@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `cacheLookbackPositions` and `convertToLlm` to `PruneConfig` and `SupersedePruneConfig` so warm-cache pruning stays within the model's prompt-cache lookback, counting app messages as they are sent, and `getMessageFromEntry` to the compaction exports ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
+
+### Fixed
+
+- Fixed warm-cache tool-result pruning re-writing a whole Anthropic prompt cache when the pruned result sat behind many small turns ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
+
+## [18.8.1] - 2026-10-07
+
+### Added
+
+- Added the public `validateAgentToolArguments()` API for consistent, lenient-aware validation of agent tool arguments across agent and coding-agent workflows.
+
 ## [18.8.0] - 2026-10-07
 
 ### Changed
@@ -9,9 +23,6 @@
 - Improved performance when pruning tool output and capturing telemetry messages during long-running sessions.
 
 ## [18.7.0] - 2026-10-06
-### Added
-
-- Added `validateAgentToolArguments()`, the shared `lenientArgValidation`-aware tool argument validator now used by the agent loop, speculative execution, and coding-agent's Cursor, eval-bridge, and `xd://` dispatch ([#14624](https://github.com/can1357/oh-my-pi/pull/14624) by [@alphastorm](https://github.com/alphastorm))
 
 ### Fixed
 
