@@ -59,6 +59,7 @@ import {
 } from "./capability/rule";
 import { bucketRules } from "./capability/rule-buckets";
 import type { EffectiveExtensionRoots } from "./capability/types";
+import { type OAuthAccountPools, SessionAccountPoolScope } from "./config/account-pools";
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
 import { shouldInlineToolDescriptors } from "./config/inline-tool-descriptors-mode";
 import { isAuthenticated, kNoAuth, ModelRegistry } from "./config/model-registry";
@@ -192,7 +193,11 @@ import {
 	USER_INTERRUPT_LABEL,
 	wrapSteeringForModel,
 } from "./session/messages";
-import { clampProviderContextImages, dropUnreadableContextImages } from "./session/provider-image-budget";
+import {
+	clampProviderContextImageBytes,
+	clampProviderContextImages,
+	dropUnreadableContextImages,
+} from "./session/provider-image-budget";
 import {
 	expandDefaultRetryFallbackChains,
 	findRetryFallbackCandidates,
@@ -548,6 +553,17 @@ export interface CreateAgentSessionOptions {
 	 * @internal
 	 */
 	credentialSourceSessionId?: string;
+	/**
+	 * OAuth account pools for this session: provider id → identity keys (see
+	 * `AuthStorage.sessions.restrict`). A listed provider authenticates only with
+	 * those accounts, never another account or an API key, and requests fail
+	 * when none of them can serve. Applied after {@link credentialSourceSessionId}
+	 * affinity is copied, and enforced on every key lookup through the session's
+	 * model registry, whatever provider session id it carries (title generation,
+	 * advisors, subagents this session spawns). A custom {@link getApiKey}
+	 * bypasses it.
+	 */
+	oauthAccountPools?: OAuthAccountPools;
 
 	/** Model to use. Default: from settings, else first available */
 	model?: Model;
@@ -1700,7 +1716,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// Pin authStorage to modelRegistry.authStorage: ModelRegistry.getApiKey() routes refresh
 	// failures through that instance, so any divergent storage handed to the bridge / mcpManager
 	// / session would silently miss credential_disabled events.
-	const modelRegistry =
+	let modelRegistry =
 		options.modelRegistry ??
 		new ModelRegistry(
 			options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir, { settings, cwd })),
@@ -1847,6 +1863,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			providerSessionId,
 			provider => !ownPins.has(provider),
 		);
+	}
+	// From here on the session resolves every key through its pools; see
+	// SessionAccountPoolScope. A startup failure leaves no session to lift them.
+	const accountPoolScope = options.oauthAccountPools
+		? new SessionAccountPoolScope(modelRegistry.authStorage, options.oauthAccountPools, providerSessionId)
+		: undefined;
+	if (accountPoolScope) {
+		modelRegistry = accountPoolScope.registry(modelRegistry);
+		startupCleanup.defer(() => accountPoolScope.release());
 	}
 	const forkCacheShapeChanged =
 		options.model !== undefined ||
@@ -2194,12 +2219,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 	try {
 		const getActiveModelString = (): string | undefined => {
-			const activeModel = agent?.state.model ?? model;
-			if (!activeModel) return undefined;
-			// Inherit the live route and effective effort, not just the model identity.
-			// A later effort change must not reuse the startup selector or restart auto triage.
-			const effort = agent?.state.model ? agent.state.thinkingLevel : effectiveThinkingLevel;
-			return formatModelSelectorValue(formatModelStringWithRouting(activeModel), effort);
+			const activeModel = agent?.state.model;
+			if (activeModel) return formatModelString(activeModel);
+			if (model) return formatModelString(model);
+			return undefined;
 		};
 		// Per-path mutation counter shared across edit/write tools. Late-diagnostics
 		// entries capture it at fetch time and are dropped at injection if a newer
@@ -4169,6 +4192,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// else, and it runs before the blob broker uploads any of these bytes.
 			transformed = await dropUnreadableContextImages(transformed, transformModel);
 			transformed = await blobBroker.decorateContext(transformed, transformModel);
+			// Byte budget after decoration: URL/file-referenced images carry no inline bytes.
+			transformed = clampProviderContextImageBytes(transformed, transformModel);
 			// Keep per-request volatility out of the system prompt: the date/cwd
 			// reminder rides on the first user turn so open-weight providers keep
 			// their tool-schema prefix cache (#7404).
@@ -4615,6 +4640,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			agentId: resolvedAgentId,
 			agentKind,
 			providerSessionId: options.providerSessionId,
+			accountPoolScope,
 			providerPromptCacheKeySource,
 			advisorTools,
 			// Same per-call `grep` seam the primary bridge gets, built against the
@@ -5117,6 +5143,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						transformed = await normalizeProviderContextImagesForModel(transformed, transformModel);
 						transformed = await dropUnreadableContextImages(transformed, transformModel);
 						transformed = await blobBroker.decorateContext(transformed, transformModel);
+						transformed = clampProviderContextImageBytes(transformed, transformModel);
 						return captureDateCwdReminder.transform(
 							transformed,
 							formatLocalCalendarDate(),
