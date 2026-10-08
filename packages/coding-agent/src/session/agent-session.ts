@@ -10446,6 +10446,8 @@ export class AgentSession implements SettingsScope {
 		if (!checkpointState) {
 			return;
 		}
+		// The rewound turn's reply is the exploration branch's newest, so this records its prompt.
+		const explorationPromptDigest = this.#tools.recordedPromptDigest();
 		this.#bash.withBranchTransition(() => {
 			try {
 				this.sessionManager.branchWithSummary(checkpointState.checkpointEntryId, report, {
@@ -10482,6 +10484,8 @@ export class AgentSession implements SettingsScope {
 				);
 				if (calls.length > 0) {
 					const callIds = new Set(calls.map(call => call.id));
+					// The rewind branch ends at the checkpoint, whose recorded prompt may predate this reply's.
+					this.#tools.recordPromptDigest(explorationPromptDigest);
 					this.sessionManager.appendMessage(
 						sanitizeAssistantForReparentedHistory({ ...turn.message, content: calls }),
 					);

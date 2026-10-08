@@ -48,6 +48,7 @@ import { buildToolNamespacesInfo, resolveCodeMode, type ToolNamespacesInfo } fro
 import { toolReadsSkillUris } from "../system-prompt";
 
 import type { CustomMessage } from "./messages";
+import type { SessionEntry } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 
 import { cfgDisabledExtensions, cfgSkills, type SkillsSettings } from "../extensibility/settings";
@@ -233,6 +234,12 @@ function systemPromptDigest(blocks: readonly string[]): string {
 	return hash.toString(16);
 }
 
+/** The digest a branch entry records, `undefined` for a malformed record, or `null` when it is not a record. */
+function promptDigestOfEntry(entry: SessionEntry): string | undefined | null {
+	if (entry.type !== "custom" || entry.customType !== SYSTEM_PROMPT_DIGEST_CUSTOM_TYPE) return null;
+	return typeof entry.data === "string" ? entry.data : undefined;
+}
+
 /**
  * Structured payload persisted on each {@link XDEV_MOUNT_NOTICE_MESSAGE_TYPE}
  * custom message. Lets a resumed session reconstruct which dynamic devices the
@@ -325,8 +332,14 @@ export class SessionTools {
 	#restoredTranscript: { reply: AgentMessage; promptDigest: string } | undefined;
 	/** Base-prompt digest of the last primary model call, until its reply ends. */
 	#capturedPromptDigest: string | undefined;
-	/** Base-prompt digest each primary reply with provider output was produced under, until it is persisted. */
+	/** Base-prompt digest each primary reply with provider output was produced under. */
 	readonly #replyPromptDigests = new WeakMap<AgentMessage, string>();
+	/**
+	 * Newest digest found in a branch view and how much of it was scanned. The
+	 * session manager's memoized view only grows in place, so a later read of
+	 * the same array scans just the appended entries.
+	 */
+	#recordedDigestScan: { branch: readonly SessionEntry[]; scanned: number; digest: string | undefined } | undefined;
 	/**
 	 * Dynamic (`xd://`) devices the model has already been told are mounted.
 	 * Seeded lazily from persisted history on resume (see
@@ -460,7 +473,7 @@ export class SessionTools {
 		this.#setActiveToolNames = options.setActiveToolNames;
 		this.#baseSystemPrompt = options.baseSystemPrompt;
 		const restoredReply = this.#latestReply();
-		const restoredPromptDigest = restoredReply && this.#recordedPromptDigest();
+		const restoredPromptDigest = restoredReply && this.recordedPromptDigest();
 		this.#restoredTranscript =
 			restoredReply && restoredPromptDigest
 				? { reply: restoredReply, promptDigest: restoredPromptDigest }
@@ -1389,15 +1402,27 @@ export class SessionTools {
 	}
 
 	/** Digest of the base prompt the current branch's newest reply with provider output was produced under. */
-	#recordedPromptDigest(): string | undefined {
+	recordedPromptDigest(): string | undefined {
 		const branch = this.#host.sessionManager.getBranchView();
+		const scan = this.#recordedDigestScan;
+		if (scan?.branch === branch) {
+			for (let index = scan.scanned; index < branch.length; index++) {
+				const digest = promptDigestOfEntry(branch[index]);
+				if (digest !== null) scan.digest = digest;
+			}
+			scan.scanned = branch.length;
+			return scan.digest;
+		}
+		let digest: string | undefined;
 		for (let index = branch.length - 1; index >= 0; index--) {
-			const entry = branch[index];
-			if (entry.type === "custom" && entry.customType === SYSTEM_PROMPT_DIGEST_CUSTOM_TYPE) {
-				return typeof entry.data === "string" ? entry.data : undefined;
+			const found = promptDigestOfEntry(branch[index]);
+			if (found !== null) {
+				digest = found;
+				break;
 			}
 		}
-		return undefined;
+		this.#recordedDigestScan = { branch, scanned: branch.length, digest };
+		return digest;
 	}
 
 	/**
@@ -1435,15 +1460,20 @@ export class SessionTools {
 	 * branch's, ahead of the reply so every path to the reply carries it.
 	 */
 	recordReplyPrompt(reply: AgentMessage): void {
-		const digest = this.#replyPromptDigests.get(reply);
-		if (digest !== undefined && digest !== this.#recordedPromptDigest()) {
+		this.recordPromptDigest(this.#replyPromptDigests.get(reply));
+	}
+
+	/** Records `digest` on the current branch unless it is already the branch's newest record. */
+	recordPromptDigest(digest: string | undefined): void {
+		if (digest !== undefined && digest !== this.recordedPromptDigest()) {
 			this.#host.sessionManager.appendCustomEntry(SYSTEM_PROMPT_DIGEST_CUSTOM_TYPE, digest);
 		}
 	}
 
-	/** Drops the restored reply when the session is disposed before its first primary model call. */
+	/** Drops retained transcript references when the session is disposed. */
 	releaseRestoredTranscript(): void {
 		this.#restoredTranscript = undefined;
+		this.#recordedDigestScan = undefined;
 	}
 
 	/**
