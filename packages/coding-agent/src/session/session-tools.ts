@@ -323,6 +323,10 @@ export class SessionTools {
 	 * {@link #implicitRebuildBinding}.
 	 */
 	#restoredTranscript: { reply: AgentMessage; promptDigest: string } | undefined;
+	/** Base-prompt digest of the last primary model call, until its reply ends. */
+	#capturedPromptDigest: string | undefined;
+	/** Base-prompt digest each primary reply with provider output was produced under, until it is persisted. */
+	readonly #replyPromptDigests = new WeakMap<AgentMessage, string>();
 	/**
 	 * Dynamic (`xd://`) devices the model has already been told are mounted.
 	 * Seeded lazily from persisted history on resume (see
@@ -1384,13 +1388,13 @@ export class SessionTools {
 		return this.#host.agent.state.messages.findLast(message => message.role === "assistant");
 	}
 
-	/** Digest of the base prompt the current branch's latest primary model call was built from. */
+	/** Digest of the base prompt the current branch's newest reply with provider output was produced under. */
 	#recordedPromptDigest(): string | undefined {
 		const branch = this.#host.sessionManager.getBranchView();
 		for (let index = branch.length - 1; index >= 0; index--) {
 			const entry = branch[index];
 			if (entry.type === "custom" && entry.customType === SYSTEM_PROMPT_DIGEST_CUSTOM_TYPE) {
-				return entry.data as string;
+				return typeof entry.data === "string" ? entry.data : undefined;
 			}
 		}
 		return undefined;
@@ -1400,15 +1404,39 @@ export class SessionTools {
 	 * Called with the prompt a primary model call captures, before the request is
 	 * sent. From then on the transcript's signed thinking may be bound to that
 	 * prompt, whatever later history edits (`/tree`, fork, recovery) leave as the
-	 * newest reply, so the restored transcript is dropped for good. The base
-	 * prompt's digest is recorded on the branch whenever it changes, so a resumed
-	 * process knows which prompt its transcript was sent with. Side requests
-	 * (`runEphemeralTurn`) do not count.
+	 * newest reply, so the restored transcript is dropped for good. The capture
+	 * is not recorded yet: the call may still stop before it is sent; see
+	 * {@link bindReplyToCapturedPrompt}. Side requests (`runEphemeralTurn`) do
+	 * not count.
 	 */
 	recordPrimaryModelCall(prompt: string[]): void {
 		this.#restoredTranscript = undefined;
-		const digest = systemPromptDigest(this.baseOfSystemPrompt(prompt));
-		if (digest !== this.#recordedPromptDigest()) {
+		this.#capturedPromptDigest = systemPromptDigest(this.baseOfSystemPrompt(prompt));
+	}
+
+	/**
+	 * Called synchronously when a primary reply ends. A reply carrying provider
+	 * output was produced under the last captured prompt; one without (a call
+	 * stopped before it was sent, an abort before the first event) binds nothing,
+	 * so the replies before it keep their prompt.
+	 */
+	bindReplyToCapturedPrompt(reply: AgentMessage): void {
+		const digest = this.#capturedPromptDigest;
+		this.#capturedPromptDigest = undefined;
+		if (digest === undefined || reply.role !== "assistant") return;
+		if (reply.content.some(block => block.type !== "text" || block.text.length > 0)) {
+			this.#replyPromptDigests.set(reply, digest);
+		}
+	}
+
+	/**
+	 * Called just before a primary reply is appended to the branch: records the
+	 * digest of the prompt it was produced under when it differs from the
+	 * branch's, ahead of the reply so every path to the reply carries it.
+	 */
+	recordReplyPrompt(reply: AgentMessage): void {
+		const digest = this.#replyPromptDigests.get(reply);
+		if (digest !== undefined && digest !== this.#recordedPromptDigest()) {
 			this.#host.sessionManager.appendCustomEntry(SYSTEM_PROMPT_DIGEST_CUSTOM_TYPE, digest);
 		}
 	}

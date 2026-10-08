@@ -344,6 +344,47 @@ describe("prefix-bound tool roster changes", () => {
 			expect(resumed.systemPrompts[0]).toEqual(live.systemPrompts[1]);
 		});
 
+		it.each([
+			{
+				path: "a before-model-call gate stops it",
+				stopBeforeDispatch: (session: AgentSession) => {
+					session.agent.addBeforeModelCall(() => ({ stop: true, reason: "gated" }));
+				},
+			},
+			{
+				path: "its credential lookup fails",
+				stopBeforeDispatch: (session: AgentSession) => {
+					session.agent.getApiKey = () => {
+						throw new Error("no credentials");
+					};
+				},
+			},
+		])(
+			"keeps the transcript's prompt when a call captured a newer prompt but $path",
+			async ({ stopBeforeDispatch }) => {
+				const sessionManager = SessionManager.inMemory();
+				const live = newSession(createPrefixBindingModel(), { sessionManager });
+				sessions.push(live.session);
+				await live.session.setActiveToolPresentation(["read"], []);
+				await live.session.prompt("first");
+				// A forced refresh moves the base to a prompt no reply was produced under.
+				await live.session.setActiveToolPresentation(["read", "bash"], []);
+				await live.session.refreshBaseSystemPrompt();
+				stopBeforeDispatch(live.session);
+				await live.session.prompt("second").catch(() => undefined);
+				const resumed = newSession(createPrefixBindingModel(), { sessionManager });
+				sessions.push(resumed.session);
+				await resumed.session.setActiveToolPresentation(["read"], []);
+				await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+
+				await resumed.session.prompt("third");
+
+				expect(live.systemPrompts).toEqual([["tools:read"]]);
+				expect(resumed.systemPrompts[0]).toEqual(["tools:read"]);
+				expect(providerText(resumed.contexts[0])).toContain("Now available: bash.");
+			},
+		);
+
 		it("keeps the startup prompt for a transcript recorded without a prompt digest", async () => {
 			const transcript = await liveTranscript();
 			// Transcripts written before prompt digests were recorded hold only the messages.
