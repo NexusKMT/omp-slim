@@ -58,6 +58,7 @@ interface TestSession {
 	session: AgentSession;
 	contexts: Message[][];
 	systemPrompts: string[][];
+	promptCacheKeys: (string | undefined)[];
 	rebuild: Mock<(toolNames: string[]) => Promise<string>>;
 }
 
@@ -68,6 +69,8 @@ function newSession(
 		sessionManager?: SessionManager;
 		/** Runs after a request captured its prompt, before its reply starts. */
 		beforeRequest?: () => Promise<void>;
+		/** Prompt-cache key inherited from the session a fork was taken from. */
+		forkPromptCacheKey?: string;
 	} = {},
 ): TestSession {
 	const read = createTool("read");
@@ -79,6 +82,7 @@ function newSession(
 	const mock = createMockModel({ responses: [{ content: ["ok"] }, { content: ["ok"] }] });
 	const contexts: Message[][] = [];
 	const systemPrompts: string[][] = [];
+	const promptCacheKeys: (string | undefined)[] = [];
 	const rebuilder = {
 		async rebuildSystemPrompt(toolNames: string[]): Promise<string> {
 			return `tools:${toolNames.join(",")}`;
@@ -87,6 +91,7 @@ function newSession(
 	const rebuild = vi.spyOn(rebuilder, "rebuildSystemPrompt");
 	const agent = new Agent({
 		getApiKey: () => "test-key",
+		promptCacheKey: options.forkPromptCacheKey,
 		initialState: {
 			model,
 			systemPrompt: ["initial"],
@@ -98,6 +103,7 @@ function newSession(
 		streamFn: async (requestModel, context, streamOptions) => {
 			contexts.push([...context.messages]);
 			systemPrompts.push([...(context.systemPrompt ?? [])]);
+			promptCacheKeys.push(streamOptions?.promptCacheKey);
 			await options.beforeRequest?.();
 			return mock.stream(requestModel, context, streamOptions);
 		},
@@ -109,6 +115,7 @@ function newSession(
 		modelRegistry: { getApiKey: async () => "test-key" } as never,
 		toolRegistry,
 		builtInToolNames: ["read", "bash"],
+		providerPromptCacheKeySource: options.forkPromptCacheKey ? "fork" : undefined,
 		extensionRunner: options.beforeAgentStartSystemPrompt
 			? ({
 					emitBeforeAgentStart: async () => ({ systemPrompt: options.beforeAgentStartSystemPrompt }),
@@ -119,7 +126,7 @@ function newSession(
 			systemPrompt: [await rebuilder.rebuildSystemPrompt(toolNames)],
 		}),
 	});
-	return { session, contexts, systemPrompts, rebuild };
+	return { session, contexts, systemPrompts, promptCacheKeys, rebuild };
 }
 
 function providerText(messages: Message[]): string {
@@ -226,6 +233,22 @@ describe("prefix-bound tool roster changes", () => {
 
 			expect(resumed.systemPrompts[0]).toEqual(transcript.systemPrompt);
 			expect(providerText(resumed.contexts[0])).not.toContain("Tool availability changed.");
+		});
+
+		it("keeps a fork's inherited prompt-cache key when the late rebuild restores the transcript's prompt", async () => {
+			const transcript = await liveTranscript();
+			const resumed = newSession(createPrefixBindingModel(), {
+				sessionManager: transcript.sessionManager,
+				forkPromptCacheKey: "parent-cache-key",
+			});
+			sessions.push(resumed.session);
+			await resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+
+			await resumed.session.prompt("second");
+
+			expect(resumed.systemPrompts[0]).toEqual(transcript.systemPrompt);
+			expect(resumed.promptCacheKeys[0]).toBe("parent-cache-key");
 		});
 
 		it("keeps the prompt frozen after a resumed request when /tree returns to the restored reply", async () => {

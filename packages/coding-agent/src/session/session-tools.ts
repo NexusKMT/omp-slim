@@ -1323,18 +1323,21 @@ export class SessionTools {
 			// exactly as if it had frozen up front. Before that call, a resumed
 			// transcript binds the prompt it was sent with: only a rebuild that
 			// reproduces it commits.
+			let restoresTranscriptPrompt = false;
 			if (rebuiltSystemPrompt && implicitRebuildSignature !== undefined) {
 				const binding = this.#implicitRebuildBinding();
-				if (
-					binding === "frozen" ||
-					(binding !== "free" && systemPromptDigest(rebuiltSystemPrompt) !== binding.promptDigest)
-				) {
+				restoresTranscriptPrompt =
+					typeof binding === "object" && systemPromptDigest(rebuiltSystemPrompt) === binding.promptDigest;
+				if (binding !== "free" && !restoresTranscriptPrompt) {
 					rebuiltSystemPrompt = undefined;
 					frozenSignature = implicitRebuildSignature;
 				}
 			}
 			if (rebuiltSystemPrompt && rebuiltSignature) {
-				if (this.#lastAppliedToolSignature !== undefined) this.#host.clearInheritedProviderPromptCacheKey();
+				// The restored transcript was sent with this prompt under the inherited cache key.
+				if (this.#lastAppliedToolSignature !== undefined && !restoresTranscriptPrompt) {
+					this.#host.clearInheritedProviderPromptCacheKey();
+				}
 				this.#baseSystemPrompt = rebuiltSystemPrompt;
 				this.#host.clearMemoryPromotionSnapshot();
 				this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
