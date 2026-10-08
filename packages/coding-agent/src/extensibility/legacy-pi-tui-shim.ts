@@ -11,6 +11,13 @@ import { ImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
 export * from "@oh-my-pi/pi-tui";
 export { decodePrintableKey as decodeKittyPrintable } from "@oh-my-pi/pi-tui";
 
+/**
+ * Legacy pi-tui name for omp's `compositeLineAt` (upstream Pi renamed it
+ * `compositeTuiLine` and exported it from the package root). Same algorithm:
+ * splice overlay content into a base line at a column and clamp to width.
+ */
+export { compositeLineAt as compositeTuiLine } from "@oh-my-pi/pi-tui/render/composite";
+
 /** Report canonical terminal capabilities through the legacy Pi TUI shape. */
 export function getCapabilities(): {
 	images: "kitty" | "iterm2" | null;
