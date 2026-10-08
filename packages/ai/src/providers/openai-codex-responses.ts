@@ -3380,10 +3380,7 @@ export async function prewarmOpenAICodexResponses(
 	if (!sessionKey || !transportSessionId || !providerSessionState) return;
 	const state = getCodexWebSocketSessionState(sessionKey, transportSessionId, providerSessionState);
 	if (!shouldUseCodexWebSocket(model, state, options?.preferWebsockets)) return;
-	const metadataSession = getOrCreateCodexMetadataSessionState(
-		transportSessionId ?? crypto.randomUUID(),
-		providerSessionState,
-	);
+	const metadataSession = getOrCreateCodexMetadataSessionState(transportSessionId, providerSessionState);
 	const turnState = getOrCreateCodexTurnState(metadataSession, sessionKey);
 	const codexClientVersion = CODEX_CLIENT_VERSION;
 	const requestIdentity = createCodexCompatibilityIdentity(metadataSession);

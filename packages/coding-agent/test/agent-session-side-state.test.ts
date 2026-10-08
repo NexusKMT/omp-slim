@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { Agent, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { Context, FetchImpl, Message, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
 import { streamOpenAIResponses } from "@oh-my-pi/pi-ai/providers/openai-responses";
@@ -46,7 +46,6 @@ describe("one-shot side request state", () => {
 	const sessions: AgentSession[] = [];
 
 	afterEach(async () => {
-		vi.restoreAllMocks();
 		for (const session of sessions.splice(0)) await session.dispose();
 	});
 
@@ -149,7 +148,7 @@ describe("one-shot side request state", () => {
 			expect(state.chains.size).toBe(0);
 		} finally {
 			finish.resolve();
-			await pending;
+			await pending.catch(() => {});
 		}
 	});
 
