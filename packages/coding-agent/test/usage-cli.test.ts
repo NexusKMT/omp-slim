@@ -35,6 +35,7 @@ function makeLimit(opts: {
 	notes?: string[];
 	shared?: boolean;
 	sharedGroup?: string;
+	status?: UsageReport["limits"][number]["status"];
 }): UsageReport["limits"][number] {
 	return {
 		id: opts.id,
@@ -53,6 +54,7 @@ function makeLimit(opts: {
 				: undefined,
 		amount: { unit: "percent", usedFraction: opts.usedFraction },
 		...(opts.notes ? { notes: opts.notes } : {}),
+		...(opts.status ? { status: opts.status } : {}),
 	};
 }
 
@@ -537,6 +539,22 @@ describe("formatUsageBreakdown", () => {
 		);
 
 		expect(text).toContain("policy: priority 10 · reserve 0% (override) · exhausted · 0.0% left");
+	});
+
+	it("reports a provider-flagged exhausted window as exhausted even with fractional quota left", () => {
+		const report = makeReport("anthropic", "flagged@example.test", [
+			makeLimit({ id: "5h", usedFraction: 0.995, durationMs: FIVE_HOURS, windowId: "5h", status: "exhausted" }),
+		]);
+		const policyOptions: UsagePolicyDiagnosticsOptions = {
+			globalReservePct: 0,
+			getAccountPolicy: () => ({ provider: "anthropic", account: { email: "flagged@example.test" }, priority: 0 }),
+		};
+
+		const text = stripVTControlCharacters(
+			formatUsageBreakdown([report], [], Date.now(), undefined, [], policyOptions),
+		);
+
+		expect(text).toContain("policy: priority 0 · reserve 0% (global) · exhausted · 0.5% left");
 	});
 
 	it("marks reserve state unknown when a configured account has no transient usage report", () => {
