@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added `worktree.onStart` and `worktree.onExit` settings to start each session in its own worktree and clean it up on exit.
+- Added `worktree.onStart` and `worktree.onExit` settings to start each session in its own worktree and clean it up on exit ([#14908](https://github.com/can1357/oh-my-pi/pull/14908) by [@gitpushoriginmaster](https://github.com/gitpushoriginmaster))
 
 ### Fixed
 

@@ -53,7 +53,7 @@ function worktreePaths(repo: string): string[] {
 	return git(repo, "worktree", "list", "--porcelain")
 		.split("\n")
 		.filter(line => line.startsWith("worktree "))
-		.map(line => line.slice("worktree ".length));
+		.map(line => path.resolve(line.slice("worktree ".length)));
 }
 
 function branchSha(repo: string, branch: string): string | null {
@@ -92,6 +92,7 @@ describe("session worktree helpers (real git)", () => {
 		delete process.env.OMP_WORKTREE_DIR;
 		setWorktreesDir(path.join(root, "wt"));
 		git(repo, "init", "-q", "-b", "main");
+		git(repo, "config", "core.autocrlf", "false");
 		await Bun.write(path.join(repo, "tracked.txt"), "base\n");
 		git(repo, "add", ".");
 		git(repo, "commit", "-q", "-m", "init");
@@ -228,7 +229,7 @@ describe("session worktree helpers (real git)", () => {
 			async () => true,
 			() => {},
 		);
-		expect(plan).toEqual([{ worktree: wt, approved: clean }]);
+		expect(plan.map(p => p.worktree)).toEqual([wt]);
 		await Bun.write(path.join(wt.path, "late.txt"), "written during teardown\n");
 		const messages = await removeExitWorktrees(plan);
 		expect(messages).toHaveLength(1);
@@ -236,7 +237,7 @@ describe("session worktree helpers (real git)", () => {
 		expect(await Bun.file(path.join(wt.path, "late.txt")).text()).toBe("written during teardown\n");
 	});
 
-	it("keeps a confirmed worktree that gained a new risk after the prompt", async () => {
+	it("keeps a confirmed dirty worktree that got more uncommitted edits after the prompt", async () => {
 		const wt = await create();
 		await Bun.write(path.join(wt.path, "dirty.txt"), "d\n");
 		const plan = await planWorktreeExit(
@@ -245,8 +246,8 @@ describe("session worktree helpers (real git)", () => {
 			async () => true,
 			() => {},
 		);
-		expect(plan).toEqual([{ worktree: wt, approved: { ...clean, dirty: true } }]);
-		await commitFile(wt.path, "late.txt");
+		expect(plan.map(p => p.worktree)).toEqual([wt]);
+		await Bun.write(path.join(wt.path, "dirty.txt"), "more work written during teardown\n");
 		const messages = await removeExitWorktrees(plan);
 		expect(messages).toHaveLength(1);
 		expect(messages[0]).toContain("changed while the session was closing");
@@ -264,7 +265,7 @@ describe("session worktree helpers (real git)", () => {
 			async () => true,
 			() => {},
 		);
-		expect(plan).toEqual([{ worktree: wt, approved: { ...clean, dirty: true, moved: true } }]);
+		expect(plan.map(p => p.worktree)).toEqual([wt]);
 		process.chdir(wt.path);
 		expect(await removeExitWorktrees(plan)).toEqual([
 			`Removed worktree ${shortenPath(wt.path)}. Resuming opens in the directory you launch omp from; its commits are on branch ${branch}.`,

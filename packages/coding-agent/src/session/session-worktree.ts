@@ -164,12 +164,15 @@ export async function createSessionWorktree(
 	};
 }
 
-/**
- * Gets the state of `wt`. A missing worktree is not dirty and not off-branch; a
- * deleted branch has not moved; a missing source repo counts as moved so the
- * branch is never deleted.
- */
-export async function inspectSessionWorktree(wt: SessionWorktree): Promise<SessionWorktreeState> {
+/** State of `wt` plus a fingerprint that changes whenever any file, ref, or `HEAD` in it changes. */
+interface WorktreeSnapshot {
+	state: SessionWorktreeState;
+	fingerprint: string;
+	/** Worktree directory still exists as a git checkout. */
+	present: boolean;
+}
+
+async function snapshotSessionWorktree(wt: SessionWorktree): Promise<WorktreeSnapshot> {
 	const sourceRepo = vcs.git(wt.sourceCwd);
 	let moved = true;
 	let tip: string | null | undefined;
@@ -182,10 +185,38 @@ export async function inspectSessionWorktree(wt: SessionWorktree): Promise<Sessi
 		() => false,
 	);
 	const worktreeRepo = worktreeExists ? vcs.git(wt.path) : null;
-	if (!worktreeRepo) return { dirty: false, moved, offBranch: false };
+	if (!worktreeRepo) {
+		return { state: { dirty: false, moved, offBranch: false }, fingerprint: `missing\0${tip ?? ""}`, present: false };
+	}
 	const status = await worktreeRepo.statusPorcelain({ untracked: "all", nulTerminated: true });
 	const head = await worktreeRepo.headSha();
-	return { dirty: status.length > 0, moved, offBranch: Boolean(head) && head !== tip };
+	// Porcelain codes do not change when an already-modified file is edited again,
+	// so fold in each changed path's size and mtime.
+	const parts = [head ?? "", tip ?? "", status];
+	const entries = status.split("\0");
+	for (let i = 0; i < entries.length; i++) {
+		const entry = entries[i];
+		if (entry.length < 4) continue;
+		// Renames and copies are followed by their source path as a separate entry.
+		if (entry[0] === "R" || entry[0] === "C") i++;
+		const file = entry.slice(3);
+		const stat = await fs.stat(path.join(wt.path, file)).catch(() => undefined);
+		parts.push(stat ? `${file}:${stat.size}:${stat.mtimeMs}` : `${file}:-`);
+	}
+	return {
+		state: { dirty: status.length > 0, moved, offBranch: Boolean(head) && head !== tip },
+		fingerprint: Bun.hash(parts.join("\0")).toString(16),
+		present: true,
+	};
+}
+
+/**
+ * Gets the state of `wt`. A missing worktree is not dirty and not off-branch; a
+ * deleted branch has not moved; a missing source repo counts as moved so the
+ * branch is never deleted.
+ */
+export async function inspectSessionWorktree(wt: SessionWorktree): Promise<SessionWorktreeState> {
+	return (await snapshotSessionWorktree(wt)).state;
 }
 
 /** Describes what removing a worktree in `state` would lose, for the exit prompt. */
@@ -200,11 +231,9 @@ function describeWorktreeRisk(wt: SessionWorktree, state: SessionWorktreeState):
 /** A worktree chosen for removal at exit. */
 export interface WorktreeExitPlan {
 	worktree: SessionWorktree;
-	/** State the removal was approved in; all clear when no prompt was shown. */
-	approved: SessionWorktreeState;
+	/** Snapshot fingerprint at the time removal was decided or approved. */
+	approvedFingerprint: string;
 }
-
-const CLEAN_STATE: SessionWorktreeState = { dirty: false, moved: false, offBranch: false };
 
 /**
  * Applies `policy` to `owned` and returns the worktrees to remove, newest first.
@@ -222,16 +251,16 @@ export async function planWorktreeExit(
 	// Newest first: a `/wt` worktree may have been forked from an older owned one.
 	for (const worktree of owned.toReversed()) {
 		try {
-			const state = await inspectSessionWorktree(worktree);
+			const { state, fingerprint } = await snapshotSessionWorktree(worktree);
 			const action = decideWorktreeExit(policy, state);
 			if (action === "keep") continue;
 			if (action === "remove") {
-				plan.push({ worktree, approved: CLEAN_STATE });
+				plan.push({ worktree, approvedFingerprint: fingerprint });
 				continue;
 			}
 			const risk = describeWorktreeRisk(worktree, state);
 			const message = `${shortenPath(worktree.path)} (${worktree.branch})${risk ? `: ${risk}` : ""}`;
-			if (await confirm("Remove worktree?", message)) plan.push({ worktree, approved: state });
+			if (await confirm("Remove worktree?", message)) plan.push({ worktree, approvedFingerprint: fingerprint });
 		} catch (err) {
 			warn(err instanceof Error ? err.message : String(err));
 		}
@@ -240,20 +269,17 @@ export async function planWorktreeExit(
 }
 
 /**
- * Removes the planned worktrees in order, keeping any that gained a risk since
- * approval. Returns one message per kept or failed worktree, plus a resume note
- * when the worktree holding the process cwd is removed.
+ * Removes the planned worktrees in order, keeping any that changed at all since
+ * removal was decided or approved. Returns one message per kept or failed
+ * worktree, plus a resume note when the worktree holding the process cwd is removed.
  */
 export async function removeExitWorktrees(plan: readonly WorktreeExitPlan[]): Promise<string[]> {
 	const messages: string[] = [];
-	for (const { worktree, approved } of plan) {
+	for (const { worktree, approvedFingerprint } of plan) {
 		try {
-			const state = await inspectSessionWorktree(worktree);
-			if (
-				(state.dirty && !approved.dirty) ||
-				(state.moved && !approved.moved) ||
-				(state.offBranch && !approved.offBranch)
-			) {
+			const { state, fingerprint, present } = await snapshotSessionWorktree(worktree);
+			// A vanished worktree holds nothing to lose; `state.moved` still guards the branch.
+			if (present && fingerprint !== approvedFingerprint) {
 				messages.push(`Kept worktree ${shortenPath(worktree.path)}: it changed while the session was closing.`);
 				continue;
 			}
