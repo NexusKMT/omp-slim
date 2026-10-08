@@ -176,6 +176,16 @@ describe("buildProviderCards", () => {
 		expect(cards[0].windows.map(window => window.label)).toEqual(["5 Hour limit", "Weekly limit", "Monthly limit"]);
 	});
 
+	it("keeps an exhausted bucket past the row cap visible", () => {
+		// Gemini emits one limit per model bucket; with declared order alone an
+		// exhausted 5th bucket would hide behind "+1 more".
+		const buckets = ["a", "b", "c", "d", "e"].map((model, index) =>
+			limit("google-gemini-cli", "g", model, `Model ${model}`, index === 4 ? 1 : 0.1 * (index + 1), "ok"),
+		);
+		const [card] = buildProviderCards([report("google-gemini-cli", "g@x.test", buckets)], now);
+		expect(card.windows.map(window => window.label)).toEqual(["Model b", "Model c", "Model d", "Model e", "Model a"]);
+	});
+
 	it("shows a prepaid balance on the card instead of falling back to no data", () => {
 		// Balance-only limits carry no fraction, so the card used to render the
 		// literal "no data" for providers that sell prepaid credits.

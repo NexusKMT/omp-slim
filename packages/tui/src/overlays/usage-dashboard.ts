@@ -84,7 +84,7 @@ export interface ProviderCard {
 	/** Number of represented accounts, including unavailable usage lookups. */
 	accounts: number;
 	unavailableAccounts: string[];
-	/** Window rows in provider-declared order (e.g. 5h → weekly → monthly). */
+	/** Window rows in provider-declared order (e.g. 5h → weekly → monthly); the fullest CARD_MAX_WINDOWS lead. */
 	windows: CardWindowRow[];
 	/** True when every account reports no limits (e.g. enterprise plans). */
 	unlimited: boolean;
@@ -183,7 +183,7 @@ export function buildProviderCards(
 			}
 		}
 
-		const windows: CardWindowRow[] = [...buckets.values()].map(bucket => {
+		const declared: CardWindowRow[] = [...buckets.values()].map(bucket => {
 			const fractions = bucket.limits
 				.map(limit => resolveUsedFraction(limit))
 				.filter((value): value is number => value !== undefined);
@@ -202,6 +202,13 @@ export function buildProviderCards(
 				usedText: fraction === undefined ? formatAbsoluteOnlyAmount(bucket.limits) : undefined,
 			};
 		});
+		// Cards render at most CARD_MAX_WINDOWS rows; when a provider declares
+		// more, keep the fullest ones visible (still in declared order) so an
+		// exhausted bucket never hides behind "+N more".
+		const visible = new Set(
+			[...declared].sort((a, b) => (b.fraction ?? -1) - (a.fraction ?? -1)).slice(0, CARD_MAX_WINDOWS),
+		);
+		const windows = [...declared.filter(row => visible.has(row)), ...declared.filter(row => !visible.has(row))];
 		// The window tag earns its columns only when sibling rows would otherwise
 		// be indistinguishable (e.g. Antigravity's daily vs weekly "Usage (Google)").
 		for (const window of windows) {
