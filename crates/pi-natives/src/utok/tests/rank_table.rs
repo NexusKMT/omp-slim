@@ -1,4 +1,4 @@
-use super::RankTable;
+use crate::utok::bpe::RankTable;
 
 #[test]
 fn parses_empty_slots_duplicate_entries_and_short_long_boundaries() {

@@ -513,7 +513,3 @@ fn nfc_quick<U: Unit>(units: &[U]) -> bool {
 	}
 	xutf::is_nfc_codepoints(Cps(units, 0))
 }
-
-#[cfg(test)]
-#[path = "tests/rank_table.rs"]
-mod tests;
