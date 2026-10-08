@@ -181,6 +181,30 @@ describe("AgentSession todo reminder self-continuation suppression", () => {
 		expect(continueSpy).not.toHaveBeenCalled();
 	});
 
+	it.each(["**What should I do next?**", "*What should I do next?*", "***What should I do next?***"])(
+		"does not remind when the assistant emphasizes its own question: %s",
+		async text => {
+			const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+			emitTextOnlyStop(text);
+			await session.waitForIdle();
+
+			expect(reminderAttempts).toEqual([]);
+			expect(todoReminderTranscriptEntry()).toBeUndefined();
+			expect(continueSpy).not.toHaveBeenCalled();
+		},
+	);
+
+	it("still reminds when the assistant strikes through its own question", async () => {
+		vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		emitTextOnlyStop("~~What should I do next?~~");
+		await session.waitForIdle();
+
+		expect(reminderAttempts).toEqual([1]);
+		expect(todoReminderTranscriptEntry()).toBeDefined();
+	});
+
 	it("does not remind or continue when the assistant yields with a non-English (Chinese) question", async () => {
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
 

@@ -45,6 +45,13 @@ const USER_RESPONSE_CUE_RE =
  */
 const NON_ASCII_TEXT_RE = /[^\x00-\x7F]/;
 
+// A question wrapped whole in italics (`*…*`, `_…_`) — or the `*…*` that
+// INLINE_EMPHASIS_RE leaves of `***…***` — must still match the ^-anchored
+// QUESTION_PROMPT_RE. Strikethrough is deliberately absent: `~~…~~` marks the
+// author as having discarded the span, so unwrapping it would promote a retracted
+// question back to a live one and idle the session waiting for an answer nobody is going to give.
+const WRAPPED_EMPHASIS_RE = /^(\*\*\*|\*\*|\*|___|__|_)([\s\S]+)\1$/;
+
 interface PromptLine {
 	text: string;
 	hadPromptLabel: boolean;
@@ -379,8 +386,9 @@ function promptLine(line: string): PromptLine {
 		.replace(MARKDOWN_PROMPT_PREFIX_RE, "")
 		.trim();
 	const withoutPromptLabel = withoutMarkdownPrefix.replace(PROMPT_LABEL_RE, "").trim();
+	const withoutEmphasis = withoutPromptLabel.replace(WRAPPED_EMPHASIS_RE, "$2").trim();
 	return {
-		text: withoutPromptLabel,
+		text: withoutEmphasis,
 		hadPromptLabel: withoutPromptLabel !== withoutMarkdownPrefix,
 	};
 }
