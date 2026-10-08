@@ -729,43 +729,33 @@ pub fn get_supported_languages() -> Vec<String> {
 }
 
 #[cfg(test)]
+#[path = "syntaxes/builder.rs"]
+mod builder;
+
+#[cfg(test)]
 mod tests {
-	use syntect::parsing::SyntaxDefinition;
+	use std::{collections::BTreeSet, sync::LazyLock};
 
 	use super::*;
 
-	fn legacy_syntax_set() -> &'static SyntaxSet {
-		static LEGACY_SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
-		LEGACY_SYNTAX_SET.get_or_init(|| {
-			let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
-			for source in [
-				include_str!("syntaxes/Julia.sublime-syntax"),
-				include_str!("syntaxes/Nix.sublime-syntax"),
-				include_str!("syntaxes/Mermaid.sublime-syntax"),
-				include_str!("syntaxes/TypeScript.sublime-syntax"),
-				include_str!("syntaxes/TypeScriptReact.sublime-syntax"),
-				include_str!("syntaxes/Astro.sublime-syntax"),
-			] {
-				builder.add(SyntaxDefinition::load_from_str(source, true, None).unwrap());
-			}
-			builder.build()
-		})
-	}
+	/// The syntax set `build.rs` serializes, rebuilt from source.
+	static SOURCE_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(builder::build_syntax_set);
 
 	#[test]
 	fn generated_syntax_set_preserves_supported_languages() {
-		let expected: Vec<String> = legacy_syntax_set()
+		let expected: BTreeSet<String> = SOURCE_SYNTAX_SET
 			.syntaxes()
 			.iter()
 			.map(|syntax| syntax.name.clone())
 			.collect();
-		assert_eq!(get_supported_languages(), expected);
+		let actual: BTreeSet<String> = get_supported_languages().into_iter().collect();
+		assert_eq!(actual, expected);
 	}
 
 	#[test]
 	fn generated_syntax_set_preserves_highlighting() {
 		let colors = test_colors();
-		let ss = legacy_syntax_set();
+		let ss = &*SOURCE_SYNTAX_SET;
 		let extra_snippets = [
 			("julia", "function greet(name)\n  # Unicode\n  println(\"héllo $name\")\nend\n"),
 			("nix", "let name = \"world\"; in { message = ''héllo ${name}''; }\n"),

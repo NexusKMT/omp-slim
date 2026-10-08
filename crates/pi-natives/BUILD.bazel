@@ -80,11 +80,11 @@ rust_binary(
 )
 
 # The NAPI cdylib. build.rs is intentionally not wired in: napi_build::setup()
-# link args are hardcoded below and the OAuth relay is a separate target whose
-# executable and precompiled syntax set are embedded as compile data.
-# TypeScript typedef regeneration stays
-# a cargo-side dev flow (`bun --cwd packages/natives run build:bindings`);
-# index.js/index.d.ts are committed, so artifact builds never need the napi CLI.
+# link args are hardcoded below, and the OAuth relay executable and the
+# `:syntax_set` genrule output are separate targets embedded as compile data.
+# TypeScript typedef regeneration stays a cargo-side dev flow
+# (`bun --cwd packages/natives run build:bindings`); index.js/index.d.ts are
+# committed, so artifact builds never need the napi CLI.
 rust_shared_library(
     name = "pi_natives",
     srcs = glob(["src/**/*.rs"]),
