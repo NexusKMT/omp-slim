@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.6] - 2026-10-08
+
 ### Fixed
 
 - Fixed Google Gemini and Cloud Code Assist (Antigravity) requests failing when tool schemas contain unsupported JSON Schema keywords or fields that allow multiple types.

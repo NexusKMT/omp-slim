@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.6] - 2026-10-08
+
 ### Added
 
 - Added per-session Git worktree support with `worktree.onStart` and `worktree.onExit` settings to create an isolated worktree for each session and clean it up when the session ends.

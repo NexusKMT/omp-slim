@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.6] - 2026-10-08
+
 ### Changed
 
 - Improved rendering performance for streaming long Markdown lists while preserving nested items, numbering, and reference links.

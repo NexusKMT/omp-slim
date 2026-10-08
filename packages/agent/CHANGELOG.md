@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.6] - 2026-10-08
+
 ### Added
 
 - Added support for warm-cache-aware conversation pruning, keeping pruned history within the model’s prompt-cache lookback window while preserving Anthropic prompt-cache efficiency.
