@@ -817,9 +817,10 @@ function smallTurns(count: number, timestamp: number): SessionMessageEntry[] {
 }
 
 describe("warm-cache guard — prompt-cache lookback window", () => {
-	// 12 small turns + the newer read = 26 content blocks after the stale result,
-	// far below the 8k token limit but past Anthropic's ~20-block breakpoint lookback:
-	// rewriting it would re-write the whole conversation, not just the suffix.
+	// 12 small turns put the stale read's issuing turn 29 lookback positions
+	// behind the next request's tail, far below the 8k token limit but past
+	// Anthropic's 20-position lookback: rewriting it would re-write the whole
+	// conversation, not just the suffix.
 	function staleReadBehind(turns: number): { stale: SessionMessageEntry; entries: SessionEntry[] } {
 		const [call1, stale] = readPair("src/foo.ts", FILE_CONTENT, T0);
 		const [call2, latest] = readPair("src/foo.ts", FILE_CONTENT, T0 + 2_000);
@@ -897,5 +898,82 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 		expect(supersede.prunedCount).toBe(0);
 		expect(guarded.prunedCount).toBe(0);
 		expect(resultText(stale)).toBe(FILE_CONTENT);
+	});
+
+	/** Per-turn supersede pass and cache-guarded prune pass, each run on fresh entries. */
+	const guardedPasses: Array<(entries: SessionEntry[]) => PruneResult> = [
+		entries => pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 })),
+		entries =>
+			pruneToolOutputs(entries, tokenizer, {
+				protectTokens: 1_000_000,
+				minimumSavings: 0,
+				protectedTools: [],
+				supersedeKey: readToolSupersedeKey,
+				cacheWarmSuffixTokens: 8_000,
+			}),
+	];
+
+	/** Stale read issued by an assistant turn of `before` blocks, followed by `after` entries and a newer read. */
+	function staleReadAround(
+		before: AssistantMessage["content"],
+		after: SessionMessageEntry[],
+	): { stale: SessionMessageEntry; entries: SessionEntry[] } {
+		const callId = `call-${idCounter++}`;
+		const call1 = messageEntry(
+			assistantMessage(
+				[...before, { type: "toolCall", id: callId, name: "read", arguments: { path: "src/foo.ts" } }],
+				T0,
+			),
+			T0,
+		);
+		const stale = messageEntry(toolResultMessage("read", callId, FILE_CONTENT, T0), T0);
+		const [call2, latest] = readPair("src/foo.ts", FILE_CONTENT, T0 + 2_000);
+		return { stale, entries: [call1, stale, ...after, call2, latest] };
+	}
+
+	test("counts the issuing assistant turn: [text, tool_use] + result + 16 positions + prompt is out of reach", () => {
+		// The newest cache entry surviving the rewrite ends the message before the
+		// issuing turn, so its two blocks count too: 2 + 1 + 16 + 1 = 20 positions.
+		const text = { type: "text" as const, text: "Reading it." };
+		for (const pass of guardedPasses) {
+			const outOfReach = staleReadAround([text], smallTurns(7, T0 + 1_000));
+			expect(pass(outOfReach.entries).prunedCount).toBe(0);
+			expect(resultText(outOfReach.stale)).toBe(FILE_CONTENT);
+
+			// One small turn fewer (18 positions) is back in reach.
+			const inReach = staleReadAround([text], smallTurns(6, T0 + 1_000));
+			expect(pass(inReach.entries).prunedCount).toBe(1);
+			expect(resultText(inReach.stale)).toBe(SUPERSEDED_NOTICE);
+		}
+	});
+
+	test("a parallel batch counts as runs, not one position per tool block", () => {
+		// [text, 8 tool_use] + 8 tool_result is 3 positions, so the stale read's
+		// rewrite needs 1 + 1 + 3 + 2 + 1 = 8 positions, not 22.
+		for (const pass of guardedPasses) {
+			const callIds = Array.from({ length: 8 }, () => `call-${idCounter++}`);
+			const batch = [
+				messageEntry(
+					assistantMessage(
+						[
+							{ type: "text", text: "Checking everything at once." },
+							...callIds.map(id => ({
+								type: "toolCall" as const,
+								id,
+								name: "bash",
+								arguments: { command: "true" },
+							})),
+						],
+						T0 + 1_000,
+					),
+					T0 + 1_000,
+				),
+				...callIds.map(id => messageEntry(toolResultMessage("bash", id, "ok", T0 + 1_000), T0 + 1_000)),
+			];
+			const { stale, entries } = staleReadAround([], batch);
+
+			expect(pass(entries).prunedCount).toBe(1);
+			expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
+		}
 	});
 });
