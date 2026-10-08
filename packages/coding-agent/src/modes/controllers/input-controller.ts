@@ -2047,13 +2047,17 @@ export class InputController {
 		const image: ImageContent = source
 			? tagImageAttachmentSource(imageData, source.path, source.kind)
 			: { type: "image", data: imageData.data, mimeType: imageData.mimeType };
-		// File-backed attachments link to their file (so the chip opens it); payloads
-		// without one (a failed clipboard persist) materialize a clickable blob copy.
+		// The source URL stays on the image for the model; a chip needs a real
+		// filesystem path, so internal URLs open a stable blob copy across /move.
 		const imageLink =
-			source?.path ??
-			(
-				await materializeImageReferenceLinks([image], this.ctx.sessionManager.putBlob.bind(this.ctx.sessionManager))
-			)?.[0];
+			source?.path && !InternalUrlRouter.instance().canHandle(source.path)
+				? source.path
+				: (
+						await materializeImageReferenceLinks(
+							[image],
+							this.ctx.sessionManager.putBlob.bind(this.ctx.sessionManager),
+						)
+					)?.[0];
 		this.ctx.editor.pendingImages.push(image);
 		this.ctx.editor.pendingImageLinks.push(imageLink);
 		this.ctx.editor.imageLinks = this.ctx.editor.pendingImageLinks;

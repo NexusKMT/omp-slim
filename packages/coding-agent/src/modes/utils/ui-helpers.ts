@@ -6,6 +6,7 @@ import { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
 import { QueuedMessagesBand } from "@oh-my-pi/pi-tui/prompt/queued-messages";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AdvisorMessageDetails } from "../../advisor";
+import { InternalUrlRouter } from "../../internal-urls";
 import { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "../../collab/protocol";
 import { settings } from "../../config/settings";
 import { createAdvisorMessageCard } from "@oh-my-pi/pi-tui/chat/advisor-message";
@@ -132,7 +133,10 @@ function imageLinksForMessage(
 ): (string | undefined)[] | undefined {
 	if (images.length === 0) return undefined;
 	const materialized = materializeImageReferenceLinksSync(images, putBlobSync);
-	return images.map((image, index) => imageAttachmentSource(image)?.path ?? materialized?.[index]);
+	return images.map((image, index) => {
+		const sourcePath = imageAttachmentSource(image)?.path;
+		return sourcePath && !InternalUrlRouter.instance().canHandle(sourcePath) ? sourcePath : materialized?.[index];
+	});
 }
 
 export class UiHelpers {
