@@ -658,8 +658,14 @@ def tonumber: tonumber_;
 				if session.cancelled() {
 					return Ok(last);
 				}
-				let output = match output.map_err(Error::from) {
-					Ok(output) => output,
+				// an error raised while printing, such as a non-string object key,
+				// fails the input like one raised by the filter
+				let printed = output.map_err(Error::from).and_then(|output| {
+					let truthy = output.as_bool();
+					f(output).map(|()| truthy)
+				});
+				match printed {
+					Ok(truthy) => last = Some(truthy),
 					Err(error) => match (read_failed(), on_error, error) {
 						(Some(read), ..) => return Err(read),
 						(None, OnError::Continue, error @ Error::Jaq(_)) => {
@@ -668,9 +674,7 @@ def tonumber: tonumber_;
 						},
 						(None, _, error) => return Err(error),
 					},
-				};
-				last = Some(output.as_bool());
-				f(output)?;
+				}
 			}
 		}
 		read_failed().or(failed).map_or(Ok(last), Err)
@@ -2151,6 +2155,16 @@ mod tests {
 		let (code, out, err) = run_jq(&[". + 1"], "1 2 \"a\"");
 		assert_eq!((code, out.as_str()), (5, "2\n3\n"));
 		assert_eq!(err, "Error: cannot calculate \"a\" + 1\n");
+
+		// also when the error is raised while printing
+		let (code, out, err) = run_jq(&["-c", "{(.): 1}"], "\"a\" 1 \"b\"");
+		assert_eq!((code, out.as_str()), (0, "{\"a\":1}\n{\"b\":1}\n"));
+		assert_eq!(err, "Error: cannot use 1 as object key\n");
+
+		// a failed write still ends the run
+		let mut out = Writes { fail: true, ..Writes::default() };
+		assert_eq!(run_jq_into(&mut out, &["."], "1 2 3"), 2);
+		assert_eq!(out.calls, [b"1\n"]);
 	}
 
 	#[test]
