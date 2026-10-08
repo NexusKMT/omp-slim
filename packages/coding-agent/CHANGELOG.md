@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed judge-gated features resolving a new judge role while the next judgment still used the previous role's cached model chain ([#14861](https://github.com/can1357/oh-my-pi/pull/14861) by [@alnaggar-dev](https://github.com/alnaggar-dev))
 - Fixed tool-result pruning re-writing the whole Anthropic prompt cache when the pruned result sat behind many small turns ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed resumed Claude sessions losing earlier thinking and prompt-cache reuse when extension or MCP tools they last ran with register before the first message; applies to sessions saved by this version or later ([#14754](https://github.com/can1357/oh-my-pi/pull/14754) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed a subagent advisor set to `@advisor` in `/agents` running on the built-in `slow` model (e.g. `gpt-5.6-sol`) instead of your configured advisor role ([#14972](https://github.com/can1357/oh-my-pi/pull/14972) by [@H4vC](https://github.com/H4vC))
