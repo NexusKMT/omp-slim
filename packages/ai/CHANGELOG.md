@@ -15,6 +15,7 @@
 - Fixed Anthropic sessions missing the prompt cache a second time after the API dropped thinking blocks from a changed conversation ([#14748](https://github.com/can1357/oh-my-pi/pull/14748) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed Cursor logins never renewing: every refresh was rejected with "Invalid User API Key", so logins lapsed about 60 days after sign-in; a session Cursor has ended is now disabled with a re-login hint ([#14753](https://github.com/can1357/oh-my-pi/pull/14753) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed the auth broker logging caller-supplied `X-Forwarded-For` / `X-Real-IP` values and unknown request paths; peers come from the socket unless `trustProxyHeaders` is set ([#14762](https://github.com/can1357/oh-my-pi/pull/14762) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed auth broker clients judging an account by a sibling account's usage when only the sibling's usage fetch succeeded, so account selection and usage-limit blocks acted on the wrong quota ([#14904](https://github.com/can1357/oh-my-pi/pull/14904) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.8.3] - 2026-10-07
 
