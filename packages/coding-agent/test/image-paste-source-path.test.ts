@@ -25,7 +25,8 @@ import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-containe
 import { imageReferenceHyperlink } from "@oh-my-pi/pi-tui/prompt/image-references";
 import { imageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
 import { applyHyperlinkSetting } from "@oh-my-pi/pi-tui/render/hyperlink";
-import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
+import { getEditorTheme, initTheme } from "@oh-my-pi/pi-tui/theme";
 import { ADVISOR_RENDER_OPTIONS } from "@oh-my-pi/pi-coding-agent/advisor/delta-split";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -33,7 +34,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resolveLocalUrlToPath } from "@oh-my-pi/pi-coding-agent/internal-urls/local-protocol";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
+import { materializeImageChipLinks, UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
@@ -306,6 +307,20 @@ describe("path-pasted image source path (#12244)", () => {
 			const transcriptTarget = rendered?.match(/\x1b\]8;[^;]*;(file:[^\x1b]*)/)?.[1];
 			if (!transcriptTarget) throw new Error("Expected a linked transcript image chip");
 			expect(Buffer.from(await Bun.file(url.fileURLToPath(transcriptTarget)).arrayBuffer()).toBase64()).toBe(
+				editor.pendingImages[0]?.data,
+			);
+			// A draft restored with the image (/tree, rewind, branch) must also link to a file.
+			const restored = new CustomEditor(getEditorTheme());
+			let restoredLinks: Promise<(string | undefined)[]> | undefined;
+			restored.draftImageLinkMaterializer = images => {
+				restoredLinks = materializeImageChipLinks(images, sessionManager.putBlob.bind(sessionManager));
+				return restoredLinks;
+			};
+			restored.setDraft("What is in [Image #1]?", [...editor.pendingImages]);
+			await restoredLinks;
+			const restoredLink = restored.imageLinks?.[0];
+			if (!restoredLink) throw new Error("Expected a linked restored draft image");
+			expect(Buffer.from(await Bun.file(chipPath(restoredLink)).arrayBuffer()).toBase64()).toBe(
 				editor.pendingImages[0]?.data,
 			);
 			// Tools addressing `attachment://1` get the post-move filesystem path.
