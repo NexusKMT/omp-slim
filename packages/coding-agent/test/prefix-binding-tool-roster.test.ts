@@ -349,7 +349,9 @@ describe("prefix-bound tool roster changes", () => {
 			// Transcripts written before prompt digests were recorded hold only the messages.
 			const sessionManager = SessionManager.inMemory();
 			for (const entry of transcript.sessionManager.getEntries()) {
-				if (entry.type === "message") sessionManager.appendMessage(entry.message);
+				if (entry.type !== "message") continue;
+				const { message } = entry;
+				if (message.role === "user" || message.role === "assistant") sessionManager.appendMessage(message);
 			}
 			const resumed = newSession(createPrefixBindingModel(), { sessionManager });
 			sessions.push(resumed.session);
