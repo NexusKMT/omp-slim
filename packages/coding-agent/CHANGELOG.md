@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed `/switch` and the alt+p model picker crashing the TUI when stored model speed stats contained an entry without a model name ([#14784](https://github.com/can1357/oh-my-pi/issues/14784))
 ### Added
 
 - Added `worktree.onStart` and `worktree.onExit` settings to start each session in its own worktree and clean it up on exit ([#14908](https://github.com/can1357/oh-my-pi/pull/14908) by [@gitpushoriginmaster](https://github.com/gitpushoriginmaster))
@@ -15,6 +12,7 @@
 - Fixed tool-result pruning re-writing the whole Anthropic prompt cache when the pruned result sat behind many small turns ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed resumed Claude sessions losing earlier thinking and prompt-cache reuse when extension or MCP tools they last ran with register before the first message; applies to sessions saved by this version or later ([#14754](https://github.com/can1357/oh-my-pi/pull/14754) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed a subagent advisor set to `@advisor` in `/agents` running on the built-in `slow` model (e.g. `gpt-5.6-sol`) instead of your configured advisor role ([#14972](https://github.com/can1357/oh-my-pi/pull/14972) by [@H4vC](https://github.com/H4vC))
+- Fixed `/switch` and the alt+p model picker crashing the TUI when stored model speed stats contained an entry without a model name ([#14784](https://github.com/can1357/oh-my-pi/issues/14784))
 ## [18.8.5] - 2026-10-08
 
 ### Added
