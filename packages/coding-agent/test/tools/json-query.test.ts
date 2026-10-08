@@ -223,15 +223,16 @@ describe("JSON query in read tool", () => {
 		]);
 	});
 
+	// Holds for the bundled jq and, with PI_DISABLE_UUTILS_BUILTINS set, for a system jq.
 	it("reports a line that fails mid-file alongside the other lines' results", async () => {
 		const text = getText(await readTool.execute("call_mid_error", { path: `${failingLineFile}?q=.n + 1` }));
-		expect(text).toStartWith("[jq stderr: Error: ");
+		expect(text).toStartWith("[jq stderr: ");
 		expect(text.split("\n").slice(1)).toEqual(["2", "4"]);
 
 		const paged = getText(
 			await readTool.execute("call_mid_error_page", { path: `${failingLineFile}?q=.n + 1&limit=1` }),
 		);
-		expect(paged).toStartWith("[jq stderr: Error: ");
+		expect(paged).toStartWith("[jq stderr: ");
 		expect(paged).toEndWith("\n2\n[more results; append ?q=.n + 1&limit=1&offset=1 to continue]");
 	});
 

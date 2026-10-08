@@ -6409,25 +6409,43 @@ replace = [{ pattern = "hello", replacement = "HI" }]
 	async fn jq_run_that_reported_an_error_is_not_minimized() {
 		let root = unique_temp_dir("jq-error");
 		std::fs::write(root.join("in.jsonl"), "1\n2\n3\n").expect("write input");
-		let enabled = || minimizer::MinimizerOptions { enabled: Some(true), ..Default::default() };
+		let _guard = shell_test_lock().lock().await;
+		let run = async |command: &str| {
+			let (tx, rx) = flume::unbounded::<String>();
+			let options = ShellExecuteOptions {
+				command: command.to_string(),
+				cwd: Some(root.to_string_lossy().into_owned()),
+				// the built-in jq even when the environment turns builtins off
+				session_env: Some(HashMap::from([(
+					"PI_DISABLE_UUTILS_BUILTINS".to_string(),
+					"0".to_string(),
+				)])),
+				minimizer: Some(minimizer::MinimizerOptions {
+					enabled: Some(true),
+					..Default::default()
+				}),
+				..Default::default()
+			};
+			let result = execute_shell(options, Some(tx), CancelToken::default())
+				.await
+				.expect("execute_shell");
+			let output: String = rx.drain().collect();
+			(result, output)
+		};
 		let rows = r#"range(0; 100) | "row with many fields and a longer string value""#;
 		// `stderr` writes no newline, so the error lands mid-line
 		let failing = format!(
 			r#"jq -r 'if . == 2 then "prefix" | stderr | error("boom") else {rows} end' in.jsonl"#
 		);
 		for command in [failing.clone(), format!("cd . && {failing}")] {
-			let (result, output) =
-				run_command_capture(&command, Some(&root), Some(enabled()), CancelToken::default())
-					.await;
+			let (result, output) = run(&command).await;
 			assert_eq!(result.exit_code, Some(0), "{command}");
 			assert!(output.contains("prefixError: \"boom\""), "{command}: {output:?}");
 			assert!(result.minimized.is_none(), "{command}: {:?}", result.minimized);
 		}
 		for value in ["Error: expected user data", "jq: error is data"] {
 			let command = format!(r#"jq -nr 'range(0; 200) | "{value}"'"#);
-			let (result, _) =
-				run_command_capture(&command, Some(&root), Some(enabled()), CancelToken::default())
-					.await;
+			let (result, _) = run(&command).await;
 			assert_eq!(result.exit_code, Some(0), "{command}");
 			assert!(result.minimized.is_some(), "{command} is shortened");
 		}
