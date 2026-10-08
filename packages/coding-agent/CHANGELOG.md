@@ -29,6 +29,8 @@
 - Fixed resumed Claude sessions losing earlier thinking context and prompt-cache reuse when extension or MCP tools were registered before the first message; applies to sessions saved with this version or later.
 - Fixed subagent advisors configured with `@advisor` incorrectly using the built-in `slow` model instead of the configured advisor role.
 - Fixed Anthropic idle recaps, `/btw` and `/omfg` replies, and streaming previews displaying raw token markers instead of Nerd Font icons.
+- Fixed sessions moved by `/wt` disappearing from `/resume` and `omp --resume` in the original checkout: the current-folder list now includes the same folder in every git worktree of the repository, with each session's directory shown.
+- Fixed resuming a session whose `/wt` worktree was removed: it stays listed, and resuming it moves it into the current checkout and continues there instead of failing or asking.
 
 ## [18.8.5] - 2026-10-08
 
