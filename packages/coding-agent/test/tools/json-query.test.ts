@@ -36,6 +36,7 @@ describe("JSON query in read tool", () => {
 	let jsonlFile: string;
 	let numbersFile: string;
 	let mixedFile: string;
+	let failingLineFile: string;
 	let session: SessionLike;
 	let readTool: ReadTool;
 
@@ -45,6 +46,7 @@ describe("JSON query in read tool", () => {
 		jsonlFile = path.join(tempDir, "events.jsonl");
 		numbersFile = path.join(tempDir, "numbers.json");
 		mixedFile = path.join(tempDir, "mixed.json");
+		failingLineFile = path.join(tempDir, "failing.jsonl");
 
 		const testData = {
 			name: "my-project",
@@ -73,6 +75,8 @@ describe("JSON query in read tool", () => {
 		await fs.writeFile(numbersFile, '{"ids":[12345678901234567890,1.0,3]}', "utf-8");
 		// `.name` fails on the third element.
 		await fs.writeFile(mixedFile, '[{"name":"a"},{"name":"b"},3]', "utf-8");
+		// `.n + 1` fails on the second line only.
+		await fs.writeFile(failingLineFile, '{"n":1}\n{"n":"x"}\n{"n":3}\n', "utf-8");
 
 		session = createSession(tempDir);
 		readTool = new ReadTool(session);
@@ -212,7 +216,23 @@ describe("JSON query in read tool", () => {
 
 	it("stops jq once the page is full, before later results fail", async () => {
 		const result = await readTool.execute("call_early_stop", { path: `${mixedFile}?q=.[] | .name&raw=true&limit=1` });
-		expect(getText(result)).toBe("a\n[more results; append ?q=.[] | .name&raw=true&limit=1&offset=1 to continue]");
+		// jaq may report the later failure before it is stopped; the page still stands
+		expect(getText(result).split("\n").slice(-2)).toEqual([
+			"a",
+			"[more results; append ?q=.[] | .name&raw=true&limit=1&offset=1 to continue]",
+		]);
+	});
+
+	it("reports a line that fails mid-file alongside the other lines' results", async () => {
+		const text = getText(await readTool.execute("call_mid_error", { path: `${failingLineFile}?q=.n + 1` }));
+		expect(text).toStartWith("[jq stderr: Error: ");
+		expect(text.split("\n").slice(1)).toEqual(["2", "4"]);
+
+		const paged = getText(
+			await readTool.execute("call_mid_error_page", { path: `${failingLineFile}?q=.n + 1&limit=1` }),
+		);
+		expect(paged).toStartWith("[jq stderr: Error: ");
+		expect(paged).toEndWith("\n2\n[more results; append ?q=.n + 1&limit=1&offset=1 to continue]");
 	});
 
 	it("treats a filter starting with - as a filter, not jq flags", async () => {
