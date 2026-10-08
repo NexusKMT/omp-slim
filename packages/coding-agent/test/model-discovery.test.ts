@@ -738,6 +738,54 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(await registry.getApiKey(opus, sessionId)).toContain('"token":"token-b"');
 	});
 
+	test("Antigravity routing still works for an account whose login stored no email", async () => {
+		// Google's userinfo lookup is optional at login; such a credential keeps
+		// only its project id, which must still tag and select the account.
+		await authStorage.credentials.set("google-antigravity", [
+			{
+				type: "oauth",
+				access: "token-a",
+				refresh: "refresh-a",
+				expires: Date.now() + 3_600_000,
+				email: "a@example.com",
+				projectId: "project-a",
+			},
+			{
+				type: "oauth",
+				access: "token-b",
+				refresh: "refresh-b",
+				expires: Date.now() + 3_600_000,
+				projectId: "project-b",
+			},
+		]);
+		const gemini = { "gemini-3.1-pro-low": { displayName: "Gemini 3.1 Pro (Low)", supportsThinking: true } };
+		const claude = Object.fromEntries(
+			["low", "medium", "high"].map(tier => [`claude-opus-5-5-${tier}`, { supportsThinking: true }]),
+		);
+		const rosters: Record<string, object> = {
+			"Bearer token-a": { models: gemini },
+			"Bearer token-b": { models: { ...gemini, ...claude } },
+		};
+		const fetchMock: FetchImpl = async (input, init) => {
+			if (String(input).includes(":fetchAvailableModels")) {
+				const roster = rosters[new Headers(init?.headers).get("authorization") ?? ""];
+				return roster ? Response.json(roster) : new Response("Unauthorized", { status: 401 });
+			}
+			return new Response("version: 2.19.1\n");
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+
+		await registry.refreshProvider("google-antigravity", "online");
+
+		const opus = registry.find("google-antigravity", "claude-opus-5-5");
+		expect(opus?.accountAccess).toEqual({ "project-b": {} });
+		const sessionId = "antigravity-emailless-session";
+		const accountA = authStorage.oauth.accounts("google-antigravity")[0];
+		if (!accountA || !opus) throw new Error("expected account A and Claude Opus 5.5");
+		expect(authStorage.sessions.pin("google-antigravity", sessionId, accountA.credentialId)).toBe(true);
+		expect(await registry.getApiKey(opus, sessionId)).toContain('"token":"token-b"');
+	});
+
 	test("Gemini CLI discovery forwards a stored OAuth project id to the quota fallback", async () => {
 		await authStorage.credentials.set("google-gemini-cli", {
 			type: "oauth",

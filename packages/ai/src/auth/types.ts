@@ -497,10 +497,16 @@ export type AuthApiKeyOptions = {
  * Identity that multi-account discovery records in `Model.accountAccess` and
  * that {@link AuthApiKeyOptions.accountIds} selection matches: the provider
  * account id (Codex `chatgpt_account_id`), else the login email for providers
- * whose credentials carry no account id (Antigravity).
+ * whose credentials carry no account id (Antigravity), else the project id for
+ * a login whose email lookup failed. Same precedence as the credential store's
+ * identity key.
  */
-export function oauthAccountKey(identity: { accountId?: string; email?: string }): string | undefined {
-	return identity.accountId ?? identity.email;
+export function oauthAccountKey(identity: {
+	accountId?: string;
+	email?: string;
+	projectId?: string;
+}): string | undefined {
+	return identity.accountId ?? identity.email ?? identity.projectId;
 }
 
 /** Non-secret identity bound to the OAuth credential selected for one request attempt. */
