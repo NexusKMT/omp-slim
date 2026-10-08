@@ -136,7 +136,7 @@ export function createPersistedSubagentReviverFactory(
 								: undefined),
 						}
 					: undefined),
-				...compactionThresholdSettings(init.compactionThreshold, ctx.settings),
+				...compactionThresholdSettings(init.compactionThreshold),
 			});
 			// Restore the `subagent:<id>` fallback chain the spawn installed; the
 			// transcript alone cannot rebuild it (multi-model agent patterns and

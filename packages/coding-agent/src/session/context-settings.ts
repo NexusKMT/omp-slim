@@ -169,6 +169,17 @@ export const cfgCompactionModelThresholds = register({
 	validate: validateModelCompactionThresholds,
 });
 
+/**
+ * Whether `compaction.modelThresholds` applies. Subagent spawn turns it off for an
+ * agent whose `task.agentCompactionThresholdOverrides` entry applies, so that entry
+ * outranks every model entry, including ones added while the agent runs.
+ */
+export const cfgCompactionModelThresholdsEnabled = register({
+	id: "compaction.modelThresholdsEnabled",
+	type: "boolean",
+	default: true,
+});
+
 export const cfgCompactionHandoffSaveToDisk = register({
 	id: "compaction.handoffSaveToDisk",
 	type: "boolean",

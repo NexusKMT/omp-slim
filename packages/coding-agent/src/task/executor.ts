@@ -39,7 +39,7 @@ import {
 	resolveSubagentServiceTier,
 	type ServiceTierInheritSettingValue,
 } from "../config/service-tier";
-import type { AgentCompactionThresholdOverride, CompactionThresholdPair } from "../config/compaction-threshold";
+import type { CompactionThresholdPair } from "../config/compaction-threshold";
 import { type OAuthAccountPools, validateAgentAccountPools } from "../config/account-pools";
 import { type OverlayLayers, Settings } from "../config/settings";
 
@@ -147,7 +147,7 @@ import {
 import { cfgDisabledProviders } from "../config/model-settings";
 import { getRetryFallbackRole, installRetryFallbackRole } from "../session/retry-fallback-chains";
 import {
-	cfgCompactionModelThresholds,
+	cfgCompactionModelThresholdsEnabled,
 	cfgCompactionThresholdPercent,
 	cfgCompactionThresholdTokens,
 } from "../session/context-settings";
@@ -1067,14 +1067,14 @@ function inheritedSubagentServiceTiers(
 /**
  * Compaction thresholds of the root (non-subagent) settings a subagent chain
  * started from. Per-agent `task.agentCompactionThresholdOverrides` entries
- * replace `compaction.threshold*` and clear `compaction.modelThresholds` only
- * for the agent they name; every other descendant resolves against these root
- * values, not an ancestor's override.
+ * replace `compaction.threshold*` and switch off `compaction.modelThresholds`
+ * only for the agent they name; every other descendant resolves against these
+ * root values, not an ancestor's override.
  */
 const kRootCompactionThresholds = Symbol("task.rootCompactionThresholds");
 
 interface RootCompactionThresholds extends CompactionThresholdPair {
-	modelThresholds: Readonly<Record<string, AgentCompactionThresholdOverride>>;
+	modelThresholdsEnabled: boolean;
 }
 
 /** Settings from {@link createSubagentSettings}, tagged with its chain's root compaction thresholds. */
@@ -1084,21 +1084,19 @@ interface SubagentChainSettings extends Settings {
 
 /**
  * Settings overrides applying an exact-name compaction threshold entry to one
- * subagent. The agent entry outranks `compaction.modelThresholds`, so every
- * model entry `settings` configures is cleared for it.
+ * subagent. The agent entry outranks `compaction.modelThresholds`, including
+ * entries added while the agent runs, so model entries are switched off for it.
  */
 export function compactionThresholdSettings(
 	threshold: CompactionThresholdPair | undefined,
-	settings: Settings,
 ): Readonly<Record<string, unknown>> | undefined {
-	if (threshold === undefined) return undefined;
-	const clearedModelThresholds: Record<string, null> = {};
-	for (const key in cfgCompactionModelThresholds.get(settings)) clearedModelThresholds[key] = null;
-	return {
-		"compaction.thresholdPercent": threshold.thresholdPercent,
-		"compaction.thresholdTokens": threshold.thresholdTokens,
-		"compaction.modelThresholds": clearedModelThresholds,
-	};
+	return threshold === undefined
+		? undefined
+		: {
+				"compaction.thresholdPercent": threshold.thresholdPercent,
+				"compaction.thresholdTokens": threshold.thresholdTokens,
+				"compaction.modelThresholdsEnabled": false,
+			};
 }
 
 export function createSubagentSettings(
@@ -1118,14 +1116,14 @@ export function createSubagentSettings(
 	const rootThresholds = inheritedRootThresholds ?? {
 		thresholdPercent: cfgCompactionThresholdPercent.get(baseSettings),
 		thresholdTokens: cfgCompactionThresholdTokens.get(baseSettings),
-		modelThresholds: cfgCompactionModelThresholds.get(baseSettings),
+		modelThresholdsEnabled: cfgCompactionModelThresholdsEnabled.get(baseSettings),
 	};
 	// Every other setting reads through to the parent live; writes on the overlay stay local.
 	const subagentSettings: SubagentChainSettings = baseSettings.overlay({
 		...(inheritedRootThresholds && {
 			"compaction.thresholdPercent": inheritedRootThresholds.thresholdPercent,
 			"compaction.thresholdTokens": inheritedRootThresholds.thresholdTokens,
-			"compaction.modelThresholds": inheritedRootThresholds.modelThresholds,
+			"compaction.modelThresholdsEnabled": inheritedRootThresholds.modelThresholdsEnabled,
 		}),
 		// A subagent's thinking level is chosen at spawn (agent definition, `effort`, or this
 		// snapshot of the parent default); a later parent default edit must not re-steer it.
@@ -3928,7 +3926,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	const subagentSettings = createSubagentSettings(
 		settings,
 		{
-			...compactionThresholdSettings(options.compactionThresholdOverride, settings),
+			...compactionThresholdSettings(options.compactionThresholdOverride),
 			...(agent.readSummarize === false ? { "read.summarize.enabled": false } : undefined),
 			// Isolated runs must not expose roots outside the worktree.
 			...(worktree !== undefined ? { "workspace.additionalDirectories": [] } : undefined),
