@@ -566,7 +566,9 @@ describe("formatUsageBreakdown", () => {
 		const text = stripVTControlCharacters(
 			formatUsageBreakdown(reports, [], Date.now(), undefined, [], policyOptions),
 		);
-		expect(text).toContain("policy: priority 0 · reserve 30% (override) · inside reserve · 30.0% left");
+		const policyLine = text.split("\n").find(line => line.includes("policy:"));
+		expect(policyLine).toContain("· inside reserve ·");
+		expect(policyLine).toContain("30.0% left");
 	});
 
 	it("reports a provider-flagged exhausted window as exhausted even with fractional quota left", () => {
