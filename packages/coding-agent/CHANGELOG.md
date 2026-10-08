@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed models such as Claude Opus 5.5 and Sonnet 5.5 sometimes missing from Google Antigravity when only some of several signed-in accounts can use them; requests for those models now go to an account that has access ([#14924](https://github.com/can1357/oh-my-pi/issues/14924)).
+- Fixed Claude Opus 5.5 and Sonnet 5.5 disappearing with mixed-access Google Antigravity accounts; models now route to accounts that serve them, and revoked accounts no longer block catalog refresh ([#14924](https://github.com/can1357/oh-my-pi/issues/14924)).
 
 ## [18.8.4] - 2026-10-08
 

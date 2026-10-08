@@ -1,3 +1,4 @@
+import { logger } from "@oh-my-pi/pi-utils";
 import { reviewedCollapseTable } from "../compat/collapse";
 import { classifyModel } from "../compat/taxonomy";
 import { providerEntry } from "../compat/providers";
@@ -108,25 +109,35 @@ export function googleAntigravityModelManagerOptions(
 						const rosters = await Promise.all(
 							accounts.map(async account => ({
 								accountKey: account.accountKey,
-								models: await fetchAntigravityDiscoveryModels({
+								result: await fetchAntigravityDiscoveryModels({
 									token: account.accessToken,
 									endpoint: config?.endpoint,
 									fetcher,
 								}),
 							})),
 						);
-						const tagAccess = accounts.every(account => account.accountKey !== undefined);
-						const catalogs: ModelSpec<"google-gemini-cli">[][] = [];
-						for (const { accountKey, models } of rosters) {
-							// A failed roster would leave the union partial; keep the previous catalog.
-							if (!models) return null;
-							catalogs.push(
+						const catalogs: { accountKey: string | undefined; models: ModelSpec<"google-gemini-cli">[] }[] = [];
+						for (const { accountKey, result } of rosters) {
+							// A transient failure would leave the union partial; keep the previous catalog.
+							if (!result) return null;
+							if (result.rejectedStatus !== undefined) {
+								logger.warn("Antigravity model discovery skipped an account whose credential was rejected", {
+									accountKey,
+									status: result.rejectedStatus,
+								});
+								continue;
+							}
+							catalogs.push({ accountKey, models: result.models });
+						}
+						if (catalogs.length === 0) return null;
+						const tagAccess = catalogs.every(catalog => catalog.accountKey !== undefined);
+						return unionAccountCatalogs(
+							catalogs.map(({ accountKey, models }) =>
 								tagAccess && accountKey !== undefined
 									? models.map(model => ({ ...model, accountAccess: { [accountKey]: {} } }))
 									: models,
-							);
-						}
-						return unionAccountCatalogs(catalogs);
+							),
+						);
 					},
 				}
 			: undefined),
@@ -148,19 +159,19 @@ export function googleGeminiCliModelManagerOptions(
 						if (collapseTable === undefined) {
 							throw new Error("missing reviewed collapse table for google-gemini-cli");
 						}
-						const models = await fetchAntigravityDiscoveryModels({
+						const result = await fetchAntigravityDiscoveryModels({
 							token,
 							fetcher,
-							collapseTable: collapseTable,
+							collapseTable,
 						});
 						// Antigravity's fetchAvailableModels is unreachable for
 						// credentials without Antigravity entitlement (Code Assist
 						// Standard returns HTTP 403). Fall back to the account's own
 						// retrieveUserQuota list on Cloud Code Assist.
-						if (models === null) {
+						if (result === null || result.rejectedStatus !== undefined) {
 							return fetchGeminiCliQuotaModels({ token, projectId: config?.projectId, endpoint, fetcher });
 						}
-						return models
+						return result.models
 							.filter(m => classifyModel("google-gemini-cli", m.id, { lenient: true }).class === "gemini")
 							.map(m => ({
 								...m,
