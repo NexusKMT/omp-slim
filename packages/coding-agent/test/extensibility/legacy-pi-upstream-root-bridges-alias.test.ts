@@ -81,7 +81,9 @@ describe("legacy aliased-scope roots resolve the upstream 1.1.0 bridges", () => 
 		const loaded = (await loadLegacyPiModule(entry)) as { composed: string };
 		// The overlay is spliced at column 2 with ANSI resets around it.
 		expect(loaded.composed).toContain("XY");
-		expect(loaded.composed.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07\x1b]*(\x07|\x1b\\)/g, "")).toBe("abXYefgh");
+		expect(loaded.composed.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07\x1b]*(\x07|\x1b\\)/g, "")).toBe(
+			"abXYefgh",
+		);
 	});
 
 	it("resolves the complete published pi-optchat v0.7.2 runtime import closure", async () => {

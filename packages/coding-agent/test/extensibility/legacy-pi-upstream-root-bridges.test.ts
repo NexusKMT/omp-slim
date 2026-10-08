@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { ImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
 import * as caShim from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-coding-agent-shim";
 import * as tuiShim from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-tui-shim";
@@ -52,5 +53,23 @@ describe("legacy shim upstream-root bridges", () => {
 
 		// Width clamp survives the extra reset bytes.
 		expect(visibleWidth(tuiShim.compositeTuiLine("abcdefgh", "TOOLONGOVERLAY", 0, 3, 8))).toBeLessThanOrEqual(8);
+	});
+
+	it("passes image-line bases through untouched, upstream semantics", () => {
+		// Upstream compositeTuiLine returns ANY image-line base unchanged;
+		// omp's canonical compositeLineAt deliberately differs (it replaces
+		// full-width overlays over image lines). The compat export must match
+		// upstream for both partial and full-width overlays.
+		const mutable = TERMINAL as unknown as { imageProtocol: ImageProtocol | null };
+		const originalProtocol = TERMINAL.imageProtocol;
+		mutable.imageProtocol = ImageProtocol.Sixel;
+		try {
+			const base = "\x1bP0;1q#0:R=600,500qSTUBLINE";
+			expect(TERMINAL.isImageLine(base)).toBe(true);
+			expect(tuiShim.compositeTuiLine(base, "XY", 2, 2, 8)).toBe(base);
+			expect(tuiShim.compositeTuiLine(base, "OVERLAY1", 0, 8, 8)).toBe(base);
+		} finally {
+			mutable.imageProtocol = originalProtocol;
+		}
 	});
 });
