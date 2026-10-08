@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Exposed `@oh-my-pi/pi-tui/native/*` as a package export so extensions in the compiled `omp` binary can import the native Tern/TSP modules ([#14834](https://github.com/can1357/oh-my-pi/issues/14834), [#14835](https://github.com/can1357/oh-my-pi/pull/14835) by [@carterlasalle](https://github.com/carterlasalle))
+
 ## [18.8.5] - 2026-10-08
 
 ### Added
@@ -10,8 +14,6 @@
 
 ### Fixed
 
-- Fixed the native ask dialog opening as a modal sheet over the transcript; on TSP surfaces it now takes the composer's place in the dock, framed as the composer (`omp.editor`), so the transcript above stays readable and scrollable ([#14812](https://github.com/can1357/oh-my-pi/pull/14812) by [@H4vC](https://github.com/H4vC))
-- Exposed `@oh-my-pi/pi-tui/native/*` as a named package export so the native Tern/TSP modules (`native/overlay`, `native/spans`, …) are registered for extensions loaded by the compiled `omp` binary, where the `./*` catch-all is intentionally not expanded ([#14835](https://github.com/can1357/oh-my-pi/pull/14835) by [@carterlasalle](https://github.com/carterlasalle))
 - Fixed `/usage` dashboard cards reordering their limit rows by usage; rows now keep the provider's window order (e.g. 5 hour → weekly → monthly) ([#14953](https://github.com/can1357/oh-my-pi/pull/14953) by [@H4vC](https://github.com/H4vC))
 - Fixed Cmd+A, Cmd+C, Cmd+X and Shift+arrow selection doing nothing in the Tern prompt while Vim mode is in Insert mode ([#14954](https://github.com/can1357/oh-my-pi/pull/14954) by [@H4vC](https://github.com/H4vC))
 

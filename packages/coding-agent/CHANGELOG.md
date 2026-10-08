@@ -8,8 +8,6 @@
 
 ### Fixed
 
-- Fixed `ask` questions in Tern covering the end of the transcript with a sheet that blocked scrolling, hiding the explanation the question was about; the question now sits in the composer's place, framed like the composer, below a transcript you can read and scroll while deciding ([#14812](https://github.com/can1357/oh-my-pi/pull/14812) by [@H4vC](https://github.com/H4vC))
-- Fixed extensions failing to load in the compiled `omp` binary with `Cannot find package '@oh-my-pi/pi-tui'` when importing `@oh-my-pi/pi-tui/native/*` (for example `native/overlay` or `native/spans`); these subpaths are now bundled for extensions like they are for `pi-tui/components/*` and `pi-tui/theme/*` ([#14835](https://github.com/can1357/oh-my-pi/pull/14835) by [@carterlasalle](https://github.com/carterlasalle))
 - Fixed judge-gated features resolving a new judge role while the next judgment still used the previous role's cached model chain ([#14861](https://github.com/can1357/oh-my-pi/pull/14861) by [@alnaggar-dev](https://github.com/alnaggar-dev))
 - Fixed tool-result pruning re-writing the whole Anthropic prompt cache when the pruned result sat behind many small turns ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed resumed Claude sessions losing earlier thinking and prompt-cache reuse when extension or MCP tools they last ran with register before the first message; applies to sessions saved by this version or later ([#14754](https://github.com/can1357/oh-my-pi/pull/14754) by [@will-bogusz](https://github.com/will-bogusz))
@@ -17,6 +15,7 @@
 - Fixed `/switch` and the alt+p model picker crashing the TUI when stored model speed stats contained an entry without a model name ([#14784](https://github.com/can1357/oh-my-pi/issues/14784))
 - Fixed the `lsp` tool and `generate_image` hanging on a FIFO or terminal path, or exhausting memory on `/dev/zero`; such files are now refused before they're read ([#14730](https://github.com/can1357/oh-my-pi/pull/14730) by [@DrFaustus-vic](https://github.com/DrFaustus-vic))
 - Fixed an `aside` message (such as one sent by an extension) waiting behind a running `wait`: it now ends the wait and reaches the model at the next step, and the job result still arrives later ([#14731](https://github.com/can1357/oh-my-pi/pull/14731) by [@mgpai22](https://github.com/mgpai22))
+- Fixed extensions importing `@oh-my-pi/pi-tui/native/*` (e.g. `native/overlay`, `native/spans`) failing to load in the compiled `omp` binary with `Cannot find package '@oh-my-pi/pi-tui'` ([#14834](https://github.com/can1357/oh-my-pi/issues/14834), [#14835](https://github.com/can1357/oh-my-pi/pull/14835) by [@carterlasalle](https://github.com/carterlasalle))
 ## [18.8.5] - 2026-10-08
 
 ### Added
