@@ -13,6 +13,10 @@
 - Fixed Tern showing an agent as finished when automatic context maintenance ends partway through a turn; omp now keeps reporting the turn's working state until the turn actually ends ([#14917](https://github.com/can1357/oh-my-pi/pull/14917) by [@wolfiesch](https://github.com/wolfiesch))
 - Fixed the terminal title and Tern busy state staying in the working state after an interrupt cancels a scheduled retry or continuation before it starts ([#14917](https://github.com/can1357/oh-my-pi/pull/14917) by [@wolfiesch](https://github.com/wolfiesch))
 
+### Removed
+
+- Removed the `PI_SUBPROCESS_CMD` environment variable; subagents run in-process and never read it ([#14632](https://github.com/can1357/oh-my-pi/pull/14632) by [@jorgoose](https://github.com/jorgoose))
+
 ## [18.8.4] - 2026-10-08
 
 ### Changed
@@ -181,10 +185,6 @@
 - Fixed `--resume <path>` silently creating a new session when the specified path did not exist; it now reports the missing path.
 - Fixed `/settings` opening duplicate menus when invoked while the settings menu was already open.
 - Fixed native Git operations resolving repositories incorrectly when run through symbolic links.
-
-### Removed
-
-- Removed the PI_SUBPROCESS_CMD environment variable; subagents run in-process and never read it ([#14632](https://github.com/can1357/oh-my-pi/pull/14632) by [@jorgoose](https://github.com/jorgoose))
 
 ## [18.6.3] - 2026-10-06
 
