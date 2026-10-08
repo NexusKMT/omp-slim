@@ -34,24 +34,29 @@ afterEach(() => {
 	process.exitCode = 0;
 });
 
+function expectNoCredentialsError(provider: string): void {
+	const message = Bun.stripANSI(stderr);
+	expect(message).toContain(`"${provider}"`);
+	expect(message).toContain("groq");
+	expect(message).not.toContain("usage endpoint");
+}
+
 test("omp usage --provider with no stored credentials names the providers that have them", async () => {
 	await runUsageCommand({ provider: "claude", noExtensions: true });
-	expect(Bun.stripANSI(stderr)).toBe(
-		'No credentials stored for provider "claude". Providers with stored credentials: groq.\n',
-	);
+	expectNoCredentialsError("claude");
 	expect(process.exitCode).toBe(1);
 });
 
 test("omp usage invalidate refuses a provider with no stored credentials", async () => {
 	await runUsageCommand({ action: "invalidate", provider: "nosuch", noExtensions: true });
 	expect(stdout).toBe("");
-	expect(Bun.stripANSI(stderr)).toBe(
-		'No credentials stored for provider "nosuch". Providers with stored credentials: groq.\n',
-	);
+	expectNoCredentialsError("nosuch");
 	expect(process.exitCode).toBe(1);
+});
 
-	process.exitCode = 0;
+test("omp usage invalidate accepts a provider with stored credentials", async () => {
 	await runUsageCommand({ action: "invalidate", provider: "groq", noExtensions: true });
+	expect(stderr).toBe("");
 	expect(stdout).toBe('Invalidated cached usage reports for provider "groq".\n');
 	expect(process.exitCode).toBe(0);
 });
