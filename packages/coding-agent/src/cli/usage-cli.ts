@@ -371,18 +371,54 @@ function formatLimitLine(limit: UsageLimit, labelWidth: number, nowMs: number): 
 }
 
 interface ProviderLimitTemplate {
-	id: string;
+	key: string;
 	title: string;
 }
 
-function collectProviderLimitTemplates(reports: UsageReport[]): ProviderLimitTemplate[] {
-	const seen = new Set<string>();
+/**
+ * One row per meter (label and window), not per limit id: Codex ids name a slot, and an
+ * account without a 5-hour window reports its 7-day one as `primary`. Most providers put the
+ * subscription plan in the tier (see {@link meterForLimit}), so the tier joins the key only for
+ * meters a single report repeats per tier (e.g. Antigravity's `Usage (<tier>)` rows).
+ */
+function meterKey(limit: UsageLimit): string {
+	return `${limit.label}|${limit.window?.id ?? limit.scope.windowId ?? ""}`;
+}
+
+function createLimitRowKey(reports: UsageReport[]): (limit: UsageLimit) => string {
+	const tiered = new Set<string>();
+	for (const report of reports) {
+		const seen = new Set<string>();
+		for (const limit of report.limits) {
+			const key = meterKey(limit);
+			if (seen.has(key)) tiered.add(key);
+			seen.add(key);
+		}
+	}
+	return limit => {
+		const key = meterKey(limit);
+		return tiered.has(key) ? `${key}|${limit.scope.tier ?? ""}` : key;
+	};
+}
+
+function collectProviderLimitTemplates(
+	reports: UsageReport[],
+	rowKey: (limit: UsageLimit) => string,
+): ProviderLimitTemplate[] {
 	const templates: ProviderLimitTemplate[] = [];
 	for (const report of reports) {
+		// A row first seen in a later report goes right after its predecessor in that report,
+		// so each account keeps its own row order.
+		let insertAt = 0;
 		for (const limit of report.limits) {
-			if (seen.has(limit.id)) continue;
-			seen.add(limit.id);
-			templates.push({ id: limit.id, title: limitTitle(limit) });
+			const key = rowKey(limit);
+			const existing = templates.findIndex(template => template.key === key);
+			if (existing >= 0) {
+				insertAt = existing + 1;
+				continue;
+			}
+			templates.splice(insertAt, 0, { key, title: limitTitle(limit) });
+			insertAt++;
 		}
 	}
 	return templates;
@@ -693,8 +729,14 @@ export function formatUsageBreakdown(
 		for (const note of providerNotes)
 			lines.push(`  ${chalk.dim(sanitizeText(note.replace(/[\r\n]+/g, " ").replace(/\t/g, "  ")))}`);
 
-		const providerLimitTemplates = collectProviderLimitTemplates(providerReports);
-		const labelWidth = providerLimitTemplates.reduce((max, template) => Math.max(max, template.title.length), 0);
+		const limitRowKey = createLimitRowKey(providerReports);
+		const providerLimitTemplates = collectProviderLimitTemplates(providerReports, limitRowKey);
+		// Rows sharing a key can carry different titles (plan tiers), so measure every rendered title.
+		const labelWidth = Math.max(
+			0,
+			...providerLimitTemplates.map(template => template.title.length),
+			...providerReports.flatMap(report => report.limits.map(limit => limitTitle(limit).length)),
+		);
 
 		providerReports.forEach((report, index) => {
 			lines.push(`  ${formatAccountHeader(report, providerReports, index, nowMs, redaction)}`);
@@ -707,15 +749,14 @@ export function formatUsageBreakdown(
 				lines.push(`      ${chalk.dim("no limits reported")}`);
 				return;
 			}
-			const limitsById = new Map<string, UsageLimit>();
-			for (const limit of report.limits) limitsById.set(limit.id, limit);
+			const limitsByKey = Map.groupBy(report.limits, limitRowKey);
 			for (const template of providerLimitTemplates) {
-				const limit = limitsById.get(template.id);
-				if (limit) {
-					lines.push(...formatLimitLine(limit, labelWidth, nowMs));
-				} else {
+				const limits = limitsByKey.get(template.key);
+				if (!limits) {
 					lines.push(formatMissingLimitLine(template, labelWidth));
+					continue;
 				}
+				for (const limit of limits) lines.push(...formatLimitLine(limit, labelWidth, nowMs));
 			}
 		});
 
