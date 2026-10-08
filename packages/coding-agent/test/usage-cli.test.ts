@@ -558,6 +558,35 @@ describe("formatUsageBreakdown", () => {
 		expect(text).toContain("policy: priority 10 · reserve 0% (override) · exhausted · 0.0% left");
 	});
 
+	it("reports an account sitting exactly on its reserve as inside reserve", () => {
+		const reports = [
+			makeReport("openai-codex", "boundary@example.test", [
+				makeLimit({
+					id: "5h",
+					provider: "openai-codex",
+					usedFraction: 0.7,
+					durationMs: FIVE_HOURS,
+					windowId: "5h",
+				}),
+			]),
+		];
+		const policyOptions: UsagePolicyDiagnosticsOptions = {
+			globalReservePct: 10,
+			getAccountPolicy: () => ({
+				provider: "openai-codex",
+				account: { email: "boundary@example.test" },
+				reservePct: 30,
+			}),
+		};
+
+		const text = stripVTControlCharacters(
+			formatUsageBreakdown(reports, [], Date.now(), undefined, [], policyOptions),
+		);
+		const policyLine = text.split("\n").find(line => line.includes("policy:"));
+		expect(policyLine).toContain("· inside reserve ·");
+		expect(policyLine).toContain("30.0% left");
+	});
+
 	it("reports a provider-flagged exhausted window as exhausted even with fractional quota left", () => {
 		const report = makeReport("anthropic", "flagged@example.test", [
 			makeLimit({ id: "5h", usedFraction: 0.995, durationMs: FIVE_HOURS, windowId: "5h", status: "exhausted" }),
