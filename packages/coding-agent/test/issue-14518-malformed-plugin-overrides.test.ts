@@ -59,9 +59,9 @@ async function writeOverrides(cwd: string, contents: string): Promise<string> {
 }
 
 /** First warn() call about plugin overrides, with its message and path detail. */
-function overridesWarning(
-	warn: { mock: { calls: Array<[string, Record<string, unknown> | undefined]> } },
-): { message: unknown; path: unknown } | undefined {
+function overridesWarning(warn: {
+	mock: { calls: Array<[message: string, details?: Record<string, unknown>]> };
+}): { message: unknown; path: unknown } | undefined {
 	for (const [message, details] of warn.mock.calls) {
 		if (details === undefined) continue;
 		const { path } = details;
