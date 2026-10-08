@@ -291,6 +291,18 @@ function reportAccountLabel(report: UsageReport, index: number): string {
 	return `account ${index + 1}`;
 }
 
+/** Bold identity plus the dim same-email qualifier and plan the main view shows. */
+function formatQualifiedIdentity(
+	report: UsageReport,
+	peers: readonly UsageReport[],
+	label: string,
+	redaction?: Map<string, string>,
+): string {
+	const identity = sanitizeText((redaction?.get(label) ?? label).replace(/[\r\n\t]+/g, " "));
+	const rendered = formatCodexUsageReportLabel(report, peers, label, redaction, true, "inline");
+	return `${chalk.bold(identity)}${chalk.dim(rendered.slice(identity.length))}`;
+}
+
 function formatAccountHeader(
 	report: UsageReport,
 	peers: readonly UsageReport[],
@@ -303,9 +315,7 @@ function formatAccountHeader(
 	const label = reportAccountLabel(report, index);
 	let header = `${icon} ${chalk.bold(redaction?.get(label) ?? label)}`;
 	if (report.provider === "openai-codex") {
-		const identity = sanitizeText((redaction?.get(label) ?? label).replace(/[\r\n\t]+/g, " "));
-		const rendered = formatCodexUsageReportLabel(report, peers, label, redaction, true, "inline");
-		header = `${icon} ${chalk.bold(identity)}${chalk.dim(rendered.slice(identity.length))}`;
+		header = `${icon} ${formatQualifiedIdentity(report, peers, label, redaction)}`;
 	} else {
 		const metaOrgName = report.metadata?.orgName;
 		const metaOrgId = report.metadata?.orgId;
@@ -757,6 +767,10 @@ interface HistorySeries {
 
 interface HistoryAccount {
 	label: string;
+	provider: string;
+	email?: string;
+	accountId?: string;
+	recordedAt: number;
 	series: Map<string, HistorySeries>;
 }
 
@@ -770,8 +784,25 @@ function historySeriesTitle(entry: UsageHistoryEntry): string {
 	return `${label} (${windowLabel})`;
 }
 
-function historyAccountLabel(entry: UsageHistoryEntry): string {
-	return entry.email ?? entry.accountId ?? entry.accountKey;
+function historyAccount(entry: UsageHistoryEntry): HistoryAccount {
+	return {
+		label: entry.email ?? entry.accountId ?? entry.accountKey,
+		provider: entry.provider,
+		email: entry.email,
+		accountId: entry.accountId,
+		recordedAt: entry.recordedAt,
+		series: new Map(),
+	};
+}
+
+/** Identity stand-in so same-email accounts get the main view's qualifier. */
+function historyIdentityReport(account: HistoryAccount): UsageReport {
+	return {
+		provider: account.provider,
+		fetchedAt: account.recordedAt,
+		limits: [],
+		metadata: { email: account.email, accountId: account.accountId },
+	};
 }
 
 function historyStatus(fraction: number | undefined, status: UsageHistoryEntry["status"]): LimitStatus {
@@ -805,7 +836,7 @@ function renderHistorySparkline(entries: UsageHistoryEntry[], sinceMs: number, n
 }
 
 /** Identity strings a history rendering could surface — input for {@link buildRedactionMap}. */
-function collectHistoryIdentityStrings(entries: UsageHistoryEntry[]): string[] {
+export function collectHistoryIdentityStrings(entries: UsageHistoryEntry[]): string[] {
 	const values: string[] = [];
 	for (const entry of entries) {
 		if (entry.email) values.push(entry.email);
@@ -834,7 +865,7 @@ export function formatUsageHistory(
 		}
 		let account = accounts.get(entry.accountKey);
 		if (!account) {
-			account = { label: historyAccountLabel(entry), series: new Map() };
+			account = historyAccount(entry);
 			accounts.set(entry.accountKey, account);
 		}
 		let series = account.series.get(entry.limitId);
@@ -859,8 +890,12 @@ export function formatUsageHistory(
 			`${chalk.bold.cyan(formatProviderName(provider))} ${chalk.dim(`— ${accounts.size} ${accounts.size === 1 ? "account" : "accounts"}`)}`,
 		);
 		const sortedAccounts = [...accounts.values()].sort((a, b) => a.label.localeCompare(b.label));
-		for (const account of sortedAccounts) {
-			lines.push(`  ${chalk.bold(redaction?.get(account.label) ?? account.label)}`);
+		const reports = provider === "openai-codex" ? sortedAccounts.map(historyIdentityReport) : undefined;
+		for (const [index, account] of sortedAccounts.entries()) {
+			const identity = reports
+				? formatQualifiedIdentity(reports[index], reports, account.label, redaction)
+				: chalk.bold(redaction?.get(account.label) ?? account.label);
+			lines.push(`  ${identity}`);
 			const labelWidth = [...account.series.values()].reduce((max, series) => Math.max(max, series.title.length), 0);
 			const sortedSeries = [...account.series.values()].sort((a, b) => a.title.localeCompare(b.title));
 			for (const series of sortedSeries) {
@@ -883,6 +918,45 @@ export function formatUsageHistory(
 	}
 
 	return lines.join("\n");
+}
+
+/**
+ * Load extension usage providers and refresh broker credentials, so usage
+ * lookups see every provider and account the live session would.
+ */
+async function loadUsageSources(
+	cmd: UsageCommandArgs,
+	settings: Settings,
+	authStorage: AuthStorage,
+): Promise<ModelRegistry> {
+	const modelRegistry = new ModelRegistry(authStorage);
+	// Extensions contribute usage providers via `registerProvider(name, { usage })`;
+	// without loading them their accounts land in `accountsWithoutUsage`.
+	await loadCliExtensionProviders(modelRegistry, settings, getProjectDir(), {
+		additionalExtensionPaths: cmd.extensions,
+		disableExtensionDiscovery: cmd.noExtensions,
+		includeAmbientHooks: false,
+		discoverModels: false,
+	});
+	// The broker may serve reports for credentials newer than the local
+	// snapshot. Refresh before probing extension providers with local keys
+	// and before labeling accounts; offline brokers keep the cached snapshot.
+	try {
+		await authStorage.credentials.revalidate();
+	} catch {
+		// Stale identities beat no output.
+	}
+	return modelRegistry;
+}
+
+/** Name the providers that do hold credentials so a mistyped `--provider` id is easy to correct. */
+function formatNoProviderCredentials(provider: string, storedAccounts: UsageAccountIdentity[]): string {
+	const stored = [...new Set(storedAccounts.map(account => account.provider))].sort();
+	const hint =
+		stored.length > 0
+			? `Providers with stored credentials: ${stored.join(", ")}.`
+			: "Run `omp` and use /login to add accounts.";
+	return `No credentials stored for provider "${provider}". ${hint}\n`;
 }
 
 /** Apply a redaction mask to an optional identity field. */
@@ -1049,6 +1123,20 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 	try {
 		if (cmd.action === "invalidate") {
 			const provider = cmd.provider?.toLowerCase();
+			if (provider) {
+				// Usage providers registered by extensions and broker credentials newer than
+				// the cached snapshot count too, so load both before rejecting the id.
+				await loadUsageSources(cmd, settings, authStorage);
+				const storedAccounts = collectStoredAccounts(authStorage);
+				const known =
+					authStorage.usage.providerFor(provider) !== undefined ||
+					storedAccounts.some(account => account.provider.toLowerCase() === provider);
+				if (!known) {
+					process.stderr.write(chalk.yellow(formatNoProviderCredentials(provider, storedAccounts)));
+					process.exitCode = 1;
+					return;
+				}
+			}
 			await authStorage.usage.invalidate(provider);
 			if (provider) {
 				process.stdout.write(`Invalidated cached usage reports for provider "${provider}".\n`);
@@ -1157,23 +1245,7 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			globalReservePct: cfgRetryUsageReservePct.get(settings),
 			getAccountPolicy: (provider, identity) => authStorage.oauth.policy(provider, identity),
 		};
-		const modelRegistry = new ModelRegistry(authStorage);
-		// Extensions contribute usage providers via `registerProvider(name, { usage })`;
-		// without loading them their accounts land in `accountsWithoutUsage`.
-		await loadCliExtensionProviders(modelRegistry, settings, getProjectDir(), {
-			additionalExtensionPaths: cmd.extensions,
-			disableExtensionDiscovery: cmd.noExtensions,
-			includeAmbientHooks: false,
-			discoverModels: false,
-		});
-		// The broker may serve reports for credentials newer than the local
-		// snapshot. Refresh before probing extension providers with local keys
-		// and before labeling accounts; offline brokers keep the cached snapshot.
-		try {
-			await authStorage.credentials.revalidate();
-		} catch {
-			// Stale identities beat no output.
-		}
+		const modelRegistry = await loadUsageSources(cmd, settings, authStorage);
 		const reports =
 			(await authStorage.usage.reports({
 				baseUrlResolver: provider => modelRegistry.getProviderBaseUrl(provider),
@@ -1250,13 +1322,17 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 		}
 
 		if (filteredReports.length === 0 && accounts.length === 0) {
-			const scope = cmd.provider ? ` for provider "${cmd.provider}"` : "";
-			// Credentials exist but every one is for a provider without a usage
-			// endpoint — say so rather than implying nothing is logged in.
-			const message =
-				storedAccounts.length > 0
-					? `No usage data${scope}. Stored credentials are for providers without a usage endpoint.\n`
-					: `No credentials found${scope}. Run \`omp\` and use /login to add accounts.\n`;
+			// An explicit --provider keeps every stored account of that provider, so
+			// reaching here with one means none is stored for it. Without one,
+			// credentials may exist only for providers without a usage endpoint.
+			let message: string;
+			if (cmd.provider) {
+				message = formatNoProviderCredentials(cmd.provider, storedAccounts);
+			} else if (storedAccounts.length > 0) {
+				message = "No usage data. Stored credentials are for providers without a usage endpoint.\n";
+			} else {
+				message = "No credentials found. Run `omp` and use /login to add accounts.\n";
+			}
 			process.stderr.write(chalk.yellow(message));
 			process.exitCode = 1;
 			return;
