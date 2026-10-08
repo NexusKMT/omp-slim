@@ -2023,7 +2023,10 @@ export class AgentSession implements SettingsScope {
 			cancel: toolCallId => this.#ttsr.cancelBridgedToolCall(toolCallId),
 		});
 		this.agent.setOnBeforeYield(() => this.#ttsr.settleJudgments());
-		this.agent.setOnModelCallSystemPrompt(prompt => this.#recordModelCallSystemPrompt(prompt));
+		this.agent.setOnModelCallSystemPrompt(prompt => {
+			this.#tools.markPrimaryRequestSent();
+			this.#recordModelCallSystemPrompt(prompt);
+		});
 		this.#obfuscator = config.obfuscator;
 		const providerBoundaryHost: SessionProviderBoundaryHost = {
 			agent: this.agent,
@@ -3329,11 +3332,6 @@ export class AgentSession implements SettingsScope {
 		// never revoke a foreground-control grant acquired by a later prompt.
 		const computerControlRevocation =
 			event.type === "agent_end" ? revokeComputerControlForOwner(this.#eval.getKernelOwnerId()) : undefined;
-		// Latch once a primary assistant reply starts (usually a request built from
-		// the current prompt; also gate-stop and pre-stream aborted replies, which
-		// freeze anyway). Before any await, so a mid-request roster change cannot
-		// rebuild the prompt that request carries.
-		if (event.type === "message_start" && event.message.role === "assistant") this.#tools.markPrimaryRequestSent();
 		if (event.type === "tool_execution_end" && this.#isTerminalYieldToolResult(event)) {
 			const alreadyTerminated = this.#synchronouslyTerminatedYieldToolCallIds.delete(event.toolCallId);
 			if (!alreadyTerminated) {

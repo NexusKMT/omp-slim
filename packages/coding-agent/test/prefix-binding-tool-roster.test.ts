@@ -63,7 +63,12 @@ interface TestSession {
 
 function newSession(
 	model: Model,
-	options: { beforeAgentStartSystemPrompt?: string[]; sessionManager?: SessionManager } = {},
+	options: {
+		beforeAgentStartSystemPrompt?: string[];
+		sessionManager?: SessionManager;
+		/** Runs after a request captured its prompt, before its reply starts. */
+		beforeRequest?: () => Promise<void>;
+	} = {},
 ): TestSession {
 	const read = createTool("read");
 	const bash = createTool("bash");
@@ -90,9 +95,10 @@ function newSession(
 			messages: options.sessionManager ? options.sessionManager.buildSessionContext().messages : [],
 		},
 		convertToLlm,
-		streamFn: (requestModel, context, streamOptions) => {
+		streamFn: async (requestModel, context, streamOptions) => {
 			contexts.push([...context.messages]);
 			systemPrompts.push([...(context.systemPrompt ?? [])]);
+			await options.beforeRequest?.();
 			return mock.stream(requestModel, context, streamOptions);
 		},
 	});
@@ -254,6 +260,28 @@ describe("prefix-bound tool roster changes", () => {
 			await resumed.session.prompt("second");
 			rebuildGate.resolve();
 			await rosterChange;
+
+			await resumed.session.prompt("third");
+
+			expect(resumed.systemPrompts[1]).toEqual(resumed.systemPrompts[0]);
+			expect(providerText(resumed.contexts[1])).toContain("Tool availability changed.");
+		});
+
+		it("freezes a roster rebuild that commits after the first resumed request captured its prompt", async () => {
+			const transcript = await liveTranscript();
+			let lateRegistration: Promise<void> | undefined;
+			const resumed = newSession(createPrefixBindingModel(), {
+				sessionManager: transcript.sessionManager,
+				// Provider setup (credentials, a Bedrock round trip) runs between the
+				// prompt capture and the reply; a tool registers meanwhile.
+				beforeRequest: async () => {
+					lateRegistration ??= resumed.session.setActiveToolPresentation(["read", "bash"], []);
+					await lateRegistration;
+				},
+			});
+			sessions.push(resumed.session);
+			await resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.prompt("second");
 
 			await resumed.session.prompt("third");
 

@@ -308,12 +308,11 @@ export class SessionTools {
 	#basePromptReflectsRosterDelta = false;
 	/**
 	 * Newest assistant reply restored with the transcript this session was
-	 * created with. It and every reply before it were answered under another
-	 * process's prompt; see {@link #transcriptBindsPrompt}.
+	 * created with, until this session's first primary model call. It and every
+	 * reply before it were answered under another process's prompt; see
+	 * {@link #transcriptBindsPrompt}.
 	 */
 	#restoredReply: AgentMessage | undefined;
-	/** Latched once a primary assistant reply is recorded; see {@link markPrimaryRequestSent}. */
-	#primaryRequestSent = false;
 	/**
 	 * Dynamic (`xd://`) devices the model has already been told are mounted.
 	 * Seeded lazily from persisted history on resume (see
@@ -1306,8 +1305,8 @@ export class SessionTools {
 			this.#codeModeDirectWireSignature = codeMode.active
 				? this.#computeCodeModeDirectWireSignature(appliedNames)
 				: undefined;
-			// The first primary request can complete while the rebuild awaits; the
-			// prompt it carried is bound from then on, so an implicit rebuild ends
+			// The first primary model call can capture the prompt while the rebuild
+			// awaits; that prompt is bound from then on, so an implicit rebuild ends
 			// exactly as if it had frozen up front.
 			if (rebuiltSystemPrompt && implicitRebuildSignature !== undefined && this.#prefixBindingFreezesPrompt()) {
 				rebuiltSystemPrompt = undefined;
@@ -1360,31 +1359,29 @@ export class SessionTools {
 	}
 
 	/**
-	 * Record that a primary assistant reply started, normally for a request sent
-	 * with the current prompt (gate-stop and pre-stream aborted replies latch too;
-	 * they freeze anyway). Never reset: from then on the transcript's signed
-	 * thinking may be bound to this prompt, whatever later history edits (`/tree`,
-	 * fork, recovery) leave as the newest reply. Side requests
+	 * Called as a primary model call captures its prompt, before the request is
+	 * sent. From then on the transcript's signed thinking may be bound to that
+	 * prompt, whatever later history edits (`/tree`, fork, recovery) leave as the
+	 * newest reply, so the restored reply is dropped for good. Side requests
 	 * (`runEphemeralTurn`) do not count.
 	 */
 	markPrimaryRequestSent(): void {
-		this.#primaryRequestSent = true;
+		this.#restoredReply = undefined;
 	}
 
 	/**
 	 * Whether the transcript's signed thinking may be bound to the current
-	 * prompt: it holds a reply, and either a primary reply was already recorded
-	 * in this session or the newest reply is not one restored
-	 * at construction (a transcript switched in later). A resumed process builds
-	 * its base prompt before its first primary request, so tools that register
-	 * before that request (lazily registered extension tools, MCP servers)
-	 * rebuild the prompt as the original process's first turn did, instead of
-	 * freezing a startup prompt the transcript was never sent with.
+	 * prompt: it holds a reply, and that reply is not the one restored at
+	 * construction (this session made a primary model call, or a transcript was
+	 * switched in later). A resumed process builds its base prompt before its
+	 * first primary model call, so tools that register before that call (lazily
+	 * registered extension tools, MCP servers) rebuild the prompt as the original
+	 * process's first turn did, instead of freezing a startup prompt the
+	 * transcript was never sent with.
 	 */
 	#transcriptBindsPrompt(): boolean {
 		const latest = this.#latestReply();
-		if (latest === undefined) return false;
-		return this.#primaryRequestSent || latest !== this.#restoredReply;
+		return latest !== undefined && latest !== this.#restoredReply;
 	}
 
 	/**
