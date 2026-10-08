@@ -20,7 +20,7 @@ import {
 	type UsageReport,
 	type UsageUnit,
 } from "@oh-my-pi/pi-ai";
-import { AuthBrokerClient } from "@oh-my-pi/pi-ai/auth-broker";
+import { AuthBrokerClient, AuthBrokerError } from "@oh-my-pi/pi-ai/auth-broker";
 import type { ClientUsageClientSummary } from "@oh-my-pi/pi-ai/usage";
 import { formatProviderName } from "@oh-my-pi/pi-tui/chrome/format";
 import { formatDuration, formatNumber, getProjectDir, sanitizeText } from "@oh-my-pi/pi-utils";
@@ -1062,6 +1062,12 @@ export function formatClientUsage(clients: ClientUsageClientSummary[], sinceMs: 
 	return lines.join("\n");
 }
 
+/** The configured auth broker's client, or undefined when this machine reads its own store. */
+async function resolveBrokerClient(): Promise<AuthBrokerClient | undefined> {
+	const config = await resolveAuthBrokerConfig();
+	return config ? new AuthBrokerClient({ url: config.url, token: config.token }) : undefined;
+}
+
 /** One OAuth account as `omp usage accounts` lists it. */
 interface OAuthIdentityKeyRow {
 	provider: string;
@@ -1179,14 +1185,10 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			const sinceMs = nowMs - days * 86_400_000;
 			// Prefer the broker's fleet-wide record; fall back to the local agent
 			// DB, which has rows only when this machine hosts the broker.
-			const brokerConfig = await resolveAuthBrokerConfig();
-			let clients: ClientUsageClientSummary[];
-			if (brokerConfig) {
-				const client = new AuthBrokerClient({ url: brokerConfig.url, token: brokerConfig.token });
-				clients = (await client.fetchClientUsageSummary({ sinceMs })).clients;
-			} else {
-				clients = authStorage.usage.clientSummary(sinceMs).clients;
-			}
+			const broker = await resolveBrokerClient();
+			const clients = broker
+				? (await broker.fetchClientUsageSummary({ sinceMs })).clients
+				: authStorage.usage.clientSummary(sinceMs).clients;
 			if (cmd.json) {
 				process.stdout.write(`${JSON.stringify({ generatedAt: nowMs, sinceMs, clients }, null, 2)}\n`);
 				return;
@@ -1207,7 +1209,12 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			const days = cmd.days !== undefined && Number.isFinite(cmd.days) && cmd.days > 0 ? cmd.days : 7;
 			const nowMs = Date.now();
 			const sinceMs = nowMs - days * 86_400_000;
-			const entries = authStorage.usage.history({ sinceMs, provider: cmd.provider?.toLowerCase() });
+			const provider = cmd.provider?.toLowerCase();
+			// The broker host records every upstream usage fetch; a broker client's own store holds none.
+			const broker = await resolveBrokerClient();
+			const entries = broker
+				? (await broker.fetchUsageHistory({ sinceMs, provider })).entries
+				: authStorage.usage.history({ sinceMs, provider });
 			const redaction = cmd.redact ? buildRedactionMap(collectHistoryIdentityStrings(entries)) : undefined;
 			if (cmd.json) {
 				const masked = redaction
@@ -1334,6 +1341,12 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 		process.stdout.write(
 			`${formatUsageBreakdown(filteredReports, accounts, Date.now(), redaction, disabled, policyOptions)}\n`,
 		);
+	} catch (error) {
+		// Broker-backed reads (`clients`, `--history`) fail on an unreachable or
+		// pre-endpoint broker; report one line instead of a stack dump.
+		if (!(error instanceof AuthBrokerError)) throw error;
+		process.stderr.write(`${chalk.red(`Error: auth broker request failed: ${error.message}`)}\n`);
+		process.exitCode = 1;
 	} finally {
 		authStorage.close();
 	}
