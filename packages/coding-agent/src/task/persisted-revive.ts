@@ -4,6 +4,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { MAIN_AGENT_RULE_NAME, SUB_AGENT_RULE_NAME } from "../capability/rule";
 import { validateAgentAccountPools } from "../config/account-pools";
 import type { ModelRegistry } from "../config/model-registry";
+import { resolveAgentAdvisorRolePattern } from "../config/model-resolver";
 import { formatModelRoleAlias } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import { MCPManager } from "../mcp/manager";
@@ -132,7 +133,12 @@ export function createPersistedSubagentReviverFactory(
 					? {
 							"advisor.enabled": true,
 							...(init.advisor !== "on"
-								? { modelRoles: { ...ctx.settings.getModelRoles(), advisor: init.advisor } }
+								? {
+										modelRoles: {
+											...ctx.settings.getModelRoles(),
+											advisor: resolveAgentAdvisorRolePattern(init.advisor, ctx.settings),
+										},
+									}
 								: undefined),
 						}
 					: undefined),

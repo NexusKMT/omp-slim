@@ -24,6 +24,7 @@ import {
 import { type EditMode, getEditInputPaths } from "@oh-my-pi/pi-tui/tools/edit";
 import {
 	formatModelStringWithRouting,
+	resolveAgentAdvisorRolePattern,
 	resolveAgentAdvisorSelection,
 	resolveAgentPrewalkPattern,
 	resolveConfiguredModelPatterns,
@@ -3932,7 +3933,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			...(worktree !== undefined ? { "workspace.additionalDirectories": [] } : undefined),
 			...(advisorSelection ? { "advisor.enabled": true } : undefined),
 			...(advisorSelection?.model
-				? { modelRoles: { ...settings.getModelRoles(), advisor: advisorSelection.model } }
+				? {
+						modelRoles: {
+							...settings.getModelRoles(),
+							advisor: resolveAgentAdvisorRolePattern(advisorSelection.model, settings),
+						},
+					}
 				: undefined),
 		},
 		options.parentServiceTier,
