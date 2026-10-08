@@ -17,6 +17,7 @@ import {
 	mathSpanInContext,
 	mathStartIndex,
 } from "@oh-my-pi/pi-utils/math-delimiters";
+import { listMayContinueAt } from "@oh-my-pi/pi-utils/marked-list";
 import { latexToBlock } from "../latex-block";
 import { isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import { plainText } from "../native/spans";
@@ -1009,69 +1010,6 @@ function lexInlineTokens(text: string): Token[] {
 const REF_DEF_LINE_RE = /^ {0,3}\[(?:\\.|[^\]\\])+\]:/;
 const HAS_REF_DEF = new RegExp(REF_DEF_LINE_RE.source, "m");
 
-// marked's list tokenizer (Tokenizer.list, marked v18) continues a list across
-// blank lines only when the remaining source matches
-// `listItemRegex(marker)` = `^( {0,3}${marker})((?:[\t ][^\n]*)?(?:\n|$))`,
-// where `marker` is the exact bullet char for unordered lists (`\${char}`) or
-// 1-9 digits plus the exact delimiter for ordered lists (`\d{1,9}\${delim}`).
-// The marker is derived from the list's FIRST item (`n = t[1].trim()`), which
-// sits at the start of a top-level list token's raw:
-const LIST_MARKER_RE = /^ {0,3}(?:([*+-])|\d{1,9}([.)]))/;
-
-// Streaming-freeze equivalence invariant: lex(prefix) ++ lex(tail) must equal
-// lex(full text) — for the CURRENT text and for every append-only extension of
-// it, because a frozen prefix is sticky (it keeps being reused while the text
-// grows). At a blank-line (`\n\n`) cut directly after a top-level `list`
-// token, the only construct that can straddle the cut is a continuation item
-// of that list: marked consumed the blank line into the last item's raw and
-// re-ran `listItemRegex` at exactly `tailStart`, merging a same-marker item
-// into one renumbered loose list. The cut is safe only when that regex can
-// NEVER match at `tailStart`, no matter what is appended later.
-//
-// Append-only growth means existing characters are immutable while new ones
-// may appear after them, so "closed" may only be concluded from a present
-// character that contradicts every possible continuation (e.g. tail "1x" can
-// never grow into an ordered item, but tail "1" can become "1. c"). Running
-// out of text mid-marker therefore answers "may continue".
-//
-// Returns true when the tail could still continue the list (or the list's
-// marker is unrecognizable) — the conservative "don't freeze" answer. marked
-// may break the list anyway when the matching line is also an hr (`- - -`);
-// treating that as "may continue" merely skips a freeze, never corrupts one.
-function listMayContinueAt(text: string, tailStart: number, listRaw: string): boolean {
-	const marker = LIST_MARKER_RE.exec(listRaw);
-	if (marker === null) return true; // unrecognized list shape — stay conservative
-	const n = text.length;
-	let i = tailStart;
-	// `listItemRegex` allows up to 3 leading spaces (the caller's next-char
-	// guard rejects whitespace at the final cut, but mirror the rule exactly).
-	while (i < n && i - tailStart < 3 && text.charCodeAt(i) === 0x20 /* space */) i++;
-	if (i >= n) return true;
-	const bullet = marker[1];
-	if (bullet !== undefined) {
-		if (text[i] !== bullet) return false; // wrong marker char — closed forever
-		i++;
-	} else {
-		// Ordered: 1-9 digits, then the same `.`/`)` delimiter.
-		let digits = 0;
-		while (i < n && digits < 10) {
-			const c = text.charCodeAt(i);
-			if (c < 0x30 /* 0 */ || c > 0x39 /* 9 */) break;
-			digits++;
-			i++;
-		}
-		if (digits === 0 || digits > 9) return false; // no digit run / too long — closed forever
-		if (i >= n) return true; // delimiter (or more digits) may still arrive
-		if (text[i] !== marker[2]) return false; // wrong delimiter — closed forever
-		i++;
-	}
-	// After the marker: `(?:[\t ][^\n]*)?(?:\n|$)` — tab/space + anything, a
-	// bare newline, or end-of-input (which appends can still extend).
-	if (i >= n) return true;
-	const after = text.charCodeAt(i);
-	return after === 0x20 /* space */ || after === 0x09 /* tab */ || after === 0x0a; /* \n */
-}
-
 /** The last stable block boundary of a token run: see {@link stableBlockBoundary}. */
 interface BlockBoundary {
 	/** Offset just past the boundary token, or 0 when the run holds none. */
@@ -1179,6 +1117,18 @@ export function lexDocument(text: string): TokensList {
 	return markdownParser.lexer(text);
 }
 
+/**
+ * `source` as a fenced code block in `lang`: the fence is one backtick longer
+ * than any backtick run in the source (at least three), so the block always
+ * closes where intended. `open` leaves it unclosed, the source verbatim, for
+ * a body that is still arriving.
+ */
+export function fencedCode(lang: string, source: string, options?: { open?: boolean }): string {
+	const longest = source.match(/`+/g)?.reduce((max, run) => Math.max(max, run.length), 2) ?? 2;
+	const fence = "`".repeat(longest + 1);
+	return options?.open ? `${fence}${lang}\n${source}` : `${fence}${lang}\n${source.trimEnd()}\n${fence}`;
+}
+
 /** A hyperlink as the renderer sees it: inline `[text](href)`, `<autolink>`, bare GFM URL, or reference link. */
 export interface MarkdownLink {
 	/** Flattened visible label with whitespace collapsed to one row; falls back to `href` when empty. */
@@ -1221,6 +1171,120 @@ export function extractMarkdownLinks(text: string): MarkdownLink[] {
 	};
 	walk(markdownParser.lexer(text));
 	return links;
+}
+
+/**
+ * Offset just past the destination that starts at or after `start` in `raw`
+ * (CommonMark link destination grammar), plus where it begins. `null` when no
+ * destination is there.
+ */
+function scanLinkDestination(raw: string, start: number): { start: number; end: number } | null {
+	let i = start;
+	while (i < raw.length && (raw[i] === " " || raw[i] === "\t" || raw[i] === "\n" || raw[i] === "\r")) i++;
+	if (i >= raw.length) return null;
+	if (raw[i] === "<") {
+		for (let j = i + 1; j < raw.length; j++) {
+			if (raw[j] === "\\") j++;
+			else if (raw[j] === ">") return { start: i, end: j + 1 };
+			else if (raw[j] === "<" || raw[j] === "\n") return null;
+		}
+		return null;
+	}
+	let depth = 0;
+	let j = i;
+	for (; j < raw.length; j++) {
+		const ch = raw[j]!;
+		if (ch === "\\") {
+			j++;
+			continue;
+		}
+		if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch.charCodeAt(0) < 0x20) break;
+		if (ch === "(") depth++;
+		else if (ch === ")") {
+			if (depth === 0) break;
+			depth--;
+		}
+	}
+	return j > i ? { start: i, end: j } : null;
+}
+
+/** A destination that stays one destination whatever bytes the target holds. */
+function formatLinkDestination(target: string): string {
+	return /[\s()<>\\]/.test(target) ? `<${target.replaceAll(/[<>\\]/g, ch => encodeURIComponent(ch))}>` : target;
+}
+
+function isListToken(token: Token): token is Tokens.List {
+	return token.type === "list";
+}
+
+function isTableToken(token: Token): token is Tokens.Table {
+	return token.type === "table";
+}
+
+/**
+ * Rewrite the destinations of inline links and link reference definitions in
+ * `text` to `resolve(href)`, leaving everything else byte-for-byte intact.
+ * Hosts that render the Markdown source themselves (a native terminal's `md`
+ * node) resolve relative destinations against their own idea of the working
+ * directory; handing them the session-resolved target keeps links pointing at
+ * what the author meant. Links inside code, images, autolinks and reference
+ * uses (`[x][ref]`, rewritten through their definition) are untouched; a link
+ * whose source cannot be located exactly is left as written.
+ */
+export function rewriteMarkdownLinkDestinations(text: string, resolve: (href: string) => string | undefined): string {
+	const edits: Array<{ start: number; end: number; target: string }> = [];
+	let cursor = 0;
+	const rewrite = (token: Token, labelEnd: number | undefined): void => {
+		const at = text.indexOf(token.raw, cursor);
+		if (at < 0) return;
+		cursor = at + token.raw.length;
+		const href = "href" in token && typeof token.href === "string" ? token.href : "";
+		if (!href || labelEnd === undefined) return;
+		const target = resolve(href);
+		if (!target || target === href) return;
+		const dest = scanLinkDestination(token.raw, labelEnd);
+		if (dest) edits.push({ start: at + dest.start, end: at + dest.end, target });
+	};
+	const walk = (tokens: readonly Token[] | undefined): void => {
+		if (!tokens) return;
+		for (const token of tokens) {
+			if (token.type === "link") {
+				const label = "text" in token && typeof token.text === "string" ? `[${token.text}](` : undefined;
+				rewrite(token, label && token.raw.startsWith(label) ? label.length : undefined);
+				continue;
+			}
+			if (token.type === "def") {
+				const close = token.raw.indexOf("]:");
+				rewrite(token, close < 0 ? undefined : close + 2);
+				continue;
+			}
+			const children = "tokens" in token && Array.isArray(token.tokens) ? token.tokens : undefined;
+			const items = isListToken(token) ? token.items : undefined;
+			const table = isTableToken(token) ? token : undefined;
+			if (token.type === "image" || (!children && !items && !table)) {
+				// A leaf (text, code span, fenced code, html, image…): step past it so a
+				// later link's source is never matched inside it.
+				const at = token.raw ? text.indexOf(token.raw, cursor) : -1;
+				if (at >= 0) cursor = at + token.raw.length;
+				continue;
+			}
+			walk(children);
+			walk(items);
+			if (table) {
+				for (const cell of table.header) walk(cell.tokens);
+				for (const row of table.rows) for (const cell of row) walk(cell.tokens);
+			}
+		}
+	};
+	walk(markdownParser.lexer(text));
+	if (edits.length === 0) return text;
+	let out = "";
+	let last = 0;
+	for (const edit of edits) {
+		out += text.slice(last, edit.start) + formatLinkDestination(edit.target);
+		last = edit.end;
+	}
+	return out + text.slice(last);
 }
 
 /** Drop all L2 cache entries. Call on theme change to prevent stale styled output. */
