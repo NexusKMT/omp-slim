@@ -40,6 +40,7 @@ import { completeSimple, streamSimple } from "../stream";
 import type { Api, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from "../types";
 import { deterministicUuid } from "../utils/deterministic-id";
 import { parseBind } from "../utils/parse-bind";
+import { resolvePeer } from "../utils/resolve-peer";
 import {
 	type AuthGatewayBootOptions,
 	type AuthGatewayRouteOptions,
@@ -58,7 +59,6 @@ import {
 	isAuthorized,
 	json,
 	resolveClientIdentity,
-	resolvePeer,
 	withCors,
 } from "./http";
 import { handleEmbeddings } from "./routes/embeddings";
