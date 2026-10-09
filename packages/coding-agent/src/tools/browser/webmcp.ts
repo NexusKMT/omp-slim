@@ -422,7 +422,8 @@ export function installWebMcpPageHook(key: string): void {
 		return context;
 	};
 
-	if (nativeAvailable) {
+	// A page whose own modelContext is null reports the API but still gets the polyfill.
+	if (getters.length > 0 || pageContext) {
 		adopt(pageContext);
 		for (const getter of getters) {
 			const { instance, owner, descriptor } = getter;

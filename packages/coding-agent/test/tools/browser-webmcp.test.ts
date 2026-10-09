@@ -217,6 +217,16 @@ window.cachedContext = navigator.modelContext;`,
 			registerOn: "navigator.modelContext",
 		},
 		{
+			setup: "a data property holding null",
+			define: `Object.defineProperty(navigator, "modelContext", { configurable: true, value: null });`,
+			registerOn: "navigator.modelContext",
+		},
+		{
+			setup: "a prototype accessor that yields null",
+			define: `Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: () => null });`,
+			registerOn: "navigator.modelContext",
+		},
+		{
 			setup: "a bound prototype accessor the page read before attach",
 			define: `Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: function () { return window.pageContext; }.bind(null) });
 window.cachedContext = navigator.modelContext;`,
