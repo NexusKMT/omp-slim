@@ -10,11 +10,16 @@ import catalog from "./nerd-font-glyphs.txt" with { type: "text" };
  * The catalog entry for a Nerd Fonts class name (`nf-md-flask` or `md-flask`):
  * its `<class>-<name>` key and hex codepoint. Entries are newline-delimited
  * `<key> <hex>` lines, so the lookup is one search for "\n<key> ".
+ *
+ * A name joins its words with `_` (`md-text_box`), and no name in the catalog
+ * holds a `-`, so a model writing `nf-md-text-box` still finds it.
  */
 function find(name: string): [key: string, hex: string] | undefined {
-	const key = name.trim().replace(/^nf-/, "");
+	const written = name.trim().replace(/^nf-/, "");
 	// Anything outside the catalog's name alphabet could match across entry delimiters.
-	if (!/^[a-z0-9_-]+$/.test(key)) return undefined;
+	if (!/^[a-z0-9_-]+$/.test(written)) return undefined;
+	const dash = written.indexOf("-");
+	const key = dash === -1 ? written : written.slice(0, dash + 1) + written.slice(dash + 1).replaceAll("-", "_");
 	const at = catalog.indexOf(`\n${key} `);
 	if (at === -1) return undefined;
 	const hex = at + key.length + 2;
