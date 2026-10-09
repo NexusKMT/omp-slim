@@ -153,8 +153,8 @@ export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOpti
 		// waiters start a fresh attempt instead of waiting out a launch or connect
 		// that may never return. Only the registered entry is removed, so a late
 		// settlement cannot drop a replacement already in flight. A spawned app
-		// keeps its key until the open settles: disposing that open kills the app,
-		// which a fresh attempt could already have adopted as a reusable endpoint.
+		// keeps its key until its abandoned open has been disposed: that kills
+		// the app, which a fresh attempt could otherwise adopt as a reusable endpoint.
 		const clearEntry = () => {
 			opts.signal?.removeEventListener("abort", clearEntry);
 			if (pendingOpens.get(key) === entry) pendingOpens.delete(key);
@@ -162,8 +162,13 @@ export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOpti
 		};
 		if (kind.kind !== "spawned") opts.signal?.addEventListener("abort", clearEntry, { once: true });
 		pendingOpens.set(key, entry);
-		void open.then(clearEntry, clearEntry);
-		const handle = await open;
+		let handle: BrowserHandle;
+		try {
+			handle = await open;
+		} catch (error) {
+			clearEntry();
+			throw error;
+		}
 		// The launch may resolve AFTER the caller has already aborted (the outer
 		// `untilAborted` rejects immediately on abort but does not cancel the
 		// inner promise, and `launchHeadlessBrowser` does not accept a signal).
@@ -178,9 +183,11 @@ export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOpti
 					error: err instanceof Error ? err.message : String(err),
 				});
 			});
+			clearEntry();
 			throw new ToolAbortError("Browser open aborted");
 		}
 		browsers.set(key, handle);
+		clearEntry();
 		return handle;
 	}
 }

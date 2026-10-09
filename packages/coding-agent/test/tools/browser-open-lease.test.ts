@@ -267,10 +267,16 @@ describe("browser open — an abandoned browser acquisition does not hold up the
 		expect(disposedBeforeRelease).toBe(1);
 	});
 
-	it("waits for a spawned app's abandoned acquisition to settle before starting another", async () => {
-		const app = "/tmp/omp-open-lease-app";
+	it("waits until a spawned app's abandoned acquisition has killed the app before looking for one to reuse", async () => {
+		const kind = { kind: "spawned" as const, path: "/bin/sh", args: ["-c", "exec sleep 30"] };
 		const events: string[] = [];
-		spyOn(attach, "findReusableCdp").mockResolvedValue({ cdpUrl: "http://127.0.0.1:1", pid: 4242 });
+		let lookups = 0;
+		spyOn(attach, "findReusableCdp").mockImplementation(async () => {
+			events.push("lookup");
+			return lookups++ === 0 ? null : { cdpUrl: "http://127.0.0.1:1", pid: 4242 };
+		});
+		spyOn(attach, "findFreeCdpPort").mockResolvedValue(1);
+		spyOn(attach, "waitForCdp").mockResolvedValue(undefined);
 		const stalledConnect = Promise.withResolvers<Browser>();
 		const firstConnect = Promise.withResolvers<void>();
 		spyOn(launch, "connectPuppeteer").mockImplementation(() => {
@@ -278,30 +284,28 @@ describe("browser open — an abandoned browser acquisition does not hold up the
 			firstConnect.resolve();
 			return stalledConnect.promise;
 		});
-		const browser = {
-			connected: true,
-			disconnect: () => {
-				events.push("disconnect");
-			},
-		} as unknown as Browser;
+		const killGate = Promise.withResolvers<void>();
+		spyOn(attach, "gracefulKillTreeOnce").mockImplementation(async pid => {
+			events.push("kill-start");
+			await killGate.promise;
+			process.kill(pid, "SIGKILL");
+			events.push("kill-end");
+		});
+		const browser = { connected: true, disconnect: () => undefined } as unknown as Browser;
 
 		const owner = new AbortController();
-		const first = rejectionOf(
-			registry.acquireBrowser({ kind: "spawned", path: app }, { cwd: "/tmp", signal: owner.signal }),
-		);
+		const first = rejectionOf(registry.acquireBrowser(kind, { cwd: "/tmp", signal: owner.signal }));
 		await firstConnect.promise;
 		owner.abort();
-		const second = registry.acquireBrowser({ kind: "spawned", path: app }, { cwd: "/tmp" });
-		for (let i = 0; i < 20; i++) await Promise.resolve();
+		const second = registry.acquireBrowser(kind, { cwd: "/tmp" });
 		stalledConnect.resolve(browser);
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		killGate.resolve();
 
 		expect(await first).toBeInstanceOf(ToolAbortError);
 		const handle = await second;
-		const published = registry.getBrowsersMapForTest().get(handle.key);
 		await registry.releaseBrowser(handle, { kill: false });
-		// The retry connects only after the abandoned open disposed its handle.
-		expect(events).toEqual(["connect", "disconnect", "connect", "disconnect"]);
-		expect(published).toBe(handle);
+		expect(events).toEqual(["lookup", "connect", "kill-start", "kill-end", "lookup", "connect"]);
 	});
 });
 
