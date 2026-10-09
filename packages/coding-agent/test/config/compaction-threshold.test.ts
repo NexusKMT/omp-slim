@@ -193,7 +193,7 @@ describe("compaction.modelThresholds", () => {
 		const tiers = { standard: 272_000, extended: 1_050_000 };
 
 		const pending = setModelCompactionPoint(settings, model, "400k", { tiers });
-		expect(pending).toMatchObject({ kind: "confirm", message: expect.stringContaining("long-context rate") });
+		expect(pending).toEqual({ kind: "confirm", message: "Opens 1.05M window; >272K costs more" });
 		expect(resolveModelCompactionSettings(settings, model).thresholdTokens).toBe(-1);
 
 		expect(setModelCompactionPoint(settings, model, "400k", { tiers, confirmed: true })).toEqual({
@@ -204,9 +204,9 @@ describe("compaction.modelThresholds", () => {
 		expect(setModelCompactionPoint(settings, model, "200k", { tiers })).toEqual({ kind: "saved", entry: 200_000 });
 
 		expect(() => setModelCompactionPoint(settings, model, "1050k", { tiers, confirmed: true })).toThrow(
-			"maximum 1,050,000-token window",
+			"Must be below the 1.05M max window",
 		);
-		expect(() => setModelCompactionPoint(settings, model, "300k")).toThrow("272,000-token window");
+		expect(() => setModelCompactionPoint(settings, model, "300k")).toThrow("Must be below the 272K window");
 		expect(resolveModelCompactionSettings(settings, model).thresholdTokens).toBe(200_000);
 	});
 

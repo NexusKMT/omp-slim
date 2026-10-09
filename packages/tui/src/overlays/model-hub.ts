@@ -332,8 +332,10 @@ function compactionConfirmPending(strip: CompactionStrip): boolean {
  */
 function compactionNotice(strip: CompactionStrip): { text: string; style: "error" | "warning" | "dim" } {
 	if (strip.error) return { text: sanitizeDisplayWarning(strip.error), style: "error" };
+	// The footer hint and the primary action already say Enter accepts; the
+	// notice stays short so it fits beside the field.
 	if (strip.confirm && compactionConfirmPending(strip)) {
-		return { text: `${sanitizeDisplayWarning(strip.confirm.message)} · enter again to accept`, style: "warning" };
+		return { text: sanitizeDisplayWarning(strip.confirm.message), style: "warning" };
 	}
 	return { text: COMPACTION_INPUT_HINT, style: "dim" };
 }
@@ -2856,7 +2858,10 @@ export class ModelHubComponent implements Component {
 						? "Preset name:"
 						: "New role name:";
 			const label = theme.fg("accent", labelText);
-			const inputWidth = Math.max(8, Math.min(32, width - visibleWidth(labelText) - 24));
+			// A compaction point is at most a few characters (`1500k`, `12.5%`); a
+			// narrow field leaves the row for its notice.
+			const maxInputWidth = strip.purpose === "compaction" ? 10 : 32;
+			const inputWidth = Math.max(8, Math.min(maxInputWidth, width - visibleWidth(labelText) - 24));
 			const inputLine = strip.input.render(inputWidth)[0] ?? "";
 			let hint: string;
 			if (strip.purpose === "compaction") {

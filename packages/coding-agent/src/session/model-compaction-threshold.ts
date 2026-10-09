@@ -47,6 +47,11 @@ export function describeModelCompactionPoint(scope: ScopeLike, model: Model): Mo
 	};
 }
 
+/** A window size as the hub's one-line notices show it: `272K`, `1.05M`. */
+function formatWindow(tokens: number): string {
+	return tokens.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 2 });
+}
+
 /** Outcome of {@link setModelCompactionPoint}: the entry written (`undefined` = removed), or a warning to acknowledge first. */
 export type ModelCompactionPointUpdate =
 	| { kind: "saved"; entry: number | string | undefined }
@@ -85,20 +90,16 @@ export function setModelCompactionPoint(
 		const { tiers } = options;
 		const ceiling = tiers?.extended ?? model.contextWindow;
 		if (ceiling !== null && ceiling !== undefined && entry >= ceiling) {
-			throw new Error(
-				`${entry.toLocaleString("en-US")} reaches ${model.id}'s ${tiers ? "maximum " : ""}${ceiling.toLocaleString("en-US")}-token window; compaction must trigger below it`,
-			);
+			throw new Error(`Must be below the ${formatWindow(ceiling)} ${tiers ? "max " : ""}window`);
 		}
 		if (tiers && entry >= tiers.standard && !options.confirmed && !cfgExtendedContext.get(settings)) {
 			const premiumThreshold = model.cost.longContext?.inputThreshold;
 			const pricing =
 				premiumThreshold !== undefined && entry > premiumThreshold
-					? `; input over ${premiumThreshold.toLocaleString("en-US")} bills at the long-context rate`
+					? `; >${formatWindow(premiumThreshold)} costs more`
 					: "";
-			return {
-				kind: "confirm",
-				message: `Past the ${tiers.standard.toLocaleString("en-US")}-token standard window: ${model.id} switches to its ${tiers.extended.toLocaleString("en-US")}-token extended window${pricing}`,
-			};
+			// Kept short: the hub shows it on one line beside the input field.
+			return { kind: "confirm", message: `Opens ${formatWindow(tiers.extended)} window${pricing}` };
 		}
 	}
 	cfgCompactionModelThresholds.setEntry(settings, key, entry);
