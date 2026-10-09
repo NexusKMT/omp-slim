@@ -24,6 +24,10 @@ import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
+import {
+	cfgCompactionModelThresholds,
+	cfgCompactionModelThresholdsEnabled,
+} from "@oh-my-pi/pi-coding-agent/session/context-settings";
 import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 describe("createAgentSession deferred model pattern resolution", () => {
@@ -2010,6 +2014,45 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		} finally {
 			await subagent.dispose();
 			await parent.dispose();
+		}
+	});
+
+	test("a compaction point edit switches the bound window before the next prompt can start", async () => {
+		const authStorage = createInMemoryAuthStorage();
+		authStoragesToClose.push(authStorage);
+		authStorage.keys.setRuntime("openai", "sk-test");
+		const settings = Settings.isolated();
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir: tempDir,
+			authStorage,
+			settings,
+			sessionManager: SessionManager.inMemory(),
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
+			enableMCP: false,
+			enableLsp: false,
+			skipPythonPreflight: true,
+			rules: [],
+			preloadedCustomToolPaths: [],
+			toolNames: ["read"],
+			modelPattern: "openai/gpt-5.6-terra",
+		});
+		try {
+			expect(session.model?.contextWindow).toBe(272_000);
+			// Setting listeners run one microtask after the write; no catalog rebuild
+			// may be awaited before the bound row carries the new tier.
+			cfgCompactionModelThresholds.set(settings, { "openai/gpt-5.6-terra": 400_000 });
+			await Promise.resolve();
+			expect(session.model?.contextWindow).toBe(1_050_000);
+			cfgCompactionModelThresholdsEnabled.set(settings, false);
+			await Promise.resolve();
+			expect(session.model?.contextWindow).toBe(272_000);
+		} finally {
+			await session.dispose();
 		}
 	});
 
