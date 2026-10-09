@@ -146,13 +146,19 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		const subDir = sessionFile.slice(0, -".jsonl".length);
 		await Bun.write(path.join(subDir, "Scout.jsonl"), subagentJsonl("scout", "scout task"));
 		await Bun.write(path.join(subDir, "Broken.jsonl"), `{"type":"session","version":3,"id":"bro`);
+		// Valid records without a leading header parse cleanly but still cannot be exported.
+		const headless = subagentJsonl("headless", "headless task").split("\n").slice(1).join("\n");
+		await Bun.write(path.join(subDir, "Headless.jsonl"), headless);
 
 		const archive = await session.dumpAnonymizedArchiveToTmpDir();
 		if (!archive) throw new Error("Expected an archive");
 		archives.push(archive.path);
 
 		expect(archive.subagentCount).toBe(1);
-		expect(archive.malformed).toEqual([[expect.stringMatching(/^subagents\/seg\d+\.jsonl \(not exported/), 1]]);
+		expect(archive.unreadable).toEqual([
+			expect.stringMatching(/^subagents\/seg\d+\.jsonl$/),
+			expect.stringMatching(/^subagents\/seg\d+\.jsonl$/),
+		]);
 	});
 
 	it("reports malformed records skipped while loading the main session", async () => {

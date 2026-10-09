@@ -4,7 +4,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { getProjectDir, isEnoent, pathIsWithin } from "@oh-my-pi/pi-utils";
 import { ANONYMIZED_REVIEW_NOTE, anonymizeSessionTranscripts } from "../session/session-anonymizer";
 import type { SessionEntry, SessionHeader } from "../session/session-entries";
 import { loadSessionFile } from "../session/session-loader";
@@ -29,6 +29,7 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 	const outDir = path.resolve(args.out ?? `${path.basename(sourcePath, ".jsonl")}.anon`);
 	// Subagent transcripts sit next to the real file, not next to a symlink pointing at it.
 	const sourceReal = await fs.realpath(sourcePath);
+	if (!(await fs.stat(sourceReal)).isFile()) throw new CliUsageError(`${sourcePath} is not a session file`);
 	const { entries: records, malformedRecords } = await loadSessionFile(sourceReal);
 	// The loader returns [] for a file without a valid session header.
 	const header = records.find((record): record is SessionHeader => record.type === "session");
@@ -56,7 +57,10 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 		}
 		throw err;
 	}
-	if (isWithin(path.dirname(sourceReal), outReal) || isWithin(outReal, sourceReal.slice(0, -".jsonl".length))) {
+	if (
+		pathIsWithin(outReal, path.dirname(sourceReal)) ||
+		pathIsWithin(sourceReal.slice(0, -".jsonl".length), outReal)
+	) {
 		throw new CliUsageError(
 			`--out ${outDir} would mix the export with raw session transcripts; choose another directory`,
 		);
@@ -73,12 +77,9 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 	for (const [member, skipped] of result.malformed) {
 		process.stdout.write(`Skipped ${skipped} malformed record${skipped === 1 ? "" : "s"} in ${member}\n`);
 	}
+	for (const member of result.unreadable)
+		process.stdout.write(`Not exported (no readable session header): ${member}\n`);
 	process.stdout.write(`${ANONYMIZED_REVIEW_NOTE}\n`);
-}
-
-/** Whether `child` is `parent` or lies beneath it. */
-function isWithin(child: string, parent: string): boolean {
-	return child === parent || child.startsWith(`${parent}${path.sep}`);
 }
 
 /** Real path of `target`, resolving its nearest existing ancestor when it does not exist yet. */

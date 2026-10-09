@@ -13165,6 +13165,7 @@ export class AgentSession implements SettingsScope {
 			subagentError: result.subagentError,
 			anonymized: true,
 			malformed: result.malformed,
+			unreadable: result.unreadable,
 		};
 	}
 

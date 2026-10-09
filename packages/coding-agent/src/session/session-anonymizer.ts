@@ -1215,6 +1215,8 @@ function looksLikePath(value: string): boolean {
 
 export class SessionAnonymizer {
 	#tokens = new Map<string, number>();
+	/** Ids of tool calls seen in assistant messages; the execution log may only echo these raw. */
+	#toolCallIds = new Set<string>();
 
 	#index(value: string): number {
 		let index = this.#tokens.get(value);
@@ -1338,11 +1340,53 @@ export class SessionAnonymizer {
 	 * `fromTool` marks built-in tool details, whose writer cannot be verified from the transcript.
 	 */
 	#struct(object: JsonObject, fromTool = false): JsonObject {
+		// Real tool-call ids, so execution-log entries (which extensions can spoof) only keep ids that exist.
+		if (!fromTool && TOOL_CALL_TYPES[String(object.type)] === true && typeof object.id === "string") {
+			this.#toolCallIds.add(object.id);
+		}
 		const out: JsonObject = {};
 		for (const [key, value] of Object.entries(object)) {
 			const rule = Object.hasOwn(FIELD_RULES, key) ? FIELD_RULES[key] : undefined;
 			if (rule === undefined) out[this.placeholder(key)] = this.#opaque(value);
 			else out[key] = this.#field(rule, value, object, key, fromTool);
+		}
+		return out;
+	}
+
+	/**
+	 * `tool_execution_start` data, projected onto its exact schema. Extensions can append a custom entry
+	 * under any `customType`, so nothing beyond these fields is trusted, and the call id stays raw only
+	 * when it names a tool call already seen in the transcript.
+	 */
+	#executionLog(data: JsonObject): JsonObject {
+		const out: JsonObject = {};
+		for (const [key, value] of Object.entries(data)) {
+			switch (key) {
+				case "toolCallId":
+					// A known call id gets the same treatment as in its message; anything else is tokenized.
+					out[key] = this.#field(
+						"id",
+						value,
+						data,
+						key,
+						!(typeof value === "string" && this.#toolCallIds.has(value)),
+					);
+					break;
+				case "toolName":
+					out[key] = this.#field("tool", value, data, key, true);
+					break;
+				case "startedAt":
+					out[key] = this.#field("time", value, data, key, true);
+					break;
+				case "args":
+					out[key] = this.#toolArgs(value, data);
+					break;
+				case "intent":
+					out[key] = this.#field("label", value, data, key, true);
+					break;
+				default:
+					out[this.placeholder(key)] = this.#opaque(value);
+			}
 		}
 		return out;
 	}
@@ -1363,7 +1407,7 @@ export class SessionAnonymizer {
 			case "data":
 				// omp's execution log mirrors the tool call; every other custom entry is extension state.
 				return parent.type === "custom" && parent.customType === "tool_execution_start" && isObject(value)
-					? this.#struct(value, fromTool)
+					? this.#executionLog(value)
 					: this.#opaque(value);
 			case "name":
 				return this.#field(
@@ -1616,6 +1660,8 @@ export interface AnonymizedTranscripts {
 	subagentError?: string;
 	/** `[member path, count]` for transcripts whose malformed JSONL records were skipped. */
 	malformed: Array<readonly [string, number]>;
+	/** Subagent transcripts (mapped member paths) skipped because no session header could be read. */
+	unreadable: string[];
 }
 
 /**
@@ -1631,6 +1677,7 @@ export async function anonymizeSessionTranscripts(session: AnonymizeSessionInput
 	const files: Array<readonly [string, string]> = [["session.jsonl", toJsonl(session.header, session.entries)]];
 	const malformed: Array<readonly [string, number]> = [];
 	if (session.malformedRecords) malformed.push(["session.jsonl", session.malformedRecords]);
+	const unreadable: string[] = [];
 	// Agent ids map through the same table as `agent://<id>` path segments.
 	const memberFor = (key: string): string =>
 		`subagents/${key
@@ -1641,9 +1688,7 @@ export async function anonymizeSessionTranscripts(session: AnonymizeSessionInput
 	let subagentError: string | undefined;
 	try {
 		if (session.sessionFile) {
-			subSessions = await collectSubSessions(session.sessionFile, (key, count) => {
-				malformed.push([`${memberFor(key)} (not exported: no readable session header)`, count]);
-			});
+			subSessions = await collectSubSessions(session.sessionFile, key => unreadable.push(memberFor(key)));
 		}
 	} catch (error) {
 		subagentError = error instanceof Error ? error.message : String(error);
@@ -1654,5 +1699,5 @@ export async function anonymizeSessionTranscripts(session: AnonymizeSessionInput
 		files.push([member, toJsonl(sub.header, sub.entries)]);
 		if (sub.malformedRecords > 0) malformed.push([member, sub.malformedRecords]);
 	}
-	return { files, subagentCount: files.length - 1, subagentError, malformed };
+	return { files, subagentCount: files.length - 1, subagentError, malformed, unreadable };
 }

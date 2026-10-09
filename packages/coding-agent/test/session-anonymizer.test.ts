@@ -340,6 +340,20 @@ describe("SessionAnonymizer", () => {
 		expect(anonymizer.command("grep -ecustomer=secret file")).not.toMatch(/customer|secret/);
 	});
 
+	test("projects execution-log entries onto their schema, since extensions can spoof the custom type", () => {
+		const anonymizer = new SessionAnonymizer();
+		const json = JSON.stringify(
+			anonymizer.entry({
+				type: "custom",
+				customType: "tool_execution_start",
+				data: { toolCallId: "account_12345", toolName: "grep", provider: "customer-acme" },
+			}),
+		);
+		expect(json).not.toContain("acme");
+		expect(json).not.toContain("account_12345");
+		expect(json).toContain('"toolName":"grep"');
+	});
+
 	test("tokenizes numeric path segments", () => {
 		const anonymizer = new SessionAnonymizer();
 		expect(anonymizer.path("/customers/123456789/private.ts:10-20")).toMatch(/^\/seg\d+\/seg\d+\/seg\d+\.ts:10-20$/);

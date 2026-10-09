@@ -28,8 +28,8 @@ export interface SubSession {
 	malformedRecords: number;
 }
 
-/** Receives the key and malformed-record count of a subagent transcript whose header could not be loaded. */
-export type UnreadableSubSessionHandler = (key: string, malformedRecords: number) => void;
+/** Receives the key of a subagent transcript that exists but has no readable session header. */
+export type UnreadableSubSessionHandler = (key: string) => void;
 
 /**
  * Collect subagent session transcripts stored next to a session file.
@@ -71,9 +71,9 @@ async function collectSubSessionsFromDir(
 		if (!name.endsWith(".jsonl") || name.includes(".bak") || isAdvisorTranscriptName(name)) continue;
 		const agentId = name.slice(0, -6);
 		const key = parentKey ? `${parentKey}/${agentId}` : agentId;
-		const { entries: fileEntries, malformedRecords } = await loadSessionFile(path.join(dir, name));
-		// Empty/corrupt files (no valid session header) load as [] — skipped, but a corrupt one is
-		// reported so exports do not look complete while omitting it.
+		const { entries: fileEntries, malformedRecords, invalidHeader } = await loadSessionFile(path.join(dir, name));
+		// Empty files load as [] and are skipped; a corrupt or missing header is reported so exports do
+		// not look complete while omitting the transcript.
 		if (fileEntries.length > 0) {
 			const header = (fileEntries.find(e => e.type === "session") as SessionHeader | undefined) ?? null;
 			const entries = fileEntries.filter((e): e is SessionEntry => e.type !== "session");
@@ -86,8 +86,8 @@ async function collectSubSessionsFromDir(
 				aborted: fileNames.has(getAgentTombstonePath(name)),
 				malformedRecords,
 			};
-		} else if (malformedRecords > 0) {
-			onUnreadable?.(key, malformedRecords);
+		} else if (invalidHeader) {
+			onUnreadable?.(key);
 		}
 		// Only descend into real child directories: a transcript stem such as "." or ".."
 		// would revisit an ancestor, and symlinked directories can loop back into the tree.

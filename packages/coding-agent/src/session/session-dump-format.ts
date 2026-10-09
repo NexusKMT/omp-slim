@@ -288,6 +288,8 @@ export interface SessionDumpArchive {
 	anonymized?: boolean;
 	/** `[member, count]` for transcripts whose malformed JSONL records were skipped. */
 	malformed?: ReadonlyArray<readonly [string, number]>;
+	/** Subagent transcripts skipped because no session header could be read. */
+	unreadable?: readonly string[];
 }
 
 /** Lines describing a `/dump all` archive: path, members, and any subagent discovery failure. */
@@ -303,6 +305,7 @@ export function formatDumpArchiveReport(archive: SessionDumpArchive): string[] {
 	for (const [member, skipped] of archive.malformed ?? []) {
 		lines.push(`Skipped ${skipped} malformed record${skipped === 1 ? "" : "s"} in ${member}`);
 	}
+	for (const member of archive.unreadable ?? []) lines.push(`Not exported (no readable session header): ${member}`);
 	lines.push(
 		archive.anonymized
 			? ANONYMIZED_REVIEW_NOTE
