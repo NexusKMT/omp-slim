@@ -48,6 +48,7 @@ export class DownloadManager {
 	readonly #browser: Browser;
 	readonly #page: Page;
 	readonly #defaultDirectory: string;
+	readonly #perTab: boolean;
 	#directory?: string;
 	#arming?: Promise<void>;
 	#session?: CDPSession;
@@ -58,15 +59,21 @@ export class DownloadManager {
 	#willBegin?: (event: DownloadStarted & { frameId: string }) => void;
 	#progress?: (event: DownloadProgress) => void;
 
-	constructor(browser: Browser, page: Page, tabId: string) {
+	/**
+	 * `perTab` gives each tab its own folder by saving under download GUIDs and moving each tab's own files. Leave it off
+	 * for a browser the user drives (connected, relay): there the folder also receives the user's own downloads, which
+	 * would otherwise be saved under bare GUIDs nobody renames.
+	 */
+	constructor(browser: Browser, page: Page, tabId: string, options: { perTab: boolean }) {
 		this.#browser = browser;
 		this.#page = page;
 		this.#defaultDirectory = path.join(os.tmpdir(), `omp-downloads-${tabId}`);
+		this.#perTab = options.perTab;
 	}
 
 	/**
-	 * Point the browser's one download folder at this tab's folder. Files are saved under their download GUID so tabs
-	 * never overwrite each other's, and each tab moves its own into its folder under the suggested name.
+	 * Point the browser's one download folder at this tab's folder. Per tab, files are saved under their download GUID
+	 * so tabs never overwrite each other's, and each tab moves its own into its folder under the suggested name.
 	 */
 	async enable(directory?: string): Promise<void> {
 		const resolved = path.resolve(directory ?? this.#defaultDirectory);
@@ -74,7 +81,7 @@ export class DownloadManager {
 		if (!this.#session) await this.#attach();
 		const context = this.#page.browserContext() as { id?: string };
 		await this.#session!.send("Browser.setDownloadBehavior", {
-			behavior: "allowAndName",
+			behavior: this.#perTab ? "allowAndName" : "allow",
 			downloadPath: resolved,
 			eventsEnabled: true,
 			...(context.id ? { browserContextId: context.id } : {}),
@@ -96,7 +103,13 @@ export class DownloadManager {
 			const arming = (this.#arming ??= this.enable(this.#directory).finally(() => {
 				this.#arming = undefined;
 			}));
-			await untilAborted(signal, arming);
+			try {
+				await untilAborted(signal, arming);
+			} catch (error) {
+				// Abort with the caller's reason, as the waits below do.
+				if (signal?.aborted) throw signal.reason;
+				throw error;
+			}
 		}
 		const ready = this.#unclaimed.shift();
 		if (ready) return { ...ready };
@@ -161,7 +174,7 @@ export class DownloadManager {
 
 	async #complete(pending: PendingDownload, filePath: string | undefined): Promise<void> {
 		const directory = this.#directory ?? this.#defaultDirectory;
-		const source = filePath ?? path.join(directory, pending.guid);
+		const source = filePath ?? path.join(directory, this.#perTab ? pending.guid : pending.suggestedFilename);
 		for (let attempt = 0; attempt < 100; attempt++) {
 			try {
 				await fs.stat(source);
@@ -175,7 +188,11 @@ export class DownloadManager {
 		// Only the last segment of the suggested name is used; anything else, or a download that cannot be moved, is
 		// reported where Chromium saved it.
 		const movable =
-			name !== "" && name !== "." && name !== ".." && (await canMoveDownload(source, pending.guid, target));
+			this.#perTab &&
+			name !== "" &&
+			name !== "." &&
+			name !== ".." &&
+			(await canMoveDownload(source, pending.guid, target));
 		const downloadPath = movable
 			? await moveDownload(source, target).then(
 					() => target,

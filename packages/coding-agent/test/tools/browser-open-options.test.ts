@@ -96,7 +96,10 @@ describe("browser open options CDP helpers", () => {
 		]);
 	});
 
-	async function fakeDownloads(send: () => Promise<unknown> = async () => undefined) {
+	async function fakeDownloads(
+		send: (method: string, params: unknown) => Promise<unknown> = async () => undefined,
+		perTab = true,
+	) {
 		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-download-test-"));
 		const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-download-test-"));
 		tempDirs.push(directory, elsewhere);
@@ -109,7 +112,7 @@ describe("browser open options CDP helpers", () => {
 		};
 		const browser = { target: () => ({ createCDPSession: async () => session }) } as unknown as Browser;
 		const page = { frames: () => [{ _id: "frame" }], browserContext: () => ({}) } as unknown as Page;
-		const downloads = new DownloadManager(browser, page, "tab");
+		const downloads = new DownloadManager(browser, page, "tab", { perTab });
 		const complete = async (
 			guid: unknown,
 			filePath: string | undefined,
@@ -198,15 +201,18 @@ describe("browser open options CDP helpers", () => {
 		const guid = crypto.randomUUID();
 		const saved = path.join(elsewhere, guid);
 		await Bun.write(saved, "bytes");
-		await fs.chmod(saved, 0o000);
 		await Bun.write(path.join(directory, "report.txt"), "earlier report");
 		const rename = spyOn(nodeFs.promises, "rename").mockImplementationOnce(async () => {
 			throw Object.assign(new Error("cross-device link not permitted"), { code: "EXDEV" });
+		});
+		const copyFile = spyOn(nodeFs.promises, "copyFile").mockImplementationOnce(async () => {
+			throw Object.assign(new Error("i/o error"), { code: "EIO" });
 		});
 		try {
 			expect(await complete(guid, saved)).toBe(saved);
 		} finally {
 			rename.mockRestore();
+			copyFile.mockRestore();
 		}
 		expect(await Bun.file(path.join(directory, "report.txt")).text()).toBe("earlier report");
 		expect(await fs.readdir(directory)).toEqual(["report.txt"]);
@@ -218,18 +224,35 @@ describe("browser open options CDP helpers", () => {
 		const saved = path.join(elsewhere, guid);
 		await Bun.write(saved, "bytes");
 		await Bun.write(path.join(directory, "report.txt"), "earlier report");
-		await fs.chmod(elsewhere, 0o555);
 		const rename = spyOn(nodeFs.promises, "rename").mockImplementationOnce(async () => {
 			throw Object.assign(new Error("cross-device link not permitted"), { code: "EXDEV" });
+		});
+		const unlink = spyOn(nodeFs.promises, "unlink").mockImplementationOnce(async () => {
+			throw Object.assign(new Error("permission denied"), { code: "EACCES" });
 		});
 		try {
 			expect(await complete(guid, saved)).toBe(path.join(directory, "report.txt"));
 		} finally {
 			rename.mockRestore();
-			await fs.chmod(elsewhere, 0o755);
+			unlink.mockRestore();
 		}
 		expect(await Bun.file(path.join(directory, "report.txt")).text()).toBe("bytes");
 		expect(await fs.readdir(directory)).toEqual(["report.txt"]);
+	});
+
+	it("keeps real file names and leaves files in place in a browser the user drives", async () => {
+		const behaviors: unknown[] = [];
+		const { elsewhere, complete } = await fakeDownloads(async (method, params) => {
+			if (method === "Browser.setDownloadBehavior") behaviors.push(params);
+		}, false);
+		const guid = crypto.randomUUID();
+		const saved = path.join(elsewhere, "report.txt");
+		await Bun.write(saved, "bytes");
+
+		expect(await complete(guid, saved)).toBe(saved);
+		expect(await Bun.file(saved).text()).toBe("bytes");
+		expect(behaviors.length).toBeGreaterThan(0);
+		for (const params of behaviors) expect(params).toMatchObject({ behavior: "allow" });
 	});
 
 	it("reports a download whose suggested name is not a string where Chromium saved it", async () => {
@@ -260,6 +283,17 @@ describe("browser open options CDP helpers", () => {
 		// A second enable runs the same steps, so an enable the wait started has failed by now, inside this test, where
 		// Bun fails it if nothing handled the rejection.
 		expect(await rejectionOf(downloads.enable())).toBeInstanceOf(Error);
+	});
+
+	it("rejects a wait aborted while downloads are being enabled with the caller's reason", async () => {
+		const enabling = Promise.withResolvers<void>();
+		const { downloads } = await fakeDownloads(() => enabling.promise);
+		const controller = new AbortController();
+		const waiting = rejectionOf(downloads.wait(controller.signal));
+		const reason = new Error("cancelled");
+		controller.abort(reason);
+		expect(await waiting).toBe(reason);
+		enabling.resolve();
 	});
 });
 
