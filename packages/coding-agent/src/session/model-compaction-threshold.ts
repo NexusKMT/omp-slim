@@ -39,9 +39,10 @@ export function describeModelCompactionPoint(scope: ScopeLike, model: Model): Mo
 	const match = matchModelCompactionThreshold(thresholds, model);
 	const settings = applyModelCompactionThreshold(configured, thresholds, model);
 	const contextWindow = model.contextWindow ?? 0;
+	const trigger = settings.enabled && contextWindow > 0 ? describeTrigger(settings, contextWindow) : undefined;
 	return {
-		tokens: settings.enabled && contextWindow > 0 ? resolveThresholdTokens(contextWindow, settings) : undefined,
-		percent: settings.thresholdTokens > 0 || settings.thresholdPercent <= 0 ? undefined : settings.thresholdPercent,
+		tokens: trigger?.tokens,
+		basis: trigger?.basis,
 		source: match?.key ?? (configured.thresholdTokens > 0 || configured.thresholdPercent > 0 ? "global" : "default"),
 		draft: match?.key === `${model.provider}/${model.id}` ? formatCompactionPointInput(match.threshold) : undefined,
 	};
@@ -52,9 +53,107 @@ function formatWindow(tokens: number): string {
 	return tokens.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 2 });
 }
 
-/** Outcome of {@link setModelCompactionPoint}: the entry written (`undefined` = removed), or a warning to acknowledge first. */
+/**
+ * Where `settings` compacts on `window`, and why in a few words: `fixed`, or
+ * the share of what it scales (`85% of 400K base`, `80% of window`).
+ */
+function describeTrigger(settings: CompactionSettings, window: number): { tokens: number; basis: string } {
+	const tokens = resolveThresholdTokens(window, settings);
+	if (settings.thresholdTokens > 0) return { tokens, basis: "fixed" };
+	const base = settings.baseWindowTokens;
+	const scaled = base !== undefined && base > 0 && base < window ? base : window;
+	const share = `${Math.round((tokens / scaled) * 100)}%`;
+	return { tokens, basis: scaled === window ? `${share} of window` : `${share} of ${formatWindow(scaled)} base` };
+}
+
+/**
+ * How a typed entry would apply to `model`: the policy it yields, the window it
+ * runs on (the extended tier once the entry needs it), and why it is refused.
+ */
+interface ModelCompactionEntryPlan {
+	settings: CompactionSettings;
+	window: number | undefined;
+	opensExtended: boolean;
+	/** Set when the entry does not fit the largest window `model` can run with. */
+	error?: string;
+}
+
+function planModelCompactionEntry(
+	settings: Settings,
+	model: Model,
+	entry: number | string | undefined,
+	tiers: ContextWindowTiers | undefined,
+): ModelCompactionEntryPlan {
+	const configured = cfgCompaction.get(settings);
+	// `parseCompactionPointInput` yields a number (base), `"fN"` (fixed) or `"N%"`.
+	const fixed = typeof entry === "string" && entry.startsWith("f");
+	const tokens =
+		typeof entry === "number" ? entry : typeof entry === "string" && fixed ? Number(entry.slice(1)) : undefined;
+	let applied: CompactionSettings = configured;
+	if (tokens !== undefined) {
+		applied = fixed
+			? { ...configured, thresholdPercent: -1, thresholdTokens: tokens }
+			: { ...configured, thresholdTokens: -1, baseWindowTokens: tokens };
+	} else if (typeof entry === "string") {
+		applied = { ...configured, thresholdPercent: Number(entry.slice(0, -1)), thresholdTokens: -1 };
+	}
+	const opensExtended =
+		tiers !== undefined && tokens !== undefined && (fixed ? tokens >= tiers.standard : tokens > tiers.standard);
+	const window = tiers
+		? opensExtended || cfgExtendedContext.get(settings)
+			? tiers.extended
+			: tiers.standard
+		: (model.contextWindow ?? undefined);
+	const ceiling = tiers?.extended ?? model.contextWindow;
+	let error: string | undefined;
+	if (tokens !== undefined && ceiling !== null && ceiling !== undefined) {
+		const max = tiers ? "max " : "";
+		if (fixed && tokens >= ceiling) error = `Must be below the ${formatWindow(ceiling)} ${max}window`;
+		if (!fixed && tokens > ceiling) error = `Must not exceed the ${formatWindow(ceiling)} ${max}window`;
+	}
+	return { settings: applied, window, opensExtended, error };
+}
+
+/** Where the plan compacts, as one short line: `compacts at 340K · 85% of 400K base`. */
+function summarizePlan(plan: ModelCompactionEntryPlan): string | undefined {
+	if (!plan.settings.enabled) return "auto-compaction is off";
+	if (plan.window === undefined || plan.window <= 0) return undefined;
+	const trigger = describeTrigger(plan.settings, plan.window);
+	return trigger.basis === "fixed"
+		? `compacts at exactly ${formatWindow(trigger.tokens)}`
+		: `compacts at ${formatWindow(trigger.tokens)} · ${trigger.basis}`;
+}
+
+/**
+ * Live preview of a typed compaction limit for the hub field: where `model`
+ * would compact with it (`compacts at 340K · 85% of 400K base`), or with no
+ * entry for empty input. Undefined for input that does not parse or fit, which
+ * {@link setModelCompactionPoint} reports on submit.
+ */
+export function previewModelCompactionPoint(
+	settings: Settings,
+	model: Model,
+	input: string,
+	tiers: ContextWindowTiers | undefined,
+): string | undefined {
+	let entry: number | string | null;
+	try {
+		entry = parseCompactionPointInput(input);
+	} catch {
+		return undefined;
+	}
+	const plan = planModelCompactionEntry(settings, model, entry ?? undefined, tiers);
+	if (plan.error) return undefined;
+	const summary = summarizePlan(plan);
+	return entry === null && summary ? `resets: ${summary}` : summary;
+}
+
+/**
+ * Outcome of {@link setModelCompactionPoint}: the entry written (`undefined` =
+ * removed) with where the model now compacts, or a warning to acknowledge first.
+ */
 export type ModelCompactionPointUpdate =
-	| { kind: "saved"; entry: number | string | undefined }
+	| { kind: "saved"; entry: number | string | undefined; summary: string | undefined }
 	| { kind: "confirm"; message: string };
 
 /**
@@ -88,39 +187,19 @@ export function setModelCompactionPoint(
 	) {
 		throw new Error(`${key} is set in the project config; edit compaction.modelThresholds there`);
 	}
-	// `parseCompactionPointInput` yields a number (base), `"fN"` (fixed) or `"N%"`.
-	const fixed = typeof entry === "string" && entry.startsWith("f");
-	const tokens =
-		typeof entry === "number" ? entry : typeof entry === "string" && fixed ? Number(entry.slice(1)) : undefined;
-	if (tokens !== undefined) {
-		const { tiers } = options;
-		const ceiling = tiers?.extended ?? model.contextWindow;
-		const max = tiers ? "max " : "";
-		if (ceiling !== null && ceiling !== undefined && (fixed ? tokens >= ceiling : tokens > ceiling)) {
-			throw new Error(
-				fixed
-					? `Must be below the ${formatWindow(ceiling)} ${max}window`
-					: `Must not exceed the ${formatWindow(ceiling)} ${max}window`,
-			);
-		}
-		const opensExtended = tiers !== undefined && (fixed ? tokens >= tiers.standard : tokens > tiers.standard);
-		if (tiers && opensExtended && !options.confirmed && !cfgExtendedContext.get(settings)) {
-			// Pricing follows where compaction actually triggers: the fixed point, or the policy scaled from the base.
-			const trigger = fixed
-				? tokens
-				: resolveThresholdTokens(tiers.extended, {
-						...cfgCompaction.get(settings),
-						thresholdTokens: -1,
-						baseWindowTokens: tokens,
-					});
-			const premiumThreshold = model.cost.longContext?.inputThreshold;
-			const pricing =
-				premiumThreshold !== undefined && trigger > premiumThreshold
-					? `; >${formatWindow(premiumThreshold)} costs more`
-					: "";
-			// Kept short: the hub shows it on one line beside the input field.
-			return { kind: "confirm", message: `Opens ${formatWindow(tiers.extended)} window${pricing}` };
-		}
+	const { tiers } = options;
+	const plan = planModelCompactionEntry(settings, model, entry, tiers);
+	if (plan.error) throw new Error(plan.error);
+	if (tiers && plan.opensExtended && !options.confirmed && !cfgExtendedContext.get(settings)) {
+		// Pricing follows where compaction actually triggers: the fixed point, or the policy scaled from the base.
+		const trigger = resolveThresholdTokens(tiers.extended, plan.settings);
+		const premiumThreshold = model.cost.longContext?.inputThreshold;
+		const pricing =
+			premiumThreshold !== undefined && trigger > premiumThreshold
+				? `; >${formatWindow(premiumThreshold)} costs more`
+				: "";
+		// Kept short: the hub shows it on one line beside the input field.
+		return { kind: "confirm", message: `Opens ${formatWindow(tiers.extended)} window${pricing}` };
 	}
 	cfgCompactionModelThresholds.setEntry(settings, key, entry);
 	const effective = cfgCompactionModelThresholds.get(settings)[key] ?? undefined;
@@ -129,5 +208,5 @@ export function setModelCompactionPoint(
 			`${key} is overridden by a higher-priority config layer; the global entry was saved but has no effect`,
 		);
 	}
-	return { kind: "saved", entry };
+	return { kind: "saved", entry, summary: summarizePlan(plan) };
 }

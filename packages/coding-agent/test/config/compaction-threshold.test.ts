@@ -13,6 +13,7 @@ import {
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgCompactionModelThresholds } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 import {
+	previewModelCompactionPoint,
 	resolveModelCompactionSettings,
 	setModelCompactionPoint,
 } from "@oh-my-pi/pi-coding-agent/session/model-compaction-threshold";
@@ -216,7 +217,7 @@ describe("compaction.modelThresholds", () => {
 
 			expect(() => setModelCompactionPoint(settings, deepseek, "90k")).toThrow("project config");
 			expect(resolveModelCompactionSettings(settings, deepseek)).toMatchObject({ baseWindowTokens: 50000 });
-			expect(setModelCompactionPoint(settings, other, "90k")).toEqual({ kind: "saved", entry: 90000 });
+			expect(setModelCompactionPoint(settings, other, "90k")).toMatchObject({ kind: "saved", entry: 90000 });
 			expect(resolveModelCompactionSettings(settings, other)).toMatchObject({ baseWindowTokens: 90000 });
 		});
 	});
@@ -240,12 +241,17 @@ describe("compaction.modelThresholds", () => {
 			message: "Opens 1.05M window",
 		});
 
+		// The saved summary says where the model now compacts: 400k minus the 60k reserve, on the extended window.
 		expect(setModelCompactionPoint(settings, model, "400k", { tiers, confirmed: true })).toEqual({
 			kind: "saved",
 			entry: 400_000,
+			summary: "compacts at 340K · 85% of 400K base",
 		});
 		expect(resolveModelCompactionSettings(settings, model).baseWindowTokens).toBe(400_000);
-		expect(setModelCompactionPoint(settings, model, "200k", { tiers })).toEqual({ kind: "saved", entry: 200_000 });
+		expect(setModelCompactionPoint(settings, model, "200k", { tiers })).toMatchObject({
+			kind: "saved",
+			entry: 200_000,
+		});
 
 		expect(() => setModelCompactionPoint(settings, model, "1100k", { tiers, confirmed: true })).toThrow(
 			"Must not exceed the 1.05M max window",
@@ -260,7 +266,10 @@ describe("compaction.modelThresholds", () => {
 		const tiers = { standard: 272_000, extended: 1_050_000 };
 
 		// A base equal to the standard window fits it; a fixed trigger there needs the extended one.
-		expect(setModelCompactionPoint(settings, model, "272k", { tiers })).toEqual({ kind: "saved", entry: 272_000 });
+		expect(setModelCompactionPoint(settings, model, "272k", { tiers })).toMatchObject({
+			kind: "saved",
+			entry: 272_000,
+		});
 		expect(setModelCompactionPoint(settings, model, "f272k", { tiers })).toEqual({
 			kind: "confirm",
 			message: "Opens 1.05M window",
@@ -268,6 +277,7 @@ describe("compaction.modelThresholds", () => {
 		expect(setModelCompactionPoint(settings, model, "f272k", { tiers, confirmed: true })).toEqual({
 			kind: "saved",
 			entry: "f272000",
+			summary: "compacts at exactly 272K",
 		});
 		expect(resolveModelCompactionSettings(settings, model)).toMatchObject({ thresholdTokens: 272_000 });
 		expect(() => setModelCompactionPoint(settings, model, "f1050k", { tiers, confirmed: true })).toThrow(
@@ -280,6 +290,21 @@ describe("compaction.modelThresholds", () => {
 		const model = { provider: "openai", id: "gpt-5.6-terra", contextWindow: 1_050_000 } as Model;
 		expect(
 			setModelCompactionPoint(settings, model, "400k", { tiers: { standard: 272_000, extended: 1_050_000 } }),
-		).toEqual({ kind: "saved", entry: 400_000 });
+		).toMatchObject({ kind: "saved", entry: 400_000 });
+	});
+
+	it("previews where each kind of typed limit compacts, and stays silent on input submit would reject", () => {
+		const settings = Settings.isolated({ extendedContext: false });
+		const model = { provider: "openai", id: "gpt-5.6-terra", contextWindow: 272_000 } as Model;
+		const tiers = { standard: 272_000, extended: 1_050_000 };
+		const preview = (input: string) => previewModelCompactionPoint(settings, model, input, tiers);
+
+		expect(preview("400k")).toBe("compacts at 340K · 85% of 400K base");
+		// A base inside the standard window keeps the model on it.
+		expect(preview("200k")).toBe("compacts at 170K · 85% of 200K base");
+		expect(preview("f400k")).toBe("compacts at exactly 400K");
+		expect(preview("50%")).toBe("compacts at 136K · 50% of window");
+		expect(preview("")).toBe("resets: compacts at 231.2K · 85% of window");
+		for (const rejected of ["abc", "1100k", "f1050k"]) expect(preview(rejected)).toBeUndefined();
 	});
 });

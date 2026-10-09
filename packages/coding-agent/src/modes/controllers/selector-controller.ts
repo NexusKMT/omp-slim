@@ -63,7 +63,7 @@ import {
 	persistForeignSession,
 } from "../../session/foreign-session-import";
 import type { ForeignSessionInfo, ForeignSessionSource } from "../../session/foreign-session-store";
-import { setModelCompactionPoint } from "../../session/model-compaction-threshold";
+import { previewModelCompactionPoint, setModelCompactionPoint } from "../../session/model-compaction-threshold";
 import { isTranscriptEntry, type TranscriptEntry } from "../../session/session-context";
 import { isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import type { SessionEntry, SessionTreeNode } from "../../session/session-entries";
@@ -1101,7 +1101,7 @@ export class SelectorController {
 							confirmed,
 						});
 						if (update.kind === "confirm") return update;
-						const { entry } = update;
+						const { entry, summary } = update;
 						const selector = `${model.provider}/${model.id}`;
 						let described: string;
 						if (entry === undefined) described = "reset";
@@ -1109,7 +1109,9 @@ export class SelectorController {
 						else if (entry.startsWith("f"))
 							described = `fixed at ${Number(entry.slice(1)).toLocaleString("en-US")} tokens`;
 						else described = `${entry} of the window`;
-						this.ctx.showStatus(`Compaction limit for ${selector}: ${described}`);
+						this.ctx.showStatus(
+							`Compaction limit for ${selector}: ${described}${summary ? ` · ${summary}` : ""}`,
+						);
 						this.ctx.statusLine.invalidate();
 						// The entry can move the model between window tiers; the open hub's
 						// rows are a pre-rebuild snapshot until the catalog rebuild settles.
@@ -1127,6 +1129,13 @@ export class SelectorController {
 						return { kind: "error", message: error instanceof Error ? error.message : String(error) };
 					}
 				},
+				previewCompactionPoint: (model, input) =>
+					previewModelCompactionPoint(
+						this.ctx.settings,
+						model,
+						input,
+						this.ctx.session.modelRegistry.contextWindowTiers(model),
+					),
 				onSavePreset: name => {
 					try {
 						saveModelPreset(this.ctx.settings, name);
