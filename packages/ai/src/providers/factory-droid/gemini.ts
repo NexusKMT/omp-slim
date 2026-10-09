@@ -415,6 +415,8 @@ export function streamFactoryDroidGemini(
 				},
 			);
 			for await (const chunk of chunks) {
+				// A server-declared error keeps its status and the same classification
+				// as the Google provider; only a stream that just stops is a premature close.
 				if (chunk.error) throw googleStreamChunkError(chunk.error, model.provider);
 				if (firstTokenTime === undefined && chunk.candidates?.[0]?.content?.parts?.some(part => part.text)) {
 					firstTokenTime = performance.now();
