@@ -535,6 +535,9 @@ export class CredentialSelector {
 		const credentials = stored.filter(entry => this.#deps.affinity.allows(provider, sessionId, entry.credential));
 
 		if (credentials.length === 0) return undefined;
+		// Ranking and preflight both await provider work; preserve the row each
+		// selection started with even if a peer reorders the live pool.
+		const credentialIds = this.#deps.pool.entries(provider).map(entry => entry.id);
 		this.#deps.policies.validateUsageCapability(provider, this.#deps.usage.canFetchOAuthUsage(provider));
 
 		const providerKey = providerTypeKey(provider, "oauth");
@@ -719,21 +722,24 @@ export class CredentialSelector {
 		const forceRefreshIndex = options?.forceRefresh
 			? (sessionPreferredIndex ?? candidates[0]?.selection.index)
 			: undefined;
-		// Each candidate's synchronous prefix below runs back to back inside `map`,
-		// before any await, so one provider re-list serves every initial rebind.
-		// Resyncs after an await (refresh, disable) re-read the store.
+		// Candidate IDs were captured before ranking. Their synchronous rebinds
+		// share one provider re-list; resyncs after refresh await re-read the store.
 		let preflightRows: StoredAuthCredential[] | undefined;
 		await Promise.all(
 			candidates.map(async candidate => {
 				const force = forceRefreshIndex !== undefined && candidate.selection.index === forceRefreshIndex;
-				const initialCredentialId = this.#deps.pool.entries(provider)[candidate.selection.index]?.id;
-				let syncedPeerCredential = false;
-				if (initialCredentialId !== undefined) {
-					const beforeSync = candidate.selection.credential;
-					preflightRows ??= this.#reloadProviderRows(provider);
-					if (!this.#rebindOAuthSelection(preflightRows, candidate.selection, initialCredentialId)) return;
-					syncedPeerCredential = !authCredentialEquals(beforeSync, candidate.selection.credential);
+				const initialCredentialId = credentialIds[candidate.selection.index];
+				if (initialCredentialId === undefined) {
+					preflightFailures.add(candidate);
+					return;
 				}
+				const beforeSync = candidate.selection.credential;
+				preflightRows ??= this.#reloadProviderRows(provider);
+				if (!this.#rebindOAuthSelection(preflightRows, candidate.selection, initialCredentialId)) {
+					preflightFailures.add(candidate);
+					return;
+				}
+				const syncedPeerCredential = !authCredentialEquals(beforeSync, candidate.selection.credential);
 				const hasFreshAccess = Date.now() + OAUTH_REFRESH_SKEW_MS < candidate.selection.credential.expires;
 				if ((!force || syncedPeerCredential) && hasFreshAccess) return;
 				const latestCredential = this.#deps.pool.credentials(provider)[candidate.selection.index];

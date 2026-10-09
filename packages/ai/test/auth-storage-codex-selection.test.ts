@@ -1102,6 +1102,35 @@ describe("AuthStorage codex oauth ranking", () => {
 		expect(await authStorage.keys.get("openai-codex", sessionId)).toBe("api-acct-b");
 	});
 
+	test("retains the pinned row when the first preflight reload reorders later candidates", async () => {
+		if (!authStorage || !store) throw new Error("test setup failed");
+		const storage = authStorage;
+		await storage.credentials.set("openai-codex", [
+			{ type: "oauth", ...createCredential("acct-a", "a@example.com") },
+			{ type: "oauth", ...createCredential("acct-b", "b@example.com") },
+		]);
+		const accounts = storage.oauth.accounts("openai-codex");
+		const accountA = accounts.find(account => account.accountId === "acct-a");
+		const accountB = accounts.find(account => account.accountId === "acct-b");
+		if (!accountA || !accountB) throw new Error("expected both accounts");
+		const sessionId = "first-preflight-reorder";
+		await storage.limits.markReached("openai-codex", sessionId, {
+			credentialId: accountA.credentialId,
+			retryAfterMs: HOUR_MS,
+		});
+		await storage.limits.markReached("openai-codex", sessionId, {
+			credentialId: accountB.credentialId,
+			retryAfterMs: 4 * HOUR_MS,
+		});
+		expect(storage.sessions.pin("openai-codex", sessionId, accountB.credentialId)).toBe(true);
+
+		// The first preflight callback reloads B,A before the next callback
+		// reads its original index, but the pinned row remains B.
+		const list = store.listAuthCredentials.bind(store);
+		vi.spyOn(store, "listAuthCredentials").mockImplementation(provider => list(provider).reverse());
+		expect(await storage.keys.get("openai-codex", sessionId)).toBe("api-acct-b");
+	});
+
 	test("keeps an explicit blocked pin when concurrent preflight reorders the pool", async () => {
 		if (!authStorage || !store) throw new Error("test setup failed");
 		const storage = authStorage;
