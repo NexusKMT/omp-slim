@@ -631,14 +631,39 @@ describe("retired edit and write formatting", () => {
 	const diff = "@@ -1,2 +1,2 @@\n-const value = 1;\n+const value = 2;\n const stable = true;";
 	const result = { content: [{ type: "text", text: "completed" }], details: { diff } };
 	const args = { path: "src/values.ts", content: WRITE_CONTENT };
-	const builders: { name: string; build: (theme: Theme) => Component | undefined }[] = [
+
+	/** Counts formatter runs behind `cachedRenderedString` while `build`'s card renders, releases, and re-renders. */
+	async function formatsAcrossRelease(build: (theme: Theme) => Component | undefined) {
+		const theme = await getThemeByName("dark");
+		if (!theme) throw new Error("expected the dark theme");
+		const format = renderUtils.cachedRenderedString;
+		let formats = 0;
+		spyOn(renderUtils, "cachedRenderedString").mockImplementation((cache, theme, expanded, salt, content, render) =>
+			format(cache, theme, expanded, salt, content, () => {
+				formats++;
+				return render();
+			}),
+		);
+		const component = build(theme);
+		if (!component) throw new Error("expected a card");
+		const rows = component.render(80);
+		const before = formats;
+		expect(before).toBeGreaterThan(0);
+		component.releaseRenderCaches?.();
+		expect(component.render(80)).toEqual(rows);
+		return { before, after: formats };
+	}
+
+	// Write previews highlight without regard to width; re-highlighting every committed card on each resize replay
+	// froze replay for seconds, so release keeps them.
+	for (const { name, build } of [
 		{
 			name: "write call",
-			build: theme => writeToolRenderer.renderCall(args, { expanded: true, isPartial: true }, theme),
+			build: (theme: Theme) => writeToolRenderer.renderCall(args, { expanded: true, isPartial: true }, theme),
 		},
 		{
 			name: "write result",
-			build: theme =>
+			build: (theme: Theme) =>
 				writeToolRenderer.renderResult(
 					{ ...result, details: {} },
 					{ expanded: true, isPartial: false },
@@ -646,57 +671,63 @@ describe("retired edit and write formatting", () => {
 					args,
 				),
 		},
-		{
-			name: "multi-file edit call",
-			build: theme =>
-				editToolRenderer.renderCall(
-					{ path: "src/values.ts", previewDiff: diff },
-					{
-						expanded: true,
-						isPartial: true,
-						renderContext: {
-							perFileDiffPreview: [
-								{ path: "src/values.ts", diff },
-								{ path: "src/other.ts", diff: diff.replace("value", "other") },
-							],
-						},
-					},
-					theme,
-				),
-		},
-		{
-			name: "edit result",
-			build: theme => editToolRenderer.renderResult(result, { expanded: true, isPartial: false }, theme, args),
-		},
-	];
-
-	for (const { name, build } of builders) {
-		it(`recomputes released ${name} formatting only when replayed and preserves its rows`, async () => {
-			const theme = await getThemeByName("dark");
-			if (!theme) throw new Error("expected the dark theme");
-			const format = renderUtils.cachedRenderedString;
-			let formats = 0;
-			spyOn(renderUtils, "cachedRenderedString").mockImplementation(
-				(cache, theme, expanded, salt, content, render) =>
-					format(cache, theme, expanded, salt, content, () => {
-						formats++;
-						return render();
-					}),
-			);
-			const component = build(theme);
-			if (!component) throw new Error(`expected the ${name} card`);
-			const rows = component.render(80);
-			const firstRenderFormats = formats;
-			expect(firstRenderFormats).toBeGreaterThan(0);
-			expect(component.render(80)).toEqual(rows);
-			expect(formats).toBe(firstRenderFormats);
-
-			component.releaseRenderCaches?.();
-			expect(formats).toBe(firstRenderFormats);
-			expect(component.render(80)).toEqual(rows);
-			expect(formats).toBeGreaterThan(firstRenderFormats);
+	]) {
+		it(`keeps released ${name} highlighting and preserves its rows`, async () => {
+			const { before, after } = await formatsAcrossRelease(build);
+			expect(after).toBe(before);
 		});
 	}
+
+	it("recomputes a released width-keyed edit call preview and preserves its rows", async () => {
+		const { before, after } = await formatsAcrossRelease(theme =>
+			editToolRenderer.renderCall(
+				{ path: "src/values.ts", previewDiff: diff },
+				{
+					expanded: true,
+					isPartial: true,
+					renderContext: {
+						perFileDiffPreview: [
+							{ path: "src/values.ts", diff },
+							{ path: "src/other.ts", diff: diff.replace("value", "other") },
+						],
+					},
+				},
+				theme,
+			),
+		);
+		expect(after).toBeGreaterThan(before);
+	});
+
+	it("re-wraps a released edit result without re-highlighting its diff", async () => {
+		let highlights = 0;
+		const renderDiff = (text: string) => {
+			highlights++;
+			return text;
+		};
+		const { before, after } = await formatsAcrossRelease(theme =>
+			editToolRenderer.renderResult(
+				result,
+				{ expanded: true, isPartial: false, renderContext: { renderDiff } },
+				theme,
+				args,
+			),
+		);
+		expect(after).toBeGreaterThan(before);
+		expect(highlights).toBe(1);
+	});
+
+	it("drops a released write call's incremental highlighter state", async () => {
+		const theme = await getThemeByName("dark");
+		if (!theme) throw new Error("expected the dark theme");
+		const renderState = { expanded: false, isPartial: true, argsComplete: true };
+		const card = writeToolRenderer.renderCall(args, renderState, theme);
+		if (!card) throw new Error("expected the write call card");
+		const rows = card.render(80);
+		const preview = previewHighlightedLines(renderState);
+		card.releaseRenderCaches?.();
+		expect(await becomesCollectible(preview)).toBe(true);
+		expect(card.render(80)).toEqual(rows);
+	});
 });
 
 /**

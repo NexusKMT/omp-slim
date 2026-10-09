@@ -1562,11 +1562,9 @@ function renderSingleFileResult(
 			};
 		},
 		{
-			onReleaseRenderCaches: () => {
-				releaseRenderedStringCache(diffSectionCache);
-				releaseRenderedStringCache(renderedDiffCache);
-				releaseRenderedStringCache(statsSuffixCache);
-			},
+			// Only the width-keyed diff section goes; the highlighted diff and stats suffix do not depend on width, and
+			// re-highlighting every committed card on each resize replay costs seconds.
+			onReleaseRenderCaches: () => releaseRenderedStringCache(diffSectionCache),
 		},
 	);
 }

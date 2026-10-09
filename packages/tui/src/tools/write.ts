@@ -666,7 +666,9 @@ export const writeToolRenderer = {
 					borderColor: "borderMuted",
 				};
 			},
-			{ onReleaseRenderCaches: () => releaseRenderedStringCache(streamingCache) },
+			// The highlighted body in `streamingCache` does not depend on width, and re-highlighting every committed
+			// card on each resize replay costs seconds; only the incremental highlighter state goes.
+			{ onReleaseRenderCaches: () => delete options?.[writeStreamingPreviewStateKey] },
 		);
 	},
 
@@ -676,6 +678,8 @@ export const writeToolRenderer = {
 		uiTheme: Theme,
 		args?: WriteRenderArgs,
 	): Component {
+		// Write merges call and result, so this builder runs once per display rebuild after the result arrives and the
+		// call card never renders again: its incremental highlighter state is dead from here on.
 		delete options[writeStreamingPreviewStateKey];
 		const cardPath =
 			typeof args?.path === "string" ? args.path : typeof args?.file_path === "string" ? args.file_path : "";
@@ -770,7 +774,8 @@ export const writeToolRenderer = {
 					borderColor: "borderMuted",
 				};
 			},
-			{ onReleaseRenderCaches: () => releaseRenderedStringCache(previewCache) },
+			// No release hook: `previewCache` holds the width-independent highlighted preview, which resize replay
+			// would otherwise re-highlight for every committed card.
 		);
 	},
 	describeCall(
