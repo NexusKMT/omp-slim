@@ -48,7 +48,7 @@ import type {
 	ResolvedModelRoleValue,
 } from "./model-browser";
 import { AUTO_THINKING, type ConfiguredThinkingLevel, getConfiguredThinkingLevelMetadata } from "../thinking";
-import { thinkingLevelGlyph } from "../render/render-utils";
+import { sanitizeDisplayWarning, thinkingLevelGlyph } from "../render/render-utils";
 import { theme } from "../theme/theme";
 import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import {
@@ -325,11 +325,15 @@ function compactionConfirmPending(strip: CompactionStrip): boolean {
 	return strip.confirm !== undefined && strip.confirm.value === strip.input.getValue();
 }
 
-/** The note beside the compaction field: the last error, a pending warning, or the input hint. */
+/**
+ * The note beside the compaction field: the last error, a pending warning, or
+ * the input hint. Host messages embed model ids and config text, so both are
+ * sanitized for every render path (terminal footer, Tern picker and strip).
+ */
 function compactionNotice(strip: CompactionStrip): { text: string; style: "error" | "warning" | "dim" } {
-	if (strip.error) return { text: strip.error, style: "error" };
+	if (strip.error) return { text: sanitizeDisplayWarning(strip.error), style: "error" };
 	if (strip.confirm && compactionConfirmPending(strip)) {
-		return { text: `${strip.confirm.message} · enter again to accept`, style: "warning" };
+		return { text: `${sanitizeDisplayWarning(strip.confirm.message)} · enter again to accept`, style: "warning" };
 	}
 	return { text: COMPACTION_INPUT_HINT, style: "dim" };
 }

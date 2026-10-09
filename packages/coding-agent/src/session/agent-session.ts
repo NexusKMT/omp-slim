@@ -493,6 +493,7 @@ import { cfgTaskBatch, cfgTaskDisabledAgents } from "../task/settings";
 import {
 	cfgBranchSummaryReserveTokens,
 	cfgCompactionModelThresholds,
+	cfgCompactionModelThresholdsEnabled,
 	cfgExtendedContext,
 	cfgWorkspaceAdditionalDirectories,
 } from "./context-settings";
@@ -2373,11 +2374,12 @@ export class AgentSession implements SettingsScope {
 		cfgModelRoles.listen(this, () => this.#advisors.reconcileModelRoles());
 		// Re-derive the active model's effective context window when the
 		// extended-context setting flips at runtime, or a per-model compaction
-		// point moves past (or back inside) a standard window: the registry
+		// point moves past (or back inside) a standard window or is switched on/off: the registry
 		// re-clamps (or restores) extended windows, and the live model object must
 		// follow so compaction thresholds and context display react immediately.
 		cfgExtendedContext.listen(this, () => this.#reapplyContextWindowPolicy());
 		cfgCompactionModelThresholds.listen(this, () => this.#reapplyContextWindowPolicy());
+		cfgCompactionModelThresholdsEnabled.listen(this, () => this.#reapplyContextWindowPolicy());
 		cfgBrowserEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("browser.enabled", enabled));
 		cfgComputerEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("computer.enabled", enabled));
 		cfgRatchetEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("ratchet.enabled", enabled));

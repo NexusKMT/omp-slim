@@ -347,11 +347,11 @@ export class ModelRegistry {
 		Map<ModelRefreshStrategy, Promise<ConfiguredModelDiscoveryResult>>
 	> = new Map();
 	#policyReapply?: Promise<void>;
-	// Window tiers of models whose extended window is larger, keyed by
-	// `contextWindowKey`: as the hardcoded policies resolve them, and as
-	// explicit overrides / configured maxima finalize them (`null` = pinned).
-	#policyWindowTiers = new Map<string, ContextWindowTiers>();
-	#configuredWindowTiers = new Map<string, ContextWindowTiers | null>();
+	// Window tiers of models whose extended window is larger: per row as the
+	// hardcoded policies produced it (custom overlays replacing that row never
+	// inherit them), and per `contextWindowKey` as composition finalized them.
+	#policyWindowTiers = new WeakMap<Model<Api>, ContextWindowTiers>();
+	#windowTiers = new Map<string, ContextWindowTiers>();
 	// A catalog row refitted to the other tier by `fitContextWindow`; a row has only one other tier.
 	#refittedRows = new WeakMap<Model<Api>, Model<Api>>();
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
@@ -2597,7 +2597,7 @@ export class ModelRegistry {
 			}
 		}
 		if (overrides.size === 0 && customWindows.size === 0) {
-			this.#configuredWindowTiers.clear();
+			for (const model of models) this.#recordWindowTiers(model, this.#policyWindowTiers.get(model));
 			return models;
 		}
 		const extendedContext = isExtendedContextEnabledFromSettings(this.#settings);
@@ -2619,7 +2619,7 @@ export class ModelRegistry {
 				override?.maxContextWindow ??
 				(override?.contextWindow === undefined ? customWindows.get(contextWindowKey(model)) : undefined);
 			if (override?.contextWindow === undefined && maximum === undefined) {
-				this.#configuredWindowTiers.delete(contextWindowKey(model));
+				this.#recordWindowTiers(model, this.#policyWindowTiers.get(model));
 				return overridden;
 			}
 			return this.#applyConfiguredExtendedWindow(overridden, maximum, model, {
@@ -2630,11 +2630,18 @@ export class ModelRegistry {
 		});
 	}
 
+	#recordWindowTiers(model: Model<Api>, tiers: ContextWindowTiers | undefined): void {
+		if (tiers) this.#windowTiers.set(contextWindowKey(model), tiers);
+		else this.#windowTiers.delete(contextWindowKey(model));
+	}
+
 	/**
 	 * Finalizes the window of a row carrying an explicit `contextWindow` override
 	 * (`pinned`: the policy tiers no longer apply) and/or a configured maximum,
 	 * which extends from the policy's standard window when extended context is
-	 * on or the model's compaction point reaches past that window.
+	 * on or the model's compaction point reaches past that window. Policy tiers
+	 * apply only to the row the hardcoded policies produced (`baseline`); a
+	 * custom overlay replacing it never went through them.
 	 */
 	#applyConfiguredExtendedWindow(
 		model: Model<Api>,
@@ -2642,12 +2649,11 @@ export class ModelRegistry {
 		baseline: Model<Api>,
 		options: { pinned: boolean; extendedContext: boolean; compactionPoints: unknown },
 	): Model<Api> {
-		const key = contextWindowKey(baseline);
 		const current = model.contextWindow;
-		const policy = options.pinned ? undefined : this.#policyWindowTiers.get(key);
+		const policy = options.pinned ? undefined : this.#policyWindowTiers.get(baseline);
 		const standard = policy?.standard ?? current;
 		if (current === null || standard === null) {
-			this.#configuredWindowTiers.set(key, null);
+			this.#recordWindowTiers(baseline, undefined);
 			return model;
 		}
 		const window =
@@ -2656,8 +2662,10 @@ export class ModelRegistry {
 				: clampsContextOverride(baseline)
 					? clampCodexContextWindow(baseline, maximum)
 					: maximum;
+		// The window an opt-in actually runs with: the policy's extended row
+		// (already applied upstream when opted in), widened by the configured maximum.
 		const extended = Math.max(policy?.extended ?? current, window ?? 0);
-		this.#configuredWindowTiers.set(key, extended > standard ? { standard, extended } : null);
+		this.#recordWindowTiers(baseline, extended > standard ? { standard, extended } : undefined);
 		if (window === undefined || window <= current) return model;
 		if (!options.extendedContext && !compactionPointReaches(options.compactionPoints, baseline, standard)) {
 			return model;
@@ -2672,10 +2680,9 @@ export class ModelRegistry {
 	 * `contextWindow` override pins it.
 	 */
 	contextWindowTiers(model: { provider: string; id: string }): ContextWindowTiers | undefined {
-		const key = contextWindowKey(model);
-		const configured = this.#configuredWindowTiers.get(key);
-		if (configured !== undefined) return configured ?? undefined;
-		return this.#policyWindowTiers.get(key);
+		// Tiers are recorded as the provider's rows compose; compose them first.
+		this.#modelsForProviderLookup(model.provider);
+		return this.#windowTiers.get(contextWindowKey(model));
 	}
 
 	/**
@@ -2746,17 +2753,17 @@ export class ModelRegistry {
 		const extendedContext = isExtendedContextEnabledFromSettings(this.#settings);
 		const compactionPoints = getModelCompactionPointsFromSettings(this.#settings);
 		return models.map(model => {
+			let tiers: ContextWindowTiers | undefined;
 			// Hosts whose context window is authoritative (subscription limits that
 			// carry public price tiers only as estimates) skip every inferred
 			// window policy.
-			if (model.contextWindowAuthoritative) {
-				this.#policyWindowTiers.delete(contextWindowKey(model));
-			} else {
-				model = this.#applyContextWindowPolicies(model, extendedContext, compactionPoints);
+			if (!model.contextWindowAuthoritative) {
+				({ model, tiers } = this.#applyContextWindowPolicies(model, extendedContext, compactionPoints));
 			}
 			if (model.provider === "ollama-cloud" && model.omitMaxOutputTokens !== true) {
 				model = applyModelOverride(model, { omitMaxOutputTokens: true });
 			}
+			if (tiers) this.#policyWindowTiers.set(model, tiers);
 			return model;
 		});
 	}
@@ -2764,25 +2771,30 @@ export class ModelRegistry {
 	/**
 	 * Resolves both window tiers and picks one: extended when the setting is on
 	 * or the model's own compaction point reaches past its standard window
-	 * (an explicit per-model opt-in, confirmed in the model hub).
+	 * (an explicit per-model opt-in, confirmed in the model hub). `tiers` is
+	 * absent when no larger window exists.
 	 */
-	#applyContextWindowPolicies(model: Model<Api>, extendedContext: boolean, compactionPoints: unknown): Model<Api> {
-		const key = contextWindowKey(model);
+	#applyContextWindowPolicies(
+		model: Model<Api>,
+		extendedContext: boolean,
+		compactionPoints: unknown,
+	): { model: Model<Api>; tiers?: ContextWindowTiers } {
 		// Without a maximum or a long-context tier both resolutions are identical.
 		if (resolveMaxContextWindow(model) === undefined && model.cost.longContext?.inputThreshold === undefined) {
-			this.#policyWindowTiers.delete(key);
-			return this.#resolveContextWindowPolicies(model, false);
+			return { model: this.#resolveContextWindowPolicies(model, false) };
 		}
 		const standard = this.#resolveContextWindowPolicies(model, false);
 		const extended = this.#resolveContextWindowPolicies(model, true);
 		const standardWindow = standard.contextWindow;
 		const extendedWindow = extended.contextWindow;
 		if (standardWindow === null || extendedWindow === null || extendedWindow <= standardWindow) {
-			this.#policyWindowTiers.delete(key);
-			return extendedContext ? extended : standard;
+			return { model: extendedContext ? extended : standard };
 		}
-		this.#policyWindowTiers.set(key, { standard: standardWindow, extended: extendedWindow });
-		return extendedContext || compactionPointReaches(compactionPoints, model, standardWindow) ? extended : standard;
+		const optedIn = extendedContext || compactionPointReaches(compactionPoints, model, standardWindow);
+		return {
+			model: optedIn ? extended : standard,
+			tiers: { standard: standardWindow, extended: extendedWindow },
+		};
 	}
 
 	#resolveContextWindowPolicies(model: Model<Api>, extendedContext: boolean): Model<Api> {

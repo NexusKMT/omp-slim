@@ -2608,6 +2608,36 @@ describe("ModelRegistry", () => {
 			expect(registry.find("proxy-window", "gpt-6-astra")?.contextWindow).toBe(512_000);
 		});
 
+		test("a custom maximum replacing a bundled row reports and runs the window an opt-in actually gets", async () => {
+			writeRawModelsJson({
+				openai: {
+					baseUrl: "https://example.com/v1",
+					auth: "none",
+					api: "openai-responses",
+					models: [{ id: "gpt-5.6-terra", contextWindow: 128_000, maxContextWindow: 512_000, maxTokens: 64_000 }],
+				},
+			});
+			const testSettings = Settings.isolated({ extendedContext: false });
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+			// The overlay's own pair, not the bundled 272K/1.05M tiers it replaced.
+			expect(registry.contextWindowTiers({ provider: "openai", id: "gpt-5.6-terra" })).toEqual({
+				standard: 128_000,
+				extended: 512_000,
+			});
+
+			cfgCompactionModelThresholds.set(testSettings, { "openai/gpt-5.6-terra": 200_000 });
+			await registry.reapplyModelPolicies();
+			const row = registry.find("openai", "gpt-5.6-terra");
+			expect(row?.contextWindow).toBe(512_000);
+			// A scope with model entries off (an overridden subagent) refits the row to the standard tier.
+			const subagentScope = Settings.isolated({
+				extendedContext: false,
+				"compaction.modelThresholdsEnabled": false,
+			});
+			if (!row) throw new Error("Expected the custom gpt-5.6-terra row");
+			expect(registry.fitContextWindow(row, subagentScope).contextWindow).toBe(128_000);
+		});
+
 		test("modelOverrides supply standard and extended windows to a non-Codex provider", async () => {
 			writeRawModelsJson({
 				openrouter: {
