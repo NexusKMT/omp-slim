@@ -205,6 +205,17 @@ window.cachedContext = navigator.modelContext;`,
 			define: `Object.defineProperty(navigator, "modelContext", { configurable: true, get: () => undefined });`,
 			registerOn: "navigator.modelContext",
 		},
+		{
+			setup: "a prototype accessor the page read before attach",
+			define: `Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: () => window.pageContext });
+window.cachedContext = navigator.modelContext;`,
+			registerOn: "window.cachedContext",
+		},
+		{
+			setup: "a prototype accessor that yields no context",
+			define: `Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: () => undefined });`,
+			registerOn: "navigator.modelContext",
+		},
 	])(
 		"mirrors a tool registered after attach on a page whose modelContext is $setup",
 		async ({ define, registerOn }) => {
@@ -216,7 +227,7 @@ window.cachedContext = navigator.modelContext;`,
 				await page.goto("data:text/html,<title>page-owned context</title>");
 				// The realm installWebMcp hooks in existing frames.
 				const realm = page.mainFrame().mainRealm();
-				await realm.evaluate(`window.pageContext = { registerTool() {}, unregisterTool() {} };\n${define}`);
+				await realm.evaluate(`window.pageContext = { registerTool() {}, unregisterTool() {} };\n${define}\nnull;`);
 				const controller = await installWebMcp(page);
 				await realm.evaluate(
 					`${registerOn}.registerTool({ name: "page_owned", description: "Page tool.", inputSchema: { type: "object" }, execute: () => ({ value: 42 }) })`,

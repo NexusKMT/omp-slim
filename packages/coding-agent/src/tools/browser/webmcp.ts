@@ -313,8 +313,8 @@ export function installWebMcpPageHook(key: string): void {
 	};
 	const nav = pageGlobals.navigator;
 	const doc = pageGlobals.document;
-	// Platform getters live on the interface prototypes and are configurable;
-	// everything else is the page's own and is read now.
+	// The platform getter is a configurable native accessor on an interface
+	// prototype; anything the page defined itself is read now.
 	const getters: { instance: { modelContext?: PageModelContext }; owner: object; descriptor: PropertyDescriptor }[] =
 		[];
 	let pageContext: PageModelContext | undefined;
@@ -326,7 +326,11 @@ export function installWebMcpPageHook(key: string): void {
 		for (let owner: object | null = Object.getPrototypeOf(instance); owner; owner = Object.getPrototypeOf(owner)) {
 			const descriptor = Object.getOwnPropertyDescriptor(owner, "modelContext");
 			if (!descriptor) continue;
-			if (descriptor.get && descriptor.configurable) getters.push({ instance, owner, descriptor });
+			const platform =
+				descriptor.get !== undefined &&
+				descriptor.configurable === true &&
+				Function.prototype.toString.call(descriptor.get).includes("[native code]");
+			if (platform) getters.push({ instance, owner, descriptor });
 			else pageContext ??= instance.modelContext;
 			break;
 		}
