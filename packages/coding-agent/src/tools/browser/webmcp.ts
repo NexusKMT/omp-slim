@@ -315,8 +315,12 @@ export function installWebMcpPageHook(key: string): void {
 	const doc = pageGlobals.document;
 	// The platform getter is a configurable native accessor on an interface
 	// prototype; anything the page defined itself is read now.
-	const getters: { instance: { modelContext?: PageModelContext }; owner: object; descriptor: PropertyDescriptor }[] =
-		[];
+	const getters: {
+		instance: { modelContext?: PageModelContext };
+		owner: object;
+		descriptor: PropertyDescriptor;
+		wrapped?: () => PageModelContext | undefined;
+	}[] = [];
 	let pageContext: PageModelContext | undefined;
 	for (const instance of [doc, nav]) {
 		if (Object.getOwnPropertyDescriptor(instance, "modelContext")) {
@@ -420,14 +424,14 @@ export function installWebMcpPageHook(key: string): void {
 
 	if (nativeAvailable) {
 		adopt(pageContext);
-		for (const { instance, owner, descriptor } of getters) {
+		for (const getter of getters) {
+			const { instance, owner, descriptor } = getter;
+			const wrapped = function (this: unknown): PageModelContext | undefined {
+				return adopt(descriptor.get?.call(this));
+			};
 			try {
-				Object.defineProperty(owner, "modelContext", {
-					...descriptor,
-					get() {
-						return adopt(descriptor.get?.call(this));
-					},
-				});
+				Object.defineProperty(owner, "modelContext", { ...descriptor, get: wrapped });
+				getter.wrapped = wrapped;
 			} catch {
 				adopt(instance.modelContext);
 			}
@@ -487,9 +491,12 @@ export function installWebMcpPageHook(key: string): void {
 			return await execute(params, { signal: controller.signal });
 		},
 		uninstall(): void {
-			for (const { owner, descriptor } of getters) {
+			for (const { owner, descriptor, wrapped } of getters) {
 				try {
-					Object.defineProperty(owner, "modelContext", descriptor);
+					// Leave an accessor the page installed after ours in place.
+					if (wrapped && Object.getOwnPropertyDescriptor(owner, "modelContext")?.get === wrapped) {
+						Object.defineProperty(owner, "modelContext", descriptor);
+					}
 				} catch {
 					// Best-effort cleanup for attached user tabs.
 				}

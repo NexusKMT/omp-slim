@@ -251,4 +251,35 @@ window.cachedContext = navigator.modelContext;`,
 			}
 		},
 	);
+
+	it("leaves a modelContext accessor the page replaced after attach when disposed", async () => {
+		// A secure context, so Chromium exposes its own modelContext getter for the hook to wrap.
+		using server = Bun.serve({
+			port: 0,
+			hostname: "localhost",
+			fetch: () =>
+				new Response("<!doctype html><title>replaced</title>", { headers: { "content-type": "text/html" } }),
+		});
+		const handle = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+		if (!("browser" in handle)) throw new Error("Expected a Puppeteer browser");
+		holdBrowser(handle);
+		const page = await handle.browser.newPage();
+		try {
+			await page.goto(`http://localhost:${server.port}/`);
+			const realm = page.mainFrame().mainRealm();
+			const controller = await installWebMcp(page);
+			await realm.evaluate(`window.pageGetter = () => undefined;
+Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: window.pageGetter });
+null;`);
+			await controller.dispose();
+			expect(
+				await realm.evaluate(
+					`Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext").get === window.pageGetter`,
+				),
+			).toBe(true);
+		} finally {
+			await page.close();
+			await releaseBrowser(handle, { kill: false });
+		}
+	}, 30_000);
 });
