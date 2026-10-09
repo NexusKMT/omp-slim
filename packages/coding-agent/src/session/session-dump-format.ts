@@ -299,7 +299,7 @@ export function formatDumpArchiveReport(archive: SessionDumpArchive): string[] {
 	if (archive.subagentError) lines.push(`Subagent transcripts unavailable: ${archive.subagentError}`);
 	lines.push(
 		archive.anonymized
-			? "Turn contents are redacted and paths/literals replaced; metadata such as model names and error messages is kept — review before sharing."
+			? "Turn contents and error text are redacted and paths/literals replaced; metadata such as model names is kept — review before sharing."
 			: "This archive persists on disk and may contain raw context/secrets — treat accordingly.",
 	);
 	return lines;
