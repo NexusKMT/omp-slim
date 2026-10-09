@@ -1101,16 +1101,9 @@ export class SelectorController {
 							confirmed,
 						});
 						if (update.kind === "confirm") return update;
-						const { entry, summary } = update;
-						const selector = `${model.provider}/${model.id}`;
-						let described: string;
-						if (entry === undefined) described = "reset";
-						else if (typeof entry === "number") described = `${entry.toLocaleString("en-US")}-token base`;
-						else if (entry.startsWith("f"))
-							described = `fixed at ${Number(entry.slice(1)).toLocaleString("en-US")} tokens`;
-						else described = `${entry} of the window`;
+						const { described, summary } = update;
 						this.ctx.showStatus(
-							`Compaction limit for ${selector}: ${described}${summary ? ` · ${summary}` : ""}`,
+							`Compaction limit for ${model.provider}/${model.id}: ${described}${summary ? ` · ${summary}` : ""}`,
 						);
 						this.ctx.statusLine.invalidate();
 						// The entry can move the model between window tiers; the open hub's

@@ -245,6 +245,7 @@ describe("compaction.modelThresholds", () => {
 		expect(setModelCompactionPoint(settings, model, "400k", { tiers, confirmed: true })).toEqual({
 			kind: "saved",
 			entry: 400_000,
+			described: "400,000-token base",
 			summary: "compacts at 340K · 85% of 400K base",
 		});
 		expect(resolveModelCompactionSettings(settings, model).baseWindowTokens).toBe(400_000);
@@ -277,6 +278,7 @@ describe("compaction.modelThresholds", () => {
 		expect(setModelCompactionPoint(settings, model, "f272k", { tiers, confirmed: true })).toEqual({
 			kind: "saved",
 			entry: "f272000",
+			described: "fixed at 272,000 tokens",
 			summary: "compacts at exactly 272K",
 		});
 		expect(resolveModelCompactionSettings(settings, model)).toMatchObject({ thresholdTokens: 272_000 });
@@ -306,5 +308,15 @@ describe("compaction.modelThresholds", () => {
 		expect(preview("50%")).toBe("compacts at 136K · 50% of window");
 		expect(preview("")).toBe("resets: compacts at 231.2K · 85% of window");
 		for (const rejected of ["abc", "1100k", "f1050k"]) expect(preview(rejected)).toBeUndefined();
+	});
+
+	it("previews a reset as the prefix entry the model falls back to", () => {
+		const settings = Settings.isolated({
+			extendedContext: false,
+			"compaction.modelThresholds": { "openai/*": "f100000", "openai/gpt-5.6-terra": 400_000 },
+		});
+		const model = { provider: "openai", id: "gpt-5.6-terra", contextWindow: 1_050_000 } as Model;
+		const tiers = { standard: 272_000, extended: 1_050_000 };
+		expect(previewModelCompactionPoint(settings, model, "", tiers)).toBe("resets: compacts at exactly 100K");
 	});
 });

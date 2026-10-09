@@ -141,14 +141,33 @@ export function matchModelCompactionThreshold(
 
 const appliedThresholds = new WeakMap<object, Map<string, { threshold: CompactionThresholdPair; applied: object }>>();
 
+/** One persisted `compaction.modelThresholds` value (`400000`, `"f400000"`, `"80%"`) as its threshold pair. */
+export function parseModelCompactionEntry(entry: unknown): CompactionThresholdPair | undefined {
+	return parseThresholdEntry(entry, true);
+}
+
 /**
- * `settings` with the `compaction.modelThresholds` entry governing `model`
- * applied; the same object when no entry applies. A token entry is the base
- * the configured policy scales (`baseWindowTokens`, standing in for the window:
+ * `settings` with one model entry applied. A token entry is the base the
+ * configured policy scales (`baseWindowTokens`, standing in for the window:
  * `thresholdPercent` of it, else it minus the reserve) and drops a global fixed
  * `thresholdTokens`; a fixed entry (`"f90000"`) is the exact trigger; a
- * percentage entry replaces both threshold fields. Results are cached per
- * settings snapshot so hot paths allocate once per entry.
+ * percentage entry replaces both threshold fields.
+ */
+export function applyCompactionThresholdPair<T extends CompactionThresholdPair & { baseWindowTokens?: number }>(
+	settings: T,
+	threshold: CompactionThresholdPair,
+): T {
+	const { thresholdPercent, thresholdTokens, fixed } = threshold;
+	return thresholdTokens > 0 && !fixed
+		? { ...settings, thresholdTokens: -1, baseWindowTokens: thresholdTokens }
+		: { ...settings, thresholdPercent, thresholdTokens };
+}
+
+/**
+ * `settings` with the `compaction.modelThresholds` entry governing `model`
+ * applied ({@link applyCompactionThresholdPair}); the same object when no entry
+ * applies. Results are cached per settings snapshot so hot paths allocate once
+ * per entry.
  */
 export function applyModelCompactionThreshold<T extends CompactionThresholdPair & { baseWindowTokens?: number }>(
 	settings: T,
@@ -165,11 +184,7 @@ export function applyModelCompactionThreshold<T extends CompactionThresholdPair 
 	}
 	const cached = byKey.get(match.key);
 	if (cached?.threshold === match.threshold) return cached.applied as T;
-	const { thresholdPercent, thresholdTokens, fixed } = match.threshold;
-	const applied: T =
-		thresholdTokens > 0 && !fixed
-			? { ...settings, thresholdTokens: -1, baseWindowTokens: thresholdTokens }
-			: { ...settings, thresholdPercent, thresholdTokens };
+	const applied = applyCompactionThresholdPair(settings, match.threshold);
 	byKey.set(match.key, { threshold: match.threshold, applied });
 	return applied;
 }

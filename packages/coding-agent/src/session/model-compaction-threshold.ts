@@ -3,10 +3,13 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import type { ModelCompactionPoint } from "@oh-my-pi/pi-tui/overlays/model-browser";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import {
+	applyCompactionThresholdPair,
 	applyModelCompactionThreshold,
+	type CompactionThresholdPair,
 	formatCompactionPointInput,
 	matchModelCompactionThreshold,
 	parseCompactionPointInput,
+	parseModelCompactionEntry,
 } from "../config/compaction-threshold";
 import type { ContextWindowTiers } from "../config/model-registry";
 import type { ScopeLike } from "../config/registry";
@@ -78,6 +81,12 @@ interface ModelCompactionEntryPlan {
 	error?: string;
 }
 
+/**
+ * Plan `entry` (as `parseCompactionPointInput` persists it) for `model`, decoded
+ * and applied exactly as the runtime does ({@link parseModelCompactionEntry},
+ * {@link applyCompactionThresholdPair}). With no entry, the model falls back to
+ * whatever else matches it: a `…*` prefix entry, else the configured policy.
+ */
 function planModelCompactionEntry(
 	settings: Settings,
 	model: Model,
@@ -85,18 +94,18 @@ function planModelCompactionEntry(
 	tiers: ContextWindowTiers | undefined,
 ): ModelCompactionEntryPlan {
 	const configured = cfgCompaction.get(settings);
-	// `parseCompactionPointInput` yields a number (base), `"fN"` (fixed) or `"N%"`.
-	const fixed = typeof entry === "string" && entry.startsWith("f");
-	const tokens =
-		typeof entry === "number" ? entry : typeof entry === "string" && fixed ? Number(entry.slice(1)) : undefined;
-	let applied: CompactionSettings = configured;
-	if (tokens !== undefined) {
-		applied = fixed
-			? { ...configured, thresholdPercent: -1, thresholdTokens: tokens }
-			: { ...configured, thresholdTokens: -1, baseWindowTokens: tokens };
-	} else if (typeof entry === "string") {
-		applied = { ...configured, thresholdPercent: Number(entry.slice(0, -1)), thresholdTokens: -1 };
+	let threshold: CompactionThresholdPair | undefined;
+	if (entry !== undefined) {
+		threshold = parseModelCompactionEntry(entry);
+	} else if (cfgCompactionModelThresholdsEnabled.get(settings)) {
+		const { [`${model.provider}/${model.id}`]: _removed, ...others } = cfgCompactionModelThresholds.get(settings);
+		threshold = matchModelCompactionThreshold(others, model)?.threshold;
 	}
+	const applied = threshold ? applyCompactionThresholdPair(configured, threshold) : configured;
+	const tokens = threshold && threshold.thresholdTokens > 0 ? threshold.thresholdTokens : undefined;
+	const fixed = threshold?.fixed === true;
+	// A base stands in for the window, so it needs a window at least that large;
+	// a fixed trigger needs room above it.
 	const opensExtended =
 		tiers !== undefined && tokens !== undefined && (fixed ? tokens >= tiers.standard : tokens > tiers.standard);
 	const window = tiers
@@ -106,12 +115,19 @@ function planModelCompactionEntry(
 		: (model.contextWindow ?? undefined);
 	const ceiling = tiers?.extended ?? model.contextWindow;
 	let error: string | undefined;
-	if (tokens !== undefined && ceiling !== null && ceiling !== undefined) {
+	if (entry !== undefined && tokens !== undefined && ceiling !== null && ceiling !== undefined) {
 		const max = tiers ? "max " : "";
 		if (fixed && tokens >= ceiling) error = `Must be below the ${formatWindow(ceiling)} ${max}window`;
 		if (!fixed && tokens > ceiling) error = `Must not exceed the ${formatWindow(ceiling)} ${max}window`;
 	}
-	return { settings: applied, window, opensExtended, error };
+	return { settings: applied, window, opensExtended: entry !== undefined && opensExtended, error };
+}
+
+/** A model entry in words, for the save message: `400,000-token base`, `fixed at 400,000 tokens`, `80% of the window`. */
+function describeModelCompactionEntry(threshold: CompactionThresholdPair): string {
+	if (threshold.thresholdTokens <= 0) return `${threshold.thresholdPercent}% of the window`;
+	const tokens = threshold.thresholdTokens.toLocaleString("en-US");
+	return threshold.fixed ? `fixed at ${tokens} tokens` : `${tokens}-token base`;
 }
 
 /** Where the plan compacts, as one short line: `compacts at 340K · 85% of 400K base`. */
@@ -150,10 +166,11 @@ export function previewModelCompactionPoint(
 
 /**
  * Outcome of {@link setModelCompactionPoint}: the entry written (`undefined` =
- * removed) with where the model now compacts, or a warning to acknowledge first.
+ * removed), that entry in words (`400,000-token base`, `reset`), and where the
+ * model now compacts; or a warning to acknowledge first.
  */
 export type ModelCompactionPointUpdate =
-	| { kind: "saved"; entry: number | string | undefined; summary: string | undefined }
+	| { kind: "saved"; entry: number | string | undefined; described: string; summary: string | undefined }
 	| { kind: "confirm"; message: string };
 
 /**
@@ -208,5 +225,11 @@ export function setModelCompactionPoint(
 			`${key} is overridden by a higher-priority config layer; the global entry was saved but has no effect`,
 		);
 	}
-	return { kind: "saved", entry, summary: summarizePlan(plan) };
+	const threshold = entry === undefined ? undefined : parseModelCompactionEntry(entry);
+	return {
+		kind: "saved",
+		entry,
+		described: threshold ? describeModelCompactionEntry(threshold) : "reset",
+		summary: summarizePlan(plan),
+	};
 }
