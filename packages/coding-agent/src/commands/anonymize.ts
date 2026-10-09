@@ -3,6 +3,7 @@
  */
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { runAnonymizeCommand } from "../cli/anonymize-cli";
+import { reportCliUsageError } from "../cli/args";
 import { anonymizeHelp as commandHelp } from "../cli/command-help";
 
 export default class Anonymize extends Command {
@@ -22,6 +23,11 @@ export default class Anonymize extends Command {
 
 	async run(): Promise<void> {
 		const { args, flags } = await this.parse(Anonymize);
-		await runAnonymizeCommand({ session: args.session, out: flags.out });
+		try {
+			await runAnonymizeCommand({ session: args.session, out: flags.out });
+		} catch (error) {
+			if (!reportCliUsageError(error)) throw error;
+			process.exitCode = 2;
+		}
 	}
 }
