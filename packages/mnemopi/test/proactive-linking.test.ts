@@ -5,6 +5,7 @@ import { configureRecallFeatures } from "@oh-my-pi/pi-mnemopi/config";
 import { BeamMemory } from "@oh-my-pi/pi-mnemopi/core/beam";
 import type { EpisodicGraph, RelatedMemory } from "@oh-my-pi/pi-mnemopi/core/episodic-graph";
 import { Mnemopi } from "@oh-my-pi/pi-mnemopi/core/memory";
+import { transaction } from "../src/db";
 
 const previousProactive = process.env.MNEMOPI_PROACTIVE_LINKING;
 
@@ -477,6 +478,57 @@ describe("proactive memory linking", () => {
 		} finally {
 			beam.close();
 			dir.removeSync();
+		}
+	});
+
+	it("preserves proactive links in a caller transaction and later write rollback", () => {
+		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
+		const beam = new BeamMemory({ sessionId: "proactive-caller-tx", dbPath: ":memory:" });
+		try {
+			const first = beam.remember("Alice set up the deployment pipeline");
+			const second = beam.db.transaction(() => beam.remember("Alice set up the deployment pipeline for testing"))();
+
+			const links = beam.db
+				.query<{ count: number }, [string, string]>(
+					"SELECT COUNT(*) AS count FROM graph_edges WHERE source = ? AND target = ?",
+				)
+				.get(second, first);
+			expect(links?.count).toBeGreaterThan(0);
+
+			expect(() =>
+				transaction(beam.db, () => {
+					beam.db.run("INSERT INTO gists (id, text) VALUES ('rolled-back', 'temporary')");
+					throw new Error("rollback");
+				}),
+			).toThrow("rollback");
+			expect(beam.db.query("SELECT id FROM gists WHERE id = 'rolled-back'").get()).toBeNull();
+		} finally {
+			beam.close();
+		}
+	});
+
+	it("leaves graph writes inside a manually begun transaction for the caller to roll back", () => {
+		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
+		const beam = new BeamMemory({ sessionId: "proactive-manual-tx", dbPath: ":memory:" });
+		try {
+			const first = beam.remember("Alice set up the deployment pipeline");
+			beam.db.exec("BEGIN IMMEDIATE");
+			let second: string;
+			try {
+				second = beam.remember("Alice set up the deployment pipeline for testing");
+				const linked = beam.db
+					.query<{ count: number }, [string, string]>(
+						"SELECT COUNT(*) AS count FROM graph_edges WHERE source = ? AND target = ?",
+					)
+					.get(second, first);
+				expect(linked?.count).toBeGreaterThan(0);
+			} finally {
+				beam.db.exec("ROLLBACK");
+			}
+			expect(beam.db.query("SELECT id FROM working_memory WHERE id = ?").get(second)).toBeNull();
+			expect(beam.db.query("SELECT source FROM graph_edges WHERE source = ?").get(second)).toBeNull();
+		} finally {
+			beam.close();
 		}
 	});
 });
