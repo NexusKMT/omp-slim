@@ -40,6 +40,9 @@ interface DownloadWaiter {
 	onAbort?: () => void;
 }
 
+/** Chromium names an `allowAndName` download after its GUID, a lowercase UUID. */
+const DOWNLOAD_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Owns tab-scoped Chromium download behavior and completion events. */
 export class DownloadManager {
 	readonly #browser: Browser;
@@ -87,6 +90,8 @@ export class DownloadManager {
 	/** Wait for the next unclaimed completed download. */
 	async wait(signal?: AbortSignal): Promise<BrowserDownload> {
 		if (this.#unclaimed.length === 0) {
+			// A rejected `arming` nobody awaits would surface as an unhandled rejection.
+			if (signal?.aborted) throw signal.reason;
 			// The tab that pointed Chromium last resets it to the browser's default folder when it closes, so re-point it.
 			const arming = (this.#arming ??= this.enable(this.#directory).finally(() => {
 				this.#arming = undefined;
@@ -165,9 +170,19 @@ export class DownloadManager {
 		}
 		const name = path.basename(pending.suggestedFilename);
 		const target = path.join(directory, name);
-		// Only a file Chromium saved under this download's GUID is moved, and only under the last segment of its
-		// suggested name; anything else, or a file that cannot be moved, is reported where Chromium saved it.
-		const movable = path.basename(source) === pending.guid && name !== "" && name !== "." && name !== "..";
+		// The peer names both the GUID and the saved path, so only a regular file (not a symlink or directory) named by a
+		// UUID-shaped GUID is moved, and only under the last segment of its suggested name; anything else, or a file that
+		// cannot be moved, is reported where Chromium saved it.
+		const movable =
+			DOWNLOAD_GUID.test(pending.guid) &&
+			path.basename(source) === pending.guid &&
+			name !== "" &&
+			name !== "." &&
+			name !== ".." &&
+			(await fs.lstat(source).then(
+				stats => stats.isFile(),
+				() => false,
+			));
 		const downloadPath = movable
 			? await moveDownload(source, target).then(
 					() => target,

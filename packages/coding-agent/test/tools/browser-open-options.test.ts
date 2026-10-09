@@ -94,7 +94,7 @@ describe("browser open options CDP helpers", () => {
 		]);
 	});
 
-	it("moves only a file saved under its download GUID, under the last segment of the suggested name", async () => {
+	async function fakeDownloads(send: () => Promise<unknown> = async () => undefined) {
 		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-download-test-"));
 		const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-download-test-"));
 		tempDirs.push(directory, elsewhere);
@@ -102,31 +102,82 @@ describe("browser open options CDP helpers", () => {
 		const session = {
 			on: (event: string, listener: (event: unknown) => void) => listeners.set(event, listener),
 			off: () => undefined,
-			send: async () => undefined,
+			send,
 			detach: async () => undefined,
 		};
 		const browser = { target: () => ({ createCDPSession: async () => session }) } as unknown as Browser;
 		const page = { frames: () => [{ _id: "frame" }], browserContext: () => ({}) } as unknown as Page;
 		const downloads = new DownloadManager(browser, page, "tab");
-		await downloads.enable(directory);
 		const complete = async (guid: string, filePath: string) => {
+			await downloads.enable(directory);
 			const waiting = downloads.wait();
 			const started = { guid, url: "https://example.com/", suggestedFilename: "../../report.txt", frameId: "frame" };
 			listeners.get("Browser.downloadWillBegin")!(started);
 			listeners.get("Browser.downloadProgress")!({ guid, state: "completed", receivedBytes: 5, filePath });
 			return (await waiting).path;
 		};
+		return { directory, elsewhere, downloads, complete };
+	}
+
+	it("moves only a file saved under its download GUID, under the last segment of the suggested name", async () => {
+		const { directory, elsewhere, complete } = await fakeDownloads();
 
 		const unrelated = path.join(elsewhere, "notes.txt");
 		await Bun.write(unrelated, "notes");
-		expect(await complete("first-guid", unrelated)).toBe(unrelated);
+		expect(await complete(crypto.randomUUID(), unrelated)).toBe(unrelated);
 		expect(await Bun.file(unrelated).text()).toBe("notes");
 
-		const saved = path.join(elsewhere, "second-guid");
+		const guid = crypto.randomUUID();
+		const saved = path.join(elsewhere, guid);
 		await Bun.write(saved, "bytes");
-		expect(await complete("second-guid", saved)).toBe(path.join(directory, "report.txt"));
+		expect(await complete(guid, saved)).toBe(path.join(directory, "report.txt"));
 		expect(await Bun.file(path.join(directory, "report.txt")).text()).toBe("bytes");
 		expect(await Bun.file(saved).exists()).toBe(false);
+	});
+
+	it("leaves a file in place when the peer names it by a GUID that is not a UUID", async () => {
+		const { directory, elsewhere, complete } = await fakeDownloads();
+		const key = path.join(elsewhere, "id_ed25519");
+		await Bun.write(key, "private key");
+
+		expect(await complete("id_ed25519", key)).toBe(key);
+		expect(await Bun.file(key).text()).toBe("private key");
+		expect(await Bun.file(path.join(directory, "report.txt")).exists()).toBe(false);
+	});
+
+	it("leaves a symlink named by a UUID GUID in place", async () => {
+		const { directory, elsewhere, complete } = await fakeDownloads();
+		const guid = crypto.randomUUID();
+		const link = path.join(elsewhere, guid);
+		await Bun.write(path.join(elsewhere, "notes.txt"), "notes");
+		await fs.symlink(path.join(elsewhere, "notes.txt"), link);
+
+		expect(await complete(guid, link)).toBe(link);
+		expect(await fs.readlink(link)).toBe(path.join(elsewhere, "notes.txt"));
+		expect(await Bun.file(path.join(directory, "report.txt")).exists()).toBe(false);
+	});
+
+	it("leaves a directory named by a UUID GUID in place", async () => {
+		const { directory, elsewhere, complete } = await fakeDownloads();
+		const guid = crypto.randomUUID();
+		const folder = path.join(elsewhere, guid);
+		await Bun.write(path.join(folder, "notes.txt"), "notes");
+
+		expect(await complete(guid, folder)).toBe(folder);
+		expect(await Bun.file(path.join(folder, "notes.txt")).text()).toBe("notes");
+		expect(await Bun.file(path.join(directory, "report.txt")).exists()).toBe(false);
+	});
+
+	it("rejects a wait whose signal is already aborted without leaving the enable failure unhandled", async () => {
+		const { downloads } = await fakeDownloads(async () => {
+			throw new Error("setDownloadBehavior failed");
+		});
+		const controller = new AbortController();
+		controller.abort(new Error("cancelled"));
+		expect(await rejectionOf(downloads.wait(controller.signal))).toBe(controller.signal.reason);
+		// A second enable runs the same steps, so an enable the wait started has failed by now, inside this test, where
+		// Bun fails it if nothing handled the rejection.
+		expect(await rejectionOf(downloads.enable())).toBeInstanceOf(Error);
 	});
 });
 
