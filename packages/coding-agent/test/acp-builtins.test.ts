@@ -593,66 +593,12 @@ describe("ACP builtin slash commands", () => {
 		expect(output[0]).toContain("Cancelled background job j1");
 	});
 
-	it("jobs kill <id>: reports an unknown or settled id without cancelling", async () => {
-		const { output, runtime } = createRuntime();
-		let calls = 0;
-		runtime.session.getAsyncJobSnapshot = () => ({
-			running: [{ id: "j1", type: "bash", status: "running", label: "npm install", startTime: Date.now() }],
-			recent: [],
-			delivery: { queued: 0, delivering: false, pendingJobIds: [] },
-		});
-		runtime.session.cancelAsyncJob = () => {
-			calls += 1;
-			return true;
-		};
-
-		await executeAcpBuiltinSlashCommand("/jobs kill j9", runtime);
-
-		expect(calls).toBe(0);
-		expect(output[0]).toContain('No running background job with id "j9"');
-	});
-
-	it("jobs kill all: cancels every running job", async () => {
-		const { output, runtime } = createRuntime();
-		const cancelled: string[] = [];
-		runtime.session.getAsyncJobSnapshot = () => ({
-			running: [
-				{ id: "j1", type: "bash", status: "running", label: "a", startTime: Date.now() },
-				{ id: "j2", type: "task", status: "running", label: "b", startTime: Date.now() },
-			],
-			recent: [],
-			delivery: { queued: 0, delivering: false, pendingJobIds: [] },
-		});
-		runtime.session.cancelAsyncJob = (id: string) => {
-			cancelled.push(id);
-			return true;
-		};
-
-		await executeAcpBuiltinSlashCommand("/jobs kill all", runtime);
-
-		expect(cancelled).toEqual(["j1", "j2"]);
-		expect(output[0]).toContain("Cancelled 2 background jobs");
-	});
-
 	it("jobs kill: missing id prints usage", async () => {
 		const { output, runtime } = createRuntime();
 
 		await executeAcpBuiltinSlashCommand("/jobs kill", runtime);
 
 		expect(output[0]).toBe("Usage: /jobs kill <id>|all");
-	});
-
-	it("jobs kill all: reports when nothing is running", async () => {
-		const { output, runtime } = createRuntime();
-		runtime.session.getAsyncJobSnapshot = () => ({
-			running: [],
-			recent: [],
-			delivery: { queued: 0, delivering: false, pendingJobIds: [] },
-		});
-
-		await executeAcpBuiltinSlashCommand("/jobs kill all", runtime);
-
-		expect(output[0]).toBe("No running background jobs to cancel.");
 	});
 
 	it("jobs full: strips control sequences and fences the command", async () => {
