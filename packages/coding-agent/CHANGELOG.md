@@ -20,7 +20,7 @@
 - Reduced memory growth after one-shot side requests without interrupting ongoing conversations ([#14334](https://github.com/can1357/oh-my-pi/pull/14334) by [@iliaal](https://github.com/iliaal)).
 - Fixed sessions staying untitled when you interrupted the first reply to send a queued steer message.
 - Fixed `/rename` without a title dropping the session's title card (icon and short code) ([#14980](https://github.com/can1357/oh-my-pi/issues/14980))
-- Fixed title cards showing the emoji instead of the Nerd Font icon when the model wrote the icon name with dashes for underscores (`nf-md-text-box` for `nf-md-text_box`).
+- Fixed title cards showing the emoji instead of the Nerd Font icon when the model misremembered the icon's name: dashes for underscores (`nf-md-text-box`), the wrong icon set (`nf-md-spinner` for `nf-fa-spinner`), or reordered, missing, or extra words (`nf-md-test` for `nf-md-test_tube`).
 - Fixed interrupting a reply to send a queued steer message briefly showing omp as idle (title, progress, working indicator) before the steer ran; RPC and SDK clients also no longer see a final `agent_end` for that interrupt.
 
 ## [18.8.6] - 2026-10-08

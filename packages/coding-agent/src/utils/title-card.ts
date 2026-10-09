@@ -68,7 +68,8 @@ function cardEmoji(value: string | undefined): string | undefined {
 /**
  * The card for `code` and its icons, or `undefined` when a piece the card form
  * needs is missing: a code (a lowercase one is repaired) and at least one icon.
- * An `nf` name the bundled catalog does not know is dropped, leaving the emoji.
+ * An `nf` name resolves to the catalog glyph it means; one matching nothing in
+ * the bundled catalog is dropped, leaving the emoji.
  */
 function buildCard(code: string | undefined, emoji: string | undefined, nf: string | undefined): ReplyCard | undefined {
 	const cardCode = code?.trim().toUpperCase();
@@ -106,9 +107,9 @@ export function formatCardTitle(card: TitleCard, title: string): string {
  *
  * Returns `null` when the reply names no title: `<title/>` (the model declined),
  * no tag at all, or a title {@link normalizeGeneratedTitle} rejects. Card pieces
- * degrade one by one: an unknown `nf` name leaves the emoji, and a missing or
- * invalid code or icon leaves a plain title. A plain `<title>` holding the line
- * form (`🧪 FLAKY: Fix flaky park tests`) keeps its card as well.
+ * degrade one by one: an `nf` name matching no catalog glyph leaves the emoji,
+ * and a missing or invalid code or icon leaves a plain title. A plain `<title>`
+ * holding the line form (`🧪 FLAKY: Fix flaky park tests`) keeps its card as well.
  *
  * @param sourceText The user's message, to reconcile the title's casing against.
  */
