@@ -5,6 +5,8 @@
 ### Added
 
 - Added `/jobs kill <id>|all` to cancel a running background job (or every one this session owns) from the command line, even while the agent is busy ([#14160](https://github.com/can1357/oh-my-pi/pull/14160) by [@KanwarGill](https://github.com/KanwarGill))
+- Added `omp anonymize [session] [-o dir]` to write a shareable copy of a session and its subagent transcripts: message, thinking, and tool-output text become size-annotated `[redacted …]` markers; ids, timestamps, models, usage, and tool names are kept; tool-call paths become mock paths (`/home/seg3/seg4/src/seg9.ts:10-20`), shell commands keep programs and flags, and other literals such as a grep pattern become `PLACEHOLDER_N`, with the same original always mapping to the same token across files
+- Added `/dump anon`, which writes the same anonymized session and subagent JSONL to a zip in the temp directory and copies its path
 
 ### Changed
 
@@ -44,6 +46,7 @@
 
 ### Fixed
 
+- Fixed `/omfg` save, overwrite, and validation prompts in Tern opening as a sheet over the candidate rule; they now sit in the composer slot like `ask`, so the rule stays readable while you choose.
 - Reduced memory growth after one-shot side requests without interrupting ongoing conversations ([#14334](https://github.com/can1357/oh-my-pi/pull/14334) by [@iliaal](https://github.com/iliaal)).
 - Fixed sessions staying untitled when you interrupted the first reply to send a queued steer message.
 - Fixed browser downloads saving into another tab's `downloads` folder, and `tab.waitForDownload()` saving into the system Downloads folder once another tab closed; each tab in a Chromium omp launched or spawned now saves into its own, iframe downloads included. In those browsers a download no tab tracks (started by a page omp did not open, or finishing after its tab closed) now keeps Chromium's GUID file name instead of its suggested name; connected and relay browsers keep real file names ([#14544](https://github.com/can1357/oh-my-pi/pull/14544) by [@will-bogusz](https://github.com/will-bogusz))

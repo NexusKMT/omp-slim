@@ -275,7 +275,7 @@ export function formatSubagentDumpText(subagent: SessionDumpSubagent): string {
 	return lines.join("\n").trim();
 }
 
-/** Result of writing a `/dump all` zip (see `AgentSession.dumpSessionArchiveToTmpDir`). */
+/** Result of writing a `/dump all` or `/dump anon` zip (see `AgentSession.dumpSessionArchiveToTmpDir`). */
 export interface SessionDumpArchive {
 	path: string;
 	/** Archive member names in write order. */
@@ -283,6 +283,8 @@ export interface SessionDumpArchive {
 	subagentCount: number;
 	/** Why subagent discovery failed; the main dump is archived regardless. */
 	subagentError?: string;
+	/** Members are anonymized session JSONL (`/dump anon`), not raw transcripts. */
+	anonymized?: boolean;
 }
 
 /** Lines describing a `/dump all` archive: path, members, and any subagent discovery failure. */
@@ -295,6 +297,10 @@ export function formatDumpArchiveReport(archive: SessionDumpArchive): string[] {
 		...archive.files.map(file => `  ${file}`),
 	];
 	if (archive.subagentError) lines.push(`Subagent transcripts unavailable: ${archive.subagentError}`);
-	lines.push("This archive persists on disk and may contain raw context/secrets — treat accordingly.");
+	lines.push(
+		archive.anonymized
+			? "Turn contents are redacted and paths/literals replaced; metadata such as model names and error messages is kept — review before sharing."
+			: "This archive persists on disk and may contain raw context/secrets — treat accordingly.",
+	);
 	return lines;
 }
