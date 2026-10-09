@@ -1263,12 +1263,20 @@ export class ModelRegistry {
 			const override = this.#providerOverrides.get(model.provider);
 			// Custom composition already resolved headers and metadata. Reapply only
 			// the provider transport and its gateway URL, without rebuilding the model.
-			return override?.transport
+			const merged = override?.transport
 				? this.#applyProviderTransportOverride(model, {
 						baseUrl: override.baseUrl,
 						transport: override.transport,
 					})
 				: model;
+			// An overlay that authors no window keeps the bundled row's window, so it
+			// keeps that row's policy tiers too; one that authors a window owns its own.
+			const inheritedTiers =
+				existingModel && customModel.contextWindow === undefined && customModel.maxContextWindow === undefined
+					? this.#policyWindowTiers.get(existingModel)
+					: undefined;
+			if (inheritedTiers) this.#policyWindowTiers.set(merged, inheritedTiers);
+			return merged;
 		});
 	}
 
