@@ -20,7 +20,7 @@ import { getTabsMapForTest, releaseTab } from "@oh-my-pi/pi-coding-agent/tools/b
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
-import type { Browser, default as Puppeteer } from "puppeteer-core";
+import type { Browser } from "puppeteer-core";
 import { TimeoutError } from "puppeteer-core";
 import { rejectionOf } from "../helpers/rejection";
 
@@ -271,7 +271,6 @@ describe("browser open — an abandoned browser acquisition does not hold up the
 		const app = "/tmp/omp-open-lease-app";
 		const events: string[] = [];
 		spyOn(attach, "findReusableCdp").mockResolvedValue({ cdpUrl: "http://127.0.0.1:1", pid: 4242 });
-		spyOn(launch, "loadPuppeteer").mockResolvedValue({} as unknown as typeof Puppeteer);
 		const stalledConnect = Promise.withResolvers<Browser>();
 		const firstConnect = Promise.withResolvers<void>();
 		spyOn(launch, "connectPuppeteer").mockImplementation(() => {
