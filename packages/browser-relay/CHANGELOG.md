@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed tabs a relay client asks to open in the background being created as the selected tab
+
 ## [18.6.3] - 2026-10-06
 
 ### Fixed
