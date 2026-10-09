@@ -298,6 +298,10 @@ function boundedResult(value: unknown): WebMcpInvokeSuccess {
 /**
  * Page function (self-contained; serialisable via `.toString()`): mirror `navigator/document.modelContext`
  * registrations into a bridge stored at `globalThis[key]`, polyfilling `modelContext` when absent. Idempotent.
+ * A native `modelContext` is never read here: reading it creates the document's context, and Chromium kills a
+ * renderer whose frame creates one twice, as this hook would in an iframe's initial empty document and again
+ * in the document the iframe then loads. The native getters are wrapped instead, so the context is patched
+ * when the page first asks for it.
  */
 export function installWebMcpPageHook(key: string): void {
 	const realm = globalThis as typeof globalThis & Record<string, unknown>;
@@ -309,17 +313,26 @@ export function installWebMcpPageHook(key: string): void {
 	};
 	const nav = pageGlobals.navigator;
 	const doc = pageGlobals.document;
-	const existingContext = doc.modelContext ?? nav.modelContext;
-	const nativeAvailable = existingContext !== undefined;
+	// Where `modelContext` comes from, found without calling a getter: native
+	// getters to wrap, or a context the page stored on navigator/document itself.
+	const getters: { owner: object; descriptor: PropertyDescriptor }[] = [];
+	let pageContext: PageModelContext | undefined;
+	for (const instance of [doc, nav]) {
+		for (let owner: object | null = instance; owner; owner = Object.getPrototypeOf(owner)) {
+			const descriptor = Object.getOwnPropertyDescriptor(owner, "modelContext");
+			if (!descriptor) continue;
+			if (descriptor.get) getters.push({ owner, descriptor });
+			else pageContext ??= descriptor.value;
+			break;
+		}
+	}
+	const nativeAvailable = getters.length > 0 || pageContext !== undefined;
 	const tools = new Map<string, PageModelContextTool>();
-	const originalDescriptor = existingContext
-		? Object.getOwnPropertyDescriptor(existingContext, "registerTool")
-		: undefined;
-	const originalUnregisterDescriptor = existingContext
-		? Object.getOwnPropertyDescriptor(existingContext, "unregisterTool")
-		: undefined;
-	const originalRegister = existingContext?.registerTool?.bind(existingContext);
-	const originalUnregister = existingContext?.unregisterTool?.bind(existingContext);
+	let existingContext: PageModelContext | undefined;
+	let originalDescriptor: PropertyDescriptor | undefined;
+	let originalUnregisterDescriptor: PropertyDescriptor | undefined;
+	let originalRegister: PageModelContext["registerTool"];
+	let originalUnregister: PageModelContext["unregisterTool"];
 	const changeTarget = new EventTarget();
 	let polyfillContext: PageModelContext | undefined;
 
@@ -367,15 +380,22 @@ export function installWebMcpPageHook(key: string): void {
 		if (tools.delete(name)) notify();
 	};
 
-	if (existingContext) {
+	// The first context the page obtains is the one mirrored.
+	const adopt = (context: PageModelContext | undefined): PageModelContext | undefined => {
+		if (!context || existingContext) return context;
+		existingContext = context;
+		originalDescriptor = Object.getOwnPropertyDescriptor(context, "registerTool");
+		originalUnregisterDescriptor = Object.getOwnPropertyDescriptor(context, "unregisterTool");
+		originalRegister = context.registerTool?.bind(context);
+		originalUnregister = context.unregisterTool?.bind(context);
 		try {
-			Object.defineProperty(existingContext, "registerTool", {
+			Object.defineProperty(context, "registerTool", {
 				configurable: true,
 				writable: true,
 				value: registerTool,
 			});
 			if (originalUnregister) {
-				Object.defineProperty(existingContext, "unregisterTool", {
+				Object.defineProperty(context, "unregisterTool", {
 					configurable: true,
 					writable: true,
 					value: unregisterTool,
@@ -383,6 +403,23 @@ export function installWebMcpPageHook(key: string): void {
 			}
 		} catch {
 			// Native CDP discovery remains authoritative when this object is not patchable.
+		}
+		return context;
+	};
+
+	if (nativeAvailable) {
+		adopt(pageContext);
+		for (const { owner, descriptor } of getters) {
+			try {
+				Object.defineProperty(owner, "modelContext", {
+					...descriptor,
+					get() {
+						return adopt(descriptor.get?.call(this));
+					},
+				});
+			} catch {
+				// An unpatchable getter leaves its context to native CDP discovery.
+			}
 		}
 	} else {
 		polyfillContext = {
@@ -439,6 +476,13 @@ export function installWebMcpPageHook(key: string): void {
 			return await execute(params, { signal: controller.signal });
 		},
 		uninstall(): void {
+			for (const { owner, descriptor } of getters) {
+				try {
+					Object.defineProperty(owner, "modelContext", descriptor);
+				} catch {
+					// Best-effort cleanup for attached user tabs.
+				}
+			}
 			if (existingContext) {
 				try {
 					if (originalDescriptor) Object.defineProperty(existingContext, "registerTool", originalDescriptor);

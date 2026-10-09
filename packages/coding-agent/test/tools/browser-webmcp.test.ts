@@ -138,4 +138,49 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser WebMCP helpers", () => {
 		]);
 		await invoke({ action: "close", name: "webmcp", kill: true });
 	}, 30_000);
+
+	it("keeps a page alive whose same-site iframe is touched before it navigates", async () => {
+		const invoke = createBrowserHost();
+		// Same site, other origin: the iframe shares the parent's renderer.
+		using child = Bun.serve({
+			port: 0,
+			hostname: "localhost",
+			fetch: () =>
+				new Response("<!doctype html><title>child</title>child", { headers: { "content-type": "text/html" } }),
+		});
+		using parent = Bun.serve({
+			port: 0,
+			hostname: "localhost",
+			fetch: () =>
+				new Response(
+					`<!doctype html><title>parent</title><body><script>
+const frame = document.createElement("iframe");
+frame.onload = () => { document.title = "iframe loaded"; };
+frame.src = "http://localhost:${child.port}/";
+document.body.appendChild(frame);
+// Touching the window before it navigates gives its initial empty document a script context.
+frame.contentWindow.location.href;
+navigator.modelContext.registerTool({
+  name: "page_title",
+  description: "Returns the page title.",
+  inputSchema: { type: "object" },
+  execute() { return { title: document.title }; }
+});
+</script></body>`,
+					{ headers: { "content-type": "text/html" } },
+				),
+		});
+
+		await invoke({ action: "open", name: "webmcp-iframe", url: `http://localhost:${parent.port}/`, timeout: 10 });
+		expect(valueFrom<string>(await invoke(call("webmcp-iframe", "evaluate", ["document.title"])))).toBe(
+			"iframe loaded",
+		);
+		const listed = valueFrom<WebMcpListResult>(await invoke(call("webmcp-iframe", "webmcpList")));
+		expect(listed.tools.map(tool => tool.name)).toEqual(["page_title"]);
+		const result = valueFrom<WebMcpInvokeResult>(
+			await invoke(call("webmcp-iframe", "webmcpInvoke", ["page_title", {}])),
+		);
+		expect(result).toEqual({ ok: true, result: { title: "iframe loaded" }, untrusted: true });
+		await invoke({ action: "close", name: "webmcp-iframe", kill: true });
+	}, 30_000);
 });
