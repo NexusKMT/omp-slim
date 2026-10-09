@@ -546,8 +546,8 @@ mod tests {
 
 	#[test]
 	fn provenance_growth_evicts_older_history_without_discarding_current() {
-		// x86_64: old + current = 8,704 B; 299 lines add 5,980 B.
-		let store = EditStore::with_limits(10, 4, 8_704);
+		// 64-bit: 8_004 text + 124 metadata + 8 slots; 299 lines add 5_980 B.
+		let store = EditStore::with_limits(10, 4, 8_128 + 8 * size_of::<StoredSnapshot>());
 		let old = Path::new("old");
 		let current = Path::new("current");
 		store.record(old, &"x".repeat(8_000), None);
@@ -630,8 +630,8 @@ mod tests {
 
 	#[test]
 	fn unicode_budget_survives_promotion_and_version_truncation() {
-		// x86_64: a + b = 6,701 B; c adds 1,310 B.
-		let store = EditStore::with_limits(10, 2, 6_701);
+		// 64-bit: a + b = 6_000 text + 125 metadata + 8 slots; c adds 1_310 B.
+		let store = EditStore::with_limits(10, 2, 6_125 + 8 * size_of::<StoredSnapshot>());
 		let a = Path::new("a");
 		let b = Path::new("b");
 		let emoji = "😀".repeat(500);
@@ -640,7 +640,7 @@ mod tests {
 		store.record(a, &emoji, None);
 		store.record(a, &accented, None);
 		store.record(b, &"abc".repeat(1_000), None);
-		store.record(a, &emoji, None);
+		store.record(a, &emoji, None); // Promotion does not add a version.
 		store.record(a, &replacement, None);
 		assert!(store.by_content(a, &accented).is_none());
 		assert!(store.by_content(a, &emoji).is_some());
@@ -656,7 +656,8 @@ mod tests {
 
 	#[test]
 	fn invalidation_and_eviction_release_their_budget() {
-		let store = EditStore::with_limits(10, 2, 4_096);
+		// 64-bit: next + last = 3_400 text + 120 metadata + 8 slots.
+		let store = EditStore::with_limits(10, 2, 3_520 + 8 * size_of::<StoredSnapshot>());
 		store.record(Path::new("old"), &"😀".repeat(600), None);
 		store.record(Path::new("next"), &"é".repeat(1_200), None);
 		assert!(store.head(Path::new("old")).is_none());
@@ -664,7 +665,7 @@ mod tests {
 		assert!(store.head(Path::new("next")).is_some());
 		assert!(store.head(Path::new("last")).is_some());
 		store.invalidate(Path::new("next"));
-		store.invalidate(Path::new("next"));
+		store.invalidate(Path::new("next")); // An absent history releases nothing.
 		store.record(Path::new("replacement"), &"😀".repeat(600), None);
 		assert!(store.head(Path::new("last")).is_some());
 		assert!(store.head(Path::new("replacement")).is_some());
@@ -672,8 +673,8 @@ mod tests {
 
 	#[test]
 	fn relocation_releases_duplicate_and_truncated_versions() {
-		// x86_64: 9,496 B initially; dedup frees room for 4,320 B.
-		let store = EditStore::with_limits(10, 2, 10_000);
+		// 64-bit: initially 8_632 data + 12 slots; the limit leaves 504 B spare.
+		let store = EditStore::with_limits(10, 2, 9_136 + 12 * size_of::<StoredSnapshot>());
 		let from = Path::new("from");
 		let to = Path::new("to");
 		let emoji = "😀".repeat(500);
@@ -684,7 +685,7 @@ mod tests {
 		store.record(to, &"abc".repeat(500), None);
 		store.record(Path::new("other"), &"wxyz".repeat(500), None);
 		store.relocate(from, to);
-		store.relocate(to, to);
+		store.relocate(to, to); // Self-relocation preserves the budget.
 		store.relocate(Path::new("missing"), to);
 		store.record(Path::new("filler"), &"1234".repeat(1_000), None);
 		assert!(store.head(from).is_none());
