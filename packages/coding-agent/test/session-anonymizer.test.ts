@@ -90,6 +90,22 @@ describe("SessionAnonymizer", () => {
 					isError: false,
 				},
 			},
+			{
+				type: "model_usage",
+				id: "e1b2c3d4",
+				parentId: "d1b2c3d4",
+				timestamp: "2026-09-22T15:12:07.000Z",
+				model: "claude-opus-5-5",
+				stopReason: "error",
+				errorMessage: "400 prompt contained password=hunter2 for user alice@example.com",
+			},
+			{
+				type: "ttsr_injection",
+				id: "f1b2c3d4",
+				parentId: "e1b2c3d4",
+				timestamp: "2026-09-22T15:12:08.000Z",
+				injectedRules: ["acme"],
+			},
 		];
 
 		const anonymizer = new SessionAnonymizer();
@@ -97,7 +113,10 @@ describe("SessionAnonymizer", () => {
 		const serialized = JSON.stringify(anonymized);
 		for (const word of SECRET_WORDS) expect(serialized).not.toContain(word);
 
-		const [header, user, assistant, start, toolResult] = anonymized;
+		const [header, user, assistant, start, toolResult, usageEntry, ttsr] = anonymized;
+		// Provider errors may echo request content; only the HTTP status survives.
+		expect(usageEntry.errorMessage).toMatch(/^400 \[redacted #\d+: \d+ chars, 1 line\]$/);
+		expect(ttsr.injectedRules).toEqual([expect.stringMatching(/^PLACEHOLDER_\d+$/)]);
 		expect(header).toMatchObject({ type: "session", id: "01a0c9ac-8c2d", timestamp: "2026-09-22T15:12:03.629Z" });
 		expect(header.cwd).toMatch(/^\/home\/seg\d+\/seg\d+$/);
 

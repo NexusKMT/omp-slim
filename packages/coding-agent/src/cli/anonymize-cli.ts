@@ -2,12 +2,14 @@
  * `omp anonymize` — write a shareable copy of a session (and its subagent
  * transcripts) with turn contents redacted and metadata preserved.
  */
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getProjectDir } from "@oh-my-pi/pi-utils";
+import { getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { anonymizeSessionTranscripts } from "../session/session-anonymizer";
 import type { SessionEntry, SessionHeader } from "../session/session-entries";
 import { loadEntriesFromFile } from "../session/session-loader";
 import { resolveSessionFileArg } from "./session-arg";
+import { CliUsageError } from "./usage-error";
 
 export interface AnonymizeCommandArgs {
 	/** Session file path or id prefix (default: most recent for cwd). */
@@ -25,7 +27,26 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 		entries: records.filter((record): record is SessionEntry => record.type !== "session"),
 		sessionFile: sourcePath,
 	});
-	for (const [name, content] of result.files) await Bun.write(path.join(outDir, name), content);
+	const targets = result.files.map(([name, content]) => [path.join(outDir, name), content] as const);
+	// Never overwrite the input: `-o <session dir>` would replace the session (or a subagent
+	// transcript under `<stem>/`) with its redacted copy. Only existing targets can collide.
+	const sourceReal = await fs.realpath(sourcePath);
+	const subagentDirReal = `${sourceReal.slice(0, -".jsonl".length)}${path.sep}`;
+	for (const [target] of targets) {
+		let targetReal: string;
+		try {
+			targetReal = await fs.realpath(target);
+		} catch (err) {
+			if (isEnoent(err)) continue;
+			throw err;
+		}
+		if (targetReal === sourceReal || targetReal.startsWith(subagentDirReal)) {
+			throw new CliUsageError(
+				`Refusing to overwrite source transcript ${targetReal}; choose another --out directory`,
+			);
+		}
+	}
+	for (const [target, content] of targets) await Bun.write(target, content);
 
 	const count = result.files.length;
 	process.stdout.write(`Anonymized ${count} transcript${count === 1 ? "" : "s"} → ${outDir}\n`);

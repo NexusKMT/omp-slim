@@ -82,7 +82,6 @@ const META_KEYS: Record<string, true> = {
 	declared: true,
 	active: true,
 	deferred: true,
-	injectedRules: true,
 };
 
 /** Tool-call argument keys whose identifier-shaped values are option enums, not content. */
@@ -368,7 +367,6 @@ const SHELL_FLAG = /^--?[A-Za-z][\w-]*$/;
 const NUMBER = /^-?\d+(?:\.\d+)?$/;
 const ENV_REF = /^\$\{?\w+\}?$/;
 const ENV_ASSIGN = /^([A-Za-z_]\w*)=([\s\S]*)$/;
-const EMBEDDED_PATH = /[a-zA-Z][\w+.-]*:\/\/[^\s"'`<>()]+|(?:[A-Za-z]:[\\/]|~[\\/]|\/(?=[\w.-]+\/))[^\s"'`<>|,;()]*/g;
 const MAX_PLACEHOLDER_LENGTH = 120;
 
 function isObject(value: unknown): value is JsonObject {
@@ -426,11 +424,6 @@ export class SessionAnonymizer {
 				.join("");
 		}
 		return this.#name(value);
-	}
-
-	/** Free text kept verbatim except for embedded paths and URLs. */
-	scrub(value: string): string {
-		return value.replace(EMBEDDED_PATH, match => this.path(match));
 	}
 
 	/** Anonymize one session record (header or entry). */
@@ -538,10 +531,12 @@ export class SessionAnonymizer {
 		}
 		if (TEXT_KEYS[key] === true) return this.redactText(value);
 		if (key === "data" && parent?.type === "image") return this.redactText(value);
-		// Provider/transport failures, kept for debugging with embedded paths remapped. Other
-		// `explanation` fields (subagent verdicts) are content.
-		if (key === "errorMessage" || (key === "explanation" && parent !== undefined && "category" in parent)) {
-			return this.scrub(value);
+		// Provider errors can echo request content or credentials: only a leading HTTP status survives.
+		if (key === "errorMessage" || key === "explanation") {
+			const status = /^\d{3}\b/.exec(value);
+			return status
+				? `${status[0]} ${this.redactText(value.slice(status[0].length).trimStart())}`
+				: this.redactText(value);
 		}
 		if (IDENTIFIER.test(value)) {
 			if (IDENTITY_KEYS[key] === true) return value;

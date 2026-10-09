@@ -1,0 +1,30 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { TempDir } from "@oh-my-pi/pi-utils";
+import { runAnonymizeCommand } from "../src/cli/anonymize-cli";
+
+const SESSION = `${JSON.stringify({ type: "session", version: 3, id: "01a0c9ac", timestamp: "2026-10-01T00:00:00.000Z", cwd: "/tmp" })}
+${JSON.stringify({ type: "message", id: "a1b2c3d4", parentId: null, timestamp: "2026-10-01T00:00:01.000Z", message: { role: "user", content: "keep me", timestamp: 1 } })}
+`;
+
+describe("omp anonymize output", () => {
+	let tempDir: TempDir;
+
+	beforeEach(() => {
+		tempDir = TempDir.createSync("@omp-anonymize-");
+	});
+
+	afterEach(async () => {
+		await tempDir.remove();
+	});
+
+	it("refuses an --out directory that would overwrite the source session", async () => {
+		const source = path.join(tempDir.path(), "session.jsonl");
+		await Bun.write(source, SESSION);
+
+		await expect(runAnonymizeCommand({ session: source, out: tempDir.path() })).rejects.toThrow(
+			"Refusing to overwrite source transcript",
+		);
+		expect(await Bun.file(source).text()).toBe(SESSION);
+	});
+});
