@@ -6,7 +6,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
-test("opting into authoritative reasoning refreshes an old cache and preserves a live false through offline reload", async () => {
+test("authoritative reasoning keeps a live false over the bundled dial through a failed-refresh cache merge", async () => {
 	const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "reasoning-authority-"));
 	const bundled: ModelSpec<"openai-completions"> = {
 		id: "future-model",
@@ -21,29 +21,30 @@ test("opting into authoritative reasoning refreshes an old cache and preserves a
 		maxTokens: 8192,
 		thinking: { mode: "effort", efforts: [Effort.High] },
 	};
-	let fetches = 0;
-	const options = {
-		providerId: "custom",
-		staticModels: [bundled],
-		cacheDbPath: path.join(tempDir, "models.db"),
-		fetchDynamicModels: async () => {
-			fetches++;
-			return [{ ...bundled, reasoning: false, thinking: undefined }];
-		},
-	};
+	let fail = false;
+	const fetchDynamicModels = async () => (fail ? null : [{ ...bundled, reasoning: false, thinking: undefined }]);
+	const base = { providerId: "custom", staticModels: [bundled], fetchDynamicModels };
 	try {
-		// Default merge behavior remains additive for providers that omit capabilities.
-		const legacy = await resolveProviderModels(options, "online");
-		expect(legacy.models[0]?.reasoning).toBe(true);
-		const authoritative = { ...options, dynamicReasoningAuthoritative: true };
-		const refreshed = await resolveProviderModels(authoritative, "online-if-uncached");
-		expect(fetches).toBe(2);
-		expect(refreshed.models[0]?.reasoning).toBe(false);
-		expect(refreshed.models[0]?.thinking).toBeUndefined();
-		const offline = await resolveProviderModels(authoritative, "offline");
-		expect(fetches).toBe(2);
-		expect(offline.models[0]?.reasoning).toBe(false);
-		expect(offline.models[0]?.thinking).toBeUndefined();
+		// Default merge behavior stays additive for discovery that omits capabilities.
+		const additive = await resolveProviderModels(
+			{ ...base, cacheDbPath: path.join(tempDir, "additive.db") },
+			"online",
+		);
+		expect(additive.models[0]?.reasoning).toBe(true);
+
+		// The failing pass merges the cached live row back over the bundled one.
+		const options = {
+			...base,
+			cacheDbPath: path.join(tempDir, "authoritative.db"),
+			dynamicReasoningAuthoritative: true,
+		};
+		for (const failing of [false, true]) {
+			fail = failing;
+			const { models, stale } = await resolveProviderModels(options, "online");
+			expect(stale).toBe(failing);
+			expect(models[0]?.reasoning).toBe(false);
+			expect(models[0]?.thinking).toBeUndefined();
+		}
 	} finally {
 		await fs.rm(tempDir, { recursive: true, force: true });
 	}

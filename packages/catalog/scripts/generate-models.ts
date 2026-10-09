@@ -564,9 +564,6 @@ async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-resp
 }
 
 async function generateModels(selectedProvider?: string) {
-	if (selectedProvider !== undefined && !PROVIDER_DESCRIPTORS.some(entry => entry.providerId === selectedProvider)) {
-		throw new Error(`Unknown catalog provider: ${selectedProvider}`);
-	}
 	// Fetch models from dynamic sources.
 	const modelsDevModels = await loadModelsDevData();
 	const catalogProviderDescriptors = PROVIDER_DESCRIPTORS.filter(
@@ -743,6 +740,12 @@ async function generateModels(selectedProvider?: string) {
 	};
 
 	const modelSpecs: Record<string, Record<string, ModelSpec>> = sortObj(providers);
+	// Validated against the generated rows, not a descriptor list, so every
+	// source kind (descriptor, special discovery, models.dev, seed) is selectable
+	// and a typo fails before models.json is rewritten.
+	if (selectedProvider !== undefined && modelSpecs[selectedProvider] === undefined) {
+		throw new Error(`No catalog rows generated for provider: ${selectedProvider}`);
+	}
 	// A provider-only update must not re-bake unrelated snapshot metadata.
 	// Keep cross-provider inputs above for reference fills, but replace only
 	// the requested provider in the generated output.
@@ -761,9 +764,10 @@ async function generateModels(selectedProvider?: string) {
 	await Bun.write(path.join(packageRoot, "src/models.json"), JSON.stringify(sortObj(MODELS)));
 	console.log("Generated src/models.json");
 
-	// Print statistics
-	const totalModels = allModels.length;
-	const reasoningModels = allModels.filter(m => m.reasoning).length;
+	// Print statistics for the rows this run regenerated.
+	const writtenModels = selectedProvider === undefined ? allModels : Object.values(MODELS[selectedProvider] ?? {});
+	const totalModels = writtenModels.length;
+	const reasoningModels = writtenModels.filter(m => m.reasoning).length;
 
 	console.log(`
 Model Statistics:`);
@@ -771,6 +775,7 @@ Model Statistics:`);
 	console.log(`  Reasoning-capable models: ${reasoningModels}`);
 
 	for (const [provider, models] of Object.entries(MODELS)) {
+		if (selectedProvider !== undefined && provider !== selectedProvider) continue;
 		console.log(`  ${provider}: ${Object.keys(models).length} models`);
 	}
 }

@@ -9,7 +9,9 @@ import {
 	CORALBRICKS_BASE_URL,
 	coralbricksModelManagerOptions,
 } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
+import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { applyGeneratedModelPolicies } from "../scripts/generated-policies";
 
 const DISCOVERY_URL = `${CORALBRICKS_BASE_URL}/models`;
 
@@ -153,34 +155,76 @@ describe("CoralBricks built-in provider", () => {
 		}
 	});
 
-	test("does not invent a dial for an advertised empty or unrecognized ladder, while missing metadata keeps the fallback", async () => {
+	test("does not invent a dial for an advertised empty or unrecognized ladder through a failed-refresh reload, while missing metadata keeps the fallback", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "coral-empty-ladder-"));
+		let fail = false;
+		const options = {
+			...coralbricksModelManagerOptions({
+				apiKey: "cb-test-key",
+				fetch: async () =>
+					fail
+						? new Response("upstream down", { status: 503 })
+						: Response.json({
+								data: [
+									coralRow({ supports_reasoning: true, reasoning: { supported_efforts: [] } }),
+									coralRow({
+										id: "coral-unknown-efforts",
+										supports_reasoning: true,
+										reasoning: { supported_efforts: ["turbo", null] },
+									}),
+									coralRow({
+										id: "deepseek-v4.1-flash-fast",
+										supports_reasoning: "true",
+										reasoning: { supported_efforts: "high" },
+									}),
+								],
+							}),
+			}),
+			cacheDbPath: path.join(tempDir, "models.db"),
+		};
+		try {
+			// The second pass fails, so the cached snapshot is merged back over
+			// the bundled rows, which still carry the reviewed GLM ladder.
+			for (const failing of [false, true]) {
+				fail = failing;
+				const { models, stale } = await resolveProviderModels(options, "online");
+				expect(stale).toBe(failing);
+				expect(models.find(model => model.id === "glm-5.3-fast")?.thinking).toBeUndefined();
+				expect(models.find(model => model.id === "coral-unknown-efforts")?.thinking).toBeUndefined();
+				expect(models.find(model => model.id === "deepseek-v4.1-flash-fast")?.thinking?.efforts).toEqual([
+					Effort.Low,
+					Effort.High,
+					Effort.Max,
+				]);
+			}
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("keeps live effort ladders through the generator's thinking re-bake", async () => {
+		// A keyed `gen:models` bakes discovery rows through
+		// `applyGeneratedModelPolicies`; a row that trusts only its explicit
+		// thinking must keep the live ladder instead of being re-derived away.
 		const options = coralbricksModelManagerOptions({
 			apiKey: "cb-test-key",
 			fetch: async () =>
 				Response.json({
 					data: [
-						coralRow({ supports_reasoning: true, reasoning: { supported_efforts: [] } }),
 						coralRow({
-							id: "coral-unknown-efforts",
 							supports_reasoning: true,
-							reasoning: { supported_efforts: ["turbo", null] },
-						}),
-						coralRow({
-							id: "deepseek-v4.1-flash-fast",
-							supports_reasoning: "true",
-							reasoning: { supported_efforts: "high" },
+							reasoning: { supported_efforts: ["low", "high"], default_effort: "high", mandatory: true },
 						}),
 					],
 				}),
 		});
-		const models = (await options.fetchDynamicModels?.())?.map(model => buildModel(model));
-		expect(models?.find(model => model.id === "glm-5.3-fast")?.thinking).toBeUndefined();
-		expect(models?.find(model => model.id === "coral-unknown-efforts")?.thinking).toBeUndefined();
-		expect(models?.find(model => model.id === "deepseek-v4.1-flash-fast")?.thinking?.efforts).toEqual([
-			Effort.Low,
-			Effort.High,
-			Effort.Max,
-		]);
+		const specs = (await options.fetchDynamicModels?.())?.map(model => toModelSpec(buildModel(model))) ?? [];
+		applyGeneratedModelPolicies(specs);
+		expect(specs[0]?.thinking).toMatchObject({
+			efforts: [Effort.Low, Effort.High],
+			defaultLevel: Effort.High,
+			requiresEffort: true,
+		});
 	});
 
 	test("gates discovery on credentials because /v1/models is key-protected", () => {
@@ -188,11 +232,13 @@ describe("CoralBricks built-in provider", () => {
 		expect(coralbricksModelManagerOptions({ apiKey: "cb-test-key" }).fetchDynamicModels).toBeDefined();
 	});
 
-	test("keeps a live modality removal authoritative through the production manager merge", async () => {
+	test("keeps live modality removal and zero prices authoritative through the production manager merge", async () => {
 		// Coral documents `supports_image_input` as authoritative and answers
 		// unsupported content with `400 unsupported_content_type`, so a live
 		// text-only row must strip the bundled row's image support instead of
-		// OR-merging it back.
+		// OR-merging it back. Its `pricing` block is the live tariff, so an
+		// explicit `0` (dropped cache-write charge) must not revert to the
+		// bundled rate.
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-coralbricks-refresh-"));
 		const dbPath = path.join(tempDir, "models.db");
 		const bundledVisionModel: ModelSpec<"openai-completions"> = {
@@ -213,7 +259,7 @@ describe("CoralBricks built-in provider", () => {
 				data: [
 					coralRow({
 						id: "deepseek-v4.1-flash-fast",
-						pricing: { cached_input_per_m: 0, cache_write_per_m: 0.09, input_per_m: 0.3, output_per_m: 1.2 },
+						pricing: { cached_input_per_m: 0, cache_write_per_m: 0, input_per_m: 0.3, output_per_m: 1.2 },
 						supports_image_input: false,
 					}),
 				],
@@ -231,6 +277,7 @@ describe("CoralBricks built-in provider", () => {
 
 			const model = models.find(item => item.id === "deepseek-v4.1-flash-fast");
 			expect(model?.input).toEqual(["text"]);
+			expect(model?.cost).toMatchObject({ input: 0.3, output: 1.2, cacheRead: 0, cacheWrite: 0 });
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}

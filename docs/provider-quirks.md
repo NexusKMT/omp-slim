@@ -2185,6 +2185,7 @@ Provider-specific overrides in `packages/catalog/src/compat/rules/providers/zhip
 
 ### Special casings
 - Chat discovery uses `openai-completions` with CoralBricks' own `/v1/models` row fields (per-million `pricing`, `context_length`, `supports_image_input`, `supports_tools`). The endpoint publishes no output cap, so that still follows the bundled reference.
+- Live modality and prices are authoritative (`dynamicInputAuthoritative`, `dynamicCostAuthoritative`): a text-only row drops bundled image support, and an explicit `0` price replaces the bundled rate. A missing price field keeps the bundled rate.
 - Live `supports_reasoning` and `reasoning.supported_efforts` supply reasoning capability and the effort ladder, including for new model IDs and aliases. Explicit non-reasoning and empty effort vocabularies override stale bundled controls through refresh and cache reload; missing legacy metadata keeps the reviewed fallback.
 - `reasoning.mandatory` controls whether thinking can be switched off. `reasoning.disable: {"reasoning_effort":"none"}` maps off to `none`; mandatory models clamp an explicit off request to the lowest supported effort. Named `default_effort` values set the model default when supported. `none` is the server's off default, not an effort tier: an unrequested effort is omitted, while OMP's existing session/user thinking selection still applies. Coral models do not expose a thinking-token budget.
 

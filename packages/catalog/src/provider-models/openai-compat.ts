@@ -1653,8 +1653,8 @@ interface CoralbricksModelRecord extends OpenAICompatibleModelRecord {
 
 /**
  * Read one live per-million price; a missing or negative field falls back to
- * the bundled reference. The manager merge (`preferDiscoveryCost`) still
- * treats a live `0` as unknown and keeps a bundled non-zero rate.
+ * the bundled reference. An explicit `0` is a real price: the manager keeps it
+ * because `coralbricksModelManagerOptions` declares `dynamicCostAuthoritative`.
  */
 function coralRate(value: unknown, fallback: number): number {
 	const parsed = toNumber(value);
@@ -1764,6 +1764,9 @@ export function coralbricksModelManagerOptions(
 		// `supports_image_input` is the row's whole truth for modality (Coral
 		// answers unsupported content with `400 unsupported_content_type`).
 		dynamicInputAuthoritative: true,
+		// Coral's `pricing` block is the deployment tariff; an explicit live `0`
+		// (a free model or no cache-write charge) must not revert to the bundle.
+		dynamicCostAuthoritative: true,
 		...(apiKey && {
 			fetchDynamicModels: () =>
 				fetchOpenAICompatibleModels({

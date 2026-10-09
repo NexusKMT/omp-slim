@@ -57,7 +57,11 @@ function usageChunk(model: Model<"openai-completions">, usage: Record<string, un
 
 async function captureRequest(
 	model: Model<"openai-completions">,
-	options: { reasoning?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max"; disableReasoning?: boolean },
+	options: {
+		reasoning?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+		disableReasoning?: boolean;
+		maxTokens?: number;
+	},
 ): Promise<{ url: string; authorization: string | null; payload: Record<string, unknown> }> {
 	let url = "";
 	let authorization: string | null = null;
@@ -83,13 +87,16 @@ async function captureRequest(
 
 describe("CoralBricks wire contract", () => {
 	it("routes requests to Coral's chat-completions endpoint with the resolved key", async () => {
-		const { url, authorization, payload } = await captureRequest(requireBundled("glm-5.3-fast"), {});
+		const { url, authorization, payload } = await captureRequest(requireBundled("glm-5.3-fast"), {
+			maxTokens: 1024,
+		});
 		expect(url).toBe(`${CORALBRICKS_BASE_URL}/chat/completions`);
 		expect(authorization).toBe("Bearer cb-test-key");
 		expect(payload.model).toBe("glm-5.3-fast");
-		// Gateway dialect: no `store`, no `max_completion_tokens`.
-		expect(payload.store).toBeUndefined();
+		// Gateway dialect: output cap rides `max_tokens`, and no `store` is sent.
+		expect(payload.max_tokens).toBe(1024);
 		expect(payload.max_completion_tokens).toBeUndefined();
+		expect(payload.store).toBeUndefined();
 	});
 
 	it("gates thinking on via bare reasoning_effort with no zai-dialect fields", async () => {
