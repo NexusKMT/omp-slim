@@ -88,7 +88,7 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 			if (existing.readyAt === undefined) await waitReady(client, name, "Browser relay", opts.signal);
 			if (await probeRelayServer(opts.cdpUrl)) return true;
 			// Live record but nothing listening: replace the wedged daemon.
-			await stopQuietly(client, name, "Browser relay", opts.signal, existing.id);
+			await stopQuietly(client, name, "Browser relay", opts.signal);
 			continue;
 		}
 		try {
@@ -112,7 +112,7 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 			);
 			if (started.op !== "start") continue;
 			if (await probeRelayServer(opts.cdpUrl)) return true;
-			await stopQuietly(client, name, "Browser relay", opts.signal, started.daemon.id);
+			await stopQuietly(client, name, "Browser relay", opts.signal);
 		} catch (error) {
 			throwIfAborted(opts.signal);
 			// Lost a cross-process start race; the next round adopts the winner.
