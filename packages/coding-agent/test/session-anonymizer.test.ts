@@ -256,7 +256,48 @@ describe("SessionAnonymizer", () => {
 		expect(json).toMatch(/"preserveData":"\[redacted #\d+/);
 		// A dotted task name and its agent:// URI share one token index.
 		const index = /"tasks":\[\{"name":"PLACEHOLDER_(\d+)"/.exec(json)?.[1];
-		expect(json).toContain(`"path":"agent://seg${index}.v2"`);
+		// `.v2` is not a file extension, so the whole name maps to the shared token.
+		expect(json).toContain(`"path":"agent://seg${index}"`);
+	});
+
+	test("keeps only known schemes, extensions, env names, long flags, and count selectors", () => {
+		const anonymizer = new SessionAnonymizer();
+		const outputs = [
+			anonymizer.path("customer-acme://tenant/private"),
+			anonymizer.path("/reports/customer.alice"),
+			anonymizer.command("ACME_CUSTOMER=hunter2 env | grep $ACME_CUSTOMER"),
+			anonymizer.command("echo --customer-acme -123456789"),
+		];
+		for (const output of outputs) {
+			for (const secret of ["acme", "ACME", "alice", "hunter2", "123456789"]) expect(output).not.toContain(secret);
+		}
+		// The assignment and its `$` reference share one token.
+		const name = anonymizer.placeholder("ACME_CUSTOMER");
+		expect(outputs[2]).toBe(`${name}=${anonymizer.placeholder("hunter2")} env | grep $${name}`);
+		// Known schemes and real file extensions stay; a host's `.test` suffix is part of the name.
+		expect(anonymizer.path("https://x.test/a/b.ts")).toMatch(/^https:\/\/seg\d+\/seg\d+\/seg\d+\.ts$/);
+		expect(anonymizer.command("git log --oneline -3")).toBe("git log --oneline -3");
+	});
+
+	test("keeps provider message addresses only in inputTransformations", () => {
+		const anonymizer = new SessionAnonymizer();
+		const json = JSON.stringify(
+			anonymizer.entry({
+				type: "message",
+				message: {
+					role: "assistant",
+					inputTransformations: [{ type: "thinking_dropped", path: "messages.1.content.0" }],
+				},
+			}),
+		);
+		expect(json).toContain('"path":"messages.1.content.0"');
+		const grep = JSON.stringify(
+			anonymizer.entry({
+				type: "message",
+				message: { role: "toolResult", toolName: "grep", details: { files: ["messages.aliceCustomer"] } },
+			}),
+		);
+		expect(grep).not.toContain("alice");
 	});
 
 	test("tokenizes attached short-option values and flags of programs outside the allowlist", () => {

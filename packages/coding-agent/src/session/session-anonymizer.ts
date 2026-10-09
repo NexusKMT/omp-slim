@@ -62,7 +62,8 @@ type Rule =
 	| "args"
 	| "details"
 	| "data"
-	| "opaque";
+	| "opaque"
+	| "transforms";
 
 function fields(rule: Rule, keys: readonly string[]): Record<string, Rule> {
 	return Object.fromEntries(keys.map(key => [key, rule]));
@@ -328,6 +329,7 @@ const FIELD_RULES: Record<string, Rule> = {
 	...fields("tool", ["toolName", "tools", "declared", "deferred", "active"]),
 	name: "name",
 	customType: "customType",
+	inputTransformations: "transforms",
 	content: "content",
 	...fields("struct", [
 		"message",
@@ -340,7 +342,6 @@ const FIELD_RULES: Record<string, Rule> = {
 		"supersededBy",
 		"stopDetails",
 		"requestControls",
-		"inputTransformations",
 		"providerPayload",
 		"items",
 		"compactionThreshold",
@@ -832,6 +833,298 @@ const SUBCOMMANDS: Record<string, true> = {
 /** Prefix programs after which a new command name follows. */
 const COMMAND_PREFIXES = new Set(["sudo", "env", "time", "timeout", "nohup", "xargs", "do", "then", "else"]);
 
+/** Programs whose `-N` is a count selector (`head -3`, `git log -3`). */
+const NUMERIC_FLAG_PROGRAMS = new Set(["head", "tail", "git", "jj"]);
+
+/** Long options kept verbatim for allowlisted programs; any other `--word` may carry a name. */
+const LONG_FLAGS = new Set([
+	"--help",
+	"--version",
+	"--verbose",
+	"--quiet",
+	"--silent",
+	"--json",
+	"--all",
+	"--force",
+	"--global",
+	"--recursive",
+	"--dry-run",
+	"--watch",
+	"--color",
+	"--no-color",
+	"--oneline",
+	"--stat",
+	"--format",
+	"--pretty",
+	"--graph",
+	"--decorate",
+	"--no-pager",
+	"--short",
+	"--porcelain",
+	"--name-only",
+	"--name-status",
+	"--cached",
+	"--staged",
+	"--exit-code",
+	"--since",
+	"--until",
+	"--author",
+	"--message",
+	"--amend",
+	"--no-edit",
+	"--no-verify",
+	"--continue",
+	"--abort",
+	"--skip",
+	"--rebase",
+	"--ff-only",
+	"--prune",
+	"--tags",
+	"--branch",
+	"--depth",
+	"--set-upstream",
+	"--force-with-lease",
+	"--delete",
+	"--merged",
+	"--remote",
+	"--repo",
+	"--jq",
+	"--limit",
+	"--state",
+	"--title",
+	"--body",
+	"--head",
+	"--base",
+	"--draft",
+	"--web",
+	"--comments",
+	"--patch",
+	"--squash",
+	"--merge",
+	"--auto",
+	"--admin",
+	"--label",
+	"--release",
+	"--workspace",
+	"--features",
+	"--all-features",
+	"--manifest-path",
+	"--lib",
+	"--tests",
+	"--test",
+	"--bin",
+	"--target",
+	"--frozen-lockfile",
+	"--filter",
+	"--cwd",
+	"--timeout",
+	"--run",
+	"--bail",
+	"--coverage",
+	"--reporter",
+	"--only",
+	"--update-snapshots",
+	"--ignore-case",
+	"--line-number",
+	"--count",
+	"--files-with-matches",
+	"--glob",
+	"--type",
+	"--hidden",
+	"--no-ignore",
+	"--max-count",
+	"--context",
+	"--after-context",
+	"--before-context",
+	"--fixed-strings",
+	"--word-regexp",
+	"--include",
+	"--exclude",
+	"--max-depth",
+	"--sort",
+	"--reverse",
+	"--unique",
+	"--raw-output",
+	"--compact-output",
+	"--slurp",
+	"--null-input",
+	"--method",
+	"--header",
+	"--data",
+	"--request",
+	"--location",
+	"--show-error",
+	"--fail",
+	"--compressed",
+	"--output",
+	"--check",
+	"--fix",
+	"--write",
+	"--list",
+	"--interactive",
+]);
+
+/** Environment variable names kept verbatim; any other name may embed a project or tenant. */
+const ENV_NAMES = new Set([
+	"PATH",
+	"HOME",
+	"PWD",
+	"SHELL",
+	"TERM",
+	"LANG",
+	"LC_ALL",
+	"TMPDIR",
+	"TEMP",
+	"TMP",
+	"CI",
+	"DEBUG",
+	"NODE_ENV",
+	"NODE_OPTIONS",
+	"RUST_LOG",
+	"RUST_BACKTRACE",
+	"CARGO_TARGET_DIR",
+	"GOPATH",
+	"GOOS",
+	"GOARCH",
+	"PYTHONPATH",
+	"VIRTUAL_ENV",
+	"FORCE_COLOR",
+	"NO_COLOR",
+	"PAGER",
+	"GIT_PAGER",
+	"EDITOR",
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"NO_PROXY",
+]);
+
+/** URI schemes kept verbatim: standard web/file schemes and omp's built-in internal schemes. */
+const KNOWN_SCHEMES = new Set([
+	"http",
+	"https",
+	"file",
+	"ssh",
+	"git",
+	"ftp",
+	"ws",
+	"wss",
+	"agent",
+	"artifact",
+	"attachment",
+	"cfg",
+	"conflict",
+	"history",
+	"issue",
+	"local",
+	"mcp",
+	"memory",
+	"omp",
+	"pr",
+	"proc",
+	"rule",
+	"security",
+	"skill",
+	"vault",
+	"xd",
+]);
+
+/** File extensions kept on mock names; `.test`/`.spec`/`.d` qualify a known final extension. */
+const KNOWN_EXTENSIONS = new Set([
+	"ts",
+	"tsx",
+	"mts",
+	"cts",
+	"js",
+	"jsx",
+	"mjs",
+	"cjs",
+	"json",
+	"jsonl",
+	"jsonc",
+	"md",
+	"mdx",
+	"txt",
+	"yml",
+	"yaml",
+	"toml",
+	"kdl",
+	"ini",
+	"cfg",
+	"conf",
+	"env",
+	"lock",
+	"log",
+	"csv",
+	"tsv",
+	"xml",
+	"html",
+	"css",
+	"scss",
+	"less",
+	"svg",
+	"png",
+	"jpg",
+	"jpeg",
+	"gif",
+	"webp",
+	"ico",
+	"pdf",
+	"zip",
+	"tar",
+	"gz",
+	"tgz",
+	"xz",
+	"rs",
+	"go",
+	"py",
+	"rb",
+	"java",
+	"kt",
+	"swift",
+	"c",
+	"h",
+	"cc",
+	"cpp",
+	"hpp",
+	"cs",
+	"php",
+	"lua",
+	"sh",
+	"bash",
+	"zsh",
+	"ps1",
+	"bat",
+	"sql",
+	"proto",
+	"graphql",
+	"vue",
+	"svelte",
+	"wasm",
+	"diff",
+	"patch",
+	"ttf",
+	"otf",
+	"woff",
+	"woff2",
+	"mp3",
+	"mp4",
+	"wav",
+	"exe",
+	"dll",
+	"so",
+	"dylib",
+]);
+
+/** Whether every dotted part of `ext` (`.ts`, `.test.ts`, `.d.ts`) is file-extension vocabulary. */
+function isKnownExtension(ext: string): boolean {
+	const parts = ext.toLowerCase().split(".").filter(Boolean);
+	return (
+		parts.length > 0 &&
+		KNOWN_EXTENSIONS.has(parts[parts.length - 1]) &&
+		parts.slice(0, -1).every(part => part === "test" || part === "spec" || part === "d" || KNOWN_EXTENSIONS.has(part))
+	);
+}
+
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const IDENTIFIER = /^[\w.:/@+-]{1,128}$/;
 /** Object keys shaped like schema fields; anything else (paths, labels) is data. */
@@ -915,7 +1208,11 @@ export class SessionAnonymizer {
 		if (GLOB_CHARS.test(value)) {
 			return value
 				.split(GLOB_CHARS)
-				.map(piece => (piece === "" || GLOB_CHARS.test(piece) || EXT_ONLY.test(piece) ? piece : this.#name(piece)))
+				.map(piece =>
+					piece === "" || GLOB_CHARS.test(piece) || (EXT_ONLY.test(piece) && isKnownExtension(piece))
+						? piece
+						: this.#name(piece),
+				)
 				.join("");
 		}
 		return this.#name(value);
@@ -929,7 +1226,8 @@ export class SessionAnonymizer {
 	#name(value: string): string {
 		if (value.startsWith(".") && value.length > 1) return `.${this.#name(value.slice(1))}`;
 		const match = EXTENSION.exec(value);
-		if (match && !/^\d+$/.test(match[1])) {
+		// Only real file extensions survive; `customer.alice` is a name, not a `.alice` file.
+		if (match && !/^\d+$/.test(match[1]) && isKnownExtension(match[2])) {
 			// Index the whole name so `Probe.v2` shares its token with `PLACEHOLDER_N` and `agent://`.
 			return `${KEEP_SEGMENTS[match[1]] === true ? match[1] : `seg${this.#index(value)}`}${match[2]}`;
 		}
@@ -943,8 +1241,10 @@ export class SessionAnonymizer {
 		let suffix = "";
 		const scheme = SCHEME.exec(rest);
 		if (scheme) {
-			prefix = scheme[0];
-			rest = rest.slice(prefix.length);
+			// Custom schemes (MCP resources) can name a server or customer; only known ones stay.
+			const name = scheme[0].slice(0, -3);
+			prefix = KNOWN_SCHEMES.has(name.toLowerCase()) ? scheme[0] : `${this.placeholder(name)}://`;
+			rest = rest.slice(scheme[0].length);
 			const query = rest.indexOf("?");
 			if (query >= 0) {
 				suffix = `?${this.placeholder(rest.slice(query + 1))}`;
@@ -1033,6 +1333,12 @@ export class SessionAnonymizer {
 				rule === "id" ||
 				rule === "path" ||
 				rule === "tool";
+			if (rule === "transforms") {
+				// Provider input transformations address transcript slots (`messages.3.content.0`), not files.
+				const out = this.#struct(value, fromTool);
+				if (typeof value.path === "string" && MESSAGE_ADDRESS.test(value.path)) out.path = value.path;
+				return out;
+			}
 			return descends ? this.#struct(value, fromTool) : this.#opaque(value);
 		}
 		if (typeof value !== "string") return this.#opaque(value);
@@ -1064,7 +1370,7 @@ export class SessionAnonymizer {
 				// ids (subagent names) are mapped like the `agent://` segment they mirror.
 				return !fromTool && RANDOM_ID.test(value) ? value : this.segment(value);
 			case "path":
-				return MESSAGE_ADDRESS.test(value) ? value : this.path(value);
+				return this.path(value);
 			case "cmd":
 				return this.command(value);
 			case "label":
@@ -1173,7 +1479,7 @@ export class SessionAnonymizer {
 			if (commandStart) {
 				const assign = ENV_ASSIGN.exec(word);
 				if (assign) {
-					out += `${assign[1]}=${this.#shellValue(assign[2], false)}`;
+					out += `${this.#envName(assign[1])}=${this.#shellValue(assign[2], false)}`;
 					continue;
 				}
 				commandStart = COMMAND_PREFIXES.has(word);
@@ -1190,18 +1496,20 @@ export class SessionAnonymizer {
 	}
 
 	#shellArg(word: string, program: string | undefined, argIndex: number): string {
-		// `-3` (head/tail count style) is a flag; bare numeric operands may be ids, PINs, or amounts.
-		if (/^-\d+$/.test(word) || ENV_REF.test(word)) return word;
+		if (ENV_REF.test(word)) return this.#envRef(word);
 		// Flag names are vocabulary only for allowlisted programs; an unknown script's flags may name things.
 		if (program === undefined) return this.#shellValue(word, false);
+		// `-3` is a count selector only for programs that define one; elsewhere (`echo -123`) it is data.
+		if (/^-\d+$/.test(word)) return NUMERIC_FLAG_PROGRAMS.has(program) ? word : this.#shellValue(word, false);
 		if (SHELL_FLAG.test(word)) {
-			// `-ehunter2` attaches a value to a short option; only long flags and bare `-x` are names.
-			return word.startsWith("--") || word.length <= 2
-				? word
-				: word.slice(0, 2) + this.#shellValue(word.slice(2), false);
+			// Long options must be known vocabulary; `-ehunter2` attaches a value to a short option.
+			if (word.startsWith("--")) return LONG_FLAGS.has(word) ? word : this.#shellValue(word, false);
+			return word.length <= 2 ? word : word.slice(0, 2) + this.#shellValue(word.slice(2), false);
 		}
-		const flagValue = /^(--?[A-Za-z][\w-]*=)([\s\S]*)$/.exec(word);
-		if (flagValue) return flagValue[1] + this.#shellValue(flagValue[2], false);
+		const flagValue = /^(--?[A-Za-z][\w-]*)=([\s\S]*)$/.exec(word);
+		if (flagValue && (!flagValue[1].startsWith("--") || LONG_FLAGS.has(flagValue[1]))) {
+			return `${flagValue[1]}=${this.#shellValue(flagValue[2], false)}`;
+		}
 		if (argIndex === 0 && SUBCOMMANDS[word] === true) return word;
 		return this.#shellValue(word, false);
 	}
@@ -1212,9 +1520,20 @@ export class SessionAnonymizer {
 		if ((quote === '"' || quote === "'") && word.length >= 2 && word.endsWith(quote)) {
 			return quote + this.#shellValue(word.slice(1, -1), isPath) + quote;
 		}
-		if (word === "" || ENV_REF.test(word)) return word;
+		if (word === "") return word;
+		if (ENV_REF.test(word)) return this.#envRef(word);
 		if (isPath || looksLikePath(word)) return this.path(word);
 		return this.#literal(word);
+	}
+
+	/** Environment variable name: well-known names stay, user-defined ones share the token table. */
+	#envName(name: string): string {
+		return ENV_NAMES.has(name) ? name : this.placeholder(name);
+	}
+
+	/** `$NAME` / `${NAME}` with the name mapped like its assignment. */
+	#envRef(word: string): string {
+		return word.replace(/\w+/, name => this.#envName(name));
 	}
 }
 
