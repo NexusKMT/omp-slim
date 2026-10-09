@@ -12,6 +12,10 @@
 - Fixed the built-in `jq` reading each file operand separately: `-s` now slurps them into one array and `input` reads on into the next file, as in jq ([#14659](https://github.com/can1357/oh-my-pi/pull/14659) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed the built-in `jq` stopping at the first input that fails and rejecting `"021"` and `"+1"` in `tonumber`, where jq does neither; a run that reported a failing input is never shortened by the output minimizer, even when it exits 0 ([#14659](https://github.com/can1357/oh-my-pi/pull/14659) by [@will-bogusz](https://github.com/will-bogusz))
 
+### Changed
+
+- Reduced syntax-highlighting startup work by bundling the complete precompiled grammar set ([#14104](https://github.com/can1357/oh-my-pi/pull/14104) by [@iliaal](https://github.com/iliaal)).
+
 ## [18.8.4] - 2026-10-08
 
 ### Fixed
