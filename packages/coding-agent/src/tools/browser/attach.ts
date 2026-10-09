@@ -525,10 +525,14 @@ export async function waitForMainFrame(
 		}
 	}
 }
-async function fetchRelayEntries(relayJson: string, signal?: AbortSignal): Promise<RelayJsonEntry[] | null> {
+async function fetchRelayEntries(
+	relayJson: string,
+	signal?: AbortSignal,
+	timeoutMs = RELAY_JSON_TIMEOUT_MS,
+): Promise<RelayJsonEntry[] | null> {
 	try {
 		const res = await probeCdpResponse(`${relayJson.replace(/\/$/, "")}/json`, {
-			timeoutMs: RELAY_JSON_TIMEOUT_MS,
+			timeoutMs,
 			signal,
 		});
 		if (!res || res.status < 200 || res.status >= 300) return null;
@@ -574,14 +578,21 @@ export async function pickElectronTarget(browser: Browser, options: PickTargetOp
 		let entries = await fetchRelayEntries(options.relayJson, options.signal);
 		const needle = options.matcher?.toLowerCase();
 		const settleDeadline = Date.now() + RELAY_MATCH_SETTLE_MS;
+		// Without page metadata, target enumeration below decides at once, as before.
 		while (
-			entries &&
 			needle &&
+			entries?.some(e => e.type === "page") &&
 			!entries.some(e => e.type === "page" && relayEntryMatches(e, needle)) &&
 			Date.now() < settleDeadline
 		) {
-			await abortable(options.signal, () => Bun.sleep(RELAY_MATCH_POLL_MS));
-			entries = (await fetchRelayEntries(options.relayJson, options.signal)) ?? entries;
+			await abortable(options.signal, () => Bun.sleep(Math.min(RELAY_MATCH_POLL_MS, settleDeadline - Date.now())));
+			const polled = await fetchRelayEntries(
+				options.relayJson,
+				options.signal,
+				Math.max(1, settleDeadline - Date.now()),
+			);
+			throwIfAborted(options.signal);
+			entries = polled ?? entries;
 		}
 		if (entries) {
 			const pageEntries = entries.filter(e => e.type === "page");
@@ -635,7 +646,9 @@ export async function pickElectronTarget(browser: Browser, options: PickTargetOp
 					} catch (error) {
 						throwIfAborted(options.signal);
 						if (error instanceof Error && error.name === "TimeoutError") {
-							throw new ToolError("Selected tab closed before omp could attach; reopen it and retry");
+							throw new ToolError(
+								"Selected tab did not become available before omp could attach; retry, or reopen it if it closed",
+							);
 						}
 						throw error;
 					}

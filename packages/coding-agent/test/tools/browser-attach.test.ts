@@ -900,7 +900,7 @@ describe("pickElectronTarget relay path", () => {
 		expect(await pickElectronTarget(browser, { relayJson, matcher: "whole foods" })).toBe(cartPage);
 	});
 
-	it("reports a tab that closed before Puppeteer saw it", async () => {
+	it("tells the model to retry when Puppeteer never sees the selected tab", async () => {
 		const browser = Object.assign(makeBrowser([]), {
 			waitForTarget: async () => {
 				throw Object.assign(new Error("Waiting for target failed"), { name: "TimeoutError" });
@@ -909,7 +909,23 @@ describe("pickElectronTarget relay path", () => {
 
 		const error = await rejectionOf(pickElectronTarget(browser, { relayJson, matcher: "whole foods" }));
 
-		expect(error).toMatchObject({ message: "Selected tab closed before omp could attach; reopen it and retry" });
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toMatch(/^Selected tab did not become available.*retry, or reopen it/);
+	});
+
+	it("falls back to target enumeration at once when /json lists no pages", async () => {
+		let served = 0;
+		relay.reload({
+			fetch: () => {
+				served++;
+				return Response.json([]);
+			},
+		});
+		const cartPage = fakePage({ url: "https://example.com/cart", title: "Cart" });
+		const cart = makeTarget("PAGE_CART", cartPage);
+
+		expect(await pickElectronTarget(makeBrowser([cart.target]), { relayJson, matcher: "cart" })).toBe(cartPage);
+		expect(served).toBe(1);
 	});
 
 	it("does not adopt another live tab when the selected tab is unreadable", async () => {
