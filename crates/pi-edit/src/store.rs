@@ -132,8 +132,11 @@ impl StoredSnapshot {
 		let text_bytes =
 			(snapshot.text.len() + 2 * size_of::<usize>()).next_multiple_of(size_of::<usize>());
 		let seen_bytes = snapshot.seen_lines.as_ref().map_or(0, |lines| {
-			// BTreeSet does not expose node capacity; include an allowance for
-			// links and unused slots.
+			// BTreeSet does not expose its nodes. Half-full u32 leaves (56 B, 5 of
+			// 11 keys) cost about 11 B per key and internal nodes at most 6 B
+			// more, so 20 B per line is an upper bound; sorted inserts
+			// pack nodes and overcount up to 4×, which only evicts
+			// sooner.
 			2 * size_of::<usize>()
 				+ size_of::<BTreeSet<u32>>()
 				+ lines.len() * (size_of::<u32>() + 2 * size_of::<usize>())
@@ -389,6 +392,9 @@ impl EditStore {
 		let mut hashes = BTreeSet::new();
 		merged.retain(|version| hashes.insert(version.snapshot.hash.clone()));
 		merged.truncate(max_versions);
+		// `extend` can leave room for both histories; keep only the slots a path
+		// may use.
+		merged.shrink_to(max_versions);
 		let history = PathHistory { versions: merged, touched };
 		let path = to.to_owned();
 		state.retained_bytes += history.retained_bytes(path.capacity());
@@ -673,8 +679,10 @@ mod tests {
 
 	#[test]
 	fn relocation_releases_duplicate_and_truncated_versions() {
-		// 64-bit: initially 8_632 data + 12 slots; the limit leaves 504 B spare.
-		let store = EditStore::with_limits(10, 2, 9_136 + 12 * size_of::<StoredSnapshot>());
+		// 64-bit: initially 8_632 data + 12 slots, 504 B less two slots under the
+		// limit. Relocation leaves `to` two slots, so after the filler
+		// 9_112 data + 10 slots sit 24 B under it.
+		let store = EditStore::with_limits(10, 2, 9_136 + 10 * size_of::<StoredSnapshot>());
 		let from = Path::new("from");
 		let to = Path::new("to");
 		let emoji = "😀".repeat(500);
