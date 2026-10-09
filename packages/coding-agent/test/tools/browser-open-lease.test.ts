@@ -233,6 +233,40 @@ describe("browser open — an abandoned browser acquisition does not hold up the
 		expect(getTabsMapForTest().has("retry")).toBe(true);
 	});
 
+	it("keeps the replacement acquisition shared when the abandoned one settles while it is still connecting", async () => {
+		const kind = { kind: "cmux" as const, socketPath: `/tmp/omp-open-lease-${process.pid}-late.sock` };
+		const abandonedConnect = { entered: Promise.withResolvers<void>(), gate: Promise.withResolvers<void>() };
+		const replacementConnect = { entered: Promise.withResolvers<void>(), gate: Promise.withResolvers<void>() };
+		const gatedConnects = [abandonedConnect, replacementConnect];
+		let connects = 0;
+		spyOn(CmuxSocketClient.prototype, "connect").mockImplementation(async () => {
+			const gated = gatedConnects[connects++];
+			gated?.entered.resolve();
+			await gated?.gate.promise;
+		});
+		const closeSpy = spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
+
+		const owner = new AbortController();
+		const abandoned = rejectionOf(registry.acquireBrowser(kind, { cwd: "/tmp", signal: owner.signal }));
+		await abandonedConnect.entered.promise;
+		owner.abort();
+		const replacement = registry.acquireBrowser(kind, { cwd: "/tmp" });
+		await replacementConnect.entered.promise;
+		abandonedConnect.gate.resolve();
+		expect(await abandoned).toBeInstanceOf(ToolAbortError);
+
+		// A third acquisition arriving now must join the replacement, not launch its own.
+		const joined = registry.acquireBrowser(kind, { cwd: "/tmp" });
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		replacementConnect.gate.resolve();
+		const [first, second] = await Promise.all([replacement, joined]);
+		const disposedBeforeRelease = closeSpy.mock.calls.length;
+		for (const handle of new Set([first, second])) await registry.releaseBrowser(handle, { kill: false });
+		expect(second).toBe(first);
+		expect(connects).toBe(2);
+		expect(disposedBeforeRelease).toBe(1);
+	});
+
 	it("waits for a spawned app's abandoned acquisition to settle before starting another", async () => {
 		const app = "/tmp/omp-open-lease-app";
 		const events: string[] = [];
