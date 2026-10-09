@@ -63,7 +63,8 @@ type Rule =
 	| "details"
 	| "data"
 	| "opaque"
-	| "transforms";
+	| "transforms"
+	| "sessionPath";
 
 function fields(rule: Rule, keys: readonly string[]): Record<string, Rule> {
 	return Object.fromEntries(keys.map(key => [key, rule]));
@@ -281,8 +282,6 @@ const FIELD_RULES: Record<string, Rule> = {
 		"files",
 		"file_path",
 		"additionalDirectories",
-		"parentSession",
-		"previousSessionFiles",
 		"scopePath",
 		"searchPath",
 		"resolvedPath",
@@ -330,6 +329,8 @@ const FIELD_RULES: Record<string, Rule> = {
 	name: "name",
 	customType: "customType",
 	inputTransformations: "transforms",
+	parentSession: "sessionPath",
+	previousSessionFiles: "sessionPath",
 	content: "content",
 	...fields("struct", [
 		"message",
@@ -1255,9 +1256,7 @@ export class SessionAnonymizer {
 	segment(value: string): string {
 		// Numeric segments are often tenant/ticket/account ids; only `.`/`..`/`~` pass through.
 		if (value === "" || value === "." || value === ".." || value === "~") return value;
-		// Session file stems (`<iso-time>_<session-id>`) only repeat kept metadata; leaving them
-		// intact keeps `parentSession` pointing at the anonymized parent's real file name.
-		if (KEEP_SEGMENTS[value] === true || SESSION_STEM.test(value)) return value;
+		if (KEEP_SEGMENTS[value] === true) return value;
 		if (GLOB_CHARS.test(value)) {
 			return value
 				.split(GLOB_CHARS)
@@ -1466,6 +1465,13 @@ export class SessionAnonymizer {
 				return !fromTool && RANDOM_ID.test(value) ? value : this.segment(value);
 			case "path":
 				return this.path(value);
+			case "sessionPath": {
+				// A session file name (`<iso-time>_<session-id>.jsonl`) only repeats kept metadata; keeping it
+				// leaves `parentSession` pointing at the anonymized parent. Directories are mocked as usual.
+				const base = /[^\\/]*$/.exec(value)?.[0] ?? "";
+				const dir = value.slice(0, value.length - base.length);
+				return (dir ? this.path(dir) : "") + (SESSION_STEM.test(base) ? base : this.segment(base));
+			}
 			case "cmd":
 				return this.command(value);
 			case "label":
@@ -1546,6 +1552,7 @@ export class SessionAnonymizer {
 		let redirectTarget = false;
 		let previousWord = "";
 		let descriptorNext = false;
+		let optionsEnded = false;
 		for (const token of lexShellCommand(value)) {
 			if (token.kind === "separator") {
 				out += token.raw;
@@ -1556,6 +1563,7 @@ export class SessionAnonymizer {
 				} else if (/[\n;&|()]/.test(token.raw)) {
 					commandStart = true;
 					program = undefined;
+					optionsEnded = false;
 				}
 				continue;
 			}
@@ -1590,6 +1598,17 @@ export class SessionAnonymizer {
 				program = SHELL_COMMANDS.has(word) ? word : undefined;
 				out += program ?? this.#shellValue(word, false);
 				argIndex = 0;
+				optionsEnded = false;
+				continue;
+			}
+			// After `--` every word is an operand (`head -- -123456789` reads a file named `-123456789`).
+			if (optionsEnded) {
+				out += this.#shellValue(word, false);
+				continue;
+			}
+			if (word === "--") {
+				optionsEnded = true;
+				out += word;
 				continue;
 			}
 			out += this.#shellArg(word, program, argIndex);

@@ -357,6 +357,18 @@ describe("SessionAnonymizer", () => {
 	test("tokenizes numeric path segments", () => {
 		const anonymizer = new SessionAnonymizer();
 		expect(anonymizer.path("/customers/123456789/private.ts:10-20")).toMatch(/^\/seg\d+\/seg\d+\/seg\d+\.ts:10-20$/);
+		// Session-file names stay only in parent-session metadata, never in ordinary tool paths.
+		const stem = "2026-01-02T12-34-56Z_123456789.jsonl";
+		expect(anonymizer.path(`/exports/${stem}`)).not.toContain("123456789");
+		const header = anonymizer.entry({ type: "session", id: "01a0c9ac", parentSession: `/home/alice/${stem}` });
+		expect(JSON.stringify(header)).toContain(`/${stem}"`);
+		expect(JSON.stringify(header)).not.toContain("alice");
+	});
+
+	test("treats every word after `--` as an operand", () => {
+		const anonymizer = new SessionAnonymizer();
+		expect(anonymizer.command("head -- -123456789")).not.toContain("123456789");
+		expect(anonymizer.command("head -3 -- file.txt")).toMatch(/^head -3 -- PLACEHOLDER_\d+$/);
 	});
 
 	test("does not trust a built-in tool name with values outside the built-in vocabulary", () => {
