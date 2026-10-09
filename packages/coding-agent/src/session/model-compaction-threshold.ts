@@ -8,6 +8,7 @@ import {
 	matchModelCompactionThreshold,
 	parseCompactionPointInput,
 } from "../config/compaction-threshold";
+import type { ContextWindowTiers } from "../config/model-registry";
 import type { ScopeLike } from "../config/registry";
 import type { Settings } from "../config/settings";
 import {
@@ -15,6 +16,7 @@ import {
 	cfgCompaction,
 	cfgCompactionModelThresholds,
 	cfgCompactionModelThresholdsEnabled,
+	cfgExtendedContext,
 } from "./context-settings";
 
 /** The compaction policy in force for `model`: the configured policy with its `compaction.modelThresholds` entry applied. */
@@ -45,14 +47,30 @@ export function describeModelCompactionPoint(scope: ScopeLike, model: Model): Mo
 	};
 }
 
+/** Outcome of {@link setModelCompactionPoint}: the entry written (`undefined` = removed), or a warning to acknowledge first. */
+export type ModelCompactionPointUpdate =
+	| { kind: "saved"; entry: number | string | undefined }
+	| { kind: "confirm"; message: string };
+
 /**
  * Persist `input` (see {@link parseCompactionPointInput}) as `model`'s own
  * `compaction.modelThresholds` entry in the global config; empty input removes
- * it. Throws on unparseable input, and when a project or higher-priority layer
- * sets the same key, which would leave the global write without effect.
- * Returns the entry written, or `undefined` when removed.
+ * it. Throws on unparseable input, on a token count at or past the largest
+ * window `model` can run with (`tiers.extended`, else its current window), and
+ * when a project or higher-priority layer sets the same key, which would leave
+ * the global write without effect.
+ *
+ * A token count at or past `tiers.standard` opts the model into its extended
+ * window (see `ModelRegistry.contextWindowTiers`); unless extended context is
+ * already on, it is written only once `confirmed`, and otherwise returns the
+ * warning to show.
  */
-export function setModelCompactionPoint(settings: Settings, model: Model, input: string): number | string | undefined {
+export function setModelCompactionPoint(
+	settings: Settings,
+	model: Model,
+	input: string,
+	options: { tiers?: ContextWindowTiers; confirmed?: boolean } = {},
+): ModelCompactionPointUpdate {
 	const entry = parseCompactionPointInput(input) ?? undefined;
 	const key = `${model.provider}/${model.id}`;
 	const projectThresholds = settings.getProjectSettings().compaction;
@@ -63,6 +81,26 @@ export function setModelCompactionPoint(settings: Settings, model: Model, input:
 	) {
 		throw new Error(`${key} is set in the project config; edit compaction.modelThresholds there`);
 	}
+	if (typeof entry === "number") {
+		const { tiers } = options;
+		const ceiling = tiers?.extended ?? model.contextWindow;
+		if (ceiling !== null && ceiling !== undefined && entry >= ceiling) {
+			throw new Error(
+				`${entry.toLocaleString("en-US")} reaches ${model.id}'s ${tiers ? "maximum " : ""}${ceiling.toLocaleString("en-US")}-token window; compaction must trigger below it`,
+			);
+		}
+		if (tiers && entry >= tiers.standard && !options.confirmed && !cfgExtendedContext.get(settings)) {
+			const premiumThreshold = model.cost.longContext?.inputThreshold;
+			const pricing =
+				premiumThreshold !== undefined && entry > premiumThreshold
+					? `; input over ${premiumThreshold.toLocaleString("en-US")} bills at the long-context rate`
+					: "";
+			return {
+				kind: "confirm",
+				message: `Past the ${tiers.standard.toLocaleString("en-US")}-token standard window: ${model.id} switches to its ${tiers.extended.toLocaleString("en-US")}-token extended window${pricing}`,
+			};
+		}
+	}
 	cfgCompactionModelThresholds.setEntry(settings, key, entry);
 	const effective = cfgCompactionModelThresholds.get(settings)[key] ?? undefined;
 	if (effective !== entry) {
@@ -70,5 +108,5 @@ export function setModelCompactionPoint(settings: Settings, model: Model, input:
 			`${key} is overridden by a higher-priority config layer; the global entry was saved but has no effect`,
 		);
 	}
-	return entry;
+	return { kind: "saved", entry };
 }

@@ -1093,9 +1093,14 @@ export class SelectorController {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
 					}
 				},
-				onCompactionPointChange: (model, input) => {
+				onCompactionPointChange: (model, input, confirmed) => {
 					try {
-						const entry = setModelCompactionPoint(this.ctx.settings, model, input);
+						const update = setModelCompactionPoint(this.ctx.settings, model, input, {
+							tiers: this.ctx.session.modelRegistry.contextWindowTiers(model),
+							confirmed,
+						});
+						if (update.kind === "confirm") return update;
+						const { entry } = update;
 						const selector = `${model.provider}/${model.id}`;
 						this.ctx.showStatus(
 							entry === undefined
@@ -1105,7 +1110,7 @@ export class SelectorController {
 						this.ctx.statusLine.invalidate();
 						return undefined;
 					} catch (error) {
-						return error instanceof Error ? error.message : String(error);
+						return { kind: "error", message: error instanceof Error ? error.message : String(error) };
 					}
 				},
 				onSavePreset: name => {

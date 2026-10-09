@@ -3056,7 +3056,8 @@ export class SessionMaintenance {
 			contextWindow > 0 &&
 			cfgContextPromotionEnabled.get(this.#host.settings)
 		) {
-			const failedModel = this.#host.modelRegistry.find(assistantMessage.provider, assistantMessage.model);
+			const foundModel = this.#host.modelRegistry.find(assistantMessage.provider, assistantMessage.model);
+			const failedModel = foundModel && this.#host.modelRegistry.fitContextWindow(foundModel, this.#host.settings);
 			const failedWindow = failedModel?.contextWindow ?? 0;
 			const promotionTarget = failedModel
 				? resolveContextPromotionConfiguredTarget(failedModel, this.#host.modelRegistry.getAvailable())
@@ -3375,7 +3376,9 @@ export class SessionMaintenance {
 		const availableModels = this.#host.modelRegistry.getAvailable();
 		if (availableModels.length === 0) return undefined;
 
-		const candidate = resolveContextPromotionConfiguredTarget(currentModel, availableModels);
+		const configured = resolveContextPromotionConfiguredTarget(currentModel, availableModels);
+		// Judge the window this session would actually run the target with.
+		const candidate = configured && this.#host.modelRegistry.fitContextWindow(configured, this.#host.settings);
 		if (!candidate) return undefined;
 		if (modelsAreEqual(candidate, currentModel)) return undefined;
 		if (candidate.contextWindow == null || candidate.contextWindow <= contextWindow) return undefined;

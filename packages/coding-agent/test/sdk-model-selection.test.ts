@@ -1962,6 +1962,57 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		}
 	});
 
+	test("a subagent with its own compaction override does not inherit a model's compaction-point opt-in", async () => {
+		const authStorage = createInMemoryAuthStorage();
+		authStoragesToClose.push(authStorage);
+		authStorage.keys.setRuntime("openai", "sk-test");
+		const root = Settings.isolated({
+			extendedContext: false,
+			"compaction.modelThresholds": { "openai/gpt-5.6-terra": 400_000 },
+		});
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"), { settings: root });
+		const child = executorModule.createSubagentSettings(
+			root,
+			executorModule.compactionThresholdSettings({ thresholdPercent: 80, thresholdTokens: -1 }),
+		);
+		const open = (settings: Settings) =>
+			createAgentSession({
+				cwd: tempDir,
+				agentDir: tempDir,
+				authStorage,
+				modelRegistry,
+				settings,
+				sessionManager: SessionManager.inMemory(),
+				disableExtensionDiscovery: true,
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				skipPythonPreflight: true,
+				rules: [],
+				preloadedCustomToolPaths: [],
+				toolNames: ["read"],
+				modelPattern: "openai/gpt-5.6-terra",
+			});
+
+		const { session: parent } = await open(root);
+		const { session: subagent } = await open(child);
+		try {
+			expect(parent.model?.contextWindow).toBe(1_050_000);
+			expect(subagent.model?.contextWindow).toBe(272_000);
+			// Re-selecting the shared catalog row keeps the subagent on its own tier.
+			const row = modelRegistry.find("openai", "gpt-5.6-terra");
+			if (!row) throw new Error("Expected bundled gpt-5.6-terra");
+			await subagent.setModel(row, "default", { persist: false });
+			expect(subagent.model?.contextWindow).toBe(272_000);
+		} finally {
+			await subagent.dispose();
+			await parent.dispose();
+		}
+	});
+
 	test("loads model overrides from the supplied agent directory", async () => {
 		await Bun.write(
 			path.join(tempDir, "models.yml"),
