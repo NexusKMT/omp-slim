@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Devin's discovered models not marking the account's default model and effort lane, the one Devin's own CLI starts the account on (SWE-2 High on Pro, SWE-1.6 Slow on Free). Cursor's discovered models no longer carry that marker, so Cursor keeps its existing startup selection
+- Fixed Devin's discovered models not marking the account's default model, the one Devin's own CLI starts the account on (SWE-2 High on Pro, SWE-1.6 Slow on Free); when it is an effort lane of a family, the family starts at that effort. Cursor's discovered models no longer carry that marker, so Cursor keeps its existing startup selection
 
 ## [18.8.7] - 2026-10-09
 

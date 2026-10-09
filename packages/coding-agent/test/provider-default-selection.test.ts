@@ -146,6 +146,43 @@ describe("provider default selection", () => {
 		});
 	});
 
+	test("starts a statically collapsed Devin family on the account default's lane", async () => {
+		// No server family metadata: `taxonomy/_collapse.kdl` collapses these lanes into `claude-opus-5`.
+		const devin = await discoverDevin(
+			["claude-opus-5-low", "claude-opus-5-medium", "claude-opus-5-high"].map(uid => devinConfig(uid)),
+			"claude-opus-5-medium",
+		);
+
+		const picked = pickDefaultAvailableModel(devin);
+
+		expect(picked).toMatchObject({
+			provider: "devin",
+			id: "claude-opus-5",
+			requestModelId: "claude-opus-5-medium",
+			thinking: { defaultLevel: "medium" },
+		});
+	});
+
+	test("starts a Devin family whose account default is its no-thinking lane on the family's own default", async () => {
+		// No effort routes to the `off` lane, so the family keeps a consistent default wire id and effort.
+		const devin = await discoverDevin(
+			[
+				devinConfig("gpt-5-5-none", { family: "GPT-5.5", effort: "None" }),
+				devinConfig("gpt-5-5-high", { family: "GPT-5.5", effort: "High", familyDefault: true }),
+			],
+			"gpt-5-5-none",
+		);
+
+		const picked = pickDefaultAvailableModel(devin);
+
+		expect(picked).toMatchObject({
+			provider: "devin",
+			id: "gpt-5-5",
+			requestModelId: "gpt-5-5-high",
+			thinking: { defaultLevel: "high", effortRouting: { off: "gpt-5-5-none", high: "gpt-5-5-high" } },
+		});
+	});
+
 	test("gives a Free Devin account its account default, SWE-1.6 Slow, as Devin's default", async () => {
 		// Free serves only SWE-1.6 Slow, so the bundled `swe-1-6` is never listed. Without the account
 		// default Devin had no default of its own and lost to the next provider's.

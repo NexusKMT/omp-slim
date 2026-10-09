@@ -552,14 +552,6 @@ function normalizeDevinModels(
 		}
 	}
 
-	// The account default outranks the family default, so its family starts on
-	// the account's own lane: that lane's wire uid and effort.
-	for (const lane of lanes.values()) {
-		if (accountDefaultUid !== undefined && lane.members.includes(accountDefaultUid)) {
-			lane.defaultMember = accountDefaultUid;
-		}
-	}
-
 	// Server-declared families first — they are live truth for wire uids, per
 	// effort routes, and the native default. The static table then collapses
 	// whatever upstream served without family metadata; families already
@@ -567,5 +559,18 @@ function normalizeDevinModels(
 	const families = devinDynamicFamilies(lanes.values());
 	const dynamic = families.length > 0 ? collapseVariants(specs, { table: { families } }) : specs;
 	const collapsed = collapseVariants(dynamic);
+	// The account default outranks its family's own default lane when an effort
+	// routes to it, from server metadata or the static table: the family starts
+	// on that wire uid and effort. Other lanes (a no-thinking `off` default) keep
+	// the family's own default.
+	const accountFamily = collapsed.find(spec => spec.isProviderDefault && spec.thinking?.effortRouting);
+	const accountEffort = THINKING_EFFORTS.find(
+		effort => accountFamily?.thinking?.effortRouting?.[effort] === accountDefaultUid,
+	);
+	if (accountFamily?.thinking && accountEffort !== undefined) {
+		accountFamily.thinking = { ...accountFamily.thinking, defaultLevel: accountEffort };
+		if (accountFamily.id === accountDefaultUid) delete accountFamily.requestModelId;
+		else accountFamily.requestModelId = accountDefaultUid;
+	}
 	return collapsed.sort((a, b) => a.id.localeCompare(b.id));
 }
