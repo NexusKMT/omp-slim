@@ -1618,7 +1618,7 @@ export interface Model<TApi extends Api = Api> {
 	isNew?: boolean;
 	/** Upstream marks this model as beta / preview quality. */
 	isBeta?: boolean;
-	/** Authenticated provider catalog marks this as the account's default model. */
+	/** Authenticated catalog marks this as the account's default; the startup pick prefers it over `default-model`. */
 	isProviderDefault?: boolean;
 	/** Upstream marks this model as one of its recommended picks. */
 	isRecommended?: boolean;

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Devin's discovered models not marking the account's default model, the one Devin's own CLI starts the account on (SWE-2 High on Pro, SWE-1.6 Slow on Free). Cursor's discovered models no longer carry that marker, so Cursor keeps its bundled startup default
+
 ## [18.8.7] - 2026-10-09
 
 ### Added

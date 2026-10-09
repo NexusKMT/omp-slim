@@ -9,6 +9,7 @@ import {
 	type ClientModelConfig,
 	DisplayOption,
 	GetCliModelConfigsRequestSchema,
+	type GetCliModelConfigsResponse,
 	GetCliModelConfigsResponseSchema,
 	type Metadata,
 	MetadataSchema,
@@ -346,7 +347,7 @@ export async function fetchDevinModels(
 				GetCliModelConfigsResponseSchema,
 				new Uint8Array(await response.arrayBuffer()),
 			);
-			return decoded ? normalizeDevinModels(decoded.clientModelConfigs, options.baseUrl) : null;
+			return decoded ? normalizeDevinModels(decoded, options.baseUrl) : null;
 		} catch {
 			return null;
 		}
@@ -497,9 +498,12 @@ function routeDevinFusionLead(spec: ModelSpec<"devin-agent">, lead: ModelSpec<"d
 }
 
 function normalizeDevinModels(
-	configs: readonly ClientModelConfig[],
+	response: GetCliModelConfigsResponse,
 	baseUrlOverride: string | undefined,
 ): ModelSpec<"devin-agent">[] {
+	const configs = response.clientModelConfigs;
+	// The model the native client starts this account on (plan-dependent).
+	const accountDefaultUid = response.defaultOverrideModelConfig?.modelUid.trim();
 	const baseUrl = baseUrlOverride ?? DEVIN_DEFAULT_BASE_URL;
 	const specs: ModelSpec<"devin-agent">[] = [];
 	const seen = new Set<string>();
@@ -539,6 +543,7 @@ function normalizeDevinModels(
 		if (lead === null) continue;
 		const spec = devinModelSpec(config, uid, baseUrl, isAssignModelRouter);
 		if (lead !== undefined) routeDevinFusionLead(spec, devinModelSpec(liveConfigs.get(lead)!, lead, baseUrl, false));
+		if (uid === accountDefaultUid) spec.isProviderDefault = true;
 		specs.push(spec);
 		// A router is a server-side dispatcher, not an effort tier: it stays a
 		// standalone model even when upstream files it under a family.
