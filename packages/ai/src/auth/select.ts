@@ -659,6 +659,11 @@ export class CredentialSelector {
 							? { selection, usage: sessionPreferredUsage, usageChecked: true }
 							: { selection, usage: null, usageChecked: false },
 					);
+		// Keep the candidate object: preflight may rebind its positional index
+		// after a peer changes the credential pool.
+		const explicitPin = sessionPinIsExplicit
+			? candidates.find(candidate => candidate.selection.index === sessionPreferredIndex)
+			: undefined;
 		const preflightFailures = new Set<OAuthCandidate>();
 		// The last retryable refresh error (network, timeout, 5xx) that removed a candidate.
 		// When no candidate resolves, it is rethrown so callers retry instead of reporting
@@ -887,9 +892,6 @@ export class CredentialSelector {
 		// Blocked candidates rank earliest-unblock first, which would route a
 		// blocked explicit pin to an equally blocked sibling. Once the strict
 		// pass finds no unblocked account, the user's pin goes first.
-		const explicitPin = sessionPinIsExplicit
-			? candidates.find(candidate => candidate.selection.index === sessionPreferredIndex)
-			: undefined;
 		const lastResortCandidates = explicitPin
 			? [explicitPin, ...candidates.filter(candidate => candidate !== explicitPin)]
 			: candidates;
