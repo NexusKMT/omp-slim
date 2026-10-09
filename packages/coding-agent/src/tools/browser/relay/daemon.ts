@@ -126,11 +126,13 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 }
 
 /**
- * Replace the broker-owned relay at `cdpUrl` with one from this OMP version.
- * True once the old relay has stopped (the caller's wait reports whether the
- * new one serves) or another process already replaced it or stopped it to
- * replace it. False when a relay the broker does not run serves there (a
- * manually started relay is left alone) or the old relay did not stop.
+ * Replace the broker-owned relay at `cdpUrl` with one from this OMP version
+ * when it comes from an older one. True once the old relay has stopped (the
+ * caller's wait reports whether the new one serves) or another process already
+ * replaced it or stopped it to replace it. False when a relay the broker does
+ * not run serves there (a manually started relay is left alone), the relay
+ * comes from a newer OMP (a concurrently running newer omp owns it), or the old
+ * relay did not stop.
  */
 export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortSignal }): Promise<boolean> {
 	const port = relayPort(opts.cdpUrl);
@@ -143,17 +145,24 @@ export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortS
 		// replacement; start or adopt it unless a relay the broker does not run serves.
 		const serving = await probeRelayServer(opts.cdpUrl);
 		throwIfAborted(opts.signal);
-		if (serving) return servesVersion(opts.cdpUrl, opts.signal);
+		if (serving) return (await relayVersionAt(opts.cdpUrl, opts.signal)) === VERSION;
+		// Returns true even if the start fails: the caller's next wait then reports
+		// the relay unreachable, which is accurate, rather than out of date.
 		await ensureRelayDaemon(opts);
 		return true;
 	}
 	// Another omp of this version may have replaced it since the caller's probe,
 	// possibly with a relay that has not printed its ready line yet.
 	if (existing.readyAt === undefined) await waitReady(client, name, "Browser relay", opts.signal);
-	if (await servesVersion(opts.cdpUrl, opts.signal)) return true;
+	const version = await relayVersionAt(opts.cdpUrl, opts.signal);
+	if (version === VERSION) return true;
+	// A newer omp running alongside this one owns a newer relay; replacing it
+	// would only make the two versions take turns killing each other's relay.
+	if (version !== null && !isOlderRelayVersion(version)) return false;
 	// Stops only the generation judged outdated, not one another omp started since.
 	const stopped = await stopQuietly(client, name, "Browser relay", opts.signal, existing.id);
 	if (stopped?.state === "exited" || stopped?.state === "failed") {
+		// As above: a failed start surfaces as unreachable on the caller's wait.
 		await ensureRelayDaemon(opts);
 		return true;
 	}
@@ -162,15 +171,30 @@ export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortS
 	return true;
 }
 
-/** Whether the relay at `cdpUrl` reports this OMP version on `/json/version` (ready or waiting for its extension). */
-async function servesVersion(cdpUrl: string, signal: AbortSignal | undefined): Promise<boolean> {
+/**
+ * The OMP version the relay at `cdpUrl` reports on `/json/version` (ready or
+ * waiting for its extension): empty for a relay too old to report one, null
+ * when nothing parseable answers.
+ */
+async function relayVersionAt(cdpUrl: string, signal: AbortSignal | undefined): Promise<string | null> {
 	const response = await probeCdpResponse(`${cdpUrl}/json/version`, { timeoutMs: PROBE_TIMEOUT_MS, signal });
 	throwIfAborted(signal);
-	if (!response) return false;
+	if (!response) return null;
 	try {
 		const parsed: unknown = JSON.parse(response.body);
-		return typeof parsed === "object" && parsed !== null && relayVersionOf(parsed) === VERSION;
+		return typeof parsed === "object" && parsed !== null ? relayVersionOf(parsed) : null;
 	} catch {
+		return null;
+	}
+}
+
+/** Whether a relay reporting `version` predates this OMP; one reporting none predates version markers. */
+function isOlderRelayVersion(version: string): boolean {
+	if (version === "") return true;
+	try {
+		return Bun.semver.order(version, VERSION) < 0;
+	} catch {
+		// Unparseable: not provably older, so leave it to its owner.
 		return false;
 	}
 }

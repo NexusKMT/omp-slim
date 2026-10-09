@@ -284,9 +284,8 @@ try {
 		}
 	}, 60_000);
 
-	it("replaces a broker-owned relay from another omp version, also after another omp stopped it, but not a starting replacement or a manually started one", async () => {
+	it("replaces a broker-owned relay from an older omp version, also after another omp stopped it, but not a starting replacement, a newer relay, or a manually started one", async () => {
 		const home = await fs.mkdtemp(path.join(os.tmpdir(), "omp-relay-restart-"));
-		const globalRuntimeDir = path.join(home, ".omp", "run", "daemons", "global", "browser-relay");
 		const ownedPort = await findFreeCdpPort();
 		let manualPort = await findFreeCdpPort();
 		while (manualPort === ownedPort) manualPort = await findFreeCdpPort();
@@ -301,11 +300,9 @@ Bun.serve({ hostname: "127.0.0.1", port: Number(port), fetch: () => Response.jso
 console.log(\`omp browser relay listening on http://127.0.0.1:\${port}\`);
 `,
 		);
-		const child = Bun.spawn(
-			[
-				process.execPath,
-				"-e",
-				`import { VERSION } from "@oh-my-pi/pi-utils/dirs";
+		const result = await runWithIsolatedBroker(
+			home,
+			`import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { closeDaemonClients, daemonClientForGlobal } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/launch/client.ts"))};
 import { restartRelayDaemon } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/tools/browser/relay/daemon.ts"))};
 const [ownedPort, manualPort, standIn] = [Bun.env.OMP_TEST_OWNED_PORT!, Bun.env.OMP_TEST_MANUAL_PORT!, Bun.env.OMP_TEST_STALE_RELAY!];
@@ -363,6 +360,14 @@ try {
 	const manualOverRecordRestarted = await restartRelayDaemon({ cdpUrl: ownedUrl });
 	const manualOverRecordVersion = await versionAt(ownedPort);
 	const ownedRecordState = (await describe())?.state;
+	manualOnOwnedPort.kill();
+	await manualOnOwnedPort.exited;
+	// A concurrently running newer omp owns a newer relay; replacing it would only start a tug of war.
+	await start([ownedPort, "0", "999.0.0"]);
+	const newerPid = (await describe())?.pid;
+	const newerRestarted = await restartRelayDaemon({ cdpUrl: ownedUrl });
+	const newerKept = newerPid !== undefined && (await describe())?.pid === newerPid;
+	const newerVersion = await versionAt(ownedPort);
 	const manualRestarted = await restartRelayDaemon({ cdpUrl: \`http://127.0.0.1:\${manualPort}\` });
 	const manualRecord = await client
 		.request({ op: "describe", name: \`omp.browser.relay.\${manualPort}\` })
@@ -378,6 +383,9 @@ try {
 			manualOverRecordRestarted,
 			manualOverRecordVersion,
 			ownedRecordState,
+			newerRestarted,
+			newerKept,
+			newerVersion,
 			manualRestarted,
 			manualVersion: await versionAt(manualPort),
 			manualRecord,
@@ -388,59 +396,29 @@ try {
 	manualOverRecord?.kill();
 	await closeDaemonClients();
 }`,
-			],
 			{
-				cwd: path.resolve(import.meta.dir, "../.."),
-				env: {
-					...process.env,
-					HOME: home,
-					USERPROFILE: home,
-					PI_CONFIG_DIR: ".omp",
-					OMP_DAEMON_IDLE_GRACE_MS: "200",
-					OMP_TEST_OWNED_PORT: String(ownedPort),
-					OMP_TEST_MANUAL_PORT: String(manualPort),
-					OMP_TEST_STALE_RELAY: staleRelayPath,
-				},
-				stdout: "pipe",
-				stderr: "pipe",
+				OMP_TEST_OWNED_PORT: String(ownedPort),
+				OMP_TEST_MANUAL_PORT: String(manualPort),
+				OMP_TEST_STALE_RELAY: staleRelayPath,
 			},
 		);
-		try {
-			const [exitCode, stdout, stderr] = await Promise.all([
-				child.exited,
-				new Response(child.stdout).text(),
-				new Response(child.stderr).text(),
-			]);
-			expect(exitCode, stderr).toBe(0);
-			expect(JSON.parse(stdout)).toEqual({
-				owned: true,
-				ownedVersionIsCurrent: true,
-				startingRestarted: true,
-				startingKept: true,
-				exitedRestarted: true,
-				exitedVersionIsCurrent: true,
-				manualOverRecordRestarted: false,
-				manualOverRecordVersion: null,
-				ownedRecordState: "exited",
-				manualRestarted: false,
-				manualVersion: null,
-				manualRecord: null,
-			});
-		} finally {
-			if (child.exitCode === null) child.kill();
-			await child.exited;
-			const rescue = await createDaemonBrokerClient(globalRuntimeDir, {
-				runtimeDir: globalRuntimeDir,
-				idleGraceMs: 200,
-			});
-			try {
-				await rescue.request({ op: "shutdown" });
-			} catch {
-				// The last-client grace may already have stopped the broker.
-			}
-			rescue.close();
-			await fs.rm(home, { recursive: true, force: true });
-		}
+		expect(result).toEqual({
+			owned: true,
+			ownedVersionIsCurrent: true,
+			startingRestarted: true,
+			startingKept: true,
+			exitedRestarted: true,
+			exitedVersionIsCurrent: true,
+			manualOverRecordRestarted: false,
+			manualOverRecordVersion: null,
+			ownedRecordState: "exited",
+			newerRestarted: false,
+			newerKept: true,
+			newerVersion: "999.0.0",
+			manualRestarted: false,
+			manualVersion: null,
+			manualRecord: null,
+		});
 	}, 60_000);
 
 	it("keeps a replacement another omp started while this one was about to stop the outdated relay", async () => {
