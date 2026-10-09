@@ -46,7 +46,7 @@ await tab.close();
 - `browser.close({ name?, all?, kill?, timeout? }) -> Promise<void>` releases one or all managed tabs.
 - `tab.close({ kill?, timeout? }) -> Promise<void>` releases that handle's tab.
 
-`close` and `run` resolve `timeout` like `open`: seconds, default 30, capped by positive `tools.maxTimeout`, then clamped to 1–300. `waitFor*` helpers take `timeout` in milliseconds.
+`close` and `run` resolve `timeout` like `open`: seconds, default 30, capped by positive `tools.maxTimeout`, then clamped to 1–300. `waitFor*` helpers take `timeout` in milliseconds and cannot outlast the enclosing call's `timeout`.
 
 ### Open options
 
