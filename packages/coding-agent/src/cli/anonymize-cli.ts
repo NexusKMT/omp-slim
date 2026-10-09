@@ -5,7 +5,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
-import { anonymizeSessionTranscripts } from "../session/session-anonymizer";
+import { ANONYMIZED_REVIEW_NOTE, anonymizeSessionTranscripts } from "../session/session-anonymizer";
 import type { SessionEntry, SessionHeader } from "../session/session-entries";
 import { loadEntriesFromFile } from "../session/session-loader";
 import { resolveSessionFileArg } from "./session-arg";
@@ -22,8 +22,11 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 	const sourcePath = await resolveSessionFileArg(args.session, getProjectDir());
 	const outDir = path.resolve(args.out ?? `${path.basename(sourcePath, ".jsonl")}.anon`);
 	const records = await loadEntriesFromFile(sourcePath);
+	// The loader returns [] for a file without a valid session header.
+	const header = records.find((record): record is SessionHeader => record.type === "session");
+	if (!header) throw new CliUsageError(`${sourcePath} is not a valid session file`);
 	const result = await anonymizeSessionTranscripts({
-		header: (records.find(record => record.type === "session") as SessionHeader | undefined) ?? null,
+		header,
 		entries: records.filter((record): record is SessionEntry => record.type !== "session"),
 		sessionFile: sourcePath,
 	});
@@ -51,4 +54,5 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 	const count = result.files.length;
 	process.stdout.write(`Anonymized ${count} transcript${count === 1 ? "" : "s"} → ${outDir}\n`);
 	if (result.subagentError) process.stdout.write(`Subagent transcripts unavailable: ${result.subagentError}\n`);
+	process.stdout.write(`${ANONYMIZED_REVIEW_NOTE}\n`);
 }

@@ -27,4 +27,13 @@ describe("omp anonymize output", () => {
 		);
 		expect(await Bun.file(source).text()).toBe(SESSION);
 	});
+
+	it("rejects a file without a valid session header instead of writing an empty bundle", async () => {
+		const source = path.join(tempDir.path(), "notes.jsonl");
+		const out = path.join(tempDir.path(), "out");
+		await Bun.write(source, `${JSON.stringify({ hello: "world" })}\n`);
+
+		await expect(runAnonymizeCommand({ session: source, out })).rejects.toThrow("is not a valid session file");
+		expect(await Bun.file(path.join(out, "session.jsonl")).exists()).toBe(false);
+	});
 });

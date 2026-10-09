@@ -159,4 +159,40 @@ describe("SessionAnonymizer", () => {
 			`git --no-pager log --oneline -3 ${acme} 2>&1 | grep "${anonymizer.placeholder("hunter2")}" > /tmp/seg${acme.slice(12)}/out.txt && bun run ${anonymizer.placeholder("build")}`,
 		);
 	});
+
+	test("treats data-derived keys, extension tool enums, and dotted agent names as content", () => {
+		const anonymizer = new SessionAnonymizer();
+		const call = (id: string, name: string, args: Record<string, unknown>) => ({
+			type: "toolCall",
+			id,
+			name,
+			arguments: args,
+		});
+		const json = JSON.stringify([
+			anonymizer.entry({
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						call("toolu_01abcdef", "mcp__crm_lookup", { status: "customer-acme" }),
+						call("toolu_02abcdef", "todo", { op: "start" }),
+						call("toolu_03abcdef", "task", { tasks: [{ name: "Probe.v2" }] }),
+						call("toolu_04abcdef", "read", { path: "agent://Probe.v2" }),
+					],
+				},
+			}),
+			anonymizer.entry({
+				type: "message",
+				message: { role: "toolResult", toolName: "eval", details: { jsonOutputs: { "/home/alice/acme/x.ts": 1 } } },
+			}),
+		]);
+		for (const word of ["acme", "alice", "Probe"]) expect(json).not.toContain(word);
+		// Built-in tool options stay; the same key on an extension tool is user data.
+		expect(json).toContain('"op":"start"');
+		expect(json).toMatch(/"status":"PLACEHOLDER_\d+"/);
+		// A dotted task name and its agent:// URI share one token index.
+		const index = /"name":"PLACEHOLDER_(\d+)"/.exec(json)?.[1];
+		expect(json).toContain(`"path":"agent://seg${index}.v2"`);
+		expect(json).toMatch(/"jsonOutputs":\{"\/home\/seg\d+\/seg\d+\/seg\d+\.ts":1\}/);
+	});
 });

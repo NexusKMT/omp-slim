@@ -13,11 +13,17 @@
  * `agent://Probe` → `agent://seg7`.
  */
 import { logger } from "@oh-my-pi/pi-utils";
+import { BUILTIN_TOOL_NAMES } from "../tools/builtin-names";
 import type { SessionEntry, SessionHeader } from "./session-entries";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
 
-type Scope = "meta" | "args";
+/** `meta`: session records; `builtin-args`: built-in tool arguments (known option enums); `args`: any other tool. */
+type Scope = "meta" | "builtin-args" | "args";
 type JsonObject = Record<string, unknown>;
+
+/** Shown wherever an anonymized export is written: the redaction is heuristic, not a guarantee. */
+export const ANONYMIZED_REVIEW_NOTE =
+	"Turn contents and error text are redacted and paths/literals replaced; metadata such as model names is kept — review before sharing.";
 
 /** Strings in these keys are turn contents: always replaced by a redaction marker. */
 const TEXT_KEYS: Record<string, true> = {
@@ -123,6 +129,7 @@ const IDENTITY_KEYS: Record<string, true> = {
 	resolvedModel: true,
 	selector: true,
 	upstreamProvider: true,
+	upstreamModel: true,
 	toolName: true,
 };
 
@@ -348,6 +355,8 @@ const COMMAND_PREFIXES = new Set(["sudo", "env", "time", "timeout", "nohup", "xa
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const IDENTIFIER = /^[\w.:/@+-]{1,128}$/;
+/** Object keys shaped like schema fields; anything else (paths, labels) is data. */
+const SCHEMA_KEY = /^(?:[A-Za-z_$][\w$]{0,63}|\d+)$/;
 const ID_KEY = /(?:^id|Id|_id|Ids)$/;
 /** Machine-minted ids: hex/uuid, or `prefix_<digits>` / `prefix_<token containing a digit>` (`toolu_01…`, `call_…|fc_…`). */
 const RANDOM_ID = /^(?:[0-9a-f-]{6,}|[a-z]+_(?:\d+|(?=[\w|=-]*\d)[\w|=-]{6,}))$/i;
@@ -435,8 +444,8 @@ export class SessionAnonymizer {
 		if (value.startsWith(".") && value.length > 1) return `.${this.#name(value.slice(1))}`;
 		const match = EXTENSION.exec(value);
 		if (match && !/^\d+$/.test(match[1])) {
-			const stem = match[1];
-			return `${KEEP_SEGMENTS[stem] === true ? stem : `seg${this.#index(stem)}`}${match[2]}`;
+			// Index the whole name so `Probe.v2` shares its token with `PLACEHOLDER_N` and `agent://`.
+			return `${KEEP_SEGMENTS[match[1]] === true ? match[1] : `seg${this.#index(value)}`}${match[2]}`;
 		}
 		return `seg${this.#index(value)}`;
 	}
@@ -485,17 +494,24 @@ export class SessionAnonymizer {
 		if (value === null || typeof value === "number" || typeof value === "boolean") return value;
 		// Tool-call argument slots: toolCall/function_call `arguments`, streamed `partialArgs`,
 		// Anthropic `tool_use.input`, and `tool_execution_start` custom entries' `args`.
-		const isToolArgs =
-			parent !== undefined &&
-			(((key === "arguments" || key === "partialArgs") && typeof parent.name === "string") ||
-				(key === "input" && TOOL_CALL_TYPES[String(parent.type)] === true) ||
-				(key === "args" && typeof parent.toolName === "string"));
-		if (isToolArgs) return this.#toolArgs(value);
+		const toolName =
+			parent === undefined
+				? undefined
+				: (key === "arguments" || key === "partialArgs") && typeof parent.name === "string"
+					? parent.name
+					: key === "input" && TOOL_CALL_TYPES[String(parent.type)] === true
+						? String(parent.name)
+						: key === "args" && typeof parent.toolName === "string"
+							? parent.toolName
+							: undefined;
+		if (toolName !== undefined) return this.#toolArgs(value, toolName);
 		if (Array.isArray(value)) return value.map(item => this.#value(item, key, parent, scope));
 		if (isObject(value)) {
 			const out: JsonObject = {};
 			for (const [childKey, child] of Object.entries(value)) {
-				out[childKey] = this.#value(child, childKey, value, scope);
+				// Schema keys stay; data-derived keys (paths, ids, `display({...})` labels) are content.
+				const outKey = SCHEMA_KEY.test(childKey) ? childKey : this.#literal(childKey);
+				out[outKey] = this.#value(child, childKey, value, scope);
 			}
 			return out;
 		}
@@ -503,11 +519,13 @@ export class SessionAnonymizer {
 		return this.#string(value, key, parent, scope);
 	}
 
-	#toolArgs(value: unknown): unknown {
-		if (typeof value !== "string") return this.#value(value, undefined, undefined, "args");
+	#toolArgs(value: unknown, toolName: string): unknown {
+		// Extension/MCP schemas are arbitrary: only built-in tools' option keys are known enums.
+		const scope: Scope = (BUILTIN_TOOL_NAMES as readonly string[]).includes(toolName) ? "builtin-args" : "args";
+		if (typeof value !== "string") return this.#value(value, undefined, undefined, scope);
 		// Wire payloads carry arguments as JSON text; partial streams may not parse.
 		try {
-			return JSON.stringify(this.#value(JSON.parse(value), undefined, undefined, "args"));
+			return JSON.stringify(this.#value(JSON.parse(value), undefined, undefined, scope));
 		} catch {
 			return this.redactText(value);
 		}
@@ -524,8 +542,8 @@ export class SessionAnonymizer {
 		if (key.endsWith("At") && IDENTIFIER.test(value)) return value;
 		if (PATH_KEYS[key] === true || PATH_KEY.test(key)) return MESSAGE_ADDRESS.test(value) ? value : this.path(value);
 		if (key === "command" || key === "cmd") return this.command(value);
-		if (scope === "args") {
-			if (ARG_ENUM_KEYS[key] === true && IDENTIFIER.test(value)) return value;
+		if (scope !== "meta") {
+			if (scope === "builtin-args" && ARG_ENUM_KEYS[key] === true && IDENTIFIER.test(value)) return value;
 			if (PATTERN_ARG_KEYS[key] === true) return this.#literal(value, false);
 			return this.#literal(value);
 		}
