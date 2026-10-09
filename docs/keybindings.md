@@ -112,6 +112,10 @@ The status line also shows the mode, pending command, and multi-line Visual sele
 | `x` `D` `C`                   | Delete character, delete to line end (`2D` takes `count` lines), change to line end (`2C` likewise) |
 | `r` + char                    | Replace the character under the cursor (`3rx` replaces three)  |
 | `R`                           | Replace mode: typed characters overwrite until Escape          |
+| `%`                           | Jump to the matching `()` `[]` `{}` `"` `'` on or after the cursor. Quotes stay on the line; brackets can cross lines. |
+| `{` `}`                       | Previous / next paragraph (blank-line boundary)                |
+| `J`                           | Join lines, dropping the indent of the following line          |
+| `>>` `<<`                     | Indent / outdent by two spaces (`3>>` shifts three lines; `>}` shifts a motion) |
 | `d` `y` `c` + motion          | Operate over a motion, e.g. `dw`, `d$`, `yb`, `cw`             |
 | `dd` `yy` `cc`                | Linewise delete / yank / change                                |
 | `d` `y` `c` + text object     | Operate over a text object, e.g. `diw`, `ca(`, `ci"`, `dap`    |

@@ -13,7 +13,7 @@ import { getSegmenter, moveWordLeft, moveWordRight } from "./utils";
 
 export type VimMode = "insert" | "normal" | "visual" | "visual-line" | "replace";
 
-export type VimOperator = "d" | "y" | "c";
+export type VimOperator = "d" | "y" | "c" | ">" | "<";
 
 export interface VimPosition {
 	line: number;
@@ -39,7 +39,9 @@ export type VimCommand =
 	| { kind: "openLine"; below: boolean }
 	| { kind: "paste"; after: boolean; count: number }
 	| { kind: "undo" }
-	| { kind: "replace"; from: VimPosition; to: VimPosition; text: string };
+	| { kind: "replace"; from: VimPosition; to: VimPosition; text: string }
+	| { kind: "join"; fromLine: number; lines: number }
+	| { kind: "indent"; fromLine: number; toLine: number; out: boolean };
 
 const segmenter = getSegmenter();
 
@@ -181,7 +183,6 @@ function bigWordBackward(text: string, col: number): number {
 	return i >= 0 ? segs[i]!.index : 0;
 }
 
-
 /** End-exclusive span an `iw`/`a(`-style text object resolves to. */
 interface TextObjectRange {
 	from: VimPosition;
@@ -248,11 +249,7 @@ function wordObject(text: string, col: number, around: boolean, big: boolean, co
  * leading run when there is none.
  */
 function quoteObject(text: string, col: number, quote: string, around: boolean): [number, number] | null {
-	const marks: number[] = [];
-	for (let i = 0; i < text.length; i++) {
-		if (text.charAt(i) === "\\") i++;
-		else if (text.charAt(i) === quote) marks.push(i);
-	}
+	const marks = quoteMarks(text, quote);
 	for (let p = 0; p + 1 < marks.length; p += 2) {
 		const open = marks[p]!;
 		const close = marks[p + 1]!;
@@ -343,6 +340,113 @@ function paragraphObject(buf: VimBuffer, around: boolean): TextObjectRange {
 		if (end === stop) while (first > 0 && blank(first - 1) !== target) first--;
 	}
 	return { from: { line: first, col: 0 }, to: { line: end, col: (buf.lines[end] ?? "").length }, linewise: true };
+}
+
+const BRACKET_MATCH: Record<string, { mate: string; forward: boolean }> = {
+	"(": { mate: ")", forward: true },
+	")": { mate: "(", forward: false },
+	"[": { mate: "]", forward: true },
+	"]": { mate: "[", forward: false },
+	"{": { mate: "}", forward: true },
+	"}": { mate: "{", forward: false },
+};
+
+/** Quote columns, skipping a backslash and the character after it, same as `i"`/`a"`. */
+function quoteMarks(text: string, quote: string): number[] {
+	const marks: number[] = [];
+	for (let i = 0; i < text.length; i++) {
+		if (text.charAt(i) === "\\") i++;
+		else if (text.charAt(i) === quote) marks.push(i);
+	}
+	return marks;
+}
+
+function quoteMate(marks: readonly number[], col: number): number | null {
+	for (let p = 0; p + 1 < marks.length; p += 2) {
+		const open = marks[p]!;
+		const close = marks[p + 1]!;
+		if (col === open) return close;
+		if (col === close) return open;
+	}
+	return null;
+}
+
+/** Column of the match for `%`: the next bracket or quote on this line, then its pair. */
+function matchDelimiter(buf: VimBuffer): VimPosition | null {
+	const line = buf.lines[buf.cursorLine] ?? "";
+	const quotes = {
+		'"': quoteMarks(line, '"'),
+		"'": quoteMarks(line, "'"),
+	};
+	const quoteAt = (col: number): '"' | "'" | null =>
+		quotes['"'].includes(col) ? '"' : quotes["'"].includes(col) ? "'" : null;
+	let col = buf.cursorCol;
+	while (col < line.length && BRACKET_MATCH[line.charAt(col)] === undefined && quoteAt(col) === null) col++;
+	const quote = quoteAt(col);
+	if (quote) {
+		const mate = quoteMate(quotes[quote], col);
+		return mate === null ? null : { line: buf.cursorLine, col: mate };
+	}
+	const spec = BRACKET_MATCH[line.charAt(col)];
+	if (!spec) return null;
+	const { text, cursor } = flatten({ lines: buf.lines, cursorLine: buf.cursorLine, cursorCol: col });
+	const open = spec.forward ? line.charAt(col) : spec.mate;
+	const close = spec.forward ? spec.mate : line.charAt(col);
+	let depth = 0;
+	let match = -1;
+	if (spec.forward) {
+		for (let i = cursor + 1; i < text.length; i++) {
+			const ch = text.charAt(i);
+			if (ch === open) depth++;
+			else if (ch === close) {
+				if (depth === 0) {
+					match = i;
+					break;
+				}
+				depth--;
+			}
+		}
+	} else {
+		for (let i = cursor - 1; i >= 0; i--) {
+			const ch = text.charAt(i);
+			if (ch === close) depth++;
+			else if (ch === open) {
+				if (depth === 0) {
+					match = i;
+					break;
+				}
+				depth--;
+			}
+		}
+	}
+	return match < 0 ? null : offsetToPos(buf.lines, match);
+}
+
+function isParagraphBlank(lines: readonly string[], line: number): boolean {
+	return (lines[line] ?? "").trim() === "";
+}
+
+/** Line `{`/`}` land on. A missing boundary stays on the first or last line. */
+function paragraphBoundary(lines: readonly string[], line: number, forward: boolean): number {
+	const last = lines.length - 1;
+	if (last < 0) return 0;
+	let i = Math.max(0, Math.min(line, last));
+	if (forward) {
+		if (i < last && !isParagraphBlank(lines, i)) {
+			while (i < last && !isParagraphBlank(lines, i + 1)) i++;
+			return i < last ? i + 1 : last;
+		}
+		while (i < last && isParagraphBlank(lines, i)) i++;
+		while (i < last && !isParagraphBlank(lines, i)) i++;
+		return i;
+	}
+	if (i > 0 && !isParagraphBlank(lines, i)) {
+		while (i > 0 && !isParagraphBlank(lines, i - 1)) i--;
+		return i > 0 ? i - 1 : 0;
+	}
+	while (i > 0 && isParagraphBlank(lines, i)) i--;
+	while (i > 0 && !isParagraphBlank(lines, i - 1)) i--;
+	return i > 0 ? i - 1 : 0;
 }
 
 interface Motion {
@@ -631,6 +735,20 @@ export class VimState {
 				for (let i = 0; i < count; i++) col = bigWordEnd(line, col);
 				return { to: at(col), inclusive: true, linewise: false };
 			}
+			case "%": {
+				const to = matchDelimiter(buf);
+				return to === null ? null : { to, inclusive: true, linewise: false };
+			}
+			case "{":
+			case "}": {
+				let line = buf.cursorLine;
+				for (let n = 0; n < count; n++) {
+					const next = paragraphBoundary(buf.lines, line, key === "}");
+					if (next === line) break;
+					line = next;
+				}
+				return { to: { line, col: 0 }, inclusive: false, linewise: false };
+			}
 			case "G": {
 				const target = this.#count.length > 0 ? count - 1 : buf.lines.length - 1;
 				return {
@@ -676,6 +794,11 @@ export class VimState {
 		const operator = this.#operator;
 		this.#operator = null;
 		this.#takeCount();
+		if (operator === ">" || operator === "<") {
+			const fromLine = Math.min(buf.cursorLine, motion.to.line);
+			const toLine = Math.max(buf.cursorLine, motion.to.line);
+			return [{ kind: "indent", fromLine, toLine, out: operator === "<" }];
+		}
 
 		if (operator === null) {
 			// `$` parks on the last grapheme in Normal mode but must still be able to select the
@@ -887,6 +1010,28 @@ export class VimState {
 			case "u":
 				this.#takeCount();
 				return [{ kind: "undo" }];
+			case "J": {
+				if (this.#operator !== null) {
+					this.#clearPending();
+					return [];
+				}
+				return [{ kind: "join", fromLine: buf.cursorLine, lines: Math.max(2, this.#takeCount()) }];
+			}
+			case ">":
+			case "<": {
+				if (this.#operator === key) {
+					const span = this.#takeCount();
+					const last = Math.min(buf.cursorLine + span - 1, buf.lines.length - 1);
+					this.#operator = null;
+					return [{ kind: "indent", fromLine: buf.cursorLine, toLine: last, out: key === "<" }];
+				}
+				if (this.#operator !== null) {
+					this.#clearPending();
+					return [];
+				}
+				this.#operator = key;
+				return [];
+			}
 			default:
 				// Normal mode swallows unknown printable keys rather than typing them into the buffer.
 				this.#clearPending();
@@ -930,6 +1075,19 @@ export class VimState {
 				if (operator !== "c") this.mode = "normal";
 				const commands = this.#operate(operator, from, to, linewise);
 				return operator === "c" ? commands : [...commands, { kind: "mode", mode: "normal" }];
+			}
+			case ">":
+			case "<":
+			case "J": {
+				const { from, to } = visualRange(buf, anchor, linewise);
+				this.#clearPending();
+				this.anchor = null;
+				this.mode = "normal";
+				const edit: VimCommand =
+					key === "J"
+						? { kind: "join", fromLine: from.line, lines: Math.max(2, to.line - from.line + 1) }
+						: { kind: "indent", fromLine: from.line, toLine: to.line, out: key === "<" };
+				return [edit, { kind: "mode", mode: "normal" }];
 			}
 			default:
 				this.#clearPending();

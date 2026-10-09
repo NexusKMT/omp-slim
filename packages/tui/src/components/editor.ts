@@ -2267,7 +2267,6 @@ export class Editor implements Component, Focusable {
 			}
 		}
 
-
 		const mapped = canonical === undefined ? undefined : VIM_NAV_KEYS[canonical];
 		if (mapped !== undefined) return this.#runVimKey(mapped, vim);
 
@@ -2340,6 +2339,12 @@ export class Editor implements Component, Focusable {
 				case "replace":
 					this.#replaceVimSpan(command.from, command.to, command.text);
 					break;
+				case "join":
+					this.#joinVimLines(command.fromLine, command.lines);
+					break;
+				case "indent":
+					this.#indentVimLines(command.fromLine, command.toLine, command.out);
+					break;
 			}
 		}
 		this.#clampVimCursor();
@@ -2381,10 +2386,59 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 		const line = this.#state.lines[entry.line] ?? "";
-		this.#state.lines[entry.line] =
-			line.slice(0, entry.col) + entry.removed + line.slice(entry.col + entry.written);
+		this.#state.lines[entry.line] = line.slice(0, entry.col) + entry.removed + line.slice(entry.col + entry.written);
 		this.#setCursorCol(entry.col);
 		this.#notifyChange();
+	}
+
+	#joinVimLines(fromLine: number, span: number): void {
+		const start = Math.max(0, Math.min(fromLine, this.#state.lines.length - 1));
+		const last = Math.min(start + Math.max(span, 2) - 1, this.#state.lines.length - 1);
+		if (last <= start) return;
+		this.#recordUndoState();
+		let text = this.#state.lines[start] ?? "";
+		let cursor = text.length;
+		for (let i = start + 1; i <= last; i++) {
+			const raw = this.#state.lines[i] ?? "";
+			let trim = /^[ \t]*/.exec(raw)?.[0].length ?? 0;
+			const token = this.#atomicTokenAt(raw, 0);
+			if (token && token.start < trim) trim = token.start;
+			const next = raw.slice(trim);
+			const at = text.length;
+			if (i === start + 1) cursor = at;
+			// Vim join: no extra space after whitespace or before `)`, two spaces after `.!?`.
+			const gap =
+				text.length === 0 || /[ \t]$/.test(text) || next.startsWith(")") ? "" : /[.!?]$/.test(text) ? "  " : " ";
+			text += gap + next;
+		}
+		this.#state.lines.splice(start, last - start + 1, text);
+		this.#state.cursorLine = start;
+		this.#setCursorCol(cursor);
+		this.#lastAction = null;
+		this.#afterVimEdit();
+	}
+
+	#indentVimLines(fromLine: number, toLine: number, out: boolean): void {
+		const first = Math.max(0, Math.min(fromLine, this.#state.lines.length - 1));
+		const last = Math.max(first, Math.min(toLine, this.#state.lines.length - 1));
+		// Two spaces, not Vim's shiftwidth of 8: a prompt draft should not jump a tab stop. A leading tab shifts by one tab so the line keeps its own indent style.
+		const next = this.#state.lines.slice(first, last + 1).map(line => {
+			const text = line ?? "";
+			if (!out) return (text.startsWith("\t") ? "\t" : "  ") + text;
+			if (text.startsWith("\t")) return text.slice(1);
+			const spaces = /^ */.exec(text)?.[0].length ?? 0;
+			return text.slice(Math.min(2, spaces));
+		});
+		if (next.every((line, i) => line === (this.#state.lines[first + i] ?? ""))) return;
+		this.#recordUndoState();
+		for (let i = first; i <= last; i++) this.#state.lines[i] = next[i - first] ?? "";
+		this.#state.cursorLine = first;
+		const landed = this.#state.lines[first] ?? "";
+		let col = 0;
+		while (col < landed.length && /\s/.test(landed.charAt(col))) col++;
+		this.#setCursorCol(col);
+		this.#lastAction = null;
+		this.#afterVimEdit();
 	}
 
 	#moveVimCursor(to: VimPosition): void {

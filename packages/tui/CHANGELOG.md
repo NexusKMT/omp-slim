@@ -14,6 +14,7 @@
 - Added Vim find and till motions (`f`, `F`, `t`, `T`) in the prompt editor, with `;` and `,` to repeat them
 - Added Vim WORD motions (`W`, `B`, `E`) in the prompt editor
 - Added Vim replace (`r`, `R`) in the prompt editor
+- Added Vim bracket and quote matching (`%`), paragraph motions (`{`, `}`), line join (`J`), and indent (`>>`, `<<`) in the prompt editor
 
 ## [18.8.7] - 2026-10-09
 

@@ -362,6 +362,17 @@ describe("Editor vim mode", () => {
 			expect(editor.getText()).toBe("\nthree");
 		});
 
+		it("dap takes the trailing blank line, or the leading one at the end of the buffer", () => {
+			const middle = vimEditor("one\ntwo\n\nthree");
+			for (const key of "dap") middle.handleInput(key);
+			expect(middle.getText()).toBe("three");
+
+			const end = vimEditor("one\ntwo\n\nthree");
+			end.handleInput("G");
+			for (const key of "dap") end.handleInput(key);
+			expect(end.getText()).toBe("one\ntwo");
+		});
+
 		it("viw selects the word so the next operator applies to it", () => {
 			const editor = vimEditor("alfa beta");
 			for (const key of "viw") editor.handleInput(key);
@@ -823,6 +834,146 @@ describe("Editor vim mode", () => {
 			editor.handleInput("R");
 			editor.handleInput("YZ");
 			expect(editor.getText()).toBe("aYZ");
+		});
+	});
+
+	describe("bracket match", () => {
+		it("jumps between a nested pair and back", () => {
+			const editor = vimEditor("(a(b)c)");
+			editor.handleInput("%");
+			expect(cursor(editor)).toEqual({ line: 0, col: 6 });
+			editor.handleInput("%");
+			expect(cursor(editor)).toEqual({ line: 0, col: 0 });
+			editor.handleInput("l");
+			editor.handleInput("l");
+			editor.handleInput("%");
+			expect(cursor(editor)).toEqual({ line: 0, col: 4 });
+		});
+
+		it("matches across lines and deletes through the pair", () => {
+			const editor = vimEditor("(\n)");
+			editor.handleInput("%");
+			expect(cursor(editor)).toEqual({ line: 1, col: 0 });
+			editor.handleInput("%");
+			editor.handleInput("d");
+			editor.handleInput("%");
+			expect(editor.getText()).toBe("");
+		});
+
+		it("scans forward on the line and stays put when unmatched", () => {
+			const editor = vimEditor("ab(c");
+			editor.handleInput("%");
+			expect(cursor(editor)).toEqual({ line: 0, col: 0 });
+			expect(editor.getText()).toBe("ab(c");
+		});
+
+		it("jumps between quotes and ignores an escaped one", () => {
+			const doubled = vimEditor('say "hi"');
+			doubled.handleInput("f");
+			doubled.handleInput('"');
+			doubled.handleInput("%");
+			expect(cursor(doubled)).toEqual({ line: 0, col: 7 });
+			doubled.handleInput("%");
+			expect(cursor(doubled)).toEqual({ line: 0, col: 4 });
+
+			const single = vimEditor("say 'hi'");
+			single.handleInput("%");
+			expect(cursor(single)).toEqual({ line: 0, col: 7 });
+
+			const escaped = vimEditor('say \\"hi\\"');
+			escaped.handleInput("%");
+			expect(cursor(escaped)).toEqual({ line: 0, col: 0 });
+			expect(escaped.getText()).toBe('say \\"hi\\"');
+		});
+	});
+
+	describe("paragraph motions", () => {
+		it("lands on blank-line boundaries and steps back", () => {
+			const editor = vimEditor("aaa\n\nbbb\n\nccc");
+			editor.handleInput("}");
+			expect(cursor(editor)).toEqual({ line: 1, col: 0 });
+			editor.handleInput("}");
+			expect(cursor(editor)).toEqual({ line: 3, col: 0 });
+			editor.handleInput("{");
+			expect(cursor(editor)).toEqual({ line: 1, col: 0 });
+		});
+
+		it("deletes the paragraph text and leaves the boundary line", () => {
+			const editor = vimEditor("aaa\n\nbbb");
+			editor.handleInput("d");
+			editor.handleInput("}");
+			expect(editor.getText()).toBe("\nbbb");
+		});
+	});
+
+	describe("join", () => {
+		it("inserts one space, two after a sentence, and none before a closing paren", () => {
+			const spaced = vimEditor("foo\n  bar");
+			spaced.handleInput("J");
+			expect(spaced.getText()).toBe("foo bar");
+			expect(cursor(spaced)).toEqual({ line: 0, col: 3 });
+
+			const sentence = vimEditor("end.\nnext");
+			sentence.handleInput("J");
+			expect(sentence.getText()).toBe("end.  next");
+
+			const paren = vimEditor("call(\n  )");
+			paren.handleInput("J");
+			expect(paren.getText()).toBe("call()");
+		});
+
+		it("keeps a trailing space, joins a count, and does nothing on the last line", () => {
+			const editor = vimEditor("foo \nbar\nbaz");
+			editor.handleInput("J");
+			expect(editor.getText()).toBe("foo bar\nbaz");
+			editor.handleInput("g");
+			editor.handleInput("g");
+			editor.handleInput("3");
+			editor.handleInput("J");
+			expect(editor.getText()).toBe("foo bar baz");
+
+			const last = vimEditor("only");
+			last.handleInput("J");
+			expect(last.getText()).toBe("only");
+		});
+	});
+
+	describe("indent", () => {
+		it("shifts by two spaces, honors a count, and stops at the margin", () => {
+			const editor = vimEditor("a\nb");
+			editor.handleInput(">");
+			editor.handleInput(">");
+			expect(editor.getText()).toBe("  a\nb");
+			expect(cursor(editor)).toEqual({ line: 0, col: 2 });
+			editor.handleInput("2");
+			editor.handleInput(">");
+			editor.handleInput(">");
+			expect(editor.getText()).toBe("    a\n  b");
+			editor.handleInput("g");
+			editor.handleInput("g");
+			editor.handleInput("<");
+			editor.handleInput("<");
+			expect(editor.getText()).toBe("  a\n  b");
+			editor.handleInput("<");
+			editor.handleInput("<");
+			expect(editor.getText()).toBe("a\n  b");
+			editor.handleInput("<");
+			editor.handleInput("<");
+			expect(editor.getText()).toBe("a\n  b");
+		});
+
+		it("shifts the lines a motion covers, and a visual selection", () => {
+			const moved = vimEditor("a\nb\nc");
+			moved.handleInput(">");
+			moved.handleInput("j");
+			expect(moved.getText()).toBe("  a\n  b\nc");
+
+			const visual = vimEditor("a\nb");
+			visual.handleInput("V");
+			visual.handleInput("j");
+			visual.handleInput(">");
+			expect(visual.getText()).toBe("  a\n  b");
+			expect(visual.vimMode).toBe("normal");
 		});
 	});
 });
