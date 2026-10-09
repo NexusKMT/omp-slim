@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { hasFsCode, isEnoent, toError, untilAborted } from "@oh-my-pi/pi-utils";
 import type { Browser, CDPSession, Page } from "puppeteer-core";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
-import { replaceFileAtomically } from "../../utils/atomic-file";
+import { replaceFileAcrossDevices, replaceFileAtomically } from "../../utils/atomic-file";
 import { devtoolsFrameId } from "./frames";
 
 /** Completed download metadata returned by tab download helpers. */
@@ -43,9 +43,6 @@ interface DownloadWaiter {
 /** Chromium names an `allowAndName` download after its GUID, a lowercase UUID. */
 const DOWNLOAD_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The one folder every tab points Chromium at; tabs move their downloads out of it into their own folders. */
-const DOWNLOAD_STAGING_DIRECTORY = path.join(os.tmpdir(), "omp-downloads-staging");
-
 /** Owns tab-scoped Chromium download behavior and completion events. */
 export class DownloadManager {
 	readonly #browser: Browser;
@@ -68,19 +65,17 @@ export class DownloadManager {
 	}
 
 	/**
-	 * Point the browser's one download folder at the shared staging folder and track downloads into this tab's folder.
-	 * Files are saved under their download GUID so tabs never overwrite each other's, and each tab moves its own into
-	 * its folder under the suggested name.
+	 * Point the browser's one download folder at this tab's folder. Files are saved under their download GUID so tabs
+	 * never overwrite each other's, and each tab moves its own into its folder under the suggested name.
 	 */
 	async enable(directory?: string): Promise<void> {
 		const resolved = path.resolve(directory ?? this.#defaultDirectory);
 		await fs.mkdir(resolved, { recursive: true });
-		await fs.mkdir(DOWNLOAD_STAGING_DIRECTORY, { recursive: true });
 		if (!this.#session) await this.#attach();
 		const context = this.#page.browserContext() as { id?: string };
 		await this.#session!.send("Browser.setDownloadBehavior", {
 			behavior: "allowAndName",
-			downloadPath: DOWNLOAD_STAGING_DIRECTORY,
+			downloadPath: resolved,
 			eventsEnabled: true,
 			...(context.id ? { browserContextId: context.id } : {}),
 		});
@@ -165,7 +160,8 @@ export class DownloadManager {
 	}
 
 	async #complete(pending: PendingDownload, filePath: string | undefined): Promise<void> {
-		const source = filePath ?? path.join(DOWNLOAD_STAGING_DIRECTORY, pending.guid);
+		const directory = this.#directory ?? this.#defaultDirectory;
+		const source = filePath ?? path.join(directory, pending.guid);
 		for (let attempt = 0; attempt < 100; attempt++) {
 			try {
 				await fs.stat(source);
@@ -175,7 +171,7 @@ export class DownloadManager {
 			}
 		}
 		const name = typeof pending.suggestedFilename === "string" ? path.basename(pending.suggestedFilename) : "";
-		const target = path.join(this.#directory ?? this.#defaultDirectory, name);
+		const target = path.join(directory, name);
 		// Only the last segment of the suggested name is used; anything else, or a download that cannot be moved, is
 		// reported where Chromium saved it.
 		const movable =
@@ -216,18 +212,12 @@ export class DownloadManager {
 }
 
 /**
- * Whether `source` is a regular file Chromium saved under the download's GUID in the staging folder, and `target` is
- * free or a file it may replace. The peer names the GUID, the saved path and the suggested name, so none is trusted
- * alone: a symlink, directory or file outside the staging folder stays where it is.
+ * Whether `source` is a regular file saved under a UUID-shaped download GUID, and `target` is free or a file it may
+ * replace. The peer names the GUID, the saved path and the suggested name, so a symlink or directory stays where it is.
  */
 async function canMoveDownload(source: string, guid: string, target: string): Promise<boolean> {
 	if (!DOWNLOAD_GUID.test(guid) || path.basename(source) !== guid) return false;
-	if ((await entryKind(source)) !== "file" || (await entryKind(target)) === "other") return false;
-	const [sourceDirectory, staging] = await Promise.all([
-		fs.realpath(path.dirname(source)),
-		fs.realpath(DOWNLOAD_STAGING_DIRECTORY),
-	]).catch(() => [undefined, undefined]);
-	return sourceDirectory !== undefined && sourceDirectory === staging;
+	return (await entryKind(source)) === "file" && (await entryKind(target)) !== "other";
 }
 
 /** What a path names, without following a symlink there. */
@@ -246,21 +236,6 @@ async function moveDownload(source: string, target: string): Promise<void> {
 		await replaceFileAtomically(source, target);
 	} catch (error) {
 		if (!hasFsCode(error, "EXDEV")) throw error;
-		// Copy beside the target and replace it in one rename, so a failed copy leaves a same-named file untouched.
-		const staged = `${target}.${crypto.randomUUID()}.download`;
-		try {
-			await fs.copyFile(source, staged);
-			const handle = await fs.open(staged, "r+");
-			try {
-				await handle.sync();
-			} finally {
-				await handle.close();
-			}
-			await replaceFileAtomically(staged, target);
-		} catch (copyError) {
-			await fs.rm(staged, { force: true });
-			throw copyError;
-		}
-		await fs.rm(source);
+		await replaceFileAcrossDevices(source, target);
 	}
 }

@@ -101,26 +101,15 @@ describe("browser open options CDP helpers", () => {
 		const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-download-test-"));
 		tempDirs.push(directory, elsewhere);
 		const listeners = new Map<string, (event: unknown) => void>();
-		let downloadPath = "";
 		const session = {
 			on: (event: string, listener: (event: unknown) => void) => listeners.set(event, listener),
 			off: () => undefined,
-			send: async (_method: string, params: { downloadPath: string }) => {
-				downloadPath = params.downloadPath;
-				return await send();
-			},
+			send,
 			detach: async () => undefined,
 		};
 		const browser = { target: () => ({ createCDPSession: async () => session }) } as unknown as Browser;
 		const page = { frames: () => [{ _id: "frame" }], browserContext: () => ({}) } as unknown as Page;
 		const downloads = new DownloadManager(browser, page, "tab");
-		/** A path in the folder the manager pointed Chromium at. */
-		const staged = async (name: string) => {
-			await downloads.enable(directory);
-			const file = path.join(downloadPath, name);
-			tempDirs.push(file);
-			return file;
-		};
 		const complete = async (
 			guid: unknown,
 			filePath: string | undefined,
@@ -134,34 +123,28 @@ describe("browser open options CDP helpers", () => {
 			listeners.get("Browser.downloadProgress")!({ guid, state: "completed", receivedBytes: 5, filePath });
 			return (await waiting).path;
 		};
-		return { directory, elsewhere, downloads, staged, complete };
+		return { directory, elsewhere, downloads, complete };
 	}
 
-	it("moves a file saved under its download GUID in the staging folder, under the last segment of the suggested name", async () => {
-		const { directory, staged, complete } = await fakeDownloads();
-		const guid = crypto.randomUUID();
-		const saved = await staged(guid);
-		await Bun.write(saved, "bytes");
+	it("moves only a file saved under its download GUID, under the last segment of the suggested name", async () => {
+		const { directory, elsewhere, complete } = await fakeDownloads();
 
+		const unrelated = path.join(elsewhere, "notes.txt");
+		await Bun.write(unrelated, "notes");
+		expect(await complete(crypto.randomUUID(), unrelated)).toBe(unrelated);
+		expect(await Bun.file(unrelated).text()).toBe("notes");
+
+		const guid = crypto.randomUUID();
+		const saved = path.join(elsewhere, guid);
+		await Bun.write(saved, "bytes");
 		expect(await complete(guid, saved)).toBe(path.join(directory, "report.txt"));
 		expect(await Bun.file(path.join(directory, "report.txt")).text()).toBe("bytes");
 		expect(await Bun.file(saved).exists()).toBe(false);
 	});
 
-	it("leaves a file named by a UUID GUID outside the staging folder in place", async () => {
-		const { directory, elsewhere, complete } = await fakeDownloads();
-		const guid = crypto.randomUUID();
-		const unrelated = path.join(elsewhere, guid);
-		await Bun.write(unrelated, "notes");
-
-		expect(await complete(guid, unrelated)).toBe(unrelated);
-		expect(await Bun.file(unrelated).text()).toBe("notes");
-		expect(await Bun.file(path.join(directory, "report.txt")).exists()).toBe(false);
-	});
-
 	it("leaves a file in place when the peer names it by a GUID that is not a UUID", async () => {
-		const { directory, staged, complete } = await fakeDownloads();
-		const key = await staged("id_ed25519");
+		const { directory, elsewhere, complete } = await fakeDownloads();
+		const key = path.join(elsewhere, "id_ed25519");
 		await Bun.write(key, "private key");
 
 		expect(await complete("id_ed25519", key)).toBe(key);
@@ -170,9 +153,9 @@ describe("browser open options CDP helpers", () => {
 	});
 
 	it("leaves a symlink named by a UUID GUID in place", async () => {
-		const { directory, elsewhere, staged, complete } = await fakeDownloads();
+		const { directory, elsewhere, complete } = await fakeDownloads();
 		const guid = crypto.randomUUID();
-		const link = await staged(guid);
+		const link = path.join(elsewhere, guid);
 		await Bun.write(path.join(elsewhere, "notes.txt"), "notes");
 		await fs.symlink(path.join(elsewhere, "notes.txt"), link);
 
@@ -182,9 +165,9 @@ describe("browser open options CDP helpers", () => {
 	});
 
 	it("leaves a directory named by a UUID GUID in place", async () => {
-		const { directory, staged, complete } = await fakeDownloads();
+		const { directory, elsewhere, complete } = await fakeDownloads();
 		const guid = crypto.randomUUID();
-		const folder = await staged(guid);
+		const folder = path.join(elsewhere, guid);
 		await Bun.write(path.join(folder, "notes.txt"), "notes");
 
 		expect(await complete(guid, folder)).toBe(folder);
@@ -193,9 +176,9 @@ describe("browser open options CDP helpers", () => {
 	});
 
 	it("keeps a directory named like the download when the rename takes the Windows replacement path", async () => {
-		const { directory, staged, complete } = await fakeDownloads();
+		const { directory, elsewhere, complete } = await fakeDownloads();
 		const guid = crypto.randomUUID();
-		const saved = await staged(guid);
+		const saved = path.join(elsewhere, guid);
 		await Bun.write(saved, "bytes");
 		await Bun.write(path.join(directory, "report.txt", "notes.txt"), "notes");
 		const rename = spyOn(nodeFs.promises, "rename").mockImplementationOnce(async () => {
@@ -211,9 +194,9 @@ describe("browser open options CDP helpers", () => {
 	});
 
 	it("keeps the same-named file when a cross-device move fails to copy", async () => {
-		const { directory, staged, complete } = await fakeDownloads();
+		const { directory, elsewhere, complete } = await fakeDownloads();
 		const guid = crypto.randomUUID();
-		const saved = await staged(guid);
+		const saved = path.join(elsewhere, guid);
 		await Bun.write(saved, "bytes");
 		await fs.chmod(saved, 0o000);
 		await Bun.write(path.join(directory, "report.txt"), "earlier report");
@@ -229,10 +212,30 @@ describe("browser open options CDP helpers", () => {
 		expect(await fs.readdir(directory)).toEqual(["report.txt"]);
 	});
 
-	it("reports a download whose suggested name is not a string where Chromium saved it", async () => {
-		const { staged, complete } = await fakeDownloads();
+	it("reports the moved file when a cross-device move cannot remove the source", async () => {
+		const { directory, elsewhere, complete } = await fakeDownloads();
 		const guid = crypto.randomUUID();
-		const saved = await staged(guid);
+		const saved = path.join(elsewhere, guid);
+		await Bun.write(saved, "bytes");
+		await Bun.write(path.join(directory, "report.txt"), "earlier report");
+		await fs.chmod(elsewhere, 0o555);
+		const rename = spyOn(nodeFs.promises, "rename").mockImplementationOnce(async () => {
+			throw Object.assign(new Error("cross-device link not permitted"), { code: "EXDEV" });
+		});
+		try {
+			expect(await complete(guid, saved)).toBe(path.join(directory, "report.txt"));
+		} finally {
+			rename.mockRestore();
+			await fs.chmod(elsewhere, 0o755);
+		}
+		expect(await Bun.file(path.join(directory, "report.txt")).text()).toBe("bytes");
+		expect(await fs.readdir(directory)).toEqual(["report.txt"]);
+	});
+
+	it("reports a download whose suggested name is not a string where Chromium saved it", async () => {
+		const { elsewhere, complete } = await fakeDownloads();
+		const guid = crypto.randomUUID();
+		const saved = path.join(elsewhere, guid);
 		await Bun.write(saved, "bytes");
 
 		expect(await complete(guid, saved, null)).toBe(saved);
