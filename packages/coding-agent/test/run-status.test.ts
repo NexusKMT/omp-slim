@@ -10,7 +10,7 @@ import * as titleGenerator from "@oh-my-pi/pi-coding-agent/utils/title-generator
 import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
 
 // OSC 7501 Program Status Protocol reports, as the terminal parses them:
-// https://www.superlogical.com/rex/docs/build/program-status
+// https://mitchellh.com/writing/program-status-osc7501
 const report = (body: string) => `\x1b]7501;${body}\x1b\\`;
 const CLEAR = report("state=clear");
 

@@ -1,7 +1,7 @@
 /**
  * The agent's run status, published to every terminal surface that shows it:
  * the title's run-state separator, and the root record of the OSC 7501 Program
- * Status Protocol (https://www.superlogical.com/rex/docs/build/program-status),
+ * Status Protocol (https://mitchellh.com/writing/program-status-osc7501),
  * which tabs, multiplexers, and agent inboxes read from the PTY instead of
  * scraping the title.
  *
