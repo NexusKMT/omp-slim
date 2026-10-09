@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.7] - 2026-10-09
+
 ### Added
 
 - Added automated release binary publication to build.stencil.so
