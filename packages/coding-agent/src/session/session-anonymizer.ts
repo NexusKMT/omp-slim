@@ -446,6 +446,31 @@ const PATH_KEYS: Record<string, true> = {
 	uri: true,
 };
 
+/** MIME types kept verbatim in tool-written data and content blocks. */
+const MIME_TYPES: ReadonlySet<string> = new Set([
+	"text/markdown",
+	"text/plain",
+	"text/html",
+	"text/css",
+	"text/csv",
+	"text/xml",
+	"text/javascript",
+	"text/typescript",
+	"application/json",
+	"application/xml",
+	"application/pdf",
+	"application/octet-stream",
+	"application/feed",
+	"image/png",
+	"image/jpeg",
+	"image/webp",
+	"image/gif",
+	"image/svg+xml",
+	"video/mp4",
+	"audio/mpeg",
+	"unknown",
+]);
+
 /**
  * Option values of built-in tools and built-in tool details, kept only when listed. An extension may
  * shadow a built-in tool name and the transcript does not record provenance, so a built-in-looking
@@ -524,29 +549,9 @@ const TOOL_ENUM_VALUES: Record<string, ReadonlySet<string>> = {
 	resolvedThinkingLevel: new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]),
 	outcome: new Set(["injected", "woken", "revived", "failed"]),
 	server: new Set(["typescript-native", "typescript-language-server", "rust-analyzer", "gopls", "pyright", "clangd"]),
-	contentType: new Set([
-		"text/markdown",
-		"text/plain",
-		"text/html",
-		"text/css",
-		"text/csv",
-		"text/xml",
-		"text/javascript",
-		"text/typescript",
-		"application/json",
-		"application/xml",
-		"application/pdf",
-		"application/octet-stream",
-		"application/feed",
-		"image/png",
-		"image/jpeg",
-		"image/webp",
-		"image/gif",
-		"image/svg+xml",
-		"video/mp4",
-		"audio/mpeg",
-		"unknown",
-	]),
+	contentType: MIME_TYPES,
+	mimeType: MIME_TYPES,
+	detail: new Set(["auto", "low", "high", "original"]),
 };
 
 /** Built-in tool argument keys holding free-form structures (env maps, schemas, structured output). */
@@ -632,6 +637,34 @@ const TOOL_CALL_TYPES: Record<string, true> = {
 	custom_tool_call: true,
 	tool_use: true,
 	server_tool_use: true,
+};
+
+/**
+ * Fields of each content-block type. A block is projected onto its type's fields: tools and
+ * extensions build result blocks, and extra fields on an otherwise valid block are their payload.
+ * Unknown block types are opaque.
+ */
+const CONTENT_BLOCK_KEYS: Record<string, ReadonlySet<string>> = {
+	text: new Set(["type", "text", "textSignature"]),
+	image: new Set(["type", "data", "mimeType", "detail", "providerFile", "url"]),
+	thinking: new Set(["type", "thinking", "thinkingSignature", "itemId"]),
+	redactedThinking: new Set(["type", "data"]),
+	toolCall: new Set([
+		"type",
+		"id",
+		"name",
+		"arguments",
+		"intent",
+		"partialArgs",
+		"streamIndex",
+		"thoughtSignature",
+		"rawBlock",
+		"customWireName",
+		"providerMetadata",
+	]),
+	fallback: new Set(["type", "from", "to"]),
+	anthropicServerTool: new Set(["type", "block"]),
+	output_text: new Set(["type", "text", "annotations", "logprobs"]),
 };
 
 /** Path segments too generic to identify a project; kept verbatim. */
@@ -1352,6 +1385,21 @@ export class SessionAnonymizer {
 		return out;
 	}
 
+	/** A content block projected onto its type's fields; extra fields become opaque under tokenized keys. */
+	#contentBlock(block: JsonObject, fromTool: boolean): unknown {
+		const allowed = typeof block.type === "string" ? CONTENT_BLOCK_KEYS[block.type] : undefined;
+		if (!allowed) return this.#opaque(block);
+		const out: JsonObject = {};
+		for (const [key, value] of Object.entries(block)) {
+			const rule = allowed.has(key) && Object.hasOwn(FIELD_RULES, key) ? FIELD_RULES[key] : undefined;
+			if (rule === undefined) out[this.placeholder(key)] = this.#opaque(value);
+			// A tool call is the model's own request (its id must stay joinable with the result).
+			else out[key] = this.#field(rule, value, block, key, fromTool && block.type !== "toolCall");
+		}
+		if (block.type === "toolCall" && typeof block.id === "string") this.#toolCallIds.add(block.id);
+		return out;
+	}
+
 	/**
 	 * `tool_execution_start` data, projected onto its exact schema. Extensions can append a custom entry
 	 * under any `customType`, so nothing beyond these fields is trusted, and the call id stays raw only
@@ -1391,13 +1439,16 @@ export class SessionAnonymizer {
 	}
 
 	#field(rule: Rule, value: unknown, parent: JsonObject, key: string, fromTool: boolean): unknown {
-		if (rule === "opaque") return this.#opaque(value);
-		if (value === null || typeof value === "number" || typeof value === "boolean") {
-			return rule === "label" ? this.placeholder(String(value)) : value;
-		}
+		// Payload scopes come first: a primitive inside an untrusted payload is still untrusted.
 		switch (rule) {
+			case "opaque":
+				return this.#opaque(value);
 			case "args":
-				return this.#toolArgs(value, parent);
+				// `input` is also a usage counter; only a tool-call envelope makes it arguments.
+				if (typeof parent.name === "string" || typeof parent.toolName === "string") {
+					return this.#toolArgs(value, parent);
+				}
+				break;
 			case "details":
 				// Built-in tools write their own details; anything else is an extension payload.
 				return parent.role === "toolResult" && isBuiltinTool(parent.toolName) && isObject(value)
@@ -1417,16 +1468,23 @@ export class SessionAnonymizer {
 					fromTool,
 				);
 		}
+		if (value === null || typeof value === "number" || typeof value === "boolean") {
+			return rule === "label" ? this.placeholder(String(value)) : value;
+		}
 		if (Array.isArray(value)) return value.map(item => this.#field(rule, item, parent, key, fromTool));
 		if (isObject(value)) {
+			if (rule === "content") {
+				// Tool results and extension messages carry tool-built blocks: their enum fields are untrusted.
+				const untrusted =
+					fromTool ||
+					parent.role === "toolResult" ||
+					parent.role === "custom" ||
+					parent.role === "hookMessage" ||
+					parent.type === "custom_message";
+				return this.#contentBlock(value, untrusted);
+			}
 			// Only structural rules descend; a scalar field holding an object is not omp's shape.
-			const descends =
-				rule === "struct" ||
-				rule === "content" ||
-				rule === "enum" ||
-				rule === "id" ||
-				rule === "path" ||
-				rule === "tool";
+			const descends = rule === "struct" || rule === "enum" || rule === "id" || rule === "path" || rule === "tool";
 			if (rule === "transforms") {
 				// Provider input transformations address transcript slots (`messages.3.content.0`), not files.
 				const out = this.#struct(value, fromTool);

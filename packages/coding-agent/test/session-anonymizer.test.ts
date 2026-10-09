@@ -365,6 +365,28 @@ describe("SessionAnonymizer", () => {
 		expect(JSON.stringify(header)).not.toContain("alice");
 	});
 
+	test("redacts primitive extension payloads and projects tool-built content blocks", () => {
+		const anonymizer = new SessionAnonymizer();
+		const json = JSON.stringify([
+			anonymizer.entry({ type: "custom", customType: "crm", data: 123456789 }),
+			anonymizer.entry({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "toolu_01abcdef",
+					toolName: "mcp__crm_lookup",
+					details: 987654321,
+					content: [{ type: "image", data: "AAAA", mimeType: "image/png", status: "customer-acme" }],
+				},
+			}),
+			// Usage counters stay even though `input` is also the tool-call arguments key.
+			anonymizer.entry({ type: "message", message: { role: "assistant", usage: { input: 120, output: 30 } } }),
+		]);
+		for (const secret of ["123456789", "987654321", "acme", "status"]) expect(json).not.toContain(secret);
+		expect(json).toContain('"mimeType":"image/png"');
+		expect(json).toContain('"usage":{"input":120,"output":30}');
+	});
+
 	test("treats every word after `--` as an operand", () => {
 		const anonymizer = new SessionAnonymizer();
 		expect(anonymizer.command("head -- -123456789")).not.toContain("123456789");
