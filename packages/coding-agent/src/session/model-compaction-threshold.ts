@@ -37,7 +37,7 @@ export function describeModelCompactionPoint(scope: ScopeLike, model: Model): Mo
 		? cfgCompactionModelThresholds.get(scope)
 		: undefined;
 	const match = matchModelCompactionThreshold(thresholds, model);
-	const settings = match ? { ...configured, ...match.threshold } : configured;
+	const settings = applyModelCompactionThreshold(configured, thresholds, model);
 	const contextWindow = model.contextWindow ?? 0;
 	return {
 		tokens: settings.enabled && contextWindow > 0 ? resolveThresholdTokens(contextWindow, settings) : undefined,
@@ -60,15 +60,16 @@ export type ModelCompactionPointUpdate =
 /**
  * Persist `input` (see {@link parseCompactionPointInput}) as `model`'s own
  * `compaction.modelThresholds` entry in the global config; empty input removes
- * it. Throws on unparseable input, on a token count at or past the largest
- * window `model` can run with (`tiers.extended`, else its current window), and
- * when a project or higher-priority layer sets the same key, which would leave
- * the global write without effect.
+ * it. A token count is the base the compaction policy scales (it stands in for
+ * the window), so it may not exceed the largest window `model` can run with
+ * (`tiers.extended`, else its current window). Throws on unparseable or
+ * too-large input, and when a project or higher-priority layer sets the same
+ * key, which would leave the global write without effect.
  *
- * A token count at or past `tiers.standard` opts the model into its extended
- * window (see `ModelRegistry.contextWindowTiers`); unless extended context is
- * already on, it is written only once `confirmed`, and otherwise returns the
- * warning to show.
+ * A token count past `tiers.standard` opts the model into its extended window
+ * (see `ModelRegistry.contextWindowTiers`); unless extended context is already
+ * on, it is written only once `confirmed`, and otherwise returns the warning
+ * to show.
  */
 export function setModelCompactionPoint(
 	settings: Settings,
@@ -89,13 +90,19 @@ export function setModelCompactionPoint(
 	if (typeof entry === "number") {
 		const { tiers } = options;
 		const ceiling = tiers?.extended ?? model.contextWindow;
-		if (ceiling !== null && ceiling !== undefined && entry >= ceiling) {
-			throw new Error(`Must be below the ${formatWindow(ceiling)} ${tiers ? "max " : ""}window`);
+		if (ceiling !== null && ceiling !== undefined && entry > ceiling) {
+			throw new Error(`Must not exceed the ${formatWindow(ceiling)} ${tiers ? "max " : ""}window`);
 		}
-		if (tiers && entry >= tiers.standard && !options.confirmed && !cfgExtendedContext.get(settings)) {
+		if (tiers && entry > tiers.standard && !options.confirmed && !cfgExtendedContext.get(settings)) {
+			// Pricing follows where compaction actually triggers: the policy scaled from this base.
+			const trigger = resolveThresholdTokens(tiers.extended, {
+				...cfgCompaction.get(settings),
+				thresholdTokens: -1,
+				baseWindowTokens: entry,
+			});
 			const premiumThreshold = model.cost.longContext?.inputThreshold;
 			const pricing =
-				premiumThreshold !== undefined && entry > premiumThreshold
+				premiumThreshold !== undefined && trigger > premiumThreshold
 					? `; >${formatWindow(premiumThreshold)} costs more`
 					: "";
 			// Kept short: the hub shows it on one line beside the input field.

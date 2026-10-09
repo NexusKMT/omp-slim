@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
+import { resolveThresholdTokens } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { getProjectAgentDir } from "@oh-my-pi/pi-utils";
 import {
@@ -142,7 +143,7 @@ describe("compaction.modelThresholds", () => {
 			"compaction.thresholdPercent": 80,
 			"compaction.modelThresholds": { "deepseek/*": 90000 },
 		});
-		expect(resolveModelCompactionSettings(root, deepseek)).toMatchObject({ thresholdTokens: 90000 });
+		expect(resolveModelCompactionSettings(root, deepseek)).toMatchObject({ baseWindowTokens: 90000 });
 
 		const agent = createSubagentSettings(
 			root,
@@ -155,14 +156,39 @@ describe("compaction.modelThresholds", () => {
 
 		// An exact entry added while the agent runs (the /models hub) must not take over.
 		cfgCompactionModelThresholds.override(root, { "deepseek/*": 90000, "deepseek/v4": 120000 });
-		expect(resolveModelCompactionSettings(root, deepseek)).toMatchObject({ thresholdTokens: 120000 });
+		expect(resolveModelCompactionSettings(root, deepseek)).toMatchObject({ baseWindowTokens: 120000 });
 		expect(resolveModelCompactionSettings(agent, deepseek)).toMatchObject({
 			thresholdPercent: 50,
 			thresholdTokens: -1,
 		});
 
 		const grandchild = createSubagentSettings(agent);
-		expect(resolveModelCompactionSettings(grandchild, deepseek)).toMatchObject({ thresholdTokens: 120000 });
+		expect(resolveModelCompactionSettings(grandchild, deepseek)).toMatchObject({ baseWindowTokens: 120000 });
+	});
+
+	it("scales the configured policy from a token entry instead of triggering at it", () => {
+		const terra = { provider: "openai", id: "gpt-5.6-terra" };
+		const window = 1_050_000;
+		const byDefault = Settings.isolated({ "compaction.modelThresholds": { "openai/gpt-5.6-terra": 400_000 } });
+		// Reserve policy: the base minus max(15%, 16384).
+		expect(resolveThresholdTokens(window, resolveModelCompactionSettings(byDefault, terra))).toBe(340_000);
+
+		const byPercent = Settings.isolated({
+			"compaction.thresholdPercent": 80,
+			"compaction.modelThresholds": { "openai/gpt-5.6-terra": 400_000 },
+		});
+		expect(resolveThresholdTokens(window, resolveModelCompactionSettings(byPercent, terra))).toBe(320_000);
+
+		// A global fixed trigger is not a scale; the model's base replaces it.
+		const byFixed = Settings.isolated({
+			"compaction.thresholdTokens": 40_000,
+			"compaction.modelThresholds": { "openai/gpt-5.6-terra": 400_000 },
+		});
+		expect(resolveThresholdTokens(window, resolveModelCompactionSettings(byFixed, terra))).toBe(340_000);
+
+		// A percentage entry still scales the real window.
+		const byModelPercent = Settings.isolated({ "compaction.modelThresholds": { "openai/gpt-5.6-terra": "50%" } });
+		expect(resolveThresholdTokens(window, resolveModelCompactionSettings(byModelPercent, terra))).toBe(525_000);
 	});
 
 	it("refuses a hub edit that a project entry for the same model would shadow", async () => {
@@ -176,9 +202,9 @@ describe("compaction.modelThresholds", () => {
 			const other = { provider: "deepseek", id: "r2" } as Model;
 
 			expect(() => setModelCompactionPoint(settings, deepseek, "90k")).toThrow("project config");
-			expect(resolveModelCompactionSettings(settings, deepseek)).toMatchObject({ thresholdTokens: 50000 });
+			expect(resolveModelCompactionSettings(settings, deepseek)).toMatchObject({ baseWindowTokens: 50000 });
 			expect(setModelCompactionPoint(settings, other, "90k")).toEqual({ kind: "saved", entry: 90000 });
-			expect(resolveModelCompactionSettings(settings, other)).toMatchObject({ thresholdTokens: 90000 });
+			expect(resolveModelCompactionSettings(settings, other)).toMatchObject({ baseWindowTokens: 90000 });
 		});
 	});
 
@@ -194,20 +220,25 @@ describe("compaction.modelThresholds", () => {
 
 		const pending = setModelCompactionPoint(settings, model, "400k", { tiers });
 		expect(pending).toEqual({ kind: "confirm", message: "Opens 1.05M window; >272K costs more" });
-		expect(resolveModelCompactionSettings(settings, model).thresholdTokens).toBe(-1);
+		expect(resolveModelCompactionSettings(settings, model).baseWindowTokens).toBeUndefined();
+		// The pricing note follows the scaled trigger: a 300k base compacts at 255k, inside the standard tier.
+		expect(setModelCompactionPoint(settings, model, "300k", { tiers })).toEqual({
+			kind: "confirm",
+			message: "Opens 1.05M window",
+		});
 
 		expect(setModelCompactionPoint(settings, model, "400k", { tiers, confirmed: true })).toEqual({
 			kind: "saved",
 			entry: 400_000,
 		});
-		expect(resolveModelCompactionSettings(settings, model).thresholdTokens).toBe(400_000);
+		expect(resolveModelCompactionSettings(settings, model).baseWindowTokens).toBe(400_000);
 		expect(setModelCompactionPoint(settings, model, "200k", { tiers })).toEqual({ kind: "saved", entry: 200_000 });
 
-		expect(() => setModelCompactionPoint(settings, model, "1050k", { tiers, confirmed: true })).toThrow(
-			"Must be below the 1.05M max window",
+		expect(() => setModelCompactionPoint(settings, model, "1100k", { tiers, confirmed: true })).toThrow(
+			"Must not exceed the 1.05M max window",
 		);
-		expect(() => setModelCompactionPoint(settings, model, "300k")).toThrow("Must be below the 272K window");
-		expect(resolveModelCompactionSettings(settings, model).thresholdTokens).toBe(200_000);
+		expect(() => setModelCompactionPoint(settings, model, "300k")).toThrow("Must not exceed the 272K window");
+		expect(resolveModelCompactionSettings(settings, model).baseWindowTokens).toBe(200_000);
 	});
 
 	it("skips the warning when extended context is already on", () => {

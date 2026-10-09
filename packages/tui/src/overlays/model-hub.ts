@@ -2853,7 +2853,7 @@ export class ModelHubComponent implements Component {
 		if (strip.kind === "name") {
 			const labelText =
 				strip.purpose === "compaction"
-					? `Compact ${strip.model.id} at:`
+					? `${strip.model.id} limit:`
 					: strip.purpose === "preset"
 						? "Preset name:"
 						: "New role name:";
@@ -3636,9 +3636,8 @@ export class ModelHubComponent implements Component {
 				const notice = compactionNotice(strip);
 				return {
 					label: [
-						span("Compact ", "muted"),
 						span(strip.model.id, "mono"),
-						span(" at ", "muted"),
+						span(" limit ", "muted"),
 						span(strip.input.getValue(), "mono"),
 						span("▏", "accent"),
 						span(`  ${notice.text}`, notice.style),
@@ -4025,7 +4024,7 @@ export class ModelHubComponent implements Component {
 					"row",
 					{ gap: "sm", align: "center" },
 					[
-						text([span(`Compact ${strip.model.id} at:`, "accent")]),
+						text([span(`${strip.model.id} limit:`, "accent")]),
 						col([strip.input], { grow: 1 }),
 						text([span(notice.text, notice.style)], { wrap: "word" }),
 					],

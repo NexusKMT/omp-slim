@@ -119,14 +119,17 @@ export function matchModelCompactionThreshold(
 	return best;
 }
 
-const appliedThresholds = new WeakMap<object, Map<string, CompactionThresholdPair>>();
+const appliedThresholds = new WeakMap<object, Map<string, { threshold: CompactionThresholdPair; applied: object }>>();
 
 /**
- * `settings` with the threshold fields of the `compaction.modelThresholds` entry
- * governing `model`; the same object when no entry applies. Results are cached
- * per settings snapshot so hot paths allocate once per entry.
+ * `settings` with the `compaction.modelThresholds` entry governing `model`
+ * applied; the same object when no entry applies. A token entry is the base
+ * the configured policy scales (`baseWindowTokens`, standing in for the window:
+ * `thresholdPercent` of it, else it minus the reserve) and drops a global fixed
+ * `thresholdTokens`; a percentage entry replaces both threshold fields. Results
+ * are cached per settings snapshot so hot paths allocate once per entry.
  */
-export function applyModelCompactionThreshold<T extends CompactionThresholdPair>(
+export function applyModelCompactionThreshold<T extends CompactionThresholdPair & { baseWindowTokens?: number }>(
 	settings: T,
 	raw: unknown,
 	model: { provider: string; id: string } | null | undefined,
@@ -140,15 +143,13 @@ export function applyModelCompactionThreshold<T extends CompactionThresholdPair>
 		appliedThresholds.set(settings, byKey);
 	}
 	const cached = byKey.get(match.key);
-	if (
-		cached &&
-		cached.thresholdPercent === match.threshold.thresholdPercent &&
-		cached.thresholdTokens === match.threshold.thresholdTokens
-	) {
-		return cached as T;
-	}
-	const applied: T = { ...settings, ...match.threshold };
-	byKey.set(match.key, applied);
+	if (cached?.threshold === match.threshold) return cached.applied as T;
+	const { thresholdPercent, thresholdTokens } = match.threshold;
+	const applied: T =
+		thresholdTokens > 0
+			? { ...settings, thresholdTokens: -1, baseWindowTokens: thresholdTokens }
+			: { ...settings, thresholdPercent, thresholdTokens: -1 };
+	byKey.set(match.key, { threshold: match.threshold, applied });
 	return applied;
 }
 
