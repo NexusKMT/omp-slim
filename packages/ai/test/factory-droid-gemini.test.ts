@@ -386,6 +386,18 @@ describe("Factory Droid gemini wire — finishReason mapping", () => {
 		expect(AIError.retriable(id)).toBe(true);
 	});
 
+	it.each([
+		{ code: 400, status: "INVALID_ARGUMENT", retriable: false },
+		{ code: 503, status: "UNAVAILABLE", retriable: true },
+	])("an in-band $code error frame keeps its status and classification", async ({ code, status, retriable }) => {
+		const errorFrame = JSON.stringify({ error: { code, message: "upstream said no", status } });
+		const { result } = await run("hi", [textChunk, errorFrame]);
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(code);
+		const id = AIError.classifyMessage({ errorId: result.errorId, errorMessage: result.errorMessage });
+		expect(AIError.retriable(id)).toBe(retriable);
+	});
+
 	it("keeps a promptFeedback block without a finishReason a non-retryable content filter", async () => {
 		const blocked = JSON.stringify({ promptFeedback: { blockReason: "PROHIBITED_CONTENT" } });
 		const { result } = await run("hi", [blocked]);
