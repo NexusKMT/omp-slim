@@ -88,7 +88,7 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 			if (existing.readyAt === undefined) await waitReady(client, name, "Browser relay", opts.signal);
 			if (await probeRelayServer(opts.cdpUrl)) return true;
 			// Live record but nothing listening: replace the wedged daemon.
-			await stopQuietly(client, name, "Browser relay", opts.signal);
+			await stopQuietly(client, name, "Browser relay", opts.signal, existing.id);
 			continue;
 		}
 		try {
@@ -112,7 +112,7 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 			);
 			if (started.op !== "start") continue;
 			if (await probeRelayServer(opts.cdpUrl)) return true;
-			await stopQuietly(client, name, "Browser relay", opts.signal);
+			await stopQuietly(client, name, "Browser relay", opts.signal, started.daemon.id);
 		} catch (error) {
 			throwIfAborted(opts.signal);
 			// Lost a cross-process start race; the next round adopts the winner.
@@ -141,7 +141,9 @@ export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortS
 	if (!existing || existing.state === "exited" || existing.state === "failed") {
 		// Another omp may have stopped the old relay and not yet registered its
 		// replacement; start or adopt it unless a relay the broker does not run serves.
-		if (await probeRelayServer(opts.cdpUrl)) return servesVersion(opts.cdpUrl, opts.signal);
+		const serving = await probeRelayServer(opts.cdpUrl);
+		throwIfAborted(opts.signal);
+		if (serving) return servesVersion(opts.cdpUrl, opts.signal);
 		await ensureRelayDaemon(opts);
 		return true;
 	}
@@ -149,15 +151,21 @@ export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortS
 	// possibly with a relay that has not printed its ready line yet.
 	if (existing.readyAt === undefined) await waitReady(client, name, "Browser relay", opts.signal);
 	if (await servesVersion(opts.cdpUrl, opts.signal)) return true;
-	const stopped = await stopQuietly(client, name, "Browser relay", opts.signal);
-	if (stopped?.state !== "exited" && stopped?.state !== "failed") return false;
-	await ensureRelayDaemon(opts);
+	// Stops only the generation judged outdated, not one another omp started since.
+	const stopped = await stopQuietly(client, name, "Browser relay", opts.signal, existing.id);
+	if (stopped?.state === "exited" || stopped?.state === "failed") {
+		await ensureRelayDaemon(opts);
+		return true;
+	}
+	if (stopped === undefined || stopped.id === existing.id) return false;
+	if (stopped.readyAt === undefined) await waitReady(client, name, "Browser relay", opts.signal);
 	return true;
 }
 
 /** Whether the relay at `cdpUrl` reports this OMP version on `/json/version` (ready or waiting for its extension). */
 async function servesVersion(cdpUrl: string, signal: AbortSignal | undefined): Promise<boolean> {
 	const response = await probeCdpResponse(`${cdpUrl}/json/version`, { timeoutMs: PROBE_TIMEOUT_MS, signal });
+	throwIfAborted(signal);
 	if (!response) return false;
 	try {
 		const parsed: unknown = JSON.parse(response.body);
