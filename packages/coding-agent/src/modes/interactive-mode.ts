@@ -2201,6 +2201,8 @@ export class InteractiveMode implements InteractiveModeContext {
 					);
 			}
 		});
+		// Keys pressed while a Tern startup loaded were held for these handlers.
+		this.ui.releaseHeldInput();
 
 		// Wire observer registry to EventBus
 		if (this.#eventBus) {

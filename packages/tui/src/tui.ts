@@ -196,6 +196,10 @@ export interface TUIStartOptions {
 	 * Paint without owning stdin: the terminal stays in cooked mode (kernel
 	 * echo + line editing at the hardware cursor) until {@link TUI.enableInput}
 	 * switches to raw input and replays the kernel-buffered keystrokes.
+	 *
+	 * A terminal expected to speak TSP needs raw input from the start, so it
+	 * gets it; its keystrokes are held instead (terminal reports still flow)
+	 * until {@link TUI.releaseHeldInput} replays them.
 	 */
 	deferInput?: boolean;
 }
@@ -991,6 +995,11 @@ export class TUI extends Container {
 	#cancelPostmortemRestore?: () => void;
 	/** True between a `deferInput` start() and enableInput(). */
 	#inputDeferred = false;
+	/**
+	 * Keystrokes held since a TSP `deferInput` start, replayed by
+	 * releaseHeldInput(); undefined when not holding.
+	 */
+	#heldInput: string[] | undefined;
 	// Always-on event-loop lag probe. The high default threshold keeps it quiet;
 	// it only logs `ui.loop-blocked` (with the current loop phase) when a frame
 	// budget is genuinely starved. Armed in start(), disarmed in stop().
@@ -1435,6 +1444,7 @@ export class TUI extends Container {
 		// `hello` query must go out now to confirm the surface.
 		const nativeExpected = this.terminal.tspExpected === true;
 		this.#inputDeferred = options?.deferInput === true && !nativeExpected;
+		this.#heldInput = options?.deferInput === true && nativeExpected ? [] : undefined;
 		this.#watchdog.start();
 		this.#ghosttyInitialImageDelayDone = false;
 		this.#ghosttyImageReadyAtMs = this.#renderScheduler.now() + TUI.#GHOSTTY_INITIAL_IMAGE_DELAY_MS;
@@ -2273,6 +2283,20 @@ export class TUI extends Container {
 		this.requestRender(true);
 	}
 
+	/**
+	 * Replay the keystrokes held since a TSP `deferInput` start through the
+	 * normal input path, then deliver input live. Call once the app's key
+	 * handlers are installed so a hotkey pressed during startup still fires.
+	 * Idempotent; no-op when nothing is held.
+	 */
+	releaseHeldInput(): void {
+		const held = this.#heldInput;
+		if (held === undefined) return;
+		this.#heldInput = undefined;
+		if (this.#stopped) return;
+		for (const data of held) this.#handleInput(data);
+	}
+
 	addStartListener(listener: StartListener): () => void {
 		this.#startListeners.add(listener);
 		return () => {
@@ -2464,6 +2488,7 @@ export class TUI extends Container {
 		this.#nativeHoldTimer?.cancel();
 		this.#nativeHoldTimer = undefined;
 		this.#clearNativeConfirm();
+		this.#heldInput = undefined;
 		const nativeWasLive = this.#nativeLive;
 		if (nativeWasLive) {
 			this.#native!.stop();
@@ -2781,6 +2806,11 @@ export class TUI extends Container {
 		}
 		if (data.length === 0) return;
 
+		if (this.#heldInput !== undefined) {
+			this.#holdInput(data);
+			return;
+		}
+
 		// If focused component is an overlay, verify it's still visible (visibility can change due to
 		// terminal resize or visible() callback). Runs before the capture preflight below, which must
 		// target the effective focus owner, not a hidden overlay.
@@ -2816,22 +2846,9 @@ export class TUI extends Container {
 			return;
 		}
 
-		if (this.#inputListeners.size > 0) {
-			let current = data;
-			for (const listener of this.#inputListeners) {
-				const result = listener(current);
-				if (result?.consume) {
-					return;
-				}
-				if (result?.data !== undefined) {
-					current = result.data;
-				}
-			}
-			if (current.length === 0) {
-				return;
-			}
-			data = current;
-		}
+		const current = this.#applyInputListeners(data);
+		if (current === undefined) return;
+		data = current;
 
 		// Consume terminal cell size responses without blocking unrelated input.
 		if (this.#consumeCellSizeResponse(data)) {
@@ -2858,6 +2875,30 @@ export class TUI extends Container {
 			focused.handleInput(data);
 			this.requestRender();
 		}
+	}
+
+	/** Run input listeners; undefined when one consumed the input or nothing remains. */
+	#applyInputListeners(data: string): string | undefined {
+		let current = data;
+		for (const listener of this.#inputListeners) {
+			const result = listener(current);
+			if (result?.consume) return undefined;
+			if (result?.data !== undefined) current = result.data;
+		}
+		return current.length === 0 ? undefined : current;
+	}
+
+	/**
+	 * Queue a keystroke typed before the app installed its key handlers. Probe
+	 * replies still reach their listeners now (their timeouts would otherwise
+	 * expire), and Ctrl+C/Ctrl+D release the queue so a stalled startup stays
+	 * interruptible.
+	 */
+	#holdInput(data: string): void {
+		const keys = this.#applyInputListeners(data);
+		if (keys === undefined || this.#consumeCellSizeResponse(keys)) return;
+		this.#heldInput!.push(keys);
+		if (matchesKey(keys, "ctrl+c") || matchesKey(keys, "ctrl+d")) this.releaseHeldInput();
 	}
 
 	#consumeCellSizeResponse(data: string): boolean {
