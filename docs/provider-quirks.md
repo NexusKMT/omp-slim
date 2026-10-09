@@ -2195,7 +2195,7 @@ Provider-specific overrides in `packages/catalog/src/compat/rules/providers/zhip
 ### Catalog model handling
 - **Provider entry (`coralbricks`)**: `packages/catalog/src/compat/rules/providers/coralbricks.kdl` declares default model `glm-5.3-fast`. Environment keys: `CORAL_API_KEY`, then `CORALBRICKS_API_KEY`.
 - **Discovery replacement**: Successful authoritative discovery replaces bundled provider rows rather than retaining retired seed models.
-- **Authored seeds**: `glm-5.3-fast`, `deepseek-v4.1-flash-fast`; bundle policy `always`. Limits, capabilities, and prices are authored alongside these rows. GLM 5.3 Flash retired on 2026-10-07; the older `-fp4` slugs remain resolvable aliases.
+- **Authored seeds**: `glm-5.3-fast`, `deepseek-v4.1-flash-fast`; bundle policy `always`. Limits, capabilities, and prices are authored alongside these rows. GLM 5.3 Flash retired on 2026-10-07.
 - Runtime manager: `coralbricksModelManagerOptions` in `packages/catalog/src/provider-models/openai-compat.ts`.
 
 ## DeepInfra (`deepinfra`)

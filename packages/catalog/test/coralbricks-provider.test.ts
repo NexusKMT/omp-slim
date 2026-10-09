@@ -52,7 +52,7 @@ function catalogFixture(): Response {
 			// A row the bundled catalog has never seen: neutral defaults, no
 			// capabilities invented from the live response.
 			coralRow({
-				id: "glm-5.2-fp4",
+				id: "coral-unknown-model",
 				pricing: { input_per_m: 0.75, output_per_m: 2.4 },
 				supports_tools: false,
 			}),
@@ -77,7 +77,7 @@ describe("CoralBricks built-in provider", () => {
 
 		// `/v1/models` is key-protected, so discovery must authenticate.
 		expect(requests).toEqual([{ url: DISCOVERY_URL, authorization: "Bearer cb-test-key" }]);
-		expect(models?.map(item => item.id)).toEqual(["deepseek-v4.1-flash-fast", "glm-5.2-fp4", "glm-5.3-fast"]);
+		expect(models?.map(item => item.id)).toEqual(["coral-unknown-model", "deepseek-v4.1-flash-fast", "glm-5.3-fast"]);
 
 		// Legacy rows without reasoning metadata keep the bundled fallback;
 		// the endpoint still publishes no output cap.
@@ -87,7 +87,7 @@ describe("CoralBricks built-in provider", () => {
 
 		// Unknown ids stay neutral: no invented reasoning or output cap, and
 		// the live tools flag maps through.
-		const unknown = models?.find(item => item.id === "glm-5.2-fp4");
+		const unknown = models?.find(item => item.id === "coral-unknown-model");
 		expect(unknown?.reasoning).toBe(false);
 		expect(unknown?.maxTokens).toBeNull();
 		expect(unknown?.cost).toEqual({ input: 0.75, output: 2.4, cacheRead: 0, cacheWrite: 0 });

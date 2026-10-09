@@ -23,8 +23,7 @@ provider "coralbricks" {
 	// Reviewed snapshot of the public catalog
 	// (https://www.coralbricks.ai/api/public/models). Coral retired GLM 5.3
 	// Flash on 2026-10-07 and renamed the remaining slugs (`glm-5.3-fast`,
-	// `deepseek-v4.1-flash-fast`); the older `-fp4` ids still resolve as
-	// aliases at the same price. The public rows list input/output rates
+	// `deepseek-v4.1-flash-fast`). The public rows list input/output rates
 	// only; cache-write rates come from Coral's published pricing and cached
 	// reads are $0 on every model. `/v1/models` needs a key, so generation
 	// without credentials bundles these rows; successful runtime discovery

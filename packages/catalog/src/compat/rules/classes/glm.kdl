@@ -106,12 +106,8 @@ class "glm" {
 	// and flashx/preview shapes that keep host dialects; the explicit priority resolves
 	// the intentional overlap with census host-dialect residues such as
 	// baseten's `zai-org/GLM-5*`.
-	// CoralBricks serves the same coding SKUs behind its OpenAI-compatible
-	// gateway as `glm-5.3-fast`; the older `-fp4` slugs still resolve as
-	// aliases, and the Flash SKU retired on 2026-10-07.
 	models "*glm-5.3" "*glm-5.3-air" "*glm-5.3-turbo" "*glm-5.3-flash" "*glm-5.3:*" \
-		"*glm-5.3-flash-uncensored" "*glm-5.3-free" "*glm-5.3-highspeed" "*glm-5.3-fast" "*glm-5.3-flash-lab" \
-		"*glm-5.3-fp4" priority=10 {
+		"*glm-5.3-flash-uncensored" "*glm-5.3-free" "*glm-5.3-highspeed" "*glm-5.3-fast" "*glm-5.3-flash-lab" priority=10 {
 		thinking-default-level "max"
 		thinking-efforts "low" "high" "max"
 		thinking-requires-effort #true

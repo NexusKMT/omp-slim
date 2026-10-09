@@ -1000,13 +1000,13 @@ describe("issue #10416 — retired bare opencode provider", () => {
 describe("mergePreviousSnapshotModels — static-seed-complete providers", () => {
 	// CoralBricks' reviewed KDL seed is the complete documented fallback
 	// catalog (`bundle="always"`; `/v1/models` is key-protected), and
-	// Yolo-Auto's is the same. A host-retired id (GLM 5.3 Flash, 2026-10-07)
-	// must not return as a previous-snapshot zombie while other providers'
-	// unfetched rows are still restored.
+	// Yolo-Auto's is the same. A host-retired id must not return as a
+	// previous-snapshot zombie while other providers' unfetched rows are
+	// still restored.
 	test("drops previous-snapshot rows for providers whose seed is the complete fallback catalog", () => {
 		const coralZombie = buildModel({
-			id: "glm-5.3-flash-fp4",
-			name: "GLM 5.3 Flash",
+			id: "retired-coral-model",
+			name: "Retired Coral Model",
 			api: "openai-completions",
 			provider: "coralbricks",
 			baseUrl: "https://inference.coralbricks.ai/v1",
