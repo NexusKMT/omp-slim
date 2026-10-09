@@ -552,6 +552,14 @@ function normalizeDevinModels(
 		}
 	}
 
+	// The account default outranks the family default, so its family starts on
+	// the account's own lane: that lane's wire uid and effort.
+	for (const lane of lanes.values()) {
+		if (accountDefaultUid !== undefined && lane.members.includes(accountDefaultUid)) {
+			lane.defaultMember = accountDefaultUid;
+		}
+	}
+
 	// Server-declared families first — they are live truth for wire uids, per
 	// effort routes, and the native default. The static table then collapses
 	// whatever upstream served without family metadata; families already

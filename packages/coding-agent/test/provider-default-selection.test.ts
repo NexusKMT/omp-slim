@@ -129,6 +129,23 @@ describe("provider default selection", () => {
 		});
 	});
 
+	test("starts a Devin family on the account default's lane when it is not the family default", async () => {
+		// SWE-2 High stays the server's family default; the account default names the Medium lane.
+		const devin = await discoverDevin(
+			[...swe2Lanes(false), devinConfig("swe-1-6", { family: "SWE-1.6" })],
+			"swe-2-medium",
+		);
+
+		const picked = pickDefaultAvailableModel(devin);
+
+		expect(picked).toMatchObject({
+			provider: "devin",
+			id: "swe-2",
+			requestModelId: "swe-2-medium",
+			thinking: { defaultLevel: "medium" },
+		});
+	});
+
 	test("gives a Free Devin account its account default, SWE-1.6 Slow, as Devin's default", async () => {
 		// Free serves only SWE-1.6 Slow, so the bundled `swe-1-6` is never listed. Without the account
 		// default Devin had no default of its own and lost to the next provider's.
