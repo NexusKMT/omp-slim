@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenAI V1 remote compaction re-attaching a prior Anthropic native payload after a successful compact
+
 ## [18.8.6] - 2026-10-08
 
 ### Added
