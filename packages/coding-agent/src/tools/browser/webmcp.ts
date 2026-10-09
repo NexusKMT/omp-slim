@@ -327,9 +327,11 @@ export function installWebMcpPageHook(key: string): void {
 			const descriptor = Object.getOwnPropertyDescriptor(owner, "modelContext");
 			if (!descriptor) continue;
 			const platform =
-				descriptor.get !== undefined &&
+				descriptor.get?.name === "get modelContext" &&
 				descriptor.configurable === true &&
-				Function.prototype.toString.call(descriptor.get).includes("[native code]");
+				/^function get modelContext\(\) \{\s*\[native code\]\s*\}$/.test(
+					Function.prototype.toString.call(descriptor.get),
+				);
 			if (platform) getters.push({ instance, owner, descriptor });
 			else pageContext ??= instance.modelContext;
 			break;

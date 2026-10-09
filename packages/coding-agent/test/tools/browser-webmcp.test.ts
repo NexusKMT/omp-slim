@@ -216,6 +216,12 @@ window.cachedContext = navigator.modelContext;`,
 			define: `Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: () => undefined });`,
 			registerOn: "navigator.modelContext",
 		},
+		{
+			setup: "a bound prototype accessor the page read before attach",
+			define: `Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: function () { return window.pageContext; }.bind(null) });
+window.cachedContext = navigator.modelContext;`,
+			registerOn: "window.cachedContext",
+		},
 	])(
 		"mirrors a tool registered after attach on a page whose modelContext is $setup",
 		async ({ define, registerOn }) => {
