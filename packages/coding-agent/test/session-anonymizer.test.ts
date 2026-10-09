@@ -186,7 +186,11 @@ describe("SessionAnonymizer", () => {
 				message: {
 					role: "assistant",
 					content: [
-						call("toolu_01abcdef", "mcp__crm_lookup", { status: "customer-acme", customerId: "account_12345" }),
+						call("toolu_01abcdef", "mcp__crm_lookup", {
+							status: "customer-acme",
+							customerId: "account_12345",
+							publishAt: "customer-acme",
+						}),
 						call("toolu_02abcdef", "todo", { op: "start" }),
 						call("toolu_03abcdef", "task", { tasks: [{ name: "Probe.v2" }] }),
 						call("toolu_04abcdef", "read", { path: "agent://Probe.v2" }),
@@ -198,7 +202,14 @@ describe("SessionAnonymizer", () => {
 				message: {
 					role: "toolResult",
 					toolName: "eval",
-					details: { jsonOutputs: { "/home/alice/acme/x.ts": 1, aliceCustomer: { status: "customer-acme" } } },
+					details: {
+						jsonOutputs: {
+							"/home/alice/acme/x.ts": 1,
+							aliceCustomer: { status: "customer-acme" },
+							aliceCustomerId: 3,
+							acmeFile: 4,
+						},
+					},
 				},
 			}),
 			anonymizer.entry({
@@ -206,8 +217,15 @@ describe("SessionAnonymizer", () => {
 				customType: "crm",
 				data: { toolCallId: "toolu_01abcdef", account: { customerId: "account_12345", aliceCustomer: 2 } },
 			}),
+			// Timestamp-shaped turn text is still turn content.
+			anonymizer.entry({
+				type: "message",
+				message: { role: "user", content: [{ type: "text", text: "2026-09-22T15:12:03Z" }] },
+			}),
 		]);
-		for (const word of ["acme", "alice", "Probe", "account_12345"]) expect(json).not.toContain(word);
+		for (const word of ["acme", "alice", "Probe", "account_12345", "2026-09-22T15:12:03Z"]) {
+			expect(json).not.toContain(word);
+		}
 		// Built-in tool options stay; the same key on an extension tool is user data.
 		expect(json).toContain('"op":"start"');
 		expect(json).toMatch(/"status":"PLACEHOLDER_\d+"/);

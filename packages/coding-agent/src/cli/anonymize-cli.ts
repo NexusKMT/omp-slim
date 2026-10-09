@@ -29,35 +29,41 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 		header,
 		entries: records.filter((record): record is SessionEntry => record.type !== "session"),
 		sessionFile: sourcePath,
+		malformedRecords,
 	});
-	const targets = result.files.map(([name, content]) => [path.join(outDir, name), content] as const);
-	// Never overwrite the input: `-o <session dir>` would replace the session (or a subagent
-	// transcript under `<stem>/`) with its redacted copy. Only existing targets can collide.
+	// The output must never hold raw transcripts: writing into the session's directory (or an ancestor)
+	// could overwrite the session and would bundle it, and `<stem>/` holds raw subagent transcripts.
 	const sourceReal = await fs.realpath(sourcePath);
-	const subagentDirReal = `${sourceReal.slice(0, -".jsonl".length)}${path.sep}`;
-	for (const [target] of targets) {
-		let targetReal: string;
-		try {
-			targetReal = await fs.realpath(target);
-		} catch (err) {
-			if (isEnoent(err)) continue;
-			throw err;
-		}
-		if (targetReal === sourceReal || targetReal.startsWith(subagentDirReal)) {
-			throw new CliUsageError(
-				`Refusing to overwrite source transcript ${targetReal}; choose another --out directory`,
-			);
-		}
+	const outReal = await realpathAllowingMissing(outDir);
+	if (isWithin(path.dirname(sourceReal), outReal) || isWithin(outReal, sourceReal.slice(0, -".jsonl".length))) {
+		throw new CliUsageError(
+			`--out ${outDir} would mix the export with raw session transcripts; choose another directory`,
+		);
 	}
-	for (const [target, content] of targets) await Bun.write(target, content);
+	for (const [name, content] of result.files) await Bun.write(path.join(outDir, name), content);
 
 	const count = result.files.length;
 	process.stdout.write(`Anonymized ${count} transcript${count === 1 ? "" : "s"} → ${outDir}\n`);
 	if (result.subagentError) process.stdout.write(`Subagent transcripts unavailable: ${result.subagentError}\n`);
-	if (malformedRecords > 0) {
-		process.stdout.write(
-			`Skipped ${malformedRecords} malformed record${malformedRecords === 1 ? "" : "s"} in ${sourcePath}; the export omits them\n`,
-		);
+	for (const [member, skipped] of result.malformed) {
+		process.stdout.write(`Skipped ${skipped} malformed record${skipped === 1 ? "" : "s"} in ${member}\n`);
 	}
 	process.stdout.write(`${ANONYMIZED_REVIEW_NOTE}\n`);
+}
+
+/** Whether `child` is `parent` or lies beneath it. */
+function isWithin(child: string, parent: string): boolean {
+	return child === parent || child.startsWith(`${parent}${path.sep}`);
+}
+
+/** Real path of `target`, resolving its nearest existing ancestor when it does not exist yet. */
+async function realpathAllowingMissing(target: string): Promise<string> {
+	try {
+		return await fs.realpath(target);
+	} catch (err) {
+		if (!isEnoent(err)) throw err;
+		const parent = path.dirname(target);
+		if (parent === target) throw err;
+		return path.join(await realpathAllowingMissing(parent), path.basename(target));
+	}
 }

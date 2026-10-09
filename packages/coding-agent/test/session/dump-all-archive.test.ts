@@ -108,7 +108,11 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		if (!sessionFile) throw new Error("Expected a persistent session file");
 		const subDir = sessionFile.slice(0, -".jsonl".length);
 		await Bun.write(path.join(subDir, "Scout.jsonl"), subagentJsonl("scout", "scout task"));
-		await Bun.write(path.join(subDir, "Scout", "Helper.jsonl"), subagentJsonl("helper", "helper task"));
+		// A truncated trailing record: the transcript still loads, and the skip must be reported.
+		await Bun.write(
+			path.join(subDir, "Scout", "Helper.jsonl"),
+			`${subagentJsonl("helper", "helper task")}{"type":"message","id":"helper-x`,
+		);
 
 		const archive = await session.dumpAnonymizedArchiveToTmpDir();
 		if (!archive) throw new Error("Expected an archive");
@@ -120,6 +124,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		expect(main).toBe("session.jsonl");
 		expect(scout).toMatch(/^subagents\/seg\d+\.jsonl$/);
 		expect(helper).toMatch(new RegExp(`^${scout.slice(0, -".jsonl".length)}/seg\\d+\\.jsonl$`));
+		expect(archive.malformed).toEqual([[helper, 1]]);
 		const entries = await readArchiveEntries({ bytes: await Bun.file(archive.path).bytes(), format: "zip" });
 		const scoutLines = new TextDecoder()
 			.decode(entries.get(scout))

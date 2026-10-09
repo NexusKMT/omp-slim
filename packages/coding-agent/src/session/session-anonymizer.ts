@@ -368,6 +368,16 @@ const PROTOCOL_ID_KEYS: Record<string, true> = {
 	turn_id: true,
 };
 
+/** omp-written timestamp fields; ISO values here stay even inside extension payloads. */
+const TIMESTAMP_KEYS: Record<string, true> = {
+	timestamp: true,
+	startedAt: true,
+	recordedAt: true,
+	updatedAt: true,
+	createdAt: true,
+	completedAt: true,
+};
+
 /** Keys omp itself writes; the only object keys kept verbatim inside untrusted data containers. */
 const KNOWN_KEYS: Record<string, true> = {
 	...TEXT_KEYS,
@@ -387,17 +397,14 @@ const KNOWN_KEYS: Record<string, true> = {
 	path: true,
 	paths: true,
 	cwd: true,
-	timestamp: true,
-	startedAt: true,
+	...TIMESTAMP_KEYS,
+	readFiles: true,
+	modifiedFiles: true,
+	files: true,
 };
 
 /** Object keys shaped like schema fields; anything else (paths, labels) is data. */
 const SCHEMA_KEY = /^(?:[A-Za-z_$][\w$]{0,63}|\d+)$/;
-
-/** Whether a key inside untrusted data is omp vocabulary (`readFiles`, `toolCallId`) rather than user data. */
-function isKnownDataKey(key: string): boolean {
-	return KNOWN_KEYS[key] === true || PATH_KEY.test(key) || ID_KEY.test(key);
-}
 
 const ID_KEY = /(?:^id|Id|_id|Ids)$/;
 /** Machine-minted ids: hex/uuid, or `prefix_<digits>` / `prefix_<token containing a digit>` (`toolu_01…`, `call_…|fc_…`). */
@@ -558,7 +565,7 @@ export class SessionAnonymizer {
 				const childScope = scope === "meta" ? this.#childScope(childKey, value) : scope;
 				// Data containers carry arbitrary maps (`display({ aliceCustomer: 1 })`), so only keys omp
 				// itself writes survive there; trusted structure keeps schema-shaped keys.
-				const keepKey = scope === "data" ? isKnownDataKey(childKey) : SCHEMA_KEY.test(childKey);
+				const keepKey = scope === "data" ? KNOWN_KEYS[childKey] === true : SCHEMA_KEY.test(childKey);
 				out[keepKey ? childKey : this.#literal(childKey)] = this.#value(child, childKey, value, childScope);
 			}
 			return out;
@@ -591,8 +598,15 @@ export class SessionAnonymizer {
 	}
 
 	#string(value: string, key: string | undefined, parent: JsonObject | undefined, scope: Scope): string {
-		if (ISO_TIMESTAMP.test(value)) return value;
 		if (key === undefined) return this.#literal(value);
+		// Timestamps are metadata only in omp-written fields; turn text or extension data that happens
+		// to be timestamp-shaped is content.
+		if (
+			ISO_TIMESTAMP.test(value) &&
+			(TIMESTAMP_KEYS[key] === true || (scope === "meta" && TEXT_KEYS[key] !== true))
+		) {
+			return value;
+		}
 		if (ID_KEY.test(key) && /^\S{1,512}$/.test(value)) {
 			// Protocol links stay raw everywhere so call ↔ result ↔ execution-log stay joinable. Other
 			// machine-minted ids stay in omp-written structure; in untrusted data (`customerId`) every
@@ -600,7 +614,7 @@ export class SessionAnonymizer {
 			if (PROTOCOL_ID_KEYS[key] === true) return value;
 			return scope !== "data" && RANDOM_ID.test(value) ? value : this.segment(value);
 		}
-		if (key.endsWith("At") && IDENTIFIER.test(value)) return value;
+		if (scope === "meta" && key.endsWith("At") && IDENTIFIER.test(value)) return value;
 		if (PATH_KEYS[key] === true || PATH_KEY.test(key)) return MESSAGE_ADDRESS.test(value) ? value : this.path(value);
 		if (key === "command" || key === "cmd") return this.command(value);
 		if (scope !== "meta") {
@@ -748,6 +762,8 @@ export interface AnonymizeSessionInput {
 	header: SessionHeader | null;
 	entries: readonly SessionEntry[];
 	sessionFile?: string;
+	/** Malformed records the caller skipped while loading the main transcript. */
+	malformedRecords?: number;
 }
 
 /** Anonymized JSONL bodies for a session and its persisted subagents. */
@@ -757,6 +773,8 @@ export interface AnonymizedTranscripts {
 	subagentCount: number;
 	/** Why subagent discovery failed; the main transcript is anonymized regardless. */
 	subagentError?: string;
+	/** `[member path, count]` for transcripts whose malformed JSONL records were skipped. */
+	malformed: Array<readonly [string, number]>;
 }
 
 /**
@@ -770,6 +788,8 @@ export async function anonymizeSessionTranscripts(session: AnonymizeSessionInput
 		return `${records.map(record => JSON.stringify(anonymizer.entry(record))).join("\n")}\n`;
 	};
 	const files: Array<readonly [string, string]> = [["session.jsonl", toJsonl(session.header, session.entries)]];
+	const malformed: Array<readonly [string, number]> = [];
+	if (session.malformedRecords) malformed.push(["session.jsonl", session.malformedRecords]);
 	let subSessions: Record<string, SubSession> = {};
 	let subagentError: string | undefined;
 	try {
@@ -784,7 +804,9 @@ export async function anonymizeSessionTranscripts(session: AnonymizeSessionInput
 			.split("/")
 			.map(part => anonymizer.segment(part))
 			.join("/");
-		files.push([`subagents/${mappedKey}.jsonl`, toJsonl(sub.header, sub.entries)]);
+		const member = `subagents/${mappedKey}.jsonl`;
+		files.push([member, toJsonl(sub.header, sub.entries)]);
+		if (sub.malformedRecords > 0) malformed.push([member, sub.malformedRecords]);
 	}
-	return { files, subagentCount: files.length - 1, subagentError };
+	return { files, subagentCount: files.length - 1, subagentError, malformed };
 }

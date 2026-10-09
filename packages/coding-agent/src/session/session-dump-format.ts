@@ -286,6 +286,8 @@ export interface SessionDumpArchive {
 	subagentError?: string;
 	/** Members are anonymized session JSONL (`/dump anon`), not raw transcripts. */
 	anonymized?: boolean;
+	/** `[member, count]` for transcripts whose malformed JSONL records were skipped. */
+	malformed?: ReadonlyArray<readonly [string, number]>;
 }
 
 /** Lines describing a `/dump all` archive: path, members, and any subagent discovery failure. */
@@ -298,6 +300,9 @@ export function formatDumpArchiveReport(archive: SessionDumpArchive): string[] {
 		...archive.files.map(file => `  ${file}`),
 	];
 	if (archive.subagentError) lines.push(`Subagent transcripts unavailable: ${archive.subagentError}`);
+	for (const [member, skipped] of archive.malformed ?? []) {
+		lines.push(`Skipped ${skipped} malformed record${skipped === 1 ? "" : "s"} in ${member}`);
+	}
 	lines.push(
 		archive.anonymized
 			? ANONYMIZED_REVIEW_NOTE

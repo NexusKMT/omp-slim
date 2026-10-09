@@ -13163,6 +13163,7 @@ export class AgentSession implements SettingsScope {
 			subagentCount: result.subagentCount,
 			subagentError: result.subagentError,
 			anonymized: true,
+			malformed: result.malformed,
 		};
 	}
 

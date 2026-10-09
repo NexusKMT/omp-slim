@@ -18,14 +18,25 @@ describe("omp anonymize output", () => {
 		await tempDir.remove();
 	});
 
-	it("refuses an --out directory that would overwrite the source session", async () => {
+	it("refuses an --out directory that would overwrite or bundle the source session", async () => {
 		const source = path.join(tempDir.path(), "session.jsonl");
 		await Bun.write(source, SESSION);
 
 		await expect(runAnonymizeCommand({ session: source, out: tempDir.path() })).rejects.toThrow(
-			"Refusing to overwrite source transcript",
+			"would mix the export with raw session transcripts",
 		);
 		expect(await Bun.file(source).text()).toBe(SESSION);
+	});
+
+	it("refuses an --out directory inside the raw subagent directory, even before it exists", async () => {
+		const source = path.join(tempDir.path(), "main.jsonl");
+		await Bun.write(source, SESSION);
+		await Bun.write(path.join(tempDir.path(), "main", "Scout.jsonl"), SESSION);
+
+		await expect(runAnonymizeCommand({ session: source, out: path.join(tempDir.path(), "main") })).rejects.toThrow(
+			"would mix the export with raw session transcripts",
+		);
+		expect(await Bun.file(path.join(tempDir.path(), "main", "session.jsonl")).exists()).toBe(false);
 	});
 
 	it("rejects a file without a valid session header instead of writing an empty bundle", async () => {

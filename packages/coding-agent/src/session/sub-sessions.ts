@@ -11,7 +11,7 @@ import { isEnoent } from "@oh-my-pi/pi-utils";
 import { isAdvisorTranscriptName } from "../advisor/transcript-recorder";
 import { getAgentTombstonePath } from "../registry/agent-tombstone";
 import type { SessionEntry, SessionHeader } from "./session-entries";
-import { loadEntriesFromFile } from "./session-loader";
+import { loadSessionFile } from "./session-loader";
 
 /** Persisted subagent session transcript, keyed by slash-joined agent path. */
 export interface SubSession {
@@ -24,6 +24,8 @@ export interface SubSession {
 	leafId: string | null;
 	/** The subagent was explicitly killed (a tombstone sidecar sits next to its transcript). */
 	aborted: boolean;
+	/** JSONL records skipped as malformed while loading this transcript. */
+	malformedRecords: number;
 }
 
 /**
@@ -61,7 +63,7 @@ async function collectSubSessionsFromDir(
 		if (!name.endsWith(".jsonl") || name.includes(".bak") || isAdvisorTranscriptName(name)) continue;
 		const agentId = name.slice(0, -6);
 		const key = parentKey ? `${parentKey}/${agentId}` : agentId;
-		const fileEntries = await loadEntriesFromFile(path.join(dir, name));
+		const { entries: fileEntries, malformedRecords } = await loadSessionFile(path.join(dir, name));
 		// Empty/corrupt files (no valid session header) load as [] — skip silently.
 		if (fileEntries.length > 0) {
 			const header = (fileEntries.find(e => e.type === "session") as SessionHeader | undefined) ?? null;
@@ -73,6 +75,7 @@ async function collectSubSessionsFromDir(
 				entries,
 				leafId: entries.length > 0 ? entries[entries.length - 1].id : null,
 				aborted: fileNames.has(getAgentTombstonePath(name)),
+				malformedRecords,
 			};
 		}
 		// Only descend into real child directories: a transcript stem such as "." or ".."
