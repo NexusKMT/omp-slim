@@ -268,5 +268,53 @@ describe("SessionAnonymizer", () => {
 		expect(anonymizer.command("git -C acme status")).toBe(
 			`git -C ${anonymizer.placeholder("acme")} ${anonymizer.placeholder("status")}`,
 		);
+		// Numeric operands may be ids or PINs; `-3` style flags and `2>&1` descriptors stay.
+		const numeric = anonymizer.command("curl --data 123456789 https://x.test/a 2>&1 | head -3");
+		expect(numeric).not.toContain("123456789");
+		expect(numeric).toContain("2>&1 | head -3");
+	});
+
+	test("tokenizes numeric path segments", () => {
+		const anonymizer = new SessionAnonymizer();
+		expect(anonymizer.path("/customers/123456789/private.ts:10-20")).toMatch(/^\/seg\d+\/seg\d+\/seg\d+\.ts:10-20$/);
+	});
+
+	test("does not trust a built-in tool name with values outside the built-in vocabulary", () => {
+		// Extensions may shadow built-in tool names; the transcript records no provenance.
+		const anonymizer = new SessionAnonymizer();
+		const json = JSON.stringify([
+			anonymizer.entry({
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "toolCall",
+							id: "toolu_01abcdef",
+							name: "todo",
+							arguments: { op: "start", status: "customer-acme", jobId: "account_12345" },
+						},
+					],
+				},
+			}),
+			anonymizer.entry({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "toolu_01abcdef",
+					toolName: "task",
+					details: {
+						status: "customer-acme",
+						jobId: "account_12345",
+						results: [{ structuredOutput: { data: { status: "customer-acme" } } }],
+						progress: [{ status: "completed", tokens: 12 }],
+					},
+				},
+			}),
+		]);
+		expect(json).not.toContain("acme");
+		expect(json).not.toContain("account_12345");
+		expect(json).toContain('"op":"start"');
+		expect(json).toContain('"progress":[{"status":"completed","tokens":12}]');
 	});
 });

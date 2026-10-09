@@ -13154,6 +13154,7 @@ export class AgentSession implements SettingsScope {
 			header: this.sessionManager.getHeader(),
 			entries: this.sessionManager.getEntries(),
 			sessionFile: this.sessionManager.getSessionFile(),
+			malformedRecords: this.sessionManager.loadedMalformedRecords,
 		});
 		const filePath = path.join(os.tmpdir(), `omp-dump-anon-${Snowflake.next()}.zip`);
 		await writeArchive(filePath, "zip", result.files);

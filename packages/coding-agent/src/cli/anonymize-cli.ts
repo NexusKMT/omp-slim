@@ -19,21 +19,28 @@ export interface AnonymizeCommandArgs {
 }
 
 export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<void> {
-	const sourcePath = await resolveSessionFileArg(args.session, getProjectDir());
+	let sourcePath: string;
+	try {
+		sourcePath = await resolveSessionFileArg(args.session, getProjectDir());
+	} catch (err) {
+		// Unknown path/id or no sessions for the cwd is an input mistake, not a crash.
+		throw new CliUsageError(err instanceof Error ? err.message : String(err));
+	}
 	const outDir = path.resolve(args.out ?? `${path.basename(sourcePath, ".jsonl")}.anon`);
-	const { entries: records, malformedRecords } = await loadSessionFile(sourcePath);
+	// Subagent transcripts sit next to the real file, not next to a symlink pointing at it.
+	const sourceReal = await fs.realpath(sourcePath);
+	const { entries: records, malformedRecords } = await loadSessionFile(sourceReal);
 	// The loader returns [] for a file without a valid session header.
 	const header = records.find((record): record is SessionHeader => record.type === "session");
 	if (!header) throw new CliUsageError(`${sourcePath} is not a valid session file`);
 	const result = await anonymizeSessionTranscripts({
 		header,
 		entries: records.filter((record): record is SessionEntry => record.type !== "session"),
-		sessionFile: sourcePath,
+		sessionFile: sourceReal,
 		malformedRecords,
 	});
 	// The output must never hold raw transcripts: writing into the session's directory (or an ancestor)
 	// could overwrite the session and would bundle it, and `<stem>/` holds raw subagent transcripts.
-	const sourceReal = await fs.realpath(sourcePath);
 	const outReal = await realpathAllowingMissing(outDir);
 	if (isWithin(path.dirname(sourceReal), outReal) || isWithin(outReal, sourceReal.slice(0, -".jsonl".length))) {
 		throw new CliUsageError(

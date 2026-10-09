@@ -140,6 +140,35 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		}
 	});
 
+	it("reports malformed records skipped while loading the main session", async () => {
+		const file = path.join(tempDir.path(), "corrupt.jsonl");
+		await Bun.write(file, `${subagentJsonl("main", "hello")}{"type":"message","id":"broken`);
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("Expected bundled anthropic model");
+		const reopened = new AgentSession({
+			agent: new Agent({
+				initialState: {
+					model,
+					systemPrompt: [],
+					tools: [],
+					messages: [{ role: "user", content: "x", timestamp: 1 }],
+				},
+			}),
+			sessionManager: await SessionManager.open(file, tempDir.path()),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry: new ModelRegistry(createInMemoryAuthStorage()),
+			advisorTools: [],
+		});
+		try {
+			const archive = await reopened.dumpAnonymizedArchiveToTmpDir();
+			if (!archive) throw new Error("Expected an archive");
+			archives.push(archive.path);
+			expect(archive.malformed).toEqual([["session.jsonl", 1]]);
+		} finally {
+			await reopened.dispose();
+		}
+	});
+
 	it("returns undefined when the main session has no messages", async () => {
 		session.agent.state.messages = [];
 		expect(await session.dumpSessionArchiveToTmpDir()).toBeUndefined();

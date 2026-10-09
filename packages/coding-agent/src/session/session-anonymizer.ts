@@ -15,6 +15,7 @@
 import { logger } from "@oh-my-pi/pi-utils";
 import { getBundledAgentsMap } from "../task/agents";
 import { BUILTIN_TOOL_NAMES, isMCPToolName } from "../tools/builtin-names";
+import { lexShellCommand } from "../tools/shell-tokenize";
 import type { SessionEntry, SessionHeader } from "./session-entries";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
 
@@ -443,34 +444,121 @@ const PATH_KEYS: Record<string, true> = {
 	uri: true,
 };
 
-/** Tool-call argument keys whose identifier-shaped values are option enums, not content. */
-const ARG_ENUM_KEYS: Record<string, true> = {
-	op: true,
-	mode: true,
-	action: true,
-	language: true,
-	kind: true,
-	format: true,
-	type: true,
-	case: true,
-	recency: true,
-	schemaMode: true,
-	level: true,
-	method: true,
-	operation: true,
-	scope: true,
-	sort: true,
-	order: true,
-	state: true,
-	status: true,
-	encoding: true,
-	shell: true,
-	strategy: true,
-	role: true,
-	model: true,
-	provider: true,
-	effort: true,
-	thinking: true,
+/**
+ * Option values of built-in tools and built-in tool details, kept only when listed. An extension may
+ * shadow a built-in tool name and the transcript does not record provenance, so a built-in-looking
+ * name never lets an arbitrary value through: unlisted values become placeholders.
+ */
+const TOOL_ENUM_VALUES: Record<string, ReadonlySet<string>> = {
+	op: new Set([
+		"init",
+		"start",
+		"done",
+		"drop",
+		"rm",
+		"append",
+		"update",
+		"block",
+		"wait",
+		"jobs",
+		"send",
+		"stop",
+		"cancel",
+		"logs",
+		"view",
+		"delete",
+		"list",
+		"kill",
+	]),
+	language: new Set(["py", "js", "python", "javascript", "typescript", "ts"]),
+	languages: new Set(["py", "js", "python", "javascript", "typescript", "ts"]),
+	recency: new Set(["day", "week", "month", "year"]),
+	case: new Set(["smart", "sensitive", "insensitive"]),
+	status: new Set([
+		"complete",
+		"completed",
+		"running",
+		"success",
+		"pending",
+		"error",
+		"failed",
+		"cancelled",
+		"skipped",
+		"done",
+		"aborted",
+	]),
+	direction: new Set(["head", "middle", "tail"]),
+	truncatedBy: new Set(["lines", "bytes", "middle"]),
+	unit: new Set(["bytes", "chars", "lines"]),
+	type: new Set(["path", "internal", "url", "file", "directory", "task", "bash"]),
+	state: new Set(["running", "ready", "exited", "starting", "failed", "stopped"]),
+	kind: new Set(["url", "file", "directory"]),
+	method: new Set([
+		"text",
+		"json",
+		"failed",
+		"native",
+		"raw",
+		"image",
+		"jina",
+		"trafilatura",
+		"md-suffix",
+		"content-negotiation",
+		"alternate-feed",
+		"alternate-markdown",
+		"github-pr",
+		"github-repo",
+		"github-issue",
+		"github-raw",
+		"github-commit",
+		"github-tree",
+		"twitter-nitter",
+	]),
+	source: new Set(["interrupt_skipped", "assistant_stop_aborted", "assistant_stop_error"]),
+	execution: new Set(["started", "completed"]),
+	storage: new Set(["session", "file"]),
+	agentSource: new Set(["bundled", "user", "project"]),
+	modelRole: new Set(["default", "smol", "slow", "plan", "vision", "commit"]),
+	resolvedThinkingLevel: new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]),
+	outcome: new Set(["injected", "woken", "revived", "failed"]),
+	server: new Set(["typescript-native", "typescript-language-server", "rust-analyzer", "gopls", "pyright", "clangd"]),
+	contentType: new Set([
+		"text/markdown",
+		"text/plain",
+		"text/html",
+		"text/css",
+		"text/csv",
+		"text/xml",
+		"text/javascript",
+		"text/typescript",
+		"application/json",
+		"application/xml",
+		"application/pdf",
+		"application/octet-stream",
+		"application/feed",
+		"image/png",
+		"image/jpeg",
+		"image/webp",
+		"image/gif",
+		"image/svg+xml",
+		"video/mp4",
+		"audio/mpeg",
+		"unknown",
+	]),
+};
+
+/** Built-in tool argument keys holding free-form structures (env maps, schemas, structured output). */
+const OPAQUE_ARG_KEYS: Record<string, true> = {
+	env: true,
+	data: true,
+	result: true,
+	outputSchema: true,
+	schema: true,
+	headers: true,
+	json: true,
+	variables: true,
+	params: true,
+	payload: true,
 };
 
 /** Tool-call argument keys holding search text: always a placeholder, never path-mapped. */
@@ -762,10 +850,7 @@ const GLOB_CHARS = /([*?[\]{},])/;
 const EXT_ONLY = /^(?:\.[A-Za-z0-9]{1,10})+$/;
 /** Provider transcript addresses (`messages.3.content.0`), not filesystem paths. */
 const MESSAGE_ADDRESS = /^messages(?:\.\w+)+$/;
-const SHELL_OPERATOR = /&&|\|\||;;|\d?>>?&?\d?|<<-?|[|;&()<>\n]/y;
-const SHELL_BLANK = /[^\S\n]+/y;
 const SHELL_FLAG = /^--?[A-Za-z][\w-]*$/;
-const NUMBER = /^-?\d+(?:\.\d+)?$/;
 const ENV_REF = /^\$\{?\w+\}?$/;
 const ENV_ASSIGN = /^([A-Za-z_]\w*)=([\s\S]*)$/;
 const MAX_PLACEHOLDER_LENGTH = 120;
@@ -822,7 +907,8 @@ export class SessionAnonymizer {
 
 	/** Mock name for a single path segment (also used for output file names). */
 	segment(value: string): string {
-		if (value === "" || value === "." || value === ".." || value === "~" || /^\d+$/.test(value)) return value;
+		// Numeric segments are often tenant/ticket/account ids; only `.`/`..`/`~` pass through.
+		if (value === "" || value === "." || value === ".." || value === "~") return value;
 		// Session file stems (`<iso-time>_<session-id>`) only repeat kept metadata; leaving them
 		// intact keeps `parentSession` pointing at the anonymized parent's real file name.
 		if (KEEP_SEGMENTS[value] === true || SESSION_STEM.test(value)) return value;
@@ -896,18 +982,21 @@ export class SessionAnonymizer {
 		return this.redactText(typeof value === "string" ? value : JSON.stringify(value));
 	}
 
-	/** Walk an omp-defined object: ruled fields by rule, unknown fields opaque under a tokenized key. */
-	#struct(object: JsonObject): JsonObject {
+	/**
+	 * Walk an omp-defined object: ruled fields by rule, unknown fields opaque under a tokenized key.
+	 * `fromTool` marks built-in tool details, whose writer cannot be verified from the transcript.
+	 */
+	#struct(object: JsonObject, fromTool = false): JsonObject {
 		const out: JsonObject = {};
 		for (const [key, value] of Object.entries(object)) {
 			const rule = Object.hasOwn(FIELD_RULES, key) ? FIELD_RULES[key] : undefined;
 			if (rule === undefined) out[this.placeholder(key)] = this.#opaque(value);
-			else out[key] = this.#field(rule, value, object);
+			else out[key] = this.#field(rule, value, object, key, fromTool);
 		}
 		return out;
 	}
 
-	#field(rule: Rule, value: unknown, parent: JsonObject): unknown {
+	#field(rule: Rule, value: unknown, parent: JsonObject, key: string, fromTool: boolean): unknown {
 		if (rule === "opaque") return this.#opaque(value);
 		if (value === null || typeof value === "number" || typeof value === "boolean") {
 			return rule === "label" ? this.placeholder(String(value)) : value;
@@ -918,17 +1007,23 @@ export class SessionAnonymizer {
 			case "details":
 				// Built-in tools write their own details; anything else is an extension payload.
 				return parent.role === "toolResult" && isBuiltinTool(parent.toolName) && isObject(value)
-					? this.#struct(value)
+					? this.#struct(value, true)
 					: this.#opaque(value);
 			case "data":
 				// omp's execution log mirrors the tool call; every other custom entry is extension state.
 				return parent.type === "custom" && parent.customType === "tool_execution_start" && isObject(value)
-					? this.#struct(value)
+					? this.#struct(value, fromTool)
 					: this.#opaque(value);
 			case "name":
-				return this.#field(TOOL_CALL_TYPES[String(parent.type)] === true ? "tool" : "label", value, parent);
+				return this.#field(
+					TOOL_CALL_TYPES[String(parent.type)] === true ? "tool" : "label",
+					value,
+					parent,
+					key,
+					fromTool,
+				);
 		}
-		if (Array.isArray(value)) return value.map(item => this.#field(rule, item, parent));
+		if (Array.isArray(value)) return value.map(item => this.#field(rule, item, parent, key, fromTool));
 		if (isObject(value)) {
 			// Only structural rules descend; a scalar field holding an object is not omp's shape.
 			const descends =
@@ -938,19 +1033,22 @@ export class SessionAnonymizer {
 				rule === "id" ||
 				rule === "path" ||
 				rule === "tool";
-			return descends ? this.#struct(value) : this.#opaque(value);
+			return descends ? this.#struct(value, fromTool) : this.#opaque(value);
 		}
 		if (typeof value !== "string") return this.#opaque(value);
-		return this.#string(rule, value);
+		return this.#string(rule, value, key, fromTool);
 	}
 
-	#string(rule: Rule, value: string): string {
+	#string(rule: Rule, value: string, key: string, fromTool: boolean): string {
 		switch (rule) {
 			case "time":
 				return ISO_TIMESTAMP.test(value) ? value : this.placeholder(value);
 			case "enum":
+				// Tool-written values come from a closed list: a shadowing extension can reuse any field name.
+				if (fromTool) return TOOL_ENUM_VALUES[key]?.has(value) ? value : this.placeholder(value);
 				return value.length <= 64 && IDENTIFIER.test(value) ? value : this.placeholder(value);
 			case "identity":
+				if (fromTool) return /^[\w.-]+\/[\w.:@+-]+$/.test(value) ? value : this.placeholder(value);
 				return IDENTIFIER.test(value) ? value : this.placeholder(value);
 			case "agent":
 				return getBundledAgentsMap().has(value) ? value : this.placeholder(value);
@@ -959,12 +1057,12 @@ export class SessionAnonymizer {
 					? value
 					: value
 							.split(",")
-							.map(part => this.#string("agent", part.trim()))
+							.map(part => this.#string("agent", part.trim(), key, fromTool))
 							.join(",");
 			case "id":
-				// Machine-minted ids stay joinable with provider logs; named ids (subagent names) are
-				// mapped like the `agent://` segment they mirror.
-				return RANDOM_ID.test(value) ? value : this.segment(value);
+				// Machine-minted ids omp writes stay joinable with provider logs; tool-written and named
+				// ids (subagent names) are mapped like the `agent://` segment they mirror.
+				return !fromTool && RANDOM_ID.test(value) ? value : this.segment(value);
 			case "path":
 				return MESSAGE_ADDRESS.test(value) ? value : this.path(value);
 			case "cmd":
@@ -1012,94 +1110,88 @@ export class SessionAnonymizer {
 		if (isObject(value)) {
 			const out: JsonObject = {};
 			for (const [childKey, child] of Object.entries(value)) {
-				// `env` maps user-chosen variable names to values.
-				if (childKey === "env") out[childKey] = this.#opaque(child);
+				if (OPAQUE_ARG_KEYS[childKey] === true) out[childKey] = this.#opaque(child);
 				else out[SCHEMA_KEY.test(childKey) ? childKey : this.#literal(childKey)] = this.#argValue(child, childKey);
 			}
 			return out;
 		}
 		if (typeof value !== "string") return this.#opaque(value);
 		if (key === undefined) return this.#literal(value);
-		if (ID_KEY.test(key)) return RANDOM_ID.test(value) ? value : this.segment(value);
+		// Model-written ids are tokenized (consistently), never exported raw.
+		if (ID_KEY.test(key)) return this.segment(value);
 		if (PATH_KEYS[key] === true || PATH_KEY.test(key)) return this.path(value);
 		if (key === "command" || key === "cmd") return this.command(value);
-		if (key === "agent") return this.#string("agent", value);
-		if (ARG_ENUM_KEYS[key] === true && value.length <= 64 && IDENTIFIER.test(value)) return value;
+		if (key === "agent") return this.#string("agent", value, key, true);
+		if (TOOL_ENUM_VALUES[key]?.has(value)) return value;
 		if (TEXT_ARG_KEYS[key] === true) return this.redactText(value);
 		return this.#literal(value, PATTERN_ARG_KEYS[key] !== true);
 	}
 
-	/** Shell command with program names, flags, operators, and numbers kept; literals replaced. */
+	/** Shell command with allowlisted programs, their flags/subcommands, and operators kept; literals replaced. */
 	command(value: string): string {
-		const out: string[] = [];
+		let out = "";
 		let commandStart = true;
 		let program: string | undefined;
 		let argIndex = 0;
 		let redirectTarget = false;
-		let i = 0;
-		while (i < value.length) {
-			SHELL_BLANK.lastIndex = i;
-			const blank = SHELL_BLANK.exec(value);
-			if (blank) {
-				out.push(blank[0]);
-				i += blank[0].length;
-				continue;
-			}
-			if (value[i] === "#") {
-				const end = value.indexOf("\n", i);
-				const comment = value.slice(i + 1, end < 0 ? value.length : end);
-				out.push(`#${this.placeholder(comment)}`);
-				i += comment.length + 1;
-				continue;
-			}
-			SHELL_OPERATOR.lastIndex = i;
-			const operator = SHELL_OPERATOR.exec(value);
-			if (operator) {
-				const op = operator[0];
-				out.push(op);
-				i += op.length;
-				if (/[<>]/.test(op)) {
-					// `2>&1` duplicates a descriptor; every other redirect takes a path operand.
-					redirectTarget = !/&\d$/.test(op);
-				} else {
+		let previousWord = "";
+		let descriptorNext = false;
+		for (const token of lexShellCommand(value)) {
+			if (token.kind === "separator") {
+				out += token.raw;
+				// The shared lexer splits `2>&1` at `&`; the word after a trailing `>`/`<` is a descriptor.
+				descriptorNext = token.raw === "&" && /[<>]$/.test(previousWord);
+				if (descriptorNext) {
+					redirectTarget = false;
+				} else if (/[\n;&|()]/.test(token.raw)) {
 					commandStart = true;
 					program = undefined;
 				}
 				continue;
 			}
-			const word = this.#scanWord(value, i);
-			i += word.length;
+			const word = token.raw;
+			previousWord = word;
+			if (descriptorNext && /^\d+$/.test(word)) {
+				descriptorNext = false;
+				out += word;
+				continue;
+			}
+			descriptorNext = false;
+			// The lexer keeps redirections inside words (`>out.txt`, `2>`, `<<EOF`); their operand is a path.
+			const redirect = /^\d*(?:>>?|<<?-?)/.exec(word);
+			if (redirect) {
+				const target = word.slice(redirect[0].length);
+				out += redirect[0] + (target === "" ? "" : this.#shellValue(target, true));
+				redirectTarget = target === "";
+				continue;
+			}
 			if (redirectTarget) {
 				redirectTarget = false;
-				out.push(this.#shellValue(word, true));
+				out += this.#shellValue(word, true);
 				continue;
 			}
 			if (commandStart) {
 				const assign = ENV_ASSIGN.exec(word);
 				if (assign) {
-					out.push(`${assign[1]}=${this.#shellValue(assign[2], false)}`);
+					out += `${assign[1]}=${this.#shellValue(assign[2], false)}`;
 					continue;
 				}
 				commandStart = COMMAND_PREFIXES.has(word);
-				if (SHELL_COMMANDS.has(word)) {
-					out.push(word);
-					program = word;
-				} else {
-					out.push(this.#shellValue(word, false));
-					program = undefined;
-				}
+				program = SHELL_COMMANDS.has(word) ? word : undefined;
+				out += program ?? this.#shellValue(word, false);
 				argIndex = 0;
 				continue;
 			}
-			out.push(this.#shellArg(word, program, argIndex));
+			out += this.#shellArg(word, program, argIndex);
 			// Positional index only: `git --no-pager log` still sees `log` as the subcommand.
 			if (!word.startsWith("-")) argIndex++;
 		}
-		return out.join("");
+		return out;
 	}
 
 	#shellArg(word: string, program: string | undefined, argIndex: number): string {
-		if (NUMBER.test(word) || ENV_REF.test(word)) return word;
+		// `-3` (head/tail count style) is a flag; bare numeric operands may be ids, PINs, or amounts.
+		if (/^-\d+$/.test(word) || ENV_REF.test(word)) return word;
 		// Flag names are vocabulary only for allowlisted programs; an unknown script's flags may name things.
 		if (program === undefined) return this.#shellValue(word, false);
 		if (SHELL_FLAG.test(word)) {
@@ -1120,30 +1212,9 @@ export class SessionAnonymizer {
 		if ((quote === '"' || quote === "'") && word.length >= 2 && word.endsWith(quote)) {
 			return quote + this.#shellValue(word.slice(1, -1), isPath) + quote;
 		}
-		if (word === "" || ENV_REF.test(word) || NUMBER.test(word)) return word;
+		if (word === "" || ENV_REF.test(word)) return word;
 		if (isPath || looksLikePath(word)) return this.path(word);
 		return this.#literal(word);
-	}
-
-	/** Length of the shell word starting at `start`, honoring quotes and escapes. */
-	#scanWord(line: string, start: number): string {
-		let i = start;
-		let quote: string | undefined;
-		while (i < line.length) {
-			const ch = line[i];
-			if (quote) {
-				if (ch === "\\" && quote === '"') i++;
-				else if (ch === quote) quote = undefined;
-			} else if (ch === "\\") {
-				i++;
-			} else if (ch === '"' || ch === "'" || ch === "`") {
-				quote = ch;
-			} else if (/[\s|;&()<>]/.test(ch)) {
-				break;
-			}
-			i++;
-		}
-		return line.slice(start, Math.max(i, start + 1));
 	}
 }
 
