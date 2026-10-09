@@ -666,4 +666,83 @@ describe("Editor vim mode", () => {
 			expect(cursor(editor)).toEqual({ line: 2, col: 17 });
 		});
 	});
+	describe("find and till", () => {
+		it("lands f and F on the match, and t and T on the adjacent grapheme", () => {
+			const editor = vimEditor("abcde");
+			editor.handleInput("f");
+			editor.handleInput("c");
+			expect(cursor(editor)).toEqual({ line: 0, col: 2 });
+
+			editor.handleInput("F");
+			editor.handleInput("a");
+			expect(cursor(editor)).toEqual({ line: 0, col: 0 });
+
+			editor.handleInput("t");
+			editor.handleInput("c");
+			expect(cursor(editor)).toEqual({ line: 0, col: 1 });
+
+			editor.handleInput("$");
+			editor.handleInput("T");
+			editor.handleInput("c");
+			expect(cursor(editor)).toEqual({ line: 0, col: 3 });
+		});
+
+		it("counts occurrences and does not cross lines", () => {
+			const editor = vimEditor("abaca\nzzz");
+			editor.handleInput("2");
+			editor.handleInput("f");
+			editor.handleInput("a");
+			expect(cursor(editor)).toEqual({ line: 0, col: 4 });
+
+			editor.handleInput("f");
+			editor.handleInput("z");
+			expect(cursor(editor)).toEqual({ line: 0, col: 4 });
+		});
+
+		it("includes the find target and stops short of the till target", () => {
+			const found = vimEditor("abcde");
+			found.handleInput("d");
+			found.handleInput("f");
+			found.handleInput("c");
+			expect(found.getText()).toBe("de");
+
+			const till = vimEditor("abcde");
+			till.handleInput("d");
+			till.handleInput("t");
+			till.handleInput("c");
+			expect(till.getText()).toBe("cde");
+		});
+
+		it("repeats with semicolon and reverses with comma", () => {
+			const editor = vimEditor("a-b-c");
+			editor.handleInput("f");
+			editor.handleInput("-");
+			expect(cursor(editor)).toEqual({ line: 0, col: 1 });
+			editor.handleInput(";");
+			expect(cursor(editor)).toEqual({ line: 0, col: 3 });
+			editor.handleInput(",");
+			expect(cursor(editor)).toEqual({ line: 0, col: 1 });
+		});
+
+		it("cancels a half-typed find without moving, and finds a digit", () => {
+			const editor = vimEditor("a1b");
+			editor.handleInput("f");
+			expect(editor.vimConsumesEscape()).toBe(true);
+			editor.handleInput(ESC);
+			expect(cursor(editor)).toEqual({ line: 0, col: 0 });
+			expect(editor.vimConsumesEscape()).toBe(false);
+
+			editor.handleInput("f");
+			editor.handleInput("1");
+			expect(cursor(editor)).toEqual({ line: 0, col: 1 });
+		});
+
+		it("finds a multi-code-unit grapheme", () => {
+			const text = "a😀b";
+			const editor = vimEditor(text);
+			editor.handleInput("f");
+			editor.handleInput("😀");
+			expect(cursor(editor)).toEqual({ line: 0, col: text.indexOf("😀") });
+		});
+	});
 });

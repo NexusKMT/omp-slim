@@ -75,6 +75,35 @@ function firstNonBlank(text: string): number {
 	}
 	return 0;
 }
+function findPendingKey(pending: { forward: boolean; till: boolean } | null): string {
+	if (!pending) return "";
+	return pending.till ? (pending.forward ? "t" : "T") : pending.forward ? "f" : "F";
+}
+
+/**
+ * Column of the `count`th grapheme equal to `target`, searching strictly after `fromCol` when
+ * `forward` and strictly before it otherwise. Line-local, like Vim's `f`/`F`.
+ */
+function findGrapheme(text: string, fromCol: number, target: string, forward: boolean, count: number): number | null {
+	if (count < 1 || target.length === 0) return null;
+	const segs = [...segmenter.segment(text)];
+	let here = -1;
+	for (let i = 0; i < segs.length; i++) {
+		if (segs[i]!.index <= fromCol) here = i;
+		else break;
+	}
+	let seen = 0;
+	if (forward) {
+		for (let i = here + 1; i < segs.length; i++) {
+			if (segs[i]!.segment === target && ++seen === count) return segs[i]!.index;
+		}
+	} else {
+		for (let i = here - 1; i >= 0; i--) {
+			if (segs[i]!.segment === target && ++seen === count) return segs[i]!.index;
+		}
+	}
+	return null;
+}
 
 /** Vim's `w`: `moveWordRight` stops at the end of the current word, so skip the gap that follows. */
 function wordForward(text: string, col: number): number {
@@ -271,6 +300,10 @@ export class VimState {
 	#pendingG = false;
 	/** `i` or `a` typed after an operator or in Visual mode — waiting for the object key. */
 	#textObject: "i" | "a" | null = null;
+	/** `f`/`F`/`t`/`T` waiting for the target grapheme. */
+	#findPending: { forward: boolean; till: boolean } | null = null;
+	/** Last find attempt, so `;` repeats it and `,` reverses it. */
+	#lastFind: { forward: boolean; till: boolean; target: string } | null = null;
 	/**
 	 * Vim's "desired column": `j`/`k` remember the column you started from, so descending through a
 	 * short line and back out returns to it instead of collapsing permanently. `null` means the
@@ -279,18 +312,24 @@ export class VimState {
 	 */
 	#desiredCol: number | null = null;
 
-	/** True while a count, operator, `g`, or text-object prefix is half-typed — Escape cancels it. */
+	/** True while a count, operator, `g`, text-object, or find prefix is half-typed — Escape cancels it. */
 	get pending(): boolean {
-		return this.#count.length > 0 || this.#operator !== null || this.#pendingG || this.#textObject !== null;
+		return (
+			this.#count.length > 0 ||
+			this.#operator !== null ||
+			this.#pendingG ||
+			this.#textObject !== null ||
+			this.#findPending !== null
+		);
 	}
 
 	/**
-	 * The half-typed command as Vim would echo it (`"2"`, `"d"`, `"2d"`, `"di"`) — empty when
-	 * nothing is pending. Hosts render this next to the mode so a partially entered operator is
+	 * The half-typed command as Vim would echo it (`"2"`, `"d"`, `"2d"`, `"di"`, `"df"`) — empty
+	 * when nothing is pending. Hosts render this next to the mode so a partially entered operator is
 	 * visible instead of silently swallowing the next keystroke.
 	 */
 	get pendingText(): string {
-		return `${this.#count}${this.#operator ?? ""}${this.#pendingG ? "g" : ""}${this.#textObject ?? ""}`;
+		return `${this.#count}${this.#operator ?? ""}${this.#pendingG ? "g" : ""}${this.#textObject ?? ""}${findPendingKey(this.#findPending)}`;
 	}
 
 	get visual(): boolean {
@@ -302,6 +341,7 @@ export class VimState {
 		this.anchor = null;
 		this.#desiredCol = null;
 		this.#clearPending();
+		this.#lastFind = null;
 	}
 
 	#clearPending(): void {
@@ -309,6 +349,7 @@ export class VimState {
 		this.#operator = null;
 		this.#pendingG = false;
 		this.#textObject = null;
+		this.#findPending = null;
 	}
 
 	#takeCount(): number {
@@ -334,7 +375,20 @@ export class VimState {
 	handleKey(key: string, buf: VimBuffer): VimCommand[] | null {
 		if (key === "escape") return this.#handleEscape(buf);
 		if (this.mode === "insert") return null;
-
+		// The character after `f`/`t` is the target, including digits. Resolve it before the count prefix.
+		if (this.#findPending) {
+			const spec = this.#findPending;
+			this.#findPending = null;
+			this.#lastFind = { ...spec, target: key };
+			const count = this.#count.length > 0 ? Math.max(1, Number.parseInt(this.#count, 10)) : 1;
+			const motion = this.#seek(key, buf, spec, count);
+			if (!motion) {
+				this.#operator = null;
+				this.#count = "";
+				return [];
+			}
+			return this.#applyMotion(buf, motion);
+		}
 		// Count prefix. `0` is the line-start motion unless it extends a count already being typed.
 		if ((key >= "1" && key <= "9") || (key === "0" && this.#count.length > 0)) {
 			this.#count += key;
@@ -364,7 +418,10 @@ export class VimState {
 			this.#textObject = key;
 			return [];
 		}
-
+		if (key === "f" || key === "F" || key === "t" || key === "T") {
+			this.#findPending = { forward: key === "f" || key === "t", till: key === "t" || key === "T" };
+			return [];
+		}
 		// Only consecutive `j`/`k` carry the desired column; anything else re-anchors it. Counts and
 		// the `g` prefix returned above, so `2j` still continues an established column.
 		if (key !== "j" && key !== "k") this.#desiredCol = null;
@@ -462,9 +519,36 @@ export class VimState {
 					linewise: true,
 				};
 			}
+			case ";":
+			case ",":
+				return this.#repeatFind(key === ";", buf, count);
 			default:
 				return null;
 		}
+	}
+
+	#repeatFind(sameDirection: boolean, buf: VimBuffer, count: number): Motion | null {
+		const last = this.#lastFind;
+		if (!last) return null;
+		return this.#seek(
+			last.target,
+			buf,
+			{ forward: sameDirection ? last.forward : !last.forward, till: last.till },
+			count,
+		);
+	}
+
+	/**
+	 * `f`/`F` land on the match and include it. `t`/`T` land on the adjacent grapheme and include
+	 * that grapheme, so the operator stops short of the target. A till that would not move fails.
+	 */
+	#seek(target: string, buf: VimBuffer, spec: { forward: boolean; till: boolean }, count: number): Motion | null {
+		const text = buf.lines[buf.cursorLine] ?? "";
+		const match = findGrapheme(text, buf.cursorCol, target, spec.forward, count);
+		if (match === null) return null;
+		const land = spec.till ? (spec.forward ? prevGraphemeStart(text, match) : nextGraphemeStart(text, match)) : match;
+		if (land === buf.cursorCol) return null;
+		return { to: { line: buf.cursorLine, col: land }, inclusive: true, linewise: false };
 	}
 
 	/** Turn a resolved motion into either a cursor move, a selection extension, or an operator range. */
