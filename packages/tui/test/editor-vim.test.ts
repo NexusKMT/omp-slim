@@ -745,4 +745,30 @@ describe("Editor vim mode", () => {
 			expect(cursor(editor)).toEqual({ line: 0, col: text.indexOf("😀") });
 		});
 	});
+
+	describe("WORD motions", () => {
+		it("treats punctuation as part of the WORD", () => {
+			const editor = vimEditor("foo-bar baz");
+			editor.handleInput("W");
+			expect(cursor(editor)).toEqual({ line: 0, col: 8 });
+			editor.handleInput("B");
+			expect(cursor(editor)).toEqual({ line: 0, col: 0 });
+			editor.handleInput("E");
+			expect(cursor(editor)).toEqual({ line: 0, col: 6 });
+		});
+
+		it("deletes a WORD and the blank after it, and changes only to its end", () => {
+			const deleted = vimEditor("foo-bar baz");
+			deleted.handleInput("d");
+			deleted.handleInput("W");
+			expect(deleted.getText()).toBe("baz");
+
+			const changed = vimEditor("foo-bar baz");
+			changed.handleInput("c");
+			changed.handleInput("W");
+			expect(changed.vimMode).toBe("insert");
+			changed.handleInput("x");
+			expect(changed.getText()).toBe("x baz");
+		});
+	});
 });
