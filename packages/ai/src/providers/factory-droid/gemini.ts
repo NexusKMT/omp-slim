@@ -484,6 +484,20 @@ export function streamFactoryDroidGemini(
 			if (firstTokenTime !== undefined) output.ttft = firstTokenTime - startTime;
 
 			closeBlock();
+			// A stream that reaches EOF without a finishReason (and without a
+			// promptFeedback block) was truncated, even when it already carried
+			// functionCall parts; fail it as retryable instead of finishing the turn.
+			if (finishReason === undefined && !blockReason) {
+				// Worded like the other incomplete-stream errors so turn recovery
+				// continues a stream that already rendered text.
+				throw new AIError.ProviderResponseError(
+					"Factory Droid Gemini stream closed before a finish_reason was received",
+					{
+						provider: model.provider,
+						kind: "incomplete-stream",
+					},
+				);
+			}
 			for (const contentIndex of toolCallIndices) {
 				const toolCall = output.content[contentIndex] as ToolCall;
 				stream.push({ type: "toolcall_end", contentIndex, toolCall, partial: output });
