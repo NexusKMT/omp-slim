@@ -284,7 +284,7 @@ try {
 		}
 	}, 60_000);
 
-	it("replaces a broker-owned relay from another omp version, but not a starting replacement or a manually started one", async () => {
+	it("replaces a broker-owned relay from another omp version, also after another omp stopped it, but not a starting replacement or a manually started one", async () => {
 		const home = await fs.mkdtemp(path.join(os.tmpdir(), "omp-relay-restart-"));
 		const globalRuntimeDir = path.join(home, ".omp", "run", "daemons", "global", "browser-relay");
 		const ownedPort = await findFreeCdpPort();
@@ -311,9 +311,14 @@ import { restartRelayDaemon } from ${JSON.stringify(path.resolve(import.meta.dir
 const [ownedPort, manualPort, standIn] = [Bun.env.OMP_TEST_OWNED_PORT!, Bun.env.OMP_TEST_MANUAL_PORT!, Bun.env.OMP_TEST_STALE_RELAY!];
 const name = \`omp.browser.relay.\${ownedPort}\`;
 const ownedUrl = \`http://127.0.0.1:\${ownedPort}\`;
-const versionAt = async (port: string) =>
-	((await (await fetch(\`http://127.0.0.1:\${port}/json/version\`)).json()) as { ompRelayVersion?: string }).ompRelayVersion ?? null;
+const versionAt = async (port: string) => {
+	const response = await fetch(\`http://127.0.0.1:\${port}/json/version\`).catch(() => null);
+	if (!response) return "unreachable";
+	const body: unknown = await response.json();
+	return typeof body === "object" && body !== null && "ompRelayVersion" in body ? body.ompRelayVersion : null;
+};
 const manual = Bun.spawn([process.execPath, standIn, manualPort], { stdout: "pipe" });
+let manualOverRecord: { kill(): void } | undefined;
 try {
 	const client = await daemonClientForGlobal("browser-relay");
 	const start = (args: string[]) =>
@@ -345,19 +350,42 @@ try {
 	const startingPid = snapshot?.pid;
 	const startingRestarted = await restartRelayDaemon({ cdpUrl: ownedUrl });
 	await starting;
+	const startingKeptPid = (await describe())?.pid;
+	// Another omp stopped the outdated relay and has not registered its replacement yet.
+	await client.request({ op: "stop", name, timeoutMs: 5_000 });
+	const exitedRestarted = await restartRelayDaemon({ cdpUrl: ownedUrl });
+	const exitedVersionIsCurrent = (await versionAt(ownedPort)) === VERSION;
+	// A relay started by hand on a port whose broker record has exited is not the broker's to replace.
+	await client.request({ op: "stop", name, timeoutMs: 5_000 });
+	const manualOnOwnedPort = Bun.spawn([process.execPath, standIn, ownedPort], { stdout: "pipe" });
+	manualOverRecord = manualOnOwnedPort;
+	await manualOnOwnedPort.stdout.getReader().read();
+	const manualOverRecordRestarted = await restartRelayDaemon({ cdpUrl: ownedUrl });
+	const manualOverRecordVersion = await versionAt(ownedPort);
+	const ownedRecordState = (await describe())?.state;
 	const manualRestarted = await restartRelayDaemon({ cdpUrl: \`http://127.0.0.1:\${manualPort}\` });
+	const manualRecord = await client
+		.request({ op: "describe", name: \`omp.browser.relay.\${manualPort}\` })
+		.then(response => response.daemon ?? null, () => null);
 	process.stdout.write(
 		JSON.stringify({
 			owned,
 			ownedVersionIsCurrent,
 			startingRestarted,
-			startingKept: startingPid !== undefined && (await describe())?.pid === startingPid,
+			startingKept: startingPid !== undefined && startingPid === startingKeptPid,
+			exitedRestarted,
+			exitedVersionIsCurrent,
+			manualOverRecordRestarted,
+			manualOverRecordVersion,
+			ownedRecordState,
 			manualRestarted,
 			manualVersion: await versionAt(manualPort),
+			manualRecord,
 		}),
 	);
 } finally {
 	manual.kill();
+	manualOverRecord?.kill();
 	await closeDaemonClients();
 }`,
 			],
@@ -389,8 +417,14 @@ try {
 				ownedVersionIsCurrent: true,
 				startingRestarted: true,
 				startingKept: true,
+				exitedRestarted: true,
+				exitedVersionIsCurrent: true,
+				manualOverRecordRestarted: false,
+				manualOverRecordVersion: null,
+				ownedRecordState: "exited",
 				manualRestarted: false,
 				manualVersion: null,
+				manualRecord: null,
 			});
 		} finally {
 			if (child.exitCode === null) child.kill();

@@ -128,9 +128,9 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 /**
  * Replace the broker-owned relay at `cdpUrl` with one from this OMP version.
  * True once the old relay has stopped (the caller's wait reports whether the
- * new one serves) or another process already replaced it. False when the
- * broker runs no relay there (a manually started relay is left alone) or the
- * old relay did not stop.
+ * new one serves) or another process already replaced it or stopped it to
+ * replace it. False when a relay the broker does not run serves there (a
+ * manually started relay is left alone) or the old relay did not stop.
  */
 export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortSignal }): Promise<boolean> {
 	const port = relayPort(opts.cdpUrl);
@@ -138,7 +138,13 @@ export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortS
 	const name = relayDaemonName(port);
 	const client = await daemonClientForGlobal(RELAY_BROKER_SCOPE);
 	const existing = await describeQuietly(client, name, "Browser relay", opts.signal);
-	if (!existing || existing.state === "exited" || existing.state === "failed") return false;
+	if (!existing || existing.state === "exited" || existing.state === "failed") {
+		// Another omp may have stopped the old relay and not yet registered its
+		// replacement; start or adopt it unless a relay the broker does not run serves.
+		if (await probeRelayServer(opts.cdpUrl)) return servesVersion(opts.cdpUrl, opts.signal);
+		await ensureRelayDaemon(opts);
+		return true;
+	}
 	// Another omp of this version may have replaced it since the caller's probe,
 	// possibly with a relay that has not printed its ready line yet.
 	if (existing.readyAt === undefined) await waitReady(client, name, "Browser relay", opts.signal);
