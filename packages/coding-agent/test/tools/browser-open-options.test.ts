@@ -1,7 +1,9 @@
+import * as nodeFs from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterAll, describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it, spyOn } from "bun:test";
+import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
@@ -99,45 +101,67 @@ describe("browser open options CDP helpers", () => {
 		const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-download-test-"));
 		tempDirs.push(directory, elsewhere);
 		const listeners = new Map<string, (event: unknown) => void>();
+		let downloadPath = "";
 		const session = {
 			on: (event: string, listener: (event: unknown) => void) => listeners.set(event, listener),
 			off: () => undefined,
-			send,
+			send: async (_method: string, params: { downloadPath: string }) => {
+				downloadPath = params.downloadPath;
+				return await send();
+			},
 			detach: async () => undefined,
 		};
 		const browser = { target: () => ({ createCDPSession: async () => session }) } as unknown as Browser;
 		const page = { frames: () => [{ _id: "frame" }], browserContext: () => ({}) } as unknown as Page;
 		const downloads = new DownloadManager(browser, page, "tab");
-		const complete = async (guid: string, filePath: string) => {
+		/** A path in the folder the manager pointed Chromium at. */
+		const staged = async (name: string) => {
+			await downloads.enable(directory);
+			const file = path.join(downloadPath, name);
+			tempDirs.push(file);
+			return file;
+		};
+		const complete = async (
+			guid: unknown,
+			filePath: string | undefined,
+			suggestedFilename: unknown = "../../report.txt",
+		) => {
 			await downloads.enable(directory);
 			const waiting = downloads.wait();
-			const started = { guid, url: "https://example.com/", suggestedFilename: "../../report.txt", frameId: "frame" };
+			await downloads.arming;
+			const started = { guid, url: "https://example.com/", suggestedFilename, frameId: "frame" };
 			listeners.get("Browser.downloadWillBegin")!(started);
 			listeners.get("Browser.downloadProgress")!({ guid, state: "completed", receivedBytes: 5, filePath });
 			return (await waiting).path;
 		};
-		return { directory, elsewhere, downloads, complete };
+		return { directory, elsewhere, downloads, staged, complete };
 	}
 
-	it("moves only a file saved under its download GUID, under the last segment of the suggested name", async () => {
-		const { directory, elsewhere, complete } = await fakeDownloads();
-
-		const unrelated = path.join(elsewhere, "notes.txt");
-		await Bun.write(unrelated, "notes");
-		expect(await complete(crypto.randomUUID(), unrelated)).toBe(unrelated);
-		expect(await Bun.file(unrelated).text()).toBe("notes");
-
+	it("moves a file saved under its download GUID in the staging folder, under the last segment of the suggested name", async () => {
+		const { directory, staged, complete } = await fakeDownloads();
 		const guid = crypto.randomUUID();
-		const saved = path.join(elsewhere, guid);
+		const saved = await staged(guid);
 		await Bun.write(saved, "bytes");
+
 		expect(await complete(guid, saved)).toBe(path.join(directory, "report.txt"));
 		expect(await Bun.file(path.join(directory, "report.txt")).text()).toBe("bytes");
 		expect(await Bun.file(saved).exists()).toBe(false);
 	});
 
-	it("leaves a file in place when the peer names it by a GUID that is not a UUID", async () => {
+	it("leaves a file named by a UUID GUID outside the staging folder in place", async () => {
 		const { directory, elsewhere, complete } = await fakeDownloads();
-		const key = path.join(elsewhere, "id_ed25519");
+		const guid = crypto.randomUUID();
+		const unrelated = path.join(elsewhere, guid);
+		await Bun.write(unrelated, "notes");
+
+		expect(await complete(guid, unrelated)).toBe(unrelated);
+		expect(await Bun.file(unrelated).text()).toBe("notes");
+		expect(await Bun.file(path.join(directory, "report.txt")).exists()).toBe(false);
+	});
+
+	it("leaves a file in place when the peer names it by a GUID that is not a UUID", async () => {
+		const { directory, staged, complete } = await fakeDownloads();
+		const key = await staged("id_ed25519");
 		await Bun.write(key, "private key");
 
 		expect(await complete("id_ed25519", key)).toBe(key);
@@ -146,9 +170,9 @@ describe("browser open options CDP helpers", () => {
 	});
 
 	it("leaves a symlink named by a UUID GUID in place", async () => {
-		const { directory, elsewhere, complete } = await fakeDownloads();
+		const { directory, elsewhere, staged, complete } = await fakeDownloads();
 		const guid = crypto.randomUUID();
-		const link = path.join(elsewhere, guid);
+		const link = await staged(guid);
 		await Bun.write(path.join(elsewhere, "notes.txt"), "notes");
 		await fs.symlink(path.join(elsewhere, "notes.txt"), link);
 
@@ -158,14 +182,69 @@ describe("browser open options CDP helpers", () => {
 	});
 
 	it("leaves a directory named by a UUID GUID in place", async () => {
-		const { directory, elsewhere, complete } = await fakeDownloads();
+		const { directory, staged, complete } = await fakeDownloads();
 		const guid = crypto.randomUUID();
-		const folder = path.join(elsewhere, guid);
+		const folder = await staged(guid);
 		await Bun.write(path.join(folder, "notes.txt"), "notes");
 
 		expect(await complete(guid, folder)).toBe(folder);
 		expect(await Bun.file(path.join(folder, "notes.txt")).text()).toBe("notes");
 		expect(await Bun.file(path.join(directory, "report.txt")).exists()).toBe(false);
+	});
+
+	it("keeps a directory named like the download when the rename takes the Windows replacement path", async () => {
+		const { directory, staged, complete } = await fakeDownloads();
+		const guid = crypto.randomUUID();
+		const saved = await staged(guid);
+		await Bun.write(saved, "bytes");
+		await Bun.write(path.join(directory, "report.txt", "notes.txt"), "notes");
+		const rename = spyOn(nodeFs.promises, "rename").mockImplementationOnce(async () => {
+			throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+		});
+		try {
+			expect(await complete(guid, saved)).toBe(saved);
+		} finally {
+			rename.mockRestore();
+		}
+		expect(await Bun.file(path.join(directory, "report.txt", "notes.txt")).text()).toBe("notes");
+		expect(await Bun.file(saved).text()).toBe("bytes");
+	});
+
+	it("keeps the same-named file when a cross-device move fails to copy", async () => {
+		const { directory, staged, complete } = await fakeDownloads();
+		const guid = crypto.randomUUID();
+		const saved = await staged(guid);
+		await Bun.write(saved, "bytes");
+		await fs.chmod(saved, 0o000);
+		await Bun.write(path.join(directory, "report.txt"), "earlier report");
+		const rename = spyOn(nodeFs.promises, "rename").mockImplementationOnce(async () => {
+			throw Object.assign(new Error("cross-device link not permitted"), { code: "EXDEV" });
+		});
+		try {
+			expect(await complete(guid, saved)).toBe(saved);
+		} finally {
+			rename.mockRestore();
+		}
+		expect(await Bun.file(path.join(directory, "report.txt")).text()).toBe("earlier report");
+		expect(await fs.readdir(directory)).toEqual(["report.txt"]);
+	});
+
+	it("reports a download whose suggested name is not a string where Chromium saved it", async () => {
+		const { staged, complete } = await fakeDownloads();
+		const guid = crypto.randomUUID();
+		const saved = await staged(guid);
+		await Bun.write(saved, "bytes");
+
+		expect(await complete(guid, saved, null)).toBe(saved);
+		expect(await Bun.file(saved).text()).toBe("bytes");
+	});
+
+	it("rejects the wait when a completed download cannot be read", async () => {
+		const { complete } = await fakeDownloads();
+
+		const error = await rejectionOf(complete(42, undefined));
+		expect(error).toBeInstanceOf(ToolError);
+		expect((error as ToolError).message).toStartWith("Download failed: https://example.com/");
 	});
 
 	it("rejects a wait whose signal is already aborted without leaving the enable failure unhandled", async () => {
