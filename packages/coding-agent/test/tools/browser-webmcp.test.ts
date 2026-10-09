@@ -2,11 +2,13 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
+import { acquireBrowser, holdBrowser, releaseBrowser } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
-import type {
-	WebMcpEventsResult,
-	WebMcpInvokeResult,
-	WebMcpListResult,
+import {
+	installWebMcp,
+	type WebMcpEventsResult,
+	type WebMcpInvokeResult,
+	type WebMcpListResult,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/webmcp";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { chromiumAvailable } from "./chromium-probe";
@@ -183,4 +185,53 @@ navigator.modelContext.registerTool({
 		expect(result).toEqual({ ok: true, result: { title: "iframe loaded" }, untrusted: true });
 		await invoke({ action: "close", name: "webmcp-iframe", kill: true });
 	}, 30_000);
+
+	// The hook reaches a loaded page when omp attaches to it: a context the page set up itself is
+	// patched at once rather than waiting for a getter read, as a platform context is.
+	it.each([
+		{
+			setup: "a non-configurable accessor",
+			define: `Object.defineProperty(navigator, "modelContext", { get: () => window.pageContext });`,
+			registerOn: "navigator.modelContext",
+		},
+		{
+			setup: "an accessor the page read before attach",
+			define: `Object.defineProperty(navigator, "modelContext", { configurable: true, get: () => window.pageContext });
+window.cachedContext = navigator.modelContext;`,
+			registerOn: "window.cachedContext",
+		},
+		{
+			setup: "an accessor that yields no context",
+			define: `Object.defineProperty(navigator, "modelContext", { configurable: true, get: () => undefined });`,
+			registerOn: "navigator.modelContext",
+		},
+	])(
+		"mirrors a tool registered after attach on a page whose modelContext is $setup",
+		async ({ define, registerOn }) => {
+			const handle = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			if (!("browser" in handle)) throw new Error("Expected a Puppeteer browser");
+			holdBrowser(handle);
+			const page = await handle.browser.newPage();
+			try {
+				await page.goto("data:text/html,<title>page-owned context</title>");
+				// The realm installWebMcp hooks in existing frames.
+				const realm = page.mainFrame().mainRealm();
+				await realm.evaluate(`window.pageContext = { registerTool() {}, unregisterTool() {} };\n${define}`);
+				const controller = await installWebMcp(page);
+				await realm.evaluate(
+					`${registerOn}.registerTool({ name: "page_owned", description: "Page tool.", inputSchema: { type: "object" }, execute: () => ({ value: 42 }) })`,
+				);
+				expect((await controller.list()).tools.map(tool => tool.name)).toEqual(["page_owned"]);
+				expect(await controller.invoke("page_owned", {})).toEqual({
+					ok: true,
+					result: { value: 42 },
+					untrusted: true,
+				});
+				await controller.dispose();
+			} finally {
+				await page.close();
+				await releaseBrowser(handle, { kill: false });
+			}
+		},
+	);
 });

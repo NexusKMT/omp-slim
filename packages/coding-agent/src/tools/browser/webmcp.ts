@@ -298,10 +298,10 @@ function boundedResult(value: unknown): WebMcpInvokeSuccess {
 /**
  * Page function (self-contained; serialisable via `.toString()`): mirror `navigator/document.modelContext`
  * registrations into a bridge stored at `globalThis[key]`, polyfilling `modelContext` when absent. Idempotent.
- * A native `modelContext` is never read here: reading it creates the document's context, and Chromium kills a
- * renderer whose frame creates one twice, as this hook would in an iframe's initial empty document and again
- * in the document the iframe then loads. The native getters are wrapped instead, so the context is patched
- * when the page first asks for it.
+ * The platform's `modelContext` getter is never called here: it creates the document's context, and Chromium kills
+ * a renderer whose frame creates one twice, as this hook would in an iframe's initial empty document and again in
+ * the document the iframe then loads. That getter is wrapped instead, so its context is patched when the page first
+ * asks for it; a context the page put on navigator/document itself is patched at once.
  */
 export function installWebMcpPageHook(key: string): void {
 	const realm = globalThis as typeof globalThis & Record<string, unknown>;
@@ -313,16 +313,21 @@ export function installWebMcpPageHook(key: string): void {
 	};
 	const nav = pageGlobals.navigator;
 	const doc = pageGlobals.document;
-	// Where `modelContext` comes from, found without calling a getter: native
-	// getters to wrap, or a context the page stored on navigator/document itself.
-	const getters: { owner: object; descriptor: PropertyDescriptor }[] = [];
+	// Platform getters live on the interface prototypes and are configurable;
+	// everything else is the page's own and is read now.
+	const getters: { instance: { modelContext?: PageModelContext }; owner: object; descriptor: PropertyDescriptor }[] =
+		[];
 	let pageContext: PageModelContext | undefined;
 	for (const instance of [doc, nav]) {
-		for (let owner: object | null = instance; owner; owner = Object.getPrototypeOf(owner)) {
+		if (Object.getOwnPropertyDescriptor(instance, "modelContext")) {
+			pageContext ??= instance.modelContext;
+			continue;
+		}
+		for (let owner: object | null = Object.getPrototypeOf(instance); owner; owner = Object.getPrototypeOf(owner)) {
 			const descriptor = Object.getOwnPropertyDescriptor(owner, "modelContext");
 			if (!descriptor) continue;
-			if (descriptor.get) getters.push({ owner, descriptor });
-			else pageContext ??= descriptor.value;
+			if (descriptor.get && descriptor.configurable) getters.push({ instance, owner, descriptor });
+			else pageContext ??= instance.modelContext;
 			break;
 		}
 	}
@@ -409,7 +414,7 @@ export function installWebMcpPageHook(key: string): void {
 
 	if (nativeAvailable) {
 		adopt(pageContext);
-		for (const { owner, descriptor } of getters) {
+		for (const { instance, owner, descriptor } of getters) {
 			try {
 				Object.defineProperty(owner, "modelContext", {
 					...descriptor,
@@ -418,7 +423,7 @@ export function installWebMcpPageHook(key: string): void {
 					},
 				});
 			} catch {
-				// An unpatchable getter leaves its context to native CDP discovery.
+				adopt(instance.modelContext);
 			}
 		}
 	} else {
