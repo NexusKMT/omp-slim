@@ -2645,9 +2645,9 @@ class CodexStreamProcessor {
 				// An empty terminal item falls back to what `.delta`/`.done` already delivered.
 				arguments: item.arguments
 					? parseToolCallArguments(item.arguments)
-					: partial || block?.type !== "toolCall"
-						? parseToolCallArguments(partial)
-						: block.arguments,
+					: block?.type === "toolCall" && !partial
+						? block.arguments
+						: parseToolCallArguments(partial),
 			};
 			item.arguments = replayableToolCallArguments(item.arguments, toolCall.arguments);
 			if (block?.type === "toolCall") {
