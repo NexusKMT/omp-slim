@@ -60,6 +60,14 @@ describe("omp anonymize output", () => {
 		expect(await Bun.file(path.join(out, "session.jsonl")).exists()).toBe(false);
 	});
 
+	it("reports an --out path that is an existing file as a usage error", async () => {
+		const source = path.join(tempDir.path(), "main.jsonl");
+		const out = path.join(tempDir.path(), "report.zip");
+		await Bun.write(source, SESSION);
+		await Bun.write(out, "zip");
+		await expect(runAnonymizeCommand({ session: source, out })).rejects.toThrow("is not a directory");
+	});
+
 	it("reports an unknown session path as a usage error", async () => {
 		const missing = path.join(tempDir.path(), "missing.jsonl");
 		await expect(

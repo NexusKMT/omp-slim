@@ -562,6 +562,59 @@ const OPAQUE_ARG_KEYS: Record<string, true> = {
 	payload: true,
 };
 
+/** Declared argument keys of a built-in tool (at any depth) and which of them are numeric. */
+interface ArgSchema {
+	keys: ReadonlySet<string>;
+	numeric: ReadonlySet<string>;
+}
+
+/** `"path limit#"` → keys `path`, `limit`; `#` marks a numeric field. */
+function argSchema(spec: string): ArgSchema {
+	const fields = spec.split(/\s+/).filter(Boolean);
+	return {
+		keys: new Set(fields.map(field => field.replace(/#$/, ""))),
+		numeric: new Set(fields.filter(field => field.endsWith("#")).map(field => field.slice(0, -1))),
+	};
+}
+
+/** Harness-level keys every tool call may carry (`i` is the intent field). */
+const COMMON_ARG_KEYS = new Set(["i", "intent"]);
+
+/**
+ * Argument schemas of built-in tools, from their declared parameters. A built-in name without an
+ * entry here exports its arguments as one opaque marker.
+ */
+const ARG_SCHEMAS: Record<string, ArgSchema> = {
+	read: argSchema("path limit# offset#"),
+	write: argSchema("path content"),
+	edit: argSchema(
+		"path input old_string new_string replace_all edits old_text new_text oldText newText op rename file_path diff content",
+	),
+	bash: argSchema("command timeout# cwd pty async name ready log port# host description"),
+	grep: argSchema("pattern path case gitignore skip# limit# hidden glob context#"),
+	glob: argSchema("path pattern hidden gitignore limit# skip#"),
+	find: argSchema("query path grep_keywords limit# hidden"),
+	eval: argSchema("code language title timeout# reset"),
+	task: argSchema("context tasks name task agent solutionSpace tools isolated schemaMode"),
+	todo: argSchema("op items task phase list reason tasks content status phase_note"),
+	wait: argSchema("ids timeout#"),
+	web_search: argSchema("query limit# recency num_search_results# max_tokens# temperature#"),
+	ask: argSchema("questions id question options label description recommended# header preview multi"),
+	ast_grep: argSchema("pat path lang skip# limit#"),
+	ast_edit: argSchema("pat out ops paths path lang"),
+	github: argSchema(
+		"op repo branch path pr# force forceWithLease title body base head draft fill reviewer assignee label query since until dateField limit# run tail#",
+	),
+	checkpoint: argSchema("goal report"),
+	rewind: argSchema("goal report"),
+	context_notes: argSchema("text"),
+	new_context: argSchema("text"),
+	memory_edit: argSchema("op id content importance# replacement_id"),
+	retain: argSchema("items content context scope"),
+	recall: argSchema("query"),
+	reflect: argSchema("query context"),
+};
+
 /** Tool-call argument keys holding search text: always a placeholder, never path-mapped. */
 const PATTERN_ARG_KEYS: Record<string, true> = {
 	pattern: true,
@@ -1127,8 +1180,6 @@ function isKnownExtension(ext: string): boolean {
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const IDENTIFIER = /^[\w.:/@+-]{1,128}$/;
-/** Object keys shaped like schema fields; anything else (paths, labels) is data. */
-const SCHEMA_KEY = /^(?:[A-Za-z_$][\w$]{0,63}|\d+)$/;
 
 const ID_KEY = /(?:^id|Id|_id|Ids)$/;
 /** Machine-minted ids: hex/uuid, or `prefix_<digits>` / `prefix_<token containing a digit>` (`toolu_01…`, `call_…|fc_…`). */
@@ -1399,25 +1450,34 @@ export class SessionAnonymizer {
 	/** Tool-call args: built-in tools walk their known schema; any other tool's args are opaque. */
 	#toolArgs(value: unknown, parent: JsonObject): unknown {
 		const toolName = typeof parent.name === "string" ? parent.name : parent.toolName;
-		if (!isBuiltinTool(toolName)) return this.#opaque(value);
-		if (typeof value !== "string") return this.#argValue(value, undefined);
+		const schema = typeof toolName === "string" && isBuiltinTool(toolName) ? ARG_SCHEMAS[toolName] : undefined;
+		if (!schema) return this.#opaque(value);
+		if (typeof value !== "string") return this.#argValue(value, undefined, schema);
 		// Wire payloads carry arguments as JSON text; partial streams may not parse.
 		try {
-			return JSON.stringify(this.#argValue(JSON.parse(value), undefined));
+			return JSON.stringify(this.#argValue(JSON.parse(value), undefined, schema));
 		} catch {
 			return this.redactText(value);
 		}
 	}
 
-	/** One built-in tool argument: schema keys stay, values follow the argument's role. */
-	#argValue(value: unknown, key: string | undefined): unknown {
-		if (value === null || typeof value === "number" || typeof value === "boolean") return value;
-		if (Array.isArray(value)) return value.map(item => this.#argValue(item, key));
+	/**
+	 * One built-in tool argument. Only keys the tool's schema declares stay (a shadowing extension can
+	 * send any record), and numbers stay only in the schema's numeric fields (limits, timeouts, lines).
+	 */
+	#argValue(value: unknown, key: string | undefined, schema: ArgSchema): unknown {
+		if (value === null || typeof value === "boolean") return value;
+		if (typeof value === "number") {
+			return key !== undefined && schema.numeric.has(key) ? value : this.placeholder(String(value));
+		}
+		if (Array.isArray(value)) return value.map(item => this.#argValue(item, key, schema));
 		if (isObject(value)) {
 			const out: JsonObject = {};
 			for (const [childKey, child] of Object.entries(value)) {
 				if (OPAQUE_ARG_KEYS[childKey] === true) out[childKey] = this.#opaque(child);
-				else out[SCHEMA_KEY.test(childKey) ? childKey : this.#literal(childKey)] = this.#argValue(child, childKey);
+				else if (schema.keys.has(childKey) || COMMON_ARG_KEYS.has(childKey)) {
+					out[childKey] = this.#argValue(child, childKey, schema);
+				} else out[this.placeholder(childKey)] = this.#opaque(child);
 			}
 			return out;
 		}
@@ -1501,13 +1561,14 @@ export class SessionAnonymizer {
 		if (program === undefined) return this.#shellValue(word, false);
 		// `-3` is a count selector only for programs that define one; elsewhere (`echo -123`) it is data.
 		if (/^-\d+$/.test(word)) return NUMERIC_FLAG_PROGRAMS.has(program) ? word : this.#shellValue(word, false);
-		if (SHELL_FLAG.test(word)) {
-			// Long options must be known vocabulary; `-ehunter2` attaches a value to a short option.
-			if (word.startsWith("--")) return LONG_FLAGS.has(word) ? word : this.#shellValue(word, false);
+		// A short option is one letter; anything attached (`-ehunter2`, `-ecustomer=secret`) is its value.
+		if (/^-[A-Za-z]/.test(word)) {
 			return word.length <= 2 ? word : word.slice(0, 2) + this.#shellValue(word.slice(2), false);
 		}
-		const flagValue = /^(--?[A-Za-z][\w-]*)=([\s\S]*)$/.exec(word);
-		if (flagValue && (!flagValue[1].startsWith("--") || LONG_FLAGS.has(flagValue[1]))) {
+		if (SHELL_FLAG.test(word)) return LONG_FLAGS.has(word) ? word : this.#shellValue(word, false);
+		// Long options must be known vocabulary; their `=value` is a literal.
+		const flagValue = /^(--[A-Za-z][\w-]*)=([\s\S]*)$/.exec(word);
+		if (flagValue && LONG_FLAGS.has(flagValue[1])) {
 			return `${flagValue[1]}=${this.#shellValue(flagValue[2], false)}`;
 		}
 		if (argIndex === 0 && SUBCOMMANDS[word] === true) return word;
@@ -1570,21 +1631,26 @@ export async function anonymizeSessionTranscripts(session: AnonymizeSessionInput
 	const files: Array<readonly [string, string]> = [["session.jsonl", toJsonl(session.header, session.entries)]];
 	const malformed: Array<readonly [string, number]> = [];
 	if (session.malformedRecords) malformed.push(["session.jsonl", session.malformedRecords]);
+	// Agent ids map through the same table as `agent://<id>` path segments.
+	const memberFor = (key: string): string =>
+		`subagents/${key
+			.split("/")
+			.map(part => anonymizer.segment(part))
+			.join("/")}.jsonl`;
 	let subSessions: Record<string, SubSession> = {};
 	let subagentError: string | undefined;
 	try {
-		if (session.sessionFile) subSessions = await collectSubSessions(session.sessionFile);
+		if (session.sessionFile) {
+			subSessions = await collectSubSessions(session.sessionFile, (key, count) => {
+				malformed.push([`${memberFor(key)} (not exported: no readable session header)`, count]);
+			});
+		}
 	} catch (error) {
 		subagentError = error instanceof Error ? error.message : String(error);
 		logger.warn("Failed to collect subagent transcripts for anonymization", { error: subagentError });
 	}
 	for (const [key, sub] of Object.entries(subSessions)) {
-		// Agent ids map through the same table as `agent://<id>` path segments.
-		const mappedKey = key
-			.split("/")
-			.map(part => anonymizer.segment(part))
-			.join("/");
-		const member = `subagents/${mappedKey}.jsonl`;
+		const member = memberFor(key);
 		files.push([member, toJsonl(sub.header, sub.entries)]);
 		if (sub.malformedRecords > 0) malformed.push([member, sub.malformedRecords]);
 	}

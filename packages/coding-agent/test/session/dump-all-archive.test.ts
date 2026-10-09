@@ -140,6 +140,21 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		}
 	});
 
+	it("reports a subagent whose session header cannot be read instead of dropping it silently", async () => {
+		const sessionFile = session.sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persistent session file");
+		const subDir = sessionFile.slice(0, -".jsonl".length);
+		await Bun.write(path.join(subDir, "Scout.jsonl"), subagentJsonl("scout", "scout task"));
+		await Bun.write(path.join(subDir, "Broken.jsonl"), `{"type":"session","version":3,"id":"bro`);
+
+		const archive = await session.dumpAnonymizedArchiveToTmpDir();
+		if (!archive) throw new Error("Expected an archive");
+		archives.push(archive.path);
+
+		expect(archive.subagentCount).toBe(1);
+		expect(archive.malformed).toEqual([[expect.stringMatching(/^subagents\/seg\d+\.jsonl \(not exported/), 1]]);
+	});
+
 	it("reports malformed records skipped while loading the main session", async () => {
 		const file = path.join(tempDir.path(), "corrupt.jsonl");
 		await Bun.write(file, `${subagentJsonl("main", "hello")}{"type":"message","id":"broken`);

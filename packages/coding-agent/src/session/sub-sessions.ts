@@ -28,16 +28,23 @@ export interface SubSession {
 	malformedRecords: number;
 }
 
+/** Receives the key and malformed-record count of a subagent transcript whose header could not be loaded. */
+export type UnreadableSubSessionHandler = (key: string, malformedRecords: number) => void;
+
 /**
  * Collect subagent session transcripts stored next to a session file.
  *
  * Keys in the returned record are slash-joined ids relative to the main session
- * ("ToolAsk", "ToolAsk/Helper"). Corrupt or empty files are skipped silently.
+ * ("ToolAsk", "ToolAsk/Helper"). Empty files are skipped silently; corrupt ones
+ * are skipped and reported to `onUnreadable`.
  */
-export async function collectSubSessions(sessionFile: string): Promise<Record<string, SubSession>> {
+export async function collectSubSessions(
+	sessionFile: string,
+	onUnreadable?: UnreadableSubSessionHandler,
+): Promise<Record<string, SubSession>> {
 	const result: Record<string, SubSession> = {};
 	if (!sessionFile.endsWith(".jsonl")) return result;
-	await collectSubSessionsFromDir(sessionFile.slice(0, -6), null, result);
+	await collectSubSessionsFromDir(sessionFile.slice(0, -6), null, result, onUnreadable);
 	return result;
 }
 
@@ -45,6 +52,7 @@ async function collectSubSessionsFromDir(
 	dir: string,
 	parentKey: string | null,
 	out: Record<string, SubSession>,
+	onUnreadable: UnreadableSubSessionHandler | undefined,
 ): Promise<void> {
 	let dirents: fs.Dirent[];
 	try {
@@ -64,7 +72,8 @@ async function collectSubSessionsFromDir(
 		const agentId = name.slice(0, -6);
 		const key = parentKey ? `${parentKey}/${agentId}` : agentId;
 		const { entries: fileEntries, malformedRecords } = await loadSessionFile(path.join(dir, name));
-		// Empty/corrupt files (no valid session header) load as [] — skip silently.
+		// Empty/corrupt files (no valid session header) load as [] — skipped, but a corrupt one is
+		// reported so exports do not look complete while omitting it.
 		if (fileEntries.length > 0) {
 			const header = (fileEntries.find(e => e.type === "session") as SessionHeader | undefined) ?? null;
 			const entries = fileEntries.filter((e): e is SessionEntry => e.type !== "session");
@@ -77,9 +86,13 @@ async function collectSubSessionsFromDir(
 				aborted: fileNames.has(getAgentTombstonePath(name)),
 				malformedRecords,
 			};
+		} else if (malformedRecords > 0) {
+			onUnreadable?.(key, malformedRecords);
 		}
 		// Only descend into real child directories: a transcript stem such as "." or ".."
 		// would revisit an ancestor, and symlinked directories can loop back into the tree.
-		if (childDirectories.has(agentId)) await collectSubSessionsFromDir(path.join(dir, agentId), key, out);
+		if (childDirectories.has(agentId)) {
+			await collectSubSessionsFromDir(path.join(dir, agentId), key, out, onUnreadable);
+		}
 	}
 }

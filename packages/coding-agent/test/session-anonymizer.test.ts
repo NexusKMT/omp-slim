@@ -315,6 +315,31 @@ describe("SessionAnonymizer", () => {
 		expect(numeric).toContain("2>&1 | head -3");
 	});
 
+	test("keeps only declared built-in argument keys and numeric fields", () => {
+		// An extension shadowing `grep` can send any record under a built-in name.
+		const anonymizer = new SessionAnonymizer();
+		const json = JSON.stringify(
+			anonymizer.entry({
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "toolCall",
+							id: "toolu_01abcdef",
+							name: "grep",
+							arguments: { pattern: 123456789, aliceCustomer: "x", limit: 5 },
+						},
+					],
+				},
+			}),
+		);
+		expect(json).not.toContain("123456789");
+		expect(json).not.toContain("alice");
+		expect(json).toContain('"limit":5');
+		expect(anonymizer.command("grep -ecustomer=secret file")).not.toMatch(/customer|secret/);
+	});
+
 	test("tokenizes numeric path segments", () => {
 		const anonymizer = new SessionAnonymizer();
 		expect(anonymizer.path("/customers/123456789/private.ts:10-20")).toMatch(/^\/seg\d+\/seg\d+\/seg\d+\.ts:10-20$/);

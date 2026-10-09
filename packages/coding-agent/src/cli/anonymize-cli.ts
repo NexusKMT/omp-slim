@@ -41,19 +41,27 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 	});
 	// The output must never hold raw transcripts: writing into the session's directory (or an ancestor)
 	// could overwrite the session and would bundle it, and `<stem>/` holds raw subagent transcripts.
-	const outReal = await realpathAllowingMissing(outDir);
+	let outReal: string;
+	let existing: string[];
+	try {
+		outReal = await realpathAllowingMissing(outDir);
+		existing = await fs.readdir(outDir).catch((err: unknown) => {
+			if (isEnoent(err)) return [];
+			throw err;
+		});
+	} catch (err) {
+		// `-o report.zip` (an existing file) or a file somewhere in the path is an input mistake.
+		if ((err as NodeJS.ErrnoException).code === "ENOTDIR") {
+			throw new CliUsageError(`--out ${outDir} is not a directory`);
+		}
+		throw err;
+	}
 	if (isWithin(path.dirname(sourceReal), outReal) || isWithin(outReal, sourceReal.slice(0, -".jsonl".length))) {
 		throw new CliUsageError(
 			`--out ${outDir} would mix the export with raw session transcripts; choose another directory`,
 		);
 	}
 	// Merging into an existing directory would leave stale or unrelated files beside the export.
-	let existing: string[] = [];
-	try {
-		existing = await fs.readdir(outDir);
-	} catch (err) {
-		if (!isEnoent(err)) throw err;
-	}
 	if (existing.length > 0) {
 		throw new CliUsageError(`--out ${outDir} is not empty; choose a new or empty directory`);
 	}
