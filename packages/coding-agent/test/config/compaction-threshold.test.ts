@@ -115,7 +115,9 @@ describe("compaction.modelThresholds", () => {
 		expect(parseCompactionPointInput("1b")).toBe(1_000_000_000);
 		expect(parseCompactionPointInput(" 12.5% ")).toBe("12.5%");
 		expect(parseCompactionPointInput("  ")).toBeNull();
-		for (const input of ["abc", "0", "1.5m", "90 kb", "101%", "-5"]) {
+		expect(parseCompactionPointInput("f400k")).toBe("f400000");
+		expect(parseCompactionPointInput("F2M")).toBe("f2000000");
+		for (const input of ["abc", "0", "1.5m", "90 kb", "101%", "-5", "f0", "ff1", "f80%"]) {
 			expect(() => parseCompactionPointInput(input)).toThrow("Invalid compaction point");
 		}
 	});
@@ -189,6 +191,17 @@ describe("compaction.modelThresholds", () => {
 		// A percentage entry still scales the real window.
 		const byModelPercent = Settings.isolated({ "compaction.modelThresholds": { "openai/gpt-5.6-terra": "50%" } });
 		expect(resolveThresholdTokens(window, resolveModelCompactionSettings(byModelPercent, terra))).toBe(525_000);
+
+		// An `f`-prefixed entry is the exact trigger, whatever the policy.
+		const byModelFixed = Settings.isolated({
+			"compaction.thresholdPercent": 80,
+			"compaction.modelThresholds": { "openai/gpt-5.6-terra": "f400000" },
+		});
+		expect(resolveThresholdTokens(window, resolveModelCompactionSettings(byModelFixed, terra))).toBe(400_000);
+		// Agent entries are always exact triggers, so the prefix is not part of their syntax.
+		expect(() => validateAgentCompactionThresholdOverrides({ task: "f90000" })).toThrow(
+			"task.agentCompactionThresholdOverrides.task",
+		);
 	});
 
 	it("refuses a hub edit that a project entry for the same model would shadow", async () => {
@@ -239,6 +252,27 @@ describe("compaction.modelThresholds", () => {
 		);
 		expect(() => setModelCompactionPoint(settings, model, "300k")).toThrow("Must not exceed the 272K window");
 		expect(resolveModelCompactionSettings(settings, model).baseWindowTokens).toBe(200_000);
+	});
+
+	it("needs room above a fixed trigger: the standard window opens the extended one and the max is rejected", () => {
+		const settings = Settings.isolated({ extendedContext: false });
+		const model = { provider: "openai", id: "gpt-5.6-terra", contextWindow: 272_000, cost: {} } as Model;
+		const tiers = { standard: 272_000, extended: 1_050_000 };
+
+		// A base equal to the standard window fits it; a fixed trigger there needs the extended one.
+		expect(setModelCompactionPoint(settings, model, "272k", { tiers })).toEqual({ kind: "saved", entry: 272_000 });
+		expect(setModelCompactionPoint(settings, model, "f272k", { tiers })).toEqual({
+			kind: "confirm",
+			message: "Opens 1.05M window",
+		});
+		expect(setModelCompactionPoint(settings, model, "f272k", { tiers, confirmed: true })).toEqual({
+			kind: "saved",
+			entry: "f272000",
+		});
+		expect(resolveModelCompactionSettings(settings, model)).toMatchObject({ thresholdTokens: 272_000 });
+		expect(() => setModelCompactionPoint(settings, model, "f1050k", { tiers, confirmed: true })).toThrow(
+			"Must be below the 1.05M max window",
+		);
 	});
 
 	it("skips the warning when extended context is already on", () => {

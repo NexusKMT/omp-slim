@@ -1103,11 +1103,13 @@ export class SelectorController {
 						if (update.kind === "confirm") return update;
 						const { entry } = update;
 						const selector = `${model.provider}/${model.id}`;
-						this.ctx.showStatus(
-							entry === undefined
-								? `Compaction point for ${selector} reset`
-								: `Compaction point for ${selector}: ${typeof entry === "number" ? `${entry.toLocaleString("en-US")} tokens` : entry}`,
-						);
+						let described: string;
+						if (entry === undefined) described = "reset";
+						else if (typeof entry === "number") described = `${entry.toLocaleString("en-US")}-token base`;
+						else if (entry.startsWith("f"))
+							described = `fixed at ${Number(entry.slice(1)).toLocaleString("en-US")} tokens`;
+						else described = `${entry} of the window`;
+						this.ctx.showStatus(`Compaction limit for ${selector}: ${described}`);
 						this.ctx.statusLine.invalidate();
 						// The entry can move the model between window tiers; the open hub's
 						// rows are a pre-rebuild snapshot until the catalog rebuild settles.

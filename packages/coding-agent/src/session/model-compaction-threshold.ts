@@ -62,14 +62,15 @@ export type ModelCompactionPointUpdate =
  * `compaction.modelThresholds` entry in the global config; empty input removes
  * it. A token count is the base the compaction policy scales (it stands in for
  * the window), so it may not exceed the largest window `model` can run with
- * (`tiers.extended`, else its current window). Throws on unparseable or
- * too-large input, and when a project or higher-priority layer sets the same
- * key, which would leave the global write without effect.
+ * (`tiers.extended`, else its current window); a fixed trigger (`f400k`) must
+ * stay below it. Throws on unparseable or too-large input, and when a project
+ * or higher-priority layer sets the same key, which would leave the global
+ * write without effect.
  *
- * A token count past `tiers.standard` opts the model into its extended window
- * (see `ModelRegistry.contextWindowTiers`); unless extended context is already
- * on, it is written only once `confirmed`, and otherwise returns the warning
- * to show.
+ * A base past `tiers.standard`, or a fixed trigger at or past it, opts the
+ * model into its extended window (see `ModelRegistry.contextWindowTiers`);
+ * unless extended context is already on, it is written only once `confirmed`,
+ * and otherwise returns the warning to show.
  */
 export function setModelCompactionPoint(
 	settings: Settings,
@@ -87,19 +88,31 @@ export function setModelCompactionPoint(
 	) {
 		throw new Error(`${key} is set in the project config; edit compaction.modelThresholds there`);
 	}
-	if (typeof entry === "number") {
+	// `parseCompactionPointInput` yields a number (base), `"fN"` (fixed) or `"N%"`.
+	const fixed = typeof entry === "string" && entry.startsWith("f");
+	const tokens =
+		typeof entry === "number" ? entry : typeof entry === "string" && fixed ? Number(entry.slice(1)) : undefined;
+	if (tokens !== undefined) {
 		const { tiers } = options;
 		const ceiling = tiers?.extended ?? model.contextWindow;
-		if (ceiling !== null && ceiling !== undefined && entry > ceiling) {
-			throw new Error(`Must not exceed the ${formatWindow(ceiling)} ${tiers ? "max " : ""}window`);
+		const max = tiers ? "max " : "";
+		if (ceiling !== null && ceiling !== undefined && (fixed ? tokens >= ceiling : tokens > ceiling)) {
+			throw new Error(
+				fixed
+					? `Must be below the ${formatWindow(ceiling)} ${max}window`
+					: `Must not exceed the ${formatWindow(ceiling)} ${max}window`,
+			);
 		}
-		if (tiers && entry > tiers.standard && !options.confirmed && !cfgExtendedContext.get(settings)) {
-			// Pricing follows where compaction actually triggers: the policy scaled from this base.
-			const trigger = resolveThresholdTokens(tiers.extended, {
-				...cfgCompaction.get(settings),
-				thresholdTokens: -1,
-				baseWindowTokens: entry,
-			});
+		const opensExtended = tiers !== undefined && (fixed ? tokens >= tiers.standard : tokens > tiers.standard);
+		if (tiers && opensExtended && !options.confirmed && !cfgExtendedContext.get(settings)) {
+			// Pricing follows where compaction actually triggers: the fixed point, or the policy scaled from the base.
+			const trigger = fixed
+				? tokens
+				: resolveThresholdTokens(tiers.extended, {
+						...cfgCompaction.get(settings),
+						thresholdTokens: -1,
+						baseWindowTokens: tokens,
+					});
 			const premiumThreshold = model.cost.longContext?.inputThreshold;
 			const pricing =
 				premiumThreshold !== undefined && trigger > premiumThreshold

@@ -315,8 +315,8 @@ function providerInitials(providerId: string): string {
 
 const PROVIDER_REFRESH_DEBOUNCE_MS = 120;
 const RECENT_LIMIT = 15;
-/** Accepted compaction point input, shown beside the field. */
-const COMPACTION_INPUT_HINT = "90000 · 90k · 1m · 80% · empty resets";
+/** Accepted compaction limit input, shown beside the field: a scaled base, a fixed trigger, or a percentage. */
+const COMPACTION_INPUT_HINT = "400k base · f400k fixed · 80% · empty resets";
 
 type CompactionStrip = Extract<StripState, { purpose: "compaction" }>;
 
