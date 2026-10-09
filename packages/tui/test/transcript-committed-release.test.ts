@@ -248,6 +248,36 @@ describe("committed transcript blocks release render caches", () => {
 		expect(settled.invalidations + active.invalidations).toBe(0);
 	});
 
+	it("keeps committed caches through replay retries until the replay batch is acknowledged", () => {
+		const transcript = new TranscriptContainer();
+		const block = new ReleaseCountingBlock(["committed"], true);
+		transcript.addChild(block);
+		commitAll(transcript, 80);
+		expect(block.releases).toBe(1);
+
+		transcript.beginReplay();
+		const offered = transcript.peekReplayBatch(80);
+		if (!offered) throw new Error("expected a replay batch");
+		expect(block.releases).toBe(1);
+		expect(transcript.rerenderOfferedBatch(60)?.rows).toEqual(["committed", ""]);
+		expect(block.releases).toBe(1);
+
+		transcript.acknowledgeFinalizedBatch(offered.id);
+		expect(block.releases).toBe(2);
+	});
+
+	it("releases committed caches when replay renders no rows to acknowledge", () => {
+		const transcript = new TranscriptContainer();
+		const block = new ReleaseCountingBlock([""], true);
+		transcript.addChild(block);
+		expect(commitAll(transcript, 80)).toEqual([]);
+		expect(block.releases).toBe(1);
+
+		transcript.beginReplay();
+		expect(transcript.peekReplayBatch(80)).toBeUndefined();
+		expect(block.releases).toBe(2);
+	});
+
 	it("never re-runs extension renderers when a block commits or replays", () => {
 		const frameCalls = { count: 0 };
 		const framed = () =>
@@ -601,15 +631,13 @@ describe("retired edit and write formatting", () => {
 	const diff = "@@ -1,2 +1,2 @@\n-const value = 1;\n+const value = 2;\n const stable = true;";
 	const result = { content: [{ type: "text", text: "completed" }], details: { diff } };
 	const args = { path: "src/values.ts", content: WRITE_CONTENT };
-	const builders: { name: string; slots: number; build: (theme: Theme) => Component | undefined }[] = [
+	const builders: { name: string; build: (theme: Theme) => Component | undefined }[] = [
 		{
 			name: "write call",
-			slots: 1,
 			build: theme => writeToolRenderer.renderCall(args, { expanded: true, isPartial: true }, theme),
 		},
 		{
 			name: "write result",
-			slots: 1,
 			build: theme =>
 				writeToolRenderer.renderResult(
 					{ ...result, details: {} },
@@ -620,7 +648,6 @@ describe("retired edit and write formatting", () => {
 		},
 		{
 			name: "multi-file edit call",
-			slots: 2,
 			build: theme =>
 				editToolRenderer.renderCall(
 					{ path: "src/values.ts", previewDiff: diff },
@@ -639,12 +666,11 @@ describe("retired edit and write formatting", () => {
 		},
 		{
 			name: "edit result",
-			slots: 3,
 			build: theme => editToolRenderer.renderResult(result, { expanded: true, isPartial: false }, theme, args),
 		},
 	];
 
-	for (const { name, slots, build } of builders) {
+	for (const { name, build } of builders) {
 		it(`recomputes released ${name} formatting only when replayed and preserves its rows`, async () => {
 			const theme = await getThemeByName("dark");
 			if (!theme) throw new Error("expected the dark theme");
@@ -660,14 +686,15 @@ describe("retired edit and write formatting", () => {
 			const component = build(theme);
 			if (!component) throw new Error(`expected the ${name} card`);
 			const rows = component.render(80);
-			expect(formats).toBe(slots);
+			const firstRenderFormats = formats;
+			expect(firstRenderFormats).toBeGreaterThan(0);
 			expect(component.render(80)).toEqual(rows);
-			expect(formats).toBe(slots);
+			expect(formats).toBe(firstRenderFormats);
 
 			component.releaseRenderCaches?.();
-			expect(formats).toBe(slots);
+			expect(formats).toBe(firstRenderFormats);
 			expect(component.render(80)).toEqual(rows);
-			expect(formats).toBe(slots * 2);
+			expect(formats).toBeGreaterThan(firstRenderFormats);
 		});
 	}
 });

@@ -2,11 +2,18 @@
 
 ## [Unreleased]
 
-## [18.8.6] - 2026-10-08
+### Added
+
+- Added cache-release hooks for TUI components and tool cards, allowing extensions to discard derived render data without rebuilding content ([#13632](https://github.com/can1357/oh-my-pi/pull/13632) by [@iliaal](https://github.com/iliaal)).
 
 ### Changed
 
 - Reduced memory held by retired transcript history in long sessions ([#13632](https://github.com/can1357/oh-my-pi/pull/13632) by [@iliaal](https://github.com/iliaal)).
+
+## [18.8.6] - 2026-10-08
+
+### Changed
+
 - Improved rendering performance for streaming long Markdown lists while preserving nested items, numbering, and reference links.
 
 ### Fixed

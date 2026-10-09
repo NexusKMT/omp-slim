@@ -584,7 +584,10 @@ export class TranscriptContainer extends Container {
 			popLoopPhase();
 		}
 		this.#replayPending = false;
-		if (rows.length === 0) return undefined;
+		if (rows.length === 0) {
+			this.#releaseCommittedRenderCaches();
+			return undefined;
+		}
 		const batch: HistoryBatch = { id: this.#nextBatchId++, rows, kind: "replay" };
 		this.#offered = { batch, kind: "replay" };
 		return batch;
@@ -748,6 +751,8 @@ export class TranscriptContainer extends Container {
 				this.#retireEntry(this.#entries[index]!);
 			}
 			this.#frontier = offered.end;
+		} else {
+			this.#releaseCommittedRenderCaches();
 		}
 		this.#offered = undefined;
 		if (this.#replayRequested) this.#startReplay();
@@ -1022,7 +1027,6 @@ export class TranscriptContainer extends Container {
 				if (rows.length > 0) rows.push("");
 				rows.push(...block);
 			}
-			if (entry.state === "committed") this.#releaseRenderCaches(entry);
 			if (budgetMs !== undefined && performance.now() - startedAt >= budgetMs) break;
 		}
 		if (trailingBlank && rows.length > 0) rows.push("");
@@ -1060,6 +1064,12 @@ export class TranscriptContainer extends Container {
 		entry.stableRowCountByWidth = new Map();
 		this.#frameRows.delete(entry);
 		this.#releaseRenderCaches(entry);
+	}
+
+	#releaseCommittedRenderCaches(): void {
+		for (let index = 0; index < this.#frontier; index++) {
+			this.#releaseRenderCaches(this.#entries[index]!);
+		}
 	}
 
 	#releaseRenderCaches(entry: TranscriptEntry): void {
