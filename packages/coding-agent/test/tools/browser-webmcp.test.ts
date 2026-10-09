@@ -6,9 +6,12 @@ import { acquireBrowser, holdBrowser, releaseBrowser } from "@oh-my-pi/pi-coding
 import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import {
 	installWebMcp,
+	installWebMcpPageHook,
+	WEBMCP_BRIDGE_KEY,
 	type WebMcpEventsResult,
 	type WebMcpInvokeResult,
 	type WebMcpListResult,
+	webMcpSnapshotInPage,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/webmcp";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { chromiumAvailable } from "./chromium-probe";
@@ -292,4 +295,32 @@ null;`);
 			await releaseBrowser(handle, { kill: false });
 		}
 	}, 30_000);
+
+	// The hook reads `document.modelContext ?? navigator.modelContext` without the platform API.
+	it.each([
+		{ owner: "document", nativeAvailable: false },
+		{ owner: "navigator", nativeAvailable: true },
+	])(
+		"reports nativeAvailable $nativeAvailable when $owner has a null modelContext",
+		async ({ owner, nativeAvailable }) => {
+			const handle = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+			if (!("browser" in handle)) throw new Error("Expected a Puppeteer browser");
+			holdBrowser(handle);
+			const page = await handle.browser.newPage();
+			try {
+				await page.goto("data:text/html,<title>null context</title>");
+				const realm = page.mainFrame().mainRealm();
+				await realm.evaluate(
+					`Object.defineProperty(${owner}, "modelContext", { configurable: true, value: null }); null;`,
+				);
+				await realm.evaluate(installWebMcpPageHook, WEBMCP_BRIDGE_KEY);
+				expect((await realm.evaluate(webMcpSnapshotInPage, WEBMCP_BRIDGE_KEY)).nativeAvailable).toBe(
+					nativeAvailable,
+				);
+			} finally {
+				await page.close();
+				await releaseBrowser(handle, { kill: false });
+			}
+		},
+	);
 });

@@ -322,24 +322,26 @@ export function installWebMcpPageHook(key: string): void {
 		wrapped?: () => PageModelContext | undefined;
 	}[] = [];
 	let pageContext: PageModelContext | undefined;
-	for (const instance of [doc, nav]) {
-		if (Object.getOwnPropertyDescriptor(instance, "modelContext")) {
-			pageContext ??= instance.modelContext;
-			continue;
+	instances: for (const instance of [doc, nav]) {
+		if (!Object.getOwnPropertyDescriptor(instance, "modelContext")) {
+			for (let owner: object | null = Object.getPrototypeOf(instance); owner; owner = Object.getPrototypeOf(owner)) {
+				const descriptor = Object.getOwnPropertyDescriptor(owner, "modelContext");
+				if (!descriptor) continue;
+				const platform =
+					descriptor.get?.name === "get modelContext" &&
+					descriptor.configurable === true &&
+					/^function get modelContext\(\) \{\s*\[native code\]\s*\}$/.test(
+						Function.prototype.toString.call(descriptor.get),
+					);
+				if (platform) {
+					getters.push({ instance, owner, descriptor });
+					continue instances;
+				}
+				break;
+			}
 		}
-		for (let owner: object | null = Object.getPrototypeOf(instance); owner; owner = Object.getPrototypeOf(owner)) {
-			const descriptor = Object.getOwnPropertyDescriptor(owner, "modelContext");
-			if (!descriptor) continue;
-			const platform =
-				descriptor.get?.name === "get modelContext" &&
-				descriptor.configurable === true &&
-				/^function get modelContext\(\) \{\s*\[native code\]\s*\}$/.test(
-					Function.prototype.toString.call(descriptor.get),
-				);
-			if (platform) getters.push({ instance, owner, descriptor });
-			else pageContext ??= instance.modelContext;
-			break;
-		}
+		// Read as `document.modelContext ?? navigator.modelContext`: a null one falls through.
+		pageContext ??= instance.modelContext;
 	}
 	const nativeAvailable = getters.length > 0 || pageContext !== undefined;
 	const tools = new Map<string, PageModelContextTool>();
