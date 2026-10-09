@@ -14,12 +14,15 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import * as attach from "@oh-my-pi/pi-coding-agent/tools/browser/attach";
 import { CmuxSocketClient } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/socket-client";
+import * as launch from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
 import * as registry from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
 import { getTabsMapForTest, releaseTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+import type { Browser, default as Puppeteer } from "puppeteer-core";
 import { TimeoutError } from "puppeteer-core";
+import { rejectionOf } from "../helpers/rejection";
 
 function makeSession(): ToolSession {
 	return {
@@ -111,6 +114,35 @@ describe("browser open — requested timeout bounds the whole acquisition (#6365
 		for (let i = 0; i < 20; i++) await Promise.resolve();
 		expect(closeSpy).toHaveBeenCalledTimes(1);
 		expect(registry.getBrowsersMapForTest().size).toBe(0);
+		expect(outcome.err.message).toContain("while launching or connecting to the browser (cmux:split)");
+	});
+
+	it("names the tab step when tab acquisition stays pending past the deadline", async () => {
+		vi.useFakeTimers();
+		spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
+		spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
+		const openSplitGate = Promise.withResolvers<void>();
+		const openSplitEntered = Promise.withResolvers<void>();
+		spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+			async (method: string): Promise<Record<string, unknown>> => {
+				if (method === "browser.open_split") {
+					openSplitEntered.resolve();
+					await openSplitGate.promise;
+				}
+				return {};
+			},
+		);
+
+		const invokeBrowser = createBrowserHost();
+		const open = rejectionOf(invokeBrowser({ action: "open", name: "slow-tab", timeout: 1 }));
+		await openSplitEntered.promise;
+		vi.advanceTimersByTime(1000);
+
+		const error = await open;
+		openSplitGate.resolve();
+		expect(error).toBeInstanceOf(ToolError);
+		if (!(error instanceof Error)) throw new Error("Expected an error");
+		expect(error.message).toContain('timed out after 1000ms while opening tab "slow-tab"');
 	});
 });
 
@@ -161,6 +193,82 @@ describe("browser open — caller cancellation rolls back the fresh browser (#63
 		// Let the orphaned acquisition unwind so it does not leak past the test.
 		openSplitGate.resolve();
 		await Promise.resolve();
+	});
+});
+
+describe("browser open — an abandoned browser acquisition does not hold up the next one", () => {
+	it("starts a fresh connect for the next open instead of waiting out a timed-out one", async () => {
+		const stalledConnect = Promise.withResolvers<void>();
+		let connects = 0;
+		spyOn(CmuxSocketClient.prototype, "connect").mockImplementation(async () => {
+			if (++connects === 1) await stalledConnect.promise;
+		});
+		const closeSpy = spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
+		spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+			async (method: string): Promise<Record<string, unknown>> =>
+				method === "browser.open_split" ? { surface_id: "surface-retry", url: "about:blank" } : {},
+		);
+		const invokeBrowser = createBrowserHost();
+
+		vi.useFakeTimers();
+		const first = rejectionOf(invokeBrowser({ action: "open", name: "retry", timeout: 1 }));
+		vi.advanceTimersByTime(1000);
+		expect(await first).toBeInstanceOf(ToolError);
+		vi.useRealTimers();
+
+		// The connect the timed-out open started never returns; the retry must
+		// not queue behind it.
+		const second = await invokeBrowser({ action: "open", name: "retry", timeout: 2 });
+		expect(second.content.some(part => part.type === "text" && /Opened tab "retry"/.test(part.text ?? ""))).toBe(
+			true,
+		);
+		expect(connects).toBe(2);
+
+		// When the abandoned connect finally returns, it disposes only its own
+		// client and leaves the retry's browser and tab in place.
+		stalledConnect.resolve();
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		expect(closeSpy).toHaveBeenCalledTimes(1);
+		expect(registry.getBrowsersMapForTest().size).toBe(1);
+		expect(getTabsMapForTest().has("retry")).toBe(true);
+	});
+
+	it("waits for a spawned app's abandoned acquisition to settle before starting another", async () => {
+		const app = "/tmp/omp-open-lease-app";
+		const events: string[] = [];
+		spyOn(attach, "findReusableCdp").mockResolvedValue({ cdpUrl: "http://127.0.0.1:1", pid: 4242 });
+		spyOn(launch, "loadPuppeteer").mockResolvedValue({} as unknown as typeof Puppeteer);
+		const stalledConnect = Promise.withResolvers<Browser>();
+		const firstConnect = Promise.withResolvers<void>();
+		spyOn(launch, "connectPuppeteer").mockImplementation(() => {
+			events.push("connect");
+			firstConnect.resolve();
+			return stalledConnect.promise;
+		});
+		const browser = {
+			connected: true,
+			disconnect: () => {
+				events.push("disconnect");
+			},
+		} as unknown as Browser;
+
+		const owner = new AbortController();
+		const first = rejectionOf(
+			registry.acquireBrowser({ kind: "spawned", path: app }, { cwd: "/tmp", signal: owner.signal }),
+		);
+		await firstConnect.promise;
+		owner.abort();
+		const second = registry.acquireBrowser({ kind: "spawned", path: app }, { cwd: "/tmp" });
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		stalledConnect.resolve(browser);
+
+		expect(await first).toBeInstanceOf(ToolAbortError);
+		const handle = await second;
+		const published = registry.getBrowsersMapForTest().get(handle.key);
+		await registry.releaseBrowser(handle, { kill: false });
+		// The retry connects only after the abandoned open disposed its handle.
+		expect(events).toEqual(["connect", "disconnect", "connect", "disconnect"]);
+		expect(published).toBe(handle);
 	});
 });
 

@@ -90,8 +90,11 @@ export interface ReleaseBrowserOptions {
 }
 
 const browsers = new Map<string, BrowserHandle>();
-/** In-flight opens by browser key, so concurrent acquisitions share one launch instead of storming Chromium. */
-const pendingOpens = new Map<string, { promise: Promise<BrowserHandle>; startedAt: number }>();
+/**
+ * In-flight opens by browser key, so concurrent acquisitions share one launch instead of storming Chromium.
+ * `settled` resolves once the open settles or its caller aborts, whichever comes first.
+ */
+const pendingOpens = new Map<string, { settled: Promise<void> }>();
 
 export function browserKey(kind: BrowserKind): string {
 	switch (kind.kind) {
@@ -114,13 +117,6 @@ export interface AcquireBrowserOptions {
 	cwd: string;
 	viewport?: { width: number; height: number; deviceScaleFactor?: number };
 	signal?: AbortSignal;
-	/**
-	 * The caller's own open budget. A waiter that aborts while the pending open
-	 * has already outlived one full budget evicts that entry, so a stalled
-	 * acquisition cannot wedge its browser key for the rest of the process.
-	 * Omit for callers whose abort does not imply the pending open is stuck.
-	 */
-	budgetMs?: number;
 }
 
 export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOptions): Promise<BrowserHandle> {
@@ -146,37 +142,26 @@ export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOpti
 		// leaking the rest as unreferenced process trees.
 		const pending = pendingOpens.get(key);
 		if (pending) {
-			// A pending open that never settles poisons its key: every later
-			// acquisition waits here forever while its caller reports nothing but
-			// its own timeout, and the real failure is discarded. Wait under the
-			// caller's signal instead, and once an aborted waiter has outlived a
-			// full caller budget, evict the entry so the next acquisition gets a
-			// fresh attempt. The abandoned open keeps whatever handle it produces —
-			// the `opts.signal?.aborted` branch below disposes it when it settles.
-			try {
-				await untilAborted(opts.signal, () => pending.promise.catch(() => undefined));
-			} catch (error) {
-				if (opts.budgetMs !== undefined && performance.now() - pending.startedAt >= opts.budgetMs) {
-					if (pendingOpens.get(key) === pending) pendingOpens.delete(key);
-					logger.debug("Evicted stalled browser open", {
-						key,
-						stalledMs: Math.round(performance.now() - pending.startedAt),
-					});
-				}
-				throw error;
-			}
+			await untilAborted(opts.signal, () => pending.settled);
 			continue;
 		}
 		const open = openBrowserHandle(kind, opts);
-		const entry = { promise: open, startedAt: performance.now() };
-		pendingOpens.set(key, entry);
-		// Drop the entry when the open settles, but only while it is still the
-		// registered one — a late settlement of an evicted open must not remove
-		// the replacement now in flight. Both branches are handled here, so a
-		// rejected open never surfaces as an unhandled rejection.
+		const settled = Promise.withResolvers<void>();
+		const entry = { settled: settled.promise };
+		// An open whose caller aborted is disposed below, never published, so it
+		// stops being this key's single flight the moment its caller gives up:
+		// waiters start a fresh attempt instead of waiting out a launch or connect
+		// that may never return. Only the registered entry is removed, so a late
+		// settlement cannot drop a replacement already in flight. A spawned app
+		// keeps its key until the open settles: disposing that open kills the app,
+		// which a fresh attempt could already have adopted as a reusable endpoint.
 		const clearEntry = () => {
+			opts.signal?.removeEventListener("abort", clearEntry);
 			if (pendingOpens.get(key) === entry) pendingOpens.delete(key);
+			settled.resolve();
 		};
+		if (kind.kind !== "spawned") opts.signal?.addEventListener("abort", clearEntry, { once: true });
+		pendingOpens.set(key, entry);
 		void open.then(clearEntry, clearEntry);
 		const handle = await open;
 		// The launch may resolve AFTER the caller has already aborted (the outer
