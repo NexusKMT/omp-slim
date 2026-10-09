@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { TempDir } from "@oh-my-pi/pi-utils";
 import "./setup";
 import { configureRecallFeatures } from "@oh-my-pi/pi-mnemopi/config";
 import { BeamMemory } from "@oh-my-pi/pi-mnemopi/core/beam";
@@ -442,6 +443,40 @@ describe("proactive memory linking", () => {
 			expect(after).toBe(before);
 		} finally {
 			beam.close();
+		}
+	});
+
+	// #14998: linking a retain against a large on-disk bank autocommitted every
+	// edge, so the synchronous remember paid one WAL commit (fsync) per linked
+	// memory and froze the TUI for seconds. Each commit appends at least one WAL
+	// frame, so the frame count separates one commit from one-per-edge.
+	it("links a new memory against an on-disk bank in a single commit", () => {
+		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
+		const dir = TempDir.createSync("@mnemopi-proactive-commit-");
+		const beam = new BeamMemory({ sessionId: "proactive-commit", dbPath: dir.join("bank.db") });
+		try {
+			const seeded = 60;
+			const insert = beam.db.prepare(
+				"INSERT INTO episodic_memory (id, content, source, timestamp, session_id, importance) VALUES (?, ?, 'seed', ?, 'seed', 0.5)",
+			);
+			for (let i = 0; i < seeded; i++) {
+				insert.run(`seed-${i}`, `Deployment pipeline database indexing review ${i}`, new Date().toISOString());
+			}
+			insert.finalize();
+			beam.db.exec("PRAGMA wal_autocheckpoint=0");
+			beam.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+
+			const id = beam.remember("Deployment pipeline database indexing review notes", { importance: 0.8 });
+
+			const linked = beam.db
+				.query("SELECT COUNT(*) AS count FROM graph_edges WHERE source = ? AND edge_type = 'related_to'")
+				.get(id) as { count: number };
+			expect(linked.count).toBe(seeded);
+			const wal = beam.db.query("PRAGMA wal_checkpoint(PASSIVE)").get() as { log: number };
+			expect(wal.log).toBeLessThan(seeded);
+		} finally {
+			beam.close();
+			dir.removeSync();
 		}
 	});
 });
