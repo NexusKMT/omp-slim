@@ -17,8 +17,11 @@ import { BUILTIN_TOOL_NAMES } from "../tools/builtin-names";
 import type { SessionEntry, SessionHeader } from "./session-entries";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
 
-/** `meta`: session records; `builtin-args`: built-in tool arguments (known option enums); `args`: any other tool. */
-type Scope = "meta" | "builtin-args" | "args";
+/**
+ * `meta`: session structure omp writes; `builtin-args`: built-in tool arguments (known option enums);
+ * `data`: anything else — extension/MCP tool args, extension entry payloads, non-built-in tool details.
+ */
+type Scope = "meta" | "builtin-args" | "data";
 type JsonObject = Record<string, unknown>;
 
 /** Shown wherever an anonymized export is written: the redaction is heuristic, not a guarantee. */
@@ -355,8 +358,47 @@ const COMMAND_PREFIXES = new Set(["sudo", "env", "time", "timeout", "nohup", "xa
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const IDENTIFIER = /^[\w.:/@+-]{1,128}$/;
+/** Id keys that join omp/provider records (call ↔ result ↔ execution log); raw in every scope. */
+const PROTOCOL_ID_KEYS: Record<string, true> = {
+	toolCallId: true,
+	call_id: true,
+	responseId: true,
+	sourceEntryId: true,
+	firstKeptEntryId: true,
+	turn_id: true,
+};
+
+/** Keys omp itself writes; the only object keys kept verbatim inside untrusted data containers. */
+const KNOWN_KEYS: Record<string, true> = {
+	...TEXT_KEYS,
+	...PATH_KEYS,
+	...META_KEYS,
+	...IDENTITY_KEYS,
+	...ARG_ENUM_KEYS,
+	...PATTERN_ARG_KEYS,
+	...PROTOCOL_ID_KEYS,
+	id: true,
+	parentId: true,
+	name: true,
+	args: true,
+	intent: true,
+	command: true,
+	cmd: true,
+	path: true,
+	paths: true,
+	cwd: true,
+	timestamp: true,
+	startedAt: true,
+};
+
 /** Object keys shaped like schema fields; anything else (paths, labels) is data. */
 const SCHEMA_KEY = /^(?:[A-Za-z_$][\w$]{0,63}|\d+)$/;
+
+/** Whether a key inside untrusted data is omp vocabulary (`readFiles`, `toolCallId`) rather than user data. */
+function isKnownDataKey(key: string): boolean {
+	return KNOWN_KEYS[key] === true || PATH_KEY.test(key) || ID_KEY.test(key);
+}
+
 const ID_KEY = /(?:^id|Id|_id|Ids)$/;
 /** Machine-minted ids: hex/uuid, or `prefix_<digits>` / `prefix_<token containing a digit>` (`toolu_01…`, `call_…|fc_…`). */
 const RANDOM_ID = /^(?:[0-9a-f-]{6,}|[a-z]+_(?:\d+|(?=[\w|=-]*\d)[\w|=-]{6,}))$/i;
@@ -380,6 +422,10 @@ const MAX_PLACEHOLDER_LENGTH = 120;
 
 function isObject(value: unknown): value is JsonObject {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBuiltinTool(name: unknown): boolean {
+	return typeof name === "string" && (BUILTIN_TOOL_NAMES as readonly string[]).includes(name);
 }
 
 function looksLikePath(value: string): boolean {
@@ -509,9 +555,11 @@ export class SessionAnonymizer {
 		if (isObject(value)) {
 			const out: JsonObject = {};
 			for (const [childKey, child] of Object.entries(value)) {
-				// Schema keys stay; data-derived keys (paths, ids, `display({...})` labels) are content.
-				const outKey = SCHEMA_KEY.test(childKey) ? childKey : this.#literal(childKey);
-				out[outKey] = this.#value(child, childKey, value, scope);
+				const childScope = scope === "meta" ? this.#childScope(childKey, value) : scope;
+				// Data containers carry arbitrary maps (`display({ aliceCustomer: 1 })`), so only keys omp
+				// itself writes survive there; trusted structure keeps schema-shaped keys.
+				const keepKey = scope === "data" ? isKnownDataKey(childKey) : SCHEMA_KEY.test(childKey);
+				out[keepKey ? childKey : this.#literal(childKey)] = this.#value(child, childKey, value, childScope);
 			}
 			return out;
 		}
@@ -519,9 +567,20 @@ export class SessionAnonymizer {
 		return this.#string(value, key, parent, scope);
 	}
 
+	/**
+	 * Scope for `parent[key]` inside trusted structure. Payloads omp does not define — custom/extension
+	 * entry data, non-built-in tool result details, and `eval` display output — are untrusted data.
+	 */
+	#childScope(key: string, parent: JsonObject): Scope {
+		if (key === "jsonOutputs") return "data";
+		if (key === "data" && parent.type === "custom") return "data";
+		if (key !== "details") return "meta";
+		return parent.role === "toolResult" && isBuiltinTool(parent.toolName) ? "meta" : "data";
+	}
+
 	#toolArgs(value: unknown, toolName: string): unknown {
 		// Extension/MCP schemas are arbitrary: only built-in tools' option keys are known enums.
-		const scope: Scope = (BUILTIN_TOOL_NAMES as readonly string[]).includes(toolName) ? "builtin-args" : "args";
+		const scope: Scope = isBuiltinTool(toolName) ? "builtin-args" : "data";
 		if (typeof value !== "string") return this.#value(value, undefined, undefined, scope);
 		// Wire payloads carry arguments as JSON text; partial streams may not parse.
 		try {
@@ -535,15 +594,18 @@ export class SessionAnonymizer {
 		if (ISO_TIMESTAMP.test(value)) return value;
 		if (key === undefined) return this.#literal(value);
 		if (ID_KEY.test(key) && /^\S{1,512}$/.test(value)) {
-			// Random ids (uuids, hex, `toolu_01…`, `call_…|fc_…`, `bg_12`) stay; named ids such as
-			// subagent ids are model-chosen names, mapped like the `agent://` path segment they mirror.
-			return RANDOM_ID.test(value) ? value : this.segment(value);
+			// Protocol links stay raw everywhere so call ↔ result ↔ execution-log stay joinable. Other
+			// machine-minted ids stay in omp-written structure; in untrusted data (`customerId`) every
+			// id is tokenized, as is any named id (mapped like the `agent://` segment it mirrors).
+			if (PROTOCOL_ID_KEYS[key] === true) return value;
+			return scope !== "data" && RANDOM_ID.test(value) ? value : this.segment(value);
 		}
 		if (key.endsWith("At") && IDENTIFIER.test(value)) return value;
 		if (PATH_KEYS[key] === true || PATH_KEY.test(key)) return MESSAGE_ADDRESS.test(value) ? value : this.path(value);
 		if (key === "command" || key === "cmd") return this.command(value);
 		if (scope !== "meta") {
 			if (scope === "builtin-args" && ARG_ENUM_KEYS[key] === true && IDENTIFIER.test(value)) return value;
+			if (TEXT_KEYS[key] === true) return this.redactText(value);
 			if (PATTERN_ARG_KEYS[key] === true) return this.#literal(value, false);
 			return this.#literal(value);
 		}
@@ -634,7 +696,13 @@ export class SessionAnonymizer {
 	}
 
 	#shellArg(word: string, program: string | undefined, argIndex: number): string {
-		if (SHELL_FLAG.test(word) || NUMBER.test(word) || ENV_REF.test(word)) return word;
+		if (NUMBER.test(word) || ENV_REF.test(word)) return word;
+		if (SHELL_FLAG.test(word)) {
+			// `-ehunter2` attaches a value to a short option; only long flags and bare `-x` are names.
+			return word.startsWith("--") || word.length <= 2
+				? word
+				: word.slice(0, 2) + this.#shellValue(word.slice(2), false);
+		}
 		const flagValue = /^(--?[A-Za-z][\w-]*=)([\s\S]*)$/.exec(word);
 		if (flagValue) return flagValue[1] + this.#shellValue(flagValue[2], false);
 		if (program && SUBCOMMAND_PROGRAMS[program] === true && argIndex === 0 && /^[a-z][a-z-]*$/.test(word))

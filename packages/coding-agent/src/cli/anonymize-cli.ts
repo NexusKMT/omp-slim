@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { ANONYMIZED_REVIEW_NOTE, anonymizeSessionTranscripts } from "../session/session-anonymizer";
 import type { SessionEntry, SessionHeader } from "../session/session-entries";
-import { loadEntriesFromFile } from "../session/session-loader";
+import { loadSessionFile } from "../session/session-loader";
 import { resolveSessionFileArg } from "./session-arg";
 import { CliUsageError } from "./usage-error";
 
@@ -21,7 +21,7 @@ export interface AnonymizeCommandArgs {
 export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<void> {
 	const sourcePath = await resolveSessionFileArg(args.session, getProjectDir());
 	const outDir = path.resolve(args.out ?? `${path.basename(sourcePath, ".jsonl")}.anon`);
-	const records = await loadEntriesFromFile(sourcePath);
+	const { entries: records, malformedRecords } = await loadSessionFile(sourcePath);
 	// The loader returns [] for a file without a valid session header.
 	const header = records.find((record): record is SessionHeader => record.type === "session");
 	if (!header) throw new CliUsageError(`${sourcePath} is not a valid session file`);
@@ -54,5 +54,10 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 	const count = result.files.length;
 	process.stdout.write(`Anonymized ${count} transcript${count === 1 ? "" : "s"} → ${outDir}\n`);
 	if (result.subagentError) process.stdout.write(`Subagent transcripts unavailable: ${result.subagentError}\n`);
+	if (malformedRecords > 0) {
+		process.stdout.write(
+			`Skipped ${malformedRecords} malformed record${malformedRecords === 1 ? "" : "s"} in ${sourcePath}; the export omits them\n`,
+		);
+	}
 	process.stdout.write(`${ANONYMIZED_REVIEW_NOTE}\n`);
 }
