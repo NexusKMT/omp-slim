@@ -11,7 +11,7 @@ import { getSegmenter, moveWordLeft, moveWordRight } from "./utils";
  * modes, the common motions, and operators built from those motions.
  */
 
-export type VimMode = "insert" | "normal" | "visual" | "visual-line";
+export type VimMode = "insert" | "normal" | "visual" | "visual-line" | "replace";
 
 export type VimOperator = "d" | "y" | "c";
 
@@ -38,7 +38,8 @@ export type VimCommand =
 	| { kind: "delete"; from: VimPosition; to: VimPosition; linewise: boolean; insert: boolean }
 	| { kind: "openLine"; below: boolean }
 	| { kind: "paste"; after: boolean; count: number }
-	| { kind: "undo" };
+	| { kind: "undo" }
+	| { kind: "replace"; from: VimPosition; to: VimPosition; text: string };
 
 const segmenter = getSegmenter();
 
@@ -365,6 +366,9 @@ export class VimState {
 	#findPending: { forward: boolean; till: boolean } | null = null;
 	/** Last find attempt, so `;` repeats it and `,` reverses it. */
 	#lastFind: { forward: boolean; till: boolean; target: string } | null = null;
+	/** `r` waiting for the replacement grapheme. */
+	#replaceChar = false;
+
 	/**
 	 * Vim's "desired column": `j`/`k` remember the column you started from, so descending through a
 	 * short line and back out returns to it instead of collapsing permanently. `null` means the
@@ -373,24 +377,25 @@ export class VimState {
 	 */
 	#desiredCol: number | null = null;
 
-	/** True while a count, operator, `g`, text-object, or find prefix is half-typed — Escape cancels it. */
+	/** True while a count, operator, `g`, text-object, find, or `r` prefix is half-typed — Escape cancels it. */
 	get pending(): boolean {
 		return (
 			this.#count.length > 0 ||
 			this.#operator !== null ||
 			this.#pendingG ||
 			this.#textObject !== null ||
-			this.#findPending !== null
+			this.#findPending !== null ||
+			this.#replaceChar
 		);
 	}
 
 	/**
-	 * The half-typed command as Vim would echo it (`"2"`, `"d"`, `"2d"`, `"di"`, `"df"`) — empty
+	 * The half-typed command as Vim would echo it (`"2"`, `"d"`, `"2d"`, `"di"`, `"df"`, `"r"`) — empty
 	 * when nothing is pending. Hosts render this next to the mode so a partially entered operator is
 	 * visible instead of silently swallowing the next keystroke.
 	 */
 	get pendingText(): string {
-		return `${this.#count}${this.#operator ?? ""}${this.#pendingG ? "g" : ""}${this.#textObject ?? ""}${findPendingKey(this.#findPending)}`;
+		return `${this.#count}${this.#operator ?? ""}${this.#pendingG ? "g" : ""}${this.#textObject ?? ""}${findPendingKey(this.#findPending)}${this.#replaceChar ? "r" : ""}`;
 	}
 
 	get visual(): boolean {
@@ -411,6 +416,7 @@ export class VimState {
 		this.#pendingG = false;
 		this.#textObject = null;
 		this.#findPending = null;
+		this.#replaceChar = false;
 	}
 
 	#takeCount(): number {
@@ -450,6 +456,29 @@ export class VimState {
 			}
 			return this.#applyMotion(buf, motion);
 		}
+		if (this.#replaceChar) {
+			this.#replaceChar = false;
+			const count = this.#count.length > 0 ? Math.max(1, Number.parseInt(this.#count, 10)) : 1;
+			const line = buf.lines[buf.cursorLine] ?? "";
+			let end = buf.cursorCol;
+			for (let n = 0; n < count; n++) {
+				if (end >= line.length) {
+					this.#count = "";
+					return [];
+				}
+				end = nextGraphemeStart(line, end);
+			}
+			this.#count = "";
+			return [
+				{
+					kind: "replace",
+					from: { line: buf.cursorLine, col: buf.cursorCol },
+					to: { line: buf.cursorLine, col: end },
+					text: key.repeat(count),
+				},
+			];
+		}
+
 		// Count prefix. `0` is the line-start motion unless it extends a count already being typed.
 		if ((key >= "1" && key <= "9") || (key === "0" && this.#count.length > 0)) {
 			this.#count += key;
@@ -483,6 +512,16 @@ export class VimState {
 			this.#findPending = { forward: key === "f" || key === "t", till: key === "t" || key === "T" };
 			return [];
 		}
+		if ((key === "r" || key === "R") && this.#operator === null && !this.visual) {
+			if (key === "R") {
+				this.#takeCount();
+				this.mode = "replace";
+				return [{ kind: "mode", mode: "replace" }];
+			}
+			this.#replaceChar = true;
+			return [];
+		}
+
 		// Only consecutive `j`/`k` carry the desired column; anything else re-anchors it. Counts and
 		// the `g` prefix returned above, so `2j` still continues an established column.
 		if (key !== "j" && key !== "k") this.#desiredCol = null;
@@ -506,7 +545,7 @@ export class VimState {
 				{ kind: "move", to: this.#clampNormal(buf, cursorOf(buf)) },
 			];
 		}
-		if (this.mode === "insert") {
+		if (this.mode === "insert" || this.mode === "replace") {
 			this.mode = "normal";
 			const text = buf.lines[buf.cursorLine] ?? "";
 			return [

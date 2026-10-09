@@ -83,6 +83,7 @@ const VIM_MODE_LABELS: Record<VimMode, string | undefined> = {
 	normal: "NORMAL",
 	visual: "VISUAL",
 	"visual-line": "VISUAL",
+	replace: "REPLACE",
 };
 
 const PASSTHROUGH_COLOR = (text: string): string => text;
@@ -672,7 +673,9 @@ export class Editor implements Component, Focusable {
 	// Emacs-style kill ring
 	#killRing = new KillRing();
 	/** Previous edit, for kill/yank chaining, undo coalescing, and the provisional space after a Tab word accept. */
-	#lastAction: "kill" | "yank" | "type-word" | "accept-word" | null = null;
+	#lastAction: "kill" | "yank" | "type-word" | "accept-word" | "replace" | null = null;
+	/** Graphemes overwritten in the current `R` session, so Backspace can restore them. */
+	#replaceLog: { line: number; col: number; removed: string; written: number }[] = [];
 
 	// Character jump mode
 	#jumpMode: "forward" | "backward" | null = null;
@@ -2252,6 +2255,18 @@ export class Editor implements Component, Focusable {
 			return this.isShowingAutocomplete() ? false : this.#runVimKey("escape", vim);
 		}
 		if (vim.mode === "insert") return false;
+		if (vim.mode === "replace") {
+			if (canonical === "backspace" || matchesKey(data, "backspace") || matchesKey(data, "shift+backspace")) {
+				this.#replaceBackspace();
+				return true;
+			}
+			const replacing = extractPrintableText(data);
+			if (replacing) {
+				for (const seg of segmenter.segment(replacing)) this.#overwriteReplaceGrapheme(seg.segment);
+				return true;
+			}
+		}
+
 
 		const mapped = canonical === undefined ? undefined : VIM_NAV_KEYS[canonical];
 		if (mapped !== undefined) return this.#runVimKey(mapped, vim);
@@ -2284,6 +2299,8 @@ export class Editor implements Component, Focusable {
 		if (vim.mode !== before || vim.pendingText !== pendingBefore || this.vimSelectedLines !== selectedLinesBefore) {
 			this.onVimModeChange?.(vim.mode);
 		}
+		if (before === "replace" && vim.mode !== "replace") this.#replaceLog.length = 0;
+		if (vim.mode === "replace" && before !== "replace") this.#replaceLog.length = 0;
 		return true;
 	}
 
@@ -2320,10 +2337,54 @@ export class Editor implements Component, Focusable {
 				case "undo":
 					this.#applyUndo();
 					break;
+				case "replace":
+					this.#replaceVimSpan(command.from, command.to, command.text);
+					break;
 			}
 		}
 		this.#clampVimCursor();
 		this.invalidate();
+	}
+
+	#replaceVimSpan(from: VimPosition, to: VimPosition, text: string): void {
+		const line = this.#state.lines[from.line] ?? "";
+		if (this.#atomicTokenAt(line, from.col)) return;
+		this.#recordUndoState();
+		this.#lastAction = null;
+		this.#state.lines[from.line] = line.slice(0, from.col) + text + line.slice(to.col);
+		this.#state.cursorLine = from.line;
+		let last = from.col;
+		for (const seg of segmenter.segment(text)) last = from.col + seg.index;
+		this.#setCursorCol(last);
+		this.#afterVimEdit();
+	}
+
+	#overwriteReplaceGrapheme(grapheme: string): void {
+		const lineIdx = this.#state.cursorLine;
+		const line = this.#state.lines[lineIdx] ?? "";
+		const col = this.#state.cursorCol;
+		if (this.#atomicTokenAt(line, col)) return;
+		if (this.#lastAction !== "replace") this.#recordUndoState();
+		this.#lastAction = "replace";
+		const end = col >= line.length ? col : nextGraphemeStart(line, col);
+		const removed = line.slice(col, end);
+		this.#state.lines[lineIdx] = line.slice(0, col) + grapheme + line.slice(end);
+		this.#replaceLog.push({ line: lineIdx, col, removed, written: grapheme.length });
+		this.#setCursorCol(col + grapheme.length);
+		this.#notifyChange();
+	}
+
+	#replaceBackspace(): void {
+		const entry = this.#replaceLog.pop();
+		if (!entry || this.#state.cursorLine !== entry.line || this.#state.cursorCol !== entry.col + entry.written) {
+			if (entry) this.#replaceLog.push(entry);
+			return;
+		}
+		const line = this.#state.lines[entry.line] ?? "";
+		this.#state.lines[entry.line] =
+			line.slice(0, entry.col) + entry.removed + line.slice(entry.col + entry.written);
+		this.#setCursorCol(entry.col);
+		this.#notifyChange();
 	}
 
 	#moveVimCursor(to: VimPosition): void {

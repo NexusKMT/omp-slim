@@ -13,6 +13,7 @@
 - Added `ModelHubCallbacks.previewCompactionPoint`, whose line the compaction limit field shows while you type instead of the input syntax ([#15065](https://github.com/can1357/oh-my-pi/pull/15065) by [@H4vC](https://github.com/H4vC))
 - Added Vim find and till motions (`f`, `F`, `t`, `T`) in the prompt editor, with `;` and `,` to repeat them
 - Added Vim WORD motions (`W`, `B`, `E`) in the prompt editor
+- Added Vim replace (`r`, `R`) in the prompt editor
 
 ## [18.8.7] - 2026-10-09
 

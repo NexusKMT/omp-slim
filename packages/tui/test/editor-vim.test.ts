@@ -666,6 +666,7 @@ describe("Editor vim mode", () => {
 			expect(cursor(editor)).toEqual({ line: 2, col: 17 });
 		});
 	});
+
 	describe("find and till", () => {
 		it("lands f and F on the match, and t and T on the adjacent grapheme", () => {
 			const editor = vimEditor("abcde");
@@ -769,6 +770,59 @@ describe("Editor vim mode", () => {
 			expect(changed.vimMode).toBe("insert");
 			changed.handleInput("x");
 			expect(changed.getText()).toBe("x baz");
+		});
+	});
+
+	describe("replace", () => {
+		it("replaces the character under the cursor and stays in normal mode", () => {
+			const editor = vimEditor("abcd");
+			editor.handleInput("l");
+			editor.handleInput("r");
+			expect(editor.vimConsumesEscape()).toBe(true);
+			editor.handleInput("X");
+			expect(editor.getText()).toBe("aXcd");
+			expect(editor.vimMode).toBe("normal");
+			expect(cursor(editor)).toEqual({ line: 0, col: 1 });
+		});
+
+		it("replaces a count and refuses to run past the line", () => {
+			const editor = vimEditor("abcd");
+			editor.handleInput("3");
+			editor.handleInput("r");
+			editor.handleInput("z");
+			expect(editor.getText()).toBe("zzzd");
+			expect(cursor(editor)).toEqual({ line: 0, col: 2 });
+
+			editor.handleInput("$");
+			editor.handleInput("2");
+			editor.handleInput("r");
+			editor.handleInput("Q");
+			expect(editor.getText()).toBe("zzzd");
+		});
+
+		it("overwrites in replace mode, restores on backspace, and steps back on Escape", () => {
+			const editor = vimEditor("abcd");
+			editor.handleInput("R");
+			expect(editor.vimMode).toBe("replace");
+			editor.handleInput("XY");
+			expect(editor.getText()).toBe("XYcd");
+			editor.handleInput("\x7f");
+			expect(editor.getText()).toBe("Xbcd");
+			editor.handleInput("Z");
+			expect(editor.getText()).toBe("XZcd");
+			editor.handleInput(ESC);
+			expect(editor.vimMode).toBe("normal");
+			expect(cursor(editor)).toEqual({ line: 0, col: 1 });
+			editor.handleInput("q");
+			expect(editor.getText()).toBe("XZcd");
+		});
+
+		it("appends once replace mode runs past the end of the line", () => {
+			const editor = vimEditor("ab");
+			editor.handleInput("$");
+			editor.handleInput("R");
+			editor.handleInput("YZ");
+			expect(editor.getText()).toBe("aYZ");
 		});
 	});
 });
