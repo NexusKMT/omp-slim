@@ -1477,14 +1477,22 @@ export class AgentSession implements SettingsScope {
 		// after the loop's final queue/aside poll. Such a tail arrival is a real
 		// continuation, not a terminal stop: mark this end non-terminal so
 		// subscribers wait through the queued steer/follow-up or stranded IRC wake.
-		const canDrain =
-			!this.#abortInProgress && this.#unsubscribeAgent !== undefined && this.#modeExitDrainSuppressionDepth === 0;
+		// An abort flushes here before its own `finally` drain, which still delivers
+		// a queued steer (interrupt-and-send), so queued work counts during an abort
+		// too. Stranded IRC does not: a user interrupt folds most of it into context
+		// instead of waking.
+		const canDrain = this.#unsubscribeAgent !== undefined && this.#modeExitDrainSuppressionDepth === 0;
 		const queuedContinuation =
 			canDrain &&
 			!this.#queuedMessageDrainBlocked &&
 			this.#canAutoContinueForFollowUp() &&
 			this.agent.hasQueuedMessages();
-		const ircContinuation = canDrain && !this.#isDisposed && !this.#planModeState?.enabled && this.#irc.hasPending();
+		const ircContinuation =
+			canDrain &&
+			!this.#abortInProgress &&
+			!this.#isDisposed &&
+			!this.#planModeState?.enabled &&
+			this.#irc.hasPending();
 		this.#emit(queuedContinuation || ircContinuation ? { ...pending, isTerminal: false } : pending);
 	}
 
