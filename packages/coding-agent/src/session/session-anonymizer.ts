@@ -544,11 +544,14 @@ export class SessionAnonymizer {
 	}
 
 	#value(value: unknown, key: string | undefined, parent: JsonObject | undefined, scope: Scope): unknown {
-		if (value === null || typeof value === "number" || typeof value === "boolean") return value;
+		// Numbers in untrusted payloads may be account ids or secrets; elsewhere they are usage/timing metadata.
+		if (typeof value === "number") return scope === "data" ? this.placeholder(String(value)) : value;
+		if (value === null || typeof value === "boolean") return value;
 		// Tool-call argument slots: toolCall/function_call `arguments`, streamed `partialArgs`,
-		// Anthropic `tool_use.input`, and `tool_execution_start` custom entries' `args`.
+		// Anthropic `tool_use.input`, and `tool_execution_start` custom entries' `args`. Only trusted
+		// structure carries real envelopes; a look-alike inside untrusted data must not gain built-in scope.
 		const toolName =
-			parent === undefined
+			parent === undefined || scope !== "meta"
 				? undefined
 				: (key === "arguments" || key === "partialArgs") && typeof parent.name === "string"
 					? parent.name
@@ -576,11 +579,14 @@ export class SessionAnonymizer {
 
 	/**
 	 * Scope for `parent[key]` inside trusted structure. Payloads omp does not define — custom/extension
-	 * entry data, non-built-in tool result details, and `eval` display output — are untrusted data.
+	 * entry data, compaction `preserveData`, non-built-in tool result details, and `eval` display output —
+	 * are untrusted data.
 	 */
 	#childScope(key: string, parent: JsonObject): Scope {
-		if (key === "jsonOutputs") return "data";
-		if (key === "data" && parent.type === "custom") return "data";
+		if (key === "jsonOutputs" || key === "preserveData") return "data";
+		// `tool_execution_start` is omp's own execution log; its `args` must mirror the tool call.
+		if (key === "data" && parent.type === "custom")
+			return parent.customType === "tool_execution_start" ? "meta" : "data";
 		if (key !== "details") return "meta";
 		return parent.role === "toolResult" && isBuiltinTool(parent.toolName) ? "meta" : "data";
 	}

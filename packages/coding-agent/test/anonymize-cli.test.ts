@@ -39,6 +39,16 @@ describe("omp anonymize output", () => {
 		expect(await Bun.file(path.join(tempDir.path(), "main", "session.jsonl")).exists()).toBe(false);
 	});
 
+	it("refuses an existing non-empty --out directory instead of merging into it", async () => {
+		const source = path.join(tempDir.path(), "main.jsonl");
+		const out = path.join(tempDir.path(), "report");
+		await Bun.write(source, SESSION);
+		await Bun.write(path.join(out, "raw-notes.txt"), "keep me");
+
+		await expect(runAnonymizeCommand({ session: source, out })).rejects.toThrow("is not empty");
+		expect(await Bun.file(path.join(out, "session.jsonl")).exists()).toBe(false);
+	});
+
 	it("rejects a file without a valid session header instead of writing an empty bundle", async () => {
 		const source = path.join(tempDir.path(), "notes.jsonl");
 		const out = path.join(tempDir.path(), "out");

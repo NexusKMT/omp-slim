@@ -40,6 +40,16 @@ export async function runAnonymizeCommand(args: AnonymizeCommandArgs): Promise<v
 			`--out ${outDir} would mix the export with raw session transcripts; choose another directory`,
 		);
 	}
+	// Merging into an existing directory would leave stale or unrelated files beside the export.
+	let existing: string[] = [];
+	try {
+		existing = await fs.readdir(outDir);
+	} catch (err) {
+		if (!isEnoent(err)) throw err;
+	}
+	if (existing.length > 0) {
+		throw new CliUsageError(`--out ${outDir} is not empty; choose a new or empty directory`);
+	}
 	for (const [name, content] of result.files) await Bun.write(path.join(outDir, name), content);
 
 	const count = result.files.length;

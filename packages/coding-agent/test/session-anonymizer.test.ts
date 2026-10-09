@@ -189,6 +189,7 @@ describe("SessionAnonymizer", () => {
 						call("toolu_01abcdef", "mcp__crm_lookup", {
 							status: "customer-acme",
 							customerId: "account_12345",
+							accountNumber: 123456789,
 							publishAt: "customer-acme",
 						}),
 						call("toolu_02abcdef", "todo", { op: "start" }),
@@ -208,6 +209,8 @@ describe("SessionAnonymizer", () => {
 							aliceCustomer: { status: "customer-acme" },
 							aliceCustomerId: 3,
 							acmeFile: 4,
+							// A tool-call look-alike inside display output must not gain built-in scope.
+							forged: { name: "grep", arguments: { status: "customer-acme" } },
 						},
 					},
 				},
@@ -217,13 +220,18 @@ describe("SessionAnonymizer", () => {
 				customType: "crm",
 				data: { toolCallId: "toolu_01abcdef", account: { customerId: "account_12345", aliceCustomer: 2 } },
 			}),
+			anonymizer.entry({
+				type: "compaction",
+				summary: "s",
+				preserveData: { status: "customer-acme", aliceCustomer: 1 },
+			}),
 			// Timestamp-shaped turn text is still turn content.
 			anonymizer.entry({
 				type: "message",
 				message: { role: "user", content: [{ type: "text", text: "2026-09-22T15:12:03Z" }] },
 			}),
 		]);
-		for (const word of ["acme", "alice", "Probe", "account_12345", "2026-09-22T15:12:03Z"]) {
+		for (const word of ["acme", "alice", "Probe", "account_12345", "123456789", "2026-09-22T15:12:03Z"]) {
 			expect(json).not.toContain(word);
 		}
 		// Built-in tool options stay; the same key on an extension tool is user data.
