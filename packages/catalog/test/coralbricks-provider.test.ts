@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
 import {
 	CORALBRICKS_BASE_URL,
@@ -12,13 +14,13 @@ import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 const DISCOVERY_URL = `${CORALBRICKS_BASE_URL}/models`;
 
 /**
- * A Coral `/v1/models` row shaped as the gateway returns it (2026-10-02):
+ * A Coral `/v1/models` row shaped as the gateway returns it (2026-10-08):
  * OpenAI list fields plus Coral's own per-million pricing block and the
  * capability flags its docs declare authoritative.
  */
 function coralRow(overrides: Record<string, unknown>): Record<string, unknown> {
 	return {
-		id: "glm-5.3-fp4",
+		id: "glm-5.3-fast",
 		object: "model",
 		owned_by: "coralbricks",
 		context_length: 1048576,
@@ -43,8 +45,8 @@ function catalogFixture(): Response {
 		data: [
 			coralRow({}),
 			coralRow({
-				id: "glm-5.3-flash-fp4",
-				pricing: { cached_input_per_m: 0, cache_write_per_m: 0.23, input_per_m: 0.15, output_per_m: 0.5 },
+				id: "deepseek-v4.1-flash-fast",
+				pricing: { cached_input_per_m: 0, cache_write_per_m: 0.09, input_per_m: 0.3, output_per_m: 1.2 },
 				supports_image_input: true,
 			}),
 			// A row the bundled catalog has never seen: neutral defaults, no
@@ -75,11 +77,11 @@ describe("CoralBricks built-in provider", () => {
 
 		// `/v1/models` is key-protected, so discovery must authenticate.
 		expect(requests).toEqual([{ url: DISCOVERY_URL, authorization: "Bearer cb-test-key" }]);
-		expect(models?.map(item => item.id)).toEqual(["glm-5.2-fp4", "glm-5.3-flash-fp4", "glm-5.3-fp4"]);
+		expect(models?.map(item => item.id)).toEqual(["deepseek-v4.1-flash-fast", "glm-5.2-fp4", "glm-5.3-fast"]);
 
-		// The endpoint publishes no output cap or reasoning flag; the bundled
-		// reference's values apply.
-		const glm = models?.find(item => item.id === "glm-5.3-fp4");
+		// Legacy rows without reasoning metadata keep the bundled fallback;
+		// the endpoint still publishes no output cap.
+		const glm = models?.find(item => item.id === "glm-5.3-fast");
 		expect(glm?.maxTokens).toBe(131072);
 		expect(glm?.reasoning).toBe(true);
 
@@ -90,6 +92,95 @@ describe("CoralBricks built-in provider", () => {
 		expect(unknown?.maxTokens).toBeNull();
 		expect(unknown?.cost).toEqual({ input: 0.75, output: 2.4, cacheRead: 0, cacheWrite: 0 });
 		expect(unknown?.supportsTools).toBe(false);
+	});
+
+	test("uses live reasoning metadata for new models and overrides stale bundled controls through cache reload", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "coral-reasoning-"));
+		let fetches = 0;
+		const options = {
+			...coralbricksModelManagerOptions({
+				apiKey: "cb-test-key",
+				fetch: async () => {
+					fetches++;
+					return Response.json({
+						data: [
+							coralRow({
+								id: "coral-future-reasoner",
+								supports_reasoning: true,
+								reasoning: {
+									supported_efforts: ["max", "low", "low", "none", "unknown", 7],
+									default_effort: "max",
+									mandatory: true,
+									disable: null,
+								},
+							}),
+							coralRow({
+								supports_reasoning: true,
+								reasoning: {
+									supported_efforts: ["high", "low"],
+									default_effort: "high",
+									mandatory: false,
+									disable: { reasoning_effort: "none" },
+								},
+							}),
+							coralRow({ id: "deepseek-v4.1-flash-fast", supports_reasoning: false }),
+						],
+					});
+				},
+			}),
+			cacheDbPath: path.join(tempDir, "models.db"),
+		};
+		try {
+			for (const strategy of ["online", "offline"] as const) {
+				const { models } = await resolveProviderModels(options, strategy);
+				const future = models.find(model => model.id === "coral-future-reasoner");
+				expect(future?.reasoning).toBe(true);
+				expect(future?.thinking?.efforts).toEqual([Effort.Low, Effort.Max]);
+				expect(future?.thinking?.defaultLevel).toBe(Effort.Max);
+				expect(future?.thinking?.requiresEffort).toBe(true);
+				const glm = models.find(model => model.id === "glm-5.3-fast");
+				expect(glm?.thinking?.efforts).toEqual([Effort.Low, Effort.High]);
+				expect(glm?.thinking?.defaultLevel).toBe(Effort.High);
+				expect(glm?.thinking?.requiresEffort).toBe(false);
+				expect(glm?.compat?.reasoningDisableMode).toBe("none-effort");
+				const disabled = models.find(model => model.id === "deepseek-v4.1-flash-fast");
+				expect(disabled?.reasoning).toBe(false);
+				expect(disabled?.thinking).toBeUndefined();
+			}
+			expect(fetches).toBe(1);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not invent a dial for an advertised empty or unrecognized ladder, while missing metadata keeps the fallback", async () => {
+		const options = coralbricksModelManagerOptions({
+			apiKey: "cb-test-key",
+			fetch: async () =>
+				Response.json({
+					data: [
+						coralRow({ supports_reasoning: true, reasoning: { supported_efforts: [] } }),
+						coralRow({
+							id: "coral-unknown-efforts",
+							supports_reasoning: true,
+							reasoning: { supported_efforts: ["turbo", null] },
+						}),
+						coralRow({
+							id: "deepseek-v4.1-flash-fast",
+							supports_reasoning: "true",
+							reasoning: { supported_efforts: "high" },
+						}),
+					],
+				}),
+		});
+		const models = (await options.fetchDynamicModels?.())?.map(model => buildModel(model));
+		expect(models?.find(model => model.id === "glm-5.3-fast")?.thinking).toBeUndefined();
+		expect(models?.find(model => model.id === "coral-unknown-efforts")?.thinking).toBeUndefined();
+		expect(models?.find(model => model.id === "deepseek-v4.1-flash-fast")?.thinking?.efforts).toEqual([
+			Effort.Low,
+			Effort.High,
+			Effort.Max,
+		]);
 	});
 
 	test("gates discovery on credentials because /v1/models is key-protected", () => {
@@ -105,14 +196,14 @@ describe("CoralBricks built-in provider", () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-coralbricks-refresh-"));
 		const dbPath = path.join(tempDir, "models.db");
 		const bundledVisionModel: ModelSpec<"openai-completions"> = {
-			id: "glm-5.3-flash-fp4",
-			name: "GLM 5.3 Flash",
+			id: "deepseek-v4.1-flash-fast",
+			name: "DeepSeek V4.1 Flash",
 			api: "openai-completions",
 			provider: "coralbricks",
 			baseUrl: CORALBRICKS_BASE_URL,
 			reasoning: true,
 			input: ["text", "image"],
-			cost: { input: 0.15, output: 0.5, cacheRead: 0, cacheWrite: 0.23 },
+			cost: { input: 0.3, output: 1.2, cacheRead: 0, cacheWrite: 0.09 },
 			contextWindow: 1048576,
 			maxTokens: 131072,
 		};
@@ -121,8 +212,8 @@ describe("CoralBricks built-in provider", () => {
 				object: "list",
 				data: [
 					coralRow({
-						id: "glm-5.3-flash-fp4",
-						pricing: { cached_input_per_m: 0, cache_write_per_m: 0.23, input_per_m: 0.15, output_per_m: 0.5 },
+						id: "deepseek-v4.1-flash-fast",
+						pricing: { cached_input_per_m: 0, cache_write_per_m: 0.09, input_per_m: 0.3, output_per_m: 1.2 },
 						supports_image_input: false,
 					}),
 				],
@@ -138,7 +229,7 @@ describe("CoralBricks built-in provider", () => {
 				"online",
 			);
 
-			const model = models.find(item => item.id === "glm-5.3-flash-fp4");
+			const model = models.find(item => item.id === "deepseek-v4.1-flash-fast");
 			expect(model?.input).toEqual(["text"]);
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });

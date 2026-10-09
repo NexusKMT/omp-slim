@@ -1647,6 +1647,8 @@ interface CoralbricksModelRecord extends OpenAICompatibleModelRecord {
 	supports_chat?: unknown;
 	supports_image_input?: unknown;
 	supports_tools?: unknown;
+	supports_reasoning?: unknown;
+	reasoning?: unknown;
 }
 
 /**
@@ -1664,9 +1666,9 @@ function coralRate(value: unknown, fallback: number): number {
  * (`supports_chat: false`) are dropped. Pricing arrives in Coral's own
  * per-million field names; `cached_input_per_m` is $0 on every model and a
  * missing field falls back to the bundled reference.
- * The endpoint publishes no output cap and no reasoning flag, so `maxTokens`
- * and `reasoning` keep their bundled-reference values (KDL lineage rules own
- * the thinking ladders) rather than being invented from the row.
+ * Live reasoning capabilities and controls override the bundled fallback.
+ * The endpoint publishes no output cap, so `maxTokens` keeps its reference
+ * value rather than being invented from the context window.
  */
 function mapCoralbricksModel(
 	entry: CoralbricksModelRecord,
@@ -1680,6 +1682,40 @@ function mapCoralbricksModel(
 	// A bundled reference may lend metadata, but its runner kind is not
 	// evidence the chat roster advertised it.
 	const { kind: _inheritedKind, ...chatReference } = reference ?? {};
+	const hasReasoningFlag = typeof entry.supports_reasoning === "boolean";
+	const reasoning = hasReasoningFlag
+		? entry.supports_reasoning === true
+		: (reference?.reasoning ?? defaults.reasoning);
+	const controls = isRecord(entry.reasoning) ? entry.reasoning : undefined;
+	const wireEfforts = controls?.supported_efforts;
+	let thinking = reasoning ? reference?.thinking : undefined;
+	let compat = reference?.compat;
+	if (reasoning && Array.isArray(wireEfforts)) {
+		const efforts = THINKING_EFFORTS.filter(effort => wireEfforts.includes(effort));
+		// `none` is the server's off default, not an Effort (nor `minimal`).
+		const defaultLevel = efforts.find(effort => effort === controls?.default_effort);
+		thinking =
+			efforts.length > 0
+				? {
+						mode: "effort",
+						efforts,
+						...(defaultLevel !== undefined && { defaultLevel }),
+						...(typeof controls?.mandatory === "boolean" && { requiresEffort: controls.mandatory }),
+					}
+				: undefined;
+	}
+	if (hasReasoningFlag || Array.isArray(wireEfforts)) {
+		// An explicit empty/unknown vocabulary must not regrow a guessed dial
+		// from identity or KDL. Missing legacy metadata still uses the reference.
+		compat = { ...compat, trustExplicitThinkingOnly: true };
+	}
+	if (reasoning && controls) {
+		if (controls.mandatory === true || controls.disable === null) {
+			compat = { ...compat, reasoningDisableMode: "lowest-effort" };
+		} else if (isRecord(controls.disable) && controls.disable.reasoning_effort === "none") {
+			compat = { ...compat, reasoningDisableMode: "none-effort" };
+		}
+	}
 	const input: ("text" | "image")[] =
 		entry.supports_image_input === true
 			? ["text", "image"]
@@ -1694,7 +1730,9 @@ function mapCoralbricksModel(
 		api: defaults.api,
 		provider: defaults.provider,
 		baseUrl: defaults.baseUrl,
-		reasoning: reference?.reasoning ?? defaults.reasoning,
+		reasoning,
+		thinking,
+		compat,
 		input,
 		...(typeof entry.supports_tools === "boolean" ? { supportsTools: entry.supports_tools } : {}),
 		cost: {
@@ -1722,6 +1760,7 @@ export function coralbricksModelManagerOptions(
 	return {
 		providerId: "coralbricks",
 		dynamicModelsAuthoritative: true,
+		dynamicReasoningAuthoritative: true,
 		// `supports_image_input` is the row's whole truth for modality (Coral
 		// answers unsupported content with `400 unsupported_content_type`).
 		dynamicInputAuthoritative: true,
@@ -4382,6 +4421,7 @@ export function syntheticModelManagerOptions(
 	return {
 		providerId: "synthetic",
 		dynamicModelsAuthoritative: true,
+		dynamicReasoningAuthoritative: true,
 		...(apiKey && {
 			fetchDynamicModels: () =>
 				fetchOpenAICompatibleModels({

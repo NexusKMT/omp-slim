@@ -65,6 +65,8 @@ export interface ModelManagerOptions<TApi extends Api = Api, TModelsDevPayload =
 	 * unsupported content (`github-copilot`, `deepinfra`, `coralbricks`).
 	 */
 	dynamicInputAuthoritative?: boolean;
+	/** When true, live reasoning capability replaces the fallback, including an explicit false. */
+	dynamicReasoningAuthoritative?: boolean;
 	/**
 	 * When true, a fresh cache never satisfies an online-eligible refresh: the
 	 * dynamic fetch always runs (an explicit `"offline"` strategy is still
@@ -264,8 +266,12 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 	const cacheHasUnresolvedHeaders = restoredCache.unresolvedModelIds.size > 0;
 	const dynamicModelsAuthoritative = options.dynamicModelsAuthoritative ?? false;
 	const dynamicInputAuthoritative = options.dynamicInputAuthoritative ?? false;
+	const dynamicReasoningAuthoritative = options.dynamicReasoningAuthoritative ?? false;
 	const cacheDropIds = options.dropCachedModelIdsOnStaticMismatch;
-	const staticCatalogFingerprint = fingerprintStaticModels(staticModels, dynamicModelsAuthoritative);
+	// Changing merge semantics must not replay a cache built under the old policy.
+	const staticCatalogFingerprint =
+		fingerprintStaticModels(staticModels, dynamicModelsAuthoritative) +
+		(dynamicReasoningAuthoritative ? ":reasoning-authoritative" : "");
 	// Endpoint-migration policy is cache identity: adding an id must invalidate
 	// matching-static-catalog caches written by the prior resolver.
 	const staticFingerprint =
@@ -281,7 +287,7 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 		(cache?.fresh ?? false) &&
 		!cacheHasUnresolvedHeaders &&
 		!cacheNeedsModelMigration &&
-		(!dynamicModelsAuthoritative || cacheFingerprintMatches);
+		((!dynamicModelsAuthoritative && !dynamicReasoningAuthoritative) || cacheFingerprintMatches);
 	const dynamicFetcher = options.fetchDynamicModels;
 	const hasDynamicFetcher = typeof dynamicFetcher === "function";
 	const hasModelsDevFetcher = options.modelsDev !== undefined;
@@ -308,7 +314,12 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 			: restoredCache.models;
 		const cachedModels = additiveStaticModelIds
 			? mergeCatalogMetrics(
-					mergeDynamicModels(staticModels, cacheContribution, dynamicInputAuthoritative),
+					mergeDynamicModels(
+						staticModels,
+						cacheContribution,
+						dynamicInputAuthoritative,
+						dynamicReasoningAuthoritative,
+					),
 					restoredCache.models,
 				)
 			: restoredCache.models;
@@ -363,11 +374,17 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 			dynamicModels.length > 0 &&
 			(dynamicModelsAuthoritative || !hasModelsDevFetcher || modelsDevFetchSucceeded)
 		: modelsDevFetchSucceeded;
-	const mergedWithCache = mergeDynamicModels(staticModels, cacheModels, dynamicInputAuthoritative);
+	const mergedWithCache = mergeDynamicModels(
+		staticModels,
+		cacheModels,
+		dynamicInputAuthoritative,
+		dynamicReasoningAuthoritative,
+	);
 	const mergedWithModelsDev = mergeDynamicModels(
 		mergedWithCache,
 		modelsDevModels,
 		dynamicInputAuthoritative,
+		dynamicReasoningAuthoritative,
 		fetchedModelsDevModels?.explicitKindModels,
 	);
 	const catalogMetricsSource = modelsDevFetchSucceeded ? normalizedModelsDevModels : preparedCacheModels;
@@ -378,6 +395,7 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 		mergedWithCatalogMetrics,
 		dynamicModels,
 		dynamicInputAuthoritative,
+		dynamicReasoningAuthoritative,
 		fetchedDynamicModels?.explicitKindModels,
 	);
 	const models = collapseBuiltVariants(
@@ -431,9 +449,15 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 				: preparedLatestCacheModels;
 			const fallbackSnapshotModels = collapseBuiltVariants(
 				mergeDynamicModels(
-					mergeDynamicModels(staticModels, latestCacheModels, dynamicInputAuthoritative),
+					mergeDynamicModels(
+						staticModels,
+						latestCacheModels,
+						dynamicInputAuthoritative,
+						dynamicReasoningAuthoritative,
+					),
 					modelsDevModels,
 					dynamicInputAuthoritative,
+					dynamicReasoningAuthoritative,
 				),
 			);
 			if (fallbackSnapshotModels.length > 0 || latestCache !== null || cache !== null) {
@@ -566,6 +590,7 @@ function mergeDynamicModels<TApi extends Api>(
 	baseModels: readonly Model<TApi>[],
 	dynamicModels: readonly Model<TApi>[],
 	dynamicInputAuthoritative: boolean,
+	dynamicReasoningAuthoritative: boolean,
 	explicitKindModels?: ReadonlySet<Model<TApi>>,
 ): Model<TApi>[] {
 	// Empty-side fast paths: `mergeDynamicModels(base, [])` is the common shape
@@ -586,7 +611,10 @@ function mergeDynamicModels<TApi extends Api>(
 		// A policy-derived kind on a chat row is not permission to replace an
 		// authored runner. Only a kind present before materialization can do so.
 		if (modelKind(existingModel) !== "chat" && !explicitKindModels?.has(dynamicModel)) continue;
-		merged.set(dynamicModel.id, mergeDynamicModel(existingModel, dynamicModel, dynamicInputAuthoritative));
+		merged.set(
+			dynamicModel.id,
+			mergeDynamicModel(existingModel, dynamicModel, dynamicInputAuthoritative, dynamicReasoningAuthoritative),
+		);
 	}
 	return Array.from(merged.values());
 }
@@ -621,6 +649,7 @@ function mergeDynamicModel<TApi extends Api>(
 	existingModel: Model<TApi>,
 	dynamicModel: Model<TApi>,
 	inputAuthoritative: boolean,
+	reasoningAuthoritative: boolean,
 ): Model<TApi> {
 	// When discovery resolves the same model id to a different endpoint (e.g.
 	// a GitHub Copilot business/enterprise host), the bundled reference's
@@ -637,16 +666,10 @@ function mergeDynamicModel<TApi extends Api>(
 	const supportsImage = dynamicInputAuthoritative
 		? dynamicModel.input.includes("image")
 		: existingModel.input.includes("image") || dynamicModel.input.includes("image");
-	// Synthetic's discovery is authoritative (`dynamicModelsAuthoritative`) and
-	// its per-model `reasoning_parameters.efforts` vocabulary is the route's
-	// whole truth: when the wire advertises only the `none` off-state the
-	// mapper emits `reasoning: false`, and OR-ing the bundled reference's
-	// stale `reasoning: true` back would re-arm an effort dial the route
-	// doesn't expose. Other providers keep the OR so a bundled reasoning flag
-	// survives a discovery row that simply omits the capability.
-	const dynamicReasoningAuthoritative =
-		existingModel.provider === "synthetic" && dynamicModel.provider === "synthetic";
-	const reasoning = dynamicReasoningAuthoritative
+	// Providers with authoritative reasoning metadata must not regain a
+	// stale bundled dial after explicitly reporting no reasoning. Others
+	// retain the additive fallback for discovery that omits capabilities.
+	const reasoning = reasoningAuthoritative
 		? dynamicModel.reasoning
 		: existingModel.reasoning || dynamicModel.reasoning;
 	const longContextCost = dynamicModel.cost.longContext ?? existingModel.cost.longContext;

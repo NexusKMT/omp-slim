@@ -4,7 +4,9 @@
 
 ### Added
 
-- Added built-in CoralBricks provider support (`coralbricks`, `CORAL_API_KEY`) with `/login` key validation, live model discovery from the key-protected `/v1/models`, and bundled GLM 5.3, GLM 5.3 Flash, and DeepSeek V4.1 Flash seed models. ([#14146](https://github.com/can1357/oh-my-pi/pull/14146) by [@ryan-brosas](https://github.com/ryan-brosas))
+- Added built-in CoralBricks support with `/login`, live model discovery, per-model reasoning levels and off controls, and bundled offline fallbacks. ([#14146](https://github.com/can1357/oh-my-pi/pull/14146) by [@ryan-brosas](https://github.com/ryan-brosas))
+- Added `gen:models --provider <id>` to update one provider without changing other providers' catalog snapshots. ([#14146](https://github.com/can1357/oh-my-pi/pull/14146) by [@ryan-brosas](https://github.com/ryan-brosas))
+
 ## [18.8.6] - 2026-10-08
 
 ### Added

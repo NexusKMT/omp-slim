@@ -1,7 +1,7 @@
 /**
  * Wire-contract tests for CoralBricks' OpenAI-compatible chat endpoint,
  * grounded in Coral's API reference (https://www.coralbricks.ai/docs.md,
- * 2026-10-02) and the reference Coral pi provider extension's synbad-validated
+ * 2026-10-08) and the reference Coral pi provider extension's synbad-validated
  * runs (2026-09): plain Chat Completions at https://inference.coralbricks.ai/v1,
  * `reasoning_effort` as the only thinking control, reasoning streamed back as
  * `delta.reasoning_content`, and free cached reads with per-model cache-write
@@ -10,7 +10,9 @@
 import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import type { Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
+import { coralbricksModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 
 const CORALBRICKS_BASE_URL = "https://inference.coralbricks.ai/v1";
 
@@ -81,17 +83,17 @@ async function captureRequest(
 
 describe("CoralBricks wire contract", () => {
 	it("routes requests to Coral's chat-completions endpoint with the resolved key", async () => {
-		const { url, authorization, payload } = await captureRequest(requireBundled("glm-5.3-fp4"), {});
+		const { url, authorization, payload } = await captureRequest(requireBundled("glm-5.3-fast"), {});
 		expect(url).toBe(`${CORALBRICKS_BASE_URL}/chat/completions`);
 		expect(authorization).toBe("Bearer cb-test-key");
-		expect(payload.model).toBe("glm-5.3-fp4");
+		expect(payload.model).toBe("glm-5.3-fast");
 		// Gateway dialect: no `store`, no `max_completion_tokens`.
 		expect(payload.store).toBeUndefined();
 		expect(payload.max_completion_tokens).toBeUndefined();
 	});
 
 	it("gates thinking on via bare reasoning_effort with no zai-dialect fields", async () => {
-		const { payload } = await captureRequest(requireBundled("glm-5.3-fp4"), { reasoning: "high" });
+		const { payload } = await captureRequest(requireBundled("glm-5.3-fast"), { reasoning: "high" });
 		expect(payload.reasoning_effort).toBe("high");
 		expect(payload.thinking).toBeUndefined();
 		expect(payload.reasoning).toBeUndefined();
@@ -104,23 +106,64 @@ describe("CoralBricks wire contract", () => {
 		// GLM 5.3 SKUs (low/high/max only), so the effort-format default maps
 		// the disable request to the ladder minimum instead of sending a value
 		// the gateway does not accept.
-		const { payload } = await captureRequest(requireBundled("glm-5.3-fp4"), { disableReasoning: true });
+		const { payload } = await captureRequest(requireBundled("glm-5.3-fast"), { disableReasoning: true });
 		expect(payload.reasoning_effort).toBe("low");
 		expect(payload.thinking).toBeUndefined();
 	});
 
 	it("omits reasoning_effort when unrequested and maps thinking-off to Coral's advertised none effort", async () => {
-		const unrequested = await captureRequest(requireBundled("deepseek-v4.1-flash-fast-fp4"), {});
+		const unrequested = await captureRequest(requireBundled("deepseek-v4.1-flash-fast"), {});
 		expect(unrequested.payload.reasoning_effort).toBeUndefined();
 		// DeepSeek V4.1 Flash is the one CoralBricks SKU with a genuine off
 		// value (`none`), so an off selection disables reasoning instead of
 		// clamping to the lowest effort like the GLM SKUs.
-		const off = await captureRequest(requireBundled("deepseek-v4.1-flash-fast-fp4"), { disableReasoning: true });
+		const off = await captureRequest(requireBundled("deepseek-v4.1-flash-fast"), { disableReasoning: true });
 		expect(off.payload.reasoning_effort).toBe("none");
 	});
 
+	it("uses discovery metadata to encode effort and off for models without KDL entries", async () => {
+		const options = coralbricksModelManagerOptions({
+			apiKey: "cb-test-key",
+			fetch: async () =>
+				Response.json({
+					data: [
+						{
+							id: "coral-future-optional",
+							supports_reasoning: true,
+							context_length: 32768,
+							reasoning: {
+								supported_efforts: ["low", "high", "max"],
+								default_effort: "none",
+								mandatory: false,
+								disable: { reasoning_effort: "none" },
+							},
+						},
+						{
+							id: "coral-future-mandatory",
+							supports_reasoning: true,
+							context_length: 32768,
+							reasoning: {
+								supported_efforts: ["low", "high", "max"],
+								default_effort: "max",
+								mandatory: true,
+								disable: null,
+							},
+						},
+					],
+				}),
+		});
+		const models = (await options.fetchDynamicModels?.())?.map(model => buildModel(model));
+		const optional = models?.find(model => model.id === "coral-future-optional");
+		const mandatory = models?.find(model => model.id === "coral-future-mandatory");
+		if (!optional || !mandatory) throw new Error("Expected discovered reasoning models");
+		expect((await captureRequest(optional, { reasoning: "high" })).payload.reasoning_effort).toBe("high");
+		expect((await captureRequest(optional, { disableReasoning: true })).payload.reasoning_effort).toBe("none");
+		expect((await captureRequest(optional, {})).payload.reasoning_effort).toBeUndefined();
+		expect((await captureRequest(mandatory, { disableReasoning: true })).payload.reasoning_effort).toBe("low");
+	});
+
 	it("parses streamed reasoning_content into a thinking block ahead of content", async () => {
-		const model = requireBundled("glm-5.3-fp4");
+		const model = requireBundled("glm-5.3-fast");
 		const fetchMock: FetchImpl = Object.assign(
 			async (_input: string | URL | Request, _init?: RequestInit): Promise<Response> =>
 				createSseResponse([
@@ -148,7 +191,7 @@ describe("CoralBricks wire contract", () => {
 	});
 
 	it("normalizes Coral's cache-token usage into the free-read and cache-write buckets", async () => {
-		const model = requireBundled("glm-5.3-flash-fp4");
+		const model = requireBundled("deepseek-v4.1-flash-fast");
 		const fetchMock: FetchImpl = Object.assign(
 			async (): Promise<Response> =>
 				createSseResponse([
@@ -171,7 +214,7 @@ describe("CoralBricks wire contract", () => {
 		expect(result.usage.cacheRead).toBe(900);
 		expect(result.usage.cacheWrite).toBe(90);
 		expect(result.usage.cost.cacheRead).toBe(0);
-		// 90 cache-write tokens at the GLM 5.3 Flash rate of $0.23/M.
-		expect(result.usage.cost.cacheWrite).toBeCloseTo(0.0000207, 9);
+		// 90 cache-write tokens at the DeepSeek V4.1 Flash rate of $0.09/M.
+		expect(result.usage.cost.cacheWrite).toBeCloseTo(0.0000081, 9);
 	});
 });
