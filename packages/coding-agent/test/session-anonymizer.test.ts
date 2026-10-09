@@ -172,7 +172,7 @@ describe("SessionAnonymizer", () => {
 		);
 	});
 
-	test("treats data-derived keys, extension tool enums, and dotted agent names as content", () => {
+	test("exports only allowlisted fields; extension payloads and unknown fields stay opaque", () => {
 		const anonymizer = new SessionAnonymizer();
 		const call = (id: string, name: string, args: Record<string, unknown>) => ({
 			type: "toolCall",
@@ -225,28 +225,48 @@ describe("SessionAnonymizer", () => {
 				summary: "s",
 				preserveData: { status: "customer-acme", aliceCustomer: 1 },
 			}),
-			// Timestamp-shaped turn text is still turn content.
+			// Timestamp-shaped turn text is still turn content; an unknown field is never exported raw.
 			anonymizer.entry({
 				type: "message",
-				message: { role: "user", content: [{ type: "text", text: "2026-09-22T15:12:03Z" }] },
+				message: {
+					role: "user",
+					content: [{ type: "text", text: "2026-09-22T15:12:03Z" }],
+					aliceField: "acme",
+				},
 			}),
 		]);
-		for (const word of ["acme", "alice", "Probe", "account_12345", "123456789", "2026-09-22T15:12:03Z"]) {
+		for (const word of [
+			"acme",
+			"alice",
+			"Probe",
+			"account_12345",
+			"123456789",
+			"2026-09-22T15:12:03Z",
+			"crm_lookup",
+		]) {
 			expect(json).not.toContain(word);
 		}
-		// Built-in tool options stay; the same key on an extension tool is user data.
+		// Built-in tool options stay; extension/MCP args, eval display output, extension entry data,
+		// and compaction preserveData are exported as opaque markers only.
 		expect(json).toContain('"op":"start"');
-		expect(json).toMatch(/"status":"PLACEHOLDER_\d+"/);
+		expect(json).not.toContain('"status"');
+		expect(json).toMatch(/"arguments":"\[redacted #\d+: \d+ chars, 1 line\]"/);
+		expect(json).toMatch(/"jsonOutputs":"\[redacted #\d+/);
+		expect(json).toMatch(/"data":"\[redacted #\d+/);
+		expect(json).toMatch(/"preserveData":"\[redacted #\d+/);
 		// A dotted task name and its agent:// URI share one token index.
-		const index = /"name":"PLACEHOLDER_(\d+)"/.exec(json)?.[1];
+		const index = /"tasks":\[\{"name":"PLACEHOLDER_(\d+)"/.exec(json)?.[1];
 		expect(json).toContain(`"path":"agent://seg${index}.v2"`);
-		// Protocol links stay joinable even inside extension payloads.
-		expect(json).toContain('"toolCallId":"toolu_01abcdef"');
 	});
 
-	test("tokenizes values attached to short shell options", () => {
+	test("tokenizes attached short-option values and flags of programs outside the allowlist", () => {
 		const anonymizer = new SessionAnonymizer();
 		const out = anonymizer.command("grep -ehunter2 -n file.txt");
 		expect(out).toBe(`grep -e${anonymizer.placeholder("hunter2")} -n ${anonymizer.placeholder("file.txt")}`);
+		expect(anonymizer.command("./deploy.sh --customer-acme")).not.toContain("acme");
+		// Only known subcommands survive in first position (`-C acme` is not a subcommand).
+		expect(anonymizer.command("git -C acme status")).toBe(
+			`git -C ${anonymizer.placeholder("acme")} ${anonymizer.placeholder("status")}`,
+		);
 	});
 });

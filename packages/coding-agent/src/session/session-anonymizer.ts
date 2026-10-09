@@ -1,48 +1,435 @@
 /**
- * Structural anonymizer for session JSONL files.
+ * Allowlist anonymizer for session JSONL files.
  *
- * Turn contents (user/assistant text, thinking, tool output, prompts) are
- * replaced by size-annotated markers; metadata (entry types, ids, timestamps,
- * models, usage, tool names, flags, numbers) is preserved. Tool arguments keep
- * their keys and shape: paths become mock paths, shell commands keep program
- * names and flags, and every other string literal becomes a placeholder.
+ * Every field is exported by an explicit rule in {@link FIELD_RULES}: usage, timing, models, ids,
+ * tool names, and other metadata omp writes are kept; turn contents become size-annotated markers;
+ * paths become mock paths; shell commands keep program names and flags. A field without a rule —
+ * and every payload omp does not define (extension/MCP data, non-built-in tool details or args,
+ * `eval` display output) — becomes an opaque marker under a tokenized key. Nothing is kept because
+ * of how a value looks.
  *
- * One instance carries a single token table, so equal originals map to equal
- * tokens across every line and file it processes. Path segments and
- * placeholders share the index space: `name: "Probe"` → `PLACEHOLDER_7` and
- * `agent://Probe` → `agent://seg7`.
+ * One instance carries a single token table, so equal originals map to equal tokens across every
+ * line and file it processes. Path segments and placeholders share the index space:
+ * `name: "Probe"` → `PLACEHOLDER_7` and `agent://Probe` → `agent://seg7`.
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import { BUILTIN_TOOL_NAMES } from "../tools/builtin-names";
+import { getBundledAgentsMap } from "../task/agents";
+import { BUILTIN_TOOL_NAMES, isMCPToolName } from "../tools/builtin-names";
 import type { SessionEntry, SessionHeader } from "./session-entries";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
 
-/**
- * `meta`: session structure omp writes; `builtin-args`: built-in tool arguments (known option enums);
- * `data`: anything else — extension/MCP tool args, extension entry payloads, non-built-in tool details.
- */
-type Scope = "meta" | "builtin-args" | "data";
 type JsonObject = Record<string, unknown>;
 
-/** Shown wherever an anonymized export is written: the redaction is heuristic, not a guarantee. */
+/** Shown wherever an anonymized export is written: the redaction is rule-based, not a guarantee. */
 export const ANONYMIZED_REVIEW_NOTE =
 	"Turn contents and error text are redacted and paths/literals replaced; metadata such as model names is kept — review before sharing.";
 
-/** Strings in these keys are turn contents: always replaced by a redaction marker. */
-const TEXT_KEYS: Record<string, true> = {
-	text: true,
-	thinking: true,
+/**
+ * Export rule for a field omp writes. Numbers, booleans, and null under any rule except `opaque`
+ * and `label` are kept (counts, sizes, timings, flags).
+ * - `num`: numeric/flag field; a string there is redacted.
+ * - `time`: ISO timestamp or epoch ms.
+ * - `enum`/`identity`: omp- or provider-written identifier (stop reason, model id); other shapes are tokenized.
+ * - `agent`/`spawns`: bundled agent names kept, custom agent names tokenized.
+ * - `id`: machine-minted ids kept; named ids mapped like the `agent://` segment they mirror.
+ * - `path`/`cmd`: mock paths / shell rewrite. `text`: redaction marker. `label`: placeholder.
+ * - `error`: redacted except a leading HTTP status.
+ * - `tool`/`name`/`customType`: code-chosen identifiers kept; MCP (user-configured) names tokenized.
+ * - `content`: string or content blocks. `struct`: nested omp structure.
+ * - `args`/`details`/`data`: tool-call args, tool-result details, custom-entry data — walked only
+ *   for built-in tools / omp's own entries, otherwise opaque.
+ * - `opaque`: replaced whole by a marker.
+ */
+type Rule =
+	| "num"
+	| "time"
+	| "enum"
+	| "identity"
+	| "agent"
+	| "spawns"
+	| "id"
+	| "path"
+	| "cmd"
+	| "text"
+	| "label"
+	| "error"
+	| "tool"
+	| "name"
+	| "customType"
+	| "content"
+	| "struct"
+	| "args"
+	| "details"
+	| "data"
+	| "opaque";
+
+function fields(rule: Rule, keys: readonly string[]): Record<string, Rule> {
+	return Object.fromEntries(keys.map(key => [key, rule]));
+}
+
+/** Every field omp writes in session records, messages, content blocks, and built-in tool details. */
+const FIELD_RULES: Record<string, Rule> = {
+	...fields("num", [
+		"version",
+		"resolvedModelIsFallback",
+		"display",
+		"synthetic",
+		"steering",
+		"liveSteered",
+		"userInitiated",
+		"credentialId",
+		"isError",
+		"useless",
+		"prunedAt",
+		"exitCode",
+		"cancelled",
+		"truncated",
+		"excludeFromContext",
+		"tokensBefore",
+		"tokensAfter",
+		"fromExtension",
+		"readOnly",
+		"restrictToolNames",
+		"readSummarize",
+		"isolated",
+		"streamIndex",
+		"errorStatus",
+		"errorId",
+		"requestBodyReadTimeoutFullReplay",
+		"duration",
+		"ttft",
+		"dt",
+		"exactTail",
+		"lineCount",
+		"messageIndex",
+		"attempt",
+		"promptTokens",
+		"nonMessageTokens",
+		"historyRewriteTokensRemoved",
+		"compactionEpoch",
+		"lastMessageTimestamp",
+		"historyRewriteAt",
+		"cacheRead",
+		"cacheWrite",
+		"totalTokens",
+		"reasoningTokens",
+		"total",
+		"ephemeral1h",
+		"ephemeral5m",
+		"thresholdPercent",
+		"thresholdTokens",
+		"totalLines",
+		"startLine",
+		"lineNumbers",
+		"fileSize",
+		"outputBytes",
+		"totalBytes",
+		"outputLines",
+		"start",
+		"end",
+		"fileCount",
+		"nextOffset",
+		"lastLinePartial",
+		"firstLineExceedsLimit",
+		"matchCount",
+		"count",
+		"timeoutSeconds",
+		"wallTimeMs",
+		"maxBytes",
+		"maxColumn",
+		"firstChangedLine",
+		"elidedLines",
+		"elidedBytes",
+		"artifactElidedBytes",
+		"durationMs",
+		"totalDurationMs",
+		"snapshotsPruned",
+		"index",
+		"lines",
+		"elidedSpans",
+		"perFileLimitReached",
+		"linesTruncated",
+		"fileLimitReached",
+		"pagedSource",
+		"toolCount",
+		"requests",
+		"tokens",
+		"isDirectory",
+		"timedOut",
+		"pid",
+		"resultLimitReached",
+		"reached",
+		"suggestion",
+		"restartCount",
+		"persist",
+		"detached",
+		"ready",
+		"completionPercent",
+		"errored",
+		"__interrupted",
+		"__synthetic",
+		"executed",
+		"interrupted",
+		"conflictCount",
+		"madeExecutable",
+		"chars",
+		"multi",
+		"wakeRelay",
+		"partialLine",
+		"requestedTimeoutSeconds",
+	]),
+	...fields("time", [
+		"timestamp",
+		"startedAt",
+		"recordedAt",
+		"updatedAt",
+		"createdAt",
+		"completedAt",
+		"recoveredAt",
+		"exitedAt",
+		"readyAt",
+		"interruptedAt",
+		"ts",
+	]),
+	...fields("enum", [
+		"type",
+		"role",
+		"titleSource",
+		"thinkingLevel",
+		"configured",
+		"serviceTier",
+		"purpose",
+		"stopReason",
+		"source",
+		"trigger",
+		"attribution",
+		"method",
+		"modelRole",
+		"outputSchemaMode",
+		"mimeType",
+		"detail",
+		"kind",
+		"status",
+		"recovery",
+		"category",
+		"reason",
+		"phase",
+		"clearAt",
+		"effort",
+		"topLevel",
+		"tail",
+		"disabledFeatures",
+		"mode",
+		"truncatedBy",
+		"direction",
+		"unit",
+		"contentType",
+		"op",
+		"state",
+		"language",
+		"languages",
+		"agentSource",
+		"execution",
+		"outcome",
+		"resolvedThinkingLevel",
+		"storage",
+		"server",
+		"customWireName",
+		"visibility",
+	]),
+	...fields("identity", [
+		"api",
+		"provider",
+		"model",
+		"resolvedModel",
+		"upstreamProvider",
+		"upstreamModel",
+		"advisor",
+		"selector",
+		"resolvedModelIdentity",
+	]),
+	agent: "agent",
+	spawns: "spawns",
+	...fields("id", [
+		"id",
+		"parentId",
+		"toolCallId",
+		"call_id",
+		"responseId",
+		"firstKeptEntryId",
+		"providerReplayThroughEntryId",
+		"fromId",
+		"targetId",
+		"sourceEntryId",
+		"itemId",
+		"turn_id",
+		"artifactId",
+		"jobId",
+		"agentUrlId",
+		"owner",
+		"replyTo",
+		"from",
+		"to",
+	]),
+	...fields("path", [
+		"cwd",
+		"path",
+		"paths",
+		"file",
+		"files",
+		"file_path",
+		"additionalDirectories",
+		"parentSession",
+		"previousSessionFiles",
+		"scopePath",
+		"searchPath",
+		"resolvedPath",
+		"displayTarget",
+		"url",
+		"finalUrl",
+		"missingPaths",
+		"fullOutputPath",
+		"readFiles",
+		"modifiedFiles",
+		// `meta.source.value` of a read: the path or URL it came from.
+		"value",
+	]),
+	command: "cmd",
+	...fields("text", [
+		"text",
+		"thinking",
+		"summary",
+		"shortSummary",
+		"systemPrompt",
+		"task",
+		"output",
+		"code",
+		"warning",
+		"note",
+		"rawBlock",
+		"filesText",
+		"diff",
+		"oldText",
+		"newText",
+		"resultText",
+		"errorText",
+		"error",
+		"question",
+		"customInput",
+		"preview",
+		"assignment",
+		"log",
+		"messages",
+		"body",
+	]),
+	...fields("label", ["title", "previousTitle", "label", "injectedRules", "intent", "emoji", "nf"]),
+	...fields("error", ["errorMessage", "explanation", "errorClassificationMessage", "upstreamError"]),
+	...fields("tool", ["toolName", "tools", "declared", "deferred", "active"]),
+	name: "name",
+	customType: "customType",
+	content: "content",
+	...fields("struct", [
+		"message",
+		"usage",
+		"cost",
+		"cttl",
+		"card",
+		"contextSnapshot",
+		"retryRecovery",
+		"supersededBy",
+		"stopDetails",
+		"requestControls",
+		"inputTransformations",
+		"providerPayload",
+		"items",
+		"compactionThreshold",
+		"toolChanges",
+		"meta",
+		"truncation",
+		"limits",
+		"columnTruncated",
+		"shownRange",
+		"headRange",
+		"tailRange",
+		"resultLimit",
+		"async",
+		"service",
+		"daemon",
+		"daemons",
+		"jobs",
+		"progress",
+		"cells",
+		"fileMatches",
+		"fileReplacements",
+		"perFileResults",
+		"displayContent",
+		"diagnostics",
+		"receipts",
+		"waited",
+	]),
+	...fields("args", ["arguments", "partialArgs", "args", "input"]),
+	details: "details",
+	data: "data",
+	// Known fields whose payload is never useful or never safe: keep the key, redact the value.
+	...fields("opaque", [
+		"textSignature",
+		"thinkingSignature",
+		"thoughtSignature",
+		"encrypted_content",
+		"encryptedContent",
+		"signature",
+		"hash",
+		"preserveData",
+		"outputSchema",
+		"retryFallback",
+		"workPoolYieldItems",
+		"providerPromptCacheKey",
+		"providerFile",
+		"providerMetadata",
+		"toolCallAbortMessages",
+		"fallbackCreditHandle",
+		"annotations",
+		"logprobs",
+		"retainedFiles",
+		"metadata",
+		"internal_chat_message_metadata_passthrough",
+		"block",
+		"jsonOutputs",
+		"structured",
+		"xdev",
+		"response",
+		"results",
+		"projectAgentsDir",
+		"recentTools",
+		"recentOutput",
+		"statusEvents",
+		"options",
+		"selectedOptions",
+		"phases",
+		"tasks",
+		"completedTasks",
+		"proc",
+		"cfg",
+		"terminalRows",
+		"notes",
+	]),
+};
+
+/** Built-in tool argument keys holding prose: redacted rather than tokenized. */
+const TEXT_ARG_KEYS: Record<string, true> = {
 	content: true,
-	summary: true,
-	systemPrompt: true,
-	task: true,
-	output: true,
+	text: true,
 	code: true,
-	encrypted_content: true,
-	signature: true,
-	thinkingSignature: true,
-	textSignature: true,
-	redacted_thinking: true,
+	task: true,
+	context: true,
+	prompt: true,
+	message: true,
+	body: true,
+	input: true,
+	summary: true,
+	description: true,
+	old_text: true,
+	new_text: true,
 };
 
 /** Path/URI keys not covered by {@link PATH_KEY}. */
@@ -56,50 +443,12 @@ const PATH_KEYS: Record<string, true> = {
 	uri: true,
 };
 
-/** Session metadata kept verbatim when the value is a lowercase identifier (enum-shaped). */
-const META_KEYS: Record<string, true> = {
-	type: true,
-	role: true,
-	titleSource: true,
-	contentType: true,
-	unit: true,
-	stopReason: true,
-	customType: true,
-	purpose: true,
-	thinkingLevel: true,
-	configured: true,
-	source: true,
-	attribution: true,
-	status: true,
-	phase: true,
-	mimeType: true,
-	serviceTier: true,
-	kind: true,
-	recovery: true,
-	reason: true,
-	trigger: true,
-	agent: true,
-	modelRole: true,
-	spawns: true,
-	outputSchemaMode: true,
-	visibility: true,
-	fingerprint: true,
-	category: true,
-	topLevel: true,
-	tail: true,
-	tools: true,
-	declared: true,
-	active: true,
-	deferred: true,
-};
-
 /** Tool-call argument keys whose identifier-shaped values are option enums, not content. */
 const ARG_ENUM_KEYS: Record<string, true> = {
 	op: true,
 	mode: true,
 	action: true,
 	language: true,
-	agent: true,
 	kind: true,
 	format: true,
 	type: true,
@@ -122,18 +471,6 @@ const ARG_ENUM_KEYS: Record<string, true> = {
 	provider: true,
 	effort: true,
 	thinking: true,
-};
-
-/** Model and tool identity keys kept verbatim for any identifier-shaped value (`GLM-4.6`, `Bash`). */
-const IDENTITY_KEYS: Record<string, true> = {
-	api: true,
-	provider: true,
-	model: true,
-	resolvedModel: true,
-	selector: true,
-	upstreamProvider: true,
-	upstreamModel: true,
-	toolName: true,
 };
 
 /** Tool-call argument keys holding search text: always a placeholder, never path-mapped. */
@@ -333,24 +670,75 @@ const SHELL_COMMANDS = new Set([
 	"while",
 ]);
 
-/** Programs whose first bare-word argument is a subcommand (`git status`, `cargo build`). */
-const SUBCOMMAND_PROGRAMS: Record<string, true> = {
-	git: true,
-	gh: true,
-	jj: true,
-	bun: true,
-	npm: true,
-	pnpm: true,
-	yarn: true,
-	cargo: true,
-	go: true,
-	docker: true,
-	kubectl: true,
-	uv: true,
-	pip: true,
-	rustup: true,
-	dotnet: true,
-	omp: true,
+/** Subcommand words of allowlisted programs (`git status`, `cargo build`), kept in first position. */
+const SUBCOMMANDS: Record<string, true> = {
+	add: true,
+	api: true,
+	apply: true,
+	auth: true,
+	bench: true,
+	blame: true,
+	branch: true,
+	build: true,
+	check: true,
+	checkout: true,
+	"cherry-pick": true,
+	clean: true,
+	clippy: true,
+	clone: true,
+	commit: true,
+	compose: true,
+	config: true,
+	create: true,
+	delete: true,
+	describe: true,
+	diff: true,
+	doc: true,
+	exec: true,
+	fetch: true,
+	fmt: true,
+	get: true,
+	grep: true,
+	help: true,
+	info: true,
+	init: true,
+	install: true,
+	issue: true,
+	list: true,
+	log: true,
+	logs: true,
+	"ls-files": true,
+	merge: true,
+	nextest: true,
+	pr: true,
+	ps: true,
+	publish: true,
+	pull: true,
+	push: true,
+	rebase: true,
+	remote: true,
+	remove: true,
+	repo: true,
+	reset: true,
+	restore: true,
+	"rev-parse": true,
+	revert: true,
+	run: true,
+	show: true,
+	stash: true,
+	status: true,
+	switch: true,
+	sync: true,
+	tag: true,
+	test: true,
+	tidy: true,
+	uninstall: true,
+	update: true,
+	upgrade: true,
+	version: true,
+	view: true,
+	worktree: true,
+	x: true,
 };
 
 /** Prefix programs after which a new command name follows. */
@@ -358,51 +746,6 @@ const COMMAND_PREFIXES = new Set(["sudo", "env", "time", "timeout", "nohup", "xa
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const IDENTIFIER = /^[\w.:/@+-]{1,128}$/;
-/** Id keys that join omp/provider records (call ↔ result ↔ execution log); raw in every scope. */
-const PROTOCOL_ID_KEYS: Record<string, true> = {
-	toolCallId: true,
-	call_id: true,
-	responseId: true,
-	sourceEntryId: true,
-	firstKeptEntryId: true,
-	turn_id: true,
-};
-
-/** omp-written timestamp fields; ISO values here stay even inside extension payloads. */
-const TIMESTAMP_KEYS: Record<string, true> = {
-	timestamp: true,
-	startedAt: true,
-	recordedAt: true,
-	updatedAt: true,
-	createdAt: true,
-	completedAt: true,
-};
-
-/** Keys omp itself writes; the only object keys kept verbatim inside untrusted data containers. */
-const KNOWN_KEYS: Record<string, true> = {
-	...TEXT_KEYS,
-	...PATH_KEYS,
-	...META_KEYS,
-	...IDENTITY_KEYS,
-	...ARG_ENUM_KEYS,
-	...PATTERN_ARG_KEYS,
-	...PROTOCOL_ID_KEYS,
-	id: true,
-	parentId: true,
-	name: true,
-	args: true,
-	intent: true,
-	command: true,
-	cmd: true,
-	path: true,
-	paths: true,
-	cwd: true,
-	...TIMESTAMP_KEYS,
-	readFiles: true,
-	modifiedFiles: true,
-	files: true,
-};
-
 /** Object keys shaped like schema fields; anything else (paths, labels) is data. */
 const SCHEMA_KEY = /^(?:[A-Za-z_$][\w$]{0,63}|\d+)$/;
 
@@ -469,7 +812,11 @@ export class SessionAnonymizer {
 	path(value: string): string {
 		return value
 			.split(";")
-			.map(part => this.#singlePath(part))
+			.map(part => {
+				// `a; b` lists: keep the separator spacing out of the mapped segment.
+				const trimmed = part.trim();
+				return trimmed === "" ? part : part.replace(trimmed, () => this.#singlePath(trimmed));
+			})
 			.join(";");
 	}
 
@@ -490,7 +837,7 @@ export class SessionAnonymizer {
 
 	/** Anonymize one session record (header or entry). */
 	entry(value: unknown): unknown {
-		return this.#value(value, undefined, undefined, "meta");
+		return isObject(value) ? this.#struct(value) : this.#opaque(value);
 	}
 
 	#name(value: string): string {
@@ -543,107 +890,143 @@ export class SessionAnonymizer {
 		return this.redactText(value);
 	}
 
-	#value(value: unknown, key: string | undefined, parent: JsonObject | undefined, scope: Scope): unknown {
-		// Numbers in untrusted payloads may be account ids or secrets; elsewhere they are usage/timing metadata.
-		if (typeof value === "number") return scope === "data" ? this.placeholder(String(value)) : value;
-		if (value === null || typeof value === "boolean") return value;
-		// Tool-call argument slots: toolCall/function_call `arguments`, streamed `partialArgs`,
-		// Anthropic `tool_use.input`, and `tool_execution_start` custom entries' `args`. Only trusted
-		// structure carries real envelopes; a look-alike inside untrusted data must not gain built-in scope.
-		const toolName =
-			parent === undefined || scope !== "meta"
-				? undefined
-				: (key === "arguments" || key === "partialArgs") && typeof parent.name === "string"
-					? parent.name
-					: key === "input" && TOOL_CALL_TYPES[String(parent.type)] === true
-						? String(parent.name)
-						: key === "args" && typeof parent.toolName === "string"
-							? parent.toolName
-							: undefined;
-		if (toolName !== undefined) return this.#toolArgs(value, toolName);
-		if (Array.isArray(value)) return value.map(item => this.#value(item, key, parent, scope));
-		if (isObject(value)) {
-			const out: JsonObject = {};
-			for (const [childKey, child] of Object.entries(value)) {
-				const childScope = scope === "meta" ? this.#childScope(childKey, value) : scope;
-				// Data containers carry arbitrary maps (`display({ aliceCustomer: 1 })`), so only keys omp
-				// itself writes survive there; trusted structure keeps schema-shaped keys.
-				const keepKey = scope === "data" ? KNOWN_KEYS[childKey] === true : SCHEMA_KEY.test(childKey);
-				out[keepKey ? childKey : this.#literal(childKey)] = this.#value(child, childKey, value, childScope);
-			}
-			return out;
+	/** Opaque marker for a value with no export rule; keeps only its size and an equality index. */
+	#opaque(value: unknown): unknown {
+		if (value === undefined) return value;
+		return this.redactText(typeof value === "string" ? value : JSON.stringify(value));
+	}
+
+	/** Walk an omp-defined object: ruled fields by rule, unknown fields opaque under a tokenized key. */
+	#struct(object: JsonObject): JsonObject {
+		const out: JsonObject = {};
+		for (const [key, value] of Object.entries(object)) {
+			const rule = Object.hasOwn(FIELD_RULES, key) ? FIELD_RULES[key] : undefined;
+			if (rule === undefined) out[this.placeholder(key)] = this.#opaque(value);
+			else out[key] = this.#field(rule, value, object);
 		}
-		if (typeof value !== "string") return value;
-		return this.#string(value, key, parent, scope);
+		return out;
 	}
 
-	/**
-	 * Scope for `parent[key]` inside trusted structure. Payloads omp does not define — custom/extension
-	 * entry data, compaction `preserveData`, non-built-in tool result details, and `eval` display output —
-	 * are untrusted data.
-	 */
-	#childScope(key: string, parent: JsonObject): Scope {
-		if (key === "jsonOutputs" || key === "preserveData") return "data";
-		// `tool_execution_start` is omp's own execution log; its `args` must mirror the tool call.
-		if (key === "data" && parent.type === "custom")
-			return parent.customType === "tool_execution_start" ? "meta" : "data";
-		if (key !== "details") return "meta";
-		return parent.role === "toolResult" && isBuiltinTool(parent.toolName) ? "meta" : "data";
+	#field(rule: Rule, value: unknown, parent: JsonObject): unknown {
+		if (rule === "opaque") return this.#opaque(value);
+		if (value === null || typeof value === "number" || typeof value === "boolean") {
+			return rule === "label" ? this.placeholder(String(value)) : value;
+		}
+		switch (rule) {
+			case "args":
+				return this.#toolArgs(value, parent);
+			case "details":
+				// Built-in tools write their own details; anything else is an extension payload.
+				return parent.role === "toolResult" && isBuiltinTool(parent.toolName) && isObject(value)
+					? this.#struct(value)
+					: this.#opaque(value);
+			case "data":
+				// omp's execution log mirrors the tool call; every other custom entry is extension state.
+				return parent.type === "custom" && parent.customType === "tool_execution_start" && isObject(value)
+					? this.#struct(value)
+					: this.#opaque(value);
+			case "name":
+				return this.#field(TOOL_CALL_TYPES[String(parent.type)] === true ? "tool" : "label", value, parent);
+		}
+		if (Array.isArray(value)) return value.map(item => this.#field(rule, item, parent));
+		if (isObject(value)) {
+			// Only structural rules descend; a scalar field holding an object is not omp's shape.
+			const descends =
+				rule === "struct" ||
+				rule === "content" ||
+				rule === "enum" ||
+				rule === "id" ||
+				rule === "path" ||
+				rule === "tool";
+			return descends ? this.#struct(value) : this.#opaque(value);
+		}
+		if (typeof value !== "string") return this.#opaque(value);
+		return this.#string(rule, value);
 	}
 
-	#toolArgs(value: unknown, toolName: string): unknown {
-		// Extension/MCP schemas are arbitrary: only built-in tools' option keys are known enums.
-		const scope: Scope = isBuiltinTool(toolName) ? "builtin-args" : "data";
-		if (typeof value !== "string") return this.#value(value, undefined, undefined, scope);
+	#string(rule: Rule, value: string): string {
+		switch (rule) {
+			case "time":
+				return ISO_TIMESTAMP.test(value) ? value : this.placeholder(value);
+			case "enum":
+				return value.length <= 64 && IDENTIFIER.test(value) ? value : this.placeholder(value);
+			case "identity":
+				return IDENTIFIER.test(value) ? value : this.placeholder(value);
+			case "agent":
+				return getBundledAgentsMap().has(value) ? value : this.placeholder(value);
+			case "spawns":
+				return value === "" || value === "*"
+					? value
+					: value
+							.split(",")
+							.map(part => this.#string("agent", part.trim()))
+							.join(",");
+			case "id":
+				// Machine-minted ids stay joinable with provider logs; named ids (subagent names) are
+				// mapped like the `agent://` segment they mirror.
+				return RANDOM_ID.test(value) ? value : this.segment(value);
+			case "path":
+				return MESSAGE_ADDRESS.test(value) ? value : this.path(value);
+			case "cmd":
+				return this.command(value);
+			case "label":
+			case "struct":
+				return this.placeholder(value);
+			case "error": {
+				// Provider errors can echo request content or credentials: only a leading HTTP status survives.
+				const status = /^\d{3}\b/.exec(value);
+				return status
+					? `${status[0]} ${this.redactText(value.slice(status[0].length).trimStart())}`
+					: this.redactText(value);
+			}
+			case "tool":
+				// Built-in and extension tool names are chosen in code; MCP names embed user-configured server names.
+				return isBuiltinTool(value) || (!isMCPToolName(value) && /^[A-Za-z][\w.-]{0,63}$/.test(value))
+					? value
+					: this.placeholder(value);
+			case "customType":
+				return /^[a-z][a-z0-9_:.-]{0,63}$/.test(value) ? value : this.placeholder(value);
+			default:
+				// `num`, `text`, `content`: a string here is turn content (or not omp's shape).
+				return this.redactText(value);
+		}
+	}
+
+	/** Tool-call args: built-in tools walk their known schema; any other tool's args are opaque. */
+	#toolArgs(value: unknown, parent: JsonObject): unknown {
+		const toolName = typeof parent.name === "string" ? parent.name : parent.toolName;
+		if (!isBuiltinTool(toolName)) return this.#opaque(value);
+		if (typeof value !== "string") return this.#argValue(value, undefined);
 		// Wire payloads carry arguments as JSON text; partial streams may not parse.
 		try {
-			return JSON.stringify(this.#value(JSON.parse(value), undefined, undefined, scope));
+			return JSON.stringify(this.#argValue(JSON.parse(value), undefined));
 		} catch {
 			return this.redactText(value);
 		}
 	}
 
-	#string(value: string, key: string | undefined, parent: JsonObject | undefined, scope: Scope): string {
+	/** One built-in tool argument: schema keys stay, values follow the argument's role. */
+	#argValue(value: unknown, key: string | undefined): unknown {
+		if (value === null || typeof value === "number" || typeof value === "boolean") return value;
+		if (Array.isArray(value)) return value.map(item => this.#argValue(item, key));
+		if (isObject(value)) {
+			const out: JsonObject = {};
+			for (const [childKey, child] of Object.entries(value)) {
+				// `env` maps user-chosen variable names to values.
+				if (childKey === "env") out[childKey] = this.#opaque(child);
+				else out[SCHEMA_KEY.test(childKey) ? childKey : this.#literal(childKey)] = this.#argValue(child, childKey);
+			}
+			return out;
+		}
+		if (typeof value !== "string") return this.#opaque(value);
 		if (key === undefined) return this.#literal(value);
-		// Timestamps are metadata only in omp-written fields; turn text or extension data that happens
-		// to be timestamp-shaped is content.
-		if (
-			ISO_TIMESTAMP.test(value) &&
-			(TIMESTAMP_KEYS[key] === true || (scope === "meta" && TEXT_KEYS[key] !== true))
-		) {
-			return value;
-		}
-		if (ID_KEY.test(key) && /^\S{1,512}$/.test(value)) {
-			// Protocol links stay raw everywhere so call ↔ result ↔ execution-log stay joinable. Other
-			// machine-minted ids stay in omp-written structure; in untrusted data (`customerId`) every
-			// id is tokenized, as is any named id (mapped like the `agent://` segment it mirrors).
-			if (PROTOCOL_ID_KEYS[key] === true) return value;
-			return scope !== "data" && RANDOM_ID.test(value) ? value : this.segment(value);
-		}
-		if (scope === "meta" && key.endsWith("At") && IDENTIFIER.test(value)) return value;
-		if (PATH_KEYS[key] === true || PATH_KEY.test(key)) return MESSAGE_ADDRESS.test(value) ? value : this.path(value);
+		if (ID_KEY.test(key)) return RANDOM_ID.test(value) ? value : this.segment(value);
+		if (PATH_KEYS[key] === true || PATH_KEY.test(key)) return this.path(value);
 		if (key === "command" || key === "cmd") return this.command(value);
-		if (scope !== "meta") {
-			if (scope === "builtin-args" && ARG_ENUM_KEYS[key] === true && IDENTIFIER.test(value)) return value;
-			if (TEXT_KEYS[key] === true) return this.redactText(value);
-			if (PATTERN_ARG_KEYS[key] === true) return this.#literal(value, false);
-			return this.#literal(value);
-		}
-		if (TEXT_KEYS[key] === true) return this.redactText(value);
-		if (key === "data" && parent?.type === "image") return this.redactText(value);
-		// Provider errors can echo request content or credentials: only a leading HTTP status survives.
-		if (key === "errorMessage" || key === "explanation") {
-			const status = /^\d{3}\b/.exec(value);
-			return status
-				? `${status[0]} ${this.redactText(value.slice(status[0].length).trimStart())}`
-				: this.redactText(value);
-		}
-		if (IDENTIFIER.test(value)) {
-			if (IDENTITY_KEYS[key] === true) return value;
-			if (META_KEYS[key] === true && /^[a-z0-9]/.test(value)) return value;
-			if (key === "name" && TOOL_CALL_TYPES[String(parent?.type)] === true) return value;
-		}
-		return this.#literal(value);
+		if (key === "agent") return this.#string("agent", value);
+		if (ARG_ENUM_KEYS[key] === true && value.length <= 64 && IDENTIFIER.test(value)) return value;
+		if (TEXT_ARG_KEYS[key] === true) return this.redactText(value);
+		return this.#literal(value, PATTERN_ARG_KEYS[key] !== true);
 	}
 
 	/** Shell command with program names, flags, operators, and numbers kept; literals replaced. */
@@ -717,6 +1100,8 @@ export class SessionAnonymizer {
 
 	#shellArg(word: string, program: string | undefined, argIndex: number): string {
 		if (NUMBER.test(word) || ENV_REF.test(word)) return word;
+		// Flag names are vocabulary only for allowlisted programs; an unknown script's flags may name things.
+		if (program === undefined) return this.#shellValue(word, false);
 		if (SHELL_FLAG.test(word)) {
 			// `-ehunter2` attaches a value to a short option; only long flags and bare `-x` are names.
 			return word.startsWith("--") || word.length <= 2
@@ -725,8 +1110,7 @@ export class SessionAnonymizer {
 		}
 		const flagValue = /^(--?[A-Za-z][\w-]*=)([\s\S]*)$/.exec(word);
 		if (flagValue) return flagValue[1] + this.#shellValue(flagValue[2], false);
-		if (program && SUBCOMMAND_PROGRAMS[program] === true && argIndex === 0 && /^[a-z][a-z-]*$/.test(word))
-			return word;
+		if (argIndex === 0 && SUBCOMMANDS[word] === true) return word;
 		return this.#shellValue(word, false);
 	}
 
