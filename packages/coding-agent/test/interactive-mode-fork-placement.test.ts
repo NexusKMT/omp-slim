@@ -51,17 +51,19 @@ describe("InteractiveMode fork placement bridge", () => {
 		resetSettingsForTest();
 	});
 
-	it("keeps the current session controllers active when forking into a pane", async () => {
+	it.each([
+		["an in-place fork tears down", undefined, 1],
+		["a pane fork keeps", "pane", 0],
+	] as const)("%s the current session's side controllers", async (_label, placement, disposals) => {
 		const btwDispose = vi.spyOn(BtwController.prototype, "dispose");
 		const omfgDispose = vi.spyOn(OmfgController.prototype, "dispose");
 		const cleanseDispose = vi.spyOn(CleanseCommandController.prototype, "dispose");
-		const fork = vi.spyOn(CommandController.prototype, "handleForkCommand").mockResolvedValue();
+		vi.spyOn(CommandController.prototype, "handleForkCommand").mockResolvedValue();
 
-		await mode.handleForkCommand("pane");
+		await mode.handleForkCommand(placement);
 
-		expect(fork).toHaveBeenCalledWith("pane");
-		expect(btwDispose).not.toHaveBeenCalled();
-		expect(omfgDispose).not.toHaveBeenCalled();
-		expect(cleanseDispose).not.toHaveBeenCalled();
+		expect(btwDispose).toHaveBeenCalledTimes(disposals);
+		expect(omfgDispose).toHaveBeenCalledTimes(disposals);
+		expect(cleanseDispose).toHaveBeenCalledTimes(disposals);
 	});
 });
