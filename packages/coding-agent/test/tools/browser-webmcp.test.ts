@@ -334,9 +334,8 @@ ModelContext.prototype.registerTool = window.pageRegister;`,
 			const session = await page.createCDPSession();
 			await session.send("Runtime.enable");
 			await session.send("Runtime.addBinding", { name: "reportSurface" });
-			const reported = new Promise<string>(resolve =>
-				session.on("Runtime.bindingCalled", event => resolve(event.payload)),
-			);
+			const reported = Promise.withResolvers<string>();
+			session.on("Runtime.bindingCalled", event => reported.resolve(event.payload));
 			let crashed = false;
 			page.on("error", () => {
 				crashed = true;
@@ -345,7 +344,7 @@ ModelContext.prototype.registerTool = window.pageRegister;`,
 			// created one in the first.
 			const html = `<script>reportSurface(navigator.modelContext.constructor.name);</script>`;
 			await realm.evaluate(`location.href = "javascript:" + ${JSON.stringify(JSON.stringify(html))}; null;`);
-			expect(await reported).toBe("ModelContext");
+			expect(await reported.promise).toBe("ModelContext");
 			// The kill can land after the report; a killed renderer answers nothing more and the test times out.
 			const alive = await session.send("Runtime.evaluate", { expression: "1 + 1", returnByValue: true });
 			expect(alive.result.value).toBe(2);
