@@ -165,8 +165,10 @@ frame.src = "http://localhost:${child.port}/";
 document.body.appendChild(frame);
 // Touching the window before it navigates gives its initial empty document a script context.
 frame.contentWindow.location.href;
-window.webmcpSurface = navigator.modelContext.constructor.name;
-navigator.modelContext.registerTool({
+// Chromium exposes its context on document or navigator, depending on the version.
+const context = document.modelContext ?? navigator.modelContext;
+window.webmcpSurface = context.constructor.name;
+context.registerTool({
   name: "page_title",
   description: "Returns the page title.",
   inputSchema: { type: "object" },
@@ -342,7 +344,7 @@ ModelContext.prototype.registerTool = window.pageRegister;`,
 			});
 			// The replacement document is the frame's second; reading its context binds a second time if omp
 			// created one in the first.
-			const html = `<script>reportSurface(navigator.modelContext.constructor.name);</script>`;
+			const html = `<script>reportSurface((document.modelContext ?? navigator.modelContext).constructor.name);</script>`;
 			await realm.evaluate(`location.href = "javascript:" + ${JSON.stringify(JSON.stringify(html))}; null;`);
 			expect(await reported.promise).toBe("ModelContext");
 			// The kill can land after the report; a killed renderer answers nothing more and the test times out.
@@ -359,11 +361,11 @@ ModelContext.prototype.registerTool = window.pageRegister;`,
 	it.each([
 		{
 			setup: "held before attach",
-			define: `window.pageContext = navigator.modelContext;`,
+			define: `window.pageContext = document.modelContext ?? navigator.modelContext;`,
 		},
 		{
 			setup: "exposed on document with its own registerTool",
-			define: `window.pageContext = navigator.modelContext;
+			define: `window.pageContext = document.modelContext ?? navigator.modelContext;
 const nativeRegister = pageContext.registerTool;
 pageContext.registerTool = function (tool, options) { return nativeRegister.call(this, tool, options); };
 Object.defineProperty(document, "modelContext", { configurable: true, value: pageContext });`,
