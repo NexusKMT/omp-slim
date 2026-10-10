@@ -66,7 +66,7 @@ await tab.close();
 | `allow_file_access` | Launch flag permitting local file pages to read local files; cannot change an already-running shared Chromium. |
 | `headed` | Override `browser.headless` for this open. `headed: false` also opts out of automatic Tern selection. |
 | `persist` | Default `false`; opt out of settle-freeze and idle-close management. Explicit reuse by the owning session can change it. |
-| `timeout` | Seconds; default 30, capped by positive `tools.maxTimeout`, then clamped to 1–300. First-use Chromium installation is outside the open deadline. |
+| `timeout` | Seconds; default 30, capped by positive `tools.maxTimeout`, then clamped to 1–300. First-use Chromium installation is outside the open deadline. An open that runs out names the step it stalled in: launching or connecting to the browser, closing a tab to reopen it, or opening the tab. |
 
 Reopening with init scripts, a download directory, a user-agent override, or `ignore_https_errors: true` recycles an existing tab so those worker-init options can take effect.
 
