@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
-import { TUI } from "@oh-my-pi/pi-tui";
+import { getKeybindings, setKeybindings, TUI } from "@oh-my-pi/pi-tui";
 import type {
 	ExtensionCustomOptions,
 	ExtensionUIContext,
@@ -18,6 +18,11 @@ import {
 	AnnotateCommand,
 	runAnnotateCommand,
 } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/annotate";
+import {
+	showCodeReviewOverlay,
+	showTextReviewOverlay,
+} from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/annotate/fullscreen";
+import * as externalEditor from "@oh-my-pi/pi-coding-agent/utils/external-editor";
 import type {
 	CustomCommandAPI,
 	CustomCommandContext,
@@ -689,5 +694,95 @@ describe("/annotate contracts", () => {
 			"Source summary failed; including the full source verbatim beyond the normal 999-character context limit.",
 			"warning",
 		);
+	});
+
+	it("writes an external-editor save back into the text source the paste uses", async () => {
+		const previous = getKeybindings();
+		setKeybindings(KeybindingsManager.inMemory({ "app.editor.external": "ctrl+e" }));
+		const edited = Promise.withResolvers<string>();
+		const openInEditor = spyOn(externalEditor, "openInEditor").mockImplementation(() => edited.promise);
+		spyOn(externalEditor, "getEditorCommand").mockReturnValue("vim");
+		const source: TextReviewSource = {
+			id: "prompt",
+			kind: "prompt",
+			label: "Text prompt",
+			text: "original\nkept",
+			provenance: { kind: "prompt" },
+		};
+		const notify = vi.fn();
+		try {
+			await showTextReviewOverlay(
+				{
+					cwd: "/tmp",
+					sessionManager: { getCwd: () => "/tmp" },
+					ui: {
+						notify,
+						custom: async factory => {
+							const overlay = await factory(
+								{ terminal: { rows: 40 }, requestRender() {}, stop() {}, start() {} } as TUI,
+								theme,
+								KeybindingsManager.inMemory(),
+								() => {},
+							);
+							overlay.handleInput?.("\x05");
+							edited.resolve("rewritten\nkept");
+							await edited.promise;
+							return undefined;
+						},
+					},
+				} as unknown as CustomCommandContext,
+				source,
+			);
+			expect(openInEditor).toHaveBeenCalledWith("vim", "original\nkept", {
+				extension: ".txt",
+				trimTrailingNewline: false,
+			});
+			expect(source.text).toBe("rewritten\nkept");
+			expect(notify).not.toHaveBeenCalled();
+		} finally {
+			setKeybindings(previous);
+		}
+	});
+
+	it("opens the current diff file in $EDITOR and keeps the frozen snapshot", async () => {
+		const previous = getKeybindings();
+		setKeybindings(KeybindingsManager.inMemory({ "app.editor.external": "ctrl+e" }));
+		const dir = await mkdtemp(join(tmpdir(), "annotate-editor-"));
+		const opened = Promise.withResolvers<void>();
+		const openEditorOnPath = spyOn(externalEditor, "openEditorOnPath").mockImplementation(() => opened.promise);
+		spyOn(externalEditor, "getEditorCommand").mockReturnValue("vim");
+		const notify = vi.fn();
+		try {
+			await mkdir(join(dir, "src"));
+			await writeFile(join(dir, "src/value.ts"), "const value = 2;\n");
+			await showCodeReviewOverlay(
+				{
+					cwd: dir,
+					sessionManager: { getCwd: () => dir },
+					ui: {
+						notify,
+						custom: async factory => {
+							const overlay = await factory(
+								{ terminal: { rows: 40 }, requestRender() {}, stop() {}, start() {} } as TUI,
+								theme,
+								KeybindingsManager.inMemory(),
+								() => {},
+							);
+							overlay.handleInput?.("\t");
+							overlay.handleInput?.("\x05");
+							opened.resolve();
+							await opened.promise;
+							return undefined;
+						},
+					},
+				} as unknown as CustomCommandContext,
+				localTarget(),
+			);
+			expect(openEditorOnPath).toHaveBeenCalledWith("vim", join(dir, "src/value.ts"));
+			expect(notify).toHaveBeenCalledWith("Opened src/value.ts. The review still uses the frozen diff.", "info");
+		} finally {
+			setKeybindings(previous);
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 });

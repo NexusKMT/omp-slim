@@ -7,7 +7,8 @@ import type {
 	TextReviewSource,
 } from "@oh-my-pi/pi-tui/overlays/annotation-types";
 import type { ResolvedReviewTarget } from "../review/target";
-import { getEditorCommand, openInEditor } from "../../../../utils/external-editor";
+import { resolveReadPath } from "../../../../tools/path-utils";
+import { getEditorCommand, openEditorOnPath, openInEditor } from "../../../../utils/external-editor";
 
 const ANNOTATION_OVERLAY_OPTIONS = {
 	width: "100%",
@@ -17,9 +18,16 @@ const ANNOTATION_OVERLAY_OPTIONS = {
 	mouseTracking: false,
 } as const;
 
-async function editAnnotationDraft(tui: TUI, draft: string, commit: (text: string | null) => void): Promise<void> {
+const MISSING_EDITOR = "Set $VISUAL or $EDITOR to edit in an external editor.";
+
+function requireEditor(): string {
 	const editor = getEditorCommand();
-	if (!editor) throw new Error("Set $VISUAL or $EDITOR to edit an annotation externally.");
+	if (!editor) throw new Error(MISSING_EDITOR);
+	return editor;
+}
+
+async function editAnnotationDraft(tui: TUI, draft: string, commit: (text: string | null) => void): Promise<void> {
+	const editor = requireEditor();
 	tui.stop();
 	try {
 		commit(await openInEditor(editor, draft, { extension: ".md" }));
@@ -29,18 +37,76 @@ async function editAnnotationDraft(tui: TUI, draft: string, commit: (text: strin
 	}
 }
 
+async function editTextSource(
+	tui: TUI,
+	ctx: CustomCommandContext,
+	overlay: AnnotationOverlay,
+	source: TextReviewSource,
+): Promise<void> {
+	const editor = requireEditor();
+	const filePath = source.provenance?.kind === "file" ? source.provenance.path : undefined;
+	tui.stop();
+	try {
+		let next: string | null;
+		if (filePath) {
+			await openEditorOnPath(editor, filePath);
+			next = await Bun.file(filePath).text();
+		} else {
+			next = await openInEditor(editor, overlay.textSourceText() ?? source.text, {
+				extension: ".txt",
+				trimTrailingNewline: false,
+			});
+		}
+		if (next === null) return;
+		source.text = next;
+		const dropped = overlay.replaceTextSource(next);
+		if (dropped > 0) {
+			ctx.ui.notify(
+				dropped === 1
+					? "Dropped 1 line note that no longer matches the edited text."
+					: `Dropped ${dropped} line notes that no longer match the edited text.`,
+				"warning",
+			);
+		}
+	} finally {
+		tui.start();
+		tui.requestRender(true);
+	}
+}
+
+async function editReviewedFile(tui: TUI, ctx: CustomCommandContext, overlay: AnnotationOverlay): Promise<void> {
+	const relative = overlay.reviewFilePath();
+	if (!relative) throw new Error("No file to open.");
+	const editor = requireEditor();
+	const absolute = resolveReadPath(relative, ctx.sessionManager.getCwd?.() ?? ctx.cwd);
+	if (!(await Bun.file(absolute).exists())) {
+		throw new Error(`${relative} is not on disk. The review still uses the frozen diff.`);
+	}
+	tui.stop();
+	try {
+		await openEditorOnPath(editor, absolute);
+	} finally {
+		tui.start();
+		tui.requestRender(true);
+	}
+	ctx.ui.notify(`Opened ${relative}. The review still uses the frozen diff.`, "info");
+}
+
 /** Mount the frozen diff in the TUI overlay surface owned by the command host. */
 export function showCodeReviewOverlay(
 	ctx: CustomCommandContext,
 	target: ResolvedReviewTarget,
 ): Promise<CodeReviewOverlayResult | undefined> {
 	return ctx.ui.custom<CodeReviewOverlayResult | undefined>(
-		(tui, theme, keybindings, done) =>
-			new AnnotationOverlay(tui, theme, keybindings, target.snapshot.files, target.mode, {
+		(tui, theme, keybindings, done) => {
+			const overlay = new AnnotationOverlay(tui, theme, keybindings, target.snapshot.files, target.mode, {
 				onComplete: done,
 				onWarning: message => ctx.ui.notify(message, "warning"),
 				onAnnotationExternalEditor: (draft, commit) => editAnnotationDraft(tui, draft, commit),
-			}),
+				onExternalEditor: () => editReviewedFile(tui, ctx, overlay),
+			});
+			return overlay;
+		},
 		{ overlay: true, overlayOptions: ANNOTATION_OVERLAY_OPTIONS },
 	);
 }
@@ -51,12 +117,15 @@ export function showTextReviewOverlay(
 	source: TextReviewSource,
 ): Promise<TextReviewOverlayResult | undefined> {
 	return ctx.ui.custom<TextReviewOverlayResult | undefined>(
-		(tui, theme, keybindings, done) =>
-			new AnnotationOverlay(tui, theme, keybindings, source, {
+		(tui, theme, keybindings, done) => {
+			const overlay = new AnnotationOverlay(tui, theme, keybindings, source, {
 				onComplete: done,
 				onWarning: message => ctx.ui.notify(message, "warning"),
 				onAnnotationExternalEditor: (draft, commit) => editAnnotationDraft(tui, draft, commit),
-			}),
+				onExternalEditor: () => editTextSource(tui, ctx, overlay, source),
+			});
+			return overlay;
+		},
 		{ overlay: true, overlayOptions: ANNOTATION_OVERLAY_OPTIONS },
 	);
 }

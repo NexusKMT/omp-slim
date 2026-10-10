@@ -68,17 +68,7 @@ export async function openInEditor(
 
 	try {
 		await Bun.write(tmpFile, content);
-
-		const spawnCommand = resolveEditorSpawnCommand(editorCmd, tmpFile);
-		// Inherit the real pane pty so terminal editors (including emacsclient,
-		// which resolves the device via ttyname) render into the visible pane.
-		const child = Bun.spawn(spawnCommand.cmd, {
-			stdin: "inherit",
-			stdout: "inherit",
-			stderr: "inherit",
-			windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
-		});
-		const exitCode = await child.exited;
+		const exitCode = await runEditor(editorCmd, tmpFile);
 		if (exitCode === 0) {
 			const text = await Bun.file(tmpFile).text();
 			if (options?.trimTrailingNewline === false) {
@@ -94,4 +84,26 @@ export async function openInEditor(
 			// Ignore cleanup errors
 		}
 	}
+}
+
+/**
+ * Opens an existing file in the user's editor. The editor writes the file
+ * itself; this does not copy it or delete it. A non-zero exit still returns
+ * so the caller can re-read whatever the editor saved.
+ */
+export async function openEditorOnPath(editorCmd: string, filePath: string): Promise<void> {
+	await runEditor(editorCmd, filePath);
+}
+
+async function runEditor(editorCmd: string, filePath: string): Promise<number> {
+	const spawnCommand = resolveEditorSpawnCommand(editorCmd, filePath);
+	// Inherit the real pane pty so terminal editors (including emacsclient,
+	// which resolves the device via ttyname) render into the visible pane.
+	const child = Bun.spawn(spawnCommand.cmd, {
+		stdin: "inherit",
+		stdout: "inherit",
+		stderr: "inherit",
+		windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
+	});
+	return child.exited;
 }
