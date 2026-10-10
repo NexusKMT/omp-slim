@@ -3682,7 +3682,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.editor.borderColor = theme.getPythonModeBorderColor();
 		} else if (vimMode === "visual" || vimMode === "visual-line") {
 			this.editor.borderColor = (str: string) => theme.fg("warning", str);
-		} else if (vimMode === "normal") {
+		} else if (vimMode === "normal" || vimMode === "replace") {
 			this.editor.borderColor = (str: string) => theme.fg("accent", str);
 		} else if (vimMode === "insert") {
 			// Insert gets its own colour rather than falling through to the session accent: with Normal
