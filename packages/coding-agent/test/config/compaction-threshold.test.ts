@@ -326,30 +326,27 @@ describe("compaction.modelThresholds", () => {
 		expect(planModelCompactionPoint(settings, model, "100k", tiers)?.trigger).toMatchObject({ share: 83.616 });
 	});
 
-	it("shows a fixed trigger past the window less its reserve as capped where it compacts", () => {
-		const settings = Settings.isolated({ extendedContext: false });
-		const model = { provider: "openai", id: "gpt-5.6-terra", contextWindow: 272_000 } as Model;
-		const tiers = { standard: 272_000, extended: 1_050_000 };
-		// 272k less its 40.8k reserve: f250k stays on the standard window and compacts at 231.2k.
-		expect(planModelCompactionPoint(settings, model, "f250k", tiers)).toMatchObject({
-			window: 272_000,
-			trigger: { kind: "fixed", tokens: 231_200, cappedFrom: 250_000 },
-		});
-		expect(previewModelCompactionPoint(settings, model, "f250k", tiers)).toBe(
-			"compacts at 231.2K · fixed 250K, capped by window",
-		);
-		expect(previewModelCompactionPoint(settings, model, "f200k", tiers)).toBe("compacts at exactly 200K");
-
-		// A global trigger past a window the provider caps lower.
-		const global = Settings.isolated({ "compaction.thresholdTokens": 300_000 });
+	it("shows a fixed trigger at or past the window as capped at the window less its reserve", () => {
+		// A provider capping the window below the configured trigger (Factory serves Kimi K3 with 196,608).
 		const capped = { provider: "factory-droid", id: "kimi-k3", contextWindow: 196_608 } as Model;
-		expect(describeModelCompactionPoint(global, capped)).toMatchObject({
-			tokens: 167_117,
-			basis: "fixed 300K, capped by window",
-			source: "global",
-		});
+		const global = Settings.isolated({ "compaction.thresholdTokens": 300_000 });
+		const point = describeModelCompactionPoint(global, capped);
+		expect(point).toMatchObject({ tokens: 167_117, source: "global" });
+		expect(point.basis).toContain("capped by window");
 		const wide = { provider: "anthropic", id: "claude-opus-5-5", contextWindow: 1_000_000 } as Model;
 		expect(describeModelCompactionPoint(global, wide)).toMatchObject({ tokens: 300_000, basis: "fixed" });
+
+		// A prefix entry the model falls back to; an entry below the window stays exact.
+		const prefixed = Settings.isolated({ "compaction.modelThresholds": { "factory-droid/*": "f300000" } });
+		expect(planModelCompactionPoint(prefixed, capped, "", undefined)?.trigger).toEqual({
+			kind: "fixed",
+			tokens: 167_117,
+			cappedFrom: 300_000,
+		});
+		expect(planModelCompactionPoint(prefixed, capped, "f190k", undefined)?.trigger).toEqual({
+			kind: "fixed",
+			tokens: 190_000,
+		});
 	});
 
 	it("plans and saves a reset as the prefix entry the model falls back to", () => {

@@ -166,9 +166,9 @@ export interface CompactionSettings {
 	/**
 	 * Stands in for the context window when the percentage or reserve-based
 	 * threshold is computed (when `> 0` and smaller than the window); a positive
-	 * `thresholdTokens` still wins and is clamped to the real window less its
-	 * reserve. Set by per-model compaction limits; request and overflow budgets
-	 * keep the real window.
+	 * `thresholdTokens` still wins and is checked against the real window (at
+	 * or past it, the window less its reserve applies). Set by per-model
+	 * compaction limits; request and overflow budgets keep the real window.
 	 */
 	baseWindowTokens?: number;
 	midTurnEnabled?: boolean;
@@ -380,11 +380,12 @@ export function resolveThresholdTokens(contextWindow: number, settings: Compacti
 	// the real window: `baseWindowTokens` only rescales the policies below.
 	const thresholdTokens = settings.thresholdTokens;
 	if (typeof thresholdTokens === "number" && Number.isFinite(thresholdTokens) && thresholdTokens > 0) {
-		// Clamp to the real window's prompt budget, so a trigger at or past a
-		// window the provider caps below it compacts while the next request
-		// still fits, instead of firing one token short of the window and
-		// overflowing.
-		return Math.min(promptBudgetTokens(contextWindow, settings), Math.max(1, thresholdTokens));
+		// A trigger at or past the window can never fire before the request
+		// overflows (a provider may cap the window below the configured point);
+		// fall back to the window's prompt budget, as the reserve policy does.
+		// A trigger below the window is exact.
+		if (thresholdTokens >= contextWindow) return promptBudgetTokens(contextWindow, settings);
+		return Math.min(contextWindow - 1, Math.max(1, thresholdTokens));
 	}
 	const baseWindowTokens = settings.baseWindowTokens;
 	if (typeof baseWindowTokens === "number" && Number.isFinite(baseWindowTokens) && baseWindowTokens > 0) {

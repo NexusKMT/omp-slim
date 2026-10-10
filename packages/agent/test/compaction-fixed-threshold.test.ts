@@ -20,26 +20,26 @@ describe("fixed compaction trigger near the window", () => {
 	// max(floor(196608 * 0.15), 16384) = 29,491 reserved for the next prompt and response.
 	const budget = window - 29_491;
 
-	it("clamps a trigger above, at, or just below the window to the window less its reserve", () => {
+	it("compacts a trigger at or past the window at the window less its reserve", () => {
 		expect(resolveBudgetReserveTokens(window, fixed(300_000))).toBe(29_491);
-		for (const trigger of [300_000, window, window - 1, budget + 1]) {
-			expect(resolveThresholdTokens(window, fixed(trigger))).toBe(budget);
-		}
+		expect(resolveThresholdTokens(window, fixed(300_000))).toBe(budget);
+		expect(resolveThresholdTokens(window, fixed(window))).toBe(budget);
 		expect(shouldCompact(budget, window, fixed(300_000))).toBe(false);
 		expect(shouldCompact(budget + 1, window, fixed(300_000))).toBe(true);
 		// The same budget the reserve-based default compacts at.
 		expect(resolveThresholdTokens(window, fixed(-1))).toBe(budget);
 	});
 
-	it("keeps a trigger inside the budget exact", () => {
-		expect(resolveThresholdTokens(window, fixed(budget))).toBe(budget);
+	it("keeps a trigger below the window exact", () => {
+		expect(resolveThresholdTokens(window, fixed(window - 1))).toBe(window - 1);
+		expect(resolveThresholdTokens(window, fixed(budget + 1))).toBe(budget + 1);
 		expect(resolveThresholdTokens(window, fixed(100_000))).toBe(100_000);
 		expect(resolveThresholdTokens(1_000_000, fixed(300_000))).toBe(300_000);
 	});
 
 	it("uses an explicit reserve as the budget", () => {
-		expect(resolveThresholdTokens(200_000, fixed(180_000, { reserveTokens: 50_000 }))).toBe(150_000);
-		expect(resolveThresholdTokens(200_000, fixed(140_000, { reserveTokens: 50_000 }))).toBe(140_000);
+		expect(resolveThresholdTokens(200_000, fixed(250_000, { reserveTokens: 50_000 }))).toBe(150_000);
+		expect(resolveThresholdTokens(200_000, fixed(180_000, { reserveTokens: 50_000 }))).toBe(180_000);
 	});
 
 	it("falls back to the 15% reserve on small windows", () => {

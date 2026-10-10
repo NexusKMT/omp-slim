@@ -58,10 +58,11 @@ function formatWindow(tokens: number): string {
 
 /**
  * Where a compaction policy triggers on a window, and why: at a `fixed` token
- * count (`cappedFrom` the configured count when the window less its reserve
- * is smaller), or `scaled` to `share` percent of `scaledFrom` (the entry's base
- * when `fromBase`, else the window). `share` is the configured percentage when
- * one applies, else the reserve policy's exact share, so fractions survive.
+ * count (`cappedFrom` the configured count when it is at or past the window,
+ * which then compacts at the window less its reserve), or `scaled` to `share`
+ * percent of `scaledFrom` (the entry's base when `fromBase`, else the window).
+ * `share` is the configured percentage when one applies, else the reserve
+ * policy's exact share, so fractions survive.
  */
 export type ModelCompactionTrigger =
 	| { kind: "fixed"; tokens: number; cappedFrom?: number }
@@ -70,7 +71,7 @@ export type ModelCompactionTrigger =
 function resolveTrigger(settings: CompactionSettings, window: number): ModelCompactionTrigger {
 	const tokens = resolveThresholdTokens(window, settings);
 	if (settings.thresholdTokens > 0) {
-		return tokens < settings.thresholdTokens
+		return settings.thresholdTokens >= window
 			? { kind: "fixed", tokens, cappedFrom: settings.thresholdTokens }
 			: { kind: "fixed", tokens };
 	}
