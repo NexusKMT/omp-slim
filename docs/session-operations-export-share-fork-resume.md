@@ -287,8 +287,9 @@ window, Zellij/Herdr tab, or CMUX workspace). The child starts from the current
 persisted transcript, while the parent session stays active and continues
 running.
 
-Typing `/fork ` suggests `pane`, `window`, and `tab`; the selected argument
-appears as dim inline text and Tab accepts it.
+Typing `/fork ` shows `[pane|window|tab]` as dim inline text, and Enter still
+runs the bare in-place fork. Typing a prefix (`/fork w`) opens the suggestions
+with the rest of the selected argument as dim inline text; Tab accepts it.
 
 Placement commands autodetect tmux, Zellij, Herdr, or CMUX from the terminal;
 `/fork auto` is not a subcommand (valid arguments are `pane`, `window`, and
@@ -313,11 +314,15 @@ an explicit error; use bare `/fork` there instead.
 ### Terminal placement flow
 
 For a placement command, the controller rebuilds the child CLI command from the
-current CLI entry point and restart-safe launch flags. It replaces stale startup
-model, thinking, profile, and working-directory flags with the active session
-values. The child also receives the effective agent/config directories and the
-resolved config overlays, which retain their original paths after `/move`.
-It starts with `--fork` and the absolute path of the current transcript. The
+current CLI entry point and restart-safe launch flags (one-shot selectors such
+as `--goal` and positional prompts are dropped). It replaces stale startup
+model, thinking, profile, prompt-cache-key, and working-directory flags with the
+active session values; the child is pinned to the parent's prompt-cache key so
+it reads the cache the parent populated. The child also receives the effective
+agent/config directories, the resolved config overlays (which retain their
+original paths after `/move`), and the parent's session-dir and XDG base
+directories; scope variables the parent does not set are unset rather than
+exported empty. It starts with `--fork` and the absolute path of the current transcript. The
 generic terminal launcher handles provider-specific execution and reports
 capability or launch failures in the TUI. Herdr and CMUX launches require
 explicit confirmation that the destination's configured interactive shell
@@ -378,7 +383,10 @@ Startup `--fork` is resolved before normal session creation:
    An unresolved tool call on the copied active branch is paired with an
    outcome-unknown result in the child, rather than being marked never executed.
    For a length stop, the never-executed guard is retained only when no
-   execution-start marker exists. The parent transcript is unchanged.
+   execution-start marker exists. A source whose process exit was recorded
+   after its last message is not repaired here: the child warns about the
+   pending calls and pairs them through the normal process-exit recovery.
+   The parent transcript is unchanged.
 5. Full-context forks automatically seed `providerPromptCacheKey` from the source header's inherited key, falling back to the source session id. Startup drops that automatic inheritance for explicit `--model`, `--thinking`, `--system-prompt`, `--system-prompt-template`, `--append-system-prompt`, `--tools`, or `--no-tools` overrides, or an applicable scoped-model override.
 
 Use `--prompt-cache-key <key>` to pin the provider prompt-cache identity explicitly and independently from both the OMP session id and `--provider-session-id`. `--provider-session-id` continues to control provider session/routing headers and sticky credential selection; `--prompt-cache-key` controls the OpenAI Responses `prompt_cache_key` payload where supported.
