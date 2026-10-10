@@ -953,10 +953,15 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		if (!metrics) return item;
 		const facts: Record<string, string | number> = {
 			cost: formatCost(metrics.cost),
-			// A running agent's active time ticks terminal-side; a settled one is frozen text.
+			// A running agent's active time ticks terminal-side from the age at send; a settled one
+			// is frozen text. Progress `durationMs` was current when its frame arrived, so age it to now
+			// — re-sending the stale value on every repaint rewinds Tern's clock.
 			time:
 				ref.status === "running" && metrics.durationMs > 0
-					? metrics.durationMs
+					? metrics.durationMs +
+						(observed?.progress && observed.progressAt !== undefined
+							? Math.max(0, Date.now() - observed.progressAt)
+							: 0)
 					: formatDuration(metrics.durationMs),
 			req: metrics.requests,
 			tools: metrics.tools,
