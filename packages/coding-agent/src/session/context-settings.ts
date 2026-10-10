@@ -22,7 +22,15 @@ export const cfgWorkspaceAdditionalDirectories = register({
 	},
 });
 
-/** A `contextFiles.extra` entry: one path segment, never a directory or `..`. */
+/** Built-in context filenames. Listing them in `contextFiles.extra` would load a second copy or bypass one-per-depth shadowing. */
+const BUILTIN_CONTEXT_FILE_NAMES: Record<string, true> = {
+	"agents.md": true,
+	"claude.md": true,
+	"gemini.md": true,
+	"copilot-instructions.md": true,
+};
+
+/** A `contextFiles.extra` entry: one path segment, never a directory, `..`, or a built-in context name. */
 export function contextFileBasename(value: string): string | undefined {
 	const name = value.trim();
 	if (
@@ -31,7 +39,8 @@ export function contextFileBasename(value: string): string | undefined {
 		name === ".." ||
 		name.includes("/") ||
 		name.includes("\\") ||
-		name.includes("\0")
+		name.includes("\0") ||
+		BUILTIN_CONTEXT_FILE_NAMES[name.toLowerCase()] === true
 	) {
 		return undefined;
 	}
@@ -52,10 +61,14 @@ export const cfgContextFilesExtra = register({
 			throw new Error("contextFiles.extra must be a list of file names");
 		}
 		for (const entry of raw) {
-			if (typeof entry !== "string" || contextFileBasename(entry) === undefined) {
-				throw new Error(
-					`contextFiles.extra entries must be file names, not paths (${typeof entry === "string" ? entry : String(entry)})`,
-				);
+			if (typeof entry !== "string") {
+				throw new Error(`contextFiles.extra entries must be file names, not paths (${String(entry)})`);
+			}
+			if (BUILTIN_CONTEXT_FILE_NAMES[entry.trim().toLowerCase()] === true) {
+				throw new Error(`contextFiles.extra cannot list a built-in context file (${entry.trim()})`);
+			}
+			if (contextFileBasename(entry) === undefined) {
+				throw new Error(`contextFiles.extra entries must be file names, not paths (${entry})`);
 			}
 		}
 	},

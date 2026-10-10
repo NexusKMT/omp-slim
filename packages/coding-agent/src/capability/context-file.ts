@@ -40,7 +40,9 @@ export const contextFileCapability = defineCapability<ContextFile>({
 	// are same-scope as the ancestor itself.
 	key: file => {
 		const scope = file.level === "user" ? "user" : `project:${Math.max(0, file.depth ?? 0)}`;
-		return file.additive ? `${scope}:additive:${path.basename(file.path)}` : scope;
+		// Path, not basename: two extra files can share a depth (a walked ancestor and
+		// the primary checkout of a sibling worktree) and must both survive.
+		return file.additive ? `${scope}:additive:${path.resolve(file.path)}` : scope;
 	},
 	toExtensionId: file => `context-file:${file.level}:${path.basename(file.path)}`,
 	validate: file => {

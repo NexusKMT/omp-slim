@@ -9,7 +9,7 @@
 import * as path from "node:path";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { boundDiscoverySettings, registerProvider } from "../capability";
+import { boundSettings, registerProvider } from "../capability";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { readFile } from "../capability/fs";
 import type { LoadContext, LoadResult } from "../capability/types";
@@ -20,7 +20,7 @@ const PROVIDER_ID = "custom-context";
 const DISPLAY_NAME = "Custom context files";
 
 function configuredNames(): string[] {
-	const settings = boundDiscoverySettings();
+	const settings = boundSettings();
 	if (!settings) return [];
 	const seen = new Set<string>();
 	const names: string[] = [];
@@ -42,7 +42,7 @@ function pushFile(items: ContextFile[], seen: Set<string>, file: ContextFile): v
 	items.push(file);
 }
 
-/** Depth that sorts a non-ancestor primary checkout behind every walked project file. */
+/** Depth used only to order a non-ancestor primary checkout behind the worktree's own files. */
 function primaryDepth(ctx: LoadContext, primary: string): number {
 	const cwd = path.resolve(ctx.cwd);
 	const dir = path.resolve(primary);

@@ -125,6 +125,32 @@ describe("contextFiles.extra", () => {
 		).rejects.toThrow(/file names, not paths/);
 	});
 
+	test("rejects a built-in context filename", async () => {
+		await expect(
+			Settings.init({
+				inMemory: true,
+				cwd: tempDir,
+				overrides: { "contextFiles.extra": ["AGENTS.md"] },
+			}),
+		).rejects.toThrow(/built-in context file/);
+	});
+
+	test("keeps a walked workspace copy and the primary checkout copy when they share a depth", async () => {
+		const primary = path.join(tempHome, "code", "proj");
+		const worktree = path.join(tempHome, "code", "proj-wt");
+		const workspace = path.join(tempHome, "code", "AGENTS.local.md");
+		await linkWorktree(primary, worktree);
+		await fs.writeFile(workspace, "# workspace\n");
+		await fs.writeFile(path.join(primary, "AGENTS.local.md"), "# primary personal\n");
+		await bind(["AGENTS.local.md"], worktree);
+
+		const result = await loadCapability<ContextFile>(contextFileCapability.id, { cwd: worktree });
+		const byPath = new Map(result.items.map(file => [file.path, file.content]));
+
+		expect(byPath.get(workspace)).toBe("# workspace\n");
+		expect(byPath.get(path.join(primary, "AGENTS.local.md"))).toBe("# primary personal\n");
+	});
+
 	test("loads the primary checkout copy from a linked worktree without importing the primary AGENTS.md", async () => {
 		const primary = path.join(tempDir, "primary");
 		const worktree = path.join(tempDir, ".wt", "feature");
