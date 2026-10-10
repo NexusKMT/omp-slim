@@ -149,42 +149,46 @@ test("the By parent action and the t key both switch the picker to the parent tr
 	}
 });
 
-test("a running row's Time is the age at send, not re-based to the last progress frame", () => {
-	const listeners = new Map<string, (data: unknown) => void>();
-	const bus: EventBusLike = {
-		on(channel, listener) {
-			listeners.set(channel, listener);
-			return () => listeners.delete(channel);
-		},
-	};
-	const observers = new SessionObserverRegistry();
-	observers.subscribeToEventBus(bus, bus);
-	const now = spyOn(Date, "now").mockReturnValue(1_000_000);
-	listeners.get(TASK_SUBAGENT_PROGRESS_CHANNEL)?.({
-		index: 0,
-		agent: "task",
-		agentSource: "bundled",
-		task: "work",
-		progress: {
-			id: "Worker",
+// 0 ms is a first frame emitted in the spawn's start millisecond; it must still clock rather than freeze as text.
+test.each([60_000, 0])(
+	"a running row's Time (last frame %p ms) is the age at send, not re-based to the frame",
+	durationMs => {
+		const listeners = new Map<string, (data: unknown) => void>();
+		const bus: EventBusLike = {
+			on(channel, listener) {
+				listeners.set(channel, listener);
+				return () => listeners.delete(channel);
+			},
+		};
+		const observers = new SessionObserverRegistry();
+		observers.subscribeToEventBus(bus, bus);
+		const now = spyOn(Date, "now").mockReturnValue(1_000_000);
+		listeners.get(TASK_SUBAGENT_PROGRESS_CHANNEL)?.({
 			index: 0,
-			status: "running",
-			tokens: 10,
-			requests: 1,
-			toolCount: 1,
-			cost: 0,
-			durationMs: 60_000,
-		},
-	});
-	const hub = createHub([agent("Worker", 1_000_000, { status: "running" }), agent("Idle", 900_000)], [], observers);
-	try {
-		expect(pickerProps(hub).items?.find(item => item.id === "Worker")?.facts?.time).toBe(60_000);
-		// A long tool call emits no progress; an unrelated repaint (here a selection change) re-sends
-		// the row and must keep the terminal clock moving forward instead of rewinding it.
-		now.mockReturnValue(1_045_000);
-		hub.handleNativeEvent({ type: "select", key: "", item: "Idle" });
-		expect(pickerProps(hub).items?.find(item => item.id === "Worker")?.facts?.time).toBe(105_000);
-	} finally {
-		hub.dispose();
-	}
-});
+			agent: "task",
+			agentSource: "bundled",
+			task: "work",
+			progress: {
+				id: "Worker",
+				index: 0,
+				status: "running",
+				tokens: 10,
+				requests: 1,
+				toolCount: 1,
+				cost: 0,
+				durationMs,
+			},
+		});
+		const hub = createHub([agent("Worker", 1_000_000, { status: "running" }), agent("Idle", 900_000)], [], observers);
+		try {
+			expect(pickerProps(hub).items?.find(item => item.id === "Worker")?.facts?.time).toBe(durationMs);
+			// A long tool call emits no progress; an unrelated repaint (here a selection change) re-sends
+			// the row and must keep the terminal clock moving forward instead of rewinding it.
+			now.mockReturnValue(1_045_000);
+			hub.handleNativeEvent({ type: "select", key: "", item: "Idle" });
+			expect(pickerProps(hub).items?.find(item => item.id === "Worker")?.facts?.time).toBe(durationMs + 45_000);
+		} finally {
+			hub.dispose();
+		}
+	},
+);
