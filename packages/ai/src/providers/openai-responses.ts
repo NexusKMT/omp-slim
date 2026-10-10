@@ -401,6 +401,8 @@ interface OpenAIResponsesProviderSessionState
 	 * content; the first successful response sets it.
 	 */
 	nativeHistoryReplayWarmed: boolean;
+	/** Bumped by `close()`; a response warms the state only if no close happened since its request started. */
+	closeCount: number;
 	/** Stateful `previous_response_id` chain baselines, keyed by baseUrl/model/session. */
 	chains: Map<string, OpenAIResponsesChainState>;
 	/** `configuration_update` effort baselines, keyed by baseUrl/model/session. */
@@ -437,6 +439,7 @@ function createOpenAIResponsesProviderSessionState(
 		...strictToolsState,
 		...reasoningEffortFallbackState,
 		nativeHistoryReplayWarmed: !model.compat.connectionBoundNativeHistory,
+		closeCount: 0,
 		chains: new Map(),
 		effortControls: new Map(),
 		releaseSession: sessionId => {
@@ -449,6 +452,7 @@ function createOpenAIResponsesProviderSessionState(
 		},
 		close: () => {
 			state.nativeHistoryReplayWarmed = false;
+			state.closeCount++;
 			state.chains.clear();
 			state.effortControls.clear();
 			clearOpenAIStrictToolsState(state);
@@ -740,6 +744,7 @@ const streamOpenAIResponsesOnce = (
 				});
 			const premiumRequestsTotal = copilotPremiumRequests;
 			const providerSessionState = getOpenAIResponsesProviderSessionState(model, options?.providerSessionState);
+			const closeCountAtStart = providerSessionState?.closeCount;
 			const strictToolsScope = getOpenAIStrictToolsScope(model, baseUrl);
 			const promptCacheBreakpointPolicy =
 				resolveCacheRetention(options?.cacheRetention) !== "none" && options?.promptCache?.mode === "explicit"
@@ -1257,7 +1262,9 @@ const streamOpenAIResponsesOnce = (
 				{ supportsImageDetailOriginal: model.compat.supportsImageDetailOriginal },
 			);
 			if (replayableResponseItems) {
-				if (providerSessionState) providerSessionState.nativeHistoryReplayWarmed = true;
+				if (providerSessionState && providerSessionState.closeCount === closeCountAtStart) {
+					providerSessionState.nativeHistoryReplayWarmed = true;
+				}
 				if (chainState) {
 					chainState.lastParams = cloneJsonTree(
 						activeTrailingScaffoldingItems > 0 && Array.isArray(activeParams.input)

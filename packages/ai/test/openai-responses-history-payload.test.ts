@@ -761,6 +761,46 @@ describe("OpenAI responses history payload", () => {
 		expect(containsAssistantOutputText(closed.input, "generic assistant that should be rebuilt")).toBe(true);
 	});
 
+	it("keeps a closed provider session state cold when a request started before the close succeeds", async () => {
+		const model = getOpenAIReasoningModel("xai-oauth", "grok-4.7");
+		const context = resumedEncryptedReasoningContext(model);
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const requested = Promise.withResolvers<void>();
+		const released = Promise.withResolvers<void>();
+		const completed = [
+			{ type: "response.created", response: { id: "resp_side" } },
+			{
+				type: "response.output_item.done",
+				item: {
+					type: "message",
+					id: "msg_side",
+					role: "assistant",
+					status: "completed",
+					content: [{ type: "output_text", text: "side answer" }],
+				},
+			},
+			{ type: "response.completed", response: { id: "resp_side", status: "completed" } },
+		];
+		const inFlight = streamOpenAIResponses(model, context, {
+			apiKey: "test-key",
+			providerSessionState,
+			fetch: async () => {
+				requested.resolve();
+				await released.promise;
+				return new Response(`${completed.map(event => `data: ${JSON.stringify(event)}`).join("\n\n")}\n\n`, {
+					headers: { "content-type": "text/event-stream" },
+				});
+			},
+		}).result();
+		await requested.promise;
+		for (const state of providerSessionState.values()) state.close();
+		released.resolve();
+		expect((await inFlight).stopReason).toBe("stop");
+
+		const retry = (await captureResponsesPayload(model, context, providerSessionState)) as { input?: unknown[] };
+		expect(containsEncryptedReasoning(retry.input)).toBe(false);
+	});
+
 	it("does not warm GitHub Copilot replay when only OpenAI replay state is warmed", async () => {
 		const openAiModel = getOpenAIReasoningModel("openai", "gpt-5-mini");
 		const copilotModel = getBundledModel("github-copilot", "gpt-5.4") as Model<"openai-responses">;

@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed the first request of a resumed OpenAI Responses session (xAI, Factory Droid, OpenAI and other Responses hosts) dropping every earlier turn's encrypted reasoning; only GitHub Copilot, which binds those items to one connection, still rebuilds history until its first response
+- Fixed resumed OpenAI Responses sessions (xAI, Factory Droid, OpenAI and other hosts) dropping all earlier encrypted reasoning on their first request; GitHub Copilot still rebuilds history until its first response
 
 ## [18.8.7] - 2026-10-09
 
