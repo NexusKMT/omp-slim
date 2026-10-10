@@ -201,26 +201,15 @@ describe("formatSessionDumpText markdown-headings transcript", () => {
 		expect(live).not.toContain("Status: aborted");
 	});
 
-	it("carries rounded seconds into minutes in assistant timing instead of printing 60s", () => {
-		const took = (duration: number) =>
-			formatSessionDumpText({
-				messages: [
-					{
-						role: "assistant",
-						content: [],
-						api: "mock",
-						provider: "mock",
-						model: "mock",
-						usage: ZERO_USAGE,
-						stopReason: "stop",
-						timestamp: 1,
-						duration,
-					},
-				],
-			}).match(/took ([^)]+)\)/)?.[1];
-		expect(took(59_940)).toBe("59.9s");
-		expect(took(59_960)).toBe("1m0s");
-		expect(took(119_600)).toBe("2m0s");
+	it("still renders the transcript when a persisted timestamp is outside the Date range", () => {
+		const out = formatSessionDumpText({
+			messages: [
+				{ role: "user", content: "corrupt stamp", timestamp: 1e20 },
+				{ role: "user", content: "next message", timestamp: 2 },
+			],
+		});
+		expect(out).toContain("## User · invalid time 100000000000000000000\n\ncorrupt stamp");
+		expect(out).toContain("## User · 1970-01-01T00:00:00.002Z\n\nnext message");
 	});
 
 	it("fences system notices under a readable title without breaking on nested code fences", () => {

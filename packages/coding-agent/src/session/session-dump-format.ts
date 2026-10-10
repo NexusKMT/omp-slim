@@ -10,6 +10,7 @@
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, ToolExample, TSchema } from "@oh-my-pi/pi-ai";
 import { renderDelimitedThinking, renderToolInventory } from "@oh-my-pi/pi-ai/dialect";
+import { formatDuration } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { YAML } from "bun";
 import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
@@ -166,16 +167,10 @@ function appendCustomMessage(lines: string[], message: CustomMessage | HookMessa
 	lines.push("\n");
 }
 
+/** ISO time, or a marker for timestamps outside the `Date` range (e.g. hand-edited JSONL) so one bad value never aborts the dump. */
 function formatDumpTime(ms: number): string {
-	return new Date(ms).toISOString();
-}
-
-function formatDumpDuration(ms: number): string {
-	// Round before splitting so a remainder never carries into `60s` (`1m60s`, `60.0s`).
-	const tenths = Math.round(Math.max(0, ms) / 100);
-	if (tenths < 600) return `${(tenths / 10).toFixed(1)}s`;
-	const seconds = Math.round(tenths / 10);
-	return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
+	const date = new Date(ms);
+	return Number.isNaN(date.getTime()) ? `invalid time ${ms}` : date.toISOString();
 }
 
 /** ` · <ISO time>` heading suffix from a message's `timestamp`, plus request timing for assistant turns. */
@@ -186,8 +181,8 @@ function headingStamp(message: AgentMessage): string {
 	let stamp = ` · ${formatDumpTime(timestamp)}`;
 	if (message.role === "assistant") {
 		const timing: string[] = [];
-		if (typeof message.duration === "number") timing.push(`took ${formatDumpDuration(message.duration)}`);
-		if (typeof message.ttft === "number") timing.push(`ttft ${formatDumpDuration(message.ttft)}`);
+		if (typeof message.duration === "number") timing.push(`took ${formatDuration(message.duration)}`);
+		if (typeof message.ttft === "number") timing.push(`ttft ${formatDuration(message.ttft)}`);
 		if (timing.length > 0) stamp += ` (${timing.join(", ")})`;
 	}
 	return stamp;
@@ -277,19 +272,19 @@ function appendMarkdownTranscript(lines: string[], messages: readonly AgentMessa
 			appendCustomMessage(lines, msg as CustomMessage | HookMessage);
 		} else if (msg.role === "branchSummary") {
 			const branchMsg = msg as BranchSummaryMessage;
-			lines.push("## Branch Summary\n");
+			lines.push(`## Branch Summary${headingStamp(msg)}\n`);
 			lines.push(`(from branch: ${branchMsg.fromId})\n`);
 			lines.push(branchMsg.summary);
 			lines.push("\n");
 		} else if (msg.role === "compactionSummary") {
 			const compactMsg = msg as CompactionSummaryMessage;
-			lines.push("## Compaction Summary\n");
+			lines.push(`## Compaction Summary${headingStamp(msg)}\n`);
 			lines.push(`(${compactMsg.tokensBefore} tokens before compaction)\n`);
 			lines.push(compactMsg.summary);
 			lines.push("\n");
 		} else if (msg.role === "fileMention") {
 			const fileMsg = msg as FileMentionMessage;
-			lines.push("## File Mention\n");
+			lines.push(`## File Mention${headingStamp(msg)}\n`);
 			for (const file of fileMsg.files) {
 				lines.push(`<file path="${file.path}">`);
 				if (file.content) lines.push(file.content);
@@ -317,7 +312,7 @@ function appendLiveHeader(lines: string[], live: SessionDumpLiveState): void {
 	lines.push(
 		`Live: ${live.status}${live.streaming ? ", request in flight" : ""} (captured ${formatDumpTime(live.capturedAt)})`,
 	);
-	const sinceActivity = formatDumpDuration(live.capturedAt - live.lastActivity);
+	const sinceActivity = formatDuration(live.capturedAt - live.lastActivity);
 	const activity = live.activity ? `: ${live.activity}` : "";
 	lines.push(`Last activity: ${formatDumpTime(live.lastActivity)} (${sinceActivity} before capture)${activity}`);
 	if (live.pendingToolCalls.length > 0) lines.push(`Pending tool calls: ${live.pendingToolCalls.join(", ")}`);
@@ -330,7 +325,7 @@ function appendLiveHeader(lines: string[], live: SessionDumpLiveState): void {
 function appendInFlightTurn(lines: string[], live: SessionDumpLiveState, messages: readonly AgentMessage[]): void {
 	const partial = live.streamMessage;
 	if (partial?.role === "assistant") {
-		const elapsed = formatDumpDuration(live.capturedAt - partial.timestamp);
+		const elapsed = formatDuration(live.capturedAt - partial.timestamp);
 		lines.push(
 			`## Assistant (in flight, not persisted) · started ${formatDumpTime(partial.timestamp)} (${elapsed} before capture)\n`,
 		);
@@ -347,7 +342,7 @@ function appendInFlightTurn(lines: string[], live: SessionDumpLiveState, message
 	lines.push(
 		since === undefined
 			? "Request in flight; no response events received yet."
-			: `Request in flight; no response events received in ${formatDumpDuration(live.capturedAt - since)} since the last persisted message.`,
+			: `Request in flight; no response events received in ${formatDuration(live.capturedAt - since)} since the last persisted message.`,
 	);
 	lines.push("");
 }
