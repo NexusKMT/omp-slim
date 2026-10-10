@@ -195,7 +195,7 @@ navigator.modelContext.registerTool({
 	}, 30_000);
 
 	// The hook reaches a loaded page when omp attaches to it: a context the page set up itself is
-	// patched at once rather than waiting for a getter read, as a platform context is.
+	// patched directly, not through Chromium's ModelContext prototype.
 	it.each([
 		{
 			setup: "a non-configurable accessor",
@@ -270,27 +270,21 @@ window.cachedContext = navigator.modelContext;`,
 		},
 	);
 
-	// Each check runs after dispose; `window.nativeGetter` is Chromium's getter from before attach.
+	// `window.nativeRegister` is Chromium's method from before attach.
 	it.each([
 		{
-			change: "replaced the getter",
-			afterAttach: `window.pageGetter = () => undefined;
-Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: window.pageGetter });`,
-			check: `Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext").get === window.pageGetter`,
+			change: "left registerTool alone",
+			afterAttach: "",
+			check: `ModelContext.prototype.registerTool === window.nativeRegister`,
 		},
 		{
-			change: "added a setter",
-			afterAttach: `window.pageSetter = () => {};
-Object.defineProperty(Navigator.prototype, "modelContext", { set: window.pageSetter });`,
-			check: `(d => d.get === window.nativeGetter && d.set === window.pageSetter)(Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext"))`,
+			change: "replaced registerTool",
+			afterAttach: `window.pageRegister = function registerTool() {};
+ModelContext.prototype.registerTool = window.pageRegister;`,
+			check: `ModelContext.prototype.registerTool === window.pageRegister`,
 		},
-		{
-			change: "kept the hooked getter",
-			afterAttach: `window.keptGetter = Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext").get;`,
-			check: `!Object.hasOwn(window.keptGetter.call(navigator), "registerTool")`,
-		},
-	])("undoes only its own hook on dispose after the page $change", async ({ afterAttach, check }) => {
-		// A secure context, so Chromium exposes its own modelContext getter for the hook to wrap.
+	])("restores only its own methods on dispose after the page $change", async ({ afterAttach, check }) => {
+		// A secure context, so Chromium exposes its own ModelContext.
 		using server = Bun.serve({
 			port: 0,
 			hostname: "localhost",
@@ -304,9 +298,7 @@ Object.defineProperty(Navigator.prototype, "modelContext", { set: window.pageSet
 		try {
 			await page.goto(`http://localhost:${server.port}/`);
 			const realm = page.mainFrame().mainRealm();
-			await realm.evaluate(
-				`window.nativeGetter = Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext").get; null;`,
-			);
+			await realm.evaluate(`window.nativeRegister = ModelContext.prototype.registerTool; null;`);
 			const controller = await installWebMcp(page);
 			await realm.evaluate(`${afterAttach}\nnull;`);
 			await controller.dispose();
@@ -316,6 +308,41 @@ Object.defineProperty(Navigator.prototype, "modelContext", { set: window.pageSet
 			await releaseBrowser(handle, { kill: false });
 		}
 	});
+
+	it("keeps an attached page alive whose document is replaced through a javascript: URL", async () => {
+		using server = Bun.serve({
+			port: 0,
+			hostname: "localhost",
+			fetch: () =>
+				new Response("<!doctype html><title>before</title>", { headers: { "content-type": "text/html" } }),
+		});
+		const handle = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+		if (!("browser" in handle)) throw new Error("Expected a Puppeteer browser");
+		holdBrowser(handle);
+		const page = await handle.browser.newPage();
+		try {
+			await page.goto(`http://localhost:${server.port}/`);
+			const realm = page.mainFrame().mainRealm();
+			const controller = await installWebMcp(page);
+			// Puppeteer loses track of a javascript:-replaced document's realm, so the new document reports
+			// through a CDP binding; a killed renderer never reports and the test times out.
+			const session = await page.createCDPSession();
+			await session.send("Runtime.enable");
+			await session.send("Runtime.addBinding", { name: "reportSurface" });
+			const reported = new Promise<string>(resolve =>
+				session.on("Runtime.bindingCalled", event => resolve(event.payload)),
+			);
+			// The replacement document is the frame's second; reading its context binds a second time if omp
+			// created one in the first.
+			const html = `<script>reportSurface(navigator.modelContext.constructor.name);</script>`;
+			await realm.evaluate(`location.href = "javascript:" + ${JSON.stringify(JSON.stringify(html))}; null;`);
+			expect(await reported).toBe("ModelContext");
+			await controller.dispose();
+		} finally {
+			await page.close();
+			await releaseBrowser(handle, { kill: false });
+		}
+	}, 10_000);
 
 	it("mirrors a tool registered after attach through a native modelContext the page held before", async () => {
 		using server = Bun.serve({

@@ -298,62 +298,55 @@ function boundedResult(value: unknown): WebMcpInvokeSuccess {
 /**
  * Page function (self-contained; serialisable via `.toString()`): mirror `navigator/document.modelContext`
  * registrations into a bridge stored at `globalThis[key]`, polyfilling `modelContext` when absent. Idempotent.
- * The platform's `modelContext` getter is not called at document start: it creates the document's context, and
- * Chromium kills a renderer whose frame creates one twice, as this hook would in an iframe's initial empty document
- * and again in the document the iframe then loads. That getter is wrapped instead, so its context is patched when
- * the page first asks for it; a context the page put on navigator/document itself is patched at once. `attach`
- * marks a document that was already running, whose page may hold its context: it is read then, unless `about:blank`.
+ * The platform's `modelContext` getter is never called here: it creates the document's context, and Chromium kills
+ * a renderer whose frame creates one twice, as this hook would in an iframe's initial empty document and again in
+ * the document the iframe then loads. The platform's `ModelContext.prototype` methods are patched instead, which
+ * reaches every reference to the context, however early the page took it; a context the page put on
+ * navigator/document itself is patched directly.
  */
-export function installWebMcpPageHook(key: string, attach = false): void {
+export function installWebMcpPageHook(key: string): void {
 	const realm = globalThis as typeof globalThis & Record<string, unknown>;
 	if (realm[key]) return;
 
 	const pageGlobals = globalThis as unknown as {
 		navigator: { modelContext?: PageModelContext };
 		document: { modelContext?: PageModelContext };
+		ModelContext?: { prototype: PageModelContext };
 	};
 	const nav = pageGlobals.navigator;
 	const doc = pageGlobals.document;
-	// The platform getter is a configurable native accessor on an interface
-	// prototype; anything the page defined itself is read now.
-	const getters: {
-		instance: { modelContext?: PageModelContext };
-		owner: object;
-		descriptor: PropertyDescriptor;
-		wrapped?: () => PageModelContext | undefined;
-	}[] = [];
+	// Chromium's getter is a native accessor on an interface prototype; anything else the page defined itself and
+	// is read now.
+	let platform = false;
 	let pageContext: PageModelContext | undefined;
-	instances: for (const instance of [doc, nav]) {
-		if (!Object.getOwnPropertyDescriptor(instance, "modelContext")) {
-			for (let owner: object | null = Object.getPrototypeOf(instance); owner; owner = Object.getPrototypeOf(owner)) {
-				const descriptor = Object.getOwnPropertyDescriptor(owner, "modelContext");
-				if (!descriptor) continue;
-				const platform =
-					descriptor.get?.name === "get modelContext" &&
-					descriptor.configurable === true &&
-					/^function get modelContext\(\) \{\s*\[native code\]\s*\}$/.test(
-						Function.prototype.toString.call(descriptor.get),
-					);
-				if (platform) {
-					getters.push({ instance, owner, descriptor });
-					continue instances;
-				}
-				break;
-			}
+	for (const instance of [doc, nav]) {
+		let descriptor = Object.getOwnPropertyDescriptor(instance, "modelContext");
+		for (let owner = Object.getPrototypeOf(instance); !descriptor && owner; owner = Object.getPrototypeOf(owner)) {
+			descriptor = Object.getOwnPropertyDescriptor(owner, "modelContext");
 		}
-		// Read as `document.modelContext ?? navigator.modelContext`: a null one falls through.
-		pageContext ??= instance.modelContext;
+		if (
+			descriptor?.get &&
+			/^function get modelContext\(\) \{\s*\[native code\]\s*\}$/.test(
+				Function.prototype.toString.call(descriptor.get),
+			)
+		) {
+			platform = true;
+		} else {
+			// Read as `document.modelContext ?? navigator.modelContext`: a null one falls through.
+			pageContext ??= instance.modelContext;
+		}
 	}
-	const nativeAvailable = getters.length > 0 || pageContext !== undefined;
+	const platformPrototype = platform ? pageGlobals.ModelContext?.prototype : undefined;
+	const nativeAvailable = platform || pageContext !== undefined;
 	const tools = new Map<string, PageModelContextTool>();
-	let existingContext: PageModelContext | undefined;
-	let originalDescriptor: PropertyDescriptor | undefined;
-	let originalUnregisterDescriptor: PropertyDescriptor | undefined;
-	let originalRegister: PageModelContext["registerTool"];
-	let originalUnregister: PageModelContext["unregisterTool"];
+	const patches: {
+		target: PageModelContext;
+		name: "registerTool" | "unregisterTool";
+		original?: PropertyDescriptor;
+		value: unknown;
+	}[] = [];
 	const changeTarget = new EventTarget();
 	let polyfillContext: PageModelContext | undefined;
-	let uninstalled = false;
 
 	const cloneMetadata = (value: unknown): unknown => {
 		if (value === undefined) return undefined;
@@ -390,74 +383,48 @@ export function installWebMcpPageHook(key: string, attach = false): void {
 		}
 		notify();
 	};
-	const registerTool = async (tool: PageModelContextTool, options?: { signal?: AbortSignal }): Promise<void> => {
-		if (originalRegister) await originalRegister(tool, options);
-		remember(tool, options?.signal);
-	};
-	const unregisterTool = async (name: string): Promise<void> => {
-		if (originalUnregister) await originalUnregister(name);
+	const forget = (name: string): void => {
 		if (tools.delete(name)) notify();
 	};
 
-	// The first context the page obtains is the one mirrored.
-	const adopt = (context: PageModelContext | undefined): PageModelContext | undefined => {
-		if (!context || existingContext) return context;
-		existingContext = context;
-		originalDescriptor = Object.getOwnPropertyDescriptor(context, "registerTool");
-		originalUnregisterDescriptor = Object.getOwnPropertyDescriptor(context, "unregisterTool");
-		originalRegister = context.registerTool?.bind(context);
-		originalUnregister = context.unregisterTool?.bind(context);
-		try {
-			Object.defineProperty(context, "registerTool", {
-				configurable: true,
-				writable: true,
-				value: registerTool,
-			});
-			if (originalUnregister) {
-				Object.defineProperty(context, "unregisterTool", {
-					configurable: true,
-					writable: true,
-					value: unregisterTool,
-				});
+	// Wrap the methods every registration goes through: the page's own context, or the platform prototype.
+	const patch = (target: PageModelContext): void => {
+		const register = target.registerTool;
+		const unregister = target.unregisterTool;
+		const wrappers = {
+			async registerTool(this: unknown, tool: PageModelContextTool, options?: { signal?: AbortSignal }) {
+				if (register) await register.call(this, tool, options);
+				remember(tool, options?.signal);
+			},
+			async unregisterTool(this: unknown, name: string) {
+				if (unregister) await unregister.call(this, name);
+				forget(name);
+			},
+		};
+		for (const name of unregister ? (["registerTool", "unregisterTool"] as const) : (["registerTool"] as const)) {
+			const original = Object.getOwnPropertyDescriptor(target, name);
+			try {
+				Object.defineProperty(target, name, { configurable: true, writable: true, value: wrappers[name] });
+				patches.push({ target, name, original, value: wrappers[name] });
+			} catch {
+				// Native CDP discovery remains authoritative when this object is not patchable.
 			}
-		} catch {
-			// Native CDP discovery remains authoritative when this object is not patchable.
 		}
-		return context;
 	};
 
+	if (platformPrototype) patch(platformPrototype);
+	if (pageContext) patch(pageContext);
 	// A page whose own modelContext is null reports the API but still gets the polyfill.
-	if (getters.length > 0 || pageContext) {
-		adopt(pageContext);
-		for (const getter of getters) {
-			const { instance, owner, descriptor } = getter;
-			const wrapped = function (this: unknown): PageModelContext | undefined {
-				const context: PageModelContext | undefined = descriptor.get?.call(this);
-				// A wrapper the page kept past uninstall only forwards.
-				return uninstalled ? context : adopt(context);
-			};
-			try {
-				Object.defineProperty(owner, "modelContext", { ...descriptor, get: wrapped });
-				getter.wrapped = wrapped;
-			} catch {
-				adopt(instance.modelContext);
-			}
-		}
-		// A loaded page may already hold its context, which only a read now reaches; a frame still on its
-		// initial empty document is left to the wrapper.
-		const { location } = globalThis as unknown as { location: { href: string } };
-		if (attach && location.href !== "about:blank") {
-			for (const { instance } of getters) adopt(instance.modelContext);
-		}
-	} else {
+	if (!platform && !pageContext) {
 		polyfillContext = {
-			registerTool,
-			unregisterTool,
+			registerTool: async (tool: PageModelContextTool, options?: { signal?: AbortSignal }) =>
+				remember(tool, options?.signal),
+			unregisterTool: async (name: string) => forget(name),
 			async provideContext(context: unknown): Promise<void> {
 				const record = context && typeof context === "object" ? (context as Record<string, unknown>) : undefined;
 				const provided = Array.isArray(context) ? context : record?.tools;
 				if (!Array.isArray(provided)) throw new TypeError("provideContext() expects an array or { tools: [...] }");
-				for (const tool of provided) await registerTool(tool as PageModelContextTool);
+				for (const tool of provided) remember(tool as PageModelContextTool);
 			},
 			async getTools(): Promise<WebMcpHookToolRecord[]> {
 				return bridge.snapshot();
@@ -504,30 +471,17 @@ export function installWebMcpPageHook(key: string, attach = false): void {
 			return await execute(params, { signal: controller.signal });
 		},
 		uninstall(): void {
-			uninstalled = true;
-			for (const { owner, descriptor, wrapped } of getters) {
+			for (const { target, name, original, value } of patches) {
 				try {
-					// Swap back only our getter: an accessor or field the page changed after it stays.
-					if (wrapped && Object.getOwnPropertyDescriptor(owner, "modelContext")?.get === wrapped) {
-						Object.defineProperty(owner, "modelContext", { get: descriptor.get });
-					}
+					// Leave a method the page replaced after ours.
+					if (Object.getOwnPropertyDescriptor(target, name)?.value !== value) continue;
+					if (original) Object.defineProperty(target, name, original);
+					else delete target[name];
 				} catch {
 					// Best-effort cleanup for attached user tabs.
 				}
 			}
-			if (existingContext) {
-				try {
-					if (originalDescriptor) Object.defineProperty(existingContext, "registerTool", originalDescriptor);
-					else delete existingContext.registerTool;
-					if (originalUnregisterDescriptor) {
-						Object.defineProperty(existingContext, "unregisterTool", originalUnregisterDescriptor);
-					} else if (originalUnregister) {
-						delete existingContext.unregisterTool;
-					}
-				} catch {
-					// Best-effort cleanup for attached user tabs.
-				}
-			} else if (polyfillContext) {
+			if (polyfillContext) {
 				for (const owner of [nav, doc]) {
 					try {
 						if (owner.modelContext === polyfillContext) delete owner.modelContext;
@@ -910,7 +864,7 @@ export async function installWebMcp(page: Page): Promise<WebMcpController> {
 	for (const frame of page.frames()) {
 		await frame
 			.mainRealm()
-			.evaluate(installWebMcpPageHook, WEBMCP_BRIDGE_KEY, true)
+			.evaluate(installWebMcpPageHook, WEBMCP_BRIDGE_KEY)
 			.catch(() => undefined);
 	}
 
