@@ -2267,7 +2267,12 @@ export class Editor implements Component, Focusable {
 			}
 		}
 
+		// `f`/`t`/`r` are waiting for a character. Space is that character; arrows and other named
+		// keys cancel, instead of being rewritten to `h`/`l` and inserted or searched for.
+		const awaitingTarget = /[fFtTr]$/.test(vim.pendingText);
+		if (awaitingTarget && (canonical === "space" || data === " ")) return this.#runVimKey(" ", vim);
 		const mapped = canonical === undefined ? undefined : VIM_NAV_KEYS[canonical];
+		if (awaitingTarget && mapped !== undefined) return this.#runVimKey("escape", vim);
 		if (mapped !== undefined) return this.#runVimKey(mapped, vim);
 
 		// Control chords carry no printable text and stay with the host.
@@ -2275,9 +2280,13 @@ export class Editor implements Component, Focusable {
 		if (!printable) return false;
 
 		// Batched stdin can deliver several keystrokes at once, so replay the run one grapheme at a
-		// time. A command that drops out of Normal mode part-way (`iabc`) turns the rest of the run
-		// back into literal text rather than swallowing it.
+		// time. A command that drops out of Normal mode part-way (`iabc`, `Rxx`) turns the rest of
+		// the run into literal text or replace-mode overwrites rather than more Normal commands.
 		for (const seg of segmenter.segment(printable)) {
+			if (vim.mode === "replace") {
+				this.#overwriteReplaceGrapheme(seg.segment);
+				continue;
+			}
 			if (this.#runVimKey(seg.segment, vim)) continue;
 			this.#insertCharacter(printable.slice(seg.index));
 			return true;
@@ -2353,7 +2362,7 @@ export class Editor implements Component, Focusable {
 
 	#replaceVimSpan(from: VimPosition, to: VimPosition, text: string): void {
 		const line = this.#state.lines[from.line] ?? "";
-		if (this.#atomicTokenAt(line, from.col)) return;
+		if (this.#atomicTokenAt(line, from.col) || this.#spanCutsAtomicToken(line, from.col, to.col)) return;
 		this.#recordUndoState();
 		this.#lastAction = null;
 		this.#state.lines[from.line] = line.slice(0, from.col) + text + line.slice(to.col);
@@ -3522,6 +3531,16 @@ export class Editor implements Component, Focusable {
 			if (col < end) return { start, end };
 		}
 		return undefined;
+	}
+
+	/** True when `[from, to)` runs into a placeholder. Counted `r` must no-op rather than split it. */
+	#spanCutsAtomicToken(line: string, from: number, to: number): boolean {
+		for (let col = from; col < to;) {
+			const token = this.#atomicTokenAt(line, col);
+			if (token && token.start < to && token.end > from) return true;
+			col = token && token.end > col ? token.end : col + 1;
+		}
+		return false;
 	}
 
 	/** Expand the half-open range [start, end) so it never cuts through an atomic

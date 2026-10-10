@@ -550,6 +550,7 @@ export class VimState {
 		if (this.#findPending) {
 			const spec = this.#findPending;
 			this.#findPending = null;
+			this.#desiredCol = null;
 			this.#lastFind = { ...spec, target: key };
 			const count = this.#count.length > 0 ? Math.max(1, Number.parseInt(this.#count, 10)) : 1;
 			const motion = this.#seek(key, buf, spec, count);
@@ -613,6 +614,7 @@ export class VimState {
 			return [];
 		}
 		if (key === "f" || key === "F" || key === "t" || key === "T") {
+			this.#desiredCol = null;
 			this.#findPending = { forward: key === "f" || key === "t", till: key === "t" || key === "T" };
 			return [];
 		}
@@ -747,7 +749,11 @@ export class VimState {
 					if (next === line) break;
 					line = next;
 				}
-				return { to: { line, col: 0 }, inclusive: false, linewise: false };
+				const text = buf.lines[line] ?? "";
+				// No blank line ahead: Vim parks at the end of the buffer, not column 0. A bare move
+				// clamps back onto the last grapheme; an operator still covers the rest of the line.
+				const atBufferEnd = key === "}" && line === buf.lines.length - 1 && text.trim() !== "";
+				return { to: { line, col: atBufferEnd ? text.length : 0 }, inclusive: false, linewise: false };
 			}
 			case "G": {
 				const target = this.#count.length > 0 ? count - 1 : buf.lines.length - 1;
@@ -768,21 +774,30 @@ export class VimState {
 	#repeatFind(sameDirection: boolean, buf: VimBuffer, count: number): Motion | null {
 		const last = this.#lastFind;
 		if (!last) return null;
-		return this.#seek(
-			last.target,
-			buf,
-			{ forward: sameDirection ? last.forward : !last.forward, till: last.till },
-			count,
-		);
+		const forward = sameDirection ? last.forward : !last.forward;
+		const text = buf.lines[buf.cursorLine] ?? "";
+		// A till lands beside its target, so repeating from the cursor rediscovers that same target.
+		const fromCol = last.till
+			? forward
+				? nextGraphemeStart(text, buf.cursorCol)
+				: prevGraphemeStart(text, buf.cursorCol)
+			: buf.cursorCol;
+		return this.#seek(last.target, buf, { forward, till: last.till }, count, fromCol);
 	}
 
 	/**
 	 * `f`/`F` land on the match and include it. `t`/`T` land on the adjacent grapheme and include
 	 * that grapheme, so the operator stops short of the target. A till that would not move fails.
 	 */
-	#seek(target: string, buf: VimBuffer, spec: { forward: boolean; till: boolean }, count: number): Motion | null {
+	#seek(
+		target: string,
+		buf: VimBuffer,
+		spec: { forward: boolean; till: boolean },
+		count: number,
+		fromCol = buf.cursorCol,
+	): Motion | null {
 		const text = buf.lines[buf.cursorLine] ?? "";
-		const match = findGrapheme(text, buf.cursorCol, target, spec.forward, count);
+		const match = findGrapheme(text, fromCol, target, spec.forward, count);
 		if (match === null) return null;
 		const land = spec.till ? (spec.forward ? prevGraphemeStart(text, match) : nextGraphemeStart(text, match)) : match;
 		if (land === buf.cursorCol) return null;
@@ -821,6 +836,11 @@ export class VimState {
 	}
 
 	#operate(operator: VimOperator, from: VimPosition, to: VimPosition, linewise: boolean): VimCommand[] {
+		if (operator === ">" || operator === "<") {
+			const fromLine = Math.min(from.line, to.line);
+			const toLine = Math.max(from.line, to.line);
+			return [{ kind: "indent", fromLine, toLine, out: operator === "<" }];
+		}
 		if (operator === "y") {
 			return [
 				{ kind: "yank", from, to, linewise },

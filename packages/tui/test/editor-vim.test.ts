@@ -549,6 +549,20 @@ describe("Editor vim mode", () => {
 			editor.handleInput("x");
 			expect(editor.getText()).toBe("!");
 		});
+
+		it("counted r refuses to cut an atomic token", () => {
+			const editor = new Editor(defaultEditorTheme);
+			editor.atomicTokenPattern = /\[Image #\d+\]/g;
+			editor.setVimMode(true);
+			editor.setText("ab[Image #1] tail");
+			editor.handleInput(ESC);
+			editor.handleInput("g");
+			editor.handleInput("g");
+			editor.handleInput("5");
+			editor.handleInput("r");
+			editor.handleInput("x");
+			expect(editor.getText()).toBe("ab[Image #1] tail");
+		});
 	});
 
 	describe("toggling the setting", () => {
@@ -736,6 +750,15 @@ describe("Editor vim mode", () => {
 			expect(cursor(editor)).toEqual({ line: 0, col: 1 });
 		});
 
+		it("repeats a till past the target it just landed beside", () => {
+			const editor = vimEditor("a,b,c,d");
+			editor.handleInput("t");
+			editor.handleInput(",");
+			expect(cursor(editor)).toEqual({ line: 0, col: 0 });
+			editor.handleInput(";");
+			expect(cursor(editor)).toEqual({ line: 0, col: 2 });
+		});
+
 		it("cancels a half-typed find without moving, and finds a digit", () => {
 			const editor = vimEditor("a1b");
 			editor.handleInput("f");
@@ -904,6 +927,33 @@ describe("Editor vim mode", () => {
 			editor.handleInput("}");
 			expect(editor.getText()).toBe("\nbbb");
 		});
+
+		it("clears through the end of a prompt that has no blank line", () => {
+			const one = vimEditor("hello world");
+			one.handleInput("d");
+			one.handleInput("}");
+			expect(one.getText()).toBe("");
+
+			const two = vimEditor("one\ntwo");
+			two.handleInput("}");
+			expect(cursor(two)).toEqual({ line: 1, col: 2 });
+			two.handleInput("g");
+			two.handleInput("g");
+			two.handleInput("d");
+			two.handleInput("}");
+			expect(two.getText()).toBe("");
+		});
+
+		it("does not restore the sticky column after a find", () => {
+			const editor = vimEditor("abcdefghij\nab");
+			for (let i = 0; i < 8; i++) editor.handleInput("l");
+			editor.handleInput("j");
+			editor.handleInput("k");
+			editor.handleInput("F");
+			editor.handleInput("a");
+			editor.handleInput("j");
+			expect(cursor(editor)).toEqual({ line: 1, col: 0 });
+		});
 	});
 
 	describe("join", () => {
@@ -974,6 +1024,34 @@ describe("Editor vim mode", () => {
 			visual.handleInput(">");
 			expect(visual.getText()).toBe("  a\n  b");
 			expect(visual.vimMode).toBe("normal");
+		});
+
+		it("indents a text object instead of deleting it", () => {
+			const editor = vimEditor("one\ntwo\n\nthree");
+			editor.handleInput(">");
+			editor.handleInput("i");
+			editor.handleInput("p");
+			expect(editor.getText()).toBe("  one\n  two\n\nthree");
+		});
+
+		it("cancels a pending r on an arrow, and treats space as a find target", () => {
+			const replaced = vimEditor("abc");
+			replaced.handleInput("r");
+			replaced.handleInput("\x1b[D");
+			expect(replaced.getText()).toBe("abc");
+			expect(replaced.vimPending).toBe("");
+
+			const found = vimEditor("a b");
+			found.handleInput("f");
+			found.handleInput(" ");
+			expect(cursor(found)).toEqual({ line: 0, col: 1 });
+		});
+
+		it("overwrites the rest of a batched replace", () => {
+			const editor = vimEditor("abcd");
+			editor.handleInput("RXY");
+			expect(editor.getText()).toBe("XYcd");
+			expect(editor.vimMode).toBe("replace");
 		});
 	});
 });
