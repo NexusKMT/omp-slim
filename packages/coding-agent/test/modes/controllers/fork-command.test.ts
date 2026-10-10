@@ -46,6 +46,7 @@ function createContext(
 		thinkingLevel?: ConfiguredThinkingLevel;
 		argv?: string[];
 		promptCacheKey?: string;
+		launchWarning?: string;
 	} = {},
 ) {
 	const sessionFile = options.persisted === false ? undefined : (options.sessionFile ?? sourceSessionFile);
@@ -67,6 +68,7 @@ function createContext(
 	const launchTerminal = vi.fn(async (request: TerminalLaunchRequest): Promise<TerminalLaunchResult> => ({
 		multiplexer: request.multiplexer,
 		placement: request.placement,
+		...(options.launchWarning ? { warning: options.launchWarning } : {}),
 	}));
 	const showError = vi.fn();
 	const showHookConfirm = vi.fn(async () => options.confirmed ?? false);
@@ -182,6 +184,14 @@ describe("/fork terminal placement", () => {
 		]);
 		expect(ctx.showStatus).toHaveBeenCalledTimes(1);
 		expect(session.fork).not.toHaveBeenCalled();
+	});
+
+	it("reports a launcher warning instead of claiming a visible placement", async () => {
+		const { controller, ctx } = createContext({ launchWarning: "it started in the background." });
+		await controller.handleForkCommand("pane");
+		expect(ctx.showStatus).not.toHaveBeenCalled();
+		expect(ctx.showWarning).toHaveBeenCalledTimes(1);
+		expect(ctx.showError).not.toHaveBeenCalled();
 	});
 
 	it("drops a startup --goal and pins the parent's prompt-cache key over a startup one", async () => {
