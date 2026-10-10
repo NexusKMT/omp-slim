@@ -535,19 +535,19 @@ function isCI(): boolean {
 	return normalized !== "" && normalized !== "0" && normalized !== "false";
 }
 
-// Fan-out width for the local parallel path, clamped to the command count.
-// Defaults to the machine's available parallelism; `OMP_TEST_CONCURRENCY`
-// overrides it — a positive integer to pick an exact width (dial down on a
-// memory-constrained laptop), or `all`/`max` to launch every chunk at once.
-function testConcurrency(total: number): number {
-	const raw = Bun.env.OMP_TEST_CONCURRENCY?.trim().toLowerCase();
-	if (!raw) return Math.min(Math.max(1, os.availableParallelism()), total);
-	if (raw === "all" || raw === "max") {
-		return total;
-	}
+// Fan-out width for the local parallel path, clamped to the command count and
+// to `cores`. Defaults to `cores`; `OMP_TEST_CONCURRENCY` (`spec`) dials it down
+// on a memory-constrained machine, and `all`/`max` name the cap explicitly.
+// Never wider than `cores`: every chunk is a full `bun test` process (~1 GB
+// resident on coding-agent), so launching all ~190 at once only trades a
+// CPU-bound run for an OOM kill.
+export function testConcurrency(total: number, spec: string | undefined, cores: number): number {
+	const cap = Math.min(Math.max(1, cores), total);
+	const raw = spec?.trim().toLowerCase();
+	if (!raw || raw === "all" || raw === "max") return cap;
 	const override = Number(raw);
 	if (Number.isFinite(override) && override >= 1) {
-		return Math.min(Math.floor(override), total);
+		return Math.min(Math.floor(override), cap);
 	}
 	throw new Error(`Invalid OMP_TEST_CONCURRENCY=${JSON.stringify(raw)}; expected a positive integer, all, or max`);
 }
@@ -773,7 +773,7 @@ export async function runTestCommandsInParallel(commands: TestCommand[], concurr
 	const fileWidths = [...new Set(commands.map(c => c.parallel).filter(p => p !== undefined))].sort((a, b) => a - b);
 	console.log(
 		`Running ${commands.length} test command(s), up to ${concurrency} in parallel ` +
-			`(OMP_TEST_CONCURRENCY=<n>|all to change); ${os.availableParallelism()} cores, ` +
+			`(OMP_TEST_CONCURRENCY=<n> to lower); ${os.availableParallelism()} cores, ` +
 			`--parallel=${fileWidths.join("/") || "n/a"} per chunk.`,
 	);
 
@@ -954,7 +954,9 @@ if (import.meta.main) {
 	// `--dry-run` prints the argv the real run would use, budget included.
 	const pooled = requestedCommands.length > 1 && (!isCI() || explicitConcurrency);
 	// The sequential path is a pool of one, so a lone chunk keeps the whole budget.
-	const poolWidth = pooled ? testConcurrency(requestedCommands.length) : 1;
+	const poolWidth = pooled
+		? testConcurrency(requestedCommands.length, Bun.env.OMP_TEST_CONCURRENCY, os.availableParallelism())
+		: 1;
 	const testCommands = applyChunkBudget(requestedCommands, poolWidth);
 	if (pooled && !isDryRun) {
 		await runTestCommandsInParallel(testCommands, poolWidth);
