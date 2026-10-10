@@ -298,12 +298,13 @@ function boundedResult(value: unknown): WebMcpInvokeSuccess {
 /**
  * Page function (self-contained; serialisable via `.toString()`): mirror `navigator/document.modelContext`
  * registrations into a bridge stored at `globalThis[key]`, polyfilling `modelContext` when absent. Idempotent.
- * The platform's `modelContext` getter is never called here: it creates the document's context, and Chromium kills
- * a renderer whose frame creates one twice, as this hook would in an iframe's initial empty document and again in
- * the document the iframe then loads. That getter is wrapped instead, so its context is patched when the page first
- * asks for it; a context the page put on navigator/document itself is patched at once.
+ * The platform's `modelContext` getter is not called at document start: it creates the document's context, and
+ * Chromium kills a renderer whose frame creates one twice, as this hook would in an iframe's initial empty document
+ * and again in the document the iframe then loads. That getter is wrapped instead, so its context is patched when
+ * the page first asks for it; a context the page put on navigator/document itself is patched at once. `attach`
+ * marks a document that was already running, whose page may hold its context: it is read then, unless `about:blank`.
  */
-export function installWebMcpPageHook(key: string): void {
+export function installWebMcpPageHook(key: string, attach = false): void {
 	const realm = globalThis as typeof globalThis & Record<string, unknown>;
 	if (realm[key]) return;
 
@@ -441,6 +442,12 @@ export function installWebMcpPageHook(key: string): void {
 			} catch {
 				adopt(instance.modelContext);
 			}
+		}
+		// A loaded page may already hold its context, which only a read now reaches; a frame still on its
+		// initial empty document is left to the wrapper.
+		const { location } = globalThis as unknown as { location: { href: string } };
+		if (attach && location.href !== "about:blank") {
+			for (const { instance } of getters) adopt(instance.modelContext);
 		}
 	} else {
 		polyfillContext = {
@@ -903,7 +910,7 @@ export async function installWebMcp(page: Page): Promise<WebMcpController> {
 	for (const frame of page.frames()) {
 		await frame
 			.mainRealm()
-			.evaluate(installWebMcpPageHook, WEBMCP_BRIDGE_KEY)
+			.evaluate(installWebMcpPageHook, WEBMCP_BRIDGE_KEY, true)
 			.catch(() => undefined);
 	}
 

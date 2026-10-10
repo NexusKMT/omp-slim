@@ -165,6 +165,7 @@ frame.src = "http://localhost:${child.port}/";
 document.body.appendChild(frame);
 // Touching the window before it navigates gives its initial empty document a script context.
 frame.contentWindow.location.href;
+window.webmcpSurface = navigator.modelContext.constructor.name;
 navigator.modelContext.registerTool({
   name: "page_title",
   description: "Returns the page title.",
@@ -179,6 +180,10 @@ navigator.modelContext.registerTool({
 		await invoke({ action: "open", name: "webmcp-iframe", url: `http://localhost:${parent.port}/`, timeout: 10 });
 		expect(valueFrom<string>(await invoke(call("webmcp-iframe", "evaluate", ["document.title"])))).toBe(
 			"iframe loaded",
+		);
+		// Only Chromium's own modelContext reaches the duplicate bind; the polyfill would pass regardless.
+		expect(valueFrom<string>(await invoke(call("webmcp-iframe", "evaluate", ["window.webmcpSurface"])))).toBe(
+			"ModelContext",
 		);
 		const listed = valueFrom<WebMcpListResult>(await invoke(call("webmcp-iframe", "webmcpList")));
 		expect(listed.tools.map(tool => tool.name)).toEqual(["page_title"]);
@@ -306,6 +311,35 @@ Object.defineProperty(Navigator.prototype, "modelContext", { set: window.pageSet
 			await realm.evaluate(`${afterAttach}\nnull;`);
 			await controller.dispose();
 			expect(await realm.evaluate(check)).toBe(true);
+		} finally {
+			await page.close();
+			await releaseBrowser(handle, { kill: false });
+		}
+	});
+
+	it("mirrors a tool registered after attach through a native modelContext the page held before", async () => {
+		using server = Bun.serve({
+			port: 0,
+			hostname: "localhost",
+			fetch: () =>
+				new Response("<!doctype html><title>cached</title>", { headers: { "content-type": "text/html" } }),
+		});
+		const handle = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+		if (!("browser" in handle)) throw new Error("Expected a Puppeteer browser");
+		holdBrowser(handle);
+		const page = await handle.browser.newPage();
+		try {
+			await page.goto(`http://localhost:${server.port}/`);
+			const realm = page.mainFrame().mainRealm();
+			await realm.evaluate(`window.cachedContext = navigator.modelContext; null;`);
+			const controller = await installWebMcp(page);
+			await realm.evaluate(
+				`cachedContext.registerTool({ name: "cached_native", description: "Page tool.", inputSchema: { type: "object" }, execute: () => ({ value: 42 }) })`,
+			);
+			// The page-side mirror, which is all omp has when the browser lacks WebMCP over CDP.
+			const snapshot = await realm.evaluate(webMcpSnapshotInPage, WEBMCP_BRIDGE_KEY);
+			expect(snapshot.tools.map(tool => tool.name)).toEqual(["cached_native"]);
+			await controller.dispose();
 		} finally {
 			await page.close();
 			await releaseBrowser(handle, { kill: false });
