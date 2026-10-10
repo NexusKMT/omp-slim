@@ -227,6 +227,9 @@ export class SessionObserverRegistry {
 							existing.detached = payload.detached ?? existing.detached;
 							if (payload.description) existing.description = payload.description;
 							if (payload.sessionFile) existing.sessionFile = payload.sessionFile;
+							// A kept-alive or parked agent's next turn restarts its clock; the prior turn's
+							// snapshot must not be aged across the idle gap before the new turn's first frame.
+							if (payload.status === "started") existing.progressAt = undefined;
 						} else {
 							this.#sessions.set(payload.id, {
 								id: payload.id,
