@@ -189,7 +189,7 @@ describe("formatSessionDumpText markdown-headings transcript", () => {
 			messages: [{ role: "user", content: "helper task", timestamp: 3 }],
 		});
 		expect(killed.startsWith("# Subagent: Explore/Helper\n\nModel: (unknown)\nStatus: aborted\n")).toBe(true);
-		expect(killed).toContain("## User\n\nhelper task");
+		expect(killed).toContain("## User · 1970-01-01T00:00:00.003Z\n\nhelper task");
 
 		const live = formatSubagentDumpText({
 			key: "Explore",
