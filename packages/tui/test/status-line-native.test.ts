@@ -77,12 +77,12 @@ describe("native composer facts", () => {
 		const originalProjectDir = getProjectDir();
 		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "omp-composer-git-"));
 		try {
-			const git = (...args: string[]) => {
-				const result = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo });
-				expect(result.exitCode).toBe(0);
-			};
-			git("init", "-q", "-b", "feature/parity");
-			git("commit", "-q", "--allow-empty", "-m", "init");
+			// The repository's on-disk shape, written without invoking git (no hooks, signing or user config).
+			const gitDir = path.join(repo, ".git");
+			for (const dir of ["objects", path.join("refs", "heads")])
+				fs.mkdirSync(path.join(gitDir, dir), { recursive: true });
+			fs.writeFileSync(path.join(gitDir, "HEAD"), "ref: refs/heads/feature/parity\n");
+			fs.writeFileSync(path.join(gitDir, "config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n");
 			setProjectDir(repo);
 
 			const segs = facts(
