@@ -19,7 +19,7 @@ use objc2_core_foundation::{
 
 use super::{
 	super::{
-		ax::{AxBounds, AxHandle, AxProps, normalize_role_macos},
+		ax::{AxBounds, AxHandle, AxProps, WalkBounds, normalize_role_macos},
 		backend::AxBackend,
 		error::{CoreResult, DesktopError},
 		types::DesktopWindow,
@@ -421,22 +421,20 @@ impl AxBackend for MacAx {
 
 	fn props(&mut self, h: &AxHandle) -> CoreResult<AxProps> {
 		let element = mac_handle(h)?;
-		let native_role = copy_required_string(element, "AXRole")?;
-		let actions = copy_strings_from_action_names(element).unwrap_or_default();
-		let child_count = copy_elements_optional(element, "AXChildren")
-			.map_or(0, |children| u32::try_from(children.len()).unwrap_or(u32::MAX));
-		Ok(AxProps {
-			role: normalize_role_macos(&native_role),
-			native_role,
-			title: nonempty(copy_string(element, "AXTitle")),
-			value: nonempty(copy_value_string(element, "AXValue")),
-			description: nonempty(copy_string(element, "AXDescription")),
-			enabled: copy_bool(element, "AXEnabled").unwrap_or(true),
-			focused: copy_bool(element, "AXFocused").unwrap_or(false),
-			bounds: bounds(element),
-			actions,
-			child_count,
-		})
+		let child_count =
+			copy_elements_optional(element, "AXChildren").map_or(0, |children| children.len());
+		element_props(element, child_count, WalkBounds::Read)
+	}
+
+	fn walk_node(
+		&mut self,
+		h: &AxHandle,
+		read_bounds: WalkBounds,
+	) -> CoreResult<(AxProps, Vec<AxHandle>)> {
+		let element = mac_handle(h)?;
+		let children = copy_elements_optional(element, "AXChildren").unwrap_or_default();
+		let props = element_props(element, children.len(), read_bounds)?;
+		Ok((props, children.into_iter().map(AxHandle::Mac).collect()))
 	}
 
 	fn children(&mut self, h: &AxHandle) -> CoreResult<Vec<AxHandle>> {
@@ -562,6 +560,30 @@ impl AxBackend for MacAx {
 		}
 		Ok(result)
 	}
+}
+
+fn element_props(
+	element: &AXUIElement,
+	child_count: usize,
+	read_bounds: WalkBounds,
+) -> CoreResult<AxProps> {
+	let native_role = copy_required_string(element, "AXRole")?;
+	let actions = copy_strings_from_action_names(element).unwrap_or_default();
+	Ok(AxProps {
+		role: normalize_role_macos(&native_role),
+		native_role,
+		title: nonempty(copy_string(element, "AXTitle")),
+		value: nonempty(copy_value_string(element, "AXValue")),
+		description: nonempty(copy_string(element, "AXDescription")),
+		enabled: copy_bool(element, "AXEnabled").unwrap_or(true),
+		focused: copy_bool(element, "AXFocused").unwrap_or(false),
+		bounds: match read_bounds {
+			WalkBounds::Read => bounds(element),
+			WalkBounds::Skip => None,
+		},
+		actions,
+		child_count: u32::try_from(child_count).unwrap_or(u32::MAX),
+	})
 }
 
 fn element_pid(element: &AXUIElement) -> CoreResult<libc::pid_t> {
