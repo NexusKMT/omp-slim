@@ -28,7 +28,8 @@ const capabilities = {
 		target: false,
 		focus: true,
 		name: true,
-		minimumVersion: { focus: "0.45.0" },
+		// `new-tab -- <command>` and the printed tab ID both arrived in 0.44.0.
+		minimumVersion: { launch: "0.44.0", focus: "0.45.0" },
 	},
 } as const satisfies SupportedMultiplexerCapabilities;
 
@@ -114,7 +115,9 @@ const launchZellij: TerminalLaunchBackend<"zellij", typeof capabilities> = async
 		throw launchError(request, "capability", "zellij launch requires an active Zellij session.");
 	}
 	const operation = request.placement === "pane" ? "new-pane" : "new-tab";
-	if (request.placement === "pane" && request.target !== undefined) {
+	if (request.placement === "window") {
+		await requireZellijVersion(request, runCli, capabilities.window.minimumVersion.launch, "new-tab -- <command>");
+	} else if (request.target !== undefined) {
 		await requireZellijVersion(request, runCli, capabilities.pane.minimumVersion.target, "new-pane --tab-id");
 	}
 	if (request.focus === false) {
@@ -137,7 +140,7 @@ const launchZellij: TerminalLaunchBackend<"zellij", typeof capabilities> = async
 	if (request.focus === false) argv.push("--no-focus");
 	argv.push("--", ...request.command);
 	const output = await runStep(request, `action ${operation}`, argv, request.cwd, runCli);
-	// Zellij before 0.44.0 starts the command but prints no ID.
+	// Zellij before 0.44.0 runs a new-pane command but prints no pane ID.
 	if (!output.trim()) return { multiplexer: "zellij", placement: request.placement };
 	const id = oneLineId(request, `action ${operation}`, output);
 	if (request.placement === "pane") {

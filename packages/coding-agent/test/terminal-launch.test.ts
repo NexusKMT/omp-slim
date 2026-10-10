@@ -556,6 +556,12 @@ describe("terminal launch dispatcher", () => {
 			tabTarget.launch({ multiplexer: "zellij", placement: "pane", command: ["omp"], cwd: "/repo", target: "8" }),
 		).rejects.toThrow("new-pane --tab-id requires Zellij 0.44.1 or newer (found 0.44.0)");
 		expect(tabTarget.calls.map(call => call.argv)).toEqual([["zellij", "--version"]]);
+
+		const tab = createHarness({ ZELLIJ: "0" }, [{ stdout: "zellij 0.43.1\n", exitCode: 0 }]);
+		await expect(
+			tab.launch({ multiplexer: "zellij", placement: "window", command: ["omp"], cwd: "/repo" }),
+		).rejects.toThrow("new-tab -- <command> requires Zellij 0.44.0 or newer (found 0.43.1)");
+		expect(tab.calls.map(call => call.argv)).toEqual([["zellij", "--version"]]);
 	});
 
 	it("reports a Zellij launch without an ID when an older CLI prints none", async () => {

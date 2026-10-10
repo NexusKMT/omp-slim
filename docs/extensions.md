@@ -921,7 +921,7 @@ because `env` reads it as an assignment. `execution: "shell"` POSIX-quotes the a
 and runs it with `/bin/sh -c`, independent of `default-shell`. tmux format-expands its
 start directory, so the dispatcher passes every `#` in `cwd` as `##`. Zellij accepts
 direct argv execution. Zellij options that need a newer CLI than the one installed
-(`target` before 0.44.1, `focus: false` before 0.45.0) fail before anything is created,
+(tab placement before 0.44.0, `target` before 0.44.1, `focus: false` before 0.45.0) fail before anything is created,
 with an error naming the required version; the dispatcher checks `zellij --version`
 once per process.
 
@@ -951,7 +951,7 @@ Provider-specific fields include pane direction, Zellij floating panes/names,
 Herdr tab labels, and CMUX workspace names. Zellij floating panes cannot specify a
 split direction, and Zellij new-tab creation cannot target a tab. tmux returns
 required pane (`%...`) or window (`@...`) IDs; Zellij 0.44.0 and newer report the pane ID
-as `terminal_<id>` and tab IDs as numeric strings, while older Zellij versions report
+as `terminal_<id>` and tab IDs as numeric strings, while older Zellij pane launches report
 none, so `result.id` is unavailable; Herdr requires pane/tab IDs in
 its JSON response. CMUX reports workspace/pane IDs when present, but its JSON
 response may omit an ID, in which case `result.id` is unavailable.

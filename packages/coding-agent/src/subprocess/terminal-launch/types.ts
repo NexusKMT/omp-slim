@@ -15,10 +15,11 @@ export interface PlacementCapabilities {
 	shellGrammar?: "posix";
 	cwdShellInput?: true;
 	/**
-	 * Minimum provider CLI version for an option that changes the CLI invocation
-	 * (`focus: false`, an explicit `target`); the backend checks it before launching.
+	 * Minimum provider CLI version for the placement itself (`launch`) or for an
+	 * option that changes the CLI invocation (`focus: false`, an explicit `target`);
+	 * the backend checks it before launching.
 	 */
-	minimumVersion?: { readonly focus?: string; readonly target?: string };
+	minimumVersion?: { readonly launch?: string; readonly focus?: string; readonly target?: string };
 }
 
 export type SupportedMultiplexerCapabilities = { displayName: string; supported: true } & (
