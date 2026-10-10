@@ -1074,6 +1074,13 @@ export interface ResolvedOpenAIResponsesCompat extends ResolvedOpenAISharedCompa
 	 * `PI_MUSE_STORE_RESPONSES`); stored runs retain prompts and outputs on the provider.
 	 */
 	storeResponses: boolean;
+	/**
+	 * Whether the host binds native history items (`encrypted_content`, item
+	 * ids) to the connection that issued them, so a new process must rebuild
+	 * prior turns from message content until its first successful response.
+	 * Rule-owned: GitHub Copilot.
+	 */
+	connectionBoundNativeHistory: boolean;
 	streamIdleTimeoutMs?: number;
 	vercelGatewayRouting?: OpenAICompat["vercelGatewayRouting"];
 	/** The model sits behind Vercel AI Gateway's Responses endpoint. */
