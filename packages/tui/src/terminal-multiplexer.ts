@@ -3,7 +3,7 @@ import { herdrMultiplexer } from "./multiplexers/herdr";
 import { orcaMultiplexer } from "./multiplexers/orca";
 import { screenMultiplexer } from "./multiplexers/screen";
 import { tmuxMultiplexer } from "./multiplexers/tmux";
-import type { TerminalMultiplexerModule } from "./multiplexers/types";
+import type { TerminalMultiplexerModule, TerminalMultiplexerNotificationRequest } from "./multiplexers/types";
 import { wmuxMultiplexer } from "./multiplexers/wmux";
 import { zellijMultiplexer } from "./multiplexers/zellij";
 
@@ -30,6 +30,13 @@ const MULTIPLEXERS_BY_ID = Object.fromEntries(
 ) as Record<TerminalMultiplexer, TerminalMultiplexerModule<TerminalMultiplexer>>;
 const SESSION_TIER = TERMINAL_MULTIPLEXERS.filter(multiplexer => multiplexer.precedence === "session");
 const OUTER_APP_TIER = TERMINAL_MULTIPLEXERS.filter(multiplexer => multiplexer.precedence === "outerApp");
+const NOTIFICATION_TIER_ORDER = ["pane", "surface", "inBand"] as const;
+// Innermost target first: a pane inside a surface must receive its own signal
+// before the containing surface, followed by in-band rewrites. Registry order
+// breaks ties within a tier (sort is stable).
+const NOTIFIERS = TERMINAL_MULTIPLEXERS.flatMap(multiplexer =>
+	multiplexer.notifier ? [{ multiplexer, notifier: multiplexer.notifier }] : [],
+).sort((a, b) => NOTIFICATION_TIER_ORDER.indexOf(a.notifier.tier) - NOTIFICATION_TIER_ORDER.indexOf(b.notifier.tier));
 
 /** Every environment variable multiplexer classification reads, including the TERM fallback. */
 export const TERMINAL_MULTIPLEXER_ENV_KEYS: readonly string[] = [
@@ -50,15 +57,42 @@ export function hasTerminalMultiplexerSession(
 	return MULTIPLEXERS_BY_ID[multiplexer].isInside(env);
 }
 
-function classify(env: NodeJS.ProcessEnv): TerminalMultiplexerModule<TerminalMultiplexer> | undefined {
-	const session = SESSION_TIER.find(multiplexer => multiplexer.isInside(env));
-	if (session) return session;
+/**
+ * Every multiplexer whose explicit session markers are present, in registry
+ * order. Nested sessions all appear; TERM is not consulted.
+ */
+export function terminalMultiplexerSessions(
+	env: NodeJS.ProcessEnv = Bun.env,
+): TerminalMultiplexerModule<TerminalMultiplexer>[] {
+	return TERMINAL_MULTIPLEXERS.filter(multiplexer => multiplexer.isInside(env));
+}
+
+/**
+ * The multiplexer TERM names, whether or not its session markers survived.
+ * This is classification's TERM fallback; session markers are not consulted.
+ */
+export function terminalMultiplexerForTerm(
+	env: NodeJS.ProcessEnv = Bun.env,
+): TerminalMultiplexerModule<TerminalMultiplexer> | undefined {
 	const term = env.TERM?.toLowerCase() ?? "";
-	const termFallback = TERMINAL_MULTIPLEXERS.find(
+	return TERMINAL_MULTIPLEXERS.find(
 		multiplexer => multiplexer.termPrefix !== undefined && term.startsWith(multiplexer.termPrefix),
 	);
-	if (termFallback) return termFallback;
-	return OUTER_APP_TIER.find(multiplexer => multiplexer.isInside(env));
+}
+
+/**
+ * Registry entry for the multiplexer hosting the current process, or
+ * `undefined` for a direct terminal. Same precedence as
+ * {@link classifyTerminalMultiplexer}.
+ */
+export function classifyTerminalMultiplexerModule(
+	env: NodeJS.ProcessEnv = Bun.env,
+): TerminalMultiplexerModule<TerminalMultiplexer> | undefined {
+	return (
+		SESSION_TIER.find(multiplexer => multiplexer.isInside(env)) ??
+		terminalMultiplexerForTerm(env) ??
+		OUTER_APP_TIER.find(multiplexer => multiplexer.isInside(env))
+	);
 }
 
 /**
@@ -72,10 +106,19 @@ function classify(env: NodeJS.ProcessEnv): TerminalMultiplexerModule<TerminalMul
  * last so a multiplexer running inside them wins.
  */
 export function classifyTerminalMultiplexer(env: NodeJS.ProcessEnv = Bun.env): TerminalMultiplexer | null {
-	return classify(env)?.id ?? null;
+	return classifyTerminalMultiplexerModule(env)?.id ?? null;
 }
 
 /** True when the classified multiplexer owns the current screen grid. */
 export function isInsideTerminalMultiplexer(env: NodeJS.ProcessEnv = Bun.env): boolean {
-	return classify(env)?.ownsScreenGrid ?? false;
+	return classifyTerminalMultiplexerModule(env)?.ownsScreenGrid ?? false;
+}
+
+/**
+ * Offer a notification to every active session's notifier, innermost tier
+ * first. Returns whether one delivered it; otherwise the terminal fallback
+ * applies unchanged.
+ */
+export function routeTerminalMultiplexerNotification(request: TerminalMultiplexerNotificationRequest): boolean {
+	return NOTIFIERS.some(({ multiplexer, notifier }) => multiplexer.isInside(request.env) && notifier.send(request));
 }

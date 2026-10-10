@@ -290,6 +290,9 @@ describe("shouldEnableSynchronizedOutputByDefault", () => {
 		expect(shouldEnableSynchronizedOutputByDefault({ HERDR_PANE_ID: "p1" }, "kitty")).toBe(true);
 		expect(shouldEnableSynchronizedOutputByDefault({ HERDR_PANE_ID: "p1" }, "ghostty")).toBe(true);
 		expect(shouldEnableSynchronizedOutputByDefault({ HERDR_PANE_ID: "p1", TMUX: "1" }, "kitty")).toBe(true);
+		// Any Herdr session in the path enables sync, whichever layer classifies first.
+		expect(shouldEnableSynchronizedOutputByDefault({ HERDR_PANE_ID: "p1", STY: "x" }, "base")).toBe(true);
+		expect(shouldEnableSynchronizedOutputByDefault({ HERDR_PANE_ID: "p1", ZELLIJ: "0" }, "base")).toBe(true);
 	});
 
 	it("does not treat client-only Herdr vars as inside a pane", () => {
@@ -761,6 +764,29 @@ describe("shouldEnableHyperlinksByDefault", () => {
 			false,
 		);
 		expect(shouldEnableHyperlinksByDefault({ HERDR_ENV: "1", PI_NO_HYPERLINKS: "1" }, "base")).toBe(false);
+	});
+
+	it("keeps Herdr's own rendering when the other nested layers have no OSC 8 policy", () => {
+		// Zellij has no hyperlink policy, and a stale screen-family TERM is not a
+		// session, so neither overrides the Herdr pane.
+		expect(shouldEnableHyperlinksByDefault({ HERDR_ENV: "1", ZELLIJ: "0" }, "base")).toBe(true);
+		expect(shouldEnableHyperlinksByDefault({ HERDR_ENV: "1", TERM: "screen-256color" }, "base")).toBe(true);
+	});
+
+	it("gates a Herdr pane nested with tmux on tmux's version, and screen still vetoes it", () => {
+		const tmux34 = { TMUX: "/tmp/tmux-1000/default,1,0", TERM_PROGRAM: "tmux", TERM_PROGRAM_VERSION: "3.4" };
+		expect(shouldEnableHyperlinksByDefault({ HERDR_ENV: "1", ...tmux34 }, "kitty")).toBe(true);
+		expect(
+			shouldEnableHyperlinksByDefault({ HERDR_ENV: "1", ...tmux34, TERM_PROGRAM_VERSION: "3.3a" }, "kitty"),
+		).toBe(false);
+		expect(shouldEnableHyperlinksByDefault({ HERDR_ENV: "1", ...tmux34, STY: "1234.pts-0.host" }, "kitty")).toBe(
+			false,
+		);
+	});
+
+	it("treats a multiplexer TERM as off under a session without an OSC 8 policy", () => {
+		expect(shouldEnableHyperlinksByDefault({ ZELLIJ: "0", TERM: "screen-256color" }, "kitty")).toBe(false);
+		expect(shouldEnableHyperlinksByDefault({ ZELLIJ: "0", TERM: "xterm-256color" }, "kitty")).toBe(true);
 	});
 
 	it("lets PI_NO_HYPERLINKS beat every positive heuristic", () => {

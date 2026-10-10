@@ -322,6 +322,70 @@ describe("terminal notifications", () => {
 		expect(stdout).not.toHaveBeenCalled();
 	});
 
+	// Delivery tries the innermost pane notifier, then the containing surface,
+	// then in-band rewrites (tmux before Zellij), then the terminal fallback.
+	it.each([
+		["a Herdr pane over tmux", { HERDR_PANE_ID: "w6:p1", TMUX: "/tmp/tmux-1000/default,1234,0" }, "herdr", []],
+		[
+			"a cmux surface over tmux",
+			{ CMUX_SURFACE_ID: "123e4567-e89b-12d3-a456-426614174000", TMUX: "/tmp/tmux-1000/default,1234,0" },
+			"cmux",
+			[],
+		],
+		[
+			"a cmux surface over Zellij",
+			{ CMUX_SURFACE_ID: "123e4567-e89b-12d3-a456-426614174000", ZELLIJ: "0" },
+			"cmux",
+			[],
+		],
+		[
+			"an incomplete Herdr session over tmux",
+			{ HERDR_ENV: "1", TMUX: "/tmp/tmux-1000/default,1234,0" },
+			undefined,
+			["\x1bPtmux;\x1b\x1b]99;;ping\x1b\x1b\\\x1b\\\x07"],
+		],
+		[
+			"tmux and Zellij together",
+			{ TMUX: "/tmp/tmux-1000/default,1234,0", ZELLIJ: "0" },
+			undefined,
+			["\x1bPtmux;\x1b\x1b]99;;ping\x1b\x1b\\\x1b\\\x07"],
+		],
+	] as const)("routes a notification inside %s to the innermost notifier", (_label, env, binary, expectedWrites) => {
+		Object.assign(Bun.env, env);
+		mutableTerminal.notifyProtocol = NotifyProtocol.Osc99;
+		const writes: string[] = [];
+		vi.spyOn(process.stdout, "write").mockImplementation(chunk => {
+			writes.push(typeof chunk === "string" ? chunk : chunk.toString());
+			return true;
+		});
+		const binaries: string[] = [];
+		vi.spyOn(Bun, "spawn").mockImplementation((options: unknown) => {
+			if (options && typeof options === "object" && "cmd" in options && Array.isArray(options.cmd)) {
+				binaries.push(String(options.cmd[0]));
+			}
+			return { unref: vi.fn() } as never;
+		});
+
+		TERMINAL.sendNotification("ping");
+
+		expect(binaries).toEqual(binary === undefined ? [] : [binary]);
+		expect(writes).toEqual([...expectedWrites]);
+	});
+
+	it("under Zellij, Bell-protocol sendNotification stays a single plain BEL", () => {
+		Bun.env.ZELLIJ = "0";
+		mutableTerminal.notifyProtocol = NotifyProtocol.Bell;
+		const writes: string[] = [];
+		vi.spyOn(process.stdout, "write").mockImplementation(chunk => {
+			writes.push(typeof chunk === "string" ? chunk : chunk.toString());
+			return true;
+		});
+
+		TERMINAL.sendNotification("ping");
+
+		expect(writes).toEqual(["\x07"]);
+	});
+
 	it("keeps the OSC fallback when the herdr binary is missing", () => {
 		Bun.env.HERDR_ENV = "1";
 		Bun.env.HERDR_PANE_ID = "w6:p1";

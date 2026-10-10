@@ -9,4 +9,7 @@ export const screenMultiplexer = {
 	isInside(env: NodeJS.ProcessEnv = Bun.env): boolean {
 		return Boolean(env.STY);
 	},
+	// GNU screen never gained OSC 8 support, so a screen layer anywhere in the
+	// path vetoes hyperlinks, even under a nested tmux.
+	hyperlinks: "drop",
 } as const satisfies TerminalMultiplexerModule;

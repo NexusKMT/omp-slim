@@ -1,11 +1,8 @@
 import { $which } from "@oh-my-pi/pi-utils";
 import { isBunTestRuntime } from "@oh-my-pi/pi-utils/env";
-import { tmuxMultiplexer } from "./multiplexers/tmux";
+import { tmuxMultiplexer, wrapTmuxPassthrough } from "./multiplexers/tmux";
 
-/** Wrap a control sequence in tmux's DCS passthrough envelope. */
-export function wrapTmuxPassthrough(payload: string): string {
-	return `\x1bPtmux;${payload.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
-}
+export { wrapTmuxPassthrough } from "./multiplexers/tmux";
 
 /** Pass a control sequence through tmux, leaving direct-terminal output unchanged. */
 export function wrapTmuxPassthroughIfNeeded(payload: string, env: NodeJS.ProcessEnv = Bun.env): string {
