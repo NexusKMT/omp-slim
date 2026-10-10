@@ -1,9 +1,11 @@
 import type { TerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-multiplexer";
+import type { terminalLaunchCapabilities } from "./providers";
 
 export interface PlacementCapabilities {
 	displayName: string;
 	execution?: readonly string[];
-	target?: "pane" | "session" | "tab" | "workspace" | "surface" | "window" | "worktree" | false;
+	/** Descriptive noun for the accepted target, or `false` when the placement rejects one. */
+	target?: string | false;
 	direction?: readonly string[];
 	floating?: true;
 	floatingDirectionExclusive?: true;
@@ -14,130 +16,16 @@ export interface PlacementCapabilities {
 	cwdShellInput?: true;
 }
 
-type MultiplexerCapabilities =
-	| { displayName: string; supported: false; reason: string }
-	| ({ displayName: string; supported: true } & (
-			| { pane: PlacementCapabilities; window?: PlacementCapabilities }
-			| { pane?: PlacementCapabilities; window: PlacementCapabilities }
-	  ));
+export type SupportedMultiplexerCapabilities = { displayName: string; supported: true } & (
+	| { pane: PlacementCapabilities; window?: PlacementCapabilities }
+	| { pane?: PlacementCapabilities; window: PlacementCapabilities }
+);
 
-/**
- * Canonical multiplexer launch capabilities and presentation metadata. Supported
- * entries drive request construction and user-facing names; unsupported taxonomy
- * entries remain explicit so adding a provider requires an intentional decision.
- */
-export const terminalLaunchCapabilities = {
-	herdr: {
-		displayName: "Herdr",
-		supported: true,
-		pane: {
-			displayName: "pane",
-			execution: ["shell-input"],
-			target: "pane",
-			direction: ["right", "down"],
-			focus: true,
-			shellGrammar: "posix",
-		},
-		window: {
-			displayName: "tab",
-			execution: ["shell-input"],
-			target: "workspace",
-			focus: true,
-			label: true,
-			shellGrammar: "posix",
-		},
-	},
-	tmux: {
-		displayName: "tmux",
-		supported: true,
-		pane: {
-			displayName: "pane",
-			execution: ["direct", "shell"],
-			target: "pane",
-			direction: ["right", "down"],
-			focus: true,
-		},
-		window: {
-			displayName: "window",
-			execution: ["direct", "shell"],
-			target: "session",
-			focus: true,
-		},
-	},
-	screen: {
-		displayName: "screen",
-		supported: false,
-		reason: "screen has no supported native launch command.",
-	},
-	zellij: {
-		displayName: "Zellij",
-		supported: true,
-		pane: {
-			displayName: "pane",
-			execution: ["direct"],
-			target: "tab",
-			direction: ["right", "down"],
-			floating: true,
-			floatingDirectionExclusive: true,
-			focus: true,
-			name: true,
-		},
-		window: {
-			displayName: "tab",
-			execution: ["direct"],
-			target: false,
-			focus: true,
-			name: true,
-		},
-	},
-	cmux: {
-		displayName: "CMUX",
-		supported: true,
-		pane: {
-			displayName: "pane",
-			execution: ["shell-input"],
-			target: "surface",
-			direction: ["right", "left", "up", "down"],
-			focus: true,
-			shellGrammar: "posix",
-			cwdShellInput: true,
-		},
-		window: {
-			displayName: "workspace",
-			execution: ["shell-input"],
-			target: "window",
-			focus: true,
-			name: true,
-			shellGrammar: "posix",
-		},
-	},
-	orca: {
-		displayName: "Orca",
-		supported: true,
-		pane: {
-			displayName: "pane",
-			execution: ["shell-input"],
-			target: "pane",
-			direction: ["right", "down"],
-			shellGrammar: "posix",
-			cwdShellInput: true,
-		},
-		window: {
-			displayName: "tab",
-			execution: ["shell-input"],
-			target: "worktree",
-			focus: true,
-			name: true,
-			shellGrammar: "posix",
-			cwdShellInput: true,
-		},
-	},
-	wmux: {
-		displayName: "wmux",
-		supported: false,
-		reason: "wmux launch is not implemented by this API.",
-	},
-} as const satisfies Record<TerminalMultiplexer, MultiplexerCapabilities>;
+export interface UnsupportedMultiplexerCapabilities {
+	displayName: string;
+	supported: false;
+	reason: string;
+}
 
 export type TerminalLaunchMultiplexer = {
 	[M in TerminalMultiplexer]: (typeof terminalLaunchCapabilities)[M] extends { supported: true } ? M : never;
@@ -190,18 +78,15 @@ type RequestOptions<C> = TargetOption<C> &
 	FocusOption<C> &
 	ShellGrammarOption<C>;
 
-type RequestForPlacement<
-	Multiplexer extends TerminalLaunchMultiplexer,
-	Placement extends TerminalLaunchPlacement,
-	C,
-> = {
+type RequestForPlacement<Multiplexer extends TerminalMultiplexer, Placement extends TerminalLaunchPlacement, C> = {
 	multiplexer: Multiplexer;
 	placement: Placement;
 	command: readonly string[];
 	cwd: string;
 } & RequestOptions<C>;
 
-type RequestsForEntry<Multiplexer extends TerminalLaunchMultiplexer, Entry> = {
+/** Requests a provider accepts, derived from that provider's own capability entry. */
+export type TerminalLaunchRequestFor<Multiplexer extends TerminalMultiplexer, Entry> = {
 	[Placement in Extract<keyof Entry, TerminalLaunchPlacement>]: RequestForPlacement<
 		Multiplexer,
 		Placement,
@@ -209,15 +94,13 @@ type RequestsForEntry<Multiplexer extends TerminalLaunchMultiplexer, Entry> = {
 	>;
 }[Extract<keyof Entry, TerminalLaunchPlacement>];
 
-type RequestsFor<Multiplexer extends TerminalLaunchMultiplexer> =
-	(typeof terminalLaunchCapabilities)[Multiplexer] extends infer Entry
-		? Entry extends { supported: true }
-			? RequestsForEntry<Multiplexer, Entry>
-			: never
-		: never;
+/** Launch requests per supported provider, derived from the canonical capability map. */
+export type TerminalLaunchRequestMap = {
+	[M in TerminalLaunchMultiplexer]: TerminalLaunchRequestFor<M, (typeof terminalLaunchCapabilities)[M]>;
+};
 
 /** Requests are derived from the canonical capability map, excluding unsupported providers and impossible options. */
-export type TerminalLaunchRequest = { [M in TerminalLaunchMultiplexer]: RequestsFor<M> }[TerminalLaunchMultiplexer];
+export type TerminalLaunchRequest = TerminalLaunchRequestMap[TerminalLaunchMultiplexer];
 
 export interface TerminalLaunchResult {
 	multiplexer: TerminalLaunchMultiplexer;
@@ -237,14 +120,24 @@ export type TerminalLaunchCliRunner = (argv: readonly string[], cwd: string) => 
 /** Shared runtime inputs supplied to every provider backend. */
 export interface TerminalLaunchBackendContext {
 	environment: NodeJS.ProcessEnv;
+	platform: NodeJS.Platform;
 	runCli: TerminalLaunchCliRunner;
 }
 
-/** Typed contract implemented by each provider-specific backend module. */
-export type TerminalLaunchBackend<Multiplexer extends TerminalLaunchMultiplexer> = (
-	request: Extract<TerminalLaunchRequest, { multiplexer: Multiplexer }>,
+/** Backend that executes the requests its provider's capability entry allows. */
+export type TerminalLaunchBackend<Multiplexer extends TerminalMultiplexer, Capabilities> = (
+	request: TerminalLaunchRequestFor<Multiplexer, Capabilities>,
 	context: TerminalLaunchBackendContext,
 ) => Promise<TerminalLaunchResult>;
+
+/** A supported provider's launch capabilities and the backend that executes them. */
+export interface TerminalLaunchProvider<
+	Multiplexer extends TerminalMultiplexer,
+	Capabilities extends SupportedMultiplexerCapabilities,
+> {
+	capabilities: Capabilities;
+	launch: TerminalLaunchBackend<Multiplexer, Capabilities>;
+}
 
 /** Sanitized launch failure. Messages deliberately omit command argv, stdout, and stderr. */
 export class TerminalLaunchError extends Error {
@@ -263,5 +156,6 @@ export class TerminalLaunchError extends Error {
 /** @internal Dependency seam for deterministic CLI behavior tests. */
 export interface TerminalLaunchDependencies {
 	environment?: () => NodeJS.ProcessEnv;
+	platform?: NodeJS.Platform;
 	runCli?: TerminalLaunchCliRunner;
 }

@@ -1,6 +1,28 @@
 import { quotePosixArgvAsciiSafe } from "../../utils/shell-quote";
 import { launchError, parseJson, runStep } from "./shared";
-import type { TerminalLaunchBackend } from "./types";
+import type { SupportedMultiplexerCapabilities, TerminalLaunchBackend, TerminalLaunchProvider } from "./types";
+
+const capabilities = {
+	displayName: "CMUX",
+	supported: true,
+	pane: {
+		displayName: "pane",
+		execution: ["shell-input"],
+		target: "surface",
+		direction: ["right", "left", "up", "down"],
+		focus: true,
+		shellGrammar: "posix",
+		cwdShellInput: true,
+	},
+	window: {
+		displayName: "workspace",
+		execution: ["shell-input"],
+		target: "window",
+		focus: true,
+		name: true,
+		shellGrammar: "posix",
+	},
+} as const satisfies SupportedMultiplexerCapabilities;
 
 function cmuxPayload(value: Record<string, unknown>): Record<string, unknown> {
 	if (value.ok === false) return value;
@@ -16,7 +38,10 @@ function cmuxId(value: Record<string, unknown>, ...keys: string[]): string | und
 	return undefined;
 }
 
-export const launchCmux: TerminalLaunchBackend<"cmux"> = async (request, { environment: env, runCli }) => {
+const launchCmux: TerminalLaunchBackend<"cmux", typeof capabilities> = async (
+	request,
+	{ environment: env, runCli },
+) => {
 	if (!env.CMUX_WORKSPACE_ID && !env.CMUX_SURFACE_ID && !request.target) {
 		throw launchError(request, "capability", "CMUX launch requires a CMUX context or explicit target ID.");
 	}
@@ -63,4 +88,9 @@ export const launchCmux: TerminalLaunchBackend<"cmux"> = async (request, { envir
 		placement: "window",
 		id: cmuxId(payload, "workspace_id", "workspace_ref"),
 	};
+};
+
+export const cmuxLaunchProvider: TerminalLaunchProvider<"cmux", typeof capabilities> = {
+	capabilities,
+	launch: launchCmux,
 };

@@ -1,6 +1,34 @@
 import { hasTerminalMultiplexerSession } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 import { launchError, oneLineId, runStep } from "./shared";
-import type { TerminalLaunchBackend, TerminalLaunchCliRunner, TerminalLaunchRequest } from "./types";
+import type {
+	SupportedMultiplexerCapabilities,
+	TerminalLaunchBackend,
+	TerminalLaunchCliRunner,
+	TerminalLaunchProvider,
+	TerminalLaunchRequest,
+} from "./types";
+
+const capabilities = {
+	displayName: "Zellij",
+	supported: true,
+	pane: {
+		displayName: "pane",
+		execution: ["direct"],
+		target: "tab",
+		direction: ["right", "down"],
+		floating: true,
+		floatingDirectionExclusive: true,
+		focus: true,
+		name: true,
+	},
+	window: {
+		displayName: "tab",
+		execution: ["direct"],
+		target: false,
+		focus: true,
+		name: true,
+	},
+} as const satisfies SupportedMultiplexerCapabilities;
 
 function isTabInformation(value: unknown): value is { tab_id: string | number } {
 	return (
@@ -34,7 +62,7 @@ async function requireExistingTargetTab(
 	}
 }
 
-export const launchZellij: TerminalLaunchBackend<"zellij"> = async (request, { environment, runCli }) => {
+const launchZellij: TerminalLaunchBackend<"zellij", typeof capabilities> = async (request, { environment, runCli }) => {
 	if (!hasTerminalMultiplexerSession("zellij", environment)) {
 		throw launchError(request, "capability", "zellij launch requires an active Zellij session.");
 	}
@@ -70,4 +98,9 @@ export const launchZellij: TerminalLaunchBackend<"zellij"> = async (request, { e
 		throw launchError(request, `action ${operation}`, `zellij ${operation} returned an invalid ID.`);
 	}
 	return { multiplexer: "zellij", placement: request.placement, id };
+};
+
+export const zellijLaunchProvider: TerminalLaunchProvider<"zellij", typeof capabilities> = {
+	capabilities,
+	launch: launchZellij,
 };

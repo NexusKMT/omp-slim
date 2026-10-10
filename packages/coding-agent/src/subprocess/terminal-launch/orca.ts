@@ -1,6 +1,35 @@
 import { quotePosixArgument, quotePosixArgv } from "../../utils/shell-quote";
 import { launchError, nestedString, parseJson, runStep } from "./shared";
-import type { TerminalLaunchBackend, TerminalLaunchCliRunner, TerminalLaunchRequest } from "./types";
+import type {
+	SupportedMultiplexerCapabilities,
+	TerminalLaunchBackend,
+	TerminalLaunchCliRunner,
+	TerminalLaunchProvider,
+	TerminalLaunchRequest,
+	TerminalLaunchRequestFor,
+} from "./types";
+
+const capabilities = {
+	displayName: "Orca",
+	supported: true,
+	pane: {
+		displayName: "pane",
+		execution: ["shell-input"],
+		target: "pane",
+		direction: ["right", "down"],
+		shellGrammar: "posix",
+		cwdShellInput: true,
+	},
+	window: {
+		displayName: "tab",
+		execution: ["shell-input"],
+		target: "worktree",
+		focus: true,
+		name: true,
+		shellGrammar: "posix",
+		cwdShellInput: true,
+	},
+} as const satisfies SupportedMultiplexerCapabilities;
 
 function orcaEnvelope(request: TerminalLaunchRequest, operation: string, stdout: string): Record<string, unknown> {
 	const payload = parseJson(request, operation, stdout);
@@ -28,7 +57,7 @@ function terminalIdentityPart(value: unknown): string | undefined {
 }
 
 async function resolvePaneHandle(
-	request: Extract<TerminalLaunchRequest, { multiplexer: "orca"; placement: "pane" }>,
+	request: Extract<TerminalLaunchRequestFor<"orca", typeof capabilities>, { placement: "pane" }>,
 	cli: string,
 	environment: NodeJS.ProcessEnv,
 	runCli: TerminalLaunchCliRunner,
@@ -115,7 +144,7 @@ async function resolvePaneHandle(
 	return match;
 }
 
-export const launchOrca: TerminalLaunchBackend<"orca"> = async (request, { environment, runCli }) => {
+const launchOrca: TerminalLaunchBackend<"orca", typeof capabilities> = async (request, { environment, runCli }) => {
 	const cli = process.platform === "linux" ? "orca-ide" : "orca";
 	const shellCommand = `cd ${quotePosixArgument(request.cwd)} && ${quotePosixArgv(request.command)}`;
 
@@ -158,4 +187,9 @@ export const launchOrca: TerminalLaunchBackend<"orca"> = async (request, { envir
 		placement: "window",
 		id: requiredHandle(request, "terminal create", payload, "result", "terminal", "handle"),
 	};
+};
+
+export const orcaLaunchProvider: TerminalLaunchProvider<"orca", typeof capabilities> = {
+	capabilities,
+	launch: launchOrca,
 };

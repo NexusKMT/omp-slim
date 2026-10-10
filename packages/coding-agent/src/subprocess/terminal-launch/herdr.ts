@@ -1,9 +1,33 @@
 import { hasTerminalMultiplexerSession } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 import { quotePosixArgv } from "../../utils/shell-quote";
 import { launchError, nestedString, parseJson, runStep } from "./shared";
-import type { TerminalLaunchBackend } from "./types";
+import type { SupportedMultiplexerCapabilities, TerminalLaunchBackend, TerminalLaunchProvider } from "./types";
 
-export const launchHerdr: TerminalLaunchBackend<"herdr"> = async (request, { environment: env, runCli }) => {
+const capabilities = {
+	displayName: "Herdr",
+	supported: true,
+	pane: {
+		displayName: "pane",
+		execution: ["shell-input"],
+		target: "pane",
+		direction: ["right", "down"],
+		focus: true,
+		shellGrammar: "posix",
+	},
+	window: {
+		displayName: "tab",
+		execution: ["shell-input"],
+		target: "workspace",
+		focus: true,
+		label: true,
+		shellGrammar: "posix",
+	},
+} as const satisfies SupportedMultiplexerCapabilities;
+
+const launchHerdr: TerminalLaunchBackend<"herdr", typeof capabilities> = async (
+	request,
+	{ environment: env, runCli },
+) => {
 	if (!hasTerminalMultiplexerSession("herdr", env)) {
 		throw launchError(request, "capability", "Herdr launch requires an active Herdr pane or workspace.");
 	}
@@ -49,4 +73,9 @@ export const launchHerdr: TerminalLaunchBackend<"herdr"> = async (request, { env
 	if (!tabId || !paneId) throw launchError(request, "tab create", "Herdr tab create returned incomplete IDs.");
 	await runStep(request, "pane run", ["herdr", "pane", "run", paneId, shellCommand], request.cwd, runCli);
 	return { multiplexer: "herdr", placement: "window", id: tabId };
+};
+
+export const herdrLaunchProvider: TerminalLaunchProvider<"herdr", typeof capabilities> = {
+	capabilities,
+	launch: launchHerdr,
 };

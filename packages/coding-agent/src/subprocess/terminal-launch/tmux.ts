@@ -1,7 +1,25 @@
 import { hasTerminalMultiplexerSession } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 import { quotePosixArgv } from "../../utils/shell-quote";
 import { launchError, oneLineId, runStep } from "./shared";
-import type { TerminalLaunchBackend } from "./types";
+import type { SupportedMultiplexerCapabilities, TerminalLaunchBackend, TerminalLaunchProvider } from "./types";
+
+const capabilities = {
+	displayName: "tmux",
+	supported: true,
+	pane: {
+		displayName: "pane",
+		execution: ["direct", "shell"],
+		target: "pane",
+		direction: ["right", "down"],
+		focus: true,
+	},
+	window: {
+		displayName: "window",
+		execution: ["direct", "shell"],
+		target: "session",
+		focus: true,
+	},
+} as const satisfies SupportedMultiplexerCapabilities;
 
 function escapeTmuxArgument(value: string): string {
 	// tmux consumes the escape before a trailing separator; retain existing backslashes.
@@ -11,7 +29,10 @@ function escapeTmuxArgument(value: string): string {
 	return `${value.slice(0, -backslashes - 1)}${"\\".repeat(backslashes + 1)};`;
 }
 
-export const launchTmux: TerminalLaunchBackend<"tmux"> = async (request, { environment: env, runCli }) => {
+const launchTmux: TerminalLaunchBackend<"tmux", typeof capabilities> = async (
+	request,
+	{ environment: env, runCli },
+) => {
 	const inTmux = hasTerminalMultiplexerSession("tmux", env);
 	if (!inTmux && !request.target) {
 		throw launchError(request, "capability", "tmux launch requires an active TMUX session or an explicit target.");
@@ -63,4 +84,9 @@ export const launchTmux: TerminalLaunchBackend<"tmux"> = async (request, { envir
 	const validId = request.placement === "pane" ? /^%\d+$/u.test(id) : /^@\d+$/u.test(id);
 	if (!validId) throw launchError(request, operation, `tmux ${operation} returned an invalid ID.`);
 	return { multiplexer: "tmux", placement: request.placement, id };
+};
+
+export const tmuxLaunchProvider: TerminalLaunchProvider<"tmux", typeof capabilities> = {
+	capabilities,
+	launch: launchTmux,
 };

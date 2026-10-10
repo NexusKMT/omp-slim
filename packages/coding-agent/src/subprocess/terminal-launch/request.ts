@@ -1,12 +1,12 @@
 import type { TerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-multiplexer";
-import { validateRequest } from "./shared";
-import {
-	terminalLaunchCapabilities,
-	type TerminalLaunchMultiplexer,
-	type TerminalLaunchPlacement,
-	type TerminalLaunchPlacementInfo,
-	type TerminalLaunchRequest,
+import { terminalLaunchCapabilities } from "./providers";
+import type {
+	TerminalLaunchMultiplexer,
+	TerminalLaunchPlacement,
+	TerminalLaunchPlacementInfo,
+	TerminalLaunchRequest,
 } from "./types";
+import { validateRequest } from "./validate";
 
 function isSupportedMultiplexer(multiplexer: TerminalMultiplexer): multiplexer is TerminalLaunchMultiplexer {
 	return terminalLaunchCapabilities[multiplexer].supported;
