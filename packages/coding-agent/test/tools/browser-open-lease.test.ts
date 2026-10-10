@@ -9,6 +9,7 @@
  * `CmuxSocketClient.prototype` is spied and no real socket / Chromium is used.
  */
 
+import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it, spyOn, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
@@ -268,7 +269,9 @@ describe("browser open — an abandoned browser acquisition does not hold up the
 	});
 
 	it("waits until a spawned app's abandoned acquisition has killed the app before looking for one to reuse", async () => {
-		const kind = { kind: "spawned" as const, path: "/bin/sh", args: ["-c", "exec sleep 30"] };
+		// A long-lived stand-in app that exists on every platform: this Bun binary sleeping.
+		const kind = { kind: "spawned" as const, path: process.execPath, args: ["-e", "await Bun.sleep(30_000)"] };
+		const cwd = os.tmpdir();
 		const events: string[] = [];
 		let lookups = 0;
 		spyOn(attach, "findReusableCdp").mockImplementation(async () => {
@@ -294,10 +297,10 @@ describe("browser open — an abandoned browser acquisition does not hold up the
 		const browser = { connected: true, disconnect: () => undefined } as unknown as Browser;
 
 		const owner = new AbortController();
-		const first = rejectionOf(registry.acquireBrowser(kind, { cwd: "/tmp", signal: owner.signal }));
+		const first = rejectionOf(registry.acquireBrowser(kind, { cwd, signal: owner.signal }));
 		await firstConnect.promise;
 		owner.abort();
-		const second = registry.acquireBrowser(kind, { cwd: "/tmp" });
+		const second = registry.acquireBrowser(kind, { cwd });
 		stalledConnect.resolve(browser);
 		for (let i = 0; i < 20; i++) await Promise.resolve();
 		killGate.resolve();
