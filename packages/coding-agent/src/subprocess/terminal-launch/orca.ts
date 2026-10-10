@@ -195,10 +195,16 @@ const launchOrca: TerminalLaunchBackend<"orca", typeof capabilities> = async (
 	argv.push(`--command=${shellCommand}`, "--json");
 	const output = await runStep(request, "terminal create", argv, request.cwd, runCli);
 	const payload = orcaEnvelope(request, "terminal create", output);
+	const id = requiredHandle(request, "terminal create", payload, "result", "terminal", "handle");
+	// Orca falls back to a background terminal when its UI cannot adopt the tab.
+	const background = nestedString(payload, "result", "terminal", "surface") === "background";
 	return {
 		multiplexer: "orca",
 		placement: "window",
-		id: requiredHandle(request, "terminal create", payload, "result", "terminal", "handle"),
+		id,
+		...(background
+			? { warning: "Orca could not show the tab; the command is running in a background terminal." }
+			: {}),
 	};
 };
 

@@ -1499,7 +1499,13 @@ export class CommandController {
 				return;
 			}
 
-			await dependencies.launchTerminal(launchPlan.request);
+			const result = await dependencies.launchTerminal(launchPlan.request);
+			if (result.warning) {
+				this.ctx.showWarning(
+					`Opened a fork in ${placementInfo.displayName}, but ${result.warning} This session continues here.`,
+				);
+				return;
+			}
 			this.ctx.showStatus(
 				`Opened a fork in ${placementInfo.displayName} (${placementInfo.placementLabel}); this session continues here.`,
 			);

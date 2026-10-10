@@ -107,6 +107,8 @@ export interface TerminalLaunchResult {
 	placement: TerminalLaunchPlacement;
 	/** Provider-native pane, terminal handle, tab, workspace, window, or session ID when the CLI reports one. */
 	id?: string;
+	/** Set when the command started but the provider could not show it where requested. */
+	warning?: string;
 }
 
 export interface TerminalLaunchCliResult {

@@ -1230,6 +1230,34 @@ describe("terminal launch dispatcher", () => {
 		expect(calls[0]?.argv[0]).toBe(cli);
 	});
 
+	it("reports Orca's background-terminal fallback instead of a visible tab", async () => {
+		const { launch } = createHarness({ ORCA_WORKTREE_ID: "worktree-1" }, [
+			{
+				stdout: JSON.stringify({
+					ok: true,
+					result: { terminal: { handle: "term-bg", surface: "background", warning: "UI not attached" } },
+				}),
+				exitCode: 0,
+			},
+			{
+				stdout: JSON.stringify({ ok: true, result: { terminal: { handle: "term-visible", surface: "visible" } } }),
+				exitCode: 0,
+			},
+		]);
+		const request = {
+			multiplexer: "orca",
+			placement: "window",
+			command: ["omp"],
+			cwd: "/repo",
+			shellGrammar: "posix",
+		} as const;
+
+		const background = await launch(request);
+		expect(background.id).toBe("term-bg");
+		expect(background.warning).toContain("background terminal");
+		expect(await launch(request)).toEqual({ multiplexer: "orca", placement: "window", id: "term-visible" });
+	});
+
 	it("fails closed when an Orca pane identity is unavailable or cannot be uniquely matched", async () => {
 		const noPaneKey = createHarness({ ORCA_WORKTREE_ID: "worktree-1" }, []);
 		await expect(
