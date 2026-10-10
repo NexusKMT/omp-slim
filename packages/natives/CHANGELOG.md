@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Fixed the macOS computer tool failing with a generic `AxFailed` (`AXError(-25202)`) when a ref named an element the app had since removed; it now throws `StaleRef`, so the model re-reads the tree instead of retrying
-- Fixed `el.press()` and `el.perform()` on macOS reporting `AxFailed` for a press whose app did not reply in time, such as one that opened a modal dialog; they now throw `AxUnconfirmed`, saying the action may have taken effect, so agents observe before pressing again.
+- Fixed the macOS computer tool failing with a generic `AxFailed` (`AXError(-25202)`) when a ref named an element the app had since removed; it now throws `StaleRef`, so the model re-reads the tree instead of retrying ([#15156](https://github.com/can1357/oh-my-pi/pull/15156) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed `el.press()` and `el.perform()` on macOS reporting `AxFailed` for a press whose app did not reply in time, such as one that opened a modal dialog; they now throw `AxUnconfirmed`, saying the action may have taken effect, so agents observe before pressing again ([#15156](https://github.com/can1357/oh-my-pi/pull/15156) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.8.7] - 2026-10-09
 
