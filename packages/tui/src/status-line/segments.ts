@@ -1098,7 +1098,7 @@ const VIM_MODE_ICON_KEYS: Record<NonNullable<SegmentContext["vim"]>["mode"], Sym
 	normal: "icon.vimNormal",
 	visual: "icon.vimVisual",
 	"visual-line": "icon.vimVisualLine",
-	replace: "icon.vimNormal",
+	replace: "icon.vimReplace",
 };
 
 const VIM_MODE_COLORS: Record<NonNullable<SegmentContext["vim"]>["mode"], ThemeColor> = {

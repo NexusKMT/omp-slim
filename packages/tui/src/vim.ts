@@ -123,66 +123,6 @@ function wordEnd(text: string, col: number): number {
 	return Math.max(col, prevGraphemeStart(text, end));
 }
 
-function isBlankGrapheme(segment: string): boolean {
-	return charClass(segment, true) === 0;
-}
-
-function lineGraphemes(text: string): { index: number; segment: string }[] {
-	return [...segmenter.segment(text)];
-}
-
-function graphemeIndexAt(segs: { index: number; segment: string }[], col: number): number {
-	let i = 0;
-	while (i < segs.length && segs[i]!.index + segs[i]!.segment.length <= col) i++;
-	return i;
-}
-
-/** Vim `W`: start of the next whitespace-delimited WORD on this line. */
-function bigWordForward(text: string, col: number): number {
-	const segs = lineGraphemes(text);
-	let i = graphemeIndexAt(segs, col);
-	if (i >= segs.length) return text.length;
-	if (!isBlankGrapheme(segs[i]!.segment)) {
-		while (i < segs.length && !isBlankGrapheme(segs[i]!.segment)) i++;
-	}
-	while (i < segs.length && isBlankGrapheme(segs[i]!.segment)) i++;
-	return i < segs.length ? segs[i]!.index : text.length;
-}
-
-/** Vim `E`: last grapheme of this WORD, or of the next one if already on that end. */
-function bigWordEnd(text: string, col: number): number {
-	const segs = lineGraphemes(text);
-	if (segs.length === 0) return 0;
-	let i = graphemeIndexAt(segs, col);
-	if (i >= segs.length) return segs[segs.length - 1]!.index;
-	const onWord = !isBlankGrapheme(segs[i]!.segment);
-	const atEnd = onWord && (i + 1 >= segs.length || isBlankGrapheme(segs[i + 1]!.segment));
-	if (!onWord || atEnd) {
-		i++;
-		while (i < segs.length && isBlankGrapheme(segs[i]!.segment)) i++;
-	}
-	if (i >= segs.length) return segs[segs.length - 1]!.index;
-	while (i + 1 < segs.length && !isBlankGrapheme(segs[i + 1]!.segment)) i++;
-	return segs[i]!.index;
-}
-
-/** Vim `B`: start of this WORD, or of the previous one if already there. */
-function bigWordBackward(text: string, col: number): number {
-	const segs = lineGraphemes(text);
-	if (col <= 0 || segs.length === 0) return 0;
-	let i = graphemeIndexAt(segs, col);
-	if (i >= segs.length) i = segs.length - 1;
-	const atStart = segs[i]!.index === col;
-	if (atStart && !isBlankGrapheme(segs[i]!.segment) && i > 0 && !isBlankGrapheme(segs[i - 1]!.segment)) {
-		while (i > 0 && !isBlankGrapheme(segs[i - 1]!.segment)) i--;
-		return segs[i]!.index;
-	}
-	if (atStart) i--;
-	while (i >= 0 && isBlankGrapheme(segs[i]!.segment)) i--;
-	while (i > 0 && !isBlankGrapheme(segs[i - 1]!.segment)) i--;
-	return i >= 0 ? segs[i]!.index : 0;
-}
-
 /** End-exclusive span an `iw`/`a(`-style text object resolves to. */
 interface TextObjectRange {
 	from: VimPosition;
@@ -718,27 +658,14 @@ export class VimState {
 				for (let i = 0; i < count; i++) col = wordEnd(line, col);
 				return { to: at(col), inclusive: true, linewise: false };
 			}
-			case "W": {
-				let col = buf.cursorCol;
-				// Same quirk as `cw`: `cW` changes to the end of the WORD, not through the blank after it.
-				if (this.#operator === "c" && charClass(line.charAt(col), true) !== 0) {
-					for (let i = 0; i < count; i++) col = bigWordEnd(line, col);
-					return { to: at(col), inclusive: true, linewise: false };
-				}
-				for (let i = 0; i < count; i++) col = bigWordForward(line, col);
-				return { to: at(col), inclusive: false, linewise: false };
-			}
-			case "B": {
-				let col = buf.cursorCol;
-				for (let i = 0; i < count; i++) col = bigWordBackward(line, col);
-				return { to: at(col), inclusive: false, linewise: false };
-			}
-			case "E": {
-				let col = buf.cursorCol;
-				for (let i = 0; i < count; i++) col = bigWordEnd(line, col);
-				return { to: at(col), inclusive: true, linewise: false };
-			}
 			case "%": {
+				// `{count}%` jumps to that percentage of the buffer, linewise, like Vim.
+				if (this.#count.length > 0) {
+					if (count > 100) return null;
+					const target = Math.max(0, Math.floor((count * buf.lines.length + 99) / 100) - 1);
+					const text = buf.lines[target] ?? "";
+					return { to: { line: target, col: firstNonBlank(text) }, inclusive: false, linewise: true };
+				}
 				const to = matchDelimiter(buf);
 				return to === null ? null : { to, inclusive: true, linewise: false };
 			}
@@ -818,10 +745,12 @@ export class VimState {
 
 		if (operator === null) {
 			// `$` parks on the last grapheme in Normal mode but must still be able to select the
-			// final character in Visual mode, where the cursor is allowed one past it.
-			const to = this.visual
-				? { line: motion.to.line, col: Math.min(motion.to.col, (buf.lines[motion.to.line] ?? "").length) }
-				: this.#clampNormal(buf, motion.to);
+			// final character in Visual mode, where the cursor is allowed one past it. Replace mode
+			// may also sit past the end, so typing there appends instead of overwriting the last grapheme.
+			const to =
+				this.visual || this.mode === "replace"
+					? { line: motion.to.line, col: Math.min(motion.to.col, (buf.lines[motion.to.line] ?? "").length) }
+					: this.#clampNormal(buf, motion.to);
 			return [{ kind: "move", to }];
 		}
 

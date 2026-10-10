@@ -781,32 +781,6 @@ describe("Editor vim mode", () => {
 		});
 	});
 
-	describe("WORD motions", () => {
-		it("treats punctuation as part of the WORD", () => {
-			const editor = vimEditor("foo-bar baz");
-			editor.handleInput("W");
-			expect(cursor(editor)).toEqual({ line: 0, col: 8 });
-			editor.handleInput("B");
-			expect(cursor(editor)).toEqual({ line: 0, col: 0 });
-			editor.handleInput("E");
-			expect(cursor(editor)).toEqual({ line: 0, col: 6 });
-		});
-
-		it("deletes a WORD and the blank after it, and changes only to its end", () => {
-			const deleted = vimEditor("foo-bar baz");
-			deleted.handleInput("d");
-			deleted.handleInput("W");
-			expect(deleted.getText()).toBe("baz");
-
-			const changed = vimEditor("foo-bar baz");
-			changed.handleInput("c");
-			changed.handleInput("W");
-			expect(changed.vimMode).toBe("insert");
-			changed.handleInput("x");
-			expect(changed.getText()).toBe("x baz");
-		});
-	});
-
 	describe("replace", () => {
 		it("replaces the character under the cursor and stays in normal mode", () => {
 			const editor = vimEditor("abcd");
@@ -858,6 +832,25 @@ describe("Editor vim mode", () => {
 			editor.handleInput("YZ");
 			expect(editor.getText()).toBe("aYZ");
 		});
+
+		it("keeps appending after Right at the end of the line", () => {
+			const editor = vimEditor("abc");
+			editor.handleInput("R");
+			editor.handleInput("xyz");
+			editor.handleInput("\x1b[C");
+			editor.handleInput("w");
+			expect(editor.getText()).toBe("xyzw");
+		});
+
+		it("does not restore a replaced character into text set after the overwrite", () => {
+			const editor = vimEditor("abcd");
+			editor.handleInput("R");
+			editor.handleInput("xy");
+			editor.setText("hyllo");
+			for (let i = 0; i < 3; i++) editor.handleInput("\x1b[D");
+			editor.handleInput("\x7f");
+			expect(editor.getText()).toBe("hyllo");
+		});
 	});
 
 	describe("bracket match", () => {
@@ -907,6 +900,18 @@ describe("Editor vim mode", () => {
 			escaped.handleInput("%");
 			expect(cursor(escaped)).toEqual({ line: 0, col: 0 });
 			expect(escaped.getText()).toBe('say \\"hi\\"');
+		});
+
+		it("goes to a percentage of the buffer when counted", () => {
+			const editor = vimEditor("(a)\nb\n  c\nd");
+			editor.handleInput("5");
+			editor.handleInput("0");
+			editor.handleInput("%");
+			expect(cursor(editor)).toEqual({ line: 1, col: 0 });
+			editor.handleInput("7");
+			editor.handleInput("5");
+			editor.handleInput("%");
+			expect(cursor(editor)).toEqual({ line: 2, col: 2 });
 		});
 	});
 
@@ -986,6 +991,16 @@ describe("Editor vim mode", () => {
 			last.handleInput("J");
 			expect(last.getText()).toBe("only");
 		});
+
+		it("adds no space when the joined line is empty or blank", () => {
+			const empty = vimEditor("foo\n\nbar");
+			empty.handleInput("J");
+			expect(empty.getText()).toBe("foo\nbar");
+
+			const blank = vimEditor("foo\n   \nbar");
+			blank.handleInput("J");
+			expect(blank.getText()).toBe("foo\nbar");
+		});
 	});
 
 	describe("indent", () => {
@@ -1034,6 +1049,13 @@ describe("Editor vim mode", () => {
 			expect(editor.getText()).toBe("  one\n  two\n\nthree");
 		});
 
+		it("leaves empty lines unindented", () => {
+			const editor = vimEditor("one\n\ntwo");
+			editor.handleInput(">");
+			editor.handleInput("G");
+			expect(editor.getText()).toBe("  one\n\n  two");
+		});
+
 		it("cancels a pending r on an arrow, and treats space as a find target", () => {
 			const replaced = vimEditor("abc");
 			replaced.handleInput("r");
@@ -1045,6 +1067,18 @@ describe("Editor vim mode", () => {
 			found.handleInput("f");
 			found.handleInput(" ");
 			expect(cursor(found)).toEqual({ line: 0, col: 1 });
+		});
+
+		it("cancels a pending command when Enter submits", () => {
+			const submitted: string[] = [];
+			const editor = vimEditor("abc");
+			editor.onSubmit = text => {
+				submitted.push(text);
+			};
+			editor.handleInput("r");
+			editor.handleInput("\r");
+			expect(submitted).toEqual(["abc"]);
+			expect(editor.vimPending).toBe("");
 		});
 
 		it("overwrites the rest of a batched replace", () => {

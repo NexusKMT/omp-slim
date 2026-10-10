@@ -2275,9 +2275,14 @@ export class Editor implements Component, Focusable {
 		if (awaitingTarget && mapped !== undefined) return this.#runVimKey("escape", vim);
 		if (mapped !== undefined) return this.#runVimKey(mapped, vim);
 
-		// Control chords carry no printable text and stay with the host.
+		// Control chords, Enter, and Tab carry no printable text and stay with the host. A half-typed
+		// command (`r`, `f`, `d`) is cancelled first, like character-jump mode, so it cannot outlive a
+		// submit and swallow the first key of the next prompt.
 		const printable = extractPrintableText(data);
-		if (!printable) return false;
+		if (!printable) {
+			if (vim.pending) this.#runVimKey("escape", vim);
+			return false;
+		}
 
 		// Batched stdin can deliver several keystrokes at once, so replay the run one grapheme at a
 		// time. A command that drops out of Normal mode part-way (`iabc`, `Rxx`) turns the rest of
@@ -2387,7 +2392,12 @@ export class Editor implements Component, Focusable {
 		const line = this.#state.lines[lineIdx] ?? "";
 		const col = this.#state.cursorCol;
 		if (this.#atomicTokenAt(line, col)) return;
-		if (this.#lastAction !== "replace") this.#recordUndoState();
+		// Any other edit since the last overwrite (setText, `x`, paste) resets `#lastAction`, which
+		// makes the logged columns meaningless; start a fresh undo step and a fresh log.
+		if (this.#lastAction !== "replace") {
+			this.#recordUndoState();
+			this.#replaceLog.length = 0;
+		}
 		this.#lastAction = "replace";
 		const end = col >= line.length ? col : nextGraphemeStart(line, col);
 		const removed = line.slice(col, end);
@@ -2398,6 +2408,10 @@ export class Editor implements Component, Focusable {
 	}
 
 	#replaceBackspace(): void {
+		if (this.#lastAction !== "replace") {
+			this.#replaceLog.length = 0;
+			return;
+		}
 		const entry = this.#replaceLog.pop();
 		if (!entry) return;
 		const line = this.#state.lines[entry.line] ?? "";
@@ -2429,9 +2443,13 @@ export class Editor implements Component, Focusable {
 			const next = raw.slice(trim);
 			const at = text.length;
 			if (i === start + 1) cursor = at;
-			// Vim join: no extra space after whitespace or before `)`, two spaces after `.!?`.
+			// Vim join: no extra space after whitespace, before `)`, or for an empty line; two spaces after `.!?`.
 			const gap =
-				text.length === 0 || /[ \t]$/.test(text) || next.startsWith(")") ? "" : /[.!?]$/.test(text) ? "  " : " ";
+				text.length === 0 || next.length === 0 || /[ \t]$/.test(text) || next.startsWith(")")
+					? ""
+					: /[.!?]$/.test(text)
+						? "  "
+						: " ";
 			text += gap + next;
 		}
 		this.#state.lines.splice(start, last - start + 1, text);
@@ -2445,9 +2463,10 @@ export class Editor implements Component, Focusable {
 		const first = Math.max(0, Math.min(fromLine, this.#state.lines.length - 1));
 		const last = Math.max(first, Math.min(toLine, this.#state.lines.length - 1));
 		// Two spaces, not Vim's shiftwidth of 8: a prompt draft should not jump a tab stop. A leading tab shifts by one tab so the line keeps its own indent style.
+		// Empty lines stay empty, as in Vim, so shifting a paragraph never leaves trailing blanks.
 		const next = this.#state.lines.slice(first, last + 1).map(line => {
 			const text = line ?? "";
-			if (!out) return (text.startsWith("\t") ? "\t" : "  ") + text;
+			if (!out) return text.length === 0 ? text : (text.startsWith("\t") ? "\t" : "  ") + text;
 			if (text.startsWith("\t")) return text.slice(1);
 			const spaces = /^ */.exec(text)?.[0].length ?? 0;
 			return text.slice(Math.min(2, spaces));
