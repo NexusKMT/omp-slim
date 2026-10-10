@@ -1,3 +1,4 @@
+import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import type { TUI } from "@oh-my-pi/pi-tui";
 import { AnnotationOverlay } from "@oh-my-pi/pi-tui/overlays/annotation-overlay";
 import type { CustomCommandContext } from "../../../../extensibility/custom-commands/types";
@@ -78,7 +79,9 @@ async function editReviewedFile(tui: TUI, ctx: CustomCommandContext, overlay: An
 	const relative = overlay.reviewFilePath();
 	if (!relative) throw new Error("No file to open.");
 	const editor = requireEditor();
-	const absolute = resolveReadPath(relative, ctx.sessionManager.getCwd?.() ?? ctx.cwd);
+	// Diff paths are repository-relative, so resolve them from the repo root, not the session cwd.
+	const cwd = ctx.sessionManager.getCwd?.() ?? ctx.cwd;
+	const absolute = resolveReadPath(relative, vcs.repo(cwd)?.root() ?? cwd);
 	if (!(await Bun.file(absolute).exists())) {
 		throw new Error(`${relative} is not on disk. The review still uses the frozen diff.`);
 	}

@@ -441,6 +441,20 @@ describe("AnnotationOverlay", () => {
 		expect(overlay.getTextAnnotations()).toEqual([{ scope: "line", line: 1, quote: "beta", note: "on beta" }]);
 	});
 
+	it("does not resurrect a dropped line note when undoing after the source was replaced", () => {
+		const overlay = makeTextOverlay({ id: "prompt", kind: "prompt", label: "Text prompt", text: "old" });
+		render(overlay);
+		overlay.handleInput("a");
+		overlay.handleInput("on old");
+		overlay.handleInput(ENTER);
+		overlay.handleInput("A");
+		overlay.handleInput("whole");
+		overlay.handleInput(ENTER);
+		expect(overlay.replaceTextSource("new")).toBe(1);
+		overlay.handleInput("u");
+		expect(overlay.getTextAnnotations()).toEqual([{ scope: "text", note: "whole" }]);
+	});
+
 	it("returns undefined on cancel without a review result", () => {
 		const completed: Array<CodeReviewOverlayResult | undefined> = [];
 		const overlay = makeDiffOverlay(oneLineFiles, {

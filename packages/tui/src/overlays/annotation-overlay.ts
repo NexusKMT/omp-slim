@@ -355,6 +355,8 @@ export class AnnotationOverlay implements Focusable {
 			dropped++;
 		}
 		this.#textAnnotations = kept;
+		// Earlier snapshots hold notes anchored to the old text; undo must not resurrect them.
+		this.#undoStack = [];
 		this.#annotationRev++;
 		this.#nativeBody = undefined;
 		return dropped;

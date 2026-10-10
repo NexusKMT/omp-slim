@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, spyOn, vi } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
@@ -744,21 +744,24 @@ describe("/annotate contracts", () => {
 		}
 	});
 
-	it("opens the current diff file in $EDITOR and keeps the frozen snapshot", async () => {
+	it("opens the current diff file from the repository root when the session cwd is a subdirectory", async () => {
 		const previous = getKeybindings();
 		setKeybindings(KeybindingsManager.inMemory({ "app.editor.external": "ctrl+e" }));
-		const dir = await mkdtemp(join(tmpdir(), "annotate-editor-"));
+		const dir = await realpath(await mkdtemp(join(tmpdir(), "annotate-editor-")));
+		const cwd = join(dir, "packages");
 		const opened = Promise.withResolvers<void>();
 		const openEditorOnPath = spyOn(externalEditor, "openEditorOnPath").mockImplementation(() => opened.promise);
 		spyOn(externalEditor, "getEditorCommand").mockReturnValue("vim");
 		const notify = vi.fn();
 		try {
+			await Bun.$`git init -q ${dir}`.quiet();
+			await mkdir(cwd);
 			await mkdir(join(dir, "src"));
 			await writeFile(join(dir, "src/value.ts"), "const value = 2;\n");
 			await showCodeReviewOverlay(
 				{
-					cwd: dir,
-					sessionManager: { getCwd: () => dir },
+					cwd,
+					sessionManager: { getCwd: () => cwd },
 					ui: {
 						notify,
 						custom: async factory => {
