@@ -1,4 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { getProjectDir, removeSyncWithRetries, setProjectDir } from "@oh-my-pi/pi-utils";
 import type { TspProps } from "@oh-my-pi/pi-wire";
 import type { NativeChild, NativeNode } from "../src/native/node";
 import { setNativeRendering } from "../src/native/state";
@@ -69,14 +73,35 @@ describe("native composer facts", () => {
 
 	it("keeps the git branch by the model chip, outlasting the other facts and opening /git", () => {
 		setNativeRendering(true);
-		// The test runs inside the repository's checkout, so the git segment has a head to show.
-		const segs = facts(
-			statusLine({ preset: "custom", leftSegments: ["hostname", "model", "path", "git"], rightSegments: [] }, true),
-		);
-		expect(segs.map(seg => seg.key)).toEqual(["hostname", "git"]);
-		const [hostname, git] = segs;
-		expect(git!.props.actions).toEqual({ click: "status.git" });
-		expect(git!.props.priority!).toBeGreaterThan(hostname!.props.priority!);
+		const originalProjectDir = getProjectDir();
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "omp-composer-git-"));
+		try {
+			const git = (...args: string[]) => {
+				const result = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo });
+				expect(result.exitCode).toBe(0);
+			};
+			git("init", "-q", "-b", "feature/parity");
+			git("commit", "-q", "--allow-empty", "-m", "init");
+			setProjectDir(repo);
+
+			const segs = facts(
+				statusLine(
+					{ preset: "custom", leftSegments: ["hostname", "model", "path", "git"], rightSegments: [] },
+					true,
+				),
+			);
+			expect(segs.map(seg => seg.key)).toEqual(["hostname", "git"]);
+			const [hostname, branch] = segs;
+			expect(branch!.props).toMatchObject({
+				icon: "branch",
+				spans: [{ t: "feature/parity", s: "statusLineGitClean" }],
+				actions: { click: "status.git" },
+			});
+			expect(branch!.props.priority!).toBeGreaterThan(hostname!.props.priority!);
+		} finally {
+			setProjectDir(originalProjectDir);
+			removeSyncWithRetries(repo);
+		}
 	});
 
 	it("describes spans without ANSI escapes or separator glyphs", () => {
