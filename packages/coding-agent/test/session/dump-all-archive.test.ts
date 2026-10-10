@@ -175,7 +175,9 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 			);
 			expect(scoutText).toContain("Mentally compiling block.rs");
 			expect(workerText).toContain("Pending tool calls: bash (call-1)");
-			// A running tool is not a stalled model request.
+			// A running tool is not a stalled model request, even though the agent turn is busy.
+			expect(workerText).toContain("Live: running, running tools");
+			expect(workerText).not.toContain("request in flight");
 			expect(workerText).not.toContain("in flight, not persisted");
 		} finally {
 			registry.unregister("Scout");

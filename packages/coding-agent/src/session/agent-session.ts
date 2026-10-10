@@ -741,7 +741,7 @@ function captureLiveDumpState(ref: AgentRef): SessionDumpLiveState | undefined {
 		capturedAt: Date.now(),
 		lastActivity: ref.lastActivity,
 		activity: ref.activity,
-		streaming: session.isStreaming,
+		busy: session.isStreaming,
 		streamMessage,
 		pendingToolCalls: [...state.pendingToolCalls].map(id => `${toolNames.get(id) ?? "unknown"} (${id})`),
 	};

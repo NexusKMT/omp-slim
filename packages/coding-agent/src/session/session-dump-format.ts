@@ -45,8 +45,8 @@ export interface SessionDumpLiveState {
 	lastActivity: number;
 	/** Latest activity gist shown in the agent roster. */
 	activity?: string;
-	/** A model request or prompt is in flight. */
-	streaming: boolean;
+	/** An agent turn is active: a model request, tool execution, or the work between them. */
+	busy: boolean;
 	/** Partial assistant message still streaming; not yet in the persisted transcript. */
 	streamMessage?: AgentMessage | null;
 	/** Tool calls dispatched but not yet finished, as `name (id)`. */
@@ -309,9 +309,9 @@ export function formatSessionDumpText(options: FormatSessionDumpTextOptions): st
 
 /** Live-state header lines: registry status, staleness, and tools still executing. */
 function appendLiveHeader(lines: string[], live: SessionDumpLiveState): void {
-	lines.push(
-		`Live: ${live.status}${live.streaming ? ", request in flight" : ""} (captured ${formatDumpTime(live.capturedAt)})`,
-	);
+	// `busy` spans the whole turn; a dispatched tool means the model request already finished.
+	const phase = live.pendingToolCalls.length > 0 ? ", running tools" : live.busy ? ", request in flight" : "";
+	lines.push(`Live: ${live.status}${phase} (captured ${formatDumpTime(live.capturedAt)})`);
 	const sinceActivity = formatDuration(live.capturedAt - live.lastActivity);
 	const activity = live.activity ? `: ${live.activity}` : "";
 	lines.push(`Last activity: ${formatDumpTime(live.lastActivity)} (${sinceActivity} before capture)${activity}`);
@@ -334,7 +334,7 @@ function appendInFlightTurn(lines: string[], live: SessionDumpLiveState, message
 		lines.push("");
 		return;
 	}
-	if (!live.streaming || live.pendingToolCalls.length > 0) return;
+	if (!live.busy || live.pendingToolCalls.length > 0) return;
 	// Request sent, no message_start yet: measure from the last persisted message.
 	const last = messages.at(-1);
 	const since = last && "timestamp" in last && typeof last.timestamp === "number" ? last.timestamp : undefined;
