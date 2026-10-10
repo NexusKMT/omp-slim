@@ -9,24 +9,17 @@ import {
 	TERMINAL,
 	wrapTmuxPassthrough,
 } from "@oh-my-pi/pi-tui/terminal-capabilities";
+import { TERMINAL_MULTIPLEXER_ENV_KEYS } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
 
 const stdinIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
 const stdoutIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
 const stdinSetRawModeDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "setRawMode");
 const originalOsc99Probe = Bun.env.PI_TUI_OSC99_PROBE;
-const originalTmux = Bun.env.TMUX;
-const originalZellij = Bun.env.ZELLIJ;
-const originalHerdrEnv = Bun.env.HERDR_ENV;
-const originalHerdrPaneId = Bun.env.HERDR_PANE_ID;
-const originalHerdrTabId = Bun.env.HERDR_TAB_ID;
-const originalHerdrWorkspaceId = Bun.env.HERDR_WORKSPACE_ID;
+// Multiplexer markers plus the CMUX socket override the notifier also reads.
+const MULTIPLEXER_ENV_KEYS = [...TERMINAL_MULTIPLEXER_ENV_KEYS, "CMUX_SOCKET_PATH"];
+const originalMultiplexerEnv = MULTIPLEXER_ENV_KEYS.map(key => [key, Bun.env[key]] as const);
 const originalPiNotifications = Bun.env.PI_NOTIFICATIONS;
-const originalCmuxSurfaceId = Bun.env.CMUX_SURFACE_ID;
-const originalCmuxWorkspaceId = Bun.env.CMUX_WORKSPACE_ID;
-const originalCmuxSocketPath = Bun.env.CMUX_SOCKET_PATH;
-const originalWmux = Bun.env.WMUX;
-const originalWmuxSurfaceId = Bun.env.WMUX_SURFACE_ID;
 const mutableTerminal = TERMINAL as unknown as { notifyProtocol: NotifyProtocol };
 const originalNotifyProtocol = mutableTerminal.notifyProtocol;
 
@@ -79,17 +72,7 @@ describe("terminal notifications", () => {
 		previousHeadless = setTerminalHeadless(false);
 		// Default the suite to a direct-terminal baseline so probe/format
 		// assertions never see inherited multiplexer markers.
-		delete Bun.env.TMUX;
-		delete Bun.env.ZELLIJ;
-		delete Bun.env.HERDR_ENV;
-		delete Bun.env.HERDR_PANE_ID;
-		delete Bun.env.HERDR_TAB_ID;
-		delete Bun.env.HERDR_WORKSPACE_ID;
-		delete Bun.env.CMUX_SURFACE_ID;
-		delete Bun.env.CMUX_WORKSPACE_ID;
-		delete Bun.env.CMUX_SOCKET_PATH;
-		delete Bun.env.WMUX;
-		delete Bun.env.WMUX_SURFACE_ID;
+		for (const key of MULTIPLEXER_ENV_KEYS) delete Bun.env[key];
 		// `PI_NOTIFICATIONS=off` is set in this workspace's CI env, which would
 		// short-circuit `sendNotification` before it writes anything. Clear it
 		// so the delivery-path assertions actually observe stdout writes.
@@ -102,18 +85,8 @@ describe("terminal notifications", () => {
 		setOsc99Supported(false);
 		mutableTerminal.notifyProtocol = originalNotifyProtocol;
 		restoreEnv("PI_TUI_OSC99_PROBE", originalOsc99Probe);
-		restoreEnv("TMUX", originalTmux);
-		restoreEnv("ZELLIJ", originalZellij);
-		restoreEnv("HERDR_ENV", originalHerdrEnv);
-		restoreEnv("HERDR_PANE_ID", originalHerdrPaneId);
-		restoreEnv("HERDR_TAB_ID", originalHerdrTabId);
-		restoreEnv("HERDR_WORKSPACE_ID", originalHerdrWorkspaceId);
+		for (const [key, value] of originalMultiplexerEnv) restoreEnv(key, value);
 		restoreEnv("PI_NOTIFICATIONS", originalPiNotifications);
-		restoreEnv("CMUX_SURFACE_ID", originalCmuxSurfaceId);
-		restoreEnv("CMUX_WORKSPACE_ID", originalCmuxWorkspaceId);
-		restoreEnv("CMUX_SOCKET_PATH", originalCmuxSocketPath);
-		restoreEnv("WMUX", originalWmux);
-		restoreEnv("WMUX_SURFACE_ID", originalWmuxSurfaceId);
 		restoreProperty(process.stdin, "isTTY", stdinIsTtyDescriptor);
 		restoreProperty(process.stdout, "isTTY", stdoutIsTtyDescriptor);
 		restoreProperty(process.stdin, "setRawMode", stdinSetRawModeDescriptor);

@@ -1,11 +1,6 @@
 import { $which } from "@oh-my-pi/pi-utils";
 import { isBunTestRuntime } from "@oh-my-pi/pi-utils/env";
-
-export const tmuxMultiplexer = {
-	isInside(env: NodeJS.ProcessEnv = Bun.env): boolean {
-		return Boolean(env.TMUX);
-	},
-};
+import { tmuxMultiplexer } from "./multiplexers/tmux";
 
 /** Wrap a control sequence in tmux's DCS passthrough envelope. */
 export function wrapTmuxPassthrough(payload: string): string {

@@ -19,6 +19,7 @@ import {
 	hasTerminalMultiplexerSession,
 	isInsideTerminalMultiplexer,
 } from "@oh-my-pi/pi-tui/terminal-capabilities";
+import { TERMINAL_MULTIPLEXER_ENV_KEYS } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 
 describe("hasTerminalMultiplexerSession", () => {
 	it("recognizes Herdr session identity while ignoring client-only settings", () => {
@@ -91,14 +92,15 @@ describe("terminal multiplexer classification", () => {
 		expect(classifyTerminalMultiplexer({ TERM: "screen-256color" })).toBe("screen");
 	});
 
-	it("classifies Orca from paired identity markers after nested multiplexers", () => {
+	it("classifies Orca after nested multiplexers without moving it off the direct render path", () => {
 		const orcaEnv = {
 			ORCA_PANE_KEY: "tab-1:12345678-1234-1234-1234-123456789abc",
 			ORCA_WORKTREE_ID: "worktree-1",
 		};
 		expect(classifyTerminalMultiplexer(orcaEnv)).toBe("orca");
-		expect(isInsideTerminalMultiplexer(orcaEnv)).toBe(true);
+		expect(isInsideTerminalMultiplexer(orcaEnv)).toBe(false);
 		expect(classifyTerminalMultiplexer({ ...orcaEnv, TMUX: "session" })).toBe("tmux");
+		expect(isInsideTerminalMultiplexer({ ...orcaEnv, TMUX: "session" })).toBe(true);
 		expect(classifyTerminalMultiplexer({ ...orcaEnv, ZELLIJ: "session" })).toBe("zellij");
 		expect(classifyTerminalMultiplexer({ ...orcaEnv, TERM: "tmux-256color" })).toBe("tmux");
 		expect(classifyTerminalMultiplexer({ ...orcaEnv, TERM: "screen-256color" })).toBe("screen");
@@ -425,10 +427,7 @@ function subprocessEnv(overrides: Record<string, string | undefined>): Record<st
 		"PASEO_TERMINAL_ID",
 		"KITTY_WINDOW_ID",
 		"GHOSTTY_RESOURCES_DIR",
-		"HERDR_ENV",
-		"HERDR_PANE_ID",
-		"HERDR_TAB_ID",
-		"HERDR_WORKSPACE_ID",
+		...TERMINAL_MULTIPLEXER_ENV_KEYS,
 		"WEZTERM_PANE",
 		"ITERM_SESSION_ID",
 		"VSCODE_PID",
