@@ -126,29 +126,37 @@ interface ForkTerminalDependencies {
 	argv: () => string[];
 }
 
-const FORK_LAUNCH_OVERRIDES: Record<string, true> = {
-	"--api-key": true,
+/**
+ * Startup flags the fork child re-supplies from the parent's live state
+ * (`--profile`, `--model`, `--thinking`, `--prompt-cache-key`) or that would
+ * re-point it at a stale scope (`--config`/`--cwd`/`--provider`; the child
+ * gets the effective overlays via `PI_CONFIG_FILES` and the session cwd).
+ */
+const FORK_LAUNCH_OVERRIDES: Readonly<Record<string, true>> = {
 	"--config": true,
 	"--cwd": true,
 	"--model": true,
 	"--profile": true,
+	"--prompt-cache-key": true,
 	"--provider": true,
 	"--thinking": true,
 };
 
-function stripForkLaunchOverrides(argv: string[]): string[] {
-	const result: string[] = [];
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i]!;
-		const option = arg.startsWith("--") ? arg.split("=", 1)[0]! : arg;
-		if (Object.hasOwn(FORK_LAUNCH_OVERRIDES, option)) {
-			if (flagConsumesValue(arg, argv[i + 1])) i++;
-			continue;
-		}
-		result.push(arg);
-		if (flagConsumesValue(arg, argv[i + 1])) result.push(argv[++i]!);
+/**
+ * `env` prefix pinning each scope variable for the fork child. Multiplexer
+ * servers keep stale environment snapshots, so every variable is pinned:
+ * defined values are assigned, absent (or empty) ones are unset with `-u`
+ * (which must precede the assignments) rather than exported as empty strings
+ * that `??`-style consumers would treat as a set, relative path.
+ */
+function forkScopeEnvCommand(scope: Readonly<Record<string, string | undefined>>): string[] {
+	const unset: string[] = [];
+	const assignments: string[] = [];
+	for (const [name, value] of Object.entries(scope)) {
+		if (value) assignments.push(`${name}=${value}`);
+		else unset.push("-u", name);
 	}
-	return result;
+	return ["env", ...unset, ...assignments];
 }
 
 function hasForkApiKeyOverride(argv: string[]): boolean {
@@ -1412,8 +1420,8 @@ export class CommandController {
 			return;
 		}
 
-		const restartArgs = restartArgv(dependencies.argv(), undefined);
-		if (hasForkApiKeyOverride(restartArgs)) {
+		const childArgs = restartArgv(dependencies.argv(), undefined, FORK_LAUNCH_OVERRIDES);
+		if (hasForkApiKeyOverride(childArgs)) {
 			this.ctx.showError(
 				"Cannot open a fork in another terminal when --api-key was supplied at startup; the key cannot be forwarded without exposing it in the multiplexer command. Configure provider credentials in the auth store and retry.",
 			);
@@ -1455,23 +1463,27 @@ export class CommandController {
 		try {
 			const activeProfile = dependencies.getActiveProfile();
 			const activeModel = this.ctx.session.model;
-			const childArgs = stripForkLaunchOverrides(restartArgs);
 			if (activeProfile) childArgs.push("--profile", activeProfile);
 			if (activeModel) childArgs.push("--model", `${activeModel.provider}/${activeModel.id}`);
 			const activeThinkingLevel = this.ctx.session.configuredThinkingLevel();
 			if (activeThinkingLevel !== undefined) childArgs.push("--thinking", activeThinkingLevel);
+			// Forcing --model/--thinking marks the fork's cache shape as changed, which would
+			// drop the inherited key; pin what the parent's requests populated the cache under.
+			childArgs.push("--prompt-cache-key", this.ctx.session.agent.promptCacheKey ?? this.ctx.session.sessionId);
 			childArgs.push("--fork", sourceSessionFile);
-			// Multiplexer servers keep stale environment snapshots; override only non-secret scope variables.
+			// Pin only non-secret scope variables.
 			const command = [
-				"env",
-				`PI_CODING_AGENT_DIR=${this.ctx.settings.getAgentDir()}`,
-				`PI_CONFIG_DIR=${getConfigDirName()}`,
-				`OMP_PROFILE=${activeProfile ?? ""}`,
-				`PI_PROFILE=${activeProfile ?? ""}`,
-				`PI_CONFIG_FILES=${this.ctx.settings.getConfigFiles().join(path.delimiter)}`,
-				`XDG_DATA_HOME=${environment.XDG_DATA_HOME ?? ""}`,
-				`XDG_STATE_HOME=${environment.XDG_STATE_HOME ?? ""}`,
-				`XDG_CACHE_HOME=${environment.XDG_CACHE_HOME ?? ""}`,
+				...forkScopeEnvCommand({
+					PI_CODING_AGENT_DIR: this.ctx.settings.getAgentDir(),
+					PI_CONFIG_DIR: getConfigDirName(),
+					OMP_PROFILE: activeProfile,
+					PI_PROFILE: activeProfile,
+					PI_CONFIG_FILES: this.ctx.settings.getConfigFiles().join(path.delimiter),
+					PI_CODING_AGENT_SESSION_DIR: environment.PI_CODING_AGENT_SESSION_DIR,
+					XDG_DATA_HOME: environment.XDG_DATA_HOME,
+					XDG_STATE_HOME: environment.XDG_STATE_HOME,
+					XDG_CACHE_HOME: environment.XDG_CACHE_HOME,
+				}),
 				...dependencies.resolveCliEntryCmd(),
 				...childArgs,
 			];

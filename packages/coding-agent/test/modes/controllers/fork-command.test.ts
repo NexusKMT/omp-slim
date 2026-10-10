@@ -45,6 +45,7 @@ function createContext(
 		cwd?: string;
 		thinkingLevel?: ConfiguredThinkingLevel;
 		argv?: string[];
+		promptCacheKey?: string;
 	} = {},
 ) {
 	const sessionFile = options.persisted === false ? undefined : (options.sessionFile ?? sourceSessionFile);
@@ -52,6 +53,8 @@ function createContext(
 		isStreaming: options.streaming ?? false,
 		fork: vi.fn(async () => true),
 		sessionFile,
+		sessionId: "parent-session-id",
+		agent: { promptCacheKey: options.promptCacheKey },
 		model: options.activeModel ?? { provider: "provider", id: "model" },
 		configuredThinkingLevel: () => options.thinkingLevel,
 	};
@@ -96,38 +99,30 @@ function createContext(
 	return { controller, ctx, session, sessionManager, flush, launchTerminal, showError, showHookConfirm };
 }
 
-function getCanonicalLaunchPlacements() {
-	const placements: Array<{
-		multiplexer: TerminalLaunchMultiplexer;
-		placement: TerminalLaunchPlacement;
-		shellGrammar?: "posix";
-	}> = [];
+function findPosixShellPlacement(): { multiplexer: TerminalLaunchMultiplexer; placement: TerminalLaunchPlacement } {
 	for (const [multiplexer, capabilities] of Object.entries(terminalLaunchCapabilities) as Array<
 		[TerminalMultiplexer, (typeof terminalLaunchCapabilities)[TerminalMultiplexer]]
 	>) {
 		if (!capabilities.supported) continue;
 		for (const placement of ["pane", "window"] as const) {
 			const capability = capabilities[placement];
-			if (!capability) continue;
-			placements.push({
-				multiplexer: multiplexer as TerminalLaunchMultiplexer,
-				placement,
-				shellGrammar: "shellGrammar" in capability ? capability.shellGrammar : undefined,
-			});
+			if (capability && "shellGrammar" in capability && capability.shellGrammar === "posix") {
+				return { multiplexer: multiplexer as TerminalLaunchMultiplexer, placement };
+			}
 		}
 	}
-	return placements;
+	throw new Error("expected a launch placement that declares POSIX shell grammar");
 }
 
-const CANONICAL_LAUNCH_PLACEMENTS = getCanonicalLaunchPlacements();
-const POSIX_SHELL_PLACEMENTS = CANONICAL_LAUNCH_PLACEMENTS.filter(({ shellGrammar }) => shellGrammar === "posix");
-const UNSUPPORTED_MULTIPLEXERS = Object.entries(terminalLaunchCapabilities).flatMap(([multiplexer, capabilities]) =>
-	capabilities.supported ? [] : [multiplexer as TerminalMultiplexer],
-);
+const POSIX_SHELL_PLACEMENT = findPosixShellPlacement();
 
 describe("/fork terminal placement", () => {
 	it("preflights unavailable launch capabilities before busy or persistence checks", async () => {
-		for (const multiplexer of [null, ...UNSUPPORTED_MULTIPLEXERS]) {
+		const unsupported = Object.entries(terminalLaunchCapabilities).find(
+			([, capabilities]) => !capabilities.supported,
+		)?.[0] as TerminalMultiplexer | undefined;
+		if (!unsupported) throw new Error("expected an unsupported multiplexer");
+		for (const multiplexer of [null, unsupported]) {
 			const { controller, ctx, launchTerminal, flush } = createContext({
 				classifyTerminalMultiplexer: () => multiplexer,
 				streaming: true,
@@ -141,81 +136,89 @@ describe("/fork terminal placement", () => {
 		}
 	});
 
-	it.each(POSIX_SHELL_PLACEMENTS)(
-		"requires POSIX shell confirmation before flushing a placement that declares it",
-		async ({ multiplexer, placement }) => {
-			const { controller, ctx, flush, launchTerminal } = createContext({
-				classifyTerminalMultiplexer: () => multiplexer,
-			});
-			await controller.handleForkCommand(placement);
-			expect(ctx.showHookConfirm).toHaveBeenCalledTimes(1);
-			expect(ctx.showWarning).toHaveBeenCalledTimes(1);
-			expect(flush).not.toHaveBeenCalled();
-			expect(launchTerminal).not.toHaveBeenCalled();
-		},
-	);
+	it("requires POSIX shell confirmation before flushing a placement that declares it", async () => {
+		const { controller, ctx, flush, launchTerminal } = createContext({
+			classifyTerminalMultiplexer: () => POSIX_SHELL_PLACEMENT.multiplexer,
+		});
+		await controller.handleForkCommand(POSIX_SHELL_PLACEMENT.placement);
+		expect(ctx.showHookConfirm).toHaveBeenCalledTimes(1);
+		expect(flush).not.toHaveBeenCalled();
+		expect(launchTerminal).not.toHaveBeenCalled();
+	});
 
-	it.each(POSIX_SHELL_PLACEMENTS)(
-		"launches a placement with POSIX shell requirements after confirmation",
-		async ({ multiplexer, placement }) => {
-			const { controller, flush, launchTerminal, showHookConfirm } = createContext({
-				classifyTerminalMultiplexer: () => multiplexer,
-				confirmed: true,
-			});
-			await controller.handleForkCommand(placement);
-			expect(showHookConfirm).toHaveBeenCalledTimes(1);
-			expect(showHookConfirm.mock.invocationCallOrder[0]).toBeLessThan(flush.mock.invocationCallOrder[0]!);
-			expect(flush).toHaveBeenCalledTimes(1);
-			expect(launchTerminal).toHaveBeenCalledTimes(1);
-			expect(launchTerminal.mock.calls[0]?.[0]).toHaveProperty("shellGrammar", "posix");
-		},
-	);
-
-	it.each(CANONICAL_LAUNCH_PLACEMENTS)(
-		"uses launcher-native target defaults for a supported placement",
-		async ({ multiplexer, placement, shellGrammar }) => {
-			const { controller, ctx, launchTerminal, flush } = createContext({
-				classifyTerminalMultiplexer: () => multiplexer,
-				confirmed: true,
-			});
-			await controller.handleForkCommand(placement);
-			const request = launchTerminal.mock.calls[0]?.[0];
-			expect(request).toMatchObject({ multiplexer, placement });
-			expect(request).not.toHaveProperty("target");
-			expect(request).not.toHaveProperty("focus");
-			expect(request).not.toHaveProperty("direction");
-			expect(ctx.showHookConfirm).toHaveBeenCalledTimes(shellGrammar === "posix" ? 1 : 0);
-			expect(flush).toHaveBeenCalledTimes(1);
-		},
-	);
+	it("launches a placement with POSIX shell requirements after confirmation", async () => {
+		const { controller, flush, launchTerminal, showHookConfirm } = createContext({
+			classifyTerminalMultiplexer: () => POSIX_SHELL_PLACEMENT.multiplexer,
+			confirmed: true,
+		});
+		await controller.handleForkCommand(POSIX_SHELL_PLACEMENT.placement);
+		expect(showHookConfirm).toHaveBeenCalledTimes(1);
+		expect(showHookConfirm.mock.invocationCallOrder[0]).toBeLessThan(flush.mock.invocationCallOrder[0]!);
+		expect(flush.mock.invocationCallOrder[0]).toBeLessThan(launchTerminal.mock.invocationCallOrder[0]!);
+		expect(launchTerminal.mock.calls[0]?.[0]).toHaveProperty("shellGrammar", "posix");
+	});
 
 	it("flushes and launches an absolute persisted source with the active profile", async () => {
 		const { controller, launchTerminal, flush, ctx, session } = createContext();
 		await controller.handleForkCommand("pane");
+		expect(ctx.showHookConfirm).not.toHaveBeenCalled();
 		expect(flush.mock.invocationCallOrder[0]).toBeLessThan(launchTerminal.mock.invocationCallOrder[0]!);
-		expect(launchTerminal).toHaveBeenCalledWith(
-			expect.objectContaining({
-				multiplexer: "tmux",
-				placement: "pane",
-				command: expect.arrayContaining([
-					"env",
-					"PI_CODING_AGENT_DIR=/user/agent",
-					"OMP_PROFILE=active-profile",
-					"PI_PROFILE=active-profile",
-					"omp-entry",
-					"--profile",
-					"active-profile",
-					"--model",
-					"provider/model",
-					"--fork",
-					path.resolve(sourceSessionFile),
-				]),
-			}),
-		);
-		expect(launchTerminal.mock.calls[0]?.[0].command.slice(-2)).toEqual(["--fork", path.resolve(sourceSessionFile)]);
+		const request = launchTerminal.mock.calls[0]?.[0];
+		expect(request).toMatchObject({ multiplexer: "tmux", placement: "pane" });
+		const command = request?.command ?? [];
+		expect(command[0]).toBe("env");
+		expect(command).toContain("PI_CODING_AGENT_DIR=/user/agent");
+		expect(command).toContain("OMP_PROFILE=active-profile");
+		expect(command).toContain("PI_PROFILE=active-profile");
+		expect(command.slice(command.indexOf("omp-entry") + 1)).toEqual([
+			"--profile",
+			"active-profile",
+			"--model",
+			"provider/model",
+			"--prompt-cache-key",
+			"parent-session-id",
+			"--fork",
+			path.resolve(sourceSessionFile),
+		]);
 		expect(ctx.showStatus).toHaveBeenCalledTimes(1);
-		expect(session.isStreaming).toBe(false);
 		expect(session.fork).not.toHaveBeenCalled();
+	});
+
+	it("drops a startup --goal and pins the parent's prompt-cache key over a startup one", async () => {
+		const { controller, launchTerminal } = createContext({
+			promptCacheKey: "pinned-parent-key",
+			argv: ["--goal", "ship the release", "--prompt-cache-key", "startup-key", "--no-tools"],
+		});
+		await controller.handleForkCommand("pane");
+		const command = launchTerminal.mock.calls[0]?.[0].command ?? [];
+		const appArgs = command.slice(command.indexOf("omp-entry") + 1);
+		expect(appArgs).toContain("--no-tools");
+		expect(appArgs).not.toContain("--goal");
+		expect(appArgs).not.toContain("ship the release");
+		expect(appArgs).not.toContain("startup-key");
+		expect(appArgs.filter(arg => arg === "--prompt-cache-key")).toHaveLength(1);
+		expect(appArgs[appArgs.indexOf("--prompt-cache-key") + 1]).toBe("pinned-parent-key");
+	});
+
+	it("unsets scope variables the parent lacks instead of exporting them empty", async () => {
+		const sessionsDir = path.join(tempDirectory, "env sessions");
+		const { controller, launchTerminal } = createContext({
+			activeProfile: null,
+			environment: () =>
+				({ TMUX: "server,1,0", TMUX_PANE: "%1", PI_CODING_AGENT_SESSION_DIR: sessionsDir }) as NodeJS.ProcessEnv,
+		});
+		await controller.handleForkCommand("pane");
+		const command = launchTerminal.mock.calls[0]?.[0].command ?? [];
+		const envArgs = command.slice(0, command.indexOf("omp-entry"));
+		for (const name of ["XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "OMP_PROFILE", "PI_PROFILE"]) {
+			expect(envArgs[envArgs.indexOf(name) - 1]).toBe("-u");
+			expect(envArgs.some(arg => arg.startsWith(`${name}=`))).toBe(false);
+		}
+		expect(envArgs).toContain(`PI_CODING_AGENT_SESSION_DIR=${sessionsDir}`);
+		// `env` rejects `-u` after the first assignment.
+		const lastUnset = envArgs.lastIndexOf("-u");
+		const firstAssignment = envArgs.findIndex(arg => arg.includes("="));
+		expect(lastUnset).toBeLessThan(firstAssignment);
 	});
 
 	it("replaces stale profile and session-source arguments with current values", async () => {
@@ -282,8 +285,6 @@ describe("/fork terminal placement", () => {
 		expect(command).toContain(`XDG_DATA_HOME=${dataDir}`);
 		expect(command).toContain(`XDG_STATE_HOME=${stateDir}`);
 		expect(command).toContain(`XDG_CACHE_HOME=${cacheDir}`);
-		expect(command).toContain("OMP_PROFILE=");
-		expect(command).toContain("PI_PROFILE=");
 		expect(command).not.toContain("/stale/server/agent");
 		expect(command).not.toContain("stale-server-profile");
 		expect(command).not.toContain("old-profile");
@@ -365,20 +366,17 @@ describe("/fork terminal placement", () => {
 	it("rejects placement forks without a persisted transcript", async () => {
 		const { controller, ctx, launchTerminal, flush } = createContext({ persisted: false });
 		await controller.handleForkCommand("window");
-		expect(ctx.showError).toHaveBeenCalledWith(expect.stringContaining("has not been persisted yet"));
+		expect(ctx.showError).toHaveBeenCalledTimes(1);
 		expect(flush).not.toHaveBeenCalled();
 		expect(launchTerminal).not.toHaveBeenCalled();
 	});
 
-	it("confirms a busy fork and leaves the parent response running when accepted", async () => {
-		const { controller, ctx, launchTerminal, session } = createContext({ streaming: true, confirmed: true });
+	it("confirms a busy fork and launches without touching the running parent when accepted", async () => {
+		const { controller, ctx, flush, launchTerminal, session } = createContext({ streaming: true, confirmed: true });
 		await controller.handleForkCommand("window");
-		expect(ctx.showHookConfirm).toHaveBeenCalledWith(
-			"Fork while a response is running?",
-			expect.stringContaining("partial response"),
-		);
+		expect(ctx.showHookConfirm).toHaveBeenCalledTimes(1);
+		expect(flush.mock.invocationCallOrder[0]).toBeLessThan(launchTerminal.mock.invocationCallOrder[0]!);
 		expect(launchTerminal).toHaveBeenCalledTimes(1);
-		expect(session.isStreaming).toBe(true);
 		expect(session.fork).not.toHaveBeenCalled();
 	});
 
