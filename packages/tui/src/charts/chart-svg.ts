@@ -165,7 +165,7 @@ function drawBars(spec: ChartSpec): Layer {
 	categories.forEach((name, at) => {
 		const rowTop = top + at * groupRow;
 		const middle = rowTop + groupRow / 2;
-		parts.push(text(left - 10, middle, clip(name, MAX_LABEL_CHARS), { anchor: "end", fill: "fg" }));
+		parts.push(categoryLabel(name, middle));
 		if (kind === "paired") {
 			const [a, b] = [series[0]!.points[at], series[1]!.points[at]];
 			if (a && b) parts.push(line(scale.at(a.value), middle, scale.at(b.value), middle, "border", 4, 0.6));
@@ -256,7 +256,7 @@ function drawGrid(spec: ChartSpec, style: "heat" | "bars"): Layer {
 	const shared = intensity(all);
 	categories.forEach((name, row) => {
 		const y = top + row * rowHeight;
-		parts.push(text(left - 10, y + rowHeight / 2, clip(name, MAX_LABEL_CHARS), { anchor: "end", fill: "fg" }));
+		parts.push(categoryLabel(name, y + rowHeight / 2));
 	});
 	series.forEach((entry, index) => {
 		const x = left + index * cellWidth;
@@ -440,7 +440,7 @@ function drawChange(spec: ChartSpec): Layer {
 	categories.forEach((name, row) => {
 		const rowTop = top + row * rowHeight;
 		const middle = rowTop + rowHeight / 2;
-		parts.push(text(left - 10, middle, clip(name, MAX_LABEL_CHARS), { anchor: "end", fill: "fg" }));
+		parts.push(categoryLabel(name, middle));
 		series.forEach((entry, index) => {
 			const point = entry.points[row];
 			if (!point) return;
@@ -553,9 +553,9 @@ function drawLine(spec: ChartSpec): Layer {
 	);
 	const tickWidth = Math.max(
 		...values.flatMap(panelValues => {
-			const { ticks } = valueScale(panelValues, 0, 1, { zero: false });
-			const format = tickFormat(ticks, series[0]!);
-			return ticks.map(tick => measure(format(tick), TICK_SIZE));
+			const scale = valueScale(panelValues, 0, 1, { zero: false });
+			const format = tickFormat(scale, series[0]!);
+			return scale.ticks.map(tick => measure(format(tick), TICK_SIZE));
 		}),
 	);
 	const position = (at: number) => (x ? x.values[at]! : at);
@@ -595,7 +595,7 @@ function drawLine(spec: ChartSpec): Layer {
 		const plotTop = top + 6;
 		plotBottom = plotTop + plotHeight;
 		const scale = valueScale(values[panelIndex]!, plotBottom, plotTop, { zero: false });
-		const format = tickFormat(scale.ticks, series[0]!);
+		const format = tickFormat(scale, series[0]!);
 		// Short panels label every other gridline.
 		const labelEvery = plotHeight / Math.max(1, scale.ticks.length - 1) < 20 ? 2 : 1;
 		scale.ticks.forEach((tick, at) => {
@@ -738,9 +738,9 @@ function drawScatter(spec: ChartSpec): Layer {
 	const xs = spec.x!;
 	const ys = entry.points.map(point => point?.value ?? Number.NaN);
 	const finite = (values: readonly number[]) => values.filter(Number.isFinite);
-	const yTicks = valueScale(finite(ys), 0, 1, { zero: false }).ticks;
-	const yFormat = tickFormat(yTicks, entry);
-	const left = PAD + Math.max(...yTicks.map(tick => measure(yFormat(tick), TICK_SIZE))) + 8;
+	const yAxis = valueScale(finite(ys), 0, 1, { zero: false });
+	const yFormat = tickFormat(yAxis, entry);
+	const left = PAD + Math.max(...yAxis.ticks.map(tick => measure(yFormat(tick), TICK_SIZE))) + 8;
 	const right = WIDTH - PAD - 80;
 	const top = 18;
 	const bottom = top + 200;
@@ -757,7 +757,7 @@ function drawScatter(spec: ChartSpec): Layer {
 			}),
 		);
 	}
-	const xFormat = tickFormat(xScale.ticks, xs);
+	const xFormat = tickFormat(xScale, xs);
 	for (const tick of xScale.ticks) {
 		parts.push(
 			text(xScale.at(tick), bottom + 14, xFormat(tick), {
@@ -835,7 +835,7 @@ function niceStep(raw: number): number {
 /** Gridlines and tick labels under a horizontal value axis. */
 function drawValueAxis(scale: Scale, series: ChartSeries, top: number, bottom: number): string {
 	const parts: string[] = [];
-	const format = tickFormat(scale.ticks, series);
+	const format = tickFormat(scale, series);
 	for (const tick of scale.ticks) {
 		const x = scale.at(tick);
 		parts.push(rule(x, top, x, bottom));
@@ -869,18 +869,28 @@ function drawLegend(items: readonly (readonly [string, string])[], left: number,
 	return { height: y + 8, body: parts.join("") };
 }
 
+/**
+ * A category's name at the start of the label column. Starting there, a name
+ * set wider than {@link measure} estimates (another font, a larger size)
+ * runs toward the plot instead of off the canvas's left edge.
+ */
+function categoryLabel(name: string, y: number): string {
+	return text(PAD, y, clip(name, MAX_LABEL_CHARS), { fill: "fg" });
+}
+
 /** Width of the category label column. */
 function labelColumnWidth(categories: readonly string[]): number {
 	const widest = Math.max(...categories.map(name => measure(clip(name, MAX_LABEL_CHARS), LABEL_SIZE)));
 	return Math.max(4 * LABEL_SIZE * ADVANCE, widest);
 }
 
-/** Labels for an axis' ticks under one magnitude suffix, so it reads `0, 5k, 10k` rather than `0, 5000, 10k`. */
-function tickFormat(
-	ticks: readonly number[],
-	axis: { readonly dim: Dimension; readonly unit: string },
-): (tick: number) => string {
-	const magnitude = Math.max(0, ...ticks.map(Math.abs));
+/**
+ * Labels for a linear axis' ticks in one unit, so it reads `0, 5k, 10k`
+ * rather than `0, 5000, 10k`; a log axis spans units, each tick in its own.
+ */
+function tickFormat(scale: Scale, axis: { readonly dim: Dimension; readonly unit: string }): (tick: number) => string {
+	if (scale.log) return tick => formatValue(tick, axis.dim, axis.unit);
+	const magnitude = Math.max(0, ...scale.ticks.map(Math.abs));
 	return tick => formatValue(tick, axis.dim, axis.unit, magnitude);
 }
 
@@ -892,9 +902,10 @@ function pointText(series: ChartSeries, at: number): string {
 }
 
 /**
- * A value in base units as an axis label: durations and sizes in the unit
- * their magnitude reads best in, counts compacted (`12k`, `3.4M`) by the
- * suffix `magnitude` calls for (the value's own size by default).
+ * A value in base units as an axis label: durations and sizes in the unit,
+ * counts compacted under the suffix (`12k`, `3.4M`), that `magnitude` reads
+ * best in — the value's own size by default, an axis' largest tick to keep
+ * its labels in one unit.
  */
 export function formatValue(value: number, dim: Dimension, unit: string, magnitude = Math.abs(value)): string {
 	switch (dim) {

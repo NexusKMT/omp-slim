@@ -342,7 +342,8 @@ describe("renderChartSvg", () => {
 		for (const [markdown, plan] of plans) {
 			const analysis = markdown === "scatter" ? scatter : analyze(markdown);
 			const { svg } = renderChartSvg(buildChart(analysis, plan!)!);
-			expect(svg).not.toMatch(/(?:fill|stroke)="(?!var\(--|none")/);
+			// Gradients count as themed: their stops are tokens too.
+			expect(svg).not.toMatch(/(?:fill|stroke|stop-color)="(?!var\(--|none"|url\(#)/);
 			for (const [, name] of svg.matchAll(/var\(--([\w-]+)\)/g)) expect(palette[name!]).toBeDefined();
 			expect(prepareSvg(svg, palette)).not.toContain("var(--");
 		}
