@@ -2375,6 +2375,13 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.#enterPlanMode();
 		}
 
+		// Keys pressed while a Tern startup loaded were held until hooks ran and
+		// the session mode settled, so a startup hotkey opens against the final
+		// mode. Replay them before the draft decision below, so typed text wins
+		// over the saved draft as it does on other terminals; a held Enter meets
+		// the same bootstrap submit gate it would there.
+		this.ui.releaseHeldInput();
+
 		// Restore unsent editor draft from previous session shutdown (Ctrl+D).
 		// One-shot: consumeDraft removes the sidecar after read so the next
 		// resume does not re-restore the same text.
@@ -2509,9 +2516,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// `streamingBehavior: "steer"`, so whichever lands second queues into the
 		// other's turn instead of dying.
 		this.editor.disableSubmit = false;
-		// Keys pressed while a Tern startup loaded were held until this point,
-		// so they reach the same fully wired session a live keystroke would.
-		this.ui.releaseHeldInput();
 		// Publish native send readiness even when no user input triggers another frame.
 		this.ui.requestRender();
 	}

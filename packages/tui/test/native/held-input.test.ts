@@ -70,6 +70,29 @@ describe("keystrokes during a Tern startup prepaint", () => {
 		}
 	});
 
+	it("reach a dialog that takes focus live, and resume holding when focus returns", async () => {
+		const editor = new KeyLog();
+		const dialog = new KeyLog();
+		harness = await TspHarness.start(tui => tui.setFocus(editor), TERN_PREPAINT);
+		const h = harness;
+
+		h.terminal.send("\x1bp");
+		h.flush();
+		h.tui.setFocus(dialog);
+		h.terminal.send("\r");
+		h.flush();
+		expect(dialog.keys).toEqual(["\r"]);
+
+		h.tui.setFocus(editor);
+		h.terminal.send("a");
+		h.flush();
+		expect(editor.keys).toEqual([]);
+
+		h.tui.releaseHeldInput();
+		expect(editor.keys).toEqual(["\x1bp", "a"]);
+		expect(dialog.keys).toEqual(["\r"]);
+	});
+
 	it("are released by Ctrl+C so a stalled startup stays interruptible", async () => {
 		const log = new KeyLog();
 		harness = await TspHarness.start(tui => tui.setFocus(log), TERN_PREPAINT);

@@ -1000,6 +1000,12 @@ export class TUI extends Container {
 	 * releaseHeldInput(); undefined when not holding.
 	 */
 	#heldInput: string[] | undefined;
+	/**
+	 * The component focused when holding began. Only its keystrokes are held:
+	 * a dialog that takes focus meanwhile (a startup hook's select or confirm)
+	 * gets its input live.
+	 */
+	#heldFocus: Component | null = null;
 	// Always-on event-loop lag probe. The high default threshold keeps it quiet;
 	// it only logs `ui.loop-blocked` (with the current loop phase) when a frame
 	// budget is genuinely starved. Armed in start(), disarmed in stop().
@@ -1445,6 +1451,7 @@ export class TUI extends Container {
 		const nativeExpected = this.terminal.tspExpected === true;
 		this.#inputDeferred = options?.deferInput === true && !nativeExpected;
 		this.#heldInput = options?.deferInput === true && nativeExpected ? [] : undefined;
+		this.#heldFocus = this.#focusedComponent;
 		this.#watchdog.start();
 		this.#ghosttyInitialImageDelayDone = false;
 		this.#ghosttyImageReadyAtMs = this.#renderScheduler.now() + TUI.#GHOSTTY_INITIAL_IMAGE_DELAY_MS;
@@ -2287,6 +2294,7 @@ export class TUI extends Container {
 	 * Replay the keystrokes held since a TSP `deferInput` start through the
 	 * normal input path, then deliver input live. Call once the app's key
 	 * handlers are installed so a hotkey pressed during startup still fires.
+	 * Only keys typed while the start-time focus owner had focus are held.
 	 * Idempotent; no-op when nothing is held.
 	 */
 	releaseHeldInput(): void {
@@ -2493,6 +2501,7 @@ export class TUI extends Container {
 		this.#nativeHoldTimer = undefined;
 		this.#clearNativeConfirm();
 		this.#heldInput = undefined;
+		this.#heldFocus = null;
 		const nativeWasLive = this.#nativeLive;
 		if (nativeWasLive) {
 			this.#native!.stop();
@@ -2810,7 +2819,7 @@ export class TUI extends Container {
 		}
 		if (data.length === 0) return;
 
-		if (this.#heldInput !== undefined) {
+		if (this.#heldInput !== undefined && this.#focusedComponent === this.#heldFocus) {
 			this.#holdInput(data);
 			return;
 		}
