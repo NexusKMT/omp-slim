@@ -418,10 +418,13 @@ async function runTestCommand(testCommand: TestCommand): Promise<void> {
 		// Watchdog, mirroring the parallel path: record that *we* killed the child,
 		// otherwise the resulting 137 is indistinguishable from an OOM kill.
 		let timedOut = false;
-		const killTimer = setTimeout(() => {
+		const killTimer = setTimeout(async () => {
 			timedOut = true;
-			process.stdout.write(describeStuckProcessTree(proc.pid));
-			proc.kill("SIGKILL");
+			try {
+				process.stdout.write(await describeStuckProcessTree(proc.pid));
+			} finally {
+				proc.kill("SIGKILL");
+			}
 		}, chunkTimeoutMs());
 		const exitCode = await proc.exited;
 		clearTimeout(killTimer);
@@ -491,11 +494,22 @@ function chunkTimeoutMs(): number {
 // What a watchdog-killed chunk was still doing, captured just before the
 // SIGKILL: every process left in the chunk's tree (the `bun test` coordinator,
 // its `--test-worker`s, anything they spawned) with state, CPU, RSS and kernel
-// wait channel, plus the sockets those processes hold. A chunk can report every
-// test and still never exit; this is the only evidence of which process refused
-// to and what it was blocked on. Linux-only (ps/ss column names); elsewhere "".
-function describeStuckProcessTree(rootPid: number): string {
-	if (process.platform !== "linux") return "";
+// wait channel, plus the sockets those processes hold (via `ss`, or the raw
+// `/proc/<pid>/fd` targets when `ss` is absent, as on the CI runner image). A
+// chunk can report every test and still never exit; this is the only evidence
+// of which process refused to and what it was blocked on. Linux-only (ps column
+// names, /proc); "" elsewhere or without `ps`. Never throws: callers kill the
+// chunk right after, and a snapshot failure must not stop that.
+async function describeStuckProcessTree(rootPid: number): Promise<string> {
+	if (process.platform !== "linux" || !Bun.which("ps")) return "";
+	try {
+		return await snapshotProcessTree(rootPid);
+	} catch (err) {
+		return `[watchdog] process tree snapshot failed: ${err instanceof Error ? err.message : String(err)}\n`;
+	}
+}
+
+async function snapshotProcessTree(rootPid: number): Promise<string> {
 	const ps = Bun.spawnSync(["ps", "-eo", "pid=,ppid=,stat=,etimes=,pcpu=,rss=,wchan:24=,args="]);
 	if (!ps.success) return "";
 	const rows = ps.stdout
@@ -517,13 +531,26 @@ function describeStuckProcessTree(rootPid: number): string {
 	for (const cols of rows) {
 		if (tree.has(cols[0])) lines.push(`  ${cols.slice(0, 7).join(" ")} ${cols.slice(7).join(" ").slice(0, 200)}`);
 	}
-	const ss = Bun.spawnSync(["ss", "-tuanpH"]);
-	if (ss.success) {
+	const ss = Bun.which("ss") ? Bun.spawnSync(["ss", "-tuanpH"]) : null;
+	if (ss?.success) {
 		const owned = ss.stdout
 			.toString()
 			.split("\n")
 			.filter(line => [...tree].some(pid => line.includes(`pid=${pid},`)));
 		lines.push(`[watchdog] sockets held by that tree (${owned.length}):`, ...owned.map(line => `  ${line.trim()}`));
+		return `${lines.join("\n")}\n`;
+	}
+	// No `ss`: list each process's non-tty fds (sockets, pipes, files). A
+	// process gone between `ps` and here just yields nothing.
+	lines.push("[watchdog] open fds per process (no ss on PATH):");
+	for (const pid of tree) {
+		const fdDir = `/proc/${pid}/fd`;
+		const targets = await fs.readdir(fdDir).then(
+			fds => Promise.all(fds.map(fd => fs.readlink(`${fdDir}/${fd}`).catch(() => ""))),
+			() => [],
+		);
+		const kept = targets.filter(target => target && !target.startsWith("/dev/"));
+		if (kept.length > 0) lines.push(`  ${pid}: ${kept.join(" ").slice(0, 400)}`);
 	}
 	return `${lines.join("\n")}\n`;
 }
@@ -878,10 +905,13 @@ export async function runTestCommandsInParallel(commands: TestCommand[], concurr
 		// after a GC crash) would otherwise hang this worker forever.
 		let timedOut = false;
 		let stuckTree = "";
-		const killTimer = setTimeout(() => {
+		const killTimer = setTimeout(async () => {
 			timedOut = true;
-			stuckTree = describeStuckProcessTree(proc.pid);
-			proc.kill("SIGKILL");
+			try {
+				stuckTree = await describeStuckProcessTree(proc.pid);
+			} finally {
+				proc.kill("SIGKILL");
+			}
 		}, chunkTimeoutMs());
 		const exitCode = await proc.exited;
 		clearTimeout(killTimer);
