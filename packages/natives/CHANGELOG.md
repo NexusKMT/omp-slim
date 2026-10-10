@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the macOS computer tool failing with a generic `AxFailed` (`AXError(-25202)`) when a ref named an element the app had since removed; it now throws `StaleRef`, so the model re-reads the tree instead of retrying
+
 ## [18.8.7] - 2026-10-09
 
 ### Added
