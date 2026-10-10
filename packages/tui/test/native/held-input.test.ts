@@ -111,6 +111,24 @@ describe("keystrokes during a Tern startup prepaint", () => {
 		expect(replacement.keys).toEqual(["a", "b"]);
 	});
 
+	it("report held text separately from held hotkeys", async () => {
+		const cases: Array<[readonly string[], boolean]> = [
+			[["\x1bp", "\x07", "\r"], false],
+			[["\x1bp", "a"], true],
+			[["\x1b[97u"], true],
+			[["\x1b[200~pasted\x1b[201~"], true],
+		];
+		for (const [keys, text] of cases) {
+			const log = new KeyLog();
+			harness = await TspHarness.start(tui => tui.setFocus(log), TERN_PREPAINT);
+			for (const key of keys) harness.terminal.send(key);
+			harness.flush();
+			expect(harness.tui.hasHeldText()).toBe(text);
+			harness.stop();
+			harness = undefined;
+		}
+	});
+
 	it("are released by Ctrl+C so a stalled startup stays interruptible", async () => {
 		const log = new KeyLog();
 		harness = await TspHarness.start(tui => tui.setFocus(log), TERN_PREPAINT);

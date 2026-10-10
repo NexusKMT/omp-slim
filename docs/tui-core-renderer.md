@@ -175,10 +175,11 @@ gets its input live. A swapped-in custom editor inherits the hold through
 `Composer.setEditor()` (`TUI.replaceHeldFocus()`), so its keys queue behind the
 held ones. The cell-size reply is still consumed on arrival, and the
 sixel probe is skipped on a TSP terminal, so no probe listener sees held keys.
-`InteractiveMode.init()` calls `TUI.releaseHeldInput()` once startup hooks ran
-and the session mode settled, before the saved-draft decision, so a startup
-hotkey still fires and typed text wins over the draft. Ctrl+C/Ctrl+D release
-the queue early. The
+`InteractiveMode.init()` restores a saved draft only when `TUI.hasHeldText()`
+reports no held typing (so typed text wins over the draft), then calls
+`TUI.releaseHeldInput()` once startup hooks ran, the session mode settled and
+the draft was restored, so a startup hotkey (Alt+P, Ctrl+G) acts on the final
+mode and editor contents. Ctrl+C/Ctrl+D release the queue early. The
 debug socket's `doc` op returns the reference document
 (every sent frame applied by `native/apply.ts`), and `tsp` returns recent frames.
 

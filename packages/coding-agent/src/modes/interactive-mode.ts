@@ -2375,19 +2375,14 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.#enterPlanMode();
 		}
 
-		// Keys pressed while a Tern startup loaded were held until hooks ran and
-		// the session mode settled, so a startup hotkey opens against the final
-		// mode. Replay them before the draft decision below, so typed text wins
-		// over the saved draft as it does on other terminals; a held Enter meets
-		// the same bootstrap submit gate it would there.
-		this.ui.releaseHeldInput();
-
 		// Restore unsent editor draft from previous session shutdown (Ctrl+D).
 		// One-shot: consumeDraft removes the sidecar after read so the next
 		// resume does not re-restore the same text.
 		try {
 			const draft = await logger.time("InteractiveMode.init:draft", () => this.sessionManager.consumeDraft());
-			if (draft && !this.editor.getText()) {
+			// Text typed during a Tern startup (still held) wins over the draft,
+			// as kernel-buffered typing does on other terminals.
+			if (draft && !this.editor.getText() && !this.ui.hasHeldText()) {
 				this.editor.setText(draft);
 				this.updateEditorBorderColor();
 				this.ui.requestRender();
@@ -2395,6 +2390,12 @@ export class InteractiveMode implements InteractiveModeContext {
 		} catch (err) {
 			logger.warn("Failed to restore session draft", { error: String(err) });
 		}
+
+		// Keys pressed while a Tern startup loaded were held until hooks ran, the
+		// session mode settled and the draft was restored, so a startup hotkey
+		// (Alt+P, Ctrl+G) acts on the final mode and editor contents; a held
+		// Enter meets the same bootstrap submit gate it would on other terminals.
+		this.ui.releaseHeldInput();
 
 		// Subscribe to agent events
 		this.#subscribeToAgent();

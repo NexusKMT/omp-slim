@@ -21,7 +21,7 @@ import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import type { TspFrame, TspNode, TspText } from "@oh-my-pi/pi-wire";
 import { DEFAULT_MAX_INLINE_IMAGES, ImageBudget } from "./components/image";
 import { TuiDebugServer } from "./debug-server";
-import { isKeyRelease, matchesKey } from "./keys";
+import { decodePrintableKey, isKeyRelease, matchesKey } from "./keys";
 import { KITTY_PLACEHOLDER } from "./kitty-graphics";
 import { LoopWatchdog } from "./loop-watchdog";
 import { assumedTspHello, NativeBackend, type NativeHost } from "./native/backend";
@@ -2313,6 +2313,23 @@ export class TUI extends Container {
 	 */
 	replaceHeldFocus(previous: Component, next: Component): void {
 		if (this.#heldInput !== undefined && this.#heldFocus === previous) this.#heldFocus = next;
+	}
+
+	/**
+	 * Whether the held keystrokes include text an editor would insert (typed
+	 * characters or a paste), as opposed to only hotkeys and control keys. Lets
+	 * the app decide, before replay, whether startup typing should win over
+	 * restored editor content.
+	 */
+	hasHeldText(): boolean {
+		return (
+			this.#heldInput?.some(
+				data =>
+					data.startsWith("\x1b[200~") ||
+					decodePrintableKey(data) !== undefined ||
+					(!data.includes("\x1b") && /[^\x00-\x1f\x7f]/.test(data)),
+			) ?? false
+		);
 	}
 
 	addStartListener(listener: StartListener): () => void {
