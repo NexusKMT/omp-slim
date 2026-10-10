@@ -265,13 +265,32 @@ window.cachedContext = navigator.modelContext;`,
 		},
 	);
 
-	it("leaves a modelContext accessor the page replaced after attach when disposed", async () => {
+	// Each check runs after dispose; `window.nativeGetter` is Chromium's getter from before attach.
+	it.each([
+		{
+			change: "replaced the getter",
+			afterAttach: `window.pageGetter = () => undefined;
+Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: window.pageGetter });`,
+			check: `Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext").get === window.pageGetter`,
+		},
+		{
+			change: "added a setter",
+			afterAttach: `window.pageSetter = () => {};
+Object.defineProperty(Navigator.prototype, "modelContext", { set: window.pageSetter });`,
+			check: `(d => d.get === window.nativeGetter && d.set === window.pageSetter)(Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext"))`,
+		},
+		{
+			change: "kept the hooked getter",
+			afterAttach: `window.keptGetter = Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext").get;`,
+			check: `!Object.hasOwn(window.keptGetter.call(navigator), "registerTool")`,
+		},
+	])("undoes only its own hook on dispose after the page $change", async ({ afterAttach, check }) => {
 		// A secure context, so Chromium exposes its own modelContext getter for the hook to wrap.
 		using server = Bun.serve({
 			port: 0,
 			hostname: "localhost",
 			fetch: () =>
-				new Response("<!doctype html><title>replaced</title>", { headers: { "content-type": "text/html" } }),
+				new Response("<!doctype html><title>dispose</title>", { headers: { "content-type": "text/html" } }),
 		});
 		const handle = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
 		if (!("browser" in handle)) throw new Error("Expected a Puppeteer browser");
@@ -280,21 +299,18 @@ window.cachedContext = navigator.modelContext;`,
 		try {
 			await page.goto(`http://localhost:${server.port}/`);
 			const realm = page.mainFrame().mainRealm();
+			await realm.evaluate(
+				`window.nativeGetter = Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext").get; null;`,
+			);
 			const controller = await installWebMcp(page);
-			await realm.evaluate(`window.pageGetter = () => undefined;
-Object.defineProperty(Navigator.prototype, "modelContext", { configurable: true, get: window.pageGetter });
-null;`);
+			await realm.evaluate(`${afterAttach}\nnull;`);
 			await controller.dispose();
-			expect(
-				await realm.evaluate(
-					`Object.getOwnPropertyDescriptor(Navigator.prototype, "modelContext").get === window.pageGetter`,
-				),
-			).toBe(true);
+			expect(await realm.evaluate(check)).toBe(true);
 		} finally {
 			await page.close();
 			await releaseBrowser(handle, { kill: false });
 		}
-	}, 30_000);
+	});
 
 	// The hook reads `document.modelContext ?? navigator.modelContext` without the platform API.
 	it.each([

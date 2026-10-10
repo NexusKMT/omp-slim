@@ -352,6 +352,7 @@ export function installWebMcpPageHook(key: string): void {
 	let originalUnregister: PageModelContext["unregisterTool"];
 	const changeTarget = new EventTarget();
 	let polyfillContext: PageModelContext | undefined;
+	let uninstalled = false;
 
 	const cloneMetadata = (value: unknown): unknown => {
 		if (value === undefined) return undefined;
@@ -430,7 +431,9 @@ export function installWebMcpPageHook(key: string): void {
 		for (const getter of getters) {
 			const { instance, owner, descriptor } = getter;
 			const wrapped = function (this: unknown): PageModelContext | undefined {
-				return adopt(descriptor.get?.call(this));
+				const context: PageModelContext | undefined = descriptor.get?.call(this);
+				// A wrapper the page kept past uninstall only forwards.
+				return uninstalled ? context : adopt(context);
 			};
 			try {
 				Object.defineProperty(owner, "modelContext", { ...descriptor, get: wrapped });
@@ -494,11 +497,12 @@ export function installWebMcpPageHook(key: string): void {
 			return await execute(params, { signal: controller.signal });
 		},
 		uninstall(): void {
+			uninstalled = true;
 			for (const { owner, descriptor, wrapped } of getters) {
 				try {
-					// Leave an accessor the page installed after ours in place.
+					// Swap back only our getter: an accessor or field the page changed after it stays.
 					if (wrapped && Object.getOwnPropertyDescriptor(owner, "modelContext")?.get === wrapped) {
-						Object.defineProperty(owner, "modelContext", descriptor);
+						Object.defineProperty(owner, "modelContext", { get: descriptor.get });
 					}
 				} catch {
 					// Best-effort cleanup for attached user tabs.
