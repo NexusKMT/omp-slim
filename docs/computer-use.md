@@ -140,6 +140,7 @@ On macOS, `press()` requires the element to advertise `AXPress` in `actions()`; 
 
 On macOS, a reference whose element the application has since removed throws `StaleRef` from every element operation, without waiting for the snapshots to expire it.
 
+On macOS, `press()`, `perform()` and `raise()` throw `AxUnconfirmed` when the action was requested but the app did not reply in time or messaging failed, for example because the action opened a modal dialog. The action may already have taken effect, so observe the window before repeating it.
 On macOS, native text fields support verified whole-value replacement and exact-window selected-text insertion, including when an app has multiple windows. Web-content or unidentifiable AX value writes refuse before mutation rather than trusting stale accessibility echoes. On Linux, generic `press()` selects an advertised activation action, never an arbitrary first action. On Windows, known self-activating UIA hosts may require explicit takeover coordinate input; background automation does not disable another application's windows or mutate their styles.
 
 ## Menus, held input, and task control

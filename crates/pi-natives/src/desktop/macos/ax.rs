@@ -464,7 +464,7 @@ impl AxBackend for MacAx {
 				actions.join(", "),
 			)));
 		}
-		let perform = || perform_action(element, &native);
+		let perform = || element_action_result(&native, send_action(element, &native));
 		// AXRaise is an explicit request to change stacking, including the
 		// takeover preparation path. Other semantic actions must stay background.
 		if native == "AXRaise" {
@@ -770,10 +770,28 @@ fn replace_utf16_selection(
 }
 
 fn perform_action(element: &AXUIElement, action: &str) -> CoreResult<()> {
+	ax_result(send_action(element, action), format!("AX action '{action}' failed"))
+}
+
+fn send_action(element: &AXUIElement, action: &str) -> AXError {
 	let name = CFString::from_str(action);
 	// SAFETY: The retained element and action CFString remain valid for the
 	// synchronous AX request.
-	let error = unsafe { element.perform_action(&name) };
+	unsafe { element.perform_action(&name) }
+}
+
+/// `CannotComplete` from `AXPerformAction` means messaging failed or the app
+/// did not reply in time, e.g. while the action runs a modal dialog. The
+/// request was made, so its outcome is unknown rather than failed.
+fn element_action_result(action: &str, error: AXError) -> CoreResult<()> {
+	if error == AXError::CannotComplete {
+		return Err(DesktopError::ax_unconfirmed(format!(
+			"AX action '{action}' was requested, but its outcome could not be confirmed: the app did \
+			 not reply in time or messaging failed ({error:?}), for example because the action \
+			 opened a modal dialog. It may already have taken effect: observe the window before \
+			 retrying"
+		)));
+	}
 	ax_result(error, format!("AX action '{action}' failed"))
 }
 
@@ -1133,7 +1151,8 @@ mod tests {
 	use objc2_core_foundation::CFNumber;
 
 	use super::{
-		AttachedCandidate, ax_result, replace_utf16_selection, select_attached, stringify_value,
+		AttachedCandidate, ax_result, element_action_result, replace_utf16_selection,
+		select_attached, stringify_value,
 	};
 	use crate::desktop::error::ErrorCode;
 
@@ -1147,6 +1166,18 @@ mod tests {
 		assert_eq!(code(AXError::InvalidUIElement), ErrorCode::StaleRef);
 		assert_eq!(code(AXError::CannotComplete), ErrorCode::AxFailed);
 		assert_eq!(code(AXError::ActionUnsupported), ErrorCode::AxFailed);
+	}
+
+	#[test]
+	fn cannot_complete_reports_the_action_as_unconfirmed_not_failed() {
+		let unconfirmed = element_action_result("AXPress", AXError::CannotComplete).unwrap_err();
+		assert_eq!(unconfirmed.code, ErrorCode::AxUnconfirmed);
+		assert!(unconfirmed.message.contains("could not be confirmed"), "{}", unconfirmed.message);
+		assert!(unconfirmed.message.contains("before retrying"), "{}", unconfirmed.message);
+		let code = |error| element_action_result("AXPress", error).unwrap_err().code;
+		assert_eq!(code(AXError::InvalidUIElement), ErrorCode::StaleRef);
+		assert_eq!(code(AXError::ActionUnsupported), ErrorCode::AxFailed);
+		assert!(element_action_result("AXPress", AXError::Success).is_ok());
 	}
 
 	#[test]
