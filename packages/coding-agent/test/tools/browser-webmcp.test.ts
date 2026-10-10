@@ -283,6 +283,11 @@ window.cachedContext = navigator.modelContext;`,
 ModelContext.prototype.registerTool = window.pageRegister;`,
 			check: `ModelContext.prototype.registerTool === window.pageRegister`,
 		},
+		{
+			change: "made registerTool non-enumerable",
+			afterAttach: `Object.defineProperty(ModelContext.prototype, "registerTool", { enumerable: false });`,
+			check: `(d => d.value === window.nativeRegister && !d.enumerable)(Object.getOwnPropertyDescriptor(ModelContext.prototype, "registerTool"))`,
+		},
 	])("restores only its own methods on dispose after the page $change", async ({ afterAttach, check }) => {
 		// A secure context, so Chromium exposes its own ModelContext.
 		using server = Bun.serve({
@@ -325,18 +330,26 @@ ModelContext.prototype.registerTool = window.pageRegister;`,
 			const realm = page.mainFrame().mainRealm();
 			const controller = await installWebMcp(page);
 			// Puppeteer loses track of a javascript:-replaced document's realm, so the new document reports
-			// through a CDP binding; a killed renderer never reports and the test times out.
+			// through a CDP binding.
 			const session = await page.createCDPSession();
 			await session.send("Runtime.enable");
 			await session.send("Runtime.addBinding", { name: "reportSurface" });
 			const reported = new Promise<string>(resolve =>
 				session.on("Runtime.bindingCalled", event => resolve(event.payload)),
 			);
+			let crashed = false;
+			page.on("error", () => {
+				crashed = true;
+			});
 			// The replacement document is the frame's second; reading its context binds a second time if omp
 			// created one in the first.
 			const html = `<script>reportSurface(navigator.modelContext.constructor.name);</script>`;
 			await realm.evaluate(`location.href = "javascript:" + ${JSON.stringify(JSON.stringify(html))}; null;`);
 			expect(await reported).toBe("ModelContext");
+			// The kill can land after the report; a killed renderer answers nothing more and the test times out.
+			const alive = await session.send("Runtime.evaluate", { expression: "1 + 1", returnByValue: true });
+			expect(alive.result.value).toBe(2);
+			expect(crashed).toBe(false);
 			await controller.dispose();
 		} finally {
 			await page.close();
@@ -366,6 +379,37 @@ ModelContext.prototype.registerTool = window.pageRegister;`,
 			// The page-side mirror, which is all omp has when the browser lacks WebMCP over CDP.
 			const snapshot = await realm.evaluate(webMcpSnapshotInPage, WEBMCP_BRIDGE_KEY);
 			expect(snapshot.tools.map(tool => tool.name)).toEqual(["cached_native"]);
+			await controller.dispose();
+		} finally {
+			await page.close();
+			await releaseBrowser(handle, { kill: false });
+		}
+	});
+
+	it("calls a page-owned context's methods on that context when the page detaches them", async () => {
+		const handle = await acquireBrowser({ kind: "headless", headless: true }, { cwd: process.cwd() });
+		if (!("browser" in handle)) throw new Error("Expected a Puppeteer browser");
+		holdBrowser(handle);
+		const page = await handle.browser.newPage();
+		try {
+			await page.goto("data:text/html,<title>detached</title>");
+			const realm = page.mainFrame().mainRealm();
+			await realm.evaluate(`window.pageContext = {
+  names: new Set(),
+  registerTool(tool) { this.names.add(tool.name); },
+  unregisterTool(name) { this.names.delete(name); },
+};
+Object.defineProperty(navigator, "modelContext", { configurable: true, value: window.pageContext });
+null;`);
+			const controller = await installWebMcp(page);
+			await realm.evaluate(
+				`(({ registerTool }) => registerTool({ name: "detached", description: "Page tool.", inputSchema: { type: "object" }, execute: () => 1 }))(navigator.modelContext)`,
+			);
+			expect(await realm.evaluate(`[...pageContext.names]`)).toEqual(["detached"]);
+			expect((await controller.list()).tools.map(tool => tool.name)).toEqual(["detached"]);
+			await realm.evaluate(`(({ unregisterTool }) => unregisterTool("detached"))(navigator.modelContext)`);
+			expect(await realm.evaluate(`pageContext.names.size`)).toBe(0);
+			expect((await controller.list()).tools).toEqual([]);
 			await controller.dispose();
 		} finally {
 			await page.close();

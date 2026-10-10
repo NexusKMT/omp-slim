@@ -387,24 +387,30 @@ export function installWebMcpPageHook(key: string): void {
 		if (tools.delete(name)) notify();
 	};
 
-	// Wrap the methods every registration goes through: the page's own context, or the platform prototype.
-	const patch = (target: PageModelContext): void => {
+	// Wrap the methods every registration goes through: the page's own context, called on that context as before,
+	// or the platform prototype, called on whichever context the page used.
+	const patch = (target: PageModelContext, receiver?: PageModelContext): void => {
 		const register = target.registerTool;
 		const unregister = target.unregisterTool;
 		const wrappers = {
 			async registerTool(this: unknown, tool: PageModelContextTool, options?: { signal?: AbortSignal }) {
-				if (register) await register.call(this, tool, options);
+				if (register) await register.call(receiver ?? this, tool, options);
 				remember(tool, options?.signal);
 			},
 			async unregisterTool(this: unknown, name: string) {
-				if (unregister) await unregister.call(this, name);
+				if (unregister) await unregister.call(receiver ?? this, name);
 				forget(name);
 			},
 		};
 		for (const name of unregister ? (["registerTool", "unregisterTool"] as const) : (["registerTool"] as const)) {
 			const original = Object.getOwnPropertyDescriptor(target, name);
+			// An own method keeps its attributes; an inherited one is shadowed.
+			const descriptor =
+				original && "value" in original
+					? { value: wrappers[name] }
+					: { configurable: true, writable: true, value: wrappers[name] };
 			try {
-				Object.defineProperty(target, name, { configurable: true, writable: true, value: wrappers[name] });
+				Object.defineProperty(target, name, descriptor);
 				patches.push({ target, name, original, value: wrappers[name] });
 			} catch {
 				// Native CDP discovery remains authoritative when this object is not patchable.
@@ -413,7 +419,8 @@ export function installWebMcpPageHook(key: string): void {
 	};
 
 	if (platformPrototype) patch(platformPrototype);
-	if (pageContext) patch(pageContext);
+	// A native context the page exposes itself is already covered by the prototype.
+	if (pageContext && !platformPrototype?.isPrototypeOf(pageContext)) patch(pageContext, pageContext);
 	// A page whose own modelContext is null reports the API but still gets the polyfill.
 	if (!platform && !pageContext) {
 		polyfillContext = {
@@ -473,10 +480,10 @@ export function installWebMcpPageHook(key: string): void {
 		uninstall(): void {
 			for (const { target, name, original, value } of patches) {
 				try {
-					// Leave a method the page replaced after ours.
+					// Leave a method the page replaced after ours, and any attribute it changed.
 					if (Object.getOwnPropertyDescriptor(target, name)?.value !== value) continue;
-					if (original) Object.defineProperty(target, name, original);
-					else delete target[name];
+					if (!original) delete target[name];
+					else Object.defineProperty(target, name, "value" in original ? { value: original.value } : original);
 				} catch {
 					// Best-effort cleanup for attached user tabs.
 				}
