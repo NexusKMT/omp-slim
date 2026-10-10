@@ -2380,9 +2380,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// resume does not re-restore the same text.
 		try {
 			const draft = await logger.time("InteractiveMode.init:draft", () => this.sessionManager.consumeDraft());
-			// Text typed during a Tern startup (still held) wins over the draft,
-			// as kernel-buffered typing does on other terminals.
-			if (draft && !this.editor.getText() && !this.ui.hasHeldText()) {
+			if (draft && !this.editor.getText()) {
 				this.editor.setText(draft);
 				this.updateEditorBorderColor();
 				this.ui.requestRender();
@@ -2392,9 +2390,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 
 		// Keys pressed while a Tern startup loaded were held until hooks ran, the
-		// session mode settled and the draft was restored, so a startup hotkey
-		// (Alt+P, Ctrl+G) acts on the final mode and editor contents; a held
-		// Enter meets the same bootstrap submit gate it would on other terminals.
+		// session mode settled and the draft was restored. They replay into the
+		// restored draft, never over it, so no held edit sequence can lose it;
+		// a startup hotkey (Alt+P, Ctrl+G) acts on the final mode and editor
+		// contents, and a held Enter meets the bootstrap submit gate it would on
+		// other terminals.
 		this.ui.releaseHeldInput();
 
 		// Subscribe to agent events
