@@ -93,6 +93,24 @@ describe("keystrokes during a Tern startup prepaint", () => {
 		expect(dialog.keys).toEqual(["\r"]);
 	});
 
+	it("stay in typing order when the app swaps in a replacement editor", async () => {
+		const editor = new KeyLog();
+		const replacement = new KeyLog();
+		harness = await TspHarness.start(tui => tui.setFocus(editor), TERN_PREPAINT);
+		const h = harness;
+
+		h.terminal.send("a");
+		h.flush();
+		h.tui.replaceHeldFocus(editor, replacement);
+		h.tui.setFocus(replacement);
+		h.terminal.send("b");
+		h.flush();
+		expect(replacement.keys).toEqual([]);
+
+		h.tui.releaseHeldInput();
+		expect(replacement.keys).toEqual(["a", "b"]);
+	});
+
 	it("are released by Ctrl+C so a stalled startup stays interruptible", async () => {
 		const log = new KeyLog();
 		harness = await TspHarness.start(tui => tui.setFocus(log), TERN_PREPAINT);

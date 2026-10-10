@@ -2305,6 +2305,16 @@ export class TUI extends Container {
 		for (const data of held) this.#handleInput(data);
 	}
 
+	/**
+	 * Hand held-key ownership from `previous` to `next` when the app replaces
+	 * the component focused at start (a swapped-in custom editor), so keys
+	 * typed into the replacement stay queued behind the held ones instead of
+	 * overtaking them. No-op unless `previous` owns the held keys.
+	 */
+	replaceHeldFocus(previous: Component, next: Component): void {
+		if (this.#heldInput !== undefined && this.#heldFocus === previous) this.#heldFocus = next;
+	}
+
 	addStartListener(listener: StartListener): () => void {
 		this.#startListeners.add(listener);
 		return () => {

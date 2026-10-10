@@ -171,7 +171,9 @@ immediately and fall back to rows if the terminal does not confirm it. Such a
 session needs raw input from the start, so a `deferInput` start holds the
 keystrokes meant for the component focused at start instead of leaving the tty
 cooked; a dialog that takes focus meanwhile (a startup hook's select or confirm)
-gets its input live. The cell-size reply is still consumed on arrival, and the
+gets its input live. A swapped-in custom editor inherits the hold through
+`Composer.setEditor()` (`TUI.replaceHeldFocus()`), so its keys queue behind the
+held ones. The cell-size reply is still consumed on arrival, and the
 sixel probe is skipped on a TSP terminal, so no probe listener sees held keys.
 `InteractiveMode.init()` calls `TUI.releaseHeldInput()` once startup hooks ran
 and the session mode settled, before the saved-draft decision, so a startup
