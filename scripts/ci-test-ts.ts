@@ -582,7 +582,7 @@ const MAX_CHUNK_ATTEMPTS = 3;
 // killer reaping a chunk that outgrew the runner -- and the bare exit code
 // cannot tell them apart. Which one it was is the difference between "raise
 // OMP_TEST_CHUNK_TIMEOUT" and "lower this bucket's chunkSize", so say it.
-export function describeChunkFailure(exitCode: number, timedOut: boolean): string {
+function describeChunkFailure(exitCode: number, timedOut: boolean): string {
 	if (timedOut) {
 		return `exceeded the ${Math.round(chunkTimeoutMs() / 1000)}s chunk watchdog and was killed (exit ${exitCode}; OMP_TEST_CHUNK_TIMEOUT to change)`;
 	}
@@ -609,7 +609,7 @@ function isCI(): boolean {
 // Never wider than `cores`: every chunk is a full `bun test` process (~1 GB
 // resident on coding-agent), so launching all ~190 at once only trades a
 // CPU-bound run for an OOM kill.
-export function testConcurrency(total: number, spec: string | undefined, cores: number): number {
+function testConcurrency(total: number, spec: string | undefined, cores: number): number {
 	const cap = Math.min(Math.max(1, cores), total);
 	const raw = spec?.trim().toLowerCase();
 	if (!raw || raw === "all" || raw === "max") return cap;
@@ -707,7 +707,7 @@ function formatDuration(seconds: number): string {
 // captured output — `— file > test (+N more)` — so the exact break is visible
 // in the stream without waiting for the end-of-run report. Emitted in completion
 // order as each chunk finishes.
-export function formatProgressLine(outcome: ChunkOutcome): string {
+function formatProgressLine(outcome: ChunkOutcome): string {
 	const time = style.dim(`[${formatDuration(outcome.seconds)}]`);
 	const retryNote = outcome.retries > 0 ? ` ${style.dim(`(retried ×${outcome.retries} after bun crash)`)}` : "";
 	if (outcome.exitCode === 0) {
@@ -725,7 +725,7 @@ export function formatProgressLine(outcome: ChunkOutcome): string {
 // `N chunks passed` line, a `N failed` line (red when non-zero, dim when clean),
 // then the total wall time. Printed after the failure report so a run always
 // ends on an at-a-glance verdict.
-export function formatSummaryFooter(passed: number, failed: number, totalSeconds: number): string {
+function formatSummaryFooter(passed: number, failed: number, totalSeconds: number): string {
 	const failLine = failed > 0 ? style.red(`${failed} failed`) : style.dim("0 failed");
 	return [
 		"",
@@ -739,7 +739,7 @@ export function formatSummaryFooter(passed: number, failed: number, totalSeconds
 // `file > test` identifier and the verbatim failure block bun printed for it
 // (source frame, `error:` line, received/expected) — the detail a developer
 // needs to act without re-running.
-export interface FailingTest {
+interface FailingTest {
 	name: string;
 	detail: string;
 }
@@ -756,7 +756,7 @@ export interface FailingTest {
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 const FILE_HEADER_RE = /^(\S.*\.test\.[cm]?[jt]sx?):$/;
 const FAIL_MARKER_RE = /^\(fail\)\s+(.*?)(?:\s+\[[\d.]+\s*m?s\])?$/;
-export function extractFailingTests(output: string): FailingTest[] {
+function extractFailingTests(output: string): FailingTest[] {
 	const failing: FailingTest[] = [];
 	let currentFile = "";
 	let buffer: string[] = [];
@@ -789,9 +789,8 @@ export function extractFailingTests(output: string): FailingTest[] {
 // the blocks are shown because the run withheld them; in verbose mode they
 // already streamed inline, so only the names are listed. When a chunk crashed
 // without per-test markers (no parseable failures) the raw log is replayed as a
-// fallback in quiet mode. The banner repeats below so it stays visible whether
-// you scroll to the top or the bottom of the failures.
-export function formatChunkFailure(failure: ChunkOutcome, replayOutput: boolean): string {
+// fallback in quiet mode.
+function formatChunkFailure(failure: ChunkOutcome, replayOutput: boolean): string {
 	const lines: string[] = [];
 	lines.push(
 		"",
@@ -816,16 +815,6 @@ export function formatChunkFailure(failure: ChunkOutcome, replayOutput: boolean)
 	return lines.join("\n");
 }
 
-export function formatFailureReport(failures: ChunkOutcome[], total: number, replayOutput: boolean): string {
-	const header = `${failures.length} of ${total} test chunk(s) FAILED`;
-	const lines: string[] = ["", style.bold(style.red(`━━━ ${header} ━━━`))];
-	for (const failure of failures) {
-		lines.push(formatChunkFailure(failure, replayOutput));
-	}
-	lines.push("", style.red(header));
-	return lines.join("\n");
-}
-
 // Run every command through a fixed-width worker pool. Each child's stdout and
 // stderr are drained concurrently (so a chatty test never deadlocks on a full
 // pipe) and buffered. Quiet mode (the default) prints one progress line per
@@ -833,7 +822,7 @@ export function formatFailureReport(failures: ChunkOutcome[], total: number, rep
 // at the end; `--full` streams every chunk's output inline as it completes. All
 // failures are collected and reported together instead of failing fast, so one
 // run surfaces every broken chunk and exits non-zero without a runner stack trace.
-export async function runTestCommandsInParallel(commands: TestCommand[], concurrency: number): Promise<void> {
+async function runTestCommandsInParallel(commands: TestCommand[], concurrency: number): Promise<void> {
 	const env = buildChildEnv();
 	const queue = [...commands];
 	const failures: ChunkOutcome[] = [];
@@ -994,7 +983,7 @@ export async function runTestCommandsInParallel(commands: TestCommand[], concurr
 // contiguous ranges because the chunk list follows sorted file order, so slow
 // neighbouring suites spread evenly instead of piling into one shard. Every
 // chunk lands in exactly one shard; unset/empty runs everything.
-export function selectShard<T>(commands: T[], spec: string | undefined): T[] {
+function selectShard<T>(commands: T[], spec: string | undefined): T[] {
 	const trimmed = spec?.trim();
 	if (!trimmed) return commands;
 	const match = /^(\d+)\/(\d+)$/.exec(trimmed);
@@ -1010,32 +999,26 @@ export function selectShard<T>(commands: T[], spec: string | undefined): T[] {
 	return selected;
 }
 
-// Skipped when imported (e.g. by the runner's own unit tests), where
-// `process.argv` carries test-file paths rather than a mode/flags.
-if (import.meta.main) {
-	if (!(requestedMode in validModes)) {
-		throw new Error(
-			`Unknown mode ${shellQuote(requestedMode)}. Expected one of: ${Object.keys(validModes).join(", ")}`,
-		);
-	}
+if (!(requestedMode in validModes)) {
+	throw new Error(`Unknown mode ${shellQuote(requestedMode)}. Expected one of: ${Object.keys(validModes).join(", ")}`);
+}
 
-	const requestedCommands = selectShard(await commandsForMode(requestedMode as Mode), Bun.env.OMP_TEST_SHARD);
-	const explicitConcurrency = Boolean(Bun.env.OMP_TEST_CONCURRENCY?.trim());
-	// CI defaults to one process at a time, but memory-sized workflow buckets
-	// explicitly opt into bounded process concurrency. Local runs fan out by
-	// default and may use the same override. Resolved before the dry-run check so
-	// `--dry-run` prints the argv the real run would use, budget included.
-	const pooled = requestedCommands.length > 1 && (!isCI() || explicitConcurrency);
-	// The sequential path is a pool of one, so a lone chunk keeps the whole budget.
-	const poolWidth = pooled
-		? testConcurrency(requestedCommands.length, Bun.env.OMP_TEST_CONCURRENCY, os.availableParallelism())
-		: 1;
-	const testCommands = applyChunkBudget(requestedCommands, poolWidth);
-	if (pooled && !isDryRun) {
-		await runTestCommandsInParallel(testCommands, poolWidth);
-	} else {
-		for (const testCommand of testCommands) {
-			await runTestCommand(testCommand);
-		}
+const requestedCommands = selectShard(await commandsForMode(requestedMode as Mode), Bun.env.OMP_TEST_SHARD);
+const explicitConcurrency = Boolean(Bun.env.OMP_TEST_CONCURRENCY?.trim());
+// CI defaults to one process at a time, but memory-sized workflow buckets
+// explicitly opt into bounded process concurrency. Local runs fan out by
+// default and may use the same override. Resolved before the dry-run check so
+// `--dry-run` prints the argv the real run would use, budget included.
+const pooled = requestedCommands.length > 1 && (!isCI() || explicitConcurrency);
+// The sequential path is a pool of one, so a lone chunk keeps the whole budget.
+const poolWidth = pooled
+	? testConcurrency(requestedCommands.length, Bun.env.OMP_TEST_CONCURRENCY, os.availableParallelism())
+	: 1;
+const testCommands = applyChunkBudget(requestedCommands, poolWidth);
+if (pooled && !isDryRun) {
+	await runTestCommandsInParallel(testCommands, poolWidth);
+} else {
+	for (const testCommand of testCommands) {
+		await runTestCommand(testCommand);
 	}
 }
