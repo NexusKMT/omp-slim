@@ -30,21 +30,18 @@ const BUILTIN_CONTEXT_FILE_NAMES: Record<string, true> = {
 	"copilot-instructions.md": true,
 };
 
-/** A `contextFiles.extra` entry: one path segment, never a directory, `..`, or a built-in context name. */
-export function contextFileBasename(value: string): string | undefined {
-	const name = value.trim();
-	if (
-		name === "" ||
-		name === "." ||
-		name === ".." ||
-		name.includes("/") ||
-		name.includes("\\") ||
-		name.includes("\0") ||
-		BUILTIN_CONTEXT_FILE_NAMES[name.toLowerCase()] === true
-	) {
-		return undefined;
+/** Why `entry` is not a valid `contextFiles.extra` name; undefined for a plain, non-built-in file name. */
+function contextFileNameError(entry: unknown): string | undefined {
+	if (typeof entry !== "string") return `contextFiles.extra entries must be strings (${String(entry)})`;
+	const name = entry.trim();
+	if (name === "") return "contextFiles.extra entries must not be empty";
+	if (BUILTIN_CONTEXT_FILE_NAMES[name.toLowerCase()] === true) {
+		return `contextFiles.extra cannot list a built-in context file (${name})`;
 	}
-	return name;
+	if (name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) {
+		return `contextFiles.extra entries must be file names, not paths (${name})`;
+	}
+	return undefined;
 }
 
 /**
@@ -57,19 +54,10 @@ export const cfgContextFilesExtra = register({
 	default: EMPTY_STRING_ARRAY,
 	validate: raw => {
 		if (raw === undefined) return;
-		if (!Array.isArray(raw)) {
-			throw new Error("contextFiles.extra must be a list of file names");
-		}
+		if (!Array.isArray(raw)) throw new Error("contextFiles.extra must be a list of file names");
 		for (const entry of raw) {
-			if (typeof entry !== "string") {
-				throw new Error(`contextFiles.extra entries must be file names, not paths (${String(entry)})`);
-			}
-			if (BUILTIN_CONTEXT_FILE_NAMES[entry.trim().toLowerCase()] === true) {
-				throw new Error(`contextFiles.extra cannot list a built-in context file (${entry.trim()})`);
-			}
-			if (contextFileBasename(entry) === undefined) {
-				throw new Error(`contextFiles.extra entries must be file names, not paths (${entry})`);
-			}
+			const error = contextFileNameError(entry);
+			if (error !== undefined) throw new Error(error);
 		}
 	},
 });

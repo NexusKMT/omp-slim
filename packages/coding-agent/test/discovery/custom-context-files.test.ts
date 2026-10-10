@@ -5,7 +5,8 @@ import * as path from "node:path";
 import { type ContextFile, contextFileCapability } from "@oh-my-pi/pi-coding-agent/capability/context-file";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { initializeWithSettings, loadCapability, resetCapabilityForTests } from "@oh-my-pi/pi-coding-agent/discovery";
-import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
+import { __resetDirsFromEnvForTests, getProjectAgentDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 
 function restoreEnv(key: string, value: string | undefined): void {
 	if (value === undefined) {
@@ -34,6 +35,7 @@ describe("contextFiles.extra", () => {
 	let tempDir = "";
 	let tempHome = "";
 	let originalHome: string | undefined;
+	let originalUserProfile: string | undefined;
 	let originalAgentDir: string | undefined;
 	const dirs: string[] = [];
 
@@ -41,6 +43,7 @@ describe("contextFiles.extra", () => {
 		resetSettingsForTest();
 		resetCapabilityForTests();
 		originalHome = process.env.HOME;
+		originalUserProfile = process.env.USERPROFILE;
 		originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 		tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-extra-ctx-home-"));
 		dirs.push(tempHome);
@@ -55,8 +58,10 @@ describe("contextFiles.extra", () => {
 	afterEach(async () => {
 		resetSettingsForTest();
 		resetCapabilityForTests();
+		AgentStorage.close();
 		vi.restoreAllMocks();
 		restoreEnv("HOME", originalHome);
+		restoreEnv("USERPROFILE", originalUserProfile);
 		restoreEnv("PI_CODING_AGENT_DIR", originalAgentDir);
 		__resetDirsFromEnvForTests();
 		await Promise.all(dirs.splice(0).map(dir => removeWithRetries(dir)));
@@ -183,5 +188,21 @@ describe("contextFiles.extra", () => {
 		expect(userLocal?.level).toBe("user");
 		expect(userLocal?.content).toBe("# user personal\n");
 		expect(userShared?.content).toBe("# user shared\n");
+	});
+
+	test("a project-configured list does not read the user agent directory", async () => {
+		const agentDir = path.join(tempHome, ".omp", "agent");
+		await fs.mkdir(agentDir, { recursive: true });
+		await fs.writeFile(path.join(agentDir, "secrets.md"), "# user secret\n");
+		await fs.writeFile(path.join(tempDir, "secrets.md"), "# project file\n");
+		await Bun.write(
+			path.join(getProjectAgentDir(tempDir), "config.yml"),
+			"contextFiles:\n  extra:\n    - secrets.md\n",
+		);
+		initializeWithSettings(await Settings.init({ cwd: tempDir, agentDir }));
+
+		const result = await loadCapability<ContextFile>(contextFileCapability.id, { cwd: tempDir });
+
+		expect(result.items.map(file => file.path)).toEqual([path.join(tempDir, "secrets.md")]);
 	});
 });

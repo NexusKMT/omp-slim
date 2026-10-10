@@ -101,8 +101,8 @@ Each name is found the same way as a standalone `AGENTS.md` (the `agents-md` wal
 
 Two more locations are checked for each name:
 
-- The active user agent directory (`~/.omp/agent/<name>`, or the profile / `PI_CODING_AGENT_DIR` directory), as a user-level file.
-- When the session is in a linked git worktree, `<primary-checkout>/<name>`. The normal walk stops at the worktree's `.git`, so this is what picks up a gitignored `AGENTS.local.md` that lives only in the main checkout.
+- The active user agent directory (`~/.omp/agent/<name>`, or the profile / `PI_CODING_AGENT_DIR` directory), as a user-level file. Skipped when the effective list comes from a project config (`.omp/config.yml`), so a repository cannot pull files such as `config.yml` from your agent directory into the prompt.
+- When the session is in a linked git worktree, `<primary-checkout>/<name>`. The normal walk stops at the worktree's `.git`, so this is what picks up a gitignored `AGENTS.local.md` that lives only in the main checkout. Only the primary checkout's root is checked, not the directory matching your cwd inside it.
 
 Extra files do not take the one-per-depth scope slot and are not shadowed by the file that does. `AGENTS.local.md` loads beside `AGENTS.md`. At the same depth the extra file is injected after the scope winner, so it is the more prominent of the two. `@` imports inside an extra file resolve from that file's own directory.
 
