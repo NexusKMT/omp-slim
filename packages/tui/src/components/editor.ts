@@ -675,7 +675,7 @@ export class Editor implements Component, Focusable {
 	/** Previous edit, for kill/yank chaining, undo coalescing, and the provisional space after a Tab word accept. */
 	#lastAction: "kill" | "yank" | "type-word" | "accept-word" | "replace" | null = null;
 	/** Graphemes overwritten in the current `R` session, so Backspace can restore them. */
-	#replaceLog: { line: number; col: number; removed: string; written: number }[] = [];
+	#replaceLog: { line: number; col: number; removed: string; text: string }[] = [];
 
 	// Character jump mode
 	#jumpMode: "forward" | "backward" | null = null;
@@ -2314,6 +2314,15 @@ export class Editor implements Component, Focusable {
 
 	#applyVimCommands(commands: readonly VimCommand[]): void {
 		for (const command of commands) {
+			// A delete or other edit in replace mode invalidates Backspace restores. Motions do not.
+			if (
+				this.#vim?.mode === "replace" &&
+				command.kind !== "move" &&
+				command.kind !== "mode" &&
+				command.kind !== "yank"
+			) {
+				this.#replaceLog.length = 0;
+			}
 			switch (command.kind) {
 				case "move":
 					this.#moveVimCursor(command.to);
@@ -2383,19 +2392,24 @@ export class Editor implements Component, Focusable {
 		const end = col >= line.length ? col : nextGraphemeStart(line, col);
 		const removed = line.slice(col, end);
 		this.#state.lines[lineIdx] = line.slice(0, col) + grapheme + line.slice(end);
-		this.#replaceLog.push({ line: lineIdx, col, removed, written: grapheme.length });
+		this.#replaceLog.push({ line: lineIdx, col, removed, text: grapheme });
 		this.#setCursorCol(col + grapheme.length);
 		this.#notifyChange();
 	}
 
 	#replaceBackspace(): void {
 		const entry = this.#replaceLog.pop();
-		if (!entry || this.#state.cursorLine !== entry.line || this.#state.cursorCol !== entry.col + entry.written) {
-			if (entry) this.#replaceLog.push(entry);
+		if (!entry) return;
+		const line = this.#state.lines[entry.line] ?? "";
+		const stillThere = line.slice(entry.col, entry.col + entry.text.length) === entry.text;
+		const atCursor = this.#state.cursorLine === entry.line && this.#state.cursorCol === entry.col + entry.text.length;
+		if (!stillThere) return;
+		if (!atCursor) {
+			this.#replaceLog.push(entry);
 			return;
 		}
-		const line = this.#state.lines[entry.line] ?? "";
-		this.#state.lines[entry.line] = line.slice(0, entry.col) + entry.removed + line.slice(entry.col + entry.written);
+		this.#state.lines[entry.line] =
+			line.slice(0, entry.col) + entry.removed + line.slice(entry.col + entry.text.length);
 		this.#setCursorCol(entry.col);
 		this.#notifyChange();
 	}

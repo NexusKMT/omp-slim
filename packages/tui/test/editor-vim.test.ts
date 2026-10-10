@@ -1053,5 +1053,37 @@ describe("Editor vim mode", () => {
 			expect(editor.getText()).toBe("XYcd");
 			expect(editor.vimMode).toBe("replace");
 		});
+
+		it("does not restore a replace after another edit moves the bytes", () => {
+			const editor = vimEditor("abc");
+			editor.handleInput("R");
+			editor.handleInput("X");
+			expect(editor.getText()).toBe("Xbc");
+			editor.handleInput("\x1b[H");
+			editor.handleInput("\x1b[3~");
+			editor.handleInput("\x1b[C");
+			editor.handleInput("\x7f");
+			expect(editor.getText()).toBe("bc");
+			expect(editor.vimMode).toBe("replace");
+		});
+
+		it("does not restore the sticky column after r or R", () => {
+			const replaced = vimEditor("abcdefghij\nab\nabcdefghij");
+			for (let i = 0; i < 8; i++) replaced.handleInput("l");
+			replaced.handleInput("j");
+			replaced.handleInput("r");
+			replaced.handleInput("X");
+			replaced.handleInput("j");
+			expect(cursor(replaced)).toEqual({ line: 2, col: 1 });
+
+			const mode = vimEditor("abcdefghij\nab\nabcdefghij");
+			for (let i = 0; i < 8; i++) mode.handleInput("l");
+			mode.handleInput("j");
+			mode.handleInput("R");
+			mode.handleInput("Z");
+			mode.handleInput(ESC);
+			mode.handleInput("j");
+			expect(cursor(mode)).toEqual({ line: 2, col: 1 });
+		});
 	});
 });

@@ -619,6 +619,7 @@ export class VimState {
 			return [];
 		}
 		if ((key === "r" || key === "R") && this.#operator === null && !this.visual) {
+			this.#desiredCol = null;
 			if (key === "R") {
 				this.#takeCount();
 				this.mode = "replace";
