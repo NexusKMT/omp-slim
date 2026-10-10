@@ -420,6 +420,7 @@ async function runTestCommand(testCommand: TestCommand): Promise<void> {
 		let timedOut = false;
 		const killTimer = setTimeout(() => {
 			timedOut = true;
+			process.stdout.write(describeStuckProcessTree(proc.pid));
 			proc.kill("SIGKILL");
 		}, chunkTimeoutMs());
 		const exitCode = await proc.exited;
@@ -485,6 +486,46 @@ function chunkTimeoutMs(): number {
 	const raw = Number(Bun.env.OMP_TEST_CHUNK_TIMEOUT?.trim());
 	if (Number.isFinite(raw) && raw >= 1) return raw * 1000;
 	return 600_000;
+}
+
+// What a watchdog-killed chunk was still doing, captured just before the
+// SIGKILL: every process left in the chunk's tree (the `bun test` coordinator,
+// its `--test-worker`s, anything they spawned) with state, CPU, RSS and kernel
+// wait channel, plus the sockets those processes hold. A chunk can report every
+// test and still never exit; this is the only evidence of which process refused
+// to and what it was blocked on. Linux-only (ps/ss column names); elsewhere "".
+function describeStuckProcessTree(rootPid: number): string {
+	if (process.platform !== "linux") return "";
+	const ps = Bun.spawnSync(["ps", "-eo", "pid=,ppid=,stat=,etimes=,pcpu=,rss=,wchan:24=,args="]);
+	if (!ps.success) return "";
+	const rows = ps.stdout
+		.toString()
+		.split("\n")
+		.map(line => line.trim().split(/\s+/))
+		.filter(cols => cols.length >= 8);
+	const tree = new Set([String(rootPid)]);
+	for (let grew = true; grew;) {
+		grew = false;
+		for (const cols of rows) {
+			if (tree.has(cols[1]) && !tree.has(cols[0])) {
+				tree.add(cols[0]);
+				grew = true;
+			}
+		}
+	}
+	const lines = ["[watchdog] live process tree (pid ppid stat elapsed_s cpu% rss_kb wchan args):"];
+	for (const cols of rows) {
+		if (tree.has(cols[0])) lines.push(`  ${cols.slice(0, 7).join(" ")} ${cols.slice(7).join(" ").slice(0, 200)}`);
+	}
+	const ss = Bun.spawnSync(["ss", "-tuanpH"]);
+	if (ss.success) {
+		const owned = ss.stdout
+			.toString()
+			.split("\n")
+			.filter(line => [...tree].some(pid => line.includes(`pid=${pid},`)));
+		lines.push(`[watchdog] sockets held by that tree (${owned.length}):`, ...owned.map(line => `  ${line.trim()}`));
+	}
+	return `${lines.join("\n")}\n`;
 }
 
 // Exit codes that mean the bun process itself died to a runtime fault
@@ -836,8 +877,10 @@ export async function runTestCommandsInParallel(commands: TestCommand[], concurr
 		// Watchdog: a wedged child (e.g. bun's panic handler deadlocking
 		// after a GC crash) would otherwise hang this worker forever.
 		let timedOut = false;
+		let stuckTree = "";
 		const killTimer = setTimeout(() => {
 			timedOut = true;
+			stuckTree = describeStuckProcessTree(proc.pid);
 			proc.kill("SIGKILL");
 		}, chunkTimeoutMs());
 		const exitCode = await proc.exited;
@@ -850,7 +893,7 @@ export async function runTestCommandsInParallel(commands: TestCommand[], concurr
 		return {
 			exitCode,
 			timedOut,
-			output: `${stdout.text}${stderr.text}${timedOut ? `\n[watchdog] chunk exceeded ${Math.round(chunkTimeoutMs() / 1000)}s; killed with SIGKILL (OMP_TEST_CHUNK_TIMEOUT to change)\n` : ""}`,
+			output: `${stdout.text}${stderr.text}${timedOut ? `\n${stuckTree}[watchdog] chunk exceeded ${Math.round(chunkTimeoutMs() / 1000)}s; killed with SIGKILL (OMP_TEST_CHUNK_TIMEOUT to change)\n` : ""}`,
 		};
 	}
 
