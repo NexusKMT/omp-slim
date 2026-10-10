@@ -335,6 +335,9 @@ describe("compaction.modelThresholds", () => {
 		expect(point.basis).toContain("capped by window");
 		const wide = { provider: "anthropic", id: "claude-opus-5-5", contextWindow: 1_000_000 } as Model;
 		expect(describeModelCompactionPoint(global, wide)).toMatchObject({ tokens: 300_000, basis: "fixed" });
+		// One token below the window is still the user's exact trigger.
+		const justBelow = Settings.isolated({ "compaction.thresholdTokens": 196_607 });
+		expect(describeModelCompactionPoint(justBelow, capped)).toMatchObject({ tokens: 196_607, basis: "fixed" });
 
 		// A prefix entry the model falls back to; an entry below the window stays exact.
 		const prefixed = Settings.isolated({ "compaction.modelThresholds": { "factory-droid/*": "f300000" } });

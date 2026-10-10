@@ -383,7 +383,9 @@ export function resolveThresholdTokens(contextWindow: number, settings: Compacti
 		// A trigger at or past the window can never fire before the request
 		// overflows (a provider may cap the window below the configured point);
 		// fall back to the window's prompt budget, as the reserve policy does.
-		// A trigger below the window is exact.
+		// A trigger below the window is exact, as the `f` model entries promise,
+		// even one inside the reserve: the user chose that headroom. The step at
+		// the window is inherent; a monotone fallback would sit at window - 1.
 		if (thresholdTokens >= contextWindow) return promptBudgetTokens(contextWindow, settings);
 		return Math.min(contextWindow - 1, Math.max(1, thresholdTokens));
 	}

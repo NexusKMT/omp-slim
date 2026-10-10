@@ -71,7 +71,8 @@ export type ModelCompactionTrigger =
 function resolveTrigger(settings: CompactionSettings, window: number): ModelCompactionTrigger {
 	const tokens = resolveThresholdTokens(window, settings);
 	if (settings.thresholdTokens > 0) {
-		return settings.thresholdTokens >= window
+		// Capped exactly when `resolveThresholdTokens` lowered it, whatever its boundary.
+		return tokens < settings.thresholdTokens
 			? { kind: "fixed", tokens, cappedFrom: settings.thresholdTokens }
 			: { kind: "fixed", tokens };
 	}
