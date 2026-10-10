@@ -13,6 +13,7 @@ import {
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgCompactionModelThresholds } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 import {
+	describeModelCompactionPoint,
 	planModelCompactionPoint,
 	previewModelCompactionPoint,
 	resolveModelCompactionSettings,
@@ -323,6 +324,32 @@ describe("compaction.modelThresholds", () => {
 		expect(planModelCompactionPoint(settings, model, "0.5%", tiers)?.trigger).toMatchObject({ share: 1 });
 		// The reserve policy's share is the exact ratio, not a rounded percentage: 100k − 16,384 of 100k.
 		expect(planModelCompactionPoint(settings, model, "100k", tiers)?.trigger).toMatchObject({ share: 83.616 });
+	});
+
+	it("shows a fixed trigger past the window less its reserve as capped where it compacts", () => {
+		const settings = Settings.isolated({ extendedContext: false });
+		const model = { provider: "openai", id: "gpt-5.6-terra", contextWindow: 272_000 } as Model;
+		const tiers = { standard: 272_000, extended: 1_050_000 };
+		// 272k less its 40.8k reserve: f250k stays on the standard window and compacts at 231.2k.
+		expect(planModelCompactionPoint(settings, model, "f250k", tiers)).toMatchObject({
+			window: 272_000,
+			trigger: { kind: "fixed", tokens: 231_200, cappedFrom: 250_000 },
+		});
+		expect(previewModelCompactionPoint(settings, model, "f250k", tiers)).toBe(
+			"compacts at 231.2K · fixed 250K, capped by window",
+		);
+		expect(previewModelCompactionPoint(settings, model, "f200k", tiers)).toBe("compacts at exactly 200K");
+
+		// A global trigger past a window the provider caps lower.
+		const global = Settings.isolated({ "compaction.thresholdTokens": 300_000 });
+		const capped = { provider: "factory-droid", id: "kimi-k3", contextWindow: 196_608 } as Model;
+		expect(describeModelCompactionPoint(global, capped)).toMatchObject({
+			tokens: 167_117,
+			basis: "fixed 300K, capped by window",
+			source: "global",
+		});
+		const wide = { provider: "anthropic", id: "claude-opus-5-5", contextWindow: 1_000_000 } as Model;
+		expect(describeModelCompactionPoint(global, wide)).toMatchObject({ tokens: 300_000, basis: "fixed" });
 	});
 
 	it("plans and saves a reset as the prefix entry the model falls back to", () => {
