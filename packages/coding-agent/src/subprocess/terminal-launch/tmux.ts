@@ -56,13 +56,16 @@ const launchTmux: TerminalLaunchBackend<"tmux", typeof capabilities> = async (
 	const argv = ["tmux", operation];
 	if (request.placement === "pane") argv.push(request.direction === "down" ? "-v" : "-h");
 	if (request.focus === false) argv.push("-d");
-	argv.push("-c", escapeTmuxArgument(request.cwd));
+	// tmux format-expands the -c start directory (`#{...}`, `#S`, `#(cmd)`); `##` is a literal `#`.
+	argv.push("-c", escapeTmuxArgument(request.cwd.replaceAll("#", "##")));
 	if (target) argv.push("-t", escapeTmuxArgument(target));
 	argv.push("-P", "-F", request.placement === "pane" ? "#{pane_id}" : "#{window_id}", "--");
 
+	// tmux execs a multi-argument command directly but runs a single argument
+	// through its configured `default-shell -c`, which may not use POSIX grammar.
 	let commandArgs: readonly string[];
 	if (request.execution === "shell") {
-		commandArgs = [quotePosixArgv(request.command)];
+		commandArgs = ["/bin/sh", "-c", quotePosixArgv(request.command)];
 	} else if (request.command.length === 1) {
 		const executable = request.command[0]!;
 		if (executable.includes("=")) {
@@ -72,8 +75,8 @@ const launchTmux: TerminalLaunchBackend<"tmux", typeof capabilities> = async (
 				"tmux direct execution cannot safely run a single executable name containing '='.",
 			);
 		}
-		// tmux uses sh -c for its command field. env makes a one-element command
-		// a direct argv launch instead of executable shell text.
+		// env turns a one-element command into a multi-argument direct launch
+		// instead of default-shell text.
 		commandArgs = ["/usr/bin/env", "--", executable];
 	} else {
 		commandArgs = request.command;

@@ -20,6 +20,7 @@ const capabilities = {
 		floatingDirectionExclusive: true,
 		focus: true,
 		name: true,
+		minimumVersion: { focus: "0.45.0", target: "0.44.1" },
 	},
 	window: {
 		displayName: "tab",
@@ -27,8 +28,54 @@ const capabilities = {
 		target: false,
 		focus: true,
 		name: true,
+		minimumVersion: { focus: "0.45.0" },
 	},
 } as const satisfies SupportedMultiplexerCapabilities;
+
+type ZellijLaunchRequest = Extract<TerminalLaunchRequest, { multiplexer: "zellij" }>;
+
+/** Parsed `zellij --version` per CLI runner; the installed CLI does not change while omp runs. */
+const zellijVersions = new WeakMap<TerminalLaunchCliRunner, readonly number[]>();
+
+function parseVersion(text: string): readonly number[] | undefined {
+	const match = /(\d+)\.(\d+)\.(\d+)/u.exec(text);
+	return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
+}
+
+function isAtLeast(version: readonly number[], minimum: readonly number[]): boolean {
+	for (let index = 0; index < minimum.length; index++) {
+		if (version[index] !== minimum[index]) return version[index]! > minimum[index]!;
+	}
+	return true;
+}
+
+// Older Zellij CLIs fail on these flags with a bare usage error; name the required version instead.
+async function requireZellijVersion(
+	request: ZellijLaunchRequest,
+	runCli: TerminalLaunchCliRunner,
+	minimum: string,
+	flag: string,
+): Promise<void> {
+	let version = zellijVersions.get(runCli);
+	if (!version) {
+		version = parseVersion(await runStep(request, "--version", ["zellij", "--version"], request.cwd, runCli));
+		if (version) zellijVersions.set(runCli, version);
+	}
+	if (!version) {
+		throw launchError(
+			request,
+			"version",
+			`zellij ${flag} requires Zellij ${minimum} or newer, and the installed version could not be determined.`,
+		);
+	}
+	if (!isAtLeast(version, parseVersion(minimum)!)) {
+		throw launchError(
+			request,
+			"version",
+			`zellij ${flag} requires Zellij ${minimum} or newer (found ${version.join(".")}).`,
+		);
+	}
+}
 
 function isTabInformation(value: unknown): value is { tab_id: string | number } {
 	return (
@@ -42,7 +89,7 @@ function isTabInformation(value: unknown): value is { tab_id: string | number } 
 
 // Zellij can silently create in the active tab when --tab-id names no existing tab.
 async function requireExistingTargetTab(
-	request: Extract<TerminalLaunchRequest, { multiplexer: "zellij" }>,
+	request: ZellijLaunchRequest,
 	target: string,
 	runCli: TerminalLaunchCliRunner,
 ): Promise<void> {
@@ -67,6 +114,13 @@ const launchZellij: TerminalLaunchBackend<"zellij", typeof capabilities> = async
 		throw launchError(request, "capability", "zellij launch requires an active Zellij session.");
 	}
 	const operation = request.placement === "pane" ? "new-pane" : "new-tab";
+	if (request.placement === "pane" && request.target !== undefined) {
+		await requireZellijVersion(request, runCli, capabilities.pane.minimumVersion.target, "new-pane --tab-id");
+	}
+	if (request.focus === false) {
+		const minimum = capabilities[request.placement].minimumVersion.focus;
+		await requireZellijVersion(request, runCli, minimum, `${operation} --no-focus`);
+	}
 	const argv = ["zellij", "action", operation];
 	if (request.placement === "pane") {
 		if (request.floating) argv.push("--floating");
@@ -83,6 +137,8 @@ const launchZellij: TerminalLaunchBackend<"zellij", typeof capabilities> = async
 	if (request.focus === false) argv.push("--no-focus");
 	argv.push("--", ...request.command);
 	const output = await runStep(request, `action ${operation}`, argv, request.cwd, runCli);
+	// Zellij before 0.44.0 starts the command but prints no ID.
+	if (!output.trim()) return { multiplexer: "zellij", placement: request.placement };
 	const id = oneLineId(request, `action ${operation}`, output);
 	if (request.placement === "pane") {
 		if (!/^(?:terminal_)?[0-9]+$/u.test(id)) {

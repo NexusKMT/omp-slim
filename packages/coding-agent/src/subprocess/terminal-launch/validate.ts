@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import type { TerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 import { terminalLaunchCapabilities } from "./providers";
 import { launchError } from "./shared";
@@ -10,40 +11,19 @@ import {
 
 const terminalControlBytes = /[\u0000-\u001f\u007f-\u009f]/u;
 
-function invalidRequest(value: unknown, message: string): never {
-	if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-		const record = value as Record<string, unknown>;
-		const multiplexer = record.multiplexer;
-		const placement = record.placement;
-		if (
-			typeof multiplexer === "string" &&
-			Object.hasOwn(terminalLaunchCapabilities, multiplexer) &&
-			(placement === "pane" || placement === "window")
-		) {
-			const provider = terminalLaunchCapabilities[multiplexer as TerminalMultiplexer];
-			if (!provider.supported) {
-				throw new TerminalLaunchError(message, multiplexer as TerminalMultiplexer, placement, "validate");
-			}
-			if (provider[placement]) {
-				throw new TerminalLaunchError(message, multiplexer as TerminalLaunchMultiplexer, placement, "validate");
-			}
-		}
-	}
-	throw new TypeError(message);
-}
 /** Validate untyped extension/JavaScript requests against the same map that defines the TS request union. */
 export function validateRequest(value: unknown): asserts value is TerminalLaunchRequest {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		invalidRequest(value, "A terminal launch request must be an object.");
+		throw new TypeError("A terminal launch request must be an object.");
 	}
 	const request = value as Record<string, unknown>;
 	const multiplexer = request.multiplexer;
 	const placement = request.placement;
 	if (typeof multiplexer !== "string" || !Object.hasOwn(terminalLaunchCapabilities, multiplexer)) {
-		invalidRequest(value, "The requested terminal multiplexer is not recognized.");
+		throw new TypeError("The requested terminal multiplexer is not recognized.");
 	}
 	if (placement !== "pane" && placement !== "window") {
-		invalidRequest(value, "The requested terminal placement is not supported.");
+		throw new TypeError("The requested terminal placement is not supported.");
 	}
 
 	const provider = terminalLaunchCapabilities[multiplexer as TerminalMultiplexer];
@@ -52,7 +32,12 @@ export function validateRequest(value: unknown): asserts value is TerminalLaunch
 	}
 	const capabilities = provider[placement] as PlacementCapabilities | undefined;
 	if (!capabilities) {
-		invalidRequest(value, `${multiplexer} does not support ${placement} launches.`);
+		throw new TerminalLaunchError(
+			`${multiplexer} does not support ${placement} launches.`,
+			multiplexer as TerminalMultiplexer,
+			placement,
+			"capability",
+		);
 	}
 	const launch = {
 		multiplexer: multiplexer as TerminalLaunchMultiplexer,
@@ -82,6 +67,10 @@ export function validateRequest(value: unknown): asserts value is TerminalLaunch
 	const cwd = request.cwd;
 	if (typeof cwd !== "string" || cwd.length === 0 || cwd.includes("\0")) {
 		fail("validate", "A terminal launch requires a valid working directory.");
+	}
+	// Backends pass cwd to the CLI and also run the CLI there; a relative path would resolve twice.
+	if (!path.isAbsolute(cwd as string)) {
+		fail("validate", "A terminal launch working directory must be an absolute path.");
 	}
 	if (capabilities.cwdShellInput && typeof cwd === "string" && terminalControlBytes.test(cwd)) {
 		fail("cwd", "Shell-input launch working directories cannot contain terminal control bytes.");

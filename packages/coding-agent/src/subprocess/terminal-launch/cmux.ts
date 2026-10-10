@@ -55,13 +55,11 @@ const launchCmux: TerminalLaunchBackend<"cmux", typeof capabilities> = async (
 		const argv = ["cmux", "--json", "new-split", request.direction ?? "right"];
 		if (workspace) argv.push("--workspace", workspace);
 		if (surface) argv.push("--surface", surface);
-		if (request.target) {
-			// CMUX new-split restores CMUX_WORKSPACE_ID even with --surface, so an
-			// explicit surface must not inherit an unrelated workspace context.
-			argv.unshift("/usr/bin/env", "-u", "CMUX_WORKSPACE_ID");
-		}
 		argv.push("--command", shellCommand, ...focusArgs);
-		const output = await runStep(request, "new-split", argv, request.cwd, runCli);
+		// CMUX new-split restores CMUX_WORKSPACE_ID even with --surface, so an
+		// explicit surface must not inherit an unrelated workspace context.
+		const cliEnv = request.target ? { ...env, CMUX_WORKSPACE_ID: undefined } : undefined;
+		const output = await runStep(request, "new-split", argv, request.cwd, runCli, cliEnv);
 		const payload = cmuxPayload(parseJson(request, "new-split", output));
 		if (payload.ok === false) {
 			throw launchError(request, "new-split", "CMUX new-split returned an unsuccessful response.");

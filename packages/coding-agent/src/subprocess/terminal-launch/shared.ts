@@ -6,8 +6,8 @@ import {
 	type TerminalLaunchRequest,
 } from "./types";
 
-export const processCli: TerminalLaunchCliRunner = async (argv, cwd) => {
-	const result = await ptree.exec([...argv], { cwd, allowNonZero: true });
+export const processCli: TerminalLaunchCliRunner = async (argv, cwd, env) => {
+	const result = await ptree.exec([...argv], { cwd, env, allowNonZero: true });
 	return { stdout: result.stdout, exitCode: result.exitCode };
 };
 
@@ -26,10 +26,11 @@ export async function runStep(
 	argv: readonly string[],
 	cwd: string,
 	runCli: TerminalLaunchCliRunner,
+	env?: NodeJS.ProcessEnv,
 ): Promise<string> {
 	let result: TerminalLaunchCliResult;
 	try {
-		result = await runCli(argv, cwd);
+		result = await runCli(argv, cwd, env);
 	} catch {
 		throw launchError(request, operation, `${request.multiplexer} ${operation} could not start its CLI.`);
 	}

@@ -14,6 +14,11 @@ export interface PlacementCapabilities {
 	label?: true;
 	shellGrammar?: "posix";
 	cwdShellInput?: true;
+	/**
+	 * Minimum provider CLI version for an option that changes the CLI invocation
+	 * (`focus: false`, an explicit `target`); the backend checks it before launching.
+	 */
+	minimumVersion?: { readonly focus?: string; readonly target?: string };
 }
 
 export type SupportedMultiplexerCapabilities = { displayName: string; supported: true } & (
@@ -116,8 +121,15 @@ export interface TerminalLaunchCliResult {
 	exitCode: number | null;
 }
 
-/** Receives the exact argv dispatched to a backend CLI and its process cwd. */
-export type TerminalLaunchCliRunner = (argv: readonly string[], cwd: string) => Promise<TerminalLaunchCliResult>;
+/**
+ * Receives the exact argv dispatched to a backend CLI and its process cwd. When `env` is set,
+ * it replaces the inherited environment for that CLI process.
+ */
+export type TerminalLaunchCliRunner = (
+	argv: readonly string[],
+	cwd: string,
+	env?: NodeJS.ProcessEnv,
+) => Promise<TerminalLaunchCliResult>;
 
 /** Shared runtime inputs supplied to every provider backend. */
 export interface TerminalLaunchBackendContext {

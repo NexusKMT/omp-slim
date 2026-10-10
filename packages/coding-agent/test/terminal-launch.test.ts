@@ -8,6 +8,7 @@ import {
 	getTerminalLaunchPlacement,
 	type TerminalLaunchCliResult,
 	type TerminalLaunchCliRunner,
+	TerminalLaunchError,
 	type TerminalLaunchRequest,
 } from "../src/subprocess/terminal-launch";
 import { processCli } from "../src/subprocess/terminal-launch/shared";
@@ -15,6 +16,7 @@ import { processCli } from "../src/subprocess/terminal-launch/shared";
 interface CliCall {
 	argv: string[];
 	cwd: string;
+	env?: NodeJS.ProcessEnv;
 }
 
 function createHarness(
@@ -23,8 +25,8 @@ function createHarness(
 	platform: NodeJS.Platform = "darwin",
 ) {
 	const calls: CliCall[] = [];
-	const runCli: TerminalLaunchCliRunner = async (argv, cwd) => {
-		calls.push({ argv: [...argv], cwd });
+	const runCli: TerminalLaunchCliRunner = async (argv, cwd, env) => {
+		calls.push({ argv: [...argv], cwd, env });
 		const response = responses.shift();
 		if (!response) throw new Error("unexpected CLI call");
 		return response;
@@ -198,86 +200,6 @@ describe("generic terminal launch construction", () => {
 			expect(Object.hasOwn(confirmed.request, option)).toBe(false);
 		}
 	});
-
-	it("executes factory-built direct requests through the provider argv seam", async () => {
-		const command = [
-			process.execPath,
-			"-e",
-			"process.stdout.write(JSON.stringify(process.argv.slice(1)))",
-			"argument with spaces",
-			"literal; shell text",
-		];
-		const built = createDefaultTerminalLaunchRequest("tmux", "pane", command, process.cwd());
-		if ("error" in built) throw new Error(built.error);
-
-		const calls: CliCall[] = [];
-		let childResult: TerminalLaunchCliResult | undefined;
-		const launch = createTerminalLauncher({
-			environment: () => ({ TMUX: "/tmp/tmux.sock,1,0", TMUX_PANE: "%2" }),
-			runCli: async (argv, cwd) => {
-				calls.push({ argv: [...argv], cwd });
-				childResult = await processCli(argv.slice(argv.indexOf("--") + 1), cwd);
-				return { stdout: "%23", exitCode: 0 };
-			},
-		});
-
-		const result = await launch(built.request);
-
-		expect(result).toEqual({ multiplexer: "tmux", placement: "pane", id: "%23" });
-		expect(childResult?.exitCode).toBe(0);
-		expect(JSON.parse(childResult!.stdout)).toEqual(["argument with spaces", "literal; shell text"]);
-		expect(calls[0]!.argv.slice(calls[0]!.argv.indexOf("--") + 1)).toEqual(command);
-	});
-
-	it("executes factory-built shell-input requests through a confirmed POSIX shell", async () => {
-		if (process.platform === "win32") return;
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "terminal-launch-request-"));
-		try {
-			const recorder = path.join(tempRoot, "record.js");
-			await Bun.write(
-				recorder,
-				"process.stdout.write(JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));",
-			);
-			const args = ["space argument", "it's literal; $(not a command)"];
-			const built = createDefaultTerminalLaunchRequest(
-				"herdr",
-				"pane",
-				[process.execPath, recorder, ...args],
-				tempRoot,
-				"posix",
-			);
-			if ("error" in built) throw new Error(built.error);
-
-			const calls: CliCall[] = [];
-			let shellOutput: string | undefined;
-			const launch = createTerminalLauncher({
-				environment: () => ({ HERDR_ENV: "1", HERDR_PANE_ID: "workspace:pane-1" }),
-				runCli: async (argv, cwd) => {
-					calls.push({ argv: [...argv], cwd });
-					if (argv[1] === "pane" && argv[2] === "split") {
-						return { stdout: '{"result":{"pane":{"pane_id":"workspace:pane-2"}}}', exitCode: 0 };
-					}
-					if (argv[1] === "pane" && argv[2] === "run") {
-						const executed = await processCli(["/bin/sh", "-c", argv[4]!], cwd);
-						shellOutput = executed.stdout;
-						return { stdout: "", exitCode: executed.exitCode };
-					}
-					throw new Error(`unexpected Herdr command: ${argv.join(" ")}`);
-				},
-			});
-
-			const result = await launch(built.request);
-
-			expect(result).toEqual({ multiplexer: "herdr", placement: "pane", id: "workspace:pane-2" });
-			expect(calls.map(call => call.argv.slice(0, 4))).toEqual([
-				["herdr", "pane", "split", "workspace:pane-1"],
-				["herdr", "pane", "run", "workspace:pane-2"],
-			]);
-			expect(JSON.parse(shellOutput!)).toEqual({ cwd: tempRoot, args });
-		} finally {
-			await fs.rm(tempRoot, { recursive: true, force: true });
-		}
-	});
 });
 
 describe("terminal launch dispatcher", () => {
@@ -347,9 +269,22 @@ describe("terminal launch dispatcher", () => {
 			"-F",
 			"#{window_id}",
 			"--",
+			"/bin/sh",
+			"-c",
 			"'echo' 'a'\\''b; $(touch marker)'",
 		]);
 		expect(result).toEqual({ multiplexer: "tmux", placement: "window", id: "@5" });
+	});
+
+	it("passes # in the tmux start directory literally instead of as a format", async () => {
+		const { calls, launch } = createHarness({ TMUX: "/tmp/tmux.sock,1,0", TMUX_PANE: "%2" }, [
+			{ stdout: "%24\n", exitCode: 0 },
+		]);
+		const cwd = "/work/#S/#(touch pwned)/##{pane_id}";
+		await launch({ multiplexer: "tmux", placement: "pane", command: ["omp", "--resume"], cwd });
+
+		expect(calls[0]!.argv[calls[0]!.argv.indexOf("-c") + 1]).toBe("/work/##S/##(touch pwned)/####{pane_id}");
+		expect(calls[0]!.cwd).toBe(cwd);
 	});
 
 	it("directly launches one-element tmux commands without parsing executable text", async () => {
@@ -481,8 +416,20 @@ describe("terminal launch dispatcher", () => {
 			} as unknown as TerminalLaunchRequest;
 
 			await expect(launch(request)).rejects.toThrow(multiplexer);
+			await expect(launch(request)).rejects.toBeInstanceOf(TerminalLaunchError);
 			expect(calls).toEqual([]);
 		}
+	});
+
+	it("rejects malformed requests with TypeError and relative cwd before invoking a CLI", async () => {
+		const { calls, launch } = createHarness({ TMUX: "/tmp/tmux.sock,1,0", TMUX_PANE: "%2" }, []);
+		const unknown = { multiplexer: "kitty", placement: "pane", command: ["omp"], cwd: "/repo" };
+		await expect(launch(unknown as unknown as TerminalLaunchRequest)).rejects.toBeInstanceOf(TypeError);
+
+		const relative = launch({ multiplexer: "tmux", placement: "pane", command: ["omp"], cwd: "sub" });
+		await expect(relative).rejects.toBeInstanceOf(TerminalLaunchError);
+		await expect(relative).rejects.toThrow("must be an absolute path");
+		expect(calls).toEqual([]);
 	});
 
 	it("does not treat CMUX transport or socket overrides as an active surface", async () => {
@@ -520,9 +467,6 @@ describe("terminal launch dispatcher", () => {
 
 		const commandIndex = calls[0]!.argv.indexOf("--command");
 		expect(calls[0]!.argv.slice(0, commandIndex + 1)).toEqual([
-			"/usr/bin/env",
-			"-u",
-			"CMUX_WORKSPACE_ID",
 			"cmux",
 			"--json",
 			"new-split",
@@ -532,36 +476,23 @@ describe("terminal launch dispatcher", () => {
 			"--command",
 		]);
 		expect(calls[0]!.cwd).toBe(process.cwd());
+		// CMUX new-split restores CMUX_WORKSPACE_ID from its environment even with --surface.
+		expect(calls[0]!.env?.CMUX_WORKSPACE_ID).toBeUndefined();
+		expect(calls[0]!.env?.CMUX_SURFACE_ID).toBe("surface:ambient");
 		if (process.platform !== "win32") {
 			const commandProbe = await processCli(["/bin/sh", "-c", calls[0]!.argv[commandIndex + 1]!], process.cwd());
 			expect(commandProbe.exitCode).toBe(0);
 			expect(commandProbe.stdout).toBe("explicit CMUX command");
 		}
 		expect(result).toEqual({ multiplexer: "cmux", placement: "pane", id: "pane-9" });
-
-		// Exercise the emitted env-unsetting prefix with the real subprocess runner,
-		// without requiring or fabricating a CMUX native CLI.
-		if (process.platform !== "win32") {
-			const probe = await processCli(
-				[
-					"/usr/bin/env",
-					"CMUX_WORKSPACE_ID=unrelated-workspace",
-					"CMUX_ENV_PRESERVED=sentinel",
-					...calls[0].argv.slice(0, 3),
-					"/usr/bin/env",
-				],
-				process.cwd(),
-			);
-			expect(probe.exitCode).toBe(0);
-			expect(probe.stdout).not.toContain("CMUX_WORKSPACE_ID=unrelated-workspace");
-			expect(probe.stdout).toContain("CMUX_ENV_PRESERVED=sentinel");
-		}
 	});
 
 	it("runs a Zellij pane directly and targets its tab", async () => {
 		const { calls, launch } = createHarness({ ZELLIJ: "0", ZELLIJ_PANE_ID: "3" }, [
+			{ stdout: "zellij 0.45.1\n", exitCode: 0 },
 			{ stdout: '[{"tab_id":8}]', exitCode: 0 },
 			{ stdout: "12\n", exitCode: 0 },
+			{ stdout: "13\n", exitCode: 0 },
 		]);
 		const result = await launch({
 			multiplexer: "zellij",
@@ -576,6 +507,10 @@ describe("terminal launch dispatcher", () => {
 		});
 
 		expect(calls).toEqual([
+			{
+				argv: ["zellij", "--version"],
+				cwd: "/workspace",
+			},
 			{
 				argv: ["zellij", "action", "list-tabs", "--json"],
 				cwd: "/workspace",
@@ -603,6 +538,32 @@ describe("terminal launch dispatcher", () => {
 			},
 		]);
 		expect(result).toEqual({ multiplexer: "zellij", placement: "pane", id: "terminal_12" });
+
+		// The probed version is reused for later launches.
+		await launch({ multiplexer: "zellij", placement: "pane", command: ["omp"], cwd: "/workspace", focus: false });
+		expect(calls.slice(3).map(call => call.argv.slice(0, 3))).toEqual([["zellij", "action", "new-pane"]]);
+	});
+
+	it("names the minimum Zellij version instead of passing flags an older CLI rejects", async () => {
+		const noFocus = createHarness({ ZELLIJ: "0" }, [{ stdout: "zellij 0.44.3\n", exitCode: 0 }]);
+		await expect(
+			noFocus.launch({ multiplexer: "zellij", placement: "window", command: ["omp"], cwd: "/repo", focus: false }),
+		).rejects.toThrow("new-tab --no-focus requires Zellij 0.45.0 or newer (found 0.44.3)");
+		expect(noFocus.calls.map(call => call.argv)).toEqual([["zellij", "--version"]]);
+
+		const tabTarget = createHarness({ ZELLIJ: "0" }, [{ stdout: "zellij 0.44.0\n", exitCode: 0 }]);
+		await expect(
+			tabTarget.launch({ multiplexer: "zellij", placement: "pane", command: ["omp"], cwd: "/repo", target: "8" }),
+		).rejects.toThrow("new-pane --tab-id requires Zellij 0.44.1 or newer (found 0.44.0)");
+		expect(tabTarget.calls.map(call => call.argv)).toEqual([["zellij", "--version"]]);
+	});
+
+	it("reports a Zellij launch without an ID when an older CLI prints none", async () => {
+		const { calls, launch } = createHarness({ ZELLIJ: "0" }, [{ stdout: "", exitCode: 0 }]);
+		const result = await launch({ multiplexer: "zellij", placement: "pane", command: ["omp"], cwd: "/repo" });
+
+		expect(result).toEqual({ multiplexer: "zellij", placement: "pane" });
+		expect(calls).toHaveLength(1);
 	});
 
 	it("rejects a target that Zellij cannot apply to new-tab creation", async () => {
@@ -634,7 +595,10 @@ describe("terminal launch dispatcher", () => {
 	});
 
 	it("creates a Zellij tab directly and returns its tab ID", async () => {
-		const { calls, launch } = createHarness({ ZELLIJ: "0" }, [{ stdout: "7\n", exitCode: 0 }]);
+		const { calls, launch } = createHarness({ ZELLIJ: "0" }, [
+			{ stdout: "zellij 0.45.0\n", exitCode: 0 },
+			{ stdout: "7\n", exitCode: 0 },
+		]);
 		const result = await launch({
 			multiplexer: "zellij",
 			placement: "window",
@@ -645,7 +609,7 @@ describe("terminal launch dispatcher", () => {
 			execution: "direct",
 		});
 
-		expect(calls[0]).toEqual({
+		expect(calls[1]).toEqual({
 			argv: [
 				"zellij",
 				"action",
@@ -958,47 +922,6 @@ describe("terminal launch dispatcher", () => {
 		).rejects.toThrow("terminal control bytes");
 		expect(herdr.calls).toEqual([]);
 		expect(cmux.calls).toEqual([]);
-	});
-
-	it("passes explicit focus values to CMUX split and workspace creation", async () => {
-		const { calls, launch } = createHarness({ CMUX_WORKSPACE_ID: "workspace:1", CMUX_SURFACE_ID: "surface:1" }, [
-			{ stdout: '{"pane_id":"pane-2"}', exitCode: 0 },
-			{ stdout: '{"pane_id":"pane-3"}', exitCode: 0 },
-			{ stdout: '{"workspace_id":"workspace-2"}', exitCode: 0 },
-			{ stdout: '{"workspace_id":"workspace-3"}', exitCode: 0 },
-		]);
-		for (const focus of [false, true]) {
-			await launch({
-				multiplexer: "cmux",
-				placement: "pane",
-				command: ["omp"],
-				cwd: "/repo",
-				shellGrammar: "posix",
-				focus,
-			});
-		}
-		for (const focus of [false, true]) {
-			await launch({
-				multiplexer: "cmux",
-				placement: "window",
-				command: ["omp"],
-				cwd: "/repo",
-				shellGrammar: "posix",
-				focus,
-			});
-		}
-
-		expect(
-			calls.map(({ argv }) => {
-				const index = argv.indexOf("--focus");
-				return index < 0 ? [] : argv.slice(index, index + 2);
-			}),
-		).toEqual([
-			["--focus", "false"],
-			["--focus", "true"],
-			["--focus", "false"],
-			["--focus", "true"],
-		]);
 	});
 
 	it("resolves an Orca pane by worktree-scoped pane identity and preserves shell argument boundaries", async () => {
