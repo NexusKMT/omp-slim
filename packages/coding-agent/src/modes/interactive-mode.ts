@@ -2389,14 +2389,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			logger.warn("Failed to restore session draft", { error: String(err) });
 		}
 
-		// Keys pressed while a Tern startup loaded were held until hooks ran, the
-		// session mode settled and the draft was restored. They replay into the
-		// restored draft, never over it, so no held edit sequence can lose it;
-		// a startup hotkey (Alt+P, Ctrl+G) acts on the final mode and editor
-		// contents, and a held Enter meets the bootstrap submit gate it would on
-		// other terminals.
-		this.ui.releaseHeldInput();
-
 		// Subscribe to agent events
 		this.#subscribeToAgent();
 
@@ -2506,6 +2498,14 @@ export class InteractiveMode implements InteractiveModeContext {
 			// replay with the newly detected palette.
 			onTerminalAppearanceChange(mode, appearanceRefreshWasRequested ? {} : undefined);
 		});
+
+		// Keys pressed while a Tern startup loaded were held until hooks ran, the
+		// session mode settled, the draft was restored and every subscription
+		// above was installed. They replay into the restored draft, never over
+		// it, a startup shortcut (Alt+P, Ctrl+G, extension shortcuts) acts on the
+		// final mode, editor contents and observed session, and a held Enter
+		// still meets the bootstrap submit gate lifted just below.
+		this.ui.releaseHeldInput();
 
 		// Everything is wired: subscriptions observe agent events, the session
 		// mode is reconciled, and the submit handler is installed. Lift the
@@ -7104,6 +7104,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		nextEditor.onAutocompleteUpdate = () => {
 			this.ui.requestRender();
 		};
+		// A swap during startup keeps the bootstrap submit gate until init lifts it.
+		nextEditor.disableSubmit = previousEditor.disableSubmit;
 		nextEditor.setShimmerRepaintHandler(() => this.ui.requestComponentRender(nextEditor));
 		this.editor = nextEditor;
 		this.composer.setEditor(nextEditor);

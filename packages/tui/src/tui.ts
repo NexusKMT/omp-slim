@@ -1450,8 +1450,12 @@ export class TUI extends Container {
 		// `hello` query must go out now to confirm the surface.
 		const nativeExpected = this.terminal.tspExpected === true;
 		this.#inputDeferred = options?.deferInput === true && !nativeExpected;
-		this.#heldInput = options?.deferInput === true && nativeExpected ? [] : undefined;
-		this.#heldFocus = this.#focusedComponent;
+		// A restart (a startup dialog's external editor stops and restarts the
+		// TUI) keeps an existing hold: those keys still belong to the editor.
+		if (options?.deferInput === true && nativeExpected) {
+			this.#heldInput = [];
+			this.#heldFocus = this.#focusedComponent;
+		}
 		this.#watchdog.start();
 		this.#ghosttyInitialImageDelayDone = false;
 		this.#ghosttyImageReadyAtMs = this.#renderScheduler.now() + TUI.#GHOSTTY_INITIAL_IMAGE_DELAY_MS;
@@ -2294,8 +2298,9 @@ export class TUI extends Container {
 	 * Replay the keystrokes held since a TSP `deferInput` start through the
 	 * normal input path, then deliver input live. Call once the app's key
 	 * handlers are installed so a hotkey pressed during startup still fires.
-	 * Only keys typed while the start-time focus owner had focus are held.
-	 * Idempotent; no-op when nothing is held.
+	 * Only keys typed while the start-time focus owner had focus are held. The
+	 * hold survives a stop/start until released. Idempotent; no-op when nothing
+	 * is held.
 	 */
 	releaseHeldInput(): void {
 		const held = this.#heldInput;
@@ -2510,8 +2515,6 @@ export class TUI extends Container {
 		this.#nativeHoldTimer?.cancel();
 		this.#nativeHoldTimer = undefined;
 		this.#clearNativeConfirm();
-		this.#heldInput = undefined;
-		this.#heldFocus = null;
 		const nativeWasLive = this.#nativeLive;
 		if (nativeWasLive) {
 			this.#native!.stop();
