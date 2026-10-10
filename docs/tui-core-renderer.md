@@ -169,10 +169,11 @@ frame, and again when the resolved palette changes. The first row paint waits
 up to 300 ms for the probe. Direct Tern sessions optimistically open a surface
 immediately and fall back to rows if the terminal does not confirm it. Such a
 session needs raw input from the start, so a `deferInput` start holds keystrokes
-instead of leaving the tty cooked: terminal replies still reach their probes,
-and `TUI.releaseHeldInput()` (called by InteractiveMode once its key handlers are
-installed) replays the rest, so a startup hotkey still fires. Ctrl+C/Ctrl+D
-release the queue early. The
+instead of leaving the tty cooked. The cell-size reply is still consumed on
+arrival, and the sixel probe is skipped on a TSP terminal, so no probe listener
+sees held keys. `TUI.releaseHeldInput()`, called at the end of
+`InteractiveMode.init()`, replays them once the session is fully wired, so a
+startup hotkey still fires. Ctrl+C/Ctrl+D release the queue early. The
 debug socket's `doc` op returns the reference document
 (every sent frame applied by `native/apply.ts`), and `tsp` returns recent frames.
 

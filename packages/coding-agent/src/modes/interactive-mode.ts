@@ -2201,8 +2201,6 @@ export class InteractiveMode implements InteractiveModeContext {
 					);
 			}
 		});
-		// Keys pressed while a Tern startup loaded were held for these handlers.
-		this.ui.releaseHeldInput();
 
 		// Wire observer registry to EventBus
 		if (this.#eventBus) {
@@ -2511,6 +2509,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		// `streamingBehavior: "steer"`, so whichever lands second queues into the
 		// other's turn instead of dying.
 		this.editor.disableSubmit = false;
+		// Keys pressed while a Tern startup loaded were held until this point,
+		// so they reach the same fully wired session a live keystroke would.
+		this.ui.releaseHeldInput();
 		// Publish native send readiness even when no user input triggers another frame.
 		this.ui.requestRender();
 	}

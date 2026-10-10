@@ -198,8 +198,8 @@ export interface TUIStartOptions {
 	 * switches to raw input and replays the kernel-buffered keystrokes.
 	 *
 	 * A terminal expected to speak TSP needs raw input from the start, so it
-	 * gets it; its keystrokes are held instead (terminal reports still flow)
-	 * until {@link TUI.releaseHeldInput} replays them.
+	 * gets it; its keystrokes are held instead (TSP events and the cell-size
+	 * reply still apply) until {@link TUI.releaseHeldInput} replays them.
 	 */
 	deferInput?: boolean;
 }
@@ -2320,6 +2320,10 @@ export class TUI extends Container {
 		// PI_FORCE_IMAGE_PROTOCOL choice — including its `off` kill switch — wins
 		// over the probe.
 		if (TERMINAL.imageProtocol) return;
+		// A Tern surface (live, or about to open optimistically at start) sends
+		// images through TSP; this also keeps held startup input free of probe
+		// listeners.
+		if (this.#nativeLive || this.terminal.tspExpected) return;
 		if (isImageProtocolForced()) return;
 		if (!process.stdin.isTTY || !process.stdout.isTTY) return;
 
@@ -2846,9 +2850,22 @@ export class TUI extends Container {
 			return;
 		}
 
-		const current = this.#applyInputListeners(data);
-		if (current === undefined) return;
-		data = current;
+		if (this.#inputListeners.size > 0) {
+			let current = data;
+			for (const listener of this.#inputListeners) {
+				const result = listener(current);
+				if (result?.consume) {
+					return;
+				}
+				if (result?.data !== undefined) {
+					current = result.data;
+				}
+			}
+			if (current.length === 0) {
+				return;
+			}
+			data = current;
+		}
 
 		// Consume terminal cell size responses without blocking unrelated input.
 		if (this.#consumeCellSizeResponse(data)) {
@@ -2877,28 +2894,16 @@ export class TUI extends Container {
 		}
 	}
 
-	/** Run input listeners; undefined when one consumed the input or nothing remains. */
-	#applyInputListeners(data: string): string | undefined {
-		let current = data;
-		for (const listener of this.#inputListeners) {
-			const result = listener(current);
-			if (result?.consume) return undefined;
-			if (result?.data !== undefined) current = result.data;
-		}
-		return current.length === 0 ? undefined : current;
-	}
-
 	/**
-	 * Queue a keystroke typed before the app installed its key handlers. Probe
-	 * replies still reach their listeners now (their timeouts would otherwise
-	 * expire), and Ctrl+C/Ctrl+D release the queue so a stalled startup stays
+	 * Queue a keystroke typed before the app installed its key handlers; input
+	 * listeners see it once, on replay. The cell-size reply is a terminal report,
+	 * consumed now. Ctrl+C/Ctrl+D release the queue so a stalled startup stays
 	 * interruptible.
 	 */
 	#holdInput(data: string): void {
-		const keys = this.#applyInputListeners(data);
-		if (keys === undefined || this.#consumeCellSizeResponse(keys)) return;
-		this.#heldInput!.push(keys);
-		if (matchesKey(keys, "ctrl+c") || matchesKey(keys, "ctrl+d")) this.releaseHeldInput();
+		if (this.#consumeCellSizeResponse(data)) return;
+		this.#heldInput!.push(data);
+		if (matchesKey(data, "ctrl+c") || matchesKey(data, "ctrl+d")) this.releaseHeldInput();
 	}
 
 	#consumeCellSizeResponse(data: string): boolean {

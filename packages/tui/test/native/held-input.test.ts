@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { getCellDimensions, setCellDimensions } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import type { Component } from "@oh-my-pi/pi-tui/tui";
 import { TspHarness } from "./tsp-harness";
 
@@ -24,22 +25,49 @@ afterEach(() => {
 const TERN_PREPAINT = { expected: true, deferInput: true } as const;
 
 describe("keystrokes during a Tern startup prepaint", () => {
-	it("are held until the app releases them, then replayed in order and delivered live", async () => {
+	it("are held until the app releases them, then replayed once, in order, and delivered live", async () => {
 		const log = new KeyLog();
 		harness = await TspHarness.start(tui => tui.setFocus(log), TERN_PREPAINT);
 		const h = harness;
+		const listened: string[] = [];
+		h.tui.addInputListener(data => {
+			listened.push(data);
+			return undefined;
+		});
 
 		h.terminal.send("\x1bp");
 		h.terminal.send("a");
 		h.flush();
 		expect(log.keys).toEqual([]);
+		expect(listened).toEqual([]);
 
 		h.tui.releaseHeldInput();
 		expect(log.keys).toEqual(["\x1bp", "a"]);
+		expect(listened).toEqual(["\x1bp", "a"]);
 
 		h.terminal.send("b");
 		h.flush();
 		expect(log.keys).toEqual(["\x1bp", "a", "b"]);
+	});
+
+	it("still apply the cell-size reply on arrival instead of replaying it as typed text", async () => {
+		const before = getCellDimensions();
+		try {
+			const log = new KeyLog();
+			harness = await TspHarness.start(tui => tui.setFocus(log), TERN_PREPAINT);
+			const h = harness;
+
+			h.terminal.send("a");
+			h.terminal.send("\x1b[6;23;11t");
+			h.terminal.send("b");
+			h.flush();
+			expect(getCellDimensions()).toEqual({ widthPx: 11, heightPx: 23 });
+
+			h.tui.releaseHeldInput();
+			expect(log.keys).toEqual(["a", "b"]);
+		} finally {
+			setCellDimensions(before);
+		}
 	});
 
 	it("are released by Ctrl+C so a stalled startup stays interruptible", async () => {
