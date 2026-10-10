@@ -438,7 +438,8 @@ impl AxBackend for MacAx {
 	}
 
 	fn children(&mut self, h: &AxHandle) -> CoreResult<Vec<AxHandle>> {
-		Ok(copy_elements_optional(mac_handle(h)?, "AXChildren")
+		Ok(copy_held_attribute(mac_handle(h)?, "AXChildren")?
+			.and_then(element_array)
 			.unwrap_or_default()
 			.into_iter()
 			.map(AxHandle::Mac)
@@ -446,7 +447,9 @@ impl AxBackend for MacAx {
 	}
 
 	fn parent(&mut self, h: &AxHandle) -> CoreResult<Option<AxHandle>> {
-		Ok(copy_element(mac_handle(h)?, "AXParent").map(AxHandle::Mac))
+		Ok(copy_held_attribute(mac_handle(h)?, "AXParent")?
+			.and_then(|value| value.downcast::<AXUIElement>().ok())
+			.map(AxHandle::Mac))
 	}
 
 	fn perform(&mut self, h: &AxHandle, action: &str) -> CoreResult<()> {
@@ -459,7 +462,7 @@ impl AxBackend for MacAx {
 				actions.join(", "),
 			)));
 		}
-		let perform = || perform_action(element, &native);
+		let perform = || element_action_result(&native, send_action(element, &native));
 		// AXRaise is an explicit request to change stacking, including the
 		// takeover preparation path. Other semantic actions must stay background.
 		if native == "AXRaise" {
@@ -474,7 +477,9 @@ impl AxBackend for MacAx {
 		// A popup's value is chosen from its menu, not written. This runs before
 		// the text-target refusals: nothing is typed or written, and the verdict
 		// is the popup's own read-back after a real menu press.
-		if copy_string(element, "AXRole").as_deref() == Some("AXPopUpButton") {
+		let role = copy_held_attribute(element, "AXRole")?
+			.and_then(|value| value.downcast::<CFString>().ok());
+		if role.is_some_and(|role| role.to_string() == "AXPopUpButton") {
 			return skylight::with_background_guard(element_pid(element)?, || {
 				popup::choose(element, value)
 			});
@@ -787,10 +792,28 @@ fn replace_utf16_selection(
 }
 
 fn perform_action(element: &AXUIElement, action: &str) -> CoreResult<()> {
+	ax_result(send_action(element, action), format!("AX action '{action}' failed"))
+}
+
+fn send_action(element: &AXUIElement, action: &str) -> AXError {
 	let name = CFString::from_str(action);
 	// SAFETY: The retained element and action CFString remain valid for the
 	// synchronous AX request.
-	let error = unsafe { element.perform_action(&name) };
+	unsafe { element.perform_action(&name) }
+}
+
+/// `CannotComplete` from `AXPerformAction` means messaging failed or the app
+/// did not reply in time, e.g. while the action runs a modal dialog. The
+/// request was made, so its outcome is unknown rather than failed.
+fn element_action_result(action: &str, error: AXError) -> CoreResult<()> {
+	if error == AXError::CannotComplete {
+		return Err(DesktopError::ax_unconfirmed(format!(
+			"AX action '{action}' was requested, but its outcome could not be confirmed: the app did \
+			 not reply in time or messaging failed ({error:?}), for example because the action \
+			 opened a modal dialog. It may already have taken effect: observe the window before \
+			 retrying"
+		)));
+	}
 	ax_result(error, format!("AX action '{action}' failed"))
 }
 
@@ -883,6 +906,18 @@ fn copy_attribute(element: &AXUIElement, attribute: &str) -> Option<CFRetained<C
 	copy_attribute_result(element, attribute).ok().flatten()
 }
 
+/// Reads an optional attribute of an element a ref names: a destroyed element
+/// is a stale ref, any other failure reads as no value.
+fn copy_held_attribute(
+	element: &AXUIElement,
+	attribute: &str,
+) -> CoreResult<Option<CFRetained<CFType>>> {
+	match copy_attribute_result(element, attribute) {
+		Err(AXError::InvalidUIElement) => Err(element_gone()),
+		result => Ok(result.ok().flatten()),
+	}
+}
+
 /// The attribute's value as a `CFAbsoluteTime`, when it is a `CFDate`.
 fn copy_date(element: &AXUIElement, attribute: &str) -> Option<f64> {
 	let value = copy_attribute(element, attribute)?
@@ -901,7 +936,7 @@ fn copy_string(element: &AXUIElement, attribute: &str) -> Option<String> {
 }
 fn copy_required_string(element: &AXUIElement, attribute: &str) -> CoreResult<String> {
 	let value = copy_attribute_result(element, attribute)
-		.map_err(|error| DesktopError::ax_failed(format!("copying {attribute} failed ({error:?})")))?
+		.map_err(|error| ax_error(error, format!("copying {attribute} failed")))?
 		.ok_or_else(|| DesktopError::ax_failed(format!("copying {attribute} returned no value")))?;
 	value
 		.downcast::<CFString>()
@@ -938,9 +973,11 @@ fn copy_elements_optional(
 	element: &AXUIElement,
 	attribute: &str,
 ) -> Option<Vec<CFRetained<AXUIElement>>> {
-	let array = copy_attribute(element, attribute)?
-		.downcast::<CFArray>()
-		.ok()?;
+	element_array(copy_attribute(element, attribute)?)
+}
+
+fn element_array(value: CFRetained<CFType>) -> Option<Vec<CFRetained<AXUIElement>>> {
+	let array = value.downcast::<CFArray>().ok()?;
 	// SAFETY: AXWindows/AXChildren are documented CFArray<AXUIElement> values.
 	let array = unsafe { CFRetained::cast_unchecked::<CFArray<CFType>>(array) };
 	Some(
@@ -1112,15 +1149,58 @@ fn ax_result(error: AXError, context: impl Into<String>) -> CoreResult<()> {
 	if error == AXError::Success {
 		Ok(())
 	} else {
-		Err(DesktopError::ax_failed(format!("{} ({error:?})", context.into())))
+		Err(ax_error(error, context))
 	}
+}
+
+/// `InvalidUIElement` means the element itself is gone (its view was removed
+/// or its window closed), so the ref that named it is stale.
+fn ax_error(error: AXError, context: impl Into<String>) -> DesktopError {
+	if error == AXError::InvalidUIElement {
+		element_gone()
+	} else {
+		DesktopError::ax_failed(format!("{} ({error:?})", context.into()))
+	}
+}
+
+fn element_gone() -> DesktopError {
+	DesktopError::stale_ref("the element no longer exists; re-run ax()/find()")
 }
 
 #[cfg(test)]
 mod tests {
+	use objc2_application_services::AXError;
 	use objc2_core_foundation::CFNumber;
 
-	use super::{AttachedCandidate, replace_utf16_selection, select_attached, stringify_value};
+	use super::{
+		AttachedCandidate, ax_result, element_action_result, replace_utf16_selection,
+		select_attached, stringify_value,
+	};
+	use crate::desktop::error::ErrorCode;
+
+	#[test]
+	fn destroyed_element_is_a_stale_ref() {
+		let code = |error| {
+			ax_result(error, "AX action 'AXPress' failed")
+				.unwrap_err()
+				.code
+		};
+		assert_eq!(code(AXError::InvalidUIElement), ErrorCode::StaleRef);
+		assert_eq!(code(AXError::CannotComplete), ErrorCode::AxFailed);
+		assert_eq!(code(AXError::ActionUnsupported), ErrorCode::AxFailed);
+	}
+
+	#[test]
+	fn cannot_complete_reports_the_action_as_unconfirmed_not_failed() {
+		let unconfirmed = element_action_result("AXPress", AXError::CannotComplete).unwrap_err();
+		assert_eq!(unconfirmed.code, ErrorCode::AxUnconfirmed);
+		assert!(unconfirmed.message.contains("could not be confirmed"), "{}", unconfirmed.message);
+		assert!(unconfirmed.message.contains("before retrying"), "{}", unconfirmed.message);
+		let code = |error| element_action_result("AXPress", error).unwrap_err().code;
+		assert_eq!(code(AXError::InvalidUIElement), ErrorCode::StaleRef);
+		assert_eq!(code(AXError::ActionUnsupported), ErrorCode::AxFailed);
+		assert!(element_action_result("AXPress", AXError::Success).is_ok());
+	}
 
 	#[test]
 	fn numeric_values_render_as_numbers_at_stored_precision() {
