@@ -15,7 +15,7 @@ import { compositeLineAt } from "../render/composite";
 import { wrapLiteralLine } from "../utils";
 import { editorKey } from "../chrome/keybinding-hints";
 import { formatKeyHint, formatKeyHints, type KeybindingsManager } from "../app-keybindings";
-import { getKeybindings, type Keybinding } from "../keybindings";
+import type { Keybinding } from "../keybindings";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { type Theme } from "../theme/theme";
 import type {
@@ -38,7 +38,7 @@ import {
 	topBorder,
 	topBorderSplit,
 } from "../chrome/overlay-box";
-import { matchesAppExternalEditor } from "../keybinding-matchers";
+import { appExternalEditorKey, matchesAppExternalEditor } from "../keybinding-matchers";
 import type { KeyName } from "../key-hint-format";
 import { item, keyed, node, row as rowNode, span, text } from "../native/describe";
 import { leafKey, type NativeChild, type NativeNode, type NativeUiEvent } from "../native/node";
@@ -173,6 +173,8 @@ export class AnnotationOverlay implements Focusable {
 	#editingAnnotationIndex: number | undefined;
 	#annotationChooser: AnnotationChooser | undefined;
 	#externalOperation = false;
+	/** Set once {@link replaceTextSource} runs; the paste result then carries the edited text. */
+	#textSourceEdited = false;
 	#finished = false;
 	#annotations: CommittedAnnotation[] = [];
 	#textAnnotations: CommittedTextAnnotation[] = [];
@@ -328,6 +330,7 @@ export class AnnotationOverlay implements Focusable {
 	replaceTextSource(text: string): number {
 		if (!this.#textSource) return 0;
 		this.#textSource = { ...this.#textSource, text };
+		this.#textSourceEdited = true;
 		this.#textLines = splitTextLines(text);
 		this.#viewportDriven = false;
 		this.#sourceIndex = Math.min(this.#sourceIndex, Math.max(0, this.#textLines.length - 1));
@@ -574,6 +577,7 @@ export class AnnotationOverlay implements Focusable {
 			this.#finish({
 				action: "paste",
 				annotations: this.getTextAnnotations(),
+				...(this.#textSourceEdited ? { editedText: this.#textSource.text } : {}),
 			});
 		} else {
 			this.#finish({
@@ -1167,8 +1171,7 @@ export class AnnotationOverlay implements Focusable {
 				`${editorKey("tui.input.newLine")} newline`,
 				`${this.#key("tui.select.cancel")} cancel`,
 			];
-			const [externalEditorKey = "ctrl+g"] = getKeybindings().getKeys("app.editor.external");
-			hints.push(`${formatKeyHint(externalEditorKey)} editor`);
+			hints.push(`${formatKeyHint(appExternalEditorKey())} editor`);
 			return [caption, ...this.#editor.render(width), this.#theme.fg("dim", hints.join(" · "))];
 		}
 		return [this.#theme.fg("dim", this.#helpText())];
@@ -1219,10 +1222,7 @@ export class AnnotationOverlay implements Focusable {
 				: this.#focus === "diff"
 					? `${upDown} line · ${formatKeyHint("shift")} faster · ${this.#key("tui.select.pageUp")}/${this.#key("tui.select.pageDown")} · ${formatKeyHints(["g", "shift+g"])} ends · ${formatKeyHint("a")} line note · ${formatKeyHint("shift+a")} ${this.#textSource ? "text" : "file"} note · ${editNote}`
 					: `${upDown} select · ${confirm} confirm`;
-		const externalEditorKey = this.#callbacks.onExternalEditor
-			? (getKeybindings().getKeys("app.editor.external")[0] ?? "ctrl+g")
-			: undefined;
-		const editorHint = externalEditorKey ? ` · ${formatKeyHint(externalEditorKey)} editor` : "";
+		const editorHint = this.#callbacks.onExternalEditor ? ` · ${formatKeyHint(appExternalEditorKey())} editor` : "";
 		return `${focusHelp} · ${formatKeyHint("u")} undo · ${formatKeyHint("tab")} regions${editorHint} · ${this.#key("tui.select.cancel")} cancel`;
 	}
 
@@ -1603,7 +1603,7 @@ export class AnnotationOverlay implements Focusable {
 						this.#hint("tui.input.submit", "save"),
 						this.#hint("tui.input.newLine", "newline"),
 						this.#hint("tui.select.cancel", "cancel"),
-						this.#externalEditorNativeHint(),
+						{ keys: [appExternalEditorKey()], label: "editor" },
 					],
 					"annotateHints",
 				),
@@ -1629,7 +1629,7 @@ export class AnnotationOverlay implements Focusable {
 							editNote,
 						]
 					: [upDown("select"), this.#hint("tui.select.confirm", "confirm")];
-		if (this.#callbacks.onExternalEditor) hints.push(this.#externalEditorNativeHint());
+		if (this.#callbacks.onExternalEditor) hints.push({ keys: [appExternalEditorKey()], label: "editor" });
 		hints.push(key("u", "undo"), key("tab", "regions"), this.#hint("tui.select.cancel", "cancel"));
 		return [hintsRow(hints)];
 	}
@@ -1642,12 +1642,6 @@ export class AnnotationOverlay implements Focusable {
 			if (key) keys.push(key);
 		}
 		return keys.length > 0 ? { keys, label } : undefined;
-	}
-
-	/** Global external-editor key, not the overlay's TUI-only manager. */
-	#externalEditorNativeHint(): NativeHint {
-		const [key = "ctrl+g"] = getKeybindings().getKeys("app.editor.external");
-		return { keys: [key], label: "editor" };
 	}
 
 	render(width: number): readonly string[] {

@@ -421,13 +421,12 @@ describe("AnnotationOverlay", () => {
 		expect(overlay.getTextAnnotations()).toHaveLength(2);
 	});
 
-	it("retargets a moved unique quote and drops a quote that no longer matches", () => {
-		const overlay = makeTextOverlay({
-			id: "prompt",
-			kind: "prompt",
-			label: "Text prompt",
-			text: "alpha\nbeta\nalpha",
-		});
+	it("retargets a moved unique quote, drops a stale one, and pastes the edited text", () => {
+		const completed: Array<TextReviewOverlayResult | undefined> = [];
+		const overlay = makeTextOverlay(
+			{ id: "prompt", kind: "prompt", label: "Text prompt", text: "alpha\nbeta\nalpha" },
+			result => completed.push(result),
+		);
 		render(overlay);
 		overlay.handleInput("a");
 		overlay.handleInput("on alpha");
@@ -437,8 +436,15 @@ describe("AnnotationOverlay", () => {
 		overlay.handleInput("on beta");
 		overlay.handleInput(ENTER);
 		expect(overlay.replaceTextSource("beta\nalpha\nalpha")).toBe(1);
-		expect(overlay.textSourceText()).toBe("beta\nalpha\nalpha");
-		expect(overlay.getTextAnnotations()).toEqual([{ scope: "line", line: 1, quote: "beta", note: "on beta" }]);
+		overlay.handleInput(TAB);
+		overlay.handleInput(ENTER);
+		expect(completed).toEqual([
+			{
+				action: "paste",
+				annotations: [{ scope: "line", line: 1, quote: "beta", note: "on beta" }],
+				editedText: "beta\nalpha\nalpha",
+			},
+		]);
 	});
 
 	it("does not resurrect a dropped line note when undoing after the source was replaced", () => {

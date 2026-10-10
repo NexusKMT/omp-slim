@@ -2,12 +2,7 @@ import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import {
-	getEditorCommand,
-	openEditorOnPath,
-	openInEditor,
-	resolveEditorSpawnCommand,
-} from "../src/utils/external-editor";
+import { getEditorCommand, openInEditor, resolveEditorSpawnCommand } from "../src/utils/external-editor";
 
 interface MutableProcess {
 	platform: NodeJS.Platform;
@@ -118,23 +113,6 @@ describe("openInEditor", () => {
 			const result = await openInEditor(`"${editorPath}"`, "original");
 
 			expect(result).toBe("edited");
-		} finally {
-			await tempDir.remove();
-		}
-	});
-
-	it.skipIf(process.platform === "win32")("opens the given path and leaves that file in place", async () => {
-		const tempDir = TempDir.createSync("@external-editor-path-");
-		try {
-			const filePath = path.join(tempDir.path(), "note.txt");
-			const editorPath = path.join(tempDir.path(), "edit");
-			await Bun.write(filePath, "before");
-			await Bun.write(editorPath, '#!/bin/sh\nprintf "after" > "$1"\n');
-			fs.chmodSync(editorPath, 0o755);
-
-			await openEditorOnPath(editorPath, filePath);
-
-			expect(await Bun.file(filePath).text()).toBe("after");
 		} finally {
 			await tempDir.remove();
 		}

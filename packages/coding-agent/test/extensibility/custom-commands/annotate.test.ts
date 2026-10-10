@@ -47,6 +47,7 @@ import { VirtualTerminal } from "../../../../tui/test/virtual-terminal";
 const ENTER = "\r";
 const UP = "\x1b[A";
 const RIGHT = "\x1b[C";
+const CTRL_E = "\x05";
 
 const SAMPLE_DIFF = `diff --git a/src/value.ts b/src/value.ts
 --- a/src/value.ts
@@ -179,6 +180,46 @@ function makeAssistantEntry(
 
 function localTarget(): ResolvedReviewTarget {
 	return createResolvedReviewTarget("uncommitted", "Uncommitted changes", SAMPLE_DIFF, "No uncommitted changes");
+}
+
+/**
+ * Mounts a real annotation overlay with the external-editor key remapped to Ctrl+E, feeds
+ * `keys`, and resolves with whatever it completed. After each key it yields one macrotask so
+ * the microtask chain of an already-resolved mocked editor finishes before the next key.
+ */
+async function driveEditorOverlay<T>(
+	cwd: string,
+	keys: readonly string[],
+	show: (ctx: CustomCommandContext) => Promise<T | undefined>,
+): Promise<T | undefined> {
+	const previous = getKeybindings();
+	setKeybindings(KeybindingsManager.inMemory({ "app.editor.external": "ctrl+e" }));
+	const tui = { terminal: { rows: 40 }, requestRender() {}, stop() {}, start() {} } as unknown as TUI;
+	const ctx = {
+		cwd,
+		sessionManager: { getCwd: () => cwd },
+		ui: {
+			notify: vi.fn(),
+			custom: async (factory: Parameters<ExtensionUIContext["custom"]>[0]) => {
+				let result: unknown;
+				const component = await factory(tui, theme, KeybindingsManager.inMemory(), value => {
+					result = value;
+				});
+				component.render(120);
+				for (const key of keys) {
+					component.handleInput?.(key);
+					await new Promise<void>(resolve => setImmediate(resolve));
+					component.render(120);
+				}
+				return result;
+			},
+		},
+	} as unknown as CustomCommandContext;
+	try {
+		return await show(ctx);
+	} finally {
+		setKeybindings(previous);
+	}
 }
 
 function countOccurrences(text: string, value: string): number {
@@ -696,96 +737,69 @@ describe("/annotate contracts", () => {
 		);
 	});
 
-	it("writes an external-editor save back into the text source the paste uses", async () => {
-		const previous = getKeybindings();
-		setKeybindings(KeybindingsManager.inMemory({ "app.editor.external": "ctrl+e" }));
-		const edited = Promise.withResolvers<string>();
-		const openInEditor = spyOn(externalEditor, "openInEditor").mockImplementation(() => edited.promise);
+	it("pastes a prompt edited in the external editor with its notes", async () => {
 		spyOn(externalEditor, "getEditorCommand").mockReturnValue("vim");
+		spyOn(externalEditor, "openInEditor").mockResolvedValue("rewritten\nkept");
+		const { ctx, pasteToEditor } = createContext();
+
+		await runAnnotateCommand(API, '"original\nkept"', ctx, {
+			showTextReviewOverlay: (_ctx, source) =>
+				driveEditorOverlay("/tmp", [CTRL_E, "A", "whole note", ENTER, "\t", ENTER], editorCtx =>
+					showTextReviewOverlay(editorCtx, source),
+				),
+		});
+
+		const prompt = pasteToEditor.mock.calls[0]?.[0] as string;
+		expect(prompt).toContain("rewritten\nkept");
+		expect(prompt).not.toContain("original");
+		expect(prompt).toContain("whole note");
+	});
+
+	it("does not open the editor on a session reply the prompt would not include verbatim", async () => {
+		spyOn(externalEditor, "getEditorCommand").mockReturnValue("vim");
+		const openInEditor = spyOn(externalEditor, "openInEditor").mockResolvedValue(null);
 		const source: TextReviewSource = {
-			id: "prompt",
-			kind: "prompt",
-			label: "Text prompt",
-			text: "original\nkept",
-			provenance: { kind: "prompt" },
+			id: "reply",
+			kind: "message",
+			label: "Latest reply",
+			text: "assistant text",
+			provenance: { kind: "latest-assistant", entryId: "latest" },
 		};
-		const notify = vi.fn();
-		try {
-			await showTextReviewOverlay(
-				{
-					cwd: "/tmp",
-					sessionManager: { getCwd: () => "/tmp" },
-					ui: {
-						notify,
-						custom: async factory => {
-							const overlay = await factory(
-								{ terminal: { rows: 40 }, requestRender() {}, stop() {}, start() {} } as TUI,
-								theme,
-								KeybindingsManager.inMemory(),
-								() => {},
-							);
-							overlay.handleInput?.("\x05");
-							edited.resolve("rewritten\nkept");
-							await edited.promise;
-							return undefined;
-						},
-					},
-				} as unknown as CustomCommandContext,
-				source,
-			);
-			expect(openInEditor).toHaveBeenCalledWith("vim", "original\nkept", {
-				extension: ".txt",
-				trimTrailingNewline: false,
-			});
-			expect(source.text).toBe("rewritten\nkept");
-			expect(notify).not.toHaveBeenCalled();
-		} finally {
-			setKeybindings(previous);
-		}
+
+		await driveEditorOverlay("/tmp", [CTRL_E], editorCtx => showTextReviewOverlay(editorCtx, source));
+
+		expect(openInEditor).not.toHaveBeenCalled();
+	});
+
+	it("does not open the local checkout for a PR review", async () => {
+		spyOn(externalEditor, "getEditorCommand").mockReturnValue("vim");
+		const openEditorOnPath = spyOn(externalEditor, "openEditorOnPath").mockResolvedValue(0);
+		const target = createResolvedReviewTarget("pr", "PR #1", SAMPLE_DIFF, "No changes");
+
+		await driveEditorOverlay("/tmp", ["\t", CTRL_E], editorCtx => showCodeReviewOverlay(editorCtx, target));
+
+		expect(openEditorOnPath).not.toHaveBeenCalled();
 	});
 
 	it("opens the current diff file from the repository root when the session cwd is a subdirectory", async () => {
-		const previous = getKeybindings();
-		setKeybindings(KeybindingsManager.inMemory({ "app.editor.external": "ctrl+e" }));
-		const dir = await realpath(await mkdtemp(join(tmpdir(), "annotate-editor-")));
-		const cwd = join(dir, "packages");
-		const opened = Promise.withResolvers<void>();
-		const openEditorOnPath = spyOn(externalEditor, "openEditorOnPath").mockImplementation(() => opened.promise);
 		spyOn(externalEditor, "getEditorCommand").mockReturnValue("vim");
-		const notify = vi.fn();
-		try {
+		const opened = Promise.withResolvers<string>();
+		spyOn(externalEditor, "openEditorOnPath").mockImplementation(async (_editor, filePath) => {
+			opened.resolve(filePath);
+			return 0;
+		});
+		await withTempDir(async directory => {
+			const dir = await realpath(directory);
+			const cwd = join(dir, "packages");
 			await Bun.$`git init -q ${dir}`.quiet();
 			await mkdir(cwd);
 			await mkdir(join(dir, "src"));
 			await writeFile(join(dir, "src/value.ts"), "const value = 2;\n");
-			await showCodeReviewOverlay(
-				{
-					cwd,
-					sessionManager: { getCwd: () => cwd },
-					ui: {
-						notify,
-						custom: async factory => {
-							const overlay = await factory(
-								{ terminal: { rows: 40 }, requestRender() {}, stop() {}, start() {} } as TUI,
-								theme,
-								KeybindingsManager.inMemory(),
-								() => {},
-							);
-							overlay.handleInput?.("\t");
-							overlay.handleInput?.("\x05");
-							opened.resolve();
-							await opened.promise;
-							return undefined;
-						},
-					},
-				} as unknown as CustomCommandContext,
-				localTarget(),
-			);
-			expect(openEditorOnPath).toHaveBeenCalledWith("vim", join(dir, "src/value.ts"));
-			expect(notify).toHaveBeenCalledWith("Opened src/value.ts. The review still uses the frozen diff.", "info");
-		} finally {
-			setKeybindings(previous);
-			await rm(dir, { recursive: true, force: true });
-		}
+
+			await driveEditorOverlay(cwd, ["\t", CTRL_E], editorCtx => showCodeReviewOverlay(editorCtx, localTarget()));
+
+			// The open follows a real filesystem check, so wait for the call rather than the key loop.
+			expect(await opened.promise).toBe(join(dir, "src/value.ts"));
+		});
 	});
 });

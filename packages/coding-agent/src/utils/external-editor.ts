@@ -68,7 +68,7 @@ export async function openInEditor(
 
 	try {
 		await Bun.write(tmpFile, content);
-		const exitCode = await runEditor(editorCmd, tmpFile);
+		const exitCode = await openEditorOnPath(editorCmd, tmpFile);
 		if (exitCode === 0) {
 			const text = await Bun.file(tmpFile).text();
 			if (options?.trimTrailingNewline === false) {
@@ -87,15 +87,13 @@ export async function openInEditor(
 }
 
 /**
- * Opens an existing file in the user's editor. The editor writes the file
- * itself; this does not copy it or delete it. A non-zero exit still returns
- * so the caller can re-read whatever the editor saved.
+ * Opens an existing file in the user's editor, which writes it in place, and
+ * returns the editor's exit code. The file may have been saved even when the
+ * code is non-zero, so callers that care re-read it.
+ *
+ * The caller is responsible for stopping/starting the TUI around this call.
  */
-export async function openEditorOnPath(editorCmd: string, filePath: string): Promise<void> {
-	await runEditor(editorCmd, filePath);
-}
-
-async function runEditor(editorCmd: string, filePath: string): Promise<number> {
+export async function openEditorOnPath(editorCmd: string, filePath: string): Promise<number> {
 	const spawnCommand = resolveEditorSpawnCommand(editorCmd, filePath);
 	// Inherit the real pane pty so terminal editors (including emacsclient,
 	// which resolves the device via ttyname) render into the visible pane.
