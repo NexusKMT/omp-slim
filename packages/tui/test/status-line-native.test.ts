@@ -7,6 +7,7 @@ import type { TspProps } from "@oh-my-pi/pi-wire";
 import type { NativeChild, NativeNode } from "../src/native/node";
 import { setNativeRendering } from "../src/native/state";
 import type { StatusLineComponent } from "../src/status-line/component";
+import { describeSegment, type SegmentContext } from "../src/status-line/segments";
 import { createStartupStatusLine } from "../src/status-line/startup";
 import type { StatusLineSettings } from "../src/status-line/types";
 import { initTheme } from "../src/theme";
@@ -102,6 +103,18 @@ describe("native composer facts", () => {
 			setProjectDir(originalProjectDir);
 			removeSyncWithRetries(repo);
 		}
+	});
+
+	it("spaces the git counts apart from the branch and each other", () => {
+		const text = (branch: string | null, showBranch = true) =>
+			describeSegment("git", {
+				git: { branch, status: { staged: 2, unstaged: 3, untracked: 1 }, pr: null },
+				options: { git: { showBranch } },
+			} as unknown as SegmentContext)
+				?.spans.map(part => part.t)
+				.join("");
+		expect(text("main")).toBe("main *3 +2 ?1");
+		expect(text("main", false)).toBe("*3 +2 ?1");
 	});
 
 	it("describes spans without ANSI escapes or separator glyphs", () => {
