@@ -201,6 +201,28 @@ describe("formatSessionDumpText markdown-headings transcript", () => {
 		expect(live).not.toContain("Status: aborted");
 	});
 
+	it("carries rounded seconds into minutes in assistant timing instead of printing 60s", () => {
+		const took = (duration: number) =>
+			formatSessionDumpText({
+				messages: [
+					{
+						role: "assistant",
+						content: [],
+						api: "mock",
+						provider: "mock",
+						model: "mock",
+						usage: ZERO_USAGE,
+						stopReason: "stop",
+						timestamp: 1,
+						duration,
+					},
+				],
+			}).match(/took ([^)]+)\)/)?.[1];
+		expect(took(59_940)).toBe("59.9s");
+		expect(took(59_960)).toBe("1m0s");
+		expect(took(119_600)).toBe("2m0s");
+	});
+
 	it("fences system notices under a readable title without breaking on nested code fences", () => {
 		const notice = `<system-notice>
 Background job completed with:

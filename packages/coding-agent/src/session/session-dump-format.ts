@@ -171,10 +171,11 @@ function formatDumpTime(ms: number): string {
 }
 
 function formatDumpDuration(ms: number): string {
-	const seconds = Math.max(0, ms) / 1000;
-	if (seconds < 60) return `${seconds.toFixed(1)}s`;
-	const minutes = Math.floor(seconds / 60);
-	return `${minutes}m${Math.round(seconds - minutes * 60)}s`;
+	// Round before splitting so a remainder never carries into `60s` (`1m60s`, `60.0s`).
+	const tenths = Math.round(Math.max(0, ms) / 100);
+	if (tenths < 600) return `${(tenths / 10).toFixed(1)}s`;
+	const seconds = Math.round(tenths / 10);
+	return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
 }
 
 /** ` · <ISO time>` heading suffix from a message's `timestamp`, plus request timing for assistant turns. */
