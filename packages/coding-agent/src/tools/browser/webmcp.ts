@@ -403,6 +403,8 @@ export function installWebMcpPageHook(key: string): void {
 			},
 		};
 		for (const name of unregister ? (["registerTool", "unregisterTool"] as const) : (["registerTool"] as const)) {
+			// A native context the page exposes itself already resolves to the prototype's wrapper.
+			if (patches.some(patched => patched.value === target[name])) continue;
 			const original = Object.getOwnPropertyDescriptor(target, name);
 			// An own method keeps its attributes; an inherited one is shadowed.
 			const descriptor =
@@ -419,8 +421,7 @@ export function installWebMcpPageHook(key: string): void {
 	};
 
 	if (platformPrototype) patch(platformPrototype);
-	// A native context the page exposes itself is already covered by the prototype.
-	if (pageContext && !platformPrototype?.isPrototypeOf(pageContext)) patch(pageContext, pageContext);
+	if (pageContext) patch(pageContext, pageContext);
 	// A page whose own modelContext is null reports the API but still gets the polyfill.
 	if (!platform && !pageContext) {
 		polyfillContext = {

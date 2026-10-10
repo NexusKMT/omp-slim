@@ -357,7 +357,19 @@ ModelContext.prototype.registerTool = window.pageRegister;`,
 		}
 	}, 10_000);
 
-	it("mirrors a tool registered after attach through a native modelContext the page held before", async () => {
+	it.each([
+		{
+			setup: "held before attach",
+			define: `window.pageContext = navigator.modelContext;`,
+		},
+		{
+			setup: "exposed on document with its own registerTool",
+			define: `window.pageContext = navigator.modelContext;
+const nativeRegister = pageContext.registerTool;
+pageContext.registerTool = function (tool, options) { return nativeRegister.call(this, tool, options); };
+Object.defineProperty(document, "modelContext", { configurable: true, value: pageContext });`,
+		},
+	])("mirrors a tool registered after attach through a native modelContext $setup", async ({ define }) => {
 		using server = Bun.serve({
 			port: 0,
 			hostname: "localhost",
@@ -371,14 +383,14 @@ ModelContext.prototype.registerTool = window.pageRegister;`,
 		try {
 			await page.goto(`http://localhost:${server.port}/`);
 			const realm = page.mainFrame().mainRealm();
-			await realm.evaluate(`window.cachedContext = navigator.modelContext; null;`);
+			await realm.evaluate(`${define}\nnull;`);
 			const controller = await installWebMcp(page);
 			await realm.evaluate(
-				`cachedContext.registerTool({ name: "cached_native", description: "Page tool.", inputSchema: { type: "object" }, execute: () => ({ value: 42 }) })`,
+				`pageContext.registerTool({ name: "native_tool", description: "Page tool.", inputSchema: { type: "object" }, execute: () => ({ value: 42 }) })`,
 			);
 			// The page-side mirror, which is all omp has when the browser lacks WebMCP over CDP.
 			const snapshot = await realm.evaluate(webMcpSnapshotInPage, WEBMCP_BRIDGE_KEY);
-			expect(snapshot.tools.map(tool => tool.name)).toEqual(["cached_native"]);
+			expect(snapshot.tools.map(tool => tool.name)).toEqual(["native_tool"]);
 			await controller.dispose();
 		} finally {
 			await page.close();
