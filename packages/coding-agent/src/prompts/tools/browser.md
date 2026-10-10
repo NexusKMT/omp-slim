@@ -6,7 +6,7 @@ Drive real Chromium tabs from JavaScript or Python Eval with the global `browser
 - Python: `await browser.open(name=…, url=…)`, synchronous `browser.tab(name)`, `await browser.tabs()`, and `await browser.close(name=…)`. Python methods accept keyword arguments.
 - `open` options: `name`, `url`, `app`, `viewport`, `wait_until`, `dialogs`, `allowed_domains`, `init_scripts`, `downloads`, `user_agent`, `ignore_https_errors`, `allow_file_access`, `headed`, `timeout`, `persist`.
 - `close` options: `name`, `all`, `kill`, `timeout`.
-- `open`, `close`, and `run` take `timeout` in seconds (default 30, clamped to 1–300); `waitFor*` helpers take `timeout` in milliseconds.
+- `open`, `close`, and `run` take `timeout` in seconds (default 30, capped by `tools.maxTimeout` when set, clamped to 1–300); `waitFor*` helpers take `timeout` in milliseconds.
 - Direct tab helpers:
   - Navigation: `url`, `title`, `goto`, `back`, `forward`, `reload`, `pushState`.
   - Inspection: `observe`, `ariaSnapshot`, `a11y`, `screenshot`, `diffScreenshot`, `pdf`, `extract`, `text`, `html`, `value`, `attr`, `count`, `box`, `styles`, `isVisible`, `isEnabled`, `isChecked`.
