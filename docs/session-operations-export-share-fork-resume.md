@@ -328,13 +328,16 @@ capability or launch failures in the TUI. Herdr, CMUX, and Orca launches require
 explicit confirmation that the destination's configured interactive shell
 accepts POSIX syntax; this is never inferred from the local OS or `SHELL`.
 Declining confirmation stops before the session is flushed or a terminal is
-launched. `window` and `tab` both map to the multiplexer group placement. Orca's
-CLI executable is `orca-ide` on Linux and `orca` on macOS and Windows.
+launched. `window` and `tab` both map to the multiplexer group placement. The Orca
+CLI is resolved in Orca's documented order (`ORCA_CLI_COMMAND`, then `orca-dev` in an
+Orca development checkout, then `orca-ide` on Linux outside an Orca terminal, then
+`orca`).
 
 Orca's CLI `--command` accepts shell text, not argv, and has no `--cwd`; after
 confirmation, OMP supplies `cd <quoted-cwd> && <quoted-command>` using shared
-POSIX shell quoting. Orca splits activate the new pane by default. Tab creation
-is visible without switching focus, so `/fork tab` leaves the parent tab selected.
+POSIX shell quoting. When Orca cannot show the new tab and starts the child in a
+background terminal instead, `/fork` reports that as a warning rather than a
+visible tab.
 
 ### Session-level flow
 

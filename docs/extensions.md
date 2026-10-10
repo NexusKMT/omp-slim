@@ -815,17 +815,22 @@ editor.
 
 `ctx.ui.openTerminal(request)` is available only in the interactive TUI. It creates a
 multiplexer pane or provider-native group (a tmux window, Zellij/Herdr/Orca tab, or CMUX
-workspace—not an OS window) and returns the reported native ID. RPC, ACP, print, and
-headless contexts do not provide this optional method. The request type and
+workspace—not an OS window) and returns the reported native ID, plus a `warning` when
+the provider started the command but could not show it where requested. RPC, ACP,
+print, and headless contexts do not provide this optional method. The request type and
 supported provider set derive from canonical launch capabilities: tmux, Zellij,
 Herdr, CMUX, and Orca are supported; screen and wmux remain recognized by the
 multiplexer taxonomy but are currently unsupported.
 
 Provider-specific session detection is centralized in
-`@oh-my-pi/pi-tui/terminal-multiplexer`: `hasTerminalMultiplexerSession(provider,
-env)` checks explicit session markers, while `classifyTerminalMultiplexer(env)`
-selects the current screen-grid owner and can fall back to `TERM`. A classified
-owner does not prove that a nested provider session or a native pane ID exists.
+`@oh-my-pi/pi-tui/terminal-multiplexer`, which registers one module per multiplexer.
+`hasTerminalMultiplexerSession(provider, env)` checks explicit session markers, while
+`classifyTerminalMultiplexer(env)` names the multiplexer hosting the process: session
+markers first, then a `tmux`/`screen` `TERM` fallback, then outer applications such as
+Orca, so a multiplexer running inside Orca wins. `isInsideTerminalMultiplexer(env)` is
+true only when the classified multiplexer owns the screen grid; Orca keeps the
+direct-terminal render path. A classified multiplexer does not prove that a nested
+provider session or a native pane ID exists.
 
 The TUI host injects this capability; extensions do not need to import dispatcher
 code to use it.
@@ -871,7 +876,8 @@ Targets are provider-native IDs/refs, with different meanings by placement:
 - Orca pane splits resolve `ORCA_PANE_KEY` to the current terminal handle;
   detection requires both `ORCA_PANE_KEY` and `ORCA_WORKTREE_ID`. Tab creation
   defaults to worktree `id:<ORCA_WORKTREE_ID>`; an application label alone is
-  insufficient to detect an Orca session.
+  insufficient to detect an Orca session. Targets, titles, and commands are passed
+  as `--flag=value`, so a value starting with `--` stays data.
 - CMUX pane placement targets a surface ID; workspace placement targets a window
   ID. Both targets may be omitted when the corresponding CMUX context is active.
   An explicit surface target is authoritative and is not combined with the ambient
@@ -883,8 +889,9 @@ use provider identity markers or a native target, not `TERM` alone. `focus` cont
 apply only where a placement supports them: tmux uses `-d` when false, Zellij uses
 `--no-focus`, Herdr uses `--focus`/`--no-focus`, and CMUX passes `--focus true|false`
 to both split and workspace creation. Orca tab creation maps `focus: true` to
-`--focus`; without it, the tab is visible without switching focus. Orca pane splits
-activate the new pane by default and have no focus flag.
+`--focus`; otherwise focus follows Orca's default. Orca pane splits have no focus
+option. When Orca cannot show a new tab, it starts the command in a background
+terminal, and the result's `warning` says so.
 
 Execution is provider-specific. tmux accepts multiple command arguments for direct
 execution, but treats a single command argument as shell text. For one-argument
@@ -905,7 +912,9 @@ Orca split/create have no `--cwd` flag, so the adapter prepends
 `cd <quoted-cwd> &&` before the quoted command in `--command`; CMUX split also
 changes directory inside its shell before entering the command. These quotes are
 not claimed to work in Nushell, PowerShell, `cmd.exe`, or other shell grammars.
-Orca uses `orca-ide` on Linux and `orca` on macOS and Windows.
+The Orca CLI is resolved in Orca's documented order: `ORCA_CLI_COMMAND` when set,
+`orca-dev` in an Orca development checkout (`ORCA_DEV_REPO_ROOT`), `orca-ide` on Linux
+outside an Orca terminal, and `orca` otherwise.
 
 Because these commands are submitted as terminal input, shell-input requests
 reject C0/C1 control bytes and DEL in command arguments before creating a pane or
