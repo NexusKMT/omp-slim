@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.8] - 2026-10-10
+
 ### Fixed
 
 - Fixed OpenAI Responses and Codex tool calls running with empty `{}` arguments when a compatible host or proxy ends the call with an empty arguments payload after streaming the real ones ([#15099](https://github.com/can1357/oh-my-pi/pull/15099) by [@will-bogusz](https://github.com/will-bogusz))
