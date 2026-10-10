@@ -15,10 +15,10 @@ afterEach(() => {
 	setNativeRendering(false);
 });
 
-function statusLine(settings: StatusLineSettings): StatusLineComponent {
+function statusLine(settings: StatusLineSettings, gitEnabled = false): StatusLineComponent {
 	return createStartupStatusLine({
 		settings,
-		gitEnabled: false,
+		gitEnabled,
 		autoThinking: false,
 		fastMode: false,
 		usingSubscription: false,
@@ -65,6 +65,18 @@ describe("native composer facts", () => {
 		const segs = facts(statusLine({ preset: "custom", leftSegments: ["session", "hostname"], rightSegments: [] }));
 		const priority = Object.fromEntries(segs.map(seg => [seg.key, seg.props.priority]));
 		expect(priority.session!).toBeGreaterThan(priority.hostname!);
+	});
+
+	it("keeps the git branch by the model chip, outlasting the other facts and opening /git", () => {
+		setNativeRendering(true);
+		// The test runs inside the repository's checkout, so the git segment has a head to show.
+		const segs = facts(
+			statusLine({ preset: "custom", leftSegments: ["hostname", "model", "path", "git"], rightSegments: [] }, true),
+		);
+		expect(segs.map(seg => seg.key)).toEqual(["hostname", "git"]);
+		const [hostname, git] = segs;
+		expect(git!.props.actions).toEqual({ click: "status.git" });
+		expect(git!.props.priority!).toBeGreaterThan(hostname!.props.priority!);
 	});
 
 	it("describes spans without ANSI escapes or separator glyphs", () => {
