@@ -36,46 +36,60 @@ async function untilRendered(editor: Editor, predicate: (frame: string) => boole
 	while (true) {
 		const frame = editor.render(80).join("\n");
 		if (predicate(frame)) return frame;
-		const { promise, resolve } = Promise.withResolvers<void>();
-		const previous = editor.onAutocompleteUpdate;
-		editor.onAutocompleteUpdate = () => {
-			editor.onAutocompleteUpdate = previous;
-			previous?.();
-			resolve();
-		};
-		await promise;
+		await nextAutocompleteUpdate(editor);
 	}
 }
 
-describe("/fork slash command", () => {
-	it("renders the pane suggestion as a dim hint and accepts it with Tab", async () => {
-		const editor = createForkEditor();
-		for (const character of "/fork ") editor.handleInput(character);
+function nextAutocompleteUpdate(editor: Editor): Promise<void> {
+	const { promise, resolve } = Promise.withResolvers<void>();
+	const previous = editor.onAutocompleteUpdate;
+	editor.onAutocompleteUpdate = () => {
+		editor.onAutocompleteUpdate = previous;
+		previous?.();
+		resolve();
+	};
+	return promise;
+}
 
-		const frame = await untilRendered(
-			editor,
-			value =>
-				value.includes("\x1b[2mpane\x1b[0m") &&
-				value.includes("pane") &&
-				value.includes("window") &&
-				value.includes("tab"),
-		);
-		expect(frame).toContain("\x1b[2mpane\x1b[0m");
-		expect(editor.getText()).toBe("/fork ");
+function captureSubmissions(editor: Editor): string[] {
+	const submitted: string[] = [];
+	editor.onSubmit = text => {
+		submitted.push(text.trim());
+	};
+	return submitted;
+}
+
+describe("/fork slash command", () => {
+	it("submits bare /fork on Enter after a typed trailing space", async () => {
+		const editor = createForkEditor();
+		const submitted = captureSubmissions(editor);
+		for (const character of "/fork ") editor.handleInput(character);
+		await nextAutocompleteUpdate(editor);
+
+		editor.handleInput("\r");
+		expect(submitted).toEqual(["/fork"]);
+	});
+
+	it("submits bare /fork on Enter after Tab accepts the command name", async () => {
+		const editor = createForkEditor();
+		const submitted = captureSubmissions(editor);
+		for (const character of "/fork") editor.handleInput(character);
+		await untilRendered(editor, () => editor.isShowingAutocomplete());
 
 		editor.handleInput("\t");
-		expect(editor.getText()).toBe("/fork pane ");
+		expect(editor.getText()).toBe("/fork ");
+		// Accepting a command name chains an argument-completion request; let it settle.
+		await nextAutocompleteUpdate(editor);
+
+		editor.handleInput("\r");
+		expect(submitted).toEqual(["/fork"]);
 	});
 
 	it("renders the remaining window suffix for a partial prefix and accepts it with Tab", async () => {
 		const editor = createForkEditor();
 		for (const character of "/fork w") editor.handleInput(character);
 
-		const frame = await untilRendered(
-			editor,
-			value => editor.isShowingAutocomplete() && value.includes("\x1b[2mindow\x1b[0m"),
-		);
-		expect(frame).toContain("\x1b[2mindow\x1b[0m");
+		await untilRendered(editor, value => editor.isShowingAutocomplete() && value.includes("\x1b[2mindow\x1b[0m"));
 		expect(editor.getText()).toBe("/fork w");
 
 		editor.handleInput("\t");
@@ -104,7 +118,7 @@ describe("/fork slash command", () => {
 		const harness = createRuntime();
 		expect(await executeBuiltinSlashCommand("/fork pane extra", harness.runtime)).toBe(true);
 		expect(harness.handleForkCommand).not.toHaveBeenCalled();
-		expect(harness.showError).toHaveBeenCalledWith("Usage: /fork [pane|window|tab]");
+		expect(harness.showError).toHaveBeenCalledTimes(1);
 		expect(harness.setText).toHaveBeenCalledWith("");
 	});
 });

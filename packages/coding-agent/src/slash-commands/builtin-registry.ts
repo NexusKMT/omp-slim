@@ -71,6 +71,7 @@ export const BUILTIN_SLASH_COMMAND_DEFS: ReadonlyArray<BuiltinSlashCommand> = BU
 		},
 		icon: command.icon,
 		subcommands: command.subcommands,
+		subcommandOptional: command.subcommandOptional,
 		inlineHint: command.inlineHint,
 		getTuiAutocompleteDescription: command.getTuiAutocompleteDescription,
 	}),
@@ -92,22 +93,9 @@ function materializeTuiBuiltinSlashCommand(
 			materialized.getArgumentCompletions = buildEffortArgumentCompletions(runtime);
 			materialized.getInlineHint = buildEffortInlineHint(runtime);
 		} else {
-			const getArgumentCompletions = buildArgumentCompletions(subcommands);
-			materialized.getArgumentCompletions =
-				cmd.name === "fork"
-					? prefix => {
-							const completions = getArgumentCompletions(prefix);
-							if (!completions) return null;
-							return completions.map(item => {
-								const remaining = item.label.slice(prefix.length);
-								return {
-									...item,
-									hint: remaining ? `${remaining}${item.hint ? ` ${item.hint}` : ""}` : item.hint,
-								};
-							});
-						}
-					: getArgumentCompletions;
-			materialized.getInlineHint = buildSubcommandInlineHint(subcommands);
+			const options = { optional: cmd.subcommandOptional };
+			materialized.getArgumentCompletions = buildArgumentCompletions(subcommands, options);
+			materialized.getInlineHint = buildSubcommandInlineHint(subcommands, options);
 		}
 	} else if (cmd.name === "move") {
 		materialized.getArgumentCompletions = buildDirectoryArgumentCompletions();

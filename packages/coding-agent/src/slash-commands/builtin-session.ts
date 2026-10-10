@@ -607,6 +607,7 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			{ name: "window", description: "Open the fork in a new multiplexer window" },
 			{ name: "tab", description: "Alias for window" },
 		],
+		subcommandOptional: true,
 		allowArgs: true,
 		handleTui: async (command, runtime) => {
 			const args = command.args.trim();
