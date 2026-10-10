@@ -17,7 +17,11 @@ interface CliCall {
 	cwd: string;
 }
 
-function createHarness(env: NodeJS.ProcessEnv, responses: TerminalLaunchCliResult[]) {
+function createHarness(
+	env: NodeJS.ProcessEnv,
+	responses: TerminalLaunchCliResult[],
+	platform: NodeJS.Platform = "darwin",
+) {
 	const calls: CliCall[] = [];
 	const runCli: TerminalLaunchCliRunner = async (argv, cwd) => {
 		calls.push({ argv: [...argv], cwd });
@@ -25,7 +29,7 @@ function createHarness(env: NodeJS.ProcessEnv, responses: TerminalLaunchCliResul
 		if (!response) throw new Error("unexpected CLI call");
 		return response;
 	};
-	const launch = createTerminalLauncher({ environment: () => env, runCli });
+	const launch = createTerminalLauncher({ environment: () => env, platform, runCli });
 	return { calls, launch };
 }
 
@@ -1043,24 +1047,20 @@ describe("terminal launch dispatcher", () => {
 			shellGrammar: "posix",
 		});
 
-		const cli = process.platform === "linux" ? "orca-ide" : "orca";
 		const shellCommand = `cd '/tmp' && 'printf' '%s' 'quoted '\\'' text; printf injected; $(printf nested) *'`;
 		expect(calls).toEqual([
 			{
-				argv: [cli, "terminal", "list", "--worktree", "id:worktree-1", "--json"],
+				argv: ["orca", "terminal", "list", "--worktree=id:worktree-1", "--json"],
 				cwd: "/tmp",
 			},
 			{
 				argv: [
-					cli,
+					"orca",
 					"terminal",
 					"split",
-					"--terminal",
-					"term-current",
-					"--direction",
-					"vertical",
-					"--command",
-					shellCommand,
+					"--terminal=term-current",
+					"--direction=vertical",
+					`--command=${shellCommand}`,
 					"--json",
 				],
 				cwd: "/tmp",
@@ -1107,18 +1107,8 @@ describe("terminal launch dispatcher", () => {
 			cwd: "/tmp",
 			shellGrammar: "posix",
 		});
-		const cli = process.platform === "linux" ? "orca-ide" : "orca";
-		expect(calls[1]?.argv).toEqual([
-			cli,
-			"terminal",
-			"list",
-			"--worktree",
-			"id:worktree-1",
-			"--limit",
-			"2",
-			"--json",
-		]);
-		expect(calls[2]?.argv.slice(0, 5)).toEqual([cli, "terminal", "split", "--terminal", "term-current"]);
+		expect(calls[1]?.argv).toEqual(["orca", "terminal", "list", "--worktree=id:worktree-1", "--limit=2", "--json"]);
+		expect(calls[2]?.argv.slice(0, 4)).toEqual(["orca", "terminal", "split", "--terminal=term-current"]);
 		expect(result.id).toBe("term-new");
 	});
 
@@ -1141,15 +1131,12 @@ describe("terminal launch dispatcher", () => {
 				shellGrammar: "posix",
 			});
 			expect(calls.at(-1)?.argv).toEqual([
-				process.platform === "linux" ? "orca-ide" : "orca",
+				"orca",
 				"terminal",
 				"split",
-				"--terminal",
-				"term-explicit",
-				"--direction",
-				expected,
-				"--command",
-				"cd '/repo' && 'echo' 'safe'",
+				"--terminal=term-explicit",
+				`--direction=${expected}`,
+				"--command=cd '/repo' && 'echo' 'safe'",
 				"--json",
 			]);
 		}
@@ -1167,15 +1154,13 @@ describe("terminal launch dispatcher", () => {
 				exitCode: 0,
 			},
 		]);
-		const cli = process.platform === "linux" ? "orca-ide" : "orca";
-
 		const explicit = await launch({
 			multiplexer: "orca",
 			placement: "window",
 			command: ["printf", "%s", "literal; $(printf no)"],
 			cwd: "/repo's path",
 			target: "path:/other/worktree",
-			name: "agent's tests",
+			name: "--agent's tests",
 			focus: true,
 			shellGrammar: "posix",
 		});
@@ -1190,31 +1175,59 @@ describe("terminal launch dispatcher", () => {
 
 		expect(calls.map(call => call.argv)).toEqual([
 			[
-				cli,
+				"orca",
 				"terminal",
 				"create",
-				"--worktree",
-				"path:/other/worktree",
-				"--title",
-				"agent's tests",
+				"--worktree=path:/other/worktree",
+				"--title=--agent's tests",
 				"--focus",
-				"--command",
-				"cd '/repo'\\''s path' && 'printf' '%s' 'literal; $(printf no)'",
+				"--command=cd '/repo'\\''s path' && 'printf' '%s' 'literal; $(printf no)'",
 				"--json",
 			],
 			[
-				cli,
+				"orca",
 				"terminal",
 				"create",
-				"--worktree",
-				"id:worktree-from-runtime",
-				"--command",
-				"cd '/repo' && 'omp'",
+				"--worktree=id:worktree-from-runtime",
+				"--command=cd '/repo' && 'omp'",
 				"--json",
 			],
 		]);
 		expect(explicit).toEqual({ multiplexer: "orca", placement: "window", id: "term-created" });
 		expect(implicit).toEqual({ multiplexer: "orca", placement: "window", id: "term-created-2" });
+	});
+
+	it.each([
+		{
+			name: "ORCA_CLI_COMMAND override",
+			platform: "linux",
+			env: { ORCA_CLI_COMMAND: " orca-wsl " },
+			cli: "orca-wsl",
+		},
+		{ name: "dev checkout", platform: "darwin", env: { ORCA_DEV_REPO_ROOT: "/src/orca" }, cli: "orca-dev" },
+		{ name: "Linux outside Orca", platform: "linux", env: {}, cli: "orca-ide" },
+		{
+			name: "Linux inside an Orca terminal",
+			platform: "linux",
+			env: { ORCA_PANE_KEY: "tab-1:leaf-1", ORCA_WORKTREE_ID: "worktree-1" },
+			cli: "orca",
+		},
+		{ name: "macOS", platform: "darwin", env: {}, cli: "orca" },
+	] as const)("resolves the Orca CLI for $name", async ({ platform, env, cli }) => {
+		const { calls, launch } = createHarness(
+			env,
+			[{ stdout: '{"ok":true,"result":{"terminal":{"handle":"term-created"}}}', exitCode: 0 }],
+			platform,
+		);
+		await launch({
+			multiplexer: "orca",
+			placement: "window",
+			command: ["omp"],
+			cwd: "/repo",
+			target: "id:worktree-1",
+			shellGrammar: "posix",
+		});
+		expect(calls[0]?.argv[0]).toBe(cli);
 	});
 
 	it("fails closed when an Orca pane identity is unavailable or cannot be uniquely matched", async () => {

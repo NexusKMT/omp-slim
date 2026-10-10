@@ -1,4 +1,5 @@
-import { quotePosixArgument, quotePosixArgv } from "../../utils/shell-quote";
+import { hasTerminalMultiplexerSession } from "@oh-my-pi/pi-tui/terminal-multiplexer";
+import { quotePosixArgvAsciiSafe } from "../../utils/shell-quote";
 import { launchError, nestedString, parseJson, runStep } from "./shared";
 import type {
 	SupportedMultiplexerCapabilities,
@@ -30,6 +31,17 @@ const capabilities = {
 		cwdShellInput: true,
 	},
 } as const satisfies SupportedMultiplexerCapabilities;
+
+/** Orca's documented CLI resolution order (stablyai/orca skills/orca-cli/SKILL.md). */
+function resolveOrcaCli(environment: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+	// Orca exports the matching executable name for managed WSL sessions.
+	const override = environment.ORCA_CLI_COMMAND?.trim();
+	if (override) return override;
+	if (environment.ORCA_DEV_REPO_ROOT?.trim()) return "orca-dev";
+	// Outside Orca's terminals, Linux `orca` is normally the GNOME screen reader.
+	if (platform === "linux" && !hasTerminalMultiplexerSession("orca", environment)) return "orca-ide";
+	return "orca";
+}
 
 function orcaEnvelope(request: TerminalLaunchRequest, operation: string, stdout: string): Record<string, unknown> {
 	const payload = parseJson(request, operation, stdout);
@@ -74,8 +86,8 @@ async function resolvePaneHandle(
 
 	// Orca limits terminal.list by default; a missing pane in the first page is not proof it exited.
 	const list = async (limit?: number) => {
-		const argv = [cli, "terminal", "list", "--worktree", `id:${worktreeId}`];
-		if (limit !== undefined) argv.push("--limit", String(limit));
+		const argv = [cli, "terminal", "list", `--worktree=id:${worktreeId}`];
+		if (limit !== undefined) argv.push(`--limit=${limit}`);
 		argv.push("--json");
 		const payload = orcaEnvelope(
 			request,
@@ -144,9 +156,12 @@ async function resolvePaneHandle(
 	return match;
 }
 
-const launchOrca: TerminalLaunchBackend<"orca", typeof capabilities> = async (request, { environment, runCli }) => {
-	const cli = process.platform === "linux" ? "orca-ide" : "orca";
-	const shellCommand = `cd ${quotePosixArgument(request.cwd)} && ${quotePosixArgv(request.command)}`;
+const launchOrca: TerminalLaunchBackend<"orca", typeof capabilities> = async (
+	request,
+	{ environment, platform, runCli },
+) => {
+	const cli = resolveOrcaCli(environment, platform);
+	const shellCommand = quotePosixArgvAsciiSafe(request.command, request.cwd);
 
 	if (request.placement === "pane") {
 		const target = request.target ?? (await resolvePaneHandle(request, cli, environment, runCli));
@@ -155,12 +170,9 @@ const launchOrca: TerminalLaunchBackend<"orca", typeof capabilities> = async (re
 			cli,
 			"terminal",
 			"split",
-			"--terminal",
-			target,
-			"--direction",
-			direction,
-			"--command",
-			shellCommand,
+			`--terminal=${target}`,
+			`--direction=${direction}`,
+			`--command=${shellCommand}`,
 			"--json",
 		];
 		const output = await runStep(request, "terminal split", argv, request.cwd, runCli);
@@ -176,10 +188,11 @@ const launchOrca: TerminalLaunchBackend<"orca", typeof capabilities> = async (re
 	if (!worktree) {
 		throw launchError(request, "target", "Orca terminal creation requires a worktree selector or ORCA_WORKTREE_ID.");
 	}
-	const argv = [cli, "terminal", "create", "--worktree", worktree];
-	if (request.name) argv.push("--title", request.name);
+	// `--flag=value` keeps values that start with `--` from being parsed as flags.
+	const argv = [cli, "terminal", "create", `--worktree=${worktree}`];
+	if (request.name) argv.push(`--title=${request.name}`);
 	if (request.focus === true) argv.push("--focus");
-	argv.push("--command", shellCommand, "--json");
+	argv.push(`--command=${shellCommand}`, "--json");
 	const output = await runStep(request, "terminal create", argv, request.cwd, runCli);
 	const payload = orcaEnvelope(request, "terminal create", output);
 	return {
