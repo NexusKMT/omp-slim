@@ -22,6 +22,45 @@ export const cfgWorkspaceAdditionalDirectories = register({
 	},
 });
 
+/** A `contextFiles.extra` entry: one path segment, never a directory or `..`. */
+export function contextFileBasename(value: string): string | undefined {
+	const name = value.trim();
+	if (
+		name === "" ||
+		name === "." ||
+		name === ".." ||
+		name.includes("/") ||
+		name.includes("\\") ||
+		name.includes("\0")
+	) {
+		return undefined;
+	}
+	return name;
+}
+
+/**
+ * Extra instruction filenames discovered in addition to AGENTS.md / CLAUDE.md / GEMINI.md.
+ * Config-file only: the names are open-ended, so there is no settings-panel vocabulary.
+ */
+export const cfgContextFilesExtra = register({
+	id: "contextFiles.extra",
+	type: "array",
+	default: EMPTY_STRING_ARRAY,
+	validate: raw => {
+		if (raw === undefined) return;
+		if (!Array.isArray(raw)) {
+			throw new Error("contextFiles.extra must be a list of file names");
+		}
+		for (const entry of raw) {
+			if (typeof entry !== "string" || contextFileBasename(entry) === undefined) {
+				throw new Error(
+					`contextFiles.extra entries must be file names, not paths (${typeof entry === "string" ? entry : String(entry)})`,
+				);
+			}
+		}
+	},
+});
+
 // ────────────────────────────────────────────────────────────────────────
 // Context
 // ────────────────────────────────────────────────────────────────────────

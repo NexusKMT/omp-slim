@@ -67,6 +67,15 @@ function boundSettings(): Settings | undefined {
 	return settingsHolds.at(-1)?.settings;
 }
 
+/**
+ * Settings instance discovery should read live values from. Unset when no
+ * session has called {@link initializeWithSettings}; callers must not fall
+ * back to the process singleton or tests pick up the developer's config.
+ */
+export function boundDiscoverySettings(): Settings | undefined {
+	return boundSettings();
+}
+
 /** Disabled provider IDs in effect: the bound settings' live value, else the unbound set. */
 function disabledProviders(): ReadonlySet<string> {
 	const settings = boundSettings();

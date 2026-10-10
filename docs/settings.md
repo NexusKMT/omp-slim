@@ -993,7 +993,7 @@ Every schema path not individually tabulated in this catalog is explicitly defer
 - Execution and content: `commit.*`, `completion.*`, `edit.*`, `error.*`, `extensionHandlers.*`, `generate_image.*`, `git.*`, `images.*`, `live.*`, `paste.*`, `power.*`, `read.*`, `shellMinimizer.*`, `speech.*`, `terminal.*`, and `title.*`.
 - Interface and startup: `composer.*`, `display.*`, `input.*`, `marketplace.*`, `spelling.*`, `statusLine.*`, `startup.*`, `stt.*`, `tui.*`, `ttsr.*`, and `update.*`.
 - Discovery, sharing, and auth: `auth.*`, `browser.*`, `claudeResets.*`, `codexResets.*`, `collab.*`, `commands.*`, `gc.*`, `ida.*`, `mcp.*`, `share.*`, `skills.*`, `stream.*`, and `telemetry.*`.
-- Ungrouped keys: `setupVersion`, `proseOnlyThinking`, `omitThinking`, `externalThinking`, `includeWorkspaceTree`, `autocompleteMaxVisible`, `emojiAutocomplete`, `disabledExtensions`, `inlineToolDescriptors`, and `treeFilterMode`.
+- Ungrouped keys: `setupVersion`, `proseOnlyThinking`, `omitThinking`, `externalThinking`, `includeWorkspaceTree`, `autocompleteMaxVisible`, `emojiAutocomplete`, `disabledExtensions`, `contextFiles.extra`, `inlineToolDescriptors`, and `treeFilterMode`. `contextFiles.extra` is documented in [Context files](./context-files.md#extra-filenames).
 
 These settings follow the same schema-defined type and default rules shown above.
 
