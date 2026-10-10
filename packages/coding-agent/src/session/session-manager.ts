@@ -39,7 +39,7 @@ import {
 	stripInternalDetailsFields,
 } from "./messages";
 import type { WorkPoolYieldItem } from "../task/workpool-yield";
-import { createInterruptedToolResults } from "./exit-diagnostics";
+import { createInterruptedToolResults, sessionExitFollowsLastMessage } from "./exit-diagnostics";
 import type { RetryFallbackRole } from "./retry-fallback-chains";
 import { type BuildSessionContextOptions, buildSessionContext, type SessionContext } from "./session-context";
 import {
@@ -3902,11 +3902,16 @@ export class SessionManager {
 	 * arrives later is only present in that parent's history, so the child must
 	 * preserve an unknown outcome instead of asserting the tool never ran.
 	 *
+	 * A source whose process exit follows its last message is no longer running;
+	 * it keeps the resume recovery instead: startup warns about the pending
+	 * calls, then pairs them with process-exit results and the interrupted-turn
+	 * abort record.
+	 *
 	 * Sibling branches are excluded: only the root-to-active-leaf path is copied.
 	 */
 	static #repairForkedInterruptedTail(history: SessionEntry[], branch: readonly SessionEntry[]): void {
 		const leaf = branch.at(-1);
-		if (!leaf) return;
+		if (!leaf || sessionExitFollowsLastMessage(branch)) return;
 		const results = createInterruptedToolResults(branch, "fork");
 		if (results.length === 0) return;
 		const usedIds = new Set(history.map(entry => entry.id));

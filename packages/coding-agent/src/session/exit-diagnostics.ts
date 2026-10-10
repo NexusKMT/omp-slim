@@ -166,6 +166,19 @@ export function createInterruptedTurnAbortMessage(
 	};
 }
 
+/**
+ * Whether a persisted process exit follows the branch's last message: the
+ * branch's writer is gone, so resume recovery owns its interrupted tail.
+ */
+export function sessionExitFollowsLastMessage(entries: readonly SessionEntry[]): boolean {
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index]!;
+		if (entry.type === "message") return false;
+		if (readSessionExit(entry)) return true;
+	}
+	return false;
+}
+
 /** Pairs unresolved calls at the end of an interrupted turn with result messages. */
 export function createInterruptedToolResults(
 	entries: readonly SessionEntry[],

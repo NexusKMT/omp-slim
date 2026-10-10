@@ -4,6 +4,10 @@ import * as path from "node:path";
 import { isSyntheticToolResultMessage } from "@oh-my-pi/pi-agent-core";
 import {
 	collectPendingToolCalls,
+	createInterruptedToolResults,
+	createInterruptedTurnAbortMessage,
+	describePendingToolCalls,
+	SESSION_EXIT_CUSTOM_TYPE,
 	TOOL_EXECUTION_START_CUSTOM_TYPE,
 } from "@oh-my-pi/pi-coding-agent/session/exit-diagnostics";
 import {
@@ -328,7 +332,7 @@ describe("SessionManager.forkFrom", () => {
 		});
 	}
 
-	it("pairs an unresolved tool call with a synthetic aborted result only when repair is requested", async () => {
+	it("pairs an unresolved tool call with an unknown-outcome result only when repair is requested", async () => {
 		using tempDir = TempDir.createSync("@omp-session-fork-repair-");
 		const cwd = path.join(tempDir.path(), "project");
 		const sessionDir = path.join(tempDir.path(), "sessions");
@@ -404,6 +408,64 @@ describe("SessionManager.forkFrom", () => {
 			result.message.content.some(
 				block => block.type === "text" && block.text.includes("may still be running this tool"),
 			),
+		).toBe(true);
+	});
+
+	it("leaves an exited source's interrupted tail to resume recovery", async () => {
+		using tempDir = TempDir.createSync("@omp-session-fork-exited-");
+		const cwd = path.join(tempDir.path(), "project");
+		const sessionDir = path.join(tempDir.path(), "sessions");
+		await fs.mkdir(sessionDir, { recursive: true });
+		const sourceFile = path.join(sessionDir, "source.jsonl");
+		const timestamp = new Date().toISOString();
+		const entries = [
+			{ type: "session", version: CURRENT_SESSION_VERSION, id: "crashed-parent", timestamp, cwd },
+			{
+				type: "message",
+				id: "m1",
+				parentId: null,
+				timestamp,
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "toolu_crashed", name: "bash", arguments: { command: "make" } }],
+					api: "anthropic-messages",
+					provider: "anthropic",
+					model: "claude",
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+					usage: {
+						input: 10,
+						output: 5,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 15,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+				},
+			},
+			{
+				type: "custom",
+				id: "m2",
+				parentId: "m1",
+				timestamp,
+				customType: SESSION_EXIT_CUSTOM_TYPE,
+				data: { reason: "uncaughtException", kind: "fatal", recordedAt: timestamp },
+			},
+		];
+		await Bun.write(sourceFile, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+
+		const forked = await SessionManager.forkFrom(sourceFile, cwd, path.join(tempDir.path(), "fork"), undefined, {
+			suppressBreadcrumb: true,
+			repairInterruptedTail: true,
+		});
+		const branch = forked.getBranch();
+		expect(collectPendingToolCalls(branch).map(call => call.toolCallId)).toEqual(["toolu_crashed"]);
+		expect(describePendingToolCalls(branch)).toContain("toolu_crashed");
+		expect(createInterruptedTurnAbortMessage(branch)?.stopReason).toBe("aborted");
+		const [result] = createInterruptedToolResults(branch);
+		expect(result?.toolCallId).toBe("toolu_crashed");
+		expect(
+			result?.content.some(block => block.type === "text" && block.text.includes("Previous OMP process exited")),
 		).toBe(true);
 	});
 
