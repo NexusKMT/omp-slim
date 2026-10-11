@@ -38,6 +38,27 @@ describe("validateProviderConfiguration (models-config auth)", () => {
 			),
 		).not.toThrow();
 	});
+
+	test("schema accepts Bedrock compat.supportsThinkingBindingControls override", () => {
+		const schema = getModelsConfigSchema();
+		expect(() =>
+			schema.assert({
+				providers: {
+					"amazon-bedrock": {
+						models: [
+							{
+								id: "us.anthropic.claude-fable-5-1",
+								api: "bedrock-converse-stream",
+								compat: {
+									supportsThinkingBindingControls: false,
+								},
+							},
+						],
+					},
+				},
+			}),
+		).not.toThrow();
+	});
 });
 
 describe("ModelsConfigSchema Responses compat overrides", () => {

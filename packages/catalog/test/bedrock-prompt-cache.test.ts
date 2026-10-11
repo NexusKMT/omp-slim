@@ -155,6 +155,7 @@ describe("Bedrock prompt-cache compat", () => {
 				streamRevision: "possible",
 				// Adaptive Claude rejects temperature/top_p on every host (class rule).
 				...("rejectsSampling" in testCase ? { supportsSamplingParams: false } : {}),
+				supportsThinkingBindingControls: false,
 			});
 			if (minimumTokens === 0) {
 				expect(model.promptCache).toBeUndefined();
@@ -278,7 +279,11 @@ describe("Bedrock prompt-cache compat", () => {
 			"global.amazon.nova-2-lite-v1:0",
 		] as const) {
 			const model = buildModel(bedrockSpec({ id }));
-			expect(model.compat).toEqual({ ...expected, streamIdleTimeoutMs: 600_000 });
+			expect(model.compat).toEqual({
+				...expected,
+				supportsThinkingBindingControls: false,
+				streamIdleTimeoutMs: 600_000,
+			});
 			expect(model.promptCache).toBeUndefined();
 		}
 	});

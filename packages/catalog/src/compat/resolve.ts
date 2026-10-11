@@ -942,6 +942,7 @@ function resolveBedrockPolicy(spec: ModelSpec<"bedrock-converse-stream">, axes: 
 		promptCacheMinimumTokens: 0,
 		promptCacheMaximumCheckpoints: 0,
 		supportsForcedToolChoice: true,
+		supportsThinkingBindingControls: false,
 	};
 	// Reasoning capability is a mechanism gate; adaptive-lineage duration is rule-owned.
 	compat.streamIdleTimeoutMs = compatReasoning(spec, axes) ? BEDROCK_REASONING_STREAM_IDLE_TIMEOUT_MS : undefined;

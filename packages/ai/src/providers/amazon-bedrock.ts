@@ -454,7 +454,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 				isRecord(additionalModelRequestFields?.thinking) &&
 				additionalModelRequestFields.thinking.type === "disabled";
 			const prefixMismatchBehavior =
-				!thinkingDisabled && model.thinking?.prefixBinding
+				!thinkingDisabled && model.thinking?.prefixBinding && model.compat?.supportsThinkingBindingControls
 					? (options.anthropicPrefixMismatchBehavior ?? "drop_block")
 					: undefined;
 
@@ -463,10 +463,15 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 			const forcedChoice = toolConfig?.toolChoice?.any || toolConfig?.toolChoice?.tool;
 			if (toolConfig && forcedChoice && !model.compat.supportsForcedToolChoice) {
 				toolConfig = { ...toolConfig, toolChoice: { auto: {} } };
-			} else if (toolConfig && forcedChoice && additionalModelRequestFields && !thinkingDisabled) {
+			} else if (
+				toolConfig &&
+				forcedChoice &&
+				!thinkingDisabled &&
+				(additionalModelRequestFields || model.thinking?.prefixBinding)
+			) {
 				// Bedrock rejects thinking + forced tool_choice. Fable's adaptive
 				// thinking cannot be disabled, so downgrade its forced choice instead.
-				if (prefixMismatchBehavior) toolConfig = { ...toolConfig, toolChoice: { auto: {} } };
+				if (model.thinking?.prefixBinding) toolConfig = { ...toolConfig, toolChoice: { auto: {} } };
 				else additionalModelRequestFields = undefined;
 			}
 			if (prefixMismatchBehavior) {

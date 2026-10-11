@@ -7,6 +7,7 @@ import { type BedrockOptions, streamBedrock } from "@oh-my-pi/pi-ai/providers/am
 import type { Context, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
 function model(): Model<"bedrock-converse-stream"> {
 	return buildModel({
@@ -34,6 +35,7 @@ async function captureSentBody(
 	onPayload: (payload: unknown) => unknown | Promise<unknown>,
 	target: Model<"bedrock-converse-stream"> = model(),
 	options: Partial<BedrockOptions> = {},
+	targetContext: Context = context,
 ): Promise<Record<string, any>> {
 	const { promise, resolve } = Promise.withResolvers<Record<string, any>>();
 	const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
@@ -50,7 +52,7 @@ async function captureSentBody(
 		);
 	}) as unknown as typeof fetch;
 
-	const stream = streamBedrock(target, context, {
+	const stream = streamBedrock(target, targetContext, {
 		...options,
 		bearerToken: "test-token",
 		fetch: fetchMock,
@@ -107,4 +109,119 @@ describe("bedrock onPayload replacement", () => {
 		expect(body.additionalModelRequestFields.anthropic_beta).toContain("thinking-binding-controls-2026-08-01");
 		expect(body.additionalModelResponseFieldPaths).toEqual(["/input_transformations"]);
 	}, 10_000);
+
+	it("honors caller-specified anthropicPrefixMismatchBehavior in serialized payload", async () => {
+		const target = buildModel({
+			id: "us.anthropic.claude-fable-5-1-v1:0",
+			name: "Claude Fable 5.1",
+			api: "bedrock-converse-stream",
+			provider: "amazon-bedrock",
+			baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+			contextWindow: 1_000_000,
+			maxTokens: 128_000,
+		});
+		const body = await captureSentBody(async () => undefined, target, {
+			reasoning: Effort.High,
+			anthropicPrefixMismatchBehavior: "error",
+		});
+
+		expect(body.additionalModelRequestFields.thinking.block_binding).toEqual({
+			prefix_mismatch_behavior: "error",
+		});
+	}, 10_000);
+
+	it("omits wire thinking-binding controls when supportsThinkingBindingControls is false", async () => {
+		const target = buildModel({
+			id: "us.anthropic.claude-fable-5-1-v1:0",
+			name: "Claude Fable 5.1",
+			api: "bedrock-converse-stream",
+			provider: "amazon-bedrock",
+			baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+			contextWindow: 1_000_000,
+			maxTokens: 128_000,
+			compat: {
+				supportsThinkingBindingControls: false,
+			},
+		});
+		const body = await captureSentBody(async () => undefined, target, {
+			reasoning: Effort.High,
+			anthropicPrefixMismatchBehavior: "error",
+		});
+
+		expect(body.additionalModelRequestFields?.thinking?.type).toBe("adaptive");
+		expect(body.additionalModelRequestFields?.thinking?.block_binding).toBeUndefined();
+		expect(body.additionalModelRequestFields?.anthropic_beta).toBeUndefined();
+		expect(body.additionalModelResponseFieldPaths).toBeUndefined();
+	}, 10_000);
+
+	it("still downgrades forced tool choice to auto when prefixBinding is active even if wire controls are opted out", async () => {
+		const target = buildModel({
+			id: "us.anthropic.claude-fable-5-1-v1:0",
+			name: "Claude Fable 5.1",
+			api: "bedrock-converse-stream",
+			provider: "amazon-bedrock",
+			baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+			contextWindow: 1_000_000,
+			maxTokens: 128_000,
+			compat: {
+				supportsThinkingBindingControls: false,
+			},
+		});
+		const toolContext: Context = {
+			...context,
+			tools: [{ name: "test_tool", description: "test", parameters: { type: "object" } }],
+		};
+
+		const bodyAny = await captureSentBody(async () => undefined, target, { toolChoice: "any" }, toolContext);
+		expect(bodyAny.toolConfig?.toolChoice).toEqual({ auto: {} });
+
+		const bodyNamed = await captureSentBody(
+			async () => undefined,
+			target,
+			{ toolChoice: { type: "tool", name: "test_tool" } },
+			toolContext,
+		);
+		expect(bodyNamed.toolConfig?.toolChoice).toEqual({ auto: {} });
+	}, 10_000);
+
+	it("does not downgrade forced tool choice on non-prefixBinding models", async () => {
+		const target = model();
+		const toolContext: Context = {
+			...context,
+			tools: [{ name: "test_tool", description: "test", parameters: { type: "object" } }],
+		};
+
+		const bodyAny = await captureSentBody(async () => undefined, target, { toolChoice: "any" }, toolContext);
+		expect(bodyAny.toolConfig?.toolChoice).toEqual({ any: {} });
+
+		const bodyNamed = await captureSentBody(
+			async () => undefined,
+			target,
+			{ toolChoice: { type: "tool", name: "test_tool" } },
+			toolContext,
+		);
+		expect(bodyNamed.toolConfig?.toolChoice).toEqual({ tool: { name: "test_tool" } });
+	}, 10_000);
+
+	it("merges sparse compat override on bundled models without dropping prompt cache settings", () => {
+		const fableRaw = getBundledModel<"bedrock-converse-stream">("amazon-bedrock", "us.anthropic.claude-fable-5-1");
+		const customized = buildModel({
+			...fableRaw,
+			compat: {
+				supportsThinkingBindingControls: false,
+			},
+		});
+		expect(customized.compat.supportsThinkingBindingControls).toBe(false);
+		expect(customized.compat.promptCacheMode).toBe("explicit");
+		expect(customized.compat.promptCacheMaximumCheckpoints).toBe(4);
+	});
 });
