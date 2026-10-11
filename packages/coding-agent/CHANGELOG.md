@@ -31,6 +31,7 @@
 
 ### Fixed
 
+- Fixed `omp --resume -p` continuing stale todos after answering instead of printing the answer and exiting ([#15320](https://github.com/can1357/oh-my-pi/issues/15320)).
 - Fixed `/btw`, IRC, and composer-prediction requests missing the conversation's prompt cache on Codex, and on GPT-6 models after a thinking-level change
 - Fixed Tern browser opens of `about:blank`, and `tab.goto` to the address the page already shows, hanging until the timeout
 - Fixed SDK and RPC sessions keeping a stale MCP tool list when a server's tools changed while extensions were loading; `createAgentSession` now adopts the change before it returns ([#11315](https://github.com/can1357/oh-my-pi/pull/11315) by [@aktanazat](https://github.com/aktanazat)).
