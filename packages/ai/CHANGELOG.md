@@ -20,6 +20,7 @@
 
 ### Fixed
 
+- Fixed Anthropic subscription quota missing from `/usage` when an OAuth token is supplied through `ANTHROPIC_API_KEY` ([#15318](https://github.com/can1357/oh-my-pi/issues/15318)).
 - Fixed custom OpenAI-compatible Responses streams truncating reasoning when a proxy omits the summary index after a completed section, and running custom tools such as `apply_patch` with empty input when the final item repeats `input: ""` ([#11863](https://github.com/can1357/oh-my-pi/pull/11863) by [@moodiness](https://github.com/moodiness))
 - Fixed Codex WebSocket prewarm to accept an optional service tier and send the model/tier routing hint consistently with normal requests, preserving omitted and explicit service-tier requests ([#15022](https://github.com/can1357/oh-my-pi/pull/15022) by [@xiangnan0811](https://github.com/xiangnan0811)).
 - Fixed the OAuth sign-in result page breaking or rendering injected markup when a provider error or callback value contains `</script>` or `$` replacement sequences ([#15037](https://github.com/can1357/oh-my-pi/pull/15037) by [@BAKocska](https://github.com/BAKocska)).
