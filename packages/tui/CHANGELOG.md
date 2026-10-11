@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- Fixed the session model picker and setup model step showing auto-selected role chips (e.g. `judge`) on a chat model the session would not use, when the role actually resolves to a non-chat runner such as TypeSafe jev
 - Fixed table charts showing indistinguishable rows when the first text column repeats (`Model | Harness | …`): bar, heatmap, and change charts now show each repeated name once beside a separated block of its rows, and other charts use combined names like `Sonnet 5.5 · bash`
 - Fixed table charts dropping bars for scores like `1.0/4` or `27.0/36` when the same column held `0.6/4`; mean scores now read as the percent of their total
 - Fixed table charts misreading tables: restated columns (`pass` beside `pass%`) plot once, unrelated column pairs no longer draw as before/after dumbbells, ids and zero-padded codes are no longer plotted, outline tables with blank cells read as groups, side-by-side halves read as one list, long labels shed shared prefixes and descriptions, and prose tables with only tiny counts draw no chart
