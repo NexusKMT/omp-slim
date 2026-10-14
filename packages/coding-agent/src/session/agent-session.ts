@@ -155,6 +155,8 @@ import type {
 	TreePreparation,
 } from "../extensibility/extensions";
 import { emitSessionShutdownEvent, TOP_LEVEL_AGENT, UNAVAILABLE_ANNOTATIONS } from "../extensibility/extensions";
+import type { ExtensionModeControls } from "../extensibility/extensions/mode-api";
+import { SessionModeController } from "../modes/session-mode-controller";
 import { extensionEventFromSessionEvent } from "../extensibility/extensions/lifecycle-mirror";
 import { ManagedTimers } from "../extensibility/extensions/managed-timers";
 import { createExtensionModelQuery } from "../extensibility/extensions/model-api";
@@ -988,6 +990,8 @@ export class AgentSession implements SettingsScope {
 	#adoptedResetMarkers = new Map<string, number>();
 	// Extension system
 	#extensionRunner: ExtensionRunner | undefined = undefined;
+	#modeControls: ExtensionModeControls | undefined;
+	#modeController: SessionModeController | undefined;
 	#getEvalPreludes: (() => readonly EvalPreludeDefinition[]) | undefined;
 	#reconcileBrowserMcpFilter: AgentSessionConfig["reconcileBrowserMcpFilter"];
 	#skillDescriptions: SkillDescriptionCatalog;
@@ -2667,6 +2671,11 @@ export class AgentSession implements SettingsScope {
 
 	getAgentId(): string | undefined {
 		return this.#agentId;
+	}
+
+	/** @internal Host lifecycle policy must not depend on extension-runner initialization. */
+	getAgentKind(): "main" | "sub" {
+		return this.#agentKind;
 	}
 
 	/** Dequeue the next HARD forced tool choice for the upcoming LLM call, dropping
@@ -5654,6 +5663,11 @@ export class AgentSession implements SettingsScope {
 
 	async #doDispose(options: AgentSessionDisposeOptions = {}): Promise<void> {
 		this.beginDispose();
+		try {
+			await this.#modeController?.dispose();
+		} catch (error) {
+			logger.warn("Failed to tear down session modes during dispose", { error: String(error) });
+		}
 		// Stop cache warming before the drain windows below: an armed tick firing
 		// mid-dispose would issue a paid warm request and persist usage into the
 		// closing session writer.
@@ -8097,6 +8111,7 @@ export class AgentSession implements SettingsScope {
 		}
 
 		return {
+			modes: this.modes,
 			ui: noOpUIContext,
 			mode: "print",
 			hasUI: false,
@@ -9804,9 +9819,11 @@ export class AgentSession implements SettingsScope {
 			}
 		}
 
+		this.#ownedModeController?.assertCanChangeSession();
 		this.#disconnectFromAgent();
 		let advisorRecordersDetached = false;
 		await this.abort();
+		await this.#ownedModeController?.beforeSessionChange();
 		this.#cancelOwnAsyncJobs();
 		this.#closeAllProviderSessions("new session");
 		await this.#bash.flushPending();
@@ -9892,6 +9909,7 @@ export class AgentSession implements SettingsScope {
 			// turn goes out.
 			resetCapabilities();
 			await this.refreshBaseSystemPrompt();
+			await this.#ownedModeController?.reconcile();
 
 			// Emit session_switch event with reason "new" to hooks
 			if (this.#extensionRunner) {
@@ -9971,6 +9989,7 @@ export class AgentSession implements SettingsScope {
 				return false;
 			}
 		}
+		this.#ownedModeController?.assertCanChangeSession();
 
 		await this.flushToDisk();
 		// Work admitted during the hook or flush awaits would be copied mid-flight.
@@ -10015,6 +10034,8 @@ export class AgentSession implements SettingsScope {
 			advisorRecordersDetached = false;
 			await this.#memory.resetContextForNewTranscript();
 
+			await this.#ownedModeController?.beforeSessionChange();
+			await this.#ownedModeController?.reconcile({ preserveActiveGoal: true });
 			// Emit session_switch event with reason "fork" to hooks
 			if (this.#extensionRunner) {
 				await this.#extensionRunner.emit({
@@ -11421,8 +11442,10 @@ export class AgentSession implements SettingsScope {
 			}
 		}
 
+		this.#ownedModeController?.assertCanChangeSession();
 		this.#disconnectFromAgent();
 		await this.abort({ goalReason: "internal" });
+		await this.#ownedModeController?.beforeSessionChange();
 		await this.#sessionBeforeSwitchReconciler?.();
 
 		await this.#bash.flushPending();
@@ -11561,6 +11584,7 @@ export class AgentSession implements SettingsScope {
 				didSessionMessagesChange(previousSessionContext.messages, sessionContext.messages);
 			this.#rehydrateCheckpointRewindState();
 
+			await this.#ownedModeController?.reconcile({ preserveActiveGoal: true });
 			// Emit session_switch event to hooks
 			if (this.#extensionRunner) {
 				await this.#extensionRunner.emit({
@@ -11753,6 +11777,7 @@ export class AgentSession implements SettingsScope {
 			this.#reconnectToAgent();
 			try {
 				await this.#sessionSwitchReconciler?.();
+				await this.#ownedModeController?.reconcile({ preserveActiveGoal: true });
 			} catch (reconcileError) {
 				logger.warn("Failed to reconcile session mode after switch rollback", {
 					targetSessionFile: sessionPath,
@@ -11870,6 +11895,7 @@ export class AgentSession implements SettingsScope {
 			if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		}
 
+		this.#ownedModeController?.assertCanChangeSession();
 		await this.#bash.flushPending();
 		// Flush pending writes before branching
 		await this.sessionManager.flush();
@@ -11877,6 +11903,7 @@ export class AgentSession implements SettingsScope {
 		// idle-only snapshot refuses here, after the flush awaits but before any state of the
 		// old session (pending messages, async jobs, auto-learn capture) is discarded.
 		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
+		await this.#ownedModeController?.beforeSessionChange();
 
 		// Clear pending messages (bound to old session state)
 		this.#pendingNextTurnMessages = [];
@@ -11925,6 +11952,7 @@ export class AgentSession implements SettingsScope {
 			// Reload messages from entries (works for both file and in-memory mode)
 			const sessionContext = this.buildDisplaySessionContext();
 
+			await this.#ownedModeController?.reconcile({ preserveActiveGoal: true });
 			// Emit session_branch event to hooks (after branch completes)
 			if (this.#extensionRunner) {
 				await this.#extensionRunner.emit({
@@ -12349,6 +12377,8 @@ export class AgentSession implements SettingsScope {
 			newLeafId = targetId;
 		}
 
+		this.#ownedModeController?.assertCanChangeSession();
+		await this.#ownedModeController?.beforeSessionChange();
 		// Switch leaf (with or without summary)
 		// Summary is attached at the navigation target position (newLeafId), not the old branch
 		const bashTransition = this.#bash.beginSessionTransition();
@@ -12397,6 +12427,7 @@ export class AgentSession implements SettingsScope {
 		// `renderInitialMessages(...)` (issue #6483). Plain leaf moves and the
 		// read-only `reopenAsk` probe leave the flag unset.
 
+		await this.#ownedModeController?.reconcile({ preserveActiveGoal: true });
 		// Emit session_tree event; only handlers can mutate session entries, so skip
 		// the emit and the context rebuild when no handlers are registered (mirrors
 		// the session_before_tree guard above).
@@ -13729,6 +13760,23 @@ export class AgentSession implements SettingsScope {
 	 */
 	get extensionRunner(): ExtensionRunner | undefined {
 		return this.#extensionRunner;
+	}
+
+	/** Host-owned mode controls; injected controllers preserve RPC/ACP lifecycle ownership. */
+	get modes(): ExtensionModeControls {
+		if (this.#modeControls) return this.#modeControls;
+		this.#modeController ??= new SessionModeController(this);
+		return this.#modeController;
+	}
+
+	/** The built-in lifecycle owner, unless a host (the TUI) installed its own controls. */
+	get #ownedModeController(): SessionModeController | undefined {
+		return this.#modeControls ? undefined : this.#modeController;
+	}
+
+	setModeControls(controls: ExtensionModeControls | undefined, expectedOwner?: ExtensionModeControls): void {
+		if (expectedOwner && this.#modeControls !== expectedOwner) return;
+		this.#modeControls = controls;
 	}
 
 	/**

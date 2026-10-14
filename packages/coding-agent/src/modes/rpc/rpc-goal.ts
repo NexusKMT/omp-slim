@@ -14,6 +14,7 @@ import { cfgGoalContinuationModes, cfgGoalEnabled } from "../../goals/settings";
 import { type GoalModeState, goalContinuationActivity, goalFromModeData } from "../../goals/state";
 import type { AgentSession, AgentSessionEvent } from "../../session/agent-session";
 import { nextActionableTask } from "../../tools/todo";
+import type { ModeRequest } from "../../extensibility/extensions/mode-api";
 
 /** `goal.continuationModes` value that enables automatic continuation for RPC hosts. */
 export const RPC_GOAL_CONTINUATION_MODE = "rpc";
@@ -133,10 +134,12 @@ export class RpcGoalController {
 	 * the previous transcript's goal. Not for use inside extension notifications.
 	 */
 	async settled(): Promise<void> {
-		for (let tail = this.#reconcileTask; ; tail = this.#reconcileTask) {
-			await this.#exitTask;
+		for (;;) {
+			const tail = this.#reconcileTask;
+			const exit = this.#exitTask;
+			await exit;
 			await tail;
-			if (tail === this.#reconcileTask) return;
+			if (tail === this.#reconcileTask && exit === this.#exitTask) return;
 		}
 	}
 
@@ -229,6 +232,50 @@ export class RpcGoalController {
 		}
 	}
 
+	async applyModeRequest(request: Extract<ModeRequest, { mode: "goal" }>): Promise<void> {
+		const current = this.#session.getGoalModeState();
+		switch (request.action) {
+			case "enter":
+				if (current?.enabled) return;
+				this.#assertCanEnter();
+				if (current?.goal.status === "paused")
+					throw new Error("Resume or drop the paused goal before entering a new objective.");
+				await this.#enter(() => this.#session.goalRuntime.createGoal(request), false);
+				return;
+			case "resume":
+				if (current?.enabled) return;
+				this.#assertCanEnter();
+				if (current?.goal.status !== "paused") throw new Error("No paused goal to resume.");
+				await this.#enter(() => this.#session.goalRuntime.resumeGoal(), false);
+				return;
+			case "replace":
+				if (
+					current?.goal.objective === request.objective.trim() &&
+					current.goal.tokenBudget === request.tokenBudget
+				)
+					return;
+				await this.#session.goalRuntime.replaceGoal(request);
+				this.stopForHostAbort();
+				return;
+			case "exit":
+			case "pause":
+				if (!current?.enabled) return;
+				await this.handle({ op: "pause" });
+				this.stopForHostAbort();
+				return;
+			case "drop":
+				if (!current) return;
+				await this.handle({ op: "drop" });
+				this.stopForHostAbort();
+				return;
+			case "budget":
+				if (!current) throw new Error("No current goal to budget.");
+				if (current.goal.tokenBudget === (request.tokenBudget ?? undefined)) return;
+				await this.#session.goalRuntime.onBudgetMutated(request.tokenBudget ?? undefined);
+				return;
+		}
+	}
+
 	#assertCanEnter(): void {
 		if (!cfgGoalEnabled.get(this.#session.settings)) {
 			throw new Error("Goal mode is disabled (goal.enabled).");
@@ -264,7 +311,7 @@ export class RpcGoalController {
 		return this.#state;
 	}
 
-	async #enter(start: () => Promise<GoalModeState>): Promise<void> {
+	async #enter(start: () => Promise<GoalModeState>, continueImmediately = true): Promise<void> {
 		// The pre-goal tool set is captured once, when this controller first adds `goal`
 		// (a reattached paused goal already holds it). A `goal` tool the host enabled
 		// before the goal stays enabled afterwards.
@@ -278,7 +325,8 @@ export class RpcGoalController {
 			await this.#session.sendGoalModeContext({ deliverAs: "steer" });
 			return;
 		}
-		this.#scheduleContinuation();
+		if (continueImmediately) this.#scheduleContinuation();
+		else this.stopForHostAbort();
 	}
 
 	/** Restore the pre-goal tool set. Idempotent. */
