@@ -84,6 +84,7 @@ export class RpcGoalController {
 	#reconcileTask: Promise<void> = Promise.resolve();
 	/** Reconciles queued or running. */
 	#reconcilesPending = 0;
+	#reconciledSessionId: string | undefined;
 	/**
 	 * The in-progress change began while a reconcile was queued or running, so that
 	 * reconcile may have read a transcript this change later replaced or rolled back:
@@ -381,13 +382,24 @@ export class RpcGoalController {
 	async reconcile(options?: { preserveActiveGoal?: boolean }): Promise<void> {
 		this.#reconcilesPending++;
 		const run = this.#reconcileTask.then(() => this.#reconcileOnce(options));
-		this.#reconcileTask = run.catch(reportControllerError).finally(() => {
-			this.#reconcilesPending--;
-		});
+		this.#reconcileTask = run
+			.then(() => {
+				// Mark only after the whole restore completed: a failed reconcile
+				// stays eligible so the next caller re-runs it.
+				this.#reconciledSessionId = this.#session.sessionManager.getSessionId();
+			})
+			.catch(reportControllerError)
+			.finally(() => {
+				this.#reconcilesPending--;
+			});
 		await run;
 	}
 
 	async #reconcileOnce(options: { preserveActiveGoal?: boolean } | undefined): Promise<void> {
+		// Startup, session-change, and the SessionModeController's host reconcile
+		// can each reach this for the same journal — one restore per session id.
+		const sessionId = this.#session.sessionManager.getSessionId();
+		if (sessionId !== undefined && sessionId === this.#reconciledSessionId) return;
 		// Goal state and the goal tool belong to the session that set them; the
 		// session itself keeps both across a switch, so clear them here first.
 		this.#continuationScheduled = false;

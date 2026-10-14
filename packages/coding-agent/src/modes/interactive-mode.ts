@@ -2999,7 +2999,17 @@ export class InteractiveMode implements InteractiveModeContext {
 			throw new Error(`MODE_${code}: ${message}`);
 		};
 		const rejectBusy = (): void => {
-			if (this.session.isBusyForSnapshot || this.session.isSessionTransitioning || this.session.isDisposed) {
+			if (
+				this.session.isBusyForSnapshot ||
+				this.session.isSessionTransitioning ||
+				this.session.isDisposed ||
+				// A prompt admitted but still in setup (image normalization, vision
+				// preflight) is busy: mode changes must not swap model/tools out from
+				// under it. Exempt the admitted submission that IS this extension's
+				// command handler — the /mission pattern legitimately runs set()
+				// before its own turn starts.
+				(this.session.hasAdmittedSubmission && !this.session.isInSoleExtensionCommandDispatch)
+			) {
 				fail("busy", "The session must be idle to change modes.");
 			}
 		};

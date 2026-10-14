@@ -144,6 +144,10 @@ describe("extension built-in mode lifecycle", () => {
 		await session.waitForIdle();
 		expect(provider.calls[0]?.context.messages.some(message => message.role === "user")).toBe(true);
 		expect(ctx.modes.getState().plan.status).toBe("active");
+		// DEBUG
+		// Dispatch bookkeeping can outlive agent idle by a few ticks (post-turn
+		// teardown inside the admission window); exit must wait for it to settle.
+		await session.waitForAdmittedSubmissions();
 		await runner.getCommand("mission-exit")!.handler("", runner.createCommandContext());
 		expect(ctx.modes.getState().plan.status).toBe("inactive");
 		expect(await Bun.file(localDraft).text()).toContain("Keep this draft.");

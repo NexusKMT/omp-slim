@@ -39,6 +39,9 @@ const OPERATIONS: Record<SessionModeName, readonly ModeOperation[]> = {
 export class SessionModeController implements ExtensionModeControls {
 	readonly #session: AgentSession;
 	#host: SessionModeHost;
+	#planPreviousOnSwitch:
+		| { tools: string[]; mounted: string[]; model?: Model; thinking?: ConfiguredThinkingLevel }
+		| undefined;
 	#transitioning = false;
 	#revision = 0;
 	#last: ModeSnapshot;
@@ -469,6 +472,11 @@ export class SessionModeController implements ExtensionModeControls {
 			this.#vibeScope = undefined;
 			this.#vibePrevious = undefined;
 		}
+		// Stash the pre-plan model before #exitPlan clears it: a destination whose
+		// journal records no model (`/new` boundary) would otherwise inherit the
+		// live plan-role model. #restoreSession applies it only in that case —
+		// TUI parity with `restorePlanModel: models.length === 0`.
+		this.#planPreviousOnSwitch = this.#planPrevious;
 		await this.#exitPlan(false, { persist: false, restoreModel: false });
 		await this.#restoreGoalTools();
 		this.#session.setGoalModeState(undefined);
@@ -534,6 +542,20 @@ export class SessionModeController implements ExtensionModeControls {
 				await this.#session.goalRuntime.onThreadResumed(options);
 			}
 		}
+
+		// Model-less destination (new session, or a branch point before any
+		// model_change): restore the pre-plan model so the fresh session does
+		// not keep the plan-role selection. Journals into the destination.
+		if (
+			this.#planPreviousOnSwitch &&
+			Object.keys(context.models).length === 0 &&
+			!this.#session.getPlanModeState()?.enabled
+		) {
+			const stashed = this.#planPreviousOnSwitch;
+			if (stashed.model) await this.#session.setModelTemporary(stashed.model, stashed.thinking);
+			else this.#session.setThinkingLevel(stashed.thinking);
+		}
+		this.#planPreviousOnSwitch = undefined;
 		await this.#host.reconcile?.(options);
 	}
 
@@ -542,6 +564,7 @@ export class SessionModeController implements ExtensionModeControls {
 		this.#unsubscribe();
 		await this.#exitVibe(false);
 		await this.#restoreGoalTools();
+		this.#planPreviousOnSwitch = undefined;
 		this.#disposed = true;
 	}
 }
