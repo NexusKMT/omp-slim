@@ -56,6 +56,15 @@ export interface ExtensionModeControls {
 	getState(): ModeSnapshot;
 	/** Explicit idempotent transition; never submits a user prompt or opens a dialog. */
 	set(request: ModeRequest): Promise<ModeResult>;
+
+	/**
+	 * Host-only guard: invoked by the session before a session-changing operation
+	 * (new/switch/fork/branch) commits. Throwing refuses the transition while an
+	 * extension-driven mode change is still in flight, so teardown cannot land in
+	 * a session the caller no longer owns. Optional — controllers without
+	 * long-running transitions may omit it.
+	 */
+	assertCanChangeSession?(): void;
 }
 
 export interface ModeChangedEvent {

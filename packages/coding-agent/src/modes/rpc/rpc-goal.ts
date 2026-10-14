@@ -316,9 +316,21 @@ export class RpcGoalController {
 		// (a reattached paused goal already holds it). A `goal` tool the host enabled
 		// before the goal stays enabled afterwards.
 		const previousTools = this.#previousTools ?? this.#session.getEnabledToolNames();
-		const state = await start();
+		const nextTools = [...new Set([...previousTools, "goal"])];
+		// Activate the tool set BEFORE committing the goal: if rebuild rejects after
+		// createGoal() persisted a running goal, the failed ModeResult would leave
+		// the session holding a goal it cannot drive. Activate first; on failure
+		// of the commit step, restore the pre-entry tools before propagating.
+		await this.#session.setActiveToolsByName(nextTools);
+		let state: GoalModeState;
+		try {
+			state = await start();
+		} catch (error) {
+			this.#previousTools = undefined;
+			await this.#session.setActiveToolsByName(previousTools).catch(() => {});
+			throw error;
+		}
 		this.#previousTools = previousTools;
-		await this.#session.setActiveToolsByName([...new Set([...previousTools, "goal"])]);
 		this.#session.setGoalModeState(state);
 		this.#resetContinuation();
 		if (this.#session.isStreaming) {

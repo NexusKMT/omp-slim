@@ -14,6 +14,7 @@ import type {
 import { cfgGoalEnabled } from "../goals/settings";
 import { goalFromModeData } from "../goals/state";
 import { cfgPlanEnabled } from "../plan-mode/settings";
+import planProposalHeadlessPrompt from "../prompts/system/plan-proposal-headless.md" with { type: "text" };
 import type { AgentSession } from "../session/agent-session";
 import { VibeSessionRegistry, type VibeOwnerScope, type VibeParentSession } from "../vibe/runtime";
 
@@ -105,8 +106,13 @@ export class SessionModeController implements ExtensionModeControls {
 		if (
 			this.#transitioning ||
 			this.#session.isSessionTransitioning ||
-			this.#session.isStreaming ||
-			this.#session.hasAdmittedSubmission
+			// Full snapshot-busy predicate (TUI parity): covers streaming, bash/eval,
+			// compaction, handoff, and retry — not just streaming.
+			this.#session.isBusyForSnapshot ||
+			// An admitted submission about to start a turn is busy — except when the
+			// admitted work IS this extension's command handler, which legitimately
+			// runs `ctx.modes.set()` before its own turn (`/mission` pattern).
+			(this.#session.hasAdmittedSubmission && !this.#session.isInSoleExtensionCommandDispatch)
 		)
 			return fail("busy", "Wait for the current turn or mode/session transition to finish, then retry.");
 		const validation = this.#validate(request);
@@ -166,20 +172,29 @@ export class SessionModeController implements ExtensionModeControls {
 			)
 				return "tokenBudget must be a positive safe integer, or null to clear a budget.";
 		}
-		if (
-			request.mode === "plan" &&
-			"workflow" in request &&
-			request.workflow !== undefined &&
-			request.workflow !== "parallel" &&
-			request.workflow !== "iterative"
-		)
-			return "workflow must be parallel or iterative.";
+		if (request.mode === "plan") {
+			const active = this.#session.getPlanModeState()?.enabled === true;
+			// TUI parity: pause needs an active (or already paused, idempotent)
+			// plan, resume needs the paused state. Without this, `pause` from
+			// inactive journals a synthetic plan_paused and `resume`/`enter`
+			// semantics diverge from the interactive host.
+			if (request.action === "pause" && !active && !this.#planPaused) return "No active plan to pause.";
+			if (request.action === "resume" && !this.#planPaused) return "Plan mode is not paused.";
+			if (
+				"workflow" in request &&
+				request.workflow !== undefined &&
+				request.workflow !== "parallel" &&
+				request.workflow !== "iterative"
+			)
+				return "workflow must be parallel or iterative.";
+		}
 		return undefined;
 	}
 
 	async #apply(request: ModeRequest): Promise<void> {
 		switch (request.mode) {
 			case "plan":
+				if (request.action === "enter" && this.#planPaused) break;
 				if (request.action === "enter" || request.action === "resume") await this.#enterPlan(request.workflow);
 				else await this.#exitPlan(request.action === "pause");
 				break;
@@ -241,7 +256,7 @@ export class SessionModeController implements ExtensionModeControls {
 				content: [
 					{
 						type: "text",
-						text: "Plan submitted for host review. Plan mode remains active and nothing was approved; stop and wait for the controlling host.",
+						text: planProposalHeadlessPrompt.trimEnd(),
 					},
 				],
 			};
@@ -258,7 +273,7 @@ export class SessionModeController implements ExtensionModeControls {
 			});
 	}
 
-	async #exitPlan(paused: boolean, persist = true): Promise<void> {
+	async #exitPlan(paused: boolean, options?: { persist?: boolean; restoreModel?: boolean }): Promise<void> {
 		const session = this.#session;
 		if (!session.getPlanModeState()?.enabled && this.#planPaused === paused) return;
 		const state = session.getPlanModeState();
@@ -270,9 +285,14 @@ export class SessionModeController implements ExtensionModeControls {
 		try {
 			if (this.#planPrevious) {
 				await session.restoreNonMCPToolPresentation(this.#planPrevious.tools, this.#planPrevious.mounted);
-				if (this.#planPrevious.model && !modelsAreEqual(session.model, this.#planPrevious.model)) {
-					await session.setModelTemporary(this.#planPrevious.model, this.#planPrevious.thinking);
-				} else session.setThinkingLevel(this.#planPrevious.thinking);
+				// Session-change teardown passes restoreModel:false: the destination
+				// journal ends on the plan-role change, and writing the pre-plan model
+				// here would corrupt the recorded active model for a later restore.
+				if (options?.restoreModel !== false) {
+					if (this.#planPrevious.model && !modelsAreEqual(session.model, this.#planPrevious.model)) {
+						await session.setModelTemporary(this.#planPrevious.model, this.#planPrevious.thinking);
+					} else session.setThinkingLevel(this.#planPrevious.thinking);
+				}
 			}
 		} catch (error) {
 			session.setPlanModeState(state);
@@ -283,7 +303,7 @@ export class SessionModeController implements ExtensionModeControls {
 		session.setPlanProposalHandler(null);
 		this.#planPrevious = undefined;
 		this.#planPaused = paused;
-		if (persist)
+		if (options?.persist !== false)
 			session.sessionManager.appendModeChange(
 				paused ? "plan_paused" : "none",
 				paused ? { planFilePath: this.#planDraft, workflow: this.#planWorkflow } : undefined,
@@ -309,7 +329,7 @@ export class SessionModeController implements ExtensionModeControls {
 		};
 	}
 
-	async #enterVibe(): Promise<void> {
+	async #enterVibe(restored = false): Promise<void> {
 		if (this.#session.getVibeModeState()?.enabled) return;
 		const previous = this.#session.getEnabledToolNames();
 		const registry = VibeSessionRegistry.global();
@@ -324,10 +344,10 @@ export class SessionModeController implements ExtensionModeControls {
 		this.#vibePrevious = previous;
 		this.#vibeScope = scope;
 		this.#session.setVibeModeState({ enabled: true });
-		this.#session.sessionManager.appendModeChange("vibe", { previousTools: previous });
+		if (!restored) this.#session.sessionManager.appendModeChange("vibe", { previousTools: previous });
 	}
 
-	async #exitVibe(): Promise<void> {
+	async #exitVibe(persist = true): Promise<void> {
 		if (!this.#session.getVibeModeState()?.enabled && !this.#vibeScope) return;
 		await this.#session.runModeExitTeardown(async () => {
 			await VibeSessionRegistry.global().killAll(this.#vibeParent(), this.#vibeScope);
@@ -336,6 +356,10 @@ export class SessionModeController implements ExtensionModeControls {
 		});
 		this.#vibeScope = undefined;
 		this.#vibePrevious = undefined;
+		// A journaled "vibe" survives reload/switch reconciliation; an explicit exit
+		// must be recorded or a later restore re-enters vibe and resurrects the
+		// worker tools. Dispose skips the write so quit preserves the mode like plan.
+		if (persist) this.#session.sessionManager.appendModeChange("none");
 	}
 
 	async #applyGoal(request: Extract<ModeRequest, { mode: "goal" }>): Promise<void> {
@@ -445,7 +469,7 @@ export class SessionModeController implements ExtensionModeControls {
 			this.#vibeScope = undefined;
 			this.#vibePrevious = undefined;
 		}
-		await this.#exitPlan(false, false);
+		await this.#exitPlan(false, { persist: false, restoreModel: false });
 		await this.#restoreGoalTools();
 		this.#session.setGoalModeState(undefined);
 		this.#session.goalRuntime.clearAccounting();
@@ -495,7 +519,7 @@ export class SessionModeController implements ExtensionModeControls {
 			}
 		} else if (context.mode === "vibe") {
 			await VibeSessionRegistry.global().rehydrate(this.#vibeParent());
-			await this.#enterVibe();
+			await this.#enterVibe(true);
 			if (Array.isArray(context.modeData?.previousTools))
 				this.#vibePrevious = context.modeData.previousTools.filter(
 					(name): name is string => typeof name === "string",
@@ -516,7 +540,7 @@ export class SessionModeController implements ExtensionModeControls {
 	async dispose(): Promise<void> {
 		if (this.#disposed) return;
 		this.#unsubscribe();
-		await this.#exitVibe();
+		await this.#exitVibe(false);
 		await this.#restoreGoalTools();
 		this.#disposed = true;
 	}

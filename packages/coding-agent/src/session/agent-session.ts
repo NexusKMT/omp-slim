@@ -13,6 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -3000,6 +3001,20 @@ export class AgentSession implements SettingsScope {
 	 */
 	hasPendingAsyncWork(): boolean {
 		return this.#hasPendingAsyncWake();
+	}
+
+	/**
+	 * Async-scoped while an extension slash-command handler dispatched through
+	 * {@link prompt} is executing. Mode controls consult this so a handler that
+	 * calls `ctx.modes.set()` from inside its own admitted submission (the
+	 * `/mission` pattern) is not rejected as busy before its turn ever starts.
+	 * A second concurrent admission (count > 1) means another prompt is
+	 * mid-flight and stays a busy signal even inside a command handler.
+	 */
+	readonly #extensionCommandDispatch = new AsyncLocalStorage<true>();
+
+	get isInSoleExtensionCommandDispatch(): boolean {
+		return this.#extensionCommandDispatch.getStore() === true && this.#admittedSubmissionCount === 1;
 	}
 
 	/** True while a submission has been admitted but has not yet started a turn, queued, or bailed. */
@@ -8077,26 +8092,27 @@ export class AgentSession implements SettingsScope {
 	 * `onRouted` fires once the command is found, before its handler runs.
 	 */
 	async #tryExecuteExtensionCommand(text: string, onRouted?: () => void): Promise<boolean> {
-		if (!this.#extensionRunner) return false;
+		const runner = this.#extensionRunner;
+		if (!runner) return false;
 
 		// Parse command name and args
 		const spaceIndex = text.indexOf(" ");
 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
 		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
 
-		const command = this.#extensionRunner.getCommand(commandName);
+		const command = runner.getCommand(commandName);
 		if (!command) return false;
 		onRouted?.();
 
 		// Get command context from extension runner (includes session control methods)
-		const ctx = this.#extensionRunner.createCommandContext();
+		const ctx = runner.createCommandContext();
 
 		try {
-			await this.#extensionRunner.runScoped(() => command.handler(args, ctx));
+			await this.#extensionCommandDispatch.run(true, () => runner.runScoped(() => command.handler(args, ctx)));
 			return true;
 		} catch (err) {
 			// Emit error via extension runner
-			this.#extensionRunner.emitError({
+			runner.emitError({
 				extensionPath: `command:${commandName}`,
 				event: "command",
 				error: err instanceof Error ? err.message : String(err),
@@ -9819,7 +9835,7 @@ export class AgentSession implements SettingsScope {
 			}
 		}
 
-		this.#ownedModeController?.assertCanChangeSession();
+		this.#assertModeChangeGate();
 		this.#disconnectFromAgent();
 		let advisorRecordersDetached = false;
 		await this.abort();
@@ -9989,7 +10005,7 @@ export class AgentSession implements SettingsScope {
 				return false;
 			}
 		}
-		this.#ownedModeController?.assertCanChangeSession();
+		this.#assertModeChangeGate();
 
 		await this.flushToDisk();
 		// Work admitted during the hook or flush awaits would be copied mid-flight.
@@ -11442,7 +11458,7 @@ export class AgentSession implements SettingsScope {
 			}
 		}
 
-		this.#ownedModeController?.assertCanChangeSession();
+		this.#assertModeChangeGate();
 		this.#disconnectFromAgent();
 		await this.abort({ goalReason: "internal" });
 		await this.#ownedModeController?.beforeSessionChange();
@@ -11895,7 +11911,7 @@ export class AgentSession implements SettingsScope {
 			if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		}
 
-		this.#ownedModeController?.assertCanChangeSession();
+		this.#assertModeChangeGate();
 		await this.#bash.flushPending();
 		// Flush pending writes before branching
 		await this.sessionManager.flush();
@@ -12377,7 +12393,7 @@ export class AgentSession implements SettingsScope {
 			newLeafId = targetId;
 		}
 
-		this.#ownedModeController?.assertCanChangeSession();
+		this.#assertModeChangeGate();
 		await this.#ownedModeController?.beforeSessionChange();
 		// Switch leaf (with or without summary)
 		// Summary is attached at the navigation target position (newLeafId), not the old branch
@@ -13767,6 +13783,20 @@ export class AgentSession implements SettingsScope {
 		if (this.#modeControls) return this.#modeControls;
 		this.#modeController ??= new SessionModeController(this);
 		return this.#modeController;
+	}
+
+	/**
+	 * Refuse a session change while any installed mode controls have a transition
+	 * in flight. Covers both the owned controller (RPC/ACP/SDK hosts) and a
+	 * host-installed implementation (the TUI), whose `modes` object guards the
+	 * same hazard through {@link ExtensionModeControls.assertCanChangeSession}.
+	 */
+	#assertModeChangeGate(): void {
+		if (this.#modeControls) {
+			this.#modeControls.assertCanChangeSession?.();
+			return;
+		}
+		this.#modeController?.assertCanChangeSession();
 	}
 
 	/** The built-in lifecycle owner, unless a host (the TUI) installed its own controls. */

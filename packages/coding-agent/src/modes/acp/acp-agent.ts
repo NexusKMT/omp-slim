@@ -765,11 +765,6 @@ export class AcpAgent implements Agent {
 	async setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse> {
 		const record = this.#getSessionRecord(params.sessionId);
 		await this.#applyModeChange(record.session, params.modeId);
-		await this.#connection.sessionUpdate({
-			sessionId: record.session.sessionId,
-			update: this.#buildCurrentModeUpdate(record.session),
-		});
-		await this.#pushConfigOptionUpdate(record);
 		return {};
 	}
 
@@ -793,28 +788,23 @@ export class AcpAgent implements Agent {
 				throw new Error(`Unknown ACP config option: ${params.configId}`);
 		}
 
-		// When mode is changed via the generic config-option API, mirror the
-		// `current_mode_update` notification that `setSessionMode` emits so
-		// ACP clients tracking session-mode state see a consistent transition.
-		if (params.configId === MODE_CONFIG_ID) {
+		// Mode changes publish through the mode controller's onChanged (installed
+		// during #configureExtensions), which sends current_mode_update plus the
+		// config update — pushing here would duplicate the sequence. Before that
+		// wiring exists, or for model/thinking without a lifetime subscription,
+		// push the config update ourselves.
+		const handledBySubscription =
+			(params.configId === THINKING_CONFIG_ID || params.configId === MODEL_CONFIG_ID) &&
+			record.lifetimeUnsubscribe !== undefined;
+		const handledByModeHost = params.configId === MODE_CONFIG_ID && record.extensionsConfigured;
+		if (!handledBySubscription && !handledByModeHost) {
+			await this.#pushConfigOptionUpdate(record);
+		}
+		if (params.configId === MODE_CONFIG_ID && !record.extensionsConfigured) {
 			await this.#connection.sessionUpdate({
 				sessionId: record.session.sessionId,
 				update: this.#buildCurrentModeUpdate(record.session),
 			});
-		}
-
-		// For `model`/`thinking`, `#setModelById`/`#setThinkingLevelById` change
-		// the session model/thinking level through AgentSession, which now emits
-		// a lifetime event (`model_changed`/`thinking_level_changed`) that
-		// `#handleLifetimeEvent` turns into a push once the subscription is
-		// installed. Only push here when that subscription is not yet
-		// installed, so pre-bootstrap callers still see the change without a
-		// post-bootstrap duplicate.
-		const handledBySubscription =
-			(params.configId === THINKING_CONFIG_ID || params.configId === MODEL_CONFIG_ID) &&
-			record.lifetimeUnsubscribe !== undefined;
-		if (!handledBySubscription) {
-			await this.#pushConfigOptionUpdate(record);
 		}
 		return { configOptions: this.#buildConfigOptions(record.session) };
 	}
@@ -1941,18 +1931,6 @@ export class AcpAgent implements Agent {
 				error,
 			});
 			autosaveFailed = true;
-		}
-		try {
-			await this.#connection.sessionUpdate({
-				sessionId: session.sessionId,
-				update: this.#buildCurrentModeUpdate(session),
-			});
-			await this.#pushConfigOptionUpdateForSession(session);
-		} catch (error) {
-			logger.warn("Failed to emit mode updates after plan approval", {
-				sessionId: session.sessionId,
-				error,
-			});
 		}
 		return {
 			content: [

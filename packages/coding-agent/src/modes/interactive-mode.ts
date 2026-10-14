@@ -1238,6 +1238,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	goalModePaused = false;
 	vibeModeEnabled = false;
 	planModePlanFilePath: string | undefined = undefined;
+	/** Workflow persisted with a paused plan; kept for resume, cleared on full exit. */
+	planModeWorkflow: "parallel" | "iterative" | undefined = undefined;
 	loopModeEnabled = false;
 	loopModePaused = false;
 	loopPrompt: string | undefined = undefined;
@@ -1262,6 +1264,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	readonly modes: ExtensionModeControls = {
 		getState: () => this.#getModeSnapshot(),
 		set: request => this.#setMode(request),
+		// The owned-controller gate only covers headless hosts; the TUI's
+		// in-flight transition must equally refuse an overlapping session change,
+		// or teardown lands in the session being switched away.
+		assertCanChangeSession: () => {
+			if (this.#modeTransitionActive) {
+				throw new Error("A mode transition is in progress; retry the session change after it settles.");
+			}
+		},
 	};
 	#todoAutoClearTimer: NodeJS.Timeout | undefined;
 	#todoAutoClearGeneration = 0;
@@ -3007,7 +3017,8 @@ export class InteractiveMode implements InteractiveModeContext {
 					} else {
 						this.planModePaused = false;
 						this.#planModeHasEntered = false;
-						this.#updatePlanModeStatus();
+						this.planModePlanFilePath = undefined;
+						this.planModeWorkflow = undefined;
 						this.sessionManager.appendModeChange("none");
 					}
 					return true;
@@ -3245,8 +3256,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#cancelLoopAutoSubmit();
 		if (!this.loopModeEnabled || !this.loopPrompt || this.#isShuttingDown) return;
 		const prompt = this.loopPrompt;
-		const loopAction = this.#loopStrategy ?? cfgLoopMode.get(settings);
 		this.#deferLoopAutoSubmit(() => {
+			// Resolve the strategy when the timer fires, not when it was armed: a
+			// configure call that lands inside the 800ms window must take effect on
+			// the very next iteration instead of running one stale iteration.
+			const loopAction = this.#loopStrategy ?? cfgLoopMode.get(settings);
 			void this.#runLoopIteration(loopAction, prompt);
 		});
 	}
@@ -5363,10 +5377,20 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		if (sessionContext.mode === "plan") {
 			const planFilePath = sessionContext.modeData?.planFilePath as string | undefined;
-			await this.#enterPlanMode({ planFilePath, preserveRestoredModel: true });
+			const workflow = sessionContext.modeData?.workflow;
+			await this.#enterPlanMode({
+				planFilePath,
+				workflow: workflow === "parallel" || workflow === "iterative" ? workflow : undefined,
+				preserveRestoredModel: true,
+			});
 		} else if (sessionContext.mode === "plan_paused") {
 			this.planModePaused = true;
 			this.#planModeHasEntered = true;
+			const pausedPath = sessionContext.modeData?.planFilePath;
+			if (typeof pausedPath === "string") this.planModePlanFilePath = pausedPath;
+			const pausedWorkflow = sessionContext.modeData?.workflow;
+			this.planModeWorkflow =
+				pausedWorkflow === "parallel" || pausedWorkflow === "iterative" ? pausedWorkflow : undefined;
 			this.#updatePlanModeStatus();
 		}
 	}
@@ -5427,7 +5451,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.session.setPlanModeState({
 			enabled: true,
 			planFilePath,
-			workflow: options?.workflow ?? "parallel",
+			workflow: options?.workflow ?? this.planModeWorkflow ?? "parallel",
 			reentry: this.#planModeHasEntered,
 		});
 		try {
@@ -5449,7 +5473,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.#applyPlanModeModel();
 		}
 		this.#updatePlanModeStatus();
-		this.sessionManager.appendModeChange("plan", { planFilePath });
+		this.sessionManager.appendModeChange("plan", {
+			planFilePath,
+			workflow: this.session.getPlanModeState()?.workflow,
+		});
 		this.showStatus(`Plan mode enabled. Plan file: ${planFilePath}`);
 		this.#notifyModeChange(previousMode);
 	}
@@ -5588,12 +5615,20 @@ export class InteractiveMode implements InteractiveModeContext {
 		// prompt, which predictably invalidates the cache.
 		this.lastAssistantUsage = undefined;
 		this.planModePaused = options?.paused ?? false;
-		this.planModePlanFilePath = undefined;
+		const paused = options?.paused ?? false;
+		if (paused) {
+			this.planModeWorkflow = planModeState?.workflow;
+		} else {
+			this.planModePlanFilePath = undefined;
+			this.planModeWorkflow = undefined;
+		}
 		this.#planModePreviousToolPresentation = undefined;
 		if (!options?.deferModelRestore) this.#planModePreviousModelState = undefined;
 		this.#updatePlanModeStatus();
-		const paused = options?.paused ?? false;
-		this.sessionManager.appendModeChange(paused ? "plan_paused" : "none");
+		this.sessionManager.appendModeChange(
+			paused ? "plan_paused" : "none",
+			paused ? { planFilePath: planModeState?.planFilePath, workflow: planModeState?.workflow } : undefined,
+		);
 		if (!options?.silent) {
 			this.showStatus(paused ? "Plan mode paused." : "Plan mode disabled.");
 		}
@@ -5676,7 +5711,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	}): Promise<void> {
 		const previousMode = this.#getModeSnapshot();
 		const previousTools = this.#goalModePreviousTools;
-		if (this.goalModeEnabled && previousTools) {
+		// Restore on previousTools presence, not goalModeEnabled: the synchronous
+		// `goal_updated` dispatch (pauseGoal → goal_updated) may already have
+		// flipped the flag before this call, which would strand the goal tool.
+		if (previousTools) {
 			await this.session.setActiveToolsByName(previousTools);
 		}
 		const currentState = this.session.getGoalModeState();
@@ -6369,7 +6407,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			const previousMode = this.#getModeSnapshot();
 			this.planModePaused = false;
 			this.#planModeHasEntered = false;
-			this.#updatePlanModeStatus();
+			this.planModePlanFilePath = undefined;
+			this.planModeWorkflow = undefined;
 			this.sessionManager.appendModeChange("none");
 			this.showStatus("Plan mode disabled.");
 			this.#notifyModeChange(previousMode);
@@ -6619,6 +6658,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#vibeModePreviousTools = undefined;
 		this.#vibeModeOwnerScope = undefined;
 		this.lastAssistantUsage = undefined;
+		// Persist the exit: a journaled "vibe" entry would otherwise resurrect the
+		// mode (and its worker toolset) on the next reload or reconcile.
+		this.sessionManager.appendModeChange("none");
 		this.#updateVibeModeStatus();
 		this.showStatus(
 			killed > 0
@@ -7096,7 +7138,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const planState = this.session.getPlanModeState();
 		if (planState?.enabled && planState.planFilePath !== planFilePath) {
 			this.session.setPlanModeState({ ...planState, planFilePath });
-			this.sessionManager.appendModeChange("plan", { planFilePath });
+			this.sessionManager.appendModeChange("plan", { planFilePath, workflow: planState.workflow });
 		}
 
 		const contextUsage = this.#getPlanApprovalContextUsage();
