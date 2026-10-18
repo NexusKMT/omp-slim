@@ -31,6 +31,7 @@ import {
 	getTab,
 	listTabs,
 	releaseAllTabs,
+	releaseTabsForOwner,
 	releaseIdleTabsForOwner,
 	releaseTab,
 	runInTab,
@@ -328,7 +329,7 @@ async function invokeBrowser(
 			case "open":
 				return await openBrowser(session, name, parsed, details, timeoutMs, context.signal);
 			case "close":
-				return await closeBrowser(name, parsed, details, timeoutMs, context.signal);
+				return await closeBrowser(session, name, parsed, details, timeoutMs, context.signal);
 			case "tabs":
 				details.value = listTabs();
 				return toolResult(details).done();
@@ -597,6 +598,7 @@ async function listTargets(
 }
 
 async function closeBrowser(
+	session: ToolSession,
 	name: string,
 	params: BrowserParams,
 	details: BrowserPreludeDetails,
@@ -605,7 +607,10 @@ async function closeBrowser(
 ): Promise<AgentToolResult<unknown>> {
 	const kill = !!params.kill;
 	if (params.all) {
-		const count = await untilAborted(signal, () => releaseAllTabs({ kill, timeoutMs }));
+		const ownerId = session.getSessionId?.() ?? undefined;
+		const count = await untilAborted(signal, () =>
+			ownerId ? releaseTabsForOwner(ownerId, { kill, timeoutMs }) : releaseAllTabs({ kill, timeoutMs }),
+		);
 		const text = `Released ${count} managed tab${count === 1 ? "" : "s"}`;
 		return toolResult(details).text(text).done();
 	}
