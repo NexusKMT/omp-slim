@@ -138,7 +138,7 @@ const browserSchema = type({
 	"args?": type("unknown[]").describe("arguments passed to a serialized function"),
 	"chain?": tabCallStepSchema.array(),
 	"timeout?": type("number").describe("timeout in seconds"),
-	"all?": type("boolean").describe("release every managed tab"),
+	"all?": type("boolean").describe("release every managed tab owned by this session (or all tabs if unowned)"),
 	"kill?": type("boolean").describe("also kill spawned-app browsers"),
 	"persist?": type("boolean").describe("keep tab live across turn settle and idle close"),
 });

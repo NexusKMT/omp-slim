@@ -29,7 +29,18 @@ import {
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/types";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+
+function makeSession(settings = Settings.isolated({ "browser.enabled": true }), sessionId?: string): ToolSession {
+	return {
+		cwd: "/tmp",
+		hasUI: true,
+		getSessionFile: () => null,
+		getSessionSpawns: () => "*",
+		getSessionId: sessionId ? () => sessionId : undefined,
+		settings,
+	};
+}
 
 function makeKind(socketSuffix: string): CmuxKind {
 	return { kind: "cmux", socketPath: `/tmp/omp-test-${socketSuffix}.sock`, surface: `surface-${socketSuffix}` };
@@ -206,23 +217,63 @@ describe("browser lifecycle — session-scoped teardown reaps owned tabs", () =>
 
 		expect(getTabsMapForTest().size).toBe(2);
 
-		const subagentSession = {
-			cwd: "/tmp",
-			settings: Settings.isolated(),
-			getSessionId: () => "session-subagent",
-		} as unknown as ToolSession;
-
+		const subagentSession = makeSession(Settings.isolated(), "session-subagent");
 		const subagentPrelude = createBrowserPrelude(subagentSession);
-		const result = await subagentPrelude.invoke({ action: "close", all: true }, {
-			signal: new AbortController().signal,
-			hasPermission: () => true,
-		} as any);
+		const result = await subagentPrelude.invoke(
+			{ action: "close", all: true },
+			{
+				session: subagentSession,
+				toolCallId: "test-subagent-close",
+			},
+		);
 
 		expect(result.content).toEqual([{ type: "text", text: "Released 1 managed tab" }]);
 		expect(getTabsMapForTest().has("subagent-tab")).toBe(false);
 		expect(getTabsMapForTest().has("parent-tab")).toBe(true);
 
 		await releaseTabsForOwner("session-parent", { kill: false });
+		expect(getTabsMapForTest().size).toBe(0);
+	});
+
+	it("browser.close({ all: true }) without a session ID falls back to releasing all tabs", async () => {
+		spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
+		spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
+		let openCount = 0;
+		spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+			async (method: string): Promise<Record<string, unknown>> => {
+				if (method === "browser.open_split") {
+					openCount++;
+					return { surface_id: `surface-${openCount}`, url: "about:blank" };
+				}
+				return {};
+			},
+		);
+
+		const kind = makeKind("unowned-close-all");
+		const browser = await acquireBrowser(kind, { cwd: "/tmp" });
+
+		await acquireTab("tab-1", browser, {
+			timeoutMs: 1_000,
+			ownerSessionId: "session-1",
+		});
+		await acquireTab("tab-2", browser, {
+			timeoutMs: 1_000,
+			ownerSessionId: "session-2",
+		});
+
+		expect(getTabsMapForTest().size).toBe(2);
+
+		const unownedSession = makeSession();
+		const unownedPrelude = createBrowserPrelude(unownedSession);
+		const result = await unownedPrelude.invoke(
+			{ action: "close", all: true },
+			{
+				session: unownedSession,
+				toolCallId: "test-unowned-close",
+			},
+		);
+
+		expect(result.content).toEqual([{ type: "text", text: "Released 2 managed tabs" }]);
 		expect(getTabsMapForTest().size).toBe(0);
 	});
 });
