@@ -93,7 +93,7 @@ export class HindsightRetainQueue {
 		return this.#items.length;
 	}
 
-	enqueue(content: string, context: string | undefined, scope: MemoryWriteScope): void {
+	enqueue(content: string, context?: string, scope: MemoryWriteScope = "project"): void {
 		if (this.#closed) {
 			throw new Error("Hindsight retain queue is closed.");
 		}
@@ -169,7 +169,7 @@ export class HindsightRetainQueue {
 		const projectTags = state.retainTags && state.retainTags.length > 0 ? state.retainTags : undefined;
 		const groups = projectTags
 			? [
-					{ scope: "project" as const, tags: projectTags, items: items.filter(item => item.scope === "project") },
+					{ scope: "project" as const, tags: projectTags, items: items.filter(item => item.scope !== "global") },
 					{ scope: "global" as const, tags: undefined, items: items.filter(item => item.scope === "global") },
 				]
 			: [{ scope: undefined, tags: undefined, items }];
