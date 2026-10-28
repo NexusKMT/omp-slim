@@ -7,6 +7,10 @@
 - `PI_INTENT_DESC` replaces the schema description of the injected `i` intent field
 - `AgentTool.approvalRestrictionPaths` reports paths a call reads, so restricted folders cover them without the approval being remembered per path ([#17133](https://github.com/can1357/oh-my-pi/pull/17133) by [@iliaal](https://github.com/iliaal))
 
+### Fixed
+
+- Fixed remote compaction treating fallback computer-tool metadata as replayable native items on connection-bound Responses backends
+
 ## [18.13.3] - 2026-10-28
 
 ### Changed

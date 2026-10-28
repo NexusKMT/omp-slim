@@ -436,37 +436,115 @@ async function captureServiceTier(opts: {
 	return { wire: captured?.serviceTier, summary: summary.serviceTierByFamily };
 }
 
-describe("bench provider session state and websocket preference", () => {
-	it("sends providerSessionState and preferWebsockets to the stream", async () => {
-		const registry = fakeRegistry({
-			models: [fakeModel("openai-codex", "gpt-5.5")],
-			authedProviders: ["openai-codex"],
-		});
-		let captured: SimpleStreamOptions | undefined;
-		await runBenchCommand(
-			{ models: ["openai-codex/gpt-5.5"], flags: { runs: 1, maxTokens: 64, json: true } },
+describe("bench Codex provider state", () => {
+	it("retains the Codex opt-in and closes request-owned state after each run", async () => {
+		const model = { ...fakeModel("openai-codex", "gpt-5.5"), api: "openai-codex-responses" } as Model;
+		const registry = fakeRegistry({ models: [model], authedProviders: ["openai-codex"] });
+		const captured: SimpleStreamOptions[] = [];
+		let closed = 0;
+		const summary = await runBenchCommand(
+			{ models: ["openai-codex/gpt-5.5"], flags: { runs: 2, maxTokens: 64, json: true } },
 			{
-				createRuntime: async () => ({
-					modelRegistry: registry,
-					settings: undefined,
-					close: () => {},
-				}),
+				createRuntime: async () => ({ modelRegistry: registry }),
 				randomSessionId: () => "sess-1",
 				writeStdout: () => {},
 				writeStderr: () => {},
 				setExitCode: () => {},
 				streamSimple: (_model, _context, options) => {
-					captured = options;
+					if (!options?.providerSessionState) throw new Error("Missing request-owned provider state");
+					captured.push(options);
+					options.providerSessionState.set("codex-test", { close: () => closed++ });
 					return fakeStream();
 				},
 				now: () => 0,
 				stdoutIsTTY: false,
 			},
 		);
-		expect(captured?.providerSessionState).toBeInstanceOf(Map);
-		expect(captured?.providerSessionState?.size).toBe(0);
-		expect(captured?.preferWebsockets).toBe(true);
+		expect(summary.failures).toBe(0);
+		expect(captured).toHaveLength(2);
+		expect(captured.every(options => options.preferWebsockets === true)).toBe(true);
+		expect(captured[0]?.providerSessionState).not.toBe(captured[1]?.providerSessionState);
+		expect(captured.every(options => options.providerSessionState?.size === 0)).toBe(true);
+		expect(closed).toBe(2);
 	});
+});
+
+describe("bench standard Responses transport", () => {
+	it.each([undefined, true])(
+		"benchmarks an OpenAI gateway with preference %s through the normal HTTP path",
+		async preferWebsockets => {
+			let posts = 0;
+			let upgrades = 0;
+			const item = {
+				type: "message",
+				id: "msg_bench",
+				role: "assistant",
+				status: "completed",
+				content: [{ type: "output_text", text: "OK" }],
+			};
+			const sse = [
+				{ type: "response.created", response: { id: "resp_bench" } },
+				{ type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
+				{ type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "OK" },
+				{ type: "response.output_item.done", output_index: 0, item },
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_bench",
+						status: "completed",
+						usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 },
+					},
+				},
+			]
+				.map(event => `data: ${JSON.stringify(event)}\n\n`)
+				.join("");
+			const server = Bun.serve({
+				hostname: "127.0.0.1",
+				port: 0,
+				fetch(request) {
+					if (request.headers.get("upgrade")) {
+						upgrades++;
+						return new Response("HTTP only", { status: 426 });
+					}
+					if (request.method !== "POST") return new Response("Unexpected request", { status: 404 });
+					posts++;
+					return new Response(sse, { headers: { "content-type": "text/event-stream" } });
+				},
+			});
+			try {
+				const model = buildModel({
+					provider: "openai",
+					id: "gpt-5.4",
+					name: "OpenAI gateway",
+					api: "openai-responses",
+					baseUrl: `http://127.0.0.1:${server.port}/v1`,
+					preferWebsockets,
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 8192,
+					maxTokens: 64,
+				});
+				const registry = fakeRegistry({ models: [model], authedProviders: ["openai"] });
+				const summary = await runBenchCommand(
+					{ models: ["openai/gpt-5.4"], flags: { runs: 1, maxTokens: 8, json: true } },
+					{
+						createRuntime: async () => ({ modelRegistry: registry, settings: Settings.isolated() }),
+						writeStdout: () => {},
+						writeStderr: () => {},
+						setExitCode: () => {},
+						stdoutIsTTY: false,
+					},
+				);
+				expect(summary.failures).toBe(0);
+				expect(summary.models[0]?.stats?.outputTokens).toBe(2);
+				expect(posts).toBe(1);
+				expect(upgrades).toBe(preferWebsockets ? 1 : 0);
+			} finally {
+				await server.stop(true);
+			}
+		},
+	);
 });
 
 describe("bench service tier", () => {

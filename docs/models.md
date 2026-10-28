@@ -9,7 +9,7 @@ Primary implementation files:
 - `packages/coding-agent/src/config/model-registry.ts` — loads built-in + custom models, provider overrides, runtime discovery, auth integration
 - `packages/coding-agent/src/config/model-resolver.ts` — parses model patterns and selects initial/smol/slow models
 - `packages/coding-agent/src/config/model-settings.ts` — model selection settings (`modelRoles`, `enabledModels`, `enabledProviders`/`disabledProviders`, `modelProviderOrder`, `cycleOrder`)
-- `packages/coding-agent/src/session/settings.ts` — provider transport preferences (`providers.*`)
+- `packages/coding-agent/src/session/settings.ts` — provider timeouts and Codex transport preferences (`providers.*`)
 - `packages/coding-agent/src/config/models-config.ts` and `models-config-schema-bundle.ts` — custom provider/model validation
 - `packages/coding-agent/src/session/auth-storage.ts` — re-exports `AuthStorage` from `@oh-my-pi/pi-ai`; credential precedence is implemented in `packages/ai/src/auth/cascade.ts`
 - `packages/catalog/src/compat/resolve.ts` and `compat/rules/` — compatibility and model policy resolution
@@ -114,8 +114,85 @@ An unscoped OpenRouter `baseUrl` names the `/api/v1` chat root, so OpenRouter De
 models use its `/api/alpha` sibling on the same host, e.g. a `.../api/v1` relay serves judges at
 `.../api/alpha/decisions`.
 
-`preferWebsockets` (on a model or `modelOverrides` entry) controls whether Codex requests prefer
-the WebSocket transport. `omitMaxOutputTokens` omits the model-derived output cap.
+Standard Responses WebSocket eligibility is catalog-owned. The built-in KDL rule
+enables it only for the OpenAI provider's `openai-responses` API. Eligible models
+prefer WS at the official catalog endpoint by default; custom gateway URLs default
+to HTTP/SSE. Providers outside that catalog scope, including GitHub Copilot and
+OpenRouter, use standard HTTP/SSE even with request/model `preferWebsockets: true`.
+
+Within that eligible scope, precedence is SDK request `preferWebsockets` → model
+`preferWebsockets` → the official-endpoint default. Explicit `false` disables WS;
+explicit `true` opts an eligible gateway in. Neither value bypasses catalog
+eligibility. There is no standard Responses global or provider-level transport
+setting. The independent Codex setting `providers.openaiWebsockets: auto|on|off`
+and `PI_CODEX_WEBSOCKET` remain Codex-only.
+
+SDK `fetch` overrides apply to HTTP/SSE, not WebSocket connections. Set request
+`preferWebsockets: false` when a request must pass through a custom `fetch`.
+
+For a gateway with uneven upstream support, configure individual models in
+`models.yml`, for example:
+
+```yaml
+providers:
+  openai:
+    api: openai-responses
+    baseUrl: https://gateway.example.com/v1
+    modelOverrides:
+      gpt-5-mini:
+        preferWebsockets: true
+      gpt-5:
+        preferWebsockets: false
+```
+
+Merge these fields into the existing provider entry. Custom `models` entries accept
+the same model-level boolean. Keep the existing API root, authentication and
+discovery: WS upgrades the same `/responses` endpoint without adding `/codex`.
+The gateway must implement Responses WS `response.create`; HTTP Responses
+compatibility alone does not establish WS support. CLI, SDK, advisor/side requests
+and `omp bench` leave the standard provider to make the same catalog-based choice,
+rather than predicting the actual transport in each caller.
+
+Before a generation is sent, a handshake network failure or HTTP upgrade status
+404, 405, 426 or 501 switches that call to the original full HTTP/SSE pipeline,
+including its authentication, HTTP retries, tools, usage and payload hooks. Upgrade
+400, 401, 403, 422, 429 and other 5xx statuses keep their normal error/retry
+classification, not protocol fallback. Rejected-upgrade diagnostics preserve the
+actual status and available headers; response-body messages are not read.
+
+After sending has begun, a network failure or first-event/idle timeout fails the
+current WS call and preserves any partial output; it never silently replays that
+generation over HTTP. Existing Agent/TurnRecovery may issue a new SSE request,
+retaining displayed text or completed tool results under its normal recovery
+rules. Incomplete tool arguments are not executed. Caller cancellation does not
+trigger protocol fallback or mark the session as SSE-only.
+
+A transport failure that selects SSE makes it sticky for the logical session,
+normalized endpoint and model. SSE success, another prompt, a token change or an
+explicit preference does not clear it. A new session/scope or the existing
+`releaseSession`/provider-state `close` lifecycle can try WS again; CLI session
+creation, model changes and stale-replay state resets use those existing boundaries.
+There is no cooldown, periodic probe or extra reset setting.
+
+Standard WS uses connection-local `previous_response_id` continuation on a healthy,
+idle socket when history and request options (including tools) still match. It
+works with `store: false` without forcing server-side storage; SDK
+`statefulResponses: false` disables WS continuation. HTTP's existing stored-stateful
+settings and precedence are unchanged. Changed history/options require full input.
+A socket closed after successful completion or retired while idle is replaced
+normally with a new WS connection and full history, without an old anchor or SSE
+downgrade. Credential changes and concurrent independent sockets cannot borrow
+another connection's baseline.
+
+Injected `previous_response_id` (including through `onPayload`) and
+`background: true` are rejected: WS anchors are connection-owned. An explicit
+first-frame stale-anchor rejection permits at most one full-history resend on the
+same healthy socket, before `response.created` or output. A successful empty WS
+completion submits one generation per provider call; actual SSE retains its
+existing empty-completion retries. Agent-level recovery remains separate. Codex
+chaining, steering, attach, timers and recovery policies are unchanged.
+
+`omitMaxOutputTokens` omits the model-derived output cap.
 
 ### Bedrock request options
 

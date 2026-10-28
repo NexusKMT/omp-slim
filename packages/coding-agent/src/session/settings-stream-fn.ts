@@ -37,8 +37,9 @@ import {
 	validateProviderMaxInFlightRequests,
 } from "./settings";
 
-/** Map `providers.openaiWebsockets` to the provider `preferWebsockets` hint (`auto` → model default). */
-export function resolveOpenAIWebsocketPreference(settings: Settings): boolean | undefined {
+/** Resolve the Codex-only setting without predicting standard Responses transport. */
+export function resolveCodexWebsocketPreference(settings: Settings, model: Model | undefined): boolean | undefined {
+	if (model?.api !== "openai-codex-responses") return undefined;
 	const setting = cfgProvidersOpenaiWebsockets.get(settings);
 	return setting === "on" ? true : setting === "off" ? false : undefined;
 }
@@ -136,13 +137,11 @@ export function createSettingsAwareStreamFn(
 		const maxInFlightRequests = validateProviderMaxInFlightRequests(
 			streamOptions?.maxInFlightRequests ?? cfgProvidersMaxInFlightRequests.get(settings),
 		);
-		// A cold Responses session rebuilds turns without their encrypted reasoning.
-		// A request that may wait for a provider slot is built when it gets one,
-		// after a concurrent response may have warmed the session, so it is
-		// fitted as replaying.
-		const nativeHistoryReplay =
-			Object.hasOwn(maxInFlightRequests, model.provider) ||
-			openAIResponsesReplaysNativeHistory(model, streamOptions?.providerSessionState);
+		// A queued request may be built after another response warms its session.
+		const nativeHistoryReplay = openAIResponsesReplaysNativeHistory(
+			model,
+			Object.hasOwn(maxInFlightRequests, model.provider) ? undefined : streamOptions?.providerSessionState,
+		);
 		const tokenizerKey = `${model.provider}\0${model.api}\0${model.id}\0${nativeHistoryReplay}`;
 		let tokenizer = tokenizers.get(tokenizerKey);
 		if (!tokenizer) {

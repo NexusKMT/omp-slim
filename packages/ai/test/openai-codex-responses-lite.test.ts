@@ -6,7 +6,7 @@ import {
 	resetOpenAICodexHistoryAfterCompaction,
 	streamOpenAICodexResponses,
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import { isOpenAIResponsesProgressEvent } from "@oh-my-pi/pi-ai/providers/openai-shared";
+import { isOpenAIResponsesProgressEvent } from "@oh-my-pi/pi-ai/utils/websocket";
 import { configureCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import type {
 	CodexCompactionRequestContext,

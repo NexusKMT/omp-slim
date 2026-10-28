@@ -271,6 +271,7 @@ describe("openai-responses socket-drop resume", () => {
 			() => new Response(JSON.stringify(completedResult("resp_resume3")), { status: 200 }),
 		]);
 		const result = await streamOpenAIResponses(bundledModel("openai"), context, {
+			preferWebsockets: false,
 			fetch: scenario.fetchImpl,
 			apiKey: "test-key",
 			providerRetryWait: noWait,
@@ -313,6 +314,7 @@ describe("openai-responses socket-drop resume", () => {
 			() => new Response(JSON.stringify(completedResult("resp_resume7")), { status: 200 }),
 		]);
 		const result = await streamOpenAIResponses(bundledModel("openai"), context, {
+			preferWebsockets: false,
 			fetch: scenario.fetchImpl,
 			apiKey: "test-key",
 			providerRetryWait: noWait,

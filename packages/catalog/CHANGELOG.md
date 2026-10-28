@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added catalog-controlled standard Responses WebSockets, preferred on official OpenAI endpoints while gateways require explicit opt-in
+
 ### Fixed
 
 - Fixed DeepSeek V4.1 Flash image attachments being stripped on publisher-namespaced ids such as `ds/deepseek-flash` ([#16470](https://github.com/can1357/oh-my-pi/pull/16470) by [@ZanDev32](https://github.com/ZanDev32))

@@ -704,7 +704,7 @@ async function runBenchRequest(
 			disableReasoning: options.disableReasoning,
 			serviceTier: options.serviceTier,
 			providerSessionState,
-			preferWebsockets: true,
+			preferWebsockets: model.api === "openai-codex-responses" ? true : undefined,
 			// pi-ai opts every OpenRouter request into response caching (1h TTL).
 			// Bench sends a byte-identical request each run, so within the TTL
 			// OpenRouter replays the cached generation with zeroed usage — the run

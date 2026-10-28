@@ -17,7 +17,10 @@ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream"
 import { bindEffects } from "@oh-my-pi/pi-coding-agent/config/registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgProvidersMuseCodeStoreResponses } from "@oh-my-pi/pi-coding-agent/session/settings";
-import { createSettingsAwareStreamFn } from "@oh-my-pi/pi-coding-agent/session/settings-stream-fn";
+import {
+	createSettingsAwareStreamFn,
+	resolveCodexWebsocketPreference,
+} from "@oh-my-pi/pi-coding-agent/session/settings-stream-fn";
 
 function captureBase(): { fn: StreamFn; calls: Array<{ options?: SimpleStreamOptions }> } {
 	const calls: Array<{ options?: SimpleStreamOptions }> = [];
@@ -86,6 +89,19 @@ function replayedReasoningContext(producer: Model): Context {
 }
 
 describe("createSettingsAwareStreamFn", () => {
+	it("keeps the WebSocket setting exclusive to Codex", () => {
+		for (const setting of ["auto", "on", "off"] as const) {
+			const settings = Settings.isolated({ "providers.openaiWebsockets": setting });
+			expect(resolveCodexWebsocketPreference(settings, stubCodexModel)).toBe(
+				setting === "on" ? true : setting === "off" ? false : undefined,
+			);
+			for (const api of ["openai-responses", "openrouter", "anthropic-messages"] as const) {
+				expect(resolveCodexWebsocketPreference(settings, { api } as Model)).toBeUndefined();
+			}
+			expect(resolveCodexWebsocketPreference(settings, undefined)).toBeUndefined();
+		}
+	});
+
 	it("applies provider settings to the forwarded options when caller omits them", () => {
 		const settings = Settings.isolated({
 			"providers.openrouterVariant": "floor",
@@ -311,6 +327,25 @@ describe("createSettingsAwareStreamFn", () => {
 		expect(calls[1]?.options?.maxTokens).toBeLessThan(9_000);
 	});
 
+	it("forwards raw standard Responses preferences without deriving them from model or Codex settings", () => {
+		const { fn: base, calls } = captureBase();
+		const wrapped = createSettingsAwareStreamFn(Settings.isolated({ "providers.openaiWebsockets": "on" }), base);
+		for (const api of ["openai-responses", "openrouter"] as const) {
+			const model = { ...stubResponsesModel, api, preferWebsockets: true };
+			wrapped(model, stubContext);
+			wrapped(model, stubContext, { preferWebsockets: false });
+			wrapped(model, stubContext, { preferWebsockets: true });
+		}
+		expect(calls.map(call => call.options?.preferWebsockets)).toEqual([
+			undefined,
+			false,
+			true,
+			undefined,
+			false,
+			true,
+		]);
+	});
+
 	it("fits a cold request that may wait for a provider slot as replaying", () => {
 		const copilot: Model = {
 			...getBundledModel("github-copilot", "gpt-5.4"),
@@ -333,9 +368,12 @@ describe("createSettingsAwareStreamFn", () => {
 			base,
 		);
 		elsewhere(copilot, context, { apiKey: "k", providerSessionState: new Map() });
+		// Explicit transport preference cannot change native-history accounting.
+		queued(copilot, context, { apiKey: "k", providerSessionState: new Map(), preferWebsockets: true });
 
 		expect(calls[0]?.options?.maxTokens).toBeLessThan(9_000);
 		expect(calls[1]?.options?.maxTokens).toBeUndefined();
+		expect(calls[2]?.options?.maxTokens).toBeLessThan(9_000);
 	});
 
 	describe("providers.anthropic.serverSideFallback (opt-in)", () => {

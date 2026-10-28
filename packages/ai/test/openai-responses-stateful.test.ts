@@ -8,7 +8,10 @@ import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import * as utils from "@oh-my-pi/pi-utils";
 
-const model = getBundledModel("openai", "gpt-5-mini") as Model<"openai-responses">;
+const model: Model<"openai-responses"> = {
+	...getBundledModel<"openai-responses">("openai", "gpt-5-mini"),
+	preferWebsockets: false,
+};
 
 const explicitPromptCacheModel: Model<"openai-responses"> = {
 	...model,

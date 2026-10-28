@@ -404,7 +404,7 @@ export class ModelRegistry {
 		this.#catalogMetrics.add(models);
 	}
 
-	/** Final pass over every published model list: catalog metrics, then implicit local providers last. */
+	/** Final projection: catalog metrics, then implicit local providers last. */
 	#finalizeModels(models: Model<Api>[]): Model<Api>[] {
 		return this.#orderImplicitProvidersLast(applyCatalogMetrics(models, this.#catalogMetrics));
 	}
@@ -1779,7 +1779,7 @@ export class ModelRegistry {
 				baseUrlApis.add(providerConfig.api);
 			}
 			const baseUrlScope = baseUrlApis.size > 0 ? [...baseUrlApis] : undefined;
-			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/guardrail*/transport are present
+			// Store provider transport and policy overrides.
 			if (
 				providerConfig.baseUrl ||
 				providerConfig.headers ||
@@ -3834,7 +3834,7 @@ export interface ProviderConfigInput {
 		contextWindow: number;
 		maxTokens: number;
 		promptCache?: Model<Api>["promptCache"];
-		/** Whether Codex requests should prefer WebSocket transport. */
+		/** WebSocket preference within catalog policy; explicit false disables transport selection. */
 		preferWebsockets?: boolean;
 		headers?: Record<string, string>;
 		compat?: ModelSpec<Api>["compat"];

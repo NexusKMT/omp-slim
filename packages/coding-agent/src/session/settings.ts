@@ -1136,10 +1136,10 @@ export const cfgProvidersOpenaiWebsockets = register({
 		tab: "providers",
 		group: "Protocol",
 		label: "OpenAI WebSockets",
-		description: "Websocket policy for OpenAI Codex models (auto uses model defaults, on forces, off disables)",
+		description: "WebSocket policy for OpenAI Codex models only",
 		options: [
-			{ value: "auto", label: "Auto", description: "Use model/provider default websocket behavior" },
-			{ value: "off", label: "Off", description: "Disable websockets for OpenAI Codex models" },
+			{ value: "auto", label: "Auto", description: "Use Codex model defaults" },
+			{ value: "off", label: "Off", description: "Disable WebSockets for OpenAI Codex models" },
 			{ value: "on", label: "On", description: "Force websockets for OpenAI Codex models" },
 		],
 	},
