@@ -4060,10 +4060,8 @@ async function getOrCreateCodexWebSocketConnection(
 		const pending = state.connection;
 		if (!pending || pending.isOpen() || !pending.isConnecting()) break;
 		try {
-			await pending.connect(signal);
-		} catch (error) {
-			// A cancelled joiner must not replace the handshake owned by another caller.
-			if (signal?.aborted) throw error;
+			await pending.connect();
+		} catch {
 			// The handshake owner surfaces its own failure; re-evaluate below
 			// (state.connection may have been replaced or cleared).
 		}

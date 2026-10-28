@@ -215,15 +215,10 @@ actual mode. A successful empty WS completion submits one generation per provide
 call. Actual SSE, including pre-send fallback, retains its existing empty retry
 budget. Agent-level empty-turn recovery remains separate.
 
-Copilot has no standard WS route. Its real HTTP cold/warm native-history rules and
-portable replay remain independent of WS selection; `openAIResponsesReplaysNativeHistory`
-has no transport argument. Computer-call metadata remains available for current
-execution and safety checks. On a connection-bound HTTP target, fallback history
-without replayable native payload becomes visible action notes and screenshot
-input instead of native computer calls with old item IDs. Valid HTTP-native
-payloads retain their replay behavior, and explicit remote compaction still demotes
-fallback computer items to history notes. CLI, advisor, maintenance and budget
-callers use the actual request model and genuine options, not a predicted transport.
+Copilot has no standard WS route. Its HTTP native-history behavior remains
+independent of WS selection; `openAIResponsesReplaysNativeHistory` has no
+transport argument. CLI, advisor, maintenance and budget callers use the actual
+request model and genuine options, not a predicted transport.
 
 ### OpenRouter native finish reasons
 

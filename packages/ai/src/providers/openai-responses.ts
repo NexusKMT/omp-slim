@@ -539,16 +539,13 @@ export function openAIResponsesReplaysNativeHistory(
 	model: Pick<Model, "api" | "provider" | "compat"> | null | undefined,
 	providerSessionState: Map<string, ProviderSessionState> | undefined,
 ): boolean {
-	if (model?.api !== "openai-responses") return true;
-	const compat = model.compat;
-	const connectionBoundNativeHistory =
-		compat && "connectionBoundNativeHistory" in compat && compat.connectionBoundNativeHistory;
-	if (!providerSessionState) return true;
+	if (model?.api !== "openai-responses" || !providerSessionState) return true;
 	const state = providerSessionState.get(`${OPENAI_RESPONSES_PROVIDER_SESSION_STATE_PREFIX}${model.provider}`) as
 		| OpenAIResponsesProviderSessionState
 		| undefined;
 	if (state) return state.nativeHistoryReplayWarmed;
-	return !connectionBoundNativeHistory;
+	const compat = model.compat;
+	return !(compat && "connectionBoundNativeHistory" in compat && compat.connectionBoundNativeHistory);
 }
 
 /** Host per-provider storage defaults; see {@link configureProviderStoreResponses}. */

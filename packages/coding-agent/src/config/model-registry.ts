@@ -404,7 +404,7 @@ export class ModelRegistry {
 		this.#catalogMetrics.add(models);
 	}
 
-	/** Final projection: catalog metrics, then implicit local providers last. */
+	/** Final pass over every published model list: catalog metrics, then implicit local providers last. */
 	#finalizeModels(models: Model<Api>[]): Model<Api>[] {
 		return this.#orderImplicitProvidersLast(applyCatalogMetrics(models, this.#catalogMetrics));
 	}
@@ -1779,7 +1779,7 @@ export class ModelRegistry {
 				baseUrlApis.add(providerConfig.api);
 			}
 			const baseUrlScope = baseUrlApis.size > 0 ? [...baseUrlApis] : undefined;
-			// Store provider transport and policy overrides.
+			// Always set overrides when baseUrl/headers/apiKey/authHeader/compat/disableStrictTools/guardrail*/transport are present
 			if (
 				providerConfig.baseUrl ||
 				providerConfig.headers ||

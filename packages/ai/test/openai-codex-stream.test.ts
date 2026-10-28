@@ -5,7 +5,6 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
 	buildTransformedCodexRequestBody,
 	createOpenAICodexCompatibilityMetadata,
-	CodexWebSocketTransportError,
 	getOpenAICodexTransportDetails,
 	getOpenAICodexWebSocketDebugStats,
 	openCodexCompactionEventStream,
@@ -6329,12 +6328,15 @@ describe("openai-codex streaming", () => {
 		});
 
 		let constructorCount = 0;
+		const created = Promise.withResolvers<void>();
+		const joined = Promise.withResolvers<void>();
 		const sockets: DeferredOpenWebSocket[] = [];
 		class DeferredOpenWebSocket extends MockWebSocket {
 			constructor(url: string, options?: { headers?: WsHeaders }) {
 				super(url, options);
 				constructorCount += 1;
 				sockets.push(this);
+				created.resolve();
 			}
 
 			open(): void {
@@ -6364,6 +6366,14 @@ describe("openai-codex streaming", () => {
 			sessionId: "ws-join-session",
 			providerSessionState,
 		});
+		await created.promise;
+		const originalTime = piUtils.logger.time.bind(piUtils.logger);
+		const interceptTime = ((...args: Parameters<typeof originalTime>) => {
+			const result = originalTime(...args);
+			if (args[0] === "codexWs:awaitSharedHandshake") joined.resolve();
+			return result;
+		}) as typeof piUtils.logger.time;
+		const timeSpy = vi.spyOn(piUtils.logger, "time").mockImplementation(interceptTime);
 		const streamResult = streamOpenAICodexResponses(model, createCodexTestContext(), {
 			fetch: fetchMock as FetchImpl,
 			apiKey: token,
@@ -6371,8 +6381,9 @@ describe("openai-codex streaming", () => {
 			providerSessionState,
 		}).result();
 
-		// Let both callers reach the handshake before the socket opens.
-		await Bun.sleep(5);
+		// Open only after the second caller has entered the shared handshake wait.
+		await joined.promise;
+		timeSpy.mockRestore();
 		for (const socket of sockets) socket.open();
 
 		await prewarmPromise;
@@ -6389,49 +6400,6 @@ describe("openai-codex streaming", () => {
 		expect(details.websocketDisabled).toBe(false);
 		expect(fetchMock).not.toHaveBeenCalled();
 	}, 15_000); // real handshake join; 5s default flakes under full-suite load
-
-	it("leaves a prewarm owner's handshake intact when a joining prewarm is cancelled", async () => {
-		const token = createCodexTestToken();
-		const created = Promise.withResolvers<DeferredOpenWebSocket>();
-		let constructorCount = 0;
-		class DeferredOpenWebSocket extends MockWebSocket {
-			constructor(url: string, options?: WsOptions) {
-				super(url, options);
-				constructorCount += 1;
-				created.resolve(this);
-			}
-		}
-		global.WebSocket = DeferredOpenWebSocket as unknown as typeof WebSocket;
-		const model = createCodexTestModel("https://chatgpt.com/backend-api");
-		const providerSessionState = new Map<string, ProviderSessionState>();
-		const options = { apiKey: token, sessionId: "ws-cancelled-join-session", providerSessionState };
-		const owner = prewarmOpenAICodexResponses(model, options);
-		const socket = await created.promise;
-		const controller = new AbortController();
-		const reason = new Error("only the joining prewarm was cancelled");
-		controller.abort(reason);
-		try {
-			const joining = prewarmOpenAICodexResponses(model, { ...options, signal: controller.signal });
-			await expect(joining).rejects.toBeInstanceOf(CodexWebSocketTransportError);
-			await expect(joining).rejects.toMatchObject({
-				message: "Codex websocket transport error: request was aborted",
-				cause: reason,
-			});
-			expect(socket.readyState).toBe(MockWebSocket.CONNECTING);
-			socket.readyState = MockWebSocket.OPEN;
-			socket.emit("open", new Event("open"));
-			await owner;
-			expect(constructorCount).toBe(1);
-			expect(getOpenAICodexTransportDetails(model, options)).toMatchObject({
-				websocketConnected: true,
-				websocketDisabled: false,
-				prewarmed: true,
-			});
-		} finally {
-			for (const state of providerSessionState.values()) state.close?.();
-			await owner.catch(() => {});
-		}
-	});
 
 	it("surfaces a whitespace flood arriving after a delivered tool call instead of replaying", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");

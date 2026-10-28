@@ -2568,14 +2568,7 @@ export function convertResponsesAssistantMessage<TApi extends Api>(
 		}
 
 		if (block.providerMetadata?.type === "computer") {
-			// Fallback blocks carry no native-payload ownership proof. Keep their
-			// actions visible instead of replaying a foreign connection-owned item ID.
-			if (
-				model.supportsComputerUse !== true ||
-				(model.compat &&
-					"connectionBoundNativeHistory" in model.compat &&
-					model.compat.connectionBoundNativeHistory)
-			) {
+			if (model.supportsComputerUse !== true) {
 				const callId = normalizeResponsesToolCallId(block.id, "ctc").callId;
 				outputItems.push({
 					type: "message",
@@ -2728,34 +2721,8 @@ export function appendResponsesToolResultMessages<TApi extends Api>(
 	supportsCustomToolCalls = true,
 	computerCallIds?: ReadonlySet<string>,
 ): void {
-	const normalized = normalizeResponsesToolCallId(toolResult.toolCallId);
-	if (
-		toolResult.providerMetadata?.type === "computer" &&
-		model.supportsComputerUse === true &&
-		model.compat &&
-		"connectionBoundNativeHistory" in model.compat &&
-		model.compat.connectionBoundNativeHistory &&
-		!computerCallIds?.has(normalized.callId)
-	) {
-		// The call was rebuilt as visible history, so its screenshot must not
-		// become an unpaired native output or a text-only orphan note.
-		const screenshot = toolResult.providerMetadata.screenshot;
-		messages.push({
-			type: "message",
-			role: "user",
-			content: [
-				{ type: "input_text", text: `[Previous computer result; call_id=${normalized.callId}]` },
-				{
-					type: "input_image",
-					image_url: screenshot.image_url,
-					file_id: screenshot.file_id,
-					detail: supportsImageDetailOriginal ? "original" : "auto",
-				},
-			],
-		} as ResponseInput[number]);
-		return;
-	}
 	const { output, outputText } = encodeResponsesToolResultOutput(toolResult, model, supportsImageDetailOriginal);
+	const normalized = normalizeResponsesToolCallId(toolResult.toolCallId);
 	if (toolResult.providerMetadata?.type === "computer" && model.supportsComputerUse !== true) {
 		messages.push({
 			type: "message",
