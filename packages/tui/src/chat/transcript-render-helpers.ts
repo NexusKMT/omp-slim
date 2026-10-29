@@ -18,6 +18,8 @@ import type { OutputArtifactError } from "../tools/streaming-output";
 import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
 import { canonicalizeMessage } from "./thinking-display";
 import { ToolActivityContainer } from "../chrome/tool-activity";
+import { CustomMessageComponent } from "./custom-message";
+import type { MessageRenderer } from "./extension-types";
 import { type TranscriptBlock } from "../chrome/transcript-container";
 import { TranscriptStatusBlock, type TranscriptStatusRow } from "../chrome/transcript-status";
 import { theme } from "../theme";
@@ -79,6 +81,42 @@ export function buildAsyncResultBlock(message: CustomOrHookMessage): ToolActivit
 	}
 	if (details?.meta?.artifactError) rows.push(artifactErrorRow(details.meta.artifactError));
 	return new ToolActivityContainer(new TranscriptStatusBlock(rows));
+}
+
+/** A transcript component that can expand/collapse; both card shapes implement it. */
+type ExpandableComponent = Component & { setExpanded(expanded: boolean): void };
+
+/**
+ * Build the `async-result` transcript card, letting a registered
+ * `registerMessageRenderer("async-result", …)` renderer OWN it (#14131).
+ *
+ * Both transcript surfaces — the live `UiHelpers.addMessageToChat` and the
+ * replayed `ChatTranscriptBuilder.#appendCustomMessage` — must dispatch
+ * identically, or a replayed transcript renders differently from the live one.
+ * Keeping the decision here is what stops the two from drifting apart again,
+ * which is how the built-in branch came to shadow registered renderers.
+ *
+ * The built-in completion block stays the fallback in all three cases:
+ * no renderer registered, a renderer that declines (returns `undefined`), and
+ * a renderer that THROWS. The throw case matters: `FramedMessageComponent`
+ * swallows renderer exceptions and falls through to the generic frame, so
+ * without this guard a broken extension renderer would replace the useful
+ * "Background job completed" row with the raw `<system-notice>` body.
+ *
+ * Returns a component both transcript surfaces can expand/collapse.
+ */
+export function buildAsyncResultComponent(
+	message: CustomOrHookMessage,
+	renderer: MessageRenderer | undefined,
+): ExpandableComponent {
+	if (!renderer) return buildAsyncResultBlock(message);
+	return new CustomMessageComponent(message as CustomMessage<unknown>, (delegate, options, rendererTheme) => {
+		try {
+			return renderer(delegate, options, rendererTheme) ?? buildAsyncResultBlock(message);
+		} catch {
+			return buildAsyncResultBlock(message);
+		}
+	});
 }
 
 /** The warning row under a background job whose output artifact could not be saved. */
