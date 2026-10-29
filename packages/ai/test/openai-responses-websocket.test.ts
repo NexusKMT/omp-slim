@@ -80,15 +80,36 @@ describe("standard OpenAI Responses WebSocket opt-in", () => {
 		expect(observed).toContain("response.output_text.delta");
 	});
 
-	it("honors model opt-in and lets explicit false force HTTP", async () => {
+	it("honors explicit transport preferences over an injected fetch", async () => {
 		const fixture = endpoint();
+		let fetchCalls = 0;
+		const customFetch = Object.assign(
+			(...args: Parameters<typeof fetch>) => {
+				fetchCalls++;
+				return fetch(...args);
+			},
+			{ preconnect: fetch.preconnect },
+		);
 		const model = { ...fixture.model, preferWebsockets: true };
-		expect((await streamOpenAIResponses(model, fixture.context, fixture.options).result()).stopReason).toBe("stop");
-		expect(
-			(await streamOpenAIResponses(model, fixture.context, { ...fixture.options, preferWebsockets: false }).result())
-				.stopReason,
-		).toBe("stop");
-		expect(fixture.requests).toHaveLength(1);
+		const options = { ...fixture.options, fetch: customFetch };
+		const modelOptIn = await streamOpenAIResponses(model, fixture.context, options).result();
+		expect(modelOptIn.content).toMatchObject([{ type: "text", text: "WS" }]);
+		expect(fetchCalls).toBe(0);
+
+		const requestOptOut = await streamOpenAIResponses(model, fixture.context, {
+			...options,
+			preferWebsockets: false,
+		}).result();
+		expect(requestOptOut.content).toMatchObject([{ type: "text", text: "HTTP" }]);
+		expect(fetchCalls).toBe(1);
+
+		const requestOptIn = await streamOpenAIResponses({ ...model, preferWebsockets: false }, fixture.context, {
+			...options,
+			preferWebsockets: true,
+		}).result();
+		expect(requestOptIn.content).toMatchObject([{ type: "text", text: "WS" }]);
+		expect(fetchCalls).toBe(1);
+		expect(fixture.requests).toHaveLength(2);
 		expect(fixture.httpRequests).toHaveLength(1);
 	});
 

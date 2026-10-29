@@ -972,6 +972,8 @@ Standard Responses has no global/provider-level WebSocket setting. Its catalog
 policy enables WS by default only for eligible OpenAI `openai-responses` models at
 the official endpoint; gateways default to HTTP/SSE and can opt eligible models in
 with model/request `preferWebsockets: true`. An explicit `false` disables it.
+SDK calls supplying a custom `fetch` stay on HTTP/SSE unless the request or model
+explicitly selects WS.
 Copilot and OpenRouter standard Responses remain HTTP/SSE regardless of that hint.
 Transport-failure downgrade is sticky for the session/endpoint/model until the
 existing session/provider-state lifecycle resets it; there is no probe or cooldown

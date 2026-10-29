@@ -109,9 +109,10 @@ Tool-call argument streaming:
 `resolveResponsesWebSocketPreference` in
 `packages/catalog/src/compat/responses-websocket.ts`. The catalog's
 `prefer-websockets` rule enables only OpenAI `openai-responses`. Within that scope,
-request `preferWebsockets` overrides the model value; absent either, only the
-official catalog endpoint defaults to WS. Gateways default to SSE and require an
-explicit model/request `true`. A false/missing catalog rule cannot be bypassed by
+request `preferWebsockets` overrides the model value. If neither is set, the
+provider preserves an injected SDK `fetch` by selecting HTTP/SSE; otherwise only
+the official catalog endpoint defaults to WS. Gateways default to SSE and require
+an explicit model/request `true`. A false/missing catalog rule cannot be bypassed by
 `true`: Copilot and OpenRouter standard Responses stay on HTTP/SSE. There is no
 standard global/provider transport setting or caller-side prediction of the mode.
 

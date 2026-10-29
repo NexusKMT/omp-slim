@@ -866,7 +866,11 @@ const streamOpenAIResponsesOnce = (
 			const resolvedBaseUrl = (baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
 			const requestUrl = `${resolvedBaseUrl}/responses`;
 			let transportSessions = providerSessionState?.transports;
-			attemptContext.mode ??= resolveResponsesWebSocketPreference(model, options?.preferWebsockets)
+			// A custom HTTP transport must not be bypassed by the implicit WS default.
+			attemptContext.mode ??= resolveResponsesWebSocketPreference(
+				model,
+				options?.preferWebsockets ?? model.preferWebsockets ?? (options?.fetch ? false : undefined),
+			)
 				? "websocket"
 				: "sse";
 			const idleTimeoutMs =

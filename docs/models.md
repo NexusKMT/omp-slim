@@ -120,15 +120,17 @@ prefer WS at the official catalog endpoint by default; custom gateway URLs defau
 to HTTP/SSE. Providers outside that catalog scope, including GitHub Copilot and
 OpenRouter, use standard HTTP/SSE even with request/model `preferWebsockets: true`.
 
-Within that eligible scope, precedence is SDK request `preferWebsockets` → model
-`preferWebsockets` → the official-endpoint default. Explicit `false` disables WS;
+Within that eligible scope, an SDK request `preferWebsockets` takes precedence over
+the model value. If neither is set, a custom SDK `fetch` selects HTTP/SSE;
+otherwise the official-endpoint default applies. Explicit `false` disables WS;
 explicit `true` opts an eligible gateway in. Neither value bypasses catalog
 eligibility. There is no standard Responses global or provider-level transport
 setting. The independent Codex setting `providers.openaiWebsockets: auto|on|off`
 and `PI_CODEX_WEBSOCKET` remain Codex-only.
 
-SDK `fetch` overrides apply to HTTP/SSE, not WebSocket connections. Set request
-`preferWebsockets: false` when a request must pass through a custom `fetch`.
+SDK `fetch` overrides apply to HTTP/SSE, not WebSocket connections. Explicit WS
+preferences allow a socket attempt without using the override; an HTTP/SSE
+fallback still uses the supplied `fetch`.
 
 For a gateway with uneven upstream support, configure individual models in
 `models.yml`, for example:
