@@ -4,7 +4,7 @@
 // per model and were measured against the API.
 
 provider "modular" {
-	default-model "MiniMaxAI/MiniMax-M3.1-Flash"
+	default-model "google/gemma-4-31b-it"
 	env "MODULAR_API_KEY"
 
 	thinking-mode "effort"
