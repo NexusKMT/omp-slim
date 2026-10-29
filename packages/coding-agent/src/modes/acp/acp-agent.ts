@@ -1803,20 +1803,6 @@ export class AcpAgent implements Agent {
 				notification.method,
 				this.#connection.extNotification(notification.method, notification.params),
 			);
-		// Config delivery is part of command completion, even though the
-		// subscription lives beyond an individual prompt turn.
-		const delivery = this.#pushConfigOptionUpdate(record);
-		record.promptEventHandlers.add(delivery);
-		try {
-			await delivery;
-		} catch (error) {
-			logger.warn("Failed to push config_option_update after a lifetime event", {
-				acpSessionId: record.session.sessionId,
-				eventType: event.type,
-				error,
-			});
-		} finally {
-			record.promptEventHandlers.delete(delivery);
 		}
 	}
 
@@ -1829,7 +1815,7 @@ export class AcpAgent implements Agent {
 			error => {
 				record.promptEventHandlers.delete(delivery);
 				logger.warn("Failed to deliver ACP lifetime update", {
-					sessionId: record.session.sessionId,
+					acpSessionId: record.session.sessionId,
 					eventType,
 					error,
 				});

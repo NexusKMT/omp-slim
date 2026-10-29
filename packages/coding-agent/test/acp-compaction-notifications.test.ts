@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -21,7 +21,7 @@ import {
 	type SessionNotification,
 } from "@oh-my-pi/pi-utils/acp";
 import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/agent-session-setup";
-import { until, wait } from "./helpers/fake-clock";
+import { drive, driveTurn, until, wait } from "./helpers/fake-clock";
 
 const START = "_omp/compaction/start";
 const END = "_omp/compaction/end";
@@ -241,7 +241,7 @@ async function createHarness(options: { recognizesNotifications?: boolean } = {}
 			const ready = Promise.withResolvers<void>();
 			bootstrapWaiters.set(session.sessionId, ready);
 			try {
-				await ready.promise;
+				await drive(ready.promise);
 			} finally {
 				bootstrapWaiters.delete(session.sessionId);
 			}
@@ -288,6 +288,14 @@ function expectSuccessfulPair(notifications: Notification[], session: AgentSessi
 }
 
 describe("ACP automatic compaction notifications over NDJSON", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("reports idle maintenance immediately, associates the right session, and projects persisted counts only", async () => {
 		const harness = await createHarness();
 		let work: Promise<void> | undefined;
@@ -436,7 +444,8 @@ describe("ACP automatic compaction notifications over NDJSON", () => {
 			expectSuccessfulPair(frames, session, entries[0]!);
 			expect(frames.every(frame => frame.jsonrpc === "2.0" && !("id" in frame))).toBe(true);
 
-			const response = await wait(
+			const response = await driveTurn(
+				session,
 				harness.client.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "continue" }] }),
 			);
 			expect(response.stopReason).toBe("end_turn");
