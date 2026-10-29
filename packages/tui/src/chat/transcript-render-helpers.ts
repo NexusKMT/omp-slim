@@ -6,7 +6,7 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { TspSpan } from "@oh-my-pi/pi-wire";
-import { type Component } from "../tui";
+import { type Component, Container } from "../tui";
 import { formatBytes, formatCount, formatDuration } from "@oh-my-pi/pi-utils";
 import { span } from "../native/describe";
 import type { JobSnapshot } from "../tools/wait";
@@ -87,6 +87,76 @@ export function buildAsyncResultBlock(message: CustomOrHookMessage): ToolActivit
 type ExpandableComponent = Component & { setExpanded(expanded: boolean): void };
 
 /**
+ * The built-in completion block, wrapped so `display.hideToolActivity` keeps
+ * working while a renderer is registered.
+ *
+ * The fallback has to be mounted INSIDE a `CustomMessageComponent` (that is
+ * what hosts an extension renderer), and `FramedMessageComponent` re-invokes
+ * its renderer callback on every expand or theme change. One wrapper instance
+ * is therefore reused for the whole card: it owns the visibility flag and
+ * re-applies it to the block it wraps, the same way `TodoReminder` forwards
+ * the preference to its notice.
+ */
+class AsyncResultFallback extends Container implements ExpandableComponent {
+	#visible = true;
+
+	constructor(message: CustomOrHookMessage) {
+		super();
+		this.addChild(buildAsyncResultBlock(message));
+	}
+
+	setToolActivityVisible(visible: boolean): void {
+		this.#visible = visible;
+		for (const child of this.children) {
+			const activity = child as Partial<{ setToolActivityVisible(on: boolean): void }>;
+			if (typeof activity.setToolActivityVisible === "function") activity.setToolActivityVisible(visible);
+		}
+		this.invalidate();
+	}
+
+	setExpanded(expanded: boolean): void {
+		for (const child of this.children) {
+			const expandable = child as Partial<{ setExpanded(on: boolean): void }>;
+			if (typeof expandable.setExpanded === "function") expandable.setExpanded(expanded);
+		}
+	}
+
+	override render(width: number): readonly string[] {
+		return this.#visible ? super.render(width) : [];
+	}
+}
+
+/**
+ * A `CustomMessageComponent` that also honors `display.hideToolActivity`.
+ *
+ * Only TOP-LEVEL transcript children receive `setToolActivityVisible`, and the
+ * frame — not the transcript — mounts the fallback card, so the frame relays
+ * the preference to the block it owns. Without this a registered renderer that
+ * declines or throws would show completion rows to users who hid tool
+ * activity: the card would behave differently depending on whether an
+ * extension is loaded.
+ */
+class AsyncResultCard extends CustomMessageComponent implements ExpandableComponent {
+	readonly #fallback: AsyncResultFallback;
+
+	constructor(message: CustomOrHookMessage, renderer: MessageRenderer) {
+		const fallback = new AsyncResultFallback(message);
+		super(message as CustomMessage<unknown>, (delegate, options, rendererTheme) => {
+			try {
+				return renderer(delegate, options, rendererTheme) ?? fallback;
+			} catch {
+				return fallback;
+			}
+		});
+		this.#fallback = fallback;
+	}
+
+	setToolActivityVisible(visible: boolean): void {
+		this.#fallback.setToolActivityVisible(visible);
+	}
+}
+
+/**
  * Build the `async-result` transcript card, letting a registered
  * `registerMessageRenderer("async-result", …)` renderer OWN it (#14131).
  *
@@ -110,13 +180,7 @@ export function buildAsyncResultComponent(
 	renderer: MessageRenderer | undefined,
 ): ExpandableComponent {
 	if (!renderer) return buildAsyncResultBlock(message);
-	return new CustomMessageComponent(message as CustomMessage<unknown>, (delegate, options, rendererTheme) => {
-		try {
-			return renderer(delegate, options, rendererTheme) ?? buildAsyncResultBlock(message);
-		} catch {
-			return buildAsyncResultBlock(message);
-		}
-	});
+	return new AsyncResultCard(message, renderer);
 }
 
 /** The warning row under a background job whose output artifact could not be saved. */
