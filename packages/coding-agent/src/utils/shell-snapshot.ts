@@ -128,21 +128,48 @@ function generateSnapshotScript(shell: string, snapshotPath: string, rcFile: str
 
 	const quotedPath = quotePosixArgument(snapshotPath);
 
-	// Function extraction differs between bash and zsh. Each form prints function
-	// bodies on stdout so we can both persist them AND scan their bodies for
-	// referenced env vars (issue #3470).
-	const functionExtractor = isZsh
-		? `# Force autoload all functions first
-typeset -f > /dev/null 2>&1
+	// Function extraction differs between bash and zsh. Each form prints
+	// function bodies on stdout so we can both persist them AND scan their
+	// bodies for referenced env vars (issue #3470).
+	//
+	// Names are seeded with the user's own (non-underscore-prefixed)
+	// functions, then grown to a fixpoint: every already-defined function
+	// name referenced by a kept body (typically the underscore-prefixed
+	// helpers of `mise activate` / `zoxide init`, e.g. `cd()` calling
+	// `__zsh_like_cd`) is pulled in too. Without the closure the snapshot
+	// keeps `cd() { __zsh_like_cd cd "$@" }` but drops `__zsh_like_cd`
+	// itself, so every `cd` in the agent shell dies with
+	// `command not found: __zsh_like_cd`. Referencing is lexical (the body
+	// text is scanned, not interpreted), so words in strings or comments can
+	// only over-include functions the user actually defined — never invent
+	// missing ones. Core tools stay excluded even when referenced, so
+	// `greet() { ls -la; }` keeps `greet` without redefining `ls`.
+	// `_`-prefixed names never seed the closure: completion helpers and
+	// other framework internals are only kept when a kept body calls them.
+	const listFunctionNames = isZsh ? "typeset +f" : "declare -F | cut -d' ' -f3";
+	const printFunction = isZsh ? "typeset -f" : "declare -f";
+	const functionExtractor = `# Force autoload all functions first
+${isZsh ? "typeset -f" : "declare -f"} > /dev/null 2>&1
 # Get user function names - filter system/private ones
-typeset +f 2>/dev/null | grep -vE '^(_|__)' | grep -vE '${commonFunctionRegex}' | while read func; do
-   typeset -f "$func" 2>/dev/null
-done`
-		: `# Force autoload all functions first
-declare -f > /dev/null 2>&1
-# Get user function names - filter system/private ones
-declare -F 2>/dev/null | cut -d' ' -f3 | grep -vE '^(_|__)' | grep -vE '${commonFunctionRegex}' | while read func; do
-   declare -f "$func" 2>/dev/null
+${listFunctionNames} 2>/dev/null | grep -vE '^(_|__)' | grep -vE '${commonFunctionRegex}' > /dev/null
+__omp_all=$(${listFunctionNames} 2>/dev/null | sort -u)
+__omp_names=$(printf '%s\n' "$__omp_all" | grep -vE '^(_|__)' | grep -vE '${commonFunctionRegex}')
+while :; do
+   __omp_bodies=$(printf '%s\n' "$__omp_names" | while IFS= read -r __omp_f; do
+      [ -n "$__omp_f" ] || continue
+      ${printFunction} "$__omp_f" 2>/dev/null
+   done)
+   __omp_next=$({ printf '%s\n' "$__omp_names"
+      printf '%s\n' "$__omp_bodies" | grep -oE '[A-Za-z_][A-Za-z0-9_]*' | sort -u \\
+         | grep -xF -f <(printf '%s\n' "$__omp_all") \\
+         | grep -vE '${commonFunctionRegex}'
+   } | sort -u)
+   [ "$__omp_next" = "$__omp_names" ] && break
+   __omp_names=$__omp_next
+done
+printf '%s\n' "$__omp_names" | while IFS= read -r __omp_f; do
+   [ -n "$__omp_f" ] || continue
+   ${printFunction} "$__omp_f" 2>/dev/null
 done`;
 
 	// Shell options extraction
