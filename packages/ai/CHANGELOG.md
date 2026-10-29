@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added standard Responses WebSockets with connection-local incremental turns, official OpenAI defaults, and session-scoped fallback through the existing HTTP/SSE transport
+- Added standard Responses WebSockets with connection-local incremental turns, official OpenAI defaults, and session-scoped fallback through the existing HTTP/SSE transport ([#17354](https://github.com/can1357/oh-my-pi/pull/17354) by [@TatsukiMeng](https://github.com/TatsukiMeng))
 
 ### Fixed
 

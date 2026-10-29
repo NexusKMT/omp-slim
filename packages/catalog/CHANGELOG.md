@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added catalog-controlled standard Responses WebSockets, preferred on official OpenAI endpoints while gateways require explicit opt-in
+- Added catalog-controlled standard Responses WebSockets, preferred on official OpenAI endpoints while gateways require explicit opt-in ([#17354](https://github.com/can1357/oh-my-pi/pull/17354) by [@TatsukiMeng](https://github.com/TatsukiMeng))
 
 ### Fixed
 
