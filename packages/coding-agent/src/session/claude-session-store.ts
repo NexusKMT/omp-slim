@@ -68,6 +68,19 @@ function cleanPreview(value: string): string | undefined {
 	return cleaned.length > 0 ? cleaned : undefined;
 }
 
+/** Claude stores user-set names beside the transcript in <sessionId>/custom-title.json. */
+async function readTitleSidecar(transcript: string, sessionId: string): Promise<string | undefined> {
+	try {
+		const value: unknown = await Bun.file(path.join(path.dirname(transcript), sessionId, "custom-title.json")).json();
+		if (!isRecord(value)) return undefined;
+		const title = stringField(value, "customTitle");
+		return title?.trim() ? title : undefined;
+	} catch {
+		// Sidecars are optional; a missing or unreadable title must not hide the session.
+		return undefined;
+	}
+}
+
 async function readHistoryIndex(file: string): Promise<Map<string, ClaudeHistoryMetadata>> {
 	const metadata = new Map<string, ClaudeHistoryMetadata>();
 	try {
@@ -379,6 +392,7 @@ export class ClaudeSessionStore implements ForeignSessionStore {
 					id,
 					path: item.file,
 					cwd: indexed?.cwd ?? (await recordedCwd(item.file)) ?? item.cwd,
+					title: await readTitleSidecar(item.file, id),
 					created: new Date(createdMs),
 					modified: new Date(modifiedMs),
 					firstMessage: indexed?.firstMessage,
