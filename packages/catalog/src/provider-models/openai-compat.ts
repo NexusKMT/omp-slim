@@ -1312,6 +1312,35 @@ export function cerebrasModelManagerOptions(
 }
 
 // ---------------------------------------------------------------------------
+// 3.4 Modular
+// ---------------------------------------------------------------------------
+
+export interface ModularModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+/**
+ * Modular Cloud's model manager. `/v1/models` also lists models that are not
+ * sold on the shared endpoint yet, so the live roster keeps only ids the
+ * models.dev `modular` entry lists; prices and limits come from that entry.
+ */
+export function modularModelManagerOptions(
+	config?: ModularModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	return createOpenAICompatibleModelManagerOptions({
+		api: "openai-completions",
+		providerId: "modular",
+		defaultBaseUrl: "https://api.modular.com/v1",
+		config,
+		requireApiKey: true,
+		filterModel: (_entry, model, references) => references.has(model.id),
+		mapModel: (entry, defaults, reference) => mapWithBundledReference(entry, defaults, reference),
+	});
+}
+
+// ---------------------------------------------------------------------------
 // 3.5 SambaNova
 // ---------------------------------------------------------------------------
 
@@ -7516,6 +7545,8 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_CORE: readonly ModelsDevProviderDescriptor
 	openAiCompletionsDescriptor("groq", "groq", "https://api.groq.com/openai/v1"),
 	// --- Cerebras ---
 	openAiCompletionsDescriptor("cerebras", "cerebras", "https://api.cerebras.ai/v1"),
+	// --- Modular ---
+	openAiCompletionsDescriptor("modular", "modular", "https://api.modular.com/v1"),
 	// --- ClinePass ---
 	// The live roster owns membership; this snapshot pins Cline's exact limits,
 	// pricing, modalities, and per-model reasoning controls for known ids.

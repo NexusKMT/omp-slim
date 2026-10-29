@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Modular Cloud (`modular`) as a provider: `/login modular` with an API key, models and prices from the models.dev `modular` entry, and per-model reasoning controls for MiniMax M3.1 Flash, MiniMax M3, DeepSeek V4.1 Flash, and Gemma 4 31B
+
 ### Fixed
 
 - Fixed DeepSeek V4.1 Flash image attachments being stripped on publisher-namespaced ids such as `ds/deepseek-flash` ([#16470](https://github.com/can1357/oh-my-pi/pull/16470) by [@ZanDev32](https://github.com/ZanDev32))

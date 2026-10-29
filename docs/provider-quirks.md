@@ -1316,6 +1316,19 @@ Mistral AI provides access to Mistral, Codestral, Devstral, Ministral, and Pixtr
 - **Provider entry (`mistral`)**: `packages/catalog/src/compat/rules/providers/mistral.kdl` declares default model `devstral-medium-latest`. Environment keys: `MISTRAL_API_KEY`.
 - **Host Matching**: Host URL marker matching checks for `mistral.ai` (`packages/catalog/src/hosts.ts`: `mistral`).
 
+## Modular (`modular`)
+Modular Cloud serves open models on an OpenAI-compatible API at `https://api.modular.com/v1`. Requests use the OpenAI Chat Completions transport (`openai-completions`).
+
+### Special casings
+- **Thinking wire format**: `packages/catalog/src/compat/rules/providers/modular.kdl` sets reasoning controls per model, as measured against the API. MiniMax M3.1 Flash takes a nested `reasoning.effort` (low through max) and always thinks, so it uses `thinking-requires-effort`. DeepSeek V4.1 Flash takes DeepSeek's `thinking.type` toggle plus a top-level `reasoning_effort` (low/high/max). MiniMax M3 and Gemma 4 31B switch reasoning with `reasoning.enabled` and ignore effort, so they are toggle-only, with `enabled: true` sent through `when-thinking` extra-body.
+
+### Auth & usage
+- **API Key Login**: `packages/catalog/src/compat/rules/auth/modular.kdl` declares a `login "api-key"` rule pointing at the Modular Console and validates the key against `https://api.modular.com/v1/models`. Environment key: `MODULAR_API_KEY`.
+
+### Catalog model handling
+- **Catalog source**: the models.dev `modular` entry (`openAiCompletionsDescriptor` in `packages/catalog/src/provider-models/openai-compat.ts`) supplies models, prices, and limits, and receives additive models.dev updates at runtime.
+- **Discovery**: `modularModelManagerOptions` fetches `/v1/models` when a key is configured and keeps only ids the bundled models.dev entry lists, since the endpoint also lists models that are not sold on the shared endpoint yet.
+
 ## Moonshot (`moonshot`)
 Moonshot is the pay-as-you-go open platform provider for Moonshot AI endpoints (`https://api.moonshot.ai/v1` or mainland China `https://api.moonshot.cn/v1`). It rides the `OpenAI Chat Completions` transport engine (`openai-completions` API surface) and shares Kimi-family dialect and thinking mechanics (Kimi taxonomy in `packages/catalog/src/compat/taxonomy.ts`). It is distinct from `kimi-code`, which uses subscription device OAuth and subscription endpoints (`api.kimi.com` / `/coding/v1/*`).
 
