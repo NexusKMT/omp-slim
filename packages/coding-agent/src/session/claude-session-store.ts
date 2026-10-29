@@ -68,7 +68,7 @@ function cleanPreview(value: string): string | undefined {
 	return cleaned.length > 0 ? cleaned : undefined;
 }
 
-/** Claude stores user-set names beside the transcript in <sessionId>/custom-title.json. */
+/** Claude stores the user's `/rename` title beside the transcript in <sessionId>/custom-title.json. */
 async function readTitleSidecar(transcript: string, sessionId: string): Promise<string | undefined> {
 	try {
 		const value: unknown = await Bun.file(path.join(path.dirname(transcript), sessionId, "custom-title.json")).json();
@@ -483,8 +483,12 @@ export class ClaudeSessionStore implements ForeignSessionStore {
 			if (parentId) sourceTails.set(sourceUuid, parentId);
 		}
 
-		const title = sourceTitle ?? aiTitle ?? info.title;
-		if (title) await manager.setSessionName(title, sourceTitle ? "user" : "auto");
+		// The sidecar only ever holds a user rename, so it ranks with the transcript's
+		// own custom-title and above a generated ai-title; importing it as "user" keeps
+		// omp's auto-title refresh from overwriting it.
+		const userTitle = sourceTitle ?? info.title;
+		const title = userTitle ?? aiTitle;
+		if (title) await manager.setSessionName(title, userTitle ? "user" : "auto");
 		return manager;
 	}
 }

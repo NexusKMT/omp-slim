@@ -171,6 +171,41 @@ describe("ClaudeSessionStore", () => {
 		},
 	);
 
+	it.each([
+		["no title record", []],
+		[
+			"only an ai-title record",
+			[{ type: "ai-title", aiTitle: "Generated name", sessionId: "11111111-1111-4111-8111-111111111111" }],
+		],
+	])("imports a sidecar title as the user's name when the transcript has %s", async (_label, extraRecords) => {
+		const root = path.join(tempRoot, ".claude");
+		const cwd = path.join(tempRoot, "sidecar-only");
+		const id = "11111111-1111-4111-8111-111111111111";
+		const transcript = path.join(root, "projects", encodeProjectDir(cwd), `${id}.jsonl`);
+		await writeJsonl(transcript, [
+			{
+				type: "user",
+				uuid: "u",
+				parentUuid: null,
+				timestamp: "2026-01-01T00:00:00.000Z",
+				cwd,
+				message: { content: "First prompt" },
+			},
+			...extraRecords,
+		]);
+		await Bun.write(
+			path.join(path.dirname(transcript), id, "custom-title.json"),
+			JSON.stringify({ customTitle: "Renamed session" }),
+		);
+		const store = new ClaudeSessionStore(root);
+		const info = (await store.list()).find(item => item.id === id);
+		if (!info) throw new Error("sidecar fixture was not listed");
+
+		const manager = await store.load(info);
+		expect(manager.getSessionName()).toBe("Renamed session");
+		expect(manager.titleSource).toBe("user");
+	});
+
 	it("reflects sidecar updates and removal when listing again", async () => {
 		const { info, store } = await createClaudeFixture();
 		const sidecar = path.join(path.dirname(info.path), info.id, "custom-title.json");

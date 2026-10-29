@@ -25,7 +25,7 @@
 
 ### Fixed
 
-- `omp --from-claude` shows renamed sessions using Claude Code's `custom-title.json` sidecar when available, falling back to the first prompt otherwise ([#17361](https://github.com/can1357/oh-my-pi/pull/17361) by [@namest504](https://github.com/namest504)).
+- Fixed `omp --from-claude` listing renamed Claude Code sessions by their first prompt instead of their `/rename` title; the picker now reads the `custom-title.json` sidecar beside the transcript, and that name is imported as the user's title ([#17361](https://github.com/can1357/oh-my-pi/pull/17361) by [@namest504](https://github.com/namest504)).
 - Fixed Bash services failing to start with `ready.port must be an integer from 1 to 65535` when the model sent `port: 0` beside a `log` condition; a zero port now counts as unset
 - Fixed omp's title staying on the terminal tab after exit in terminals without a title stack; Windows consoles get their original title back ([#17321](https://github.com/can1357/oh-my-pi/pull/17321) by [@asuffield](https://github.com/asuffield))
 - Fixed cached approvals offering a directory grant that would not cover every target in the call ([#17309](https://github.com/can1357/oh-my-pi/pull/17309) by [@iliaal](https://github.com/iliaal)).
