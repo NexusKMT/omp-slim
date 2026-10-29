@@ -1,35 +1,28 @@
 // Provider-wire compat for "modular". Modular Cloud serves open models on an
-// OpenAI-compatible API. Models, prices, and limits come from the models.dev
-// `modular` entry; `/v1/models` also lists models that are not sold on the
-// shared endpoint yet, so live discovery keeps only ids models.dev lists.
-// Reasoning controls differ per model and were measured against the API.
+// OpenAI-compatible API. The provider is catalog-only: models, prices, and
+// limits come from the models.dev `modular` entry. Reasoning controls differ
+// per model and were measured against the API.
 
 provider "modular" {
 	default-model "MiniMaxAI/MiniMax-M3.1-Flash"
 	env "MODULAR_API_KEY"
 
 	thinking-mode "effort"
+	// The API takes OpenRouter's `reasoning` object for every model, so a model
+	// models.dev adds later works without its own block: on sends
+	// `reasoning.effort`, off sends `reasoning.enabled = false`.
+	thinking-format "openrouter"
 
 	// MiniMax M3.1 Flash takes a nested `reasoning.effort` and always thinks:
 	// `reasoning.enabled = false` still returns reasoning tokens.
 	models "MiniMaxAI/MiniMax-M3.1-Flash" {
-		thinking-format "openrouter"
 		thinking-requires-effort #true
 		thinking-efforts "low" "medium" "high" "xhigh" "max"
-	}
-	// DeepSeek V4.1 Flash takes DeepSeek's own `thinking.type` toggle plus a
-	// top-level `reasoning_effort`, validated to low/high/max.
-	models "deepseek/deepseek-v4.1-flash" {
-		thinking-format "openai"
-		supports-reasoning-effort #true
-		reasoning-disable-mode "zai-thinking-disabled"
-		thinking-efforts "low" "high" "max"
 	}
 	// MiniMax M3 and Gemma 4 31B switch reasoning with `reasoning.enabled` and
 	// ignore any effort, so the ladder is one on-rung beside off: off sends
 	// `enabled: false`, and on replaces the effort with `enabled: true`.
 	models "minimax/minimax-m3" "google/gemma-4-31b-it" {
-		thinking-format "openrouter"
 		thinking-efforts "high"
 		when-thinking {
 			extra-body {
