@@ -2,7 +2,8 @@ import { isCatalogEndpointUrl } from "@oh-my-pi/pi-catalog/compat/catalog-endpoi
 import { logger } from "@oh-my-pi/pi-utils";
 import type { Api, FetchImpl, Model } from "../types";
 import { lastDispatchOrigin, transportFetch } from "../utils/transport-fetch";
-import { resolveAnthropicPrewarmTarget } from "./anthropic-http-options";
+import { resolveAnthropicBaseUrl, resolveAnthropicPrewarmTarget } from "./anthropic-http-options";
+import { isAnthropicMessagesModel } from "./transform-messages";
 
 /**
  * Minimum gap between warm-ups of one origin. Idle pooled sockets outlive it
@@ -11,8 +12,13 @@ import { resolveAnthropicPrewarmTarget } from "./anthropic-http-options";
  */
 const PREWARM_INTERVAL_MS = 30_000;
 const PREWARM_TIMEOUT_MS = 10_000;
+/** A host that has not answered a `HEAD` in this long counts as unreachable. */
+const PROBE_TIMEOUT_MS = 5_000;
+/** How long one probe answers for its origin; long enough to share between back-to-back callers. */
+const PROBE_CACHE_MS = 10_000;
 
 const prewarmedAt = new Map<string, number>();
+const probes = new Map<string, { at: number; reachable: Promise<boolean> }>();
 
 /**
  * Where a warm-up for {@link model} goes, or `undefined` when it must not be
@@ -72,7 +78,64 @@ export async function prewarmModelConnection(model: Model<Api>, options?: { fetc
 	}
 }
 
-/** Test hook: forgets every warm-up so the next call is not throttled. */
+/**
+ * Where a reachability probe for {@link model} goes. The warm-up target when
+ * there is one; otherwise the origin the model last sent to, or its configured
+ * base URL. Unlike a warm-up, gateways, custom providers and local servers are
+ * probed too: a local server is the one host that still answers offline.
+ */
+function resolveProbeTarget(model: Model<Api>): { origin: string; init: RequestInit } | undefined {
+	const warm = resolvePrewarmTarget(model);
+	if (warm) return warm;
+	const url =
+		lastDispatchOrigin(model) ?? (isAnthropicMessagesModel(model) ? resolveAnthropicBaseUrl(model) : model.baseUrl);
+	return url ? { origin: new URL(url).origin, init: {} } : undefined;
+}
+
+/**
+ * Whether {@link model}'s API host answers at all. Sends a credential-less
+ * `HEAD` through the same transport as real requests (proxy, extra CA, TLS
+ * options), so it fails exactly when a request would fail to connect. Any
+ * HTTP response counts as reachable; a rejected fetch or no answer within
+ * {@link PROBE_TIMEOUT_MS} does not. A model with no origin to probe counts as
+ * reachable. One probe per origin answers for {@link PROBE_CACHE_MS}.
+ */
+export function probeModelConnection(model: Model<Api>, options?: { fetch?: FetchImpl }): Promise<boolean> {
+	let target: { origin: string; init: RequestInit } | undefined;
+	try {
+		target = resolveProbeTarget(model);
+	} catch {
+		target = undefined;
+	}
+	if (!target) return Promise.resolve(true);
+	const { origin, init } = target;
+	const now = Date.now();
+	const cached = probes.get(origin);
+	if (cached && now - cached.at < PROBE_CACHE_MS) return cached.reachable;
+	const reachable = (async () => {
+		try {
+			const response = await transportFetch(model, options?.fetch)(origin, {
+				...init,
+				method: "HEAD",
+				headers: {},
+				signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+			});
+			await response.body?.cancel();
+			return true;
+		} catch (error) {
+			logger.debug("Model connection probe failed", {
+				origin,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return false;
+		}
+	})();
+	probes.set(origin, { at: now, reachable });
+	return reachable;
+}
+
+/** Test hook: forgets every warm-up and probe so the next call is not throttled or cached. */
 export function resetConnectionPrewarmForTesting(): void {
 	prewarmedAt.clear();
+	probes.clear();
 }

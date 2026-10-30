@@ -19,6 +19,7 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { probeModelConnection } from "@oh-my-pi/pi-ai/providers/connection-prewarm";
 import { shouldDropTruncatedThinkingOnlyAssistant } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
 import { fallbackCreditTargets } from "@oh-my-pi/pi-catalog/compat/fallback-credit";
@@ -2269,6 +2270,11 @@ export class TurnRecovery {
 			refusalWalk?: boolean;
 			/** The retry policy retries the failed model if this hop does not switch. */
 			sameModelRetryAvailable?: boolean;
+			/**
+			 * Set when the failed request never connected. A candidate whose host does
+			 * not answer a probe is skipped, and `unreachable` records that one was.
+			 */
+			fallbackProbe?: { unreachable: boolean };
 		},
 	): Promise<boolean> {
 		const ceiling = this.#host.thinkingLevelCeiling();
@@ -2388,6 +2394,12 @@ export class TurnRecovery {
 					if (!(error instanceof AIError.MissingApiKeyError)) throw error;
 				}
 				if (!apiKey) continue;
+				// The failed request never connected, which says nothing about the model.
+				// A fallback whose host does not answer either would fail the same way.
+				if (options?.fallbackProbe && !(await probeModelConnection(candidate))) {
+					options.fallbackProbe.unreachable = true;
+					continue;
+				}
 				const previousEditMode = this.#host.resolveActiveEditMode();
 				const previousSystemPrompt = [...this.#host.agent.state.systemPrompt];
 				const previousTools = [...this.#host.agent.state.tools];
@@ -2933,6 +2945,13 @@ export class TurnRecovery {
 			return maxDelayMs > 0 && waitMs > maxDelayMs && !waitForUsageReset;
 		};
 
+		// A request that never connected (no DNS, no route, refused) only switches to a
+		// fallback whose host answers a probe. When none does, the machine is offline:
+		// the same-model retry runs as usual and is announced as offline.
+		const networkFailure = AIError.classifyNetworkCause(errorMessage);
+		const fallbackProbe =
+			networkFailure !== undefined && networkFailure.kind !== "tls" ? { unreachable: false } : undefined;
+
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
 			// The retry budget bounds same-model retries against a failing provider. A
 			// classifier refusal is not that: retrying the same model reproduces it, and
@@ -2995,6 +3014,7 @@ export class TurnRecovery {
 								? parsedRetryAfterMs
 								: delayMs,
 						),
+					fallbackProbe,
 				});
 			}
 			// Auto fallback from a Fireworks Fast variant to its base model. Independent
@@ -3010,6 +3030,7 @@ export class TurnRecovery {
 				delayMs = parsedRetryAfterMs;
 			}
 		}
+		const offline = fallbackProbe?.unreachable === true && !switchedModel;
 
 		if (retryBudgetExhausted) {
 			if (!switchedModel && !switchedCredential) {
@@ -3090,6 +3111,7 @@ export class TurnRecovery {
 			delayMs,
 			errorMessage,
 			errorId: message.errorId,
+			offline: offline || undefined,
 		});
 		if (this.#host.abortInProgress() || this.#host.promptGeneration() !== generation) {
 			return this.#endCancelledRetry();

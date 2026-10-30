@@ -5,6 +5,7 @@
 ### Added
 
 - Added `waitForSibling` to `RotateCredentialOptions`; set it to `false` to skip the short sibling-unblock wait in `limits.rotate()` while still blocking the failed credential ([#17439](https://github.com/can1357/oh-my-pi/pull/17439) by [@wolfiesch](https://github.com/wolfiesch))
+- Added `probeModelConnection(model)` (`providers/connection-prewarm`), which reports whether a model's API host answers a credential-less `HEAD` sent through the same transport as its requests ([#PR](https://github.com/can1357/oh-my-pi/pull/PR) by [@Mannan-Goyal](https://github.com/Mannan-Goyal))
 
 ### Changed
 

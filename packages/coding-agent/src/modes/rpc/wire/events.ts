@@ -113,6 +113,10 @@ export const eventDefs = {
 		delayMs: "number.integer",
 		errorMessage: "string",
 		"errorId?": "number.integer",
+		"offline?": doc(
+			"boolean",
+			"The request could not connect and no fallback model's host answered either; the retry stays on this model.",
+		),
 	},
 	AutoRetryEndEvent: {
 		type: "'auto_retry_end'",

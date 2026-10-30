@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { buildAnthropicClientOptions } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { resolveAnthropicPrewarmTarget } from "@oh-my-pi/pi-ai/providers/anthropic-http-options";
-import { prewarmModelConnection, resetConnectionPrewarmForTesting } from "@oh-my-pi/pi-ai/providers/connection-prewarm";
+import {
+	prewarmModelConnection,
+	probeModelConnection,
+	resetConnectionPrewarmForTesting,
+} from "@oh-my-pi/pi-ai/providers/connection-prewarm";
 import type { FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import { resetDispatchOriginsForTesting, transportFetch } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -128,5 +132,32 @@ describe("prewarmModelConnection", () => {
 		);
 
 		expect(calls).toHaveLength(0);
+	});
+});
+
+describe("probeModelConnection", () => {
+	it("probes a local server's base URL before its first request", async () => {
+		// A fallback has never sent a request, and a local server is exactly the
+		// host a warm-up skips; the probe must still reach it to report it alive.
+		const { calls, fetch } = captureFetch();
+		const local = model("local-llm", "openai-completions", "http://127.0.0.1:11434/v1");
+
+		await expect(probeModelConnection(local, { fetch })).resolves.toBe(true);
+
+		expect(calls.map(call => [call.url, call.init.method])).toEqual([["http://127.0.0.1:11434", "HEAD"]]);
+	});
+
+	it("reports a host whose connection is rejected as unreachable, once per origin", async () => {
+		let requests = 0;
+		const fetch: FetchImpl = async () => {
+			requests++;
+			throw Object.assign(new TypeError("getaddrinfo ENOTFOUND api.openai.com"), { code: "ENOTFOUND" });
+		};
+		const openai = model("openai", "openai-responses", "https://api.openai.com/v1");
+
+		await expect(probeModelConnection(openai, { fetch })).resolves.toBe(false);
+		// A second chain entry on the same host reuses the answer instead of sending another probe.
+		await expect(probeModelConnection(openai, { fetch })).resolves.toBe(false);
+		expect(requests).toBe(1);
 	});
 });

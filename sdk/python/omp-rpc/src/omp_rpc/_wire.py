@@ -1104,6 +1104,8 @@ class AutoRetryStartEvent:
     delay_ms: int
     error_message: str
     error_id: int | None = None
+    offline: bool | None = None
+    """The request could not connect and no fallback model's host answered either; the retry stays on this model."""
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -2506,6 +2508,7 @@ def parse_auto_retry_start_event(value: object, path: str = "AutoRetryStartEvent
         delay_ms=required(payload, "delayMs", decode_int, path),
         error_message=required(payload, "errorMessage", decode_str, path),
         error_id=optional(payload, "errorId", decode_int, path),
+        offline=optional(payload, "offline", decode_bool, path),
     )
 
 

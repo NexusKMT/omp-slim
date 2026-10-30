@@ -3977,6 +3977,10 @@
 				},
 				"errorId": {
 					"type": "integer"
+				},
+				"offline": {
+					"type": "boolean",
+					"description": "The request could not connect and no fallback model's host answered either; the retry stays on this model."
 				}
 			},
 			"required": [

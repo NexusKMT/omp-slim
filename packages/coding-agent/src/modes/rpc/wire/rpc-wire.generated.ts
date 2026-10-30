@@ -913,6 +913,8 @@ export interface AutoRetryStartEvent {
 	delayMs: number;
 	errorMessage: string;
 	errorId?: number;
+	/** The request could not connect and no fallback model's host answered either; the retry stays on this model. */
+	offline?: boolean;
 }
 
 export interface AutoRetryEndEvent {
