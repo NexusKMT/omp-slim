@@ -14,24 +14,27 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { asGlobalFetch } from "./helpers/fetch-mock";
 
-// What a provider surfaces when the request never connected: the Anthropic
-// client's rewrite of a `getaddrinfo ENOTFOUND` rejection, as seen offline.
+// What providers surface when the request never connected: `networkFailureMessage`'s
+// rewrite of a `getaddrinfo ENOTFOUND` and of an `ECONNREFUSED` rejection.
 const CONNECT_FAILURE =
 	"Couldn't reach api.anthropic.com (getaddrinfo ENOTFOUND). Check the URL, your network, or proxy.";
+const CONNECTION_REFUSED =
+	"Couldn't connect to api.anthropic.com (connection refused). Check that the server is running and reachable.";
 const LOCAL_ORIGIN = "http://127.0.0.1:11434";
 
 type RetryStart = Extract<AgentSessionEvent, { type: "auto_retry_start" }>;
+type RetryEnd = Extract<AgentSessionEvent, { type: "auto_retry_end" }>;
 type FallbackApplied = Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>;
+
+const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+if (!primaryModel || !getBundledModel("openai", "gpt-4o-mini"))
+	throw new Error("Expected bundled test models to exist");
 
 describe("AgentSession fallback chain when the request never connected", () => {
 	let tempDir: TempDir;
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
 	let session: AgentSession | undefined;
-
-	const primary = getBundledModel("anthropic", "claude-sonnet-4-5");
-	const cloudFallback = getBundledModel("openai", "gpt-4o-mini");
-	if (!primary || !cloudFallback) throw new Error("Expected bundled test models to exist");
 
 	beforeAll(async () => {
 		tempDir = TempDir.createSync("@pi-offline-fallback-");
@@ -88,17 +91,22 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		return probed;
 	}
 
-	/** Runs one prompt whose first request on the primary fails with `firstError`; every later request answers. */
-	async function runTurn(
-		firstError: string,
-		chain: string[],
-	): Promise<{ requested: string[]; retryStarts: RetryStart[]; applied: FallbackApplied[] }> {
+	interface Turn {
+		requested: string[];
+		retryStarts: RetryStart[];
+		retryEnds: RetryEnd[];
+		applied: FallbackApplied[];
+		done: Promise<void>;
+	}
+
+	/** Starts one prompt whose first request on `active` fails with `firstError`; every later request answers. */
+	function startTurn(firstError: string, chain: string[], active: Model = primaryModel): Turn {
 		const requested: string[] = [];
 		const mock = createMockModel();
 		let failed = false;
 		const agent = new Agent({
 			getApiKey: (model: Model) => `${model.provider}-test-key`,
-			initialState: { model: primary, systemPrompt: ["Test"], tools: [], messages: [] },
+			initialState: { model: active, systemPrompt: ["Test"], tools: [], messages: [] },
 			streamFn: (model, context, options) => {
 				requested.push(`${model.provider}/${model.id}`);
 				const response: MockResponse = failed ? { content: ["ok"] } : { throw: firstError };
@@ -112,28 +120,54 @@ describe("AgentSession fallback chain when the request never connected", () => {
 			"retry.baseDelayMs": 1,
 			"retry.fallbackChains": { default: chain },
 		});
-		settings.setModelRole("default", "anthropic/claude-sonnet-4-5");
-		session = new AgentSession({ agent, sessionManager: SessionManager.inMemory(), settings, modelRegistry });
-		const retryStarts: RetryStart[] = [];
-		const applied: FallbackApplied[] = [];
-		session.subscribe(event => {
-			if (event.type === "auto_retry_start") retryStarts.push(event);
-			if (event.type === "retry_fallback_applied") applied.push(event);
+		settings.setModelRole("default", `${active.provider}/${active.id}`);
+		const current = new AgentSession({ agent, sessionManager: SessionManager.inMemory(), settings, modelRegistry });
+		session = current;
+		const turn: Turn = { requested, retryStarts: [], retryEnds: [], applied: [], done: Promise.resolve() };
+		current.subscribe(event => {
+			if (event.type === "auto_retry_start") turn.retryStarts.push(event);
+			if (event.type === "auto_retry_end") turn.retryEnds.push(event);
+			if (event.type === "retry_fallback_applied") turn.applied.push(event);
 		});
-		await session.prompt("say ok");
-		await session.waitForIdle();
-		return { requested, retryStarts, applied };
+		turn.done = current.prompt("say ok").then(() => current.waitForIdle());
+		return turn;
 	}
 
-	it("stays on the primary and reports offline when the fallback's host does not answer either", async () => {
+	async function runTurn(firstError: string, chain: string[], active?: Model): Promise<Turn> {
+		const turn = startTurn(firstError, chain, active);
+		await turn.done;
+		return turn;
+	}
+
+	it.each([
+		["a DNS failure", CONNECT_FAILURE],
+		["a refused connection", CONNECTION_REFUSED],
+	])("stays on the primary after %s when the fallback's host does not answer either", async (_label, error) => {
 		// Regression: offline, the chain switched to a fallback that failed the same way.
 		const probed = stubNetwork([]);
 
-		const { requested, retryStarts, applied } = await runTurn(CONNECT_FAILURE, ["openai/gpt-4o-mini"]);
+		const { requested, retryStarts, applied } = await runTurn(error, ["openai/gpt-4o-mini"]);
 
 		expect(probed).toEqual(["https://api.openai.com"]);
 		expect(applied).toEqual([]);
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"]);
+		expect(retryStarts.map(event => event.offline)).toEqual([true]);
+	});
+
+	it("stays on the primary when the fallback shares its unreachable host", async () => {
+		const sameHostPrimary = getBundledModel("openai", "gpt-4o");
+		if (!sameHostPrimary) throw new Error("Expected bundled openai/gpt-4o");
+		const probed = stubNetwork([]);
+
+		const { requested, retryStarts, applied } = await runTurn(
+			"Couldn't reach api.openai.com (getaddrinfo ENOTFOUND). Check the URL, your network, or proxy.",
+			["openai/gpt-4o-mini"],
+			sameHostPrimary,
+		);
+
+		expect(probed).toEqual(["https://api.openai.com"]);
+		expect(applied).toEqual([]);
+		expect(requested).toEqual(["openai/gpt-4o", "openai/gpt-4o"]);
 		expect(retryStarts.map(event => event.offline)).toEqual([true]);
 	});
 
@@ -162,9 +196,36 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		expect(retryStarts.map(event => event.offline)).toEqual([undefined]);
 	});
 
+	it("ends the retry at once when it is cancelled during a probe that gets no answer", async () => {
+		// A route that drops packets: the probe never answers, and the stub ignores
+		// the probe's own timeout, so the turn only settles if the cancel reaches it.
+		const probeStarted = Promise.withResolvers<string>();
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			asGlobalFetch(input => {
+				probeStarted.resolve(String(input));
+				return new Promise<Response>(() => {});
+			}),
+		);
+
+		const turn = startTurn(CONNECT_FAILURE, ["openai/gpt-4o-mini"]);
+		expect(await probeStarted.promise).toBe("https://api.openai.com");
+		session?.abortRetry();
+		await turn.done;
+
+		expect(turn.applied).toEqual([]);
+		expect(turn.retryStarts).toEqual([]);
+		expect(turn.requested).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(turn.retryEnds.map(event => event.finalError)).toEqual(["Retry cancelled"]);
+	});
+
 	it.each([
 		["a rate limit", "429 rate limit exceeded"],
 		["a server error", "overloaded_error: provider returned error 503"],
+		// The host answered the TLS handshake, so the network is up.
+		[
+			"a TLS failure",
+			"TLS certificate verification failed for api.anthropic.com (UNABLE_TO_VERIFY_LEAF_SIGNATURE). If you're behind a TLS-inspecting proxy, its CA may need to be trusted.",
+		],
 	])("walks the chain for %s without probing, as before", async (_label, error) => {
 		// Every host rejects: a probe here would skip the fallback.
 		const probed = stubNetwork([]);

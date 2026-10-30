@@ -201,6 +201,7 @@ export function extensionEventFromSessionEvent(
 				delayMs: event.delayMs,
 				errorMessage: event.errorMessage,
 				errorId: event.errorId,
+				offline: event.offline,
 			};
 		case "auto_retry_end":
 			return {

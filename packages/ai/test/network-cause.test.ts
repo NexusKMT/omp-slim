@@ -149,6 +149,8 @@ describe("network failure classification flags", () => {
 			const message = AIError.networkFailureMessage(cause, "https://api.anthropic.com/v1/messages");
 			expect(AIError.classifyNetworkCause(cause)?.kind).toBe(kind);
 			if (message === undefined) throw new Error(`Expected a ${kind} network-failure sentence`);
+			// Turn recovery sees only the sentence: it must classify as the error did.
+			expect(AIError.classifyNetworkCause(message)?.kind).toBe(kind);
 			expect(AIError.isProviderRetryableError(new Error(message))).toBe(true);
 			expect(AIError.is(AIError.classify(new Error(message)), AIError.Flag.Transient)).toBe(true);
 		}

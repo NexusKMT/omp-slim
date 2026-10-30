@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { buildAnthropicClientOptions } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { resolveAnthropicPrewarmTarget } from "@oh-my-pi/pi-ai/providers/anthropic-http-options";
 import {
@@ -159,5 +159,45 @@ describe("probeModelConnection", () => {
 		// A second chain entry on the same host reuses the answer instead of sending another probe.
 		await expect(probeModelConnection(openai, { fetch })).resolves.toBe(false);
 		expect(requests).toBe(1);
+	});
+
+	it("reports a host that never answers as unreachable once the probe's timeout fires", async () => {
+		// A route that drops packets never rejects; only the timeout ends the probe.
+		// The fake signal is already timed out, standing in for the 5 s wait.
+		vi.spyOn(AbortSignal, "timeout").mockImplementation(() =>
+			AbortSignal.abort(new DOMException("The operation timed out.", "TimeoutError")),
+		);
+		// Without a deadline the probe would wait forever; fail the test instead of hanging it.
+		const noDeadline = Promise.withResolvers<never>();
+		const fetch: FetchImpl = (_input, init) => {
+			const { promise, reject } = Promise.withResolvers<Response>();
+			const signal = init?.signal;
+			if (!signal) noDeadline.reject(new Error("the probe sent no deadline"));
+			else if (signal.aborted) reject(signal.reason);
+			else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+			return promise;
+		};
+
+		try {
+			const probe = probeModelConnection(model("openai", "openai-responses", "https://api.openai.com/v1"), {
+				fetch,
+			});
+			await expect(Promise.race([probe, noDeadline.promise])).resolves.toBe(false);
+		} finally {
+			vi.restoreAllMocks();
+		}
+	});
+
+	it("sends the probe through the provider's proxy, like its requests", async () => {
+		const { calls, fetch } = captureFetch();
+		await withEnv({ PI_PROXY_PROBE_PROXY_TEST: "http://proxy.corp.example:3128" }, async () => {
+			await probeModelConnection(model("probe-proxy-test", "openai-completions", "https://llm.example/v1"), {
+				fetch,
+			});
+		});
+
+		expect(calls.map(call => [call.url, "proxy" in call.init ? call.init.proxy : undefined])).toEqual([
+			["https://llm.example", "http://proxy.corp.example:3128"],
+		]);
 	});
 });

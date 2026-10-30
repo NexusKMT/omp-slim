@@ -99,39 +99,56 @@ function resolveProbeTarget(model: Model<Api>): { origin: string; init: RequestI
  * HTTP response counts as reachable; a rejected fetch or no answer within
  * {@link PROBE_TIMEOUT_MS} does not. A model with no origin to probe counts as
  * reachable. One probe per origin answers for {@link PROBE_CACHE_MS}.
+ *
+ * `signal` stops this caller's wait only, resolving `false`: the shared probe
+ * keeps running for any other caller of the same origin.
  */
-export function probeModelConnection(model: Model<Api>, options?: { fetch?: FetchImpl }): Promise<boolean> {
+export function probeModelConnection(
+	model: Model<Api>,
+	options?: { fetch?: FetchImpl; signal?: AbortSignal },
+): Promise<boolean> {
 	let target: { origin: string; init: RequestInit } | undefined;
 	try {
 		target = resolveProbeTarget(model);
 	} catch {
+		// Resolving Anthropic's TLS options throws on an unusable CA or
+		// client-certificate setup, which the real request reports.
 		target = undefined;
 	}
 	if (!target) return Promise.resolve(true);
 	const { origin, init } = target;
 	const now = Date.now();
 	const cached = probes.get(origin);
-	if (cached && now - cached.at < PROBE_CACHE_MS) return cached.reachable;
-	const reachable = (async () => {
-		try {
-			const response = await transportFetch(model, options?.fetch)(origin, {
-				...init,
-				method: "HEAD",
-				headers: {},
-				signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-			});
-			await response.body?.cancel();
-			return true;
-		} catch (error) {
-			logger.debug("Model connection probe failed", {
-				origin,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			return false;
-		}
-	})();
-	probes.set(origin, { at: now, reachable });
-	return reachable;
+	let reachable = cached && now - cached.at < PROBE_CACHE_MS ? cached.reachable : undefined;
+	if (!reachable) {
+		reachable = (async () => {
+			try {
+				const response = await transportFetch(model, options?.fetch)(origin, {
+					...init,
+					method: "HEAD",
+					headers: {},
+					signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+				});
+				await response.body?.cancel();
+				return true;
+			} catch (error) {
+				logger.debug("Model connection probe failed", {
+					origin,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				return false;
+			}
+		})();
+		probes.set(origin, { at: now, reachable });
+	}
+	const signal = options?.signal;
+	if (!signal) return reachable;
+	if (signal.aborted) return Promise.resolve(false);
+	const { promise, resolve } = Promise.withResolvers<boolean>();
+	const onAbort = (): void => resolve(false);
+	signal.addEventListener("abort", onAbort, { once: true });
+	void reachable.then(resolve).finally(() => signal.removeEventListener("abort", onAbort));
+	return promise;
 }
 
 /** Test hook: forgets every warm-up and probe so the next call is not throttled or cached. */

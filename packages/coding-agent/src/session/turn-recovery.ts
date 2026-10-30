@@ -2273,8 +2273,9 @@ export class TurnRecovery {
 			/**
 			 * Set when the failed request never connected. A candidate whose host does
 			 * not answer a probe is skipped, and `unreachable` records that one was.
+			 * An aborted `signal` ends the walk without a switch.
 			 */
-			fallbackProbe?: { unreachable: boolean };
+			fallbackProbe?: { unreachable: boolean; signal: AbortSignal };
 		},
 	): Promise<boolean> {
 		const ceiling = this.#host.thinkingLevelCeiling();
@@ -2396,9 +2397,13 @@ export class TurnRecovery {
 				if (!apiKey) continue;
 				// The failed request never connected, which says nothing about the model.
 				// A fallback whose host does not answer either would fail the same way.
-				if (options?.fallbackProbe && !(await probeModelConnection(candidate))) {
-					options.fallbackProbe.unreachable = true;
-					continue;
+				if (options?.fallbackProbe) {
+					const reachable = await probeModelConnection(candidate, { signal: options.fallbackProbe.signal });
+					if (options.fallbackProbe.signal.aborted) return false;
+					if (!reachable) {
+						options.fallbackProbe.unreachable = true;
+						continue;
+					}
 				}
 				const previousEditMode = this.#host.resolveActiveEditMode();
 				const previousSystemPrompt = [...this.#host.agent.state.systemPrompt];
@@ -2945,12 +2950,20 @@ export class TurnRecovery {
 			return maxDelayMs > 0 && waitMs > maxDelayMs && !waitForUsageReset;
 		};
 
-		// A request that never connected (no DNS, no route, refused) only switches to a
-		// fallback whose host answers a probe. When none does, the machine is offline:
-		// the same-model retry runs as usual and is announced as offline.
+		// A request that never connected (no DNS, no route, connection refused) only
+		// switches to a fallback whose host answers a probe. When none does, the
+		// machine is offline: the same-model retry runs as usual and is announced as
+		// offline. A TLS failure reached the host, so it walks the chain as before.
+		// `abortRetry()` cancels the probes like the backoff sleep below; a route that
+		// drops packets would otherwise hold the cancel for the probe timeout.
 		const networkFailure = AIError.classifyNetworkCause(errorMessage);
-		const fallbackProbe =
-			networkFailure !== undefined && networkFailure.kind !== "tls" ? { unreachable: false } : undefined;
+		const probeAbortController =
+			networkFailure !== undefined && networkFailure.kind !== "tls" ? new AbortController() : undefined;
+		const fallbackProbe = probeAbortController && { unreachable: false, signal: probeAbortController.signal };
+		if (probeAbortController) {
+			this.#retryAbortController?.abort();
+			this.#retryAbortController = probeAbortController;
+		}
 
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
 			// The retry budget bounds same-model retries against a failing provider. A
@@ -3029,6 +3042,11 @@ export class TurnRecovery {
 			} else if (usageLimitWaitMs === undefined && parsedRetryAfterMs && parsedRetryAfterMs > delayMs) {
 				delayMs = parsedRetryAfterMs;
 			}
+		}
+		if (probeAbortController) {
+			if (this.#retryAbortController !== probeAbortController) return false;
+			this.#retryAbortController = undefined;
+			if (probeAbortController.signal.aborted) return this.#endCancelledRetry();
 		}
 		const offline = fallbackProbe?.unreachable === true && !switchedModel;
 
