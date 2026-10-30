@@ -142,10 +142,15 @@ function generateSnapshotScript(shell: string, snapshotPath: string, rcFile: str
 	// `command not found: __zsh_like_cd`. Referencing is lexical (the body
 	// text is scanned, not interpreted), so words in strings or comments can
 	// only over-include functions the user actually defined — never invent
-	// missing ones. Core tools stay excluded even when referenced, so
-	// `greet() { ls -la; }` keeps `greet` without redefining `ls`.
-	// `_`-prefixed names never seed the closure: completion helpers and
-	// other framework internals are only kept when a kept body calls them.
+	// missing ones. The token regex spans the full shell function-name
+	// alphabet (letters, digits, `_`, `.`, `-`) so hyphenated helpers like
+	// `_private-helper` are not split into mismatching halves; candidates are
+	// still intersected with the exact function-name list, so wider tokens
+	// cannot match anything the user did not define. Core tools stay excluded
+	// even when referenced, so `greet() { ls -la; }` keeps `greet` without
+	// redefining `ls`. `_`-prefixed names never seed the closure: completion
+	// helpers and other framework internals are only kept when a kept body
+	// calls them.
 	const listFunctionNames = isZsh ? "typeset +f" : "declare -F | cut -d' ' -f3";
 	const printFunction = isZsh ? "typeset -f" : "declare -f";
 	const functionExtractor = `# Force autoload all functions first
@@ -160,7 +165,7 @@ while :; do
       ${printFunction} "$__omp_f" 2>/dev/null
    done)
    __omp_next=$({ printf '%s\n' "$__omp_names"
-      printf '%s\n' "$__omp_bodies" | grep -oE '[A-Za-z_][A-Za-z0-9_]*' | sort -u \\
+      printf '%s\n' "$__omp_bodies" | grep -oE '[A-Za-z_][A-Za-z0-9_.-]*' | sort -u \\
          | grep -xF -f <(printf '%s\n' "$__omp_all") \\
          | grep -vE '${commonFunctionRegex}'
    } | sort -u)

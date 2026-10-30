@@ -311,7 +311,9 @@ describe("getOrCreateSnapshot", () => {
 			// `command not found: __zsh_like_cd`. The fix grows the kept set to a
 			// dependency closure: underscore helpers enter the snapshot only when
 			// a kept body references them; unrelated private functions still drop;
-			// core tools stay excluded even when referenced.
+			// core tools stay excluded even when referenced. Hyphenated names
+			// (`_private-helper`) are legal shell function names and must not be
+			// split into mismatching tokens by the body scan.
 			const home = await fs.mkdtemp(path.join(os.tmpdir(), "omp-snap-closure-"));
 			await fs.writeFile(
 				path.join(home, ".bashrc"),
@@ -323,6 +325,9 @@ describe("getOrCreateSnapshot", () => {
 					`z () { __zoxide_cd "$@"; }`,
 					`greet () { ls -la; }`,
 					`_unrelated_private () { :; }`,
+					// Shell-valid name with a hyphen, referenced by a kept body.
+					`_hyphen-helper () { echo helper-ok; }`,
+					`use_hyphen () { _hyphen-helper; }`,
 					``,
 				].join("\n"),
 			);
@@ -336,22 +341,26 @@ describe("getOrCreateSnapshot", () => {
 			expect(snapshotPath).not.toBeNull();
 			const content = await fs.readFile(snapshotPath!, "utf8");
 
-			// Referenced private helpers must be captured with the wrappers.
+			// Referenced private helpers must be captured with the wrappers —
+			// including the hyphenated one.
 			expect(content).toContain(`__zsh_like_cd ()`);
 			expect(content).toContain(`__zoxide_cd ()`);
+			expect(content).toContain(`_hyphen-helper ()`);
 			// Unreferenced private functions and core tools stay out.
 			expect(content).not.toContain(`_unrelated_private ()`);
 			expect(content).not.toMatch(/^ls \(\)$/m);
 
 			// Replay: the exact failure mode from the field — sourcing the snapshot
-			// and running `cd` used to exit 127 with `command not found`.
+			// and running `cd` used to exit 127 with `command not found`. The
+			// hyphenated helper exercises the body-scan name alphabet: a split
+			// `_hyphen`/`helper` pair drops the helper and fails the same way.
 			const replay = Bun.spawn(
 				[
 					realBash,
 					"--noprofile",
 					"--norc",
 					"-c",
-					`source "$1"; cd "$2" && pwd && z "$2" >/dev/null 2>&1; echo "z_rc=$?"`,
+					`source "$1"; cd "$2" && pwd && z "$2" >/dev/null 2>&1; echo "z_rc=$?"; use_hyphen`,
 					"_",
 					snapshotPath!,
 					home,
@@ -362,7 +371,7 @@ describe("getOrCreateSnapshot", () => {
 			const stderr = await readStream(replay.stderr as ReadableStream<Uint8Array> | null);
 			await replay.exited;
 			expect({ exitCode: replay.exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
-			expect(stdout).toBe(`${home}\nz_rc=0\n`);
+			expect(stdout).toBe(`${home}\nz_rc=0\nhelper-ok\n`);
 		},
 	);
 
