@@ -142,7 +142,7 @@ describe("probeModelConnection", () => {
 		const { calls, fetch } = captureFetch();
 		const local = model("local-llm", "openai-completions", "http://127.0.0.1:11434/v1");
 
-		await expect(probeModelConnection(local, { fetch })).resolves.toBe(true);
+		await expect(probeModelConnection(local, { apiKey: "local-key", fetch })).resolves.toBe(true);
 
 		expect(calls.map(call => [call.url, call.init.method])).toEqual([["http://127.0.0.1:11434", "HEAD"]]);
 	});
@@ -155,10 +155,52 @@ describe("probeModelConnection", () => {
 		};
 		const openai = model("openai", "openai-responses", "https://api.openai.com/v1");
 
-		await expect(probeModelConnection(openai, { fetch })).resolves.toBe(false);
+		await expect(probeModelConnection(openai, { apiKey: "sk-test", fetch })).resolves.toBe(false);
 		// A second chain entry on the same host reuses the answer instead of sending another probe.
-		await expect(probeModelConnection(openai, { fetch })).resolves.toBe(false);
+		await expect(probeModelConnection(openai, { apiKey: "sk-test", fetch })).resolves.toBe(false);
 		expect(requests).toBe(1);
+	});
+
+	it.each([
+		[
+			"MOONSHOT_BASE_URL",
+			"moonshot",
+			"https://api.moonshot.ai/v1",
+			"https://api.moonshot.cn/v1",
+			"https://api.moonshot.cn",
+		],
+		["XAI_BASE_URL", "xai", "https://api.x.ai/v1", "https://xai-proxy.example/v1", "https://xai-proxy.example"],
+	])(
+		"probes the host %s sends requests to before the first request",
+		async (env, provider, baseUrl, override, origin) => {
+			const { calls, fetch } = captureFetch();
+			await withEnv({ [env]: override }, async () => {
+				await probeModelConnection(model(provider, "openai-completions", baseUrl), { apiKey: "sk-test", fetch });
+			});
+
+			expect(calls.map(call => call.url)).toEqual([origin]);
+		},
+	);
+
+	it("probes an Anthropic gateway with the real request's URL and TLS options", async () => {
+		const { calls, fetch } = captureFetch();
+		await withEnv({ ANTHROPIC_BASE_URL: "https://llm-gateway.corp.example" }, async () => {
+			await probeModelConnection(ANTHROPIC, { apiKey: "sk-ant-api-test", fetch });
+			const real = buildAnthropicClientOptions({ model: ANTHROPIC, apiKey: "sk-ant-api-test", extraBetas: [] });
+			expect(calls.map(call => [call.url, call.init.tls])).toEqual([
+				["https://llm-gateway.corp.example", real.fetchOptions?.tls],
+			]);
+		});
+	});
+
+	it("treats a model whose request route it cannot work out as reachable, without probing", async () => {
+		// Never skip a fallback on a guessed URL: an API with its own endpoint rules
+		// that has not sent a request yet keeps today's behaviour.
+		const { calls, fetch } = captureFetch();
+		const google = model("google", "google-generative-ai", "https://generativelanguage.googleapis.com/v1beta");
+
+		await expect(probeModelConnection(google, { apiKey: "g-test", fetch })).resolves.toBe(true);
+		expect(calls).toHaveLength(0);
 	});
 
 	it("reports a host that never answers as unreachable once the probe's timeout fires", async () => {
@@ -180,6 +222,7 @@ describe("probeModelConnection", () => {
 
 		try {
 			const probe = probeModelConnection(model("openai", "openai-responses", "https://api.openai.com/v1"), {
+				apiKey: "sk-test",
 				fetch,
 			});
 			await expect(Promise.race([probe, noDeadline.promise])).resolves.toBe(false);
@@ -192,6 +235,7 @@ describe("probeModelConnection", () => {
 		const { calls, fetch } = captureFetch();
 		await withEnv({ PI_PROXY_PROBE_PROXY_TEST: "http://proxy.corp.example:3128" }, async () => {
 			await probeModelConnection(model("probe-proxy-test", "openai-completions", "https://llm.example/v1"), {
+				apiKey: "sk-test",
 				fetch,
 			});
 		});

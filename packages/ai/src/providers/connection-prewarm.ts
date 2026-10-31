@@ -2,7 +2,12 @@ import { isCatalogEndpointUrl } from "@oh-my-pi/pi-catalog/compat/catalog-endpoi
 import { logger } from "@oh-my-pi/pi-utils";
 import type { Api, FetchImpl, Model } from "../types";
 import { lastDispatchOrigin, transportFetch } from "../utils/transport-fetch";
-import { resolveAnthropicBaseUrl, resolveAnthropicPrewarmTarget } from "./anthropic-http-options";
+import {
+	buildClaudeCodeTlsFetchOptions,
+	resolveAnthropicBaseUrl,
+	resolveAnthropicPrewarmTarget,
+} from "./anthropic-http-options";
+import { OPENAI_COMPLETIONS_BASE_URL_OPTIONS, resolveOpenAIRequestBaseUrl } from "./openai-base-url";
 import { isAnthropicMessagesModel } from "./transform-messages";
 
 /**
@@ -79,17 +84,42 @@ export async function prewarmModelConnection(model: Model<Api>, options?: { fetc
 }
 
 /**
- * Where a reachability probe for {@link model} goes. The warm-up target when
- * there is one; otherwise the origin the model last sent to, or its configured
- * base URL. Unlike a warm-up, gateways, custom providers and local servers are
- * probed too: a local server is the one host that still answers offline.
+ * Where a reachability probe for {@link model} goes, resolved by the same code
+ * its requests use, or `undefined` when that route cannot be worked out here.
+ * Unlike a warm-up, gateways, custom providers and local servers are probed
+ * too: a local server is the one host that still answers offline.
+ *
+ * - `anthropic-messages`: the client's base URL and TLS options for `apiKey`.
+ * - `openai-completions`, `openai-responses`: the origin the model last sent
+ *   to, else the request setup's base URL for `apiKey` (env overrides, Copilot
+ *   plan host, credential endpoints).
+ * - Any other API: only the origin the model last sent to. Those transports
+ *   have their own endpoint rules, so before a first request there is nothing
+ *   to probe that is not a guess.
  */
-function resolveProbeTarget(model: Model<Api>): { origin: string; init: RequestInit } | undefined {
-	const warm = resolvePrewarmTarget(model);
-	if (warm) return warm;
-	const url =
-		lastDispatchOrigin(model) ?? (isAnthropicMessagesModel(model) ? resolveAnthropicBaseUrl(model) : model.baseUrl);
-	return url ? { origin: new URL(url).origin, init: {} } : undefined;
+function resolveProbeTarget(
+	model: Model<Api>,
+	apiKey: string | undefined,
+): { origin: string; init: RequestInit } | undefined {
+	let url: string | undefined;
+	let init: RequestInit = {};
+	if (isAnthropicMessagesModel(model)) {
+		url = resolveAnthropicBaseUrl(model, apiKey);
+		if (url) init = { ...buildClaudeCodeTlsFetchOptions(model, url) };
+	} else if (model.api === "openai-completions" || model.api === "openai-responses") {
+		url =
+			lastDispatchOrigin(model) ??
+			(apiKey === undefined
+				? undefined
+				: resolveOpenAIRequestBaseUrl(
+						model,
+						apiKey,
+						model.api === "openai-completions" ? OPENAI_COMPLETIONS_BASE_URL_OPTIONS : undefined,
+					));
+	} else {
+		url = lastDispatchOrigin(model);
+	}
+	return url ? { origin: new URL(url).origin, init } : undefined;
 }
 
 /**
@@ -97,19 +127,21 @@ function resolveProbeTarget(model: Model<Api>): { origin: string; init: RequestI
  * `HEAD` through the same transport as real requests (proxy, extra CA, TLS
  * options), so it fails exactly when a request would fail to connect. Any
  * HTTP response counts as reachable; a rejected fetch or no answer within
- * {@link PROBE_TIMEOUT_MS} does not. A model with no origin to probe counts as
- * reachable. One probe per origin answers for {@link PROBE_CACHE_MS}.
+ * {@link PROBE_TIMEOUT_MS} does not. `apiKey` is the credential the request
+ * would use: some providers route by it. A model whose route cannot be worked
+ * out counts as reachable, so a caller never skips it on a guessed URL. One
+ * probe per origin answers for {@link PROBE_CACHE_MS}.
  *
  * `signal` stops this caller's wait only, resolving `false`: the shared probe
  * keeps running for any other caller of the same origin.
  */
 export function probeModelConnection(
 	model: Model<Api>,
-	options?: { fetch?: FetchImpl; signal?: AbortSignal },
+	options?: { apiKey?: string; fetch?: FetchImpl; signal?: AbortSignal },
 ): Promise<boolean> {
 	let target: { origin: string; init: RequestInit } | undefined;
 	try {
-		target = resolveProbeTarget(model);
+		target = resolveProbeTarget(model, options?.apiKey);
 	} catch {
 		// Resolving Anthropic's TLS options throws on an unusable CA or
 		// client-certificate setup, which the real request reports.

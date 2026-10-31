@@ -2398,7 +2398,10 @@ export class TurnRecovery {
 				// The failed request never connected, which says nothing about the model.
 				// A fallback whose host does not answer either would fail the same way.
 				if (options?.fallbackProbe) {
-					const reachable = await probeModelConnection(candidate, { signal: options.fallbackProbe.signal });
+					const reachable = await probeModelConnection(candidate, {
+						apiKey,
+						signal: options.fallbackProbe.signal,
+					});
 					if (options.fallbackProbe.signal.aborted) return false;
 					if (!reachable) {
 						options.fallbackProbe.unreachable = true;
