@@ -19,11 +19,16 @@ const PREWARM_INTERVAL_MS = 30_000;
 const PREWARM_TIMEOUT_MS = 10_000;
 /** A host that has not answered a `HEAD` in this long counts as unreachable. */
 const PROBE_TIMEOUT_MS = 5_000;
-/** How long one probe answers for its origin; long enough to share between back-to-back callers. */
+/** How long one probe answers for its provider and origin; long enough to share between back-to-back callers. */
 const PROBE_CACHE_MS = 10_000;
 
 const prewarmedAt = new Map<string, number>();
-const probes = new Map<string, { at: number; reachable: Promise<boolean> }>();
+/**
+ * Probes by transport, then by provider and origin. A caller-supplied fetch is
+ * its own transport, and each provider has its own proxy and TLS options, so an
+ * answer is only reused where the request would travel the same way.
+ */
+const probes = new Map<FetchImpl | undefined, Map<string, { at: number; reachable: Promise<boolean> }>>();
 
 /**
  * Where a warm-up for {@link model} goes, or `undefined` when it must not be
@@ -130,7 +135,7 @@ function resolveProbeTarget(
  * {@link PROBE_TIMEOUT_MS} does not. `apiKey` is the credential the request
  * would use: some providers route by it. A model whose route cannot be worked
  * out counts as reachable, so a caller never skips it on a guessed URL. One
- * probe per origin answers for {@link PROBE_CACHE_MS}.
+ * probe per transport, provider and origin answers for {@link PROBE_CACHE_MS}.
  *
  * `signal` stops this caller's wait only, resolving `false`: the shared probe
  * keeps running for any other caller of the same origin.
@@ -150,7 +155,13 @@ export function probeModelConnection(
 	if (!target) return Promise.resolve(true);
 	const { origin, init } = target;
 	const now = Date.now();
-	const cached = probes.get(origin);
+	let transportProbes = probes.get(options?.fetch);
+	if (!transportProbes) {
+		transportProbes = new Map();
+		probes.set(options?.fetch, transportProbes);
+	}
+	const key = `${model.provider}\u0000${origin}`;
+	const cached = transportProbes.get(key);
 	let reachable = cached && now - cached.at < PROBE_CACHE_MS ? cached.reachable : undefined;
 	if (!reachable) {
 		reachable = (async () => {
@@ -171,7 +182,7 @@ export function probeModelConnection(
 				return false;
 			}
 		})();
-		probes.set(origin, { at: now, reachable });
+		transportProbes.set(key, { at: now, reachable });
 	}
 	const signal = options?.signal;
 	if (!signal) return reachable;

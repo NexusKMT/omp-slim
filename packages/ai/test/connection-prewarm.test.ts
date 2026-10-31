@@ -147,7 +147,7 @@ describe("probeModelConnection", () => {
 		expect(calls.map(call => [call.url, call.init.method])).toEqual([["http://127.0.0.1:11434", "HEAD"]]);
 	});
 
-	it("reports a host whose connection is rejected as unreachable, once per origin", async () => {
+	it("reports a host whose connection is rejected as unreachable, once per origin and transport", async () => {
 		let requests = 0;
 		const fetch: FetchImpl = async () => {
 			requests++;
@@ -159,6 +159,32 @@ describe("probeModelConnection", () => {
 		// A second chain entry on the same host reuses the answer instead of sending another probe.
 		await expect(probeModelConnection(openai, { apiKey: "sk-test", fetch })).resolves.toBe(false);
 		expect(requests).toBe(1);
+	});
+
+	it("does not reuse one transport's failed probe for another transport to the same host", async () => {
+		const openai = model("openai", "openai-responses", "https://api.openai.com/v1");
+		const rejecting: FetchImpl = async () => {
+			throw Object.assign(new TypeError("getaddrinfo ENOTFOUND api.openai.com"), { code: "ENOTFOUND" });
+		};
+		const { calls, fetch: responding } = captureFetch();
+
+		await expect(probeModelConnection(openai, { apiKey: "sk-test", fetch: rejecting })).resolves.toBe(false);
+		await expect(probeModelConnection(openai, { apiKey: "sk-test", fetch: responding })).resolves.toBe(true);
+		expect(calls).toHaveLength(1);
+	});
+
+	it("does not reuse one provider's failed probe for another provider on the same host", async () => {
+		// Each provider has its own proxy (`PI_PROXY_<PROVIDER>`) and TLS options.
+		const rejectUnlessProxied: FetchImpl = async (_input, init) => {
+			if ("proxy" in (init ?? {})) return new Response(null, { status: 404 });
+			throw Object.assign(new TypeError("getaddrinfo ENOTFOUND gateway.example"), { code: "ENOTFOUND" });
+		};
+		await withEnv({ PI_PROXY_PROXIED_GW: "http://proxy.corp.example:3128" }, async () => {
+			const direct = model("direct-gw", "openai-completions", "https://gateway.example/v1");
+			const proxied = model("proxied-gw", "openai-completions", "https://gateway.example/v1");
+			await expect(probeModelConnection(direct, { apiKey: "k", fetch: rejectUnlessProxied })).resolves.toBe(false);
+			await expect(probeModelConnection(proxied, { apiKey: "k", fetch: rejectUnlessProxied })).resolves.toBe(true);
+		});
 	});
 
 	it.each([
