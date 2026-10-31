@@ -223,6 +223,9 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		["a server error", "overloaded_error: provider returned error 503"],
 		// A gateway answered with an HTTP status, so the request did connect.
 		["a 503 naming a refused upstream", "503 Service Unavailable: upstream connection refused"],
+		// An error frame inside an HTTP 200 stream: no status, but a server answered.
+		["an in-band error frame naming a refused upstream", "upstream connection refused"],
+		["an in-band error frame relaying the upstream's errno", "upstream error: connect ECONNREFUSED 10.0.0.1:443"],
 		// The host answered the TLS handshake, so the network is up.
 		[
 			"a TLS failure",
