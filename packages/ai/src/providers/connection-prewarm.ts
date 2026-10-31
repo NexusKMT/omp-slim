@@ -23,12 +23,18 @@ const PROBE_TIMEOUT_MS = 5_000;
 const PROBE_CACHE_MS = 10_000;
 
 const prewarmedAt = new Map<string, number>();
+interface ProbeEntry {
+	at: number;
+	reachable: Promise<boolean>;
+}
 /**
  * Probes by transport, then by provider and origin. A caller-supplied fetch is
  * its own transport, and each provider has its own proxy and TLS options, so an
- * answer is only reused where the request would travel the same way.
+ * answer is only reused where the request would travel the same way. Probes
+ * through a caller-supplied fetch live only as long as that fetch does.
  */
-const probes = new Map<FetchImpl | undefined, Map<string, { at: number; reachable: Promise<boolean> }>>();
+const defaultProbes = new Map<string, ProbeEntry>();
+let fetchProbes = new WeakMap<FetchImpl, Map<string, ProbeEntry>>();
 
 /**
  * Where a warm-up for {@link model} goes, or `undefined` when it must not be
@@ -148,17 +154,17 @@ export function probeModelConnection(
 	try {
 		target = resolveProbeTarget(model, options?.apiKey);
 	} catch {
-		// Resolving Anthropic's TLS options throws on an unusable CA or
-		// client-certificate setup, which the real request reports.
+		// Resolving the route throws on an unusable CA or client certificate
+		// (Anthropic) or a malformed credential (Copilot); the real request reports it.
 		target = undefined;
 	}
 	if (!target) return Promise.resolve(true);
 	const { origin, init } = target;
 	const now = Date.now();
-	let transportProbes = probes.get(options?.fetch);
-	if (!transportProbes) {
-		transportProbes = new Map();
-		probes.set(options?.fetch, transportProbes);
+	let transportProbes = defaultProbes;
+	if (options?.fetch) {
+		transportProbes = fetchProbes.get(options.fetch) ?? new Map();
+		fetchProbes.set(options.fetch, transportProbes);
 	}
 	const key = `${model.provider}\u0000${origin}`;
 	const cached = transportProbes.get(key);
@@ -197,5 +203,6 @@ export function probeModelConnection(
 /** Test hook: forgets every warm-up and probe so the next call is not throttled or cached. */
 export function resetConnectionPrewarmForTesting(): void {
 	prewarmedAt.clear();
-	probes.clear();
+	defaultProbes.clear();
+	fetchProbes = new WeakMap();
 }

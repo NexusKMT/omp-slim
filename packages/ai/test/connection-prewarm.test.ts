@@ -161,6 +161,25 @@ describe("probeModelConnection", () => {
 		expect(requests).toBe(1);
 	});
 
+	it("shares one probe per host on the default transport, as fallback recovery uses it", async () => {
+		// Turn recovery passes no fetch: back-to-back chain entries and parallel
+		// sessions on one host must send one probe between them.
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockImplementation(
+				Object.assign(async () => new Response(null, { status: 404 }), { preconnect: fetch.preconnect }),
+			);
+		const openai = model("openai", "openai-responses", "https://api.openai.com/v1");
+
+		try {
+			await expect(probeModelConnection(openai, { apiKey: "sk-test" })).resolves.toBe(true);
+			await expect(probeModelConnection(openai, { apiKey: "sk-test" })).resolves.toBe(true);
+			expect(fetchSpy.mock.calls.map(call => String(call[0]))).toEqual(["https://api.openai.com"]);
+		} finally {
+			vi.restoreAllMocks();
+		}
+	});
+
 	it("does not reuse one transport's failed probe for another transport to the same host", async () => {
 		const openai = model("openai", "openai-responses", "https://api.openai.com/v1");
 		const rejecting: FetchImpl = async () => {
