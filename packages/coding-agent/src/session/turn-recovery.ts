@@ -2953,10 +2953,15 @@ export class TurnRecovery {
 		// A request that never connected (no DNS, no route, connection refused) only
 		// switches to a fallback whose host answers a probe. When none does, no model
 		// server is reachable: the same-model retry runs as usual and is announced as
-		// unreachable. A TLS failure reached the host, so it walks the chain as before.
+		// unreachable. A TLS failure reached the host, and an HTTP status means a server
+		// answered (a gateway's `503 … upstream connection refused`), so both walk the
+		// chain as before.
 		// `abortRetry()` cancels the probes like the backoff sleep below; a route that
 		// drops packets would otherwise hold the cancel for the probe timeout.
-		const networkFailure = AIError.classifyNetworkCause(errorMessage);
+		const networkFailure =
+			(message.errorStatus ?? AIError.status({ message: errorMessage })) === undefined
+				? AIError.classifyNetworkCause(errorMessage)
+				: undefined;
 		const probeAbortController =
 			networkFailure !== undefined && networkFailure.kind !== "tls" ? new AbortController() : undefined;
 		const fallbackProbe = probeAbortController && { unreachable: false, signal: probeAbortController.signal };

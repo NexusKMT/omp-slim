@@ -221,6 +221,8 @@ describe("AgentSession fallback chain when the request never connected", () => {
 	it.each([
 		["a rate limit", "429 rate limit exceeded"],
 		["a server error", "overloaded_error: provider returned error 503"],
+		// A gateway answered with an HTTP status, so the request did connect.
+		["a 503 naming a refused upstream", "503 Service Unavailable: upstream connection refused"],
 		// The host answered the TLS handshake, so the network is up.
 		[
 			"a TLS failure",
