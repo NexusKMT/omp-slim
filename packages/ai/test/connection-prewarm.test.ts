@@ -7,6 +7,7 @@ import {
 	resetConnectionPrewarmForTesting,
 } from "@oh-my-pi/pi-ai/providers/connection-prewarm";
 import type { FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
+import { PROVIDER_REGISTRY } from "@oh-my-pi/pi-ai/registry/registry";
 import { resetDispatchOriginsForTesting, transportFetch } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { Api } from "@oh-my-pi/pi-catalog/types";
@@ -274,6 +275,53 @@ describe("probeModelConnection", () => {
 		await expect(probeModelConnection(gateway, { apiKey: "gw-token", fetch })).resolves.toBe(true);
 
 		expect(calls.map(call => [call.url, call.init.tls])).toEqual([["https://auth-gateway.example:8443", undefined]]);
+	});
+
+	it("does not probe Snowflake's catalog placeholder before the account route is known", async () => {
+		// Dispatch swaps `snowflake-account.invalid` for the credential's account
+		// origin in the provider's `prepareRequest`, which a probe does not run.
+		const { calls, fetch } = captureFetch();
+		const snowflake = model("snowflake", "anthropic-messages", "https://snowflake-account.invalid/api/v2/cortex");
+
+		await expect(probeModelConnection(snowflake, { apiKey: "pat", fetch })).resolves.toBe(true);
+		expect(calls).toHaveLength(0);
+
+		// Once a request has gone out, the account origin it reached is the route.
+		await dispatch(snowflake, "https://myorg-myacct.snowflakecomputing.com/api/v2/cortex/v1/messages");
+		await probeModelConnection(snowflake, { apiKey: "pat", fetch });
+		expect(calls.map(call => call.url)).toEqual(["https://myorg-myacct.snowflakecomputing.com"]);
+	});
+
+	it("treats every provider whose requests are reshaped before dispatch as reachable until it has sent one", async () => {
+		// Provider preparers (`prepareModel` / `prepareRequest`) and the providers
+		// `stream.ts` routes to hosts of their own can move a request anywhere.
+		const reshaped = [
+			...PROVIDER_REGISTRY.filter(definition => definition.prepareModel || definition.prepareRequest).map(
+				definition => definition.id,
+			),
+			"gitlab-duo",
+			"kimi-code",
+			"synthetic",
+		];
+		expect(reshaped).toContain("snowflake");
+		const { calls, fetch } = captureFetch();
+
+		for (const provider of reshaped) {
+			for (const api of ["anthropic-messages", "openai-completions", "openai-responses"] as const) {
+				await expect(
+					probeModelConnection(model(provider, api, "https://catalog-host.example/v1"), { apiKey: "k", fetch }),
+				).resolves.toBe(true);
+			}
+		}
+		expect(calls).toHaveLength(0);
+	});
+
+	it("never probes a `.invalid` host", async () => {
+		const { calls, fetch } = captureFetch();
+		const placeholder = model("custom-gw", "openai-completions", "https://gateway.invalid/v1");
+
+		await expect(probeModelConnection(placeholder, { apiKey: "k", fetch })).resolves.toBe(true);
+		expect(calls).toHaveLength(0);
 	});
 
 	it("counts a redirect as an answer instead of following it", async () => {

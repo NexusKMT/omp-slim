@@ -1,5 +1,7 @@
 import { isCatalogEndpointUrl } from "@oh-my-pi/pi-catalog/compat/catalog-endpoint";
 import { logger } from "@oh-my-pi/pi-utils";
+import { getCustomApi } from "../api-registry";
+import { getProviderDefinition } from "../registry/registry";
 import type { Api, FetchImpl, Model } from "../types";
 import { lastDispatchOrigin, transportFetch } from "../utils/transport-fetch";
 import {
@@ -9,6 +11,26 @@ import {
 } from "./anthropic-http-options";
 import { OPENAI_COMPLETIONS_BASE_URL_OPTIONS, resolveOpenAIRequestBaseUrl } from "./openai-base-url";
 import { isAnthropicMessagesModel } from "./transform-messages";
+
+/**
+ * Providers that `stream.ts` (`streamSimpleRequest`, `streamDispatch`) hands to
+ * a handler of their own, which sends to hosts other than the API transport's.
+ */
+const OWN_DISPATCH_PROVIDERS: Record<string, true> = { "gitlab-duo": true, "kimi-code": true, synthetic: true };
+
+/**
+ * Whether {@link model}'s request reaches its API transport unchanged, so the
+ * transport's own endpoint resolver gives the host before any request. Not
+ * when an extension owns the API, the provider's definition reshapes the model
+ * or request (`prepareModel` / `prepareRequest`: Snowflake's account origin,
+ * Cloudflare's account and gateway, Bedrock Mantle's region), or the provider
+ * has a dispatch of its own ({@link OWN_DISPATCH_PROVIDERS}).
+ */
+function reachesApiTransportUnchanged(model: Model<Api>): boolean {
+	if (getCustomApi(model.api) || Object.hasOwn(OWN_DISPATCH_PROVIDERS, model.provider)) return false;
+	const definition = getProviderDefinition(model.provider);
+	return !definition?.prepareModel && !definition?.prepareRequest;
+}
 
 /**
  * Minimum gap between warm-ups of one origin. Idle pooled sockets outlive it
@@ -102,7 +124,11 @@ export async function prewarmModelConnection(model: Model<Api>, options?: { fetc
  *
  * - `transport: "pi-native"`: the gateway at `baseUrl`, whatever the API. The
  *   client POSTs every turn to `baseUrl/v1/pi/stream` through the same
- *   transport fetch, with no provider endpoint rules or TLS options.
+ *   transport fetch, before any custom API, provider preparer or provider
+ *   dispatch, with no provider endpoint rules or TLS options.
+ * - A request that does not reach its API transport unchanged
+ *   ({@link reachesApiTransportUnchanged}): only the origin the model last
+ *   sent to.
  * - `anthropic-messages`: the client's base URL and TLS options for `apiKey`.
  * - `openai-completions`, `openai-responses`: the request setup's base URL for
  *   `apiKey` (env overrides, Copilot plan host, credential endpoints). Dispatch
@@ -111,6 +137,8 @@ export async function prewarmModelConnection(model: Model<Api>, options?: { fetc
  * - Any other API: only the origin the model last sent to. Those transports
  *   have their own endpoint rules, so before a first request there is nothing
  *   to probe that is not a guess.
+ *
+ * A `.invalid` host (RFC 6761, used for catalog placeholders) is never a route.
  */
 function resolveProbeTarget(
 	model: Model<Api>,
@@ -120,6 +148,8 @@ function resolveProbeTarget(
 	let init: RequestInit = {};
 	if (model.transport === "pi-native") {
 		url = model.baseUrl;
+	} else if (!reachesApiTransportUnchanged(model)) {
+		url = lastDispatchOrigin(model);
 	} else if (isAnthropicMessagesModel(model)) {
 		url = resolveAnthropicBaseUrl(model, apiKey);
 		if (url) init = { ...buildClaudeCodeTlsFetchOptions(model, url) };
@@ -136,7 +166,9 @@ function resolveProbeTarget(
 	} else {
 		url = lastDispatchOrigin(model);
 	}
-	return url ? { origin: new URL(url).origin, init } : undefined;
+	if (!url) return undefined;
+	const target = new URL(url);
+	return target.hostname.endsWith(".invalid") ? undefined : { origin: target.origin, init };
 }
 
 /**
