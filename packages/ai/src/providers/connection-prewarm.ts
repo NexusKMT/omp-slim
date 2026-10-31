@@ -101,9 +101,10 @@ export async function prewarmModelConnection(model: Model<Api>, options?: { fetc
  * too: a local server is the one host that still answers offline.
  *
  * - `anthropic-messages`: the client's base URL and TLS options for `apiKey`.
- * - `openai-completions`, `openai-responses`: the origin the model last sent
- *   to, else the request setup's base URL for `apiKey` (env overrides, Copilot
- *   plan host, credential endpoints).
+ * - `openai-completions`, `openai-responses`: the request setup's base URL for
+ *   `apiKey` (env overrides, Copilot plan host, credential endpoints). Dispatch
+ *   history is shared by every session and account, so it is used only when
+ *   that resolves nothing.
  * - Any other API: only the origin the model last sent to. Those transports
  *   have their own endpoint rules, so before a first request there is nothing
  *   to probe that is not a guess.
@@ -118,15 +119,15 @@ function resolveProbeTarget(
 		url = resolveAnthropicBaseUrl(model, apiKey);
 		if (url) init = { ...buildClaudeCodeTlsFetchOptions(model, url) };
 	} else if (model.api === "openai-completions" || model.api === "openai-responses") {
-		url =
-			lastDispatchOrigin(model) ??
-			(apiKey === undefined
+		const resolved =
+			apiKey === undefined
 				? undefined
 				: resolveOpenAIRequestBaseUrl(
 						model,
 						apiKey,
 						model.api === "openai-completions" ? OPENAI_COMPLETIONS_BASE_URL_OPTIONS : undefined,
-					));
+					);
+		url = resolved ?? lastDispatchOrigin(model);
 	} else {
 		url = lastDispatchOrigin(model);
 	}

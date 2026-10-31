@@ -248,6 +248,17 @@ describe("probeModelConnection", () => {
 		expect(calls).toHaveLength(0);
 	});
 
+	it("probes the route the selected credential resolves to, not another account's last request", async () => {
+		// Dispatch history is process-wide: a business-plan session sent this model
+		// to its plan host, while the fallback's own credential is an individual one.
+		await dispatch(COPILOT, COPILOT_PLAN_URL);
+		const { calls, fetch } = captureFetch();
+
+		await probeModelConnection(COPILOT, { apiKey: "ghu_individual-token", fetch });
+
+		expect(calls.map(call => call.url)).toEqual(["https://api.githubcopilot.com"]);
+	});
+
 	it("reports a host that never answers as unreachable once the probe's timeout fires", async () => {
 		// A route that drops packets never rejects; only the timeout ends the probe.
 		// The fake signal is already timed out, standing in for the 5 s wait.
