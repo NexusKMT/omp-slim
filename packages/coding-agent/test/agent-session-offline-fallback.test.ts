@@ -203,7 +203,7 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		vi.spyOn(globalThis, "fetch").mockImplementation(
 			asGlobalFetch(input => {
 				probeStarted.resolve(String(input));
-				return new Promise<Response>(() => {});
+				return Promise.withResolvers<Response>().promise;
 			}),
 		);
 
