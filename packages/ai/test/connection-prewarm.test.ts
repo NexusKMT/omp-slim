@@ -259,6 +259,23 @@ describe("probeModelConnection", () => {
 		expect(calls.map(call => call.url)).toEqual(["https://api.githubcopilot.com"]);
 	});
 
+	it.each([
+		["google-generative-ai", "google"],
+		["anthropic-messages", "anthropic"],
+	] as const)("probes a pi-native %s model at its gateway, with no provider routing", async (api, provider) => {
+		// pi-native POSTs every API to `baseUrl/v1/pi/stream` through the plain
+		// transport fetch: no provider endpoint rules, no Anthropic TLS options.
+		const { calls, fetch } = captureFetch();
+		const gateway = buildModel({
+			...model(provider, api, "https://auth-gateway.example:8443"),
+			transport: "pi-native",
+		});
+
+		await expect(probeModelConnection(gateway, { apiKey: "gw-token", fetch })).resolves.toBe(true);
+
+		expect(calls.map(call => [call.url, call.init.tls])).toEqual([["https://auth-gateway.example:8443", undefined]]);
+	});
+
 	it("reports a host that never answers as unreachable once the probe's timeout fires", async () => {
 		// A route that drops packets never rejects; only the timeout ends the probe.
 		// The fake signal is already timed out, standing in for the 5 s wait.

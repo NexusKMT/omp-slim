@@ -100,6 +100,9 @@ export async function prewarmModelConnection(model: Model<Api>, options?: { fetc
  * Unlike a warm-up, gateways, custom providers and local servers are probed
  * too: a local server is the one host that still answers offline.
  *
+ * - `transport: "pi-native"`: the gateway at `baseUrl`, whatever the API. The
+ *   client POSTs every turn to `baseUrl/v1/pi/stream` through the same
+ *   transport fetch, with no provider endpoint rules or TLS options.
  * - `anthropic-messages`: the client's base URL and TLS options for `apiKey`.
  * - `openai-completions`, `openai-responses`: the request setup's base URL for
  *   `apiKey` (env overrides, Copilot plan host, credential endpoints). Dispatch
@@ -115,7 +118,9 @@ function resolveProbeTarget(
 ): { origin: string; init: RequestInit } | undefined {
 	let url: string | undefined;
 	let init: RequestInit = {};
-	if (isAnthropicMessagesModel(model)) {
+	if (model.transport === "pi-native") {
+		url = model.baseUrl;
+	} else if (isAnthropicMessagesModel(model)) {
 		url = resolveAnthropicBaseUrl(model, apiKey);
 		if (url) init = { ...buildClaudeCodeTlsFetchOptions(model, url) };
 	} else if (model.api === "openai-completions" || model.api === "openai-responses") {
