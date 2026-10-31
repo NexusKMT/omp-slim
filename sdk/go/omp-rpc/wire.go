@@ -4011,8 +4011,8 @@ type AutoRetryStartEvent struct {
 	DelayMs      int64  `json:"delayMs"`
 	ErrorMessage string `json:"errorMessage"`
 	ErrorID      *int64 `json:"errorId,omitempty"`
-	// The request could not connect and no fallback model's host answered either; the retry stays on this model.
-	Offline *bool `json:"offline,omitempty"`
+	// The request could not connect, and no fallback model's server answered either; the retry stays on this model.
+	Unreachable *bool `json:"unreachable,omitempty"`
 }
 
 func (v *AutoRetryStartEvent) UnmarshalJSON(data []byte) error {
@@ -4028,7 +4028,7 @@ func (v *AutoRetryStartEvent) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("delayMs", &out.DelayMs)
 	d.required("errorMessage", &out.ErrorMessage)
 	d.optional("errorId", &out.ErrorID)
-	d.optional("offline", &out.Offline)
+	d.optional("unreachable", &out.Unreachable)
 	if d.err != nil {
 		return d.err
 	}

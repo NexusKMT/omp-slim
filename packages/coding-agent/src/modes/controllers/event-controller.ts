@@ -2805,8 +2805,8 @@ export class EventController {
 			this.ctx.clearPinnedError();
 		}
 		const retryStartMs = Date.now();
-		const retryLabel = event.offline
-			? `No network connection, retrying (${event.attempt}/${event.maxAttempts})`
+		const retryLabel = event.unreachable
+			? `No model server reachable (check your connection), retrying (${event.attempt}/${event.maxAttempts})`
 			: `Retrying (${event.attempt}/${event.maxAttempts})`;
 		this.ctx.retryLoader = new Loader(
 			this.ctx.ui,
@@ -2820,7 +2820,7 @@ export class EventController {
 		);
 		this.ctx.retryLoader.setWorkingRow(
 			() => ({
-				label: `${event.offline ? "No network connection · retrying" : "Retrying"} · attempt ${event.attempt} of ${event.maxAttempts}`,
+				label: `${event.unreachable ? "No model server reachable · retrying" : "Retrying"} · attempt ${event.attempt} of ${event.maxAttempts}`,
 				startedAt: retryStartMs,
 				variant: { kind: "retry", attempt: event.attempt, max: event.maxAttempts, delayMs: event.delayMs },
 				interruptKey: this.ctx.maintenanceInterruptKey(),

@@ -113,9 +113,9 @@ export const eventDefs = {
 		delayMs: "number.integer",
 		errorMessage: "string",
 		"errorId?": "number.integer",
-		"offline?": doc(
+		"unreachable?": doc(
 			"boolean",
-			"The request could not connect and no fallback model's host answered either; the retry stays on this model.",
+			"The request could not connect, and no fallback model's server answered either; the retry stays on this model.",
 		),
 	},
 	AutoRetryEndEvent: {

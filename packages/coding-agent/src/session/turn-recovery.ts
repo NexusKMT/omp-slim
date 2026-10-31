@@ -2951,9 +2951,9 @@ export class TurnRecovery {
 		};
 
 		// A request that never connected (no DNS, no route, connection refused) only
-		// switches to a fallback whose host answers a probe. When none does, the
-		// machine is offline: the same-model retry runs as usual and is announced as
-		// offline. A TLS failure reached the host, so it walks the chain as before.
+		// switches to a fallback whose host answers a probe. When none does, no model
+		// server is reachable: the same-model retry runs as usual and is announced as
+		// unreachable. A TLS failure reached the host, so it walks the chain as before.
 		// `abortRetry()` cancels the probes like the backoff sleep below; a route that
 		// drops packets would otherwise hold the cancel for the probe timeout.
 		const networkFailure = AIError.classifyNetworkCause(errorMessage);
@@ -3048,7 +3048,7 @@ export class TurnRecovery {
 			this.#retryAbortController = undefined;
 			if (probeAbortController.signal.aborted) return this.#endCancelledRetry();
 		}
-		const offline = fallbackProbe?.unreachable === true && !switchedModel;
+		const noServerReachable = fallbackProbe?.unreachable === true && !switchedModel;
 
 		if (retryBudgetExhausted) {
 			if (!switchedModel && !switchedCredential) {
@@ -3129,7 +3129,7 @@ export class TurnRecovery {
 			delayMs,
 			errorMessage,
 			errorId: message.errorId,
-			offline: offline || undefined,
+			unreachable: noServerReachable || undefined,
 		});
 		if (this.#host.abortInProgress() || this.#host.promptGeneration() !== generation) {
 			return this.#endCancelledRetry();

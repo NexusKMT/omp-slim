@@ -151,7 +151,7 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		expect(probed).toEqual(["https://api.openai.com"]);
 		expect(applied).toEqual([]);
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"]);
-		expect(retryStarts.map(event => event.offline)).toEqual([true]);
+		expect(retryStarts.map(event => event.unreachable)).toEqual([true]);
 	});
 
 	it("stays on the primary when the fallback shares its unreachable host", async () => {
@@ -168,7 +168,7 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		expect(probed).toEqual(["https://api.openai.com"]);
 		expect(applied).toEqual([]);
 		expect(requested).toEqual(["openai/gpt-4o", "openai/gpt-4o"]);
-		expect(retryStarts.map(event => event.offline)).toEqual([true]);
+		expect(retryStarts.map(event => event.unreachable)).toEqual([true]);
 	});
 
 	it("switches to the fallback when its host answers: only the primary's provider is down", async () => {
@@ -179,7 +179,7 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		expect(probed).toEqual(["https://api.openai.com"]);
 		expect(applied.map(event => event.to)).toEqual(["openai/gpt-4o-mini"]);
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "openai/gpt-4o-mini"]);
-		expect(retryStarts.map(event => event.offline)).toEqual([undefined]);
+		expect(retryStarts.map(event => event.unreachable)).toEqual([undefined]);
 	});
 
 	it("switches to a local fallback offline, skipping the cloud entry whose host does not answer", async () => {
@@ -193,7 +193,7 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		expect(probed).toEqual(["https://api.openai.com", LOCAL_ORIGIN]);
 		expect(applied.map(event => event.to)).toEqual(["local-llm/local-model"]);
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "local-llm/local-model"]);
-		expect(retryStarts.map(event => event.offline)).toEqual([undefined]);
+		expect(retryStarts.map(event => event.unreachable)).toEqual([undefined]);
 	});
 
 	it("ends the retry at once when it is cancelled during a probe that gets no answer", async () => {
@@ -235,6 +235,6 @@ describe("AgentSession fallback chain when the request never connected", () => {
 		expect(probed).toEqual([]);
 		expect(applied.map(event => event.to)).toEqual(["openai/gpt-4o-mini"]);
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "openai/gpt-4o-mini"]);
-		expect(retryStarts.map(event => event.offline)).toEqual([undefined]);
+		expect(retryStarts.map(event => event.unreachable)).toEqual([undefined]);
 	});
 });
