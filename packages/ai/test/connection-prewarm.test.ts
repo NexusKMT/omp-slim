@@ -276,6 +276,20 @@ describe("probeModelConnection", () => {
 		expect(calls.map(call => [call.url, call.init.tls])).toEqual([["https://auth-gateway.example:8443", undefined]]);
 	});
 
+	it("counts a redirect as an answer instead of following it", async () => {
+		// A gateway root that redirects to a docs or login host that is down.
+		const server = Bun.serve({
+			port: 0,
+			fetch: () => new Response(null, { status: 302, headers: { location: "http://127.0.0.1:1/" } }),
+		});
+		try {
+			const local = model("redirecting-gw", "openai-completions", `http://127.0.0.1:${server.port}/v1`);
+			await expect(probeModelConnection(local, { apiKey: "k" })).resolves.toBe(true);
+		} finally {
+			server.stop(true);
+		}
+	});
+
 	it("reports a host that never answers as unreachable once the probe's timeout fires", async () => {
 		// A route that drops packets never rejects; only the timeout ends the probe.
 		// The fake signal is already timed out, standing in for the 5 s wait.

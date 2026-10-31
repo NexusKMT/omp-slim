@@ -143,7 +143,8 @@ function resolveProbeTarget(
  * Whether {@link model}'s API host answers at all. Sends a credential-less
  * `HEAD` through the same transport as real requests (proxy, extra CA, TLS
  * options), so it fails exactly when a request would fail to connect. Any
- * HTTP response counts as reachable; a rejected fetch or no answer within
+ * HTTP response counts as reachable, a redirect included (it is not
+ * followed); a rejected fetch or no answer within
  * {@link PROBE_TIMEOUT_MS} does not. `apiKey` is the credential the request
  * would use: some providers route by it. A model whose route cannot be worked
  * out counts as reachable, so a caller never skips it on a guessed URL. One
@@ -182,6 +183,9 @@ export function probeModelConnection(
 					...init,
 					method: "HEAD",
 					headers: {},
+					// The first answer proves the host is up; a redirect target may be a
+					// docs or login host the API requests never touch.
+					redirect: "manual",
 					signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
 				});
 				await response.body?.cancel();
