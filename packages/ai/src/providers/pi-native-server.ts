@@ -265,3 +265,6 @@ export function encodeStream(
 		},
 	});
 }
+
+/** @deprecated Use `noStoreErrorResponse` from `auth-gateway/http`. */
+export { noStoreErrorResponse as formatError } from "../auth-gateway/http";

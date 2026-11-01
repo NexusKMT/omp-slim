@@ -157,3 +157,6 @@ export function encodeResponse(
 		usage: { total_tokens: result.usage.totalTokens, cost: result.usage.cost.total },
 	};
 }
+
+/** @deprecated Use `codedErrorResponse` from `auth-gateway/http`. */
+export { codedErrorResponse as formatError } from "../auth-gateway/http";

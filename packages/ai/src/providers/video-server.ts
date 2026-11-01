@@ -277,3 +277,6 @@ export function encodeSubmitResponse(job: VideoJob, req: Request, gatewayId: str
 export function encodePollResponse(job: VideoJob, req: Request, gatewayId: string): VideoResponseBody {
 	return encodeJobResponse(job, req, gatewayId);
 }
+
+/** @deprecated Use `codedErrorResponse` from `auth-gateway/http`. */
+export { codedErrorResponse as formatError } from "../auth-gateway/http";

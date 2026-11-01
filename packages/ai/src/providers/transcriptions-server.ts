@@ -234,3 +234,6 @@ export function encodeResponse(result: TranscriptionResult): TranscriptionRespon
 		},
 	};
 }
+
+/** @deprecated Use `codedErrorResponse` from `auth-gateway/http`. */
+export { codedErrorResponse as formatError } from "../auth-gateway/http";

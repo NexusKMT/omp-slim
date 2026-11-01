@@ -2,9 +2,9 @@
 
 ## [Unreleased]
 
-### Breaking Changes
+### Changed
 
-- Removed `createFileOps`, `computeFileLists`, `formatFileOperations`, `upsertFileOperations`, `isUrlSchemePath` and `FileOperations` from `@oh-my-pi/pi-agent-core/compaction`; import them from `@oh-my-pi/snapcompact` (`formatFileOperations` output is `upsertFileOperations("", …)`)
+- Deprecated `createFileOps`, `computeFileLists`, `formatFileOperations`, `upsertFileOperations`, `isUrlSchemePath` and `FileOperations` in `@oh-my-pi/pi-agent-core/compaction`; they now re-export `@oh-my-pi/snapcompact`, which callers should import directly
 
 ## [18.15.0] - 2026-11-01
 

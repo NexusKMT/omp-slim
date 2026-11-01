@@ -10,6 +10,24 @@ import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { AgentMessage } from "../types";
 import summarizationSystemPrompt from "./prompts/summarization-system.md" with { type: "text" };
 
+/** @deprecated Import these from `@oh-my-pi/snapcompact`. */
+export {
+	computeFileLists,
+	createFileOps,
+	type FileOperations,
+	isUrlSchemePath,
+	upsertFileOperations,
+} from "@oh-my-pi/snapcompact";
+
+/** @deprecated Use `upsertFileOperations("", readFiles, modifiedFiles, readSet)` from `@oh-my-pi/snapcompact`. */
+export function formatFileOperations(
+	readFiles: string[],
+	modifiedFiles: string[],
+	readSet?: ReadonlySet<string>,
+): string {
+	return snapcompact.upsertFileOperations("", readFiles, modifiedFiles, readSet);
+}
+
 /** Error text for a summarization call that hit its output limit (`stopReason: "length"`): partial text is never used. */
 export function incompleteOutputError(prefix: string): string {
 	return `${prefix}: model output ended incomplete (stopReason: length)`;

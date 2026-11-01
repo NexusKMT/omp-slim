@@ -2,9 +2,9 @@
 
 ## [Unreleased]
 
-### Breaking Changes
+### Changed
 
-- Removed `formatError` from the embeddings, images, rerank, speech, transcriptions, video, pi-native and SystemOne server modules and `asStrict` from `providers/aws-sigv4`; use `codedErrorResponse` / `noStoreErrorResponse` from `auth-gateway/http` and `asStrictBytes` from `@oh-my-pi/pi-utils`
+- Deprecated `formatError` on the embeddings, images, rerank, speech, transcriptions, video, pi-native and SystemOne server modules (now aliases of `codedErrorResponse` / `noStoreErrorResponse` in `auth-gateway/http`) and `asStrict` in `providers/aws-sigv4` (now `asStrictBytes` from `@oh-my-pi/pi-utils`)
 
 ### Added
 

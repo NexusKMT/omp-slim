@@ -120,3 +120,6 @@ export function encodeResponse(result: JudgmentResult): SystemOneResponseBody {
 	if (result.usage.cost.total > 0) usage.cost = result.usage.cost.total;
 	return { model: result.model, answers: result.answers, usage };
 }
+
+/** @deprecated Use `noStoreErrorResponse` from `auth-gateway/http`. */
+export { noStoreErrorResponse as formatError } from "../auth-gateway/http";

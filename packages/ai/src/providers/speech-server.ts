@@ -41,3 +41,6 @@ export function encodeResponse(result: SpeechResult, _requestedModelId: string):
 		},
 	});
 }
+
+/** @deprecated Use `codedErrorResponse` from `auth-gateway/http`. */
+export { codedErrorResponse as formatError } from "../auth-gateway/http";

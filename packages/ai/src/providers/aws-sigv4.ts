@@ -13,6 +13,9 @@
  */
 import { asStrictBytes } from "@oh-my-pi/pi-utils/bytes";
 
+/** @deprecated Use `asStrictBytes` from `@oh-my-pi/pi-utils`. */
+export { asStrictBytes as asStrict } from "@oh-my-pi/pi-utils/bytes";
+
 export interface AwsCredentials {
 	accessKeyId: string;
 	secretAccessKey: string;
