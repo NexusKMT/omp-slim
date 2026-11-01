@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- An unrecognized boolean value in `MNEMOPI_LLM_ENABLED` / `MNEMOPI_HOST_LLM_ENABLED` now falls back to the default instead of reading as false
+
 ## [18.14.2] - 2026-10-31
 
 ### Fixed

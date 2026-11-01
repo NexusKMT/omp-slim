@@ -152,13 +152,3 @@ export function encodeResponse(result: ImageGenerationResult, _requestedModelId:
 		},
 	};
 }
-
-export function formatError(status: number, errorType: string, message: string): Response {
-	return new Response(JSON.stringify({ error: { code: status, type: errorType, message } }), {
-		status,
-		headers: {
-			"Content-Type": "application/json; charset=utf-8",
-			"Cache-Control": "no-store",
-		},
-	});
-}

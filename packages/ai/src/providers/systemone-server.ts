@@ -120,14 +120,3 @@ export function encodeResponse(result: JudgmentResult): SystemOneResponseBody {
 	if (result.usage.cost.total > 0) usage.cost = result.usage.cost.total;
 	return { model: result.model, answers: result.answers, usage };
 }
-
-/** TypeSafe answers errors with a status code and a JSON body; the envelope mirrors the other gateway routes. */
-export function formatError(status: number, type: string, message: string): Response {
-	return new Response(JSON.stringify({ error: { type, message } }), {
-		status,
-		headers: {
-			"Content-Type": "application/json; charset=utf-8",
-			"Cache-Control": "no-store",
-		},
-	});
-}
