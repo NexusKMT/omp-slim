@@ -32,6 +32,7 @@ describe("AgentSession fallback chain on connect failures", () => {
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
 		authStorage.keys.setRuntime("openai", "openai-test-key");
+		authStorage.keys.setRuntime("xai", "xai-test-key");
 		const modelsPath = path.join(tempDir.path(), "models.yml");
 		await Bun.write(
 			modelsPath,
@@ -112,19 +113,22 @@ describe("AgentSession fallback chain on connect failures", () => {
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "openai/gpt-4o-mini", "local-llm/local-model"]);
 	});
 
-	it("counts a first-party model rerouted to a local gateway as local", async () => {
-		// `ANTHROPIC_BASE_URL` sends a stock Anthropic model to this machine; its catalog URL stays remote.
-		const previous = Bun.env.ANTHROPIC_BASE_URL;
-		Bun.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:8317";
+	it.each([
+		["ANTHROPIC_BASE_URL", "anthropic/claude-haiku-4-5"],
+		["XAI_BASE_URL", "xai/grok-2"],
+	])("counts a model %s reroutes to a local gateway as local before its first request", async (env, fallback) => {
+		// The env override sends a stock catalog model to this machine; its catalog URL stays remote.
+		const previous = Bun.env[env];
+		Bun.env[env] = "http://127.0.0.1:8317/v1";
 		try {
 			const { switchedTo } = await run(
 				[ANTHROPIC_DOWN, OPENAI_DOWN],
-				["openai/gpt-4o-mini", "openai/gpt-4o", "anthropic/claude-haiku-4-5"],
+				["openai/gpt-4o-mini", "openai/gpt-4o", fallback],
 			);
-			expect(switchedTo).toEqual(["openai/gpt-4o-mini", "anthropic/claude-haiku-4-5"]);
+			expect(switchedTo).toEqual(["openai/gpt-4o-mini", fallback]);
 		} finally {
-			if (previous === undefined) delete Bun.env.ANTHROPIC_BASE_URL;
-			else Bun.env.ANTHROPIC_BASE_URL = previous;
+			if (previous === undefined) delete Bun.env[env];
+			else Bun.env[env] = previous;
 		}
 	});
 

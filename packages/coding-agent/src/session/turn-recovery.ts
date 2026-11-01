@@ -19,9 +19,12 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { resolveDirectAnthropicBaseUrl } from "@oh-my-pi/pi-ai/providers/anthropic-state";
-import { shouldDropTruncatedThinkingOnlyAssistant } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import { isLocalOrMetadataHost } from "@oh-my-pi/pi-ai/utils/proxy";
+import { resolveAnthropicBaseUrl } from "@oh-my-pi/pi-ai/providers/anthropic-http-options";
+import { resolveOpenAIRequestSetup } from "@oh-my-pi/pi-ai/providers/openai-shared";
+import {
+	isAnthropicMessagesModel,
+	shouldDropTruncatedThinkingOnlyAssistant,
+} from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
 import { lastDispatchOrigin } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { fallbackCreditTargets } from "@oh-my-pi/pi-catalog/compat/fallback-credit";
@@ -40,6 +43,7 @@ import malformedFunctionCallRetryTemplate from "../prompts/system/malformed-func
 import streamStallContinueTemplate from "../prompts/system/stream-stall-continue.md" with { type: "text" };
 import thinkingLoopRedirectTemplate from "../prompts/system/thinking-loop-redirect.md" with { type: "text" };
 import unexpectedStopRetryTemplate from "../prompts/system/unexpected-stop-retry.md" with { type: "text" };
+import { isApprovalPublicUrl } from "../tools/approval-targets";
 import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
@@ -141,34 +145,33 @@ function hasNonWhitespace(value: string): boolean {
 	return NON_WHITESPACE_RE.test(value);
 }
 
-/** Whether `hostname` is on this machine or its LAN: loopback, private IPs, mDNS `.local`, single-label intranet names. */
-function isLocalHostname(hostname: string): boolean {
-	const host = hostname.toLowerCase();
-	return isLocalOrMetadataHost(host) || host.endsWith(".local") || (!host.includes(".") && !host.includes(":"));
-}
-
-/** Whether `url` (a URL, or a bare `host[:port]`) names a local or LAN host. */
+/** Whether `url` (a URL, or a bare `host[:port]`) names a loopback, private-network or intranet host. */
 function isLocalUrl(url: string): boolean {
-	try {
-		return isLocalHostname(new URL(url.includes("://") ? url : `http://${url}`).hostname);
-	} catch {
-		return false;
-	}
+	const full = url.includes("://") ? url : `http://${url}`;
+	// Unparseable text (the sentence's "the API host" placeholder) is no host at all, not a local one.
+	return URL.canParse(full) && !isApprovalPublicUrl(full);
 }
 
 /**
- * Whether `model` is served from this machine or its LAN, which still answers when the internet is
- * down. Judged on where its requests go: the origin it last sent to, else first-party Anthropic's
- * `ANTHROPIC_BASE_URL`/Foundry reroute, else its configured base URL. A pi-native model is never
- * local: its gateway may be, but the gateway forwards to the model's cloud host.
+ * Whether `model` is served from this machine or its network, which still answers when the
+ * internet is down. Judged on where a request with `apiKey` goes, resolved by the request's own
+ * endpoint rules; other APIs use the origin the model last sent to, else its base URL. A pi-native
+ * model is never local: its gateway may be, but the gateway forwards to the model's cloud host.
  */
-function isLocalModel(model: Model): boolean {
+function isLocalModel(model: Model, apiKey: string): boolean {
 	if (model.transport === "pi-native") return false;
-	const url =
-		lastDispatchOrigin(model) ??
-		(model.provider === "anthropic" && model.api === "anthropic-messages"
-			? resolveDirectAnthropicBaseUrl(model)
-			: model.baseUrl);
+	let url: string | undefined;
+	try {
+		if (isAnthropicMessagesModel(model)) url = resolveAnthropicBaseUrl(model, apiKey);
+		else if (model.api === "openai-completions" || model.api === "openai-responses") {
+			const openai = model as Model<"openai-completions" | "openai-responses">;
+			url = resolveOpenAIRequestSetup(openai, { apiKey, messages: [] }).baseUrl;
+		}
+	} catch {
+		// A malformed credential fails the real request too; it is no local route.
+		return false;
+	}
+	url ??= lastDispatchOrigin(model) ?? model.baseUrl;
 	return url !== undefined && isLocalUrl(url);
 }
 
@@ -2392,7 +2395,6 @@ export class TurnRecovery {
 				// failure — an unbounded retry loop against a model that cannot work.
 				if (this.#isNoOpRetryFallback(candidate, selector)) continue;
 				if (options?.excludeProvider === candidate.provider) continue;
-				if (options?.localOnly && !isLocalModel(candidate)) continue;
 				// Redeeming Anthropic fallback credit replays the refused request's frozen
 				// body; the server validates thinking blocks across the boundary itself
 				// using the credit token.
@@ -2461,6 +2463,7 @@ export class TurnRecovery {
 					if (!(error instanceof AIError.MissingApiKeyError)) throw error;
 				}
 				if (!apiKey) continue;
+				if (options?.localOnly && !isLocalModel(candidate, apiKey)) continue;
 				const previousEditMode = this.#host.resolveActiveEditMode();
 				const previousSystemPrompt = [...this.#host.agent.state.systemPrompt];
 				const previousTools = [...this.#host.agent.state.tools];
