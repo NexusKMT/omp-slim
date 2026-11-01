@@ -53,6 +53,7 @@ function makeConfig(overrides: Partial<HindsightConfig> = {}): HindsightConfig {
 		bankId: null,
 		bankIdPrefix: "",
 		scoping: "global",
+		globalScope: false,
 		bankMission: "",
 		retainMission: null,
 		autoRecall: true,
@@ -122,6 +123,16 @@ function registerState(client: HindsightApi, settings?: Settings, opts: Register
 	});
 	void settings;
 }
+
+/** Hindsight configs that refuse `scope: "global"` writes, with the error each one raises. */
+const HINDSIGHT_GLOBAL_REJECTIONS = [
+	["while hindsight.globalScope is off", { scoping: "per-project-tagged" }, /set hindsight\.globalScope to true/],
+	[
+		"under per-project scoping",
+		{ scoping: "per-project", globalScope: true },
+		/requires global or per-project-tagged scoping/,
+	],
+] as const;
 
 function makeMnemopiConfig(
 	overrides: (Partial<MnemopiBackendConfig> & Record<string, unknown>) | undefined = {},
@@ -326,7 +337,10 @@ describe("retain.execute", () => {
 		const client = new HindsightApi({ baseUrl: "http://localhost:8888" });
 		const retainBatchSpy = vi.spyOn(HindsightApi.prototype, "retainBatch").mockResolvedValue({} as never);
 		vi.spyOn(HindsightApi.prototype, "createBank").mockResolvedValue({} as never);
-		registerState(client, settings, { retainTags: ["project:pi"], config: { scoping: "per-project-tagged" } });
+		registerState(client, settings, {
+			retainTags: ["project:pi"],
+			config: { scoping: "per-project-tagged", globalScope: true },
+		});
 
 		const tool = MemoryRetainTool.createIf(makeSession(settings))!;
 		const result = await tool.execute("call-mixed", {
@@ -359,7 +373,7 @@ describe("retain.execute", () => {
 		const client = new HindsightApi({ baseUrl: "http://localhost:8888" });
 		const retainBatchSpy = vi.spyOn(HindsightApi.prototype, "retainBatch").mockResolvedValue({} as never);
 		vi.spyOn(HindsightApi.prototype, "createBank").mockResolvedValue({} as never);
-		registerState(client, settings, { config: { scoping: "global" } });
+		registerState(client, settings, { config: { scoping: "global", globalScope: true } });
 
 		await MemoryRetainTool.createIf(makeSession(settings))!.execute("call-global-mode", {
 			items: [{ content: "shared fact" }, { content: "explicitly global fact", scope: "global" }],
@@ -389,29 +403,33 @@ describe("retain.execute", () => {
 		]);
 	});
 
-	it("rejects a global item enqueued directly on the queue under per-project scoping", () => {
-		const client = new HindsightApi({ baseUrl: "http://localhost:8888" });
-		registerState(client, undefined, { config: { scoping: "per-project" } });
+	it.each(HINDSIGHT_GLOBAL_REJECTIONS)(
+		"rejects a global item enqueued directly on the queue %s",
+		(_label, config, error) => {
+			const client = new HindsightApi({ baseUrl: "http://localhost:8888" });
+			registerState(client, undefined, { config });
 
-		expect(() => registeredState!.retainQueue.enqueue("cross-project fact", undefined, "global")).toThrow(
-			/requires global or per-project-tagged scoping/i,
-		);
-		expect(registeredState?.retainQueue.depth).toBe(0);
-	});
+			expect(() => registeredState!.retainQueue.enqueue("cross-project fact", undefined, "global")).toThrow(error);
+			expect(registeredState?.retainQueue.depth).toBe(0);
+		},
+	);
 
-	it("rejects a batch with a global item under per-project scoping before queueing anything", async () => {
-		const settings = Settings.isolated({ "memory.backend": "hindsight" });
-		const client = new HindsightApi({ baseUrl: "http://localhost:8888" });
-		registerState(client, settings, { config: { scoping: "per-project" } });
+	it.each(HINDSIGHT_GLOBAL_REJECTIONS)(
+		"rejects a batch with a global item %s before queueing anything",
+		async (_label, config, error) => {
+			const settings = Settings.isolated({ "memory.backend": "hindsight" });
+			const client = new HindsightApi({ baseUrl: "http://localhost:8888" });
+			registerState(client, settings, { config });
 
-		const tool = MemoryRetainTool.createIf(makeSession(settings))!;
-		await expect(
-			tool.execute("call-global", {
-				items: [{ content: "project fact" }, { content: "global preference", scope: "global" }],
-			}),
-		).rejects.toThrow(/requires global or per-project-tagged scoping/i);
-		expect(registeredState?.retainQueue.depth).toBe(0);
-	});
+			const tool = MemoryRetainTool.createIf(makeSession(settings))!;
+			await expect(
+				tool.execute("call-global", {
+					items: [{ content: "project fact" }, { content: "global preference", scope: "global" }],
+				}),
+			).rejects.toThrow(error);
+			expect(registeredState?.retainQueue.depth).toBe(0);
+		},
+	);
 
 	it.each([
 		["project", /failed for 2 memories: HTTP 503/, "global one"],
@@ -432,7 +450,7 @@ describe("retain.execute", () => {
 			const noticeSpy = vi.fn();
 			registerState(client, settings, {
 				retainTags: ["project:pi"],
-				config: { scoping: "per-project-tagged" },
+				config: { scoping: "per-project-tagged", globalScope: true },
 				sessionOverrides: { emitNotice: noticeSpy },
 			});
 
@@ -748,19 +766,20 @@ describe("global memory scope exposure", () => {
 	});
 
 	it.each([
-		["mnemopi", "per-project", false],
-		["mnemopi", "per-project-tagged", true],
-		["mnemopi", "global", true],
-		["hindsight", "per-project", false],
-		["hindsight", "per-project-tagged", true],
-		["hindsight", "global", true],
-		["local", "per-project-tagged", false],
-	] as const)("%s backend with %s scoping offers scope: %p", (backend, scoping, offered) => {
+		["mnemopi", { "mnemopi.scoping": "per-project" }, false],
+		["mnemopi", { "mnemopi.scoping": "per-project-tagged" }, true],
+		["mnemopi", { "mnemopi.scoping": "global" }, true],
+		["hindsight", { "hindsight.scoping": "per-project-tagged" }, false],
+		["hindsight", { "hindsight.globalScope": true, "hindsight.scoping": "per-project" }, false],
+		["hindsight", { "hindsight.globalScope": true, "hindsight.scoping": "per-project-tagged" }, true],
+		["hindsight", { "hindsight.globalScope": true, "hindsight.scoping": "global" }, true],
+		["local", { "hindsight.globalScope": true, "mnemopi.scoping": "per-project-tagged" }, false],
+	] as const)("%s backend with %j offers scope: %p", (backend, overrides, offered) => {
 		const settings = Settings.isolated({
 			"memory.backend": backend,
-			[backend === "hindsight" ? "hindsight.scoping" : "mnemopi.scoping"]: scoping,
 			"hindsight.apiUrl": "http://localhost:8888",
 			"autolearn.enabled": true,
+			...overrides,
 		});
 		const session = makeSession(settings);
 		expect(offersScope(LearnTool.createIf(session)!)).toEqual({ schema: offered, prompt: offered });
@@ -890,7 +909,7 @@ describe("learn.execute (Hindsight backend)", () => {
 		vi.spyOn(HindsightApi.prototype, "createBank").mockResolvedValue({} as never);
 		registerState(new HindsightApi({ baseUrl: "http://localhost:8888" }), settings, {
 			retainTags: ["project:alpha"],
-			config: { scoping: "per-project-tagged" },
+			config: { scoping: "per-project-tagged", globalScope: true },
 		});
 		const learn = LearnTool.createIf(makeSession(settings))!;
 
@@ -916,22 +935,28 @@ describe("learn.execute (Hindsight backend)", () => {
 		);
 	});
 
-	it("rejects a global lesson under per-project scoping before queueing or minting a skill", async () => {
-		const settings = hindsightSettings();
-		registerState(new HindsightApi({ baseUrl: "http://localhost:8888" }), settings, {
-			config: { scoping: "per-project" },
-		});
+	it.each(HINDSIGHT_GLOBAL_REJECTIONS)(
+		"rejects a global lesson %s before queueing or minting a skill",
+		async (_label, config, error) => {
+			const settings = hindsightSettings();
+			registerState(new HindsightApi({ baseUrl: "http://localhost:8888" }), settings, { config });
 
-		await expect(
-			LearnTool.createIf(makeSession(settings))!.execute("learn-unsupported-global", {
-				memory: "A cross-project lesson must not become project-local.",
-				scope: "global",
-				skill: { action: "create", name: "global-lesson", description: "Shared lesson.", body: "# Shared lesson" },
-			}),
-		).rejects.toThrow(/requires global or per-project-tagged scoping/i);
-		expect(registeredState?.retainQueue.depth).toBe(0);
-		expect(await Bun.file(path.join(getManagedSkillsDir(), "global-lesson", "SKILL.md")).exists()).toBe(false);
-	});
+			await expect(
+				LearnTool.createIf(makeSession(settings))!.execute("learn-unsupported-global", {
+					memory: "A cross-project lesson must not become project-local.",
+					scope: "global",
+					skill: {
+						action: "create",
+						name: "global-lesson",
+						description: "Shared lesson.",
+						body: "# Shared lesson",
+					},
+				}),
+			).rejects.toThrow(error);
+			expect(registeredState?.retainQueue.depth).toBe(0);
+			expect(await Bun.file(path.join(getManagedSkillsDir(), "global-lesson", "SKILL.md")).exists()).toBe(false);
+		},
+	);
 });
 
 describe("Mnemopi backend lifecycle", () => {

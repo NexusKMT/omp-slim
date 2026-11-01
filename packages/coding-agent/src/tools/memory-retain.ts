@@ -128,7 +128,7 @@ export class MemoryRetainTool implements AgentTool<MemoryRetainSchema, MemoryRet
 		if (!state) {
 			throw new Error("Hindsight backend is not initialised for this session.");
 		}
-		// Check before queueing anything, so an unsupported scoping mode rejects the whole batch.
+		// Check before queueing anything, so a disabled or unsupported global scope rejects the whole batch.
 		if (params.items.some(item => item.scope === "global")) {
 			state.assertGlobalRetainAvailable();
 		}

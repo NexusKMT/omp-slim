@@ -130,7 +130,7 @@ export class LearnTool implements AgentTool<LearnSchema> {
 			if (!state) {
 				throw new Error("Hindsight backend is not initialised for this session.");
 			}
-			// Throws before queueing when the scoping mode has no global destination, so no skill is written either.
+			// Throws before queueing while global scope is off or has no destination, so no skill is written either.
 			state.enqueueRetain(params.memory, params.context, params.scope);
 			memoryMessage = "Lesson queued for retention";
 		}
