@@ -6,6 +6,10 @@
 
 - Added `btw.inject` (off by default; `/settings` → Interaction → "/btw Steering Inject"): when you ask `/btw` for a steering prompt, it drafts one in an `<inject>` block shown behind a pink rail, and `Alt+I` (`app.btw.inject`) sends it to the main session (as a steer while the agent runs, else as a new turn) from the inline answer or the BTW history sheet, once per answer from the current run. Once sent, the block turns green with `➤` on each line and "Injected into main session" below it; if the main session drops or refuses the send, the block turns back to pending and the same key retries ([#17618](https://github.com/can1357/oh-my-pi/pull/17618) by [@apullin](https://github.com/apullin))
 
+### Fixed
+
+- Offline, `retry.fallbackChains` no longer hops through every fallback model: once two models fail without reaching a server, it jumps to the first local or LAN model in the chain, or otherwise keeps retrying the current one, and `omp -p` text mode prints each retry with its error instead of only `Working...` ([#17529](https://github.com/can1357/oh-my-pi/pull/17529) by [@Mannan-Goyal](https://github.com/Mannan-Goyal))
+
 ## [18.15.0] - 2026-11-01
 
 ### Added
