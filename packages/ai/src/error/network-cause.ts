@@ -138,26 +138,6 @@ export function classifyNetworkCause(err: unknown): NetworkFailure | undefined {
 	return undefined;
 }
 
-/** Fixed wording around the host (and optional detail) of each {@link networkFailureMessage} sentence. */
-const SENTENCE = {
-	offline: ["No internet connection: couldn't reach ", ". Check your network or proxy and try again."],
-	unreachable: ["Couldn't reach ", ". Check the URL, your network, or proxy."],
-	refused: ["Couldn't connect to ", " (connection refused). Check that the server is running and reachable."],
-	tls: [
-		"TLS certificate verification failed for ",
-		". If you're behind a TLS-inspecting proxy, its CA may need to be trusted.",
-	],
-} as const satisfies Record<NetworkFailureKind, readonly [head: string, tail: string]>;
-
-const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** The offline, unreachable and refused sentences, capturing the host. TLS is left out: the host answered. */
-const CONNECT_FAILURE_PATTERN = new RegExp(
-	[SENTENCE.offline, SENTENCE.unreachable, SENTENCE.refused]
-		.map(([head, tail]) => `${escapeRegExp(head)}(.+?)(?: \\([^()]*\\))?${escapeRegExp(tail)}`)
-		.join("|"),
-);
-
 /**
  * User-visible sentence for a network failure, or `undefined` when the error is
  * not one. `requestUrl` wins over any host parsed out of the error text.
@@ -176,21 +156,16 @@ export function networkFailureMessage(err: unknown, requestUrl?: string): string
 	}
 	const host = urlHost ?? failure.host ?? UNKNOWN_HOST;
 	const detail = failure.detail === undefined ? "" : ` (${failure.detail})`;
-	const [head, tail] = SENTENCE[failure.kind];
-	// The refused sentence carries no detail: `detailOf` returns none for it.
-	return `${head}${host}${detail}${tail}`;
-}
-
-/**
- * Host named by the {@link networkFailureMessage} sentence in `text` for a
- * request that never reached a server (offline, unreachable, refused), or
- * `undefined`. Only omp writes these sentences, so a provider's own words
- * about a refused upstream do not match.
- */
-export function connectFailureHost(text: string): string | undefined {
-	return CONNECT_FAILURE_PATTERN.exec(text)
-		?.slice(1)
-		.find(host => host !== undefined);
+	switch (failure.kind) {
+		case "offline":
+			return `No internet connection: couldn't reach ${host}${detail}. Check your network or proxy and try again.`;
+		case "unreachable":
+			return `Couldn't reach ${host}${detail}. Check the URL, your network, or proxy.`;
+		case "refused":
+			return `Couldn't connect to ${host} (connection refused). Check that the server is running and reachable.`;
+		case "tls":
+			return `TLS certificate verification failed for ${host}${detail}. If you're behind a TLS-inspecting proxy, its CA may need to be trusted.`;
+	}
 }
 
 /**

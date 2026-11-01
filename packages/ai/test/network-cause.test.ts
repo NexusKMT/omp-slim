@@ -149,8 +149,6 @@ describe("network failure classification flags", () => {
 			const message = AIError.networkFailureMessage(cause, "https://api.anthropic.com/v1/messages");
 			expect(AIError.classifyNetworkCause(cause)?.kind).toBe(kind);
 			if (message === undefined) throw new Error(`Expected a ${kind} network-failure sentence`);
-			// Turn recovery reads only the flattened sentence; TLS reached the host.
-			expect(AIError.connectFailureHost(message)).toBe(kind === "tls" ? undefined : "api.anthropic.com");
 			expect(AIError.isProviderRetryableError(new Error(message))).toBe(true);
 			expect(AIError.is(AIError.classify(new Error(message)), AIError.Flag.Transient)).toBe(true);
 		}
@@ -160,9 +158,6 @@ describe("network failure classification flags", () => {
 			expect(AIError.isProviderRetryableError(new Error(message))).toBe(true);
 			expect(AIError.is(AIError.classify(new Error(message)), AIError.Flag.Transient)).toBe(true);
 		}
-
-		// A provider's own words about a refused upstream mean a server answered.
-		expect(AIError.connectFailureHost("upstream connect error: ECONNREFUSED 10.0.0.1:443")).toBeUndefined();
 	});
 });
 

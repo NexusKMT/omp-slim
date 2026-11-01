@@ -19,16 +19,8 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { resolveAnthropicBaseUrl } from "@oh-my-pi/pi-ai/providers/anthropic-http-options";
-import { resolveAzureConfig } from "@oh-my-pi/pi-ai/providers/azure-openai-config";
-import { resolveOpenAIRequestSetup } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import {
-	isAnthropicMessagesModel,
-	shouldDropTruncatedThinkingOnlyAssistant,
-} from "@oh-my-pi/pi-ai/providers/transform-messages";
-import { getProxyForProvider } from "@oh-my-pi/pi-ai/utils/proxy";
+import { shouldDropTruncatedThinkingOnlyAssistant } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
-import { lastDispatchOrigin } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { fallbackCreditTargets } from "@oh-my-pi/pi-catalog/compat/fallback-credit";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { isFireworksFastModelId, toFireworksBaseModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
@@ -45,7 +37,6 @@ import malformedFunctionCallRetryTemplate from "../prompts/system/malformed-func
 import streamStallContinueTemplate from "../prompts/system/stream-stall-continue.md" with { type: "text" };
 import thinkingLoopRedirectTemplate from "../prompts/system/thinking-loop-redirect.md" with { type: "text" };
 import unexpectedStopRetryTemplate from "../prompts/system/unexpected-stop-retry.md" with { type: "text" };
-import { isApprovalPublicUrl } from "../tools/approval-targets";
 import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
@@ -145,40 +136,6 @@ const GENERIC_ABORT_MESSAGES: Record<string, true> = {
 
 function hasNonWhitespace(value: string): boolean {
 	return NON_WHITESPACE_RE.test(value);
-}
-
-/** Whether `url` (a URL, or a bare `host[:port]`) names a loopback, private-network or intranet host. */
-function isLocalUrl(url: string): boolean {
-	const full = url.includes("://") ? url : `http://${url}`;
-	// Unparseable text (the sentence's "the API host" placeholder) is no host at all, not a local one.
-	return URL.canParse(full) && !isApprovalPublicUrl(full);
-}
-
-/**
- * Whether `model` is served from this machine or its network, which still answers when the
- * internet is down. Judged on where a request with `apiKey` goes, resolved by the request's own
- * endpoint rules; other APIs use the origin the model last sent to, else its base URL. A pi-native
- * model is never local: its gateway may be, but the gateway forwards to the model's cloud host.
- */
-function isLocalModel(model: Model, apiKey: string): boolean {
-	if (model.transport === "pi-native") return false;
-	let url: string | undefined;
-	try {
-		if (isAnthropicMessagesModel(model)) url = resolveAnthropicBaseUrl(model, apiKey);
-		else if (model.api === "openai-completions" || model.api === "openai-responses") {
-			const openai = model as Model<"openai-completions" | "openai-responses">;
-			// Chat completions honour an Alibaba Coding Plan credential's own endpoint, as the real request does.
-			const alibabaCodingPlanAuth = openai.api === "openai-completions";
-			url = resolveOpenAIRequestSetup(openai, { apiKey, messages: [], alibabaCodingPlanAuth }).baseUrl;
-		} else if (model.api === "azure-openai-responses") {
-			url = resolveAzureConfig(model as Model<"azure-openai-responses">).baseUrl;
-		}
-	} catch {
-		// A malformed credential fails the real request too; it is no local route.
-		return false;
-	}
-	url ??= lastDispatchOrigin(model) ?? model.baseUrl;
-	return url !== undefined && isLocalUrl(url);
 }
 
 /**
@@ -441,14 +398,6 @@ export class TurnRecovery {
 	readonly #refusalWalkTried = new Set<string>();
 	/** Per-model account walk allowance, snapshotted once and cleared when the retry saga ends. */
 	readonly #accountPolicyRotationsRemaining = new Map<string, number>();
-	/**
-	 * Hosts a request could not reach in the current retry saga. Two different
-	 * ones mean the network is down rather than a provider: the fallback chain
-	 * then only moves to a local or LAN model, since a cloud one would fail the
-	 * same way. Any attempt that reaches a server clears it, and so does
-	 * `resolveRetry()` with the rest of the saga state.
-	 */
-	readonly #connectFailedHosts = new Set<string>();
 	#requestBodyReadTimeoutRecoveryPromptSequence: number | undefined;
 	#retryPromise: Promise<void> | undefined;
 	#retryResolve: (() => void) | undefined;
@@ -942,7 +891,6 @@ export class TurnRecovery {
 	resolveRetry(): void {
 		this.#refusalWalkTried.clear();
 		this.#accountPolicyRotationsRemaining.clear();
-		this.#connectFailedHosts.clear();
 		if (this.#retryResolve) {
 			this.#retryResolve();
 			this.#retryResolve = undefined;
@@ -2348,8 +2296,6 @@ export class TurnRecovery {
 			refusalWalk?: boolean;
 			/** The retry policy retries the failed model if this hop does not switch. */
 			sameModelRetryAvailable?: boolean;
-			/** The network is down: only a candidate served from this machine or its LAN can answer. */
-			localOnly?: boolean;
 		},
 	): Promise<boolean> {
 		const ceiling = this.#host.thinkingLevelCeiling();
@@ -2469,15 +2415,6 @@ export class TurnRecovery {
 					if (!(error instanceof AIError.MissingApiKeyError)) throw error;
 				}
 				if (!apiKey) continue;
-				// A candidate leaving through another proxy than the failed request took
-				// (`PI_PROXY_<PROVIDER>`) is a different route, which may still be up.
-				if (
-					options?.localOnly &&
-					!isLocalModel(candidate, apiKey) &&
-					getProxyForProvider(candidate.provider) === getProxyForProvider(failedMessage.provider)
-				) {
-					continue;
-				}
 				const previousEditMode = this.#host.resolveActiveEditMode();
 				const previousSystemPrompt = [...this.#host.agent.state.systemPrompt];
 				const previousTools = [...this.#host.agent.state.tools];
@@ -3023,17 +2960,6 @@ export class TurnRecovery {
 			return maxDelayMs > 0 && waitMs > maxDelayMs && !waitForUsageReset;
 		};
 
-		// Only a server off this network proves the internet is back; a local server
-		// answering, or refusing, says nothing about it.
-		const failedHost = message.errorStatus === undefined ? AIError.connectFailureHost(errorMessage) : undefined;
-		const servedLocally =
-			currentModel !== undefined &&
-			currentModel.transport !== "pi-native" &&
-			isLocalUrl(lastDispatchOrigin(currentModel) ?? currentModel.baseUrl ?? "");
-		if (!failedHost && !servedLocally) this.#connectFailedHosts.clear();
-		else if (failedHost && !isLocalUrl(failedHost)) this.#connectFailedHosts.add(failedHost);
-		const networkDown = this.#connectFailedHosts.size > 1;
-
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
 			// The retry budget bounds same-model retries against a failing provider. A
 			// classifier refusal is not that: retrying the same model reproduces it, and
@@ -3075,7 +3001,6 @@ export class TurnRecovery {
 					refusalWalk: classifierRefusal,
 					preserveFailedTurn,
 					wrapAround: longUsageLimitFallback,
-					localOnly: networkDown,
 					// Deferring a chain candidate only pays when the code below makes
 					// another attempt on this model that can succeed. Each term is a
 					// branch below that, with no switch, ends the turn instead (a spent

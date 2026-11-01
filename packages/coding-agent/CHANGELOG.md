@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Offline, `retry.fallbackChains` no longer hops through every fallback model: once requests to two different hosts fail without reaching a server, it jumps to the first local or LAN model in the chain, or otherwise keeps retrying the current one, and `omp -p` text mode prints each retry with its error instead of only `Working...` ([#17529](https://github.com/can1357/oh-my-pi/pull/17529) by [@Mannan-Goyal](https://github.com/Mannan-Goyal))
+- `omp -p` text mode now prints each automatic retry with its error (for example "Couldn't reach api.anthropic.com … check your network") instead of showing only `Working...` while a turn retries ([#17529](https://github.com/can1357/oh-my-pi/pull/17529) by [@Mannan-Goyal](https://github.com/Mannan-Goyal))
 
 ## [18.15.0] - 2026-11-01
 
