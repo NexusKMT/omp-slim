@@ -12,14 +12,14 @@ import {
 } from "./local-llm";
 import { getMnemopiRuntimeOptions } from "./runtime-options";
 import { clipToWindow, DEFAULT_INPUT_CHARS } from "./text-window";
-import { envBool, envInt, envString } from "../util/env";
+import { envFlag, envInt, envString } from "../util/env";
 
 function llmEnabled(): boolean {
-	return envBool("MNEMOPI_LLM_ENABLED", true);
+	return envFlag("MNEMOPI_LLM_ENABLED", true);
 }
 
 function hostLlmEnabled(): boolean {
-	return envBool("MNEMOPI_HOST_LLM_ENABLED", false);
+	return envFlag("MNEMOPI_HOST_LLM_ENABLED", false);
 }
 
 function llmMaxTokens(): number {

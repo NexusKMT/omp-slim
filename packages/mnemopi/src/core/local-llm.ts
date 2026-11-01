@@ -11,7 +11,7 @@ import {
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import { fetchWithRetry } from "@oh-my-pi/pi-utils";
 import { type CompleteOptions, callHostLlm, getHostLlmBackend } from "./llm-backends";
-import { envBool, envInt, envString } from "../util/env";
+import { envFlag, envInt, envString } from "../util/env";
 import {
 	getMnemopiRuntimeOptions,
 	isPiAiModel,
@@ -59,7 +59,7 @@ function llmEnabled(): boolean {
 	if (activeCustomCompletion() !== undefined || activePiAiModel() !== undefined) {
 		return true;
 	}
-	return envBool("MNEMOPI_LLM_ENABLED", true);
+	return envFlag("MNEMOPI_LLM_ENABLED", true);
 }
 
 function llmMaxTokens(): number {
@@ -82,7 +82,7 @@ function hostLlmEnabled(): boolean {
 	if (active?.baseUrl !== undefined || (typeof active?.model === "string" && active.model !== "")) {
 		return false;
 	}
-	return envBool("MNEMOPI_HOST_LLM_ENABLED", false);
+	return envFlag("MNEMOPI_HOST_LLM_ENABLED", false);
 }
 
 function hostLlmContextTokens(): number {
@@ -403,7 +403,7 @@ async function summarizeChunk(
 		return null;
 	}
 
-	if (llmEnabled() && llmBaseUrl() !== "" && !envBool("MNEMOPI_FORCE_LOCAL", false)) {
+	if (llmEnabled() && llmBaseUrl() !== "" && !envFlag("MNEMOPI_FORCE_LOCAL", false)) {
 		const raw = await callRemoteLlm(prompt, 0.3, options);
 		if (raw !== null) {
 			const cleaned = cleanOutput(raw);
@@ -460,7 +460,7 @@ export async function complete(
 	if (attempted) {
 		return hostText;
 	}
-	if (llmEnabled() && llmBaseUrl() !== "" && !envBool("MNEMOPI_FORCE_LOCAL", false)) {
+	if (llmEnabled() && llmBaseUrl() !== "" && !envFlag("MNEMOPI_FORCE_LOCAL", false)) {
 		const remote = await callRemoteLlm(prompt, temperature, options);
 		return remote === null ? null : cleanOutput(remote) || null;
 	}
