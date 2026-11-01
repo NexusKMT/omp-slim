@@ -11,8 +11,11 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
-// `networkFailureMessage`'s rewrite of a rejected fetch: no server answered.
-const CONNECT_FAILURE = "Couldn't reach api.example (getaddrinfo ENOTFOUND). Check the URL, your network, or proxy.";
+/** `networkFailureMessage`'s rewrite of a rejected fetch to `host`: no server answered. */
+const unreachable = (host: string) =>
+	`Couldn't reach ${host} (getaddrinfo ENOTFOUND). Check the URL, your network, or proxy.`;
+const ANTHROPIC_DOWN = unreachable("api.anthropic.com");
+const OPENAI_DOWN = unreachable("api.openai.com");
 const SERVER_ERROR = "overloaded_error: provider returned error 503";
 
 const primary = getBundledModel("anthropic", "claude-sonnet-4-5");
@@ -91,9 +94,9 @@ describe("AgentSession fallback chain on connect failures", () => {
 		return { requested, switchedTo };
 	}
 
-	it("stays on the current model once a second model fails to connect and no local one is configured", async () => {
+	it("stays on the current model once a second host fails to connect and no local model is configured", async () => {
 		// Regression: offline, every chain entry was tried in turn and each failed the same way.
-		const { requested, switchedTo } = await run([CONNECT_FAILURE, CONNECT_FAILURE]);
+		const { requested, switchedTo } = await run([ANTHROPIC_DOWN, OPENAI_DOWN]);
 
 		expect(switchedTo).toEqual(["openai/gpt-4o-mini"]);
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "openai/gpt-4o-mini", "openai/gpt-4o-mini"]);
@@ -101,7 +104,7 @@ describe("AgentSession fallback chain on connect failures", () => {
 
 	it("jumps past the remaining cloud entries to a local model once the network looks down", async () => {
 		const { requested, switchedTo } = await run(
-			[CONNECT_FAILURE, CONNECT_FAILURE],
+			[ANTHROPIC_DOWN, OPENAI_DOWN],
 			["openai/gpt-4o-mini", "openai/gpt-4o", "local-llm/local-model"],
 		);
 
@@ -109,11 +112,47 @@ describe("AgentSession fallback chain on connect failures", () => {
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "openai/gpt-4o-mini", "local-llm/local-model"]);
 	});
 
-	it("keeps walking when the fallback reached a server", async () => {
-		// The first model's host is down, the fallback's provider answered: not a network outage.
-		const { requested, switchedTo } = await run([CONNECT_FAILURE, SERVER_ERROR]);
+	it("counts a first-party model rerouted to a local gateway as local", async () => {
+		// `ANTHROPIC_BASE_URL` sends a stock Anthropic model to this machine; its catalog URL stays remote.
+		const previous = Bun.env.ANTHROPIC_BASE_URL;
+		Bun.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:8317";
+		try {
+			const { switchedTo } = await run(
+				[ANTHROPIC_DOWN, OPENAI_DOWN],
+				["openai/gpt-4o-mini", "openai/gpt-4o", "anthropic/claude-haiku-4-5"],
+			);
+			expect(switchedTo).toEqual(["openai/gpt-4o-mini", "anthropic/claude-haiku-4-5"]);
+		} finally {
+			if (previous === undefined) delete Bun.env.ANTHROPIC_BASE_URL;
+			else Bun.env.ANTHROPIC_BASE_URL = previous;
+		}
+	});
+
+	it("keeps walking when every failed request went to one host", async () => {
+		// One provider's host is down, not the network: the next chain entry may live elsewhere.
+		const { requested, switchedTo } = await run([OPENAI_DOWN, OPENAI_DOWN]);
 
 		expect(switchedTo).toEqual(["openai/gpt-4o-mini", "openai/gpt-4o"]);
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "openai/gpt-4o-mini", "openai/gpt-4o"]);
+	});
+
+	it("keeps walking when the fallback reached a server", async () => {
+		const { requested, switchedTo } = await run([ANTHROPIC_DOWN, SERVER_ERROR]);
+
+		expect(switchedTo).toEqual(["openai/gpt-4o-mini", "openai/gpt-4o"]);
+		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "openai/gpt-4o-mini", "openai/gpt-4o"]);
+	});
+
+	it("resumes walking the chain once a later attempt reaches a server", async () => {
+		// The network came back: a 503 on the held model must not keep cloud fallbacks skipped.
+		const { requested, switchedTo } = await run([ANTHROPIC_DOWN, OPENAI_DOWN, SERVER_ERROR]);
+
+		expect(switchedTo).toEqual(["openai/gpt-4o-mini", "openai/gpt-4o"]);
+		expect(requested).toEqual([
+			"anthropic/claude-sonnet-4-5",
+			"openai/gpt-4o-mini",
+			"openai/gpt-4o-mini",
+			"openai/gpt-4o",
+		]);
 	});
 });

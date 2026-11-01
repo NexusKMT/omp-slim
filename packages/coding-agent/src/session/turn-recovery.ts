@@ -19,9 +19,11 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { resolveDirectAnthropicBaseUrl } from "@oh-my-pi/pi-ai/providers/anthropic-state";
 import { shouldDropTruncatedThinkingOnlyAssistant } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { isLocalOrMetadataHost } from "@oh-my-pi/pi-ai/utils/proxy";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
+import { lastDispatchOrigin } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { fallbackCreditTargets } from "@oh-my-pi/pi-catalog/compat/fallback-credit";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { isFireworksFastModelId, toFireworksBaseModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
@@ -139,11 +141,20 @@ function hasNonWhitespace(value: string): boolean {
 	return NON_WHITESPACE_RE.test(value);
 }
 
-/** Whether `model` is served from this machine or its LAN, which still answers when the internet is down. */
+/**
+ * Whether `model` is served from this machine or its LAN, which still answers when the internet is
+ * down. Judged on where its requests go: the origin it last sent to, else first-party Anthropic's
+ * `ANTHROPIC_BASE_URL`/Foundry reroute, else its configured base URL.
+ */
 function isLocalModel(model: Model): boolean {
-	if (!model.baseUrl) return false;
+	const url =
+		lastDispatchOrigin(model) ??
+		(model.provider === "anthropic" && model.api === "anthropic-messages"
+			? resolveDirectAnthropicBaseUrl(model)
+			: model.baseUrl);
+	if (!url) return false;
 	try {
-		return isLocalOrMetadataHost(new URL(model.baseUrl).hostname);
+		return isLocalOrMetadataHost(new URL(url).hostname);
 	} catch {
 		return false;
 	}
@@ -410,12 +421,13 @@ export class TurnRecovery {
 	/** Per-model account walk allowance, snapshotted once and cleared when the retry saga ends. */
 	readonly #accountPolicyRotationsRemaining = new Map<string, number>();
 	/**
-	 * Models whose request never reached a server in the current retry saga.
-	 * Once two have, the network is down rather than a provider: the fallback
-	 * chain only moves to a local or LAN model, since a cloud one would fail the
-	 * same way. Cleared in `resolveRetry()` with the rest of the saga state.
+	 * Hosts a request could not reach in the current retry saga. Two different
+	 * ones mean the network is down rather than a provider: the fallback chain
+	 * then only moves to a local or LAN model, since a cloud one would fail the
+	 * same way. Any attempt that reaches a server clears it, and so does
+	 * `resolveRetry()` with the rest of the saga state.
 	 */
-	readonly #connectFailedModels = new Set<string>();
+	readonly #connectFailedHosts = new Set<string>();
 	#requestBodyReadTimeoutRecoveryPromptSequence: number | undefined;
 	#retryPromise: Promise<void> | undefined;
 	#retryResolve: (() => void) | undefined;
@@ -909,7 +921,7 @@ export class TurnRecovery {
 	resolveRetry(): void {
 		this.#refusalWalkTried.clear();
 		this.#accountPolicyRotationsRemaining.clear();
-		this.#connectFailedModels.clear();
+		this.#connectFailedHosts.clear();
 		if (this.#retryResolve) {
 			this.#retryResolve();
 			this.#retryResolve = undefined;
@@ -2982,10 +2994,10 @@ export class TurnRecovery {
 			return maxDelayMs > 0 && waitMs > maxDelayMs && !waitForUsageReset;
 		};
 
-		if (currentModel && message.errorStatus === undefined && AIError.isConnectFailureMessage(errorMessage)) {
-			this.#connectFailedModels.add(`${currentModel.provider}/${currentModel.id}`);
-		}
-		const networkDown = this.#connectFailedModels.size > 1;
+		const failedHost = message.errorStatus === undefined ? AIError.connectFailureHost(errorMessage) : undefined;
+		if (failedHost) this.#connectFailedHosts.add(failedHost);
+		else this.#connectFailedHosts.clear();
+		const networkDown = this.#connectFailedHosts.size > 1;
 
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
 			// The retry budget bounds same-model retries against a failing provider. A
