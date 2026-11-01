@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
+import { __resetProxyCache } from "@oh-my-pi/pi-ai/utils/proxy";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -118,10 +119,13 @@ describe("AgentSession fallback chain on connect failures", () => {
 		["ANTHROPIC_BASE_URL", "anthropic/claude-haiku-4-5"],
 		["XAI_BASE_URL", "xai/grok-2"],
 		["AZURE_OPENAI_BASE_URL", "azure/codex-mini"],
-	])("counts a model %s reroutes to a local gateway as local before its first request", async (env, fallback) => {
-		// The env override sends a stock catalog model to this machine; its catalog URL stays remote.
+		// A provider proxy is another route out, which may work while direct connections fail.
+		["PI_PROXY_XAI", "xai/grok-2"],
+	])("keeps a fallback that %s sends off the failed route, before its first request", async (env, fallback) => {
+		// The env override moves a stock catalog model's requests; its catalog URL stays the same.
 		const previous = Bun.env[env];
 		Bun.env[env] = "http://127.0.0.1:8317/v1";
+		__resetProxyCache();
 		try {
 			const { switchedTo } = await run(
 				[ANTHROPIC_DOWN, OPENAI_DOWN],
@@ -131,7 +135,24 @@ describe("AgentSession fallback chain on connect failures", () => {
 		} finally {
 			if (previous === undefined) delete Bun.env[env];
 			else Bun.env[env] = previous;
+			__resetProxyCache();
 		}
+	});
+
+	it("keeps cloud fallbacks skipped when the local fallback answers with an error", async () => {
+		// A local 503 proves only the local server is up, not that the internet is back.
+		const { requested, switchedTo } = await run(
+			[ANTHROPIC_DOWN, OPENAI_DOWN, SERVER_ERROR],
+			["openai/gpt-4o-mini", "local-llm/local-model", "openai/gpt-4o"],
+		);
+
+		expect(switchedTo).toEqual(["openai/gpt-4o-mini", "local-llm/local-model"]);
+		expect(requested).toEqual([
+			"anthropic/claude-sonnet-4-5",
+			"openai/gpt-4o-mini",
+			"local-llm/local-model",
+			"local-llm/local-model",
+		]);
 	});
 
 	it("keeps walking when every failed request went to one host", async () => {

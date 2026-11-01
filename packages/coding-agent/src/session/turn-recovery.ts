@@ -26,6 +26,7 @@ import {
 	isAnthropicMessagesModel,
 	shouldDropTruncatedThinkingOnlyAssistant,
 } from "@oh-my-pi/pi-ai/providers/transform-messages";
+import { getProxyForProvider } from "@oh-my-pi/pi-ai/utils/proxy";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
 import { lastDispatchOrigin } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { fallbackCreditTargets } from "@oh-my-pi/pi-catalog/compat/fallback-credit";
@@ -2468,7 +2469,15 @@ export class TurnRecovery {
 					if (!(error instanceof AIError.MissingApiKeyError)) throw error;
 				}
 				if (!apiKey) continue;
-				if (options?.localOnly && !isLocalModel(candidate, apiKey)) continue;
+				// A candidate leaving through another proxy than the failed request took
+				// (`PI_PROXY_<PROVIDER>`) is a different route, which may still be up.
+				if (
+					options?.localOnly &&
+					!isLocalModel(candidate, apiKey) &&
+					getProxyForProvider(candidate.provider) === getProxyForProvider(failedMessage.provider)
+				) {
+					continue;
+				}
 				const previousEditMode = this.#host.resolveActiveEditMode();
 				const previousSystemPrompt = [...this.#host.agent.state.systemPrompt];
 				const previousTools = [...this.#host.agent.state.tools];
@@ -3014,10 +3023,15 @@ export class TurnRecovery {
 			return maxDelayMs > 0 && waitMs > maxDelayMs && !waitForUsageReset;
 		};
 
-		// A local server that refuses is down itself; it says nothing about the internet.
+		// Only a server off this network proves the internet is back; a local server
+		// answering, or refusing, says nothing about it.
 		const failedHost = message.errorStatus === undefined ? AIError.connectFailureHost(errorMessage) : undefined;
-		if (!failedHost) this.#connectFailedHosts.clear();
-		else if (!isLocalUrl(failedHost)) this.#connectFailedHosts.add(failedHost);
+		const servedLocally =
+			currentModel !== undefined &&
+			currentModel.transport !== "pi-native" &&
+			isLocalUrl(lastDispatchOrigin(currentModel) ?? currentModel.baseUrl ?? "");
+		if (!failedHost && !servedLocally) this.#connectFailedHosts.clear();
+		else if (failedHost && !isLocalUrl(failedHost)) this.#connectFailedHosts.add(failedHost);
 		const networkDown = this.#connectFailedHosts.size > 1;
 
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {
