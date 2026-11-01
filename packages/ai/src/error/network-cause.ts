@@ -138,22 +138,13 @@ export function classifyNetworkCause(err: unknown): NetworkFailure | undefined {
 	return undefined;
 }
 
-/** Fixed wording before and after the host (and detail) of each {@link networkFailureMessage} sentence. */
-const SENTENCES: Record<NetworkFailureKind, readonly [prefix: string, suffix: string]> = {
-	offline: ["No internet connection: couldn't reach ", ". Check your network or proxy and try again."],
-	unreachable: ["Couldn't reach ", ". Check the URL, your network, or proxy."],
-	// The refused sentence carries no detail: {@link detailOf} returns none for it.
-	refused: ["Couldn't connect to ", " (connection refused). Check that the server is running and reachable."],
-	tls: [
-		"TLS certificate verification failed for ",
-		". If you're behind a TLS-inspecting proxy, its CA may need to be trusted.",
-	],
-};
-
-const SENTENCE_PATTERNS = (Object.entries(SENTENCES) as [NetworkFailureKind, readonly [string, string]][]).map(
-	([kind, parts]) =>
-		[kind, new RegExp(parts.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".+?"))] as const,
-);
+/** Fixed tail of each {@link networkFailureMessage} sentence; unique per kind. */
+const SENTENCE_TAIL = {
+	offline: ". Check your network or proxy and try again.",
+	unreachable: ". Check the URL, your network, or proxy.",
+	refused: " (connection refused). Check that the server is running and reachable.",
+	tls: ". If you're behind a TLS-inspecting proxy, its CA may need to be trusted.",
+} as const satisfies Record<NetworkFailureKind, string>;
 
 /**
  * User-visible sentence for a network failure, or `undefined` when the error is
@@ -173,21 +164,30 @@ export function networkFailureMessage(err: unknown, requestUrl?: string): string
 	}
 	const host = urlHost ?? failure.host ?? UNKNOWN_HOST;
 	const detail = failure.detail === undefined ? "" : ` (${failure.detail})`;
-	const [prefix, suffix] = SENTENCES[failure.kind];
-	return `${prefix}${host}${detail}${suffix}`;
+	switch (failure.kind) {
+		case "offline":
+			return `No internet connection: couldn't reach ${host}${detail}${SENTENCE_TAIL.offline}`;
+		case "unreachable":
+			return `Couldn't reach ${host}${detail}${SENTENCE_TAIL.unreachable}`;
+		case "refused":
+			return `Couldn't connect to ${host}${SENTENCE_TAIL.refused}`;
+		case "tls":
+			return `TLS certificate verification failed for ${host}${detail}${SENTENCE_TAIL.tls}`;
+	}
 }
 
 /**
- * Kind of the {@link networkFailureMessage} sentence in `text`, or `undefined`.
- *
- * Only omp's own rewrite of a rejected `fetch` writes these sentences, so this
- * reads a flattened message (an assistant `errorMessage`) as a transport
- * failure only when one happened. {@link classifyNetworkCause} on free text
- * would also take a provider's own words for one: an error frame inside an
- * HTTP 200 stream that says `upstream connection refused`.
+ * Whether `text` carries the {@link networkFailureMessage} sentence for a
+ * request that never reached a server (offline, unreachable, refused). TLS is
+ * excluded: the host answered the handshake. Only omp writes these sentences,
+ * so a provider's own words about a refused upstream do not match.
  */
-export function networkFailureSentenceKind(text: string): NetworkFailureKind | undefined {
-	return SENTENCE_PATTERNS.find(([, pattern]) => pattern.test(text))?.[0];
+export function isConnectFailureMessage(text: string): boolean {
+	return (
+		text.includes(SENTENCE_TAIL.offline) ||
+		text.includes(SENTENCE_TAIL.unreachable) ||
+		text.includes(SENTENCE_TAIL.refused)
+	);
 }
 
 /**
