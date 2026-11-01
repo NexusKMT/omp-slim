@@ -374,7 +374,7 @@ async function runPrintModeCore(
 		} else if (event.type === "auto_retry_start") {
 			// Text mode shows only `Working...` while a turn runs; a turn stuck retrying
 			// (offline, an outage) must say why instead of looking like a slow answer.
-			writeStderrLine(`Retrying (${event.attempt}/${event.maxAttempts}): ${event.errorMessage}`);
+			writeStderrLine(`Retrying (${event.attempt}/${event.maxAttempts}): ${singleLine(event.errorMessage)}`);
 		}
 	});
 

@@ -141,23 +141,35 @@ function hasNonWhitespace(value: string): boolean {
 	return NON_WHITESPACE_RE.test(value);
 }
 
+/** Whether `hostname` is on this machine or its LAN: loopback, private IPs, mDNS `.local`, single-label intranet names. */
+function isLocalHostname(hostname: string): boolean {
+	const host = hostname.toLowerCase();
+	return isLocalOrMetadataHost(host) || host.endsWith(".local") || (!host.includes(".") && !host.includes(":"));
+}
+
+/** Whether `url` (a URL, or a bare `host[:port]`) names a local or LAN host. */
+function isLocalUrl(url: string): boolean {
+	try {
+		return isLocalHostname(new URL(url.includes("://") ? url : `http://${url}`).hostname);
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Whether `model` is served from this machine or its LAN, which still answers when the internet is
  * down. Judged on where its requests go: the origin it last sent to, else first-party Anthropic's
- * `ANTHROPIC_BASE_URL`/Foundry reroute, else its configured base URL.
+ * `ANTHROPIC_BASE_URL`/Foundry reroute, else its configured base URL. A pi-native model is never
+ * local: its gateway may be, but the gateway forwards to the model's cloud host.
  */
 function isLocalModel(model: Model): boolean {
+	if (model.transport === "pi-native") return false;
 	const url =
 		lastDispatchOrigin(model) ??
 		(model.provider === "anthropic" && model.api === "anthropic-messages"
 			? resolveDirectAnthropicBaseUrl(model)
 			: model.baseUrl);
-	if (!url) return false;
-	try {
-		return isLocalOrMetadataHost(new URL(url).hostname);
-	} catch {
-		return false;
-	}
+	return url !== undefined && isLocalUrl(url);
 }
 
 /**
@@ -2994,9 +3006,10 @@ export class TurnRecovery {
 			return maxDelayMs > 0 && waitMs > maxDelayMs && !waitForUsageReset;
 		};
 
+		// A local server that refuses is down itself; it says nothing about the internet.
 		const failedHost = message.errorStatus === undefined ? AIError.connectFailureHost(errorMessage) : undefined;
-		if (failedHost) this.#connectFailedHosts.add(failedHost);
-		else this.#connectFailedHosts.clear();
+		if (!failedHost) this.#connectFailedHosts.clear();
+		else if (!isLocalUrl(failedHost)) this.#connectFailedHosts.add(failedHost);
 		const networkDown = this.#connectFailedHosts.size > 1;
 
 		if (!staleOpenAIResponsesReplayError && !switchedCredential && currentSelector) {

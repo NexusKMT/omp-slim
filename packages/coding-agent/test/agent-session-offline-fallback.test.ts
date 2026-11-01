@@ -136,6 +136,18 @@ describe("AgentSession fallback chain on connect failures", () => {
 		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "openai/gpt-4o-mini", "openai/gpt-4o"]);
 	});
 
+	it("does not count a stopped local server as evidence the network is down", async () => {
+		const localRefused =
+			"Couldn't connect to 127.0.0.1:11434 (connection refused). Check that the server is running and reachable.";
+		const { requested, switchedTo } = await run(
+			[ANTHROPIC_DOWN, localRefused],
+			["local-llm/local-model", "openai/gpt-4o-mini"],
+		);
+
+		expect(switchedTo).toEqual(["local-llm/local-model", "openai/gpt-4o-mini"]);
+		expect(requested).toEqual(["anthropic/claude-sonnet-4-5", "local-llm/local-model", "openai/gpt-4o-mini"]);
+	});
+
 	it("keeps walking when the fallback reached a server", async () => {
 		const { requested, switchedTo } = await run([ANTHROPIC_DOWN, SERVER_ERROR]);
 
