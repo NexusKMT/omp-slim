@@ -23,6 +23,7 @@ import {
 import { OpenAIHttpError, postOpenAIStream } from "../utils/openai-http";
 import { sanitizeSchemaForOpenAIResponses, toolWireSchema } from "../utils/schema";
 import { mapToOpenAIResponsesToolChoice } from "../utils/tool-choice";
+import { type AzureEndpointOptions, resolveAzureConfig } from "./azure-openai-config";
 import {
 	applyOpenAIReasoningEffortFallback,
 	createOpenAIReasoningEffortFallbackKey,
@@ -43,7 +44,6 @@ import {
 
 export { parseAzureDeploymentNameMap } from "./openai-shared";
 
-const DEFAULT_AZURE_API_VERSION = "v1";
 const AZURE_OPENAI_RESPONSES_FIRST_EVENT_TIMEOUT_MESSAGE =
 	"Azure OpenAI responses stream timed out while waiting for the first event";
 
@@ -56,12 +56,9 @@ function resolveDeploymentName(model: Model<"azure-openai-responses">, options?:
 }
 
 // Azure OpenAI Responses-specific options
-export interface AzureOpenAIResponsesOptions extends StreamOptions {
+export interface AzureOpenAIResponsesOptions extends StreamOptions, AzureEndpointOptions {
 	reasoning?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 	reasoningSummary?: "auto" | "detailed" | "concise" | null;
-	azureApiVersion?: string;
-	azureResourceName?: string;
-	azureBaseUrl?: string;
 	azureDeploymentName?: string;
 	toolChoice?: ToolChoice;
 	serviceTier?: ServiceTier;
@@ -275,37 +272,6 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 		maxProviderErrorRetries: 1,
 	});
 };
-
-function resolveAzureConfig(
-	model: Model<"azure-openai-responses">,
-	options?: AzureOpenAIResponsesOptions,
-): { baseUrl: string; apiVersion: string } {
-	const apiVersion = options?.azureApiVersion || $env.AZURE_OPENAI_API_VERSION || DEFAULT_AZURE_API_VERSION;
-
-	const baseUrl = options?.azureBaseUrl?.trim() || $env.AZURE_OPENAI_BASE_URL?.trim() || undefined;
-	const resourceName = options?.azureResourceName || $env.AZURE_OPENAI_RESOURCE_NAME;
-
-	let resolvedBaseUrl = baseUrl;
-
-	if (!resolvedBaseUrl && resourceName) {
-		resolvedBaseUrl = `https://${resourceName}.openai.azure.com/openai/v1`;
-	}
-
-	if (!resolvedBaseUrl && model.baseUrl) {
-		resolvedBaseUrl = model.baseUrl;
-	}
-
-	if (!resolvedBaseUrl) {
-		throw new AIError.ConfigurationError(
-			"Azure OpenAI base URL is required. Set AZURE_OPENAI_BASE_URL or AZURE_OPENAI_RESOURCE_NAME, or pass azureBaseUrl, azureResourceName, or model.baseUrl.",
-		);
-	}
-
-	return {
-		baseUrl: resolvedBaseUrl.replace(/\/+$/, ""),
-		apiVersion,
-	};
-}
 
 function modelForAzureEndpoint(
 	model: Model<"azure-openai-responses">,

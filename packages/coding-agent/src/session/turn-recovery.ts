@@ -20,6 +20,7 @@ import type {
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { resolveAnthropicBaseUrl } from "@oh-my-pi/pi-ai/providers/anthropic-http-options";
+import { resolveAzureConfig } from "@oh-my-pi/pi-ai/providers/azure-openai-config";
 import { resolveOpenAIRequestSetup } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import {
 	isAnthropicMessagesModel,
@@ -165,7 +166,11 @@ function isLocalModel(model: Model, apiKey: string): boolean {
 		if (isAnthropicMessagesModel(model)) url = resolveAnthropicBaseUrl(model, apiKey);
 		else if (model.api === "openai-completions" || model.api === "openai-responses") {
 			const openai = model as Model<"openai-completions" | "openai-responses">;
-			url = resolveOpenAIRequestSetup(openai, { apiKey, messages: [] }).baseUrl;
+			// Chat completions honour an Alibaba Coding Plan credential's own endpoint, as the real request does.
+			const alibabaCodingPlanAuth = openai.api === "openai-completions";
+			url = resolveOpenAIRequestSetup(openai, { apiKey, messages: [], alibabaCodingPlanAuth }).baseUrl;
+		} else if (model.api === "azure-openai-responses") {
+			url = resolveAzureConfig(model as Model<"azure-openai-responses">).baseUrl;
 		}
 	} catch {
 		// A malformed credential fails the real request too; it is no local route.

@@ -33,6 +33,7 @@ describe("AgentSession fallback chain on connect failures", () => {
 		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
 		authStorage.keys.setRuntime("openai", "openai-test-key");
 		authStorage.keys.setRuntime("xai", "xai-test-key");
+		authStorage.keys.setRuntime("azure", "azure-test-key");
 		const modelsPath = path.join(tempDir.path(), "models.yml");
 		await Bun.write(
 			modelsPath,
@@ -116,6 +117,7 @@ describe("AgentSession fallback chain on connect failures", () => {
 	it.each([
 		["ANTHROPIC_BASE_URL", "anthropic/claude-haiku-4-5"],
 		["XAI_BASE_URL", "xai/grok-2"],
+		["AZURE_OPENAI_BASE_URL", "azure/codex-mini"],
 	])("counts a model %s reroutes to a local gateway as local before its first request", async (env, fallback) => {
 		// The env override sends a stock catalog model to this machine; its catalog URL stays remote.
 		const previous = Bun.env[env];
