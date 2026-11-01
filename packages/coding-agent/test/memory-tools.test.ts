@@ -753,6 +753,7 @@ describe("global memory scope exposure", () => {
 		["mnemopi", "global", true],
 		["hindsight", "per-project", false],
 		["hindsight", "per-project-tagged", true],
+		["hindsight", "global", true],
 		["local", "per-project-tagged", false],
 	] as const)("%s backend with %s scoping offers scope: %p", (backend, scoping, offered) => {
 		const settings = Settings.isolated({
