@@ -19,7 +19,7 @@ const memoryRetainSchemaBase = type({
 		.describe("memories to retain"),
 });
 
-/** Offered only where a shared bank exists; see {@link isGlobalMemoryScopeAvailable}. */
+/** Offered only where every project recalls a global item; see {@link isGlobalMemoryScopeAvailable}. */
 const memoryRetainSchemaWithScope = type({
 	items: type({
 		content: type("string").describe("information to remember"),

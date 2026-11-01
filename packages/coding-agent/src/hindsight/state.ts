@@ -41,6 +41,13 @@ interface PendingRetainItem {
 	timestamp: Date;
 }
 
+interface RetainFailure {
+	count: number;
+	/** `undefined` when the scope has no project tags and every item went in one request. */
+	scope: MemoryWriteScope | undefined;
+	errorText: string;
+}
+
 interface RecallOutcome {
 	context: string | null;
 	ok: boolean;
@@ -174,10 +181,11 @@ export class HindsightRetainQueue {
 					{ scope: "global" as const, tags: undefined, items: items.filter(item => item.scope === "global") },
 				]
 			: [{ scope: undefined, tags: undefined, items }];
-		await Promise.all(
+		// Results keep group order, so a combined notice always lists project items before global ones.
+		const results = await Promise.all(
 			groups
 				.filter(group => group.items.length > 0)
-				.map(async group => {
+				.map(async (group): Promise<RetainFailure | undefined> => {
 					try {
 						const batch: MemoryItemInput[] = group.items.map(item => ({
 							content: item.content,
@@ -195,6 +203,7 @@ export class HindsightRetainQueue {
 								tags: group.tags,
 							});
 						}
+						return undefined;
 					} catch (err) {
 						const errorText = err instanceof Error ? err.message : String(err);
 						logger.warn("Hindsight retain queue: batch flush failed", {
@@ -204,18 +213,26 @@ export class HindsightRetainQueue {
 							scope: group.scope,
 							error: errorText,
 						});
-						this.#notifyRetainFailure(group.items.length, group.scope, errorText);
+						return { count: group.items.length, scope: group.scope, errorText };
 					}
 				}),
 		);
+		// One notice per flush, even when both the project and the global request failed.
+		const failures = results.filter(result => result !== undefined);
+		if (failures.length > 0) this.#notifyRetainFailures(failures);
 	}
 
-	#notifyRetainFailure(count: number, scope: MemoryWriteScope | undefined, errorText: string): void {
-		const noun = count === 1 ? "memory" : "memories";
-		const what = scope === "global" ? `global ${noun}` : noun;
+	#notifyRetainFailures(failures: RetainFailure[]): void {
+		const what = failures
+			.map(({ count, scope }) => {
+				const noun = count === 1 ? "memory" : "memories";
+				return `${count} ${scope === "global" ? `global ${noun}` : noun}`;
+			})
+			.join(" and ");
+		const errorText = [...new Set(failures.map(failure => failure.errorText))].join("; ");
 		this.#state.session.emitNotice(
 			"warning",
-			`Memory retention failed for ${count} ${what}: ${noticeErrorText(errorText)}`,
+			`Memory retention failed for ${what}: ${noticeErrorText(errorText)}`,
 			HINDSIGHT_NOTICE_SOURCE,
 		);
 	}

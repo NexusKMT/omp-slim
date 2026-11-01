@@ -25,7 +25,7 @@ const learnSchemaBase = type({
 	"skill?": learnSkillSchema,
 });
 
-/** Offered only where a shared bank exists; see {@link isGlobalMemoryScopeAvailable}. */
+/** Offered only where every project recalls a global item; see {@link isGlobalMemoryScopeAvailable}. */
 const learnSchemaWithScope = type({
 	memory: type("string").describe("the durable, self-contained lesson to remember (what, when, why)"),
 	"context?": type("string").describe("optional source context for the lesson"),

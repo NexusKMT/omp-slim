@@ -432,17 +432,18 @@ describe("retain.execute", () => {
 	);
 
 	it.each([
-		["project", /failed for 2 memories: HTTP 503/, "global one"],
-		["global", /failed for 1 global memory: HTTP 503/, "project one"],
+		["project", /failed for 2 memories: HTTP 503$/, ["global one"]],
+		["global", /failed for 1 global memory: HTTP 503$/, ["project one", "project two"]],
+		["both", /failed for 2 memories and 1 global memory: HTTP 503$/, []],
 	] as const)(
-		"still sends the other request and names the lost items when the %s request fails",
+		"reports the lost items in a single notice when the %s request fails",
 		async (failing, notice, delivered) => {
 			const settings = Settings.isolated({ "memory.backend": "hindsight" });
 			const client = new HindsightApi({ baseUrl: "http://localhost:8888" });
 			const sent: string[] = [];
 			vi.spyOn(HindsightApi.prototype, "retainBatch").mockImplementation(async (_bankId, items) => {
 				const scope = items[0].tags ? "project" : "global";
-				if (scope === failing) throw new Error("HTTP 503");
+				if (failing === "both" || scope === failing) throw new Error("HTTP 503");
 				sent.push(...items.map(item => item.content));
 				return {} as never;
 			});
@@ -459,7 +460,7 @@ describe("retain.execute", () => {
 			});
 			await registeredState?.flushRetainQueue();
 
-			expect(sent).toContain(delivered);
+			expect(sent).toEqual([...delivered]);
 			expect(noticeSpy).toHaveBeenCalledTimes(1);
 			expect(noticeSpy.mock.calls[0][1]).toMatch(notice);
 		},
