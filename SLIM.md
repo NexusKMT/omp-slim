@@ -19,8 +19,15 @@ a component has been removed from the product. Track the actual state below.
 | Stage | State |
 | --- | --- |
 | Private repository and pinned upstream baseline | Established |
-| Repeatable Codespace bootstrap/build/artifact procedure | Added; first run pending |
-| Browser, desktop, speech and memory removal | Pending |
+| Repeatable Codespace bootstrap/build/artifact procedure | Baseline built; binary and archive recovered and SHA-256 verified |
+| Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
+| Other memory backends, browser, desktop and speech removal | Pending |
+
+As of 2026-11-10 (Asia/Shanghai), Codespace
+`omp-slim-build-vrxqgpxrj7gfp579` was verified **Shutdown** after both builds and
+logs were recovered. Retention is 72 hours. Its checkout is `88a81dd819`; later
+report-only commits are on GitHub and local `main`. List and verify live state
+again before reuse. The failed first instance was deleted.
 
 Browser removal must account for Chromium-backed PDF page screenshots, web-search
 fallbacks and cookie-capture login. Preserve PDF text extraction and HTTP search;
@@ -63,7 +70,9 @@ Reference implementations: `packages/coding-agent/DEVELOPMENT.md`,
 `packages/natives/scripts/build-bindings.ts`, and
 `packages/coding-agent/scripts/build-binary.ts`.
 
-The Codespace bootstrap installs Bun 1.4.4 and the toolchain pinned by
+The Codespace uses `mcr.microsoft.com/devcontainers/base:ubuntu-24.04` with
+the `vscode` user and the official `sshd` devcontainer feature. The bootstrap
+installs Bun 1.4.4 and the toolchain pinned by
 `rust-toolchain.toml`, plus Linux native build tools and frozen JS dependencies.
 The host native build uses Cargo/N-API. Cross-platform release addons use Bazel;
 a Linux host binary is not a macOS deliverable.
@@ -85,6 +94,36 @@ unless the user explicitly asks to keep it running. Shutdown retains storage;
 automatic retention is set to 72 hours. Do not delete an instance while it holds
 the only copy of work or artifacts.
 
+### Transport and setup findings
+
+The initial `universal:2` container failed during `apt-get update` because its
+unrelated Yarn repository had an untrusted signing key. The base Ubuntu image
+avoids that extra repository. The bootstrap checks every required build package
+with `dpkg-query` before installing missing packages.
+
+The minimal image needs the explicit `sshd` feature for `gh codespace ssh`.
+Bootstrap also runs `rustc --version` once to finish the components and targets
+declared in `rust-toolchain.toml` before checks and builds run concurrently;
+otherwise both rustup processes can race while installing the same component.
+
+On this machine, `gh codespace cp` passed quoted paths literally to the SFTP
+server. Use `gh codespace cp --expand` with explicit, controlled paths. The first
+SSH shell also lacked GitHub HTTPS credentials, so source synchronization used
+a Git bundle over the authenticated Codespace connection. No local token was
+copied into the instance. For a later incremental update:
+
+```sh
+# Replace BASE with the actual commit currently checked out in the Codespace.
+git bundle create /tmp/omp-slim-update.bundle main ^BASE
+gh codespace cp --expand -c NAME /tmp/omp-slim-update.bundle remote:/tmp/omp-slim-update.bundle
+gh codespace ssh -c NAME -- 'cd /workspaces/omp-slim && git fetch /tmp/omp-slim-update.bundle main && git merge --ff-only FETCH_HEAD && git rev-parse HEAD'
+```
+
+Compare the returned commit to the local source before building. A dirty remote
+checkout must be inspected before synchronization; do not reset it to make an
+update succeed. Codespace `Available` means the shell can connect, not that
+`postCreateCommand` succeeded; check the creation log and tool versions.
+
 ## Validation
 
 The build script checks the produced binary's version/help and worker smoke test.
@@ -92,3 +131,29 @@ This does not replace feature regression tests. Follow upstream `AGENTS.md`:
 `bun check`, targeted Bun tests, and `bun run test:rs` for Rust changes. Report
 baseline failures separately from regressions. Never treat a passing build as
 proof of real provider authentication or of completed feature removal.
+
+The first removal was verified with:
+
+```sh
+bun check
+bun test \
+  packages/coding-agent/test/settings-manager.test.ts \
+  packages/coding-agent/test/advisor-memory.test.ts \
+  packages/coding-agent/test/agent-session-memory-backend.test.ts \
+  packages/coding-agent/test/memory-backend-resolve.test.ts \
+  packages/coding-agent/test/session-manager/build-context.test.ts \
+  packages/coding-agent/test/session-manager/signature-persistence.test.ts
+```
+
+These cover old nested/dotted settings, preservation of stored decisions,
+absence of automatic decision injection in primary/advisor prompts, surviving
+memory lifecycle boundaries, session replay and compaction. There were 238
+passing tests, zero failures and 910 assertions. No Rust sources changed in this
+step, so the completed `bun check` runs skipped Rust lint under upstream policy;
+the native addon was separately compiled as part of the binary build.
+
+Build timings, source revisions and artifact hashes are recorded in
+[the first build report](docs/slim-build-2026-11-10.md). The artifacts are Linux
+x64 builds using the host's `modern` native addon (AVX2); they are not a
+cross-platform or older-x64 release. Produce a macOS addon/binary separately
+before installing this downstream on the local Mac.
