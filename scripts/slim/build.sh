@@ -31,17 +31,22 @@ git status --porcelain=v1 > "$omp_build_dir/source-status"
 bun --version > "$omp_build_dir/bun-version"
 rustc --version > "$omp_build_dir/rust-version"
 df -h /workspaces /tmp
+omp_native_started=$SECONDS
 bun run build:native
+printf '%s\n' "$((SECONDS - omp_native_started))" > "$omp_build_dir/native-build-seconds"
+omp_cli_started=$SECONDS
 bun --cwd=packages/coding-agent run build
+printf '%s\n' "$((SECONDS - omp_cli_started))" > "$omp_build_dir/cli-build-seconds"
 omp_binary="$omp_repo_root/packages/coding-agent/dist/omp"
 "$omp_binary" --version
 "$omp_binary" --help > "$omp_build_dir/help.txt"
 "$omp_binary" --smoke-test
+git status --porcelain=v1 > "$omp_build_dir/source-status-after"
 cp "$omp_binary" "$omp_build_dir/omp"
 (
   cd "$omp_build_dir"
   sha256sum omp > SHA256SUMS
-  tar -czf omp-linux-x64.tar.gz omp SHA256SUMS source-commit source-status bun-version rust-version help.txt
+  tar -czf omp-linux-x64.tar.gz omp SHA256SUMS source-commit source-status source-status-after bun-version rust-version native-build-seconds cli-build-seconds help.txt
   sha256sum omp-linux-x64.tar.gz > ARCHIVE-SHA256SUMS
 )
 printf 'Build artifacts: %s\n' "$omp_build_dir"
