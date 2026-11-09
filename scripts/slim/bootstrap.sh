@@ -36,6 +36,9 @@ if ! command -v rustup >/dev/null; then
   sh "$omp_setup_tmp/install-rust.sh" -y --profile minimal --default-toolchain none --no-modify-path
 fi
 rustup toolchain install "$omp_rust_toolchain" --profile minimal --component rustfmt --component clippy
+# Materialize the components/targets declared by rust-toolchain.toml before
+# concurrent checks/builds can make rustup race while downloading them.
+rustc --version
 bun install --frozen-lockfile
 printf 'Bun: %s\nRust toolchain: %s\n' "$(bun --version)" "$omp_rust_toolchain"
 df -h /workspaces /tmp
