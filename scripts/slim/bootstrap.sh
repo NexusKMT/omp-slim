@@ -13,9 +13,16 @@ if [[ "$(uname -s)" != Linux ]]; then
   exit 2
 fi
 
-if ! command -v ninja >/dev/null || ! command -v clang >/dev/null || ! command -v cmake >/dev/null || ! command -v pkg-config >/dev/null; then
+omp_build_packages=(build-essential clang lld libclang-dev cmake ninja-build pkg-config libssl-dev autoconf automake libtool nasm unzip zstd python3)
+omp_missing_packages=()
+for omp_package in "${omp_build_packages[@]}"; do
+  if [[ "$(dpkg-query -W -f='${Status}' "$omp_package" 2>/dev/null || true)" != 'install ok installed' ]]; then
+    omp_missing_packages+=("$omp_package")
+  fi
+done
+if (( ${#omp_missing_packages[@]} )); then
   sudo apt-get update
-  sudo apt-get install -y --no-install-recommends build-essential clang lld libclang-dev cmake ninja-build pkg-config libssl-dev autoconf automake libtool nasm unzip zstd
+  sudo apt-get install -y --no-install-recommends "${omp_missing_packages[@]}"
 fi
 
 omp_setup_tmp="$(mktemp -d /tmp/omp-slim-setup.XXXXXX)"
