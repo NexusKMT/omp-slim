@@ -3303,7 +3303,16 @@ export class Settings {
 		// enum if the latter hasn't been set yet. Idempotent: subsequent
 		// migrations are no-ops once memory.backend is materialised.
 		const memoryBackendObj = raw.memory as Record<string, unknown> | undefined;
-		const memoryBackendSet = memoryBackendObj && typeof memoryBackendObj.backend === "string";
+		// OMP Slim no longer ships Sharpshooter. Old configs select the inert
+		// backend, including when legacy memories.enabled is also present.
+		if (memoryBackendObj?.backend === "sharpshooter") memoryBackendObj.backend = "off";
+		if (raw["memory.backend"] === "sharpshooter") raw["memory.backend"] = "off";
+		delete raw.sharpshooter;
+		for (const key of Object.keys(raw)) {
+			if (key.startsWith("sharpshooter.")) delete raw[key];
+		}
+		const memoryBackendSet =
+			typeof memoryBackendObj?.backend === "string" || typeof raw["memory.backend"] === "string";
 		const memoriesObj = raw.memories as Record<string, unknown> | undefined;
 		if (!memoryBackendSet && memoriesObj && typeof memoriesObj.enabled === "boolean") {
 			const next = memoriesObj.enabled ? "local" : "off";

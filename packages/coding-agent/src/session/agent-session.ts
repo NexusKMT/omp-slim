@@ -226,8 +226,6 @@ import type { SecretObfuscator } from "../secrets/obfuscator";
 import { USER_AWAIT_ID } from "../registry/agent-awaits";
 import { type AgentRef, AgentRegistry, type AgentRegistryApi } from "../registry/agent-registry";
 import { cfgSecretsEnabled } from "../secrets/settings";
-import { releaseSharpshooterSession } from "../sharpshooter/backend";
-import { flushSharpshooterExtraction } from "../sharpshooter/extract";
 import { toolReadsSkillUris } from "../system-prompt";
 import {
 	AUTO_THINKING,
@@ -6819,14 +6817,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 		const hindsightState = this.getHindsightSessionState();
 		const mnemopiState = setMnemopiSessionState(this, undefined);
-		// Bound the wait for a just-fired sharpshooter extraction before dropping
-		// its subscriptions, so print-mode exits don't cut queued-delta writes.
-		const sharpshooterFlushed = flushSharpshooterExtraction(this, options.mnemopiConsolidateTimeoutMs);
-		try {
-			releaseSharpshooterSession(this);
-		} catch (error) {
-			logger.warn("Session dispose: Sharpshooter release failed", { error: String(error) });
-		}
 		const advisorRecorderClosed = this.#advisors.recorderClosed();
 		releaseShellSessions(this.sessionManager.getSessionId());
 		const results = await Promise.allSettled([
@@ -6838,7 +6828,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			advisorRecorderClosed,
 			hindsightState?.flushRetainQueue() ?? Promise.resolve(),
 			this.#disposeMnemopi(mnemopiState, options.mnemopiConsolidateTimeoutMs),
-			sharpshooterFlushed,
 		]);
 		for (const result of results) {
 			if (result.status === "rejected") {

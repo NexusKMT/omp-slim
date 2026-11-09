@@ -1,17 +1,18 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { getMemoryRoot } from "@oh-my-pi/pi-coding-agent/memories";
+import { projectBankSegment } from "@oh-my-pi/pi-coding-agent/mnemopi/config";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { sharpshooterMemoryFilePath } from "@oh-my-pi/pi-coding-agent/sharpshooter/paths";
-import { getAgentDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getMemoriesDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 describe("advisor memory context", () => {
@@ -86,25 +87,26 @@ describe("advisor memory context", () => {
 		return result.session;
 	}
 
-	it("injects the sharpshooter summary into main and advisor prompts without a recall tool", async () => {
+	it("ignores stored Sharpshooter decisions in main and advisor prompts when opening an old configuration", async () => {
 		tempDir = TempDir.createSync("@pi-advisor-memory-");
-		const decision = "Keep storage project-scoped for advisor memory test.";
-		const memoryFile = sharpshooterMemoryFilePath(tempDir.path(), tempDir.path(), "architecture.md");
-		await fs.mkdir(memoryFile.slice(0, memoryFile.lastIndexOf("/")), { recursive: true });
-		await Bun.write(memoryFile, `- ${decision}\n`);
+		const decision = "Legacy automatic decision that must not enter the prompt.";
+		const memoryFile = path.join(
+			getMemoriesDir(tempDir.path()),
+			"sharpshooter",
+			projectBankSegment(tempDir.path()),
+			"architecture.md",
+		);
+		await Bun.write(memoryFile, `${decision}\n`);
 
 		session = await createAdvisedSession("sharpshooter");
-		// Primary path: the decision file lands in the main agent's system prompt.
-		expect(session.agent.state.systemPrompt.join("\n")).toContain(decision);
-
+		expect(session.agent.state.systemPrompt.join("\n")).not.toContain(decision);
 		const advisor = session.getAdvisorAgent();
 		if (!advisor) throw new Error("Expected advisor agent to exist");
-		// Advisor path: same summary, wrapped as shared background knowledge.
-		const advisorPrompt = advisor.state.systemPrompt.join("\n");
-		expect(advisorPrompt).toContain("<memory-context>");
-		expect(advisorPrompt).toContain(decision);
-		// Sharpshooter builds no recall tool, so the default roster stays read-only.
+		expect(advisor.state.systemPrompt.join("\n")).not.toContain(decision);
 		expect(advisor.state.tools.map(tool => tool.name)).not.toContain("recall");
+		await session.dispose();
+		session = undefined;
+		expect(await Bun.file(memoryFile).text()).toBe(`${decision}\n`);
 	});
 
 	it("grants the default advisor roster a recall tool when the backend builds one", async () => {

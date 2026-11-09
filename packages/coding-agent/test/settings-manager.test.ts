@@ -2111,6 +2111,41 @@ describe("Settings", () => {
 		});
 	});
 	describe("migrations", () => {
+		it("retires Sharpshooter config without reactivating legacy local memory or deleting stored files", async () => {
+			const memoryFile = path.join(agentDir, "memories", "sharpshooter", "old-project", "architecture.md");
+			await Bun.write(memoryFile, "Preserve the user's existing decisions.\n");
+			await writeSettings({
+				memory: { backend: "sharpshooter" },
+				memories: { enabled: true },
+				sharpshooter: { intervalMinutes: 5 },
+			});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(cfgMemoryBackend.get(settings)).toBe("off");
+			cfgDisplayShowTokenUsage.set(settings, true);
+			await settings.flush();
+			const saved = await readSettings();
+			expect(saved.memory).toEqual({ backend: "off" });
+			expect(saved.sharpshooter).toBeUndefined();
+			expect(await Bun.file(memoryFile).text()).toBe("Preserve the user's existing decisions.\n");
+		});
+
+		it("retires dotted Sharpshooter settings in runtime overrides and persisted config", async () => {
+			const legacy = {
+				"memory.backend": "sharpshooter",
+				"sharpshooter.model": "unused-model",
+				"memories.enabled": true,
+			};
+			expect(cfgMemoryBackend.get(Settings.isolated(legacy))).toBe("off");
+			await writeSettings(legacy);
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(cfgMemoryBackend.get(settings)).toBe("off");
+			cfgDisplayShowTokenUsage.set(settings, true);
+			await settings.flush();
+			expect((await readSettings())["sharpshooter.model"]).toBeUndefined();
+			expect(() => cfgMemoryBackend.parse("sharpshooter")).toThrow();
+		});
+
 		it("preserves current ask timeout seconds in overrides and persisted config", async () => {
 			expect(cfgAskTimeout.get(Settings.isolated({ "ask.timeout": 2000 }))).toBe(2000);
 

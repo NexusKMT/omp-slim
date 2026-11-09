@@ -4280,9 +4280,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const memoryInstructions = memoryBackend
 				? await memoryBackend.buildDeveloperInstructions(agentDir, sessionManager.getCwd(), settings, session)
 				: undefined;
-			// Advisors get the same memory block (sharpshooter decisions, mnemopi/
-			// hindsight instructions) wrapped as shared background knowledge; the
-			// tool-availability caveat lives in the wrapper template.
+			// Advisors get the same memory block (mnemopi/hindsight instructions)
+			// wrapped as shared background knowledge; the tool-availability caveat
+			// lives in the wrapper template.
 			advisorMemoryPrompt = formatAdvisorMemoryPrompt(memoryInstructions);
 			if (hasSession) session.setAdvisorMemoryPrompt(advisorMemoryPrompt);
 			const inlineToolDescriptors = resolveInlineToolDescriptors();

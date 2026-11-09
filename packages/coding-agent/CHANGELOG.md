@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- OMP Slim removes Sharpshooter automatic decision extraction and consolidation; old Sharpshooter settings select memory off and existing stored files are preserved.
+
 ## [18.18.3] - 2026-11-09
 
 ### Breaking Changes

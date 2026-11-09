@@ -1352,7 +1352,7 @@ export class SessionAdvisors {
 
 			// The default roster additionally gets `recall` when the active memory
 			// backend built it (MemoryRecallTool.createIf — hindsight/mnemopi only;
-			// sharpshooter/local expose no recall tool, so the extra name filters
+			// local exposes no recall tool, so the extra name filters
 			// nothing there). The advisor's instance reads the same bank as the
 			// primary. Explicit `tools` lists stay user-owned and are not widened.
 			const names =

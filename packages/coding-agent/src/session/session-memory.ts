@@ -9,12 +9,11 @@ import type { HindsightSessionState } from "../hindsight/state";
 import { resolveMemoryBackend } from "../memory-backend/resolve";
 import type { MemoryBackendStartOptions } from "../memory-backend/types";
 import type { MnemopiSessionState } from "../mnemopi/state";
-import { releaseSharpshooterSession } from "../sharpshooter/backend";
 
 import { cfgMemoryBackend } from "../memory-backend/settings";
 
 /** Id prefixes of the memory backends' own settings; their live edits reconfigure the active backend. */
-const MEMORY_BACKEND_SETTING_PREFIXES: readonly string[] = ["hindsight.", "mnemopi.", "sharpshooter."];
+const MEMORY_BACKEND_SETTING_PREFIXES: readonly string[] = ["hindsight.", "mnemopi."];
 
 let memorySettings: Derived<Record<string, unknown>> | undefined;
 
@@ -261,11 +260,6 @@ export class SessionMemory {
 
 	async #disposeMemoryBackendState(consolidateMnemopi = true, retainMnemopi = true): Promise<void> {
 		this.cancelLocalMemoryStartup();
-		try {
-			releaseSharpshooterSession(this.#host.memoryBackendSession());
-		} catch (error) {
-			logger.warn("Memory lifecycle: Sharpshooter dispose failed", { error: String(error) });
-		}
 		const hindsight = this.#host.getHindsightSessionState();
 		if (hindsight) {
 			try {
