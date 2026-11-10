@@ -504,7 +504,6 @@ import {
 	cfgProvidersCacheWarming,
 	cfgProvidersCacheRetention,
 	cfgProvidersAntigravityEndpoint,
-	cfgRetryModelFallback,
 	cfgSampling,
 	cfgSkillful,
 	cfgTierAdvisor,
@@ -1240,7 +1239,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/** Main thread only: spots streaming spawning tool calls so a subagent worker boots ahead of dispatch. */
 	readonly #spawnSignal = isMainThread() ? new SubagentSpawnSignal() : undefined;
 	/** Creation-time permission for switchSession to keep the current model when a target's saved model is unrestorable. */
-	readonly #allowSessionModelFallback: boolean;
 	readonly #disableModelFallback: boolean;
 	/** Creation-time: false when the extension UI context cannot reach a human (ACP without form elicitation). */
 	readonly #interactivePrompts: boolean;
@@ -2049,7 +2047,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#costGate = config.costGate ?? this.#createCostGate();
 		this.#skillDescriptions = config.skillDescriptions ?? new SkillDescriptionCatalog();
 		this.#modelRegistry = config.modelRegistry;
-		this.#allowSessionModelFallback = false;
 		this.#disableModelFallback = true;
 		this.#interactivePrompts = config.interactivePrompts !== false;
 		this.#extensionRoots =
@@ -13194,15 +13191,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			if (!targetModel && !options?.keepModel && targetModelStrings.length > 0) {
 				targetModel = await this.#resolveSessionModel(targetModelStrings);
 				if (!targetModel && switchingToDifferentSession) {
-					// Like startup resume: never hand the transcript to a model the
-					// session did not choose unless a UI can say so.
-					if (!this.#allowSessionModelFallback || !cfgRetryModelFallback.get(this.settings)) {
-						throw new Error(`Could not restore model ${targetModelStrings[0]}`);
-					}
-					const currentModel = this.model;
-					modelFallbackWarning = currentModel
-						? `Could not restore model ${targetModelStrings[0]}. Using ${currentModel.provider}/${currentModel.id}`
-						: `Could not restore model ${targetModelStrings[0]}`;
+					throw new Error(`Could not restore model ${targetModelStrings[0]}`);
 				}
 			}
 			// The first build was read by the departing model; rebuild it for the

@@ -72,20 +72,6 @@ export const cfgContextFilesExtra = register({
 // Context
 // ────────────────────────────────────────────────────────────────────────
 
-// Context promotion
-export const cfgContextPromotionEnabled = register({
-	id: "contextPromotion.enabled",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "context",
-		group: "General",
-		label: "Auto-Promote Context",
-		description:
-			"Promote to the model's contextPromotionTarget on context overflow instead of compacting. Retry fallback switches are controlled by Retry Model Fallback",
-	},
-});
-
 // Opt in to advertised maximum context windows and premium long-context
 // tiers. Off preserves default windows and caps premium models before
 // requests cross into their higher pricing tier.

@@ -102,7 +102,6 @@ import {
 	stripImagesFromMessage,
 } from "./messages";
 import { isTerminalTextAssistantAnswer } from "./queued-messages";
-import { resolveContextPromotionConfiguredTarget } from "./role-models";
 import type { BuildSessionContextOptions, SessionContext } from "./session-context";
 import {
 	buildSessionContext,
@@ -123,7 +122,6 @@ import {
 	cfgCompactionAutoContinue,
 	cfgCompactionEnabled,
 	cfgCompactionMethodOrder,
-	cfgContextPromotionEnabled,
 	cfgSnapcompactShape,
 } from "./context-settings";
 import { resolveModelCompactionSettings } from "./model-compaction-threshold";
@@ -2825,19 +2823,6 @@ export class SessionMaintenance {
 			return;
 		}
 
-		// Auto-promote first: switching to a larger-context model avoids compacting
-		// the history at all. The post-turn threshold path already promotes before
-		// compacting; without this, the pre-prompt path would pre-empt promotion and
-		// compact (snapcompact/summary) a session that should have just been promoted.
-		if (await this.#promoteContextModel()) {
-			logger.debug("Pre-prompt context promotion avoided compaction", {
-				contextTokens,
-				contextWindow,
-				model: `${model.provider}/${model.id}`,
-			});
-			return;
-		}
-
 		logger.debug("Pre-prompt context maintenance triggered by pending prompt size", {
 			contextTokens,
 			contextWindow,
@@ -2967,21 +2952,6 @@ export class SessionMaintenance {
 		}
 
 		if (!persistedDeadEnd && !(await this.#host.persistTurnMessagesForMidRunCompaction(context))) return;
-
-		// Promote to a larger-context sibling before compacting, mirroring the
-		// pre-prompt (runPrePromptCompactionIfNeeded) and post-turn threshold
-		// (checkCompaction) paths. Without this, a long mid-turn tool loop that
-		// crosses the threshold compacts the history (and can hit the no-progress
-		// dead-end on a single oversized turn) on a model that should have just
-		// been promoted to a larger window instead.
-		if (await this.#promoteContextModel()) {
-			logger.debug("Mid-run context promotion avoided compaction", {
-				contextTokens,
-				contextWindow,
-				from: `${model?.provider}/${model?.id}`,
-			});
-			return;
-		}
 
 		const messagesBefore = activeMessages.length;
 		const result = await this.runAutoCompaction("threshold", false, {
@@ -3189,20 +3159,6 @@ export class SessionMaintenance {
 		if (overflowEvidence || reclaimablePayloadHistory || (payloadRejection && !trustedPayloadRejection)) {
 			this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
 
-			// A larger token window cannot raise a trusted byte-size limit.
-			const promoted = !trustedPayloadRejection && (await this.#tryContextPromotion(assistantMessage));
-			if (promoted) {
-				await this.#host.dropPersistedAssistantTurn(assistantMessage);
-				// Retry on the promoted (larger) model without compacting
-				this.#host.scheduleAgentContinue({
-					source: "context-promotion-overflow",
-					delayMs: 100,
-					generation,
-				});
-				return COMPACTION_CHECK_CONTINUATION;
-			}
-
-			// No promotion target available fall through to compaction
 			if (compactionAvailable) {
 				const compactionResult = await this.#host.runRecoveryCompactionWithRollback("overflow", assistantMessage, {
 					autoContinue,
@@ -3295,54 +3251,6 @@ export class SessionMaintenance {
 			this.#host.retainTerminalFailure(assistantMessage);
 			return COMPACTION_CHECK_NONE;
 		}
-		// A context promotion can land while the failing call is already in
-		// flight (or on a run whose loop predates the switch): the overflow
-		// error then arrives stamped with the pre-promotion model while
-		// `this.#host.model()` is already the promoted target. The sameModel guard
-		// above deliberately ignores stale foreign-model errors, but this
-		// state is not stale — recover exactly like the promotion path:
-		// drop the dead turn and retry on the already-promoted model. Gated
-		// narrowly on "current model IS the failed model's promotion target
-		// with a strictly larger window" so genuinely stale errors from
-		// old user-switched models keep surfacing untouched.
-		if (
-			!sameModel &&
-			autoContinue &&
-			!errorIsFromBeforeCompaction &&
-			assistantMessage.stopReason === "error" &&
-			this.#model &&
-			contextWindow > 0 &&
-			cfgContextPromotionEnabled.get(this.#host.settings)
-		) {
-			const foundModel = this.#host.modelRegistry.find(assistantMessage.provider, assistantMessage.model);
-			const failedModel = foundModel && this.#host.modelRegistry.fitContextWindow(foundModel, this.#host.settings);
-			const failedWindow = failedModel?.contextWindow ?? 0;
-			const promotionTarget = failedModel
-				? resolveContextPromotionConfiguredTarget(failedModel, this.#host.modelRegistry.getAvailable())
-				: undefined;
-			if (
-				failedModel &&
-				failedWindow > 0 &&
-				contextWindow > failedWindow &&
-				promotionTarget &&
-				modelsAreEqual(promotionTarget, this.#model) &&
-				AIError.isContextOverflow(assistantMessage, failedWindow)
-			) {
-				this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
-				await this.#host.dropPersistedAssistantTurn(assistantMessage);
-				logger.debug("Overflow on pre-promotion model; retrying on promoted model", {
-					failed: `${assistantMessage.provider}/${assistantMessage.model}`,
-					current: `${this.#model.provider}/${this.#model.id}`,
-				});
-				this.#host.scheduleAgentContinue({
-					source: "promoted-model-overflow",
-					delayMs: 100,
-					generation,
-				});
-				return COMPACTION_CHECK_CONTINUATION;
-			}
-		}
-
 		// Case 3: Output-side incomplete — `response.incomplete` from OpenAI Responses
 		// (and Codex), Anthropic `max_tokens` / `model_context_window_exceeded`, all
 		// map to stopReason === "length". Promotion if available; compaction only
@@ -3387,21 +3295,6 @@ export class SessionMaintenance {
 			// above: clear the dead turn from agent state so it cannot be replayed,
 			// but keep it on the branch unless promotion or compaction actually runs.
 			this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
-
-			const promoted = await this.#tryContextPromotion(assistantMessage);
-			if (promoted) {
-				await this.#host.dropPersistedAssistantTurn(assistantMessage);
-				this.#incompleteRecoveryAttempts = 0;
-				logger.debug("Context promotion triggered by response.incomplete (length stop)", {
-					from: `${assistantMessage.provider}/${assistantMessage.model}`,
-				});
-				this.#host.scheduleAgentContinue({
-					source: "context-promotion-incomplete",
-					delayMs: 100,
-					generation,
-				});
-				return COMPACTION_CHECK_CONTINUATION;
-			}
 
 			if (
 				incompleteCompactionSettings.enabled &&
@@ -3553,7 +3446,6 @@ export class SessionMaintenance {
 			postMaintenanceContextTokens,
 			maintenanceTokensFreed,
 			shouldCompact: shouldThresholdCompact,
-			contextPromotionEnabled: cfgContextPromotionEnabled.get(this.#host.settings) === true,
 		});
 		if (shouldThresholdCompact) {
 			// Grace band: a live (or just-started) background speculation absorbs
@@ -3567,82 +3459,16 @@ export class SessionMaintenance {
 				});
 				return COMPACTION_CHECK_NONE;
 			}
-			// Try promotion first — if a larger model is available, switch instead of compacting
-			const promoted = await this.#tryContextPromotion(assistantMessage);
-			if (!promoted) {
-				return await this.runAutoCompaction("threshold", false, {
-					autoContinue,
-					triggerContextTokens: postMaintenanceContextTokens,
-					phase: "pre_turn",
-					terminalTextAnswer: isTerminalTextAssistantAnswer(assistantMessage),
-				});
-			}
-			logger.debug("Auto-compaction threshold satisfied but context promotion took over", {
-				contextTokens,
-				contextWindow,
-				model: `${assistantMessage.provider}/${assistantMessage.model}`,
+			return await this.runAutoCompaction("threshold", false, {
+				autoContinue,
+				triggerContextTokens: postMaintenanceContextTokens,
+				phase: "pre_turn",
+				terminalTextAnswer: isTerminalTextAssistantAnswer(assistantMessage),
 			});
 		} else {
 			this.maybeStartSpeculativeCompaction(contextTokens, contextWindow);
 		}
 		return COMPACTION_CHECK_NONE;
-	}
-
-	/**
-	 * Attempt context promotion to a larger model.
-	 * Returns true if promotion succeeded (caller should retry without compacting).
-	 */
-	async #tryContextPromotion(assistantMessage: AssistantMessage): Promise<boolean> {
-		const currentModel = this.#model;
-		if (!currentModel) return false;
-		// The overflow/length error may have come from a model the user already
-		// switched away from; only promote when the failing turn was this model.
-		if (assistantMessage.provider !== currentModel.provider || assistantMessage.model !== currentModel.id)
-			return false;
-		return this.#promoteContextModel();
-	}
-
-	/**
-	 * Switch to a larger-context sibling when context promotion is enabled and a
-	 * target with a strictly larger window (and a usable key) exists. Returns true
-	 * when the model was switched, so the caller can retry without compacting.
-	 * Message-independent core shared by the post-turn overflow path
-	 * ({@link #tryContextPromotion}) and the pre-prompt threshold path
-	 * ({@link runPrePromptCompactionIfNeeded}).
-	 */
-	async #promoteContextModel(): Promise<boolean> {
-		if (!cfgContextPromotionEnabled.get(this.#host.settings) || this.#host.modelFallbackDisabled?.()) return false;
-		const currentModel = this.#model;
-		if (!currentModel) return false;
-		const contextWindow = currentModel.contextWindow ?? 0;
-		if (contextWindow <= 0) return false;
-		const targetModel = await this.resolveContextPromotionTarget(currentModel, contextWindow);
-		if (!targetModel) return false;
-
-		try {
-			await this.#host.setModelTemporary(targetModel, undefined, { ephemeral: true });
-			logger.debug("Context promotion switched model on overflow", {
-				from: `${currentModel.provider}/${currentModel.id}`,
-				to: `${targetModel.provider}/${targetModel.id}`,
-			});
-			return true;
-		} catch (error) {
-			logger.warn("Context promotion failed", {
-				from: `${currentModel.provider}/${currentModel.id}`,
-				to: `${targetModel.provider}/${targetModel.id}`,
-				error: String(error),
-			});
-			return false;
-		}
-	}
-
-	async resolveContextPromotionTarget(
-		currentModel: Model,
-		contextWindow: number,
-		signal?: AbortSignal,
-	): Promise<Model | undefined> {
-		// A single-model session compacts its current context instead of changing models.
-		return undefined;
 	}
 
 	#getCompactionModelCandidates(availableModels: Model[], filter?: (model: Model) => boolean): Model[] {
@@ -3651,7 +3477,7 @@ export class SessionMaintenance {
 
 	resolveCompactionModelCandidates(
 		preferredModel: Model | null | undefined,
-		availableModels: Model[],
+		_availableModels: Model[],
 		filter?: (model: Model) => boolean,
 	): Model[] {
 		const current = this.#model ?? preferredModel;
