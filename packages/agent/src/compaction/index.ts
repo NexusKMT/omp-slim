@@ -5,6 +5,7 @@
 export * from "./branch-summarization";
 export * from "./compaction";
 export * from "./entries";
+export * from "./errors";
 export * from "./message-cache";
 export * from "./messages";
 export * from "./pruning";
