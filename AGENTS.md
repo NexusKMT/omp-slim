@@ -3,8 +3,9 @@
 This checkout is the private `NexusKMT/omp-slim` downstream. Read `SLIM.md` for
 the pinned baseline, requested removal scope, build commands and Codespace
 lifecycle. Use the NexusKMT GitHub account for this project. Keep upstream
-publishing workflows disabled; downstream builds run through the documented
-Codespace procedure. Record actual build and removal status, recover artifacts
+publishing workflows archived outside `.github/workflows`; downstream Linux
+builds use Codespaces, and Intel macOS builds use the manual private GitHub
+Actions workflow described in `SLIM.md`. Record actual build and removal status, recover artifacts
 with checksums, and verify the Codespace is stopped when the task ends unless
 the user asks to keep it running. Preserve the core session/edit/shell behavior
 while removing browser, desktop, speech and long-term-memory integrations.

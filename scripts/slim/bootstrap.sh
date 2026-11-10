@@ -8,22 +8,35 @@ omp_bun_version=1.4.4
 omp_rust_toolchain="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
 test -n "$omp_rust_toolchain"
 
-if [[ "$(uname -s)" != Linux ]]; then
-  printf 'This bootstrap targets the Linux Codespace. Use the upstream host setup elsewhere.\n' >&2
-  exit 2
-fi
-
-omp_build_packages=(build-essential clang lld libclang-dev cmake ninja-build pkg-config libssl-dev autoconf automake libtool nasm unzip zstd python3)
-omp_missing_packages=()
-for omp_package in "${omp_build_packages[@]}"; do
-  if [[ "$(dpkg-query -W -f='${Status}' "$omp_package" 2>/dev/null || true)" != 'install ok installed' ]]; then
-    omp_missing_packages+=("$omp_package")
-  fi
-done
-if (( ${#omp_missing_packages[@]} )); then
-  sudo apt-get update
-  sudo apt-get install -y --no-install-recommends "${omp_missing_packages[@]}"
-fi
+case "$(uname -s)" in
+  Linux)
+    omp_build_packages=(build-essential clang lld libclang-dev cmake ninja-build pkg-config libssl-dev autoconf automake libtool nasm unzip zstd python3)
+    omp_missing_packages=()
+    for omp_package in "${omp_build_packages[@]}"; do
+      if [[ "$(dpkg-query -W -f='${Status}' "$omp_package" 2>/dev/null || true)" != 'install ok installed' ]]; then
+        omp_missing_packages+=("$omp_package")
+      fi
+    done
+    if (( ${#omp_missing_packages[@]} )); then
+      sudo apt-get update
+      sudo apt-get install -y --no-install-recommends "${omp_missing_packages[@]}"
+    fi
+    ;;
+  Darwin)
+    xcrun --find clang
+    xcrun --show-sdk-version
+    omp_missing_packages=()
+    for omp_package in cmake ninja pkg-config; do
+      if ! command -v "$omp_package" >/dev/null; then
+        omp_missing_packages+=("$omp_package")
+      fi
+    done
+    if (( ${#omp_missing_packages[@]} )); then
+      brew install "${omp_missing_packages[@]}"
+    fi
+    ;;
+  *) printf 'Supported build hosts: Linux and macOS.\n' >&2; exit 2 ;;
+esac
 
 omp_setup_tmp="$(mktemp -d /tmp/omp-slim-setup.XXXXXX)"
 trap 'rm -rf -- "$omp_setup_tmp"' EXIT
@@ -41,4 +54,4 @@ rustup toolchain install "$omp_rust_toolchain" --profile minimal --component rus
 rustc --version
 bun install --frozen-lockfile
 printf 'Bun: %s\nRust toolchain: %s\n' "$(bun --version)" "$omp_rust_toolchain"
-df -h /workspaces /tmp
+df -h "$omp_repo_root" "${TMPDIR:-/tmp}"

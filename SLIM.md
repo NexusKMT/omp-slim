@@ -22,6 +22,7 @@ a component has been removed from the product. Track the actual state below.
 | Repeatable Codespace bootstrap/build/artifact procedure | Baseline built; binary and archive recovered and SHA-256 verified |
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
 | Other memory backends, browser, desktop and speech removal | Pending |
+| Intel macOS Actions build | Configured on `macos-15-intel`; first run pending |
 
 As of 2026-11-10 (Asia/Shanghai), Codespace
 `omp-slim-build-vrxqgpxrj7gfp579` was verified **Shutdown** after both builds and
@@ -157,3 +158,37 @@ Build timings, source revisions and artifact hashes are recorded in
 x64 builds using the host's `modern` native addon (AVX2); they are not a
 cross-platform or older-x64 release. Produce a macOS addon/binary separately
 before installing this downstream on the local Mac.
+
+## Intel macOS through GitHub Actions
+
+The manual workflow is `.github/workflows/slim-macos-intel.yml`. Upstream
+workflows are archived in `.github/upstream-workflows/`, outside GitHub's
+workflow discovery directory. Repository Actions can be enabled for this build
+without activating upstream release, Nix or cache-warming jobs.
+
+As verified on 2026-11-10, GitHub still provides Intel macOS runners through
+`macos-15-intel` and `macos-26-intel`. `macos-latest` is arm64, and macOS 14
+runners have retired. See the [official runner images](https://github.com/actions/runner-images)
+and [macOS 15 image contents](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md).
+
+This workflow selects `macos-15-intel`, Xcode 16.4 / SDK 15.5, and deployment
+target 15.0 for the local Intel Mac running macOS 15.7.5. Bun remains 1.4.4;
+Rust uses `rust-toolchain.toml`. It builds the native addon and CLI, checks the
+Mach-O architecture and ad-hoc signature, rejects Homebrew/runner-specific
+dynamic library paths, runs the worker smoke test, checks TypeScript, and runs
+the six focused regression files listed above. Rust intermediates and dependency
+downloads are cached. Runs time out at 120 minutes; artifacts are retained for
+7 days. No provider credentials are required.
+
+```sh
+gh workflow run slim-macos-intel.yml --repo NexusKMT/omp-slim --ref main
+gh run list --repo NexusKMT/omp-slim --workflow slim-macos-intel.yml
+gh run view RUN_ID --repo NexusKMT/omp-slim
+gh run download RUN_ID --repo NexusKMT/omp-slim --dir dist/actions/RUN_ID
+```
+
+Use the resulting `omp-darwin-x64.tar.gz`, verify `ARCHIVE-SHA256SUMS`, extract it,
+then verify `SHA256SUMS` with `shasum -a 256 -c`. Test the extracted binary from
+its artifact directory before installing it. Use an isolated
+`PI_CODING_AGENT_DIR` for smoke tests. The build uses ad-hoc signing and does not
+perform Apple notarization.

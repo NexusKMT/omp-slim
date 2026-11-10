@@ -1,0 +1,114 @@
+name: Build OMP Slim for Intel Mac
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slim-macos-intel-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: macOS 15 Intel build and smoke test
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+      OMP_SLIM_BUILD_JOBS: "2"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Verify Intel host and select Xcode SDK
+        shell: bash
+        run: |
+          test "$(uname -m)" = x86_64
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          printf 'SDKROOT=%s\n' "$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          printf 'OMP_SLIM_CARGO_TARGET_DIR=%s/omp-slim-cargo\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf '%s\n' "$HOME/.bun/bin" "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Restore dependency and Rust build caches
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/omp-slim-cargo
+          key: slim-macos15-intel-xcode16.4-ci-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', '.cargo/**', 'rust-toolchain.toml', 'bun.lock', 'scripts/slim/**', 'packages/natives/scripts/**') }}
+          restore-keys: |
+            slim-macos15-intel-xcode16.4-ci-v1-
+
+      - name: Install pinned toolchains and dependencies
+        shell: bash
+        run: |
+          mkdir -p dist/validation/macos-intel
+          bash scripts/slim/bootstrap.sh 2>&1 | tee dist/validation/macos-intel/bootstrap.log
+
+      - name: Compile and verify native addon and standalone CLI
+        shell: bash
+        run: bash scripts/slim/build.sh macos-intel
+
+      - name: Check TypeScript workspace
+        shell: bash
+        run: bun run check:ts 2>&1 | tee dist/validation/macos-intel/check.log
+
+      - name: Test configuration, memory removal and session replay
+        shell: bash
+        run: |
+          bun test \
+            packages/coding-agent/test/settings-manager.test.ts \
+            packages/coding-agent/test/advisor-memory.test.ts \
+            packages/coding-agent/test/agent-session-memory-backend.test.ts \
+            packages/coding-agent/test/memory-backend-resolve.test.ts \
+            packages/coding-agent/test/session-manager/build-context.test.ts \
+            packages/coding-agent/test/session-manager/signature-persistence.test.ts \
+            2>&1 | tee dist/validation/macos-intel/tests.log
+
+      - name: Record artifact and source details
+        if: always()
+        shell: bash
+        run: |
+          {
+            printf 'Source: `%s`\n\n' "$GITHUB_SHA"
+            printf 'Runner: `macos-15-intel`; Xcode: `16.4`; deployment target: `15.0`.\n\n'
+            printf 'Builds use ad-hoc signing for private testing.\n\n'
+            if [ -f dist/builds/latest ]; then
+              omp_run_dir="dist/builds/$(cat dist/builds/latest)"
+              if [ -f "$omp_run_dir/ARCHIVE-SHA256SUMS" ]; then
+                printf '```text\n'
+                cat "$omp_run_dir/ARCHIVE-SHA256SUMS"
+                printf '```\n'
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload binary archive, checksums and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: omp-slim-darwin-x64-${{ github.sha }}
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
+          path: |
+            dist/builds/**/*.tar.gz
+            dist/builds/**/SHA256SUMS
+            dist/builds/**/ARCHIVE-SHA256SUMS
+            dist/builds/**/build.log
+            dist/builds/**/exit-code
+            dist/builds/**/source-*
+            dist/builds/**/bun-version
+            dist/builds/**/rust-version
+            dist/builds/**/*-seconds
+            dist/builds/**/*.txt
+            dist/validation/macos-intel/*.log
