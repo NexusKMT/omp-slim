@@ -426,28 +426,6 @@ Tool calls are always discarded rather than executed. Pass `tools: false` to rem
 
 Use `history` only for detached prior side-turn messages; it is cloned with `structuredClone`, so pass cloneable message data. A `conversationKey` keeps related side turns on one provider lineage. Rotate it after cancellation or failure before retrying. A side turn also rejects with a retryable error if its session or exact model instance changes before dispatch; callers should retry from a new current-context snapshot rather than reuse the old one.
 
-### Live voice on your own peer (`ctx.startLive`)
-
-Start a `/live` session whose audio runs on a WebRTC peer the extension owns, for example a browser on a phone, instead of the host's microphone and speakers. omp keeps everything else: Codex signaling with the session's OpenAI Codex sign-in, the bundled live prompt, delegations into this session as ordinary turns, and transcripts. The TUI shows its live visualizer, and `/live` or the stop key ends the call.
-
-```ts
-if (!ctx.startLive) throw new Error("This host does not run live sessions");
-const live = await ctx.startLive({
-	sdpOffer, // from the peer: one sendrecv Opus audio track plus an "oai-events" data channel
-	onPhase: phase => relay({ phase }), // "muted": silence the peer's microphone track
-	onTranscript: t => relay({ transcript: t }),
-	onEnd: error => relay({ end: error?.message ?? null }),
-});
-await peer.setRemoteDescription({ type: "answer", sdp: live.sdpAnswer });
-// later: await live.stop();
-```
-
-The promise resolves once the call is signaled and its control socket is open; apply `sdpAnswer` right away. It rejects without a non-empty `sdpOffer` and while another live session is active. `voice` and `instructions` work as for RPC `live_start`. The peer does its own echo cancellation and mute: the TUI mute key only moves the phase to `muted`, so silence the peer's microphone track while that phase lasts. omp reports no audio levels and no `speaking` phase for these calls. `onEnd` is called exactly once, including when the call fails to start (before the promise rejects). Observer callbacks that throw are logged and do not end the call.
-
-omp has no media peer for these calls, so it cannot tell when yours goes away. Call `live.stop()` when the peer disconnects (`connectionstatechange` to `failed` or `closed`, or your relay socket closing); otherwise the call stays open and the TUI keeps the live visualizer up.
-
-Whoever holds the peer steers this session by voice, including delegated work that runs tools, so authenticate the page or relay that hands you the offer.
-
 ### Background work (`ctx.setInterval` / `ctx.setTimeout`)
 
 Extensions run **in-process with no isolation**. A raw `setInterval`/`setTimeout`/detached-promise callback that throws runs outside the handler-dispatch try/catch, surfaces as a process-level `uncaughtException`, and the global postmortem handler treats it as fatal — **the whole session is torn down**, not just the offending extension.

@@ -7,7 +7,6 @@
 let
   inherit (pkgs) lib;
   linuxLibraries = with pkgs; [
-    libpulseaudio
     stdenv.cc.cc.lib
     zlib
   ];
@@ -42,7 +41,6 @@ pkgs.mkShell (
         unzip
 
         cmake
-        ninja
         pkg-config
         zig
 

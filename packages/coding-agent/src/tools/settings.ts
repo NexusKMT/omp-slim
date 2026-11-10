@@ -597,18 +597,6 @@ export const cfgLaunchEnabled = register({
 	},
 });
 
-export const cfgSpeechgenEnabled = register({
-	id: "speechgen.enabled",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "tools",
-		group: "Available Tools",
-		label: "Speech Generation",
-		description: "Enable the tts tool for on-device (Kokoro) or xAI Grok Voice speech-file synthesis",
-	},
-});
-
 export const cfgGenerateImageEnabled = register({
 	id: "generate_image.enabled",
 	type: "boolean",
@@ -1080,6 +1068,5 @@ export const cfgBuiltinToolGates = combine({
 export const cfgSessionToolGates = combine({
 	builtins: cfgBuiltinToolGates,
 	generateImage: cfgGenerateImageEnabled,
-	speechgen: cfgSpeechgenEnabled,
 	xdev: cfgToolsXdev,
 });

@@ -67,9 +67,6 @@ interface AppKeybindings {
 	"app.plan.toggle": true;
 	"app.history.search": true;
 	"app.links.hint": true;
-	"app.stt.pushToTalk": true;
-	"app.stt.toggle": true;
-	"app.live.toggle": true;
 }
 
 /** Application action identifier registered alongside the base TUI keybindings. */
@@ -275,18 +272,6 @@ export const KEYBINDINGS = {
 		defaultKeys: "alt+o",
 		description: "Pick an extension link on screen by its hint tag",
 	},
-	"app.stt.pushToTalk": {
-		defaultKeys: "space",
-		description: "Hold to record speech-to-text",
-	},
-	"app.stt.toggle": {
-		defaultKeys: [],
-		description: "Toggle speech-to-text recording",
-	},
-	"app.live.toggle": {
-		defaultKeys: "ctrl+l",
-		description: "Start or stop live voice mode (/live)",
-	},
 } as const satisfies KeybindingDefinitions;
 
 /**
@@ -321,7 +306,6 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	fork: "app.session.fork",
 	resume: "app.session.resume",
 	observeSessions: "app.session.observe",
-	toggleSTT: "app.stt.toggle",
 	// TUI editor (old names for backward compatibility)
 	cursorUp: "tui.editor.cursorUp",
 	cursorDown: "tui.editor.cursorDown",

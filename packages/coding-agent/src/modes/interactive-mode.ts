@@ -98,8 +98,6 @@ import type {
 } from "../extensibility/extensions";
 import type {
 	CompactOptions,
-	ExtensionLiveSession,
-	ExtensionLiveStartOptions,
 	ExtensionSessionModes,
 	PlanReviewChoice,
 	PlanReviewOption,
@@ -174,8 +172,6 @@ import type { ShakeMode } from "../session/shake-types";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
 import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
-import { type DictationTarget, MicCursor, type SttCallbacks, STTController, type SttState } from "../stt";
-import type { SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
 import { resolveCliEntryCmd } from "../subprocess/worker-client";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
 import { labelEchoesHandle } from "../task/label";
@@ -225,7 +221,6 @@ import {
 	setActiveTodoDescriptionsProvider,
 	todoMatchesAnyDescription,
 } from "@oh-my-pi/pi-tui/tools/todo";
-import { vocalizer } from "../tts/vocalizer";
 import { applyFileLinkSetting, applyHyperlinkSetting, fileHyperlink } from "@oh-my-pi/pi-tui/render/hyperlink";
 import {
 	extensionLinkClicksAvailable,
@@ -326,7 +321,6 @@ import { CommandController } from "./controllers/command-controller";
 import { EventController } from "./controllers/event-controller";
 import { ExtensionUiController } from "./controllers/extension-ui-controller";
 import { InputController } from "./controllers/input-controller";
-import { LiveCommandController } from "./controllers/live-command-controller";
 import { MCPCommandController } from "./controllers/mcp-command-controller";
 import { OmfgController } from "./controllers/omfg-controller";
 import { SelectorController } from "./controllers/selector-controller";
@@ -467,7 +461,6 @@ import { cfgGoalContinuationModes, cfgGoalEnabled } from "../goals/settings";
 import { goalContinuationActivity, goalFromModeData } from "../goals/state";
 import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "../plan-mode/settings";
 import { cfgStreamRedactPatterns } from "../stream/settings";
-import { cfgSttEnabled } from "../stt/settings";
 import { combine, type SettingValueOf } from "../config/registry";
 import { cfgAdvisorEnabled, cfgAdvisorMaxNotesPerUpdate } from "../advisor/settings";
 import { cfgExtensionAssistantTextRenderers, cfgExtensionTranscriptPresenters } from "../extensibility/settings";
@@ -1865,7 +1858,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	readonly #cleanseController: CleanseCommandController;
 	readonly #commandController: CommandController;
 	readonly #todoCommandController: TodoCommandController;
-	readonly #liveCommandController: LiveCommandController;
 	readonly #eventController: EventController;
 	get eventController(): EventController {
 		return this.#eventController;
@@ -2023,9 +2015,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.pendingTools.clear();
 	}
 	readonly #uiHelpers: UiHelpers;
-	#sttController: STTController | undefined;
-	#dictationStarting = false;
-	#micCursor: MicCursor | undefined;
 	#resizeHandler?: () => void;
 	#observerRegistry: SessionObserverRegistry;
 	/** Click override for the pinned jump-list density; undefined follows `display.pinnedAgents`. */
@@ -2127,7 +2116,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor.onPredictionAccepted = index => this.#eventController.composerPrediction.accepted(index);
 		this.editor.onPredictionShown = () => this.#eventController.composerPrediction.shown();
 		this.editor.composerState = () => this.#composerNativeState();
-		this.editor.onToggleDictation = () => void this.#toggleComposerDictation();
 		this.editor.imageReferenceHyperlink = imageReferenceHyperlink;
 		this.editor.skillFilePath = name => this.skillCommands.get(`skill:${name}`)?.filePath;
 		this.editor.resolveModelMention = selector => this.#resolveModelMentionChip(selector);
@@ -2340,7 +2328,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#eventController = new EventController(this);
 		this.#commandController = new CommandController(this);
 		this.#todoCommandController = new TodoCommandController(this);
-		this.#liveCommandController = new LiveCommandController(this);
 		this.#selectorController = new SelectorController(this);
 		this.#focusController = new SessionFocusController(this);
 		this.#inputController = new InputController(this);
@@ -2843,7 +2830,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// Restore mode from session (e.g. plan mode on resume)
 		this.session.setSessionBeforeSwitchReconciler?.(async () => {
-			await this.#liveCommandController.stop();
 			await this.#quiesceVibeForSessionSwitch();
 		});
 		this.session.setSessionSwitchReconciler?.(() => this.#reconcileModeFromSession({ preserveActiveGoal: true }));
@@ -4876,7 +4862,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	 */
 	#composerNativeState(): ComposerNativeState {
 		const draft = this.editor.getText().trimStart();
-		const dictation = this.#sttController?.state ?? "idle";
 		return {
 			shell: this.isBashMode
 				? { kind: "bash", excluded: draft.startsWith("!!") }
@@ -4887,12 +4872,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			thinkingInModel: cfgStatusLineCompactThinkingLevel.get(settings),
 			rate: this.#nativeTokenRate(),
 			running: this.loadingAnimation !== undefined || this.session.isStreaming,
-			dictation:
-				cfgSttEnabled.get(settings) || this.#dictationStarting || dictation !== "idle"
-					? this.#dictationStarting && dictation === "idle"
-						? "starting"
-						: dictation
-					: undefined,
 			viewing: this.#viewingLineage(),
 			title: this.sessionManager.getSessionName(),
 		};
@@ -8176,12 +8155,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.loadingAnimation) {
 			this.#stopLoadingAnimation(false);
 		}
-		this.#micCursor?.dispose();
-		this.#micCursor = undefined;
 		// Stop the shared tool-spinner ticker: a live block missed by per-component
 		// stopAnimation would otherwise keep an 80ms interval pinning the process.
 		stopSharedSpinnerTicker();
-		this.#liveCommandController.dispose();
 		this.#clearJudgmentBatchProgress();
 		this.#downloadActivityHud.dispose();
 		this.#cancelTodoAutoClearTimer();
@@ -8189,10 +8165,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#cancelGoalContinuation();
 		clearInterval(this.#jobsSheetTimer);
 		this.#jobsSheetTimer = undefined;
-		if (this.#sttController) {
-			this.#sttController.dispose();
-			this.#sttController = undefined;
-		}
 		this.#extensionUiController.clearExtensionTerminalInputListeners();
 		this.#extensionUiController.clearHookWidgets();
 		this.#extensionUiController.disposeComposerShapes();
@@ -8300,7 +8272,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/**
 	 * Apply `worktree.onExit` to worktrees this launch created and return the ones
-	 * to remove after teardown. Stops the agent turn and live commands first so the
+	 * to remove after teardown. Stops the agent turn first so the
 	 * prompts describe a worktree nothing is still writing to. Never throws.
 	 */
 	async #planOwnedWorktreeExit(): Promise<WorktreeExitPlan[]> {
@@ -8310,7 +8282,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#cancelLoopAutoSubmit();
 		try {
 			await this.session.abort();
-			await this.#liveCommandController.stop();
 		} catch (err) {
 			this.showWarning(err instanceof Error ? err.message : String(err));
 		}
@@ -8393,7 +8364,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/**
 	 * Claim the one-shot `shutdown()`/`restart()` close and acknowledge it before
-	 * any await: worktree exit planning, live commands, and BTW history writes can
+	 * any await: worktree exit planning and BTW history writes can
 	 * all stall, and the user must see a reason for the pause.
 	 */
 	#beginClose(): void {
@@ -8423,7 +8394,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			// Guests get goodbye and the registry entry disappears before the
 			// session is disposed, under the same still-closing progress notice.
 			await this.collabController.shutdown("host exited");
-			await this.#liveCommandController.stop();
 			await this.#btwController.dispose();
 			this.#omfgController.dispose();
 			this.#cleanseController.dispose();
@@ -8537,7 +8507,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		nextEditor.onPredictionAccepted = index => this.#eventController.composerPrediction.accepted(index);
 		nextEditor.onPredictionShown = () => this.#eventController.composerPrediction.shown();
 		nextEditor.composerState = () => this.#composerNativeState();
-		nextEditor.onToggleDictation = () => void this.#toggleComposerDictation();
 		nextEditor.attachmentChips = previousEditor.attachmentChips;
 		nextEditor.imageReferenceHyperlink = imageReferenceHyperlink;
 		nextEditor.skillFilePath = name => this.skillCommands.get(`skill:${name}`)?.filePath;
@@ -9348,80 +9317,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#commandController.handleMemoryCommand(text);
 	}
 
-	async handleSTTToggle(): Promise<void> {
-		await this.#readySTTController()?.toggle(this.editor, this.#dictationCallbacks(this.editor));
-	}
-
-	/** The composer microphone: start a draft-only capture, or stop (or cancel the start of) the running one. */
-	async #toggleComposerDictation(): Promise<void> {
-		if (this.#dictationStarting || this.#sttController?.state === "recording") {
-			await this.#sttController?.stop();
-			return;
-		}
-		if (this.#sttController?.state === "transcribing") return;
-		const controller = this.#readySTTController();
-		if (!controller) return;
-		this.#dictationStarting = true;
-		this.ui.requestRender();
-		try {
-			await controller.start(this.editor, { ...this.#dictationCallbacks(this.editor), manualSubmit: true });
-		} finally {
-			this.#dictationStarting = false;
-			this.ui.requestRender();
-		}
-	}
-
-	dictationSpaceHold(target: DictationTarget): SpaceHoldHandler {
-		return {
-			enabled: () => cfgSttEnabled.get(settings),
-			onStart: () => void this.#readySTTController()?.start(target, this.#dictationCallbacks(target)),
-			onEnd: () => void this.#sttController?.stop(),
-		};
-	}
-
-	/** The speech-to-text controller, created on first use; undefined (after a warning) while live mode
-	 *  or a disabled STT rules dictation out. */
-	#readySTTController(): STTController | undefined {
-		if (this.#liveCommandController.active) {
-			this.showWarning("End live mode before using push-to-talk speech input.");
-			return undefined;
-		}
-		if (!cfgSttEnabled.get(settings)) {
-			this.showWarning("Speech-to-text is disabled. Enable it in settings: stt.enabled");
-			return undefined;
-		}
-		this.#sttController ??= new STTController({
-			settings: this.settings,
-			registry: this.session.modelRegistry,
-			getSessionId: () => this.session.sessionId,
-		});
-		return this.#sttController;
-	}
-
-	/** Callbacks for a capture dictating into `target`: the mic glyph replaces its cursor while the
-	 *  capture runs. */
-	#dictationCallbacks(target: DictationTarget): SttCallbacks {
-		return {
-			showWarning: (msg: string) => this.showWarning(msg),
-			showStatus: (msg: string) => this.showStatus(msg),
-			onStateChange: (state: SttState) => {
-				// Duck assistant speech while the user is talking (push-to-talk); restore after.
-				if (state === "recording") vocalizer.duck();
-				else vocalizer.unduck();
-				if (state === "recording") {
-					this.#micCursor?.dispose();
-					this.#micCursor = new MicCursor(this.ui, target);
-				} else if (state === "transcribing") {
-					this.#micCursor?.showTranscribing();
-				} else {
-					this.#micCursor?.dispose();
-					this.#micCursor = undefined;
-				}
-				this.ui.requestRender();
-			},
-		};
-	}
-
 	/** Start a `/record` screen capture, or stop the running one and report where it was saved. */
 	async toggleRecording(): Promise<void> {
 		const active = this.#recorder;
@@ -9453,31 +9348,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		this.statusLine.setRecording(true);
 		this.showStatus(`Recording to ${this.#recorder.path} · /record again to stop`);
-	}
-
-	/** Why live mode cannot start right now, or `undefined` when it can. */
-	#liveStartBlocker(): string | undefined {
-		if (this.#dictationStarting || (this.#sttController && this.#sttController.state !== "idle")) {
-			return "Finish the current speech-to-text capture before starting live mode.";
-		}
-		return undefined;
-	}
-
-	/** Start or stop the Codex-backed realtime voice surface. */
-	async handleLiveCommand(): Promise<void> {
-		const blocker = this.#liveStartBlocker();
-		if (blocker) {
-			this.showWarning(blocker);
-			return;
-		}
-		await this.#liveCommandController.handleCommand();
-	}
-
-	/** Start a live session whose audio runs on an extension's own WebRTC peer. */
-	async startRemoteLive(options: ExtensionLiveStartOptions): Promise<ExtensionLiveSession> {
-		const blocker = this.#liveStartBlocker();
-		if (blocker) throw new Error(blocker);
-		return await this.#liveCommandController.startRemote(options);
 	}
 
 	async showDebugSelector(): Promise<void> {

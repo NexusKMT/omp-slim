@@ -146,8 +146,6 @@ async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
 async function runSmokeTest(): Promise<void> {
 	const { smokeTestSyncWorker, startServer } = await import("@oh-my-pi/omp-stats");
 	const { smokeTestTinyTitleWorker } = await import("./tiny/title-client");
-	const { smokeTestSttWorker } = await import("./stt/asr-client");
-	const { smokeTestTtsWorker } = await import("./tts/tts-client");
 	const { smokeTestMnemopiEmbedWorker } = await import("./mnemopi/embed-client");
 	const { smokeTestStatsActivityWorker } = await import("./stats/activity-client");
 	const { smokeTestJsEvalWorker } = await import("./eval/js/context-manager");
@@ -175,9 +173,7 @@ async function runSmokeTest(): Promise<void> {
 	}
 
 	await smokeTestTinyTitleWorker();
-	await smokeTestSttWorker();
 	await smokeTestJsEvalWorker();
-	await smokeTestTtsWorker();
 	await smokeTestMnemopiEmbedWorker();
 	await smokeTestDaemonBroker();
 	await smokeTestLspMux();
@@ -193,8 +189,6 @@ const TINY_WORKER_ARG = "__omp_worker_tiny_inference";
 const STATS_SYNC_WORKER_ARG = "__omp_worker_stats_sync";
 const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 const JS_EVAL_PROCESS_ARG = "__omp_worker_js_eval_process";
-const STT_WORKER_ARG = "__omp_worker_stt";
-const TTS_WORKER_ARG = "__omp_worker_tts";
 const MNEMOPI_EMBED_WORKER_ARG = "__omp_worker_mnemopi_embed";
 
 async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
@@ -255,16 +249,6 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 			transport => startJsEvalProcess(transport, interceptUnhandledRejections),
 			{ rethrowConnectedSendErrors: true },
 		);
-		return true;
-	}
-	if (arg === STT_WORKER_ARG) {
-		const { startSttWorker } = await import("./stt/asr-worker");
-		await runIpcSubprocessWorker(startSttWorker);
-		return true;
-	}
-	if (arg === TTS_WORKER_ARG) {
-		const { startTtsWorker } = await import("./tts/tts-worker");
-		await runIpcSubprocessWorker(startTtsWorker);
 		return true;
 	}
 	if (arg === MNEMOPI_EMBED_WORKER_ARG) {
@@ -334,8 +318,7 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 
 /**
  * Boot a subprocess-isolated transformers.js worker over the parent's IPC
- * channel and block until the parent disconnects. The tiny-model, STT, and TTS
- * workers each run `onnxruntime-node` (loaded transitively by
+ * channel and block until the parent disconnects. Tiny-model workers run `onnxruntime-node` (loaded transitively by
  * `@huggingface/transformers`) in a child address space because its NAPI
  * finalizer segfaults Bun on shutdown (issue #1606); the parent `SIGKILL`s the
  * child so that finalizer never runs in either process. This wires `process`

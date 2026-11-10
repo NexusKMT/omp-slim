@@ -309,13 +309,12 @@ describe("ModelRegistry", () => {
 			);
 		});
 
-		test("keeps image and speech fallback runners across authoritative chat cache and refresh", async () => {
+		test("keeps image fallback runners across authoritative chat cache and refresh", async () => {
 			authStorage.keys.setRuntime("deepinfra", "deepinfra-test-key");
 			const settings = Settings.isolated({
-				modelRoles: { image: "deepinfra/missing-image", speech: "deepinfra/missing-speech" },
+				modelRoles: { image: "deepinfra/missing-image" },
 				"retry.fallbackChains": {
 					image: ["deepinfra/black-forest-labs/FLUX-2-pro"],
-					speech: ["deepinfra/hexgrad/Kokoro-82M"],
 				},
 			});
 			const cachedChat = buildModel({
@@ -343,12 +342,12 @@ describe("ModelRegistry", () => {
 				fetch: async () => Response.json({ data: [] }),
 			});
 			const runnerRoutes = () =>
-				["image", "speech"].flatMap(role =>
+				["image"].flatMap(role =>
 					resolveRoleChain(role, settings, roleCandidatePool(role, settings, registry)).map(
 						({ model }) => `${model.provider}/${model.id}`,
 					),
 				);
-			const expectedRoutes = ["deepinfra/black-forest-labs/FLUX-2-pro", "deepinfra/hexgrad/Kokoro-82M"];
+			const expectedRoutes = ["deepinfra/black-forest-labs/FLUX-2-pro"];
 
 			expect(runnerRoutes()).toEqual(expectedRoutes);
 			expect(

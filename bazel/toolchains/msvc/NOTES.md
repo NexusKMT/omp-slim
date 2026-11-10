@@ -12,7 +12,7 @@ exec hosts. Replaces cargo-xwin.
 | `@xwin_sysroot`    | `sysroot.bzl`                                                    | xwin 0.6.5 (pinned per-host sha256) runs `splat` in the repo rule. The ~1 GiB CRT/SDK payload comes from the Microsoft CDN via xwin itself and is **not** in Bazel's repo cache — a cold output base re-downloads it. Keep `sysroot.bzl` stable. |
 | `@msvc_cc`         | `cc.bzl`                                                         | Wrapper scripts + `cc_toolchain` + MSVC feature config (copied from the resolved rules_cc, like `@local_config_cc`). Cheap to regenerate — iterate flags here.                                                                                   |
 | `toolchain()`s     | `//bazel/toolchains` (`msvc-cc-from-*`)                          | One per exec host (linux-x64/arm64, darwin-arm64/x64), all pointing at `@msvc_cc//:cc_toolchain`; only the local host's variant can resolve. `target_compatible_with = [windows, x86_64]` ⇒ can never shadow zig on linux.                       |
-| MODULE.bazel       | `# --- msvc cross toolchain ---` section                         | `rules_cc` 0.2.17 (= Bazel 9.2's builtin pin) + the three `use_repo_rule` instantiations. Plus the target-suffixed toolchain-file key in the `opusic-sys` annotation (see below).                                                                |
+| MODULE.bazel       | `# --- msvc cross toolchain ---` section                         | `rules_cc` 0.2.17 (= Bazel 9.2's builtin pin) + the three `use_repo_rule` instantiations.                                                                |
 
 ## Design decisions
 
@@ -32,9 +32,6 @@ exec hosts. Replaces cargo-xwin.
   Without this the `.node` imports `VCRUNTIME140.dll` from the Visual C++
   Redistributable, which is absent on a clean Windows install and makes the
   loader's dlopen fail with error 126 (issue #8439).
-  CMake also gets `OPUS_STATIC_RUNTIME=ON`: Opus otherwise overwrites
-  `CMAKE_MSVC_RUNTIME_LIBRARY` to the DLL CRT after `project()`, causing
-  LNK4217 imports for `malloc`/`free` despite the toolchain's initial `/MT`.
 - **Static Wasmtime headers**: tree-sitter's Windows build-script CFLAGS define
   `LIBWASM_STATIC`, matching the statically linked Rust Wasmtime C API.
   Without it, `wasm.h` marks API declarations `dllimport`, producing LNK4217.
@@ -46,11 +43,6 @@ exec hosts. Replaces cargo-xwin.
   clang-cl wrapper, which only ever targets win32-x64 (baseline = x86-64-v2 ⊇
   SSE4.2). This is the old build-native.ts CFLAGS hack, windows-only by
   construction.
-- **Opus CMake configuration stays in one annotation**: `crate_universe` cannot
-  select annotations per platform, and a second `crate.annotation` for the same
-  crate hard-fails the extension. `opusic-sys` selects Ninja when it is on the
-  annotated PATH; the target-suffixed `CMAKE_TOOLCHAIN_FILE` key is inert for
-  other targets. cmake-rs sets `CMAKE_SYSTEM_NAME=Windows` when target ≠ host.
 - **cmake tool discovery**: wrappers are named bare `clang-cl`, `lld-link`,
   `llvm-lib`, `llvm-rc`, `llvm-mt` (no `.sh`) because CMake's
   `CMakeFindBinUtils`/`find_program` probes for those names next to
@@ -80,8 +72,7 @@ exec hosts. Replaces cargo-xwin.
 - `bazel build --nobuild //:natives-win32-x64-baseline` analyzes clean;
   `cquery deps(...)` confirms `@msvc_cc//:cc_toolchain` (not the host Xcode
   toolchain) resolved for the windows target. Full fetch + splat took ~2.5 min
-  on a fast link; crate-universe generation included the
-  `CMAKE_GENERATOR_x86_64_pc_windows_msvc` annotation.
+  on a fast link.
 - Wrapper smoke test outside Bazel: `clang-cl /MD` compiled a windows.h +
   smmintrin.h SSE4.1 program and driver-linked it via `-fuse-ld=lld-link` +
   `LIB` into a valid PE32+ exe; the standalone `lld-link` wrapper (rustc's
@@ -100,13 +91,6 @@ exec hosts. Replaces cargo-xwin.
   reaches the sandbox via the cc toolchain's `all_files`. NOTE: the PATH entry
   hardcodes @msvc_cc's canonical repo name — keep in sync if the repo rule or
   repo name changes. The generated crate graph includes this annotation.
-- Opus CMake cross setup: `opusic-sys` selects Ninja, installs to `lib`, and
-  uses static-library `try_compile` checks itself. @msvc_cc's self-locating
-  `toolchain.cmake` is handed to cmake-rs through
-  `CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc` in the `opusic-sys` annotation
-  (same `$${pwd}` + canonical-repo-path mechanism as the blake3 shim). It pins
-  compiler/linker/rc/mt to the wrappers and selects the static release `/MT`
-  runtime, matching the addon's static-CRT policy (issue #8439).
 
 ## What to verify on the Linux CI runners (linux-x64)
 
@@ -117,18 +101,14 @@ exec hosts. Replaces cargo-xwin.
 2. LLVM 20.1.7 Linux-X64 binaries are built on a newish Ubuntu: confirm the
    CI runner template's glibc is ≥ 2.35-ish and has `libtinfo6`/`libstdc++6`
    (usual LLVM release-binary runtime deps).
-3. `ninja` + `cmake` must be on the `opusic-sys` build-script PATH
-   (`/usr/local/bin:/usr/bin:/bin`) on the CI runner template.
-4. `opusic-sys` configure should report "Clang with MSVC-like command-line",
-   take `toolchain.cmake`, and produce `opus.lib` with `/MT` objects.
-5. tree-sitter grammar compiles via cc-rs: wrapper is picked up as `CC`
+3. tree-sitter grammar compiles via cc-rs: wrapper is picked up as `CC`
    (family detection needs the basename to contain `clang-cl` — it does).
-6. ring: no `nasm`/`perl` spawns in the build-script log; archive step uses
+4. ring: no `nasm`/`perl` spawns in the build-script log; archive step uses
    the `llvm-lib` wrapper.
-7. blake3: build-script log should show `ml64.exe` resolving to the shim (no
+5. blake3: build-script log should show `ml64.exe` resolving to the shim (no
    "failed to find tool" error); spot-check the assembled objects land in the
    rlib.
-8. Repo fetch time/disk on the pods (first fetch ~3 GiB, ~25 min worst case);
+6. Repo fetch time/disk on the pods (first fetch ~3 GiB, ~25 min worst case);
    consider pre-warming the bazel output base or a persistent
    `--repository_cache` volume if it hurts.
 
@@ -155,5 +135,3 @@ quirks, all generated by `cc.bzl` for `arch = "aarch64"`:
   windows-aarch64; the shim translates the toolchain's clang-cl-style CFLAGS
   (`/D` → `-D`, other `/flags` dropped), selects the static CRT and adds the
   xwin includes. The `ring` crate.annotation prepends `@msvc_cc_arm64`'s bin/.
-- `toolchain.cmake` sets `OPUS_PRESUME_NEON=ON` / `OPUS_MAY_HAVE_NEON=OFF`:
-  opus' ARM RTCD (`celt/arm/armcpu.c`) uses MSVC's `__emit`, absent in clang-cl.

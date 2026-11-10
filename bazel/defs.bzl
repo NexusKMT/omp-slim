@@ -21,7 +21,7 @@ _STRIP_FLAGS = ["-Cstrip=symbols"]
 def _addon_transition_impl(settings, attr):
     # Statically link the MSVC CRT for the shipped win32 addon: rustc gets
     # +crt-static via the crate's rustc_flags select, and the C dependencies
-    # (opus/cmake, tree-sitter, blake3, ring) must move to /MT in lock-step so
+    # (tree-sitter, blake3, ring) must move to /MT in lock-step so
     # the final .node imports no VCRUNTIME140.dll from the Visual C++
     # Redistributable (absent on a clean Windows install -> dlopen error 126).
     # The static_link_msvcrt cc feature flips the toolchain compile flags that

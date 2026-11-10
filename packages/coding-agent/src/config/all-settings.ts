@@ -1,7 +1,6 @@
 /**
  * Every settings domain, in settings-panel order. Importing this module registers every setting;
- * {@link orderedSettings} lists them by domain order, then declaration order within a domain;
- * `PLACED_DOMAINS` splice a domain into another domain's rows.
+ * {@link orderedSettings} lists them by domain order, then declaration order within a domain.
  */
 import { all, type AnySetting, Setting } from "./registry";
 import * as modesSettings from "../modes/settings";
@@ -30,9 +29,6 @@ import * as idaSettings from "../ida/settings";
 import * as mcpSettings from "../mcp/settings";
 import * as blobBrokerSettings from "../blob-broker/settings";
 import * as secretsSettings from "../secrets/settings";
-import * as ttsSettings from "../tts/settings";
-import * as sttSettings from "../stt/settings";
-import * as liveSettings from "../live/settings";
 import * as collabSettings from "../collab/settings";
 import * as commandsSettings from "../commands/settings";
 import * as streamSettings from "../stream/settings";
@@ -69,19 +65,12 @@ const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	mcpSettings,
 	blobBrokerSettings,
 	secretsSettings,
-	sttSettings,
 	collabSettings,
 	commandsSettings,
 	streamSettings,
 	commitSettings,
 	cliGcSettings,
 	spotlightSettings,
-];
-
-/** Domains listed immediately before `before` (a setting of a DOMAINS entry) instead of in DOMAINS order. */
-const PLACED_DOMAINS: readonly { domain: Readonly<Record<string, unknown>>; before: AnySetting }[] = [
-	{ domain: liveSettings, before: sessionSettings.cfgProvidersFetch },
-	{ domain: ttsSettings, before: sessionSettings.cfgProvidersFetch },
 ];
 
 let ordered: readonly AnySetting[] | undefined;
@@ -106,17 +95,9 @@ export function orderedSettings(): readonly AnySetting[] {
 		for (const key in domain) collect(domain[key]);
 		return handles.sort((a, b) => (sequence.get(a) ?? 0) - (sequence.get(b) ?? 0));
 	};
-	const placedBefore = new Map<AnySetting, AnySetting[]>();
-	for (const { domain, before } of PLACED_DOMAINS) {
-		const placed = placedBefore.get(before) ?? [];
-		placed.push(...domainHandles(domain));
-		placedBefore.set(before, placed);
-	}
 	const result: AnySetting[] = [];
 	for (const domain of DOMAINS) {
 		for (const handle of domainHandles(domain)) {
-			const placed = placedBefore.get(handle);
-			if (placed) result.push(...placed);
 			result.push(handle);
 		}
 	}

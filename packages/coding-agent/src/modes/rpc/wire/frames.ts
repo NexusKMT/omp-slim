@@ -96,33 +96,6 @@ export const frameDefs = {
 		{ type: "'subagent_event'", payload: "SubagentEventPayload" },
 		'A subagent\'s own session event; sent only at subscription level "events".',
 	),
-	LivePhase: "'connecting' | 'listening' | 'working' | 'speaking' | 'muted' | 'error'",
-	LiveRole: "'user' | 'assistant'",
-	LivePhaseEvent: { type: "'live_phase'", phase: "LivePhase" },
-	LiveLevelsEvent: doc(
-		{ type: "'live_levels'", input: "number", output: "number" },
-		"Microphone (`input`) and speaker (`output`) RMS in [0, 1], at most every 100 ms.",
-	),
-	LiveTranscriptEvent: doc(
-		{ type: "'live_transcript'", role: "LiveRole", turn: "number.integer", text: "string", final: "boolean" },
-		"Accumulated text of one realtime turn; replaces earlier frames with the same `role` and `turn`.",
-	),
-	LiveEndEvent: doc(
-		{ type: "'live_end'", "error?": "string" },
-		"Sent exactly once when a live session ends; `error` carries the failure cause.",
-	),
-	DictationStateEvent: doc(
-		{ type: "'dictation_state'", captureId: "string", state: "'starting' | 'recording' | 'transcribing'" },
-		"State of one draft-only microphone capture.",
-	),
-	DictationTranscriptEvent: doc(
-		{ type: "'dictation_transcript'", captureId: "string", text: "string" },
-		"Full accumulated draft preview; replaces the previous preview for this capture.",
-	),
-	DictationEndEvent: doc(
-		{ type: "'dictation_end'", captureId: "string", text: "string", "error?": "string" },
-		"Exactly one terminal frame per capture; text is the accumulated result.",
-	),
 	BtwDeltaEvent: doc(
 		{ type: "'btw_delta'", recordId: "string", delta: "string" },
 		"Text appended to the running side question's latest answer.",

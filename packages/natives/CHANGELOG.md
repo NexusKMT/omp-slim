@@ -5,6 +5,7 @@
 ### Removed
 
 - OMP Slim removes desktop capture, input, accessibility, application control, front-app tracking, desktop compatibility wrappers, and their platform dependencies. Clipboard, terminal, shell, PTY, OAuth, and general OS utilities remain available.
+- Removed microphone capture, speaker playback, and live WebRTC bindings from OMP Slim.
 
 ## [18.18.2] - 2026-11-08
 

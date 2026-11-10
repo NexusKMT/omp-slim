@@ -13,9 +13,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
 import * as clipboard from "@oh-my-pi/pi-coding-agent/utils/clipboard";
 import * as atomicFile from "@oh-my-pi/pi-coding-agent/utils/atomic-file";
-import { Container, Input, type KeyId, type TUI } from "@oh-my-pi/pi-tui";
-import type { DictationTarget } from "@oh-my-pi/pi-coding-agent/stt/push-to-talk";
-import { SPACE_HOLD_MECHANICAL_RUN, type SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
+import { Container, type TUI } from "@oh-my-pi/pi-tui";
 
 interface TurnArgs {
 	promptText: string;
@@ -83,7 +81,7 @@ async function records(manager: SessionManager): Promise<readonly BtwHistoryReco
 	return (await BtwHistoryStore.open(artifacts)).getRecords();
 }
 
-async function harness(spaceHoldKeys: readonly KeyId[] = ["space"]) {
+async function harness() {
 	const directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-btw-follow-up-"));
 	const manager = SessionManager.create(directory, directory);
 	const managers = [manager];
@@ -93,8 +91,6 @@ async function harness(spaceHoldKeys: readonly KeyId[] = ["space"]) {
 		requests.push({ args, resolve: pending.resolve, reject: pending.reject });
 		return pending.promise;
 	});
-	const dictationTargets: DictationTarget[] = [];
-	const dictationInputs: DictationTarget[] = [];
 	const session = {
 		model: { provider: "anthropic", id: "claude-sonnet-4-5" },
 		isStreaming: false,
@@ -112,23 +108,10 @@ async function harness(spaceHoldKeys: readonly KeyId[] = ["space"]) {
 		editorContainer: new Container(),
 		session,
 		settings: Settings.isolated(),
-		keybindings: {
-			getKeys(action: string) {
-				return action === "app.stt.pushToTalk" ? [...spaceHoldKeys] : [];
-			},
-		},
 		sessionManager: manager,
 		showStatus: vi.fn(),
 		showError: vi.fn(),
 		handleBtwBranch: vi.fn(async () => {}),
-		dictationSpaceHold: (target: DictationTarget): SpaceHoldHandler => {
-			dictationInputs.push(target);
-			return {
-				enabled: () => true,
-				onStart: () => dictationTargets.push(target),
-				onEnd: () => {},
-			};
-		},
 	} as unknown as InteractiveModeContext;
 	const controller = new BtwController(ctx);
 	cleanups.push(async () => {
@@ -165,8 +148,6 @@ async function harness(spaceHoldKeys: readonly KeyId[] = ["space"]) {
 		runEphemeralTurn,
 		complete,
 		root,
-		dictationTargets,
-		dictationInputs,
 	};
 }
 
@@ -621,66 +602,6 @@ describe("BTW follow-up lifecycle", () => {
 		await h.complete("Continued answer");
 		const topics = await records(h.manager);
 		expect(topics.find(topic => topic.question === "Current topic")?.followUps?.[0]?.answer).toBe("Continued answer");
-	});
-
-	it("uses the configured remapped hold key in the follow-up composer", async () => {
-		const h = await harness(["x"]);
-		await h.controller.start("Current topic");
-		await h.complete("Current answer");
-		const overlay = vi.spyOn(h.ctx.ui, "showOverlay");
-		expect(h.controller.handleFollowUp()).toBe(true);
-		const panel = overlay.mock.calls.at(-1)?.[0];
-		if (!(panel instanceof BtwHistoryPanel)) throw new Error("Expected BTW follow-up composer");
-		vi.useFakeTimers();
-		try {
-			panel.handleInput(" ");
-			for (let i = 0; i < SPACE_HOLD_MECHANICAL_RUN + 2; i++) {
-				vi.advanceTimersByTime(30);
-				panel.handleInput("x");
-			}
-		} finally {
-			vi.useRealTimers();
-		}
-		const [composer] = h.dictationTargets;
-		if (!(composer instanceof Input)) throw new Error("Expected dictation into the follow-up composer");
-		expect(composer.getValue()).toBe(" ");
-
-		composer.commitVolatileText("Spoken follow-up");
-		const started = Promise.withResolvers<boolean>();
-		const start = h.controller.startFollowUp.bind(h.controller);
-		vi.spyOn(h.controller, "startFollowUp").mockImplementation(async (...args) => {
-			const accepted = await start(...args);
-			started.resolve(accepted);
-			return accepted;
-		});
-		panel.handleInput("\r");
-		expect(await started.promise).toBe(true);
-		expect(h.requests.at(-1)!.args.promptText).toContain("Spoken follow-up");
-	});
-
-	it("keeps repeated input as text in the BTW composer when PTT has no bindings", async () => {
-		const h = await harness([]);
-		await h.controller.start("Current topic");
-		await h.complete("Current answer");
-		const overlay = vi.spyOn(h.ctx.ui, "showOverlay");
-		expect(h.controller.handleFollowUp()).toBe(true);
-		const panel = overlay.mock.calls.at(-1)?.[0];
-		if (!(panel instanceof BtwHistoryPanel)) throw new Error("Expected BTW follow-up composer");
-		const [composer] = h.dictationInputs;
-		if (!(composer instanceof Input)) throw new Error("Expected dictation into the follow-up composer");
-
-		vi.useFakeTimers();
-		try {
-			for (let i = 0; i < SPACE_HOLD_MECHANICAL_RUN + 2; i++) {
-				vi.advanceTimersByTime(30);
-				panel.handleInput(" ");
-			}
-		} finally {
-			vi.useRealTimers();
-		}
-
-		expect(composer.getValue()).toBe(" ".repeat(SPACE_HOLD_MECHANICAL_RUN + 2));
-		expect(h.dictationTargets).toEqual([]);
 	});
 
 	it("resumes only the selected chronological conversation, including cancelled partial output, without promoting it into main chat", async () => {

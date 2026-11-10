@@ -770,27 +770,27 @@ describe("ModelHub", () => {
 			expect(thinking).not.toContain("max");
 		});
 		test("a model with no reasoning surface is assigned without a thinking strip", () => {
-			// inherit/off/auto are all no-ops for an STT/TTS/image model, so the
+			// inherit/off/auto are all no-ops for an image model, so the
 			// assignment completes instead of parking on a dead strip (#13111).
-			const model = makeModel("local", "parakeet-tdt-0.6b-v3", 128_000, undefined, "stt");
+			const model = makeModel("openai", "gpt-image-2", 128_000, undefined, "image");
 			const { hub, onAssign } = createHub({ models: [model], scoped: true });
 			installTestTheme();
 
 			hub.handleInput("\n"); // Sidebar → model list.
 			hub.handleInput("\n");
-			expect(footerLine(hub.render(220))).toContain("dictation");
+			expect(footerLine(hub.render(220))).toContain("image");
 
-			hub.handleInput("\n"); // assign to dictation (first chip)
+			hub.handleInput("\n"); // assign to image (first chip)
 			expect(onAssign).toHaveBeenCalledTimes(1);
-			expect(onAssign.mock.calls[0]?.[1]).toBe("dictation");
+			expect(onAssign.mock.calls[0]?.[1]).toBe("image");
 			expect(onAssign.mock.calls[0]?.[2]).toBe(ThinkingLevel.Inherit);
 			const footer = footerLine(hub.render(220));
 			expect(footer).not.toContain("inherit");
 			expect(footer).not.toContain("auto");
 		});
 		test("t and its hint stay inert on a role row whose model cannot reason", () => {
-			const model = makeModel("local", "parakeet-tdt-0.6b-v3", 128_000, undefined, "stt");
-			const settings = Settings.isolated({ modelRoles: { dictation: "local/parakeet-tdt-0.6b-v3" } });
+			const model = makeModel("openai", "gpt-image-2", 128_000, undefined, "image");
+			const settings = Settings.isolated({ modelRoles: { image: "openai/gpt-image-2" } });
 			const { hub } = createHub({ models: [model], scoped: true, settings });
 			installTestTheme();
 
@@ -801,8 +801,8 @@ describe("ModelHub", () => {
 					.render(220)
 					.map(line => stripVTControlCharacters(line))
 					.find(line => line.includes("❯")) ?? "";
-			for (let step = 0; step < 20 && !selected().includes("DICTATION"); step++) hub.handleInput(DOWN);
-			expect(selected()).toContain("DICTATION");
+			for (let step = 0; step < 20 && !selected().includes("IMAGE"); step++) hub.handleInput(DOWN);
+			expect(selected()).toContain("IMAGE");
 
 			expect(footerLine(hub.render(220))).not.toContain("t thinking");
 			hub.handleInput("t");

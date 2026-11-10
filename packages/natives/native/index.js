@@ -22,8 +22,6 @@ import { loadNative, missingNativeClass, missingNativeExport } from "./loader-st
 const nativeBindings = loadNative();
 // --- generated native exports (do not edit) ---
 // classes
-export const AudioCapture = nativeBindings.AudioCapture ?? missingNativeClass("AudioCapture");
-export const AudioPlayback = nativeBindings.AudioPlayback ?? missingNativeClass("AudioPlayback");
 export const DiffStream = nativeBindings.DiffStream ?? missingNativeClass("DiffStream");
 export const EditSession = nativeBindings.EditSession ?? missingNativeClass("EditSession");
 export const EditStore = nativeBindings.EditStore ?? missingNativeClass("EditStore");
@@ -32,7 +30,6 @@ export const HighlightStream = nativeBindings.HighlightStream ?? missingNativeCl
 export const IpcConnection = nativeBindings.IpcConnection ?? missingNativeClass("IpcConnection");
 export const IpcServer = nativeBindings.IpcServer ?? missingNativeClass("IpcServer");
 export const LineMatcher = nativeBindings.LineMatcher ?? missingNativeClass("LineMatcher");
-export const LiveWebRtcPeer = nativeBindings.LiveWebRtcPeer ?? missingNativeClass("LiveWebRtcPeer");
 export const MacAppearanceObserver = nativeBindings.MacAppearanceObserver ?? missingNativeClass("MacAppearanceObserver");
 export const NativeOAuthCallback = nativeBindings.NativeOAuthCallback ?? missingNativeClass("NativeOAuthCallback");
 export const PipeStreams = nativeBindings.PipeStreams ?? missingNativeClass("PipeStreams");

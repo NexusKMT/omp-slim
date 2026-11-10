@@ -23,7 +23,6 @@ from omp_rpc import (
     AvailableCommandsUpdateEvent,
     GoalResult,
     HandoffResult,
-    LivePhaseEvent,
     OpenSessionResult,
     PromptResultEvent,
     QueueUpdateEvent,
@@ -606,7 +605,6 @@ FAKE_SERVER = textwrap.dedent(
             if message == "side frames":
                 print(json.dumps({"type": "available_commands_update", "commands": [{"name": "plan", "source": "builtin"}]}), flush=True)
                 print(json.dumps({"type": "subagent_lifecycle", "payload": {"id": "Worker", "agent": "task", "agentSource": "bundled", "status": "started", "index": 0}}), flush=True)
-                print(json.dumps({"type": "live_phase", "phase": "listening"}), flush=True)
             if message == "needs cancel":
                 print(json.dumps({"type": "extension_ui_request", "id": "ui-3", "method": "editor", "title": "Edit", "placeholder": "value"}), flush=True)
                 continue
@@ -1198,11 +1196,9 @@ class RpcClientTests(unittest.TestCase):
     ) -> None:
         commands: list[AvailableCommandsUpdateEvent] = []
         lifecycle: list[SubagentLifecycleEvent] = []
-        live: list[LivePhaseEvent] = []
         with self.make_client() as client:
             client.on_available_commands_update(commands.append)
             client.on_subagent_lifecycle(lifecycle.append)
-            client.on_live_phase(live.append)
             turn = client.prompt_and_wait("side frames", timeout=2.0)
 
         self.assertEqual([command.name for command in commands[0].commands], ["plan"])
@@ -1210,10 +1206,9 @@ class RpcClientTests(unittest.TestCase):
             [(event.payload.id, event.payload.status) for event in lifecycle],
             [("Worker", "started")],
         )
-        self.assertEqual(live, [LivePhaseEvent(phase="listening")])
         self.assertEqual(turn.assistant_text, "pong")
         self.assertFalse(
-            {"available_commands_update", "subagent_lifecycle", "live_phase"}
+            {"available_commands_update", "subagent_lifecycle"}
             & {event.type for event in turn.events}
         )
 

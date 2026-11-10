@@ -182,7 +182,7 @@ export type SymbolKey =
 	| "cmd.hammer"
 	| "cmd.power"
 	| "cmd.cart"
-	// STT
+	// Microphone
 	| "icon.mic"
 	// Compaction divider
 	| "icon.camera"
@@ -571,7 +571,7 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"cmd.hammer": "🔨",
 	"cmd.power": "⏻",
 	"cmd.cart": "🛒",
-	// STT
+	// Microphone
 	"icon.mic": "🎤",
 	// Compaction divider
 	"icon.camera": "📷",
@@ -1037,7 +1037,7 @@ const NERD_SYMBOLS: SymbolMap = {
 	"cmd.power": "\uf011",
 	// pick:  (nf-fa-shopping_cart) | alt: 󰄋 (nf-md-cart)
 	"cmd.cart": "\uf07a",
-	// STT - fa-microphone
+	// Microphone - fa-microphone
 	"icon.mic": "\uf130",
 	// Compaction divider - fa-camera-retro
 	"icon.camera": "\uf083",
@@ -1370,7 +1370,7 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"cmd.hammer": "",
 	"cmd.power": "",
 	"cmd.cart": "",
-	// STT
+	// Microphone
 	"icon.mic": "MIC",
 	// Compaction divider
 	"icon.camera": "[o]",

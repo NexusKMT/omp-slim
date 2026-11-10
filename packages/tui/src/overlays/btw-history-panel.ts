@@ -36,11 +36,10 @@ import {
 	appBtwInjectKey,
 	matchesAppBtwInject,
 } from "../keybinding-matchers";
-import type { SpaceHoldHandler } from "../space-hold";
 import { sanitizeErrorLine } from "../chrome/error-block";
 import { sanitizeDisplayLine, sanitizeDisplayText } from "./extensions/display-text";
 import { editorKey, editorKeys, keyHint, rawKeyHint } from "../chrome/keybinding-hints";
-import { formatKeyHint, type KeyId } from "../app-keybindings";
+import { formatKeyHint } from "../app-keybindings";
 import { bottomBorder, row, topBorder } from "../chrome/overlay-box";
 import { padToWidth } from "../render/utils";
 import { SplitPane } from "../components/layout/split-pane";
@@ -77,9 +76,6 @@ interface BtwHistoryPanelOptions {
 	onPasteImage?: () => Promise<unknown>;
 	/** Attach an image file whose path was pasted or dropped into the follow-up. */
 	onPasteImagePath?: (path: string) => Promise<void>;
-	/** Configured push-to-talk keys for a follow-up composer. */
-	spaceHoldKeys?: readonly KeyId[];
-	spaceHold?: (input: Input) => SpaceHoldHandler;
 	requestRender: () => void;
 	getHeight: () => number;
 	/**
@@ -383,8 +379,6 @@ export class BtwHistoryPanel implements Component, Focusable {
 		input.prompt = theme.fg("accent", "Follow up: ");
 		input.placeholder = "Ask about this answer…";
 		input.setUseTerminalCursor(this.#useTerminalCursor);
-		if (this.#options.spaceHoldKeys !== undefined) input.spaceHold.keys = this.#options.spaceHoldKeys;
-		input.spaceHold.handler = this.#options.spaceHold?.(input);
 		const composer: FollowUpComposer = {
 			recordId: record.id,
 			input,
@@ -457,11 +451,6 @@ export class BtwHistoryPanel implements Component, Focusable {
 			this.#followUpPending = false;
 			this.#options.requestRender();
 		}
-	}
-
-	/** Only an active follow-up composer can claim its configured push-to-talk keys. */
-	capturesInput(data: string): boolean {
-		return this.#composer?.input.capturesInput(data) ?? false;
 	}
 
 	/** False while a follow-up is sent: it already took its images, and the composer clears after. */

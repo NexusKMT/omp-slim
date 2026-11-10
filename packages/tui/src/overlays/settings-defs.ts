@@ -48,7 +48,7 @@ export const TAB_METADATA: Record<SettingTab, TabMetadata> = {
 export const TAB_LEADS: Record<SettingTab, string> = {
 	appearance: "Theme, composer, status line and how the transcript renders.",
 	model: "Thinking, sampling, the system prompt, retries and the helper models.",
-	interaction: "Input, approvals, notifications, speech and what happens at startup.",
+	interaction: "Input, approvals, notifications and what happens at startup.",
 	context: "What the model sees, and when and how the conversation compacts.",
 	memory: "What omp remembers across sessions and where it keeps it.",
 	files: "How files are read, summarized and edited, and the language servers.",
@@ -70,7 +70,6 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 		"Input",
 		"Approvals",
 		"Notifications",
-		"Speech",
 		"Collab",
 		"Stream",
 		"Magic Keywords",

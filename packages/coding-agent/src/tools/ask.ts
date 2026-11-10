@@ -40,8 +40,6 @@ import type { ExtensionUIContext, ExtensionUIDialogOptions, ExtensionUISelectIte
 import { askTimeoutMs, cfgAskNotify } from "../modes/settings";
 import askDescription from "../prompts/tools/ask.md" with { type: "text" };
 import askHeadlessForkMessage from "../prompts/tools/ask-headless-fork.md" with { type: "text" };
-import { cfgSpeechEnabled } from "../tts/settings";
-import { vocalizer } from "../tts/vocalizer";
 import type { ToolSession } from ".";
 import { ToolAbortError } from "./tool-errors";
 
@@ -403,7 +401,6 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 		}
 
 		const form = parseHtmlForm(params.html);
-		const questions = fieldQuestions(form);
 		const named = form.fields.filter(field => field.name);
 		if (named.length === 0) {
 			return { content: [{ type: "text", text: NO_NAMED_CONTROLS_ERROR }], details: { answers: [] } };
@@ -435,13 +432,6 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 
 		// Send notification if waiting and not suppressed
 		this.#sendAskNotification();
-
-		// Speak the questions aloud before surfacing them. Ask vocalizes in every
-		// mode — it's the assistant addressing the user — gated only by speech.enabled
-		// (the vocalizer re-checks the setting and no-ops when disabled).
-		if (cfgSpeechEnabled.get(this.session.settings)) {
-			vocalizer.speak(named.map(field => questions.get(field) ?? field.name).join("\n"));
-		}
 
 		let answered: { data: HtmlFormData; timedOut?: boolean } | undefined;
 		try {

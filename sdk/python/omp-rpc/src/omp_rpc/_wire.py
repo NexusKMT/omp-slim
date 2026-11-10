@@ -176,16 +176,6 @@ _SUBAGENT_LIFECYCLE_STATUS_VALUES: Final[frozenset[str]] = frozenset({"started",
 _decode_subagent_lifecycle_status = cast("Decoder[SubagentLifecycleStatus]", literal(_SUBAGENT_LIFECYCLE_STATUS_VALUES))
 
 
-LivePhase: TypeAlias = Literal["connecting", "listening", "working", "speaking", "muted", "error"]
-_LIVE_PHASE_VALUES: Final[frozenset[str]] = frozenset({"connecting", "listening", "working", "speaking", "muted", "error"})
-_decode_live_phase = cast("Decoder[LivePhase]", literal(_LIVE_PHASE_VALUES))
-
-
-LiveRole: TypeAlias = Literal["user", "assistant"]
-_LIVE_ROLE_VALUES: Final[frozenset[str]] = frozenset({"user", "assistant"})
-_decode_live_role = cast("Decoder[LiveRole]", literal(_LIVE_ROLE_VALUES))
-
-
 WidgetPlacement: TypeAlias = Literal["aboveEditor", "belowEditor"]
 _WIDGET_PLACEMENT_VALUES: Final[frozenset[str]] = frozenset({"aboveEditor", "belowEditor"})
 _decode_widget_placement = cast("Decoder[WidgetPlacement]", literal(_WIDGET_PLACEMENT_VALUES))
@@ -1378,62 +1368,6 @@ class SubagentEvent:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
-class LivePhaseEvent:
-    type: Literal["live_phase"] = "live_phase"
-    phase: LivePhase
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class LiveLevelsEvent:
-    """Microphone (`input`) and speaker (`output`) RMS in [0, 1], at most every 100 ms."""
-    type: Literal["live_levels"] = "live_levels"
-    input: float
-    output: float
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class LiveTranscriptEvent:
-    """Accumulated text of one realtime turn; replaces earlier frames with the same `role` and `turn`."""
-    type: Literal["live_transcript"] = "live_transcript"
-    role: LiveRole
-    turn: int
-    text: str
-    final: bool
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class LiveEndEvent:
-    """Sent exactly once when a live session ends; `error` carries the failure cause."""
-    type: Literal["live_end"] = "live_end"
-    error: str | None = None
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class DictationStateEvent:
-    """State of one draft-only microphone capture."""
-    type: Literal["dictation_state"] = "dictation_state"
-    capture_id: str
-    state: Literal["starting", "recording", "transcribing"]
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class DictationTranscriptEvent:
-    """Full accumulated draft preview; replaces the previous preview for this capture."""
-    type: Literal["dictation_transcript"] = "dictation_transcript"
-    capture_id: str
-    text: str
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class DictationEndEvent:
-    """Exactly one terminal frame per capture; text is the accumulated result."""
-    type: Literal["dictation_end"] = "dictation_end"
-    capture_id: str
-    text: str
-    error: str | None = None
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
 class BtwDeltaEvent:
     """Text appended to the running side question's latest answer."""
     type: Literal["btw_delta"] = "btw_delta"
@@ -1677,12 +1611,6 @@ class NegotiateProtocolResult:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
-class LiveConnectResult:
-    voice: str
-    sdp_answer: str
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
 class GetSessionLeaseResult:
     held: tuple[str, ...]
     unknown: tuple[str, ...]
@@ -1715,7 +1643,7 @@ RpcAgentEvent: TypeAlias = AgentStartEvent | AgentEndEvent | TurnStartEvent | Tu
 """A session event, discriminated by `type`; `set_event_filter` selects which are sent."""
 
 
-RpcNotification: TypeAlias = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent | UnknownNotification
+RpcNotification: TypeAlias = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent | UnknownNotification
 """Unsolicited outbound frame (everything except responses and host tool/URI requests), discriminated by `type`."""
 
 
@@ -2840,70 +2768,6 @@ def parse_subagent_event(value: object, path: str = "SubagentEvent") -> Subagent
     )
 
 
-def parse_live_phase_event(value: object, path: str = "LivePhaseEvent") -> LivePhaseEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["live_phase"]]', literal(frozenset({"live_phase"}))), path)
-    return LivePhaseEvent(
-        phase=required(payload, "phase", _decode_live_phase, path),
-    )
-
-
-def parse_live_levels_event(value: object, path: str = "LiveLevelsEvent") -> LiveLevelsEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["live_levels"]]', literal(frozenset({"live_levels"}))), path)
-    return LiveLevelsEvent(
-        input=required(payload, "input", decode_float, path),
-        output=required(payload, "output", decode_float, path),
-    )
-
-
-def parse_live_transcript_event(value: object, path: str = "LiveTranscriptEvent") -> LiveTranscriptEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["live_transcript"]]', literal(frozenset({"live_transcript"}))), path)
-    return LiveTranscriptEvent(
-        role=required(payload, "role", _decode_live_role, path),
-        turn=required(payload, "turn", decode_int, path),
-        text=required(payload, "text", decode_str, path),
-        final=required(payload, "final", decode_bool, path),
-    )
-
-
-def parse_live_end_event(value: object, path: str = "LiveEndEvent") -> LiveEndEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["live_end"]]', literal(frozenset({"live_end"}))), path)
-    return LiveEndEvent(
-        error=optional(payload, "error", decode_str, path),
-    )
-
-
-def parse_dictation_state_event(value: object, path: str = "DictationStateEvent") -> DictationStateEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["dictation_state"]]', literal(frozenset({"dictation_state"}))), path)
-    return DictationStateEvent(
-        capture_id=required(payload, "captureId", decode_str, path),
-        state=required(payload, "state", cast('Decoder[Literal["starting", "recording", "transcribing"]]', literal(frozenset({"starting", "recording", "transcribing"}))), path),
-    )
-
-
-def parse_dictation_transcript_event(value: object, path: str = "DictationTranscriptEvent") -> DictationTranscriptEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["dictation_transcript"]]', literal(frozenset({"dictation_transcript"}))), path)
-    return DictationTranscriptEvent(
-        capture_id=required(payload, "captureId", decode_str, path),
-        text=required(payload, "text", decode_str, path),
-    )
-
-
-def parse_dictation_end_event(value: object, path: str = "DictationEndEvent") -> DictationEndEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["dictation_end"]]', literal(frozenset({"dictation_end"}))), path)
-    return DictationEndEvent(
-        capture_id=required(payload, "captureId", decode_str, path),
-        text=required(payload, "text", decode_str, path),
-        error=optional(payload, "error", decode_str, path),
-    )
-
-
 def parse_btw_delta_event(value: object, path: str = "BtwDeltaEvent") -> BtwDeltaEvent:
     payload = expect_object(value, path)
     required(payload, "type", cast('Decoder[Literal["btw_delta"]]', literal(frozenset({"btw_delta"}))), path)
@@ -3183,14 +3047,6 @@ def parse_negotiate_protocol_result(value: object, path: str = "NegotiateProtoco
     )
 
 
-def parse_live_connect_result(value: object, path: str = "LiveConnectResult") -> LiveConnectResult:
-    payload = expect_object(value, path)
-    return LiveConnectResult(
-        voice=required(payload, "voice", decode_str, path),
-        sdp_answer=required(payload, "sdpAnswer", decode_str, path),
-    )
-
-
 def parse_get_session_lease_result(value: object, path: str = "GetSessionLeaseResult") -> GetSessionLeaseResult:
     payload = expect_object(value, path)
     return GetSessionLeaseResult(
@@ -3276,13 +3132,6 @@ _RPC_NOTIFICATION_CASES: Final[dict[str, Decoder[RpcNotification]]] = {
         "subagent_lifecycle": parse_subagent_lifecycle_event,
         "subagent_progress": parse_subagent_progress_event,
         "subagent_event": parse_subagent_event,
-        "live_phase": parse_live_phase_event,
-        "live_levels": parse_live_levels_event,
-        "live_transcript": parse_live_transcript_event,
-        "live_end": parse_live_end_event,
-        "dictation_state": parse_dictation_state_event,
-        "dictation_transcript": parse_dictation_transcript_event,
-        "dictation_end": parse_dictation_end_event,
         "btw_delta": parse_btw_delta_event,
         "btw_record": parse_btw_record_event,
         "command_output": parse_command_output_event,
@@ -3482,48 +3331,6 @@ class WireClient:
         params["subagentId"] = subagent_id
         params["message"] = message
         self._command("steer_subagent", params)
-
-    def live_start(self, *, voice: str | None = None, instructions: str | None = None) -> str:
-        """Start a live voice session bound to this session; returns the voice in use."""
-        params: dict[str, object] = {}
-        if voice is not None:
-            params["voice"] = voice
-        if instructions is not None:
-            params["instructions"] = instructions
-        return required(expect_object(self._command("live_start", params), "live_start"), "voice", decode_str, "live_start")
-
-    def live_connect(self, sdp_offer: str, *, voice: str | None = None, instructions: str | None = None) -> LiveConnectResult:
-        """Start a live voice session whose audio runs on a caller-owned WebRTC peer: send its SDP offer, apply the returned answer."""
-        params: dict[str, object] = {}
-        params["sdpOffer"] = sdp_offer
-        if voice is not None:
-            params["voice"] = voice
-        if instructions is not None:
-            params["instructions"] = instructions
-        return parse_live_connect_result(self._command("live_connect", params), "live_connect")
-
-    def live_stop(self) -> None:
-        """Stop the live voice session, if any."""
-        params: dict[str, object] = {}
-        self._command("live_stop", params)
-
-    def live_mute(self, muted: bool | None = None) -> bool:
-        """Set microphone mute, or toggle it when `muted` is omitted; returns the new state."""
-        params: dict[str, object] = {}
-        if muted is not None:
-            params["muted"] = muted
-        return required(expect_object(self._command("live_mute", params), "live_mute"), "muted", decode_bool, "live_mute")
-
-    def dictation_start(self, capture_id: str) -> None:
-        """Start draft-only speech-to-text; resolves once the microphone is recording."""
-        params: dict[str, object] = {}
-        params["captureId"] = capture_id
-        self._command("dictation_start", params, timeout=600)
-
-    def dictation_stop(self) -> str:
-        """Stop and flush draft-only dictation, returning the accumulated text."""
-        params: dict[str, object] = {}
-        return required(expect_object(self._command("dictation_stop", params, timeout=600), "dictation_stop"), "text", decode_str, "dictation_stop")
 
     def set_model(self, provider: str, model_id: str) -> ModelInfo:
         """Select a model by provider and id."""
@@ -3814,34 +3621,6 @@ class WireClient:
         """Subscribe to `subagent_event`: A subagent's own session event; sent only at subscription level "events"."""
         return self._listen("subagent_event", listener)
 
-    def on_live_phase(self, listener: Callable[[LivePhaseEvent], None]) -> Callable[[], None]:
-        """Subscribe to `live_phase` frames."""
-        return self._listen("live_phase", listener)
-
-    def on_live_levels(self, listener: Callable[[LiveLevelsEvent], None]) -> Callable[[], None]:
-        """Subscribe to `live_levels`: Microphone (`input`) and speaker (`output`) RMS in [0, 1], at most every 100 ms."""
-        return self._listen("live_levels", listener)
-
-    def on_live_transcript(self, listener: Callable[[LiveTranscriptEvent], None]) -> Callable[[], None]:
-        """Subscribe to `live_transcript`: Accumulated text of one realtime turn; replaces earlier frames with the same `role` and `turn`."""
-        return self._listen("live_transcript", listener)
-
-    def on_live_end(self, listener: Callable[[LiveEndEvent], None]) -> Callable[[], None]:
-        """Subscribe to `live_end`: Sent exactly once when a live session ends; `error` carries the failure cause."""
-        return self._listen("live_end", listener)
-
-    def on_dictation_state(self, listener: Callable[[DictationStateEvent], None]) -> Callable[[], None]:
-        """Subscribe to `dictation_state`: State of one draft-only microphone capture."""
-        return self._listen("dictation_state", listener)
-
-    def on_dictation_transcript(self, listener: Callable[[DictationTranscriptEvent], None]) -> Callable[[], None]:
-        """Subscribe to `dictation_transcript`: Full accumulated draft preview; replaces the previous preview for this capture."""
-        return self._listen("dictation_transcript", listener)
-
-    def on_dictation_end(self, listener: Callable[[DictationEndEvent], None]) -> Callable[[], None]:
-        """Subscribe to `dictation_end`: Exactly one terminal frame per capture; text is the accumulated result."""
-        return self._listen("dictation_end", listener)
-
     def on_btw_delta(self, listener: Callable[[BtwDeltaEvent], None]) -> Callable[[], None]:
         """Subscribe to `btw_delta`: Text appended to the running side question's latest answer."""
         return self._listen("btw_delta", listener)
@@ -4064,9 +3843,6 @@ __all__ = [
     "ContextUsage",
     "CustomMessage",
     "DeveloperMessage",
-    "DictationEndEvent",
-    "DictationStateEvent",
-    "DictationTranscriptEvent",
     "EditorUiRequest",
     "Effort",
     "ExtensionError",
@@ -4092,13 +3868,6 @@ __all__ = [
     "InterruptMode",
     "IrcMessageEvent",
     "LineRange",
-    "LiveConnectResult",
-    "LiveEndEvent",
-    "LiveLevelsEvent",
-    "LivePhase",
-    "LivePhaseEvent",
-    "LiveRole",
-    "LiveTranscriptEvent",
     "LoginProvider",
     "LogoutAccount",
     "LogoutResult",
@@ -4257,9 +4026,6 @@ __all__ = [
     "parse_context_usage",
     "parse_custom_message",
     "parse_developer_message",
-    "parse_dictation_end_event",
-    "parse_dictation_state_event",
-    "parse_dictation_transcript_event",
     "parse_editor_ui_request",
     "parse_extension_error",
     "parse_extension_ui_request",
@@ -4280,11 +4046,6 @@ __all__ = [
     "parse_input_ui_request",
     "parse_irc_message_event",
     "parse_line_range",
-    "parse_live_connect_result",
-    "parse_live_end_event",
-    "parse_live_levels_event",
-    "parse_live_phase_event",
-    "parse_live_transcript_event",
     "parse_login_provider",
     "parse_logout_account",
     "parse_logout_result",

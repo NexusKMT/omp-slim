@@ -42,7 +42,7 @@ export interface ModelDownloadRequest<Key extends string> {
 export type ModelWorkerMessage<Outbound> = Exclude<Outbound, { type: "log" | "progress" | "pong" | "downloaded" }>;
 
 export interface ModelWorkerHostOptions<Inbound, Outbound, Request> {
-	/** Log/error prefix, e.g. `"stt"`. */
+	/** Log/error prefix, e.g. `"tiny"`. */
 	name: string;
 	spawnWorker: () => RefCountedWorkerHandle<Inbound, Outbound>;
 	/** Display label for a model key in the download registry. */
@@ -169,7 +169,7 @@ export class ModelWorkerHost<
 
 	/**
 	 * Workers start unreferenced so an idle warm model never blocks exit. A
-	 * short-lived command (`omp say`, STT setup/download) awaiting IPC would
+	 * short-lived command awaiting model inference over IPC would
 	 * otherwise let Bun drain the event loop and exit before the reply arrives,
 	 * so the worker is `ref`'d exactly while a request or stream is active.
 	 */

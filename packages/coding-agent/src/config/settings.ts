@@ -16,7 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { roleDefaultModels } from "@oh-my-pi/pi-catalog/compat/behavior";
 import { type GeneratedProvider, getBundledModels } from "@oh-my-pi/pi-catalog/models";
-import { type Api, type Model, modelKind } from "@oh-my-pi/pi-catalog/types";
+import { type Api, type Model } from "@oh-my-pi/pi-catalog/types";
 import {
 	expandTilde,
 	getAgentDbPath,
@@ -3616,11 +3616,10 @@ export class Settings {
 		// Retired provider/model selectors now live in modelRoles plus explicit
 		// retry chains. Read nested and quoted-dotted forms from the same layer;
 		// an owned nested key wins even when its value is undefined. Every legacy
-		// key is removed after inspection so it cannot leak back into config.yml.
+		// active key is removed after inspection so it cannot leak back into config.yml.
+		// Retired speech settings remain inert and untouched for configuration portability.
 		function migrateKindRoleSettings(): void {
 			const providerSettings = isRecord(raw.providers) ? raw.providers : undefined;
-			const ttsSettings = isRecord(raw.tts) ? raw.tts : undefined;
-			const sttSettings = isRecord(raw.stt) ? raw.stt : undefined;
 			const legacy = (root: Record<string, unknown> | undefined, key: string, flatKey: string): unknown =>
 				root && Object.hasOwn(root, key) ? root[key] : raw[flatKey];
 			const removeLegacy = (root: Record<string, unknown> | undefined, key: string, flatKey: string): void => {
@@ -3651,8 +3650,8 @@ export class Settings {
 			const legacyWebExclude = legacy(providerSettings, "webSearchExclude", "providers.webSearchExclude");
 			const legacyGeminiModel = legacy(providerSettings, "webSearchGeminiModel", "providers.webSearchGeminiModel");
 			// Legacy settings named a provider; its swap target is the catalog's
-			// resolved per-model policy (`web-search-model` / `image-model` / tts
-			// seed kind), uniform across that provider's bundled rows.
+			// resolved per-model policy (`web-search-model` / `image-model`),
+			// uniform across that provider's bundled rows.
 			const bundledSelector = (
 				provider: string,
 				pick: (model: Model<Api>) => string | undefined,
@@ -3759,27 +3758,6 @@ export class Settings {
 				setRoleChain("image", dedupe([...orderedImageSelectors, ...roleDefaultModels().image]));
 			}
 
-			const legacyTtsProvider = legacy(providerSettings, "tts", "providers.tts");
-			const speechSelector =
-				legacyTtsProvider === "local" || legacyTtsProvider === "xai" || legacyTtsProvider === "deepinfra"
-					? bundledSelector(legacyTtsProvider, model => (modelKind(model) === "tts" ? model.id : undefined))
-					: undefined;
-			if (speechSelector) setRoleChain("speech", [speechSelector]);
-
-			const legacySttModel = legacy(sttSettings, "modelName", "stt.modelName");
-			const dictationSelector =
-				legacySttModel === "fast" || legacySttModel === "whisper-base"
-					? "local/whisper-base"
-					: legacySttModel === "balanced" || legacySttModel === "whisper-small"
-						? "local/whisper-small"
-						: legacySttModel === "turbo" || legacySttModel === "whisper-large-v3-turbo"
-							? "local/whisper-large-v3-turbo"
-							: undefined;
-			if (dictationSelector && !Object.hasOwn(roles, "dictation")) {
-				roles.dictation = dictationSelector;
-				rolesChanged = true;
-			}
-
 			const legacyJudgmentProvider = legacy(providerSettings, "judgmentProvider", "providers.judgmentProvider");
 			const legacyAutoThinkingModel = legacy(providerSettings, "autoThinkingModel", "providers.autoThinkingModel");
 			const legacyUnexpectedStopModel = legacy(
@@ -3827,7 +3805,6 @@ export class Settings {
 				"webSearchGeminiModel",
 				"image",
 				"imageOrder",
-				"tts",
 				"judgmentProvider",
 				"autoThinkingModel",
 				"unexpectedStopModel",
@@ -3836,8 +3813,6 @@ export class Settings {
 			]) {
 				removeLegacy(providerSettings, key, `providers.${key}`);
 			}
-			removeLegacy(ttsSettings, "localModel", "tts.localModel");
-			removeLegacy(sttSettings, "modelName", "stt.modelName");
 
 			if (rolesChanged) raw.modelRoles = roles;
 			if (fallbackChainsChanged) {
@@ -3845,8 +3820,6 @@ export class Settings {
 				raw.retry = retrySettings;
 			}
 			if (providerSettings && Object.keys(providerSettings).length === 0) delete raw.providers;
-			if (ttsSettings && Object.keys(ttsSettings).length === 0) delete raw.tts;
-			if (sttSettings && Object.keys(sttSettings).length === 0) delete raw.stt;
 		}
 		migrateKindRoleSettings();
 

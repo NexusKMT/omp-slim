@@ -185,41 +185,6 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		params: { subagentId: "string", message: "string" },
 	},
 	{
-		name: "live_start",
-		doc: "Start a live voice session bound to this session; returns the voice in use.",
-		params: { "voice?": "string", "instructions?": "string" },
-		result: { voice: "string" },
-		unwrap: "voice",
-	},
-	{
-		name: "live_connect",
-		doc: "Start a live voice session whose audio runs on a caller-owned WebRTC peer: send its SDP offer, apply the returned answer.",
-		params: { sdpOffer: "string", "voice?": "string", "instructions?": "string" },
-		result: { voice: "string", sdpAnswer: "string" },
-	},
-	{ name: "live_stop", doc: "Stop the live voice session, if any." },
-	{
-		name: "live_mute",
-		doc: "Set microphone mute, or toggle it when `muted` is omitted; returns the new state.",
-		params: { "muted?": "boolean" },
-		result: { muted: "boolean" },
-		unwrap: "muted",
-	},
-	{
-		name: "dictation_start",
-		doc: "Start draft-only speech-to-text; resolves once the microphone is recording.",
-		params: { captureId: "string" },
-		timeoutMs: 600_000,
-	},
-	{
-		name: "dictation_stop",
-		doc: "Stop and flush draft-only dictation, returning the accumulated text.",
-		result: { text: "string" },
-		unwrap: "text",
-		timeoutMs: 600_000,
-	},
-
-	{
 		name: "set_model",
 		doc: "Select a model by provider and id.",
 		params: { provider: "string", modelId: "string" },

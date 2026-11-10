@@ -74,7 +74,7 @@ import type {
 	RenderSessionContextOptions,
 	ShowStatusOptions,
 } from "../../modes/types";
-import { extractVisibleAssistantText } from "../rpc/rpc-live";
+import { extractTextContent } from "../../commit/utils";
 import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
@@ -1668,6 +1668,6 @@ export class UiHelpers {
 	}
 
 	extractAssistantText(message: AssistantMessage): string {
-		return extractVisibleAssistantText(message);
+		return extractTextContent(message);
 	}
 }

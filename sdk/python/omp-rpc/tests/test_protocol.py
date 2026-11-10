@@ -11,7 +11,6 @@ from omp_rpc import (
     ExtensionUiRequest,
     GoalUpdatedEvent,
     IrcMessageEvent,
-    LiveTranscriptEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -190,16 +189,6 @@ class ProtocolParsingTests(unittest.TestCase):
         )
         assert isinstance(valid, SubagentEvent)
         self.assertIsInstance(valid.payload.event, MessageEndEvent)
-
-    def test_parse_live_frames(self) -> None:
-        self.assertEqual(
-            parse_notification(
-                {"type": "live_transcript", "role": "user", "turn": 3, "text": "hello", "final": False}
-            ),
-            LiveTranscriptEvent(role="user", turn=3, text="hello", final=False),
-        )
-        with self.assertRaises(ValueError):
-            parse_notification({"type": "live_phase", "phase": "dozing"})
 
     def test_parse_message_update_preserves_assistant_event_type(self) -> None:
         assistant = {"role": "assistant"}

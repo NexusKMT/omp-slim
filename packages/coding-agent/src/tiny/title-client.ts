@@ -147,9 +147,7 @@ export function tinyModelEnvKey(): string {
 }
 
 /**
- * Env for an ONNX inference subprocess with the resolved device/dtype —
- * used for the tiny worker and reused verbatim by the STT and TTS workers,
- * which share the same device/dtype resolution.
+ * Env for the ONNX tiny inference subprocess with the resolved device/dtype.
  */
 export function tinyWorkerEnv(): Record<string, string> {
 	return inferenceWorkerEnv(tinyModelEnv());

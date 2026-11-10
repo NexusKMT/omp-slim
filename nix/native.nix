@@ -2,7 +2,6 @@
   cmake,
   craneLib,
   lib,
-  ninja,
   pkg-config,
   rustPlatform,
   source,
@@ -64,7 +63,6 @@ let
     cargoExtraArgs = "--locked -p pi-natives";
     nativeBuildInputs = [
       cmake
-      ninja
       pkg-config
       rustPlatform.bindgenHook
     ];

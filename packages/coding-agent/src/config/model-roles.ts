@@ -73,20 +73,6 @@ export const MODEL_ROLES: Record<ModelRole, ModelRoleInfo> = {
 		accepts: model => modelKind(model) === "image",
 	},
 	web: { tag: "WEB", name: "Web search", color: "success", section: "kind", accepts: acceptsWeb },
-	speech: {
-		tag: "SPEECH",
-		name: "Speech",
-		color: "warning",
-		section: "kind",
-		accepts: model => modelKind(model) === "tts",
-	},
-	dictation: {
-		tag: "DICTATION",
-		name: "Dictation",
-		color: "warning",
-		section: "kind",
-		accepts: model => modelKind(model) === "stt",
-	},
 	judge: { tag: "JUDGE", name: "Judge", color: "muted", section: "kind", accepts: acceptsJudge },
 };
 

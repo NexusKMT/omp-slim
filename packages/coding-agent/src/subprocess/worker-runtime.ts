@@ -11,7 +11,7 @@ import type { ProgressInfo } from "./transformers-types";
 
 /**
  * Child-side scaffolding shared by the ONNX inference worker bodies
- * (`stt/asr-worker`, `tiny/worker`, `tts/tts-worker`). These are the helpers
+ * (`tiny/worker`, `mnemopi/embed-worker`). These are the helpers
  * that run inside the spawned subprocess: error serialization, structured log
  * and progress reporting over the worker's typed transport, side-runtime
  * install (sharp stubbing + module-resolver patch), once-per-process runtime

@@ -1875,15 +1875,6 @@ describe("Settings", () => {
 				{ image: imageOrderedCandidates[0] },
 				{ image: imageOrderedCandidates.slice(1) },
 			],
-			["local speech provider", "providers.tts", "local", { speech: "local/kokoro" }, { speech: [] }],
-			["xAI speech provider", "providers.tts", "xai", { speech: "xai/grok-tts" }, { speech: [] }],
-			[
-				"DeepInfra speech provider",
-				"providers.tts",
-				"deepinfra",
-				{ speech: "deepinfra/hexgrad/Kokoro-82M" },
-				{ speech: [] },
-			],
 			[
 				"judgment provider",
 				"providers.judgmentProvider",
@@ -1907,10 +1898,6 @@ describe("Settings", () => {
 			],
 			["tiny model", "providers.tinyModel", "lfm2.5-230m", { tiny: "local/lfm2.5-230m" }, {}],
 			["memory model", "providers.memoryModel", "lfm2-1.2b", { memory: "local/lfm2-1.2b" }, {}],
-			["local speech model", "tts.localModel", "kokoro", {}, {}],
-			["fast dictation model", "stt.modelName", "fast", { dictation: "local/whisper-base" }, {}],
-			["balanced dictation model", "stt.modelName", "balanced", { dictation: "local/whisper-small" }, {}],
-			["turbo dictation model", "stt.modelName", "turbo", { dictation: "local/whisper-large-v3-turbo" }, {}],
 			[
 				"older web search preference",
 				"providers.webSearch",
@@ -2036,8 +2023,25 @@ describe("Settings", () => {
 			const saved = await readSettings();
 			expect(saved.modelRoles).toBeUndefined();
 			expect(saved.retry).toBeUndefined();
-			expect(saved.providers).toBeUndefined();
-			expect(saved.stt).toBeUndefined();
+			expect(saved.providers).toEqual({ tts: "auto" });
+			expect(saved.stt).toEqual({ modelName: "parakeet" });
+		});
+
+		it("preserves retired speech configuration when saving unrelated settings", async () => {
+			const retired = {
+				stt: { enabled: true, modelName: "fast", language: "zh" },
+				tts: { localModel: "kokoro", localVoice: "af_heart" },
+				speech: { enabled: true },
+				speechgen: { enabled: true },
+				live: { voice: "alloy" },
+				providers: { tts: "local" },
+			};
+			await writeSettings(retired);
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(cfgModelRoles.get(settings)).toEqual({});
+			cfgDisplayShowTokenUsage.set(settings, true);
+			await settings.flush();
+			expect(await readSettings()).toMatchObject(retired);
 		});
 
 		it("prefers nested legacy values over flat forms", async () => {

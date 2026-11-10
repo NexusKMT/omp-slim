@@ -14,7 +14,6 @@ members = [
    "crates/pi-shell",
    "crates/pi-vcs",
    "crates/pi-vfs",
-   "crates/pi-voice",
    "crates/pi-walker",
    "crates/vendor/cfg_aliases",
    "crates/vendor/grep-searcher",
@@ -259,7 +258,6 @@ pi-edit = { path = "crates/pi-edit" }
 pi-iso = { path = "crates/pi-iso" }
 pi-shell = { path = "crates/pi-shell" }
 pi-predict = { path = "crates/pi-predict" }
-pi-voice = { path = "crates/pi-voice" }
 pi-walker = { path = "crates/pi-walker" }
 pi-vcs = { path = "crates/pi-vcs" }
 pi-vfs = { path = "crates/pi-vfs" }
@@ -331,20 +329,12 @@ smallvec = { version = "1.16.1", features = [
 xxhash-rust = { version = "0.8", features = ["xxh64", "xxh32"] }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Audio & Realtime Media
-# ──────────────────────────────────────────────────────────────────────────────
-opus = "0.4.0"
-webrtc = "0.17.2"
-
-# ──────────────────────────────────────────────────────────────────────────────
 # System & Platform
 # ──────────────────────────────────────────────────────────────────────────────
 libc = "0.2.191"
 windows-sys = { version = "0.61", features = [
    "Win32_Foundation",
    "Win32_Globalization",
-   "Win32_Media_Audio",
-   "Win32_Media_Multimedia",
    "Win32_Security",
    "Win32_Storage_FileSystem",
    "Win32_Storage_ProjectedFileSystem",

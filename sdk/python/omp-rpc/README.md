@@ -300,13 +300,8 @@ At `"events"`, `on_subagent_event()` delivers each subagent's own session
 events as `SubagentEvent.payload.event` (an `UnknownNotification` when it cannot
 be parsed).
 
-## Live Voice, Login, Handoff, and Word Prediction
+## Login, Handoff, and Word Prediction
 
-- `live_start(voice=None, instructions=None)` starts a GPT live voice session
-  bound to this session and returns the voice in use; `live_mute(muted=None)`
-  sets or toggles the microphone; `live_stop()` ends it. `on_live_phase()`,
-  `on_live_levels()`, `on_live_transcript()`, and `on_live_end()` receive the
-  live frames.
 - `get_login_providers()` lists OAuth providers; `login(provider_id)` blocks
   (up to 10 minutes) until credentials are stored. The flow arrives as UI
   requests: an `open_url` request (prefer `launch_url` as the copy target) and,

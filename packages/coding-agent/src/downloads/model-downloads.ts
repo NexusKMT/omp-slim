@@ -6,7 +6,7 @@
  */
 import { type DownloadProgressUpdate, type DownloadTracker, trackDownload } from "./activity";
 
-/** Structural subset of the tiny/STT/TTS worker progress events. */
+/** Structural subset of model worker progress events. */
 export interface ModelLoadProgressEvent {
 	modelKey: string;
 	status: "initiate" | "download" | "progress" | "progress_total" | "done" | "ready" | "error";

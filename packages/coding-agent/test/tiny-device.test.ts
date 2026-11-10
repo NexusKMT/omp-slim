@@ -20,7 +20,7 @@ describe("tiny model device selection", () => {
 	it("routes mlx and its metal alias to the MLX backend while ONNX workers stay CPU-only", () => {
 		expect(normalizeTinyModelDevice("metal")).toBe("mlx");
 		expect(normalizeTinyModelDevice("MLX")).toBe("mlx");
-		// STT/TTS only speak ONNX: `mlx` must never reach transformers.js as a device.
+		// ONNX-only callers must never forward `mlx` to transformers.js as a device.
 		expect(tinyModelDeviceLoadOrder(resolveTinyModelDevicePreference("mlx"))).toEqual(["cpu"]);
 		expect(tinyModelDeviceLoadOrder(resolveTinyModelDevicePreference("metal"))).toEqual(["cpu"]);
 	});

@@ -1368,61 +1368,6 @@ describe("ACP agent", () => {
 		await Bun.sleep(0);
 	});
 
-	it("lists role selectors for ACP mobile voice settings", async () => {
-		const harness = await createHarness();
-
-		const result = (await harness.agent.extMethod("speech.models.list", {})) as Record<string, unknown> & {
-			speechToText: { models: Array<{ value: string }> };
-			textToSpeech: {
-				models: Array<{ value: string; voices: unknown[] }>;
-				voices: unknown[];
-				speeds: Array<{ value: unknown }>;
-			};
-		};
-
-		expect(result).toMatchObject({
-			settings: {
-				speechToTextModel: "modelRoles.dictation",
-				textToSpeechModel: "modelRoles.speech",
-				textToSpeechVoice: "tts.localVoice",
-				speechVoice: "speech.voice",
-				textToSpeechSpeed: "tts.localSpeed",
-				speechSpeed: "speech.speed",
-			},
-			defaults: {
-				speechToTextModel: "local/parakeet-tdt-0.6b-v3",
-				textToSpeechModel: "local/kokoro",
-				voice: "af_heart",
-				speed: 1,
-			},
-			speechToText: {
-				setting: "modelRoles.dictation",
-				defaultValue: "local/parakeet-tdt-0.6b-v3",
-			},
-			textToSpeech: {
-				modelSetting: "modelRoles.speech",
-				voiceSetting: "tts.localVoice",
-				speechVoiceSetting: "speech.voice",
-				speedSetting: "tts.localSpeed",
-				speechSpeedSetting: "speech.speed",
-				defaultModel: "local/kokoro",
-				defaultVoice: "af_heart",
-				defaultSpeed: 1,
-				speedRange: { min: 0.5, max: 2.5 },
-			},
-		});
-		expect(result.speechToText.models).toContainEqual(
-			expect.objectContaining({ value: "local/nemotron-streaming-en-0.6b" }),
-		);
-		expect(result.textToSpeech.models.map(model => model.value)).toEqual(["local/kokoro"]);
-		expect(result.textToSpeech.models[0]?.voices).toEqual(result.textToSpeech.voices);
-		// Speed presets are numbers so clients can write them straight into the numeric settings.
-		expect(result.textToSpeech.speeds.map(speed => speed.value)).toEqual([0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5]);
-
-		harness.abortController.abort();
-		await Bun.sleep(0);
-	});
-
 	it("accepts OMP extension methods and rejects unknown unprefixed methods", async () => {
 		const harness = await createHarness();
 

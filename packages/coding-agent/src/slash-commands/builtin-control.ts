@@ -91,15 +91,6 @@ export const BUILTIN_CONTROL_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
-		name: "live",
-		icon: "voice",
-		description: "Start Codex-backed realtime voice mode",
-		handleTui: async (_command, runtime) => {
-			clearSubmittedText(runtime);
-			await runtime.ctx.handleLiveCommand();
-		},
-	},
-	{
 		name: "record",
 		icon: "export",
 		description: "Start or stop recording this screen to a replayable file (omp play)",

@@ -2009,34 +2009,18 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		}
 	});
 
-	it("does not register the xAI TTS tool unless enabled", async () => {
+	it("does not reactivate the removed speech tool from a legacy configuration", async () => {
 		const tempDir = makeTempDir();
+		await Bun.write(path.join(tempDir, "config.yml"), "speechgen:\n  enabled: true\n");
 
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
+			settings: await Settings.loadIsolated({ cwd: tempDir, agentDir: tempDir, readOnly: true }),
 		});
 
 		try {
 			expect(session.getToolByName("tts")).toBeUndefined();
 			expect(session.getAllToolNames()).not.toContain("tts");
-			expect(session.getActiveToolNames()).not.toContain("tts");
-		} finally {
-			await session.dispose();
-		}
-	});
-
-	it("registers the xAI TTS tool when enabled", async () => {
-		const tempDir = makeTempDir();
-
-		const { session } = await createAgentSession({
-			...baseOptions(tempDir),
-			settings: Settings.isolated({ "speechgen.enabled": true }),
-		});
-
-		try {
-			expect(session.getToolByName("tts")).toBeDefined();
-			// tts is a discoverable custom tool → mounted as an xd:// device, not top-level.
-			expect(session.getXdevToolEntries().map(entry => entry.name)).toContain("tts");
 			expect(session.getActiveToolNames()).not.toContain("tts");
 		} finally {
 			await session.dispose();
@@ -2084,7 +2068,6 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			Settings.isolated({
 				modelRoles: { image: "openai/gpt-image-1" },
 				"generate_image.enabled": true,
-				"speechgen.enabled": true,
 				"memory.backend": "hindsight",
 				"autolearn.enabled": true,
 			});
@@ -2131,7 +2114,6 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(restricted.getActiveToolNames()).toEqual(["read", "lsp", "yield"]);
 			for (const name of [
 				"generate_image",
-				"tts",
 				"recall",
 				"retain",
 				"reflect",
@@ -2169,7 +2151,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			// Explicit and force-included tools stay top-level. Ambient custom and
 			// extension capabilities mount through the device-only write transport.
 			const mountedNames = normal.getXdevToolEntries().map(entry => entry.name);
-			expect(mountedNames).toEqual(expect.arrayContaining(["tts", "default_active_tool", "sdk_custom_tool"]));
+			expect(mountedNames).toEqual(expect.arrayContaining(["default_active_tool", "sdk_custom_tool"]));
 			expect(activeToolNames).not.toContain("tts");
 			expect(activeToolNames).not.toContain("default_active_tool");
 			expect(activeToolNames).not.toContain("sdk_custom_tool");
@@ -2178,7 +2160,6 @@ describe("createAgentSession defaultInactive tool activation", () => {
 					"generate_image",
 					"read",
 					"yield",
-					"tts",
 					"default_active_tool",
 					"sdk_custom_tool",
 					"recall",

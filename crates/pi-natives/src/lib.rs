@@ -25,7 +25,6 @@
 pub mod appearance;
 pub mod applefm;
 pub mod ast;
-pub mod audio;
 pub mod block;
 pub mod clipboard;
 pub mod crash_handler;
@@ -47,7 +46,6 @@ pub mod ipc;
 pub mod js;
 pub mod keys;
 pub mod line_match;
-pub mod live;
 pub mod memory;
 pub mod mermaid;
 pub mod oauth_callback;

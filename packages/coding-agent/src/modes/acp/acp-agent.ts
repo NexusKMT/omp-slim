@@ -72,7 +72,6 @@ import type { SessionInfo as StoredSessionInfo } from "../../session/session-lis
 import { SessionManager } from "../../session/session-manager";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands, toAcpAvailableCommands } from "../../slash-commands/available-commands";
-import { DEFAULT_STT_MODEL_KEY, STT_MODELS } from "../../stt/models";
 import { refreshAgentDiscovery } from "../../task";
 import { AUTO_THINKING, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import {
@@ -88,15 +87,6 @@ import {
 import { type ChoiceField, type HtmlForm, parseHtmlForm, spansText } from "@oh-my-pi/pi-tui/html-form/parse";
 import { resolvePlanFilePath } from "../../plan-mode/plan-files";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
-import {
-	DEFAULT_TTS_SPEED,
-	DEFAULT_TTS_VOICE,
-	TTS_LOCAL_MODELS,
-	TTS_LOCAL_VOICE_OPTIONS,
-	TTS_SPEED_MAX,
-	TTS_SPEED_MIN,
-	TTS_SPEED_OPTIONS,
-} from "../../tts/models";
 import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
 import { createAcpClientBridge } from "./acp-client-bridge";
 import {
@@ -121,7 +111,6 @@ const MODEL_CONFIG_ID = "model";
 const THINKING_CONFIG_ID = "thinking";
 const THINKING_OFF = "off";
 const SESSION_PAGE_SIZE = 50;
-const SPEECH_MODELS_LIST_METHOD = "speech.models.list";
 /**
  * `_session/steering` — the steering extension method from claude-agent-acp /
  * codex-acp (spec proposal: ACP `session/inject`,
@@ -453,74 +442,6 @@ function normalizeCreatedAcpSession(created: AgentSession | AcpSessionHandle): {
 	setToolUIContext: AcpSessionHandle["setToolUIContext"] | undefined;
 } {
 	return "session" in created ? created : { session: created, setToolUIContext: undefined };
-}
-
-type AcpSpeechOption = {
-	value: string;
-	label: string;
-	description?: string;
-};
-
-type AcpSpeechVoiceOption = {
-	value: string;
-	label: string;
-};
-
-type AcpSpeechTtsModelOption = AcpSpeechOption & {
-	voices: AcpSpeechVoiceOption[];
-};
-
-function buildAcpSpeechModelsCatalog(): Record<string, unknown> {
-	const localSelector = (modelId: string) => `local/${modelId}`;
-	const defaultSpeechModel = localSelector(TTS_LOCAL_MODELS[0].key);
-	const defaultDictationModel = localSelector(DEFAULT_STT_MODEL_KEY);
-	const voices = TTS_LOCAL_VOICE_OPTIONS.map(({ value, label }) => ({ value, label }));
-	// Speed settings are numeric, so presets are advertised as numbers clients can write back as-is.
-	const speeds = TTS_SPEED_OPTIONS.map(({ value, label }) => ({ value: Number(value), label }));
-	return {
-		settings: {
-			speechToTextModel: "modelRoles.dictation",
-			textToSpeechModel: "modelRoles.speech",
-			textToSpeechVoice: "tts.localVoice",
-			speechVoice: "speech.voice",
-			textToSpeechSpeed: "tts.localSpeed",
-			speechSpeed: "speech.speed",
-		},
-		defaults: {
-			speechToTextModel: defaultDictationModel,
-			textToSpeechModel: defaultSpeechModel,
-			voice: DEFAULT_TTS_VOICE,
-			speed: DEFAULT_TTS_SPEED,
-		},
-		speechToText: {
-			setting: "modelRoles.dictation",
-			defaultValue: defaultDictationModel,
-			models: STT_MODELS.map(({ key, label, description }) => ({
-				value: localSelector(key),
-				label,
-				description,
-			})),
-		},
-		textToSpeech: {
-			modelSetting: "modelRoles.speech",
-			voiceSetting: "tts.localVoice",
-			speechVoiceSetting: "speech.voice",
-			speedSetting: "tts.localSpeed",
-			speechSpeedSetting: "speech.speed",
-			defaultModel: defaultSpeechModel,
-			defaultVoice: DEFAULT_TTS_VOICE,
-			defaultSpeed: DEFAULT_TTS_SPEED,
-			speedRange: { min: TTS_SPEED_MIN, max: TTS_SPEED_MAX },
-			models: TTS_LOCAL_MODELS.map(({ key, label, description, voices: modelVoices }): AcpSpeechTtsModelOption => ({
-				value: localSelector(key),
-				label,
-				description,
-				voices: modelVoices.map(({ id, label: voiceLabel }) => ({ value: id, label: voiceLabel })),
-			})),
-			voices,
-			speeds,
-		},
-	};
 }
 
 /**
@@ -1631,8 +1552,6 @@ export class AcpAgent implements Agent {
 
 	async extMethod(method: string, params: { [key: string]: unknown }): Promise<{ [key: string]: unknown }> {
 		switch (method) {
-			case SPEECH_MODELS_LIST_METHOD:
-				return buildAcpSpeechModelsCatalog();
 			case "_omp/sessions/listAll": {
 				const limit = typeof params.limit === "number" ? Math.max(1, Math.min(5000, params.limit as number)) : 1000;
 				const sessions = await SessionManager.listAll();

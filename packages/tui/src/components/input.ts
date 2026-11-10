@@ -1,6 +1,6 @@
 import { BracketedPasteHandler, decodeReencodedPasteControls } from "../bracketed-paste";
-import { canonicalKeyId, getKeybindings } from "../keybindings";
-import { extractPrintableText, parseKey } from "../keys";
+import { getKeybindings } from "../keybindings";
+import { extractPrintableText } from "../keys";
 import { KillRing } from "../kill-ring";
 import type { TspInputProps } from "@oh-my-pi/pi-wire";
 import { node } from "../native/describe";
@@ -14,7 +14,6 @@ import {
 	type NativeUiEvent,
 	resolveTextEdit,
 } from "../native/node";
-import { getSpaceHoldText, SpaceHoldGesture } from "../space-hold";
 import { type Component, CURSOR_MARKER, type Focusable } from "../tui";
 import { cursorColumnWindow } from "./scroll-viewport";
 import {
@@ -31,7 +30,7 @@ import {
 const segmenter = getSegmenter();
 
 /**
- * Clean text entering the single-line value from outside the keyboard (pastes, dictation) —
+ * Clean text entering the single-line value from outside the keyboard (pastes) —
  * decode tmux's re-encoded control bytes (both extended-keys formats, e.g. Ctrl+J → "\n") back to
  * literal bytes so the escape tail does not leak in, remove newlines/carriage returns, expand tabs,
  * NFC-normalize, then strip any remaining control bytes. The decoder can synthesize Ctrl+A..Ctrl+Z
@@ -74,8 +73,6 @@ export class Input implements Component, Focusable {
 	placeholder: string | undefined;
 	onSubmit?: (value: string) => void;
 	onEscape?: () => void;
-	/** Space-bar push-to-talk; set its `handler` to enable it. */
-	readonly spaceHold = new SpaceHoldGesture(count => this.deleteBeforeCursor(count));
 	/** When set, replaces the cursor glyph at end-of-text with this ANSI-styled string. */
 	cursorOverride: string | undefined;
 
@@ -91,9 +88,6 @@ export class Input implements Component, Focusable {
 
 	// Undo support
 	#undoStack: InputState[] = [];
-
-	/** Code units of the current volatile speech-to-text preview (see {@link setVolatileText}). */
-	#volatileTextLen = 0;
 
 	#native?: { props: TspInputProps; node: NativeNode };
 
@@ -134,10 +128,6 @@ export class Input implements Component, Focusable {
 		return this.#useTerminalCursor;
 	}
 
-	capturesInput(data: string): boolean {
-		return this.spaceHold.shouldRoute(data);
-	}
-
 	/**
 	 * Apply one key: the editor's text bindings (motion, deletion, kill ring,
 	 * undo), pastes and printable text. Returns whether the key was the
@@ -156,19 +146,6 @@ export class Input implements Component, Focusable {
 				}
 			}
 			return true;
-		}
-
-		// Reserve configured keys before text bindings or submit/delete handlers can consume them.
-		const parsedKey = parseKey(data);
-		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
-		const spaceHoldText = getSpaceHoldText(data, canonical);
-		switch (this.spaceHold.process(canonical, spaceHoldText?.length ?? 0)) {
-			case "type":
-				this.#insertCharacter(spaceHoldText!);
-				this.spaceHold.recordTyped(spaceHoldText!.length);
-				return true;
-			case "swallow":
-				return true;
 		}
 
 		const kb = getKeybindings();
@@ -342,46 +319,12 @@ export class Input implements Component, Focusable {
 		this.#cursor = resolved.cursor;
 	}
 
-	/** Programmatically trigger submission (e.g. for voice submit). */
+	/** Programmatically trigger submission. */
 	submit(): void {
 		this.onSubmit?.(this.#value);
 	}
 
-	/** Delete up to `count` characters immediately before the cursor. */
-	deleteBeforeCursor(count: number): void {
-		const removable = Math.min(count, this.#cursor);
-		if (removable <= 0) return;
-		this.#lastAction = null;
-		this.#pushUndo();
-		this.#replaceBeforeCursor(removable, "");
-	}
-
-	/** Show or replace a volatile speech-to-text preview at the cursor, outside undo history.
-	 *  Finalize it with {@link commitVolatileText} or drop it with {@link clearVolatileText}. */
-	setVolatileText(text: string): void {
-		const clean = toSingleLine(text);
-		this.#replaceBeforeCursor(this.#volatileTextLen, clean);
-		this.#volatileTextLen = clean.length;
-	}
-
-	/** Remove the current volatile preview without committing it. */
-	clearVolatileText(): void {
-		this.setVolatileText("");
-	}
-
-	/** Drop any volatile preview, then insert `text` as a single undoable edit. */
-	commitVolatileText(text: string): void {
-		this.clearVolatileText();
-		const clean = toSingleLine(text);
-		if (!clean) return;
-		this.#lastAction = null;
-		this.#pushUndo();
-		this.#replaceBeforeCursor(0, clean);
-	}
-
-	/** Replace up to `count` code units before the cursor with `text`, leaving the cursor after it. The
-	 *  range stops at the start of the value: a volatile preview's length can outrun the cursor once
-	 *  the caret moves while dictation is still streaming. */
+	/** Replace up to `count` code units before the cursor with `text`, leaving the cursor after it. The range stops at the start of the value. */
 	#replaceBeforeCursor(count: number, text: string): void {
 		const start = Math.max(0, this.#cursor - count);
 		this.#value = this.#value.slice(0, start) + text + this.#value.slice(this.#cursor);

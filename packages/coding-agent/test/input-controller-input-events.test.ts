@@ -71,7 +71,6 @@ async function createHarness(factory: ExtensionFactory) {
 		eventController: { isAwaitingAsyncWork: () => false },
 		settings: Settings.isolated({}),
 		keybindings: KeybindingsManager.inMemory(),
-		dictationSpaceHold: vi.fn(),
 		ui: {
 			requestRender: vi.fn(),
 			addInputListener: vi.fn(),

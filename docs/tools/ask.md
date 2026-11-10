@@ -38,7 +38,7 @@ The form is plain semantic HTML. Controls: `<input type="radio">` (one-of), `typ
 2. `execute()` requires `context.hasUI` and `context.ui`. Without them a headless fork gets a `ToolError` telling its model to put open questions in its final answer; any other session aborts the context and throws `ToolAbortError("Ask tool requires interactive mode")`.
 3. The form is parsed. A form without a named control returns an error text result rather than throwing.
 4. It reads `ask.timeout` (seconds; `0` disables) and disables the timeout entirely while plan mode is enabled.
-5. If the session has a local UI and `ask.notify` is not `off`, it sends a terminal notification: `Waiting for input`. When `speech.enabled` is true, it speaks the field questions.
+5. If the session has a local UI and `ask.notify` is not `off`, it sends a terminal notification: `Waiting for input`.
 6. When the UI supplies `formDialog`, the whole form opens at once: the interactive TUI shows `HtmlFormDialog` (it validates on submit; any key resets the countdown), ACP clients with form elicitation get one elicitation with a property per field.
 7. Otherwise (RPC hosts, extension UIs without `formDialog`) it walks named fields in order:
    - radio group / single select: one `select`, opening on the preselected option
@@ -54,7 +54,6 @@ The form is plain semantic HTML. Controls: `<input type="radio">` (one-of), `typ
 - User-visible prompts / interactive UI
    - Uses `context.ui.formDialog(...)` when available; otherwise `context.ui.select(...)`, `input(...)` and `editor(...)`.
    - Sends a terminal notification when the session has a local UI, unless `ask.notify=off`.
-   - Speaks the field questions through the vocalizer when `speech.enabled=true`.
 - Session state
    - Reads plan-mode state to disable timeouts.
    - Calls `context.abort()` on headless use or user cancellation.

@@ -25,13 +25,11 @@ import { generateEnumExports } from "./gen-enums";
 // static build so the local addon never retains host Homebrew paths.
 process.env.PCRE2_SYS_STATIC ??= "1";
 
-// Windows: cc-rs and rustc auto-locate cl.exe/link.exe through the VS
-// registry, but the cmake crate (opusic-sys' bundled Opus) needs cmake —
-// and its Ninja generator needs ninja — on PATH. VS Build Tools ships both
-// without exposing them, so outside a vcvars prompt the build dies on
-// "cmake not found". Resolve the VS install via vswhere and append its
-// CMake/Ninja dirs, keeping any user-provided tools ahead.
-if (process.platform === "win32" && (!Bun.which("cmake") || !Bun.which("ninja"))) {
+// Windows: wasmtime installs the C API headers used by tree-sitter with CMake.
+// VS Build Tools ships CMake without exposing it outside a vcvars prompt.
+// Resolve the VS install via vswhere and append its CMake directory, keeping
+// any user-provided tools ahead.
+if (process.platform === "win32" && !Bun.which("cmake")) {
 	const vcToolsComponent =
 		process.arch === "arm64"
 			? "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
@@ -49,9 +47,7 @@ if (process.platform === "win32" && (!Bun.which("cmake") || !Bun.which("ninja"))
 	const vsRoot = probe.exitCode === 0 ? probe.stdout.toString("utf-8").trim() : "";
 	if (vsRoot) {
 		const cmakeExt = path.join(vsRoot, "Common7", "IDE", "CommonExtensions", "Microsoft", "CMake");
-		const extraDirs = [path.join(cmakeExt, "CMake", "bin"), path.join(cmakeExt, "Ninja")].filter(dir =>
-			fsSync.existsSync(dir),
-		);
+		const extraDirs = [path.join(cmakeExt, "CMake", "bin")].filter(dir => fsSync.existsSync(dir));
 		if (extraDirs.length > 0) {
 			process.env.PATH = [process.env.PATH ?? "", ...extraDirs].filter(Boolean).join(path.delimiter);
 		}

@@ -1167,59 +1167,6 @@ export interface SubagentEvent {
 	payload: SubagentEventPayload;
 }
 
-export type LivePhase = "connecting" | "listening" | "working" | "speaking" | "muted" | "error";
-
-export type LiveRole = "user" | "assistant";
-
-export interface LivePhaseEvent {
-	type: "live_phase";
-	phase: LivePhase;
-}
-
-/** Microphone (`input`) and speaker (`output`) RMS in [0, 1], at most every 100 ms. */
-export interface LiveLevelsEvent {
-	type: "live_levels";
-	input: number;
-	output: number;
-}
-
-/** Accumulated text of one realtime turn; replaces earlier frames with the same `role` and `turn`. */
-export interface LiveTranscriptEvent {
-	type: "live_transcript";
-	role: LiveRole;
-	turn: number;
-	text: string;
-	final: boolean;
-}
-
-/** Sent exactly once when a live session ends; `error` carries the failure cause. */
-export interface LiveEndEvent {
-	type: "live_end";
-	error?: string;
-}
-
-/** State of one draft-only microphone capture. */
-export interface DictationStateEvent {
-	type: "dictation_state";
-	captureId: string;
-	state: "starting" | "recording" | "transcribing";
-}
-
-/** Full accumulated draft preview; replaces the previous preview for this capture. */
-export interface DictationTranscriptEvent {
-	type: "dictation_transcript";
-	captureId: string;
-	text: string;
-}
-
-/** Exactly one terminal frame per capture; text is the accumulated result. */
-export interface DictationEndEvent {
-	type: "dictation_end";
-	captureId: string;
-	text: string;
-	error?: string;
-}
-
 /** Text appended to the running side question's latest answer. */
 export interface BtwDeltaEvent {
 	type: "btw_delta";
@@ -1539,7 +1486,7 @@ export interface HostUriSchemeDefinition {
 }
 
 /** Unsolicited outbound frame (everything except responses and host tool/URI requests), discriminated by `type`. */
-export type RpcNotification = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
+export type RpcNotification = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
 
 /** Any frame the server writes to stdout (after reassembling `rpc_chunk` sequences), discriminated by `type`. */
 export type RpcServerFrame = RpcResponse | RpcHostRequest | RpcNotification;
@@ -1693,42 +1640,6 @@ export interface CancelSubagentResult {
 export interface SteerSubagentParams {
 	subagentId: string;
 	message: string;
-}
-
-export interface LiveStartParams {
-	voice?: string;
-	instructions?: string;
-}
-
-export interface LiveStartResult {
-	voice: string;
-}
-
-export interface LiveConnectParams {
-	sdpOffer: string;
-	voice?: string;
-	instructions?: string;
-}
-
-export interface LiveConnectResult {
-	voice: string;
-	sdpAnswer: string;
-}
-
-export interface LiveMuteParams {
-	muted?: boolean;
-}
-
-export interface LiveMuteResult {
-	muted: boolean;
-}
-
-export interface DictationStartParams {
-	captureId: string;
-}
-
-export interface DictationStopResult {
-	text: string;
 }
 
 export interface SetModelParams {
@@ -1950,12 +1861,6 @@ export interface RpcWireCommands {
 	get_subagent_messages: { params: GetSubagentMessagesParams; result: SubagentMessages };
 	cancel_subagent: { params: CancelSubagentParams; result: CancelSubagentResult };
 	steer_subagent: { params: SteerSubagentParams; result: undefined };
-	live_start: { params: LiveStartParams; result: LiveStartResult };
-	live_connect: { params: LiveConnectParams; result: LiveConnectResult };
-	live_stop: { params: undefined; result: undefined };
-	live_mute: { params: LiveMuteParams; result: LiveMuteResult };
-	dictation_start: { params: DictationStartParams; result: undefined };
-	dictation_stop: { params: undefined; result: DictationStopResult };
 	set_model: { params: SetModelParams; result: ModelInfo };
 	cycle_model: { params: undefined; result: ModelCycleResult | null };
 	get_available_models: { params: undefined; result: GetAvailableModelsResult };

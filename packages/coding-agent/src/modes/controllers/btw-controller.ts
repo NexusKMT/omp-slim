@@ -722,8 +722,6 @@ export class BtwController {
 			},
 			onPasteImage: () => this.ctx.handleImagePaste(),
 			onPasteImagePath: path => this.ctx.handleImagePathPaste(path),
-			spaceHoldKeys: this.ctx.keybindings.getKeys("app.stt.pushToTalk"),
-			spaceHold: input => this.ctx.dictationSpaceHold(input),
 			requestRender: () => this.ctx.ui.requestRender(),
 			inject: this.#injectEnabled()
 				? {

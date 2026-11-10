@@ -2,10 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
-import { SpaceHoldGesture } from "@oh-my-pi/pi-tui/space-hold";
 import type { InteractiveModeContext, SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { vocalizer } from "@oh-my-pi/pi-coding-agent/tts/vocalizer";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import type { FileSlashCommand } from "@oh-my-pi/pi-coding-agent/extensibility/slash-commands";
 
@@ -38,7 +36,6 @@ type FakeEditor = {
 	setActionKeys(action: string, keys: string[]): void;
 	setCustomKeyHandler(key: string, handler: () => void): void;
 	clearCustomKeyHandlers(): void;
-	spaceHold: SpaceHoldGesture;
 	pendingImages: ImageContent[];
 	pendingImageLinks: (string | undefined)[];
 };
@@ -146,7 +143,6 @@ function createContext(): {
 		setActionKeys: vi.fn(),
 		setCustomKeyHandler: vi.fn(),
 		clearCustomKeyHandlers: vi.fn(),
-		spaceHold: new SpaceHoldGesture(() => {}),
 		pendingImages: [],
 		pendingImageLinks: [],
 	};
@@ -241,8 +237,6 @@ function createContext(): {
 		showAgentHub: vi.fn(),
 		unfocusSession: vi.fn(async () => {}),
 		focusParentSession: vi.fn(async () => {}),
-		handleSTTToggle: vi.fn(),
-		dictationSpaceHold: vi.fn(),
 		handleBtwEscape,
 		handleBtwCommand,
 		hasActiveBtw,
@@ -1104,45 +1098,6 @@ describe("InputController escape behavior", () => {
 
 		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
 		expect(ctx.showUserMessageSelector).not.toHaveBeenCalled();
-	});
-
-	it("silences TTS before aborting an overlapping agent turn (#6118)", () => {
-		const clear = vi.spyOn(vocalizer, "clear").mockImplementation(() => {});
-		vi.spyOn(vocalizer, "isSpeaking").mockReturnValue(true);
-		const { ctx, editor, spies } = createContext();
-		const pauseLoop = vi.fn();
-		ctx.loopModeEnabled = true;
-		ctx.pauseLoop = pauseLoop;
-		mutableSessionState(ctx).isStreaming = true;
-		const controller = new InputController(ctx);
-
-		controller.setupKeyHandlers();
-		editor.onEscape?.();
-
-		expect(clear).toHaveBeenCalledTimes(1);
-		expect(pauseLoop).not.toHaveBeenCalled();
-		expect(spies.abort).not.toHaveBeenCalled();
-	});
-
-	it("silences a still-audible vocalizer on Esc instead of opening the tree selector (#4521)", () => {
-		const clear = vi.spyOn(vocalizer, "clear").mockImplementation(() => {});
-		const isSpeaking = vi.spyOn(vocalizer, "isSpeaking").mockReturnValue(true);
-		const { ctx, editor, spies } = createContext();
-		const controller = new InputController(ctx);
-
-		controller.setupKeyHandlers();
-		editor.onEscape?.();
-
-		expect(clear).toHaveBeenCalledTimes(1);
-		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
-		expect(ctx.showUserMessageSelector).not.toHaveBeenCalled();
-		expect(spies.resetDisplay).not.toHaveBeenCalled();
-
-		// A second Esc after silence must NOT immediately fire the double-Esc
-		// gesture — the first press consumed the arm.
-		isSpeaking.mockReturnValue(false);
-		editor.onEscape?.();
-		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
 	});
 });
 

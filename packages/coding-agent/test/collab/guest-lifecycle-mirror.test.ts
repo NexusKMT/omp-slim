@@ -24,9 +24,7 @@ import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/typ
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { cfgSpeechEnabled, cfgSpeechMode } from "@oh-my-pi/pi-coding-agent/tts/settings";
-import { vocalizer } from "@oh-my-pi/pi-coding-agent/tts/vocalizer";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 import * as fsp from "node:fs/promises";
@@ -431,7 +429,6 @@ describe("collab guest extension lifecycle mirror", () => {
 	});
 
 	it("applies a mirrored stream tail in order through the event controller", async () => {
-		// The controller reads global settings (speech) when it enqueues a stream delta.
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true });
 		const writeSpy = spyOn(Bun, "write").mockResolvedValue(0);
@@ -559,17 +556,11 @@ describe("collab guest extension lifecycle mirror", () => {
 		}
 	});
 
-	it("speaks the text of updates the host superseded", async () => {
+	it("delivers reconstructed deltas for updates the host superseded", async () => {
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true });
-		cfgSpeechEnabled.set(settings, true);
-		cfgSpeechMode.set(settings, "all");
 		const writeSpy = spyOn(Bun, "write").mockResolvedValue(0);
 		const renameSpy = spyOn(fsp, "rename").mockResolvedValue(undefined);
-		const spoken: string[] = [];
-		const pushDelta = spyOn(vocalizer, "pushDelta").mockImplementation(text => {
-			spoken.push(text);
-		});
 		const controller = new EventController(createInteractiveModeContext());
 		const handleEvent = spyOn(controller, "handleEvent").mockResolvedValue(undefined);
 		const harness = await makeHarness("lifecycle-mirror-room-12", { eventController: controller });
@@ -601,7 +592,6 @@ describe("collab guest extension lifecycle mirror", () => {
 			harness.hostSocket.send({ t: "event", event: { type: "message_end", message: answered } } as CollabFrame);
 			await harness.barrier();
 
-			expect(spoken).toEqual(["Plan", " it", "Hello", " world"]);
 			// Extensions see the same reconstructed stream.
 			const extensionDeltas = harness.emitted.flatMap(event =>
 				event.type === "message_update" && "delta" in event.assistantMessageEvent
@@ -610,7 +600,6 @@ describe("collab guest extension lifecycle mirror", () => {
 			);
 			expect(extensionDeltas).toEqual(["Plan", " it", "Hello", " world"]);
 		} finally {
-			pushDelta.mockRestore();
 			handleEvent.mockRestore();
 			writeSpy.mockRestore();
 			renameSpy.mockRestore();

@@ -55,22 +55,11 @@ describe("CustomEditor vim mode", () => {
 		expect(editor.getText()).toBe("alfa beta");
 	});
 
-	it("keeps the space bar as a motion in normal mode instead of push-to-talk", () => {
+	it("keeps the space bar as a motion in normal mode", () => {
 		const { editor } = makeEditor(true);
-		const gestures: string[] = [];
-		editor.spaceHold.handler = { enabled: () => true, onStart: () => gestures.push("start"), onEnd: () => {} };
 		editor.setText("alfa");
 		editor.handleInput(ESC);
 		for (let i = 0; i < 6; i++) editor.handleInput(" ");
-		expect(gestures).toEqual([]);
 		expect(editor.getText()).toBe("alfa");
-	});
-
-	it("still offers push-to-talk while composing in insert mode", () => {
-		const { editor } = makeEditor(true);
-		editor.spaceHold.handler = { enabled: () => true, onStart: () => {}, onEnd: () => {} };
-		expect(editor.vimMode).toBe("insert");
-		editor.handleInput(" ");
-		expect(editor.getText()).toBe(" ");
 	});
 });

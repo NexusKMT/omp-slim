@@ -41,7 +41,6 @@ Do not import unexported `native/*` implementation paths from package consumers.
 | Shell and PTY            | `executeShell`, `Shell`, `PtySession`                                                                                                                                                | `shell.rs`, `pty.rs`                                                  | classes/promises                    |
 | Process and files        | `Process`, `FileLock`, `execReplace`                                                                                                                                                 | `ps.rs`, `file_lock/mod.rs`                                           | classes/mixed                       |
 | Clipboard    | `copyToClipboard`, `readImageFromClipboard`                                                                                                                        | `clipboard.rs`                                      | class, sync, promise                |
-| Audio and live media     | `AudioCapture`, `AudioPlayback`, `LiveWebRtcPeer`                                                                                                                                    | `audio.rs`, `live.rs`                                                 | classes/mixed                       |
 | Text and highlighting    | `wrapTextWithAnsi`, `truncateToWidth`, `sliceWithWidth`, `extractSegments`, `visibleWidth`, `setHangulCompatJamoWidthOverride`, `highlightCode`, `HighlightStream`, language queries | `text.rs`, `highlight.rs`                                             | sync                                |
 | Conversion and rendering | `htmlToMarkdown`, `pdfToMarkdown`, `rasterizeSvg`, `encodeSixel`, `renderSnapcompactPng`, `snapcompactSupportedChars`                                                                | `html.rs`, `pdf.rs`, `svg.rs`, `sixel.rs`, `snapcompact.rs`           | mixed sync/promise                  |
 | Tokens and system        | `countTokens`, macOS appearance, cross-platform power exports, `getWorkProfile`, `deviceCheckGenerateToken`                                                                          | `tokens.rs`, `appearance.rs`, `power.rs`, `prof.rs`, `devicecheck.rs` | mixed                               |
@@ -77,7 +76,7 @@ Callback parameters generated from napi-rs `ThreadsafeFunction` use an error-fir
 
 ## Objects, enums, and binary data
 
-`#[napi(object)]` structs become TS interfaces such as search results, AST payloads, shell/PTY results, audio/live events, and isolation records. napi-rs owns runtime conversion; TypeScript optionality does not provide semantic validation to untyped callers.
+`#[napi(object)]` structs become TS interfaces such as search results, AST payloads, shell/PTY results, and isolation records. napi-rs owns runtime conversion; TypeScript optionality does not provide semantic validation to untyped callers.
 
 The generated runtime enum objects currently are:
 

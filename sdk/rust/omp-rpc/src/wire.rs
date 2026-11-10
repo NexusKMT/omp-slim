@@ -4302,108 +4302,6 @@ pub struct SubagentEvent {
 	pub payload: SubagentEventPayload,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum LivePhase {
-	#[serde(rename = "connecting")]
-	Connecting,
-	#[serde(rename = "listening")]
-	Listening,
-	#[serde(rename = "working")]
-	Working,
-	#[serde(rename = "speaking")]
-	Speaking,
-	#[serde(rename = "muted")]
-	Muted,
-	#[serde(rename = "error")]
-	Error,
-}
-
-impl LivePhase {
-	/// Wire value.
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Connecting => "connecting",
-			Self::Listening => "listening",
-			Self::Working => "working",
-			Self::Speaking => "speaking",
-			Self::Muted => "muted",
-			Self::Error => "error",
-		}
-	}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum LiveRole {
-	#[serde(rename = "user")]
-	User,
-	#[serde(rename = "assistant")]
-	Assistant,
-}
-
-impl LiveRole {
-	/// Wire value.
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::User => "user",
-			Self::Assistant => "assistant",
-		}
-	}
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LivePhaseEvent {
-	pub phase: LivePhase,
-}
-
-/// Microphone (`input`) and speaker (`output`) RMS in [0, 1], at most every 100 ms.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveLevelsEvent {
-	pub input: f64,
-	pub output: f64,
-}
-
-/// Accumulated text of one realtime turn; replaces earlier frames with the same `role` and `turn`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveTranscriptEvent {
-	pub role: LiveRole,
-	pub turn: i64,
-	pub text: String,
-	pub r#final: bool,
-}
-
-/// Sent exactly once when a live session ends; `error` carries the failure cause.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveEndEvent {
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub error: Option<String>,
-}
-
-/// State of one draft-only microphone capture.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DictationStateEvent {
-	#[serde(rename = "captureId")]
-	pub capture_id: String,
-	pub state: DictationStateEventState,
-}
-
-/// Full accumulated draft preview; replaces the previous preview for this capture.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DictationTranscriptEvent {
-	#[serde(rename = "captureId")]
-	pub capture_id: String,
-	pub text: String,
-}
-
-/// Exactly one terminal frame per capture; text is the accumulated result.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DictationEndEvent {
-	#[serde(rename = "captureId")]
-	pub capture_id: String,
-	pub text: String,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub error: Option<String>,
-}
-
 /// Text appended to the running side question's latest answer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BtwDeltaEvent {
@@ -5070,19 +4968,6 @@ pub enum RpcNotification {
 	SubagentProgress(SubagentProgressEvent),
 	/// A subagent's own session event; sent only at subscription level "events".
 	SubagentEvent(SubagentEvent),
-	LivePhase(LivePhaseEvent),
-	/// Microphone (`input`) and speaker (`output`) RMS in [0, 1], at most every 100 ms.
-	LiveLevels(LiveLevelsEvent),
-	/// Accumulated text of one realtime turn; replaces earlier frames with the same `role` and `turn`.
-	LiveTranscript(LiveTranscriptEvent),
-	/// Sent exactly once when a live session ends; `error` carries the failure cause.
-	LiveEnd(LiveEndEvent),
-	/// State of one draft-only microphone capture.
-	DictationState(DictationStateEvent),
-	/// Full accumulated draft preview; replaces the previous preview for this capture.
-	DictationTranscript(DictationTranscriptEvent),
-	/// Exactly one terminal frame per capture; text is the accumulated result.
-	DictationEnd(DictationEndEvent),
 	/// Text appended to the running side question's latest answer.
 	BtwDelta(BtwDeltaEvent),
 	/// Full side-question record on every lifecycle change (started, complete, cancelled, error); the last one per id wins.
@@ -5114,13 +4999,6 @@ impl RpcNotification {
 			Some("subagent_lifecycle") => |value| serde_json::from_value(value).map(Self::SubagentLifecycle),
 			Some("subagent_progress") => |value| serde_json::from_value(value).map(Self::SubagentProgress),
 			Some("subagent_event") => |value| serde_json::from_value(value).map(Self::SubagentEvent),
-			Some("live_phase") => |value| serde_json::from_value(value).map(Self::LivePhase),
-			Some("live_levels") => |value| serde_json::from_value(value).map(Self::LiveLevels),
-			Some("live_transcript") => |value| serde_json::from_value(value).map(Self::LiveTranscript),
-			Some("live_end") => |value| serde_json::from_value(value).map(Self::LiveEnd),
-			Some("dictation_state") => |value| serde_json::from_value(value).map(Self::DictationState),
-			Some("dictation_transcript") => |value| serde_json::from_value(value).map(Self::DictationTranscript),
-			Some("dictation_end") => |value| serde_json::from_value(value).map(Self::DictationEnd),
 			Some("btw_delta") => |value| serde_json::from_value(value).map(Self::BtwDelta),
 			Some("btw_record") => |value| serde_json::from_value(value).map(Self::BtwRecord),
 			Some("command_output") => |value| serde_json::from_value(value).map(Self::CommandOutput),
@@ -5146,13 +5024,6 @@ impl Serialize for RpcNotification {
 			Self::SubagentLifecycle(member) => serialize_tagged(member, &[("type", "subagent_lifecycle")], serializer),
 			Self::SubagentProgress(member) => serialize_tagged(member, &[("type", "subagent_progress")], serializer),
 			Self::SubagentEvent(member) => serialize_tagged(member, &[("type", "subagent_event")], serializer),
-			Self::LivePhase(member) => serialize_tagged(member, &[("type", "live_phase")], serializer),
-			Self::LiveLevels(member) => serialize_tagged(member, &[("type", "live_levels")], serializer),
-			Self::LiveTranscript(member) => serialize_tagged(member, &[("type", "live_transcript")], serializer),
-			Self::LiveEnd(member) => serialize_tagged(member, &[("type", "live_end")], serializer),
-			Self::DictationState(member) => serialize_tagged(member, &[("type", "dictation_state")], serializer),
-			Self::DictationTranscript(member) => serialize_tagged(member, &[("type", "dictation_transcript")], serializer),
-			Self::DictationEnd(member) => serialize_tagged(member, &[("type", "dictation_end")], serializer),
 			Self::BtwDelta(member) => serialize_tagged(member, &[("type", "btw_delta")], serializer),
 			Self::BtwRecord(member) => serialize_tagged(member, &[("type", "btw_record")], serializer),
 			Self::CommandOutput(member) => serialize_tagged(member, &[("type", "command_output")], serializer),
@@ -5190,7 +5061,7 @@ impl RpcServerFrame {
 		let decode: fn(Value) -> Result<Self, serde_json::Error> = match value.get("type").and_then(Value::as_str) {
 			Some("response") => |value| serde_json::from_value(value).map(Self::Response),
 			Some("host_tool_call" | "host_tool_cancel" | "host_uri_request" | "host_uri_cancel") => |value| serde_json::from_value(value).map(Self::RpcHostRequest),
-			Some("ready" | "prompt_result" | "session_settled" | "extension_error" | "extension_ui_request" | "available_commands_update" | "subagent_lifecycle" | "subagent_progress" | "subagent_event" | "live_phase" | "live_levels" | "live_transcript" | "live_end" | "dictation_state" | "dictation_transcript" | "dictation_end" | "btw_delta" | "btw_record" | "command_output" | "session_info_update" | "config_update" | "rpc_frame_error" | "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "manual_compaction_start" | "manual_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcNotification),
+			Some("ready" | "prompt_result" | "session_settled" | "extension_error" | "extension_ui_request" | "available_commands_update" | "subagent_lifecycle" | "subagent_progress" | "subagent_event" | "btw_delta" | "btw_record" | "command_output" | "session_info_update" | "config_update" | "rpc_frame_error" | "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "manual_compaction_start" | "manual_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcNotification),
 			_ => |value| Ok(Self::Unknown(value)),
 		};
 		decode(value)
@@ -5421,58 +5292,6 @@ pub struct SteerSubagentParams {
 	#[serde(rename = "subagentId")]
 	pub subagent_id: String,
 	pub message: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveStartParams {
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub voice: Option<String>,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub instructions: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveStartResult {
-	pub voice: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveConnectParams {
-	#[serde(rename = "sdpOffer")]
-	pub sdp_offer: String,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub voice: Option<String>,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub instructions: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveConnectResult {
-	pub voice: String,
-	#[serde(rename = "sdpAnswer")]
-	pub sdp_answer: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveMuteParams {
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub muted: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveMuteResult {
-	pub muted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DictationStartParams {
-	#[serde(rename = "captureId")]
-	pub capture_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DictationStopResult {
-	pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -5995,27 +5814,6 @@ impl<'de> Deserialize<'de> for LitCostCap {
 			Ok(Self)
 		} else {
 			Err(D::Error::custom(format!("expected \"cost_cap\", got {value}")))
-		}
-	}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum DictationStateEventState {
-	#[serde(rename = "starting")]
-	Starting,
-	#[serde(rename = "recording")]
-	Recording,
-	#[serde(rename = "transcribing")]
-	Transcribing,
-}
-
-impl DictationStateEventState {
-	/// Wire value.
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Starting => "starting",
-			Self::Recording => "recording",
-			Self::Transcribing => "transcribing",
 		}
 	}
 }
@@ -6642,110 +6440,6 @@ impl Command for SteerSubagentCommand {
 	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
 		let _ = data;
 		Ok(())
-	}
-}
-
-/// Start a live voice session bound to this session; returns the voice in use.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct LiveStartCommand {
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub voice: Option<String>,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub instructions: Option<String>,
-}
-
-impl Command for LiveStartCommand {
-	const NAME: &'static str = "live_start";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = String;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<LiveStartResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.voice)
-	}
-}
-
-/// Start a live voice session whose audio runs on a caller-owned WebRTC peer: send its SDP offer, apply the returned answer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LiveConnectCommand {
-	#[serde(rename = "sdpOffer")]
-	pub sdp_offer: String,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub voice: Option<String>,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub instructions: Option<String>,
-}
-
-impl Command for LiveConnectCommand {
-	const NAME: &'static str = "live_connect";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = LiveConnectResult;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<LiveConnectResult>(data.unwrap_or_else(|| Value::Object(Map::new())))
-	}
-}
-
-/// Stop the live voice session, if any.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct LiveStopCommand {}
-
-impl Command for LiveStopCommand {
-	const NAME: &'static str = "live_stop";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = ();
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		let _ = data;
-		Ok(())
-	}
-}
-
-/// Set microphone mute, or toggle it when `muted` is omitted; returns the new state.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct LiveMuteCommand {
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub muted: Option<bool>,
-}
-
-impl Command for LiveMuteCommand {
-	const NAME: &'static str = "live_mute";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = bool;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<LiveMuteResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.muted)
-	}
-}
-
-/// Start draft-only speech-to-text; resolves once the microphone is recording.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DictationStartCommand {
-	#[serde(rename = "captureId")]
-	pub capture_id: String,
-}
-
-impl Command for DictationStartCommand {
-	const NAME: &'static str = "dictation_start";
-	const TIMEOUT_MS: Option<u64> = Some(600000);
-	type Output = ();
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		let _ = data;
-		Ok(())
-	}
-}
-
-/// Stop and flush draft-only dictation, returning the accumulated text.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct DictationStopCommand {}
-
-impl Command for DictationStopCommand {
-	const NAME: &'static str = "dictation_stop";
-	const TIMEOUT_MS: Option<u64> = Some(600000);
-	type Output = String;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<DictationStopResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.text)
 	}
 }
 

@@ -31,8 +31,6 @@ describe("buildHotkeysMarkdown", () => {
 			"app.editor.external": "Ctrl+G",
 			"app.retry": "Alt+R",
 			"app.clipboard.pasteImage": "Ctrl+V",
-			"app.stt.toggle": "Alt+H",
-			"app.live.toggle": "Ctrl+L",
 		};
 		const markdown = buildHotkeysMarkdown({
 			keybindings: {
@@ -49,7 +47,6 @@ describe("buildHotkeysMarkdown", () => {
 		expect(markdown).toContain("| `Ctrl+Shift+L` | Select model (temporary) |");
 		expect(markdown).toContain("| `Alt+M` | Select model (set roles) |");
 		expect(markdown).toContain("| `Alt+L` | Reset terminal display |");
-		expect(markdown).toContain("| `Ctrl+L` | Start/stop live voice mode (/live) |");
 		expect(markdown).toContain("| `Alt+R` | Retry last failed assistant turn |");
 		expect(markdown).toContain("| `Alt+Shift+P` | Toggle plan mode |");
 		expect(markdown).toContain("| `Ctrl+Shift+O` | Toggle tool activity visibility |");
@@ -93,43 +90,5 @@ describe("buildHotkeysMarkdown", () => {
 
 		expect(markdown).not.toContain("Option+");
 		expect(markdown).not.toContain("Cmd+");
-	});
-
-	it("renders the effective push-to-talk remap without borrowing the separate toggle binding", () => {
-		const markdown = buildHotkeysMarkdown({
-			keybindings: {
-				getKeys(action) {
-					if (action === "app.stt.pushToTalk") return ["x", "ctrl+x"];
-					if (action === "app.stt.toggle") return ["alt+h"];
-					return [];
-				},
-				getDisplayString(action) {
-					if (action === "app.stt.pushToTalk") return "X / Ctrl+X";
-					if (action === "app.stt.toggle") return "Alt+H";
-					return "Disabled";
-				},
-				matchesCanonical: () => false,
-			},
-		});
-
-		const pushToTalkRow = markdown.split("\n").find(line => line.includes("Speech-to-text (push-to-talk)")) ?? "";
-		expect(pushToTalkRow).toContain("X / Ctrl+X");
-		expect(pushToTalkRow).not.toContain("Alt+H");
-		expect(markdown).not.toContain("Alt+H");
-	});
-
-	it("renders push-to-talk as disabled when its effective key list is empty", () => {
-		const markdown = buildHotkeysMarkdown({
-			keybindings: {
-				...noForwardDelete,
-				getDisplayString(action) {
-					return action === "app.stt.pushToTalk" ? "" : "Disabled";
-				},
-			},
-		});
-
-		const pushToTalkRow = markdown.split("\n").find(line => line.includes("Speech-to-text (push-to-talk)")) ?? "";
-		expect(pushToTalkRow).toContain("Disabled");
-		expect(pushToTalkRow).not.toContain("Hold");
 	});
 });

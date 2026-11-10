@@ -452,14 +452,6 @@
 			"types": "./src/ssh/*.ts",
 			"import": "./src/ssh/*.ts"
 		},
-		"./stt": {
-			"types": "./src/stt/index.ts",
-			"import": "./src/stt/index.ts"
-		},
-		"./stt/*": {
-			"types": "./src/stt/*.ts",
-			"import": "./src/stt/*.ts"
-		},
 		"./task": {
 			"types": "./src/task/index.ts",
 			"import": "./src/task/index.ts"

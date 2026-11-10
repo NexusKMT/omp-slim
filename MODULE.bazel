@@ -192,26 +192,8 @@ crate.from_cargo(
     ],
 )
 
-# opusic-sys builds its bundled Opus via `cmake` and selects Ninja from PATH.
-# The target-specific toolchain keeps MSVC cross builds on the wrapper
-# compiler/linker; CFLAGS keeps Zig cross builds free of host UBSan links.
-crate.annotation(
-    build_script_env = {
-        "CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc": "$${pwd}/external/+msvc_cc_repository+msvc_cc/toolchain.cmake",
-        "CMAKE_TOOLCHAIN_FILE_aarch64_pc_windows_msvc": "$${pwd}/external/+msvc_cc_repository+msvc_cc_arm64/toolchain.cmake",
-        "CFLAGS": "-fno-sanitize=undefined",
-        "PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/run/current-system/sw/bin",
-    },
-    crate = "opusic-sys",
-    patch_args = ["-p1"],
-    # CMake explicitly installs to lib; the upstream host-Linux lib64 search
-    # points at a nonexistent directory even when cross-compiling for macOS.
-    patches = ["//bazel/patches:opusic-sys-install-libdir.patch"],
-    version = "0.7.5",
-)
-
 # wasmtime-c-api-impl (tree-sitter's `wasm` feature) runs `cmake -P` to install
-# the C API headers tree-sitter compiles against; same host PATH as opusic-sys.
+# the C API headers tree-sitter compiles against; provide the host CMake PATH.
 crate.annotation(
     build_script_env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/run/current-system/sw/bin",
@@ -306,7 +288,7 @@ msvc_cc(
 # rules_rust build-script runner. The leading entry is the canonical repo path
 # of @msvc_cc (`+<repo rule>+<name>`) — keep in sync if the rule or repo in
 # this section is ever renamed. On non-msvc targets the dir simply does not
-# exist and the rest of the PATH matches the opusic-sys annotation above.
+# exist and the remaining entries provide the usual host tool directories.
 crate.annotation(
     build_script_env = {
         "PATH": "$${pwd}/external/+msvc_cc_repository+msvc_cc/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin",
