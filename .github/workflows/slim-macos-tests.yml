@@ -1,0 +1,84 @@
+name: Test OMP Slim on Intel Mac
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Completed Intel Mac build run whose native addon will be verified and reused
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: slim-macos-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: macOS 15 Intel TypeScript validation
+    if: ${{ github.event.repository.private == false }}
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    env:
+      OMP_TEST_CONCURRENCY: "2"
+      OMP_TEST_TIMEOUT: "120"
+      # Hosted NSSpellServer times out; the real service is checked locally.
+      OMP_TEST_SKIP_MACOS_SPELLING: "1"
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+
+      - name: Verify and recover compatible native addon
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OMP_NATIVE_BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          mkdir -p dist/validation/macos-tests
+          bash scripts/slim/reuse-macos-native.sh 2>&1 | tee dist/validation/macos-tests/native-reuse.log
+
+      - name: Install frozen dependencies
+        shell: bash
+        run: bun install --frozen-lockfile 2>&1 | tee dist/validation/macos-tests/install.log
+
+      - name: Check TypeScript workspace
+        shell: bash
+        run: bun run check:ts 2>&1 | tee dist/validation/macos-tests/check.log
+
+      - name: Test retained TypeScript workspace behavior
+        shell: bash
+        run: bun run ci:test:ts 2>&1 | tee dist/validation/macos-tests/tests.log
+
+      - name: Record validation provenance
+        if: always()
+        shell: bash
+        run: |
+          {
+            printf 'Validation source: `%s`\n\n' "$GITHUB_SHA"
+            printf 'Runner: `macos-15-intel`; Bun: `1.4.4`. Native reuse checks and test results are recorded in the validation artifact.\n\n'
+            printf 'The hosted AppleSpell integration is skipped; platform capability tests still run.\n\n'
+            if [ -f dist/validation/macos-tests/provenance.txt ]; then
+              printf '```text\n'
+              cat dist/validation/macos-tests/provenance.txt
+              printf '```\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload checksums, provenance and validation logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: omp-slim-macos-tests-${{ github.sha }}-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: dist/validation/macos-tests/
