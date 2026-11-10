@@ -109,7 +109,6 @@ describe("CLI RPC MCP discovery", () => {
 							"--no-skills",
 							"--no-rules",
 							"--no-lsp",
-							"--no-prewalk",
 						],
 						{ cwd: project, env, stdin: "pipe", detached: true, timeout: 60_000 },
 					);

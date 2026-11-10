@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, setSy
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { clearCache as clearFsCache } from "@oh-my-pi/pi-coding-agent/capability/fs";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -197,13 +198,16 @@ describe("a plugin upgrade that replaces the plugin's version directory under a 
 		});
 	}
 
-	async function startSession(options: { skills?: AgentSession["skills"]; cwd?: string } = {}): Promise<AgentSession> {
+	async function startSession(
+		options: { skills?: AgentSession["skills"]; cwd?: string; model?: AgentSession["model"] } = {},
+	): Promise<AgentSession> {
 		const cwd = options.cwd ?? tempDir;
 		const { session } = await sdkModule.createAgentSession({
 			cwd,
 			agentDir: tempDir,
 			sessionManager: SessionManager.inMemory(cwd),
 			modelRegistry: sharedModelRegistry,
+			model: options.model,
 			settings: skillsSettings(),
 			...(options.skills ? { skills: [...options.skills] } : {}),
 		});
@@ -689,14 +693,14 @@ describe("a plugin upgrade that replaces the plugin's version directory under a 
 	});
 
 	it("a subagent spawned with an autoload skill after the upgrade receives the new version", async () => {
-		const parent = await startSession();
+		const parent = await startSession({ model: createMockModel().model });
 		const skill = parent.skills.find(entry => entry.name === SKILL)!;
 
 		installPluginVersion("2.0.0", "1.0.0");
 
 		// The child is a real session with the parent's list, fixed, as the executor creates it; only its
-		// turn is stubbed (there is no model to run), ending at once with a successful yield.
-		const child = await startSession({ skills: parent.skills });
+		// turn is stubbed to avoid a provider request, ending at once with a successful yield.
+		const child = await startSession({ skills: parent.skills, model: parent.model });
 		const listeners: Array<(event: AgentSessionEvent) => void> = [];
 		vi.spyOn(child, "subscribe").mockImplementation(listener => {
 			listeners.push(listener);
@@ -722,7 +726,7 @@ describe("a plugin upgrade that replaces the plugin's version directory under a 
 			eventBus: new EventBus(),
 		});
 
-		await runSubprocess({
+		const result = await runSubprocess({
 			cwd: tempDir,
 			agent: { name: "task", description: "test", systemPrompt: "test", source: "bundled" },
 			task: "do work",
@@ -730,11 +734,14 @@ describe("a plugin upgrade that replaces the plugin's version directory under a 
 			id: "upgrade-subagent",
 			settings: skillsSettings(),
 			modelRegistry: sharedModelRegistry,
+			parentModel: parent.model,
 			enableLsp: false,
 			skills: [...parent.skills],
 			autoloadSkills: [skill],
 		});
 
+		expect(result.error).toBeUndefined();
+		expect(result.exitCode).toBe(0);
 		expect(sendCustomMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				customType: SKILL_PROMPT_MESSAGE_TYPE,
