@@ -11,7 +11,7 @@ import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { AssistantMessage, Model, ToolCall } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
 import { Effort } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 
 function createAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
 	return {
@@ -122,7 +122,6 @@ describe("handoff helpers", () => {
 			systemPrompt,
 			tools,
 			customInstructions: "preserve failing test name",
-			initiatorOverride: "agent",
 			metadata: { session: "handoff-test" },
 		});
 
@@ -139,7 +138,6 @@ describe("handoff helpers", () => {
 			apiKey: "test-key",
 			reasoning: Effort.High,
 			toolChoice: "none",
-			initiatorOverride: "agent",
 			metadata: { session: "handoff-test" },
 		});
 

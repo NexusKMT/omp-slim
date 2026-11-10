@@ -1,21 +1,4 @@
-import type { AssistantMessage, Model, Usage, UserMessage } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-
-/** Creates a Codex model whose provider policy enables Harmony leak mitigation. */
-export function createHarmonyMitigationModel(): Model<"openai-codex-responses"> {
-	return buildModel({
-		id: "gpt-5.4",
-		name: "GPT-5.4",
-		api: "openai-codex-responses",
-		provider: "openai-codex",
-		baseUrl: "https://chatgpt.example/backend-api",
-		reasoning: true,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 272000,
-		maxTokens: 128000,
-	});
-}
+import type { AssistantMessage, Usage, UserMessage } from "@oh-my-pi/pi-ai";
 
 /** Creates a timestamped user message for agent-loop tests. */
 export function createUserMessage(text: string): UserMessage {
@@ -30,7 +13,7 @@ export function createAssistantMessage(
 	return {
 		role: "assistant",
 		content,
-		api: "mock",
+		api: "openai-completions",
 		provider: "mock",
 		model: "mock-model",
 		usage: createUsage(),

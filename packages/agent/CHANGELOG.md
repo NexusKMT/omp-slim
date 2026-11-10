@@ -4,6 +4,7 @@
 
 ### Removed
 
+- Removed the browser proxy transport and its custom streaming protocol.
 - Removed vendor execution channels, native protocol replay, and tool-call dialect translation; agent requests now use standard Chat Completions with the explicitly configured model.
 
 ## [18.18.2] - 2026-11-08

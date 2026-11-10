@@ -39,9 +39,9 @@ import {
 const MODEL: Model = buildModel({
 	id: "mock-model",
 	name: "mock-model",
-	api: "mock",
+	api: "openai-completions",
 	provider: "mock",
-	baseUrl: "mock://",
+	baseUrl: "http://localhost:0/v1",
 	reasoning: false,
 	input: ["text"],
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -82,7 +82,7 @@ function makeAssistantMessage(text: string, usage: Usage = makeUsage()): Assista
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "mock",
+		api: "openai-completions",
 		provider: "mock",
 		model: "mock-model",
 		usage,
@@ -114,7 +114,7 @@ function makePreparation(overrides: Partial<CompactionPreparation> = {}): Compac
 		isSplitTurn: false,
 		tokensBefore: 12345,
 		fileOps: snapcompact.createFileOps(),
-		settings: { ...DEFAULT_COMPACTION_SETTINGS, remoteEnabled: false },
+		settings: { ...DEFAULT_COMPACTION_SETTINGS },
 		...overrides,
 	};
 }

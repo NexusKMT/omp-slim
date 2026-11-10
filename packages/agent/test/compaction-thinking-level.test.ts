@@ -10,27 +10,10 @@ import * as snapcompact from "@oh-my-pi/snapcompact";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
-import { getTestModel } from "../../catalog/test/fixtures/models";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
-// Pins fix #1 of the compaction effort-override bug. Before this fix,
-// `generateHandoff` (and the three other compaction summarizers) hardcoded
-// `reasoning: Effort.High`, ignoring the user's `/model` thinking selection.
-// On a model with `compat.supportsReasoningEffort: false` (xai-oauth/grok-build),
-// this produced "Compaction failed: Thinking effort high is not supported by
-// xai-oauth/grok-build" — but the underlying defect (silent user-intent
-// override) was present on every model, just invisible because most models
-// silently accept the override.
-//
-// `resolveCompactionEffort` is the per-call resolver:
-// - `Off`              → `undefined` (user said no thinking; honored)
-// - `undefined`/`Inherit` → `Effort.High` default → clamped per model
-// - explicit Effort    → respect it → clamped per model
-//
-// `generateHandoff` is chosen as the test vehicle because it issues exactly
-// one LLM call per invocation (simpler to assert than `compact()` which fans
-// out into summary + short-summary + turn-prefix). The contract under test
-// (`resolveCompactionEffort`) is shared across all four call sites in
-// `packages/agent/src/compaction/compaction.ts`.
+// User-selected effort must reach the handoff and every summary in a split turn.
+// No provider identity may override the explicit model's reasoning capabilities.
 
 function createAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
 	return {
@@ -39,7 +22,7 @@ function createAssistantMessage(content: AssistantMessage["content"]): Assistant
 		timestamp: Date.now(),
 		provider: "mock",
 		model: "mock",
-		api: "mock",
+		api: "openai-completions",
 		usage: {
 			input: 0,
 			output: 0,
@@ -52,16 +35,14 @@ function createAssistantMessage(content: AssistantMessage["content"]): Assistant
 	};
 }
 
-function getAnthropicModel(): Model {
-	const model = getTestModel("anthropic", "claude-sonnet-4-5");
-	if (!model) throw new Error("Expected built-in anthropic/claude-sonnet-4-5 to exist");
-	return model;
-}
-
-function getGrokBuildModel(): Model {
-	const model = getTestModel("xai-oauth", "grok-build");
-	if (!model) throw new Error("Expected built-in xai-oauth/grok-build to exist");
-	return model;
+function getModel(): Model {
+	return buildModel({
+		id: "configured-model",
+		provider: "gateway",
+		baseUrl: "http://localhost:0/v1",
+		reasoning: true,
+		thinking: { mode: "effort", efforts: [ai.Effort.Low, ai.Effort.Medium, ai.Effort.High] },
+	});
 }
 
 const messages: AgentMessage[] = [
@@ -74,11 +55,11 @@ afterEach(() => {
 });
 
 describe("compaction thinking-level resolution (regression)", () => {
-	test("undefined thinkingLevel on Anthropic → reasoning=high (historical default preserved)", async () => {
+	test("undefined thinkingLevel → reasoning=high (historical default preserved)", async () => {
 		const spy = vi
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "handoff" }]));
-		await generateHandoff(messages, getAnthropicModel(), "test-key", {
+		await generateHandoff(messages, getModel(), "test-key", {
 			systemPrompt: ["sp"],
 			tools: [],
 			// thinkingLevel omitted — must default to high
@@ -88,11 +69,11 @@ describe("compaction thinking-level resolution (regression)", () => {
 		expect(call[2]?.reasoning).toBe(ai.Effort.High);
 	});
 
-	test("ThinkingLevel.Off on Anthropic → reasoning=undefined (user intent honored)", async () => {
+	test("ThinkingLevel.Off → reasoning=undefined (user intent honored)", async () => {
 		const spy = vi
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "handoff" }]));
-		await generateHandoff(messages, getAnthropicModel(), "test-key", {
+		await generateHandoff(messages, getModel(), "test-key", {
 			systemPrompt: ["sp"],
 			tools: [],
 			thinkingLevel: ThinkingLevel.Off,
@@ -103,11 +84,11 @@ describe("compaction thinking-level resolution (regression)", () => {
 		expect(call[2]?.reasoning).toBeUndefined();
 	});
 
-	test("ThinkingLevel.Low on Anthropic → reasoning=low (explicit user choice)", async () => {
+	test("ThinkingLevel.Low → reasoning=low (explicit user choice)", async () => {
 		const spy = vi
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "handoff" }]));
-		await generateHandoff(messages, getAnthropicModel(), "test-key", {
+		await generateHandoff(messages, getModel(), "test-key", {
 			systemPrompt: ["sp"],
 			tools: [],
 			thinkingLevel: ThinkingLevel.Low,
@@ -117,29 +98,11 @@ describe("compaction thinking-level resolution (regression)", () => {
 		expect(call[2]?.reasoning).toBe(ai.Effort.Low);
 	});
 
-	test("ThinkingLevel.High on xai-oauth/grok-build → reasoning=undefined (clamp)", async () => {
+	test("ThinkingLevel.Inherit → reasoning=high (Inherit folds to historical default)", async () => {
 		const spy = vi
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "handoff" }]));
-		await generateHandoff(messages, getGrokBuildModel(), "test-key", {
-			systemPrompt: ["sp"],
-			tools: [],
-			thinkingLevel: ThinkingLevel.High,
-		});
-		const call = spy.mock.calls[0];
-		if (!call) throw new Error("expected completeSimple call");
-		// clampThinkingLevelForModel(grokBuild, High) === undefined because
-		// supportsReasoningEffort: false ⇒ getSupportedEfforts returns [] ⇒
-		// no clamp target. The omitReasoningEffort gate at the wire layer is
-		// the actual strip; this just ensures the upstream throw doesn't fire.
-		expect(call[2]?.reasoning).toBeUndefined();
-	});
-
-	test("ThinkingLevel.Inherit on Anthropic → reasoning=high (Inherit folds to historical default)", async () => {
-		const spy = vi
-			.spyOn(ai, "completeSimple")
-			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "handoff" }]));
-		await generateHandoff(messages, getAnthropicModel(), "test-key", {
+		await generateHandoff(messages, getModel(), "test-key", {
 			systemPrompt: ["sp"],
 			tools: [],
 			thinkingLevel: ThinkingLevel.Inherit,
@@ -183,7 +146,7 @@ function makePreparation(overrides: Partial<CompactionPreparation> = {}): Compac
 		isSplitTurn: true,
 		tokensBefore: 12_345,
 		fileOps: snapcompact.createFileOps(),
-		settings: { ...DEFAULT_COMPACTION_SETTINGS, remoteEnabled: false },
+		settings: { ...DEFAULT_COMPACTION_SETTINGS },
 		...overrides,
 	};
 }
@@ -194,7 +157,7 @@ describe("compact() propagates thinkingLevel to all three summarizers (regressio
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "summary" }]));
 
-		await compact(makePreparation(), getAnthropicModel(), "test-key", undefined, undefined, {
+		await compact(makePreparation(), getModel(), "test-key", undefined, undefined, {
 			thinkingLevel: ThinkingLevel.Off,
 		});
 
@@ -210,7 +173,7 @@ describe("compact() propagates thinkingLevel to all three summarizers (regressio
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "summary" }]));
 
-		await compact(makePreparation(), getAnthropicModel(), "test-key", undefined, undefined, {
+		await compact(makePreparation(), getModel(), "test-key", undefined, undefined, {
 			thinkingLevel: ThinkingLevel.Low,
 		});
 
@@ -225,30 +188,11 @@ describe("compact() propagates thinkingLevel to all three summarizers (regressio
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "summary" }]));
 
-		await compact(makePreparation(), getAnthropicModel(), "test-key", undefined, undefined);
+		await compact(makePreparation(), getModel(), "test-key", undefined, undefined);
 
 		expect(spy).toHaveBeenCalledTimes(3);
 		for (const [, , opts] of spy.mock.calls) {
 			expect(opts?.reasoning).toBe(ai.Effort.High);
-		}
-	});
-
-	test("xai-oauth/grok-build + ThinkingLevel.High → every fan-out call gets reasoning=undefined (clamp)", async () => {
-		const spy = vi
-			.spyOn(ai, "completeSimple")
-			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "summary" }]));
-
-		await compact(makePreparation(), getGrokBuildModel(), "test-key", undefined, undefined, {
-			thinkingLevel: ThinkingLevel.High,
-		});
-
-		expect(spy).toHaveBeenCalledTimes(3);
-		for (const [, , opts] of spy.mock.calls) {
-			// Without the propagation fix at compaction.ts:971 / 1061, the
-			// three summarizers would see undefined → fall back to High and
-			// trip requireSupportedEffort. The fix + the wire-side strip in
-			// fix #2 keep this clean.
-			expect(opts?.reasoning).toBeUndefined();
 		}
 	});
 });
