@@ -36,25 +36,27 @@ import {
 const addonUrl = new URL("../native/index.js", import.meta.url).href;
 
 describe("macOS spelling", () => {
-	it("reports platform capability and uses UTF-16 ranges", async () => {
-		const nonsense = "qzxvplmokn";
+	it("reports platform capability and returns no ranges on other platforms", async () => {
+		expect(macOSSpellCheckerAvailable()).toBe(process.platform === "darwin");
 		if (process.platform !== "darwin") {
-			expect(macOSSpellCheckerAvailable()).toBeFalse();
-			expect(await macOSCheckSpelling(nonsense)).toEqual([]);
-			return;
+			expect(await macOSCheckSpelling("qzxvplmokn")).toEqual([]);
 		}
-
-		expect(macOSSpellCheckerAvailable()).toBeTrue();
-		expect(await macOSCheckSpelling(nonsense)).toContainEqual({ start: 0, length: nonsense.length });
 	});
-	it("returns only word spans, never the whole-string orthography result", async () => {
-		if (process.platform !== "darwin") return;
-		// With automatic language identification, checkString: also yields an
-		// orthography result spanning the entire string; leaking it as a typo
-		// range doubled editor text under the undercurl renderer.
-		const text = "hello qzxvplmokn world ";
-		expect(await macOSCheckSpelling(text)).toEqual([{ start: 6, length: 10 }]);
-	});
+	// Platform support does not guarantee a responsive NSSpellServer. Hosted
+	// macOS CI opts out explicitly; local macOS runs still require real results.
+	it.skipIf(process.platform !== "darwin" || process.env.OMP_TEST_SKIP_MACOS_SPELLING === "1")(
+		"returns UTF-16 word spans without the whole-string orthography result",
+		async () => {
+			const nonsense = "qzxvplmokn";
+			expect(await macOSCheckSpelling(nonsense)).toContainEqual({ start: 0, length: nonsense.length });
+			// With automatic language identification, checkString: also yields an
+			// orthography result spanning the entire string; leaking it as a typo
+			// range doubled editor text under the undercurl renderer. The emoji
+			// prefix distinguishes UTF-16 offsets from code-point and byte offsets.
+			const text = "😀 hello qzxvplmokn world ";
+			expect(await macOSCheckSpelling(text)).toEqual([{ start: 9, length: 10 }]);
+		},
+	);
 });
 
 let testDir: string;
