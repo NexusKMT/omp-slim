@@ -1,4 +1,3 @@
-import { isAnthropicServerToolHistoryBlock } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import { countNewlines, isRecord, stringifyJson } from "@oh-my-pi/pi-utils";
 import { PRESERVE_KEY as SNAPCOMPACT_PRESERVE_KEY } from "@oh-my-pi/snapcompact";
 import {
@@ -216,7 +215,7 @@ function truncateForPersistence(obj: unknown, blobStore: BlobStore, key?: string
 				...("tool_use_id" in block ? { tool_use_id: block.tool_use_id } : {}),
 				...("content" in block ? { content: block.content } : {}),
 			};
-			if (isAnthropicServerToolHistoryBlock(validationView)) return obj;
+			if (isLegacyServerToolHistoryBlock(validationView)) return obj;
 		}
 	}
 	// Anthropic server-side compaction replay state: `encrypted_content` is
@@ -424,7 +423,7 @@ function isAtomicPersistenceNode(obj: object, key?: string): boolean {
 					...("tool_use_id" in asBlock ? { tool_use_id: asBlock.tool_use_id } : {}),
 					...("content" in asBlock ? { content: asBlock.content } : {}),
 				};
-				if (isAnthropicServerToolHistoryBlock(validationView)) return true;
+				if (isLegacyServerToolHistoryBlock(validationView)) return true;
 			}
 			return false;
 		}
@@ -594,4 +593,26 @@ export function prepareEntryForPersistence(entry: FileEntry, blobStore: BlobStor
 			throw error;
 		}
 	}
+}
+
+/** Preserve opaque blocks from imported sessions without a provider runtime dependency. */
+function isLegacyServerToolHistoryBlock(block: {
+	type: string;
+	name?: unknown;
+	id?: unknown;
+	tool_use_id?: unknown;
+	content?: unknown;
+}): boolean {
+	if (block.type === "server_tool_use")
+		return (
+			["web_search", "tool_search_tool_regex", "tool_search_tool_bm25"].includes(String(block.name)) &&
+			typeof block.id === "string" &&
+			block.id.length > 0
+		);
+	return (
+		(block.type === "web_search_tool_result" || block.type === "tool_search_tool_result") &&
+		typeof block.tool_use_id === "string" &&
+		block.tool_use_id.length > 0 &&
+		Object.hasOwn(block, "content")
+	);
 }

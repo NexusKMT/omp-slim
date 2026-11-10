@@ -33,39 +33,6 @@ export function formatRoleModelValue(
 	return formatModelSelectorValue(modelKey, thinkingLevel);
 }
 
-/** Resolves a configured model target relative to the current provider. */
-export function resolveConfiguredModelTarget(
-	configuredTarget: string | undefined,
-	currentModel: Model,
-	availableModels: Model[],
-): Model | undefined {
-	const trimmedTarget = configuredTarget?.trim();
-	if (!trimmedTarget) return undefined;
-	const parsed = parseModelString(trimmedTarget, {
-		allowMaxSuffix: true,
-		allowAutoAlias: true,
-		isLiteralModelId: (provider, id) => availableModels.some(model => model.provider === provider && model.id === id),
-	});
-	if (parsed) {
-		const explicitModel = availableModels.find(model => model.provider === parsed.provider && model.id === parsed.id);
-		if (explicitModel) return explicitModel;
-	}
-	return availableModels.find(model => model.provider === currentModel.provider && model.id === trimmedTarget);
-}
-
-/** Resolves a model's configured context-promotion target. */
-export function resolveContextPromotionConfiguredTarget(
-	currentModel: Model,
-	availableModels: Model[],
-): Model | undefined {
-	return resolveConfiguredModelTarget(currentModel.contextPromotionTarget, currentModel, availableModels);
-}
-
-/** Resolves a model's configured compaction target. */
-export function resolveCompactionConfiguredTarget(currentModel: Model, availableModels: Model[]): Model | undefined {
-	return resolveConfiguredModelTarget(currentModel.compactionModel, currentModel, availableModels);
-}
-
 /** Resolves a model role and its explicit thinking selection. */
 export function resolveRoleModelFull(
 	settings: Settings,

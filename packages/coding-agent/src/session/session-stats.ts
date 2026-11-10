@@ -14,7 +14,7 @@ import type { ContextUsage } from "../extensibility/extensions/types";
 import {
 	computeNonMessageBreakdown,
 	computeNonMessageTokens,
-	estimateContextToolSchemaTokens,
+	estimateToolSchemaTokens,
 	type NonMessageTokenSource,
 } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import type { ContextUsageBreakdown, SessionStats } from "./agent-session-types";
@@ -111,7 +111,7 @@ export class SessionStatsTracker {
 	/** Tool-schema tokens the active model carries in its prompt. */
 	#currentToolSchemaTokens(): number {
 		const session = this.#host.session;
-		return estimateContextToolSchemaTokens(session.agent?.state?.tools ?? [], this.#tokenizer, session.model, {
+		return estimateToolSchemaTokens(session.agent?.state?.tools ?? [], this.#tokenizer, {
 			sourceRevision: session.settings?.revision,
 			pruneDescriptions: session.agent?.prunesToolDescriptions?.(session.model),
 		});
@@ -487,17 +487,6 @@ export class SessionStatsTracker {
 			promptTokens: nonMessageTokens + this.#tokenizer.countMessages(messages),
 			nonMessageTokens,
 			cutoffCount: messages.length,
-		});
-	}
-
-	/** Records provider usage headers against the active session account. */
-	ingestProviderUsageHeaders(response: ProviderResponseMetadata, model?: Model): void {
-		const provider = model?.provider;
-		if (!provider) return;
-		this.#host.modelRegistry.authStorage.usage.ingestHeaders(provider, response.headers, {
-			sessionId: this.#host.agent.sessionId,
-			baseUrl: this.#host.modelRegistry.getProviderBaseUrl?.(provider),
-			responseStatus: response.status,
 		});
 	}
 }
