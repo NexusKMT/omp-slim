@@ -14,7 +14,7 @@ import { Database } from "bun:sqlite";
  * Each result records the fork title, its latency, and its usage — `cacheRead`
  * against the main request's prefix shows whether the fork hit the cache — next
  * to the session's recorded titles and the production title path
- * (`AgentSession.generateTitle`, the configured tiny/smol title model).
+ * (`AgentSession.generateTitle`, using the same primary model).
  *
  * The sample is drawn once into `<dir>/sample.json`; results append to
  * `<dir>/results-<variant>.jsonl`, so reruns skip finished sessions and a larger
@@ -26,33 +26,24 @@ import { Database } from "bun:sqlite";
  *   bun scripts/bench-title-fork.ts --model anthropic/claude-opus-5-5 --thinking high --fork-thinking off
  *   bun scripts/bench-title-fork.ts --count 500 --resample
  *   bun scripts/bench-title-fork.ts --prompt scripts/bench-title-card.md --no-baseline
- *   bun scripts/bench-title-fork.ts --tiny --prompt scripts/bench-title-card-nf.md
  *   bun scripts/bench-title-fork.ts --report
  *
  * `--prompt` swaps the fork's title request (results go to their own file per
  * prompt); `--no-baseline` skips the production title path. Titles in the
  * card form `<emoji> <CODE>: <title>` are checked and tallied in the report.
  *
- * `--tiny` sends the same title request to the configured tiny title model
- * instead of forking: no agent turn, so no system prompt, tools, or reasoning —
- * just the first message (cleaned as production cleans tiny input) followed by
- * the request, with production's decoding (temperature 0, reasoning off).
  */
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type AssistantMessage, completeSimple, type Model, type Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
 import { type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { isEnoent, prompt } from "@oh-my-pi/pi-utils";
-import { resolveRoleSelection } from "../src/config/model-resolver";
-import { roleCandidatePool } from "../src/config/model-roles";
 import { createAgentSession } from "../src/sdk";
 import type { AgentSession } from "../src/session/agent-session";
 import { loadEntriesFromFile } from "../src/session/session-loader";
 import { SessionManager } from "../src/session/session-manager";
-import { preprocessTinyMessage } from "../src/tiny/message-preproc";
 import { normalizeGeneratedTitle } from "../src/tiny/text";
-import { shutdownTinyTitleClient } from "../src/tiny/title-client";
 
 /** The fork's title request when `--prompt` names none. */
 const DEFAULT_PROMPT = path.join(import.meta.dir, "bench-title-fork.md");
@@ -134,7 +125,7 @@ interface MainSnapshot {
 	usage: Usage;
 }
 
-/** The title request: the forked side turn, or the tiny model call on the tiny lane. */
+/** A title request through the forked side turn. */
 interface ForkResult {
 	title: string | null;
 	reply: string;
@@ -146,7 +137,7 @@ interface ForkResult {
 
 /** One finished session, as appended to the results JSONL. */
 interface RunRecord {
-	/** Absent on records written before `--tiny` existed, which are all fork-lane. */
+	/** Legacy records can name the retired tiny lane; new requests only use the fork. */
 	lane?: "fork" | "tiny";
 	sessionId: string;
 	prompt: string;
@@ -181,13 +172,14 @@ interface Config {
 	reportOnly: boolean;
 	promptPath: string;
 	baseline: boolean;
-	tiny: boolean;
 	glyphs?: string;
 }
 
 const PROMPT_PREVIEW_CHARS = 160;
 
 function parseArgs(argv: string[]): Config {
+	if (argv.includes("--tiny"))
+		throw new Error("The --tiny benchmark mode was removed; this benchmark uses the primary model.");
 	const get = (flag: string): string | undefined => {
 		const index = argv.indexOf(flag);
 		return index >= 0 ? argv[index + 1] : undefined;
@@ -215,7 +207,6 @@ function parseArgs(argv: string[]): Config {
 		reportOnly: argv.includes("--report"),
 		promptPath: path.resolve(get("--prompt") ?? DEFAULT_PROMPT),
 		baseline: !argv.includes("--no-baseline"),
-		tiny: argv.includes("--tiny"),
 		glyphs: get("--glyphs") && home(get("--glyphs")!),
 	};
 }
@@ -365,9 +356,7 @@ function snapshotMain(
 /**
  * A headless in-memory session with the user's settings and credentials, minus
  * MCP, LSP, IRC, and extensions. Model discovery runs before returning, as the
- * CLI's startup refresh does; without it discovery-backed roles (e.g. an
- * Ollama `tiny`) resolve only while the catalog cache is fresh, and title
- * generation silently falls through to other models.
+ * CLI's startup refresh does, so the explicitly selected primary model is available.
  */
 async function createHeadlessSession(cwd: string, config: Config, agentId: string): Promise<AgentSession> {
 	const { session } = await createAgentSession({
@@ -429,83 +418,6 @@ function failedRequest(err: unknown, ms: number): ForkResult {
 		thinkingChars: 0,
 		error: errorText(err),
 	};
-}
-
-/**
- * The `tiny` role's model. Production would fall through to `commit`/`smol`
- * and the session model when it does not resolve; the experiment must not
- * silently measure those instead.
- *
- * Throws when the role does not resolve, or resolves to an on-device model —
- * those take one system prompt plus one message, not the fork-shaped conversation.
- */
-function resolveTinyModel(host: AgentSession): Model {
-	const pool = roleCandidatePool("tiny", host.settings, host.modelRegistry);
-	const model = resolveRoleSelection(["tiny"], host.settings, pool)?.model;
-	if (!model) throw new Error("The tiny role does not resolve to an available model.");
-	if (model.api === "local-inference") {
-		throw new Error(`${model.provider}/${model.id} is on-device; --tiny needs an online title model.`);
-	}
-	return model;
-}
-
-/**
- * Send one session's first message plus the title request to the tiny model,
- * shaped like the fork's tail: two user turns, nothing else.
- */
-async function runTinyEntry(
-	entry: SampleEntry,
-	config: Config,
-	titlePrompt: string,
-	host: AgentSession,
-	model: Model,
-): Promise<RunRecord> {
-	const record: RunRecord = {
-		lane: "tiny",
-		sessionId: entry.sessionId,
-		prompt: entry.prompt.slice(0, 2000),
-		recorded: entry.recorded,
-		model: `${model.provider}/${model.id}`,
-		baseline: config.baseline ? await runBaseline(host, entry.prompt) : { title: null, ms: 0 },
-		finishedAt: "",
-	};
-	const started = performance.now();
-	try {
-		const now = Date.now();
-		const response = await completeSimple(
-			model,
-			{
-				messages: [
-					{ role: "user", content: preprocessTinyMessage(entry.prompt), timestamp: now },
-					{ role: "user", content: titlePrompt, timestamp: now },
-				],
-			},
-			{
-				apiKey: host.modelRegistry.resolver(model, host.sessionId),
-				sessionId: host.sessionId,
-				// Production's ceiling: survives backends that ignore `disableReasoning`.
-				maxTokens: 1024,
-				disableReasoning: true,
-				temperature: 0,
-				signal: AbortSignal.timeout(config.timeoutMs),
-			},
-		);
-		const ms = Math.round(performance.now() - started);
-		if (response.stopReason === "error" || response.stopReason === "aborted") {
-			record.fork = failedRequest(response.errorMessage ?? response.stopReason, ms);
-		} else {
-			const reply = response.content
-				.filter(block => block.type === "text")
-				.map(block => block.text)
-				.join("")
-				.trim();
-			record.fork = requestResult(reply, response, ms, entry.prompt);
-		}
-	} catch (err) {
-		record.fork = failedRequest(err, Math.round(performance.now() - started));
-	}
-	record.finishedAt = new Date().toISOString();
-	return record;
 }
 
 /**
@@ -752,9 +664,9 @@ async function main(): Promise<void> {
 	const sample = await loadOrDrawSample(config);
 	const promptName = path.basename(config.promptPath, ".md");
 	const variant = [
-		...(config.tiny
-			? ["tiny"]
-			: [config.model ?? "default", config.thinking ?? "default", `fork-${config.forkThinking ?? "inherit"}`]),
+		config.model ?? "primary",
+		config.thinking ?? "default",
+		`fork-${config.forkThinking ?? "inherit"}`,
 		...(config.promptPath === DEFAULT_PROMPT ? [] : [promptName]),
 	]
 		.join("-")
@@ -767,25 +679,8 @@ async function main(): Promise<void> {
 			const titlePrompt = prompt.render(await Bun.file(config.promptPath).text());
 			const fallbackCwd = path.join(config.dir, "cwd");
 			await fs.mkdir(fallbackCwd, { recursive: true });
-			if (config.tiny) {
-				// One host session lends the tiny lane its settings, registry, and credentials.
-				const host = await createHeadlessSession(fallbackCwd, config, "TitleFork-tiny");
-				try {
-					const model = resolveTinyModel(host);
-					console.info(`Tiny model: ${model.provider}/${model.id}`);
-					await runPending(pending, config, resultsPath, entry =>
-						runTinyEntry(entry, config, titlePrompt, host, model),
-					);
-				} finally {
-					await host.dispose();
-				}
-			} else {
-				await runPending(pending, config, resultsPath, entry =>
-					runForkEntry(entry, config, titlePrompt, fallbackCwd),
-				);
-			}
+			await runPending(pending, config, resultsPath, entry => runForkEntry(entry, config, titlePrompt, fallbackCwd));
 		}
-		await shutdownTinyTitleClient();
 	}
 	printReport(await readResults(resultsPath), config.glyphs);
 	console.info(`\nResults: ${resultsPath}`);

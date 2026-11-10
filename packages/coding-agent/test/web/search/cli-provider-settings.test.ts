@@ -5,8 +5,6 @@ import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config
 import { __resetDirsFromEnvForTests, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import { runSearchCommand } from "../../../src/cli/web-search-cli";
 
-import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
-
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const originalOmpProfile = process.env.OMP_PROFILE;
 const originalPiProfile = process.env.PI_PROFILE;
@@ -53,9 +51,7 @@ beforeEach(async () => {
 	resetSettingsForTest();
 	tempAgentDir = TempDir.createSync("@omp-search-cli-");
 	setAgentDir(tempAgentDir.path());
-	const settings = await Settings.init({ inMemory: true, cwd: tempAgentDir.path() });
-	settings.setModelRole("web", "web/startpage");
-	cfgRetryFallbackChains.set(settings, { web: [] });
+	await Settings.init({ inMemory: true, cwd: tempAgentDir.path() });
 });
 
 afterEach(async () => {
@@ -74,8 +70,8 @@ afterEach(async () => {
 	}
 });
 
-describe("runSearchCommand model role settings", () => {
-	it("honors modelRoles.web for the implicit request", async () => {
+describe("runSearchCommand HTTP engine selection", () => {
+	it.each(["startpage", "duckduckgo"] as const)("searches using the explicit %s engine", async engine => {
 		vi.spyOn(globalThis, "fetch").mockImplementation(makeFetchMock());
 		let stdout = "";
 		vi.spyOn(process.stdout, "write").mockImplementation(chunk => {
@@ -83,30 +79,10 @@ describe("runSearchCommand model role settings", () => {
 			return true;
 		});
 
-		await runSearchCommand({ query: "role selection smoke test", limit: 1, expanded: false });
+		await runSearchCommand({ query: "explicit HTTP engine selection", engine, limit: 1, expanded: false });
 
 		const plain = stripVTControlCharacters(stdout);
-		expect(plain).toContain("startpage.example");
-		expect(plain).not.toContain("duckduckgo.example");
-	});
-
-	it("treats --model as a one-shot override of modelRoles.web", async () => {
-		vi.spyOn(globalThis, "fetch").mockImplementation(makeFetchMock());
-		let stdout = "";
-		vi.spyOn(process.stdout, "write").mockImplementation(chunk => {
-			stdout += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-			return true;
-		});
-
-		await runSearchCommand({
-			query: "explicit model override",
-			model: "web/duckduckgo",
-			limit: 1,
-			expanded: false,
-		});
-
-		const plain = stripVTControlCharacters(stdout);
-		expect(plain).toContain("duckduckgo.example");
-		expect(plain).not.toContain("startpage.example");
+		expect(plain).toContain(`${engine}.example`);
+		expect(plain).not.toContain(`${engine === "startpage" ? "duckduckgo" : "startpage"}.example`);
 	});
 });
