@@ -22,7 +22,6 @@ interface SecurityPlanCliOptions {
 	knowledgeBasePaths: string[];
 	outputRoot?: string;
 	archiveExisting?: boolean;
-	credentialId?: number;
 }
 
 const DISPOSITIONS: ReadonlySet<SecurityDispositionStatus> = new Set([
@@ -52,11 +51,7 @@ function requireToken(tokens: readonly string[], index: number, flag: string): s
 	return value;
 }
 
-function parsePositiveCredential(value: string): number {
-	const credentialId = Number(value);
-	if (!Number.isSafeInteger(credentialId) || credentialId < 1) throw new Error(`Invalid credential id: ${value}`);
-	return credentialId;
-}
+
 
 function parsePlanOptions(rest: string): SecurityPlanCliOptions {
 	const tokens = parseCommandArgs(rest);
@@ -68,7 +63,6 @@ function parsePlanOptions(rest: string): SecurityPlanCliOptions {
 	let headRevision: string | undefined;
 	let outputRoot: string | undefined;
 	let archiveExisting = false;
-	let credentialId: number | undefined;
 	for (let index = 0; index < tokens.length; index++) {
 		const token = tokens[index]!;
 		switch (token) {
@@ -97,9 +91,6 @@ function parsePlanOptions(rest: string): SecurityPlanCliOptions {
 			case "--archive-existing":
 				archiveExisting = true;
 				break;
-			case "--credential":
-				credentialId = parsePositiveCredential(requireToken(tokens, ++index, token));
-				break;
 			default:
 				throw new Error(`Unknown security plan option: ${token}`);
 		}
@@ -118,7 +109,7 @@ function parsePlanOptions(rest: string): SecurityPlanCliOptions {
 				: kind === "scoped_path"
 					? { kind, ...common }
 					: { kind: "repository", ...common };
-	return { target, knowledgeBasePaths, outputRoot, archiveExisting, credentialId };
+	return { target, knowledgeBasePaths, outputRoot, archiveExisting };
 }
 
 async function preflight(runtime: SlashCommandRuntime, rest: string) {
@@ -128,7 +119,6 @@ async function preflight(runtime: SlashCommandRuntime, rest: string) {
 		knowledgeBasePaths: options.knowledgeBasePaths,
 		outputRoot: options.outputRoot,
 		archiveExisting: options.archiveExisting,
-		credentialId: options.credentialId,
 		model: runtime.session.model,
 	};
 	return coordinatorFor(runtime).preflight(input);

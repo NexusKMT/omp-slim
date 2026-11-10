@@ -71,7 +71,7 @@ export async function createCleanseAgentRuntime(options: {
 }): Promise<CleanseAgentRuntime> {
 	const cwd = options.cwd ?? getProjectDir();
 	const settings = await Settings.init({ cwd });
-	const authStorage = await discoverAuthStorage(undefined, { settings });
+	const authStorage = await discoverAuthStorage(undefined);
 	const modelRegistry = new ModelRegistry(authStorage);
 	await modelRegistry.refresh();
 	const resolved = resolveCliModel({ cliModel: options.model, modelRegistry, settings });

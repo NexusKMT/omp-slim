@@ -167,13 +167,7 @@ export const eventDefs = {
 			type: "'queue_update'",
 			steering: "string[]",
 			followUp: "string[]",
-			liveSteered: absentAs(
-				doc(
-					"number.integer",
-					"Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them.",
-				),
-				0,
-			),
+			
 		},
 		"Coalesced snapshot of the displayable steering/follow-up queue, sent whenever it changes.",
 	),

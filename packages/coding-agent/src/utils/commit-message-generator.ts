@@ -79,7 +79,6 @@ export async function generateCommitMessage(
 						},
 						{
 							apiKey: registry.resolver(candidate.model, sessionId),
-							disableServerSideFallback: true,
 							sessionId,
 							maxTokens,
 						},

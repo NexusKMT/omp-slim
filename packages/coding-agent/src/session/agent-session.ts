@@ -284,7 +284,6 @@ import type {
 	RestoredQueuedMessage,
 	SendUserMessageOptions,
 	SessionHandoffOptions,
-	SessionOAuthAccountList,
 	SessionStats,
 	SteerOptions,
 } from "./agent-session-types";
@@ -435,7 +434,6 @@ import {
 	cfgProviderAppendOnlyContext,
 	cfgSampling,
 	cfgSkillful,
-	cfgTierAdvisor,
 	cfgTierOpenai,
 } from "./settings";
 import { cfgInterruptMode } from "../modes/settings";
@@ -467,7 +465,6 @@ import {
 const cfgAdvisorRuntimeInputs = combine({
 	enabled: cfgAdvisorEnabled,
 	maxNotesPerUpdate: cfgAdvisorMaxNotesPerUpdate,
-	tier: cfgTierAdvisor,
 });
 /** Settings behind the session's extra workspace roots and the auto-QA prompt note. */
 const cfgWorkspacePromptInputs = combine({
@@ -1052,7 +1049,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/** Main thread only: spots streaming spawning tool calls so a subagent worker boots ahead of dispatch. */
 	readonly #spawnSignal = isMainThread() ? new SubagentSpawnSignal() : undefined;
 	/** Creation-time permission for switchSession to keep the current model when a target's saved model is unrestorable. */
-	readonly #disableModelFallback: boolean;
 	/** Creation-time: false when the extension UI context cannot reach a human (ACP without form elicitation). */
 	readonly #interactivePrompts: boolean;
 
@@ -1830,7 +1826,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#costGate = config.costGate ?? this.#createCostGate();
 		this.#skillDescriptions = config.skillDescriptions ?? new SkillDescriptionCatalog();
 		this.#modelRegistry = config.modelRegistry;
-		this.#disableModelFallback = true;
 		this.#interactivePrompts = config.interactivePrompts !== false;
 		this.#extensionRoots =
 			config.extensionRoots ??
@@ -2499,8 +2494,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			runRecoveryCompactionWithRollback: (reason, message, options) =>
 				this.#recovery.runRecoveryCompactionWithRollback(reason, message, options),
 			parseRetryAfterMsFromError: errorMessage => this.#recovery.parseRetryAfterMsFromError(errorMessage),
-			setModelTemporary: (model, thinkingLevel, options) =>
-				this.#models.setModelTemporary(model, thinkingLevel, options, "automatic"),
 			abort: options => this.abort(options),
 			abortHandoff: () => this.abortHandoff(),
 		};
@@ -2527,6 +2520,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.addDisposer(() => removeCostCapGate?.());
 
 		const handoffHost: SessionHandoffHost = {
+			effectiveServiceTier: () => this.agent.serviceTier,
 			agent: this.agent,
 			sessionManager: this.sessionManager,
 			settings: this.settings,
@@ -2848,11 +2842,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				error: String(error),
 			});
 		}
-	}
-
-	/** Request preference from the live setting for the current model's API. */
-	get preferWebsockets(): boolean | undefined {
-		return resolveWebsocketPreference(this.settings, this.model);
 	}
 
 	/** TTSR manager for time-traveling stream rules */
@@ -5777,7 +5766,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	freshSession(): FreshSessionResult | undefined {
 		if (this.isStreaming) return undefined;
 		const previousSessionId = this.sessionId;
-		const closedProviderSessions = 0;
 
 		this.#freshProviderSessionId = Bun.randomUUIDv7();
 		this.#syncAgentSessionId();
@@ -5785,7 +5773,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		return {
 			previousSessionId,
 			sessionId: this.sessionId,
-			closedProviderSessions,
 		};
 	}
 
@@ -9634,14 +9621,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 	/** Chip texts for the queue display. Steering live steering took for the streaming response
 	 *  stays listed until the transcript records it, when the model actually switches to it. */
-	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[]; liveSteered: number } {
-		const liveSteered = this.agent.peekLiveSteeredMessages().filter(isUserAuthoredQueuedMessage).length;
+	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[] } {
 		return {
-			steering: [...this.agent.peekLiveSteeredMessages(), ...this.agent.peekSteeringQueue()]
-				.filter(isUserAuthoredQueuedMessage)
-				.map(queueChipText),
+			steering: this.agent.peekSteeringQueue().filter(isUserAuthoredQueuedMessage).map(queueChipText),
 			followUp: this.agent.peekFollowUpQueue().filter(isUserAuthoredQueuedMessage).map(queueChipText),
-			liveSteered,
 		};
 	}
 
@@ -9650,9 +9633,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 *  externally observable transitions RPC/ACP/TUI subscribers actually care
 	 *  about, so a mutation that leaves the displayable queue unchanged (e.g. an
 	 *  agent-authored aside, or a claim/restore round-trip) never re-emits. */
-	#lastEmittedQueueSnapshot:
-		| { steering: readonly string[]; followUp: readonly string[]; liveSteered: number }
-		| undefined;
+	#lastEmittedQueueSnapshot: { steering: readonly string[]; followUp: readonly string[] } | undefined;
 
 	#emitQueueUpdateIfChanged(): void {
 		const snapshot = this.getQueuedMessages();
@@ -9661,7 +9642,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			last !== undefined &&
 			last.steering.length === snapshot.steering.length &&
 			last.followUp.length === snapshot.followUp.length &&
-			last.liveSteered === snapshot.liveSteered &&
 			last.steering.every((text, i) => text === snapshot.steering[i]) &&
 			last.followUp.every((text, i) => text === snapshot.followUp[i]);
 		if (unchanged) return;
@@ -9670,7 +9650,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			type: "queue_update",
 			steering: [...snapshot.steering],
 			followUp: [...snapshot.followUp],
-			liveSteered: snapshot.liveSteered,
 		});
 	}
 
@@ -10327,7 +10306,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				() => buildSessionMetadata(sessionId),
 				customSystemPrompt ?? this.#titleSystemPrompt,
 				titleSignal,
-				parentSessionId,
 			),
 		);
 		if (await this.#sessionGenerationChanged(sessionGeneration)) return null;
@@ -13417,23 +13395,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	setAdvisorEnabled(enabled: boolean): boolean {
 		return this.#advisors.setAdvisorEnabled(enabled);
 	}
-
-	/**
-	 * Run the retry.fallbackChains validation a `deferRetryFallbackValidation`
-	 * session skipped at construction. Validation composes the catalog slice of
-	 * every provider a chain names, so interactive startup runs it after the
-	 * first frame; the header picks the warnings up via `config_warnings_changed`.
-	 */
-
-	/**
-	 * Re-run retry.fallbackChains validation once the initial background discovery
-	 * settles. Startup validation suppresses "unknown model" warnings for
-	 * config-declared discovery providers whose cold cache left the registry empty
-	 * (#10048); this retracts the ones discovery resolved and surfaces any that
-	 * stayed unknown. Uses {@link ModelRegistry.awaitInitialBackgroundRefresh}
-	 * because the CLI starts that refresh right after the session is built, so an
-	 * in-flight snapshot taken in the constructor would always miss it.
-	 */
 
 	/**
 	 * Toggle the advisor setting and start/stop the runtime accordingly.

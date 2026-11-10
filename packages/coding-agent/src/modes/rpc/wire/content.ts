@@ -310,7 +310,6 @@ export const modelDefs = {
 			maxTokens: doc("number.integer | null", "Null when the provider does not report a limit."),
 			"headers?": "Record<string, string>",
 			"premiumMultiplier?": "number",
-			"preferWebsockets?": "boolean",
 			"contextPromotionTarget?": "string",
 			"priority?": "number.integer",
 			"thinking?": "ThinkingConfig",

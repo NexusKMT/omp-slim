@@ -2176,7 +2176,6 @@ export interface ProviderModelConfig {
 	/** Maximum output tokens. */
 	maxTokens: number;
 	/** WebSocket preference within catalog policy; explicit false disables transport selection. */
-	preferWebsockets?: boolean;
 	/** Custom headers for this model. */
 	headers?: Record<string, string>;
 	/** OpenAI compatibility settings. */

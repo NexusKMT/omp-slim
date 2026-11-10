@@ -2,38 +2,9 @@ import { type } from "@oh-my-pi/omptype";
 import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 
-/** Whether a model transport can suppress native reasoning while private scratchpad thoughts are active. */
+/** Whether the configured Chat model permits disabling reasoning. */
 export function supportsExternalThinking(model: Model | null | undefined): boolean {
-	if (!model) return false;
-	const compat = model.compat;
-	const requiresThinking =
-		model.api === "anthropic-messages" &&
-		compat !== undefined &&
-		"requiresThinkingEnabled" in compat &&
-		compat.requiresThinkingEnabled === true;
-	if (model.reasoning && (requiresThinking || (model.thinking?.requiresEffort && !model.thinking.suppressWhenOff))) {
-		return false;
-	}
-	// Transports that reject `reasoning.effort` (xAI Grok 4 and the other
-	// reasoning-only Responses models) cannot honour `forceReasoningOff`, so the
-	// scratchpad would run alongside native reasoning instead of replacing it.
-	if (
-		model.reasoning &&
-		compat !== undefined &&
-		(("omitReasoningEffort" in compat && compat.omitReasoningEffort === true) ||
-			("supportsReasoningEffort" in compat && compat.supportsReasoningEffort === false))
-	) {
-		return false;
-	}
-	if (model.api === "google-generative-ai" || model.api === "google-gemini-cli" || model.api === "google-vertex") {
-		return !model.reasoning || model.thinking?.mode === "budget" || model.thinking?.suppressWhenOff === true;
-	}
-	return (
-		model.api === "openai-responses" ||
-		model.api === "azure-openai-responses" ||
-		model.api === "openai-codex-responses" ||
-		model.api === "anthropic-messages"
-	);
+	return model?.api === "openai-completions" && model.thinking?.requiresEffort !== true;
 }
 
 const thinkSchema = type({

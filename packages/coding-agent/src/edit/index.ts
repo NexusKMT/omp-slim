@@ -151,21 +151,9 @@ export function editDescriptionCompact(mode: EditMode): string | undefined {
 	}
 }
 
-/**
- * Tool description for `mode`, at the density the model's catalog policy
- * selects (`edit-prompt-variant`). Models without the compact variant — or
- * modes that have none — keep the full prompt; both renderings preserve every
- * operation and invariant.
- */
-export function resolveEditToolDescription(
-	mode: EditMode,
-	model: Pick<Model, "editPromptVariant"> | undefined,
-): string {
-	const source =
-		model?.editPromptVariant === "compact"
-			? (editDescriptionCompact(mode) ?? editDescription(mode))
-			: editDescription(mode);
-	return prompt.render(source);
+/** Render the configured edit mode's tool description. */
+export function resolveEditToolDescription(mode: EditMode): string {
+	return prompt.render(editDescription(mode));
 }
 
 /** Builds the LSP writethrough from the current `lsp.*` settings; called per write so changes apply immediately. */
@@ -386,7 +374,7 @@ export class EditTool implements AgentTool<TInput> {
 	}
 
 	get description(): string {
-		return resolveEditToolDescription(this.mode, this.session.getActiveModel?.());
+		return resolveEditToolDescription(this.mode);
 	}
 
 	get parameters(): TInput {
