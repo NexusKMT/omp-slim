@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- macOS PTY sessions preserve unread output when a child exits before the reader catches up, while keeping cancellation and output backpressure active.
+
 ### Removed
 
 - OMP Slim removes the Mnemopi-only cosine similarity, vector index, and MMR ranking kernels and bindings.

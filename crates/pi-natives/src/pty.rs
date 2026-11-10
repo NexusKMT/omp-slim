@@ -407,6 +407,11 @@ fn run_pty_sync(
 		.slave
 		.spawn_command(cmd)
 		.map_err(|err| Error::from_reason(format!("Failed to spawn PTY command: {err}")))?;
+	// macOS discards unread output when the last slave closes. Keep our
+	// descriptor until the reader has accepted the exited child's output.
+	#[cfg(target_os = "macos")]
+	let held_slave = pair.slave;
+	#[cfg(not(target_os = "macos"))]
 	drop(pair.slave);
 	let child_process_id = child.process_id();
 	let child_pid = child_process_id.and_then(|value| i32::try_from(value).ok());
@@ -445,6 +450,8 @@ fn run_pty_sync(
 	// waits on JS (input/resize/kill/exit stay live).
 	let (reader_tx, reader_rx) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 	let queued = reader_tx.clone();
+	#[cfg(target_os = "macos")]
+	let (read_progress_tx, read_progress_rx) = flume::bounded::<()>(1);
 	let reader_thread = std::thread::spawn(move || {
 		const BUF: usize = 65536;
 		let mut buf = vec![0u8; BUF];
@@ -456,11 +463,14 @@ fn run_pty_sync(
 		loop {
 			match reader.read(&mut buf) {
 				Ok(0) | Err(_) => break,
-				Ok(n) if forwarding => {
-					let text = decoder.push(&buf[..n]);
-					forwarding = text.is_empty() || reader_tx.send(ReaderEvent::Chunk(text)).is_ok();
+				Ok(n) => {
+					#[cfg(target_os = "macos")]
+					let _ = read_progress_tx.try_send(());
+					if forwarding {
+						let text = decoder.push(&buf[..n]);
+						forwarding = text.is_empty() || reader_tx.send(ReaderEvent::Chunk(text)).is_ok();
+					}
 				},
-				Ok(_) => {},
 			}
 		}
 		if !forwarding {
@@ -593,12 +603,46 @@ fn run_pty_sync(
 			give_up_at = Some(now + KILL_GRACE + CANCEL_EXIT_WAIT);
 		}
 	};
-	cancel_task.abort();
 	let exit_code = status
 		.transpose()
-		.map_err(|err| Error::from_reason(format!("Failed waiting PTY process: {err}")))?
+		.map_err(|err| {
+			cancel_task.abort();
+			Error::from_reason(format!("Failed waiting PTY process: {err}"))
+		})?
 		.map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
 	// --- Teardown ---
+
+	#[cfg(target_os = "macos")]
+	if cancelled || timed_out {
+		drop(held_slave);
+	} else {
+		wait_for_pty_reader(master.as_raw_fd(), || {
+			let event = flume::Selector::new()
+				.recv(&read_progress_rx, |progress| progress.map(|()| None))
+				.recv(&control_rx, |message| message.map(Some))
+				.wait();
+			match event {
+				Ok(Some(ControlMessage::Kill | ControlMessage::JsGone)) => {
+					cancelled = true;
+					false
+				},
+				Ok(Some(ControlMessage::Cancelled { timed_out: by_timeout })) => {
+					timed_out = by_timeout;
+					cancelled = !by_timeout;
+					false
+				},
+				Ok(_) => true,
+				Err(_) => false,
+			}
+		});
+		drop(held_slave);
+		if cancelled || timed_out {
+			// The child is already reaped; terminate any remaining descendants
+			// as the control loop does when exit follows cancellation.
+			targets.signal(ps::KILL_SIGNAL);
+		}
+	}
+	cancel_task.abort();
 
 	// Step 1: Close the ConPTY input pipe first.
 	// Per Microsoft docs, close the input handle before calling
@@ -635,6 +679,32 @@ fn run_pty_sync(
 	);
 	drop(pump_task);
 	Ok(PtyRunResult { exit_code, cancelled, timed_out })
+}
+
+/// Wait before releasing the macOS slave hold until the master has no unread
+/// bytes. Reader progress comes before JS backpressure; once the reader owns
+/// the bytes, the existing bridge drain guarantees their delivery. A
+/// disconnected reader also ends the wait instead of leaving the slave open
+/// forever.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn wait_for_pty_reader(
+	master_fd: Option<std::os::fd::RawFd>,
+	mut wait_for_reader: impl FnMut() -> bool,
+) {
+	if let Some(fd) = master_fd {
+		loop {
+			// FIONREAD on a macOS master can report zero while output is
+			// readable. Query readiness instead, without a timed poll loop.
+			let mut ready = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+			// SAFETY: one live pollfd; zero timeout only queries readiness.
+			if unsafe { libc::poll(&raw mut ready, 1, 0) } <= 0
+				|| ready.revents & libc::POLLIN == 0
+				|| !wait_for_reader()
+			{
+				break;
+			}
+		}
+	}
 }
 
 /// Wait for the JS pump after the child has exited and the master is dropped.
@@ -710,6 +780,13 @@ fn await_pty_output_drain(
 
 #[cfg(test)]
 mod reader_queue_tests {
+	#[cfg(unix)]
+	use std::{
+		fs::File,
+		io::{Read, Write},
+		os::fd::AsRawFd,
+		process::{Command, Stdio},
+	};
 	use std::{
 		sync::{
 			Arc,
@@ -718,10 +795,61 @@ mod reader_queue_tests {
 		time::{Duration, Instant},
 	};
 
+	#[cfg(unix)]
+	use super::wait_for_pty_reader;
 	use super::{
 		BRIDGE_QUEUE_CHUNKS, POST_CANCEL_DRAIN_TIMEOUT, ReaderEvent, STUCK_SLAVE_IDLE,
 		await_pty_output_drain,
 	};
+
+	#[cfg(unix)]
+	#[test]
+	fn preserves_output_when_the_child_exits_before_the_reader_starts() {
+		let (master, slave, _) = pi_shell::sys::tty::open_pty(None).unwrap();
+		let expected = "output from an already exited child";
+		let mut child = Command::new("/usr/bin/printf")
+			.args(["%s", expected])
+			.stdout(Stdio::from(slave.try_clone().unwrap()))
+			.spawn()
+			.unwrap();
+		assert!(child.wait().unwrap().success());
+		// Deliberately start reading after exit, without scheduler timing. On
+		// macOS, closing the parent's slave here would discard every byte.
+		let mut reader = File::from(master.try_clone().unwrap());
+		let mut output = vec![0; expected.len()];
+		let mut reads = 0;
+		wait_for_pty_reader(Some(master.as_raw_fd()), || {
+			reads += 1;
+			reader.read_exact(&mut output).unwrap();
+			true
+		});
+		drop(slave);
+		assert_eq!(reads, 1);
+		assert_eq!(output, expected.as_bytes());
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn slave_drain_stops_when_the_reader_disconnects_or_the_run_is_interrupted() {
+		let (master, slave, _) = pi_shell::sys::tty::open_pty(None).unwrap();
+		let mut slave = File::from(slave);
+		slave.write_all(b"unread output").unwrap();
+		let mut waits = 0;
+		wait_for_pty_reader(Some(master.as_raw_fd()), || {
+			waits += 1;
+			false
+		});
+		assert_eq!(waits, 1);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn slave_drain_does_not_wait_when_empty_or_the_descriptor_is_unavailable() {
+		let (master, _slave, _) = pi_shell::sys::tty::open_pty(None).unwrap();
+		for fd in [Some(master.as_raw_fd()), Some(-1), None] {
+			wait_for_pty_reader(fd, || panic!("no readable output to wait for"));
+		}
+	}
 
 	#[test]
 	fn drain_waits_for_slow_js_after_reader_eof() {

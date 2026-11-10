@@ -886,7 +886,44 @@ try {
 			const payload = output
 				.replace(/\u001b\][^\u0007]*?(?:\u0007|\u001b\\)|\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
 				.trim();
+			expect(payload, `PTY output: ${JSON.stringify(output)}`).not.toBe("");
 			expect(JSON.parse(payload)).toEqual(expected);
+		});
+
+		it("drains output from concurrent children that exit immediately after writing", async () => {
+			const scriptPath = path.join(testDir, "pty-fast-exit.ts");
+			await Bun.write(
+				scriptPath,
+				'import { writeSync } from "node:fs"; writeSync(1, JSON.stringify(process.argv.slice(2)) + "\\n");\n',
+			);
+			await Promise.all(
+				Array.from({ length: 4 }, async (_, index) => {
+					const expected = [`child-${index}`, "argument with spaces", 'quote"inside', "backslash\\end"];
+					const session = new PtySession();
+					let output = "";
+					let callbackError: Error | null = null;
+					const result = await session.startArgv(
+						{
+							application: process.execPath,
+							args: [scriptPath, ...expected],
+							cwd: testDir,
+							timeoutMs: 5_000,
+							cols: 80,
+							rows: 24,
+						},
+						(error, chunk) => {
+							callbackError ??= error;
+							output += chunk;
+						},
+					);
+					expect(callbackError).toBeNull();
+					expect(result).toEqual({ exitCode: 0, timedOut: false, cancelled: false });
+					const payload = output
+						.replace(/\u001b\][^\u0007]*?(?:\u0007|\u001b\\)|\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+						.trim();
+					expect(payload, `child ${index} PTY output: ${JSON.stringify(output)}`).toBe(JSON.stringify(expected));
+				}),
+			);
 		});
 
 		it("reports the child PID as soon as the PTY process starts", async () => {

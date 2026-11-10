@@ -214,6 +214,7 @@ Termination path:
 - Cancellation, kill, or a lost JS callback terminates process targets and starts a 300ms post-cancel window. The result may still include an exit code observed while reaping.
 - On non-Windows, cancelled-child reaping polls for up to 500ms, then delegates an unfinished reap to a detached thread rather than pinning the promise.
 - Normal finite runs wait for accepted output to reach JS. A descendant that holds the slave open can end draining after 2s with an empty queue and no callback in flight; backpressure is not treated as an idle slave.
+- On macOS, the parent retains the PTY slave until the exited child's unread master bytes have reached the reader. This prevents the last slave close from discarding pending output; reader progress and cancellation wake that drain without polling.
 - Interrupted runs abort a slow output pump and wait up to 300ms for it to stop; an already-queued JS callback may still run.
 
 ### Failure behavior
