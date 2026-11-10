@@ -15,7 +15,7 @@ import { Settings } from "../src/config/settings";
 import { releaseShellSessions } from "../src/exec/bash-executor";
 import type { ToolSession } from "../src/tools";
 import { BashTool } from "../src/tools/bash";
-import { waitForFile } from "./helpers/skill-image-vision";
+import { waitForFile } from "./helpers/skill-image";
 
 let cwd: string;
 let manager: AsyncJobManager;

@@ -8,9 +8,10 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { convertToLlm, type CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import * as imagePreservation from "@oh-my-pi/pi-coding-agent/utils/image-vision-fallback";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
-import { ONE_PIXEL_PNG as PNG, VISION_DESCRIPTION_SSE } from "./helpers/skill-image-vision";
+import { ONE_PIXEL_PNG as PNG } from "./helpers/skill-image";
 
 const skill: Pick<CustomMessage, "customType" | "content" | "display" | "attribution" | "details"> = {
 	customType: "skill-prompt",
@@ -28,14 +29,14 @@ afterEach(async () => {
 	for (const dispose of cleanup.splice(0)) await dispose();
 });
 
-function setup(options: { responses?: MockResponseSource; beforeVisionReply?: () => Promise<void> } = {}) {
+function setup(options: { responses?: MockResponseSource; beforeImageNotice?: () => Promise<void> } = {}) {
 	const tempDir = TempDir.createSync("@skill-image-");
 	const authStorage = createInMemoryAuthStorage();
 	authStorage.keys.setRuntime("zai", "test-key");
 	const registry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 	const settings = Settings.isolated({
 		"compaction.enabled": false,
-		modelRoles: { vision: "zai/glm-5.3-flash:max", default: "zai/glm-5.3:max" },
+		model: "zai/glm-5.3",
 	});
 	const mock = createMockModel({ responses: options.responses, handler: () => ({ content: ["done"] }) });
 	const agent = new Agent({
@@ -56,73 +57,67 @@ function setup(options: { responses?: MockResponseSource; beforeVisionReply?: ()
 		modelRegistry: registry,
 		toolRegistry: new Map(),
 	});
-	const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
-		Object.assign(
-			async (input: string | URL | Request) => {
-				// Only the vision role (openai-completions) is gated; unrelated side requests
-				// such as auto-title generation on the anthropic endpoint pass straight through.
-				const url = input instanceof Request ? input.url : String(input);
-				if (url.endsWith("/chat/completions")) await options.beforeVisionReply?.();
-				return new Response(VISION_DESCRIPTION_SSE, {
-					status: 200,
-					headers: { "content-type": "text/event-stream" },
-				});
-			},
-			{ preconnect: fetch.preconnect },
-		),
+	const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected auxiliary model request"));
+	const saveImages = imagePreservation.describeAttachedImagesForTextModel;
+	const saveImagesSpy = spyOn(imagePreservation, "describeAttachedImagesForTextModel").mockImplementation(
+		async (...args) => {
+			const notice = await saveImages(...args);
+			await options.beforeImageNotice?.();
+			return notice;
+		},
 	);
 	cleanup.push(async () => {
 		fetchSpy.mockRestore();
+		saveImagesSpy.mockRestore();
 		await session.dispose();
 		authStorage.close();
 		tempDir.removeSync();
 	});
-	const visionCalls = () =>
-		fetchSpy.mock.calls.filter(([input]) =>
-			(input instanceof Request ? input.url : String(input)).endsWith("/chat/completions"),
-		).length;
-	return { session, mock, visionCalls };
+	return { session, mock, fetchSpy };
 }
 
-function expectDescriptionBeforeSkill(messages: { role: string; content: unknown }[]) {
-	const description = messages.findIndex(
-		message => message.role === "developer" && JSON.stringify(message.content).includes("A red square."),
+function expectSavedImageBeforeSkill(messages: { role: string; content: unknown }[]) {
+	const notice = messages.findIndex(
+		message =>
+			message.role === "developer" &&
+			JSON.stringify(message.content).includes("current model does not support image input"),
 	);
 	const prompt = messages.findIndex(
 		message => message.role === "user" && JSON.stringify(message.content).includes("Expanded skill."),
 	);
-	expect(description).toBeGreaterThanOrEqual(0);
-	expect(prompt).toBeGreaterThan(description);
+	expect(notice).toBeGreaterThanOrEqual(0);
+	expect(JSON.stringify(messages[notice]?.content)).toContain("local://image-");
+	expect(prompt).toBeGreaterThan(notice);
 }
 
-it("describes a pasted image in an idle user-invoked skill before the main model call", async () => {
-	const { session, mock, visionCalls } = setup();
+it("preserves a pasted image in an idle user-invoked skill before the current model call", async () => {
+	const { session, mock, fetchSpy } = setup();
 	await session.promptCustomMessage(skill);
-	expect(visionCalls()).toBe(1);
-	expectDescriptionBeforeSkill(mock.calls[0]?.context.messages ?? []);
+	expect(fetchSpy).not.toHaveBeenCalled();
+	expectSavedImageBeforeSkill(mock.calls[0]?.context.messages ?? []);
 });
 
-it("describes a queued user-invoked skill image before delivery", async () => {
-	const { session, mock, visionCalls } = setup();
+it("preserves a queued user-invoked skill image before delivery", async () => {
+	const { session, mock, fetchSpy } = setup();
 	await session.promptCustomMessage(skill, { streamingBehavior: "followUp", queueOnly: true });
 	await session.prompt("kickoff");
 	await session.waitForIdle();
-	expect(visionCalls()).toBe(1);
+	expect(fetchSpy).not.toHaveBeenCalled();
 	const skillRequest = mock.calls.find(call =>
 		call.context.messages.some(message => JSON.stringify(message.content).includes("Expanded skill.")),
 	);
-	expectDescriptionBeforeSkill(skillRequest?.context.messages ?? []);
+	expectSavedImageBeforeSkill(skillRequest?.context.messages ?? []);
 });
 
-it("queues an image-bearing skill when another turn starts during vision preprocessing", async () => {
-	const visionStarted = Promise.withResolvers<void>();
-	const releaseVision = Promise.withResolvers<void>();
+it("queues an image-bearing skill when another turn starts while its image notice is being prepared", async () => {
+	const imagePrepared = Promise.withResolvers<void>();
+	const releaseImage = Promise.withResolvers<void>();
 	const otherStarted = Promise.withResolvers<void>();
 	const releaseOther = Promise.withResolvers<void>();
-	const { session, mock, visionCalls } = setup({
-		beforeVisionReply: async () => {
-			visionStarted.resolve();
-			await releaseVision.promise;
+	const { session, mock, fetchSpy } = setup({
+		beforeImageNotice: async () => {
+			imagePrepared.resolve();
+			await releaseImage.promise;
 		},
 		responses: [
 			async () => {
@@ -133,10 +128,10 @@ it("queues an image-bearing skill when another turn starts during vision preproc
 		],
 	});
 	const skillDispatch = session.promptCustomMessage(skill, { streamingBehavior: "followUp" });
-	await visionStarted.promise;
+	await imagePrepared.promise;
 	const otherTurn = session.prompt("other turn");
 	await otherStarted.promise;
-	releaseVision.resolve();
+	releaseImage.resolve();
 	// Queued into the running turn, the skill settles while that turn is still blocked;
 	// dispatching it as its own turn would wait for the other turn and never settle here.
 	await skillDispatch;
@@ -144,30 +139,30 @@ it("queues an image-bearing skill when another turn starts during vision preproc
 	releaseOther.resolve();
 	await otherTurn;
 	await session.waitForIdle();
-	expect(visionCalls()).toBe(1);
+	expect(fetchSpy).not.toHaveBeenCalled();
 	const skillRequest = mock.calls.find(call =>
 		call.context.messages.some(message => JSON.stringify(message.content).includes("Expanded skill.")),
 	);
 	expect(JSON.stringify(skillRequest?.context.messages)).toContain("other turn");
-	expectDescriptionBeforeSkill(skillRequest?.context.messages ?? []);
+	expectSavedImageBeforeSkill(skillRequest?.context.messages ?? []);
 });
 
-it("drops an image-bearing skill when aborted during vision preprocessing", async () => {
-	const visionStarted = Promise.withResolvers<void>();
-	const releaseVision = Promise.withResolvers<void>();
-	const { session, mock, visionCalls } = setup({
-		beforeVisionReply: async () => {
-			visionStarted.resolve();
-			await releaseVision.promise;
+it("drops an image-bearing skill when aborted while its image notice is being prepared", async () => {
+	const imagePrepared = Promise.withResolvers<void>();
+	const releaseImage = Promise.withResolvers<void>();
+	const { session, mock, fetchSpy } = setup({
+		beforeImageNotice: async () => {
+			imagePrepared.resolve();
+			await releaseImage.promise;
 		},
 	});
 	const skillDispatch = session.promptCustomMessage(skill);
-	await visionStarted.promise;
+	await imagePrepared.promise;
 	await session.abort();
-	releaseVision.resolve();
+	releaseImage.resolve();
 	await skillDispatch;
 	await session.waitForIdle();
-	expect(visionCalls()).toBe(1);
+	expect(fetchSpy).not.toHaveBeenCalled();
 	expect(mock.calls.length).toBe(0);
 	expect(session.messages.length).toBe(0);
 });

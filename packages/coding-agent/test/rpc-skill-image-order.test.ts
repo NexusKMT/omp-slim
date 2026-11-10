@@ -6,7 +6,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 import type { RpcPromptResultFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
-import { ONE_PIXEL_PNG as PNG, waitForFile } from "./helpers/skill-image-vision";
+import { ONE_PIXEL_PNG as PNG, waitForFile } from "./helpers/skill-image";
 
 function submissionOrder(messages: AgentMessage[]): string[] {
 	return messages.flatMap(message => {
@@ -38,7 +38,7 @@ afterEach(async () => {
 	await removeWithRetries(directory);
 });
 
-test("a later prompt does not overtake an idle image skill while its image is described", async () => {
+test("a later prompt stays behind an image skill while its current-model request runs", async () => {
 	const results = new Map<string, RpcPromptResultFrame>();
 	const bothSettled = Promise.withResolvers<void>();
 	const unsubscribe = client.onPromptResult(frame => {
@@ -47,21 +47,14 @@ test("a later prompt does not overtake an idle image skill while its image is de
 	});
 	try {
 		const skill = client.prompt("/skill:look what is this?", [{ type: "image", data: PNG, mimeType: "image/png" }]);
-		// The skill is acknowledged only after admission, which waits for the held vision request.
-		// An acknowledgement first means the vision path never ran, so fail now instead of at the test timeout.
-		let visionStarted = false;
-		await Promise.race([
-			waitForFile(path.join(directory, "vision-started")).then(() => {
-				visionStarted = true;
-			}),
-			skill.then(() => {
-				if (!visionStarted) throw new Error("skill was admitted without starting a vision description request");
-			}),
-		]);
+		// Wait for the real current-model request to start. Image preparation uses
+		// local storage and must not trigger a separate vision request.
+		await waitForFile(path.join(directory, "model-started"));
+		await skill;
 		const second = client.prompt("second", undefined, "followUp");
 		// get_state runs on the serial queue after the second prompt was accepted and handed to the input gate.
 		await client.getState();
-		await Bun.write(path.join(directory, "vision-release"), "");
+		await Bun.write(path.join(directory, "model-release"), "");
 		await Promise.all([skill, second]);
 		await bothSettled.promise;
 	} finally {
