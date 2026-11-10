@@ -125,68 +125,6 @@ describe("AgentActivityIndex", () => {
 		expect(activity.retainedToolMappings("Worker")).toBe(0);
 	});
 
-	it("tails remote transcripts from a bounded offset and refetches after rotation", async () => {
-		let transcript = `${"x".repeat(300_000)}\n${messageEntry("recent", 2_000, {
-			role: "assistant",
-			content: "Recent remote result",
-		})}\n`;
-		const offsets: number[] = [];
-		const activity = new AgentActivityIndex({
-			remote: {
-				readTranscript: async (_agentId, fromByte) => {
-					offsets.push(fromByte);
-					const bytes = Buffer.from(transcript);
-					if (fromByte >= bytes.byteLength) return { text: "", newSize: bytes.byteLength };
-					return { text: bytes.subarray(fromByte).toString("utf-8"), newSize: bytes.byteLength };
-				},
-			},
-		});
-
-		await activity.sync("Guest");
-		expect(offsets[0]).toBe(Number.MAX_SAFE_INTEGER);
-		expect(offsets[1]).toBe(Buffer.byteLength(transcript) - 256 * 1024);
-		expect(activity.query().map(row => row.summary)).toEqual(["Recent remote result"]);
-
-		transcript = `${messageEntry("rotated", 3_000, { role: "assistant", content: "After rotation" })}\n`;
-		await activity.sync("Guest");
-		expect(activity.query().map(row => row.summary)).toEqual(["After rotation"]);
-	});
-
-	it("swallows rejecting remote transcript reads without throwing", async () => {
-		const activity = new AgentActivityIndex({
-			remote: {
-				readTranscript: async () => {
-					throw new Error("host unavailable");
-				},
-			},
-		});
-		await expect(activity.sync("Guest")).resolves.toBeUndefined();
-		expect(activity.query()).toEqual([]);
-	});
-
-	it("drops a truncated remote transcript's rows even when the new tail has none", async () => {
-		let transcript = `${messageEntry("old", 1_000, { role: "assistant", content: "Old remote result" })}\n`;
-		const activity = new AgentActivityIndex({
-			remote: {
-				readTranscript: async (_agentId, fromByte) => {
-					const bytes = Buffer.from(transcript);
-					return {
-						text: bytes.subarray(Math.min(fromByte, bytes.byteLength)).toString("utf-8"),
-						newSize: bytes.byteLength,
-					};
-				},
-			},
-		});
-		await activity.sync("Guest");
-		expect(activity.query().map(row => row.summary)).toEqual(["Old remote result"]);
-		expect(activity.recent("Guest").map(row => row.summary)).toEqual(["Old remote result"]);
-
-		transcript = "";
-		await activity.sync("Guest");
-		expect(activity.query()).toEqual([]);
-		expect(activity.recent("Guest")).toEqual([]);
-	});
-
 	it("keeps a long response whose text follows a long run of leading whitespace", async () => {
 		using tempDir = TempDir.createSync("@activity-index-whitespace-");
 		const sessionFile = path.join(tempDir.path(), "worker.jsonl");

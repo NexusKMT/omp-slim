@@ -33,15 +33,6 @@ export const cleanseHelp = {
 	description: "Detect and fix project diagnostics with weighted parallel subagents",
 } satisfies CommandMetadata;
 
-export const collabHelp = {
-	description:
-		"List active local Collab host metadata without URLs; use collab link <instanceId|pid> to retrieve a control link (--view for view-only)",
-} satisfies CommandMetadata;
-
-export const clipHelp = {
-	description: "Upload a /record recording to live.omp.sh as a public clip and print its URL",
-} satisfies CommandMetadata;
-
 export const commitHelp = { description: "Generate a commit message and update changelogs" } satisfies CommandMetadata;
 
 export const completionsHelp = {
@@ -95,15 +86,9 @@ export const installHelp = {
 	description: "Install or link an extension package (alias of `plugin install`/`plugin link`)",
 } satisfies CommandMetadata;
 
-export const joinHelp = { description: "Join a shared collab session (same as /join)" } satisfies CommandMetadata;
-
 export const modelsHelp = { description: "List, search, and refresh available models" } satisfies CommandMetadata;
 
 export const pluginHelp = { description: "Manage plugins (install, uninstall, list, etc.)" } satisfies CommandMetadata;
-
-export const playHelp = {
-	description: "Replay a /record session recording in the terminal (space pauses, q quits)",
-} satisfies CommandMetadata;
 
 export const psHelp = {
 	description: "List and control daemon-supervised background processes (logs, stop, kill, restart)",
@@ -121,10 +106,6 @@ export const searchHelp = { description: "Search the web with HTTP engines" } sa
 export const sessionHelp = {
 	description:
 		"Hand a session to another machine (pack, unpack, moved) or check which sessions a running omp owns (lease)",
-} satisfies CommandMetadata;
-
-export const shareHelp = {
-	description: "Share a saved session via an encrypted link (same as /share)",
 } satisfies CommandMetadata;
 
 export const setupHelp = {
@@ -160,10 +141,6 @@ export const skillHelp = {
 export const sshHelp = { description: "Manage SSH host configurations" } satisfies CommandMetadata;
 
 export const statsHelp = { description: "View usage statistics" } satisfies CommandMetadata;
-
-export const streamHelp = {
-	description: "Broadcast local omp session screens and chat to your public live channel",
-} satisfies CommandMetadata;
 
 export const tokenHelp = { description: "Get the API key or OAuth token for a provider" } satisfies CommandMetadata;
 

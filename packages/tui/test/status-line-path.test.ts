@@ -32,7 +32,6 @@ function createPathContext(): SegmentContext {
 		session: {
 			state: {},
 			isFastModeEnabled: () => false,
-			modelRegistry: { isUsingSubscription: () => false },
 			sessionManager: undefined,
 		} as unknown as SegmentContext["session"],
 		width: 120,
@@ -49,9 +48,6 @@ function createPathContext(): SegmentContext {
 		goalMode: null,
 		vibeMode: null,
 		vim: null,
-		collab: null,
-		stream: null,
-		recording: false,
 		usageStats: {
 			input: 0,
 			output: 0,
@@ -81,7 +77,6 @@ function createPathContext(): SegmentContext {
 			status: null,
 			pr: null,
 		},
-		usage: null,
 	};
 }
 

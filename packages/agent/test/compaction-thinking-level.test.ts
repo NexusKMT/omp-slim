@@ -10,7 +10,7 @@ import * as snapcompact from "@oh-my-pi/snapcompact";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel } from "../../catalog/test/fixtures/models";
 
 // Pins fix #1 of the compaction effort-override bug. Before this fix,
 // `generateHandoff` (and the three other compaction summarizers) hardcoded
@@ -53,13 +53,13 @@ function createAssistantMessage(content: AssistantMessage["content"]): Assistant
 }
 
 function getAnthropicModel(): Model {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = getTestModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("Expected built-in anthropic/claude-sonnet-4-5 to exist");
 	return model;
 }
 
 function getGrokBuildModel(): Model {
-	const model = getBundledModel("xai-oauth", "grok-build");
+	const model = getTestModel("xai-oauth", "grok-build");
 	if (!model) throw new Error("Expected built-in xai-oauth/grok-build to exist");
 	return model;
 }

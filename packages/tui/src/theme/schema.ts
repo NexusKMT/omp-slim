@@ -47,11 +47,7 @@ export interface ThemeJson {
 	vars?: Record<string, ColorValue>;
 	colors: Omit<Record<ThemeColor | ThemeBg, ColorValue>, "thinkingMax" | keyof typeof OPTIONAL_THEME_COLOR_RECORD> &
 		Partial<Record<keyof typeof OPTIONAL_THEME_COLOR_RECORD, ColorValue>> & { thinkingMax?: ColorValue };
-	export?: {
-		pageBg?: ColorValue;
-		cardBg?: ColorValue;
-		infoBg?: ColorValue;
-	};
+
 	/**
 	 * The terminal this theme was made for, for hosts that paint the terminal
 	 * themselves (Tern). omp never sets the terminal's colors: its TUI draws on

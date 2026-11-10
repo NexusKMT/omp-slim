@@ -6,14 +6,6 @@ import { ASSETS } from "./ci-build-upload";
 
 const repoRoot = path.join(import.meta.dir, "..");
 const cleanups: (() => Promise<void> | void)[] = [];
-const viewerBytes = Buffer.from('globalThis.viewer = "shared ✓";\n');
-
-interface Manifest {
-	file: string;
-	integrity: string;
-	size: number;
-}
-
 interface BuildFile {
 	name: string;
 	platform: string;
@@ -34,9 +26,6 @@ interface UploadFixture {
 	dir: string;
 	files: string[];
 	bytes: Map<string, Buffer>;
-	manifest: Manifest;
-	manifestPath: string;
-	viewerPath: string;
 }
 
 interface LocalService {
@@ -70,17 +59,7 @@ async function fixture(): Promise<UploadFixture> {
 		await fs.copyFile(path.join(repoRoot, file), path.join(dir, file));
 	}
 	const codingAgent = path.join(dir, "packages", "coding-agent");
-	const manifestPath = path.join(codingAgent, "src", "export", "html", "viewer.generated.json");
-	const digest = sha256(viewerBytes);
-	const manifest: Manifest = {
-		file: `export-viewer-${digest}.js`,
-		integrity: `sha256-${Buffer.from(digest, "hex").toString("base64")}`,
-		size: viewerBytes.byteLength,
-	};
-	const viewerPath = path.join(codingAgent, "export-assets", manifest.file);
-	await Bun.write(manifestPath, JSON.stringify(manifest));
-	await Bun.write(viewerPath, viewerBytes);
-	await Bun.write(path.join(codingAgent, "CHANGELOG.md"), "## [1.2.3]\n\n### Added\n\n- Shared viewer.\n");
+	await Bun.write(path.join(codingAgent, "CHANGELOG.md"), "## [1.2.3]\n\n### Added\n\n- Release binaries.\n");
 	const files: string[] = [];
 	const bytes = new Map<string, Buffer>();
 	for (const name in ASSETS) {
@@ -90,8 +69,7 @@ async function fixture(): Promise<UploadFixture> {
 		files.push(file);
 		bytes.set(name, content);
 	}
-	bytes.set(manifest.file, viewerBytes);
-	return { dir, files, bytes, manifest, manifestPath, viewerPath };
+	return { dir, files, bytes };
 }
 
 function startService(
@@ -175,7 +153,7 @@ describe("build-service release upload", () => {
 		["v1.2.3", "stable"],
 		["v1.2.3-canary.4", "canary"],
 	]) {
-		test(`publishes all required binaries and the pinned viewer for ${tag}`, async () => {
+		test(`publishes all required binaries for ${tag}`, async () => {
 			const f = await fixture();
 			const service = startService({ retryPublish: channel === "canary" });
 			const result = await runUpload(f, service, tag);
@@ -184,21 +162,14 @@ describe("build-service release upload", () => {
 			const created = service.creates[0];
 			expect(created.version).toBe(tag.slice(1));
 			expect(created.channel).toBe(channel);
-			expect(created.files).toHaveLength(9);
-			if (channel === "stable") expect(created.notes).toBe("### Added\n\n- Shared viewer.");
+			expect(created.files).toHaveLength(8);
+			if (channel === "stable") expect(created.notes).toBe("### Added\n\n- Release binaries.");
 			const expected: BuildFile[] = [];
 			for (const name in ASSETS) {
 				const bytes = f.bytes.get(name)!;
 				expected.push({ name, ...ASSETS[name], kind: "archive", size: bytes.byteLength, sha256: sha256(bytes) });
 			}
-			expected.push({
-				name: f.manifest.file,
-				kind: "web",
-				platform: "web",
-				arch: "wasm32",
-				size: viewerBytes.byteLength,
-				sha256: sha256(viewerBytes),
-			});
+
 			expect(created.files).toEqual(expected);
 			expect(service.uploads).toEqual(f.bytes);
 			expect(service.requests[0]).toEqual({
@@ -212,8 +183,8 @@ describe("build-service release upload", () => {
 				pathname: "/api/products/omp/builds",
 				authorization: "Bearer local-oidc-token",
 			});
-			expect(service.requests.slice(2, 11).map(request => request.method)).toEqual(Array(9).fill("PUT"));
-			expect(service.requests[11]).toMatchObject({
+			expect(service.requests.slice(2, 10).map(request => request.method)).toEqual(Array(8).fill("PUT"));
+			expect(service.requests[10]).toMatchObject({
 				method: "POST",
 				pathname: "/api/products/omp/builds/test-build/publish",
 				authorization: "Bearer local-oidc-token",
@@ -223,38 +194,6 @@ describe("build-service release upload", () => {
 	}
 
 	const invalid: { name: string; change: (f: UploadFixture) => Promise<unknown>; error: string }[] = [
-		{ name: "missing viewer", change: f => fs.unlink(f.viewerPath), error: "ENOENT" },
-		{ name: "missing manifest", change: f => fs.unlink(f.manifestPath), error: "ENOENT" },
-		{
-			name: "tampered viewer",
-			change: f => Bun.write(f.viewerPath, Buffer.alloc(viewerBytes.byteLength)),
-			error: "does not match generated manifest",
-		},
-		{
-			name: "wrong size",
-			change: f => Bun.write(f.manifestPath, JSON.stringify({ ...f.manifest, size: f.manifest.size + 1 })),
-			error: "does not match generated manifest",
-		},
-		{
-			name: "wrong integrity",
-			change: f => Bun.write(f.manifestPath, JSON.stringify({ ...f.manifest, integrity: "sha256-invalid" })),
-			error: "does not match generated manifest",
-		},
-		{
-			name: "wrong filename hash",
-			change: async f => {
-				const file = `export-viewer-${"0".repeat(64)}.js`;
-				await fs.rename(f.viewerPath, path.join(path.dirname(f.viewerPath), file));
-				await Bun.write(f.manifestPath, JSON.stringify({ ...f.manifest, file }));
-			},
-			error: "does not match generated manifest",
-		},
-		{
-			name: "manifest path traversal",
-			change: f => Bun.write(f.manifestPath, JSON.stringify({ ...f.manifest, file: "../unrelated.js" })),
-			error: "invalid viewer manifest",
-		},
-		{ name: "malformed manifest", change: f => Bun.write(f.manifestPath, "null"), error: "invalid viewer manifest" },
 		{
 			name: "missing binary",
 			change: async f => {

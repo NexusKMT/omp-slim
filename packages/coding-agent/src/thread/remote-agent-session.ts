@@ -762,10 +762,6 @@ export class RemoteAgentSession implements AgentViewSession {
 		return this.#view.ephemeralMaxTokensPreservesRequest;
 	}
 
-	exportToHtml(outputPath?: string, useUserThemes?: boolean): Promise<string> {
-		return this.#command("exportToHtml", outputPath, useUserThemes);
-	}
-
 	/** Idle maintenance runs on the home worker; its blocking predicates are answered synchronously from main. */
 	enableIdleMaintenance(options: IdleMaintenanceOptions = {}): void {
 		const { isBlocked, scheduledTurn, onRecap } = options;

@@ -1085,14 +1085,6 @@ export class RpcClient {
 	}
 
 	/**
-	 * Export session to HTML.
-	 */
-	async exportHtml(outputPath?: string): Promise<{ path: string }> {
-		const response = await this.#send({ type: "export_html", outputPath });
-		return this.#getData(response);
-	}
-
-	/**
 	 * Switch to a different session file, optionally with `model` instead of its saved one.
 	 * @returns Object with `cancelled: true` if an extension cancelled the switch
 	 */

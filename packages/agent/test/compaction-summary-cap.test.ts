@@ -10,7 +10,7 @@ import {
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel } from "../../catalog/test/fixtures/models";
 
 function createAssistantMessage(text: string): AssistantMessage {
 	return {
@@ -33,7 +33,7 @@ function createAssistantMessage(text: string): AssistantMessage {
 }
 
 function getModel(): Model {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = getTestModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("Expected built-in anthropic/claude-sonnet-4-5 to exist");
 	return model;
 }
@@ -55,19 +55,6 @@ describe("compaction summary output budget", () => {
 		expect(spy.mock.calls[0]?.[2]?.maxTokens).toBe(MAX_SUMMARY_TOKENS);
 	});
 
-	test("forwards the cap to remote compaction", async () => {
-		let requestBody: Record<string, unknown> | undefined;
-		await generateSummary(messages, getModel(), 150_000, "test-key", undefined, undefined, undefined, {
-			remoteEndpoint: "https://compaction.example.test/summarize",
-			fetch: async (_input, init) => {
-				requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-				return new Response(JSON.stringify({ summary: "summary" }));
-			},
-		});
-
-		expect(requestBody?.maxTokens).toBe(MAX_SUMMARY_TOKENS);
-	});
-
 	test("caps both summaries when compaction splits a turn", async () => {
 		const spy = vi.spyOn(ai, "completeSimple").mockResolvedValue(createAssistantMessage("summary"));
 		const preparation: CompactionPreparation = {
@@ -81,7 +68,6 @@ describe("compaction summary output budget", () => {
 			settings: {
 				...DEFAULT_COMPACTION_SETTINGS,
 				reserveTokens: 150_000,
-				remoteEnabled: false,
 			},
 		};
 
@@ -104,7 +90,6 @@ describe("compaction summary output budget", () => {
 			settings: {
 				...DEFAULT_COMPACTION_SETTINGS,
 				reserveTokens: 16_384,
-				remoteEnabled: false,
 			},
 		};
 		const extraContext = "Extension note: the deploy freeze stays in place until Friday.";

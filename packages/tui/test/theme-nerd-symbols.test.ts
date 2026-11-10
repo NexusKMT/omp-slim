@@ -41,7 +41,7 @@ it("uses the Nerd Fonts v3 session and C# icons", async () => {
 	expect(theme?.getLangIcon("csharp")).toBe("\u{e7b2}");
 });
 
-it("resolves subscription and advisor icons in Nerd Font mode", async () => {
+it("resolves advisor icons in Nerd Font mode", async () => {
 	originalAgentDir = getAgentDir();
 	originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
 	tempAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-nerd-symbols-"));
@@ -55,10 +55,8 @@ it("resolves subscription and advisor icons in Nerd Font mode", async () => {
 	);
 
 	const theme = await getThemeByName(customThemeName);
-	expect(theme?.symbol("icon.subscription")).toBe("\u{f067a}");
 	expect(theme?.symbol("icon.advisor")).toBe("\uea70");
 	expect(theme?.symbol("icon.advisorClosed")).toBe("\ueae7");
-	expect(theme?.icon.subscription).toBe("\u{f067a}");
 	expect(theme?.icon.advisor).toBe("\uea70");
 	expect(theme?.icon.advisorClosed).toBe("\ueae7");
 });

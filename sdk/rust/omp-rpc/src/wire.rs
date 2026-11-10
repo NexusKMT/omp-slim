@@ -5377,17 +5377,6 @@ pub struct GetSessionLeaseResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExportHtmlParams {
-	#[serde(rename = "outputPath", default, skip_serializing_if = "Option::is_none")]
-	pub output_path: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExportHtmlResult {
-	pub path: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SwitchSessionParams {
 	#[serde(rename = "sessionPath")]
 	pub session_path: String,
@@ -6714,23 +6703,6 @@ impl Command for GetSessionLeaseCommand {
 
 	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
 		serde_json::from_value::<GetSessionLeaseResult>(data.unwrap_or_else(|| Value::Object(Map::new())))
-	}
-}
-
-/// Export the session as HTML; returns the written path.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct ExportHtmlCommand {
-	#[serde(rename = "outputPath", default, skip_serializing_if = "Option::is_none")]
-	pub output_path: Option<String>,
-}
-
-impl Command for ExportHtmlCommand {
-	const NAME: &'static str = "export_html";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = String;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<ExportHtmlResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.path)
 	}
 }
 

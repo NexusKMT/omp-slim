@@ -1,10 +1,6 @@
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
-import {
-	getAntigravityCounterKeyForModel,
-	scopeAntigravityLimitsForModel,
-} from "@oh-my-pi/pi-ai/usage/google-antigravity";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { getNextTimeBasedPricingTransition } from "@oh-my-pi/pi-catalog/models";
 import type { Model, ModelCost } from "@oh-my-pi/pi-catalog/types";
 import type { VcsGitRepo, VcsRepo } from "@oh-my-pi/pi-natives";
@@ -22,25 +18,13 @@ import {
 	visibleWidth,
 } from "../index";
 import { adjustHsv, formatNumber, getProjectDir, hexToRgb, rgbToHex } from "@oh-my-pi/pi-utils";
-import type {
-	ActiveRepoContext,
-	StatusAccountIdentity as OAuthAccountIdentity,
-	StatusLineHost,
-	PromptCacheStatus,
-	StatusLineSession,
-} from "./host";
+import type { ActiveRepoContext, StatusLineHost, PromptCacheStatus, StatusLineSession } from "./host";
 import type { Editor } from "../components/editor";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { sanitizeHookStatusText, sanitizeStatusText } from "../chrome/shared";
 import { getThemeEpoch, theme } from "../theme";
 import { type CompactionBoundaries, EMPTY_STRING_PARTS, getToolSchemaMetadataRevision } from "./context-usage";
-import {
-	type CodexResetFireworksEvent,
-	type CodexResetUsageSnapshot,
-	detectCodexResetFireworks,
-} from "../overlays/codex-reset-fireworks";
 import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
-import { summarizeUsageResetCredits } from "../overlays/usage-display";
 import { getPreset } from "./presets";
 import { describeSegment, renderSegment, type SegmentContext } from "./segments";
 import { promptCacheBrief } from "./prompt-cache";
@@ -52,7 +36,6 @@ import { isNativeRendering, onNativeRenderingChange } from "../native/state";
 import { getSeparator } from "./separators";
 import { formatJobWidgetGlance, type JobWidgetEntry, latestJobWidget } from "../tools/job-widget";
 import type {
-	CollabStatus,
 	ComposerFacts,
 	ComposerFactsSource,
 	EffectiveStatusLineSettings,
@@ -62,7 +45,6 @@ import type {
 	StatusLineSegmentOptions,
 	StatusLineSeparatorStyle,
 	StatusLineSettings,
-	StatusResetExpiry,
 } from "./types";
 
 /** Sparkline cells the ANSI jobs segment draws after the freshest widget's headline. */
@@ -197,63 +179,6 @@ const BRAND_FADE_FRAME_MS = 40;
 const ACTIVE_WINDOW_REPAINT_MS = 250;
 /** Turn-window repaint cadence under a static spinner: only the one-second timers still move. */
 const STATIC_SPINNER_REPAINT_MS = 1_000;
-
-/**
- * Providers whose subscription quota is a single monthly bucket, so their
- * `monthly`/`30d` window is the one the usage segment must show. Providers that
- * merely report a monthly side-counter (GitHub Copilot's premium requests) stay
- * out: their monthly row is not the session quota.
- */
-const MONTHLY_SUBSCRIPTION_PROVIDERS: Record<string, true> = {
-	"alibaba-token-plan": true,
-	cursor: true,
-	"opencode-go": true,
-};
-
-/** A displayable limit after provider, account, model, and window filtering. */
-interface UsageWindowCandidate {
-	id?: string;
-	windowClass: "5h" | "daily" | "7d" | "monthly";
-	fraction: number;
-	resetsAt?: number;
-}
-
-/** Limits sharing one model/tier scope, ranked as an indivisible display unit. */
-interface UsageScopeGroup {
-	priority: number;
-	tier?: string;
-	candidates: UsageWindowCandidate[];
-}
-
-function normalizeUsageScopeValue(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : undefined;
-}
-
-/**
- * Fireworks are stateful, so their report match must be stricter than the
- * status display's fallback matching: every known credential identifier must
- * be present and equal or a workspace sibling can mutate this account's
- * baseline.
- */
-function reportMatchesExactIdentity(report: UsageReport, identity: OAuthAccountIdentity | undefined): boolean {
-	if (!identity) return false;
-	const accountId = normalizeUsageScopeValue(identity.accountId);
-	const email = normalizeUsageScopeValue(identity.email);
-	const projectId = normalizeUsageScopeValue(identity.projectId);
-	const orgId = normalizeUsageScopeValue(identity.orgId);
-	if (!accountId && !email && !projectId && !orgId) return false;
-
-	const metadata = report.metadata ?? {};
-	const reportAccountId =
-		normalizeUsageScopeValue(metadata.accountId) ?? normalizeUsageScopeValue(metadata.account_id);
-	const reportProjectId =
-		normalizeUsageScopeValue(metadata.projectId) ?? normalizeUsageScopeValue(metadata.project_id);
-	if (accountId && reportAccountId !== accountId) return false;
-	if (email && normalizeUsageScopeValue(metadata.email) !== email) return false;
-	if (projectId && reportProjectId !== projectId) return false;
-	if (orgId && normalizeUsageScopeValue(metadata.orgId) !== orgId) return false;
-	return true;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Context-usage memo
@@ -483,7 +408,6 @@ class StatusLineExternalInputs {
 	isStreaming: boolean | undefined = undefined;
 	isAutoThinking: boolean | undefined = undefined;
 	isFastModeActive = false;
-	anthropicSlowModeLabel: string | undefined = undefined;
 	compactionSpeculation: unknown = undefined;
 	/** The freshest running job widget's view (stable identity while its data is unchanged). */
 	jobWidgetRef: unknown = undefined;
@@ -587,8 +511,6 @@ interface ActiveMeter {
 }
 
 const EMPTY_MESSAGES: readonly AgentMessage[] = [];
-const STATUS_USAGE_START_DELAY_MS = 0;
-const STATUS_USAGE_REFRESH_TIMEOUT_MS = 2_000;
 
 function isContextSegment(segment: StatusLineSegmentId): boolean {
 	return segment === "context_pct" || segment === "context_total";
@@ -793,9 +715,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 * dependency graph; interactive-mode wires it to VibeSessionRegistry.
 	 */
 	#vibeWorkerTokenRate: (() => number | null) | null = null;
-	#collabStatus: CollabStatus | null = null;
-	#streamStatus: { viewers: number } | null = null;
-	#recording = false;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
 
@@ -832,33 +751,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#lastTokensPerSecond: number | null = null;
 	#lastTokensPerSecondTimestamp: number | null = null;
 
-	// Provider usage caching (5-min TTL, OAuth/sub only)
-	#cachedUsage: {
-		tier?: string;
-		fiveHour?: { percent: number; resetMinutes?: number };
-		daily?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number };
-		monthly?: { percent: number; resetHours?: number };
-		resetCredits?: {
-			bankedCount: number;
-			redeemableCount: number;
-			expiryHours?: number;
-			expired?: boolean;
-			unavailableReason?: string;
-			expiring?: StatusResetExpiry;
-		};
-	} | null = null;
-	#cachedUsageContextKey: string | null = null;
-	#usageFetchedAt = 0;
-	#usageInFlight = false;
-	#usageStartTimer: Timer | null = null;
-	// A timed-out request may still resolve. Its result remains eligible only
-	// until a newer request has applied.
-	#usageRefreshSequence = 0;
-	#latestAppliedUsageRefreshSequence = 0;
-	#codexResetSnapshots = new Map<string, CodexResetUsageSnapshot>();
-	#onCodexResetFireworks: ((event: CodexResetFireworksEvent) => void) | undefined;
-	#onResetExpiryNotice: ((notice: string) => void) | undefined;
 	// Context-usage memo. The status line redraws on every agent event, so the
 	// hot path must not recompute context tokens unless an input changed.
 	// `getContextUsage()` anchors on the last assistant's real prompt-token
@@ -1055,7 +947,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 */
 	setSubagentHubHint(_hint: string | undefined): void {}
 
-	/** Active subagent count as currently displayed (collab state mirroring). */
+	/** Active subagent count as currently displayed. */
 	get subagentCount(): number {
 		return this.#subagentCount;
 	}
@@ -1078,7 +970,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	/**
 	 * Reset the currently-attached session's active-time accumulators so
 	 * the `time_spent` segment starts from zero. Called from `/clear`,
-	 * fresh-session, and joined-collab paths; both the completed
+	 * fresh-session paths; both the completed
 	 * accumulator and any in-flight window are dropped, so a reset
 	 * mid-turn ignores the running window (the matching `markActivityEnd`
 	 * will see an idle meter and no-op).
@@ -1243,32 +1135,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#invalidateStatusLineRenderCache();
 	}
 
-	setCollabStatus(status: CollabStatus | null): void {
-		if (
-			!this.#collabStatus?.stateOverride &&
-			!status?.stateOverride &&
-			this.#collabStatus?.role === status?.role &&
-			this.#collabStatus?.participantCount === status?.participantCount
-		) {
-			return;
-		}
-		this.#collabStatus = status;
-		this.#invalidateStatusLineRenderCache();
-	}
-
-	setStreamStatus(status: { viewers: number } | null): void {
-		if (this.#streamStatus?.viewers === status?.viewers) return;
-		this.#streamStatus = status;
-		this.#invalidateStatusLineRenderCache();
-	}
-
-	/** Toggle the `● REC` badge shown while `/record` captures the screen. */
-	setRecording(recording: boolean): void {
-		if (this.#recording === recording) return;
-		this.#recording = recording;
-		this.#invalidateStatusLineRenderCache();
-	}
-
 	/** Mark one session pinned or unpinned; `session_name` shows the pin for the viewed session. */
 	setSessionPinned(sessionId: string, pinned: boolean): void {
 		if (this.#pinnedSessionIds.has(sessionId) === pinned) return;
@@ -1285,16 +1151,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 
 	isSessionPinned(sessionId: string | undefined): boolean {
 		return sessionId !== undefined && this.#pinnedSessionIds.has(sessionId);
-	}
-
-	/** Set the callback that presents detected Codex reset celebrations, or clear it with `undefined`. */
-	setCodexResetFireworksHandler(handler: ((event: CodexResetFireworksEvent) => void) | undefined): void {
-		this.#onCodexResetFireworks = handler;
-	}
-
-	/** Set the callback that presents pool-wide saved-reset expiry warnings, or clear it with `undefined`. */
-	setResetExpiryNoticeHandler(handler: ((notice: string) => void) | undefined): void {
-		this.#onResetExpiryNotice = handler;
 	}
 
 	setHookStatus(key: string, text: string | undefined): void {
@@ -1366,12 +1222,8 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#stopActiveWindowRepaint();
 		this.#stopPricingTimer();
 		this.#stopPromptCacheTimer();
-		this.#clearUsageStartTimer();
 		this.#unwatchNativeRendering?.();
 		this.#unwatchNativeRendering = undefined;
-		this.#onCodexResetFireworks = undefined;
-		this.#onResetExpiryNotice = undefined;
-		this.#codexResetSnapshots.clear();
 		this.#retireGitWatcher();
 	}
 
@@ -1594,12 +1446,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		timer.unref();
 	}
 
-	#clearUsageStartTimer(): void {
-		if (!this.#usageStartTimer) return;
-		clearTimeout(this.#usageStartTimer);
-		this.#usageStartTimer = null;
-	}
-
 	#invalidateStatusLineRenderCache(): void {
 		this.#statusLineInputRevision++;
 	}
@@ -1620,10 +1466,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#cachedPrExpired = true;
 	}
 	#invalidateSessionCaches(): void {
-		this.#clearUsageStartTimer();
-		this.#cachedUsage = null;
-		this.#usageFetchedAt = 0;
-		this.#usageInFlight = false;
 		this.#contextUsageCache = undefined;
 		this.#lastTokensPerSecond = null;
 		this.#lastTokensPerSecondTimestamp = null;
@@ -2114,447 +1956,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		return this.#vibeWorkerTokenRate?.() ?? null;
 	}
 
-	#formatUsageContextKey(activeProvider: string | undefined, identity: OAuthAccountIdentity | undefined): string {
-		if (!activeProvider) return "";
-		// orgId is part of the key: rotating between two same-email Anthropic
-		// subscriptions must invalidate the cached usage immediately instead of
-		// showing the previous org's quota for the rest of the cache TTL.
-		return [
-			activeProvider,
-			identity?.accountId ?? "",
-			identity?.email ?? "",
-			identity?.projectId ?? "",
-			identity?.orgId ?? "",
-		].join("\0");
-	}
-
-	#getUsageContextKey(session: TSession): string {
-		const activeProvider = session.state.model?.provider ?? session.model?.provider;
-		const identity = activeProvider ? this.host.activeAccount(session, activeProvider) : undefined;
-		// Model id is part of the invalidation key (but not the account-scoped
-		// fireworks key): normalized usage now selects a model-scoped window group,
-		// so switching models must drop the previous model's cached scope instead
-		// of showing it for the rest of the TTL.
-		const activeModelId = session.state.model?.id ?? session.model?.id ?? "";
-		return `${this.#formatUsageContextKey(activeProvider, identity)}\0${activeModelId}`;
-	}
-
-	/**
-	 * Startup redraws only arm a short-delayed task; timeout releases the render
-	 * cadence while a late successful fetch can still refresh the cached segment.
-	 */
-	refreshUsageInBackground(): void {
-		if (this.#disposed) return;
-		const now = Date.now();
-		const session = this.session;
-		const usageContextKey = this.#getUsageContextKey(session);
-		if (this.#cachedUsageContextKey !== usageContextKey) {
-			this.#cachedUsage = null;
-			this.#usageFetchedAt = 0;
-			this.#cachedUsageContextKey = usageContextKey;
-		}
-		if (this.#usageInFlight || this.#usageStartTimer) return;
-		if (this.#usageFetchedAt > 0 && now - this.#usageFetchedAt < 5 * 60_000) return;
-		if (!this.host.canFetchUsageReports(session)) return;
-		this.#usageInFlight = true;
-		this.#usageStartTimer = setTimeout(() => {
-			this.#usageStartTimer = null;
-			void this.#runUsageRefresh(session);
-		}, STATUS_USAGE_START_DELAY_MS);
-	}
-
-	async #runUsageRefresh(session: TSession): Promise<void> {
-		if (this.#disposed || this.session !== session) {
-			this.#usageInFlight = false;
-			return;
-		}
-		const sequence = ++this.#usageRefreshSequence;
-		const signal = AbortSignal.timeout(STATUS_USAGE_REFRESH_TIMEOUT_MS);
-		let reportsPromise: Promise<unknown> | undefined;
-		try {
-			reportsPromise = this.host.fetchUsageReports(session, signal);
-			this.#applyUsageRefreshReports(
-				session,
-				await this.#raceUsageRefreshWithSignal(reportsPromise, signal),
-				sequence,
-			);
-		} catch {
-			if (this.session !== session) return;
-			this.#usageFetchedAt = Date.now();
-			if (signal.aborted && reportsPromise) {
-				this.#observeLateUsageRefresh(session, reportsPromise, sequence);
-			}
-		} finally {
-			if (this.session === session) this.#usageInFlight = false;
-		}
-	}
-
-	#applyUsageRefreshReports(session: TSession, reports: unknown, sequence: number): void {
-		if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
-			return;
-		}
-		this.#latestAppliedUsageRefreshSequence = sequence;
-		const activeProvider = session.state.model?.provider ?? session.model?.provider;
-		const activeModelId = session.state.model?.id ?? session.model?.id;
-		const activeIdentity = activeProvider ? this.host.activeAccount(session, activeProvider) : undefined;
-		const normalized = this.#normalizeUsageReports(reports, {
-			provider: activeProvider,
-			modelId: activeModelId,
-			identity: activeIdentity,
-		});
-		const resetSnapshot =
-			activeProvider === "openai-codex" ? this.#normalizeCodexResetSnapshot(reports, activeIdentity) : null;
-		const usageChanged = this.#cachedUsage !== normalized;
-		this.#cachedUsage = normalized;
-		this.#usageFetchedAt = Date.now();
-		// Usage fetch is async; without a repaint the top border stays blank until
-		// some unrelated event (git resolve, keystroke, …) rebuilds it.
-		if (usageChanged) {
-			this.#invalidateStatusLineRenderCache();
-			this.#onBranchChange?.();
-		}
-		this.#noticeResetExpiry(session, reports);
-		if (!resetSnapshot) return;
-		const contextKey = this.#formatUsageContextKey(activeProvider, activeIdentity);
-		const previous = this.#codexResetSnapshots.get(contextKey);
-		this.#codexResetSnapshots.set(contextKey, resetSnapshot);
-		if (!previous || !this.host.codexResetFireworksEnabled()) return;
-		const event = detectCodexResetFireworks(previous, resetSnapshot);
-		if (event) this.#onCodexResetFireworks?.(event);
-	}
-
-	#noticeResetExpiry(session: TSession, reports: unknown): void {
-		// A focused subagent's view is not a conversation the user started; leave the warning for their own.
-		if (
-			this.#focusedAgentId !== undefined ||
-			!this.#onResetExpiryNotice ||
-			!this.host.resetExpiryNotice ||
-			!Array.isArray(reports)
-		) {
-			return;
-		}
-		// fetchUsageReports supplies normalized rows; keep only entries shaped like reports.
-		const usageReports = reports.filter(
-			(report): report is UsageReport =>
-				!!report &&
-				typeof report === "object" &&
-				"provider" in report &&
-				"limits" in report &&
-				Array.isArray(report.limits),
-		);
-		const notice = this.host.resetExpiryNotice(session, usageReports, Date.now());
-		if (notice) this.#onResetExpiryNotice(notice);
-	}
-
-	#observeLateUsageRefresh(session: TSession, reportsPromise: Promise<unknown>, sequence: number): void {
-		void reportsPromise
-			.then(reports => {
-				this.#applyUsageRefreshReports(session, reports, sequence);
-			})
-			.catch(() => {
-				if (this.#disposed || this.session !== session || sequence < this.#latestAppliedUsageRefreshSequence) {
-					return;
-				}
-				this.#usageFetchedAt = Date.now();
-			});
-	}
-
-	async #raceUsageRefreshWithSignal(promise: Promise<unknown>, signal: AbortSignal): Promise<unknown> {
-		if (signal.aborted) throw signal.reason;
-		const aborted = Promise.withResolvers<never>();
-		const onAbort = () => aborted.reject(signal.reason);
-		signal.addEventListener("abort", onAbort, { once: true });
-		try {
-			return await Promise.race([promise, aborted.promise]);
-		} finally {
-			signal.removeEventListener("abort", onAbort);
-		}
-	}
-
-	#normalizeCodexResetSnapshot(
-		reports: unknown,
-		activeIdentity: OAuthAccountIdentity | undefined,
-	): CodexResetUsageSnapshot | null {
-		if (!Array.isArray(reports)) return null;
-		let matchingReport: UsageReport | undefined;
-		for (const report of reports) {
-			if (!report || typeof report !== "object") continue;
-			if (
-				!("provider" in report) ||
-				report.provider !== "openai-codex" ||
-				!("limits" in report) ||
-				!Array.isArray(report.limits)
-			) {
-				continue;
-			}
-			// The report boundary above validates the fields this extractor iterates;
-			// optional metadata and credit fields are narrowed again before use.
-			const usageReport = report as UsageReport;
-			if (!reportMatchesExactIdentity(usageReport, activeIdentity)) continue;
-			matchingReport = usageReport;
-			break;
-		}
-		if (!matchingReport) return null;
-
-		const plan =
-			typeof matchingReport.metadata?.planType === "string" && matchingReport.metadata.planType
-				? matchingReport.metadata.planType
-				: undefined;
-		let sevenDay: CodexResetUsageSnapshot["sevenDay"];
-		let sevenDayTier: string | undefined;
-		for (const limit of matchingReport.limits) {
-			if (!limit || typeof limit !== "object") continue;
-			const candidate = limit as {
-				scope?: { windowId?: string; tier?: string };
-				window?: { resetsAt?: number };
-				amount?: { usedFraction?: number };
-			};
-			const fraction = candidate.amount?.usedFraction;
-			if (candidate.scope?.windowId !== "7d" || typeof fraction !== "number" || !Number.isFinite(fraction)) {
-				continue;
-			}
-			const tier =
-				typeof candidate.scope?.tier === "string" && candidate.scope.tier ? candidate.scope.tier : undefined;
-			if (sevenDay && (sevenDayTier === undefined || tier)) continue;
-			const resetsAt = candidate.window?.resetsAt;
-			sevenDay = {
-				percent: fraction * 100,
-				resetsAt: typeof resetsAt === "number" && Number.isFinite(resetsAt) ? resetsAt : undefined,
-				tier,
-				plan,
-			};
-			sevenDayTier = tier;
-		}
-
-		const fetchedAt = matchingReport.fetchedAt;
-		const availableCount = matchingReport.resetCredits?.availableCount;
-		const observedAt = typeof fetchedAt === "number" && Number.isFinite(fetchedAt) ? fetchedAt : undefined;
-		const savedResets =
-			typeof availableCount === "number" && Number.isFinite(availableCount)
-				? Math.max(0, Math.trunc(availableCount))
-				: undefined;
-		if (!sevenDay && savedResets === undefined) return null;
-		return { observedAt, sevenDay, savedResets };
-	}
-
-	#normalizeUsageReports(
-		reports: unknown,
-		context: { provider?: string; modelId?: string; identity?: OAuthAccountIdentity },
-	): {
-		tier?: string;
-		fiveHour?: { percent: number; resetMinutes?: number };
-		daily?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number };
-		monthly?: { percent: number; resetHours?: number };
-		resetCredits?: {
-			bankedCount: number;
-			redeemableCount: number;
-			expiryHours?: number;
-			expired?: boolean;
-			unavailableReason?: string;
-			expiring?: StatusResetExpiry;
-		};
-	} | null {
-		if (!Array.isArray(reports)) return null;
-		const now = Date.now();
-		const resetReports: UsageReport[] = [];
-		const activeModelId = normalizeUsageScopeValue(context.modelId);
-		const activeAntigravityCounter =
-			context.provider === "google-antigravity" ? getAntigravityCounterKeyForModel(context.modelId) : undefined;
-		const monthlySubscriptionProvider =
-			context.provider !== undefined && MONTHLY_SUBSCRIPTION_PROVIDERS[context.provider] === true;
-		const scopeGroups = new Map<string, UsageScopeGroup>();
-		for (const report of reports) {
-			if (!report || typeof report !== "object") continue;
-			const provider = "provider" in report ? report.provider : undefined;
-			if (context.provider && provider !== context.provider) continue;
-			const reportLimits = "limits" in report ? report.limits : undefined;
-			if (!Array.isArray(reportLimits)) continue;
-			// fetchUsageReports supplies normalized rows; the guards above protect
-			// the unknown session boundary before the account matcher reads metadata.
-			const usageReport = report as UsageReport;
-			if (
-				usageReport.resetCredits &&
-				(!context.identity || reportMatchesExactIdentity(usageReport, context.identity))
-			) {
-				resetReports.push(usageReport);
-			}
-			const limits =
-				provider === "google-antigravity" && activeAntigravityCounter
-					? scopeAntigravityLimitsForModel(usageReport, context)
-					: reportLimits;
-			for (const limit of limits) {
-				if (
-					!limit ||
-					typeof limit !== "object" ||
-					!("scope" in limit) ||
-					!limit.scope ||
-					typeof limit.scope !== "object" ||
-					!("amount" in limit) ||
-					!limit.amount ||
-					typeof limit.amount !== "object"
-				) {
-					continue;
-				}
-				const scope = limit.scope;
-				const amount = limit.amount;
-				// The matcher only reads scope identity fields, whose object boundary
-				// is validated above; other required UsageLimit fields are irrelevant.
-				const usageLimit = limit as UsageLimit;
-				if (context.identity && !this.host.limitMatchesActiveAccount(usageReport, usageLimit, context.identity))
-					continue;
-
-				const fraction = "usedFraction" in amount ? amount.usedFraction : undefined;
-				if (typeof fraction !== "number") continue;
-				const window =
-					"window" in limit && limit.window && typeof limit.window === "object" ? limit.window : undefined;
-				const windowId = "windowId" in scope ? scope.windowId : undefined;
-				const durationValue = window && "durationMs" in window ? window.durationMs : undefined;
-				const durationMs = typeof durationValue === "number" ? durationValue : undefined;
-				const subscriptionWindow =
-					windowId === "5h" || windowId === "7d"
-						? windowId
-						: windowId === "daily" || windowId === "24h" || windowId === "1d"
-							? "daily"
-							: durationMs !== undefined && Math.abs(durationMs - 5 * 3_600_000) <= 60_000
-								? "5h"
-								: durationMs !== undefined && Math.abs(durationMs - 86_400_000) <= 60_000
-									? "daily"
-									: durationMs !== undefined && Math.abs(durationMs - 7 * 86_400_000) <= 60_000
-										? "7d"
-										: undefined;
-				const windowClass =
-					subscriptionWindow ??
-					(monthlySubscriptionProvider && (windowId === "monthly" || windowId === "30d") ? "monthly" : undefined);
-				if (!windowClass) continue;
-
-				const modelId = normalizeUsageScopeValue("modelId" in scope ? scope.modelId : undefined);
-				if (modelId && modelId !== activeModelId) continue;
-				const rawTier = "tier" in scope ? scope.tier : undefined;
-				const rawPlanType = usageReport.metadata?.planType;
-				// Scoped tiers (Claude Fable, Codex Spark) win; plan-wide tiers
-				// (Z.AI `pro`, Codex `pro`) label otherwise-untiered windows.
-				const tier =
-					(typeof rawTier === "string" && rawTier.trim() ? rawTier.trim() : undefined) ??
-					(typeof rawPlanType === "string" && rawPlanType.trim() ? rawPlanType.trim() : undefined);
-				const normalizedTier = normalizeUsageScopeValue(tier);
-				const scopeKey = `${modelId ?? ""}\0${normalizedTier ?? ""}`;
-				// Exact-model groups outrank provider-wide groups; within either
-				// specificity, untiered limits preserve the historical preference.
-				const priority = modelId ? (normalizedTier ? 1 : 0) : normalizedTier ? 3 : 2;
-				const id = "id" in limit && typeof limit.id === "string" ? limit.id : undefined;
-				const resetValue = window && "resetsAt" in window ? window.resetsAt : undefined;
-				const displayCandidate: UsageWindowCandidate = {
-					id,
-					windowClass,
-					fraction,
-					resetsAt: typeof resetValue === "number" ? resetValue : undefined,
-				};
-				const group = scopeGroups.get(scopeKey);
-				if (group) {
-					group.candidates.push(displayCandidate);
-				} else {
-					scopeGroups.set(scopeKey, { priority, tier, candidates: [displayCandidate] });
-				}
-			}
-		}
-
-		let selectedGroup: UsageScopeGroup | undefined;
-		for (const group of scopeGroups.values()) {
-			if (!selectedGroup || group.priority < selectedGroup.priority) selectedGroup = group;
-		}
-		const resetReport =
-			resetReports.length === 1
-				? resetReports[0]
-				: context.identity
-					? resetReports.find(report => reportMatchesExactIdentity(report, context.identity))
-					: undefined;
-		const resetSummary = summarizeUsageResetCredits(resetReport?.resetCredits, now);
-		const expiring =
-			resetSummary && resetSummary.bankedCount > 0 && resetReport
-				? this.host.classifyResetExpiry?.(resetReport, now)
-				: undefined;
-		// The highlighted countdown is the warned reset's, not an earlier one that is not worth warning about.
-		const resetExpiryMs = expiring
-			? expiring.expiresAtMs - now
-			: resetSummary?.soonestExpiry
-				? Date.parse(resetSummary.soonestExpiry) - now
-				: undefined;
-		const resetCredits =
-			resetSummary && resetSummary.bankedCount > 0
-				? {
-						bankedCount: resetSummary.bankedCount,
-						redeemableCount: resetSummary.redeemableCount,
-						expiryHours:
-							resetExpiryMs !== undefined && resetExpiryMs > 0
-								? Math.max(1, Math.ceil(resetExpiryMs / 3_600_000))
-								: undefined,
-						expired: resetExpiryMs !== undefined && resetExpiryMs <= 0,
-						unavailableReason: resetSummary.unavailableReason,
-						expiring,
-					}
-				: undefined;
-		if (!selectedGroup) return resetCredits ? { resetCredits } : null;
-
-		let fiveHour: { percent: number; resetMinutes?: number } | undefined;
-		let daily: { percent: number; resetMinutes?: number } | undefined;
-		let sevenDay: { percent: number; resetHours?: number } | undefined;
-		let monthly: { percent: number; resetHours?: number } | undefined;
-		let monthlyPriority = Number.POSITIVE_INFINITY;
-		const cursorMonthlyPriority = (limitId: unknown): number => {
-			// When /auth/usage and /api/usage-summary are merged, prefer the personal
-			// dashboard rails over legacy per-model request fractions.
-			if (limitId === "cursor:usd:individual-auto") return 0;
-			if (limitId === "cursor:usd:individual-plan" || limitId === "cursor:usd:individual-overall") return 1;
-			if (typeof limitId === "string" && limitId.startsWith("cursor:usd:individual-")) return 2;
-			return 3;
-		};
-		for (const candidate of selectedGroup.candidates) {
-			if (candidate.windowClass === "5h" && !fiveHour) {
-				fiveHour = {
-					percent: candidate.fraction * 100,
-					resetMinutes:
-						typeof candidate.resetsAt === "number"
-							? Math.max(0, Math.round((candidate.resetsAt - now) / 60_000))
-							: undefined,
-				};
-			}
-			if (candidate.windowClass === "daily" && !daily) {
-				daily = {
-					percent: candidate.fraction * 100,
-					resetMinutes:
-						typeof candidate.resetsAt === "number"
-							? Math.max(0, Math.round((candidate.resetsAt - now) / 60_000))
-							: undefined,
-				};
-			}
-			if (candidate.windowClass === "7d" && !sevenDay) {
-				sevenDay = {
-					percent: candidate.fraction * 100,
-					resetHours:
-						typeof candidate.resetsAt === "number"
-							? Math.max(0, Math.round((candidate.resetsAt - now) / 3_600_000))
-							: undefined,
-				};
-			}
-			if (candidate.windowClass === "monthly") {
-				const priority = cursorMonthlyPriority(candidate.id);
-				if (priority < monthlyPriority) {
-					monthly = {
-						percent: candidate.fraction * 100,
-						resetHours:
-							typeof candidate.resetsAt === "number"
-								? Math.max(0, Math.round((candidate.resetsAt - now) / 3_600_000))
-								: undefined,
-					};
-					monthlyPriority = priority;
-				}
-			}
-		}
-		if (!fiveHour && !daily && !sevenDay && !monthly && !resetCredits) return null;
-		return { tier: selectedGroup.tier, fiveHour, daily, sevenDay, monthly, resetCredits };
-	}
-
 	/**
 	 * Used-tokens / context-window totals for the status-line context% segment,
 	 * memoized so the per-event redraw stays O(1) when nothing changed.
@@ -2563,7 +1964,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 * last assistant's real prompt-token count — so the bar matches the provider
 	 * and the `/context` panel — and reports `null` while that count is unknown
 	 * (right after compaction, before the next response). Exposed (non-private)
-	 * for unit tests and the collab host's state broadcast.
+	 * for context inspection and tests.
 	 */
 	getCachedContextBreakdown(): { usedTokens: number; contextWindow: number } {
 		const messages = this.session.messages ?? EMPTY_MESSAGES;
@@ -2637,7 +2038,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const state = this.session.state;
 
 		// Trigger background fetch (5-min TTL); render uses cached value
-		this.refreshUsageInBackground();
 
 		// Get usage statistics
 		const aggregateUsageStats = this.session.sessionManager?.getUsageStatistics() ?? {
@@ -2659,20 +2059,12 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 
 		let contextWindow = state.model?.contextWindow ?? this.session.model?.contextWindow ?? 0;
 		const breakdown = this.getCachedContextBreakdown();
-		let contextTokens = breakdown.usedTokens;
+		const contextTokens = breakdown.usedTokens;
 		contextWindow = breakdown.contextWindow || contextWindow;
-		let contextPercent: number | null =
+		const contextPercent: number | null =
 			contextWindow > 0 && !this.#contextUsageCache?.percentUnknown
 				? (breakdown.usedTokens / contextWindow) * 100
 				: null;
-		// Collab guest: context comes from the host's state frames — the local
-		// replica does no accounting of its own.
-		const collabState = this.#collabStatus?.stateOverride;
-		if (collabState?.contextUsage) {
-			contextWindow = collabState.contextUsage.contextWindow || contextWindow;
-			contextTokens = collabState.contextUsage.tokens ?? contextTokens;
-			contextPercent = collabState.contextUsage.percent ?? contextPercent;
-		}
 
 		const shouldResolveActiveRepo = this.#gitEnabled() && (includePath || includeGit || includePr);
 		const projectDir = getProjectDir();
@@ -2719,9 +2111,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			goalStatusInFooter: this.#goalModeStatus ? this.host.goalStatusInFooter(this.session) : false,
 			vibeMode: this.#vibeModeStatus,
 			vim: this.#vimStatus,
-			collab: this.#collabStatus,
-			stream: this.#streamStatus,
-			recording: this.#recording,
 			usageStats,
 			contextPercent,
 			contextTokens,
@@ -2743,7 +2132,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				pr: gitPr,
 			},
 			worktree: activeRepoCache.worktree,
-			usage: this.#cachedUsage,
 			promptCache,
 		};
 	}
@@ -2902,10 +2290,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		target.isAutoThinking = this.session.isAutoThinking;
 		target.isFastModeActive =
 			typeof this.session.isFastModeActive === "function" ? this.session.isFastModeActive() : false;
-		target.anthropicSlowModeLabel =
-			typeof this.session.getAnthropicSlowModeLabel === "function"
-				? this.session.getAnthropicSlowModeLabel()
-				: undefined;
 		target.compactionSpeculation = this.session.compactionSpeculation;
 		target.jobWidgetRef = this.#latestJobWidget()?.view;
 	}
@@ -2966,7 +2350,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			left.isStreaming === right.isStreaming &&
 			left.isAutoThinking === right.isAutoThinking &&
 			left.isFastModeActive === right.isFastModeActive &&
-			left.anthropicSlowModeLabel === right.anthropicSlowModeLabel &&
 			left.compactionSpeculation === right.compactionSpeculation &&
 			left.jobWidgetRef === right.jobWidgetRef
 		);
@@ -3300,7 +2683,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 				// Preserve the current working directory as long as possible. The
 				// previous right-to-left pop could collapse a normal-width bar to
 				// just the model segment, hiding the path before less-critical left
-				// segments such as model/mode/collab were removed.
+				// segments such as model/mode were removed.
 				for (let i = leftSegIds.length - 1; i >= 0; i--) {
 					if (leftSegIds[i] !== "path") return i;
 				}

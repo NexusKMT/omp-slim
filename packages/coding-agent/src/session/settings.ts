@@ -1,19 +1,12 @@
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { combine, effect, register, type SettingValueOf } from "../config/registry";
 import {
-	SERVICE_TIER_ANTHROPIC_OPTIONS,
-	SERVICE_TIER_ANTHROPIC_VALUES,
-	SERVICE_TIER_GOOGLE_OPTIONS,
-	SERVICE_TIER_GOOGLE_VALUES,
 	SERVICE_TIER_INHERIT_OPTIONS,
 	SERVICE_TIER_INHERIT_SETTING_VALUES,
 	SERVICE_TIER_OPENAI_OPTIONS,
 	SERVICE_TIER_OPENAI_VALUES,
 } from "../config/service-tier";
 import { DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS, MAX_WEB_SEARCH_TIMEOUT_SECONDS } from "../web/search/types";
-import { DEFAULT_USAGE_RESERVE_PCT } from "@oh-my-pi/pi-ai/auth-storage";
-import { configureProviderStoreResponses } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
-import { configureCodexAccessPrograms } from "@oh-my-pi/pi-ai/providers/openai-codex/access-programs";
 import { configureProviderMaxInFlightRequests } from "@oh-my-pi/pi-ai/stream";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
@@ -553,36 +546,6 @@ export const cfgTierOpenai = register({
 	},
 });
 
-export const cfgTierAnthropic = register({
-	id: "tier.anthropic",
-	type: "enum",
-	values: SERVICE_TIER_ANTHROPIC_VALUES,
-	default: "none",
-	ui: {
-		tab: "model",
-		group: "Sampling",
-		label: "Service Tier — Anthropic",
-		description:
-			'Processing tier for Claude requests. `priority` realizes fast mode (`speed: "fast"`) on supported direct Anthropic models; ignored on Bedrock/Vertex Claude and via OpenRouter.',
-		options: SERVICE_TIER_ANTHROPIC_OPTIONS,
-	},
-});
-
-export const cfgTierGoogle = register({
-	id: "tier.google",
-	type: "enum",
-	values: SERVICE_TIER_GOOGLE_VALUES,
-	default: "none",
-	ui: {
-		tab: "model",
-		group: "Sampling",
-		label: "Service Tier — Google",
-		description:
-			"Processing tier for Gemini (Google AI Studio + Vertex) requests, and Google-family models routed via OpenRouter (none = omit). Sent as the top-level `serviceTier` field.",
-		options: SERVICE_TIER_GOOGLE_OPTIONS,
-	},
-});
-
 export const cfgTierSubagent = register({
 	id: "tier.subagent",
 	type: "enum",
@@ -652,79 +615,16 @@ export const cfgRetryMaxDelayMs = register({
 	},
 });
 
-export const cfgRetryWaitForUsageReset = register({
-	id: "retry.waitForUsageReset",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "model",
-		group: "Retry",
-		label: "Wait For Usage Reset",
-		get description() {
-			return `When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable (${formatKeyHint("escape")}) but also hold subagents, so leave off for unattended runs.`;
-		},
-	},
-});
-
-export const cfgRetryUsageReservePct = register({
-	id: "retry.usageReservePct",
-	type: "number",
-	default: DEFAULT_USAGE_RESERVE_PCT,
-	ui: {
-		tab: "model",
-		group: "Retry",
-		label: "Reserve Margin",
-		description:
-			"Prefer another account for the current model below this remaining percentage. Unknown or unmapped usage does not change the model.",
-		options: [
-			{ value: "5", label: "5%", description: "Act only when nearly exhausted" },
-			{ value: "10", label: "10%", description: "Balanced safety margin" },
-			{ value: "15", label: "15%", description: "Conservative" },
-			{ value: "20", label: "20%", description: "Early protection" },
-			{ value: "25", label: "25%", description: "Very conservative" },
-		],
-	},
-});
-
 /** Retry/backoff and same-model account reserve policy. */
 export const cfgRetry = combine({
 	enabled: cfgRetryEnabled,
 	maxRetries: cfgRetryMaxRetries,
 	baseDelayMs: cfgRetryBaseDelayMs,
 	maxDelayMs: cfgRetryMaxDelayMs,
-	waitForUsageReset: cfgRetryWaitForUsageReset,
-	usageReservePct: cfgRetryUsageReservePct,
 });
 
 /** Retry/backoff policy ({@link cfgRetry}). */
 export type RetrySettings = SettingValueOf<typeof cfgRetry>;
-
-/**
- * Anthropic subscription slow mode (`off` | `auto`). Deliberately has no
- * `/settings` UI: `/slow on|off` on an Anthropic model is the only switch.
- * `auto` switches to low priority automatically when a Claude subscription
- * hits its 5-hour limit and Anthropic offers it. Wrap-up allowance tracking
- * runs either way; this only gates the low-priority lane.
- */
-export const cfgProvidersAnthropicSlowMode = register({
-	id: "providers.anthropic.slowMode",
-	type: "enum",
-	values: ["off", "auto"] as const,
-	default: "off" as const,
-});
-
-// Provider selection
-export const cfgProvidersOllamaCloudMaxConcurrency = register({
-	id: "providers.ollama-cloud.maxConcurrency",
-	type: "number",
-	default: 3,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Ollama Cloud Max Concurrency",
-		description: "Maximum concurrent Ollama Cloud subagent runs per process; 0 disables the provider-specific limit",
-	},
-});
 
 export const cfgProvidersWebSearchTimeoutSeconds = register({
 	id: "providers.webSearchTimeoutSeconds",
@@ -741,58 +641,6 @@ export const cfgProvidersWebSearchTimeoutSeconds = register({
 			{ value: "120", label: "2 minutes" },
 			{ value: "180", label: "3 minutes" },
 			{ value: "300", label: "5 minutes" },
-		],
-	},
-});
-
-export const cfgProvidersAntigravityEndpoint = register({
-	id: "providers.antigravityEndpoint",
-	type: "enum",
-	values: ["auto", "production", "sandbox"] as const,
-	default: "auto",
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Antigravity Endpoint Mode",
-		description: "Endpoint routing strategy for google-antigravity providers (chat, search, image, discovery)",
-		options: [
-			{
-				value: "auto",
-				label: "Auto",
-				description: "Try production endpoint, fail over to sandbox on 5xx/429",
-			},
-			{
-				value: "production",
-				label: "Production Only",
-				description: "Force production endpoint only",
-			},
-			{
-				value: "sandbox",
-				label: "Sandbox Only",
-				description: "Force sandbox endpoint only",
-			},
-		],
-	},
-});
-
-export const cfgProvidersFireworksTier = register({
-	id: "providers.fireworksTier",
-	type: "enum",
-	values: ["standard", "priority"] as const,
-	default: "standard",
-	ui: {
-		tab: "providers",
-		group: "Fireworks",
-		label: "Fireworks Tier",
-		description:
-			'Serving path for Fireworks requests. Priority sends `service_tier: "priority"` for higher reliability during peak traffic at a higher price; Standard omits it. Fast (`-fast`) models ignore this — Fast is its own serving path.',
-		options: [
-			{ value: "standard", label: "Standard", description: "Default serving path (no service_tier)" },
-			{
-				value: "priority",
-				label: "Priority",
-				description: "Priority serving path: higher reliability, premium per-token pricing",
-			},
 		],
 	},
 });
@@ -818,161 +666,11 @@ export const cfgFeaturesUnexpectedStopDetection = register({
 	},
 });
 
-export const cfgProvidersKimiApiFormat = register({
-	id: "providers.kimiApiFormat",
-	type: "enum",
-	values: ["auto", "openai", "anthropic"] as const,
-	default: "auto",
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "Kimi API Format",
-		description: "API format for Kimi Code provider (auto follows live model metadata)",
-		options: [
-			{ value: "auto", label: "Auto", description: "Use the model's server-declared protocol" },
-			{ value: "openai", label: "OpenAI", description: "api.kimi.com" },
-			{ value: "anthropic", label: "Anthropic", description: "api.moonshot.ai" },
-		],
-	},
-});
-
-export const cfgProvidersOpenaiWebsockets = register({
-	id: "providers.openaiWebsockets",
-	type: "enum",
-	values: ["auto", "off", "on"] as const,
-	default: "auto",
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "OpenAI Codex WebSockets",
-		description: "WebSocket policy for OpenAI Codex models only",
-		options: [
-			{ value: "auto", label: "Auto", description: "Use Codex model defaults" },
-			{ value: "off", label: "Off", description: "Disable WebSockets for OpenAI Codex models" },
-			{ value: "on", label: "On", description: "Force websockets for OpenAI Codex models" },
-		],
-	},
-});
-
-export const cfgProvidersOpenaiResponsesWebsockets = register({
-	id: "providers.openaiResponsesWebsockets",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "OpenAI Responses WebSockets",
-		description: "Opt in for catalog-supported standard Responses models; model or request false disables it",
-	},
-});
-
-export const cfgProvidersOpenaiLiveSteering = register({
-	id: "providers.openaiLiveSteering",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "OpenAI Live Steering",
-		description:
-			"Deliver messages typed while a GPT-6 response streams into that response over the Codex WebSocket, instead of waiting for the next tool boundary",
-	},
-});
-
-export const cfgProvidersMuseCodeStoreResponses = register({
-	id: "providers.muse-code.storeResponses",
-	type: "boolean",
-	default: false,
-	env: "PI_MUSE_STORE_RESPONSES",
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "Muse Code Stored Responses",
-		description:
-			"Store Muse Code results on Meta's servers so a turn whose connection drops is recovered instead of re-run. Stored runs keep prompts and outputs on Meta's side.",
-	},
-});
 // Process-wide too, so side requests that call `completeSimple`/`streamSimple`
 // directly (titles, commit messages) follow the setting.
-effect(cfgProvidersMuseCodeStoreResponses, enabled => configureProviderStoreResponses({ "muse-code": enabled }));
 
-export const cfgProvidersOpenaiCodexDaybreak = register({
-	id: "providers.openai-codex.daybreak",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "Codex Daybreak Blue",
-		description:
-			"Automatically request the Daybreak Blue cyber access program on ChatGPT accounts eligible for it. OpenAI may use content from Daybreak Blue sessions to improve its models. Does not cover dedicated Daybreak Blue models (gpt-daybreak-blue-*), which may still run as Daybreak sessions.",
-	},
-});
 // Sessions pass their own value per request; this process-wide default covers
 // callers without a session stream function (titles, commit messages).
-effect(cfgProvidersOpenaiCodexDaybreak, enabled => configureCodexAccessPrograms(enabled));
-
-export const cfgProvidersCacheRetention = register({
-	id: "providers.cacheRetention",
-	type: "enum",
-	values: ["auto", "short", "long", "none"] as const,
-	default: "auto",
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "Prompt Cache Retention",
-		description:
-			"Prompt-cache retention forwarded to providers that support it (Anthropic, Bedrock, OpenRouter, OpenAI)",
-		options: [
-			{
-				value: "auto",
-				label: "Auto",
-				description:
-					"Provider default — Anthropic OAuth subscriber sessions default to 1h, API keys use 5m; PI_CACHE_RETENTION still applies",
-			},
-			{
-				value: "short",
-				label: "Short (5m)",
-				description: "Cheapest cache writes; pair with cache warming to keep short entries alive while idle",
-			},
-			{
-				value: "long",
-				label: "Long (1h+)",
-				description:
-					"Longer TTL where supported (Anthropic/Bedrock 1h, OpenAI GPT-5.6+ Responses 12h); pricier writes, only warmed during active runs",
-			},
-			{ value: "none", label: "Off", description: "Disable prompt caching and cache-affinity routing" },
-		],
-	},
-});
-
-export const cfgProvidersCacheWarming = register({
-	id: "providers.cacheWarming",
-	type: "enum",
-	values: ["off", "streaming", "idle"] as const,
-	default: "idle",
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "Cache Warming",
-		description:
-			"Re-send the last request with a one-token output budget shortly before its prompt-cache entry expires",
-		options: [
-			{ value: "off", label: "Off", description: "Disable cache warming" },
-			{
-				value: "streaming",
-				label: "Streaming",
-				description: "Protect expensive prefixes during long tool executions; stops when the agent settles",
-			},
-			{
-				value: "idle",
-				label: "Idle",
-				description:
-					"Also refresh 5-minute entries between runs while the expected savings stay above the cost floor",
-			},
-		],
-	},
-});
 
 export const cfgProvidersStreamFirstEventTimeoutSeconds = register({
 	id: "providers.streamFirstEventTimeoutSeconds",
@@ -1014,31 +712,6 @@ export const cfgProvidersStreamIdleTimeoutSeconds = register({
 	},
 });
 
-export const cfgProvidersOpenrouterVariant = register({
-	id: "providers.openrouterVariant",
-	type: "enum",
-	values: ["default", "nitro", "floor", "online", "exacto"] as const,
-	default: "default",
-	ui: {
-		tab: "providers",
-		group: "Protocol",
-		label: "OpenRouter Routing",
-		description:
-			"Default routing-variant suffix appended to OpenRouter model IDs (overridden when the selector already names a variant)",
-		options: [
-			{ value: "default", label: "Default", description: "No suffix; use OpenRouter's default routing" },
-			{ value: "nitro", label: ":nitro", description: "Prioritize throughput / lowest latency" },
-			{ value: "floor", label: ":floor", description: "Prioritize cheapest available provider" },
-			{ value: "online", label: ":online", description: "Enable OpenRouter's web-search plugin" },
-			{
-				value: "exacto",
-				label: ":exacto",
-				description: "Cherry-picked high-quality providers (only defined for select models)",
-			},
-		],
-	},
-});
-
 export const cfgProvidersFetch = register({
 	id: "providers.fetch",
 	type: "enum",
@@ -1065,152 +738,7 @@ export const cfgProvidersFetch = register({
 	},
 });
 
-// Codex saved rate-limit resets (auto-redeem)
-export const cfgCodexResetsAutoRedeem = register({
-	id: "codexResets.autoRedeem",
-	type: "enum",
-	values: ["unset", "yes", "no"] as const,
-	default: "unset" as const,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Codex Auto-Redeem Saved Resets",
-		description:
-			"Spend saved Codex rate-limit resets automatically: restore an account blocked by an exhausted 5h or weekly window when a turn is stuck and no other account can take over, and salvage credits that are about to expire. unset asks before the first spend (with no prompt UI, it spends only a reset expiring within 5 minutes), yes spends without prompting, and no disables both checks.",
-		options: [
-			{
-				value: "unset",
-				label: "Unset",
-				description:
-					"Check eligibility, then ask before spending the first saved reset. With no prompt UI, spend only a reset expiring within 5 minutes.",
-			},
-			{ value: "yes", label: "Yes", description: "Spend eligible saved resets without prompting." },
-			{ value: "no", label: "No", description: "Do not run the saved-reset auto-redeem check." },
-		],
-	},
-});
 
-export const cfgCodexResetsMinBlockedMinutes = register({
-	id: "codexResets.minBlockedMinutes",
-	type: "number",
-	default: 60,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Codex Auto-Redeem Min Block",
-		description:
-			"Only auto-redeem when the natural unblock — the latest reset among the exhausted 5h/weekly windows — is at least this many minutes away (don't spend a scarce credit to save a short wait). Raise it (e.g. 360) to ignore 5h-only blocks.",
-	},
-});
-
-export const cfgCodexResetsKeepCredits = register({
-	id: "codexResets.keepCredits",
-	type: "number",
-	default: 0,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Codex Auto-Redeem Reserve",
-		description:
-			"Never auto-spend below this many saved resets (0 = the last credit may be spent automatically). Credits about to expire are exempt — a reserved credit that expires preserves nothing.",
-	},
-});
-
-export const cfgCodexResetsSalvageHorizonHours = register({
-	id: "codexResets.salvageHorizonHours",
-	type: "number",
-	default: 12,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Codex Reset Salvage Horizon",
-		description:
-			"With auto-redeem enabled, spend a saved Codex reset within this many hours of expiry when either chat window has meaningful usage. 0 disables early salvage; credits expiring within 5 minutes are still attempted regardless of usage.",
-	},
-});
-
-/** Codex saved-reset auto-redeem policy (`codexResets.*`). */
-export const cfgCodexResets = combine({
-	autoRedeem: cfgCodexResetsAutoRedeem,
-	minBlockedMinutes: cfgCodexResetsMinBlockedMinutes,
-	keepCredits: cfgCodexResetsKeepCredits,
-	salvageHorizonHours: cfgCodexResetsSalvageHorizonHours,
-});
-
-/** Whether automatic reset redemption asks first, spends, or remains disabled. */
-export type ResetAutoRedeemMode = SettingValueOf<typeof cfgCodexResetsAutoRedeem>;
-
-// Claude Cedar/Juniper rate-limit resets (independent auto-redeem consent)
-export const cfgClaudeResetsAutoRedeem = register({
-	id: "claudeResets.autoRedeem",
-	type: "enum",
-	values: ["unset", "yes", "no"] as const,
-	default: "unset" as const,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Claude Auto-Redeem Resets",
-		description:
-			"Spend eligible Claude Cedar or Juniper resets automatically. Cedar is spent only for covered limits; Juniper can only recover a sole 5-hour block. unset asks before the first spend (with no prompt UI, it spends only a reset expiring within 5 minutes), yes spends without prompting, and no disables blocked recovery and expiry salvage.",
-		options: [
-			{
-				value: "unset",
-				label: "Unset",
-				description:
-					"Check live eligibility, then ask before spending the first Claude reset. With no prompt UI, spend only a reset expiring within 5 minutes.",
-			},
-			{ value: "yes", label: "Yes", description: "Spend eligible Claude resets without prompting." },
-			{ value: "no", label: "No", description: "Do not run Claude reset auto-redeem checks." },
-		],
-	},
-});
-
-export const cfgClaudeResetsMinBlockedMinutes = register({
-	id: "claudeResets.minBlockedMinutes",
-	type: "number",
-	default: 60,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Claude Auto-Redeem Min Block",
-		description:
-			"Only auto-redeem when the natural unblock — the latest reset among the exhausted covered windows — is at least this many minutes away. A 5-hour-only reset is never used for a weekly or model-scoped block.",
-	},
-});
-
-export const cfgClaudeResetsKeepCredits = register({
-	id: "claudeResets.keepCredits",
-	type: "number",
-	default: 0,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Claude Auto-Redeem Reserve",
-		description:
-			"Keep at least this many Claude resets banked (0 allows the last eligible reset to be spent automatically). The reserve applies to early salvage, but not to eligible resets expiring within 5 minutes.",
-	},
-});
-
-export const cfgClaudeResetsSalvageHorizonHours = register({
-	id: "claudeResets.salvageHorizonHours",
-	type: "number",
-	default: 12,
-	ui: {
-		tab: "providers",
-		group: "Services",
-		label: "Claude Reset Salvage Horizon",
-		description:
-			"With auto-redeem enabled, use a server-selected Cedar reset within this many hours of expiry when its covered windows have meaningful usage. 0 disables early salvage; eligible Cedar or Juniper resets expiring within 5 minutes are still attempted regardless of usage or reserve. Provider limit requirements still apply.",
-	},
-});
-
-/** Claude reset auto-redeem policy (`claudeResets.*`), independent of {@link cfgCodexResets}. */
-export const cfgClaudeResets = combine({
-	autoRedeem: cfgClaudeResetsAutoRedeem,
-	minBlockedMinutes: cfgClaudeResetsMinBlockedMinutes,
-	keepCredits: cfgClaudeResetsKeepCredits,
-	salvageHorizonHours: cfgClaudeResetsSalvageHorizonHours,
-});
 
 export const cfgProviderAppendOnlyContext = register({
 	id: "provider.appendOnlyContext",

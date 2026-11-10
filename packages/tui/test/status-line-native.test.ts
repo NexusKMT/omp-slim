@@ -29,7 +29,6 @@ function statusLine(settings: StatusLineSettings, gitEnabled = false): StatusLin
 		gitEnabled,
 		autoThinking: false,
 		fastMode: false,
-		usingSubscription: false,
 		autoCompactEnabled: false,
 		compactionBoundaries: null,
 	});
@@ -169,7 +168,6 @@ function cacheStatusLine(
 			getSessionId: () => "",
 			getUsageStatistics: () => NO_USAGE,
 		},
-		modelRegistry: { isUsingSubscription: () => false },
 		getContextUsage: () => undefined,
 		autoResolvedThinkingLevel: () => undefined,
 		isFastModeActive: () => false,
@@ -180,18 +178,13 @@ function cacheStatusLine(
 	const host: StatusLineHost = {
 		getSettings: () => settings,
 		gitEnabled: () => false,
-		codexResetFireworksEnabled: () => false,
 		getSettingsRevision: () => 0,
 		getSessionSettingsIdentity: () => undefined,
 		getSessionSettingsRevision: () => 0,
 		goalStatusInFooter: () => false,
-		activeAccount: () => undefined,
-		canFetchUsageReports: () => false,
-		fetchUsageReports: async () => null,
 		resolveActiveRepo: () => null,
 		lookupPullRequest: async () => ({ stdout: "", exitCode: 1 }),
 		calculateTokensPerSecond: () => null,
-		limitMatchesActiveAccount: () => false,
 		computeCompactionBoundaries: () => null,
 	};
 	return new StatusLineComponent(session, host);

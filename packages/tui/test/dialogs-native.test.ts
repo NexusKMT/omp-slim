@@ -1,12 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
-import { setKeybindings, type Component, type TerminalFrameProvider, type TUI } from "@oh-my-pi/pi-tui";
+import { setKeybindings, type Component, type TerminalFrameProvider } from "@oh-my-pi/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { md } from "@oh-my-pi/pi-tui/native/describe";
 import type { DescribeContext, NativeChild, NativeNode, NativeSurfaceProvider } from "@oh-my-pi/pi-tui/native/node";
 import { AskDialogComponent, type ExtensionAskDialogQuestion } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
 import { APPROVE_ARM_MS, ApprovalDialogComponent } from "@oh-my-pi/pi-tui/overlays/approval-dialog";
-import { LoginDialogComponent } from "@oh-my-pi/pi-tui/overlays/login-dialog";
 import { PlanReviewOverlay } from "@oh-my-pi/pi-tui/overlays/plan-review-overlay";
 import { setNativeRendering } from "@oh-my-pi/pi-tui/native/state";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-tui/theme";
@@ -617,37 +616,5 @@ describe("dialogs under a native surface", () => {
 			setNativeRendering(false);
 		}
 		expect(onPick).toHaveBeenCalledWith("Refine");
-	});
-
-	it("login: Cancel runs Esc's path and Continue submits the pasted code", async () => {
-		const tui = { requestRender() {}, setFocus() {} } as unknown as TUI;
-		const onComplete = vi.fn();
-		const dialog = new LoginDialogComponent(tui, "openai-codex", onComplete, () => {});
-		dialog.showAuth("https://auth.example.com/authorize?x=1", "Enter code: ABCD-1234");
-		const waiting = dialog.describe();
-		// The device code copies itself; with nothing to answer, opening the page is the primary action.
-		expect(find(waiting, node => node.p?.role === "omp.login.code")?.node.p).toMatchObject({
-			actions: { click: "copy" },
-			href: "ABCD-1234",
-		});
-		expect(find(waiting, node => node.p?.actions?.click === "open")?.node.p).toMatchObject({
-			href: "https://auth.example.com/authorize?x=1",
-			tone: "accent",
-		});
-		expect(find(waiting, node => node.p?.actions?.click === "submit")).toBeUndefined();
-
-		const pending = dialog.showManualInput("Paste the authorization code:");
-		const described = dialog.describe();
-		// A field waiting for an answer takes the primary action; Open stays as a plain button.
-		expect(find(described, node => node.p?.actions?.click === "submit")?.node.p).toMatchObject({ tone: "accent" });
-		expect(find(described, node => node.p?.actions?.click === "open")?.node.p?.tone).toBeUndefined();
-		dialog.pasteText("code-123");
-		dialog.handleNativeEvent({ type: "action", key: "x", act: "submit", mods: [] });
-		expect(await pending).toBe("code-123");
-
-		const cancelled = dialog.showManualInput("Paste the authorization code:");
-		dialog.handleNativeEvent({ type: "action", key: "x", act: "cancel", mods: [] });
-		await expect(cancelled).rejects.toThrow("Login cancelled");
-		expect(onComplete).toHaveBeenCalledWith(false, "Login cancelled");
 	});
 });

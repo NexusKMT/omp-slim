@@ -1,16 +1,9 @@
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Tool, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
+import type { Tool } from "@oh-my-pi/pi-ai";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
 import type { JobWidgetEntry } from "../tools/job-widget";
 import type { CompactionBoundaries } from "./context-usage";
-import type { StatusLineSettings, StatusResetExpiry } from "./types";
-
-export interface StatusAccountIdentity {
-	accountId?: string;
-	email?: string;
-	projectId?: string;
-	orgId?: string;
-}
+import type { StatusLineSettings } from "./types";
 
 /** Nested repository selected as the active workspace context. */
 export interface ActiveRepoContext {
@@ -96,21 +89,15 @@ export interface StatusLineSession {
 			subagentCost?: number;
 		};
 	};
-	modelRegistry: {
-		isUsingSubscription(model: Model): boolean;
-	};
 	getContextUsage(): { tokens: number; contextWindow: number; percent: number | null } | undefined;
 	autoResolvedThinkingLevel(): string | undefined;
 	isFastModeActive(): boolean;
-	/** Anthropic usage-limit label (`limit reached · wrapping up · resets 14:30`, `low priority until 14:30 · 62% left`). */
-	getAnthropicSlowModeLabel?(): string | undefined;
 	getAsyncJobSnapshot(): { running: readonly { type: string; agentId?: string }[] } | null | undefined;
 	/** Widgets of the running background jobs, in job order; the jobs segment appends the freshest one's glance. */
 	getRunningJobWidgets?(): readonly JobWidgetEntry[];
 	getGoalModeState(): { goal?: { status: string; tokensUsed: number; tokenBudget?: number } } | undefined;
 	getAdvisorStatusOverview?(): { configured: boolean; advisors: readonly { status: string; yielded: boolean }[] };
 	getAdvisorCost?(): number;
-	isAdvisorUsingSubscription?(): boolean;
 	/**
 	 * What the next request finds in the prompt cache at `nowMs`; undefined when there is nothing to reason about.
 	 * `nextTokens` is the caller's current context token count, so the session need not recount it.
@@ -123,7 +110,6 @@ export interface FooterSession {
 	isAutoThinking: boolean;
 	autoResolvedThinkingLevel(): string | undefined;
 	getContextUsage: StatusLineSession["getContextUsage"];
-	modelRegistry: Pick<StatusLineSession["modelRegistry"], "isUsingSubscription">;
 	/**
 	 * Cumulative session rollup. Unlike the active-window stats it spans every
 	 * entry in the session, so compaction does not reset the counters, and it
@@ -139,25 +125,13 @@ export interface FooterSession {
 export interface StatusLineHost<TSession extends StatusLineSession = StatusLineSession> {
 	getSettings(): StatusLineSettings;
 	gitEnabled(): boolean;
-	codexResetFireworksEnabled(): boolean;
 	getSettingsRevision(): number;
 	getSessionSettingsIdentity(session: TSession): unknown;
 	getSessionSettingsRevision(session: TSession): number;
 	goalStatusInFooter(session: TSession): boolean;
-	activeAccount(session: TSession, provider: string): StatusAccountIdentity | undefined;
-	canFetchUsageReports(session: TSession): boolean;
-	fetchUsageReports(session: TSession, signal: AbortSignal): Promise<unknown>;
 	resolveActiveRepo(cwd: string): ActiveRepoContext | null;
 	lookupPullRequest(cwd: string): Promise<{ stdout: string; exitCode: number }>;
 	calculateTokensPerSecond(messages: readonly AgentMessage[], isStreaming: boolean): number | null;
-	limitMatchesActiveAccount(report: UsageReport, limit: UsageLimit, identity: StatusAccountIdentity): boolean;
-	classifyResetExpiry?(report: UsageReport, nowMs: number): StatusResetExpiry | undefined;
-	/**
-	 * One-line warning for saved resets anywhere in the pool that are about to expire.
-	 * The host owns deduplication: a returned warning counts as shown, so each saved
-	 * reset is warned about once, not once per refresh or conversation.
-	 */
-	resetExpiryNotice?(session: TSession, reports: readonly UsageReport[], nowMs: number): string | undefined;
 	computeCompactionBoundaries(session: TSession, contextWindow: number, model?: Model): CompactionBoundaries | null;
 }
 

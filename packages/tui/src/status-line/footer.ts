@@ -179,8 +179,7 @@ export class FooterComponent implements Component {
 		// Cumulative usage: the session manager's running rollup spans every entry
 		// in the session (so it survives compaction) and already folds in the usage
 		// completed `task` tool results carry, which is where subagent spend lands.
-		const { input, output, cacheRead, cacheWrite, cost, premiumRequests } =
-			this.session.sessionManager.getUsageStatistics();
+		const { input, output, cacheRead, cacheWrite, cost } = this.session.sessionManager.getUsageStatistics();
 		const segs: NativeNode[] = [];
 		const seg = (key: string, props: TspProps<"seg">): void => {
 			segs.push(node("seg", { role: `omp.footer.${key}`, ...props }, undefined, key));
@@ -198,8 +197,7 @@ export class FooterComponent implements Component {
 		for (const [key, glyph, amount] of counters) {
 			if (amount) seg(key, { side: "left", priority: 1, spans: [span(`${glyph}${formatNumber(amount)}`, "dim")] });
 		}
-		const usingSubscription = state.model ? this.session.modelRegistry.isUsingSubscription(state.model) : false;
-		const billing = formatBillingSummary({ cost, usingSubscription, premiumRequests, fractionDigits: 3 }, theme);
+		const billing = formatBillingSummary({ cost, fractionDigits: 3 }, theme);
 		if (billing) seg("cost", { side: "left", priority: 3, spans: [span(billing, "dim")] });
 		const contextUsage = this.session.getContextUsage();
 		const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
@@ -255,7 +253,6 @@ export class FooterComponent implements Component {
 			cacheRead: totalCacheRead,
 			cacheWrite: totalCacheWrite,
 			cost: totalCost,
-			premiumRequests: totalPremiumRequests,
 		} = this.session.sessionManager.getUsageStatistics();
 		// Calculate context usage from session (handles compaction correctly).
 		// After compaction, tokens are unknown until the next LLM response.
@@ -301,13 +298,9 @@ export class FooterComponent implements Component {
 			if (part !== undefined) statsParts.push(part);
 		}
 
-		// Show billing summary with subscription and premium-request indicators
-		const usingSubscription = state.model ? this.session.modelRegistry.isUsingSubscription(state.model) : false;
+		// Show the accumulated cost.
 		const { auto: autoIcon } = theme.icon;
-		const billing = formatBillingSummary(
-			{ cost: totalCost, usingSubscription, premiumRequests: totalPremiumRequests, fractionDigits: 3 },
-			theme,
-		);
+		const billing = formatBillingSummary({ cost: totalCost, fractionDigits: 3 }, theme);
 		if (billing) statsParts.push(billing);
 		// Colorize context percentage based on usage
 		let contextPercentStr: string;

@@ -63,9 +63,6 @@ async function main(): Promise<void> {
 	// placeholders (stats client archive, docs index) even on failure.
 	try {
 		await runCommand(["bun", "--cwd=../stats", "run", "gen:stats"]);
-		// Embed the same generated viewer used by source exports.
-		// Generate here too for clean checkouts that skipped install hooks.
-		await runCommand(["bun", "--cwd=../collab-web", "run", "gen:export-viewer"]);
 		await compileCodingAgent({
 			repoRoot,
 			entrypoint: path.join(packageDir, "src", "cli.ts"),

@@ -1,19 +1,17 @@
 /**
  * Focused subagent views are chat-only, except for viewer-scoped commands: `/btw`
- * asks a side question about the focused transcript, `/export` writes the focused
- * agent's own transcript (with its nested subagents), `/jobs` lists the focused
+ * asks a side question about the focused transcript, `/jobs` lists the focused
  * agent's background jobs, `/usage` reports account-wide limits, and `/effort`
  * adjusts the focused agent's thinking. Model selection belongs to the main
  * session. Everything else, and mutating forms such as `/usage reset` and
  * `/jobs kill`, still requires returning to main.
  *
  * Failure mode if this regresses: these commands silently do nothing (or steer the
- * agent) in a focused view, `/export` writes the main session instead of the viewed
- * one, an agent selects a different model, or its thinking change lands on main.
+ * agent) in a focused view, an agent selects a different model, or its thinking
+ * change lands on main.
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { beginSettingsTest, restoreSettingsTestState } from "./helpers/settings-test-state";
@@ -56,14 +54,12 @@ function createFocusedContext() {
 		focusedAgentId: "Worker",
 		skillCommands: new Map(),
 		fileSlashCommands: new Set<string>(),
-		collabGuest: false,
 		compactionQueuedMessages: [],
 		locallySubmittedUserSignatures: new Set<string>(),
 		showStatus: vi.fn(),
 		showError: vi.fn(),
 		updatePendingMessagesDisplay: vi.fn(),
 		handleUsageCommand: vi.fn(async () => {}),
-		handleExportCommand: vi.fn(async () => {}),
 		handleBtwCommand: vi.fn(async () => {}),
 		handleJobsCommand: vi.fn(async () => {}),
 		showResetUsageSelector: vi.fn(async () => {}),
@@ -112,12 +108,6 @@ describe("focused subagent view slash commands", () => {
 			expect(raw.handleJobsCommand).toHaveBeenCalledWith({ full });
 			expect(prompt).not.toHaveBeenCalled();
 		}
-	});
-
-	it("runs /export with its arguments from the focused view", async () => {
-		const { raw, prompt } = await submit("/export out.html");
-		expect(raw.handleExportCommand).toHaveBeenCalledWith("/export out.html");
-		expect(prompt).not.toHaveBeenCalled();
 	});
 
 	it("runs /btw with its question from the focused view instead of steering the agent", async () => {
@@ -257,26 +247,5 @@ describe("focused subagent view slash commands", () => {
 			expect(raw.showStatus).toHaveBeenCalled();
 			expect(editor.getText()).toBe(text);
 		}
-	});
-
-	it("exports the viewed (focused) session rather than the main session", async () => {
-		const mainExport = vi.fn(async () => "main.html");
-		const viewExport = vi.fn(async () => "worker.html");
-		const showStatus = vi.fn();
-		const ctx = {
-			session: { exportToHtml: mainExport },
-			viewSession: { exportToHtml: viewExport },
-			showStatus,
-			showError: vi.fn(),
-			showWarning: vi.fn(),
-		} as unknown as InteractiveModeContext;
-		const controller = new CommandController(ctx);
-		vi.spyOn(controller, "openInBrowser").mockImplementation(() => {});
-
-		await controller.handleExportCommand("/export");
-
-		expect(viewExport).toHaveBeenCalledTimes(1);
-		expect(mainExport).not.toHaveBeenCalled();
-		expect(showStatus).toHaveBeenCalledWith("Session exported to: worker.html");
 	});
 });

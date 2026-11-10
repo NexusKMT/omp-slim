@@ -225,7 +225,7 @@ class ModelSceneController implements SetupSceneController {
 					...rows,
 					state,
 					...(state === "error" && this.#discoveryError !== undefined ? { message: this.#discoveryError } : {}),
-					empty: "No models yet. Skip this step and run /login to sign in to a provider.",
+					empty: "No models configured. Add a Chat Completions endpoint and API key in models.yml, then reopen /model.",
 					actions: [pickerAction("skip", "Skip", "escape", { end: true }), primary],
 				},
 				this.#saveError === undefined
@@ -314,7 +314,7 @@ class ModelSceneController implements SetupSceneController {
 	}
 }
 
-/** Setup step that assigns one available model to the persisted default role. */
+/** Setup step that saves one configured chat model as the default. */
 export const modelSetupScene: SetupScene = {
 	id: "model",
 	title: TITLE,

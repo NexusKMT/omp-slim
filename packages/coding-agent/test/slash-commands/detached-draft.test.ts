@@ -5,14 +5,14 @@ import { createInteractiveModeContext } from "../helpers/interactive-mode-contex
 
 interface Harness {
 	ctx: InteractiveModeContext;
-	toggleRecording: Mock<() => Promise<void>>;
+	handleTraceCommand: Mock<() => Promise<void>>;
 	showError: Mock<(message: string) => void>;
 	editorText(): string;
 }
 
 function createHarness(draft: string): Harness {
 	let text = draft;
-	const toggleRecording = vi.fn(async () => {});
+	const handleTraceCommand = vi.fn(async () => {});
 	const showError = vi.fn((_message: string) => {});
 	const ctx = createInteractiveModeContext({
 		editor: {
@@ -21,14 +21,14 @@ function createHarness(draft: string): Harness {
 				text = next;
 			},
 		},
-		toggleRecording,
+		handleTraceCommand,
 		showError,
 	});
-	return { ctx, toggleRecording, showError, editorText: () => text };
+	return { ctx, handleTraceCommand, showError, editorText: () => text };
 }
 
 const COMMANDS: ReadonlyArray<readonly [string, (h: Harness) => void]> = [
-	["/record", h => expect(h.toggleRecording).toHaveBeenCalledTimes(1)],
+	["/trace", h => expect(h.handleTraceCommand).toHaveBeenCalledTimes(1)],
 	["/skills search", h => expect(h.showError).toHaveBeenCalledWith("Usage: /skills search <query>")],
 ];
 

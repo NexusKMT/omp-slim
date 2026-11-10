@@ -276,7 +276,6 @@ export type SessionHostProtocol = {
 	>;
 	fetchUsageReports: RpcMethod<[signal?: AbortSignal], UsageReport[] | null>;
 	runEphemeralTurn: RpcMethod<[args: EphemeralTurnOptions], EphemeralTurnResult>;
-	exportToHtml: RpcMethod<[outputPath?: string, useUserThemes?: boolean], string>;
 	enableIdleMaintenance: RpcMethod<[options: IdleMaintenanceOptions], void>;
 	refreshIdleMaintenance: RpcMethod<[], void>;
 };

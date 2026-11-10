@@ -98,7 +98,6 @@ export type SymbolKey =
 	| "icon.tokens"
 	| "icon.context"
 	| "icon.cost"
-	| "icon.subscription"
 	| "icon.advisor"
 	| "icon.advisorClosed"
 	| "icon.time"
@@ -154,7 +153,6 @@ export type SymbolKey =
 	| "cmd.stats"
 	| "cmd.news"
 	| "cmd.keyboard"
-	| "cmd.export"
 	| "cmd.clipboard"
 	| "cmd.share"
 	| "cmd.broadcast"
@@ -338,7 +336,6 @@ export type SlashCommandIconName =
 	| "stats"
 	| "news"
 	| "keyboard"
-	| "export"
 	| "clipboard"
 	| "share"
 	| "broadcast"
@@ -483,7 +480,6 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"icon.tokens": "🪙",
 	"icon.context": "◫",
 	"icon.cost": "💲",
-	"icon.subscription": "(sub)",
 	"icon.advisor": "👁",
 	"icon.advisorClosed": "🙈",
 	"icon.time": "⏱",
@@ -540,7 +536,6 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"cmd.stats": "📊",
 	"cmd.news": "📰",
 	"cmd.keyboard": "⌨",
-	"cmd.export": "📤",
 	"cmd.clipboard": "📋",
 	"cmd.share": "↗",
 	"cmd.broadcast": "📡",
@@ -864,7 +859,6 @@ const NERD_SYMBOLS: SymbolMap = {
 	// pick:  | alt: $ ¢
 	"icon.cost": "\uf155",
 	// pick: 󰙺 (nf-md-currency_usd_off)
-	"icon.subscription": "\u{f067a}",
 	// pick:  (nf-cod-eye)
 	"icon.advisor": "\uea70",
 	// pick:  (nf-oct-eye_closed)
@@ -978,7 +972,6 @@ const NERD_SYMBOLS: SymbolMap = {
 	// pick:  (nf-fa-keyboard_o) | alt: 󰌌 (nf-md-keyboard)
 	"cmd.keyboard": "\uf11c",
 	// pick:  (nf-fa-external_link) | alt:  (nf-cod-link_external)
-	"cmd.export": "\uf08e",
 	// pick:  (nf-fa-clipboard) | alt: 󰅇 (nf-md-clipboard)
 	"cmd.clipboard": "\uf0ea",
 	// pick:  (nf-fa-share_alt)
@@ -1280,7 +1273,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"icon.tokens": "tok:",
 	"icon.context": "ctx:",
 	"icon.cost": "$",
-	"icon.subscription": "(sub)",
 	"icon.advisor": "(adv)",
 	"icon.advisorClosed": "(adv)",
 	"icon.time": "t:",
@@ -1335,7 +1327,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"cmd.stats": "",
 	"cmd.news": "",
 	"cmd.keyboard": "",
-	"cmd.export": "",
 	"cmd.clipboard": "",
 	"cmd.share": "",
 	"cmd.broadcast": "",

@@ -2460,11 +2460,6 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				return success(id, "get_session_lease", probeSessionLeases(sessionIds));
 			}
 
-			case "export_html": {
-				const path = await session.exportToHtml(command.outputPath);
-				return success(id, "export_html", { path });
-			}
-
 			case "get_branch_messages": {
 				const messages = session.getUserMessagesForBranching();
 				return success(id, "get_branch_messages", { messages });

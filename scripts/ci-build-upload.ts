@@ -1,15 +1,12 @@
 #!/usr/bin/env bun
 //
-// Publish an omp release's binaries and shared HTML viewer to build.stencil.so,
+// Publish an omp release's binaries to build.stencil.so,
 // which serves them, with binary patches between releases, to update
 // clients. Canary releases (`v<semver>-canary.<n>`) are uploaded with channel
 // `canary`, everything else with channel `stable`.
 //
 // Usage:
 //   bun scripts/ci-build-upload.ts <tag> <file>...    # all 8 release binaries
-// The viewer is read from packages/coding-agent/export-assets and must exactly
-// match src/export/html/viewer.generated.json before any network request.
-//
 // Runs in ci.yml's `release_build` job (which npm and the Homebrew tap wait
 // for), on the binaries this run built. Requests the job's GitHub OIDC token
 // for audience `build.stencil.so` (needs `permissions: id-token: write`); the service
@@ -33,7 +30,6 @@ const AUDIENCE = "build.stencil.so";
 const SERVICE_URL = (process.env.BUILD_URL ?? "https://build.stencil.so").replace(/\/+$/, "");
 const CODING_AGENT = path.join(import.meta.dir, "..", "packages", "coding-agent");
 const CHANGELOG = path.join(CODING_AGENT, "CHANGELOG.md");
-const VIEWER_MANIFEST = path.join(CODING_AGENT, "src", "export", "html", "viewer.generated.json");
 /** The service rejects notes longer than this many bytes. */
 const MAX_NOTES_BYTES = 16 << 10;
 /** Attempts per upload/publish request on network errors and transient statuses. */
@@ -117,36 +113,6 @@ async function describe(file: string): Promise<BuildFile> {
 	return { name, ...ASSETS[name], kind: "archive", ...(await fingerprint(file)) };
 }
 
-/** Only the content-addressed viewer pinned into the release may be published. */
-async function describeViewer(): Promise<{ file: string; entry: BuildFile }> {
-	const manifest: unknown = await Bun.file(VIEWER_MANIFEST).json();
-	if (
-		!manifest ||
-		typeof manifest !== "object" ||
-		!("file" in manifest) ||
-		typeof manifest.file !== "string" ||
-		!/^export-viewer-[a-f0-9]{64}\.js$/.test(manifest.file) ||
-		!("integrity" in manifest) ||
-		typeof manifest.integrity !== "string" ||
-		!("size" in manifest) ||
-		typeof manifest.size !== "number" ||
-		!Number.isSafeInteger(manifest.size) ||
-		manifest.size <= 0
-	) {
-		throw new Error("invalid viewer manifest");
-	}
-	const file = path.join(CODING_AGENT, "export-assets", manifest.file);
-	const { size, sha256 } = await fingerprint(file);
-	const integrity = `sha256-${Buffer.from(sha256, "hex").toString("base64")}`;
-	if (manifest.file !== `export-viewer-${sha256}.js` || manifest.integrity !== integrity || manifest.size !== size) {
-		throw new Error(`${manifest.file}: viewer filename, integrity or size does not match generated manifest`);
-	}
-	return {
-		file,
-		entry: { name: manifest.file, platform: "web", arch: "wasm32", kind: "web", size, sha256 },
-	};
-}
-
 /** fetch() that throws with the response body on any non-2xx answer. */
 async function request(what: string, url: string, init: RequestInit, attempts = 1): Promise<Response> {
 	for (let attempt = 1; ; attempt++) {
@@ -205,10 +171,7 @@ async function main(): Promise<void> {
 		if (!described.some(d => d.name === name)) missing.push(name);
 	}
 	if (missing.length > 0) throw new Error(`missing release binaries: ${missing.join(", ")}`);
-	const viewer = await describeViewer();
-	described.push(viewer.entry);
-	files.push(viewer.file);
-	console.log(`${viewer.entry.name}\tweb-wasm32\t${viewer.entry.size}\t${viewer.entry.sha256}`);
+
 	const notes = releaseNotes(await Bun.file(CHANGELOG).text(), version);
 
 	const token = await oidcToken();
