@@ -3,9 +3,8 @@ import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { MAIN_AGENT_RULE_NAME, SUB_AGENT_RULE_NAME } from "../capability/rule";
 import { validateAgentAccountPools } from "../config/account-pools";
-import type { Model } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "../config/model-registry";
-import { formatModelStringWithRouting } from "../config/model-resolver";
+import { inheritedModelGuard } from "./model-inheritance";
 import type { Settings } from "../config/settings";
 import { MCPManager } from "../mcp/manager";
 import { initializeExtensions } from "../modes/runtime-init";
@@ -317,11 +316,7 @@ export async function revivePersistedSubagent(spec: PersistedReviveSpec, expecte
 			oauthAccountPools,
 			disableModelFallback: true,
 			disableServerSideFallback: true,
-			assertDispatchModel: (dispatchModel: Model) => {
-				if (formatModelStringWithRouting(dispatchModel) !== formatModelStringWithRouting(model)) {
-					throw new Error("Revived subagents must use the current parent model.");
-				}
-			},
+			assertDispatchModel: inheritedModelGuard(model),
 			expectedAgentRef: expectedRef,
 			taskDepth,
 			toolNames: revivedToolNames,

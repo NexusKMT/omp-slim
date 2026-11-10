@@ -98,6 +98,7 @@ import {
 	resolveTaskEffortLevel,
 	type TaskEffort,
 } from "@oh-my-pi/pi-tui/thinking";
+import { inheritedModelGuard } from "./model-inheritance";
 import type { ContextFileEntry, ToolSession } from "../tools";
 import { resolveEvalBackends } from "../tools/eval-backends";
 import { isIrcEnabled } from "../irc/messaging";
@@ -4233,13 +4234,7 @@ function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 				({ session: revived } = await createAgentSession({
 					...options,
 					model,
-					assertDispatchModel: dispatchModel => {
-						if (formatModelStringWithRouting(dispatchModel) !== formatModelStringWithRouting(model)) {
-							throw new Error("Subagents must use the inherited parent model.");
-						}
-						if (options.thinkingLevelCeiling)
-							assertModelSupportsEffortCeiling(dispatchModel, options.thinkingLevelCeiling);
-					},
+					assertDispatchModel: inheritedModelGuard(model, options.thinkingLevelCeiling),
 					oauthAccountPools: Object.hasOwn(agentAccountPools, capture.agentName)
 						? agentAccountPools[capture.agentName]
 						: undefined,
@@ -4707,12 +4702,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 					thinkingLevel: effectiveThinkingLevel,
 					disableModelFallback: true,
 					disableServerSideFallback: true,
-					assertDispatchModel: (dispatchModel: Model) => {
-						if (formatModelStringWithRouting(dispatchModel) !== formatModelStringWithRouting(model)) {
-							throw new Error("Subagents must use the inherited parent model.");
-						}
-						if (spawnEffortCeiling) assertModelSupportsEffortCeiling(dispatchModel, spawnEffortCeiling);
-					},
+					assertDispatchModel: inheritedModelGuard(model, spawnEffortCeiling),
 					thinkingLevelCeiling: spawnEffortCeiling,
 					// Subagents are short-lived; never schedule background warm requests.
 					cacheWarming: false,

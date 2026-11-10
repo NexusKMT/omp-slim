@@ -18,7 +18,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { cfgContextPromotionEnabled } from "@oh-my-pi/pi-coding-agent/session/context-settings";
+import { cfgTaskMaxEffort } from "@oh-my-pi/pi-coding-agent/task/settings";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
@@ -95,7 +95,7 @@ async function collected(ref: WeakRef<object>, deadlineMs: number): Promise<bool
 /** Makes a settings write in the live session's own overlay, then observes the overlay weakly (outside the test body). */
 function writeAndObserveLiveSettings(id: string): WeakRef<Settings> {
 	const session = localSession(AgentRegistry.global().get(id)?.session);
-	cfgContextPromotionEnabled.set(session, true);
+	cfgTaskMaxEffort.set(session, "high");
 	return new WeakRef(session.settings);
 }
 
@@ -130,7 +130,7 @@ async function runKeptAliveSubagent(): Promise<{ release(): void; close(): void 
 			task: "report done",
 			index: 0,
 			id: AGENT_ID,
-			modelOverride: "mock/mock-model",
+			parentModel: mock,
 			authStorage,
 			modelRegistry,
 			settings: Settings.isolated({
@@ -193,7 +193,7 @@ it("parks without retaining the run's settings overlay and revives with the sett
 		expect(await collected(settingsRef, COLLECT_DEADLINE_MS)).toBe(true);
 
 		const revived = localSession(await AgentLifecycleManager.global().ensureLive(AGENT_ID));
-		expect(cfgContextPromotionEnabled.get(revived)).toBe(true);
+		expect(cfgTaskMaxEffort.get(revived)).toBe("high");
 	} finally {
 		run.close();
 	}
