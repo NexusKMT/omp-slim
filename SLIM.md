@@ -22,12 +22,13 @@ a component has been removed from the product. Track the actual state below.
 | Repeatable Codespace bootstrap/build/artifact procedure | Baseline built; binary and archive recovered and SHA-256 verified |
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
 | Other memory backends, browser, desktop and speech removal | Pending |
-| Intel macOS Actions build | Configured on `macos-15-intel`; first run pending |
+| Intel macOS Actions build | Run `42763829793` passed; archive recovered and verified on the local Intel Mac |
 
 As of 2026-11-10 (Asia/Shanghai), Codespace
-`omp-slim-build-vrxqgpxrj7gfp579` was verified **Shutdown** after both builds and
-logs were recovered. Retention is 72 hours. Its checkout is `88a81dd819`; later
-report-only commits are on GitHub and local `main`. List and verify live state
+`omp-slim-build-vrxqgpxrj7gfp579` was verified **Shutdown** after both Linux builds
+and again after the macOS Actions build. Retention is 72 hours. Its checkout is
+`88a81dd819`; later build/workflow and report commits are on GitHub and local
+`main`. List and verify live state
 again before reuse. The failed first instance was deleted.
 
 Browser removal must account for Chromium-backed PDF page screenshots, web-search
@@ -156,8 +157,8 @@ the native addon was separately compiled as part of the binary build.
 Build timings, source revisions and artifact hashes are recorded in
 [the first build report](docs/slim-build-2026-11-10.md). The artifacts are Linux
 x64 builds using the host's `modern` native addon (AVX2); they are not a
-cross-platform or older-x64 release. Produce a macOS addon/binary separately
-before installing this downstream on the local Mac.
+cross-platform or older-x64 release. The separate macOS artifact and local
+verification are recorded in [the Intel Mac report](docs/slim-macos-build-2026-11-10.md).
 
 ## Intel macOS through GitHub Actions
 
@@ -187,8 +188,26 @@ runner. It builds the native addon and CLI, checks the
 Mach-O architecture and ad-hoc signature, rejects Homebrew/runner-specific
 dynamic library paths, runs the worker smoke test, checks TypeScript, and runs
 the six focused regression files listed above. Rust intermediates and dependency
-downloads are cached. Runs time out at 120 minutes; artifacts are retained for
-7 days. No provider credentials are required.
+downloads are cached; cache saving also runs after validation failures. Runs
+time out at 120 minutes; verified archives are retained for 7 days. A failed
+run also uploads any unverified binary/addon separately for 2 days. No provider
+credentials are required.
+
+[Run 42763829793](https://github.com/NexusKMT/omp-slim/actions/runs/42763829793)
+passed from source `4cf083db60ff87624b79d960fdedfd6713fea329`. It completed in
+32m11s including cache restoration, 22m27s of Cargo compilation, CLI packaging,
+worker smoke, TypeScript checks and 238 regression tests (0 failures).
+The archive and binary SHA-256 checks passed after download. The extracted CLI
+also passed version/help, worker smoke, shell pipelines, file roundtrip and
+exit-status checks on the local Intel Core m3-8100Y / macOS 15.7.5.
+This is a `darwin-x64-modern` build with an `x86-64-v3` native addon, validated
+for the current AVX2-capable host and macOS 15+.
+
+Recovered artifact directory:
+`dist/actions/42763829793/artifact/builds/macos-intel-20261110T054738Z/`.
+The extracted executable is `extracted/omp` under that directory. Full logs,
+hashes, cold/cache build timings and the validation-script fixes are in
+[the Intel Mac report](docs/slim-macos-build-2026-11-10.md).
 
 ```sh
 gh workflow run slim-macos-intel.yml --repo NexusKMT/omp-slim --ref main
@@ -200,5 +219,6 @@ gh run download RUN_ID --repo NexusKMT/omp-slim --dir dist/actions/RUN_ID
 Use the resulting `omp-darwin-x64.tar.gz`, verify `ARCHIVE-SHA256SUMS`, extract it,
 then verify `SHA256SUMS` with `shasum -a 256 -c`. Test the extracted binary from
 its artifact directory before installing it. Use an isolated
-`PI_CODING_AGENT_DIR` for smoke tests. The build uses ad-hoc signing and does not
-perform Apple notarization.
+`PI_CODING_AGENT_DIR` and `PI_CONFIG_DIR` for local smoke tests; the latter also
+isolates shared runtime/log directories. The build uses ad-hoc signing and does
+not perform Apple notarization. Provider authentication is outside these tests.
