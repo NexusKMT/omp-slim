@@ -3,6 +3,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isEnoent } from "@oh-my-pi/pi-utils";
+import { readExportViewer } from "./export-viewer";
 import { buildDocsIndexPayload } from "./generate-docs-index";
 import { createJsonParsePlugin } from "./json-parse-plugin";
 import { createLegacyPiVirtualModulePlugin } from "./legacy-pi-virtual-module";
@@ -78,6 +79,7 @@ async function cleanBundleOutputs(outDir: string): Promise<void> {
 				entry =>
 					entry === "cli.js" ||
 					entry === "docs-index.generated.txt" ||
+					entry === "export-viewer.generated.txt" ||
 					entry.endsWith(".node") ||
 					entry.endsWith(".js.map") ||
 					/\.json-[^/]+\.zst$/.test(entry) ||
@@ -93,6 +95,7 @@ export async function bundleDist(outDir: string = defaultOutDir): Promise<void> 
 	const cliPath = path.join(outDir, "cli.js");
 	const start = Bun.nanoseconds();
 	await cleanBundleOutputs(outDir);
+	await runCommand(["bun", "--cwd=../collab-web", "run", "gen:export-viewer"]);
 	// The npm bundle ships no stats dashboard sources, so embed the dashboard
 	// archive the same way compiled binaries do (scripts/build-binary.ts). Reset
 	// afterwards to keep the checked-in placeholder empty.
@@ -103,6 +106,7 @@ export async function bundleDist(outDir: string = defaultOutDir): Promise<void> 
 	// build-time embed) can still resolve omp:// docs (see src/internal-urls/docs-index.ts).
 	try {
 		const docsPayload = await buildDocsIndexPayload();
+		const exportViewer = await readExportViewer();
 		// Build in-process: the docs embed payload is far larger than Linux's
 		// 128KiB per-argv-string cap, so it can never be passed as a CLI
 		// `--define` (posix_spawn fails with E2BIG).
@@ -115,6 +119,7 @@ export async function bundleDist(outDir: string = defaultOutDir): Promise<void> 
 			define: {
 				"process.env.PI_BUNDLED": JSON.stringify("true"),
 				"process.env.PI_DOCS_EMBED": JSON.stringify(docsPayload.payload),
+				"process.env.PI_EXPORT_VIEWER_EMBED": JSON.stringify(exportViewer),
 			},
 			minify: {
 				whitespace: true,
@@ -129,6 +134,8 @@ export async function bundleDist(outDir: string = defaultOutDir): Promise<void> 
 		}
 		await ensureShebang(cliPath);
 		await Bun.write(path.join(outDir, "docs-index.generated.txt"), docsPayload.payload);
+		// SDK imports resolve to TypeScript source, so ship the viewer alongside the bundle too.
+		await Bun.write(path.join(outDir, "export-viewer.generated.txt"), exportViewer);
 	} finally {
 		await runCommand(["bun", "--cwd=../stats", "run", "gen:stats:reset"]);
 	}

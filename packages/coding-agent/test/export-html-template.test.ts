@@ -2,9 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { VERSION } from "@oh-my-pi/pi-utils";
+import { runInNewContext } from "node:vm";
 import { parseHTML } from "@oh-my-pi/pi-utils/dom";
 import type { BunPlugin } from "bun";
+import { compileCodingAgent } from "../scripts/compile-binary";
+import { readExportViewer } from "../scripts/export-viewer";
 import { getTemplate } from "../src/export/html/index";
 import viewerAsset from "../src/export/html/viewer.generated.json" with { type: "json" };
 
@@ -15,11 +17,14 @@ const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-html-template-"));
 const unrelatedCwd = path.join(tempRoot, "unrelated-cwd");
 const bundleDir = path.join(tempRoot, "bundle");
 const compiledPath = path.join(tempRoot, "compiled-template-probe");
+const installedPackageDir = path.join(tempRoot, "node_modules", "@oh-my-pi", "pi-coding-agent");
 let bundlePath: string;
+let sdkPath: string;
 const dependencyStubs: Record<string, string> = {
 	"@oh-my-pi/omp-stats/trace":
 		'export const buildSessionTraceFromSnapshots = () => { throw new Error("Trace assembly is outside the template probe"); };',
-	"@oh-my-pi/pi-utils": `export const APP_NAME = "omp"; export const VERSION = ${JSON.stringify(VERSION)}; export const isEnoent = err => err?.code === "ENOENT"; export const isCompiledBinary = () => false;`,
+	"@oh-my-pi/pi-utils":
+		'export const APP_NAME = "omp"; export const isEnoent = err => err?.code === "ENOENT"; export const isCompiledBinary = () => process.env.PI_COMPILED === "true";',
 	"@oh-my-pi/pi-tui/theme":
 		"export const getResolvedThemeColors = async () => ({}); export const getThemeExportColors = async () => ({});",
 	"../../session/sub-sessions": "export const collectSubSessions = async () => ({});",
@@ -52,25 +57,40 @@ async function runProbe(command: string[]): Promise<string> {
 
 beforeAll(async () => {
 	await fs.mkdir(unrelatedCwd);
+	const viewer = await readExportViewer();
 	const bundle = await Bun.build({
 		entrypoints: [probePath],
 		outdir: bundleDir,
 		target: "bun",
 		plugins: [focusedBundlePlugin],
-		define: { "process.env.PI_BUNDLED": '"true"' },
+		define: {
+			"process.env.PI_BUNDLED": '"true"',
+			"process.env.PI_EXPORT_VIEWER_EMBED": JSON.stringify(viewer),
+		},
 	});
 	if (!bundle.success) throw new AggregateError(bundle.logs, "Template probe bundle failed");
 	const entrypoint = bundle.outputs.find(output => output.kind === "entry-point");
 	if (!entrypoint) throw new Error("Template probe emitted no entry point");
 	bundlePath = entrypoint.path;
-	const compiled = await Bun.build({
+	// Isolate unrelated native/session imports, then use the production compiler
+	// so this probe exercises its real viewer embed rather than a test-only define.
+	const sdk = await Bun.build({
 		entrypoints: [probePath],
+		outdir: path.join(installedPackageDir, "src", "export", "html"),
 		target: "bun",
 		plugins: [focusedBundlePlugin],
-		define: { "process.env.PI_BUNDLED": '"true"' },
-		compile: { outfile: compiledPath },
 	});
-	if (!compiled.success) throw new AggregateError(compiled.logs, "Compiled template probe failed");
+	if (!sdk.success) throw new AggregateError(sdk.logs, "SDK template probe bundle failed");
+	const sdkEntrypoint = sdk.outputs.find(output => output.kind === "entry-point");
+	if (!sdkEntrypoint) throw new Error("SDK template probe emitted no entry point");
+	sdkPath = sdkEntrypoint.path;
+	await Bun.write(path.join(installedPackageDir, "dist", "export-viewer.generated.txt"), viewer);
+	await compileCodingAgent({
+		repoRoot: tempRoot,
+		entrypoint: sdkPath,
+		outfile: compiledPath,
+		native: null,
+	});
 }, 120_000);
 
 afterAll(async () => {
@@ -123,12 +143,11 @@ describe("HTML export template", () => {
 		expect(reported).toContain("packages/collab-web/scripts/build-export-viewer.ts");
 	});
 
-	test("packaged exports load the version-pinned viewer after both integrity-checked shared libraries", async () => {
+	test("packaged exports inline the viewer after both integrity-checked shared libraries", async () => {
 		const html = await runProbe([process.execPath, bundlePath]);
 		const { document } = parseHTML(html);
 		const scripts = document.querySelectorAll("script[src]");
-		expect(Buffer.byteLength(html)).toBeLessThan(3072);
-		expect(scripts).toHaveLength(3);
+		expect(scripts).toHaveLength(2);
 		for (const [index, name] of ["marked", "highlight"].entries()) {
 			const script = scripts[index]!;
 			const url = new URL(script.getAttribute("src")!);
@@ -139,23 +158,44 @@ describe("HTML export template", () => {
 			expect(integrity).toMatch(/^sha256-[A-Za-z0-9+/]{43}=$/);
 			expect(Buffer.from(integrity!.slice("sha256-".length), "base64").toHex()).toStartWith(match![1]!);
 		}
-		expect(scripts[2]!.getAttribute("src")).toBe(
-			`https://build.stencil.so/web/omp/${encodeURIComponent(VERSION)}/${viewerAsset.file}`,
-		);
-		expect(scripts[2]!.getAttribute("integrity")).toBe(viewerAsset.integrity);
 		for (const script of scripts) {
 			expect(script.getAttribute("crossorigin")).toBe("anonymous");
 			expect(script.hasAttribute("defer")).toBe(true);
 		}
+		expect(html).toBe(getTemplate());
 	});
 
-	test("npm-style bundle and compiled binary export identical hosted HTML from an unrelated directory", async () => {
+	test("npm CLI, SDK and compiled binary export identical HTML from an unrelated directory", async () => {
 		const expected = await runProbe([process.execPath, bundlePath]);
 		expect(await runProbe([compiledPath])).toBe(expected);
+		expect(await runProbe([process.execPath, sdkPath])).toBe(expected);
 		expect(await fs.readdir(bundleDir)).toEqual([path.basename(bundlePath)]);
 	});
 
-	test("npm packages keep the tiny loader and metadata but omit hosted viewer source assets", async () => {
+	test("compiled HTML carries an executable local viewer without an upstream viewer request", async () => {
+		const html = await runProbe([compiledPath]);
+		const { document } = parseHTML(html);
+		expect(document.querySelectorAll("script[src]")).toHaveLength(2);
+		expect(html).not.toContain("https://build.stencil.so/web/omp/");
+		const viewer = document.querySelector("body > script:not([src]):not([type])");
+		expect(viewer).not.toBeNull();
+		const viewerCode = viewer?.textContent;
+		if (!viewerCode) throw new Error("Compiled HTML contains no inline viewer");
+		const listeners = new Map<string, () => void>();
+		runInNewContext(viewerCode, {
+			document,
+			window: { addEventListener: (event: string, listener: () => void) => listeners.set(event, listener) },
+		});
+		expect(document.getElementById("viewer-status")?.textContent).toBe("Loading session viewer…");
+		expect(listeners.has("DOMContentLoaded")).toBe(true);
+		listeners.get("DOMContentLoaded")!();
+		// The embedded viewer ran locally and reached its shared-library check.
+		expect(document.getElementById("viewer-status")?.textContent).toBe(
+			"Failed to load viewer: Markdown dependency failed to load",
+		);
+	});
+
+	test("npm packages carry the SDK viewer while omitting its unbundled source assets", async () => {
 		const productionDir = path.join(tempRoot, "production-bundle");
 		const staleAsset = path.join(productionDir, "template-stale.css");
 		await Bun.write(staleAsset, "obsolete viewer sidecar");
@@ -177,6 +217,9 @@ describe("HTML export template", () => {
 		]);
 		expect(exitCode, `${stdout}\n${stderr}`).toBe(0);
 		expect(await Bun.file(staleAsset).exists()).toBe(false);
+		expect(await Bun.file(path.join(productionDir, "export-viewer.generated.txt")).text()).toBe(
+			await readExportViewer(),
+		);
 
 		const repoRoot = path.resolve(packageDir, "../..");
 		const packWorkspace = path.join(tempRoot, "pack-workspace");
@@ -204,6 +247,7 @@ describe("HTML export template", () => {
 		const packed = Array.from(packOut.matchAll(/^packed \S+ (.+)$/gm), match => match[1]);
 		expect(packed).toContain("src/export/html/template.html.txt");
 		expect(packed).toContain("src/export/html/viewer.generated.json");
+		expect(packed).toContain("dist/export-viewer.generated.txt");
 		for (const name of ["shell.html", "template.css", "template.js", "share-loader.js"]) {
 			expect(packed).not.toContain(`src/export/html/${name}`);
 		}
