@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Kept retry controls together in the model settings tab after removing automatic model fallback.
+
 ### Removed
 
 - Removed retired Prewalk status labels, theme symbols, and settings groups.

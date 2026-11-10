@@ -44,7 +44,7 @@ export const TAB_METADATA: Record<SettingTab, TabMetadata> = {
 /** One-sentence lead per tab, under the page title of the native settings page. */
 export const TAB_LEADS: Record<SettingTab, string> = {
 	appearance: "Theme, composer, status line and how the transcript renders.",
-	model: "Thinking, sampling, the system prompt, retries and the helper models.",
+	model: "Thinking, sampling, the system prompt, retries and advisors.",
 	interaction: "Input, approvals, notifications and what happens at startup.",
 	context: "What the model sees, and when and how the conversation compacts.",
 	files: "How files are read, summarized and edited, and the language servers.",
@@ -61,7 +61,7 @@ export const TAB_LEADS: Record<SettingTab, string> = {
  */
 export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 	appearance: ["Theme", "Composer", "Status Line", "Display", "Images"],
-	model: ["Thinking", "Sampling", "Prompt", "Retry & Fallback", "Advisor", "Vision"],
+	model: ["Thinking", "Sampling", "Prompt", "Retry", "Advisor", "Vision"],
 	interaction: [
 		"Input",
 		"Approvals",
