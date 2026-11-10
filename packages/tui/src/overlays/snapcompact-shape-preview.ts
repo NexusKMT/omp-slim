@@ -25,7 +25,6 @@ import {
 	SHAPE_VARIANTS,
 	type Shape,
 	type ShapeGeometry,
-	type ShapeTarget,
 	type ShapeVariantName,
 } from "@oh-my-pi/snapcompact";
 import { theme } from "../theme/theme";
@@ -61,8 +60,6 @@ type PreviewEntry =
 	  };
 
 export interface SnapcompactShapePreviewOptions {
-	/** Active model (api + id); resolves what `auto` maps to for this reader. */
-	model?: ShapeTarget;
 	/** Shared TUI image budget: stable graphics ids, transmit-once, exit cleanup. */
 	imageBudget?: ImageBudget;
 	/** Schedules a re-render once an async sample render completes. */
@@ -70,7 +67,6 @@ export interface SnapcompactShapePreviewOptions {
 }
 
 export class SnapcompactShapePreview implements Component {
-	#model: ShapeTarget | undefined;
 	#budget: ImageBudget | undefined;
 	#requestRender: () => void;
 	#variant: ShapeVariantName | "auto" = "auto";
@@ -78,7 +74,6 @@ export class SnapcompactShapePreview implements Component {
 	#native: { variant: ShapeVariantName | "auto"; entry: PreviewEntry | undefined; node: NativeNode } | undefined;
 
 	constructor(currentValue: string, options: SnapcompactShapePreviewOptions = {}) {
-		this.#model = options.model;
 		this.#budget = options.imageBudget;
 		this.#requestRender = options.requestRender ?? (() => {});
 		this.setValue(currentValue);
@@ -90,7 +85,7 @@ export class SnapcompactShapePreview implements Component {
 	}
 
 	describe(cx: DescribeContext): NativeNode {
-		const shape = resolveShape(this.#model, this.#variant);
+		const shape = resolveShape(this.#variant);
 		const name = this.#variant === "auto" ? resolvedVariantName(shape) : this.#variant;
 		const entry = cx.supports("image") ? this.#ensureEntry(name, shape) : undefined;
 		const memo = this.#native;
@@ -128,7 +123,7 @@ export class SnapcompactShapePreview implements Component {
 	}
 
 	render(width: number): readonly string[] {
-		const shape = resolveShape(this.#model, this.#variant);
+		const shape = resolveShape(this.#variant);
 		const name = this.#variant === "auto" ? resolvedVariantName(shape) : this.#variant;
 		const { label, stats } = this.#caption(shape, name);
 		const lines: string[] = [theme.fg("muted", `  Sample (zoomed) · ${label} · ${stats}`), ""];
