@@ -2,36 +2,10 @@
  * Settings declared by this domain (see `config/registry.ts`). Declaration order is the
  * settings-panel order; `config/all-settings.ts` registers every domain.
  */
-import { register, type SettingValueOf } from "./registry";
+import { register } from "./registry";
 import type { AuthAccountPolicies } from "@oh-my-pi/pi-ai/auth-storage";
-import type { cfgDefaultThinkingLevel } from "../session/settings";
-
-/** Display metadata for one model tag. */
-export interface ModelTagDef {
-	name: string;
-	color?: string;
-	/** If true, the role is functional but not shown in the model selector UI. */
-	hidden?: boolean;
-}
-
-/** Model tags keyed by tag id (`modelTags`). */
-export type ModelTagsSettings = Record<string, ModelTagDef>;
-
-/**
- * One saved model preset (`modelPresets.<name>`): the role assignments and default thinking level
- * captured by `/modelpreset save` or the model hub, re-applied as a whole by `/modelpreset switch`.
- */
-export interface ModelPreset {
-	modelRoles: Record<string, string>;
-	/** `defaultThinkingLevel` at save time; absent in hand-written presets that leave it alone. */
-	defaultThinkingLevel?: SettingValueOf<typeof cfgDefaultThinkingLevel>;
-}
 
 const EMPTY_STRING_ARRAY: string[] = [];
-const EMPTY_STRING_RECORD: Record<string, string> = {};
-const DEFAULT_CYCLE_ORDER: string[] = ["smol", "default", "slow"];
-const EMPTY_MODEL_TAGS_RECORD: ModelTagsSettings = {};
-const EMPTY_MODEL_PRESETS_RECORD: Record<string, ModelPreset> = {};
 const EMPTY_AUTH_ACCOUNT_POLICIES: AuthAccountPolicies = [];
 
 // Auth broker — credentials proxied through a remote `omp auth-broker serve`
@@ -81,32 +55,29 @@ export const cfgDisabledProviders = register({
 	pathScoped: { valuesKey: "providers" },
 });
 
-export const cfgModelRoleStorage = register({
-	id: "modelRoleStorage",
+/** The selected model, optionally followed by a thinking-level suffix. */
+export const cfgModel = register({ id: "model", type: "string", default: undefined });
+
+export const cfgModelStorage = register({
+	id: "modelStorage",
 	type: "enum",
 	values: ["global", "project"] as const,
 	default: "global",
 	ui: {
 		tab: "model",
 		group: "Prompt",
-		label: "Model Role Storage",
-		description: "Where model selector role assignments are saved",
+		label: "Model Storage",
+		description: "Where the selected model is saved",
 		options: [
-			{
-				value: "global",
-				label: "Global",
-				description: "Save role models in the active profile config (current behavior)",
-			},
+			{ value: "global", label: "Global", description: "Save the model in the active profile config" },
 			{
 				value: "project",
 				label: "Per-project",
-				description: "Save project role models in .omp/config.yml; missing project roles use global defaults",
+				description: "Save the model in .omp/config.yml; unset projects use the profile model",
 			},
 		],
 	},
 });
-
-export const cfgModelRoles = register({ id: "modelRoles", type: "record", default: EMPTY_STRING_RECORD });
 
 /** Total provider budget for one native judge candidate, including setup and retries. */
 export const cfgJudgmentAttemptTimeoutMs = register({
@@ -121,15 +92,4 @@ export const cfgJudgmentAttemptTimeoutMs = register({
 	},
 });
 
-/** Named model presets; no settings-panel UI — managed by `/modelpreset` and the model hub. */
-export const cfgModelPresets = register({
-	id: "modelPresets",
-	type: "record",
-	default: EMPTY_MODEL_PRESETS_RECORD,
-});
-
-export const cfgModelTags = register({ id: "modelTags", type: "record", default: EMPTY_MODEL_TAGS_RECORD });
-
 export const cfgModelProviderOrder = register({ id: "modelProviderOrder", type: "array", default: EMPTY_STRING_ARRAY });
-
-export const cfgCycleOrder = register({ id: "cycleOrder", type: "array", default: DEFAULT_CYCLE_ORDER });

@@ -14,9 +14,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { roleDefaultModels } from "@oh-my-pi/pi-catalog/compat/behavior";
-import { type GeneratedProvider, getBundledModels } from "@oh-my-pi/pi-catalog/models";
-import { type Api, type Model } from "@oh-my-pi/pi-catalog/types";
 import {
 	expandTilde,
 	getAgentDbPath,
@@ -40,7 +37,6 @@ import { loadCapability } from "../discovery";
 import { AgentStorage, type AgentStorageApi } from "../session/agent-storage";
 import { type CompactionMethod, DEFAULT_COMPACTION_METHOD_ORDER } from "../session/compaction-methods";
 import { writeFileAtomically } from "../utils/atomic-file";
-import { isRegisteredSearchEngine } from "../web/search/provider";
 import { stringifyYamlConfig } from "@oh-my-pi/pi-utils/yaml-config";
 import {
 	type AnySetting,
@@ -55,7 +51,7 @@ import {
 } from "./registry";
 // Registers every setting before any instance is read (definitions live next to their domains).
 import "./all-settings";
-import { cfgDisabledProviders, cfgModelRoles, cfgModelRoleStorage } from "./model-settings";
+import { cfgDisabledProviders, cfgModel, cfgModelStorage } from "./model-settings";
 import { cfgShellPath } from "../exec/settings";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -148,7 +144,7 @@ type ProjectSettingsDiscovery = {
 	quarantineInvalid: boolean;
 	/** Project-level settings items in discovery order, disabled providers' items included. */
 	items: SettingsCapabilityItem[];
-	nativeModelRoles: unknown;
+	nativeModel: unknown;
 	fileSettings: RawSettings;
 	warningsSeen: Set<string>;
 };
@@ -295,18 +291,12 @@ function assertKnownSettingPaths(layer: RawSettings, prefix = ""): void {
 	}
 }
 
-/** `project` as it merges over the global layer: `null` (cleared) model roles fall back to global. */
+/** A cleared project model falls back to the profile's selected model. */
 function projectLayerForMerge(project: RawSettings): RawSettings {
-	const projectRoles = getByPath(project, ["modelRoles"]);
-	if (!isRecord(projectRoles)) return project;
-
-	let filteredRoles: Record<string, unknown> | undefined;
-	for (const role in projectRoles) {
-		if (!Object.hasOwn(projectRoles, role) || modelRoleValueFromUnknown(projectRoles[role]) !== undefined) continue;
-		filteredRoles ??= { ...projectRoles };
-		delete filteredRoles[role];
-	}
-	return filteredRoles ? { ...project, modelRoles: filteredRoles } : project;
+	if (!Object.hasOwn(project, "model") || modelRoleValueFromUnknown(project.model) !== undefined) return project;
+	const filtered = { ...project };
+	delete filtered.model;
+	return filtered;
 }
 
 /** One instance's own layers, lowest precedence first. */
@@ -696,23 +686,14 @@ export class Settings {
 	 * `JSON.stringify(segments)`: a record entry key may itself contain dots.
 	 */
 	#modified = new Map<string, readonly string[]>();
-	/** Individual project model roles modified during this session */
-	#modifiedProjectModelRoles = new Set<string>();
-	/** Individual global model roles modified during this session (for partial save) */
-	#modifiedGlobalModelRoles = new Set<string>();
-	/** On-disk generations and prior values observed before each pending global mutation, keyed like {@link #modified}. */
+	/** The selected project model still needs to be written. */
+	#modifiedProjectModel = false;
+	/** On-disk generations and prior values observed before each pending global mutation. */
 	#modifiedPathMutations = new Map<string, PendingYamlMutation>();
-	#modifiedGlobalModelRoleMutations = new Map<string, PendingYamlMutation>();
 	/** Changes whenever a live API mutates a persisted layer. */
 	#persistedMutationGeneration = 0;
-	/**
-	 * Original process-wide model-role overrides captured before a project edit
-	 * temporarily replaced them via `#updateRuntimeModelRoleOverride`. Restored
-	 * on `reloadForCwd` / `cloneForCwd` so destination projects never inherit the
-	 * source-project value. Maps role → original override value (`undefined`
-	 * when the role had no runtime override).
-	 */
-	#savedRuntimeModelRoleOverrides = new Map<string, string | undefined>();
+	/** Original CLI override temporarily replaced by a project model edit, restored on cwd changes. */
+	#savedRuntimeModelOverride: { value: unknown } | undefined;
 
 	/** Legacy `lastChangelogVersion` captured from config.yml during migration (now a marker file). */
 	#legacyLastChangelogVersion?: string;
@@ -1123,8 +1104,8 @@ export class Settings {
 	writeValue(setting: AnySetting, value: unknown, layer: "global" | "override"): void {
 		if (this.#mirror) return this.#forward(this.#mirror, { op: "writeValue", id: setting.id, value, layer });
 		setting.assertWritable(value);
-		if (layer === "override" && setting === cfgModelRoles) {
-			this.#savedRuntimeModelRoleOverrides.clear();
+		if (layer === "override" && setting === cfgModel) {
+			this.#savedRuntimeModelOverride = undefined;
 		}
 		if (layer === "override") this.#softPins.delete(setting);
 		const prev = setting.get(this);
@@ -1262,8 +1243,8 @@ export class Settings {
 	/** Registry plumbing behind `Setting.clearOverride`: drops the runtime override of `setting`. */
 	clearOverrideValue(setting: AnySetting): void {
 		if (this.#mirror) return this.#forward(this.#mirror, { op: "clearOverrideValue", id: setting.id });
-		if (setting === cfgModelRoles) {
-			this.#savedRuntimeModelRoleOverrides.clear();
+		if (setting === cfgModel) {
+			this.#savedRuntimeModelOverride = undefined;
 		}
 		this.#softPins.delete(setting);
 		if (getByPath(this.#overrides, setting.segments) === undefined) return;
@@ -1506,10 +1487,10 @@ export class Settings {
 		if (this.#projectSavePromise) {
 			await this.#projectSavePromise;
 		}
-		if (this.#modified.size > 0 || this.#modifiedGlobalModelRoles.size > 0) {
+		if (this.#modified.size > 0) {
 			await this.#chainSave();
 		}
-		if (this.#modifiedProjectModelRoles.size > 0) {
+		if (this.#modifiedProjectModel) {
 			await this.#saveProjectNow();
 		}
 	}
@@ -1781,8 +1762,7 @@ export class Settings {
 			const layers = {
 				global: this.#global,
 				configOverlay: this.#configOverlay,
-				overrides:
-					this.#savedRuntimeModelRoleOverrides.size === 0 ? this.#overrides : this.#buildOriginalOverrides(),
+				overrides: this.#savedRuntimeModelOverride === undefined ? this.#overrides : this.#buildOriginalOverrides(),
 			};
 			const project = read ? this.#resolveProjectRead(read, layers) : undefined;
 			const candidate: OwnLayers = { ...layers, project: project?.settings ?? this.#project };
@@ -1793,7 +1773,7 @@ export class Settings {
 			this.#cwd = normalized;
 			this.#overrides = candidate.overrides;
 			for (const setting of settledPins) this.#softPins.delete(setting);
-			this.#savedRuntimeModelRoleOverrides.clear();
+			this.#savedRuntimeModelOverride = undefined;
 			if (project) {
 				this.#project = project.settings;
 				this.#commitProjectRead(project);
@@ -1909,295 +1889,149 @@ export class Settings {
 		return "user";
 	}
 
-	#modelRolesFromLayer(layer: RawSettings): Record<string, string> {
-		const value = getByPath(layer, ["modelRoles"]);
-		if (!isRecord(value)) return {};
+	/** Current model after runtime, overlay, project and profile precedence. */
+	getModel(): string | undefined {
+		return modelRoleValueFromUnknown(cfgModel.get(this));
+	}
 
-		const roles: Record<string, string> = {};
-		for (const role in value) {
-			if (!Object.hasOwn(value, role)) continue;
-			const modelId = modelRoleValueFromUnknown(value[role]);
-			if (modelId !== undefined) {
-				roles[role] = modelId;
-			}
+	getGlobalModel(): string | undefined {
+		return modelRoleValueFromUnknown(this.#global.model) ?? this.#parent?.getGlobalModel();
+	}
+
+	getProjectModel(): string | undefined {
+		return modelRoleValueFromUnknown(this.#project.model) ?? this.#parent?.getProjectModel();
+	}
+
+	getModelProvenance(): SettingProvenance {
+		for (const [layer, source] of [
+			[this.#overrides, "runtime"],
+			[this.#configOverlay, "overlay"],
+			[projectLayerForMerge(this.#project), "project"],
+			[this.#global, "global"],
+		] as const) {
+			if (Object.hasOwn(layer, "model")) return source;
 		}
-		return roles;
+		return this.#parent?.getModelProvenance() ?? "default";
 	}
 
-	#modelRoleLayerOwns(layer: RawSettings, role: ModelRole | string): boolean {
-		const value = getByPath(layer, ["modelRoles"]);
-		if (!isRecord(value)) return false;
-		return Object.hasOwn(value, role);
-	}
-
-	/**
-	 * Set the full `modelRoles` map on the runtime override layer without
-	 * routing through the public {@link override} method. Internal callers
-	 * (project edits, global fallback updates) use this so they can control
-	 * capture invalidation independently of the whole-map replacement
-	 * semantics that `override("modelRoles", …)` carries.
-	 */
-	#setRuntimeModelRoleOverrides(next: Record<string, string>): void {
-		const prev = cfgModelRoles.get(this);
-		setByPath(this.#overrides, ["modelRoles"], next);
-		this.#rebuildMerged();
-		this.#fireIfChanged(cfgModelRoles, prev);
-	}
-
-	#updateRuntimeModelRoleOverride(role: ModelRole | string, modelId: string | undefined): void {
-		const runtimeOverrides = getByPath(this.#overrides, ["modelRoles"]);
-		if (!isRecord(runtimeOverrides) || !Object.hasOwn(runtimeOverrides, role)) return;
-
-		const nextRuntimeOverride = this.#modelRolesFromLayer(this.#overrides);
-		if (modelId === undefined) {
-			delete nextRuntimeOverride[role];
-		} else {
-			nextRuntimeOverride[role] = modelId;
-		}
-		this.#setRuntimeModelRoleOverrides(nextRuntimeOverride);
-	}
-
-	/**
-	 * Capture the original process-wide override for `role` the first time a
-	 * project edit temporarily replaces it, so the original can be restored on
-	 * cwd changes. Subsequent edits in the same cwd must not overwrite the
-	 * first captured value.
-	 */
-	#captureRuntimeModelRoleOverride(role: ModelRole | string): void {
-		if (this.#savedRuntimeModelRoleOverrides.has(role)) return;
-		const runtimeOverrides = getByPath(this.#overrides, ["modelRoles"]);
-		if (!isRecord(runtimeOverrides) || !Object.hasOwn(runtimeOverrides, role)) return;
-		this.#savedRuntimeModelRoleOverrides.set(role, this.#modelRolesFromLayer(this.#overrides)[role]);
-	}
-
-	/**
-	 * Produce a deep copy of `#overrides` with original process-wide model-role
-	 * overrides restored (temporarily replaced by project edits), for
-	 * {@link cloneForCwd} and {@link reloadForCwd}. All remaining captures are
-	 * valid because superseding operations (late `overrideModelRoles`,
-	 * global-mode `setModelRole`, whole-map `override`/`clearOverride`)
-	 * invalidate the affected captures at the point of supersession.
-	 * Does not mutate the current instance's `#overrides`.
-	 */
-	#buildOriginalOverrides(): RawSettings {
-		if (this.#savedRuntimeModelRoleOverrides.size === 0) {
-			return structuredClone(this.#overrides);
-		}
-		const overrides = structuredClone(this.#overrides);
-		const runtimeRoles = getByPath(overrides, ["modelRoles"]);
-		if (!isRecord(runtimeRoles)) return overrides;
-		for (const [role, originalValue] of this.#savedRuntimeModelRoleOverrides) {
-			if (originalValue === undefined) {
-				delete runtimeRoles[role];
-			} else {
-				runtimeRoles[role] = originalValue;
-			}
-		}
-		return overrides;
-	}
-
-	#setProjectModelRoleValue(role: ModelRole | string, modelId: string | null): void {
-		const prev = cfgModelRoles.get(this);
-		const projectRoles = getByPath(this.#project, ["modelRoles"]);
-		const current: Record<string, unknown> = isRecord(projectRoles) ? { ...projectRoles } : {};
-		current[role] = modelId;
-		setByPath(this.#project, ["modelRoles"], current);
-		this.#modifiedProjectModelRoles.add(role);
-		this.#persistedMutationGeneration++;
-		this.#rebuildMerged();
-		this.#fireIfChanged(cfgModelRoles, prev);
-		this.#queueProjectSave();
-	}
-
-	/**
-	 * Set a model role (helper for modelRoles record). Passing `undefined`
-	 * clears the role from the persisted record and any runtime override.
-	 *
-	 * In project storage mode, when a project edit has temporarily replaced
-	 * the process-wide runtime override for `role` and that override is still
-	 * active (the runtime slot currently matches the project value), the
-	 * global-layer write must not rewrite that runtime slot — otherwise the
-	 * global fallback would immediately shadow the still-configured project
-	 * role. The global layer is still persisted; only the runtime override is
-	 * left untouched. The guard is precise so that a later clear, a late
-	 * `overrideModelRoles`, or a storage-mode transition does not leave a
-	 * stale skip in place.
-	 */
-	setModelRole(role: ModelRole | string, modelId: string | undefined): void {
-		if (this.#mirror) return this.#forward(this.#mirror, { op: "setModelRole", role, modelId });
-		const prev = cfgModelRoles.get(this);
-		// Re-setting the persisted role (or clearing an absent one) stages no config.yml rewrite;
-		// the runtime-override sync below still applies.
-		if (!this.#globalWriteIsNoop(["modelRoles", role], modelId)) {
-			const current = this.#modelRolesFromLayer(this.#global);
-			this.#captureGlobalMutation(role, this.#modifiedGlobalModelRoleMutations, current[role]);
-			if (modelId === undefined) {
-				delete current[role];
-			} else {
-				current[role] = modelId;
-			}
-			// Persist per-role rather than marking the whole `modelRoles` path
-			// modified: #saveNow merges only the changed role into the re-read
-			// file, so a concurrent external edit to a sibling role is not
-			// clobbered by this process's stale in-memory snapshot.
-			setByPath(this.#global, ["modelRoles"], current);
-			this.#modifiedGlobalModelRoles.add(role);
-			this.#persistedMutationGeneration++;
-			this.#rebuildMerged();
-			this.#queueSave();
-		}
-		this.#fireIfChanged(cfgModelRoles, prev);
-		if (this.isProjectModelRoleRuntimeOverrideActive(role)) {
-			return;
-		}
-		this.#savedRuntimeModelRoleOverrides.delete(role);
-		this.#updateRuntimeModelRoleOverride(role, modelId);
-	}
-
-	/**
-	 * Whether `role`'s runtime override slot currently holds the temporary
-	 * project-scoped value installed by a prior `setProjectModelRole`. Returns
-	 * `false` when storage is not project-mode, no capture exists, or the
-	 * project role was cleared. With explicit provenance invalidation, a
-	 * surviving capture implies no external supersession occurred.
-	 */
-	isProjectModelRoleRuntimeOverrideActive(role: ModelRole | string): boolean {
-		if (cfgModelRoleStorage.get(this) !== "project") return false;
-		if (!this.#savedRuntimeModelRoleOverrides.has(role)) return false;
-		return !!this.getProjectModelRole(role);
-	}
-	/**
-	 * Set a model role in the current project's settings layer.
-	 */
-	setProjectModelRole(role: ModelRole | string, modelId: string): void {
-		if (this.#mirror) return this.#forward(this.#mirror, { op: "setProjectModelRole", role, modelId });
-		this.#setProjectModelRoleValue(role, modelId);
-		this.#captureRuntimeModelRoleOverride(role);
-		this.#updateRuntimeModelRoleOverride(role, modelId);
-	}
-	/**
-	 * Clear a model role from the current project's settings layer.
-	 */
-	clearProjectModelRole(role: ModelRole | string): void {
-		if (this.#mirror) return this.#forward(this.#mirror, { op: "clearProjectModelRole", role });
-		this.#setProjectModelRoleValue(role, null);
-		this.#captureRuntimeModelRoleOverride(role);
-		this.#updateRuntimeModelRoleOverride(role, undefined);
-	}
-
-	/**
-	 * Get a model role (helper for modelRoles record).
-	 */
-	getModelRole(role: ModelRole | string): string | undefined {
-		const roles: unknown = cfgModelRoles.get(this);
-		if (!isRecord(roles)) return undefined;
-		return modelRoleValueFromUnknown(roles[role]);
-	}
-	/**
-	 * Get a model role from only the global settings layer (an {@link overlay}'s own, else its parent's).
-	 */
-	getGlobalModelRole(role: ModelRole | string): string | undefined {
-		const modelId = this.#modelRolesFromLayer(this.#global)[role];
-		return modelId || this.#parent?.getGlobalModelRole(role);
-	}
-
-	/**
-	 * Get a model role from only the current project settings layer (an {@link overlay}'s own, else its parent's).
-	 */
-	getProjectModelRole(role: ModelRole | string): string | undefined {
-		const modelId = this.#modelRolesFromLayer(this.#project)[role];
-		return modelId || this.#parent?.getProjectModelRole(role);
-	}
-
-	/**
-	 * Report which layer actually supplies the effective model role across
-	 * full merge precedence (runtime override → config overlay → project →
-	 * global → default). Unlike {@link getModelRoleSource}, this accounts
-	 * for runtime and config-overlay layers and detects ownership by key
-	 * presence rather than normalized value, so a `null` tombstone in the
-	 * overlay or runtime layer correctly blocks lower layers. The project
-	 * layer is checked through {@link projectLayerForMerge} because a
-	 * project null is a cleared value (falls back to global), not a
-	 * tombstone.
-	 */
-	getModelRoleProvenance(role: ModelRole | string): SettingProvenance {
-		if (this.#modelRoleLayerOwns(this.#overrides, role)) return "runtime";
-		if (this.#modelRoleLayerOwns(this.#configOverlay, role)) return "overlay";
-		if (this.#modelRoleLayerOwns(projectLayerForMerge(this.#project), role)) return "project";
-		if (this.#modelRoleLayerOwns(this.#global, role)) return "global";
-		return this.#parent?.getModelRoleProvenance(role) ?? "default";
-	}
-
-	/**
-	 * Get the persisted layer supplying a model role (project/global/default only).
-	 */
-	getModelRoleSource(role: ModelRole | string): "project" | "global" | "default" {
-		if (this.getProjectModelRole(role)) return "project";
-		if (this.getGlobalModelRole(role)) return "global";
+	getModelSource(): "project" | "global" | "default" {
+		if (this.getProjectModel()) return "project";
+		if (this.getGlobalModel()) return "global";
 		return "default";
 	}
 
-	/**
-	 * Raw `modelPresets` entry for `name` from the highest-precedence layer that
-	 * defines it (runtime override → config overlay → project → global), whole —
-	 * same-name entries are NOT deep-merged across layers. A `null` entry on a
-	 * tombstoning layer (runtime, overlay) hides the preset; a `null` anywhere
-	 * else counts as unset. Falls back to the parent chain like the model-role
-	 * layer helpers.
-	 */
-	getOwnedModelPreset(
-		name: string,
-	): { entry: unknown; source: "runtime" | "overlay" | "project" | "global" } | undefined {
-		const layers = [
-			{ layer: this.#overrides, source: "runtime", tombstone: true },
-			{ layer: this.#configOverlay, source: "overlay", tombstone: true },
-			{ layer: projectLayerForMerge(this.#project), source: "project", tombstone: false },
-			{ layer: this.#global, source: "global", tombstone: false },
-		] as const;
-		for (const { layer, source, tombstone } of layers) {
-			const presets = getByPath(layer, ["modelPresets"]);
-			if (!isRecord(presets) || !Object.hasOwn(presets, name)) continue;
-			const entry = presets[name];
-			if (entry === null || entry === undefined) {
-				if (tombstone) return undefined;
-				continue;
-			}
-			return { entry, source };
-		}
-		return this.#parent?.getOwnedModelPreset(name);
+	#updateRuntimeModelOverride(model: string | undefined): void {
+		if (!Object.hasOwn(this.#overrides, "model")) return;
+		const previous = cfgModel.get(this);
+		if (model === undefined) delete this.#overrides.model;
+		else this.#overrides.model = model;
+		this.#rebuildMerged();
+		this.#fireIfChanged(cfgModel, previous);
 	}
 
-	/**
-	 * Get all model roles (helper for modelRoles record).
-	 */
+	#captureRuntimeModelOverride(): void {
+		if (this.#savedRuntimeModelOverride || !Object.hasOwn(this.#overrides, "model")) return;
+		this.#savedRuntimeModelOverride = { value: this.#overrides.model };
+	}
+
+	#buildOriginalOverrides(): RawSettings {
+		const overrides = structuredClone(this.#overrides);
+		if (this.#savedRuntimeModelOverride) overrides.model = this.#savedRuntimeModelOverride.value;
+		return overrides;
+	}
+
+	/** Save the primary model in the active profile, synchronizing an existing CLI override. */
+	setModel(model: string | undefined): void {
+		if (this.#mirror) return this.#forward(this.#mirror, { op: "setModelRole", role: "default", modelId: model });
+		if (model === undefined) cfgModel.unset(this);
+		else cfgModel.set(this, model);
+		if (this.isProjectModelRuntimeOverrideActive()) return;
+		this.#savedRuntimeModelOverride = undefined;
+		this.#updateRuntimeModelOverride(model);
+	}
+
+	isProjectModelRuntimeOverrideActive(): boolean {
+		return (
+			cfgModelStorage.get(this) === "project" &&
+			this.#savedRuntimeModelOverride !== undefined &&
+			!!this.getProjectModel()
+		);
+	}
+
+	#setProjectModelValue(model: string | null): void {
+		if (model !== null) cfgModel.assertWritable(model);
+		const previous = cfgModel.get(this);
+		this.#project.model = model;
+		this.#modifiedProjectModel = true;
+		this.#persistedMutationGeneration++;
+		this.#rebuildMerged();
+		this.#fireIfChanged(cfgModel, previous);
+		this.#queueProjectSave();
+	}
+
+	setProjectModel(model: string): void {
+		if (this.#mirror)
+			return this.#forward(this.#mirror, { op: "setProjectModelRole", role: "default", modelId: model });
+		this.#setProjectModelValue(model);
+		this.#captureRuntimeModelOverride();
+		this.#updateRuntimeModelOverride(model);
+	}
+
+	clearProjectModel(): void {
+		if (this.#mirror) return this.#forward(this.#mirror, { op: "clearProjectModelRole", role: "default" });
+		this.#setProjectModelValue(null);
+		this.#captureRuntimeModelOverride();
+		this.#updateRuntimeModelOverride(undefined);
+	}
+
+	overrideModel(model: string | undefined): void {
+		if (model === undefined) cfgModel.clearOverride(this);
+		else cfgModel.override(this, model);
+	}
+
+	#assertDefaultModelRole(role: string): void {
+		if (role !== "default")
+			throw new Error(`Model role "${role}" has been removed; select the session model instead`);
+	}
+
+	/** Compatibility with extensions that still address the primary model as `default`. */
+	setModelRole(role: ModelRole | string, modelId: string | undefined): void {
+		this.#assertDefaultModelRole(role);
+		this.setModel(modelId);
+	}
+	setProjectModelRole(role: ModelRole | string, modelId: string): void {
+		this.#assertDefaultModelRole(role);
+		this.setProjectModel(modelId);
+	}
+	clearProjectModelRole(role: ModelRole | string): void {
+		this.#assertDefaultModelRole(role);
+		this.clearProjectModel();
+	}
+	getModelRole(role: ModelRole | string): string | undefined {
+		return role === "default" ? this.getModel() : undefined;
+	}
+	getGlobalModelRole(role: ModelRole | string): string | undefined {
+		return role === "default" ? this.getGlobalModel() : undefined;
+	}
+	getProjectModelRole(role: ModelRole | string): string | undefined {
+		return role === "default" ? this.getProjectModel() : undefined;
+	}
+	getModelRoleProvenance(role: ModelRole | string): SettingProvenance {
+		return role === "default" ? this.getModelProvenance() : "default";
+	}
+	getModelRoleSource(role: ModelRole | string): "project" | "global" | "default" {
+		return role === "default" ? this.getModelSource() : "default";
+	}
+	isProjectModelRoleRuntimeOverrideActive(role: ModelRole | string): boolean {
+		return role === "default" && this.isProjectModelRuntimeOverrideActive();
+	}
 	getModelRoles(): ReadOnlyDict<string> {
-		const roles: unknown = cfgModelRoles.get(this);
-		if (!isRecord(roles)) return {};
-
-		const normalized: Record<string, string> = {};
-		for (const role in roles) {
-			if (!Object.hasOwn(roles, role)) continue;
-			const modelId = modelRoleValueFromUnknown(roles[role]);
-			if (modelId !== undefined) {
-				normalized[role] = modelId;
-			}
-		}
-		return normalized;
+		const model = this.getModel();
+		return model === undefined ? {} : { default: model };
 	}
-
-	/*
-	 * Override model roles (helper for modelRoles record).
-	 */
 	overrideModelRoles(roles: ReadOnlyDict<string>): void {
-		if (this.#mirror) return this.#forward(this.#mirror, { op: "overrideModelRoles", roles: { ...roles } });
-		const next = this.#modelRolesFromLayer(this.#overrides);
-		for (const [role, modelId] of Object.entries(roles)) {
-			if (modelId) {
-				next[role] = modelId;
-				this.#savedRuntimeModelRoleOverrides.delete(role);
-			}
-		}
-		this.#setRuntimeModelRoleOverrides(next);
+		for (const role of Object.keys(roles)) this.#assertDefaultModelRole(role);
+		if (roles.default !== undefined) this.overrideModel(roles.default);
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -2745,7 +2579,7 @@ export class Settings {
 			cwd,
 			quarantineInvalid,
 			items: projectItems,
-			nativeModelRoles: getByPath(nativeProject, ["modelRoles"]),
+			nativeModel: nativeProject.model,
 			fileSettings: structuredClone(nativeProject),
 			warningsSeen,
 		};
@@ -2757,12 +2591,12 @@ export class Settings {
 	 * over `layers` with the merged project; the read itself runs without waiting for them.
 	 */
 	#resolveProjectRead(read: ProjectSettingsDiscovery, layers: Omit<OwnLayers, "project">): ProjectSettingsReadResult {
-		let project = this.#mergeProjectItems(read.items, read.nativeModelRoles);
+		let project = this.#mergeProjectItems(read.items, read.nativeModel);
 		const disabled = this.#disabledProviderIds({ ...layers, project: project.settings }, read.cwd);
 		if (read.items.some(item => disabled.has(item._source.provider))) {
 			const filtered = this.#mergeProjectItems(
 				read.items.filter(item => !disabled.has(item._source.provider)),
-				read.nativeModelRoles,
+				read.nativeModel,
 			);
 			const projectSwitch = getByPath(project.settings, cfgDisabledProviders.segments);
 			if (projectSwitch !== undefined) {
@@ -2799,17 +2633,23 @@ export class Settings {
 	/** Project-level settings `items` merged in discovery order, then the native project config's model roles. */
 	#mergeProjectItems(
 		items: readonly SettingsCapabilityItem[],
-		nativeModelRoles: unknown,
+		nativeModel: unknown,
 	): { settings: RawSettings; sourcePaths: string[]; shellPathSource: string | undefined } {
 		let settings: RawSettings = {};
 		const sourcePaths: string[] = [];
 		let shellPathSource: string | undefined;
 		for (const item of items) {
-			settings = this.#deepMerge(settings, dropSettingsGroupShadows(item.data as RawSettings, item.path));
+			settings = this.#deepMerge(
+				settings,
+				this.#migrateRawSettings(
+					dropSettingsGroupShadows(structuredClone(item.data) as RawSettings, item.path),
+					false,
+				),
+			);
 			sourcePaths.push(item.path);
 			if (Object.hasOwn(item.data, "shellPath")) shellPathSource = item.path;
 		}
-		if (nativeModelRoles !== undefined) settings = this.#deepMerge(settings, { modelRoles: nativeModelRoles });
+		if (nativeModel !== undefined) settings = this.#deepMerge(settings, { model: nativeModel });
 		return { settings, sourcePaths, shellPathSource };
 	}
 
@@ -3561,230 +3401,48 @@ export class Settings {
 		delete raw["mcp.discoveryMode"];
 		delete raw["mcp.discoveryDefaultServers"];
 
-		// Retired provider/model selectors now live in modelRoles plus explicit
-		// retry chains. Read nested and quoted-dotted forms from the same layer;
-		// an owned nested key wins even when its value is undefined. Every legacy
-		// active key is removed after inspection so it cannot leak back into config.yml.
-		// Retired speech settings remain inert and untouched for configuration portability.
-		function migrateKindRoleSettings(): void {
-			const providerSettings = isRecord(raw.providers) ? raw.providers : undefined;
-			const legacy = (root: Record<string, unknown> | undefined, key: string, flatKey: string): unknown =>
-				root && Object.hasOwn(root, key) ? root[key] : raw[flatKey];
-			const removeLegacy = (root: Record<string, unknown> | undefined, key: string, flatKey: string): void => {
-				if (root) delete root[key];
-				delete raw[flatKey];
-			};
-			const dedupe = (values: readonly string[]): string[] => [...new Set(values)];
-
-			const roles = isRecord(raw.modelRoles) ? raw.modelRoles : {};
-			const retrySettings = isRecord(raw.retry) ? raw.retry : {};
-			const fallbackChains = isRecord(retrySettings.fallbackChains) ? retrySettings.fallbackChains : {};
-			let rolesChanged = false;
-			let fallbackChainsChanged = false;
-			const setRoleChain = (role: string, candidates: readonly string[]): void => {
-				if (candidates.length === 0) return;
-				if (!Object.hasOwn(roles, role)) {
-					roles[role] = candidates[0];
-					rolesChanged = true;
-				}
-				if (!Object.hasOwn(fallbackChains, role)) {
-					fallbackChains[role] = candidates.slice(1);
-					fallbackChainsChanged = true;
-				}
-			};
-
-			const legacyWebSearch = legacy(providerSettings, "webSearch", "providers.webSearch");
-			const legacyWebOrder = legacy(providerSettings, "webSearchOrder", "providers.webSearchOrder");
-			const legacyWebExclude = legacy(providerSettings, "webSearchExclude", "providers.webSearchExclude");
-			const legacyGeminiModel = legacy(providerSettings, "webSearchGeminiModel", "providers.webSearchGeminiModel");
-			// Legacy settings named a provider; its swap target is the catalog's
-			// resolved per-model policy (`web-search-model` / `image-model`),
-			// uniform across that provider's bundled rows.
-			const bundledSelector = (
-				provider: string,
-				pick: (model: Model<Api>) => string | undefined,
-			): string | undefined => {
-				for (const model of getBundledModels(provider as GeneratedProvider)) {
-					const id = pick(model);
-					if (id) return `${provider}/${id}`;
-				}
-				return undefined;
-			};
-			const webSearchSelector = (provider: string): string[] => {
-				const selector = bundledSelector(provider, model => model.webSearchModel);
-				return selector ? [selector] : [];
-			};
-			const geminiSelectors = (model: string): string[] => [
-				`google-gemini-cli/${model}`,
-				`google-antigravity/${model}`,
-				`google/${model}`,
-			];
-			const webSelectors = (provider: string, geminiModel: string): string[] => {
-				switch (provider) {
-					case "gemini":
-						return geminiSelectors(geminiModel);
-					case "anthropic":
-						return webSearchSelector("anthropic");
-					case "codex":
-						return webSearchSelector("openai-codex");
-					case "xai":
-						return webSearchSelector("xai");
-					case "auto":
-						return [];
-					default:
-						return isRegisteredSearchEngine(provider) ? [`web/${provider}`] : [];
-				}
-			};
-			const geminiModel =
-				typeof legacyGeminiModel === "string" && legacyGeminiModel.trim()
-					? legacyGeminiModel.trim()
-					: (getBundledModels("google").find(model => model.webSearchModel)?.webSearchModel ?? "");
-			const excludedWebProviders = new Set(
-				Array.isArray(legacyWebExclude)
-					? legacyWebExclude.filter(
-							(value): value is string =>
-								typeof value === "string" && webSelectors(value, geminiModel).length > 0,
-						)
-					: [],
-			);
-			const isWebSelectorExcluded = (selector: string): boolean => {
-				if (excludedWebProviders.has("gemini") && geminiSelectors(geminiModel).includes(selector)) return true;
-				if (excludedWebProviders.has("anthropic") && selector.startsWith("anthropic/")) return true;
-				if (excludedWebProviders.has("codex") && selector.startsWith("openai-codex/")) return true;
-				if (excludedWebProviders.has("xai") && (selector.startsWith("xai/") || selector.startsWith("xai-oauth/"))) {
-					return true;
-				}
-				for (const provider of excludedWebProviders) {
-					if (selector === `web/${provider}`) return true;
-				}
-				return false;
-			};
-			const orderedWebProviders = Array.isArray(legacyWebOrder)
-				? legacyWebOrder
-				: typeof legacyWebSearch === "string" && legacyWebSearch !== "auto"
-					? [legacyWebSearch]
-					: [];
-			const orderedWebSelectors = orderedWebProviders.flatMap(value =>
-				typeof value === "string" ? webSelectors(value, geminiModel) : [],
-			);
-			// The Gemini model only shapes an ordered `gemini` entry; the defaults hold no chat models.
-			if (orderedWebSelectors.length > 0 || excludedWebProviders.size > 0) {
-				setRoleChain(
-					"web",
-					dedupe([...orderedWebSelectors, ...roleDefaultModels().web]).filter(
-						selector => !isWebSelectorExcluded(selector),
-					),
-				);
-			}
-
-			const legacyImage = legacy(providerSettings, "image", "providers.image");
-			const legacyImageOrder = legacy(providerSettings, "imageOrder", "providers.imageOrder");
-			const legacyImageProviders: Record<string, string> = {
-				openai: "openai",
-				"openai-codex": "openai-codex",
-				antigravity: "google-antigravity",
-				xai: "xai",
-				gemini: "google",
-				deepinfra: "deepinfra",
-			};
-			const imageSelector = (provider: string): string | undefined => {
-				// OpenRouter rows carry no gemini image-model swap (the gemini class
-				// binds to Google transports only), so its legacy target stays literal.
-				if (provider === "openrouter") return "openrouter/google/gemini-3-pro-image";
-				const catalogProvider = legacyImageProviders[provider];
-				return catalogProvider ? bundledSelector(catalogProvider, model => model.imageModel) : undefined;
-			};
-			const orderedImageProviders = Array.isArray(legacyImageOrder)
-				? legacyImageOrder
-				: typeof legacyImage === "string" && legacyImage !== "auto"
-					? [legacyImage]
-					: [];
-			const orderedImageSelectors = orderedImageProviders.flatMap(value =>
-				typeof value === "string" ? (imageSelector(value) ?? []) : [],
-			);
-			if (orderedImageSelectors.length > 0) {
-				setRoleChain("image", dedupe([...orderedImageSelectors, ...roleDefaultModels().image]));
-			}
-
-			const legacyJudgmentProvider = legacy(providerSettings, "judgmentProvider", "providers.judgmentProvider");
-			const legacyAutoThinkingModel = legacy(providerSettings, "autoThinkingModel", "providers.autoThinkingModel");
-			const legacyUnexpectedStopModel = legacy(
-				providerSettings,
-				"unexpectedStopModel",
-				"providers.unexpectedStopModel",
-			);
-			const nonDefaultJudge =
-				(typeof legacyJudgmentProvider === "string" && legacyJudgmentProvider !== "auto") ||
-				(typeof legacyAutoThinkingModel === "string" && legacyAutoThinkingModel !== "online") ||
-				(typeof legacyUnexpectedStopModel === "string" && legacyUnexpectedStopModel !== "online");
-			if (nonDefaultJudge) {
-				const judgeCandidates: string[] = [];
-				if (legacyJudgmentProvider !== "llm") judgeCandidates.push("typesafe/jev-1.14.0");
-				if (typeof legacyAutoThinkingModel === "string" && legacyAutoThinkingModel !== "online") {
-					judgeCandidates.push(`local/${legacyAutoThinkingModel}`);
-				}
-				if (typeof legacyUnexpectedStopModel === "string" && legacyUnexpectedStopModel !== "online") {
-					judgeCandidates.push(`local/${legacyUnexpectedStopModel}`);
-				}
-				judgeCandidates.push("@tiny", "@smol", "@default");
-				setRoleChain("judge", dedupe(judgeCandidates));
-			}
-
-			const prependLocalRole = (role: "tiny", model: unknown): void => {
-				if (typeof model !== "string" || model === "online" || model.length === 0) return;
-				const selector = `local/${model}`;
-				const configured = typeof roles[role] === "string" ? roles[role] : undefined;
-				const patterns = configured
-					? configured
-							.split(",")
-							.map(pattern => pattern.trim())
-							.filter(Boolean)
-					: [];
-				roles[role] = dedupe([selector, ...patterns]).join(",");
-				rolesChanged = true;
-			};
-			prependLocalRole("tiny", legacy(providerSettings, "tinyModel", "providers.tinyModel"));
-
-			for (const key of [
-				"webSearch",
-				"webSearchOrder",
-				"webSearchExclude",
-				"webSearchGeminiModel",
-				"image",
-				"imageOrder",
-				"judgmentProvider",
-				"autoThinkingModel",
-				"unexpectedStopModel",
-				"tinyModel",
-				"memoryModel",
-			]) {
-				removeLegacy(providerSettings, key, `providers.${key}`);
-			}
-
-			if (rolesChanged) raw.modelRoles = roles;
-			if (fallbackChainsChanged) {
-				retrySettings.fallbackChains = fallbackChains;
-				raw.retry = retrySettings;
-			}
-			if (providerSettings && Object.keys(providerSettings).length === 0) delete raw.providers;
+		// Retired task-specific selectors must not recreate independent model roles.
+		const providerSettings = isRecord(raw.providers) ? raw.providers : undefined;
+		for (const key of [
+			"webSearch",
+			"webSearchOrder",
+			"webSearchExclude",
+			"webSearchGeminiModel",
+			"image",
+			"imageOrder",
+			"judgmentProvider",
+			"autoThinkingModel",
+			"unexpectedStopModel",
+			"tinyModel",
+			"memoryModel",
+		]) {
+			if (providerSettings) delete providerSettings[key];
+			delete raw[`providers.${key}`];
 		}
-		migrateKindRoleSettings();
+		if (providerSettings && Object.keys(providerSettings).length === 0) delete raw.providers;
 
-		// The old web-provider migration persisted this pair of fuzzy defaults.
-		// Qualified selectors are now exact, so replace the pair without changing
-		// independently configured selectors or other role chains.
-		{
-			const retry = isRecord(raw.retry) ? raw.retry : undefined;
-			const chains = retry && isRecord(retry.fallbackChains) ? retry.fallbackChains : undefined;
-			const web = chains?.web;
-			if (chains && Array.isArray(web)) {
-				const index = web.findIndex(
-					(selector, i) => selector === "openai-codex/gpt-5.6" && web[i + 1] === "openai-codex/gpt-5.5",
-				);
-				if (index !== -1) {
-					chains.web = [...web.slice(0, index), "openai-codex/gpt-5.6-sol", ...web.slice(index + 2)];
-				}
-			}
+		// Migrate each layer independently so project/profile/CLI precedence is unchanged.
+		// An owned canonical key, including null, always wins over the legacy default.
+		const roles = isRecord(raw.modelRoles) ? raw.modelRoles : undefined;
+		const legacyModel = roles && Object.hasOwn(roles, "default") ? roles.default : raw["modelRoles.default"];
+		if (!Object.hasOwn(raw, "model") && legacyModel !== undefined) raw.model = legacyModel;
+		if (!Object.hasOwn(raw, "modelStorage") && raw.modelRoleStorage !== undefined)
+			raw.modelStorage = raw.modelRoleStorage;
+		const retiredModelSettings = ["modelRoles", "modelRoleStorage", "modelTags", "modelPresets", "cycleOrder"];
+		for (const key of Object.keys(raw)) {
+			if (retiredModelSettings.some(prefix => key === prefix || key.startsWith(`${prefix}.`))) delete raw[key];
+		}
+		const retrySettings = isRecord(raw.retry) ? raw.retry : undefined;
+		if (retrySettings) {
+			delete retrySettings.fallbackChains;
+			delete retrySettings.modelFallback;
+		}
+		delete raw["retry.fallbackChains"];
+		delete raw["retry.modelFallback"];
+		const taskSettings = isRecord(raw.task) ? raw.task : undefined;
+		for (const key of ["agentModelOverrides", "perCallModel", "perCallModelAllow", "agentPrewalk", "prewalk"]) {
+			if (taskSettings) delete taskSettings[key];
+			delete raw[`task.${key}`];
 		}
 
 		// Consolidate the retired Exa suite toggles onto the sole remaining
@@ -3890,18 +3548,13 @@ export class Settings {
 
 	async #saveNow(): Promise<void> {
 		if (this.#savesCancelled || !this.#persist || !this.#configPath) return;
-		if (this.#modified.size === 0 && this.#modifiedGlobalModelRoles.size === 0) return;
+		if (this.#modified.size === 0) return;
 
 		const configPath = this.#configPath;
 		const modifiedPaths = [...this.#modified];
-		const modifiedModelRoles = [...this.#modifiedGlobalModelRoles];
 		const modifiedPathMutations = new Map(this.#modifiedPathMutations);
-		const modifiedModelRoleMutations = new Map(this.#modifiedGlobalModelRoleMutations);
-		const globalRolesAtStart = this.#modelRolesFromLayer(this.#global);
 		this.#modified.clear();
-		this.#modifiedGlobalModelRoles.clear();
 		this.#modifiedPathMutations.clear();
-		this.#modifiedGlobalModelRoleMutations.clear();
 
 		try {
 			await this.#withYamlWriteLock(configPath, async writePath => {
@@ -3929,57 +3582,6 @@ export class Settings {
 					if (value === undefined) deleteByPath(current, segments);
 					else setByPath(current, segments, value);
 					writtenPaths.push(segments);
-					shouldWrite = true;
-				}
-
-				// Merge only the model roles captured by this save. Then retain
-				// any role changed while the async read/lock was pending before
-				// replacing #global, so the follow-up save still sees its value.
-				const latestGlobalRoles = this.#modelRolesFromLayer(this.#global);
-				const rolesToPreserve = new Set(this.#modifiedGlobalModelRoles);
-				for (const role in globalRolesAtStart) {
-					if (globalRolesAtStart[role] !== latestGlobalRoles[role]) {
-						rolesToPreserve.add(role);
-					}
-				}
-				for (const role in latestGlobalRoles) {
-					if (globalRolesAtStart[role] !== latestGlobalRoles[role]) {
-						rolesToPreserve.add(role);
-					}
-				}
-				const currentRoles = getByPath(current, ["modelRoles"]);
-				const currentRoleValues: Record<string, unknown> = isRecord(currentRoles) ? currentRoles : {};
-				const rolesToApply = modifiedModelRoles.filter(role => {
-					const mutation = modifiedModelRoleMutations.get(role);
-					const canApply =
-						mutation !== undefined &&
-						mutation.generation.kind !== "unreadable" &&
-						(yamlGenerationsMatch(mutation.generation, loaded.generation) ||
-							Bun.deepEquals(currentRoleValues[role], mutation.baseValue));
-					if (canApply) return true;
-					logger.warn("Settings: skipped stale change after external config edit", {
-						path: configPath,
-						setting: `modelRoles.${role}`,
-					});
-					return false;
-				});
-				if (rolesToApply.length > 0 || rolesToPreserve.size > 0) {
-					const mergedRoles: Record<string, unknown> = { ...currentRoleValues };
-					for (const role of rolesToApply) {
-						if (Object.hasOwn(globalRolesAtStart, role)) {
-							mergedRoles[role] = globalRolesAtStart[role];
-						} else {
-							delete mergedRoles[role];
-						}
-					}
-					for (const role of rolesToPreserve) {
-						if (Object.hasOwn(latestGlobalRoles, role)) {
-							mergedRoles[role] = latestGlobalRoles[role];
-						} else {
-							delete mergedRoles[role];
-						}
-					}
-					setByPath(current, ["modelRoles"], mergedRoles);
 					shouldWrite = true;
 				}
 
@@ -4016,15 +3618,6 @@ export class Settings {
 					}
 				}
 				this.#adoptSavedGlobal(current, configPath);
-				// These pending roles were included in this write. Remove each
-				// only if no newer local change arrived while the write was in flight.
-				const globalRolesAfterWrite = this.#modelRolesFromLayer(this.#global);
-				for (const role of rolesToPreserve) {
-					if (latestGlobalRoles[role] === globalRolesAfterWrite[role]) {
-						this.#modifiedGlobalModelRoles.delete(role);
-						this.#modifiedGlobalModelRoleMutations.delete(role);
-					}
-				}
 			});
 		} catch (error) {
 			logger.warn("Settings: save failed", { error: String(error) });
@@ -4047,19 +3640,7 @@ export class Settings {
 					);
 				}
 			}
-			for (const role of modifiedModelRoles) {
-				this.#modifiedGlobalModelRoles.add(role);
-				if (!this.#modifiedGlobalModelRoleMutations.has(role)) {
-					const mutation = modifiedModelRoleMutations.get(role) ?? {
-						generation: { kind: "unreadable" },
-						baseValue: undefined,
-					};
-					this.#modifiedGlobalModelRoleMutations.set(
-						role,
-						retryGeneration ? { ...mutation, generation: retryGeneration } : mutation,
-					);
-				}
-			}
+
 			throw error;
 		}
 	}
@@ -4084,16 +3665,6 @@ export class Settings {
 
 	/** Re-applies every global write still pending a save onto `target`, a global layer read from disk. */
 	#applyPendingGlobalWrites(target: RawSettings): void {
-		if (this.#modifiedGlobalModelRoles.size > 0) {
-			const liveRoles = getByPath(this.#global, ["modelRoles"]);
-			const targetRoles = getByPath(target, ["modelRoles"]);
-			const roles: Record<string, unknown> = isRecord(targetRoles) ? targetRoles : {};
-			for (const role of this.#modifiedGlobalModelRoles) {
-				if (isRecord(liveRoles) && Object.hasOwn(liveRoles, role)) roles[role] = liveRoles[role];
-				else delete roles[role];
-			}
-			setByPath(target, ["modelRoles"], roles);
-		}
 		for (const segments of this.#modified.values()) {
 			const value = getByPath(this.#global, segments);
 			if (value === undefined) deleteByPath(target, segments);
@@ -4101,12 +3672,9 @@ export class Settings {
 		}
 	}
 
-	/** Re-applies every project model role still pending a save onto `target`, a project layer read from disk. */
+	/** Re-apply the selected project model while its save is pending. */
 	#applyPendingProjectWrites(target: RawSettings): void {
-		const liveRoles = getByPath(this.#project, ["modelRoles"]);
-		for (const role of this.#modifiedProjectModelRoles) {
-			setByPath(target, ["modelRoles", role], isRecord(liveRoles) ? liveRoles[role] : undefined);
-		}
+		if (this.#modifiedProjectModel) target.model = this.#project.model;
 	}
 
 	#queueProjectSave(): void {
@@ -4130,11 +3698,10 @@ export class Settings {
 	}
 
 	async #saveProjectNow(): Promise<void> {
-		if (this.#savesCancelled || !this.#persist || this.#modifiedProjectModelRoles.size === 0) return;
+		if (this.#savesCancelled || !this.#persist || !this.#modifiedProjectModel) return;
 
 		const projectConfigPath = path.join(getProjectAgentDir(this.#cwd), "config.yml");
-		const modifiedModelRoles = [...this.#modifiedProjectModelRoles];
-		this.#modifiedProjectModelRoles.clear();
+		this.#modifiedProjectModel = false;
 
 		try {
 			await fs.promises.mkdir(path.dirname(projectConfigPath), { recursive: true });
@@ -4144,11 +3711,7 @@ export class Settings {
 					loaded.settings ??
 					(this.#quarantinedYamlTargets.has(projectConfigPath) ? structuredClone(this.#projectFileSettings) : {});
 
-				const projectRoles = getByPath(this.#project, ["modelRoles"]);
-				for (const role of modifiedModelRoles) {
-					const value = isRecord(projectRoles) ? projectRoles[role] : undefined;
-					setByPath(projectSettings, ["modelRoles", role], value);
-				}
+				projectSettings.model = this.#project.model;
 
 				await this.#writeYamlAtomically(writePath, stringifyYamlConfig(projectSettings));
 				this.#projectFileSettings = structuredClone(projectSettings);
@@ -4156,9 +3719,7 @@ export class Settings {
 			});
 			invalidateCapabilityFsCache(projectConfigPath);
 		} catch (error) {
-			for (const role of modifiedModelRoles) {
-				this.#modifiedProjectModelRoles.add(role);
-			}
+			this.#modifiedProjectModel = true;
 			throw error;
 		}
 

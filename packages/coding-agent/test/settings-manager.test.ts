@@ -17,9 +17,6 @@ import { bindEffects, lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 
 import * as discovery from "@oh-my-pi/pi-coding-agent/discovery";
 import { editVariantForModel } from "@oh-my-pi/pi-coding-agent/utils/edit-mode";
-import { roleDefaultModels } from "@oh-my-pi/pi-catalog/compat/behavior";
-import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
-import { resolveRoleChain } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { getAgentDbPath, getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
 import * as fileLock from "@oh-my-pi/pi-utils/file-lock";
@@ -40,11 +37,9 @@ import {
 	cfgProvidersMaxInFlightRequests,
 	cfgPowerSleepPrevention,
 	cfgFeaturesUnexpectedStopDetection,
-	cfgRetryFallbackChains,
 	cfgProviderAppendOnlyContext,
 	cfgDefaultThinkingLevel,
 	cfgInlineToolDescriptors,
-	cfgRetryModelFallback,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
 import {
 	cfgToolsXdev,
@@ -66,7 +61,7 @@ import {
 	cfgTaskIsolationEnabled,
 	cfgTaskMaxConcurrency,
 	cfgTaskEnableEffort,
-	cfgTaskAgentModelOverrides,
+	cfgTaskAgentServiceTierOverrides,
 } from "@oh-my-pi/pi-coding-agent/task/settings";
 
 import { cfgEditMode } from "@oh-my-pi/pi-coding-agent/edit/settings";
@@ -75,7 +70,7 @@ import {
 	cfgCompactionMethodOrder,
 	cfgSnapcompactSystemPrompt,
 } from "@oh-my-pi/pi-coding-agent/session/context-settings";
-import { cfgModelRoles, cfgDisabledProviders, cfgEnabledModels } from "@oh-my-pi/pi-coding-agent/config/model-settings";
+import { cfgModel, cfgDisabledProviders, cfgEnabledModels } from "@oh-my-pi/pi-coding-agent/config/model-settings";
 import { cfgShellPath } from "@oh-my-pi/pi-coding-agent/exec/settings";
 
 /** Lets microtask-coalesced setting listeners run. */
@@ -357,7 +352,7 @@ describe("Settings", () => {
 		it("backs up a config corrupted after startup and retains the pending global change for retry", async () => {
 			await writeSettings({
 				auth: { broker: { token: "TOP-SECRET" } },
-				modelRoles: { default: "keep/default" },
+				model: "keep/default",
 			});
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			const corrupted = 'auth:\n  broker:\n    token: TOP-SECRET\nmodelRoles:\n  default: "unterminated\n';
@@ -375,7 +370,7 @@ describe("Settings", () => {
 			await settings.flush();
 			expect(await readSettings()).toEqual({
 				auth: { broker: { token: "TOP-SECRET" } },
-				modelRoles: { default: "keep/default" },
+				model: "keep/default",
 				theme: { dark: "anthracite" },
 			});
 			expect(await Bun.file(backupPath).text()).toBe(corrupted);
@@ -388,15 +383,12 @@ describe("Settings", () => {
 		it("backs up a corrupted project config and retains the pending project role for retry", async () => {
 			await writeSettings({});
 			const projectConfigPath = path.join(projectDir, ".omp", "config.yml");
-			await Bun.write(
-				projectConfigPath,
-				YAML.stringify({ modelRoles: { default: "keep/default" }, custom: { keep: true } }, null, 2),
-			);
+			await Bun.write(projectConfigPath, YAML.stringify({ model: "keep/default", custom: { keep: true } }, null, 2));
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			const corrupted = 'modelRoles:\n  default: keep/default\n  advisor: "unterminated\ncustom:\n  keep: true\n';
 			await Bun.write(projectConfigPath, corrupted);
 
-			settings.setProjectModelRole("smol", "new/smol");
+			settings.setProjectModelRole("default", "new/model");
 			await expect(settings.flush()).rejects.toThrow("Settings config is invalid");
 
 			expect(await Bun.file(projectConfigPath).exists()).toBe(false);
@@ -409,7 +401,7 @@ describe("Settings", () => {
 			await settings.flush();
 			const saved = YAML.parse(await Bun.file(projectConfigPath).text()) as Record<string, unknown>;
 			expect(saved).toEqual({
-				modelRoles: { default: "keep/default", smol: "new/smol" },
+				model: "new/model",
 				custom: { keep: true },
 			});
 			expect(await Bun.file(backupPath).text()).toBe(corrupted);
@@ -1044,7 +1036,7 @@ describe("Settings", () => {
 			const original = YAML.stringify(
 				{
 					auth: { broker: { token: "TOP-SECRET" } },
-					modelRoles: { default: "keep/default" },
+					model: "keep/default",
 				},
 				null,
 				2,
@@ -1063,7 +1055,7 @@ describe("Settings", () => {
 			await settings.flush();
 			expect(await readSettings()).toEqual({
 				auth: { broker: { token: "TOP-SECRET" } },
-				modelRoles: { default: "keep/default" },
+				model: "keep/default",
 				theme: { dark: "anthracite" },
 			});
 		});
@@ -1071,10 +1063,10 @@ describe("Settings", () => {
 		it("leaves an unreadable project config untouched and retains its pending role", async () => {
 			await writeSettings({});
 			const projectConfigPath = path.join(projectDir, ".omp", "config.yml");
-			const original = YAML.stringify({ modelRoles: { default: "keep/default" }, custom: { keep: true } }, null, 2);
+			const original = YAML.stringify({ model: "keep/default", custom: { keep: true } }, null, 2);
 			await Bun.write(projectConfigPath, original);
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			settings.setProjectModelRole("smol", "new/smol");
+			settings.setProjectModelRole("default", "new/model");
 			const readSpy = vi.spyOn(fs.promises, "readFile");
 			readSpy.mockRejectedValueOnce(new FsCodeError("EACCES", "injected read failure"));
 
@@ -1087,7 +1079,7 @@ describe("Settings", () => {
 			).toBe(false);
 			await settings.flush();
 			expect(YAML.parse(await Bun.file(projectConfigPath).text())).toEqual({
-				modelRoles: { default: "keep/default", smol: "new/smol" },
+				model: "new/model",
 				custom: { keep: true },
 			});
 		});
@@ -1121,12 +1113,9 @@ describe("Settings", () => {
 			const projectConfigPath = path.join(projectDir, ".omp", "config.yml");
 			await writeSettings({
 				setupVersion: 1,
-				modelRoles: { global_role: "openai/global" },
+				model: "openai/global",
 			});
-			await Bun.write(
-				projectConfigPath,
-				YAML.stringify({ modelRoles: { project_role: "openai/project" } }, null, 2),
-			);
+			await Bun.write(projectConfigPath, YAML.stringify({ model: "openai/project" }, null, 2));
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 			const malformedGlobal = 'setupVersion: 2\nmodelRoles:\n  global_role: "unterminated\n';
 			const malformedProject = 'modelRoles:\n  project_role: "unterminated\n';
@@ -1144,8 +1133,8 @@ describe("Settings", () => {
 				fs.readdirSync(path.dirname(projectConfigPath)).some(name => name.startsWith("config.yml.broken-")),
 			).toBe(false);
 			expect(cfgSetupVersion.get(settings)).toBe(1);
-			expect(settings.getModelRole("global_role")).toBe("openai/global");
-			expect(settings.getModelRole("project_role")).toBe("openai/project");
+			expect(settings.getGlobalModel()).toBe("openai/global");
+			expect(settings.getProjectModel()).toBe("openai/project");
 		});
 		it("refreshes native project settings without changing overlay or runtime precedence", async () => {
 			await writeSettings({
@@ -1170,7 +1159,7 @@ describe("Settings", () => {
 				YAML.stringify(
 					{
 						task: {
-							agentModelOverrides: { task: "xai-oauth/grok-4.6:medium" },
+							agentServiceTierOverrides: { task: "priority" },
 							enableEffort: true,
 							maxConcurrency: 3,
 						},
@@ -1182,10 +1171,9 @@ describe("Settings", () => {
 			);
 			await settings.reloadFromDisk();
 
-			expect(cfgTaskAgentModelOverrides.get(settings)).toEqual({
-				task: "xai-oauth/grok-4.6:medium",
+			expect(cfgTaskAgentServiceTierOverrides.get(settings)).toEqual({
+				task: "priority",
 			});
-			expect(cfgRetryModelFallback.get(settings)).toBe(false);
 			expect(cfgTaskEnableEffort.get(settings)).toBe(false);
 			expect(cfgTaskMaxConcurrency.get(settings)).toBe(7);
 
@@ -1194,7 +1182,7 @@ describe("Settings", () => {
 				YAML.stringify(
 					{
 						task: {
-							agentModelOverrides: { task: "openai/gpt-4o" },
+							agentServiceTierOverrides: { task: "flex" },
 							enableEffort: true,
 							maxConcurrency: 4,
 						},
@@ -1206,8 +1194,7 @@ describe("Settings", () => {
 			);
 			await settings.reloadFromDisk();
 
-			expect(cfgTaskAgentModelOverrides.get(settings)).toEqual({ task: "openai/gpt-4o" });
-			expect(cfgRetryModelFallback.get(settings)).toBe(true);
+			expect(cfgTaskAgentServiceTierOverrides.get(settings)).toEqual({ task: "flex" });
 			expect(cfgTaskEnableEffort.get(settings)).toBe(false);
 			expect(cfgTaskMaxConcurrency.get(settings)).toBe(7);
 
@@ -1217,14 +1204,12 @@ describe("Settings", () => {
 			);
 			await settings.reloadFromDisk();
 
-			expect(cfgTaskAgentModelOverrides.get(settings)).toEqual({});
-			expect(cfgRetryModelFallback.get(settings)).toBe(true);
+			expect(cfgTaskAgentServiceTierOverrides.get(settings)).toEqual({});
 
 			await fsp.rm(projectConfigPath);
 			await settings.reloadFromDisk();
 
-			expect(cfgTaskAgentModelOverrides.get(settings)).toEqual({});
-			expect(cfgRetryModelFallback.get(settings)).toBe(true);
+			expect(cfgTaskAgentServiceTierOverrides.get(settings)).toEqual({});
 			expect(cfgTaskEnableEffort.get(settings)).toBe(false);
 			expect(cfgTaskMaxConcurrency.get(settings)).toBe(7);
 		});
@@ -1256,11 +1241,11 @@ describe("Settings", () => {
 		});
 
 		it("preserves runtime overrides and only signals semantic model-role changes", async () => {
-			await writeSettings({ modelRoles: { default: "openai/original" } });
+			await writeSettings({ model: "openai/original" });
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			settings.overrideModelRoles({ runtime: "openai/runtime" });
+			settings.overrideModel("openai/runtime");
 			let signalCount = 0;
-			const unsubscribe = cfgModelRoles.listen(settings, () => {
+			const unsubscribe = cfgModel.listen(settings, () => {
 				signalCount++;
 			});
 
@@ -1268,15 +1253,15 @@ describe("Settings", () => {
 				await settings.reloadFromDisk();
 				await tick();
 				expect(signalCount).toBe(0);
-				expect(settings.getModelRole("runtime")).toBe("openai/runtime");
+				expect(settings.getModel()).toBe("openai/runtime");
 
-				await writeSettings({ modelRoles: { default: "openai/updated" } });
+				await writeSettings({ model: "openai/updated" });
 				await settings.reloadFromDisk();
 				await tick();
 
-				expect(signalCount).toBe(1);
-				expect(settings.getModelRole("default")).toBe("openai/updated");
-				expect(settings.getModelRole("runtime")).toBe("openai/runtime");
+				expect(signalCount).toBe(0);
+				expect(settings.getGlobalModel()).toBe("openai/updated");
+				expect(settings.getModel()).toBe("openai/runtime");
 			} finally {
 				unsubscribe();
 			}
@@ -1306,7 +1291,7 @@ describe("Settings", () => {
 
 			const settings = await Settings.loadIsolated({ cwd: projectDir, agentDir });
 
-			expect(cfgRetryFallbackChains.get(settings)).toEqual({});
+			expect(settings.getModel()).toBeUndefined();
 			expect(cfgInlineToolDescriptors.get(settings)).toBe("auto");
 		});
 
@@ -1425,7 +1410,7 @@ describe("Settings", () => {
 			// Seed initial settings in config.yml
 			await writeSettings({
 				theme: "dark",
-				modelRoles: { default: "claude-sonnet" },
+				model: "claude-sonnet",
 			});
 
 			// Settings loads the initial state
@@ -1434,7 +1419,7 @@ describe("Settings", () => {
 			// Simulate external edit (e.g., user modifying DB directly or another process)
 			await writeSettings({
 				theme: { dark: "anthracite" },
-				modelRoles: { default: "claude-sonnet" },
+				model: "claude-sonnet",
 				enabledModels: ["claude-opus-4-5", "gpt-5.2-codex"],
 			});
 
@@ -1446,7 +1431,7 @@ describe("Settings", () => {
 			expect(savedSettings.enabledModels).toEqual(["claude-opus-4-5", "gpt-5.2-codex"]);
 			expect(savedSettings.defaultThinkingLevel).toBe(Effort.High);
 			expect(savedSettings.theme).toEqual({ dark: "anthracite" });
-			expect((savedSettings.modelRoles as { default?: string } | undefined)?.default).toBe("claude-sonnet");
+			expect(savedSettings.model).toBe("claude-sonnet");
 		});
 
 		it("persists native terminal progress only after the user changes it", async () => {
@@ -1491,13 +1476,13 @@ describe("Settings", () => {
 
 		it("should preserve custom settings when changing theme", async () => {
 			await writeSettings({
-				modelRoles: { default: "claude-sonnet" },
+				model: "claude-sonnet",
 			});
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
 			await writeSettings({
-				modelRoles: { default: "claude-sonnet" },
+				model: "claude-sonnet",
 				shellPath: "/bin/zsh",
 				extensions: ["/path/to/extension.ts"],
 			});
@@ -1593,181 +1578,6 @@ describe("Settings", () => {
 		});
 	});
 
-	describe("model role overrides", () => {
-		it("does not persist temporary default model overrides when another role is saved", async () => {
-			await writeSettings({
-				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			settings.overrideModelRoles({ default: "openai/gpt-5.2-codex" });
-			expect(settings.getModelRole("default")).toBe("openai/gpt-5.2-codex");
-
-			settings.setModelRole("smol", "anthropic/claude-haiku-4-5");
-			await settings.flush();
-
-			const savedSettings = await readSettings();
-			expect(savedSettings.modelRoles).toEqual({
-				default: "anthropic/claude-sonnet-4-5",
-				smol: "anthropic/claude-haiku-4-5",
-			});
-			expect(settings.getModelRole("default")).toBe("openai/gpt-5.2-codex");
-			expect(settings.getModelRole("smol")).toBe("anthropic/claude-haiku-4-5");
-		});
-
-		it("preserves a same-role external edit made after a local save was queued", async () => {
-			await writeSettings({
-				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			settings.setModelRole("default", "openai/gpt-5.2-codex");
-
-			await writeSettings({
-				modelRoles: { default: "moonshot/kimi-k3:max" },
-			});
-			await settings.flush();
-
-			expect((await readSettings()).modelRoles).toEqual({ default: "moonshot/kimi-k3:max" });
-			expect(settings.getModelRole("default")).toBe("moonshot/kimi-k3:max");
-		});
-
-		it("preserves concurrent external per-role edits when saving one global role", async () => {
-			await writeSettings({
-				modelRoles: { default: "anthropic/claude-sonnet-4-5", advisor: "moonshot/kimi-k2" },
-			});
-
-			// Process loads its #global snapshot.
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			// External edit (another omp instance / manual edit): changes advisor,
-			// adds vision. This process's #global is now stale.
-			await writeSettings({
-				modelRoles: {
-					default: "anthropic/claude-sonnet-4-5",
-					advisor: "moonshot/kimi-k3:max",
-					vision: "anthropic/claude-haiku-4-5",
-				},
-			});
-
-			// This process makes one global-scope role switch and flushes.
-			settings.setModelRole("smol", "anthropic/claude-haiku-4-5");
-			await settings.flush();
-
-			const savedSettings = await readSettings();
-			// The role we changed lands…
-			expect((savedSettings.modelRoles as Record<string, string>).smol).toBe("anthropic/claude-haiku-4-5");
-			// …and the concurrent external per-role edits survive rather than
-			// being clobbered by our stale whole-map snapshot.
-			expect(savedSettings.modelRoles).toEqual({
-				default: "anthropic/claude-sonnet-4-5",
-				advisor: "moonshot/kimi-k3:max",
-				vision: "anthropic/claude-haiku-4-5",
-				smol: "anthropic/claude-haiku-4-5",
-			});
-		});
-
-		it("does not replay a preserved role after the save writes it", async () => {
-			await writeSettings({
-				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
-			});
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			const firstSaveEntered = Promise.withResolvers<void>();
-			const releaseFirstSave = Promise.withResolvers<void>();
-			const firstSaveFinished = Promise.withResolvers<void>();
-			const withFileLock = fileLock.withFileLock;
-			vi.spyOn(fileLock, "withFileLock").mockImplementation(async (filePath, fn, options) => {
-				firstSaveEntered.resolve();
-				const result = await withFileLock(filePath, fn, options);
-				firstSaveFinished.resolve();
-				return result;
-			});
-
-			settings.setModelRole("smol", "anthropic/claude-haiku-4-5");
-			await firstSaveEntered.promise;
-			settings.setModelRole("advisor", "moonshot/kimi-k3:max");
-			releaseFirstSave.resolve();
-			await firstSaveFinished.promise;
-
-			expect((await readSettings()).modelRoles).toEqual({
-				default: "anthropic/claude-sonnet-4-5",
-				smol: "anthropic/claude-haiku-4-5",
-				advisor: "moonshot/kimi-k3:max",
-			});
-
-			await writeSettings({
-				modelRoles: {
-					default: "anthropic/claude-sonnet-4-5",
-					smol: "anthropic/claude-haiku-4-5",
-					advisor: "external/new-advisor",
-				},
-			});
-			await settings.flush();
-
-			expect((await readSettings()).modelRoles).toEqual({
-				default: "anthropic/claude-sonnet-4-5",
-				smol: "anthropic/claude-haiku-4-5",
-				advisor: "external/new-advisor",
-			});
-		});
-
-		it("restores persisted model roles after clearing runtime overrides", async () => {
-			await writeSettings({
-				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			settings.overrideModelRoles({ default: "openai/gpt-5.2-codex" });
-			expect(settings.getModelRole("default")).toBe("openai/gpt-5.2-codex");
-
-			cfgModelRoles.clearOverride(settings);
-
-			expect(settings.getModelRole("default")).toBe("anthropic/claude-sonnet-4-5");
-		});
-
-		it("keeps the live role value aligned when saving over a runtime override", () => {
-			const settings = Settings.isolated({
-				modelRoles: { default: "anthropic/claude-sonnet-4-5" },
-			});
-
-			settings.overrideModelRoles({ default: "openai/gpt-5.2-codex" });
-			settings.setModelRole("default", "anthropic/claude-opus-4-5");
-
-			expect(settings.getModelRole("default")).toBe("anthropic/claude-opus-4-5");
-
-			cfgModelRoles.clearOverride(settings);
-
-			expect(settings.getModelRole("default")).toBe("anthropic/claude-opus-4-5");
-		});
-		it("clears a role when setModelRole receives undefined", () => {
-			const settings = Settings.isolated();
-
-			settings.setModelRole("smol", "x/y");
-			expect(settings.getModelRole("smol")).toBe("x/y");
-
-			settings.setModelRole("smol", undefined);
-
-			expect(settings.getModelRole("smol")).toBeUndefined();
-			expect(Object.hasOwn(settings.getModelRoles(), "smol")).toBe(false);
-		});
-
-		it("clears a role from the runtime override layer so the effective view updates immediately", () => {
-			const settings = Settings.isolated({
-				modelRoles: { smol: "anthropic/claude-haiku-4-5" },
-			});
-
-			settings.overrideModelRoles({ smol: "openai/gpt-5.2-codex" });
-			expect(settings.getModelRole("smol")).toBe("openai/gpt-5.2-codex");
-
-			settings.setModelRole("smol", undefined);
-
-			expect(settings.getModelRole("smol")).toBeUndefined();
-			expect(Object.hasOwn(settings.getModelRoles(), "smol")).toBe(false);
-		});
-	});
-
 	describe("editVariantForModel", () => {
 		it("matches configured model variants case-insensitively", async () => {
 			await writeSettings({
@@ -1807,299 +1617,21 @@ describe("Settings", () => {
 		});
 	});
 
-	describe("kind role settings migration", () => {
-		type LegacyMigrationCase = readonly [
-			name: string,
-			path: string,
-			value: unknown,
-			expectedRoles: Record<string, string>,
-			expectedChains: Record<string, string[]>,
-		];
-
-		const MODEL_PRIO = roleDefaultModels();
-		const webExaCandidates = ["web/exa", ...MODEL_PRIO.web.filter(selector => selector !== "web/exa")];
-		const webOrderedHead = [
-			"google-gemini-cli/gemini-2.5-flash",
-			"google-antigravity/gemini-2.5-flash",
-			"google/gemini-2.5-flash",
-			"anthropic/claude-haiku-4-5",
-			"openai-codex/gpt-6-luna",
-			"xai/grok-4.5",
-			"web/exa",
-			"web/tavily",
-		];
-		const webOrderedCandidates = [
-			...webOrderedHead,
-			...MODEL_PRIO.web.filter(selector => !webOrderedHead.includes(selector)),
-		];
-		const webExcludedCandidates = MODEL_PRIO.web.filter(selector => selector !== "web/public");
-		const imageOrderedHead = [
-			"openai/gpt-image-2",
-			"openai-codex/gpt-image-2",
-			"google-antigravity/gemini-3-pro-image",
-			"xai/grok-imagine-image",
-			"openrouter/google/gemini-3-pro-image",
-			"google/gemini-3-pro-image",
-			"deepinfra/black-forest-labs/FLUX-2-pro",
-		];
-		const imageOrderedCandidates = [
-			...imageOrderedHead,
-			...MODEL_PRIO.image.filter(selector => !imageOrderedHead.includes(selector)),
-		];
-		const imageXaiCandidates = [
-			"xai/grok-imagine-image",
-			...MODEL_PRIO.image.filter(selector => selector !== "xai/grok-imagine-image"),
-		];
-		const cases: LegacyMigrationCase[] = [
-			[
-				"web search order",
-				"providers.webSearchOrder",
-				["gemini", "anthropic", "codex", "xai", "exa", "tavily"],
-				{ web: webOrderedCandidates[0] },
-				{ web: webOrderedCandidates.slice(1) },
-			],
-			[
-				"web search exclusions",
-				"providers.webSearchExclude",
-				["xai", "public"],
-				{ web: webExcludedCandidates[0] },
-				{ web: webExcludedCandidates.slice(1) },
-			],
-			["Gemini web model override", "providers.webSearchGeminiModel", "gemini-custom", {}, {}],
-			[
-				"image order",
-				"providers.imageOrder",
-				["openai", "openai-codex", "antigravity", "xai", "openrouter", "gemini", "deepinfra"],
-				{ image: imageOrderedCandidates[0] },
-				{ image: imageOrderedCandidates.slice(1) },
-			],
-			[
-				"judgment provider",
-				"providers.judgmentProvider",
-				"llm",
-				{ judge: "@tiny" },
-				{ judge: ["@smol", "@default"] },
-			],
-			[
-				"auto-thinking model",
-				"providers.autoThinkingModel",
-				"qwen3-1.7b",
-				{ judge: "typesafe/jev-1.14.0" },
-				{ judge: ["local/qwen3-1.7b", "@tiny", "@smol", "@default"] },
-			],
-			[
-				"unexpected-stop model",
-				"providers.unexpectedStopModel",
-				"gemma-3-1b",
-				{ judge: "typesafe/jev-1.14.0" },
-				{ judge: ["local/gemma-3-1b", "@tiny", "@smol", "@default"] },
-			],
-			["tiny model", "providers.tinyModel", "lfm2.5-230m", { tiny: "local/lfm2.5-230m" }, {}],
-			["retired memory model", "providers.memoryModel", "lfm2-1.2b", {}, {}],
-			[
-				"older web search preference",
-				"providers.webSearch",
-				"exa",
-				{ web: webExaCandidates[0] },
-				{ web: webExaCandidates.slice(1) },
-			],
-			[
-				"older image preference",
-				"providers.image",
-				"xai",
-				{ image: imageXaiCandidates[0] },
-				{ image: imageXaiCandidates.slice(1) },
-			],
-		];
-
-		it.each(cases)(
-			"migrates nested and flat %s settings",
-			async (_name, legacyPath, value, expectedRoles, expectedChains) => {
-				const [root, key] = legacyPath.split(".");
-				for (const input of [{ [root]: { [key]: value } }, { [legacyPath]: value }]) {
-					await writeSettings(input);
-					const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-					expect(cfgModelRoles.get(settings)).toEqual(expectedRoles);
-					expect(cfgRetryFallbackChains.get(settings)).toEqual(expectedChains);
-
-					cfgDisplayShowTokenUsage.set(settings, true);
-					await settings.flush();
-					const saved = await readSettings();
-					expect(saved.modelRoles ?? {}).toEqual(expectedRoles);
-					expect((saved.retry as Record<string, unknown> | undefined)?.fallbackChains ?? {}).toEqual(
-						expectedChains,
-					);
-					expect(Object.hasOwn(saved, legacyPath)).toBe(false);
-					expect(Object.hasOwn((saved[root] as Record<string, unknown> | undefined) ?? {}, key)).toBe(false);
-				}
-			},
-		);
-
-		it("repairs the old generated web fallback pair without changing unrelated chains", async () => {
-			await writeSettings({
-				modelRoles: { web: "web/parallel" },
-				retry: {
-					fallbackChains: {
-						web: [
-							"web/searxng",
-							"openai-codex/gpt-6-luna",
-							"openai-codex/gpt-5.6",
-							"openai-codex/gpt-5.5",
-							"xai/grok-4.5",
-						],
-						slow: ["openai-codex/gpt-5.5"],
-					},
-				},
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgRetryFallbackChains.get(settings)).toEqual({
-				web: ["web/searxng", "openai-codex/gpt-6-luna", "openai-codex/gpt-5.6-sol", "xai/grok-4.5"],
-				slow: ["openai-codex/gpt-5.5"],
-			});
-			const codex = getBundledModels("openai-codex").filter(model => model.webSearch);
-			expect(resolveRoleChain("web", settings, codex).map(candidate => candidate.model.id)).toEqual([
-				"gpt-6-luna",
-				"gpt-5.6-sol",
-			]);
-		});
-
-		it("preserves independently configured Codex web selectors", async () => {
-			await writeSettings({
-				retry: { fallbackChains: { web: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.6"] } },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgRetryFallbackChains.get(settings).web).toEqual(["openai-codex/gpt-5.5", "openai-codex/gpt-5.6"]);
-		});
-
-		it("keeps a legacy Gemini wire tier ahead of non-Gemini fallbacks", async () => {
-			await writeSettings({
-				providers: {
-					webSearch: "gemini",
-					webSearchGeminiModel: "gemini-3.8-flash-high",
-				},
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect([settings.getModelRole("web"), ...cfgRetryFallbackChains.get(settings).web.slice(0, 2)]).toEqual([
-				"google-gemini-cli/gemini-3.8-flash-high",
-				"google-antigravity/gemini-3.8-flash-high",
-				"google/gemini-3.8-flash-high",
-			]);
-		});
-
-		it("drops legacy defaults without materializing kind roles", async () => {
-			await writeSettings({
-				providers: {
-					webSearch: "auto",
-					webSearchOrder: [],
-					webSearchExclude: [],
-					webSearchGeminiModel: "",
-					image: "auto",
-					imageOrder: [],
-					tts: "auto",
-					judgmentProvider: "auto",
-					autoThinkingModel: "online",
-					unexpectedStopModel: "online",
-					tinyModel: "online",
-					memoryModel: "online",
-				},
-				stt: { modelName: "parakeet" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgModelRoles.get(settings)).toEqual({});
-			expect(cfgRetryFallbackChains.get(settings)).toEqual({});
-			cfgDisplayShowTokenUsage.set(settings, true);
-			await settings.flush();
-			const saved = await readSettings();
-			expect(saved.modelRoles).toBeUndefined();
-			expect(saved.retry).toBeUndefined();
-			expect(saved.providers).toEqual({ tts: "auto" });
-			expect(saved.stt).toEqual({ modelName: "parakeet" });
-		});
-
-		it("preserves retired speech configuration when saving unrelated settings", async () => {
-			const retired = {
-				stt: { enabled: true, modelName: "fast", language: "zh" },
-				tts: { localModel: "kokoro", localVoice: "af_heart" },
-				speech: { enabled: true },
-				speechgen: { enabled: true },
-				live: { voice: "alloy" },
-				providers: { tts: "local" },
-			};
-			await writeSettings(retired);
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			expect(cfgModelRoles.get(settings)).toEqual({});
-			cfgDisplayShowTokenUsage.set(settings, true);
-			await settings.flush();
-			expect(await readSettings()).toMatchObject(retired);
-		});
-
-		it("prefers nested legacy values over flat forms", async () => {
-			await writeSettings({
-				providers: { webSearchOrder: ["exa"] },
-				"providers.webSearchOrder": ["gemini"],
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.getModelRole("web")).toBe(webExaCandidates[0]);
-			expect(cfgRetryFallbackChains.get(settings).web).toEqual(webExaCandidates.slice(1));
-		});
-
-		it("preserves explicit roles and empty chains while prepending the local tiny model", async () => {
-			await writeSettings({
-				modelRoles: {
-					web: "custom/web",
-					image: "custom/image",
-					speech: "custom/speech",
-					dictation: "custom/dictation",
-					judge: "custom/judge",
-					tiny: "custom/tiny,@smol",
-					memory: "custom/memory",
-				},
-				retry: {
-					fallbackChains: { web: [], image: [], speech: [], dictation: [], judge: [] },
-				},
-				providers: {
-					webSearchOrder: ["exa"],
-					imageOrder: ["xai"],
-					tts: "local",
-					judgmentProvider: "llm",
-					autoThinkingModel: "qwen3-1.7b",
-					unexpectedStopModel: "gemma-3-1b",
-					tinyModel: "lfm2.5-230m",
-					memoryModel: "lfm2-1.2b",
-				},
-				stt: { modelName: "fast" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgModelRoles.get(settings)).toEqual({
-				web: "custom/web",
-				image: "custom/image",
-				speech: "custom/speech",
-				dictation: "custom/dictation",
-				judge: "custom/judge",
-				tiny: "local/lfm2.5-230m,custom/tiny,@smol",
-				memory: "custom/memory",
-			});
-			expect(cfgRetryFallbackChains.get(settings)).toEqual({
-				web: [],
-				image: [],
-				speech: [],
-				dictation: [],
-				judge: [],
-			});
-		});
+	it("preserves retired speech configuration when saving unrelated settings", async () => {
+		const retired = {
+			stt: { enabled: true, modelName: "fast", language: "zh" },
+			tts: { localModel: "kokoro", localVoice: "af_heart" },
+			speech: { enabled: true },
+			speechgen: { enabled: true },
+			live: { voice: "alloy" },
+			providers: { tts: "local" },
+		};
+		await writeSettings(retired);
+		const settings = await Settings.init({ cwd: projectDir, agentDir });
+		expect(cfgModel.get(settings)).toBeUndefined();
+		cfgDisplayShowTokenUsage.set(settings, true);
+		await settings.flush();
+		expect(await readSettings()).toMatchObject(retired);
 	});
 
 	describe("compaction method migration", () => {
@@ -2251,33 +1783,6 @@ describe("Settings", () => {
 			expect(saved["computer.backend"]).toBeUndefined();
 			expect(saved["computer.maxWidth"]).toBeUndefined();
 			expect(cfgDisplayShowTokenUsage.get(settings)).toBe(true);
-		});
-
-		it("normalizes retired local tiny title models before role migration", async () => {
-			await writeSettings({ providers: { tinyModel: "lfm2-350m" } });
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.getModelRole("tiny")).toBe("local/lfm2.5-350m");
-			cfgDisplayShowTokenUsage.set(settings, true);
-			await settings.flush();
-			const saved = await readSettings();
-			expect(saved.modelRoles).toEqual({ tiny: "local/lfm2.5-350m" });
-			expect(saved.providers).toBeUndefined();
-		});
-
-		it("normalizes retired flat tiny title keys before role migration", async () => {
-			await Bun.write(getConfigPath(), '"providers.tinyModel": lfm2-350m\n');
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.getModelRole("tiny")).toBe("local/lfm2.5-350m");
-			cfgDisplayShowTokenUsage.set(settings, true);
-			await settings.flush();
-			const saved = await readSettings();
-			expect(saved.modelRoles).toEqual({ tiny: "local/lfm2.5-350m" });
-			expect(saved.providers).toBeUndefined();
-			expect("providers.tinyModel" in saved).toBe(false);
 		});
 
 		it("maps removed atom edit mode settings to hashline", async () => {

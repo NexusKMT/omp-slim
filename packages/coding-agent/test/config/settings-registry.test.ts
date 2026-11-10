@@ -17,7 +17,7 @@ import { cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { cfgEditFuzzyMatch, cfgEditModelVariants } from "@oh-my-pi/pi-coding-agent/edit/settings";
 import { cfgTaskMaxConcurrency } from "@oh-my-pi/pi-coding-agent/task/settings";
 import { cfgEvalPy } from "@oh-my-pi/pi-coding-agent/eval/settings";
-import { cfgModelRoles } from "@oh-my-pi/pi-coding-agent/config/model-settings";
+import { cfgModel } from "@oh-my-pi/pi-coding-agent/config/model-settings";
 import { cfgSearxngBasicPassword, cfgSearxngEndpoint } from "@oh-my-pi/pi-coding-agent/web/settings";
 
 const tick = () => Promise.resolve();
@@ -183,41 +183,41 @@ describe("settings registry", () => {
 
 	it("keeps host overlays authoritative and delegates only subagent-derived views", () => {
 		const operator = Settings.isolated();
-		const host = operator.overlay({ modelRoles: { review: "mock/target" } });
-		const child = host.overlay({ modelRoles: { advisor: "mock/other" } }, { derived: true });
+		const host = operator.overlay({ model: "mock/target" });
+		const child = host.overlay({ model: "mock/other" }, { derived: true });
 		const grandchild = child.overlay({}, { derived: true });
-		expect(operator.grantAuthority().getModelRole("review")).toBeUndefined();
-		expect(host.grantAuthority().getModelRole("review")).toBe("mock/target");
+		expect(operator.grantAuthority().getModel()).toBeUndefined();
+		expect(host.grantAuthority().getModel()).toBe("mock/target");
 		expect(child.grantAuthority()).toBe(host.grantAuthority());
 		expect(grandchild.grantAuthority()).toBe(host.grantAuthority());
-		expect(child.grantAuthority().getModelRole("advisor")).toBeUndefined();
+		expect(child.grantAuthority().getModel()).toBe("mock/target");
 	});
 
 	it("rebuilds a host overlay's grant authority after its parent changes", () => {
-		const operator = Settings.isolated({ modelRoles: { review: "mock/target" } });
+		const operator = Settings.isolated({ model: "mock/target" });
 		const host = operator.overlay();
-		expect(host.grantAuthority().getModelRole("review")).toBe("mock/target");
-		operator.setModelRole("review", "mock/other");
-		expect(host.grantAuthority().getModelRole("review")).toBe("mock/other");
+		expect(host.grantAuthority().getModel()).toBe("mock/target");
+		operator.setModel("mock/other");
+		expect(host.grantAuthority().getModel()).toBe("mock/other");
 	});
 
 	it.each([false, true])("preserves derived=%s when restoring overlay layers", derived => {
 		const parent = Settings.isolated();
-		const child = parent.overlay({ modelRoles: { review: "mock/target" } }, { derived });
+		const child = parent.overlay({ model: "mock/target" }, { derived });
 		const restored = parent.restoreOverlay(child.overlayLayers());
-		expect(restored.getModelRole("review")).toBe("mock/target");
-		expect(restored.grantAuthority().getModelRole("review")).toBe(derived ? undefined : "mock/target");
+		expect(restored.getModel()).toBe("mock/target");
+		expect(restored.grantAuthority().getModel()).toBe(derived ? undefined : "mock/target");
 	});
 
 	it("preserves a derived view's host authority when cloning for cwd", async () => {
 		const operator = Settings.isolated();
-		const host = operator.overlay({ modelRoles: { review: "mock/target" } });
-		const child = host.overlay({ modelRoles: { advisor: "mock/other" } }, { derived: true });
+		const host = operator.overlay({ model: "mock/target" });
+		const child = host.overlay({ model: "mock/other" }, { derived: true });
 		const clone = await child.cloneForCwd(host.getCwd());
-		expect(clone.grantAuthority().getModelRole("review")).toBe("mock/target");
-		expect(clone.grantAuthority().getModelRole("advisor")).toBeUndefined();
+		expect(clone.grantAuthority().getModel()).toBe("mock/target");
+		expect(clone.grantAuthority().getModel()).toBe("mock/target");
 		const hostClone = await host.cloneForCwd(host.getCwd());
-		expect(hostClone.grantAuthority().getModelRole("review")).toBe("mock/target");
+		expect(hostClone.grantAuthority().getModel()).toBe("mock/target");
 	});
 
 	it("delivers every synchronous parent write to an overlay", async () => {
@@ -333,19 +333,19 @@ describe("settings registry", () => {
 
 	it("keeps an overlay's inherited values in its cwd clone and in layer accessors", async () => {
 		const parent = Settings.isolated({ temperature: 0.2 });
-		parent.setModelRole("smol", "anthropic/parent-global");
+		parent.setModel("anthropic/parent-global");
 		const child = parent.overlay({ topP: 0.5 });
 
 		const clone = await child.cloneForCwd(parent.getCwd());
 		expect(cfgTemperature.get(clone)).toBe(0.2);
 		expect(cfgTemperature.provenance(clone)).toBe("runtime");
 		expect(cfgTopP.get(clone)).toBe(0.5);
-		expect(clone.getModelRole("smol")).toBe("anthropic/parent-global");
+		expect(clone.getModel()).toBe("anthropic/parent-global");
 
-		expect(child.getGlobalModelRole("smol")).toBe("anthropic/parent-global");
-		expect(child.getModelRoleSource("smol")).toBe("global");
-		expect(child.getModelRoleProvenance("smol")).toBe("global");
-		expect(child.getGlobalSettings()).toMatchObject({ modelRoles: { smol: "anthropic/parent-global" } });
+		expect(child.getGlobalModel()).toBe("anthropic/parent-global");
+		expect(child.getModelSource()).toBe("global");
+		expect(child.getModelProvenance()).toBe("global");
+		expect(child.getGlobalSettings()).toMatchObject({ model: "anthropic/parent-global" });
 	});
 
 	it("drives effects synchronously from the newest outstanding hold only", () => {
@@ -425,6 +425,6 @@ describe("settings registry", () => {
 			Settings.isolated().overlay({ "task.agentCompactionThresholdOverrides": { scout: "eighty" } }),
 		).toThrow("Invalid task.agentCompactionThresholdOverrides.scout");
 		expect(() => Settings.isolated({ temperature: "hot" })).toThrow("Invalid value for temperature");
-		expect(cfgModelRoles.get(Settings.isolated({ modelRoles: { smol: "a/b" } }))).toEqual({ smol: "a/b" });
+		expect(cfgModel.get(Settings.isolated({ model: "a/b" }))).toBe("a/b");
 	});
 });

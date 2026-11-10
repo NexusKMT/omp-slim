@@ -55,16 +55,16 @@ describe("Settings layer refresh", () => {
 	});
 
 	it("reloads the persisted layers behind an overlay only when asked, keeping its own overrides", async () => {
-		await writeConfig({ modelRoles: { review: "mock/target" }, temperature: 0.1 });
+		await writeConfig({ model: "mock/target", temperature: 0.1 });
 		const settings = await Settings.loadIsolated({ cwd: startProject, agentDir });
 		const overlay = settings.overlay({ temperature: 0.7 });
-		expect(overlay.getModelRole("review")).toBe("mock/target");
+		expect(overlay.getModel()).toBe("mock/target");
 
 		await writeConfig({ temperature: 0.2 });
 		await overlay.reloadFromDisk();
-		expect(overlay.getModelRole("review")).toBe("mock/target");
+		expect(overlay.getModel()).toBe("mock/target");
 		await overlay.reloadFromDisk({ includeParents: true });
-		expect(overlay.getModelRole("review")).toBeUndefined();
+		expect(overlay.getModel()).toBeUndefined();
 		expect(cfgTemperature.get(settings)).toBe(0.2);
 		expect(cfgTemperature.get(overlay)).toBe(0.7);
 	});
@@ -147,32 +147,32 @@ describe("Settings layer refresh", () => {
 			const storeDir = tempDir.join("store");
 			const storeConfig = path.join(storeDir, "config.yml");
 			fs.mkdirSync(storeDir);
-			fs.writeFileSync(storeConfig, YAML.stringify({ temperature: 0.1, modelRoles: { default: "openai/base" } }));
+			fs.writeFileSync(storeConfig, YAML.stringify({ temperature: 0.1, model: "openai/base" }));
 			fs.symlinkSync(storeConfig, configPath());
 			fs.chmodSync(storeDir, 0o555);
 			const settings = await Settings.init({ cwd: startProject, agentDir });
 			try {
 				cfgTemperature.set(settings, 0.5);
-				settings.setModelRole("default", "openai/session");
-				settings.setProjectModelRole("slow", "openai/project");
+				settings.setModel("openai/session");
+				settings.setProjectModel("openai/project");
 				await expect(settings.flush()).rejects.toThrow();
 
 				// Every later reload (task preflight) must still succeed with the in-memory values.
 				await settings.reloadFromDisk();
 				await settings.reloadFromDisk();
 				expect(cfgTemperature.get(settings)).toBe(0.5);
-				expect(settings.getModelRole("default")).toBe("openai/session");
-				expect(settings.getProjectModelRole("slow")).toBe("openai/project");
+				expect(settings.getGlobalModel()).toBe("openai/session");
+				expect(settings.getProjectModel()).toBe("openai/project");
 
 				fs.chmodSync(storeDir, 0o755);
 				await settings.reloadFromDisk();
 				expect(YAML.parse(await Bun.file(storeConfig).text())).toEqual({
 					temperature: 0.5,
-					modelRoles: { default: "openai/session" },
+					model: "openai/session",
 				});
 				expect(cfgTemperature.get(settings)).toBe(0.5);
-				expect(settings.getModelRole("default")).toBe("openai/session");
-				expect(settings.getProjectModelRole("slow")).toBe("openai/project");
+				expect(settings.getGlobalModel()).toBe("openai/session");
+				expect(settings.getProjectModel()).toBe("openai/project");
 			} finally {
 				fs.chmodSync(storeDir, 0o755);
 			}
@@ -180,7 +180,7 @@ describe("Settings layer refresh", () => {
 	);
 
 	it("keeps the last good global layer when a reload's save moves a malformed config aside", async () => {
-		await writeConfig({ temperature: 0.1, compaction: { enabled: false }, modelRoles: { default: "openai/base" } });
+		await writeConfig({ temperature: 0.1, compaction: { enabled: false }, model: "openai/base" });
 		const settings = await Settings.init({ cwd: startProject, agentDir });
 		cfgTemperature.set(settings, 0.5);
 		await Bun.write(configPath(), "temperature: [\n");
@@ -188,31 +188,30 @@ describe("Settings layer refresh", () => {
 		await settings.reloadFromDisk();
 		expect(cfgTemperature.get(settings)).toBe(0.5);
 		expect(cfgCompactionEnabled.get(settings)).toBe(false);
-		expect(settings.getModelRole("default")).toBe("openai/base");
+		expect(settings.getModel()).toBe("openai/base");
 
 		await settings.flush();
 		expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({
 			temperature: 0.5,
 			compaction: { enabled: false },
-			modelRoles: { default: "openai/base" },
+			model: "openai/base",
 		});
 	});
 
-	it("keeps the last good project model roles when a reload's save moves a malformed project config aside", async () => {
+	it("keeps the last good project model when a reload's save moves a malformed project config aside", async () => {
 		const projectConfig = path.join(getProjectAgentDir(startProject), "config.yml");
 		fs.mkdirSync(path.dirname(projectConfig), { recursive: true });
-		await Bun.write(projectConfig, YAML.stringify({ modelRoles: { plan: "openai/plan" } }));
+		await Bun.write(projectConfig, YAML.stringify({ model: "openai/plan" }));
 		const settings = await Settings.init({ cwd: startProject, agentDir });
-		settings.setProjectModelRole("slow", "openai/project");
-		await Bun.write(projectConfig, "modelRoles: [\n");
+		settings.setProjectModel("openai/project");
+		await Bun.write(projectConfig, "model: [\n");
 
 		await settings.reloadFromDisk();
-		expect(settings.getProjectModelRole("plan")).toBe("openai/plan");
-		expect(settings.getProjectModelRole("slow")).toBe("openai/project");
+		expect(settings.getProjectModel()).toBe("openai/project");
 
 		await settings.flush();
 		expect(YAML.parse(await Bun.file(projectConfig).text())).toEqual({
-			modelRoles: { plan: "openai/plan", slow: "openai/project" },
+			model: "openai/project",
 		});
 	});
 
