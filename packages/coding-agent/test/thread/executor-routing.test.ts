@@ -259,7 +259,7 @@ beforeEach(async () => {
 		"todo.reminders": false,
 		"advisor.enabled": false,
 		"async.enabled": true,
-		modelRoles: { default: MODEL },
+		model: MODEL,
 	});
 	jobs = new AsyncJobManager({ maxRunningJobs: 4 });
 	costGate = new CostGate(settings, 0, () => {});
@@ -301,6 +301,8 @@ afterEach(async () => {
 });
 
 function runOptions(id: string, task: string, extra: Partial<ExecutorOptions> = {}): ExecutorOptions {
+	const parentModel = modelRegistry.find("fake", "fake-model");
+	if (!parentModel) throw new Error("fake model missing from the main registry");
 	return {
 		cwd,
 		agent: AGENT,
@@ -308,7 +310,7 @@ function runOptions(id: string, task: string, extra: Partial<ExecutorOptions> = 
 		index: 0,
 		id,
 		description: `routing ${id}`,
-		modelOverride: MODEL,
+		parentModel,
 		structured: false,
 		settings,
 		authStorage,
