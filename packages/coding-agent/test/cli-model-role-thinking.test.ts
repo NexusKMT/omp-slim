@@ -73,47 +73,5 @@ describe("--model role override thinking suffix", () => {
 		);
 	});
 
-	test("prewalk @default resolves the configured default before --model overrides the session role", async () => {
-		const startupModel = getBundledModel("anthropic", "claude-opus-4-5");
-		const configuredDefault = getBundledModel("anthropic", "claude-sonnet-4-6");
-		if (!startupModel || !configuredDefault) throw new Error("expected bundled models");
 
-		authStorage.keys.setRuntime("anthropic", "test-key");
-
-		const settings = Settings.isolated({ defaultThinkingLevel: "auto" });
-		settings.setModelRole("default", `${configuredDefault.provider}/${configuredDefault.id}`);
-
-		const options = await buildSessionOptions(
-			parseArgs(["--model", `${startupModel.provider}/${startupModel.id}`, "--prewalk-into", "@default"]),
-			[],
-			SessionManager.inMemory(),
-			modelRegistry,
-			settings,
-		);
-
-		expect(options.model?.id).toBe(startupModel.id);
-		expect(options.prewalk?.target.id).toBe(configuredDefault.id);
-	});
-
-	test("prewalk bare default resolves the configured default before --model overrides the session role", async () => {
-		const startupModel = getBundledModel("anthropic", "claude-opus-4-5");
-		const configuredDefault = getBundledModel("anthropic", "claude-sonnet-4-6");
-		if (!startupModel || !configuredDefault) throw new Error("expected bundled models");
-
-		authStorage.keys.setRuntime("anthropic", "test-key");
-
-		const settings = Settings.isolated({ defaultThinkingLevel: "auto" });
-		settings.setModelRole("default", `${configuredDefault.provider}/${configuredDefault.id}`);
-
-		const options = await buildSessionOptions(
-			parseArgs(["--model", `${startupModel.provider}/${startupModel.id}`, "--prewalk-into", "default"]),
-			[],
-			SessionManager.inMemory(),
-			modelRegistry,
-			settings,
-		);
-
-		expect(options.model?.id).toBe(startupModel.id);
-		expect(options.prewalk?.target.id).toBe(configuredDefault.id);
-	});
 });

@@ -218,7 +218,7 @@ describe("AgentSession plan-mode convergence", () => {
 			advisorTools: [],
 			advisorStreamFn,
 			sideStreamFn,
-			planYolo: options?.planYolo ? { target: model } : undefined,
+			planYolo: options?.planYolo ? true : undefined,
 			xdev,
 			rebuildSystemPrompt: options?.rebuildGate
 				? async () => {
@@ -249,7 +249,6 @@ describe("AgentSession plan-mode convergence", () => {
 				},
 			],
 		});
-		harness.session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(harness.session.setAdvisorEnabled(true)).toBe(true);
 		const advisor = harness.session.getAdvisorAgent();
 		if (!advisor) throw new Error("Expected advisor agent to be live");

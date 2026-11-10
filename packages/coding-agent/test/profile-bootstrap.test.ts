@@ -37,11 +37,10 @@ describe("extractProfileFlags", () => {
 
 		const parsed = parseArgs(extracted.argv, new Map([["plan", { type: "boolean" }]]));
 		expect(parsed.unknownFlags.get("plan")).toBe(true);
-		expect(parsed.plan).toBeUndefined();
 		expect(parsed.messages).toEqual(["follow up"]);
 	});
 
-	it("keeps the built-in --plan from swallowing the profile boundary when its extension is absent", () => {
+	it("keeps the retired --plan from swallowing the profile boundary when its extension is absent", () => {
 		// Same argv as above, but the plan-mode extension is NOT loaded, so `--plan`
 		// is the built-in string flag (planning model). It must not consume the
 		// bootstrap's internal boundary sentinel as its value — otherwise plan would
@@ -50,7 +49,6 @@ describe("extractProfileFlags", () => {
 		expect(extracted.argv).toEqual(["--plan", PROFILE_BOOTSTRAP_BOUNDARY_ARG, "follow up"]);
 
 		const parsed = parseArgs(extracted.argv);
-		expect(parsed.plan).toBeUndefined();
 		expect(parsed.messages).toEqual(["follow up"]);
 	});
 

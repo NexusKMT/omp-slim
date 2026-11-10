@@ -27,7 +27,6 @@ import {
 	cfgCompactionHandoffSaveToDisk,
 	cfgCompactionMethodOrder,
 	cfgCompactionThresholdPercent,
-	cfgContextPromotionEnabled,
 } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 
 const HANDOFF_SECRET = "HANDOFF_SECRET_TOKEN_12345";
@@ -748,7 +747,6 @@ describe("AgentSession handoff", () => {
 				"compaction.asyncEnabled": false,
 				"compaction.methodOrder": ["soft"],
 				"compaction.thresholdTokens": 8_000,
-				"contextPromotion.enabled": false,
 			}),
 			modelRegistry,
 		});
@@ -833,7 +831,6 @@ describe("AgentSession handoff", () => {
 				"compaction.autoContinue": false,
 				"compaction.methodOrder": ["soft"],
 				"compaction.thresholdTokens": 8_000,
-				"contextPromotion.enabled": false,
 			}),
 			modelRegistry,
 		});
@@ -902,7 +899,6 @@ describe("AgentSession handoff", () => {
 				"compaction.autoContinue": false,
 				"compaction.methodOrder": ["soft"],
 				"compaction.thresholdTokens": 9_500,
-				"contextPromotion.enabled": false,
 			}),
 			modelRegistry,
 		});
@@ -931,7 +927,6 @@ describe("AgentSession handoff", () => {
 	it("does not run auto maintenance after final yield", async () => {
 		cfgCompactionMethodOrder.set(session.settings, ["handoff", "soft"]);
 		cfgCompactionThresholdPercent.set(session.settings, 1);
-		cfgContextPromotionEnabled.set(session.settings, false);
 
 		const model = session.model;
 		if (!model) {
@@ -1006,7 +1001,6 @@ describe("AgentSession handoff", () => {
 	it("does not run auto maintenance when strategy is off", async () => {
 		cfgCompactionMethodOrder.set(session.settings, []);
 		cfgCompactionThresholdPercent.set(session.settings, 1);
-		cfgContextPromotionEnabled.set(session.settings, false);
 
 		const model = session.model;
 		if (!model) {
@@ -1141,7 +1135,6 @@ describe("AgentSession handoff", () => {
 				"compaction.autoContinue": autoContinue,
 				"compaction.methodOrder": ["handoff", "soft"],
 				"compaction.thresholdPercent": 1,
-				"contextPromotion.enabled": false,
 			}),
 			extensionRunner,
 			modelRegistry,

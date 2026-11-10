@@ -32,16 +32,13 @@ import {
 	cfgCompactionSupersedeReads,
 	cfgCompactionThresholdPercent,
 	cfgCompactionThresholdTokens,
-	cfgContextPromotionEnabled,
 } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 import {
 	cfgFeaturesUnexpectedStopDetection,
 	cfgRetryBaseDelayMs,
 	cfgRetryEnabled,
-	cfgRetryFallbackChains,
 	cfgRetryMaxDelayMs,
 	cfgRetryMaxRetries,
-	cfgRetryModelFallback,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 const runtimeSignalStoreKey = "__ompRuntimeSignals";
@@ -2051,15 +2048,7 @@ describe("AgentSession auto-compaction queue resume", () => {
 		cfgCompactionThresholdTokens.set(session.settings, 76384);
 		cfgCompactionThresholdPercent.set(session.settings, -1);
 		cfgCompactionAutoContinue.set(session.settings, true);
-		cfgContextPromotionEnabled.set(session.settings, false);
-		cfgFeaturesUnexpectedStopDetection.set(session.settings, "smart");
-		const judgeModel = createMockModel();
-		const getAvailable = modelRegistry.getAvailable.bind(modelRegistry);
-		vi.spyOn(modelRegistry, "getAvailable").mockImplementation(kind =>
-			kind === "all" ? [judgeModel] : getAvailable(kind),
-		);
-		session.settings.setModelRole("judge", `${judgeModel.provider}/${judgeModel.id}`);
-		cfgRetryFallbackChains.set(session.settings, { judge: [] });
+		cfgFeaturesUnexpectedStopDetection.set(session.settings, "mechanical");
 
 		vi.spyOn(unexpectedStopClassifier, "classifyUnexpectedStop").mockResolvedValue(true);
 		vi.spyOn(session.agent, "continue").mockImplementation(async () => {
@@ -2115,12 +2104,10 @@ describe("AgentSession auto-compaction queue resume", () => {
 		cfgCompactionThresholdTokens.set(session.settings, 76384);
 		cfgCompactionThresholdPercent.set(session.settings, -1);
 		cfgCompactionAutoContinue.set(session.settings, true);
-		cfgContextPromotionEnabled.set(session.settings, false);
 		cfgRetryEnabled.set(session.settings, true);
 		cfgRetryBaseDelayMs.set(session.settings, 5);
 		cfgRetryMaxDelayMs.set(session.settings, 5_000);
 		cfgRetryMaxRetries.set(session.settings, 1);
-		cfgRetryModelFallback.set(session.settings, false);
 
 		mockSchedulerWaitWithClock();
 		vi.spyOn(session.agent, "continue").mockImplementation(async () => {
@@ -2220,7 +2207,6 @@ describe("AgentSession auto-compaction queue resume", () => {
 		cfgCompactionThresholdTokens.set(session.settings, 76384);
 		cfgCompactionThresholdPercent.set(session.settings, -1);
 		cfgCompactionAutoContinue.set(session.settings, true);
-		cfgContextPromotionEnabled.set(session.settings, false);
 
 		vi.spyOn(session.agent, "continue").mockImplementation(async () => {
 			session.agent.clearAllQueues();

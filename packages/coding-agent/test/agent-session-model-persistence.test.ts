@@ -124,7 +124,7 @@ describe("AgentSession model persistence", () => {
 			for (const role in modelRoles) {
 				const modelRoleValue = modelRoles[role];
 				if (modelRoleValue !== undefined) {
-					sessionSettings.setModelRole(role, modelRoleValue);
+					if (role === "default") sessionSettings.setModel(modelRoleValue);
 				}
 			}
 		}
@@ -222,52 +222,7 @@ describe("AgentSession model persistence", () => {
 		expect(created.settings.getModelRole("default")).toBe(modelValue(nextModel));
 	});
 
-	it("cycles role models without rewriting configured roles", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const slowModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
-		const defaultRoleValue = modelValue(defaultModel);
-		const slowRoleValue = `${modelValue(slowModel)}:high`;
 
-		const created = await createSession({
-			initialModel: defaultModel,
-			modelRoles: {
-				default: defaultRoleValue,
-				slow: slowRoleValue,
-			},
-		});
-
-		const result = await created.session.cycleRoleModels(["default", "slow"]);
-
-		expect(result?.role).toBe("slow");
-		expect(result?.model.id).toBe(slowModel.id);
-		expect(created.session.model?.id).toBe(slowModel.id);
-		expect(created.settings.getModelRole("default")).toBe(defaultRoleValue);
-		expect(created.settings.getModelRole("slow")).toBe(slowRoleValue);
-	});
-
-	it("cycles role models backward from the current role", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const slowModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
-		const defaultRoleValue = modelValue(defaultModel);
-		const slowRoleValue = modelValue(slowModel);
-
-		const created = await createSession({
-			initialModel: defaultModel,
-			modelRoles: {
-				default: defaultRoleValue,
-				slow: slowRoleValue,
-			},
-		});
-
-		const forward = await created.session.cycleRoleModels(["default", "slow"], "forward");
-		const backward = await created.session.cycleRoleModels(["default", "slow"], "backward");
-
-		expect(forward?.role).toBe("slow");
-		expect(backward?.role).toBe("default");
-		expect(created.session.model?.id).toBe(defaultModel.id);
-		expect(created.settings.getModelRole("default")).toBe(defaultRoleValue);
-		expect(created.settings.getModelRole("slow")).toBe(slowRoleValue);
-	});
 
 	it("cycles available models without persisting the default role", async () => {
 		const created = await createSession({
@@ -323,7 +278,7 @@ describe("AgentSession model persistence", () => {
 		expect(result.session.model?.id).toBe(smolModel.id);
 	});
 
-	it("falls back to the saved default model when switch-session role restore is unavailable", async () => {
+	it("rejects an unavailable saved model and preserves the current session", async () => {
 		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
 		const previousModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
 		const defaultRoleValue = modelValue(defaultModel);
@@ -335,8 +290,8 @@ describe("AgentSession model persistence", () => {
 			persist: true,
 		});
 
-		await expect(created.session.switchSession(targetSessionFile)).resolves.toBe(true);
-		expect(created.session.model?.id).toBe(defaultModel.id);
+		await expect(created.session.switchSession(targetSessionFile)).rejects.toThrow("Could not restore model");
+		expect(created.session.model?.id).toBe(previousModel.id);
 	});
 
 	it("restores the saved default model when switch-session last role is fallback", async () => {
@@ -359,7 +314,7 @@ describe("AgentSession model persistence", () => {
 		expect(created.session.model?.id).toBe(defaultModel.id);
 	});
 
-	it("falls back to the saved default model when startup role restore is unavailable", async () => {
+	it("rejects startup when the saved model is unavailable despite a configured main model", async () => {
 		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
 		const settingsFallbackModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
 		const defaultRoleValue = modelValue(defaultModel);
@@ -367,9 +322,7 @@ describe("AgentSession model persistence", () => {
 		const settings = Settings.isolated();
 		settings.setModelRole("default", modelValue(settingsFallbackModel));
 
-		const result = await createStartupResumeSession(targetSessionFile, settings);
-
-		expect(result.session.model?.id).toBe(defaultModel.id);
+		await expect(createStartupResumeSession(targetSessionFile, settings)).rejects.toThrow("Could not restore model");
 	});
 
 	it("restores the saved default model when startup last role is fallback", async () => {
