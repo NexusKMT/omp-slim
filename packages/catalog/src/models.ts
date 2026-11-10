@@ -1,11 +1,7 @@
-import { classifyModel } from "./compat/taxonomy";
-import { getCatalogProvider, getCatalogProviders, openModelCatalog } from "./model-catalog-format";
-import modelsData from "./models.json" with { type: "json" };
-import { dueDatedCard, dueEffectiveRate } from "./pricing";
+import { dueEffectiveRate } from "./pricing";
 import type {
 	Api,
 	EffectiveTokenCost,
-	KnownProvider,
 	Model,
 	ModelCost,
 	ModelPricingStatus,
@@ -14,98 +10,11 @@ import type {
 	Usage,
 } from "./types";
 
-/**
- * Static bundled model registry loaded from `models.json`.
- *
- * This module intentionally exposes compile-time defaults only.
- * It does not include runtime discovery, stencil.so overlays, or on-disk cache state.
- *
- * For runtime-aware resolution, use `createModelManager()` / `resolveProviderModels()`.
- */
-const catalog = openModelCatalog(modelsData);
-const bundledProviders: readonly KnownProvider[] = Object.freeze(getCatalogProviders(catalog) as KnownProvider[]);
-const bundledProviderSet = new Set<string>(bundledProviders);
-const modelRegistry = new Map<string, Map<string, Model<Api>>>();
-
-/** Return one provider's bundled models, materialized by the generator. */
-function getProviderModels(provider: string): Map<string, Model<Api>> | undefined {
-	const cachedModels = modelRegistry.get(provider);
-	if (cachedModels !== undefined) return cachedModels;
-	const rawModels = getCatalogProvider(catalog, provider);
-	if (!rawModels) return undefined;
-
-	const providerModels = new Map<string, Model<Api>>();
-	for (const id in rawModels) {
-		const row = rawModels[id];
-		// Rows baked before the compat engine (and stale cache snapshots) lack
-		// `identity`; classify lazily so consumers can rely on the field.
-		row.identity ??= classifyModel(provider, id, { lenient: true });
-		providerModels.set(id, row);
-	}
-	modelRegistry.set(provider, providerModels);
-	return providerModels;
-}
-
-/** Provider identifier accepted by the bundled model registry. */
-export type GeneratedProvider = string;
-
-/** Whether `provider` has bundled rows in models.json (e.g. a provider id authored in KDL). */
-export function isGeneratedProvider(provider: string): provider is GeneratedProvider {
-	return bundledProviderSet.has(provider);
-}
-
-/** Look up a bundled model; nested catalog values are shared and must not be mutated. */
-export function getBundledModel<TApi extends Api = Api>(provider: GeneratedProvider, modelId: string): Model<TApi> {
-	const providerModels = getProviderModels(provider);
-	return providerModels?.get(modelId) as Model<TApi>;
-}
-
-/** List providers with bundled rows; the array is shared and frozen. */
-export function getBundledProviders(): readonly KnownProvider[] {
-	return bundledProviders;
-}
-
-/** List a provider's bundled models; nested catalog values are shared and must not be mutated. */
-export function getBundledModels(provider: GeneratedProvider): Model<Api>[] {
-	const models = getProviderModels(provider);
-	return models ? (Array.from(models.values()) as Model<Api>[]) : [];
-}
 /** Resolve display semantics without mistaking an absent rate card for a free model. */
 export function getModelPricingStatus(model: Pick<Model<Api>, "cost" | "pricingStatus">): ModelPricingStatus {
 	const cost = getEffectiveTokenCost(model.cost);
 	if (cost.input !== 0 || cost.output !== 0 || cost.cacheRead !== 0 || cost.cacheWrite !== 0) return "fixed";
 	return model.pricingStatus ?? "unknown";
-}
-
-/** Factory Droid credit rate in force at a time, and the next dated change to it. */
-export interface FactoryDroidCreditRate {
-	rate: number;
-	/** The earliest later `credit-rates` card that changes `rate`: the rate it sets and when (Unix ms). */
-	next?: { rate: number; at: number };
-}
-
-/**
- * Factory Droid Standard Credits rate at `timestamp` (Unix ms, default now):
- * the `input` of the `credit-rates` card due then (the latest at or before
- * it, as for cost cards), else the base rate. Undefined for models without a
- * credit rate.
- */
-export function getFactoryDroidCreditRate(
-	model: Pick<Model, "factoryDroidCredits" | "factoryDroidCreditCards">,
-	timestamp = Date.now(),
-): FactoryDroidCreditRate | undefined {
-	const base = model.factoryDroidCredits;
-	if (base === undefined) return undefined;
-	const cards = model.factoryDroidCreditCards ?? [];
-	const rate = dueDatedCard(cards, timestamp)?.input ?? base;
-	let next: FactoryDroidCreditRate["next"];
-	for (const card of cards) {
-		const cardRate = card.input ?? base;
-		if (card.effectiveFrom > timestamp && cardRate !== rate && !(next && next.at <= card.effectiveFrom)) {
-			next = { rate: cardRate, at: card.effectiveFrom };
-		}
-	}
-	return next ? { rate, next } : { rate };
 }
 
 /**
@@ -220,31 +129,9 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
 	return calculateUsageCost(model.cost, usage, timestamp);
 }
 
-/**
- * Price cache-write tokens, honoring the TTL breakdown when the provider reports one.
- *
- * `rates.cacheWrite` is the 5-minute write rate (Anthropic bills 5m writes at
- * 1.25x base input). When `usage.cttl` is present the write can mix 5m and 1h
- * breakpoints, and 1h writes bill at 2x base input, so each component is
- * priced at its own rate instead of the flat 5m rate. Deriving 1h from
- * `input * 2` (Anthropic's published multiplier) is model-independent and
- * stays correct even for legacy entries whose stored
- * `cacheWrite` scalar drifts from 1.25x input. Providers that omit `cttl`
- * (everyone but Anthropic) keep the flat-rate calculation.
- *
- * The breakdown is documented to sum to `usage.cacheWrite`, but the two are written
- * from independent wire fields (`cache_creation` vs `cache_creation_input_tokens`),
- * so any unattributed remainder is priced at the flat rate instead of being dropped:
- * a partial or stale breakdown must never make write tokens free.
- */
+/** Preserve historical cache-write accounting using the configured flat rate. */
 function cacheWriteCost(rates: TokenCost, usage: Usage): number {
-	const rate5m = rates.cacheWrite / 1000000;
-	const cttl = usage.cttl;
-	if (!cttl) return rate5m * usage.cacheWrite;
-	const fiveMinute = cttl.ephemeral5m ?? 0;
-	const oneHour = cttl.ephemeral1h ?? 0;
-	const residual = Math.max(0, usage.cacheWrite - fiveMinute - oneHour);
-	return rate5m * (fiveMinute + residual) + ((rates.input * 2) / 1000000) * oneHour;
+	return (rates.cacheWrite / 1_000_000) * usage.cacheWrite;
 }
 
 /**
