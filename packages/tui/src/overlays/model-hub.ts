@@ -34,23 +34,7 @@ export interface ModelHubSource extends ModelBrowserSource {
 	readonly disabledProviders: readonly string[];
 }
 export interface ModelHubRegistry extends ModelBrowserRegistry {
-	readonly authStorage: { readonly keys: { source(provider: string): unknown } };
-	getDiscoverableProviders(): string[];
-	getProviderDiscoveryState(provider: string):
-		| {
-				optional: boolean;
-				status: "idle" | "ok" | "empty" | "cached" | "unavailable" | "unauthenticated";
-				fetchedAt?: number;
-				error?: string;
-		  }
-		| undefined;
-	find(provider: string, id: string): Model | undefined;
-	refresh(strategy: "online"): Promise<void>;
-	refreshProvider(
-		provider: string,
-		strategy: "online",
-		options?: { refreshCommandCredentials?: boolean },
-	): Promise<void>;
+	refresh(): Promise<void>;
 }
 export interface ScopedModelItem {
 	model: Model;
@@ -69,9 +53,10 @@ export interface ModelHubCallbacks {
 		thinkingLevel: ConfiguredThinkingLevel | undefined,
 		selector: string,
 	) => void | boolean | Promise<void | boolean>;
-	onCatalogRefreshed?: (
-		providerId?: string,
-	) => ReadonlyArray<ScopedModelItem> | undefined | Promise<ReadonlyArray<ScopedModelItem> | undefined>;
+	onModelsReloaded?: () =>
+		| ReadonlyArray<ScopedModelItem>
+		| undefined
+		| Promise<ReadonlyArray<ScopedModelItem> | undefined>;
 	onCancel: () => void;
 }
 export interface ModelHubOptions {
@@ -79,10 +64,6 @@ export interface ModelHubOptions {
 	currentSelector?: string;
 	currentContextTokens?: number;
 	thinkingLevel?: ConfiguredThinkingLevel;
-}
-const autoRefreshedProviders = new Set<string>();
-export function resetProviderAutoRefreshGuard(): void {
-	autoRefreshedProviders.clear();
 }
 interface Scope extends SidebarEntry<"recent" | "all" | "provider"> {
 	providerId?: string;
@@ -104,9 +85,6 @@ export class ModelHubComponent implements Component {
 	#thinkingLevel: ConfiguredThinkingLevel | undefined;
 	#pending = false;
 	#ranker: ModelItemRanker | undefined;
-	#scheduled = new Map<string, NodeJS.Timeout>();
-	#providerRefreshing = new Set<string>();
-	#forcedRefresh = new Set<string>();
 	#compaction:
 		| { model: Model; input: Input; confirm?: { value: string; message: string }; error?: string }
 		| undefined;
@@ -177,7 +155,6 @@ export class ModelHubComponent implements Component {
 		this.#sync();
 		if (options.initialProviderId) this.#setScope(`provider:${options.initialProviderId}`);
 		if (this.#currentSelector) this.#browser.selectSelector(this.#currentSelector);
-		if (scopedModels.length === 0) void this.#refresh();
 	}
 	refreshAfterExternalMutation(): void {
 		this.#sync();
@@ -185,8 +162,6 @@ export class ModelHubComponent implements Component {
 	}
 	dispose(): void {
 		this.#disposed = true;
-		for (const timer of this.#scheduled.values()) clearTimeout(timer);
-		this.#scheduled.clear();
 	}
 	invalidate(): void {
 		this.#frame.invalidate();
@@ -217,18 +192,6 @@ export class ModelHubComponent implements Component {
 		this.#browser.setMruOrder(this.settings.mruOrder);
 		this.#browser.setPerfStats(this.settings.modelPerf);
 		const providers = new Set(all.map(model => model.provider));
-		if (!scoped)
-			for (const provider of this.registry.getDiscoverableProviders()) {
-				const state = this.registry.getProviderDiscoveryState(provider);
-				if (
-					state?.optional &&
-					(state.status === "idle" || state.status === "unavailable") &&
-					!this.registry.authStorage.keys.source(provider) &&
-					!available.some(model => model.provider === provider)
-				)
-					continue;
-				providers.add(provider);
-			}
 		const order = this.settings.modelProviderOrder;
 		const sorted = [...providers]
 			.filter(provider => !this.settings.disabledProviders.includes(provider))
@@ -246,10 +209,7 @@ export class ModelHubComponent implements Component {
 				label: provider,
 				providerId: provider,
 				annotation: String(available.filter(model => model.provider === provider).length),
-				locked:
-					!available.some(model => model.provider === provider) &&
-					!this.registry.getProviderDiscoveryState(provider) &&
-					this.registry.authStorage.keys.source(provider) === undefined,
+				locked: !available.some(model => model.provider === provider),
 			})),
 		];
 		if (!this.#entries.some(entry => entry.id === this.#active)) this.#active = "all";
@@ -263,52 +223,9 @@ export class ModelHubComponent implements Component {
 		const scope = this.#scope();
 		if (scope?.kind === "recent") return "No recently used models yet";
 		if (scope?.locked) return "Configure an API key in models.yml to use this endpoint";
-		const state = scope?.providerId ? this.registry.getProviderDiscoveryState(scope.providerId) : undefined;
-		if (state?.status === "empty")
-			return "Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.";
-		if (state?.status === "unavailable") {
-			const http = state.error?.match(/^HTTP (\d+) from (.+)$/);
-			if (http?.[1] === "404")
-				return sanitizeDisplayWarning(
-					`Discovery endpoint ${http[2]} returned 404. Point baseUrl at the host that serves /models (usually .../v1).`,
-				);
-			return state.error ? sanitizeDisplayWarning(`Discovery failed: ${state.error}`) : "Provider unavailable.";
-		}
-		if (state?.status === "unauthenticated")
-			return "Configure the endpoint API key in models.yml before refreshing its models.";
-		if (state?.status === "cached") return "Using cached model list. Live refresh is still pending.";
-		if (state?.status === "idle") return "Provider has not been refreshed yet.";
-		return "No models available";
+		return "No models configured. Add a Chat Completions endpoint in models.yml, then reload.";
 	}
-	#scheduleRefresh(provider?: string, force = false): void {
-		if (!provider) {
-			void this.#refresh();
-			return;
-		}
-		if (this.scopedModels.length > 0) return;
-		const pending = this.#scheduled.get(provider);
-		if (pending) {
-			if (!force) return;
-			clearTimeout(pending);
-			this.#scheduled.delete(provider);
-		}
-		if (this.#providerRefreshing.has(provider)) {
-			if (force) this.#forcedRefresh.add(provider);
-			return;
-		}
-		if (!force && autoRefreshedProviders.has(provider)) return;
-		if (force) {
-			void this.#refresh(provider, true);
-			return;
-		}
-		this.#scheduled.set(
-			provider,
-			setTimeout(() => {
-				this.#scheduled.delete(provider);
-				void this.#refresh(provider);
-			}, 120),
-		);
-	}
+
 	#openCompaction(): void {
 		const item = this.#browser.getSelected();
 		if (!item || !this.callbacks.onCompactionPointChange) return;
@@ -348,46 +265,27 @@ export class ModelHubComponent implements Component {
 	#setScope(id: string): void {
 		if (!this.#entries.some(entry => entry.id === id)) return;
 		this.#active = id;
-		for (const [provider, timer] of this.#scheduled)
-			if (`provider:${provider}` !== id) {
-				clearTimeout(timer);
-				this.#scheduled.delete(provider);
-			}
 		this.#applyScope();
-		if (!this.#scope()?.locked && this.#scope()?.providerId) this.#scheduleRefresh(this.#scope()?.providerId);
 		this.#repaint();
 	}
-	async #refresh(provider?: string, force = false): Promise<void> {
-		if (provider) {
-			this.#providerRefreshing.add(provider);
-			autoRefreshedProviders.add(provider);
-		} else {
-			if (this.#refreshing) return;
-			this.#refreshing = true;
-		}
+	async #refresh(): Promise<void> {
+		if (this.#refreshing) return;
+		this.#refreshing = true;
 		this.#error = undefined;
 		this.#repaint();
 		try {
-			if (provider)
-				await this.registry.refreshProvider(
-					provider,
-					"online",
-					force ? { refreshCommandCredentials: true } : undefined,
-				);
-			else await this.registry.refresh("online");
-			const scope = await this.callbacks.onCatalogRefreshed?.(provider);
+			await this.registry.refresh();
+			const scope = await this.callbacks.onModelsReloaded?.();
 			if (scope !== undefined) this.scopedModels = scope;
 			if (!this.#disposed) this.#sync();
 		} catch (error) {
 			this.#error = error instanceof Error ? error.message : String(error);
 		} finally {
-			if (provider) {
-				this.#providerRefreshing.delete(provider);
-				if (!this.#disposed && this.#forcedRefresh.delete(provider)) void this.#refresh(provider, true);
-			} else this.#refreshing = false;
+			this.#refreshing = false;
 			this.#repaint();
 		}
 	}
+
 	#chooseThinking(item: ModelBrowserItem): void {
 		if (this.#pending) return;
 		if (!item.model.reasoning) {
@@ -465,7 +363,7 @@ export class ModelHubComponent implements Component {
 			return;
 		}
 		if (matchesKey(data, "f5")) {
-			this.#scheduleRefresh(this.#scope()?.providerId, true);
+			void this.#refresh();
 			return;
 		}
 		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
@@ -498,9 +396,9 @@ export class ModelHubComponent implements Component {
 	render(width: number): string[] {
 		const status = this.#error
 			? sanitizeDisplayWarning(this.#error)
-			: this.#refreshing || this.#providerRefreshing.size > 0
-				? "Refreshing…"
-				: "tab providers · enter select model and thinking · ctrl+l compaction · F5 refresh · esc close";
+			: this.#refreshing
+				? "Reloading models.yml…"
+				: "tab providers · enter select model and thinking · ctrl+l compaction · F5 reload · esc close";
 		return [
 			...this.#frame.render(
 				width,
@@ -534,7 +432,7 @@ export class ModelHubComponent implements Component {
 		const subtitle = this.#error
 			? [span(this.#error, "error")]
 			: this.#refreshing
-				? "Refreshing…"
+				? "Reloading models.yml…"
 				: "Choose the current chat model and thinking level";
 		if (!cx?.supports("picker"))
 			return describeHubFrame(
@@ -590,7 +488,7 @@ export class ModelHubComponent implements Component {
 					...(this.callbacks.onCompactionPointChange
 						? [pickerAction("compaction", "Compaction limit", "ctrl+l")]
 						: []),
-					pickerAction("refresh", "Refresh", "f5"),
+					pickerAction("refresh", "Reload models.yml", "f5"),
 					CLOSE_ACTION,
 				],
 			},
@@ -622,7 +520,7 @@ export class ModelHubComponent implements Component {
 			return;
 		}
 		if (picked.act === "compaction") this.#openCompaction();
-		else if (picked.act === "refresh") this.#scheduleRefresh(this.#scope()?.providerId, true);
+		else if (picked.act === "refresh") void this.#refresh();
 		else if (picked.act === "use") {
 			const item = this.#browser.getSelected();
 			if (item) this.#chooseThinking(item);
