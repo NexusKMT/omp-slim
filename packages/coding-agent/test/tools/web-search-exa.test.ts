@@ -2,7 +2,7 @@ import type { BodyInit } from "bun";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import {
 	buildExaRequestBody,
 	ExaProvider,
@@ -12,7 +12,7 @@ import {
 	synthesizeAnswer,
 } from "@oh-my-pi/pi-coding-agent/web/search/providers/exa";
 import { isRecord } from "@oh-my-pi/pi-utils";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../helpers/auth-storage";
 
 type PostedMcpRequest = Record<string, unknown> & { id: string | number };
 

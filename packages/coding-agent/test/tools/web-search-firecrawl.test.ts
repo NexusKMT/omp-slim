@@ -3,7 +3,7 @@ import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
 import { resolveFirecrawlUrl } from "@oh-my-pi/pi-coding-agent/web/firecrawl";
 import { FirecrawlProvider, searchFirecrawl } from "@oh-my-pi/pi-coding-agent/web/search/providers/firecrawl";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../helpers/auth-storage";
 
 const TEST_KEY = "test-firecrawl-key";
 

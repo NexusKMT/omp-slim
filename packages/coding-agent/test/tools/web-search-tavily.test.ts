@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:t
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
 import { searchTavily } from "@oh-my-pi/pi-coding-agent/web/search/providers/tavily";
 import type { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../helpers/auth-storage";
 
 const authStorage = createInMemoryAuthStorage();
 

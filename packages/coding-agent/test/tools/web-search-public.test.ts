@@ -3,7 +3,7 @@ import type { FetchImpl } from "@oh-my-pi/pi-ai";
 import type { SearchParams } from "@oh-my-pi/pi-coding-agent/web/search/providers/base";
 import { searchPublicWeb } from "@oh-my-pi/pi-coding-agent/web/search/providers/public";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../helpers/auth-storage";
 
 const authStorage = createInMemoryAuthStorage();
 

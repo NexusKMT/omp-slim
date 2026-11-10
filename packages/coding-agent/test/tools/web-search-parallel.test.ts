@@ -5,7 +5,7 @@ import type { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-stora
 import { searchWithParallel } from "@oh-my-pi/pi-coding-agent/web/parallel";
 import { ParallelProvider, searchParallel } from "@oh-my-pi/pi-coding-agent/web/search/providers/parallel";
 import { USER_AGENT } from "@oh-my-pi/pi-utils";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../helpers/auth-storage";
 
 const anonymousAuthStorage = createInMemoryAuthStorage();
 
@@ -276,7 +276,7 @@ describe("Parallel web search", () => {
 		}
 	});
 
-	it("sends trusted session and selected model metadata with anonymous MCP searches", async () => {
+	it("sends session metadata without a chat model in anonymous MCP searches", async () => {
 		delete process.env.PARALLEL_API_KEY;
 		const fetchMock = mockMcpFetch({
 			result: { structuredContent: { search_id: "search-parallel-mcp-metadata", results: [] } },
@@ -298,10 +298,10 @@ describe("Parallel web search", () => {
 					objective: "session-aware search",
 					search_queries: ["session-aware search"],
 					session_id: "stable-session-123",
-					model_name: "parallel",
 				},
 			},
 		});
+		expect(capturedRequestBody).not.toHaveProperty("params.arguments.model_name");
 	});
 
 	it("sends session identifiers at the MCP schema's 100-character limit", async () => {
@@ -331,22 +331,6 @@ describe("Parallel web search", () => {
 		});
 		expect(capturedRequestBody).not.toMatchObject({
 			params: { arguments: { session_id: expect.any(String) } },
-		});
-	});
-
-	it("omits overlong model identifiers instead of truncating their identity", async () => {
-		delete process.env.PARALLEL_API_KEY;
-		const fetchMock = mockMcpFetch({
-			result: { structuredContent: { search_id: "search-parallel-mcp-model-limit", results: [] } },
-		});
-
-		await searchParallel({ query: "model metadata", modelName: "m".repeat(101), fetch: fetchMock }, fakeAuthStorage);
-
-		expect(capturedRequestBody).toMatchObject({
-			params: { arguments: { objective: "model metadata", search_queries: ["model metadata"] } },
-		});
-		expect(capturedRequestBody).not.toMatchObject({
-			params: { arguments: { model_name: expect.any(String) } },
 		});
 	});
 
