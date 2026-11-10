@@ -937,7 +937,6 @@ describe("structured subagent primitive", () => {
 				"compaction.enabled": false,
 				"retry.enabled": false,
 				"advisor.enabled": false,
-				"autolearn.enabled": false,
 				"todo.enabled": false,
 			});
 			const parentSession = Object.assign(session({ cwd, settings, planMode: true, parentSpawns: "seance,scout" }), {

@@ -18,9 +18,6 @@ import { goalRenderer } from "./tools/goal";
 import { grepRenderer } from "./tools/grep";
 import { waitRenderer } from "./tools/wait";
 import { lspRenderer } from "./tools/lsp";
-import { recallRenderer } from "./tools/memory-recall";
-import { reflectRenderer } from "./tools/memory-reflect";
-import { retainRenderer } from "./tools/memory-retain";
 import { readRenderer } from "./tools/read";
 import { reportToolIssueRenderer } from "./tools/report-tool-issue";
 import { resolveRenderer } from "./tools/resolve";
@@ -51,9 +48,6 @@ const RENDERERS: Record<string, ToolRenderer> = {
 	goal: goalRenderer,
 	wait: waitRenderer,
 	lsp: lspRenderer,
-	recall: recallRenderer,
-	reflect: reflectRenderer,
-	retain: retainRenderer,
 	read: readRenderer,
 	report_tool_issue: reportToolIssueRenderer,
 	resolve: resolveRenderer,

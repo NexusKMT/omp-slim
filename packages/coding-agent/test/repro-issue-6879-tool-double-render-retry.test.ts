@@ -365,12 +365,12 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 
 	it("keeps a successful internal read single when replay beats its live completion", async () => {
 		const ec = mode.eventController;
-		const memoryPath = "memory://root/rollout_summaries/successful-read";
+		const historyPath = "history://successful-read";
 		const readCall: ToolCall = {
 			type: "toolCall",
 			id: "read-success",
 			name: "read",
-			arguments: { path: memoryPath, i: "Read successful memory" },
+			arguments: { path: historyPath, i: "Read successful history" },
 		};
 		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
 		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<
@@ -434,7 +434,7 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		mode.rebuildChatFromMessages();
 
 		const replayCards = mode.chatContainer.children.filter(child =>
-			Bun.stripANSI(child.render(120).join("\n")).includes(memoryPath),
+			Bun.stripANSI(child.render(120).join("\n")).includes(historyPath),
 		);
 		expect(replayCards).toHaveLength(1);
 		const replayChildCount = mode.chatContainer.children.length;
@@ -450,7 +450,7 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>);
 
 		const matchingCards = mode.chatContainer.children.filter(child =>
-			Bun.stripANSI(child.render(120).join("\n")).includes(memoryPath),
+			Bun.stripANSI(child.render(120).join("\n")).includes(historyPath),
 		);
 		expect(matchingCards).toHaveLength(1);
 		expect(mode.chatContainer.children).toHaveLength(replayChildCount);

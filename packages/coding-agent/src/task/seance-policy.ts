@@ -32,7 +32,5 @@ export function seanceIsolationOptions(cwd: string) {
 		preloadedCustomToolPaths: [],
 		customTools: undefined,
 		localProtocolOptions: undefined,
-		parentHindsightSessionState: undefined,
-		parentMnemopiSessionState: undefined,
 	} satisfies Partial<CreateAgentSessionOptions>;
 }

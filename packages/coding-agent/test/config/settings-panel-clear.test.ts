@@ -40,13 +40,13 @@ afterEach(() => {
 
 it("clearing a settings-panel text field removes the key from config.yml so its env fallback applies again", async () => {
 	Bun.env.SEARXNG_ENDPOINT = "https://env.example";
-	Bun.env.HINDSIGHT_API_TOKEN = "env-secret";
+	Bun.env.SEARXNG_TOKEN = "env-secret";
 	const configPath = path.join(agentDir, "config.yml");
 	await Bun.write(configPath, YAML.stringify({ searxng: { endpoint: "https://cfg.example" }, temperature: 0.4 }));
 	await Settings.init({ cwd: projectDir, agentDir });
 	const host = createSettingsHost();
 	// The panel edits the configured layers: env values are never shown or pre-filled.
-	expect(host.get("hindsight.apiToken")).toBeUndefined();
+	expect(host.get("searxng.token")).toBeUndefined();
 
 	const selector = new SettingsSelectorComponent(
 		{

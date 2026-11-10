@@ -325,7 +325,7 @@ Final stored summary is merged as:
 2. Serialize with `serializeConversationForSummary()` using the target model's preferred dialect.
 3. Wrap in `<conversation>...</conversation>`.
 4. Optionally include `<previous-summary>...</previous-summary>`.
-5. Optionally inject extension hook context and active memory-backend compaction context as `<additional-context>` entries.
+5. Optionally inject extension hook context as `<additional-context>` entries.
 6. Execute summarization prompt with `SUMMARIZATION_SYSTEM_PROMPT`.
 
 Oversized local-summary input is folded through budgeted conversation windows, carrying each summary into the next update. Provider context-overflow rejections halve and re-plan the rejected window down to a minimum input budget; other failures surface normally.
@@ -540,8 +540,8 @@ Defined in `packages/coding-agent/src/session/context-settings.ts`:
 - `compaction.remoteStreamingV2Enabled` = `true`
 - `compaction.v2RetainedMessageBudget` = `64000`
 - `compaction.thresholdPercent` = `-1` and `compaction.thresholdTokens` = `-1`; a positive fixed token limit takes precedence over percentage, and otherwise the reserve-based threshold is used.
-- `compaction.modelThresholds` = `{}`; `provider/model-id` or `provider/…*` prefix → a token base the threshold policy scales in place of the window (dropping a global `thresholdTokens`), a fixed trigger (`"f90000"`), or a percentage replacing both thresholds, while that model is active. Editable from the `/models` Roles view (`k`). See [Settings](./settings.md#context-compaction-and-memory).
-- `task.agentCompactionThresholdOverrides` = `{}`; exact-name task/eval agent → token count (`90000`) or percentage (`"80%"`) replacing both thresholds for that agent only. See [Settings](./settings.md#context-compaction-and-memory).
+- `compaction.modelThresholds` = `{}`; `provider/model-id` or `provider/…*` prefix → a token base the threshold policy scales in place of the window (dropping a global `thresholdTokens`), a fixed trigger (`"f90000"`), or a percentage replacing both thresholds, while that model is active. Editable from the `/models` Roles view (`k`). See [Settings](./settings.md#context-and-compaction).
+- `task.agentCompactionThresholdOverrides` = `{}`; exact-name task/eval agent → token count (`90000`) or percentage (`"80%"`) replacing both thresholds for that agent only. See [Settings](./settings.md#context-and-compaction).
 - `compaction.idleEnabled` = `false`
 - `compaction.idleThresholdTokens` = `200000`
 - `compaction.idleTimeoutSeconds` = `300` (fallback unless a confirmed 1h prompt-cache entry sets the timing)

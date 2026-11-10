@@ -15,10 +15,6 @@ export const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
 	"yield",
 	"ask",
 	"todo",
-	"recall",
-	"reflect",
-	"retain",
-	"memory_edit",
 	"checkpoint",
 	"rewind",
 ]);

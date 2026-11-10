@@ -149,8 +149,6 @@ export interface SchemeHost {
 	skillUriAccess: boolean;
 	/** Number of rulebook rules addressable through rule://. */
 	ruleCount: number;
-	/** Active `memory.backend` id; undefined when memory is off. */
-	memoryBackend?: string;
 	securityEnabled: boolean;
 	/** The user approves `cfg://` writes for this session (top-level TUI session). */
 	settingsApproval: boolean;
@@ -193,7 +191,7 @@ export interface InternalResource {
 	shape?: "document" | "value";
 	/**
 	 * True when the resolved content cannot be edited by the agent (e.g. sealed
-	 * artifacts, harness docs, machine-generated memory summaries). Hashline
+	 * artifacts and harness docs). Hashline
 	 * anchors and similar edit affordances are suppressed for immutable
 	 * resources. Mutable resources (e.g. local://) behave like editable files.
 	 */
@@ -267,7 +265,7 @@ export interface ResolveContext {
 	/**
 	 * Calling session's stable session-manager id. Sessions that have no
 	 * session file yet (SDK, embedded, `-p`) are only addressable by this id,
-	 * so handlers that must bind a URL to its caller (`memory://`) accept it
+	 * so handlers that must bind a URL to its caller accept it
 	 * as a second exact identity alongside {@link sessionFile}.
 	 */
 	sessionId?: string;
@@ -358,7 +356,7 @@ export interface WriteContext {
 }
 
 /**
- * Handler for a specific internal URL scheme (e.g., agent://, memory://, skill://, xd://).
+ * Handler for a specific internal URL scheme (e.g., agent://, skill://, xd://).
  */
 export interface ProtocolHandler {
 	/** The scheme this handler processes (without trailing ://) */

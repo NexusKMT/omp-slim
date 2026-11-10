@@ -6,7 +6,6 @@ export type SettingTab =
 	| "model"
 	| "interaction"
 	| "context"
-	| "memory"
 	| "files"
 	| "shell"
 	| "tools"
@@ -22,7 +21,6 @@ export const SETTING_TABS: SettingTab[] = [
 	"model",
 	"interaction",
 	"context",
-	"memory",
 	"files",
 	"shell",
 	"tools",
@@ -36,7 +34,6 @@ export const TAB_METADATA: Record<SettingTab, TabMetadata> = {
 	model: { label: "Model", icon: "tab.model" },
 	interaction: { label: "Interaction", icon: "tab.interaction" },
 	context: { label: "Context", icon: "tab.context" },
-	memory: { label: "Memory", icon: "tab.memory" },
 	files: { label: "Files", icon: "tab.files" },
 	shell: { label: "Shell", icon: "tab.shell" },
 	tools: { label: "Tools", icon: "tab.tools" },
@@ -50,7 +47,6 @@ export const TAB_LEADS: Record<SettingTab, string> = {
 	model: "Thinking, sampling, the system prompt, retries and the helper models.",
 	interaction: "Input, approvals, notifications and what happens at startup.",
 	context: "What the model sees, and when and how the conversation compacts.",
-	memory: "What omp remembers across sessions and where it keeps it.",
 	files: "How files are read, summarized and edited, and the language servers.",
 	shell: "The bash tool and the eval runtimes.",
 	tools: "Which tools the model has, their limits and the external integrations.",
@@ -80,7 +76,6 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 		"Skills",
 	],
 	context: ["General", "Compaction", "Rules (TTSR)", "Experimental"],
-	memory: ["General", "Auto-Learn", "Mnemopi", "Hindsight"],
 	files: ["Editing", "Reading", "Read Summaries", "LSP"],
 	shell: ["Bash", "Eval & Runtimes"],
 	tools: [

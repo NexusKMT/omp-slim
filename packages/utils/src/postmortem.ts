@@ -371,7 +371,7 @@ export function isInternalSocketClosedError(err: unknown): boolean {
  * swallowed.
  *
  * Every advanced-serialization channel in this process is an optional worker
- * subsystem (TTS, STT, tiny-title, mnemopi embeddings, JS eval), so one
+ * subsystem (TTS, STT, tiny-title, JS eval), so one
  * worker's bad frame must fault only that worker — via its own `onExit`/error
  * path — never tear down the whole session. Callers log-and-continue instead of
  * taking the fatal path. Mirrors {@link classifyBrokenPipe} for the send side

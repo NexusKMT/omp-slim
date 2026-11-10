@@ -16,7 +16,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/wrapper";
 import type { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
-import * as memoryBackendModule from "@oh-my-pi/pi-coding-agent/memory-backend";
+
 import { initializeExtensions } from "@oh-my-pi/pi-coding-agent/modes/runtime-init";
 import {
 	type CreateAgentSessionOptions,
@@ -1008,52 +1008,6 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getEnabledToolNames()).toEqual(
 				expect.arrayContaining(["serialized_lifecycle_tool", mcpTool.name]),
 			);
-		} finally {
-			releaseActivation.resolve();
-			await session.dispose();
-		}
-	});
-
-	it("serializes complete memory-tool replacement with late extension activation", async () => {
-		const tempDir = makeTempDir();
-		const activationEntered = Promise.withResolvers<void>();
-		const releaseActivation = Promise.withResolvers<void>();
-		const lateRegistrationExtension: ExtensionFactory = pi => {
-			pi.on("session_start", async () => {
-				await Promise.resolve();
-				pi.registerTool({
-					name: "memory_race_lifecycle_tool",
-					label: "Memory Race Lifecycle Tool",
-					description: "Lifecycle tool activated before a memory-tool replacement.",
-					parameters: type({}),
-					async execute() {
-						return { content: [{ type: "text", text: "lifecycle" }] };
-					},
-				});
-			});
-		};
-
-		const { session } = await createAgentSession({
-			...baseOptions(tempDir),
-			extensions: [lateRegistrationExtension],
-		});
-		const originalSetActiveToolPresentation = session.setActiveToolPresentation.bind(session);
-		vi.spyOn(session, "setActiveToolPresentation").mockImplementation(async (...args) => {
-			activationEntered.resolve();
-			await releaseActivation.promise;
-			return originalSetActiveToolPresentation(...args);
-		});
-
-		try {
-			const runner = session.extensionRunner;
-			if (!runner) throw new Error("expected extension runner");
-			const emission = runner.emit({ type: "session_start" });
-			await activationEntered.promise;
-			const memoryRefresh = session.applyMemoryBackend();
-
-			releaseActivation.resolve();
-			await Promise.all([emission, memoryRefresh]);
-			expect(session.getEnabledToolNames()).toContain("memory_race_lifecycle_tool");
 		} finally {
 			releaseActivation.resolve();
 			await session.dispose();
@@ -2068,8 +2022,6 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			Settings.isolated({
 				modelRoles: { image: "openai/gpt-image-1" },
 				"generate_image.enabled": true,
-				"memory.backend": "hindsight",
-				"autolearn.enabled": true,
 			});
 
 		const inheritedManager = {
@@ -2145,10 +2097,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 
 		try {
 			const activeToolNames = normal.getActiveToolNames();
-			expect(activeToolNames).toEqual(
-				expect.arrayContaining(["read", "yield", "generate_image", "learn", "manage_skill", "write"]),
-			);
-			// Explicit and force-included tools stay top-level. Ambient custom and
+			expect(activeToolNames).toEqual(expect.arrayContaining(["read", "yield", "generate_image", "write"]));
+			// Explicit tools stay top-level. Ambient custom and
 			// extension capabilities mount through the device-only write transport.
 			const mountedNames = normal.getXdevToolEntries().map(entry => entry.name);
 			expect(mountedNames).toEqual(expect.arrayContaining(["default_active_tool", "sdk_custom_tool"]));
@@ -2156,16 +2106,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(activeToolNames).not.toContain("default_active_tool");
 			expect(activeToolNames).not.toContain("sdk_custom_tool");
 			expect(normal.getAllToolNames()).toEqual(
-				expect.arrayContaining([
-					"generate_image",
-					"read",
-					"yield",
-					"default_active_tool",
-					"sdk_custom_tool",
-					"recall",
-					"retain",
-					"reflect",
-				]),
+				expect.arrayContaining(["generate_image", "read", "yield", "default_active_tool", "sdk_custom_tool"]),
 			);
 		} finally {
 			await normal.dispose();
@@ -2393,51 +2334,6 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				expect(transportOnly.isError).toBe(true);
 				expect(fs.existsSync(transportTarget)).toBe(true);
 			} finally {
-				await session.dispose();
-			}
-		});
-	});
-
-	it("revokes native Cursor mutations before a removal rebuild commits", async () => {
-		const tempDir = makeTempDir();
-		const cursorModel = getBundledModel("cursor", "composer-1.5");
-		if (!cursorModel) throw new Error("expected bundled Cursor model");
-		const target = path.join(tempDir, "revoked-during-rebuild.txt");
-		fs.writeFileSync(target, "keep me");
-		const rebuildStarted = Promise.withResolvers<void>();
-		const releaseRebuild = Promise.withResolvers<void>();
-
-		await withProviderAuth(["cursor"], async () => {
-			const { session } = await createAgentSession(baseOptions(tempDir));
-			let deactivation: Promise<void> | undefined;
-			try {
-				const handlers = await captureCursorExecHandlers(session, cursorModel);
-				vi.spyOn(memoryBackendModule, "resolveMemoryBackend").mockResolvedValue({
-					buildDeveloperInstructions: async () => {
-						rebuildStarted.resolve();
-						await releaseRebuild.promise;
-						return undefined;
-					},
-				} as never);
-
-				deactivation = session.setActiveToolsByName(["read"]);
-				try {
-					await rebuildStarted.promise;
-					expect(session.getActiveToolNames()).toContain("write");
-					const revoked = await handlers.delete({
-						toolCallId: "sdk-write-revoked-during-rebuild",
-						path: target,
-					} as never);
-					expect(revoked.isError).toBe(true);
-					expect(fs.existsSync(target)).toBe(true);
-				} finally {
-					releaseRebuild.resolve();
-				}
-				await deactivation;
-				expect(session.getActiveToolNames()).not.toContain("write");
-			} finally {
-				releaseRebuild.resolve();
-				await deactivation?.catch(() => undefined);
 				await session.dispose();
 			}
 		});

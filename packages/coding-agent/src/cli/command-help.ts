@@ -170,7 +170,7 @@ export const streamHelp = {
 } satisfies CommandMetadata;
 
 export const tinyModelsHelp = {
-	description: "Download tiny local models (session titles, memory, word completion)",
+	description: "Download tiny local models (session titles, judgments, word completion)",
 } satisfies CommandMetadata;
 
 export const tokenHelp = { description: "Get the API key or OAuth token for a provider" } satisfies CommandMetadata;

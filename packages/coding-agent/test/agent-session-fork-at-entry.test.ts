@@ -152,13 +152,6 @@ describe("AgentSession.fork(entryId)", () => {
 	it("refuses when user work starts while the pre-cut flush awaits, keeping the old session's state", async () => {
 		const { session: seeded, forkAt } = await createSeededSession();
 		const sourceFile = seeded.sessionFile!;
-		// A running auto-learn capture is old-session state the transition would abort.
-		const capture = Promise.withResolvers<void>();
-		let captureSignal: AbortSignal | undefined;
-		const captureRun = seeded.runAutolearnCapture(async signal => {
-			captureSignal = signal;
-			await capture.promise;
-		});
 		const userEval = new AbortController();
 		const flush = seeded.sessionManager.flush.bind(seeded.sessionManager);
 		vi.spyOn(seeded.sessionManager, "flush").mockImplementation(async () => {
@@ -170,13 +163,10 @@ describe("AgentSession.fork(entryId)", () => {
 		await expect(seeded.fork(forkAt)).rejects.toBeInstanceOf(SessionBusyError);
 
 		expect(seeded.sessionFile).toBe(sourceFile);
-		expect(captureSignal?.aborted).toBe(false);
 		expect((await fs.readdir(path.dirname(sourceFile))).filter(name => name.endsWith(".jsonl"))).toEqual([
 			path.basename(sourceFile),
 		]);
 		userEval.abort();
-		capture.resolve();
-		await captureRun;
 	});
 
 	it("refuses a whole-session fork that requires idle when user work starts while the flush awaits", async () => {

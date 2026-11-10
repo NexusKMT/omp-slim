@@ -70,7 +70,7 @@ import {
 /**
  * Settings the system prompt renders from (`secrets.enabled` via the obfuscator state it
  * reports). A session rebuilds its prompt once per coalesced change of this value, so a bulk
- * settings change rebuilds once. Settings that change the tool set, skills, memory, or workspace
+ * settings change rebuilds once. Settings that change the tool set, skills or workspace
  * roots rebuild through their own reconcile instead.
  */
 export const cfgSystemPromptInputs = combine({
@@ -572,8 +572,6 @@ export interface BuildSystemPromptOptions {
 	secretsEnabled?: boolean;
 	/** Pre-loaded workspace tree (skips discovery if provided). May be a Promise to allow early kick-off. */
 	workspaceTree?: WorkspaceTree | Promise<WorkspaceTree>;
-	/** Active `memory.backend` id; undefined when memory is off. */
-	memoryBackend?: string;
 	/** Whether the read-only security:// resource namespace is active. */
 	securityEnabled?: boolean;
 	/** Whether the user approves `cfg://` writes for this session; gates advertising `cfg://`. */
@@ -639,7 +637,7 @@ export interface BuildSystemPromptResult {
 const renderUserAppend = prompt.compile(userAppendPromptTemplate.trimEnd());
 
 /**
- * Join generated append blocks (memory, auto-learn, `xd://` routes, MCP server
+ * Join generated append blocks (`xd://` routes, MCP server
  * instructions) with the user's append prompt. Keep the user text in its own
  * section so it is not misclassified as MCP server-controlled instructions.
  */
@@ -689,7 +687,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		workspaceTree: providedWorkspaceTree,
 		scoutAvailable = true,
 		delegationBias = "balanced",
-		memoryBackend,
 		securityEnabled = false,
 		settingsApproval = false,
 		outReplies = false,
@@ -972,7 +969,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	const schemeHost: SchemeHost = {
 		skillUriAccess: hasSkillUriAccess,
 		ruleCount: rules?.length ?? 0,
-		memoryBackend,
 		securityEnabled,
 		settingsApproval,
 		outReplies,

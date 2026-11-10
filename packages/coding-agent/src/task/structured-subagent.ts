@@ -859,8 +859,6 @@ function buildExecutorOptions(
 		preloadedCustomToolPaths: restrictToolNames ? [] : session.customToolPaths,
 		localProtocolOptions,
 		parentArtifactManager: preparedSession ? undefined : (session.getArtifactManager?.() ?? undefined),
-		parentHindsightSessionState: session.getHindsightSessionState?.(),
-		parentMnemopiSessionState: session.getMnemopiSessionState?.(),
 		onRelease:
 			preparedSession !== undefined && lease.temporary
 				? async () => {

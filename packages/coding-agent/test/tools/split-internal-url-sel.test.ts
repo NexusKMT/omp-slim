@@ -8,7 +8,7 @@ describe("InternalUrlRouter.split", () => {
 	it("returns the input unchanged when there is no selector tail", () => {
 		expect(split("artifact://3")).toEqual({ path: "artifact://3" });
 		expect(split("agent://reviewer_0")).toEqual({ path: "agent://reviewer_0" });
-		expect(split("memory://root")).toEqual({ path: "memory://root" });
+		expect(split("history://current")).toEqual({ path: "history://current" });
 	});
 
 	it("peels a single line-range selector", () => {

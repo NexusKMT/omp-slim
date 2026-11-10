@@ -270,7 +270,7 @@ describe("subagent LSP availability", () => {
 			description: "Reviewer-like task agent",
 			systemPrompt: "Review with read-only specialty tools.",
 			source: "bundled",
-			tools: ["bash", "ast_grep", "memory_edit", "retain", "todo"],
+			tools: ["bash", "ast_grep", "manage_skill", "todo"],
 		});
 		const { getOptions } = mockCreateAgentSession();
 		const planMode = { enabled: true, planFilePath: "local://PLAN.md" };
@@ -285,8 +285,7 @@ describe("subagent LSP availability", () => {
 		expect(options?.toolNames).toEqual(["read", "grep", "glob", "web_search", "ast_grep"]);
 		expect(options?.toolNames).not.toContain("lsp");
 		expect(options?.toolNames).not.toContain("bash");
-		expect(options?.toolNames).not.toContain("memory_edit");
-		expect(options?.toolNames).not.toContain("retain");
+		expect(options?.toolNames).not.toContain("manage_skill");
 		expect(options?.toolNames).not.toContain("todo");
 	});
 });

@@ -87,7 +87,6 @@ const settings = Settings.isolated({
 	"todo.enabled": false,
 	"todo.reminders": false,
 	"advisor.enabled": false,
-	"autolearn.enabled": false,
 	modelRoles: { default: "mock/mock-model" },
 });
 const create = async (

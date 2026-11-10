@@ -19,7 +19,7 @@ import type { Subprocess } from "bun";
 
 /**
  * Shared lifecycle scaffolding for the ONNX inference subprocess clients
- * (mnemopi embeddings and tiny-model titles/completions).
+ * (tiny-model titles/completions).
  * Each runs `onnxruntime-node` inside a dedicated Bun child process so the NAPI
  * constructor/finalizer never executes in the main agent address space — those
  * destructors segfault Bun on shutdown (issues #1606 / #1607 / #3031).

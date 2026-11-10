@@ -128,7 +128,6 @@ describe("extension transcript presenters", () => {
 			tempDir.path(),
 			target.sessionManager,
 			modelRegistry,
-			undefined,
 			mode.settings,
 		);
 		const errors: ExtensionError[] = [];

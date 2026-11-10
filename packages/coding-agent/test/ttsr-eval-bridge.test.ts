@@ -68,7 +68,6 @@ describe("TTSR eval bridge enforcement", () => {
 			tempDir.path(),
 			manager,
 			modelRegistry,
-			undefined,
 			settings,
 		);
 		const mock = createMockModel({

@@ -306,8 +306,8 @@ describe("config list --scope", () => {
 				"    models: [openai/gpt-5]",
 				"compaction:",
 				"  enabled: false",
-				"hindsight:",
-				"  apiToken: secret-token",
+				"searxng:",
+				"  token: secret-token",
 				"",
 			].join("\n"),
 		);
@@ -315,13 +315,13 @@ describe("config list --scope", () => {
 
 		const layer = await listLayer("global");
 
-		expect(Object.keys(layer).toSorted()).toEqual(["compaction.enabled", "enabledModels", "hindsight.apiToken"]);
+		expect(Object.keys(layer).toSorted()).toEqual(["compaction.enabled", "enabledModels", "searxng.token"]);
 		expect(layer.enabledModels.value).toEqual([
 			"anthropic/claude-sonnet-4-5",
 			{ path: projectDir.path(), models: ["openai/gpt-5"] },
 		]);
 		expect(layer["compaction.enabled"]).toMatchObject({ value: false, type: "boolean" });
-		expect(layer["hindsight.apiToken"]).toEqual({
+		expect(layer["searxng.token"]).toEqual({
 			redacted: true,
 			type: "string",
 			description: expect.any(String),
@@ -349,7 +349,7 @@ describe("config list --scope", () => {
 		if (!testAgentDir) throw new Error("Test directory was not initialized");
 		await Bun.write(
 			path.join(testAgentDir.path(), "config.yml"),
-			"compaction:\n  enabled: false\nhindsight:\n  apiToken: secret-token\n",
+			"compaction:\n  enabled: false\nsearxng:\n  token: secret-token\n",
 		);
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -357,7 +357,7 @@ describe("config list --scope", () => {
 
 		const text = Bun.stripANSI(logSpy.mock.calls.map(call => String(call[0] ?? "")).join("\n"));
 		expect(text).toContain("compaction.enabled = false");
-		expect(text).toContain("hindsight.apiToken = ********");
+		expect(text).toContain("searxng.token = ********");
 		expect(text).not.toContain("secret-token");
 		expect(text).not.toContain("defaultThinkingLevel");
 	});

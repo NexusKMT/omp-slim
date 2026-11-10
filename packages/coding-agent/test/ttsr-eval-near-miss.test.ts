@@ -50,7 +50,6 @@ describe("TTSR eval near-miss controls", () => {
 			tempDir.path(),
 			manager,
 			modelRegistry,
-			undefined,
 			settings,
 		);
 		const mock = createMockModel({

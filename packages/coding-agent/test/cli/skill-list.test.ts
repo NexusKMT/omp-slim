@@ -10,7 +10,7 @@ import { CliUsageError } from "@oh-my-pi/pi-utils/cli";
 
 // Every test below discovers skills through the real capability loader, which
 // walks `os.homedir()` and `getAgentDir()` for user-level providers (native
-// `<agentDir>/skills`, `~/.claude/skills`, managed auto-learn skills, and
+// `<agentDir>/skills`, `~/.claude/skills`, managed skills, and
 // `Settings.init()`'s own config.yml/settings.json lookup in the
 // `handleSkillList` tests below). Without isolating both seams, the developer's
 // or CI runner's real agent config leaks into every assertion here.

@@ -6,7 +6,7 @@
 import * as path from "node:path";
 import { getAgentDir, logger, normalizePathForComparison, parseFrontmatter, tryParseJson } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
-import { getManagedSkillsDir, MANAGED_SKILLS_PROVIDER_ID } from "../autolearn/managed-skills";
+import { getManagedSkillsDir, MANAGED_SKILLS_PROVIDER_ID } from "../extensibility/managed-skills";
 import { registerProvider } from "../capability";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type Extension, type ExtensionManifest, extensionCapability } from "../capability/extension";
@@ -336,10 +336,10 @@ async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 	};
 }
 
-// Managed skills (auto-learn) are a SEPARATE provider at the lowest skill
+// Managed skills are a SEPARATE provider at the lowest skill
 // priority, so an authored skill of the same name from ANY other provider wins
 // the capability-level priority dedup. Discovery is unconditional (an empty
-// managed dir is a no-op); only writing/nudging is gated by `autolearn.enabled`.
+// managed dir is a no-op). Writes occur only through the explicit manage_skill tool.
 const MANAGED_SKILLS_PRIORITY = 5;
 async function loadManagedSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 	return scanSkillsFromDir(ctx, {
@@ -360,7 +360,7 @@ registerProvider<Skill>(skillCapability.id, {
 
 registerProvider<Skill>(skillCapability.id, {
 	id: MANAGED_SKILLS_PROVIDER_ID,
-	displayName: "Managed Skills (auto-learn)",
+	displayName: "Managed Skills",
 	description: "Auto-generated managed skills from ~/.omp/agent/managed-skills",
 	priority: MANAGED_SKILLS_PRIORITY,
 	load: loadManagedSkills,

@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Agent, AgentMessage, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { resolveDelegationBias } from "@oh-my-pi/pi-catalog/compat/delegation";
-import { isRecord, logger, prompt, stringProperty, structuredCloneJSON, untilAborted } from "@oh-my-pi/pi-utils";
+import { isRecord, prompt, stringProperty, structuredCloneJSON, untilAborted } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
 import { shouldInlineToolDescriptors } from "../config/inline-tool-descriptors-mode";
@@ -27,10 +27,7 @@ import {
 import { type LocalProtocolOptions } from "../internal-urls";
 import { stripXdUrlPrefix, XD_URL_PREFIX } from "@oh-my-pi/pi-tui/tools/xd-url";
 import { deduplicateMCPToolsByName, resolveMCPToolAlias } from "../mcp/tool-bridge";
-import { resolveMemoryBackend } from "../memory-backend/resolve";
-import { MEMORY_BACKEND_TOOL_NAMES } from "../memory-backend/tool-names";
 import { invalidateToolSchemaMetadata } from "@oh-my-pi/pi-tui/status-line/context-usage";
-import type { MemoryBackendStartOptions, MemoryPromptPreparation } from "../memory-backend/types";
 import type { AgentDefinition } from "../task/types";
 import evalPreludeNoticePrompt from "../prompts/system/eval-prelude-notice.md" with { type: "text" };
 import sessionAgentNoticePrompt from "../prompts/system/session-agent-notice.md" with { type: "text" };
@@ -133,10 +130,7 @@ export interface SessionToolsHost {
 	queuedMessageCount(): number;
 	planModeEnabled(): boolean;
 	model(): Model | undefined;
-	memoryBackendSession(): MemoryBackendStartOptions["session"];
 	clearInheritedProviderPromptCacheKey(): void;
-	clearMemoryPromotionSnapshot(): void;
-	captureMemoryPromotionSnapshot(prompt: string[]): void;
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
 	notifyCommandMetadataChanged(): void;
 	localProtocolOptions(): LocalProtocolOptions;
@@ -203,8 +197,6 @@ interface SessionToolsOptions {
 
 interface SystemPromptPreparation {
 	systemPrompt: string[];
-	/** Memory backend note to deliver with the turn ({@link MemoryPromptPreparation.notice}). */
-	memoryNotice?: MemoryPromptPreparation["notice"];
 	/** Publish staged state at validated delivery; false declines the prepared turn without mutation. */
 	commit?(): boolean;
 }
@@ -456,8 +448,7 @@ export class SessionTools {
 	 * Per-turn system prompt returned by a `before_agent_start` extension hook
 	 * ("replace the system prompt for this turn"). While set, base-prompt
 	 * rebuilds keep this override on the agent instead of the rebuilt base, so a
-	 * rebuild landing in the prompt window (compaction/promotion, memory
-	 * promotion, MCP/RPC tool refresh, hindsight MM-TTL refresh) cannot silently
+	 * rebuild landing in the prompt window (compaction/promotion, MCP/RPC tool refresh) cannot silently
 	 * drop it before the request. Cleared when the turn ends.
 	 */
 	#turnSystemPromptOverride: string[] | undefined;
@@ -1626,7 +1617,6 @@ export class SessionTools {
 					this.#host.clearInheritedProviderPromptCacheKey();
 				}
 				this.#baseSystemPrompt = rebuiltSystemPrompt;
-				this.#host.clearMemoryPromotionSnapshot();
 				this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
 				invalidateToolSchemaMetadata(this.#host.agent.state.tools);
 				this.#lastAppliedToolSignature = rebuiltSignature;
@@ -2399,29 +2389,6 @@ export class SessionTools {
 		}
 	}
 
-	/** Replaces memory-backend tools while preserving unrelated selections. */
-	replaceMemoryTools(tools: AgentTool[]): Promise<void> {
-		return this.runToolRegistryMutation(async () => {
-			const removed = new Set<string>(MEMORY_BACKEND_TOOL_NAMES.filter(name => this.#builtInToolNames.has(name)));
-			const nextActive = this.getEnabledToolNames().filter(name => !removed.has(name));
-			for (const name of removed) {
-				this.#toolRegistry.delete(name);
-				this.#builtInToolNames.delete(name);
-			}
-
-			for (const tool of tools) {
-				if (!MEMORY_BACKEND_TOOL_NAMES.some(name => name === tool.name) || this.#toolRegistry.has(tool.name)) {
-					continue;
-				}
-				const wrapped = this.#wrapRuntimeTool(tool);
-				this.#toolRegistry.set(wrapped.name, wrapped);
-				this.#builtInToolNames.add(wrapped.name);
-				nextActive.push(wrapped.name);
-			}
-			await this.#applyActiveToolsByName([...new Set(nextActive)]);
-		});
-	}
-
 	/**
 	 * Reconciles the private `think` scratchpad with the `externalThinking`
 	 * setting and the active model. Enabling constructs the tool once;
@@ -2552,7 +2519,6 @@ export class SessionTools {
 				this.#baseSystemPrompt = built.systemPrompt;
 				this.#promptSurface = candidate;
 				this.#setBasePromptXdevNames(built.xdevCatalogNames);
-				this.#host.clearMemoryPromotionSnapshot();
 				if (!samePromptBlocks(previousBaseSystemPrompt, this.#baseSystemPrompt)) {
 					this.#host.clearInheritedProviderPromptCacheKey();
 				}
@@ -2575,7 +2541,7 @@ export class SessionTools {
 	/**
 	 * Re-renders a frozen prefix's base prompt against the roster it was
 	 * committed with, so a forced rebuild that changes nothing else (a body-only
-	 * skill update, an unchanged memory refresh) keeps the held roster change
+	 * skill update, an unchanged prompt refresh) keeps the held roster change
 	 * out of the bound prefix — eval description included — and leaves it to its
 	 * notices. Returns `undefined` when the rebuild changes the prompt anyway:
 	 * the prefix breaks regardless, so the caller absorbs the live roster.
@@ -2600,7 +2566,6 @@ export class SessionTools {
 				if (this.#host.isDisposed() || isCurrent?.() === false) return false;
 				if (this.#baseSystemPrompt !== previousBaseSystemPrompt) return true;
 				this.#promptSurface = candidate;
-				this.#host.clearMemoryPromotionSnapshot();
 				this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
 				invalidateToolSchemaMetadata(this.#host.agent.state.tools);
 				this.#promptModelKey = this.#currentPromptModelKey();
@@ -2608,64 +2573,6 @@ export class SessionTools {
 				return true;
 			},
 		};
-	}
-
-	/** Stages memory prompt injection; the owning turn commits it together with extension policy. */
-	async buildSystemPromptForAgentStart(
-		promptText: string,
-		isCurrent: () => boolean,
-		signal?: AbortSignal,
-	): Promise<SystemPromptPreparation> {
-		const backend = await resolveMemoryBackend(this.#host.settings);
-		if (!isCurrent() || !backend.beforeAgentStartPrompt) return { systemPrompt: this.#baseSystemPrompt };
-
-		try {
-			const memory = await backend.beforeAgentStartPrompt(this.#host.memoryBackendSession(), promptText, signal);
-			if (!isCurrent() || !memory) return { systemPrompt: this.#baseSystemPrompt };
-			const injected = memory.context;
-			if (!injected) {
-				return {
-					systemPrompt: this.#baseSystemPrompt,
-					memoryNotice: memory.notice,
-					commit: () => isCurrent() && memory.commit(),
-				};
-			}
-
-			let refreshed: SystemPromptPreparation | undefined;
-			try {
-				refreshed = await this.runToolRegistryMutation(() => this.#prepareBaseSystemPrompt(isCurrent));
-			} catch (refreshErr) {
-				logger.debug("Memory backend prompt refresh after beforeAgentStartPrompt failed", {
-					backend: backend.id,
-					error: String(refreshErr),
-				});
-			}
-			if (!isCurrent()) return { systemPrompt: this.#baseSystemPrompt };
-
-			const preparedBase = refreshed?.systemPrompt ?? this.#baseSystemPrompt;
-			const stablePrompt = [...preparedBase, injected];
-			return {
-				systemPrompt: stablePrompt,
-				memoryNotice: memory.notice,
-				commit: () => {
-					if (!isCurrent() || !memory.commit()) return false;
-					refreshed?.commit?.();
-					// A handler may have refreshed tools or policy. Promote the recall onto
-					// that winning base, never replace it with the preparation's snapshot.
-					const currentBase = this.#baseSystemPrompt;
-					this.#host.captureMemoryPromotionSnapshot(currentBase);
-					this.#baseSystemPrompt = currentBase === preparedBase ? stablePrompt : [...currentBase, injected];
-					this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
-					return true;
-				},
-			};
-		} catch (err) {
-			logger.debug("Memory backend beforeAgentStartPrompt failed", {
-				backend: backend.id,
-				error: String(err),
-			});
-			return { systemPrompt: this.#baseSystemPrompt };
-		}
 	}
 
 	/**
@@ -2703,12 +2610,12 @@ export class SessionTools {
 	 * the next time {@link applyActiveToolsByName} runs. Do not refactor `describeTool`
 	 * to cache per-tool strings without preserving this property.
 	 *
-	 * Inputs NOT covered: tool input schemas; memory instructions read from disk;
+	 * Inputs NOT covered: tool input schemas;
 	 * and SDK-init-time closure constants in `sdk.ts` (`inlineToolDescriptors`,
 	 * `eagerTasks`, `intentField`, `mcpDiscoveryEnabled`). The
 	 * closure-captured ones cannot change at runtime regardless of skip behavior.
 	 * For everything else, callers must explicitly call {@link refreshBaseSystemPrompt}
-	 * after side-effecting changes; see the memory hooks and {@link syncAfterModelChange}.
+	 * after side-effecting changes; see {@link syncAfterModelChange}.
 	 *
 	 * The calendar date is deliberately NOT part of the signature: the date/cwd
 	 * reminder rides on the first user turn at request time (`date-cwd-reminder`),

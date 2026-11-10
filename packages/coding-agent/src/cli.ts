@@ -37,7 +37,6 @@ import {
 	DAEMON_BROKER_WORKER_ARG,
 	IDA_HOST_WORKER_ARG,
 	LSP_MUX_WORKER_ARG,
-	MNEMOPI_EMBED_SERVER_WORKER_ARG,
 	PARENT_WATCHDOG_WORKER_ARG,
 	STATS_ACTIVITY_WORKER_ARG,
 	SUBAGENT_WORKER_ARG,
@@ -146,7 +145,6 @@ async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
 async function runSmokeTest(): Promise<void> {
 	const { smokeTestSyncWorker, startServer } = await import("@oh-my-pi/omp-stats");
 	const { smokeTestTinyTitleWorker } = await import("./tiny/title-client");
-	const { smokeTestMnemopiEmbedWorker } = await import("./mnemopi/embed-client");
 	const { smokeTestStatsActivityWorker } = await import("./stats/activity-client");
 	const { smokeTestJsEvalWorker } = await import("./eval/js/context-manager");
 	// Other smoke dependencies stay lazy so normal CLI startup does not load their worker clients.
@@ -174,7 +172,6 @@ async function runSmokeTest(): Promise<void> {
 
 	await smokeTestTinyTitleWorker();
 	await smokeTestJsEvalWorker();
-	await smokeTestMnemopiEmbedWorker();
 	await smokeTestDaemonBroker();
 	await smokeTestLspMux();
 	await smokeTestIdaHost();
@@ -189,7 +186,6 @@ const TINY_WORKER_ARG = "__omp_worker_tiny_inference";
 const STATS_SYNC_WORKER_ARG = "__omp_worker_stats_sync";
 const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 const JS_EVAL_PROCESS_ARG = "__omp_worker_js_eval_process";
-const MNEMOPI_EMBED_WORKER_ARG = "__omp_worker_mnemopi_embed";
 
 async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === TINY_WORKER_ARG) {
@@ -249,16 +245,6 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 			transport => startJsEvalProcess(transport, interceptUnhandledRejections),
 			{ rethrowConnectedSendErrors: true },
 		);
-		return true;
-	}
-	if (arg === MNEMOPI_EMBED_WORKER_ARG) {
-		const { startMnemopiEmbedWorker } = await import("./mnemopi/embed-worker");
-		await runIpcSubprocessWorker(startMnemopiEmbedWorker);
-		return true;
-	}
-	if (arg === MNEMOPI_EMBED_SERVER_WORKER_ARG) {
-		const { startMnemopiEmbedServerFromEnvironment } = await import("./mnemopi/embed-server");
-		await startMnemopiEmbedServerFromEnvironment();
 		return true;
 	}
 	if (arg === STATS_ACTIVITY_WORKER_ARG) {

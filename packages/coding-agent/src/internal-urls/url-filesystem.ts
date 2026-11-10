@@ -770,7 +770,7 @@ export class InternalUrlFilesystem {
 	#locate(route: Route, url: string, create: boolean): Promise<string | null> {
 		const locate = route.handler?.locate;
 		if (!locate) return Promise.resolve(null);
-		// Nodes keep one type: a bare `skill://<name>` / `memory://root` is always its directory.
+		// Nodes keep one type: a bare `skill://<name>` is always its directory.
 		return locate.call(route.handler, parseInternalUrl(url), this.#context, { directory: true, create });
 	}
 

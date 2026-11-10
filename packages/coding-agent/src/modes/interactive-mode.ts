@@ -110,7 +110,6 @@ import type { Skill } from "../extensibility/skills";
 import type { FileSlashCommand } from "../extensibility/slash-commands";
 import { loadSlashCommands } from "../extensibility/slash-commands";
 import type { GoalModeState } from "../goals/state";
-import { rebindMemoryBackendForCwd } from "../hindsight/backend";
 import { copyLocalArtifacts, resolveLocalRoot } from "../internal-urls";
 import { hasNativeJudge } from "../judgment";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "../lsp/startup-events";
@@ -146,7 +145,6 @@ import {
 	type AgentSessionEvent,
 	type DroppedPrompt,
 	type ResolvedRoleModel,
-	SHUTDOWN_CONSOLIDATE_BUDGET_MS,
 } from "../session/agent-session";
 import type { AgentViewSession } from "../session/agent-session-handle";
 import type { CompactMode } from "../session/compact-modes";
@@ -2466,7 +2464,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			disposeSession: async reason => {
 				await this.#btwController.dispose();
 				await this.session.dispose({
-					mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS,
 					reason,
 				});
 			},
@@ -3220,10 +3217,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			// up the destination project's configuration.
 			if (isSettingsInitialized()) {
 				await settings.reloadForCwd(newCwd);
-				// The reload fired the memory scope hooks; complete the rebind
-				// before the move commits so the next prompt cannot recall or
-				// retain against the source project's memory.
-				await rebindMemoryBackendForCwd(this.session);
 			}
 			// Re-warm plugin roots, capabilities, slash commands, and the ssh tool so
 			// the next prompt sees everything scoped to the new project directory.
@@ -3240,7 +3233,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				setProjectDir(previousCwd);
 				if (isSettingsInitialized()) {
 					await settings.reloadForCwd(previousCwd);
-					await rebindMemoryBackendForCwd(this.session);
 				}
 				clearClaudePluginRootsCache();
 				await this.refreshTitleSystemPrompt(previousCwd);
@@ -3251,7 +3243,6 @@ export class InteractiveMode implements InteractiveModeContext {
 					setProjectDir(actual);
 					if (isSettingsInitialized()) {
 						await settings.reloadForCwd(actual);
-						await rebindMemoryBackendForCwd(this.session);
 					}
 					clearClaudePluginRootsCache();
 					await this.refreshTitleSystemPrompt(actual);
@@ -8384,7 +8375,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// `#beginClose()` already acknowledged the close; escalate only once the
 		// teardown itself lingers, so time spent in exit prompts never counts.
 		const stillClosingTimer = setTimeout(() => {
-			this.showStatus("Still closing… (flushing memory backend / network)");
+			this.showStatus("Still closing… (waiting for pending work / network)");
 		}, STILL_CLOSING_DELAY_MS);
 		try {
 			this.#streamPublisher?.dispose();
@@ -8408,9 +8399,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			if (this.#signalTeardown) {
 				await this.#signalTeardown();
 			} else {
-				await this.session.dispose({
-					mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS,
-				});
+				await this.session.dispose({});
 			}
 		} finally {
 			clearTimeout(stillClosingTimer);
@@ -9311,10 +9300,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleRenameCommand(title: string): Promise<void> {
 		return this.#commandController.handleRenameCommand(title);
-	}
-
-	handleMemoryCommand(text: string): Promise<void> {
-		return this.#commandController.handleMemoryCommand(text);
 	}
 
 	/** Start a `/record` screen capture, or stop the running one and report where it was saved. */

@@ -17,7 +17,6 @@ import { goalToolRenderer } from "./goal";
 import { grepToolRenderer } from "./grep";
 import { waitToolRenderer } from "./wait";
 import { lspToolRenderer } from "./lsp";
-import { recallToolRenderer, reflectToolRenderer, retainToolRenderer } from "./memory";
 import { readToolRenderer } from "./read";
 import type { ToolRenderer } from "./renderer";
 import { resolveRenderer } from "./resolve";
@@ -53,9 +52,6 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	// through the `resolve` entry. Both devices carry the same ResolveDetails.
 	resolve: resolveRenderer,
 	reject: resolveRenderer,
-	retain: retainToolRenderer,
-	recall: recallToolRenderer,
-	reflect: reflectToolRenderer,
 	task: taskToolRenderer,
 	think: thinkToolRenderer,
 	todo: todoToolRenderer,

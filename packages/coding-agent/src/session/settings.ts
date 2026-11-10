@@ -1207,7 +1207,7 @@ export const cfgProvidersMuseCodeStoreResponses = register({
 	},
 });
 // Process-wide too, so side requests that call `completeSimple`/`streamSimple`
-// directly (titles, commit messages, memories) follow the setting.
+// directly (titles, commit messages) follow the setting.
 effect(cfgProvidersMuseCodeStoreResponses, enabled => configureProviderStoreResponses({ "muse-code": enabled }));
 
 export const cfgProvidersOpenaiCodexDaybreak = register({
@@ -1223,7 +1223,7 @@ export const cfgProvidersOpenaiCodexDaybreak = register({
 	},
 });
 // Sessions pass their own value per request; this process-wide default covers
-// callers without a session stream function (titles, commit messages, memories).
+// callers without a session stream function (titles, commit messages).
 effect(cfgProvidersOpenaiCodexDaybreak, enabled => configureCodexAccessPrograms(enabled));
 
 export const cfgProvidersCacheRetention = register({

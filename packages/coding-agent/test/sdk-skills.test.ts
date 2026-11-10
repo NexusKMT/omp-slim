@@ -14,7 +14,6 @@ import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils/dirs";
 import { cleanupTempHome } from "./helpers/temp-home-cleanup";
 
-import { cfgAutolearnEnabled } from "@oh-my-pi/pi-coding-agent/autolearn/settings";
 import { cfgSkillsCustomDirectories } from "@oh-my-pi/pi-coding-agent/extensibility/settings";
 
 function createIsolatedSkillsSettings(extensions: string[] = []): Settings {
@@ -294,7 +293,6 @@ This skill is added after session creation.
 		const managedAgentDir = path.join(tempHomeDir, ".omp", "agent");
 		setAgentDir(managedAgentDir);
 		const settings = createIsolatedSkillsSettings();
-		cfgAutolearnEnabled.set(settings, true);
 		const { session } = await createSession({
 			cwd: tempDir,
 			agentDir: managedAgentDir,
@@ -343,57 +341,6 @@ This skill is added after session creation.
 		} finally {
 			await session.dispose();
 			unsubscribeCommandMetadata();
-			setAgentDir(originalAgentDir);
-		}
-	});
-
-	it("learn hot-registers minted managed skills in the active session", async () => {
-		const originalAgentDir = getAgentDir();
-		const managedAgentDir = path.join(tempHomeDir, ".omp", "agent");
-		setAgentDir(managedAgentDir);
-		const settings = Settings.isolated({
-			"skills.enabled": true,
-			"skills.enableCodexUser": false,
-			"skills.enableClaudeUser": false,
-			"skills.enableClaudeProject": false,
-			"skills.enablePiUser": false,
-			"skills.enablePiProject": true,
-			"autolearn.enabled": true,
-			"memory.backend": "local",
-		});
-		const { session } = await createSession({
-			cwd: tempDir,
-			agentDir: managedAgentDir,
-			sessionManager: SessionManager.inMemory(tempDir),
-			modelRegistry: sharedModelRegistry,
-			settings,
-		});
-
-		try {
-			const learn = session.getToolByName("learn");
-			expect(learn).toBeDefined();
-			await learn!.execute("learn-skill-create", {
-				memory: "Use learned-managed-skill immediately in the same session.",
-				skill: {
-					action: "create",
-					name: "learned-managed-skill",
-					description: "Minted by learn during the active session.",
-					body: "# Learned Managed Skill\n\nAvailable immediately via skill://.",
-				},
-			});
-
-			expect(session.skills.some(skill => skill.name === "learned-managed-skill")).toBe(true);
-			expect(getActiveSkills().some(skill => skill.name === "learned-managed-skill")).toBe(true);
-			// The prompt keeps its skill list so the cache prefix survives; the next user prompt carries a notice.
-			expect(session.agent.state.systemPrompt.join("\n")).not.toContain("learned-managed-skill");
-			const readSkill = session.getToolByName("read");
-			expect(readSkill).toBeDefined();
-			const readResult = await readSkill!.execute("read-learned-skill", { path: "skill://learned-managed-skill" });
-			expect(
-				readResult.content.some(part => part.type === "text" && part.text.includes("# Learned Managed Skill")),
-			).toBe(true);
-		} finally {
-			await session.dispose();
 			setAgentDir(originalAgentDir);
 		}
 	});

@@ -230,7 +230,7 @@ Providers are sorted by numeric priority (higher first). Full set:
 - GitHub Copilot: `30`
 - VS Code: `20`
 - agents-md (`AGENTS.md` files) / claude-md (standalone `CLAUDE.md` files): `10`
-- mcp-json / ssh-json / managed-skills (auto-learn): `5`
+- mcp-json / ssh-json / managed-skills: `5`
 - Built-in default rules (`builtin-defaults`): `1`
 
 ```text
@@ -289,7 +289,7 @@ Native provider (`id: native`) reads native config from:
 ### Scope-specific loading
 
 - Skills: `<ancestor>/.omp/skills/*/SKILL.md` and `~/.omp/agent/skills/*/SKILL.md`
-- Managed skills: `~/.omp/agent/managed-skills/*/SKILL.md`, through a separate priority-5 provider; authored skills from any other provider win name collisions. Discovery is unconditional; `autolearn.enabled` gates writing/nudging, not loading.
+- Managed skills: `~/.omp/agent/managed-skills/*/SKILL.md`, through a separate priority-5 provider; authored skills from any other provider win name collisions. Discovery is unconditional. Changes are made through the explicit `manage_skill` tool.
 - Slash commands: `commands/*.md`
 - Rules: `rules/*.{md,mdc}` plus top-level `RULES.md`
 - Prompts: `prompts/*.md`
@@ -369,7 +369,7 @@ Settings capability items are not deduplicated; `Settings.#loadProjectSettings()
 
 - `ConfigFile` JSON -> YAML migration for YAML-targeted files.
 - Settings migration from `settings.json` and `agent.db` to `config.yml`.
-- Field migrations cover renamed/removed settings and value-shape changes, including `queueMode`, changelog settings, flat `theme`, retired image-tool settings, task isolation/eager settings, removed edit and compaction modes, `inlineToolDescriptors`, status-line segments, provider/search settings, memories/hindsight settings, and nested-leaf renames. Consult `Settings.#migrateRawSettings()` for the current exhaustive list.
+- Field migrations cover renamed/removed settings and value-shape changes, including `queueMode`, changelog settings, flat `theme`, retired image-tool settings, task isolation/eager settings, removed edit and compaction modes, `inlineToolDescriptors`, status-line segments, provider/search settings, retired automatic-memory settings, and nested-leaf renames. Consult `Settings.#migrateRawSettings()` for the current exhaustive list.
 - Legacy setting names `skills.enablePiUser` / `skills.enablePiProject` are still active gates for native skill source.
 
 If these compatibility paths are removed in code, update this document immediately; several runtime behaviors still depend on them today.

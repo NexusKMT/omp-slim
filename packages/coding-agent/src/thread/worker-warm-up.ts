@@ -11,8 +11,8 @@
  *    module state, tool construction, system-prompt rendering, the session
  *    publisher, JIT tiers) are paid here. It is sealed off from shared state:
  *    a private agent registry (nothing reaches main's), an in-memory session
- *    manager, a derived settings overlay with the memory backend and
- *    auto-learn off, no extensions, MCP, LSP, IRC, or UI, and no prompt.
+ *    manager, a derived settings overlay, no extensions, MCP, LSP, IRC, or UI,
+ *    and no prompt.
  */
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
 import { discoverAdvisorConfigs } from "../advisor/config";
@@ -47,7 +47,7 @@ export async function warmUpSubagentWorker({ cwd, settings, modelRegistry }: Sub
 		const { session } = await createAgentSession({
 			cwd,
 			agentDir,
-			settings: settings.overlay({ "memory.backend": "off", "autolearn.enabled": false }, { derived: true }),
+			settings: settings.overlay({}, { derived: true }),
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(cwd),
 			agentRegistry: new AgentRegistry(),

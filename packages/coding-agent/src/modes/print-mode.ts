@@ -9,10 +9,9 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { presentNarrationAsAnswer } from "@oh-my-pi/pi-ai/utils/narration";
 import { $flag, logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
-import { HINDSIGHT_NOTICE_SOURCE } from "../hindsight/state";
 import type { MCPManager } from "../mcp/manager";
 import { resolveMCPTimeoutMs } from "../mcp/timeout";
-import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
+import { type AgentSession, type AgentSessionEvent } from "../session/agent-session";
 import { COST_GATE_NOTICE_SOURCE } from "../session/cost-gate";
 import { CREDENTIAL_DISABLED_NOTICE_SOURCE } from "../session/credential-disabled-notice";
 import { isSilentAbort } from "../session/messages";
@@ -164,7 +163,7 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 		// bounded run drain, so a tool settling there still enqueues its terminal
 		// record. Postmortem exits once this callback settles (issue #18450).
 		try {
-			await session.dispose({ reason, mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
+			await session.dispose({ reason });
 		} catch (error) {
 			// The disposal failure stays primary; a write error behind it is secondary.
 			await stdout.drained().catch(() => {});
@@ -386,14 +385,11 @@ async function runPrintModeCore(
 			stdout.writeLine(`${JSON.stringify(printableEvent(event))}\n`);
 		} else if (
 			event.type === "notice" &&
-			(event.source === CREDENTIAL_DISABLED_NOTICE_SOURCE ||
-				event.source === COST_GATE_NOTICE_SOURCE ||
-				event.source === HINDSIGHT_NOTICE_SOURCE)
+			(event.source === CREDENTIAL_DISABLED_NOTICE_SOURCE || event.source === COST_GATE_NOTICE_SOURCE)
 		) {
 			// Text mode renders no session notices, but an automatic sign-out must not stay
 			// hidden behind a sibling account that quietly answers the prompt, a run must
-			// say when it crossed its cost thresholds, and a memory failure must not pass
-			// as an answer that used memories.
+			// say when it crossed its cost thresholds.
 			writeStderrLine(event.source === COST_GATE_NOTICE_SOURCE ? event.message : `Warning: ${event.message}`);
 		} else if (event.type === "auto_retry_start") {
 			// Text mode shows only `Working...` while a turn runs; a turn stuck retrying
@@ -644,7 +640,7 @@ async function runPrintModeCore(
 	// durability rather than letting it escape as a raw fatal dump.
 	let durabilityFailure = false;
 	try {
-		await session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
+		await session.dispose();
 	} catch (error) {
 		if (!persistenceFailure || error !== persistenceFailure) throw error;
 		durabilityFailure = true;

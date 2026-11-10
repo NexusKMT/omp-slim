@@ -79,8 +79,6 @@ import type { Settings } from "../config/settings";
 import type { ExtensionRunner, SessionBeforeCompactResult } from "../extensibility/extensions";
 import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
 import type { GoalModeState } from "../goals/state";
-import { resolveMemoryBackend } from "../memory-backend/resolve";
-import type { MemoryBackendOperationContext } from "../memory-backend/types";
 import { customMessageEntryMessage } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { computeNonMessageTokens, type NonMessageTokenSource } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import { createPlanReadMatcher } from "../plan-mode/plan-protection";
@@ -434,7 +432,6 @@ export interface SessionMaintenanceHost {
 	hasExperimentalContextRolloverTools(): boolean;
 	takeExperimentalContextRolloverRequest(context: AgentTurnEndContext | undefined): boolean;
 	queueExperimentalContextNotesReminder(prompt: string): void;
-	memoryBackendSession(): MemoryBackendOperationContext["session"];
 	emitSessionEvent(event: AgentSessionEvent, options?: { detachExtensions?: boolean }): Promise<void>;
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
 	scheduleAgentContinue(options: {
@@ -1449,11 +1446,7 @@ export class SessionMaintenance {
 				}
 			}
 
-			const compactionPrep = await this.#prepareCompactionFromHooks(
-				preparation,
-				hookCompaction,
-				compactionAbortController.signal,
-			);
+			const compactionPrep = await this.#prepareCompactionFromHooks(preparation, hookCompaction);
 			if (compactionPrep.kind !== "fromHook") methodAttempted = true;
 
 			// Focus instructions require an LLM summary, so the preference resolver
@@ -1609,7 +1602,6 @@ export class SessionMaintenance {
 						{
 							promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
 							extraContext: compactionPrep.hookContext,
-							loadExtraContext: compactionPrep.loadMemoryContext,
 							// The prompt the live turn actually sent — a per-turn
 							// `before_agent_start` override included — so a provider-native
 							// compaction shares the live request's cached prefix.
@@ -1814,7 +1806,7 @@ export class SessionMaintenance {
 		) {
 			throw new CompactionCancelledError(undefined, { cause: signalController.signal.reason });
 		}
-		const prepared = await this.#prepareCompactionFromHooks(preparation, hookCompaction, signalController.signal);
+		const prepared = await this.#prepareCompactionFromHooks(preparation, hookCompaction);
 		if (
 			signalController.signal.aborted ||
 			!this.#usesExperimentalContextManagement() ||
@@ -1978,7 +1970,7 @@ export class SessionMaintenance {
 				return COMPACTION_CHECK_NONE;
 			}
 
-			const prepared = await this.#prepareCompactionFromHooks(preparation, hookCompaction, controller.signal);
+			const prepared = await this.#prepareCompactionFromHooks(preparation, hookCompaction);
 			if (
 				controller.signal.aborted ||
 				!this.#usesExperimentalContextManagement() ||
@@ -2092,39 +2084,6 @@ export class SessionMaintenance {
 			if (this.#autoCompactionAbortController === controller) {
 				this.#autoCompactionAbortController = undefined;
 			}
-		}
-	}
-
-	/**
-	 * Ask the active memory backend for context when a compaction summary
-	 * consumes it. Native OpenAI compaction uses the live prompt instead.
-	 *
-	 * Failures are swallowed: a memory backend going sideways MUST NOT block
-	 * compaction (which is itself the recovery path for context overflow).
-	 */
-	async #collectMemoryBackendContext(
-		preparation: {
-			messagesToSummarize: AgentMessage[];
-			turnPrefixMessages: AgentMessage[];
-		},
-		signal: AbortSignal,
-	): Promise<string | undefined> {
-		const backend = await resolveMemoryBackend(this.#host.settings);
-		if (!backend.preCompactionContext) return undefined;
-		const messages = preparation.messagesToSummarize.concat(preparation.turnPrefixMessages);
-		try {
-			return await backend.preCompactionContext(
-				messages,
-				this.#host.settings,
-				this.#host.memoryBackendSession(),
-				signal,
-			);
-		} catch (err) {
-			logger.debug("Memory backend preCompactionContext failed", {
-				backend: backend.id,
-				error: String(err),
-			});
-			return undefined;
 		}
 	}
 
@@ -2479,7 +2438,7 @@ export class SessionMaintenance {
 				contextTokensAtStart: contextTokens,
 			};
 		} else {
-			const compactionPrep = await this.#prepareCompactionFromHooks(preparation, undefined, signal);
+			const compactionPrep = await this.#prepareCompactionFromHooks(preparation, undefined);
 			// No hookCompaction is passed above, so "fromHook" is unreachable;
 			// the guard just narrows the union.
 			if (compactionPrep.kind === "fromHook") return clear();
@@ -2502,7 +2461,6 @@ export class SessionMaintenance {
 				{
 					promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
 					extraContext: compactionPrep.hookContext,
-					loadExtraContext: compactionPrep.loadMemoryContext,
 					remoteSystemPrompt: this.#host.agent.state.systemPrompt,
 					codexCompaction,
 					// Isolate from the live turn: remote compaction transports key
@@ -3865,8 +3823,6 @@ export class SessionMaintenance {
 	async #prepareCompactionFromHooks(
 		preparation: CompactionPreparation,
 		hookCompaction: CompactionResult | undefined,
-		/** Aborts backend recall when compaction is cancelled or superseded. */
-		signal: AbortSignal,
 	): Promise<
 		| {
 				kind: "fromHook";
@@ -3881,7 +3837,6 @@ export class SessionMaintenance {
 		| {
 				kind: "needsLlm";
 				hookContext: string[] | undefined;
-				loadMemoryContext: () => Promise<string[] | undefined>;
 				hookPrompt: string | undefined;
 				preserveData: Record<string, unknown> | undefined;
 		  }
@@ -3917,16 +3872,11 @@ export class SessionMaintenance {
 			};
 		}
 
-		let memoryContext: Promise<string[] | undefined> | undefined;
 		return {
 			kind: "needsLlm",
 			hookContext,
 			hookPrompt,
 			preserveData,
-			loadMemoryContext: () =>
-				(memoryContext ??= this.#collectMemoryBackendContext(preparation, signal).then(context =>
-					context ? [context] : undefined,
-				)),
 		};
 	}
 
@@ -5597,11 +5547,7 @@ export class SessionMaintenance {
 				}
 			}
 
-			const compactionPrep = await this.#prepareCompactionFromHooks(
-				preparation,
-				hookCompaction,
-				autoCompactionSignal,
-			);
+			const compactionPrep = await this.#prepareCompactionFromHooks(preparation, hookCompaction);
 
 			// Handoff runs as a summary source: generate the document off the live
 			// context (cache-friendly side request), then commit it like any other
@@ -5923,7 +5869,6 @@ export class SessionMaintenance {
 								{
 									promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
 									extraContext: compactionPrep.hookContext,
-									loadExtraContext: compactionPrep.loadMemoryContext,
 									remoteSystemPrompt: this.#host.agent.state.systemPrompt,
 									metadata: this.#host.agent.metadataForProvider(candidate.provider),
 									initiatorOverride: "agent",

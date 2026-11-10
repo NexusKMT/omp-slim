@@ -12,8 +12,6 @@ import {
 	normalizeProviderMaxInFlightRequests,
 	validateProviderMaxInFlightRequests,
 } from "../session/settings";
-import { cfgAutolearnEnabled } from "../autolearn/settings";
-import { cfgMemoryBackend } from "../memory-backend/settings";
 import { cfgComposerPredictions, cfgTuiVimMode } from "../modes/settings";
 import { cfgAdvisorEnabled } from "../advisor/settings";
 import { cfgContextFilesExtra } from "../session/context-settings";
@@ -32,9 +30,6 @@ const CONDITIONS: Record<string, () => boolean> = {
 	advisorEnabled: whenSettings(s => cfgAdvisorEnabled.get(s) === true),
 	vimModeEnabled: whenSettings(s => cfgTuiVimMode.get(s) === true),
 	composerPredictionsEnabled: whenSettings(s => cfgComposerPredictions.get(s) === true),
-	hindsightActive: whenSettings(s => cfgMemoryBackend.get(s) === "hindsight"),
-	mnemopiActive: whenSettings(s => cfgMemoryBackend.get(s) === "mnemopi"),
-	autolearnActive: whenSettings(s => cfgAutolearnEnabled.get(s) === true),
 	autoThinkingActive: whenSettings(s => cfgDefaultThinkingLevel.get(s) === "auto"),
 	usageAwareFallbackEnabled: whenSettings(s => cfgRetryUsageAwareFallback.get(s) === true),
 	planModeEnabled: whenSettings(s => cfgPlanEnabled.get(s)),

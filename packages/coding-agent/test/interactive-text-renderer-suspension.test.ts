@@ -82,7 +82,6 @@ describe("assistant text renderers of a suspended extension", () => {
 			tempDir.path(),
 			session.sessionManager,
 			modelRegistry,
-			undefined,
 			mode.settings,
 		);
 		Object.defineProperty(session, "extensionRunner", { configurable: true, get: () => runner });

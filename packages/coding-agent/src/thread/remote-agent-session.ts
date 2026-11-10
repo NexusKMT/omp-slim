@@ -165,7 +165,6 @@ export function emptyMirrorState(): SessionMirrorState {
 		},
 		advisorOverview: { configured: false, advisors: [] },
 		sessionAgents: [],
-		hindsightActive: false,
 		effectiveExtensionRoots: { explicit: [], mode: "merge", configured: [], configuredLevel: "user" },
 	};
 }
@@ -408,10 +407,6 @@ export class RemoteAgentSession implements AgentViewSession {
 
 	get effectiveExtensionRoots(): EffectiveExtensionRoots {
 		return this.#state.effectiveExtensionRoots;
-	}
-
-	get hindsightActive(): boolean {
-		return this.#state.hindsightActive;
 	}
 
 	/** Main-side equivalent of the child's settings: the mirrored main instance under the child's own overlay layers. */

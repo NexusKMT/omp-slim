@@ -119,7 +119,7 @@ export class StablePrefix {
 	 * identity, the fingerprint cannot have changed, so the full snapshot +
 	 * stringify is skipped. Comparing resolved parameters (not the tool
 	 * container) is load-bearing: tools like ReadTool expose `parameters` as
-	 * a getter over live settings (`skillful`, `memory.backend`), so the
+	 * a getter over live settings (`skillful`), so the
 	 * schema can swap under stable tool references when a setting toggles.
 	 * Any other in-place mutation must go through `invalidate()`.
 	 */

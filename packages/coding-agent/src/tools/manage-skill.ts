@@ -6,12 +6,9 @@ import {
 	getManagedSkillsDir,
 	sanitizeSkillName,
 	writeManagedSkill,
-} from "../autolearn/managed-skills";
+} from "../extensibility/managed-skills";
 import { isNameClaimedByAuthoredSkill } from "../extensibility/skills";
 import manageSkillDescription from "../prompts/tools/manage-skill.md" with { type: "text" };
-import type { ToolSession } from ".";
-
-import { cfgAutolearnEnabled } from "../autolearn/settings";
 
 const manageSkillSchema = type({
 	action: "'create' | 'update' | 'delete'",
@@ -33,10 +30,7 @@ const manageSkillSchema = type({
 
 export type ManageSkillParams = typeof manageSkillSchema.infer;
 
-/**
- * Direct create/update/delete of isolated managed skills. Gated behind
- * `autolearn.enabled`; backend-independent (the skill side is standalone).
- */
+/** Direct create/update/delete of isolated managed skills. */
 export class ManageSkillTool implements AgentTool<typeof manageSkillSchema> {
 	readonly name = "manage_skill";
 	readonly approval = "write" as const;
@@ -48,11 +42,6 @@ export class ManageSkillTool implements AgentTool<typeof manageSkillSchema> {
 	readonly summary = "Create, update, or delete an isolated managed skill";
 
 	constructor(private readonly refreshSkills?: () => Promise<void>) {}
-
-	static createIf(session: ToolSession): ManageSkillTool | null {
-		if (!cfgAutolearnEnabled.get(session.settings)) return null;
-		return new ManageSkillTool(session.refreshSkills);
-	}
 
 	async execute(_id: string, params: ManageSkillParams): Promise<AgentToolResult> {
 		if (params.action === "delete") {

@@ -546,7 +546,7 @@ describe("createSettingsAwareStreamFn", () => {
 		});
 
 		it("applies to direct side requests through the bound settings", async () => {
-			// Titles, commit messages, and memories call `completeSimple`/`streamSimple`
+			// Titles and commit messages call `completeSimple`/`streamSimple`
 			// without the settings-aware stream; the process-wide effect covers them.
 			const settings = Settings.isolated();
 			const release = bindEffects(settings);

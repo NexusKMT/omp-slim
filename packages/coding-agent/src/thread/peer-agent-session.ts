@@ -144,10 +144,6 @@ export class PeerAgentSession implements AgentSessionHandle {
 		return this.#field("effectiveExtensionRoots");
 	}
 
-	get hindsightActive(): boolean {
-		return this.#field("hindsightActive");
-	}
-
 	getSessionStats(): SessionStats {
 		return this.#field("sessionStats");
 	}

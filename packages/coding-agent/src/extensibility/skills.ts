@@ -12,7 +12,7 @@ import {
 	isValidManagedSkillName,
 	MANAGED_SKILLS_PROVIDER_ID,
 	sanitizeManagedDescription,
-} from "../autolearn/managed-skills";
+} from "../extensibility/managed-skills";
 import { reset as resetCapabilities } from "../capability";
 import { skillCapability } from "../capability/skill";
 import type { EffectiveExtensionRoots, SourceMeta } from "../capability/types";
@@ -236,7 +236,7 @@ export function resetActiveSkillsForTests(): void {
 /**
  * Whether `name` is already claimed by an active authored (non-managed) skill.
  *
- * Managed (auto-learn) skills resolve dead-last in discovery, so an authored
+ * Managed skills resolve dead-last in discovery, so an authored
  * skill of the same name always wins (see `loadSkills`) and a managed skill
  * written under an authored name is silently dropped — it never surfaces.
  * `manage_skill` create consults this to refuse the write up front instead of
@@ -326,7 +326,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 	}
 	function isSourceEnabled(source: SourceMeta): boolean {
 		const { provider, level } = source;
-		// Managed skills (auto-learn) are OMP-native and discovered unconditionally
+		// Managed skills are OMP-native and discovered unconditionally
 		// — third-party CLI toggles must never silently hide them (cf. #2401). The
 		// master `enabled` flag above still gates them.
 		if (provider === MANAGED_SKILLS_PROVIDER_ID) return true;
@@ -548,7 +548,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		if (admit(skill, body, frontmatter, namespace) !== undefined) realPathSet.add(resolvedPath);
 	}
 
-	// Managed (auto-learn) skills resolve dead-last with first-wins. Source from
+	// Managed skills resolve dead-last with first-wins. Source from
 	// result.all (pre-dedup): capability-level dedup runs BEFORE isSourceEnabled,
 	// so a managed skill can be shadowed by a higher-priority authored skill that
 	// is itself disabled here — managed must stay visible regardless of toggles.

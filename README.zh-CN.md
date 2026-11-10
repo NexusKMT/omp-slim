@@ -220,10 +220,6 @@ _[观看录屏 ↗](https://omp.sh/clips/web.mp4)_
 
 其他智能体框架会额外加上 gh_issue_view、gh_pr_view、gh_search——每个都有自己的参数，智能体得去学，你得去调试。我们没这么做。read 本来就处理路径，而 PR 也是路径。模型只需学会一种接口，我们也只需维护好一套工具。
 
-### 13 · 由智能体自己整理的记忆
-
-智能体会在会话之间记住你的代码库。它在运行中用 retain 写下事实，用 learn 记录可复用的经验，用 recall 取回它们，并把每个会话压缩成一个心智模型，在下个会话的第一轮加载。用 `memory.backend` 选择引擎——local、Hindsight 或 Mnemopi。默认按项目作用域隔离，因此它对这个仓库学到的东西只留在这个仓库。
-
 ### 14 · ACP：可由编辑器驱动的智能体
 
 在 Zed 中运行 omp，你得到的就是在终端里使用的同一个智能体——读取你正在看的缓冲区，通过编辑器自身的保存流程写入，在编辑器的终端里启动 shell。有破坏性的工具会先暂停并弹出权限提示，确认一次即可。无需桥接，无需插件，也不用额外维护一套需要来回同步的智能体。
@@ -294,18 +290,13 @@ _[观看录屏 ↗](https://omp.sh/clips/codemod.mp4)_
 - `github` — GitHub CLI 操作——仓库、PR、issue、代码搜索、Actions 运行监视。
 - `generate_image` — 通过 Gemini、GPT 或 xAI Grok 图像模型生成或编辑位图。
 
-**记忆与技能**
+**技能**
 
 - `checkpoint` — 标记对话状态，以便稍后折叠并汇报。
 - `rewind` — 剪除探索性上下文，只保留简洁的报告。
-- `retain` — 把持久事实加入当前记忆库的队列。
-- `recall` — 在记忆库中搜索原始记忆。
-- `reflect` — 基于记忆库综合出一个答案。
-- `memory_edit` — 按 id 更新、遗忘或作废已存储的记忆。
-- `learn` — 记录一条可复用的经验；可选择将其提升为托管技能。
 - `manage_skill` — 创建、更新或删除一个独立的托管技能。
 
-需在设置中开启、默认关闭的工具：`github`、`security_scan`、`generate_image`、`checkpoint`、`rewind`，以及记忆工具（`retain`/`recall`/`reflect`/`memory_edit`，取决于 `memory.backend`）。
+需在设置中开启、默认关闭的工具：`github`、`security_scan`、`generate_image`、`checkpoint`、`rewind`。
 
 [完整参考 →](https://omp.sh/docs/tools)
 
@@ -651,7 +642,6 @@ bun dev -- --version
 | **[@oh-my-pi/omptype](packages/omptype)**                                     | 兼容 ArkType、带惰性 JIT 编译的 schema 校验库              |
 | **[@oh-my-pi/pi-utils](packages/utils)**                                      | 共享工具库（日志、流、目录/环境/进程辅助函数）             |
 | **[@oh-my-pi/pi-wire](packages/wire)**                                        | 协作实时会话共享的协议类型和中继常量                       |
-| **[@oh-my-pi/pi-mnemopi](packages/mnemopi)**                                  | 面向 omp 智能体的本地 SQLite 记忆引擎                      |
 | **[@oh-my-pi/snapcompact](packages/snapcompact)**                             | 位图帧上下文压缩包及 SQuAD 评测套件                        |
 | **[@oh-my-pi/pi-metaharness](packages/metaharness)**                          | 统一的基准测试运行器、Harbor 运行存储、REST/SSE API、实时面板 |
 | **[@oh-my-pi/typescript-edit-benchmark](packages/typescript-edit-benchmark)** | 基于 TypeScript 源码变异构建的编辑基准测试套件             |

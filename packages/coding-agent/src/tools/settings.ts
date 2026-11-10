@@ -1,5 +1,4 @@
 import { combine, register } from "../config/registry";
-import { cfgAutolearnEnabled } from "../autolearn/settings";
 import { cfgBashEnabled } from "../exec/settings";
 import { cfgEditMode } from "../edit/settings";
 import { cfgCompactionExperimentalContextManagement } from "../session/context-settings";
@@ -1043,7 +1042,6 @@ export const cfgBuiltinToolGates = combine({
 	astEdit: cfgAstEditEnabled,
 	astGrep: cfgAstGrepEnabled,
 	async: cfgAsyncEnabled,
-	autolearn: cfgAutolearnEnabled,
 	bash: cfgBashEnabled,
 	checkpoint: cfgCheckpointEnabled,
 	contextManagement: cfgCompactionExperimentalContextManagement,

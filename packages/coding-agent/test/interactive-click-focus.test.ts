@@ -319,7 +319,6 @@ describe("inline click-to-focus geometry", () => {
 			tempDir.path(),
 			session.sessionManager,
 			modelRegistry,
-			undefined,
 			mode.settings,
 		);
 		Object.defineProperty(session, "extensionRunner", { configurable: true, get: () => runner });
@@ -537,7 +536,6 @@ describe("inline click-to-focus geometry", () => {
 				tempDir.path(),
 				session.sessionManager,
 				modelRegistry,
-				undefined,
 				mode.settings,
 			);
 		// The main session's copy of the extension: interactive UI, never sees the click.

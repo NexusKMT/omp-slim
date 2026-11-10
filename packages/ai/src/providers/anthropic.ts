@@ -4510,14 +4510,13 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 
 /**
  * System-prompt segments whose bytes differ between sessions or turns of the
- * same agent: per-turn memory recall (`<memories>`) and the coding agent's
- * working-directory context (`<project-context>`: context files with their
+ * same agent: the coding agent's working-directory context (`<project-context>`: context files with their
  * paths, workspace tree, workspace roots, session append text; advisors use
  * the same tag for their context-file block). The coding agent renders them
  * as their own `systemPrompt` array elements after the large static prompt.
  * The system cache breakpoint anchors on the block right before the first
  * such segment, so the static head is shared byte-for-byte across sessions in
- * different directories (e.g. one git worktree per task) and a recall refresh
+ * different directories (e.g. one git worktree per task) and a context refresh
  * re-bills only the suffix and the message tail.
  *
  * Everything from the first volatile segment on sits after the head
@@ -4529,7 +4528,7 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
  * Detection is by our own markup, not model identity: only a leading tag
  * counts, so stable segments quoting these tags elsewhere are unaffected.
  */
-const VOLATILE_SYSTEM_SEGMENT_MARKERS = ["<memories>", "<project-context>"];
+const VOLATILE_SYSTEM_SEGMENT_MARKERS = ["<project-context>"];
 
 function volatileSystemSuffixStart(systemBlocks: readonly AnthropicSystemBlock[]): number {
 	const start = systemBlocks.findIndex(block =>

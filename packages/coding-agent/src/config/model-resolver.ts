@@ -1182,7 +1182,6 @@ function shouldInheritDefaultBeforePriority(role: ModelRole): boolean {
  */
 const ROLE_PRIORITY_ALIAS: Partial<Record<ModelRole, string>> = {
 	advisor: "slow",
-	memory: "smol",
 	tiny: "smol",
 	widget: "smol",
 };
@@ -1195,7 +1194,6 @@ interface ConfiguredRoleFallback {
 
 const ROLE_CONFIGURED_FALLBACK: Partial<Record<ModelRole, ConfiguredRoleFallback>> = {
 	advisor: { role: "slow", configuredOnly: true },
-	memory: { role: "tiny", configuredOnly: false },
 	tiny: { role: "smol", configuredOnly: false },
 	widget: { role: "smol", configuredOnly: false },
 };

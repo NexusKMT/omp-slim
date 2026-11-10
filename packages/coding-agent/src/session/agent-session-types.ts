@@ -51,12 +51,8 @@ import type { SettingsGatedToolDelta, SystemPromptRebuilder } from "./session-to
 import type { CostGateApi } from "./cost-gate";
 import type { SessionManager } from "./session-manager";
 
-/** Maximum time the interactive shutdown path waits for Mnemopi consolidation. */
-export const SHUTDOWN_CONSOLIDATE_BUDGET_MS = 1_500;
-
 /** Options controlling session disposal. */
 export interface AgentSessionDisposeOptions {
-	mnemopiConsolidateTimeoutMs?: number;
 	/**
 	 * Deadline for the settle/drain wait before the terminal memory release
 	 * (default 5s). The bounded-teardown paths (signal handlers, tests) may
@@ -268,14 +264,6 @@ export interface AgentSessionConfig {
 	/** Custom TypeScript slash commands. */
 	customCommands?: LoadedCustomCommand[];
 	skillsSettings?: SkillsSettings;
-	/** Whether this session may start memory backends. Defaults to true. */
-	memoryEnabled?: boolean;
-	/** Agent directory used when changing memory backends in a live session. */
-	memoryAgentDir?: string;
-	/** Recursion depth used to suppress live backend replacement in subagents. */
-	memoryTaskDepth?: number;
-	/** Creates built-in memory tools for the current backend. */
-	createMemoryTools?: () => Promise<AgentTool[]>;
 	/** Creates the private `think` scratchpad tool for runtime setting changes. */
 	createThinkTool?: () => Promise<AgentTool | null>;
 	/** Model registry for API key resolution and model discovery. */
@@ -418,8 +406,6 @@ export interface AgentSessionConfig {
 	advisorSharedMaxNotesPerUpdate?: number;
 	/** Project context rendered for advisor sessions. */
 	advisorContextPrompt?: string;
-	/** Memory backend developer instructions rendered for advisor sessions. */
-	advisorMemoryPrompt?: string;
 	/** Advisors discovered from WATCHDOG.yml. */
 	advisorConfigs?: AdvisorConfig[];
 	/** Config problems collected during WATCHDOG.yml discovery. */

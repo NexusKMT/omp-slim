@@ -19,7 +19,6 @@ import { coordinationFixtures } from "./coordination";
 import { editFixtures } from "./edit";
 import { fsFixtures } from "./fs";
 import { interactionFixtures } from "./interaction";
-import { memoryFixtures } from "./memory";
 import { miscFixtures } from "./misc";
 import { searchFixtures } from "./search";
 import { shellFixtures } from "./shell";
@@ -38,7 +37,6 @@ export const galleryFixtures = {
 	...editFixtures,
 	...agenticFixtures,
 	...coordinationFixtures,
-	...memoryFixtures,
 	...webFixtures,
 	...codeintelFixtures,
 	...statusLineFixtures,

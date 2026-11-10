@@ -133,7 +133,7 @@ describe("InternalUrlRouter URL shape", () => {
 		]) {
 			expect(router.isGlob(url)).toBe(false);
 		}
-		for (const url of ["local://*.md", "local:/drafts/*.md", "memory://root/skills/?.md", "vault://Work/*.md?op=x"]) {
+		for (const url of ["local://*.md", "local:/drafts/*.md", "skill://testing/?.md", "vault://Work/*.md?op=x"]) {
 			expect(router.isGlob(url)).toBe(true);
 		}
 	});

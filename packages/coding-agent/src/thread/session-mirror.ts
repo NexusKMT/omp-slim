@@ -80,7 +80,6 @@ export interface SessionMirrorState {
 	sessionStats: SessionStats;
 	advisorOverview: AgentSessionAdvisorOverview;
 	sessionAgents: AgentDefinition[];
-	hindsightActive: boolean;
 	effectiveExtensionRoots: EffectiveExtensionRoots;
 }
 
@@ -357,7 +356,6 @@ export const SESSION_STATE_READERS: {
 	sessionStats: session => toWireData(session.getSessionStats()),
 	advisorOverview: session => toWireData(session.getAdvisorStatusOverview()),
 	sessionAgents: session => toWireData(session.getSessionAgents()),
-	hindsightActive: session => session.hindsightActive,
 	effectiveExtensionRoots: session => toWireData(session.effectiveExtensionRoots),
 };
 

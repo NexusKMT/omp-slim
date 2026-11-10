@@ -172,7 +172,7 @@ interface CursorExecBridgeOptions {
  * anywhere else on the volume, so truncating it overwrites that file too.
  * `nlink > 1` on the OPEN handle is the test — statting the path first would
  * reintroduce the race the open just closed. Same reasoning, and the same
- * refusal, as `autolearn/managed-skills.ts`.
+ * refusal, as `extensibility/managed-skills.ts`.
  *
  * Truncation therefore happens after that check rather than through `O_TRUNC`,
  * which would have already destroyed the contents by the time it ran.

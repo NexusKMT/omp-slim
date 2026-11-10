@@ -9,7 +9,6 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { SessionMemory } from "@oh-my-pi/pi-coding-agent/session/session-memory";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -245,9 +244,11 @@ it("writes no snapshot into the target of a failed session switch", async () => 
 	const before = await Bun.file(targetFile).text();
 
 	const live = await openProcess(currentFile, sessionDir, registry, "switch");
-	const reset = spyOn(SessionMemory.prototype, "resetContextForNewTranscript").mockRejectedValueOnce(
-		new Error("forced switch failure"),
-	);
+	const setSessionFile = live.manager.setSessionFile.bind(live.manager);
+	const reset = spyOn(live.manager, "setSessionFile").mockImplementationOnce(async file => {
+		await setSessionFile(file);
+		throw new Error("forced switch failure");
+	});
 	try {
 		const switching = live.session.switchSession(targetFile, { onCwdChange: async () => true });
 		await expect(switching).rejects.toThrow("forced switch failure");

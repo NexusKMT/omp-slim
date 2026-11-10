@@ -180,21 +180,21 @@ describe("resolveMCPToolAlias", () => {
 		(names: readonly string[]) =>
 		(candidate: string): { name: string } | undefined =>
 			names.includes(candidate) ? { name: candidate } : undefined;
-	// What the isolated auto-learn capture agent advertises.
-	const captureTools = ["learn", "manage_skill"];
+	// A child agent granted only explicit skill management.
+	const childTools = ["manage_skill"];
 
 	it("resolves only through the lookup it is given", () => {
 		// The hazard this signature exists to prevent: one agent's resolver
-		// reused for another. A capture response emitting the predictable
+		// reused for another. A child response emitting the predictable
 		// doubled spelling must not reach a main-session MCP tool.
 		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", over(["read", bank]))?.name).toBe(bank);
-		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", over(captureTools))).toBeUndefined();
+		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", over(childTools))).toBeUndefined();
 		expect(resolveMCPToolAlias("mcp__seedpatch-client__bank", over([]))).toBeUndefined();
 	});
 
 	it("never resolves a non-MCP name even when that tool is advertised", () => {
 		expect(resolveMCPToolAlias("read", over(["read", bank]))).toBeUndefined();
-		expect(resolveMCPToolAlias("learn", over(captureTools))).toBeUndefined();
+		expect(resolveMCPToolAlias("learn", over(childTools))).toBeUndefined();
 	});
 
 	it("leaves an exactly-advertised name to the caller's own exact match", () => {

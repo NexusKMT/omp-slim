@@ -84,7 +84,6 @@ describe("session lifecycle environment reaches bash commands", () => {
 			undefined,
 			undefined,
 			undefined,
-			undefined,
 			agent,
 		);
 	}

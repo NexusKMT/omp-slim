@@ -15,16 +15,8 @@ describe("credential settings", () => {
 			"searxng.token",
 			"searxng.basicPassword",
 			"dev.autoqaPush.token",
-			"hindsight.apiToken",
+			"searxng.token",
 		] as const) {
-			expect(lookup(path)?.isCredential).toBe(true);
-		}
-	});
-
-	it("classifies UI-visible credentials through the same marker", () => {
-		// One field, not two: there is no separate UI-only masking flag that could
-		// drift away from this classification.
-		for (const path of ["mnemopi.embeddingApiKey", "mnemopi.llmApiKey"] as const) {
 			expect(lookup(path)?.isCredential).toBe(true);
 		}
 	});
@@ -45,17 +37,6 @@ describe("credential settings", () => {
 });
 
 describe("credential masking reaches every surface", () => {
-	it("masks a UI-visible credential in the settings panel", () => {
-		// The panel derives masking from the same classification the CLI uses, so
-		// a credential cannot render as plain text on one surface and dots on the
-		// other.
-		for (const path of ["hindsight.apiToken", "mnemopi.embeddingApiKey", "mnemopi.llmApiKey"] as const) {
-			const def = getSettingDef(createSettingsHost().entries, path);
-			expect(def?.type).toBe("text");
-			expect(def && "secret" in def ? def.secret : undefined).toBe(true);
-		}
-	});
-
 	it("keeps credentials with no panel entry out of the panel entirely", () => {
 		for (const path of ["auth.broker.token", "searxng.token", "dev.autoqaPush.token"] as const) {
 			expect(getSettingDef(createSettingsHost().entries, path)).toBeUndefined();
@@ -157,21 +138,21 @@ describe("config list output", () => {
 		expect(parsed["searxng.token"]).not.toHaveProperty("redacted");
 	});
 
-	it("leaves the Hindsight server URL readable", async () => {
+	it("leaves the SearXNG server URL readable", async () => {
 		// It sits beside the API token under the same display condition, and is an
 		// ordinary endpoint: masking it hides a value users need to inspect.
-		const url = "https://hindsight.example.test";
-		await runConfigCommand({ action: "set", key: "hindsight.apiUrl", value: url, flags: { json: true } });
-		await runConfigCommand({ action: "set", key: "hindsight.apiToken", value: SECRET, flags: { json: true } });
-		expect(lookup("hindsight.apiUrl")?.isCredential).toBe(false);
+		const url = "https://searxng.example.test";
+		await runConfigCommand({ action: "set", key: "searxng.endpoint", value: url, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "searxng.token", value: SECRET, flags: { json: true } });
+		expect(lookup("searxng.endpoint")?.isCredential).toBe(false);
 
 		const output = await humanList();
-		expect(output).toContain(`hindsight.apiUrl = ${url}`);
-		expect(output).toContain("hindsight.apiToken = ********");
+		expect(output).toContain(`searxng.endpoint = ${url}`);
+		expect(output).toContain("searxng.token = ********");
 		expect(output).not.toContain(SECRET);
 
 		const { parsed } = await jsonList();
-		expect(parsed["hindsight.apiUrl"]).toMatchObject({ value: url });
-		expect(parsed["hindsight.apiToken"]).toMatchObject({ redacted: true });
+		expect(parsed["searxng.endpoint"]).toMatchObject({ value: url });
+		expect(parsed["searxng.token"]).toMatchObject({ redacted: true });
 	});
 });

@@ -15,7 +15,10 @@
 		"url": "https://github.com/can1357/oh-my-pi/issues"
 	},
 	"license": "MIT",
-	"author": { "name": "Stencil Labs, Inc.", "url": "https://stencil.so" },
+	"author": {
+		"name": "Stencil Labs, Inc.",
+		"url": "https://stencil.so"
+	},
 	"contributors": [
 		"Mario Zechner"
 	],
@@ -360,30 +363,6 @@
 			"types": "./src/mcp/transports/*.ts",
 			"import": "./src/mcp/transports/*.ts"
 		},
-		"./memories": {
-			"types": "./src/memories/index.ts",
-			"import": "./src/memories/index.ts"
-		},
-		"./memories/*": {
-			"types": "./src/memories/*.ts",
-			"import": "./src/memories/*.ts"
-		},
-		"./memory-backend": {
-			"types": "./src/memory-backend/index.ts",
-			"import": "./src/memory-backend/index.ts"
-		},
-		"./memory-backend/*": {
-			"types": "./src/memory-backend/*.ts",
-			"import": "./src/memory-backend/*.ts"
-		},
-		"./hindsight": {
-			"types": "./src/hindsight/index.ts",
-			"import": "./src/hindsight/index.ts"
-		},
-		"./hindsight/*": {
-			"types": "./src/hindsight/*.ts",
-			"import": "./src/hindsight/*.ts"
-		},
 		"./modes": {
 			"types": "./src/modes/index.ts",
 			"import": "./src/modes/index.ts"
@@ -529,7 +508,6 @@
 		"@oh-my-pi/pi-agent-core": "catalog:",
 		"@oh-my-pi/pi-ai": "catalog:",
 		"@oh-my-pi/pi-catalog": "catalog:",
-		"@oh-my-pi/pi-mnemopi": "catalog:",
 		"@oh-my-pi/pi-natives": "catalog:",
 		"@oh-my-pi/pi-tui": "catalog:",
 		"@oh-my-pi/pi-utils": "catalog:",

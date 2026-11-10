@@ -6,14 +6,14 @@
 
 - Entry: `packages/coding-agent/src/tools/manage-skill.ts`
 - Model-facing prompt: `packages/coding-agent/src/prompts/tools/manage-skill.md`
-- Managed-skill helper: `packages/coding-agent/src/autolearn/managed-skills.ts`
+- Managed-skill helper: `packages/coding-agent/src/extensibility/managed-skills.ts`
 - Skill discovery: `packages/coding-agent/src/extensibility/skills.ts`
 
 ## Registration / Visibility
 
 - Tool metadata: `approval = "write"`, `strict = true`, `loadMode = "essential"`. It stays top-level rather than mounting under `xd://`.
-- Registration requires `autolearn.enabled = true` (default `false`) but is independent of `memory.backend`.
-- Enabled top-level sessions auto-include it in an ordinary explicit tool list. Subagents do not discover or auto-receive it, but may use it when their requested-tools/frontmatter list explicitly includes it.
+- Available in ordinary top-level sessions without an automatic-learning setting.
+- Explicit tool lists are honored. Subagents receive it only when their requested-tools/frontmatter list includes it.
 - Execution is single-shot and emits no progress updates.
 
 ## Inputs
@@ -35,7 +35,7 @@
 
 ## Flow
 
-1. `ManageSkillTool.createIf(...)` exposes the tool only when `autolearn.enabled` is true and captures the session's optional `refreshSkills` callback.
+1. `new ManageSkillTool(...)` captures the session's optional `refreshSkills` callback.
 2. Schema validation requires both `description` and `body` for `create` / `update`; `delete` needs only `name`.
 3. `delete` calls `deleteManagedSkill(name)`, then refreshes active skills when the callback exists.
 4. `create` normalizes the name and checks whether an active authored skill already owns it; if yes, it returns an error result without writing.
@@ -54,12 +54,11 @@
 
 - Filesystem: writes or deletes `<agent-dir>/managed-skills/<name>/SKILL.md`; the default agent directory is `~/.omp/agent`.
 - Network: none.
-- Session state: reads `autolearn.enabled` during tool creation and refreshes the active skill list after a successful mutation when `refreshSkills` is available.
+- Session state: refreshes the active skill list after a successful mutation when `refreshSkills` is available.
 - Background work: none.
 
 ## Limits & Caps
 
-- Availability requires `autolearn.enabled = true`.
 - Names are trimmed and lowercased, then must match `[a-z0-9][a-z0-9-]{0,63}`.
 - Descriptions are sanitized to one line and stripped of control/format characters, angle brackets, backticks, and repeated tildes.
 - Bodies are trimmed and must remain non-empty; generated frontmatter contains only normalized `name` and sanitized `description`.

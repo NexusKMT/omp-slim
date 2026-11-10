@@ -13,7 +13,7 @@ import {
 	resetSettingsForTest,
 	Settings,
 } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { bindEffects } from "@oh-my-pi/pi-coding-agent/config/registry";
+import { bindEffects, lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 
 import * as discovery from "@oh-my-pi/pi-coding-agent/discovery";
 import { editVariantForModel } from "@oh-my-pi/pi-coding-agent/utils/edit-mode";
@@ -68,9 +68,7 @@ import {
 	cfgTaskEnableEffort,
 	cfgTaskAgentModelOverrides,
 } from "@oh-my-pi/pi-coding-agent/task/settings";
-import { cfgMnemopiDbPath, cfgMnemopiScoping } from "@oh-my-pi/pi-coding-agent/mnemopi/settings";
-import { cfgMemoryBackend } from "@oh-my-pi/pi-coding-agent/memory-backend/settings";
-import { cfgHindsightBankId, cfgHindsightScoping } from "@oh-my-pi/pi-coding-agent/hindsight/settings";
+
 import { cfgEditMode } from "@oh-my-pi/pi-coding-agent/edit/settings";
 import { cfgExaEnabled } from "@oh-my-pi/pi-coding-agent/web/settings";
 import {
@@ -1897,7 +1895,7 @@ describe("Settings", () => {
 				{ judge: ["local/gemma-3-1b", "@tiny", "@smol", "@default"] },
 			],
 			["tiny model", "providers.tinyModel", "lfm2.5-230m", { tiny: "local/lfm2.5-230m" }, {}],
-			["memory model", "providers.memoryModel", "lfm2-1.2b", { memory: "local/lfm2-1.2b" }, {}],
+			["retired memory model", "providers.memoryModel", "lfm2-1.2b", {}, {}],
 			[
 				"older web search preference",
 				"providers.webSearch",
@@ -2056,7 +2054,7 @@ describe("Settings", () => {
 			expect(cfgRetryFallbackChains.get(settings).web).toEqual(webExaCandidates.slice(1));
 		});
 
-		it("preserves explicit roles and empty chains while prepending local tiny and memory models", async () => {
+		it("preserves explicit roles and empty chains while prepending the local tiny model", async () => {
 			await writeSettings({
 				modelRoles: {
 					web: "custom/web",
@@ -2092,7 +2090,7 @@ describe("Settings", () => {
 				dictation: "custom/dictation",
 				judge: "custom/judge",
 				tiny: "local/lfm2.5-230m,custom/tiny,@smol",
-				memory: "local/lfm2-1.2b,custom/memory",
+				memory: "custom/memory",
 			});
 			expect(cfgRetryFallbackChains.get(settings)).toEqual({
 				web: [],
@@ -2114,40 +2112,26 @@ describe("Settings", () => {
 		});
 	});
 	describe("migrations", () => {
-		it("retires Sharpshooter config without reactivating legacy local memory or deleting stored files", async () => {
-			const memoryFile = path.join(agentDir, "memories", "sharpshooter", "old-project", "architecture.md");
-			await Bun.write(memoryFile, "Preserve the user's existing decisions.\n");
-			await writeSettings({
-				memory: { backend: "sharpshooter" },
-				memories: { enabled: true },
-				sharpshooter: { intervalMinutes: 5 },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			expect(cfgMemoryBackend.get(settings)).toBe("off");
-			cfgDisplayShowTokenUsage.set(settings, true);
-			await settings.flush();
-			const saved = await readSettings();
-			expect(saved.memory).toEqual({ backend: "off" });
-			expect(saved.sharpshooter).toBeUndefined();
-			expect(await Bun.file(memoryFile).text()).toBe("Preserve the user's existing decisions.\n");
-		});
-
-		it("retires dotted Sharpshooter settings in runtime overrides and persisted config", async () => {
-			const legacy = {
-				"memory.backend": "sharpshooter",
-				"sharpshooter.model": "unused-model",
-				"memories.enabled": true,
-			};
-			expect(cfgMemoryBackend.get(Settings.isolated(legacy))).toBe("off");
-			await writeSettings(legacy);
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			expect(cfgMemoryBackend.get(settings)).toBe("off");
-			cfgDisplayShowTokenUsage.set(settings, true);
-			await settings.flush();
-			expect((await readSettings())["sharpshooter.model"]).toBeUndefined();
-			expect(() => cfgMemoryBackend.parse("sharpshooter")).toThrow();
-		});
+		it.each(["memory", "memories", "hindsight", "mnemopi", "mnemosyne", "sharpshooter", "autolearn"])(
+			"retires nested and dotted %s settings while preserving user files",
+			async namespace => {
+				const storedPath = path.join(agentDir, namespace, "saved-data.txt");
+				await Bun.write(storedPath, "existing user data");
+				await writeSettings({
+					[namespace]: { enabled: true, backend: "mnemopi" },
+					[`${namespace}.model`]: "legacy-model",
+				});
+				const settings = await Settings.init({ cwd: projectDir, agentDir });
+				expect(lookup(`${namespace}.enabled`)).toBeUndefined();
+				expect(lookup(`${namespace}.model`)).toBeUndefined();
+				cfgDisplayShowTokenUsage.set(settings, true);
+				await settings.flush();
+				const saved = await readSettings();
+				expect(saved[namespace]).toBeUndefined();
+				expect(saved[`${namespace}.model`]).toBeUndefined();
+				expect(await Bun.file(storedPath).text()).toBe("existing user data");
+			},
+		);
 
 		it("preserves current ask timeout seconds in overrides and persisted config", async () => {
 			expect(cfgAskTimeout.get(Settings.isolated({ "ask.timeout": 2000 }))).toBe(2000);
@@ -2312,60 +2296,6 @@ describe("Settings", () => {
 			expect(cfgEditMode.get(settings)).toBe("hashline");
 			expect(editVariantForModel(settings, "claude-opus-4-5")).toBe("hashline");
 			expect(editVariantForModel(settings, "gpt-5.2")).toBe("apply_patch");
-		});
-
-		it("maps legacy hindsight.dynamicBankId=true onto hindsight.scoping=per-project", async () => {
-			await writeSettings({
-				hindsight: { dynamicBankId: true },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgHindsightScoping.get(settings)).toBe("per-project");
-		});
-
-		it("does not override an explicit hindsight.scoping when migrating", async () => {
-			await writeSettings({
-				hindsight: { dynamicBankId: true, scoping: "global" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgHindsightScoping.get(settings)).toBe("global");
-		});
-
-		it("promotes legacy hindsight.agentName onto hindsight.bankId when bankId is unset", async () => {
-			await writeSettings({
-				hindsight: { agentName: "ada-cli" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgHindsightBankId.get(settings)).toBe("ada-cli");
-		});
-
-		it("migrates the legacy mnemosyne memory backend to mnemopi", async () => {
-			await writeSettings({
-				memory: { backend: "mnemosyne" },
-				mnemosyne: { dbPath: "/tmp/old.db", scoping: "global" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgMemoryBackend.get(settings)).toBe("mnemopi");
-			expect(cfgMnemopiDbPath.get(settings)).toBe("/tmp/old.db");
-			expect(cfgMnemopiScoping.get(settings)).toBe("global");
-		});
-
-		it("does not clobber an explicit mnemopi block when the legacy mnemosyne block is also present", async () => {
-			await writeSettings({
-				mnemosyne: { dbPath: "/tmp/old.db" },
-				mnemopi: { dbPath: "/tmp/new.db" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgMnemopiDbPath.get(settings)).toBe("/tmp/new.db");
 		});
 
 		it("migrates boolean task.eager/todo.eager true to always", async () => {

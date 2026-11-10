@@ -689,25 +689,25 @@ describe("anthropic head caching (general API-key path)", () => {
 		expect(cached).toContain(69);
 		expect(cached).toHaveLength(4);
 	});
-	it("keeps the head breakpoint on the stable prefix when the recall suffix refreshes", async () => {
+	it("keeps the head breakpoint on the stable prefix when the context suffix refreshes", async () => {
 		const oAuthModel = buildModel({ ...MODEL_SPEC, id: "claude-opus-5", name: "Claude Opus 5" });
-		const captureRecall = (recall: string, messages: Message[]) =>
+		const captureContext = (recall: string, messages: Message[]) =>
 			captureTurn(
 				oAuthModel,
 				{ systemPrompt: ["You are helpful.", "Follow the house style.", recall], messages, tools: CONTEXT.tools },
-				"sess-recall",
+				"sess-context",
 			);
 		const messages: Message[] = [{ role: "user", content: "hello", timestamp: 1 }];
-		const first = await captureRecall("<memories>\nrecall v1\n</memories>", messages);
+		const first = await captureContext("<project-context>\ncontext v1\n</project-context>", messages);
 		const before = first.body;
-		const { body: after } = await captureRecall("<memories>\nrecall v2\n</memories>", [
+		const { body: after } = await captureContext("<project-context>\ncontext v2\n</project-context>", [
 			...messages,
 			{ ...assistantMessage("hi there", 2), requestControls: first.message.requestControls },
 			{ role: "user", content: "again", timestamp: 3 },
 		]);
 		expect(countCacheBreakpoints(after)).toBeLessThanOrEqual(4);
 		// The boundary breakpoint sits on the last stable block: with 2 OAuth
-		// identity blocks + 2 stable prompt blocks + 1 recall suffix, the
+		// identity blocks + 2 stable prompt blocks + 1 context suffix, the
 		// anchor is index 3. The pre-decorated identity block (index 1) loses
 		// its breakpoint so the head stays at tool + system and both rolling
 		// message breakpoints survive.
@@ -718,18 +718,18 @@ describe("anthropic head caching (general API-key path)", () => {
 		expect(cachedSystem).toEqual([systemAfter.length - 2]);
 		expect(findCachedMessageIndices(after)).toHaveLength(2);
 		expect(textSystemBlocks(before).length).toBe(systemAfter.length);
-		// Stable prefix bytes survive the recall refresh: strip the volatile
+		// Stable prefix bytes survive the context refresh: strip the volatile
 		// suffix and the per-turn cache_control, then compare.
 		const stableText = (body: MessageCreateParams): string[] =>
 			textSystemBlocks(body)
-				.filter(block => !block.text.startsWith("<memories>"))
+				.filter(block => !block.text.startsWith("<project-context>"))
 				.map(block => block.text);
 		expect(stableText(after)).toEqual(stableText(before));
 	});
 
 	it("anchors before the first volatile segment so blocks appended behind it stay out of the cached head", async () => {
 		// Coding-agent layout: static prompt, cwd-derived `<project-context>`,
-		// per-spawn subagent role text, then per-turn recall.
+		// per-spawn subagent role text, then additional project context.
 		const capture = (cwd: string, role: string) =>
 			captureWireBody(undefined, {
 				...CONTEXT,
@@ -737,7 +737,7 @@ describe("anthropic head caching (general API-key path)", () => {
 					"Static agent prompt.",
 					`<project-context>\n<file path="${cwd}/AGENTS.md">rules</file>\n</project-context>`,
 					role,
-					"<memories>\nrecall\n</memories>",
+					"<project-context>\nrecall\n</project-context>",
 				],
 			});
 		const first = textSystemBlocks(await capture("/work/a", "Role: spawn 1"));
@@ -778,7 +778,7 @@ describe("anthropic head caching (general API-key path)", () => {
 
 	it("falls back to tail anchoring when every system block is volatile", async () => {
 		const body = await captureWireBody(undefined, {
-			systemPrompt: ["<memories>\nonly recall\n</memories>"],
+			systemPrompt: ["<project-context>\nonly context\n</project-context>"],
 			tools: [],
 			messages: [{ role: "user", content: "hello", timestamp: 1 }],
 		});

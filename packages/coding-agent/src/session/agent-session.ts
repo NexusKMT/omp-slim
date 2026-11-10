@@ -181,15 +181,11 @@ import { expandSlashCommand, type FileSlashCommand, loadSlashCommands } from "..
 import { normalizeToolEventInput, resolveToolEventInput } from "../extensibility/tool-event-input";
 import { GoalRuntime } from "../goals/runtime";
 import type { GoalModeState, GoalTokenUsage } from "../goals/state";
-import type { HindsightSessionState } from "../hindsight/state";
 import { InternalUrlRouter, type LocalProtocolOptions } from "../internal-urls";
 import { type ChainJudge, hasNativeJudge, journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "../judgment";
 import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import type { JobWidgetEntry } from "@oh-my-pi/pi-tui/tools/job-widget";
 import type { DaemonCompletionNotification } from "../launch/protocol";
-import { MEMORY_RECALL_CHANGES_MESSAGE_TYPE } from "../memory-backend/recall-entry";
-import { shutdownMnemopiEmbedClient } from "../mnemopi/embed-client";
-import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
 import { MAGIC_KEYWORDS, type MagicKeywordContext, type MagicKeywordId } from "../modes/magic-keywords";
 import { containsMagicKeyword } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
 import { theme } from "@oh-my-pi/pi-tui/theme";
@@ -485,7 +481,6 @@ import {
 	type PersistedSessionInit,
 	type SessionManager,
 } from "./session-manager";
-import { SessionMemory, type SessionMemoryHost } from "./session-memory";
 import { buildSessionMetadata } from "./session-metadata";
 import { SessionProviderBoundary, type SessionProviderBoundaryHost } from "./session-provider-boundary";
 import { SessionStatsTracker, type SessionStatsTrackerHost } from "./session-stats";
@@ -1004,8 +999,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
 	readonly settings: Settings;
-	/** Session-start policy, independent of the selected project memory backend. */
-	readonly memoryEnabled: boolean;
 	#costGate: CostGateApi;
 	/** False for a subagent, whose gate belongs to its session tree's root. */
 	readonly #ownsCostGate: boolean;
@@ -1236,8 +1229,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/** OAuth account pools enforced on this session's key lookups; lifted on dispose. */
 	#accountPoolScope: SessionAccountPoolScope | undefined;
 	#inheritedProviderPromptCacheKey: string | undefined;
-	#autolearnCaptureAbortController: AbortController | undefined;
-	#autolearnCaptureTask: Promise<void> | undefined;
 	#isDisposed = false;
 	#modelDiscoveryAbortController = new AbortController();
 	/** Process-wide by default (double-spend safety across sessions); injectable for tests. */
@@ -1324,11 +1315,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	#postPromptTasksResolve: (() => void) | undefined = undefined;
 	#postPromptTasksAbortController = new AbortController();
 	/**
-	 * Cancels the current turn's pre-dispatch setup (memory-backend auto-recall and
-	 * other awaited preparation in {@link #prepareAgentStart}) when {@link abort} runs.
+	 * Cancels the current turn's awaited preparation in {@link #prepareAgentStart}) when {@link abort} runs.
 	 * Bumping {@link #promptGeneration} only makes the cooperative `isCurrent()` checks
-	 * return false; a blocking network recall cannot observe that until it resolves, so
-	 * Esc would otherwise stall for the full recall timeout (issue #12668).
+	 * return false; an awaited operation also needs the abort signal to stop promptly.
 	 */
 	#promptSetupAbortController: AbortController | undefined;
 	/**
@@ -1466,8 +1455,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		| undefined;
 	/** {@link #branchPromptCacheObservation}'s fold of the current branch view. */
 	#branchPromptCacheScan: BranchPromptCacheScan | undefined;
-	#hindsightSessionState: HindsightSessionState | undefined = undefined;
-	readonly #memory: SessionMemory;
 	readonly rawSseDebugBuffer: RawSseDebugBuffer;
 
 	#resetPromptMaintenanceState(): void {
@@ -2116,7 +2103,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#ownsCostGate = config.costGate === undefined;
 		this.#costGate = config.costGate ?? this.#createCostGate();
 		this.#skillDescriptions = config.skillDescriptions ?? new SkillDescriptionCatalog();
-		this.memoryEnabled = config.memoryEnabled ?? true;
 		this.#modelRegistry = config.modelRegistry;
 		this.#allowSessionModelFallback = config.allowSessionModelFallback === true;
 		this.#disableModelFallback = config.disableModelFallback === true;
@@ -2373,32 +2359,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			sessionId: () => this.sessionId,
 		};
 		this.#stats = new SessionStatsTracker(statsHost);
-		const memoryHost: SessionMemoryHost = {
-			agent: this.agent,
-			settings: this.settings,
-			modelRegistry: this.#modelRegistry,
-			isDisposed: () => this.#isDisposed,
-			cwd: () => this.sessionManager.getCwd(),
-			addDisposer: dispose => this.addDisposer(dispose),
-			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
-			memoryBackendSession: () => this,
-			getHindsightSessionState: () => this.getHindsightSessionState(),
-			setHindsightSessionState: state => this.setHindsightSessionState(state),
-			getMnemopiSessionState: () => this.getMnemopiSessionState(),
-			takeMnemopiSessionState: () => setMnemopiSessionState(this, undefined),
-			setBaseSystemPrompt: prompt => {
-				this.#tools.setBaseSystemPrompt(prompt);
-				this.agent.setSystemPrompt(prompt);
-			},
-			refreshBaseSystemPrompt: () => this.#tools.refreshBaseSystemPrompt(),
-			replaceMemoryTools: tools => this.#tools.replaceMemoryTools(tools),
-		};
-		this.#memory = new SessionMemory(memoryHost, {
-			memoryEnabled: this.memoryEnabled,
-			memoryAgentDir: config.memoryAgentDir,
-			memoryTaskDepth: config.memoryTaskDepth,
-			createMemoryTools: config.createMemoryTools,
-		});
 		// Resolve the wire service-tier per request so the Fireworks Priority
 		// toggle scopes priority to Fireworks alone, without mutating the shared
 		// session `serviceTier` that drives `/fast` and OpenAI/Anthropic priority.
@@ -2585,10 +2545,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			queuedMessageCount: () => this.queuedMessageCount,
 			planModeEnabled: () => this.#planModeState?.enabled === true,
 			model: () => this.model,
-			memoryBackendSession: () => this,
 			clearInheritedProviderPromptCacheKey: () => this.#clearInheritedProviderPromptCacheKey(),
-			clearMemoryPromotionSnapshot: () => this.#memory.clearPromotionSnapshot(),
-			captureMemoryPromotionSnapshot: prompt => this.#memory.capturePromotionSnapshot(prompt),
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
 			notifyCommandMetadataChanged: () => this.#notifyCommandMetadataChanged(),
 			localProtocolOptions: () => this.#localProtocolOptions(),
@@ -2829,7 +2786,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			sharedInstructions: config.advisorSharedInstructions,
 			sharedMaxNotesPerUpdate: config.advisorSharedMaxNotesPerUpdate,
 			contextPrompt: config.advisorContextPrompt,
-			memoryPrompt: config.advisorMemoryPrompt,
 			configs: config.advisorConfigs,
 			configWarnings: config.advisorConfigWarnings,
 			streamFn: config.advisorStreamFn,
@@ -2885,7 +2841,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				if (this.#isDisposed) return;
 				this.#experimentalContextNotesReminder = { prompt, generation: this.#promptGeneration };
 			},
-			memoryBackendSession: () => this,
 			emitSessionEvent: (event, options) => this.#emitSessionEvent(event, options),
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
 			scheduleAgentContinue: options => this.#scheduleAgentContinue(options),
@@ -3385,25 +3340,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/** Request preference from the live setting for the current model's API. */
 	get preferWebsockets(): boolean | undefined {
 		return resolveWebsocketPreference(this.settings, this.model);
-	}
-
-	getHindsightSessionState(): HindsightSessionState | undefined {
-		return this.#hindsightSessionState;
-	}
-
-	/** Whether the hindsight memory backend is active for this session. */
-	get hindsightActive(): boolean {
-		return this.#hindsightSessionState !== undefined;
-	}
-
-	setHindsightSessionState(state: HindsightSessionState | undefined): HindsightSessionState | undefined {
-		const previous = this.#hindsightSessionState;
-		this.#hindsightSessionState = state;
-		return previous;
-	}
-
-	getMnemopiSessionState(): MnemopiSessionState | undefined {
-		return getMnemopiSessionState(this);
 	}
 
 	/** TTSR manager for time-traveling stream rules */
@@ -6300,7 +6236,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		done: PromiseWithResolvers<void>,
 		fromOutside: boolean,
 	): Promise<void> {
-		while (turn.nested.size > 0) await Promise.allSettled([...turn.nested]);
+		while (turn.nested.size > 0) await Promise.allSettled(turn.nested);
 		turn.released = true;
 		if (fromOutside) this.#queuedSessionTransitions--;
 		done.resolve();
@@ -6435,44 +6371,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		}
 	}
 
-	/** Run one abortable auto-learn capture outside the primary agent loop. */
-	async runAutolearnCapture(capture: (signal: AbortSignal) => Promise<void>): Promise<void> {
-		if (this.#autolearnCaptureTask || this.#isDisposed) return;
-		const controller = new AbortController();
-		this.#autolearnCaptureAbortController = controller;
-		const task = (async () => {
-			try {
-				await capture(controller.signal);
-			} catch (error) {
-				if (!controller.signal.aborted) throw error;
-			} finally {
-				if (this.#autolearnCaptureAbortController === controller) {
-					this.#autolearnCaptureAbortController = undefined;
-				}
-			}
-		})();
-		this.#autolearnCaptureTask = task;
-		try {
-			await task;
-		} finally {
-			if (this.#autolearnCaptureTask === task) this.#autolearnCaptureTask = undefined;
-		}
-	}
-
-	#abortAutolearnCapture(): void {
-		this.#autolearnCaptureAbortController?.abort();
-	}
-
-	async #drainAutolearnCapture(): Promise<void> {
-		const task = this.#autolearnCaptureTask;
-		if (!task) return;
-		try {
-			await withTimeout(task, 3_000, "Timed out draining auto-learn capture during dispose");
-		} catch (error) {
-			logger.warn("Auto-learn capture did not settle during dispose", { error: String(error) });
-		}
-	}
-
 	/** True once dispose() has begun; deferred background work (e.g. the deferred
 	 *  MCP discovery task in sdk.ts) must not touch the session past this point. */
 	get isDisposed(): boolean {
@@ -6507,9 +6405,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		if (this.agent.prepareQueuedMessages === this.#prepareQueuedUserMessages) {
 			this.agent.prepareQueuedMessages = undefined;
 		}
-		this.#memory.cancelLocalMemoryStartup();
 		this.#titleGenerationAbortController.abort();
-		this.#abortAutolearnCapture();
 		this.#irc.flushPending();
 		this.yieldQueue.clear();
 		this.agent.setAsideMessageProvider(undefined);
@@ -6577,18 +6473,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		}
 	}
 
-	async #disposeMnemopi(
-		state: MnemopiSessionState | undefined,
-		consolidateTimeoutMs: number | undefined,
-	): Promise<void> {
-		try {
-			await state?.dispose({ timeoutMs: consolidateTimeoutMs });
-		} finally {
-			// Consolidation may embed final memories, so drop the embedding-server connection only afterward.
-			await shutdownMnemopiEmbedClient();
-		}
-	}
-
 	async #doDispose(options: AgentSessionDisposeOptions = {}): Promise<void> {
 		this.beginDispose();
 		// Stop cache warming before the drain windows below: an armed tick firing
@@ -6629,11 +6513,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		} catch (error) {
 			logger.warn("Post-prompt tasks still draining at dispose deadline", { error: String(error) });
 		}
-		await this.#drainAutolearnCapture();
-		await this.#memory.transition;
 
-		const hindsightState = this.getHindsightSessionState();
-		const mnemopiState = setMnemopiSessionState(this, undefined);
 		const advisorRecorderClosed = this.#advisors.recorderClosed();
 		releaseShellSessions(this.sessionManager.getSessionId());
 		const results = await Promise.allSettled([
@@ -6641,8 +6521,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#eval.disposeKernels(),
 			this.#disconnectOwnedMcp(),
 			advisorRecorderClosed,
-			hindsightState?.flushRetainQueue() ?? Promise.resolve(),
-			this.#disposeMnemopi(mnemopiState, options.mnemopiConsolidateTimeoutMs),
 		]);
 		for (const result of results) {
 			if (result.status === "rejected") {
@@ -6657,8 +6535,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#movedFromEmptySessionFile = undefined;
 		this.#closeAllProviderSessions("dispose");
 		this.#maintenance.cancelSpeculation();
-		this.setHindsightSessionState(undefined);
-		hindsightState?.dispose();
 
 		// A dispose triggered mid-turn (Ctrl-C / timeout / hard-killed subagent)
 		// only *signals* the agent loop via the earlier abort(); the loop and the
@@ -6788,7 +6664,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#closeAllProviderSessions("fresh session");
 		this.#freshProviderSessionId = Bun.randomUUIDv7();
 		this.#syncAgentSessionId();
-		this.#memory.rekeyForCurrentSessionId();
 		this.agent.appendOnlyContext?.invalidateForModelChange();
 		return {
 			previousSessionId,
@@ -6807,7 +6682,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * This is the in-place sibling of {@link newSession}: it reuses the same
 	 * conversation-boundary teardown (drop the conversation, rotate provider-side
 	 * session state so providers that keep history server-side resume nothing,
-	 * re-prime the advisors, and undo any memory promotion) but skips minting a
+	 * re-prime the advisors) but skips minting a
 	 * new session id and opening a fresh transcript file. Unlike
 	 * {@link freshSession} (which only rotates provider stream state) it also
 	 * clears the conversation.
@@ -6873,7 +6748,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#closeAllProviderSessions("reset context");
 		this.#freshProviderSessionId = Bun.randomUUIDv7();
 		this.#syncAgentSessionId();
-		this.#memory.rekeyForCurrentSessionId();
 		this.agent.appendOnlyContext?.invalidateForModelChange();
 
 		// Re-arm the approved-plan reference: the reset dropped the plan-approved
@@ -6885,9 +6759,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#planReferenceSent = false;
 
 		// Re-prime the advisors across the conversation boundary and undo any
-		// memory promotion so the next turn rebuilds from the base system prompt.
+		// transient prompt state so the next turn rebuilds from the base system prompt.
 		this.#advisors.resetSessionState();
-		await this.#memory.resetContextForNewTranscript();
 
 		// Record a durable boundary on the persisted branch. The collapsed live
 		// transcript and the model-context rebuild start emission after the latest
@@ -7453,32 +7326,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 */
 	getAdvertisedSessionAgents(): readonly AgentDefinition[] {
 		return this.#tools.advertisedSessionAgents;
-	}
-
-	/** Cancels the local rollout-memory startup owned by this session. */
-	cancelLocalMemoryStartup(): void {
-		this.#memory.cancelLocalMemoryStartup();
-	}
-
-	/** Starts a new local rollout-memory generation and cancels its predecessor. */
-	beginLocalMemoryStartup(): AbortSignal {
-		return this.#memory.beginLocalMemoryStartup();
-	}
-
-	/** Releases the local startup slot if `signal` still owns it. */
-	endLocalMemoryStartup(signal: AbortSignal): void {
-		this.#memory.endLocalMemoryStartup(signal);
-	}
-
-	/** Apply the backend; cwd rebinding can skip Mnemopi auto-retention while still draining writes. */
-	applyMemoryBackend(options: { retainMnemopi?: boolean } = {}): Promise<void> {
-		if (!this.memoryEnabled) return Promise.resolve();
-		return this.#memory.applyMemoryBackend(options);
-	}
-
-	/** Resolves once every memory-setting edit so far, and the backend transitions it started, has settled. */
-	settleMemoryBackend(): Promise<void> {
-		return this.#memory.settle();
 	}
 
 	/** Rebuilds the stable base prompt, optionally discarding a stale asynchronous rebuild. */
@@ -9045,7 +8892,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/**
 	 * Stage extension results; committing them must remain synchronous with delivery validation.
 	 *
-	 * `signal` cancels awaited setup (memory auto-recall) for both direct and queued turns.
+	 * `signal` cancels awaited setup for both direct and queued turns.
 	 * `origin` decides the disposal contract: a direct prompt admitted before {@link beginDispose}
 	 * still runs to a settled turn, while a queued turn never starts on a disposed session.
 	 */
@@ -9079,15 +8926,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			});
 		}
 		for (let attempt = 0; attempt < AGENT_START_POLICY_MAX_ATTEMPTS; attempt++) {
-			await this.#memory.transition;
 			if (!isCurrent()) return cancelled;
 			const sourceBase = this.#tools.baseSystemPrompt;
-			const basePreparation = await this.#tools.buildSystemPromptForAgentStart(prompt, isCurrent, signal);
+			const baseSystemPrompt = sourceBase;
 			if (!isCurrent()) return cancelled;
-			const result = await this.#extensionRunner?.emitBeforeAgentStart(prompt, images, basePreparation.systemPrompt);
+			const result = await this.#extensionRunner?.emitBeforeAgentStart(prompt, images, baseSystemPrompt);
 			if (!isCurrent()) return cancelled;
 			// Overrides are opaque replacements, not string patches. Re-run only policy preparation
-			// against the winning base; discard this attempt's returned context and staged memory.
+			// against the winning base; discard this attempt's returned context.
 			const overrideIsCurrent = () => {
 				if (result?.systemPrompt === undefined) return true;
 				const currentBase = this.#tools.baseSystemPrompt;
@@ -9100,17 +8946,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			};
 			if (!overrideIsCurrent()) continue;
 			const messages: AgentMessage[] = [];
-			if (basePreparation.memoryNotice) {
-				messages.push({
-					role: "custom",
-					customType: MEMORY_RECALL_CHANGES_MESSAGE_TYPE,
-					content: basePreparation.memoryNotice.content,
-					details: basePreparation.memoryNotice.details,
-					display: false,
-					attribution: "agent",
-					timestamp: Date.now(),
-				});
-			}
 			const attribution = "attribution" in message ? message.attribution : undefined;
 			for (const payload of result?.messages ?? []) {
 				const normalized = normalizeCustomMessagePayload(payload);
@@ -9138,11 +8973,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			return {
 				baseXdevCatalogDelivered: result?.systemPrompt === undefined,
 				commit: () => {
-					// No await may separate ownership validation from publishing memory and policy.
+					// No await may separate ownership validation from publishing policy.
 					if (!isCurrent() || !overrideIsCurrent()) return undefined;
-					if (basePreparation.commit?.() === false) return undefined;
 					if (result?.systemPrompt !== undefined) {
-						this.#tools.setTurnSystemPromptOverride(result.systemPrompt, basePreparation.systemPrompt);
+						this.#tools.setTurnSystemPromptOverride(result.systemPrompt, baseSystemPrompt);
 					} else {
 						this.#tools.clearTurnSystemPromptOverride();
 						this.agent.setSystemPrompt(this.#tools.baseSystemPrompt);
@@ -11774,12 +11608,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		try {
 			this.#titleGenerationAbortController.abort();
 			if (!this.#isDisposed) this.#titleGenerationAbortController = new AbortController();
-			this.#abortAutolearnCapture();
 			for (const controller of this.#usagePreflightAbortControllers) controller.abort();
 			for (const controller of this.#imageDescriptionAbortControllers) controller.abort(options?.reason);
 			this.abortRetry();
 			this.#promptGeneration++;
-			// Cancel any awaited pre-dispatch setup (e.g. Hindsight auto-recall) so the
+			// Cancel any awaited pre-dispatch setup so the
 			// admitted submission unwinds now instead of at the recall timeout (#12668).
 			this.#promptSetupAbortController?.abort(options?.reason);
 			this.#scheduledHiddenNextTurnGeneration = undefined;
@@ -11817,7 +11650,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			// Do not let abort-and-replace callers start a new prompt before that cleanup
 			// finishes, or the replacement turn's events are neither forwarded nor persisted.
 			await manualCompactionCleanup;
-			await this.#drainAutolearnCapture();
 			await this.#goalRuntime.onTaskAborted({ reason: options?.goalReason ?? "interrupted" });
 			// The loop has restored any claimed input by now. Promote forced follow-ups
 			// before flushing agent_end so observers see the pending continuation.
@@ -11945,8 +11777,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			// post-/new turns keep sending the previous session's StablePrefix, and
 			// #syncAppendOnlyContext only re-runs on model or setting changes.
 			this.agent.appendOnlyContext?.invalidateForModelChange();
-			this.#memory.rekeyForCurrentSessionId();
-			await this.#memory.resetContextForNewTranscript();
 			this.#pendingNextTurnMessages = [];
 			// The abort above may have skipped the loop's final aside poll (issue: stranded
 			// asides survive an aborted turn by design so a resumed session can still see
@@ -12100,10 +11930,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#freshProviderSessionId = undefined;
 			this.#adoptInheritedProviderPromptCacheKey();
 			this.#syncAgentSessionId();
-			this.#memory.rekeyForCurrentSessionId();
 			this.#advisors.reattachRecorderFeeds();
 			advisorRecordersDetached = false;
-			await this.#memory.resetContextForNewTranscript();
 
 			// Emit session_switch event with reason "fork" to hooks
 			if (this.#extensionRunner) {
@@ -13677,7 +13505,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		const previousTools = [...this.agent.state.tools];
 		const previousBaseSystemPrompt = this.#tools.baseSystemPrompt;
 		const previousSystemPrompt = this.agent.state.systemPrompt;
-		const previousBaseSystemPromptBeforeMemoryPromotion = this.#memory.promotionSnapshot;
 		const previousFreshProviderSessionId = this.#freshProviderSessionId;
 		const previousInheritedProviderPromptCacheKey = this.#inheritedProviderPromptCacheKey;
 		const previousTaskSiblingCandidate = this.sessionManager.getTaskSiblingCandidate();
@@ -13750,7 +13577,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				this.sessionManager.clearTaskSiblingCandidate();
 			}
 			this.#syncAgentSessionId(undefined, false);
-			this.#memory.rekeyForCurrentSessionId();
 
 			let sessionContext = this.buildDisplaySessionContext();
 			// Resolve the target's model before announcing the switch, so an
@@ -13885,7 +13711,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			);
 
 			if (switchingToDifferentSession) {
-				await this.#memory.resetContextForNewTranscript();
 			}
 			// The switch has committed: a rolled-back one must not write the target's journal.
 			this.#persistRebuiltEvalStateContext(this.agent.state.messages);
@@ -13942,10 +13767,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.sessionManager.restoreState(previousSessionState);
 			this.#freshProviderSessionId = previousFreshProviderSessionId;
 			this.#syncAgentSessionId(previousSessionState.sessionId, false);
-			this.#memory.rekeyForCurrentSessionId();
 			this.agent.setTools(previousTools);
 			this.#tools.setBaseSystemPrompt(previousBaseSystemPrompt);
-			this.#memory.restorePromotionSnapshot(previousBaseSystemPromptBeforeMemoryPromotion);
 			this.agent.setSystemPrompt(previousSystemPrompt);
 			this.agent.replaceMessages(previousAgentMessages);
 			this.agent.replaceQueues(
@@ -14123,7 +13946,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		await this.sessionManager.flush();
 		// Last refusal point. Nothing below is rolled back when the transition stops, so an
 		// idle-only snapshot refuses here, after the flush awaits but before any state of the
-		// old session (pending messages, async jobs, auto-learn capture) is discarded.
+		// old session (pending messages, async jobs) is discarded.
 		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 
 		// Clear pending messages (bound to old session state)
@@ -14134,8 +13957,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 		const bashTransition = this.#bash.beginSessionTransition();
 		this.#cancelOwnAsyncJobs();
-		this.#abortAutolearnCapture();
-		await this.#drainAutolearnCapture();
 
 		let sessionTransitioned = false;
 		let advisorRecordersDetached = false;
@@ -14167,8 +13988,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#freshProviderSessionId = undefined;
 			this.#clearInheritedProviderPromptCacheKey();
 			this.#syncAgentSessionId();
-			this.#memory.rekeyForCurrentSessionId();
-			await this.#memory.resetContextForNewTranscript();
 
 			// Reload messages from entries (works for both file and in-memory mode)
 			const sessionContext = this.buildDisplaySessionContext();
@@ -14263,8 +14082,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		await this.sessionManager.flush();
 		const bashTransition = this.#bash.beginSessionTransition();
 		this.#cancelOwnAsyncJobs();
-		this.#abortAutolearnCapture();
-		await this.#drainAutolearnCapture();
 
 		let sessionTransitioned = false;
 		let advisorRecordersDetached = false;
@@ -14301,8 +14118,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#modelMentions.syncFromBranch();
 			this.#freshProviderSessionId = undefined;
 			this.#syncAgentSessionId();
-			this.#memory.rekeyForCurrentSessionId();
-			await this.#memory.resetContextForNewTranscript();
 
 			const sessionContext = this.buildDisplaySessionContext();
 
@@ -15825,15 +15640,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 */
 	setAdvisorContextPrompt(contextPrompt: string | undefined): void {
 		this.#advisors.setContextPrompt(contextPrompt);
-	}
-
-	/**
-	 * Refresh the memory backend instructions advisor sessions run against.
-	 * Store-only: live advisors pick the new value up at their next runtime
-	 * build (compaction, reset, toggle) — see `SessionAdvisors#setMemoryPrompt`.
-	 */
-	setAdvisorMemoryPrompt(memoryPrompt: string | undefined): void {
-		this.#advisors.setMemoryPrompt(memoryPrompt);
 	}
 
 	/**

@@ -21,7 +21,7 @@ import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { computeNonMessageTokens } from "@oh-my-pi/pi-tui/status-line/context-usage";
-import { mnemopiBackend } from "@oh-my-pi/pi-coding-agent/mnemopi/backend";
+
 import type { Tool, ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ContextNotesTool, NewContextTool } from "@oh-my-pi/pi-coding-agent/tools/context-notes";
 import { BUILTIN_TOOL_NAMES } from "@oh-my-pi/pi-coding-agent/tools/builtin-names";
@@ -703,42 +703,6 @@ describe("experimental context management", () => {
 			agent.tokenizer.countMessages(convertToLlm(manager.buildSessionContext().messages));
 		expect(entry.tokensAfter).toBe(expected);
 		expect(entry.tokensAfter).toBeGreaterThan(agent.tokenizer.countMessages(manager.buildSessionContext().messages));
-	});
-
-	it("skips built-in remote memory recall during local rollover while preserving the boundary", async () => {
-		const recallSpy = vi.spyOn(mnemopiBackend, "preCompactionContext").mockResolvedValue("recalled context");
-		try {
-			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-			if (!model) throw new Error("Expected bundled model");
-			const manager = SessionManager.inMemory();
-			const seed = [
-				user("first task"),
-				assistant("first result ".repeat(512)),
-				user("second task"),
-				assistant("second result"),
-			];
-			for (const message of seed) manager.appendMessage(message);
-			const settings = Settings.isolated({
-				"compaction.experimentalContextManagement": true,
-				"compaction.keepRecentTokens": 1,
-				"memory.backend": "mnemopi",
-			});
-			const { tools } = createRolloverTools(manager, settings);
-			const agent = new Agent({ initialState: { model, systemPrompt: ["test"], messages: seed, tools } });
-			session = new AgentSession({
-				agent,
-				sessionManager: manager,
-				settings,
-				modelRegistry,
-				toolRegistry: new Map(tools.map(tool => [tool.name, tool])),
-				builtInToolNames: BUILTIN_TOOL_NAMES,
-			});
-			await session.compact();
-			expect(recallSpy).not.toHaveBeenCalled();
-			expect(manager.getEntries().filter(candidate => candidate.type === "compaction")).toHaveLength(1);
-		} finally {
-			recallSpy.mockRestore();
-		}
 	});
 
 	it("commits no boundary when the run aborts mid-rollover while the compaction hook is parked", async () => {

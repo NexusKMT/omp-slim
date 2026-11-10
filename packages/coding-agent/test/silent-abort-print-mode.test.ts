@@ -10,11 +10,7 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runPrintMode } from "@oh-my-pi/pi-coding-agent/modes/print-mode";
-import {
-	type AgentSession,
-	type AgentSessionDisposeOptions,
-	SHUTDOWN_CONSOLIDATE_BUDGET_MS,
-} from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { type AgentSession, type AgentSessionDisposeOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SILENT_ABORT_MARKER } from "@oh-my-pi/pi-coding-agent/session/messages";
 import * as telemetryExport from "../src/telemetry-export";
 
@@ -113,15 +109,14 @@ describe("Print-mode exit status", () => {
 		expect(exitSpy).not.toHaveBeenCalled();
 	});
 
-	it("bounds final memory consolidation so print mode can exit", async () => {
-		let disposeOptions: AgentSessionDisposeOptions | undefined;
-		const session = createMockSession([makeAssistantMessage()], async options => {
-			disposeOptions = options;
+	it("disposes the session when print mode finishes", async () => {
+		let disposed = false;
+		const session = createMockSession([makeAssistantMessage()], async () => {
+			disposed = true;
 		});
 
 		await runPrintMode(session, { mode: "text" });
-
-		expect(disposeOptions?.mnemopiConsolidateTimeoutMs).toBe(SHUTDOWN_CONSOLIDATE_BUDGET_MS);
+		expect(disposed).toBe(true);
 	});
 
 	it("does not write bit-classified silent aborts to stderr or exit non-zero", async () => {
@@ -146,9 +141,9 @@ describe("Print-mode exit status", () => {
 			content: [],
 		});
 
-		let disposeOptions: AgentSessionDisposeOptions | undefined;
-		const session = createMockSession([errorMsg], async options => {
-			disposeOptions = options;
+		let disposed = false;
+		const session = createMockSession([errorMsg], async () => {
+			disposed = true;
 		});
 		const exitCode = await runPrintMode(session, { mode: "text", messages: ["hello"] });
 
@@ -157,8 +152,8 @@ describe("Print-mode exit status", () => {
 		expect(stderrText).toContain("Rate limit exceeded");
 		// The caller terminates with the returned code; runPrintMode never exits itself
 		expect(exitCode).toBe(1);
+		expect(disposed).toBe(true);
 		expect(exitSpy).not.toHaveBeenCalled();
-		expect(disposeOptions?.mnemopiConsolidateTimeoutMs).toBe(SHUTDOWN_CONSOLIDATE_BUDGET_MS);
 	});
 
 	it("returns non-zero for the terminal length-stop error retained after session recovery", async () => {

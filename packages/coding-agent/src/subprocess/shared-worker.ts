@@ -5,7 +5,7 @@
  * `JsonLineServer` in `jsonl-server.ts`). A caller describes how to start the
  * worker ({@link SharedWorkerLaunch}); {@link connectSharedWorker} adopts a
  * live worker answering with the same launch tag, replaces a stale one, or
- * spawns one. Used by the tiny-model workers and the mnemopi embedding server
+ * spawns one. Used by the tiny-model workers
  * so their models are loaded once per machine instead of once per omp process.
  */
 import * as fs from "node:fs";

@@ -59,16 +59,8 @@ export function getTinyTitleModelSpec(key: TinyTitleLocalModelKey): (typeof TINY
 	return spec;
 }
 
-/** Recommended local model for memory tasks when none is named. */
-export const DEFAULT_MEMORY_LOCAL_MODEL_KEY = "lfm2-1.2b";
-
-/**
- * Local models for Mnemopi memory tasks (fact extraction + consolidation).
- * These are larger (1B-1.7B) than the title models: structured extraction and
- * faithful summarization need more capacity than 3-6 word titles. All q4.
- * Ranking/recipe rationale lives in docs/local-models.md.
- */
-export const TINY_MEMORY_LOCAL_MODELS = [
+/** Larger local models for completion, extraction, and typed judgment workloads. */
+export const TINY_COMPLETION_LOCAL_MODELS = [
 	{
 		key: "qwen3-1.7b",
 		repo: "onnx-community/Qwen3-1.7B-ONNX",
@@ -89,7 +81,7 @@ export const TINY_MEMORY_LOCAL_MODELS = [
 		mlxRepo: "mlx-community/Llama-3.2-3B-Instruct-4bit",
 		label: "Llama 3.2 3B",
 		description:
-			"Larger Llama 3.2 option for local memory/classifier tasks; higher quality potential at higher disk/RAM/latency cost.",
+			"Larger Llama 3.2 option for local completion/classifier tasks; higher quality potential at higher disk/RAM/latency cost.",
 		contextNote: "Use when larger model capacity is preferred over faster load times.",
 	},
 	{
@@ -121,32 +113,16 @@ export const TINY_MEMORY_LOCAL_MODELS = [
 	},
 ] as const satisfies readonly TinyTitleLocalModelSpec[];
 
-export type TinyMemoryLocalModelKey = (typeof TINY_MEMORY_LOCAL_MODELS)[number]["key"];
+export type TinyCompletionLocalModelKey = (typeof TINY_COMPLETION_LOCAL_MODELS)[number]["key"];
 
-export function isTinyMemoryLocalModelKey(value: string): value is TinyMemoryLocalModelKey {
-	return TINY_MEMORY_LOCAL_MODELS.some(model => model.key === value);
-}
+/** Any local model key (title or completion), used by the shared inference worker. */
+export type TinyLocalModelKey = TinyTitleLocalModelKey | TinyCompletionLocalModelKey;
 
-export function getTinyMemoryModelSpec(key: TinyMemoryLocalModelKey): (typeof TINY_MEMORY_LOCAL_MODELS)[number] {
-	const spec = TINY_MEMORY_LOCAL_MODELS.find(model => model.key === key);
-	if (!spec) throw new Error(`Unknown tiny memory model: ${key}`);
-	return spec;
-}
-
-/** Return whether a memory local model may emit reasoning tokens before answers. */
-export function isTinyMemoryReasoningModelKey(key: TinyMemoryLocalModelKey): boolean {
-	const spec = getTinyMemoryModelSpec(key);
-	return "reasoning" in spec && spec.reasoning === true;
-}
-
-/** Any local model key (title or memory), used by the shared inference worker. */
-export type TinyLocalModelKey = TinyTitleLocalModelKey | TinyMemoryLocalModelKey;
-
-/** Resolve a local model spec by key across both the title and memory registries. */
+/** Resolve a local model spec by key across both the title and completion registries. */
 export function getTinyLocalModelSpec(key: string): TinyTitleLocalModelSpec | undefined {
 	return (
 		TINY_TITLE_LOCAL_MODELS.find(model => model.key === key) ??
-		TINY_MEMORY_LOCAL_MODELS.find(model => model.key === key)
+		TINY_COMPLETION_LOCAL_MODELS.find(model => model.key === key)
 	);
 }
 
@@ -154,8 +130,8 @@ export function isTinyLocalModelKey(value: string): value is TinyLocalModelKey {
 	return getTinyLocalModelSpec(value) !== undefined;
 }
 
-/** Combined local model registry (title + memory) for the shared tiny-models CLI. */
+/** Combined local model registry (title + completion) for the shared tiny-models CLI. */
 export const TINY_LOCAL_MODELS = [
 	...TINY_TITLE_LOCAL_MODELS,
-	...TINY_MEMORY_LOCAL_MODELS,
+	...TINY_COMPLETION_LOCAL_MODELS,
 ] as const satisfies readonly TinyTitleLocalModelSpec[];

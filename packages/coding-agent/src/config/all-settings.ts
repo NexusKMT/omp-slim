@@ -8,11 +8,6 @@ import * as sessionSettings from "../session/settings";
 import * as advisorSettings from "../advisor/settings";
 import * as configModelSettings from "./model-settings";
 import * as sessionContextSettings from "../session/context-settings";
-import * as memoryBackendSettings from "../memory-backend/settings";
-import * as memoriesSettings from "../memories/settings";
-import * as autolearnSettings from "../autolearn/settings";
-import * as mnemopiSettings from "../mnemopi/settings";
-import * as hindsightSettings from "../hindsight/settings";
 import * as exportTtsrSettings from "../export/ttsr-settings";
 import * as editSettings from "../edit/settings";
 import * as toolsSettings from "../tools/settings";
@@ -44,11 +39,6 @@ const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	telemetrySettings,
 	advisorSettings,
 	sessionContextSettings,
-	memoryBackendSettings,
-	memoriesSettings,
-	autolearnSettings,
-	mnemopiSettings,
-	hindsightSettings,
 	exportTtsrSettings,
 	editSettings,
 	toolsSettings,
