@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it, vi } from "bun:test";
 import type { TspPickerProps } from "@oh-my-pi/pi-wire";
 import { OverlayPanel } from "../src/chrome/overlay-box";
 import { TextFormField } from "../src/components/form";
@@ -114,15 +114,47 @@ describe("session selector picker", () => {
 	});
 
 	it("keeps the catalogue while typing: only order, hits and selection follow the query", () => {
-		const selector = make();
-		const before = props(selector.describe(withPicker));
-		type(selector, "gam");
-		const after = props(selector.describe(withPicker));
-		expect(after.items).toBe(before.items);
-		expect(after.query).toBe("gam");
-		expect(after.order).toEqual([old.path]);
-		expect(after.hits).toEqual({ [old.path]: [[0, 3]] });
-		expect(after.selected).toBe(old.path);
+		// Age labels invalidate the catalogue each minute. Hold time fixed to
+		// isolate query changes, and restore before this synchronous test exits.
+		const now = Date.now();
+		const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+		try {
+			const selector = make();
+			const before = props(selector.describe(withPicker));
+			type(selector, "gam");
+			const after = props(selector.describe(withPicker));
+			expect(after.items).toBe(before.items);
+			expect(after.query).toBe("gam");
+			expect(after.order).toEqual([old.path]);
+			expect(after.hits).toEqual({ [old.path]: [[0, 3]] });
+			expect(after.selected).toBe(old.path);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it("refreshes relative ages at the minute boundary without moving selection", () => {
+		let now = Math.floor(Date.now() / 60_000) * 60_000 + 59_999;
+		const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+		try {
+			const recent = session("recent", "Recent", 59_999);
+			const selector = new SessionSelectorComponent(
+				[recent],
+				() => {},
+				() => {},
+				() => {},
+				{ currentSessionPath: recent.path },
+			);
+			const before = props(selector.describe(withPicker));
+			expect(before.items?.[0]?.facts?.when).toBe("now");
+			now += 1;
+			const after = props(selector.describe(withPicker));
+			expect(after.items).not.toBe(before.items);
+			expect(after.items?.[0]?.facts?.when).toBe("1m");
+			expect(after.selected).toBe(recent.path);
+		} finally {
+			clock.mockRestore();
+		}
 	});
 
 	it("runs pointer events down the keys' paths", async () => {
