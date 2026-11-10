@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import type { AgentHubDeps, AgentHubRemote } from "@oh-my-pi/pi-tui/overlays/agent-hub";
+import type { AgentHubDeps } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import type { AgentRecordLike } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
 import { type AgentCostSnapshot, aggregateCost } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
 import type { AgentTranscriptSource } from "@oh-my-pi/pi-tui/overlays/agent-transcript-viewer";
@@ -33,7 +33,6 @@ export function createAgentHubRuntime(
 		lifecycle?: AgentLifecycleApi;
 		irc?: IrcBusApi;
 		activity?: AgentActivityIndex;
-		remote?: AgentHubRemote;
 		settings?: Settings;
 		sessionFile?: string | null;
 	} = {},
@@ -46,15 +45,13 @@ export function createAgentHubRuntime(
 	const copied = new Set<AgentRecordLike>();
 	return {
 		registry,
-		// Local roster only: a collab guest mirrors the host's registry, whose
-		// transcript paths never sit under the guest's replica session.
-		inSession:
-			rootSessionFile && !options.remote
-				? ref => !ref.sessionFile || sessionFileBelongsToRoot(ref.sessionFile, rootSessionFile) || copied.has(ref)
-				: undefined,
+		// Only include transcripts under this session's artifact tree.
+		inSession: rootSessionFile
+			? ref => !ref.sessionFile || sessionFileBelongsToRoot(ref.sessionFile, rootSessionFile) || copied.has(ref)
+			: undefined,
 		lifecycle: () => options.lifecycle ?? AgentLifecycleManager.global(),
 		irc: options.irc ?? IrcBus.global(),
-		activity: options.activity ?? new AgentActivityIndex({ remote: options.remote }),
+		activity: options.activity ?? new AgentActivityIndex(),
 		manageActivityLive: !options.activity,
 		transcript: agentTranscriptSource,
 		loadPersisted: shouldContinue =>

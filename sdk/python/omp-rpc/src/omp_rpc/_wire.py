@@ -3439,13 +3439,6 @@ class WireClient:
         params["sessionIds"] = list(session_ids)
         return parse_get_session_lease_result(self._command("get_session_lease", params), "get_session_lease")
 
-    def export_html(self, output_path: str | Path | None = None) -> Path:
-        """Export the session as HTML; returns the written path."""
-        params: dict[str, object] = {}
-        if output_path is not None:
-            params["outputPath"] = str(output_path)
-        return Path(required(expect_object(self._command("export_html", params), "export_html"), "path", decode_str, "export_html"))
-
     def switch_session(self, session_path: str | Path, *, provider: str | None = None, model_id: str | None = None) -> CancellationResult:
         """Switch to another session file. Give provider and modelId together to override the saved model; otherwise an unavailable saved model fails the request and keeps the current session."""
         params: dict[str, object] = {}

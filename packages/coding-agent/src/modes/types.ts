@@ -4,9 +4,6 @@ import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "
 import type { Component, Container, EditorTheme, KeyId, Loader, TUI } from "@oh-my-pi/pi-tui";
 import type { TspText } from "@oh-my-pi/pi-wire";
 import type { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
-import type { CollabController } from "../collab/controller";
-import type { CollabGuestLink } from "../collab/guest";
-import type { CollabHost } from "../collab/host";
 import type { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import type { Settings } from "../config/settings";
@@ -102,8 +99,6 @@ export type SubmittedUserInput = {
 export interface InteractiveModeInitOptions {
 	suppressWelcomeIntro?: boolean;
 	clearInitialTerminalHistory?: boolean;
-	/** Opt into hosting when the caller owns outer startup readiness and shutdown. */
-	autoStartCollab?: boolean;
 	/** A command-line prompt runs once startup ends: report `working` from the first frame. */
 	startupRun?: boolean;
 }
@@ -118,7 +113,6 @@ export interface ResumeSessionOptions {
 	/**
 	 * The user chose this session to resume (picker, `/resume <id>`, welcome
 	 * card): when its conversation went on in another file, resume that copy.
-	 * Restoring a session the process itself left (collab) opens the path as given.
 	 */
 	followContinuation?: boolean;
 	/**
@@ -265,14 +259,6 @@ export interface InteractiveModeContext {
 	historyStorage?: HistoryStorage;
 	mcpManager?: MCPManager;
 	lspServers?: LspStartupServerInfo[];
-	/** Owns hosting: manual `/collab`, `collab.autoStart`, and room rotation on session switch. */
-	collabController: CollabController;
-	/** Owned room; use {@link collabController}.host for current-session reuse and links. */
-	collabHost?: CollabHost;
-	/** The collab session this process joined as a guest; set with {@link setCollabGuest}. */
-	readonly collabGuest?: CollabGuestLink;
-	/** Join (`guest`) or leave (`undefined`) a collab session as a guest. */
-	setCollabGuest(guest: CollabGuestLink | undefined): void;
 	eventController: EventController;
 	eventBus?: EventBus;
 	/** Root-scoped bus carrying this session tree's `task:subagent:*` frames. */
@@ -531,7 +517,7 @@ export interface InteractiveModeContext {
 	truncateTranscriptFromMessage(message: AgentMessage): boolean;
 	findLastAssistantMessage(): AssistantMessage | undefined;
 	extractAssistantText(message: AssistantMessage): string;
-	/** Refresh the running-subagents status badge from the active local or collab registry. */
+	/** Refresh the running-subagents status badge from the local agent registry. */
 	syncRunningSubagentBadge(): void;
 	updateEditorBorderColor(): void;
 	rebuildChatFromMessages(options?: { reuseSettledComponents?: boolean }): void;
@@ -540,9 +526,7 @@ export interface InteractiveModeContext {
 	toggleTodoExpansion(): void;
 	setTodoExpanded(expanded: boolean): void;
 	// Command handling
-	handleExportCommand(text: string): Promise<void>;
 	handleTraceCommand(): Promise<void>;
-	handleShareCommand(): Promise<void>;
 	handleTodoCommand(args: string): Promise<void>;
 	handleSessionCommand(): Promise<void>;
 	handleAdvisorStatusCommand(): Promise<void>;
@@ -581,8 +565,6 @@ export interface InteractiveModeContext {
 	handleWorktreeCommand(branch?: string, options?: { keepChanges?: boolean }): Promise<void>;
 	withBtwSessionMove(operation: () => Promise<boolean>): Promise<boolean>;
 	handleRenameCommand(title: string): Promise<void>;
-	/** Start a `/record` screen capture, or stop the running one. */
-	toggleRecording(): Promise<void>;
 	executeCompaction(
 		customInstructionsOrOptions?: string | CompactOptions,
 		isAuto?: boolean,

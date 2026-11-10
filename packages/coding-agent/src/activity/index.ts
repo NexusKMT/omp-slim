@@ -10,16 +10,6 @@ export type {
 } from "@oh-my-pi/pi-tui/overlays/agent-activity";
 export { activityRowsFromProgress } from "@oh-my-pi/pi-tui/overlays/agent-activity";
 
-export interface AgentActivityTranscript {
-	text: string;
-	newSize: number;
-	error?: string;
-}
-
-export interface AgentActivityRemote {
-	readTranscript(agentId: string, fromByte: number): Promise<AgentActivityTranscript | null>;
-}
-
 interface TranscriptState {
 	path?: string;
 	offset: number;
@@ -209,16 +199,11 @@ export class AgentActivityIndex {
 	#states = new Map<string, TranscriptState>();
 	#liveRows = new Map<string, AgentActivityRow[]>();
 	#listeners = new Set<() => void>();
-	#remote: AgentActivityRemote | undefined;
 	/** Bumped on every change; keys the merged-row and query caches. */
 	#revision = 0;
 	#mergedRevision = -1;
 	#merged = new Map<string, AgentActivityRow[]>();
 	#queryCache: QueryCacheEntry | undefined;
-
-	constructor(options?: { remote?: AgentActivityRemote }) {
-		this.#remote = options?.remote;
-	}
 
 	onChange(listener: () => void): () => void {
 		this.#listeners.add(listener);
@@ -234,10 +219,6 @@ export class AgentActivityIndex {
 	}
 
 	async sync(agentId: string, sessionFile?: string | null): Promise<void> {
-		if (this.#remote) {
-			await this.#syncRemote(agentId);
-			return;
-		}
 		if (!sessionFile) return;
 		await this.#syncLocal(agentId, sessionFile);
 	}
@@ -365,49 +346,6 @@ export class AgentActivityIndex {
 		state.offset = stat.size;
 		state.mtimeMs = stat.mtimeMs;
 		this.#consume(agentId, state, text, start > 0 && state.rows.length === 0);
-	}
-
-	async #syncRemote(agentId: string): Promise<void> {
-		let state = this.#states.get(agentId);
-		if (!state) {
-			state = { offset: 0, mtimeMs: 0, pending: "", rows: [], toolRows: new Map() };
-			this.#states.set(agentId, state);
-			// The host returns the actual EOF when asked beyond it. Probe once so
-			// historical sessions start at the same bounded tail as local files.
-			let probe: AgentActivityTranscript | null | undefined;
-			try {
-				probe = await this.#remote?.readTranscript(agentId, Number.MAX_SAFE_INTEGER);
-			} catch {
-				return;
-			}
-			if (!probe || probe.error) return;
-			state.offset = Math.max(0, probe.newSize - INITIAL_TAIL_BYTES);
-		}
-		let result: AgentActivityTranscript | null | undefined;
-		try {
-			result = await this.#remote?.readTranscript(agentId, state.offset);
-		} catch {
-			return;
-		}
-		if (!result || result.error) return;
-		if (result.newSize < state.offset) {
-			state.offset = Math.max(0, result.newSize - INITIAL_TAIL_BYTES);
-			state.pending = "";
-			const hadRows = state.rows.length > 0;
-			state.rows = [];
-			state.toolRows.clear();
-			// The truncated transcript's rows are gone even if the new tail yields none.
-			if (hadRows) this.#notify();
-			try {
-				result = await this.#remote?.readTranscript(agentId, state.offset);
-			} catch {
-				return;
-			}
-			if (!result || result.error) return;
-		}
-		if (result.newSize === state.offset && !result.text) return;
-		this.#consume(agentId, state, result.text, state.offset > 0 && state.rows.length === 0);
-		state.offset = result.newSize;
 	}
 
 	#consume(agentId: string, state: TranscriptState, chunk: string, dropLeadingPartial: boolean): void {

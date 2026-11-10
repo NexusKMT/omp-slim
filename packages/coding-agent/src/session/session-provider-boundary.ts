@@ -28,9 +28,7 @@ import type { SessionManager } from "./session-manager";
 import {
 	cfgModelLoopGuardCheckAssistantContent,
 	cfgModelLoopGuardEnabled,
-	cfgProvidersAntigravityEndpoint,
 	cfgProvidersMaxInFlightRequests,
-	cfgProvidersOpenrouterVariant,
 	validateProviderMaxInFlightRequests,
 } from "./settings";
 
@@ -120,7 +118,7 @@ export class SessionProviderBoundary {
 		return deobfuscateSessionContext(
 			this.#host.sessionManager.buildSessionContext({
 				inFlightToolCallIds: this.#inFlightToolCallIds(),
-				maxFrameDataBytes: snapcompact.frameDataBytesBudget(model),
+				maxFrameDataBytes: snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET,
 				model,
 			}),
 			this.#host.obfuscator(),
@@ -133,7 +131,7 @@ export class SessionProviderBoundary {
 	 */
 	readsOtherCompaction(a: Model | undefined, b: Model | undefined): boolean {
 		const branch = this.#host.sessionManager.getBranch();
-		return getReadableCompactionEntry(branch, a) !== getReadableCompactionEntry(branch, b);
+		return false;
 	}
 
 	/**
@@ -230,19 +228,9 @@ export class SessionProviderBoundary {
 		const sessionOnResponse = this.#host.onResponse;
 		const sessionMetadata = this.#host.agent.metadataForProvider(provider);
 		const sessionOnSseEvent = this.#host.onSseEvent;
-		const openrouterRoutingPreset =
-			provider === "openrouter" ? cfgProvidersOpenrouterVariant.get(this.#host.settings) : "default";
-		const openrouterVariant =
-			openrouterRoutingPreset !== "default" && options.openrouterVariant === undefined
-				? openrouterRoutingPreset
-				: undefined;
-		const antigravityEndpointMode =
-			provider === "google-antigravity" ? cfgProvidersAntigravityEndpoint.get(this.#host.settings) : undefined;
 
 		const preparedOptions: SimpleStreamOptions = {
 			...options,
-			...(openrouterVariant !== undefined && { openrouterVariant }),
-			...(antigravityEndpointMode !== undefined && { antigravityEndpointMode }),
 			maxInFlightRequests: validateProviderMaxInFlightRequests(
 				options.maxInFlightRequests ?? cfgProvidersMaxInFlightRequests.get(this.#host.settings),
 			),

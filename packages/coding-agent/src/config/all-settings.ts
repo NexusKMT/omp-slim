@@ -24,9 +24,6 @@ import * as idaSettings from "../ida/settings";
 import * as mcpSettings from "../mcp/settings";
 import * as blobBrokerSettings from "../blob-broker/settings";
 import * as secretsSettings from "../secrets/settings";
-import * as collabSettings from "../collab/settings";
-import * as commandsSettings from "../commands/settings";
-import * as streamSettings from "../stream/settings";
 import * as commitSettings from "../commit/settings";
 import * as cliGcSettings from "../cli/gc-settings";
 import * as telemetrySettings from "../telemetry-settings";
@@ -54,9 +51,6 @@ const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	mcpSettings,
 	blobBrokerSettings,
 	secretsSettings,
-	collabSettings,
-	commandsSettings,
-	streamSettings,
 	commitSettings,
 	cliGcSettings,
 ];

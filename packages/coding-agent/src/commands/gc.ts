@@ -16,7 +16,7 @@ export default class Gc extends Command {
 		archive: Flags.boolean({ description: "Archive cold sessions" }),
 		wal: Flags.boolean({ description: "Checkpoint history/model database WAL files" }),
 		stale: Flags.boolean({
-			description: "Prune dangling session markers/breadcrumbs and old debug reports and collab replicas",
+			description: "Prune dangling session markers/breadcrumbs and old debug reports",
 		}),
 		compress: Flags.boolean({
 			description: "Store idle sessions with filesystem compression in place (APFS, NTFS)",
@@ -29,9 +29,9 @@ export default class Gc extends Command {
 		"retain-newest-global": Flags.integer({ description: "Always keep this many newest sessions active" }),
 		"retain-newest-per-cwd": Flags.integer({ description: "Always keep this many newest sessions per cwd active" }),
 		"stale-retain-newest": Flags.integer({
-			description: "Always keep this many newest debug reports and collab replicas",
+			description: "Always keep this many newest debug reports",
 		}),
-		"stale-retain-days": Flags.integer({ description: "Minimum debug report/collab replica age before pruning" }),
+		"stale-retain-days": Flags.integer({ description: "Minimum debug report age before pruning" }),
 		"compress-after-days": Flags.integer({ description: "Minimum idle days before compressing a session" }),
 		"strip-after-days": Flags.integer({ description: "Minimum idle days before stripping a session" }),
 	};

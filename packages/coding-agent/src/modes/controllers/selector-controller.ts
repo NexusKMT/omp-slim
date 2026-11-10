@@ -2248,8 +2248,6 @@ export class SelectorController {
 		const hub = new AgentHubOverlayComponent({
 			...createAgentHubRuntime({
 				settings: this.ctx.settings,
-				registry: this.ctx.collabGuest?.agentRegistry,
-				remote: this.ctx.collabGuest?.hubRemote,
 				sessionFile: this.ctx.sessionManager.getSessionFile() ?? null,
 			}),
 			observers,
@@ -2258,7 +2256,6 @@ export class SelectorController {
 			initialSection: options?.initialSection,
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
-			remote: this.ctx.collabGuest?.hubRemote,
 			ui: this.ctx.ui,
 			getTool: name => this.ctx.session.getToolByName(name),
 			isBuiltInTool: name => this.ctx.session.hasBuiltInTool(name),

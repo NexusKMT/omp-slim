@@ -3,8 +3,6 @@
  */
 
 import type { Message, ToolCall } from "@oh-my-pi/pi-ai";
-import { type Dialect, getDialectDefinition } from "@oh-my-pi/pi-ai/dialect";
-import { escapeHarmonyControlTokens } from "@oh-my-pi/pi-ai/utils/harmony-leak";
 import { prompt, stringifyJson } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { AgentMessage } from "../types";
@@ -152,23 +150,19 @@ export function escapeSummaryBoundaryTags(text: string): string {
 
 /**
  * Serialize LLM messages as plain summary input without provider control tokens.
- * `dropThinking` is the summarizer's resolved `classifier-cot-extraction` policy.
  */
-export function serializeConversationForSummary(messages: Message[], dialect?: Dialect, dropThinking = false): string {
-	const conversation = serializeConversation(messages, dialect, dropThinking);
-	const escaped = dialect === "harmony" ? escapeHarmonyControlTokens(conversation) : conversation;
-	return escapeSummaryBoundaryTags(escaped);
+export function serializeConversationForSummary(messages: Message[]): string {
+	return escapeSummaryBoundaryTags(serializeConversation(messages));
 }
 
 /**
  * Serialize LLM messages to transcript text.
  * Call convertToLlm() first to handle custom message types.
- * `dropThinking` omits assistant reasoning from dialect transcripts: set it from
  * the reader's resolved `classifier-cot-extraction` catalog policy (Claude's
  * classifier refuses inputs that reproduce the model's own reasoning as text,
  * "reasoning_extraction"). Reasoning is ephemeral and low-signal for a summary.
  */
-export function serializeConversation(messages: Message[], dialect?: Dialect, dropThinking = false): string {
+export function serializeConversation(messages: Message[]): string {
 	// Tool results flagged contextually useless (and their paired calls) are
 	// dropped from the serialized text: the source region is discarded after
 	// summarization anyway, so excluding them costs nothing and keeps garbage
@@ -178,35 +172,6 @@ export function serializeConversation(messages: Message[], dialect?: Dialect, dr
 		if (msg.role === "toolResult" && msg.useless === true && msg.isError !== true) {
 			uselessCallIds.add(msg.toolCallId);
 		}
-	}
-	if (dialect) {
-		const processed: Message[] = [];
-		for (const msg of messages) {
-			if (msg.role === "assistant") {
-				const content = msg.content.filter(
-					block =>
-						(block.type !== "toolCall" || !uselessCallIds.has(block.id)) &&
-						(!dropThinking || block.type !== "thinking"),
-				);
-				if (content.length > 0) processed.push(content.length === msg.content.length ? msg : { ...msg, content });
-				continue;
-			}
-			if (msg.role === "toolResult") {
-				if (uselessCallIds.has(msg.toolCallId)) continue;
-				const text = msg.content
-					.filter((c): c is { type: "text"; text: string } => c.type === "text")
-					.map(c => c.text)
-					.join("");
-				if (!text) continue;
-				processed.push({
-					...msg,
-					content: [{ type: "text", text: truncateToolResultForSummary(text) }],
-				});
-				continue;
-			}
-			processed.push(msg);
-		}
-		return getDialectDefinition(dialect).renderTranscript(processed);
 	}
 
 	const parts: string[] = [];

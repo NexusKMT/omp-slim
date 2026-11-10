@@ -27,13 +27,9 @@ import { getActiveProfile, getConfigDirName } from "@oh-my-pi/pi-utils/dirs";
 import { classifyTerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type BashResult, isPersistentShellCdCommand } from "../../exec/bash-executor";
-import { type LoadedCustomShare, loadCustomShare } from "../../export/custom-share";
-import { parseExportArgs } from "../../export/html/args";
-import { shareSession } from "../../export/share";
 import type { CompactOptions } from "../../extensibility/extensions/types";
 import { BashExecutionComponent, bashPtyViewport } from "@oh-my-pi/pi-tui/chat/bash-execution";
 import { appKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
-import { BorderedLoader } from "@oh-my-pi/pi-tui/overlays/bordered-loader";
 import { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
 import { promptCacheDetails } from "@oh-my-pi/pi-tui/status-line/prompt-cache";
 import { messageBlock, PresentedBlock } from "@oh-my-pi/pi-tui/chat/transcript-presentation";
@@ -105,7 +101,6 @@ import type { UnavailableUsageAccount } from "@oh-my-pi/pi-tui/overlays/usage-da
 
 import { cfgTerminalShowImages } from "../settings";
 import { cfgProviderAppendOnlyContext } from "../../session/settings";
-import { cfgShareRedactSecrets, cfgShareServerUrl, cfgShareStore } from "../../commands/settings";
 import { flagConsumesValue, restartArgv } from "../../cli/flag-tables";
 import {
 	createDefaultTerminalLaunchRequest,
@@ -348,24 +343,6 @@ export class CommandController {
 	openInBrowser(urlOrPath: string): void {
 		openPath(urlOrPath);
 	}
-
-	async handleExportCommand(text: string): Promise<void> {
-		try {
-			const { outputPath, useUserThemes } = parseExportArgs(text.slice("/export".length));
-			if (outputPath === "--copy" || outputPath === "clipboard" || outputPath === "copy") {
-				this.ctx.showWarning("Use /dump to copy the session to clipboard.");
-				return;
-			}
-
-			// The viewed session: the focused subagent's transcript (plus its own
-			// subagents) from a focused view, otherwise the main session.
-			const filePath = await this.ctx.viewSession.exportToHtml(outputPath, useUserThemes);
-			this.ctx.showStatus(`Session exported to: ${filePath}`);
-			this.openInBrowser(filePath);
-		} catch (error: unknown) {
-			this.ctx.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
-		}
-	}
 	async handleTraceCommand(): Promise<void> {
 		const sessionFile = this.ctx.session.sessionFile;
 		if (!sessionFile) {
@@ -474,90 +451,6 @@ export class CommandController {
 			this.ctx.showError(
 				`Failed to write debug transcript: ${error instanceof Error ? error.message : "Unknown error"}`,
 			);
-		}
-	}
-
-	async handleShareCommand(): Promise<void> {
-		let customShare: LoadedCustomShare | null;
-		try {
-			customShare = await loadCustomShare();
-		} catch (err) {
-			this.ctx.showError(err instanceof Error ? err.message : String(err));
-			return;
-		}
-
-		const loader = new BorderedLoader(this.ctx.ui, theme, "Sharing session...");
-		this.ctx.editorContainer.clear();
-		this.ctx.editorContainer.addChild(loader);
-		this.ctx.ui.setFocus(loader);
-		this.ctx.ui.requestRender();
-
-		const restoreEditor = () => {
-			loader.dispose();
-			this.ctx.editorContainer.clear();
-			this.ctx.editorContainer.addChild(this.ctx.editor);
-			this.ctx.ui.setFocus(this.ctx.editor);
-		};
-		loader.onAbort = () => {
-			restoreEditor();
-			this.ctx.showStatus("Share cancelled");
-		};
-
-		// Custom share scripts keep their legacy contract: they receive a path
-		// to a standalone HTML export. No fallback to the default flow on error.
-		if (customShare) {
-			const tmpFile = path.join(os.tmpdir(), `${Snowflake.next()}.html`);
-			try {
-				await this.ctx.session.exportToHtml(tmpFile);
-				const result = await customShare.fn(tmpFile);
-				if (loader.signal.aborted) return;
-				restoreEditor();
-
-				if (typeof result === "string") {
-					this.ctx.showStatus(`Share URL: ${result}`);
-					this.openInBrowser(result);
-				} else if (result) {
-					const parts: string[] = [];
-					if (result.url) parts.push(`Share URL: ${result.url}`);
-					if (result.message) parts.push(result.message);
-					if (parts.length > 0) this.ctx.showStatus(parts.join("\n"));
-					if (result.url) this.openInBrowser(result.url);
-				} else {
-					this.ctx.showStatus("Session shared");
-				}
-			} catch (err) {
-				if (!loader.signal.aborted) {
-					restoreEditor();
-					this.ctx.showError(`Custom share failed: ${err instanceof Error ? err.message : String(err)}`);
-				}
-			} finally {
-				await fs.rm(tmpFile, { force: true }).catch(() => {});
-			}
-			return;
-		}
-
-		// Default: encrypted snapshot to a secret gist (preferred) or the share
-		// server; the key rides in the link fragment and never leaves the client.
-		try {
-			const result = await shareSession(this.ctx.session.sessionManager, {
-				serverUrl: cfgShareServerUrl.get(this.ctx.settings),
-				store: cfgShareStore.get(this.ctx.settings),
-				state: this.ctx.session.state,
-				obfuscator: cfgShareRedactSecrets.get(this.ctx.settings) ? this.ctx.session.obfuscator : undefined,
-			});
-			if (loader.signal.aborted) return;
-			restoreEditor();
-
-			const lines = [`Share URL: ${result.url}`];
-			if (result.gistUrl) lines.push(`Gist: ${result.gistUrl}`);
-			if (result.truncated) lines.push("Note: large content was trimmed to fit the share size limit.");
-			this.ctx.showStatus(lines.join("\n"));
-			this.openInBrowser(result.url);
-		} catch (error: unknown) {
-			if (!loader.signal.aborted) {
-				restoreEditor();
-				this.ctx.showError(`Failed to share session: ${error instanceof Error ? error.message : "Unknown error"}`);
-			}
 		}
 	}
 

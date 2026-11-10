@@ -377,7 +377,6 @@ export interface AgentViewSession extends AgentSessionHandle {
 	/** Whether an ephemeral turn's `maxTokens` reaches the provider unchanged. */
 	ephemeralMaxTokensPreservesRequest(): boolean;
 	/** Export the transcript to HTML; returns the written path. */
-	exportToHtml(outputPath?: string, useUserThemes?: boolean): Promise<string>;
 	/** Bind idle maintenance to this session. */
 	enableIdleMaintenance(options?: IdleMaintenanceOptions): void;
 	/** Re-evaluate idle maintenance scheduling. */

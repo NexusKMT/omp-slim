@@ -9,7 +9,6 @@ import type {
 	AssistantMessage,
 	AssistantRetryRecovery,
 	AssistantRetryRecoveryKind,
-	CodexCompactionContext,
 	Model,
 	TextContent,
 	ToolChoice,
@@ -31,7 +30,6 @@ import streamStallContinueTemplate from "../prompts/system/stream-stall-continue
 import thinkingLoopRedirectTemplate from "../prompts/system/thinking-loop-redirect.md" with { type: "text" };
 import unexpectedStopRetryTemplate from "../prompts/system/unexpected-stop-retry.md" with { type: "text" };
 import type { AgentSessionEvent } from "./agent-session-events";
-import type { ResetRecoveryResult } from "./codex-auto-reset";
 import { assistantTurnProducedOutput, isEmptyAssistantStop, isEmptyErrorTurn, isUserAuthoredMessage } from "./messages";
 import { calculateRetryBackoffDelayMs, formatRetryFallbackSelector, type ServingModel } from "./retry-fallback-chains";
 import { getLatestCompactionEntry } from "./session-context";
@@ -48,7 +46,7 @@ const UNEXPECTED_STOP_MAX_RETRIES = 3;
 const EMPTY_STOP_MAX_RETRIES = 3;
 const MALFORMED_FUNCTION_CALL_MAX_RETRIES = 3;
 const STREAM_STALL_CONTINUE_MAX_RETRIES = 3;
-const SIBLING_UNBLOCK_BUFFER_MS = 1_000;
+
 const NON_WHITESPACE_RE = /\S/;
 const USAGE_PREFLIGHT_BLOCKED_PREFIX = "Usage preflight blocked:";
 const STREAM_STALL_ERROR_RE = /stream stall/i;
@@ -192,8 +190,6 @@ export interface RecoveryCompactionResult {
 	historyRewritten?: boolean;
 }
 
-type RequestBodyReadTimeoutRecovery = "not-applicable" | "handled-retry" | "handled-terminal";
-
 /** Capabilities borrowed from the owning AgentSession. */
 export interface TurnRecoveryHost {
 	agent: Agent;
@@ -224,13 +220,11 @@ export interface TurnRecoveryHost {
 	appendSessionMessage(message: AssistantMessage): void;
 	persistedAssistantEntryId(message: AssistantMessage): string | undefined;
 	sessionMessageAlreadyPersisted(message: AssistantMessage): boolean;
-	resetCurrentResponsesProviderSession(reason: string): void;
 	/**
 	 * Spend an eligible saved reset for the blocked provider pool.
 	 * `activeBlockUnblockAtMs` is the absolute unblock time parsed from the live
 	 * usage-limit error and never substitutes for live grant eligibility.
 	 */
-	maybeAutoRedeemReset(activeBlockUnblockAtMs?: number): Promise<ResetRecoveryResult>;
 	runAutoCompaction(
 		reason: "overflow" | "threshold" | "idle" | "incomplete",
 		willRetry: boolean,
@@ -239,14 +233,12 @@ export interface TurnRecoveryHost {
 			triggerContextTokens?: number;
 			suppressContinuation?: boolean;
 			suppressHandoff?: boolean;
-			phase?: CodexCompactionContext["phase"];
 			terminalTextAnswer?: boolean;
 			/** Skip `snapcompact` — a byte/payload-limit 413 recovery must not
 			 *  retry with an even larger, media-heavy request (#11482). */
 			excludeMediaMethods?: boolean;
 		},
 	): Promise<RecoveryCompactionResult>;
-	shakeForRequestBodyReadTimeout(generation: number): Promise<boolean>;
 	withBashBranchTransition<T>(operation: () => T): T;
 }
 
@@ -269,16 +261,6 @@ type RetryPolicyOptions = {
 	preserveFailedTurn?: boolean;
 };
 
-type UsageLimitOutcome = {
-	switchedCredential: boolean;
-	retryAfterMs: number;
-	retryAtMs: number | undefined;
-	blockedUntilMs: number | undefined;
-	priorBlockedUntilMs: number | undefined;
-	priorBlockedUntilTimed: boolean | undefined;
-	reportResetAtMs: number | undefined;
-};
-
 /** Owns terminal-stop recovery and retries of the current model. */
 export class TurnRecovery {
 	readonly #host: TurnRecoveryHost;
@@ -286,14 +268,11 @@ export class TurnRecovery {
 	#retryAbortController: AbortController | undefined;
 	#retryAttempt = 0;
 
-	/** Per-model account walk allowance, snapshotted once and cleared when the retry saga ends. */
-	readonly #accountPolicyRotationsRemaining = new Map<string, number>();
-	#requestBodyReadTimeoutRecoveryPromptSequence: number | undefined;
 	#retryPromise: Promise<void> | undefined;
 	#retryResolve: (() => void) | undefined;
 
 	#pendingRetryErrors: PendingRetryError[] = [];
-	#usageLimitOutcomes = new WeakMap<AssistantMessage, Promise<UsageLimitOutcome>>();
+
 	#emptyStopRetryCount = 0;
 	#unexpectedStopRetryCount = 0;
 	#malformedFunctionCallRetryCount = 0;
@@ -408,7 +387,6 @@ export class TurnRecovery {
 		// new, so the next exact full-replay body-read timeout gets its own single
 		// shake-and-retry. Back-to-back timeouts never reach this point, so the
 		// one-shot bound on an unchanged-request loop is unaffected.
-		this.#requestBodyReadTimeoutRecoveryPromptSequence = undefined;
 		const model = this.#host.model();
 		if (model) {
 			const level = this.#host.thinkingLevel();
@@ -540,7 +518,7 @@ export class TurnRecovery {
 			AIError.retriable(id) &&
 			!this.#host.streamingEditAbortTriggered() &&
 			isUnexpectedSocketCloseMessage(message.errorMessage ?? "");
-		if (!socketClosed && !AIError.isCodexSteerRejection(message) && !this.#isMidStreamTransportFailure(message, id)) {
+		if (!socketClosed && !this.#isMidStreamTransportFailure(message, id)) {
 			this.#streamStallContinueCount = 0;
 			return false;
 		}
@@ -610,50 +588,6 @@ export class TurnRecovery {
 		return this.#handleRetryableError(message, options);
 	}
 
-	/**
-	 * Records a usage-limit failure before replay eligibility decides whether the
-	 * failed turn may be discarded. Returns whether credential recovery switched
-	 * the active account.
-	 */
-	async recordUsageLimitOutcome(message: AssistantMessage): Promise<boolean> {
-		if (message.stopReason !== "error") return false;
-		const id = this.#classifyRetryMessage(message);
-		const activeModel = this.#host.model();
-		if (!activeModel || !AIError.is(id, AIError.Flag.UsageLimit)) return false;
-
-		let recorded = this.#usageLimitOutcomes.get(message);
-		if (!recorded) {
-			const errorMessage = message.errorMessage || "Unknown error";
-			const parsedRetryAfterMs = this.#parseRetryAfterMsFromError(errorMessage);
-			const retryAfterMs = parsedRetryAfterMs ?? calculateRateLimitBackoffMs(parseRateLimitReason(errorMessage));
-			recorded = (async (): Promise<UsageLimitOutcome> => {
-				const outcome = await this.#host.modelRegistry.authStorage.limits.markReached(
-					activeModel.provider,
-					this.#host.sessionId(),
-					{
-						retryAfterMs,
-						// Provider-stated timing only when the error text parsed;
-						// the 30-minute fallback is a guess.
-						providerTimed: parsedRetryAfterMs !== undefined,
-						baseUrl: activeModel.baseUrl,
-						modelId: activeModel.id,
-					},
-				);
-				return {
-					switchedCredential: outcome.switched,
-					retryAfterMs,
-					retryAtMs: outcome.retryAtMs,
-					blockedUntilMs: outcome.blockedUntilMs,
-					priorBlockedUntilMs: outcome.priorBlockedUntilMs,
-					priorBlockedUntilTimed: outcome.priorBlockedUntilTimed,
-					reportResetAtMs: outcome.reportResetAtMs,
-				};
-			})();
-			this.#usageLimitOutcomes.set(message, recorded);
-		}
-		return (await recorded).switchedCredential;
-	}
-
 	/** Prompts after transient overlap with a prior agent run. `onClaimed` fires synchronously
 	 *  right after a successful `agent.prompt` claim (before the run is awaited), letting the
 	 *  caller mark the exact moment its own run went live. */
@@ -672,7 +606,6 @@ export class TurnRecovery {
 
 	/** Resolve the pending retry promise; the saga is over, and so is its refusal walk. */
 	resolveRetry(): void {
-		this.#accountPolicyRotationsRemaining.clear();
 		if (this.#retryResolve) {
 			this.#retryResolve();
 			this.#retryResolve = undefined;
@@ -734,8 +667,7 @@ export class TurnRecovery {
 		this.#host.appendSessionMessage(message);
 	}
 
-	#retryRecoveryKind(id: number, switchedCredential: boolean, delayMs: number): AssistantRetryRecoveryKind {
-		if (switchedCredential) return "credential";
+	#retryRecoveryKind(id: number, delayMs: number): AssistantRetryRecoveryKind {
 		if (AIError.is(id, AIError.Flag.UsageLimit) && delayMs > 0) return "wait";
 		return "plain";
 	}
@@ -758,11 +690,7 @@ export class TurnRecovery {
 		return parts.join("; ");
 	}
 
-	async #recordPendingRetryError(
-		message: AssistantMessage,
-		id: number,
-		options: { switchedCredential: boolean; delayMs: number },
-	): Promise<void> {
+	async #recordPendingRetryError(message: AssistantMessage, id: number, options: { delayMs: number }): Promise<void> {
 		await this.persistTerminalEmptyErrorTurn(message);
 		const persistenceKey = sessionMessagePersistenceKey(message);
 		if (!persistenceKey) return;
@@ -777,7 +705,7 @@ export class TurnRecovery {
 		if (!branchEntry) return;
 		if (this.#pendingRetryErrors.some(error => error.entryId === branchEntry.id)) return;
 		const rateLimited = AIError.is(id, AIError.Flag.UsageLimit);
-		const recovery = this.#retryRecoveryKind(id, options.switchedCredential, options.delayMs);
+		const recovery = this.#retryRecoveryKind(id, options.delayMs);
 		const note = this.#retryRecoveryNote(recovery, rateLimited);
 		this.#pendingRetryErrors.push({
 			entryId: branchEntry.id,
@@ -1067,7 +995,6 @@ export class TurnRecovery {
 		const result = await this.#host.runAutoCompaction(reason, true, {
 			autoContinue: options.autoContinue,
 			triggerContextTokens: options.triggerContextTokens,
-			phase: "mid_turn",
 			excludeMediaMethods: options.excludeMediaMethods,
 		});
 		const compactionEntryAfter = getLatestCompactionEntry(this.#host.sessionManager.getBranch());
@@ -1235,47 +1162,6 @@ export class TurnRecovery {
 	}
 
 	/**
-	 * Own the exact Responses request-body-read timeout so terminal special outcomes
-	 * cannot fall through to the generic 408 replay path.
-	 */
-	async handleResponsesRequestBodyReadTimeout(message: AssistantMessage): Promise<RequestBodyReadTimeoutRecovery> {
-		if (message.stopReason !== "error" || !AIError.isResponsesRequestBodyReadTimeout(message)) {
-			return "not-applicable";
-		}
-		const generation = this.#host.promptGeneration();
-		const promptSequence = this.#host.promptSequence();
-		const replayUnsafe = this.#hasReplayUnsafeOutput(message);
-		const terminal = (): RequestBodyReadTimeoutRecovery => {
-			if (!replayUnsafe) this.removeAssistantMessageFromActiveContext(message, "request-body-timeout-terminal");
-			return "handled-terminal";
-		};
-		const retrySettings = cfgRetry.get(this.#host.settings);
-		if (
-			this.#requestBodyReadTimeoutRecoveryPromptSequence === promptSequence ||
-			!retrySettings.enabled ||
-			retrySettings.maxRetries <= this.#retryAttempt ||
-			this.#host.isDisposed() ||
-			this.#host.abortInProgress() ||
-			this.#host.isCompacting() ||
-			replayUnsafe
-		) {
-			return terminal();
-		}
-
-		this.#requestBodyReadTimeoutRecoveryPromptSequence = promptSequence;
-		const shook = await this.#host.shakeForRequestBodyReadTimeout(generation);
-		if (
-			!shook ||
-			this.#host.promptGeneration() !== generation ||
-			this.#host.isDisposed() ||
-			this.#host.abortInProgress()
-		) {
-			return terminal();
-		}
-		return (await this.#handleRetryableError(message)) ? "handled-retry" : terminal();
-	}
-
-	/**
 	 * Check if an error is retryable (transient errors, usage limits, or
 	 * account-scoped policy denials that can rotate credentials).
 	 * Context overflow is NOT retryable (handled by compaction instead).
@@ -1283,15 +1169,6 @@ export class TurnRecovery {
 	isRetryableError(message: AssistantMessage): boolean {
 		if (message.stopReason !== "error") return false;
 		if (this.#isUsagePreflightBlocked(message)) return false;
-		if (AIError.isResponsesRequestBodyReadTimeout(message)) return false;
-		const model = this.#host.model();
-		const immutableAnthropicThinkingError =
-			model?.api === "anthropic-messages" &&
-			(message.errorStatus === 400 ||
-				message.errorId === 400 ||
-				message.errorMessage?.startsWith("400 ") === true) &&
-			AIError.isImmutableLatestThinkingText(message.errorMessage ?? "");
-		if (immutableAnthropicThinkingError) return false;
 
 		const id = this.#classifyRetryMessage(message);
 		// Context overflow is handled by compaction, not retry.
@@ -1556,248 +1433,19 @@ export class TurnRecovery {
 			((classifierRefusal || AIError.is(id, AIError.Flag.MalformedFunctionCall) || AIError.retriable(id)) &&
 				this.#unexecutedToolCallsReplaySafe(message));
 		const rateLimitReason = parseRateLimitReason(errorMessage);
-		const staleOpenAIResponsesReplayError = AIError.is(id, AIError.Flag.StaleResponsesItem);
 		const accountPolicyDenial = AIError.is(id, AIError.Flag.AccountPolicy);
-		const recordedUsageLimitOutcome = await this.#usageLimitOutcomes.get(message);
 		const parsedRetryAfterMs = this.#parseRetryAfterMsFromError(errorMessage);
-		let delayMs = staleOpenAIResponsesReplayError
-			? 0
-			: calculateRetryBackoffDelayMs(retrySettings.baseDelayMs, this.#retryAttempt);
-		// Transient rate/concurrency caps stay on the same credential, but must
-		// honor their reason-specific windows. The default exponential base
-		// (≈500ms, capped at 8s) otherwise re-hits the cap and burns the retry
-		// budget before either window can clear. An explicit provider
-		// retry-after is authoritative in both directions, so the heuristic
-		// window only applies when the error carries no parsed timing.
-		if (
-			!staleOpenAIResponsesReplayError &&
-			!AIError.is(id, AIError.Flag.UsageLimit) &&
-			parsedRetryAfterMs === undefined &&
-			(rateLimitReason === "CONCURRENT_LIMIT" ||
-				rateLimitReason === "RATE_LIMIT_EXCEEDED" ||
-				(rateLimitReason === "MODEL_CAPACITY_EXHAUSTED" &&
-					(AIError.isUsageLimitStatus(message.errorStatus) ||
-						/\b(?:429|MODEL_CAPACITY_EXHAUSTED|MODEL_CAPACITY_EXCEEDED|resource.?exhausted)\b/i.test(
-							errorMessage,
-						))))
-		) {
-			const reasonBackoffMs = calculateRateLimitBackoffMs(rateLimitReason);
-			if (reasonBackoffMs > delayMs) delayMs = reasonBackoffMs;
+		let delayMs = calculateRetryBackoffDelayMs(retrySettings.baseDelayMs, this.#retryAttempt);
+		if (parsedRetryAfterMs !== undefined) delayMs = Math.max(delayMs, parsedRetryAfterMs);
+		else if (rateLimitReason === "CONCURRENT_LIMIT" || rateLimitReason === "RATE_LIMIT_EXCEEDED") {
+			delayMs = Math.max(delayMs, calculateRateLimitBackoffMs(rateLimitReason));
 		}
-		let switchedCredential = false;
-		// Set when a usage-limit error pinned the wait to credential
-		// availability — suppresses the generic retry-after bump below.
-		let usageLimitWaitMs: number | undefined;
-		const siblingAvailabilityWaitMs =
-			recordedUsageLimitOutcome?.retryAtMs === undefined
-				? undefined
-				: Math.max(0, recordedUsageLimitOutcome.retryAtMs - Date.now()) + SIBLING_UNBLOCK_BUFFER_MS;
-
-		if (staleOpenAIResponsesReplayError) {
-			this.#host.resetCurrentResponsesProviderSession("stale replay error");
-		}
-
-		// Rotation can spend the same-route retry budget before the last account
-		// hits its quota. Past the budget only a confirmed reset may continue: a
-		// rotation that keeps claiming a usable sibling would otherwise retry forever.
-		if (!staleOpenAIResponsesReplayError && recordedUsageLimitOutcome) {
-			const rotated = recordedUsageLimitOutcome.switchedCredential && !retryBudgetExhausted;
-			let restored = false;
-			if (!rotated) {
-				const resetAbortController = new AbortController();
-				this.#retryAbortController?.abort();
-				this.#retryAbortController = resetAbortController;
-				const startedAtMs = Date.now();
-				const unblockAtMs = parsedRetryAfterMs === undefined ? undefined : startedAtMs + parsedRetryAfterMs;
-				try {
-					for (let attempt = 0; ; attempt++) {
-						const result = await this.#host.maybeAutoRedeemReset(unblockAtMs);
-						resetAbortController.signal.throwIfAborted();
-						if (result.restored) {
-							restored = true;
-							break;
-						}
-						if (result.retryAfterMs === undefined || attempt >= maxRetries) break;
-						// Only retry the safe eligibility read, never the reset mutation or
-						// model request. Respect provider pacing within the configured wait cap.
-						const readDelayMs = Math.max(
-							1_000,
-							result.retryAfterMs,
-							calculateRetryBackoffDelayMs(retrySettings.baseDelayMs, attempt + 1),
-						);
-						if (retrySettings.maxDelayMs > 0 && Date.now() - startedAtMs + readDelayMs > retrySettings.maxDelayMs)
-							break;
-						await sleepLong(readDelayMs, resetAbortController.signal);
-					}
-				} catch (error) {
-					if (!resetAbortController.signal.aborted) throw error;
-					if (this.#retryAbortController !== resetAbortController) return false;
-					return this.#endCancelledRetry();
-				} finally {
-					if (this.#retryAbortController === resetAbortController) this.#retryAbortController = undefined;
-				}
-			}
-			if (rotated || restored) {
-				switchedCredential = true;
-				delayMs = 0;
-			} else {
-				// No sibling credential is usable right now. Wait for whichever
-				// comes first: the current account's actual unblock deadline, or
-				// the earliest moment a temporarily blocked sibling frees up
-				// (e.g. a 60s post-401 block or a 5-min usage-probe block) — the
-				// next attempt's getApiKey re-ranks and picks it up. Without the
-				// sibling minimum, one short-lived sibling block escalates a
-				// recoverable situation into the provider's multi-hour wait and
-				// trips the fail-fast cap below.
-				// The deadline merges every independent provider signal by
-				// longest-wins (mirroring extractRetryHint): the error-text hint
-				// (or heuristic fallback when hintless), the credential block
-				// the mark call persisted, and — when the usage report is a
-				// complete authority — its own reset, which replaces the
-				// heuristic instead of sleeping a guess.
-				usageLimitWaitMs = recordedUsageLimitOutcome.retryAfterMs;
-				if (recordedUsageLimitOutcome.reportResetAtMs !== undefined && parsedRetryAfterMs === undefined) {
-					// A hintless error can still carry an authoritative
-					// usage-report window: it replaces THIS call's 30-minute
-					// heuristic guess in both directions — sleeping the guess
-					// past a shorter reported reset overshoots, and vice
-					// versa.
-					usageLimitWaitMs = Math.max(0, recordedUsageLimitOutcome.reportResetAtMs - Date.now());
-				}
-				if (
-					recordedUsageLimitOutcome.priorBlockedUntilMs !== undefined &&
-					recordedUsageLimitOutcome.priorBlockedUntilTimed === true
-				) {
-					// The merged deadline below masks a pre-existing block
-					// shorter than this call's heuristic fallback (longest-wins
-					// in the mark). The prior deadline is that block's own
-					// provenance — an earlier response's provider-stated
-					// window — and must survive this call's heuristic guess:
-					// waking before it retries a still-blocked credential. A
-					// prior deadline that was itself only a heuristic guess
-					// carries no such authority and must not extend the wait
-					// past an authoritative report window.
-					const priorRemainingMs = Math.max(0, recordedUsageLimitOutcome.priorBlockedUntilMs - Date.now());
-					if (priorRemainingMs > usageLimitWaitMs) usageLimitWaitMs = priorRemainingMs;
-				}
-				if (recordedUsageLimitOutcome.blockedUntilMs !== undefined) {
-					// The stored deadline merges every mark call for this
-					// credential (longest-wins). Only a deadline past what
-					// THIS call requested — a longer report window, or a
-					// longer block an earlier sibling-session response stored
-					// for the shared credential — may override the wait:
-					// retrying before the credential's actual unblock time
-					// re-hits the cap, but this call's own heuristic
-					// contribution must not re-inflate over the authoritative
-					// report window above.
-					const requestedBlockedUntilMs = Date.now() + (recordedUsageLimitOutcome.retryAfterMs ?? 0);
-					if (recordedUsageLimitOutcome.blockedUntilMs > requestedBlockedUntilMs) {
-						const blockedRemainingMs = Math.max(0, recordedUsageLimitOutcome.blockedUntilMs - Date.now());
-						if (blockedRemainingMs > usageLimitWaitMs) usageLimitWaitMs = blockedRemainingMs;
-					}
-				}
-				if (siblingAvailabilityWaitMs !== undefined && siblingAvailabilityWaitMs < usageLimitWaitMs) {
-					usageLimitWaitMs = siblingAvailabilityWaitMs;
-				}
-				if (usageLimitWaitMs > delayMs) {
-					delayMs = usageLimitWaitMs;
-				}
-			}
-		}
-
-		const currentModel = this.#host.model();
-		if (accountPolicyDenial && currentModel) {
-			const accountPolicyKey = `${currentModel.provider}/${currentModel.id}`;
-			const rotationsRemaining =
-				this.#accountPolicyRotationsRemaining.get(accountPolicyKey) ??
-				Math.max(0, this.#host.modelRegistry.authStorage.credentials.list(currentModel.provider).length - 1);
-			this.#accountPolicyRotationsRemaining.set(accountPolicyKey, Math.max(0, rotationsRemaining - 1));
-			// `rotate` may sleep out a sibling's short block; register its signal
-			// as the retry controller so `abortRetry()` cancels that wait exactly
-			// like the backoff sleep below.
-			const rotateAbortController = new AbortController();
-			this.#retryAbortController?.abort();
-			this.#retryAbortController = rotateAbortController;
-			try {
-				switchedCredential = (
-					await this.#host.modelRegistry.authStorage.limits.rotate(currentModel.provider, this.#host.sessionId(), {
-						error: errorMessage,
-						modelId: currentModel.id,
-						signal: rotateAbortController.signal,
-						waitForSibling: rotationsRemaining > 0,
-					})
-				).switched;
-				// Rotation is advisory: expired blocks or a repeatedly offered sibling
-				// must not retry beyond one pool traversal in this saga.
-				switchedCredential &&= rotationsRemaining > 0;
-			} catch (error) {
-				if (!rotateAbortController.signal.aborted) throw error;
-				if (this.#retryAbortController !== rotateAbortController) return false;
-				return this.#endCancelledRetry();
-			} finally {
-				if (this.#retryAbortController === rotateAbortController) this.#retryAbortController = undefined;
-			}
-			if (switchedCredential) delayMs = 0;
-		}
-		const effectiveUsageLimitWaitMs =
-			usageLimitWaitMs ??
-			(siblingAvailabilityWaitMs === undefined
-				? (recordedUsageLimitOutcome?.retryAfterMs ?? parsedRetryAfterMs)
-				: Math.min(
-						recordedUsageLimitOutcome?.retryAfterMs ?? parsedRetryAfterMs ?? Infinity,
-						siblingAvailabilityWaitMs,
-					));
-
-		// Fail-fast cap: if the provider asks us to wait longer than
-		// retry.maxDelayMs and we have no fallback credential or model to
-		// switch to, surface the error instead of sleeping. Defends against
-		// 3-hour Anthropic rate-limit windows that would otherwise leave a
-		// subagent (or interactive session) silently hung. The original
-		// assistant error message is preserved in agent state so the caller
-		// can act on it.
-		// Opt-out: retry.waitForUsageReset lets a provider-stated usage-limit
-		// reset (Flag.UsageLimit — 5h/weekly quota windows, CN 使用上限, spend
-		// caps, … on any provider) sleep past the cap. Gated on authoritative
-		// provider timing: either a parsed reset hint from the error text, or
-		// a complete usage-report window (every exhausted limit carries a
-		// future reset). Usage-limit errors with neither fall back to the
-		// 30-minute QUOTA_EXHAUSTED heuristic, and sleeping on that for a
-		// permanent error (402 balance, dead spend cap) would hold the session
-		// through repeated heuristic sleeps instead of surfacing it. Bounded
-		// by the stated wait so an unrelated large backoff cannot sneak
-		// through.
 		const maxDelayMs = retrySettings.maxDelayMs;
-		// An account out of money has no reset to wait for: the QUOTA_EXHAUSTED
-		// heuristic backoff is a guess at a clock that does not exist, and a
-		// `retry.maxDelayMs` set at or above it (the 30-minute default ceiling
-		// users raise) would sleep through the whole guess. Surface the provider
-		// error instead, so the user tops up and the error frame's Retry
-		// re-attempts at once rather than idling in a retry the session cannot
-		// finish.
 		const billingCap = isBillingCapUsageLimit(message.errorStatus, errorMessage);
-		const exceedsDelayCap = (waitMs: number): boolean => {
-			if (billingCap) return true;
-			const waitForUsageReset =
-				retrySettings.waitForUsageReset === true &&
-				recordedUsageLimitOutcome !== undefined &&
-				(parsedRetryAfterMs !== undefined || recordedUsageLimitOutcome.reportResetAtMs !== undefined) &&
-				effectiveUsageLimitWaitMs !== undefined &&
-				waitMs <= effectiveUsageLimitWaitMs;
-			return maxDelayMs > 0 && waitMs > maxDelayMs && !waitForUsageReset;
-		};
-
-		if (
-			!staleOpenAIResponsesReplayError &&
-			!switchedCredential &&
-			usageLimitWaitMs === undefined &&
-			parsedRetryAfterMs &&
-			parsedRetryAfterMs > delayMs
-		) {
-			delayMs = parsedRetryAfterMs;
-		}
+		const exceedsDelayCap = (waitMs: number): boolean => billingCap || (maxDelayMs > 0 && waitMs > maxDelayMs);
 
 		if (retryBudgetExhausted) {
-			if (!switchedCredential) {
+			{
 				const attempt = this.#retryAttempt - 1;
 				message.errorMessage = `Retry budget exhausted after ${attempt} ${attempt === 1 ? "retry" : "retries"}: ${errorMessage}`;
 				await this.#closeRetrySaga(
@@ -1807,7 +1455,7 @@ export class TurnRecovery {
 				return false;
 			}
 		}
-		if ((classifierRefusal || accountPolicyDenial) && !switchedCredential) {
+		if (classifierRefusal || accountPolicyDenial) {
 			// A prior attempt in this saga already announced `auto_retry_start`
 			// (retryAttempt was incremented for each call to this method, so > 1
 			// means at least one earlier attempt started the loop) but this
@@ -1827,7 +1475,7 @@ export class TurnRecovery {
 		}
 
 		// The fail-fast cap (`exceedsDelayCap`, defined above).
-		if (exceedsDelayCap(delayMs) && !switchedCredential) {
+		if (exceedsDelayCap(delayMs)) {
 			const attempt = this.#retryAttempt;
 			this.#retryAttempt = 0;
 			await this.#closeRetrySaga(
@@ -1845,7 +1493,7 @@ export class TurnRecovery {
 			return false;
 		}
 
-		await this.#recordPendingRetryError(message, id, { switchedCredential, delayMs });
+		await this.#recordPendingRetryError(message, id, { delayMs });
 		// Quota resets elapse while the machine sleeps; capture the deadline before event delivery.
 		const usageResetDeadline = AIError.is(id, AIError.Flag.UsageLimit) ? Date.now() + delayMs : undefined;
 

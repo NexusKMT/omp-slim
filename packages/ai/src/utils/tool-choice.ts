@@ -11,22 +11,6 @@ export type OpenAICompletionsToolChoice =
 	| { type: "function"; function: { name: string } }
 	| undefined;
 
-/** OpenAI Responses API tool choice format (flat structure) */
-export type OpenAIResponsesToolChoice =
-	| "auto"
-	| "none"
-	| "required"
-	| { type: "function"; name: string }
-	| { type: "custom"; name: string }
-	| { type: "computer" }
-	| undefined;
-
-/** Anthropic-compatible tool choice format */
-export type AnthropicToolChoice = "auto" | "none" | "any" | { type: "tool"; name: string } | undefined;
-
-/**
- * Extract function name from unified ToolChoice.
- */
 function extractFunctionName(choice: ToolChoice): string | undefined {
 	if (typeof choice === "string") return undefined;
 	if (choice.type === "tool" && "name" in choice) return choice.name;
@@ -65,37 +49,4 @@ export function mapToOpenAICompletionsToolChoice(choice?: ToolChoice): OpenAICom
 export function isForcedToolChoice(choice: unknown): boolean {
 	if (choice === undefined || choice === "auto" || choice === "none") return false;
 	return true;
-}
-
-/**
- * Map unified ToolChoice to OpenAI Responses API format.
- * - "any" → "required"
- * - { type: "tool", name } → { type: "function", name } (flat structure)
- */
-export function mapToOpenAIResponsesToolChoice(choice?: ToolChoice): OpenAIResponsesToolChoice {
-	if (!choice) return undefined;
-	if (typeof choice === "string") {
-		if (choice === "any") return "required";
-		if (choice === "auto" || choice === "none" || choice === "required") return choice;
-		return undefined;
-	}
-	if (choice.type === "computer") return { type: "computer" };
-	const name = extractFunctionName(choice);
-	return name ? { type: "function", name } : undefined;
-}
-
-/**
- * Map unified ToolChoice to Anthropic-compatible format.
- * - "required" → "any"
- * - { type: "function", ... } → { type: "tool", name }
- */
-export function mapToAnthropicToolChoice(choice?: ToolChoice): AnthropicToolChoice {
-	if (!choice) return undefined;
-	if (typeof choice === "string") {
-		if (choice === "required") return "any";
-		if (choice === "auto" || choice === "none" || choice === "any") return choice;
-		return undefined;
-	}
-	const name = extractFunctionName(choice);
-	return name ? { type: "tool", name } : undefined;
 }

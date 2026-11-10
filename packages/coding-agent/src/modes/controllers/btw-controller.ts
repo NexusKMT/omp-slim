@@ -280,12 +280,12 @@ export class BtwController {
 
 	/**
 	 * Whether side answers asked now may steer the main session: `btw.inject` is on, the main
-	 * session is in view, and this host runs its turns (not a collab guest). Read once per
+	 * session is in view. Read once per
 	 * surface (inline answer, history sheet), so one value gates the prompt instruction, the
 	 * highlighted block, and the inject key there.
 	 */
 	#injectEnabled(): boolean {
-		return cfgBtwInject.get(this.ctx.settings) && !this.ctx.focusedAgentId && !this.ctx.collabGuest;
+		return cfgBtwInject.get(this.ctx.settings) && !this.ctx.focusedAgentId;
 	}
 
 	/** The topic's latest answer is ready to send, and no branch or session move would race the new main-session turn. */

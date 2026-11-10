@@ -1037,21 +1037,6 @@ describe("BtwController inject", () => {
 		expect(session.prompt).not.toHaveBeenCalled();
 	});
 
-	it("gives collab guests neither the instruction nor the block, since their turns run on the host", async () => {
-		const runEphemeralTurn = steeringTurn();
-		const session = makeInjectSession(runEphemeralTurn);
-		const ctx = Object.assign(makeCtx(session, new Container(), { "btw.inject": true }), { collabGuest: {} });
-		const controller = new BtwController(ctx);
-
-		await controller.start("Write a steering prompt to stop it");
-		await drainBtwRequest();
-
-		expect(runEphemeralTurn.mock.calls[0]?.[0].promptText).not.toContain("<inject>");
-		expect(shown(ctx)).not.toContain(BTW_INJECT_LABEL);
-		expect(controller.handleInject()).toBe(false);
-		expect(session.prompt).not.toHaveBeenCalled();
-	});
-
 	it("never injects a focused subagent's side answer into main", async () => {
 		const focusedTurn = steeringTurn();
 		const focusedSession = {

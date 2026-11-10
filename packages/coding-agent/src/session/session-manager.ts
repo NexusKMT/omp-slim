@@ -990,7 +990,7 @@ export class SessionManager {
 	#draftOnlySessionCleanupArmed = false;
 
 	/**
-	 * Collab replication tap: invoked for every appended entry with the
+	 * Observer tap: invoked for every appended entry with the
 	 * in-memory (pre-blob-externalization) entry, so inline images survive.
 	 */
 	onEntryAppended?: (entry: SessionEntry) => void;
@@ -2054,7 +2054,7 @@ export class SessionManager {
 			try {
 				callback(entry);
 			} catch (err) {
-				logger.warn("collab entry hook failed", { error: String(err) });
+				logger.warn("session entry observer failed", { error: String(err) });
 			}
 		}
 	}
@@ -3553,20 +3553,10 @@ export class SessionManager {
 
 	/**
 	 * Append a foreign (host-authored) entry verbatim, preserving its
-	 * `id`/`parentId`. Used by collab guests to mirror the host session.
+	 * `id`/`parentId`. Used when importing an existing transcript.
 	 */
 	ingestReplicatedEntry(entry: SessionEntry): void {
 		this.#recordEntry(entry);
-	}
-
-	/**
-	 * The live header and entries, for collab replication. Nothing is copied:
-	 * the host mutates entries in place on rewrite paths, so callers must not
-	 * mutate what this returns and must serialize it synchronously, before any
-	 * such rewrite can run.
-	 */
-	snapshotForReplication(): { header: SessionHeader; entries: readonly SessionEntry[] } {
-		return { header: this.#header, entries: this.#entries };
 	}
 
 	/**

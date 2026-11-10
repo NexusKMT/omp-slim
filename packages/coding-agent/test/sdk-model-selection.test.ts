@@ -1199,18 +1199,6 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		}
 	});
 
-	test("keeps the current model for a replica switch that mirrors another host's model", async () => {
-		const { session } = await createAgentSession(buildSwitchOptions());
-		try {
-			const target = await writeSavedModelSession("missing-provider/missing-model");
-			await expect(session.switchSession(target, { keepModel: true })).resolves.toBe(true);
-			expect(session.sessionFile).toBe(target);
-			expect(session.model?.id).toBe("claude-sonnet-4-5");
-		} finally {
-			await session.dispose();
-		}
-	});
-
 	test("restores a discovery-backed session model instead of falling back to the default role", async () => {
 		// Regression: on `omp --resume`, the session-model restore probed
 		// candidates only against the static+cached catalog. A discovery-backed

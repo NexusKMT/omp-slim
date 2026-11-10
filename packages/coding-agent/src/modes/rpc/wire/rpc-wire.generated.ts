@@ -1705,14 +1705,6 @@ export interface GetSessionLeaseResult {
 	unknown: string[];
 }
 
-export interface ExportHtmlParams {
-	outputPath?: string;
-}
-
-export interface ExportHtmlResult {
-	path: string;
-}
-
 export interface SwitchSessionParams {
 	sessionPath: string;
 	provider?: string;
@@ -1863,7 +1855,6 @@ export interface RpcWireCommands {
 	abort_bash: { params: undefined; result: undefined };
 	get_session_stats: { params: undefined; result: SessionStats };
 	get_session_lease: { params: GetSessionLeaseParams; result: GetSessionLeaseResult };
-	export_html: { params: ExportHtmlParams; result: ExportHtmlResult };
 	switch_session: { params: SwitchSessionParams; result: CancellationResult };
 	branch: { params: BranchParams; result: BranchResult };
 	fork: { params: ForkParams; result: CancellationResult };

@@ -1,7 +1,6 @@
 import { describe, expect, test, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import {
-	canReplayRemoteCompactionFrom,
 	DEFAULT_COMPACTION_SETTINGS,
 	findReadableCompactionIndex,
 	generateSummary,
@@ -10,7 +9,7 @@ import {
 } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel } from "../../catalog/test/fixtures/models";
 
 function createAssistantMessage(text: string): AssistantMessage {
 	return {
@@ -33,7 +32,7 @@ function createAssistantMessage(text: string): AssistantMessage {
 }
 
 function getModel(contextWindow: number): Model {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = getTestModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("Expected built-in anthropic/claude-sonnet-4-5 to exist");
 	return { ...model, contextWindow };
 }
@@ -200,25 +199,14 @@ describe("readable compaction boundary", () => {
 	const entries = [local, remote];
 
 	test("skips a provider-native compaction another provider cannot replay", () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = getTestModel("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("Expected built-in anthropic/claude-sonnet-4-5 to exist");
-		expect(findReadableCompactionIndex(entries, DEFAULT_COMPACTION_SETTINGS, model)).toBe(0);
-	});
-
-	test("keeps a provider-native compaction the same provider can replay", () => {
-		const model = getBundledModel("openai-codex", "gpt-5.6-sol");
-		if (!model) throw new Error("Expected built-in openai-codex/gpt-5.6-sol to exist");
-		expect(findReadableCompactionIndex(entries, DEFAULT_COMPACTION_SETTINGS, model)).toBe(1);
-	});
-
-	test("without an active model the newest entry is the boundary", () => {
-		expect(findReadableCompactionIndex(entries, DEFAULT_COMPACTION_SETTINGS)).toBe(1);
+		expect(findReadableCompactionIndex(entries)).toBe(0);
 	});
 
 	test("re-expands a trailing compaction the active model cannot replay", () => {
-		const claude = getBundledModel("anthropic", "claude-sonnet-4-5");
-		const codex = getBundledModel("openai-codex", "gpt-5.6-sol");
-		if (!claude || !codex) throw new Error("Expected built-in models to exist");
+		const claude = getTestModel("anthropic", "claude-sonnet-4-5");
+		if (!claude) throw new Error("Expected built-in models to exist");
 		const messages: SessionEntry[] = Array.from({ length: 30 }, (_, i) => turn(i, 4_000))
 			.flat()
 			.map((message, i) => ({
@@ -229,39 +217,9 @@ describe("readable compaction boundary", () => {
 				message,
 			}));
 		const trailing = [...messages, { ...remote, firstKeptEntryId: "m58", parentId: "m59" }];
-		// The provider that wrote it reads it: nothing is left to compact.
-		expect(prepareCompaction(trailing, DEFAULT_COMPACTION_SETTINGS, codex)).toBeUndefined();
 		// Any other provider reads only its placeholder, so the history behind it is still live.
 		const preparation = prepareCompaction(trailing, DEFAULT_COMPACTION_SETTINGS, claude);
 		expect(preparation?.previousSummary).toBeUndefined();
 		expect(preparation?.messagesToSummarize.length).toBeGreaterThan(0);
-	});
-});
-
-describe("canReplayRemoteCompactionFrom", () => {
-	const codex = getBundledModel("openai-codex", "gpt-5.6-sol");
-	const openai = getBundledModel("openai", "gpt-5.4");
-	const claude = getBundledModel("anthropic", "claude-sonnet-4-5");
-	if (!codex || !openai || !claude) throw new Error("Expected built-in models to exist");
-
-	test("an OpenAI lane's payload replays only on the same provider", () => {
-		expect(canReplayRemoteCompactionFrom(codex, codex)).toBe(true);
-		expect(canReplayRemoteCompactionFrom(codex, openai)).toBe(false);
-		expect(canReplayRemoteCompactionFrom(codex, claude)).toBe(false);
-	});
-
-	test("the Anthropic lane leaves a summary any model reads", () => {
-		expect(canReplayRemoteCompactionFrom(claude, codex)).toBe(true);
-	});
-
-	test("a Chat Completions model compacting through a Responses override writes a provider-bound payload", () => {
-		const completions: Model = {
-			...openai,
-			api: "openai-completions",
-			remoteCompaction: { api: "openai-responses" },
-		};
-		expect(canReplayRemoteCompactionFrom(completions, claude)).toBe(false);
-		// Its own Completions encoder cannot replay it either.
-		expect(canReplayRemoteCompactionFrom(completions, completions)).toBe(false);
 	});
 });

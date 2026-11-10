@@ -229,14 +229,3 @@ describe("ACP launch flag validation", () => {
 		expect(run.exitCode, run.stderr).toBe(0);
 	}, 30_000);
 });
-
-describe("--export flag validation", () => {
-	it("reports an invalid enum value instead of exporting", async () => {
-		using tempDir = TempDir.createSync("@omp-export-bad-thinking-");
-		const run = await launchWithoutTerminal(tempDir, ["--export", "missing.jsonl", "--thinking", "bogus"]);
-
-		expect(run.exitCode, run.stderr).toBe(2);
-		expect(run.stderr).toContain('Error: Invalid --thinking value: "bogus"');
-		expect(run.stdout).not.toContain("Exported to:");
-	}, 30_000);
-});

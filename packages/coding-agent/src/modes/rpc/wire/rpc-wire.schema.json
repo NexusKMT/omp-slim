@@ -518,17 +518,6 @@
 				"clientOmit": []
 			},
 			{
-				"name": "export_html",
-				"doc": "Export the session as HTML; returns the written path.",
-				"params": "ExportHtmlParams",
-				"result": "ExportHtmlResult",
-				"nullable": false,
-				"unwrap": "path",
-				"timeoutMs": null,
-				"completion": null,
-				"clientOmit": []
-			},
-			{
 				"name": "switch_session",
 				"doc": "Switch to another session file. Give provider and modelId together to override the saved model; otherwise an unavailable saved model fails the request and keeps the current session.",
 				"params": "SwitchSessionParams",
@@ -6494,25 +6483,6 @@
 			"required": [
 				"held",
 				"unknown"
-			]
-		},
-		"ExportHtmlParams": {
-			"type": "object",
-			"properties": {
-				"outputPath": {
-					"type": "string"
-				}
-			}
-		},
-		"ExportHtmlResult": {
-			"type": "object",
-			"properties": {
-				"path": {
-					"type": "string"
-				}
-			},
-			"required": [
-				"path"
 			]
 		},
 		"SwitchSessionParams": {

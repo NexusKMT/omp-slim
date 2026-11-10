@@ -658,7 +658,7 @@ describe("ExtensionUiController tool approval", () => {
 		const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
 		try {
 			const harness = makeHarness();
-			const pending = harness.controller.showCollabAwareApproval({
+			const pending = harness.controller.showApproval({
 				...prompt,
 				session: "Approve bash for this session",
 			});
@@ -682,7 +682,7 @@ describe("ExtensionUiController tool approval", () => {
 		// A steer queued before the prompt appeared does not answer it.
 		harness.queueSteer("earlier message");
 		harness.editor.onSubmit = text => harness.queueSteer(text);
-		const pending = harness.controller.showCollabAwareApproval(prompt);
+		const pending = harness.controller.showApproval(prompt);
 		const [dialog] = harness.editorContainer.children;
 		expect(harness.editorContainer.children).toEqual([dialog, harness.editor]);
 		// An Enter as the prompt appears is ignored: the dialog stays up (settling unmounts it synchronously).
@@ -699,8 +699,8 @@ describe("ExtensionUiController tool approval", () => {
 	it("one steer denies every approval of the batch, including those queued behind the shown one", async () => {
 		const harness = makeHarness();
 		harness.editor.onSubmit = text => harness.queueSteer(text);
-		const first = harness.controller.showCollabAwareApproval(prompt);
-		const second = harness.controller.showCollabAwareApproval({ ...prompt, full: "Allow tool: write" });
+		const first = harness.controller.showApproval(prompt);
+		const second = harness.controller.showApproval({ ...prompt, full: "Allow tool: write" });
 		for (const key of "stop") harness.handleInput(key);
 		harness.handleInput("\r");
 		expect(await first).toBe("deny");
@@ -711,15 +711,15 @@ describe("ExtensionUiController tool approval", () => {
 	it("a steer also denies approvals its batch requests later, until it is delivered", async () => {
 		const harness = makeHarness();
 		harness.editor.onSubmit = text => harness.queueSteer(text);
-		const first = harness.controller.showCollabAwareApproval(prompt);
+		const first = harness.controller.showApproval(prompt);
 		for (const key of "stop") harness.handleInput(key);
 		harness.handleInput("\r");
 		expect(await first).toBe("deny");
 		// An exclusive call asks only after the denied one settled; the steer is still queued.
-		expect(await harness.controller.showCollabAwareApproval(prompt)).toBe("deny");
+		expect(await harness.controller.showApproval(prompt)).toBe("deny");
 		// Delivered at the batch boundary: the next turn's approvals ask again.
 		harness.deliverSteering();
-		void harness.controller.showCollabAwareApproval(prompt);
+		void harness.controller.showApproval(prompt);
 		expect(harness.editorContainer.children).toHaveLength(2);
 	});
 
@@ -727,7 +727,7 @@ describe("ExtensionUiController tool approval", () => {
 		const harness = makeHarness();
 		harness.queueSteer("earlier message");
 		harness.editor.onSubmit = text => harness.queueSteer(text);
-		const pending = harness.controller.showCollabAwareApproval(prompt);
+		const pending = harness.controller.showApproval(prompt);
 		for (const key of "keep the build dir") harness.handleInput(key);
 		harness.handleInput("\r");
 		expect(await pending).toBe("deny");
@@ -741,14 +741,14 @@ describe("ExtensionUiController tool approval", () => {
 	it("an equal-looking steer queued after the denying one was delivered does not answer a new prompt", async () => {
 		const harness = makeHarness();
 		harness.editor.onSubmit = text => harness.queueSteer(text);
-		const first = harness.controller.showCollabAwareApproval(prompt);
+		const first = harness.controller.showApproval(prompt);
 		for (const key of "[Image]") harness.handleInput(key);
 		harness.handleInput("\r");
 		expect(await first).toBe("deny");
 		harness.deliverSteering();
 		// A later turn's steer with the same chip text predates the next prompt.
 		harness.queueSteer("[Image]");
-		void harness.controller.showCollabAwareApproval(prompt);
+		void harness.controller.showApproval(prompt);
 		expect(harness.editorContainer.children).toHaveLength(2);
 	});
 
@@ -759,7 +759,7 @@ describe("ExtensionUiController tool approval", () => {
 		const onPasteImagePath = vi.fn();
 		harness.editor.onPasteImage = onPasteImage;
 		harness.editor.onPasteImagePath = onPasteImagePath;
-		void harness.controller.showCollabAwareApproval(prompt);
+		void harness.controller.showApproval(prompt);
 		// Image-only clipboard paste: the terminal sends an empty bracketed paste.
 		harness.handleInput("\x1b[200~\x1b[201~");
 		expect(onPasteImage).toHaveBeenCalledTimes(1);
@@ -785,7 +785,7 @@ describe("ExtensionUiController tool approval", () => {
 		};
 		const onSubmit = vi.fn();
 		harness.editor.onSubmit = onSubmit;
-		void harness.controller.showCollabAwareApproval(prompt);
+		void harness.controller.showApproval(prompt);
 		harness.handleInput("\x1b[200~\x1b[201~");
 		// The composer is still empty, yet this Enter belongs to the paste, not to the empty-composer guard.
 		harness.handleInput("\r");
@@ -799,7 +799,7 @@ describe("ExtensionUiController tool approval", () => {
 	it("lets ctrl+o reveal a single-line detail the row clips, even when compact and full match", () => {
 		const harness = makeHarness();
 		const command = `Allow tool: bash\nCommand: echo ok && ${"x".repeat(120)} && rm -rf ~`;
-		void harness.controller.showCollabAwareApproval({ full: command, compact: command });
+		void harness.controller.showApproval({ full: command, compact: command });
 		const body = () =>
 			stripVTControlCharacters(harness.editorContainer.children[0]!.render(60).join("\n")).replace(/[│\s]+/g, "");
 		expect(body()).not.toContain("rm-rf~");

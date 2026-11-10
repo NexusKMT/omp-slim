@@ -1,34 +1,6 @@
-/**
- * Shared wire-session-event → extension-event mapping plus the collab-guest
- * lifecycle mirror built on it.
- *
- * A collab guest renders host activity through the ordinary event pipeline,
- * but its own agent loop never runs, so `AgentSession`'s
- * `#emitExtensionEvent` path stays silent for the whole join. Lifecycle
- * integrations installed as extensions (e.g. Herdr's pane-state reporter)
- * therefore never see `agent_start`/`agent_end` and report a stale state for
- * the guest's pane. The mapping below is the single owner of that wire-event
- * → extension-event translation — `AgentSession.#emitExtensionEvent` calls it
- * for its own events and the guest's {@link GuestLifecycleEmitter} calls it
- * for mirrored host events, so neither side can drift from the other.
- *
- * Session-only event types that never travel on the collab wire
- * (`retry_fallback_*`, `ttsr_triggered`, `todo_reminder`, `goal_updated`, …)
- * are mapped here too, so the session's copy stays complete; the guest
- * simply never sees those events (see `WIRE_AGENT_EVENT_TYPES` in
- * `collab/host.ts`).
- *
- * The `agent_end` shape mirrors the session's public-notification shape
- * (`#emitAgentEndNotification`): `messages` plus the continuation and async-wait
- * flags. The session-layer `isTerminal: false` marks a non-final settle, either
- * an automatic continuation or a background-job wait; the latter has
- * `awaitingAsyncWork: true`. Older hosts omit these flags and such settles
- * map without them, matching the pre-flag notification.
- */
-import { logger } from "@oh-my-pi/pi-utils";
+/** Map core session events into the extension event contract. */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AgentSessionEvent } from "../../session/agent-session";
-import type { ExtensionRunner } from "./runner";
 import type {
 	AgentEndEvent,
 	AutoCompactionEndEvent,
@@ -107,9 +79,9 @@ export type MappedExtensionEvent =
  * extension counterpart, so callers skip the runner entirely instead of
  * emitting a no-op.
  *
- * @param event Session event (locally emitted or mirrored over the collab wire).
+ * @param event Session event (emitted by the local session).
  * @param turnIndex Zero-based turn counter the caller owns; `AgentSession`
- *   resets it on `agent_start`, the collab guest's {@link GuestLifecycleEmitter}
+ *   resets it on `agent_start`, the session
  *   does the same for its mirrored stream.
  */
 export function extensionEventFromSessionEvent(
@@ -143,7 +115,7 @@ export function extensionEventFromSessionEvent(
 			// `message_end` is a notification, not a context-rewrite hook. Detach its
 			// payload so an async observer that mutates the event after an `await`
 			// cannot race the owner's use of the same reference — locally that is
-			// mid-run maintenance, on a collab guest it is the transcript the same
+			// mid-run maintenance, in a transcript it is the same
 			// object is rendered from.
 			const messageEnd: MessageEndEvent = {
 				type: "message_end",
@@ -233,52 +205,5 @@ export function extensionEventFromSessionEvent(
 			return { type: "goal_updated", goal: event.goal, state: event.state };
 		default:
 			return null;
-	}
-}
-
-/**
- * Mirrors lifecycle-relevant collab guest events into an `ExtensionRunner`.
- *
- * Owns the per-join turn index the session maintains for its own extension
- * events (`#turnIndex`): the wire's turn_start/turn_end carry no counter, so
- * this class numbers turns itself exactly like `AgentSession` numbers its
- * own (zero-based, reset on `agent_start`, incremented after each
- * `turn_end`).
- *
- * Emissions are chained onto one promise queue — like the session's
- * `#queueExtensionEvent` — so handler completion order matches event order
- * even when a handler awaits. Unlike the session, delivery is never awaited
- * inline: a slow extension handler must not stall the guest's frame
- * application.
- */
-export class GuestLifecycleEmitter {
-	#turnIndex = 0;
-	#chain: Promise<void> = Promise.resolve();
-	/** True between a mirrored (or synthesized) `agent_start` and its `agent_end`. */
-	#active = false;
-
-	get sawAgentStart(): boolean {
-		return this.#active;
-	}
-
-	emit(runner: ExtensionRunner, event: AgentSessionEvent): void {
-		if (event.type === "agent_start") {
-			this.#turnIndex = 0;
-			this.#active = true;
-		} else if (event.type === "agent_end") {
-			this.#active = false;
-		}
-		if (event.type !== "agent_start" && !runner.hasHandlers(event.type)) return;
-		const mapped = extensionEventFromSessionEvent(event, this.#turnIndex);
-		if (!mapped) return;
-		if (event.type === "turn_end") this.#turnIndex++;
-		this.#chain = this.#chain
-			.then(() => runner.emit(mapped))
-			.then(
-				() => {},
-				err => {
-					logger.warn("collab guest extension event emit failed", { type: event.type, error: String(err) });
-				},
-			);
 	}
 }
