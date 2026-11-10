@@ -2158,10 +2158,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			sessionId: () => this.sessionId,
 			promptGeneration: () => this.#promptGeneration,
 			resolveActiveEditMode: () => this.#tools.resolveActiveEditMode(),
-			syncAfterModelChange: previousEditMode => this.#tools.syncAfterModelChange(previousEditMode),
-			setModelWithProviderSessionReset: async (model, selection = "explicit") => {
+			syncAfterModelChange: async previousEditMode => {
+				await this.#tools.syncAfterModelChange(previousEditMode);
+				this.#advisors.reconcileModelRoles();
+			},
+			setModelWithProviderSessionReset: async model => {
 				await this.#setModelWithProviderSessionReset(model);
-				// Only a completed explicit selection, including same-model reselection, takes ownership.
 			},
 			clearInheritedProviderPromptCacheKey: () => this.#clearInheritedProviderPromptCacheKey(),
 			magicKeywordEnabled: keyword => this.#magicKeywordEnabled(keyword),

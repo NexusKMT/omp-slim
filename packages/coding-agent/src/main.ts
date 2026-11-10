@@ -161,7 +161,6 @@ import {
 	cfgMarketplaceAutoUpdate,
 	cfgSetupVersion,
 	cfgShowHardwareCursor,
-	cfgSpellingAutocomplete,
 	cfgSpellingAutocorrect,
 	cfgSpellingTypoDetection,
 	cfgStartupChangelogMode,

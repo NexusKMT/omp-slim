@@ -103,7 +103,7 @@ describe("compaction prefers the current session model over modelRoles.default",
 		expect(compactSpy.mock.calls[0]?.[5]?.promptCacheKey).toBe(promptCacheKey);
 	});
 
-	it("falls back when the authenticated Bedrock candidate cannot resolve AWS credentials", async () => {
+	it("surfaces credential failure without sending compaction to another configured model", async () => {
 		const currentModel = getBundledModel("amazon-bedrock", "global.anthropic.claude-opus-4-6-v1");
 		const fallbackModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!currentModel || !fallbackModel) {
@@ -111,7 +111,7 @@ describe("compaction prefers the current session model over modelRoles.default",
 		}
 
 		const settings = Settings.isolated({ "compaction.keepRecentTokens": 1, "compaction.methodOrder": ["soft"] });
-		settings.setModelRole("smol", `${fallbackModel.provider}/${fallbackModel.id}`);
+		settings.setModel(`${fallbackModel.provider}/${fallbackModel.id}`);
 
 		const agent = new Agent({
 			initialState: {
@@ -163,17 +163,13 @@ describe("compaction prefers the current session model over modelRoles.default",
 			};
 		});
 
-		const result = await session.compact();
-
-		expect(result.summary).toBe("fallback summary");
-		expect(compactSpy).toHaveBeenCalledTimes(2);
-		expect(compactSpy.mock.calls.map(([, model]) => `${model.provider}/${model.id}`)).toEqual([
-			`${currentModel.provider}/${currentModel.id}`,
-			`${fallbackModel.provider}/${fallbackModel.id}`,
-		]);
+		await expect(session.compact()).rejects.toThrow("Compaction requires usable credentials");
+		expect(compactSpy).toHaveBeenCalledTimes(1);
+		expect(compactSpy.mock.calls[0]?.[1].provider).toBe(currentModel.provider);
+		expect(session.model).toBe(currentModel);
 	});
 
-	it("uses compactionModel only for the summary call and leaves the active model unchanged", async () => {
+	it("ignores a provider compactionModel override and summarizes with the current model", async () => {
 		const baseCurrentModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		const compactionModel = getBundledModel("openai", "gpt-5");
 		if (!baseCurrentModel || !compactionModel) {
@@ -231,9 +227,7 @@ describe("compaction prefers the current session model over modelRoles.default",
 
 		expect(compactSpy).toHaveBeenCalled();
 		const [, firstCandidate] = compactSpy.mock.calls[0]!;
-		expect(`${firstCandidate.provider}/${firstCandidate.id}`).toBe(
-			`${compactionModel.provider}/${compactionModel.id}`,
-		);
+		expect(`${firstCandidate.provider}/${firstCandidate.id}`).toBe(`${currentModel.provider}/${currentModel.id}`);
 		expect(`${session.model?.provider}/${session.model?.id}`).toBe(`${currentModel.provider}/${currentModel.id}`);
 	});
 
