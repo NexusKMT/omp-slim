@@ -2,7 +2,6 @@ import type { AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
 import type { CompactionSettings } from "@oh-my-pi/pi-agent-core/compaction";
 import { effectiveReserveTokens, resolveThresholdTokens } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Tool as AiTool, Model } from "@oh-my-pi/pi-ai";
-import { renderToolExamples } from "@oh-my-pi/pi-ai/dialect";
 import { stripSchemaDescriptions, toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 
 interface ContextSkill {
@@ -11,7 +10,7 @@ interface ContextSkill {
 	readonly hide?: boolean;
 }
 
-type ContextTool = Pick<AiTool, "name" | "description" | "parameters" | "examples">;
+type ContextTool = Pick<AiTool, "name" | "description" | "parameters">;
 
 /** Savings computed by the host's inline-image planner, not by the renderer. */
 export interface ContextSavingsEstimate {
@@ -216,11 +215,11 @@ export function invalidateToolSchemaMetadata(tools: ToolSchemaSource): void {
 
 /** Provider-visible text of one tool definition, in wire order. */
 export interface ToolSchemaFragments {
-	/** Name, description, wire schema JSON, then rendered examples; fields that cannot be serialized are omitted. */
+	/** Name, description, wire schema JSON; fields that cannot be serialized are omitted. */
 	readonly fragments: string[];
 	/** `fragments` with the schema JSON indented for reading; present only when a display indent was requested. */
 	readonly display?: string[];
-	/** Why serialization stopped; the schema or examples after that point are missing from `fragments`. */
+	/** Why serialization stopped; the schema after that point is missing from `fragments`. */
 	readonly schemaError?: string;
 }
 
@@ -230,7 +229,7 @@ export interface ToolSchemaFragmentOptions {
 	displayIndent?: number;
 	/**
 	 * Mirror `normalizeTools({ pruneDescriptions: true })`: the wire spec is the
-	 * name plus the description-stripped schema, with no description or examples.
+	 * name plus the description-stripped schema, with no description.
 	 */
 	pruneDescriptions?: boolean;
 }
@@ -260,17 +259,12 @@ export function toolSchemaFragments(tool: ContextTool, options: ToolSchemaFragme
 			name,
 			description,
 			parameters: parameters as AiTool["parameters"],
-			examples: tool.examples,
 		};
 		const fullSchema = toolWireSchema(wireTool) ?? {};
 		const wireSchema = pruneDescriptions ? stripSchemaDescriptions(fullSchema) : fullSchema;
 		const wireJson = JSON.stringify(wireSchema);
 		if (typeof wireJson === "string")
 			push(wireJson, display ? JSON.stringify(wireSchema, null, displayIndent) : wireJson);
-		// The agent loop appends rendered examples to the wire description,
-		// which pruning empties.
-		const examplesBlock = pruneDescriptions ? undefined : renderToolExamples(wireTool);
-		if (examplesBlock) push(examplesBlock);
 	} catch (error) {
 		// Schema may contain functions or cycles.
 		return { fragments, display, schemaError: error instanceof Error ? error.message : String(error) };
@@ -316,33 +310,21 @@ export function estimateToolSchemaTokens(
 	return tokens;
 }
 
-/** Count schemas carried on every request, excluding server-side deferred catalogs. */
-export function estimateContextToolSchemaTokens(
-	tools: ToolSchemaSource,
-	tokenizer: Tokenizer,
-	model: Model | undefined,
-	options: ToolSchemaEstimateOptions = {},
-): number {
-	return model?.toolSchemasInContext === false ? 0 : estimateToolSchemaTokens(tools, tokenizer, options);
-}
-
 /**
  * Compute just the NON-MESSAGE token total: system prompt (with its skills
  * section subtracted, since skills are tokenized separately) + system context
  * (the rest of the system-prompt array) + tools + skills.
  *
  * Exposed so callers like `StatusLineComponent` can cache the non-message
- * total separately from the growing message total. A model switch can change
- * which tool schemas occupy context without changing the roster; a prune-mode
+ * total separately from the growing message total. A prune-mode
  * change (`Agent.prunesToolDescriptions`) changes how much of each spec ships.
  */
 // The per-turn threshold and compaction paths call these helpers repeatedly.
-// Cache by prompt, roster, skills, tokenizer, revision, model schema policy, and
+// Cache by prompt, roster, skills, tokenizer, revision, and
 // prune mode; setSystemPrompt/setTools replace their arrays rather than mutating them.
 interface NonMessageTokenCache {
 	systemPromptRef: readonly string[];
 	toolsRef: ToolSchemaSource;
-	toolSchemasInContext: boolean;
 	pruneToolDescriptions: boolean;
 	toolsRevision: number;
 	sourceRevision: number;
@@ -376,7 +358,6 @@ function nonMessageTokenCacheEntry(
 	const cachedSession: CachedNonMessageTokenSource = session;
 	const systemPromptRef = session.systemPrompt ?? EMPTY_STRING_PARTS;
 	const toolsRef = session.agent?.state?.tools ?? EMPTY_TOOLS;
-	const toolSchemasInContext = session.model?.toolSchemasInContext !== false;
 	const pruneToolDescriptions = session.agent?.prunesToolDescriptions?.(session.model) === true;
 	const toolsRevision = getToolSchemaMetadataRevision(toolsRef);
 	const skillsRef = session.renderedSkills ?? session.skills ?? EMPTY_SKILLS;
@@ -385,7 +366,6 @@ function nonMessageTokenCacheEntry(
 		entry &&
 		entry.systemPromptRef === systemPromptRef &&
 		entry.toolsRef === toolsRef &&
-		entry.toolSchemasInContext === toolSchemasInContext &&
 		entry.pruneToolDescriptions === pruneToolDescriptions &&
 		entry.toolsRevision === toolsRevision &&
 		entry.sourceRevision === sourceRevision &&
@@ -397,7 +377,6 @@ function nonMessageTokenCacheEntry(
 	entry = {
 		systemPromptRef,
 		toolsRef,
-		toolSchemasInContext,
 		pruneToolDescriptions,
 		toolsRevision,
 		sourceRevision,
@@ -422,7 +401,7 @@ export function computeNonMessageTokens(
 	const tools = session.agent?.state?.tools ?? EMPTY_TOOLS;
 	const tokens =
 		tokenizer.countTokens(Array.from(systemPromptParts, part => part ?? "")) +
-		estimateContextToolSchemaTokens(tools, tokenizer, session.model, {
+		estimateToolSchemaTokens(tools, tokenizer, {
 			sourceRevision,
 			pruneDescriptions: entry.pruneToolDescriptions,
 		});
@@ -457,7 +436,7 @@ export function computeNonMessageBreakdown(
 					renderedSkills(session.renderedSkills ?? session.skills ?? EMPTY_SKILLS, tools),
 					tokenizer,
 				);
-	const toolsTokens = estimateContextToolSchemaTokens(tools, tokenizer, session.model, {
+	const toolsTokens = estimateToolSchemaTokens(tools, tokenizer, {
 		sourceRevision,
 		pruneDescriptions: entry.pruneToolDescriptions,
 	});

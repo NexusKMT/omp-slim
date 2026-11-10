@@ -1,19 +1,18 @@
 import { describe, expect, it } from "bun:test";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai";
-import { reachesBudgetedHost } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { resolveInlineImageByteBudget } from "@oh-my-pi/pi-catalog/compat/request-size";
+import { DEFAULT_INLINE_IMAGE_BYTES } from "@oh-my-pi/pi-coding-agent/session/provider-image-budget";
 import { ImageUrlService } from "@oh-my-pi/pi-coding-agent/blob-broker/service";
 import { wrapStreamFnWithBlobUrlFallback } from "@oh-my-pi/pi-coding-agent/blob-broker/stream-fallback";
 
 const model: Model = buildModel({
 	id: "gpt-4.1",
 	name: "GPT 4.1",
-	api: "openai-responses",
-	provider: "openai",
-	baseUrl: "https://api.openai.com/v1",
+	api: "openai-completions",
+	provider: "custom",
+	baseUrl: "https://chat.example/v1",
 	reasoning: false,
 	input: ["text", "image"],
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -42,7 +41,7 @@ function message(text: string, stopReason: "stop" | "error" = "stop"): Assistant
 	};
 }
 
-function imageContext(channel: "native" | "url" | "inline"): Context {
+function imageContext(channel: "url" | "inline"): Context {
 	return {
 		messages: [
 			{
@@ -53,7 +52,6 @@ function imageContext(channel: "native" | "url" | "inline"): Context {
 						data: "aW1hZ2U=",
 						mimeType: "image/png",
 						...(channel !== "inline" ? { url: "https://images.test/blob" } : {}),
-						...(channel === "native" ? { providerFile: { provider: "openai" as const, id: "file_bad" } } : {}),
 					},
 				],
 				timestamp: 0,
@@ -62,12 +60,11 @@ function imageContext(channel: "native" | "url" | "inline"): Context {
 	};
 }
 
-function channelOf(context: Context): "native" | "url" | "inline" {
+function channelOf(context: Context): "url" | "inline" {
 	const first = context.messages[0];
 	if (!first || !Array.isArray(first.content)) throw new Error("missing image message");
 	const image = first.content.find(part => part.type === "image");
 	if (image?.type !== "image") throw new Error("missing image");
-	if (image.providerFile) return "native";
 	return image.url ? "url" : "inline";
 }
 
@@ -81,7 +78,6 @@ class FakeFallbackService extends ImageUrlService {
 	override async fallbackContext(context: Context, _model: Model): Promise<Context> {
 		const channel = channelOf(context);
 		this.fallbacks.push(channel);
-		if (channel === "native") return imageContext("url");
 		return imageContext("inline");
 	}
 }
@@ -109,8 +105,8 @@ async function eventTypes(stream: AssistantMessageEventStream): Promise<string[]
 	return events;
 }
 
-describe("provider-file stream fallback", () => {
-	it("recovers native to URL to inline without duplicate start events", async () => {
+describe("image URL stream fallback", () => {
+	it("recovers URL to inline without duplicate start events", async () => {
 		const calls: string[] = [];
 		const base: StreamFn = (_model, context) => {
 			const channel = channelOf(context);
@@ -120,44 +116,51 @@ describe("provider-file stream fallback", () => {
 		const service = new FakeFallbackService();
 		const wrapped = wrapStreamFnWithBlobUrlFallback(base, () => service);
 
-		const events = await eventTypes(await wrapped(model, imageContext("native")));
+		const events = await eventTypes(await wrapped(model, imageContext("url")));
 
-		expect(calls).toEqual(["native", "url", "inline"]);
-		expect(service.fallbacks).toEqual(["native", "url"]);
+		expect(calls).toEqual(["url", "inline"]);
+		expect(service.fallbacks).toEqual(["url"]);
 		expect(events).toEqual(["start", "done"]);
 	});
 
-	it("removes a rejected native handle and stops after URL succeeds", async () => {
-		const seen: Context[] = [];
+	it("tries the next URL destination before inline and does not quarantine a working URL", async () => {
+		class NextUrlService extends ImageUrlService {
+			override async fallbackContext(context: Context): Promise<Context> {
+				return {
+					...context,
+					messages: [
+						{
+							role: "user",
+							content: [
+								{
+									type: "image",
+									data: "aW1hZ2U=",
+									mimeType: "image/png",
+									url: "https://second.example/image.png",
+								},
+							],
+							timestamp: 0,
+						},
+					],
+				};
+			}
+		}
+		const service = new NextUrlService("/tmp/url-chain", [], { daemon: false });
+		const urls: string[] = [];
 		const base: StreamFn = (_model, context) => {
-			seen.push(context);
-			return scriptedStream(seen.length === 1 ? "error" : "success");
+			const first = context.messages[0];
+			if (!Array.isArray(first.content) || first.content[0]?.type !== "image") throw new Error("missing image");
+			urls.push(first.content[0].url ?? "inline");
+			return scriptedStream(urls.length === 1 ? "error" : "success");
 		};
-		const service = new FakeFallbackService();
 		const wrapped = wrapStreamFnWithBlobUrlFallback(base, () => service);
-
-		expect(await eventTypes(await wrapped(model, imageContext("native")))).toEqual(["start", "done"]);
-		expect(seen.map(channelOf)).toEqual(["native", "url"]);
-		expect(service.fallbacks).toEqual(["native"]);
+		expect(await eventTypes(await wrapped(model, imageContext("url")))).toEqual(["start", "done"]);
+		expect(urls).toEqual(["https://images.test/blob", "https://second.example/image.png"]);
+		expect(service.isQuarantined(model.provider)).toBe(false);
 	});
 
 	it("limits restored inline screenshot bytes before retrying a failed URL request", async () => {
-		const anthropicModel = buildModel({
-			id: "claude-sonnet-4-5",
-			name: "Claude Sonnet",
-			api: "anthropic-messages",
-			provider: "anthropic",
-			baseUrl: "https://api.anthropic.com",
-			reasoning: false,
-			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 1_000_000,
-			maxTokens: 4096,
-		});
-		// Sized from the budget the clamp reads for this model, so a change to the catalog value moves the case with
-		// it: the budget holds at most `withinBudget` screenshots, and the context carries 16 more.
-		const byteBudget = resolveInlineImageByteBudget(anthropicModel, reachesBudgetedHost(anthropicModel));
-		if (byteBudget === undefined) throw new Error(`${anthropicModel.id} has no inline image byte budget`);
+		const byteBudget = DEFAULT_INLINE_IMAGE_BYTES;
 		const screenshot = "A".repeat(Math.floor(byteBudget / 224));
 		const withinBudget = Math.floor(byteBudget / screenshot.length);
 		const ids = Array.from({ length: withinBudget + 16 }, (_, index) => `call-${index}`);
@@ -179,7 +182,7 @@ describe("provider-file stream fallback", () => {
 		const service = new ImageUrlService("/tmp/provider-fallback-test", [], { daemon: false });
 		const wrapped = wrapStreamFnWithBlobUrlFallback(base, () => service);
 
-		expect(await eventTypes(await wrapped(anthropicModel, context))).toEqual(["start", "done"]);
+		expect(await eventTypes(await wrapped(model, context))).toEqual(["start", "done"]);
 		expect(attempts).toHaveLength(2);
 		const retried = attempts[1];
 		// The retry drops the oldest screenshots until the rest fit; the host's body limit may drop a few more.
@@ -201,9 +204,9 @@ describe("provider-file stream fallback", () => {
 		const service = new FakeFallbackService();
 		const wrapped = wrapStreamFnWithBlobUrlFallback(base, () => service);
 
-		const events = await eventTypes(await wrapped(model, imageContext("native")));
+		const events = await eventTypes(await wrapped(model, imageContext("url")));
 
-		expect(calls).toEqual(["native"]);
+		expect(calls).toEqual(["url"]);
 		expect(service.fallbacks).toEqual([]);
 		expect(events).toEqual(["start", "text_start", "text_delta", "error"]);
 	});

@@ -9,12 +9,12 @@ export interface BlobBrokerSavingsRecord {
 	readonly timestamp: number;
 	readonly provider: string;
 	readonly model: string;
-	/** Provider-native files use `provider-files`; URLs use their publication destination. */
+	/** URL publication destination. */
 	readonly destination: string;
 	readonly imageCount: number;
 	/** UTF-8 bytes occupied by the base64 values replaced by references. */
 	readonly inlineBytes: number;
-	/** UTF-8 bytes occupied by the URL or provider-file references. */
+	/** UTF-8 bytes occupied by the URL references. */
 	readonly referenceBytes: number;
 	readonly savedBytes: number;
 }

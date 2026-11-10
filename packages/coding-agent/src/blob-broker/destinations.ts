@@ -614,24 +614,6 @@ export const BUILTIN_BLOB_DESTINATIONS = {
 		],
 		credentials: [{ key: "webhookUrl", label: "Webhook URL", required: true, secret: true }],
 	},
-	"provider-files": {
-		id: "provider-files",
-		label: "Model provider files",
-		family: "provider-files",
-		status: "requires-account",
-		directImage: false,
-		reason: "Provider file references are API-local rather than public image URLs.",
-		options: [
-			{
-				key: "provider",
-				label: "Provider",
-				type: "select",
-				required: true,
-				choices: ["openai", "anthropic", "google"],
-			},
-		],
-		credentials: noFields,
-	},
 	direct: {
 		id: "direct",
 		label: "Direct public URL",

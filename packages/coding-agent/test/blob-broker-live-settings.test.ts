@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import * as os from "node:os";
 import { ImageUrlService, LiveImageUrlService } from "@oh-my-pi/pi-coding-agent/blob-broker/service";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -7,13 +7,10 @@ import { cfgImagesUrlsEnabled, cfgImagesUrlsTtlHours } from "@oh-my-pi/pi-coding
 
 describe("LiveImageUrlService", () => {
 	it("follows images.urls.* changes made after construction", async () => {
-		// provider-files only: no URL backend, so no daemon/server is started.
-		const settings = Settings.isolated({ "images.urls.backends": ["provider-files"] });
-		const live = new LiveImageUrlService(
-			settings,
-			() => os.tmpdir(),
-			async () => undefined,
-		);
+		// Observe live replacement without starting a tunnel or daemon.
+		const prewarm = spyOn(ImageUrlService.prototype, "prewarm").mockImplementation(() => {});
+		const settings = Settings.isolated({ "images.urls.backends": ["direct"] });
+		const live = new LiveImageUrlService(settings, () => os.tmpdir());
 		try {
 			expect(live.current).toBeUndefined();
 
@@ -32,6 +29,7 @@ describe("LiveImageUrlService", () => {
 			expect(live.current).toBeUndefined();
 		} finally {
 			live.dispose();
+			prewarm.mockRestore();
 		}
 	});
 });
