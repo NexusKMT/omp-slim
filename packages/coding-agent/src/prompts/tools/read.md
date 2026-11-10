@@ -1,4 +1,4 @@
-Use `read` for static web; browser only if needed.
+Use `read` for static web pages.
 
 Put line ranges in `path`, never a separate range/offset/limit parameter: `{"path":"notes.txt:450-455"}` reads lines 450-455; `{"path":"notes.txt:-5"}` reads the last 5. Include the selector on every ranged call; repeating a bare path does not advance through the file.
 

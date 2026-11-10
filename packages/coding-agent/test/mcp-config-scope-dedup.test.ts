@@ -64,6 +64,15 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 		await removeWithRetries(userAgentDir);
 	});
 
+	test("preserves explicitly configured browser MCP servers", async () => {
+		await writeMcpJson(userAgentDir, {
+			playwright: { command: "npx", args: ["@playwright/mcp"] },
+			browserbase: { type: "http", url: "https://browserbase.com/mcp" },
+		});
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: false });
+		expect(Object.keys(result.configs).sort()).toEqual(["browserbase", "playwright"]);
+	});
+
 	test("keeps the user server when project config is disabled", async () => {
 		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: false, filterExa: false });
 		expect(Object.keys(result.configs)).toEqual(["usercontext"]);

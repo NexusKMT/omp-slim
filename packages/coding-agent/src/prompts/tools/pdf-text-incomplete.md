@@ -1,1 +1,1 @@
-Text extraction is incomplete for PDF pages {{pages}}. If this PDF is a file on disk, append `:page<N>.png` to its file path to read a page as an image (e.g. `doc.pdf:page{{firstPage}}.png`).
+Text extraction is incomplete for PDF pages {{pages}}. OCR is required to read image-only pages; run an external OCR tool and read the resulting text file.

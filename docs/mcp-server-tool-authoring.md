@@ -274,7 +274,7 @@ Full reloads use `MCPCommandController.reloadServers()`:
 
 1. `mcpManager.disconnectAll()`
 2. clear MCP prompt commands and capability filesystem caches
-3. `mcpManager.discoverAndConnect()` with current project/browser filters and session extension roots
+3. `mcpManager.discoverAndConnect()` with current project filters and session extension roots
 4. `session.refreshMCPTools(mcpManager.getTools())`
 
 Some mutations reconnect or disconnect only the affected server and then refresh

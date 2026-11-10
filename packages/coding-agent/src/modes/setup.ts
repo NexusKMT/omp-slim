@@ -12,7 +12,6 @@ import {
 } from "@oh-my-pi/pi-tui/setup/wizard";
 import type { Settings } from "../config/settings";
 import { canSelfUpdate } from "../cli/update-cli";
-import { captureBrowserSession } from "../utils/browser-session";
 import { createModelBrowserSource } from "./model-browser-source";
 import type { InteractiveModeContext } from "./types";
 
@@ -93,7 +92,6 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 			cfgUpdateAuto.set(ctx.settings, enabled);
 			await ctx.settings.flush();
 		},
-		captureBrowserSession,
 		openInBrowser: url => ctx.openInBrowser(url),
 		markComplete: version => markSetupWizardComplete(ctx.settings, version),
 		playWelcomeIntro: () => ctx.playWelcomeIntro(),

@@ -336,7 +336,6 @@ function serveMcpManager(state: PeerIntegrationState): RpcServe<MCPManager, McpM
 		waitForPendingConnections: manager => manager.waitForPendingConnections(),
 		readServerResource: (manager, name, uri, options) => manager.readServerResource(name, uri, options),
 		serverInstructions: manager => manager.getServerInstructions(),
-		reconcileBrowserFilter: (manager, enabled) => manager.reconcileBrowserFilter(enabled),
 	};
 }
 

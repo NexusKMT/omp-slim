@@ -32,8 +32,7 @@ it.skipIf(process.platform === "win32")(
 		});
 		try {
 			const home = tempDir.path();
-			// Run outside any Tern pane the test runner sits in: with TERN_* set, omp opens the
-			// dashboard in that pane (replacing its block) instead of the stub opener on PATH.
+			// Keep the spawned command independent of the test runner's terminal environment.
 			const hostEnv: Record<string, string | undefined> = {};
 			for (const key in process.env) if (!key.startsWith("TERN_")) hostEnv[key] = process.env[key];
 			const proc = Bun.spawn([process.execPath, cliEntry, "stats", "--port", String(existing.port)], {

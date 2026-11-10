@@ -223,15 +223,6 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		applyToolProxy(tool, this);
 	}
 
-	/**
-	 * Forward browser mode changes when available.
-	 */
-	restartForModeChange(): Promise<void> {
-		const target = this.tool as { restartForModeChange?: () => Promise<void> };
-		if (!target.restartForModeChange) return Promise.resolve();
-		return target.restartForModeChange();
-	}
-
 	async execute(
 		toolCallId: string,
 		params: Static<TParameters>,

@@ -18,8 +18,6 @@ export interface LoadMCPConfigsOptions {
 	enableProjectConfig?: boolean;
 	/** Whether to filter out Exa MCP servers (default: true) */
 	filterExa?: boolean;
-	/** Whether to filter out browser MCP servers when the built-in browser capability is enabled (default: false) */
-	filterBrowser?: boolean;
 	/** Session-local extension roots for post-startup rediscovery (explicit + mode + configured). */
 	extensionRoots?: EffectiveExtensionRoots;
 }
@@ -103,7 +101,6 @@ function convertToLegacyConfig(server: MCPServer): MCPServerConfig {
 export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOptions): Promise<LoadMCPConfigsResult> {
 	const enableProjectConfig = options?.enableProjectConfig ?? true;
 	const filterExa = options?.filterExa ?? true;
-	const filterBrowser = options?.filterBrowser ?? false;
 
 	// Load user-level disable/force-enable lists. The denylist always wins; the
 	// allowlist overrides a non-writable source config's `enabled: false`.
@@ -171,12 +168,6 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 		configs = exaResult.configs;
 		sources = exaResult.sources;
 		exaApiKeys = exaResult.exaApiKeys;
-	}
-
-	if (filterBrowser) {
-		const browserResult = filterBrowserMCPServers(configs, sources);
-		configs = browserResult.configs;
-		sources = browserResult.sources;
 	}
 
 	return { configs, exaApiKeys, sources };
@@ -365,102 +356,4 @@ export function validateServerConfig(name: string, config: MCPServerConfig): str
 	}
 
 	return errors;
-}
-
-export interface BrowserMCPPreludeFilterOptions {
-	restrictToolNames: boolean;
-	browserEnabled: boolean;
-	evalRegistered: boolean;
-	evalActive: boolean;
-}
-
-/** Browser MCP filtering is valid only when the built-in prelude is callable. */
-export function shouldFilterBrowserMCPForPrelude(options: BrowserMCPPreludeFilterOptions): boolean {
-	return !options.restrictToolNames && options.browserEnabled && options.evalRegistered && options.evalActive;
-}
-
-/** Known browser automation MCP server names (lowercase) */
-const BROWSER_MCP_NAMES = new Set([
-	"puppeteer",
-	"playwright",
-	"browserbase",
-	"browser-tools",
-	"browser-use",
-	"browser",
-]);
-
-/** Patterns matching browser MCP package names in command/args */
-const BROWSER_MCP_PKG_PATTERN =
-	// Official packages
-	// - @modelcontextprotocol/server-puppeteer
-	// - @playwright/mcp
-	// - @browserbasehq/mcp-server-browserbase
-	// - @agentdeskai/browser-tools-mcp
-	// - @agent-infra/mcp-server-browser
-	// Community packages: puppeteer-mcp-server, playwright-mcp, pptr-mcp, etc.
-	/(?:@modelcontextprotocol\/server-puppeteer|@playwright\/mcp|@browserbasehq\/mcp-server-browserbase|@agentdeskai\/browser-tools-mcp|@agent-infra\/mcp-server-browser|puppeteer-mcp|playwright-mcp|pptr-mcp|browser-use-mcp|mcp-browser-use)/i;
-
-/** URL patterns for hosted browser MCP services */
-const BROWSER_MCP_URL_PATTERN = /browserbase\.com|browser-use\.com/i;
-
-/**
- * Check if a server config is a browser automation MCP server.
- */
-export function isBrowserMCPServer(name: string, config: MCPServerConfig): boolean {
-	// Check by server name
-	if (BROWSER_MCP_NAMES.has(name.toLowerCase())) {
-		return true;
-	}
-
-	// Check by URL for HTTP/SSE servers
-	if (config.type === "http" || config.type === "sse") {
-		const httpConfig = config as { url?: string };
-		if (httpConfig.url && BROWSER_MCP_URL_PATTERN.test(httpConfig.url)) {
-			return true;
-		}
-	}
-
-	// Check by command/args for stdio servers
-	if (!config.type || config.type === "stdio") {
-		const stdioConfig = config as { command?: string; args?: string[] };
-		if (stdioConfig.command && BROWSER_MCP_PKG_PATTERN.test(stdioConfig.command)) {
-			return true;
-		}
-		if (stdioConfig.args?.some(arg => BROWSER_MCP_PKG_PATTERN.test(arg))) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-/** Result of filtering browser MCP servers */
-export interface BrowserFilterResult {
-	/** Configs with browser servers removed */
-	configs: Record<string, MCPServerConfig>;
-	/** Source metadata for remaining servers */
-	sources: Record<string, SourceMeta>;
-}
-
-/**
- * Filter out browser automation MCP servers.
- * Since we have a native browser capability, we don't need these MCP servers.
- */
-export function filterBrowserMCPServers(
-	configs: Record<string, MCPServerConfig>,
-	sources: Record<string, SourceMeta>,
-): BrowserFilterResult {
-	const filtered: Record<string, MCPServerConfig> = {};
-	const filteredSources: Record<string, SourceMeta> = {};
-
-	for (const [name, config] of Object.entries(configs)) {
-		if (!isBrowserMCPServer(name, config)) {
-			filtered[name] = config;
-			if (sources[name]) {
-				filteredSources[name] = sources[name];
-			}
-		}
-	}
-
-	return { configs: filtered, sources: filteredSources };
 }

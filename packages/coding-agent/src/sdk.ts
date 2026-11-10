@@ -160,7 +160,6 @@ import {
 	type MCPToolScope,
 	MCPToolCache,
 	type MCPToolsLoadResult,
-	shouldFilterBrowserMCPForPrelude,
 } from "./mcp";
 import { parseMCPToolName } from "@oh-my-pi/pi-tui/tools/mcp";
 import { mapPromptArguments } from "./mcp/prompt-args";
@@ -325,7 +324,6 @@ import {
 	type ModelJobWidgetAuthorOptions,
 	resolveToolCallIntent,
 } from "./job-widgets";
-import { createBrowserPrelude } from "./tools/browser";
 import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
 import { createComputerPrelude } from "./tools/computer";
 import { createRatchetPrelude } from "./ratchet/prelude-definition";
@@ -368,7 +366,6 @@ import {
 } from "./tools/settings";
 import { cfgToolsFormat } from "./session/context-settings";
 import { cfgAutolearnEnabled } from "./autolearn/settings";
-import { cfgBrowserEnabled } from "./tools/browser/settings";
 import {
 	cfgDefaultThinkingLevel,
 	cfgExternalThinking,
@@ -2754,17 +2751,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const spotlightExperiment =
 			options.bindProcessState === false ? undefined : startSpotlightExperiment(settings, sessionManager);
 		if (spotlightExperiment) toolSession.spotlight = spotlightExperiment;
-		let browserPrelude: EvalPreludeDefinition | undefined;
 		let computerPrelude: EvalPreludeDefinition | undefined;
 		let ratchetPrelude: EvalPreludeDefinition | undefined;
 		let archivePrelude: EvalPreludeDefinition | undefined;
 		const getEvalPreludes = (): readonly EvalPreludeDefinition[] => {
 			if (restrictToolNames || !toolRegistry.has("eval") || !activeToolNames.has("eval")) return [];
 			const builtins: EvalPreludeDefinition[] = [];
-			if (cfgBrowserEnabled.get(settings)) {
-				browserPrelude ??= createBrowserPrelude(toolSession);
-				builtins.push(browserPrelude);
-			}
 			if (cfgComputerEnabled.get(settings)) {
 				computerPrelude ??= createComputerPrelude(toolSession);
 				builtins.push(computerPrelude);
@@ -2816,12 +2808,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		// Create built-in tools (already wrapped with meta notice formatting)
 		await logger.time("createAllTools", createTools, toolSession, options.toolNames);
-		const initialBrowserPreludeAvailable = shouldFilterBrowserMCPForPrelude({
-			restrictToolNames,
-			browserEnabled: cfgBrowserEnabled.get(settings),
-			evalRegistered: toolRegistry.has("eval"),
-			evalActive: activeToolNames.has("eval"),
-		});
 
 		// Restricted sessions cannot inherit or discover MCP capabilities.
 		const enableMCP = !restrictToolNames && (options.enableMCP ?? true);
@@ -2859,8 +2845,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			enableProjectConfig: cfgMcpEnableProjectConfig.get(settings),
 			// Always filter Exa - we have native integration
 			filterExa: true,
-			// Filter browser MCP only when Eval can expose the built-in browser prelude.
-			filterBrowser: initialBrowserPreludeAvailable,
 			extensionRoots: buildSessionExtensionRoots(),
 		};
 		if (enableMCP && !mcpManager && isMainThread()) {
@@ -3799,7 +3783,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// re-registers a built-in (e.g. wrapping `write`) can delegate to the original — reaching the
 		// unwrapped native execute, which inherits the caller's already-granted approval rather than
 		// re-running the gate. Seeded from the xdev registry when present (it retains discoverable
-		// built-ins like `browser` that xdev partitioning removes from the active tool array), else
+		// built-in capabilities that xdev partitioning removes from the active tool array), else
 		// from the built-in registry; captured before the ExtensionToolWrapper pass so the natives
 		// stay unwrapped. The extension runner exposes it to re-registered tools via createContext.
 		const nativeToolsByName = new Map<string, Tool>(toolSession.xdev?.tools ?? undefined);
@@ -5137,12 +5121,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			interactivePrompts: options.interactivePrompts,
 			rebindModelAfterDiscovery: options.model === undefined || options.rebindModelAfterDiscovery === true,
 			toolRegistry,
-			reconcileBrowserMcpFilter: mcpManager
-				? async enabled => {
-						await mcpManager.reconcileBrowserFilter(enabled);
-						return mcpManager.getTools();
-					}
-				: undefined,
 			memoryEnabled: !restrictToolNames,
 			memoryAgentDir: agentDir,
 			memoryTaskDepth: taskDepth,

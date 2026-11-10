@@ -7,7 +7,6 @@ import { askRenderer } from "./tools/ask";
 import { astEditRenderer } from "./tools/ast-edit";
 import { astGrepRenderer } from "./tools/ast-grep";
 import { bashRenderer } from "./tools/bash";
-import { browserRenderer } from "./tools/browser";
 import { debugRenderer } from "./tools/debug";
 import { editRenderer } from "./tools/edit";
 import { evalRenderer } from "./tools/eval";
@@ -37,8 +36,6 @@ const RENDERERS: Record<string, ToolRenderer> = {
 	ast_edit: astEditRenderer,
 	ast_grep: astGrepRenderer,
 	bash: bashRenderer,
-	browser: browserRenderer,
-	puppeteer: browserRenderer,
 	debug: debugRenderer,
 	edit: editRenderer,
 	apply_patch: editRenderer,

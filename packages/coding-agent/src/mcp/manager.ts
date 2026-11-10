@@ -28,7 +28,6 @@ import {
 	unsubscribeFromResources,
 } from "./client";
 import {
-	isBrowserMCPServer,
 	type LoadMCPConfigsOptions,
 	type LoadMCPConfigsResult,
 	loadAllMCPConfigs,
@@ -230,8 +229,6 @@ export interface MCPDiscoverOptions {
 	enableProjectConfig?: boolean;
 	/** Whether to filter out Exa MCP servers (default: true) */
 	filterExa?: boolean;
-	/** Whether to filter out browser MCP servers when the built-in browser capability is enabled (default: false) */
-	filterBrowser?: boolean;
 	/** Session-local extension roots for post-startup rediscovery (explicit + mode + configured). */
 	extensionRoots?: EffectiveExtensionRoots;
 	/** Called when MCP server connection state changes. */
@@ -294,8 +291,6 @@ export interface MCPManagerApi {
 	): Promise<MCPResourceReadResult | undefined>;
 	/** Server-provided instructions by server name. */
 	getServerInstructions(): Map<string, string>;
-	/** Apply the browser-MCP filter after the built-in browser capability toggled. */
-	reconcileBrowserFilter(enabled: boolean): Promise<void>;
 }
 
 /** Process-global MCP manager accessors a subagent worker installs in place of its own (empty) slot. */
@@ -408,7 +403,7 @@ export class MCPManager implements MCPManagerApi {
 	/** Preserved configs for reconnection after connection loss. */
 	#serverConfigs = new Map<string, MCPServerConfig>();
 	#discoverOptions: MCPDiscoverOptions | undefined;
-	#browserFilterMutationTail: Promise<void> = Promise.resolve();
+	#projectConfigMutationTail: Promise<void> = Promise.resolve();
 	/** Settles when the latest {@link MCPManager.discoverAndConnect} call does; reconciles wait on it. */
 	#discoveryInFlight: Promise<unknown> = Promise.resolve();
 	/**
@@ -760,7 +755,6 @@ export class MCPManager implements MCPManagerApi {
 			loadedConfigs = await this.loadConfigs(this.cwd, {
 				enableProjectConfig: options?.enableProjectConfig,
 				filterExa: options?.filterExa,
-				filterBrowser: options?.filterBrowser,
 				extensionRoots: options?.extensionRoots,
 			});
 		} catch (error) {
@@ -777,25 +771,14 @@ export class MCPManager implements MCPManagerApi {
 	}
 
 	/**
-	 * Reconcile browser-automation MCP servers with the built-in browser prelude.
-	 * Calls are serialized so rapid setting toggles cannot reconnect a server
-	 * after a newer enable has filtered it again.
-	 */
-	reconcileBrowserFilter(enabled: boolean): Promise<void> {
-		const reconcile = this.#browserFilterMutationTail.then(() => this.#applyBrowserFilter(enabled));
-		this.#browserFilterMutationTail = reconcile.catch(() => undefined);
-		return reconcile;
-	}
-
-	/**
 	 * Apply a live `mcp.enableProjectConfig` change: disconnect project-level
 	 * servers when disabled (restoring any user-level server they shadowed), or
-	 * connect them when enabled. Serialized with the browser-filter reconcile; a
-	 * no-op before the first discovery, which reads the flag itself.
+	 * connect them when enabled. Serialized so rapid toggles preserve their order;
+	 * a no-op before the first discovery, which reads the flag itself.
 	 */
 	reconcileProjectConfig(enabled: boolean): Promise<void> {
-		const reconcile = this.#browserFilterMutationTail.then(() => this.#applyProjectConfig(enabled));
-		this.#browserFilterMutationTail = reconcile.catch(() => undefined);
+		const reconcile = this.#projectConfigMutationTail.then(() => this.#applyProjectConfig(enabled));
+		this.#projectConfigMutationTail = reconcile.catch(() => undefined);
 		return reconcile;
 	}
 
@@ -807,7 +790,6 @@ export class MCPManager implements MCPManagerApi {
 		const loaded = await this.loadConfigs(this.cwd, {
 			enableProjectConfig: enabled,
 			filterExa: options.filterExa,
-			filterBrowser: options.filterBrowser,
 			extensionRoots: options.extensionRoots,
 		});
 		// Every server whose resolution depends on the flag: project-level ones
@@ -834,39 +816,6 @@ export class MCPManager implements MCPManagerApi {
 		}
 		if (!reconnect) return;
 		await this.connectServers(configs, sources, options.onStatus, options.startupTimeoutMs);
-	}
-
-	async #applyBrowserFilter(enabled: boolean): Promise<void> {
-		const options = this.#discoverOptions;
-		const loaded = await this.loadConfigs(this.cwd, {
-			enableProjectConfig: options?.enableProjectConfig,
-			filterExa: options?.filterExa,
-			filterBrowser: false,
-			extensionRoots: options?.extensionRoots,
-		});
-		const browserConfigs: Record<string, MCPServerConfig> = {};
-		const browserSources: Record<string, SourceMeta> = {};
-		for (const name in loaded.configs) {
-			const config = loaded.configs[name];
-			if (!config || !isBrowserMCPServer(name, config)) continue;
-			browserConfigs[name] = config;
-			const source = loaded.sources[name];
-			if (source) browserSources[name] = source;
-		}
-
-		if (!enabled) {
-			await this.connectServers(browserConfigs, browserSources, options?.onStatus, options?.startupTimeoutMs);
-			this.#discoverOptions = { ...options, filterBrowser: false };
-			return;
-		}
-
-		const names = new Set<string>();
-		for (const name in browserConfigs) names.add(name);
-		for (const [name, config] of this.#serverConfigs) {
-			if (isBrowserMCPServer(name, config)) names.add(name);
-		}
-		await Promise.all([...names].map(name => this.disconnectServer(name)));
-		this.#discoverOptions = { ...options, filterBrowser: true };
 	}
 
 	/**

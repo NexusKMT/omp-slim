@@ -261,10 +261,6 @@ _[Watch the capture ↗](https://omp.sh/clips/conflict.mp4)_
 
 _[Watch the capture ↗](https://omp.sh/clips/codemod.mp4)_
 
-### 20 · Drives a _real browser_. _Or your Slack?_
-
-Eval's `browser.open(...)` returns a tab handle with direct navigation, inspection, interaction, and element helpers; `tab.run(...)` handles custom JavaScript. It drives Chromium or Electron in an isolated tab runtime. Stealth is on by default, while the browser relay can adopt Chrome tabs you already have open without stealing focus.
-
 ### 21 · Hands on the desktop itself
 
 Eval's `computer` helpers — `computer.window(...)`, `win.screenshot()`, `win.ax()`, `el.press()`, plus `computer.run(fnOrCode, options)` for multi-step scripts — control the real host: enumerate windows and displays, capture screenshots, send native input, walk the OS accessibility tree, and use the clipboard. It exposes no browser DOM.
@@ -303,7 +299,6 @@ Core tools live in the same namespace as `read` and `bash`. Pin the active set w
 
 **Desktop & web**
 
-- `browser` — Puppeteer tabs over headless Chromium, CDP-attached apps, or your own Chrome via the relay.
 - `computer` — persistent JS against the host desktop: windows, screenshots, native input, AX tree, clipboard.
 - `web_search` — one query across configured providers, returning answer plus citations.
 - `github` — GitHub CLI ops — repo, PR, issues, code search, Actions run-watch.
@@ -433,9 +428,9 @@ Twenty-four backends. Pin one, or let `auto` walk the chain in order.
 | `searxng`    | self-hosted                               |
 | `duckduckgo` | no key                                    |
 | `startpage`  | no key                                    |
-| `google`     | no key (browser)                          |
-| `ecosia`     | no key (browser)                          |
-| `mojeek`     | no key (browser)                          |
+| `google`     | no key (HTTP)                          |
+| `ecosia`     | no key (HTTP)                          |
+| `mojeek`     | no key (HTTP)                          |
 | `public`     | no key (all of the above, consolidated)   |
 
 Exa also accepts a stored API key through `/login exa`; explicit keyless selection uses the public MCP fallback.
@@ -671,7 +666,6 @@ For architecture and contribution guidelines, see [packages/coding-agent/DEVELOP
 | **[@oh-my-pi/pi-wire](packages/wire)**                                        | Shared collab live-session protocol types and relay constants               |
 | **[@oh-my-pi/pi-mnemopi](packages/mnemopi)**                                  | Local SQLite memory engine for omp agents                                   |
 | **[@oh-my-pi/snapcompact](packages/snapcompact)**                             | Bitmap-frame context compression package and SQuAD eval suite               |
-| **[@oh-my-pi/browser-relay](packages/browser-relay)**                         | Chrome extension that lets the Eval browser API drive your existing tabs    |
 | **[@oh-my-pi/pi-metaharness](packages/metaharness)**                          | Unified benchmark runners, Harbor run storage, REST/SSE API, live dashboard |
 | **[@oh-my-pi/typescript-edit-benchmark](packages/typescript-edit-benchmark)** | Edit benchmark suite built on TypeScript source mutations                   |
 

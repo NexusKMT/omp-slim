@@ -14,7 +14,7 @@
    - `packages/coding-agent/src/web/search/providers/utils.ts` — credential lookup; source normalization.
    - `packages/coding-agent/src/web/search/providers/browser-headers.ts` — shared Chromium navigation headers for scrape providers.
    - `packages/coding-agent/src/web/search/query.ts` — Google-style query parsing, provider syntax formatting, and lenient result filtering.
-   - `packages/coding-agent/src/web/search/providers/browser-page.ts` — shared fetch/headless-browser page loader for scrape providers.
+   - `packages/coding-agent/src/web/search/providers/http-page.ts` — shared HTTP page loader for scrape providers.
    - `packages/coding-agent/src/web/search/providers/anthropic.ts` — Claude web-search provider.
    - `packages/coding-agent/src/web/search/providers/brave.ts` — Brave Search API adapter.
    - `packages/coding-agent/src/web/search/providers/deepseek.ts` — DeepSeek Search API adapter.
@@ -22,15 +22,15 @@
    - `packages/coding-agent/src/web/search/providers/openai.ts` — billed OpenAI API Responses adapter, separate from Codex OAuth.
    - `packages/coding-agent/src/web/search/providers/openrouter.ts` — chat-completions grounding through OpenRouter's web plugin.
    - `packages/coding-agent/src/web/search/providers/duckduckgo.ts` — DuckDuckGo HTML frontend scraper.
-   - `packages/coding-agent/src/web/search/providers/ecosia.ts` — Ecosia browser-backed scraper.
+   - `packages/coding-agent/src/web/search/providers/ecosia.ts` — Ecosia HTTP scraper.
    - `packages/coding-agent/src/web/search/providers/exa.ts` — Exa API or MCP adapter.
    - `packages/coding-agent/src/web/search/providers/firecrawl.ts` — Firecrawl search adapter.
    - `packages/coding-agent/src/web/search/providers/gemini.ts` — Gemini grounding SSE adapter.
-   - `packages/coding-agent/src/web/search/providers/google.ts` — Google browser-backed SERP scraper.
+   - `packages/coding-agent/src/web/search/providers/google.ts` — Google HTTP SERP scraper.
    - `packages/coding-agent/src/web/search/providers/jina.ts` — Jina Reader search adapter.
    - `packages/coding-agent/src/web/search/providers/kagi.ts` — Kagi provider wrapper.
    - `packages/coding-agent/src/web/search/providers/kimi.ts` — Kimi search adapter.
-   - `packages/coding-agent/src/web/search/providers/mojeek.ts` — Mojeek browser-backed scraper (independent index).
+   - `packages/coding-agent/src/web/search/providers/mojeek.ts` — Mojeek HTTP scraper (independent index).
    - `packages/coding-agent/src/web/search/providers/parallel.ts` — Parallel provider wrapper.
    - `packages/coding-agent/src/web/search/providers/perplexity.ts` — Perplexity API / OAuth adapter.
    - `packages/coding-agent/src/web/search/providers/public.ts` — Public Web aggregate over all credential-free engines.
@@ -134,11 +134,8 @@ Each provider search transport receives a hard timeout from `providers.webSearch
 - **Provider adapters**
    - **Perplexity** — `packages/coding-agent/src/web/search/providers/perplexity.ts`
       - Availability: tries cookies, stored OAuth, then direct API credentials. Anonymous search is admitted only when no credential method resolves and the candidate is explicit; failed authenticated methods do not append an anonymous attempt. Automatic admission requires direct Perplexity auth. OpenRouter keys are never borrowed; select an `openrouter/perplexity/…` model for OpenRouter grounding.
-      - Browser SSO: run `/login perplexity` (or select Perplexity in the setup wizard), then press Enter or enter `sso`. Complete sign-in in the dedicated browser window, choosing **Single sign-on (SSO)** for your organization. omp captures and validates the session automatically; no extension, DevTools, cookie copying, or logout from your normal browser is needed.
-      - Browser login requires a graphical session on the machine running omp. It uses an isolated Chromium profile and incognito context, preserves sandbox and TLS checks, runs outside Chromium's automation mode (Google sign-in rejects automation-controlled browsers), and closes the browser when login finishes, is cancelled, or reaches the five-minute timeout. Microsoft Edge cannot launch outside automation mode, so when Edge is the resolved browser (including via `PUPPETEER_EXECUTABLE_PATH`) sign-in uses omp's Chrome for Testing download instead. Press Escape in omp to cancel. Profile cleanup uses the existing retry-and-warn behavior if the operating system keeps files locked.
-      - The saved session uses the existing Perplexity subscription, including an Enterprise seat; browser SSO does not switch to separately billed API credentials. Sign in again if Perplexity expires or revokes the session. Enter `email` to use the existing email-code and authenticator-code flow instead.
+      - Run `/login perplexity` for email-code or authenticator-code login, or provide an existing session token.
       - Legacy `ai.perplexity.mac` sessions may still be borrowed before the login prompt. Start omp with `PI_AUTH_NO_BORROW=1` to skip borrowing. Newer Mac app sessions in the restricted Keychain are not borrowed.
-      - SDK hosts can provide `OAuthController.onBrowserSession` to return the first non-empty cookie value matching `request.cookieNames`, checked in preference order. The callback returns the value privately; pi-ai validates it without importing browser automation. Hosts without that callback retain the email-code flow. RPC login does not launch a browser.
       - OAuth/cookie/anonymous mode: POSTs to `https://www.perplexity.ai/rest/sse/perplexity_ask`, consumes SSE, merges partial events, extracts answer and source URLs, sets `authMode: "oauth"` (`"anonymous"` for the unauthenticated fallback).
       - API-key mode: streams `https://api.perplexity.ai/chat/completions` with model default `sonar-pro` (`PI_PERPLEXITY_API_MODEL` can override it), `search_mode: "web"`, search breadth, and token/sampling controls. Native domain/date/language filters are derived from the query; absolute dates take precedence over recency.
       - `num_search_results` controls upstream API breadth only in API-key mode. `limit` is preserved separately as `num_results` and slices returned `sources` after parsing in both auth modes.
@@ -268,7 +265,7 @@ Each provider search transport receives a hard timeout from `providers.webSearch
       - Output: `sources`, optional `answer` from the instance's answer records, and `relatedQuestions` from `suggestions`. Empty source lists with upstream-engine failures raise a provider error.
    - **DuckDuckGo** — `packages/coding-agent/src/web/search/providers/duckduckgo.ts`
       - Availability: always available; no API key.
-      - Querying: POST the no-JS HTML frontend `https://html.duckduckgo.com/html/` with `q`, locale `kl` (default `us-en`; recognized `lang:` locales override it), and optional recency `df=d|w|m|y`; unwraps DuckDuckGo redirect URLs. This path does not escalate to Chromium.
+      - Querying: POST the no-JS HTML frontend `https://html.duckduckgo.com/html/` with `q`, locale `kl` (default `us-en`; recognized `lang:` locales override it), and optional recency `df=d|w|m|y`; unwraps DuckDuckGo redirect URLs.
       - `recency` maps to `df`; values outside `day|week|month|year` are ignored.
       - `limit` / `num_search_results`: collapsed and clamped to `1..20`, default `10`; output exposes `sources` only (DuckDuckGo's HTML page does not return a standalone abstract).
       - DuckDuckGo serves a bot-detection challenge (HTTP 200/202 with an `anomaly-modal` body) when it throttles datacenter or shared-egress IPs. The adapter detects this and raises a `SearchProviderError` so the orchestrator can fall through to the next configured provider with a clear cause.
@@ -276,8 +273,8 @@ Each provider search transport receives a hard timeout from `providers.webSearch
       - Availability: always available; no API key. It proxies Google's index, GETs the homepage to obtain the `sc` anti-bot form token, then POSTs `/sp/search` (with a tokenless GET fallback). `recency` maps to `with_date=d|w|m|y`.
       - Bot/challenge or consent pages raise a provider-tagged `SearchProviderError` (429) so the chain advances.
    - **Google / Ecosia / Mojeek** — `providers/google.ts`, `providers/ecosia.ts`, `providers/mojeek.ts`
-      - Availability: always available; no API key. `browserFetch` (`providers/browser-page.ts`) tries a browser-profiled plain fetch first and escalates fetch failures, non-2xx statuses, and challenge bodies to the shared stealth headless browser (`acquireBrowser`); an injected `params.fetch` (tests) never escalates.
-      - Google: seeds cookies via the homepage, then loads the rendered SERP; `recency` maps to `tbs=qdr:*`. Ecosia sits behind Cloudflare (hence the browser); its organic results are Google-backed; `recency` is a server-side no-op and silently ignored. Mojeek fronts an ALTCHA proof-of-work wall that the browser path auto-solves; `recency` maps to `since=day|week|month|year`.
+      - Availability: always available; no API key. `fetchHtmlPage` (`providers/http-page.ts`) uses ordinary HTTP requests with navigation headers. Transport failures and challenge responses are reported to the fallback chain.
+      - Google `recency` maps to `tbs=qdr:*`. Ecosia has Google-backed organic results and ignores `recency`. Mojeek `recency` maps to `since=day|week|month|year`. JavaScript challenges and CAPTCHAs are unsupported.
       - Challenge pages (Google `unusual traffic`, Ecosia Firewall, Mojeek ALTCHA/robot 403) raise provider-tagged `SearchProviderError`s (429).
    - **Public Web** — `packages/coding-agent/src/web/search/providers/public.ts`
       - Availability: explicit selection only (`isAvailable()` is `false`; `isExplicitlyAvailable()` is `true`).
@@ -290,8 +287,7 @@ Each provider search transport receives a hard timeout from `providers.webSearch
    - Calls one or more external search providers over HTTPS until one succeeds or all fail.
    - Provider-specific transports include JSON POST (including OpenAI Responses), JSON GET, SSE streaming (Perplexity OAuth/API, Gemini, Codex), and JSON-RPC over HTTP (Z.AI).
 - Subprocesses / native bindings
-   - Most HTTP/API adapters spawn nothing. Google, Ecosia, and Mojeek first try a plain fetch, but failed, non-2xx, or challenged production responses can acquire the project-shared broker-owned headless Chromium. Hosts without a CLI worker entry (such as an embedded SDK host) instead launch process-local Chromium.
-   - This fallback can start a Chromium process and create its browser-profile lifecycle. On first browser use it can also download Chromium into the omp Puppeteer cache unless a system Chromium or `PUPPETEER_EXECUTABLE_PATH` is available. The search adapter itself uses no native binding.
+   - HTTP/API search adapters perform network requests without launching a browser.
 - Session state (transcript, memory, jobs, checkpoints, registries)
    - Uses a module-global provider-instance cache in `packages/coding-agent/src/web/search/provider.ts`.
    - `packages/coding-agent/src/tools/index.ts` gates tool availability behind `cfgWebSearchEnabled.get(session.settings)` (`web_search.enabled`, defined in `packages/coding-agent/src/tools/settings.ts`).
@@ -344,5 +340,5 @@ Each provider search transport receives a hard timeout from `providers.webSearch
 - Most providers treat `limit` and `num_search_results` as the same number because adapters pass `params.numSearchResults ?? params.limit`. Perplexity preserves both concepts. TinyFish uses the collapsed value as a local cap, serializes `num_results` per page, and paginates when more results are needed. xAI uses it only to cap parsed sources/citations (`10` default, `30` max).
 - `recency` has native or engine-query mappings in Brave, DeepSeek, Perplexity, Parallel, Tavily, SearXNG, Kagi, TinyFish, Keenable, Firecrawl, DuckDuckGo, Startpage, Google, and Mojeek. xAI retains absolute query dates as hints but ignores the separate recency field; Ecosia ignores it. Public Web forwards the request to its engines.
 - `SEARCH_PROVIDER_LABELS` in `packages/tui/src/tools/web-search-types.ts` is the id→label registry for every search implementation (engines and groundings); provider ids, `SearchResponse`, and the transcript renderer all derive from it. Selection itself lives only in the `web` model role.
-- The credential-free scrapers close the auto chain: Startpage and DuckDuckGo precede the browser-backed Ecosia, Google, and Mojeek paths; `public` is listed last and never auto-selected.
+- The credential-free scrapers close the auto chain: Startpage and DuckDuckGo precede the HTTP Ecosia, Google, and Mojeek paths; `public` is listed last and never auto-selected.
 - `/login exa` stores the pasted key in AuthStorage; Exa resolves stored or environment credentials before the unauthenticated `https://mcp.exa.ai/mcp` fallback.

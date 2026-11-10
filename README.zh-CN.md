@@ -256,10 +256,6 @@ _[观看录屏 ↗](https://omp.sh/clips/conflict.mp4)_
 
 _[观看录屏 ↗](https://omp.sh/clips/codemod.mp4)_
 
-### 20 · 驱动 _真正的浏览器_。_甚至是你的 Slack？_
-
-Eval 的 `browser.open(...)` 会返回一个标签页句柄，提供直接导航、检查、交互和元素辅助方法；`tab.run(...)` 用于执行自定义 JavaScript。它在隔离的标签页运行时中驱动 Chromium 或 Electron。默认开启反检测（stealth）模式；借助浏览器中继，还可以接管你已经打开的 Chrome 标签页，且不会抢走窗口焦点。
-
 ### 21 · 直接操作桌面
 
 Eval 的 `computer` 辅助方法——`computer.window(...)`、`win.screenshot()`、`win.ax()`、`el.press()`，以及用于多步脚本的 `computer.run(fnOrCode, options)`——控制真实的宿主机：枚举窗口和显示器、截图、发送原生输入、遍历操作系统无障碍树、使用剪贴板。它不暴露浏览器 DOM。
@@ -298,7 +294,6 @@ Eval 的 `computer` 辅助方法——`computer.window(...)`、`win.screenshot()
 
 **桌面与网络**
 
-- `browser` — 基于 Puppeteer 的标签页，可用于无头 Chromium、通过 CDP 连接的应用，或经由中继的你自己的 Chrome。
 - `computer` — 针对宿主桌面的持久化 JS：窗口、截图、原生输入、AX 树、剪贴板。
 - `web_search` — 一次查询覆盖所有已配置的提供商，返回答案和引用。
 - `github` — GitHub CLI 操作——仓库、PR、issue、代码搜索、Actions 运行监视。
@@ -666,7 +661,6 @@ bun dev -- --version
 | **[@oh-my-pi/pi-wire](packages/wire)**                                        | 协作实时会话共享的协议类型和中继常量                       |
 | **[@oh-my-pi/pi-mnemopi](packages/mnemopi)**                                  | 面向 omp 智能体的本地 SQLite 记忆引擎                      |
 | **[@oh-my-pi/snapcompact](packages/snapcompact)**                             | 位图帧上下文压缩包及 SQuAD 评测套件                        |
-| **[@oh-my-pi/browser-relay](packages/browser-relay)**                         | 让 Eval 浏览器 API 驱动你现有标签页的 Chrome 扩展          |
 | **[@oh-my-pi/pi-metaharness](packages/metaharness)**                          | 统一的基准测试运行器、Harbor 运行存储、REST/SSE API、实时面板 |
 | **[@oh-my-pi/typescript-edit-benchmark](packages/typescript-edit-benchmark)** | 基于 TypeScript 源码变异构建的编辑基准测试套件             |
 

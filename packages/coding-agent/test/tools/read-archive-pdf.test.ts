@@ -1,13 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import * as piNatives from "@oh-my-pi/pi-natives";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
-import * as pdfRead from "@oh-my-pi/pi-coding-agent/tools/read-pdf";
-import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import * as markit from "@oh-my-pi/pi-coding-agent/utils/markit";
 import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import { __resetDirsFromEnvForTests, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
@@ -16,10 +12,6 @@ import { restoreEnvValue } from "../helpers/settings-test-state";
 
 const MEMBER = "folder/sample document.pdf";
 const SENTINEL = "Archive PDF text sentinel";
-const ONE_PX_PNG = Buffer.from(
-	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
-	"base64",
-);
 
 function textPdf(): Uint8Array {
 	const stream = `BT /F1 12 Tf 72 720 Td (${SENTINEL}) Tj ET`;
@@ -137,56 +129,18 @@ describe("PDF archive members", () => {
 			path: `${archivePath}:${MEMBER}`,
 		});
 		expect(textOf(result)).toContain("Text extraction is incomplete for PDF pages 2, 3");
-		expect(textOf(result)).toContain(":page2.png");
+		expect(textOf(result)).toContain("OCR is required");
 	});
 
-	for (const outcome of ["success", "failure", "abort"] as const) {
-		it(`cleans up owned PDF page materialization after ${outcome}`, async () => {
-			const archivePath = temp.join(`page-${outcome}.zip`);
-			await ar.writeArchive(archivePath, "zip", [[MEMBER, pdf]]);
-			const screenshotPath = temp.join("page.png");
-			await Bun.write(screenshotPath, ONE_PX_PNG);
-			const controller = new AbortController();
-			let scratchPath: string | undefined;
-			vi.spyOn(pdfRead, "renderPdfPageScreenshot").mockImplementation(async (_session, file, page, signal) => {
-				scratchPath = file;
-				expect<Uint8Array>(await Bun.file(file).bytes()).toEqual(pdf);
-				expect(file.startsWith(`${temp.path()}${path.sep}`)).toBe(false);
-				expect(page).toBe(2);
-				expect(signal).toBe(controller.signal);
-				if (outcome === "failure") throw new Error("page render failed");
-				if (outcome === "abort") {
-					controller.abort();
-					throw new ToolAbortError();
-				}
-				return {
-					dest: screenshotPath,
-					mimeType: "image/png",
-					bytes: ONE_PX_PNG.byteLength,
-					width: 1,
-					height: 1,
-				};
-			});
-			const read = new ReadTool(makeSession(temp.path())).execute(
-				"pdf-page",
-				{ path: `${archivePath}:${MEMBER}:page2.png` },
-				controller.signal,
-			);
-			if (outcome === "success") {
-				const result = await read;
-				expect(result.content.some(content => content.type === "image" && content.mimeType === "image/png")).toBe(
-					true,
-				);
-				expect(result.details?.resolvedPath).toBe(`${archivePath}:${MEMBER}`);
-			} else {
-				await expect(read).rejects.toThrow(outcome === "failure" ? "page render failed" : "abort");
-			}
-			expect(scratchPath).toBeDefined();
-			expect(await Bun.file(scratchPath!).exists()).toBe(false);
-			await expect(fs.stat(path.dirname(scratchPath!))).rejects.toMatchObject({ code: "ENOENT" });
-			expect(await Bun.file(temp.join(MEMBER)).exists()).toBe(false);
-		});
-	}
+	it("rejects unsupported page-image members while keeping PDF text available", async () => {
+		const archivePath = temp.join("page-image.zip");
+		await ar.writeArchive(archivePath, "zip", [[MEMBER, pdf]]);
+		const tool = new ReadTool(makeSession(temp.path()));
+		await expect(tool.execute("pdf-page", { path: `${archivePath}:${MEMBER}:page2.png` })).rejects.toThrow(
+			"not found inside archive",
+		);
+		expect(textOf(await tool.execute("pdf-text", { path: `${archivePath}:${MEMBER}` }))).toContain(SENTINEL);
+	});
 
 	it("reports corrupt PDFs through conversion errors and leaves unsupported binary members unchanged", async () => {
 		const archivePath = temp.join("binary.zip");

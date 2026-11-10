@@ -82,7 +82,7 @@ export interface RuntimeOptions {
 	sessionId: string;
 	/**
 	 * Extra globals installed alongside `__omp_helpers__` / prelude. Use for stable, lifetime-
-	 * of-the-worker bindings (e.g. browser's `page`, `browser`). Per-run scope should be set
+	 * of-the-worker bindings. Per-run scope should be set
 	 * via `setRunScope()` instead.
 	 */
 	extraGlobals?: Record<string, unknown>;
@@ -289,7 +289,7 @@ function compiles(source: string): boolean {
 }
 
 /**
- * Shared JS runtime for the eval worker and the browser tab worker. Owns the prelude,
+ * Shared JS runtime for the eval worker. Owns the prelude,
  * helper bag, console bridge, and indirect-eval execution. Emits text/output/tool-call
  * back through `RuntimeHooks` that the embedder supplies — wire format is the embedder's
  * concern.
@@ -408,7 +408,7 @@ export class JsRuntime {
 
 	setCwd(cwd: string): void {
 		if (this.#disposed) throw new Error("Cannot set cwd on a disposed JS runtime");
-		// Always stamp the runtime and session state: WorkerCore/browser/cmux call
+		// Always stamp the runtime and session state: WorkerCore callers use
 		// setCwd from init and pre-run paths that may race another same-realm
 		// runtime, and a throw here used to escape the harness microtask path as
 		// a fatal unhandledRejection that killed the whole session.
@@ -433,8 +433,7 @@ export class JsRuntime {
 	}
 
 	/**
-	 * Install per-run globals. Intended for run-scoped state (browser's `tab`, `wait`,
-	 * etc.). Overwrites previous assignments — caller is responsible for any
+	 * Install per-run globals. Overwrites previous assignments — caller is responsible for any
 	 * cleanup it wants.
 	 */
 	setRunScope(scope: Record<string, unknown>): void {
@@ -718,7 +717,7 @@ export class JsRuntime {
 			webcrypto: crypto,
 			// `process` is intentionally not overridden — user code gets the host worker's real
 			// `process` object. Subsetting it caused segfaults in workers that share state with
-			// puppeteer/worker_threads internals.
+			// worker_threads internals.
 			require: this.#buildDynamicRequire(),
 			createRequire,
 			fs,

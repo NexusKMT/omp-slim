@@ -89,8 +89,8 @@ import {
 } from "../../slash-commands/helpers/active-oauth-account";
 import { formatProviderName } from "@oh-my-pi/pi-tui/chrome/format";
 import { formatCompactQuota } from "@oh-my-pi/pi-tui/overlays/advisor-config";
-import { resolveTernPane } from "../../tools/browser/tern/kind";
-import { TernError, type TernErrorKind, TernSocketClient } from "../../tools/browser/tern/wire";
+import { resolveTernPane } from "../../utils/tern/kind";
+import { TernError, type TernErrorKind, TernSocketClient } from "../../utils/tern/wire";
 import { outputMeta } from "../../tools/output-meta";
 import { resolveToCwd, stripOuterDoubleQuotes } from "../../tools/path-utils";
 import { replaceTabs, shortenEmbeddedPaths, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";

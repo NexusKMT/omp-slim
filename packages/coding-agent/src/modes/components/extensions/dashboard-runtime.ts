@@ -25,9 +25,8 @@ export function createExtensionDashboardRuntime(options: {
 	mcpManager?: MCPManager;
 	eventBus?: EventBus;
 	onMcpToolsChanged?: (tools: CustomTool[]) => Promise<void> | void;
-	browserMcpFilterEnabled?: () => boolean;
 }): ExtensionDashboardRuntime {
-	const { cwd, settings, extensionRoots, mcpManager, eventBus, onMcpToolsChanged, browserMcpFilterEnabled } = options;
+	const { cwd, settings, extensionRoots, mcpManager, eventBus, onMcpToolsChanged } = options;
 	return {
 		getDisabledExtensions: () => cfgDisabledExtensions.get(settings),
 		setDisabledExtensions: ids => cfgDisabledExtensions.set(settings, ids),
@@ -59,7 +58,6 @@ export function createExtensionDashboardRuntime(options: {
 				discovery: {
 					enableProjectConfig: cfgMcpEnableProjectConfig.get(settings),
 					filterExa: true,
-					filterBrowser: browserMcpFilterEnabled?.() ?? false,
 				},
 				onStatus: event => eventBus?.emit(MCP_CONNECTION_STATUS_EVENT_CHANNEL, event),
 			}),

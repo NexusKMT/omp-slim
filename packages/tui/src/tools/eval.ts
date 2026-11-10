@@ -387,9 +387,8 @@ function renderAgentProgressEvents(
 function formatStatusEvent(event: EvalStatusEvent, theme: Theme): string {
 	const { op, ...data } = event;
 
-	type AvailableIcon = "icon.file" | "icon.folder" | "icon.git" | "icon.package" | "cmd.globe" | "cmd.computer";
+	type AvailableIcon = "icon.file" | "icon.folder" | "icon.git" | "icon.package" | "cmd.computer";
 	const opIcons: Record<string, AvailableIcon> = {
-		browser: "cmd.globe",
 		computer: "cmd.computer",
 		read: "icon.file",
 		write: "icon.file",

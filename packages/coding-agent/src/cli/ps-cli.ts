@@ -30,7 +30,6 @@ import {
 	tableCells,
 } from "@oh-my-pi/pi-tui/apps/ps-data";
 import { runPsTop, type PsTopHost } from "@oh-my-pi/pi-tui/apps/ps-top";
-import { isSharedBrowserDaemonName, restartSharedBrowser } from "../tools/browser/shared-daemon";
 import { collectReports, KILL_GRACE_MS, scopeClient } from "./ps-data";
 
 export type PsAction = "list" | "info" | "logs" | "stop" | "kill" | "restart";
@@ -47,7 +46,7 @@ export interface PsCommandArgs {
 		plain: boolean;
 		/** Target another project directory instead of the current one. */
 		dir?: string;
-		/** Target a machine-global service scope (e.g. browser-relay). */
+		/** Target a machine-global service scope. */
 		global?: string;
 		/** logs: keep streaming new output. */
 		follow: boolean;
@@ -63,11 +62,9 @@ export interface PsCommandArgs {
 }
 
 /**
- * Restart a supervised daemon. The project-shared browsers restart through
- * their profile claim so Chromium does not reopen the previous process's pages.
+ * Restart a supervised daemon.
  */
 async function restartDaemon(client: DaemonBrokerClient, name: string): Promise<DaemonSnapshot> {
-	if (isSharedBrowserDaemonName(name)) return restartSharedBrowser(client, name);
 	const result = await client.request({ op: "restart", name });
 	if (result.op !== "restart") throw new Error(`Unexpected broker response ${result.op}`);
 	return result.daemon;

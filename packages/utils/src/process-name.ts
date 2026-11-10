@@ -13,7 +13,7 @@
  * macOS has no clean userspace equivalent for the shebang-run path, so there
  * we only set `process.title`. Windows derives the name from the exec'd file,
  * and there Bun's `process.title` setter is libuv's `SetConsoleTitleW`: every
- * omp child attached to a pane's console (workers, `browser-relay`, servers)
+ * omp child attached to a pane's console (workers, servers)
  * would overwrite that pane's tab title, so Windows skips it entirely.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";

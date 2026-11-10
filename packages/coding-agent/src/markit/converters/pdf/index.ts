@@ -26,7 +26,6 @@ export class PdfConverter implements Converter {
 			result.pagesNeedingOcr.length > 0
 				? prompt.render(pdfTextIncompleteTemplate, {
 						pages: result.pagesNeedingOcr.join(", "),
-						firstPage: result.pagesNeedingOcr[0],
 					})
 				: undefined;
 

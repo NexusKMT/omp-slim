@@ -194,7 +194,6 @@ async function runSmokeTest(): Promise<void> {
 
 const TINY_WORKER_ARG = "__omp_worker_tiny_inference";
 const STATS_SYNC_WORKER_ARG = "__omp_worker_stats_sync";
-const TAB_WORKER_ARG = "__omp_worker_tab";
 const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 const JS_EVAL_PROCESS_ARG = "__omp_worker_js_eval_process";
 const STT_WORKER_ARG = "__omp_worker_stt";
@@ -214,7 +213,7 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 		// spawning (the smoke ping, the first parse request) would be dropped.
 		// Park early events and replay them once the module's handler is live.
 		// Worker-thread entries using `parentPort` need the same sync-prefix
-		// buffering; the computer/tab/eval cases install that inbox below.
+		// buffering; the computer/eval cases install that inbox below.
 		const scope = globalThis as unknown as { onmessage: ((event: MessageEvent) => void) | null };
 		const pending: MessageEvent[] = [];
 		const buffer = (event: MessageEvent): void => {
@@ -231,14 +230,8 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	// Bun flushes messages the parent posted before spawn once this entry's
 	// top-level evaluation completes. Install a buffering inbox synchronously
 	// before binding the selected worker's real handler so the parent's
-	// synchronous `init` survives. The dynamically imported tab/eval modules
+	// synchronous `init` survives. The dynamically imported computer/eval modules
 	// consume the same inbox after their module evaluation begins.
-	if (arg === TAB_WORKER_ARG) {
-		const parentPort = getWorkerParentPort();
-		if (parentPort) installWorkerInbox(parentPort);
-		await import("./tools/browser/tab-worker-entry");
-		return true;
-	}
 	if (arg === COMPUTER_WORKER_ARG) {
 		const parentPort = getWorkerParentPort();
 		if (parentPort) installWorkerInbox(parentPort);
@@ -521,8 +514,8 @@ export async function runCli(argv: string[]): Promise<void> {
 	// Gated on `isProcessEntry`: only the real CLI process entry is a valid
 	// worker host. Worker-thread re-entry has `!Bun.isMainThread` (isProcessEntry === false),
 	// and importers (`runCli` in profile-CLI tests, SDK embedding) have `import.meta.main === false`
-	// — declaring there would poison `workerHostEntry()` for the whole test process, forcing eval/stats/
-	// browser workers onto the same-realm inline fallback.
+	// — declaring there would poison `workerHostEntry()` for the whole test process, forcing eval/stats
+	// workers onto the same-realm inline fallback.
 	// This must run before worker selector dispatch so that worker subprocesses
 	// (e.g. stats activity) are registered as hosts and can themselves spawn worker threads.
 	if (isProcessEntry) declareWorkerHostEntry();

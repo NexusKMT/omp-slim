@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- OMP Slim renders historical browser tool results through the generic tool card after removing bundled browser automation.
+
 ## [18.18.3] - 2026-11-09
 
 ### Changed

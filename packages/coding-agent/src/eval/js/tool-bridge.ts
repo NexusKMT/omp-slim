@@ -158,7 +158,7 @@ const summarizeToolResult: StatusSummarizer = (name, args, result, text, hasErro
 };
 
 /**
- * Prelude calls (browser, computer) describe themselves: a bare op name with a
+ * Prelude calls describe themselves: a bare op name with a
  * byte count is noise, so a prelude without a `status` hook records nothing on
  * success. Failures always surface.
  */
@@ -227,9 +227,7 @@ export async function callSessionTool(name: string, args: unknown, options: Tool
 		const request = parsePreludeRequest(args);
 		const toolCallId = `prelude-${request.name}-${crypto.randomUUID()}`;
 		try {
-			// Browser/computer operations own their deadlines. Charging their host
-			// wait to Eval as well can kill its kernel during a first-use browser
-			// install or an explicitly longer navigation. Caller abort still flows
+			// Host operations own their deadlines. Caller abort still flows
 			// through; only the runtime-work watchdog is paused.
 			const result = await withBridgeTimeoutPause(options.emitStatus, () =>
 				invokeEvalPrelude(request.name, request.parameters, {

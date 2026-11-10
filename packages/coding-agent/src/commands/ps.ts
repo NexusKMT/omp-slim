@@ -28,7 +28,7 @@ export default class Ps extends Command {
 		json: Flags.boolean({ char: "j", description: "Emit machine-readable JSON" }),
 		plain: Flags.boolean({ description: "Static listing instead of the interactive monitor (list)" }),
 		dir: Flags.string({ description: "Target another project directory instead of the current one" }),
-		global: Flags.string({ description: "Target a machine-global service scope (e.g. browser-relay)" }),
+		global: Flags.string({ description: "Target a machine-global service scope" }),
 		follow: Flags.boolean({ char: "f", description: "Keep streaming new output (logs)" }),
 		head: Flags.boolean({ description: "Read from the beginning instead of the tail (logs)" }),
 		lines: Flags.integer({ char: "n", description: "Number of log lines, max 1000 (logs)" }),
@@ -36,14 +36,7 @@ export default class Ps extends Command {
 		timeout: Flags.integer({ description: "Grace period in seconds before hard kill (stop)" }),
 	};
 
-	static examples = [
-		"omp ps",
-		"omp ps --all",
-		"omp ps logs web --follow",
-		"omp ps stop web",
-		"omp ps kill web",
-		"omp ps info relay --global browser-relay",
-	];
+	static examples = ["omp ps", "omp ps --all", "omp ps logs web --follow", "omp ps stop web", "omp ps kill web"];
 
 	async run(): Promise<void> {
 		const { args, flags } = await this.parse(Ps);

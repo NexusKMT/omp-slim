@@ -237,7 +237,6 @@ describe("createTools", () => {
 				"bash.enabled": false,
 				"launch.enabled": false,
 				"web_search.enabled": false,
-				"browser.enabled": false,
 			}),
 		});
 		const tools = await createTools(session);

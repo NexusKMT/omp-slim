@@ -60,7 +60,6 @@ function sceneHost(login: Login) {
 			refreshProvider: async (provider: string) => {
 				state.refreshed.push(provider);
 			},
-			captureBrowserSession: async () => "",
 			openInBrowser(): void {},
 		},
 		requestRender(): void {},

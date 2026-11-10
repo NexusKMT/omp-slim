@@ -1,6 +1,5 @@
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { TextContent } from "@oh-my-pi/pi-ai";
-import { TempDir } from "@oh-my-pi/pi-utils";
 import {
 	type ArchiveFormat,
 	type ArchiveReader,
@@ -29,7 +28,6 @@ import {
 	type SuffixMatchCache,
 } from "./read-path-resolution";
 import { isMultiRange, type ParsedSelector, parseSel, resolveTailSelector, selToOffsetLimit } from "./read-selector";
-import { type PdfImageReadTarget, type PdfPageReadOptions, splitPdfImageReadPath } from "./read-pdf";
 import { cfgReadRenderMarkdown } from "./settings";
 import { formatBytes } from "@oh-my-pi/pi-tui/render/render-utils";
 import { throwIfAborted } from "./tool-errors";
@@ -196,7 +194,6 @@ export async function readArchive(
 	readPath: string,
 	parsedSel: ParsedSelector,
 	resolvedArchivePath: ResolvedArchiveReadPath,
-	readPdfPage: (options: PdfPageReadOptions) => Promise<AgentToolResult<ReadToolDetails>>,
 	signal?: AbortSignal,
 ): Promise<AgentToolResult<ReadToolDetails>> {
 	throwIfAborted(signal);
@@ -214,7 +211,6 @@ export async function readArchive(
 
 	let archiveSubPath = resolvedArchivePath.archiveSubPath;
 	let sel = parsedSel;
-	let pdfImageRead: PdfImageReadTarget | null = null;
 	let node = archive.getNode(archiveSubPath);
 	if (!node && archiveSubPath) {
 		// `archive.zip:500` / `archive.zip:raw`: the whole subPath is a
@@ -225,15 +221,6 @@ export async function readArchive(
 			node = archive.getNode("");
 			archiveSubPath = "";
 			sel = wholeSel;
-		}
-	}
-	if (!node && sel.kind === "none") {
-		const candidate = splitPdfImageReadPath(archiveSubPath);
-		const pdfNode = candidate ? archive.getNode(candidate.pdfPath) : undefined;
-		if (candidate && pdfNode && !pdfNode.isDirectory) {
-			pdfImageRead = candidate;
-			archiveSubPath = candidate.pdfPath;
-			node = pdfNode;
 		}
 	}
 	if (!node) {
@@ -252,26 +239,6 @@ export async function readArchive(
 	if (entry.path.toLowerCase().endsWith(".pdf")) {
 		const memberPath = `${resolvedArchivePath.absolutePath}:${entry.path}`;
 		const pdfDetails: ReadToolDetails = { ...details, resolvedPath: memberPath, fileSize: entry.size };
-		if (pdfImageRead) {
-			// Only the selected, extraction-bounded member is materialized, under
-			// an owned name rather than any untrusted archive path.
-			await using scratch = await TempDir.create("@omp-read-archive-pdf-");
-			const pdfPath = scratch.join("member.pdf");
-			await Bun.write(pdfPath, entry.bytes);
-			throwIfAborted(signal);
-			const result = await readPdfPage({
-				readPath,
-				absolutePdfPath: pdfPath,
-				page: pdfImageRead.page,
-				pdfFileSize: entry.size,
-				suffixResolution: resolvedArchivePath.suffixResolution,
-				signal,
-			});
-			return toolResult<ReadToolDetails>({ ...result.details, ...pdfDetails })
-				.content(result.content)
-				.sourcePath(memberPath)
-				.done();
-		}
 		const converted = await convertBufferWithMarkit(entry.bytes, ".pdf", signal);
 		if (!converted.ok) {
 			return toolResult<ReadToolDetails>(pdfDetails)

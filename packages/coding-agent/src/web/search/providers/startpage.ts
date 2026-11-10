@@ -6,8 +6,8 @@ import { formatScraperQuery } from "../query";
 import { clampNumResults } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import type { LoadedHtmlPage } from "./browser-page";
-import { browserFetch } from "./browser-page";
+import type { LoadedHtmlPage } from "./http-page";
+import { fetchHtmlPage } from "./http-page";
 import { classifyProviderHttpError, normalizeSearchText, withHardTimeout } from "./utils";
 
 /**
@@ -121,14 +121,10 @@ function parseHtmlResults(html: string): ParsedResult[] {
  * any failure (network, non-OK status, challenge shell, markup drift) yields
  * `undefined` and the caller falls back to a direct GET.
  */
-async function fetchFormInputs(
-	fetchImpl: FetchImpl,
-	signal: AbortSignal,
-	timeoutMs?: number,
-): Promise<Record<string, string> | undefined> {
+async function fetchFormInputs(fetchImpl: FetchImpl, signal: AbortSignal): Promise<Record<string, string> | undefined> {
 	let page: LoadedHtmlPage;
 	try {
-		page = await browserFetch(STARTPAGE_HOME_URL, { fetch: fetchImpl, signal, timeoutMs });
+		page = await fetchHtmlPage(STARTPAGE_HOME_URL, { fetch: fetchImpl, signal });
 	} catch (error) {
 		if (signal.aborted) throw error;
 		return undefined;
@@ -147,16 +143,15 @@ async function callStartpageHtml(params: SearchParams): Promise<string> {
 	// queries pass through byte-identical.
 	const query = formatScraperQuery(params.query, params.parsedQuery);
 
-	const formInputs = await fetchFormInputs(fetchImpl, signal, params.timeoutMs);
+	const formInputs = await fetchFormInputs(fetchImpl, signal);
 	let page: LoadedHtmlPage;
 	if (formInputs) {
 		const form = new URLSearchParams(formInputs);
 		form.set("query", query);
 		if (withDate) form.set("with_date", withDate);
-		page = await browserFetch(STARTPAGE_SEARCH_URL, {
+		page = await fetchHtmlPage(STARTPAGE_SEARCH_URL, {
 			fetch: fetchImpl,
 			signal,
-			timeoutMs: params.timeoutMs,
 			referer: STARTPAGE_HOME_URL,
 			init: { method: "POST", body: form.toString() },
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -165,10 +160,9 @@ async function callStartpageHtml(params: SearchParams): Promise<string> {
 		const url = new URL(STARTPAGE_SEARCH_URL);
 		url.searchParams.set("query", query);
 		if (withDate) url.searchParams.set("with_date", withDate);
-		page = await browserFetch(url.href, {
+		page = await fetchHtmlPage(url.href, {
 			fetch: fetchImpl,
 			signal,
-			timeoutMs: params.timeoutMs,
 			referer: STARTPAGE_HOME_URL,
 		});
 	}

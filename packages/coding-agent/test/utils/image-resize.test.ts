@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test
 import * as os from "node:os";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
-import { decodePng } from "@oh-my-pi/pi-coding-agent/tools/browser/screenshot";
+import { decodePng } from "../helpers/png-decode";
 import {
 	fitImage,
 	formatDimensionNote,

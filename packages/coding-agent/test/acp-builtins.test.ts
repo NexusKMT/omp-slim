@@ -19,7 +19,6 @@ import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-c
 import { getProjectDir, removeWithRetries, setProjectDir } from "@oh-my-pi/pi-utils";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
-import { cfgBrowserEnabled, cfgBrowserHeadless } from "@oh-my-pi/pi-coding-agent/tools/browser/settings";
 import { cfgExtendedContext } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 import { cfgMemoryBackend } from "@oh-my-pi/pi-coding-agent/memory-backend/settings";
 import { cfgWorktreeCleanSource } from "@oh-my-pi/pi-coding-agent/task/settings";
@@ -844,6 +843,7 @@ describe("ACP builtin slash commands", () => {
 	// Removed TUI-only and dropped commands fall through as false
 	it("removed commands return false (fall through to model)", async () => {
 		const removedCommands = [
+			"/browser",
 			"/login",
 			"/logout",
 			"/resume",
@@ -1352,30 +1352,6 @@ describe("wave 3 commands", () => {
 		expect(result).toEqual({ consumed: true });
 		expect(output[0]).toContain("Wire up router");
 		expect(session._todoPhases[0]?.tasks[0]?.status).toBe("in_progress");
-	});
-
-	// /browser
-	it("/browser visible: sets headless=false; second call is idempotent", async () => {
-		const { runtime } = createRuntime();
-		cfgBrowserEnabled.set(runtime.settings, true);
-		cfgBrowserHeadless.set(runtime.settings, true);
-		const r1 = await executeAcpBuiltinSlashCommand("/browser visible", runtime);
-		expect(r1).toEqual({ consumed: true });
-		expect(cfgBrowserHeadless.get(runtime.settings)).toBe(false);
-		const r2 = await executeAcpBuiltinSlashCommand("/browser visible", runtime);
-		expect(r2).toEqual({ consumed: true });
-		expect(cfgBrowserHeadless.get(runtime.settings)).toBe(false);
-	});
-
-	it("/browser no-arg after /browser visible toggles to headless", async () => {
-		const { output, runtime } = createRuntime();
-		cfgBrowserEnabled.set(runtime.settings, true);
-		cfgBrowserHeadless.set(runtime.settings, true);
-		await executeAcpBuiltinSlashCommand("/browser visible", runtime);
-		const r = await executeAcpBuiltinSlashCommand("/browser", runtime);
-		expect(r).toEqual({ consumed: true });
-		expect(output[output.length - 1]).toContain("headless");
-		expect(cfgBrowserHeadless.get(runtime.settings)).toBe(true);
 	});
 
 	// /compact

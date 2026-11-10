@@ -805,21 +805,6 @@ export function getPythonGatewayDir(): string {
 	return dirs.agentSubdir(undefined, "python-gateway", "state");
 }
 
-/** Get the puppeteer sandbox directory (~/.omp/puppeteer). */
-export function getPuppeteerDir(): string {
-	return dirs.rootSubdir("puppeteer", "cache");
-}
-
-/** Get the browser relay extension install directory (~/.omp/browser-relay). */
-export function getBrowserRelayDir(): string {
-	return dirs.rootSubdir("browser-relay", "data");
-}
-
-/** Get the profile root for Chromium browsers the browser tool spawns via `app.path` (~/.omp/browser-profiles). */
-export function getBrowserProfilesDir(): string {
-	return dirs.rootSubdir("browser-profiles", "state");
-}
-
 /** Get DOCS_RS cache directory () */
 export function getDocsRsCacheDir(): string {
 	return dirs.rootSubdir("webcache", "cache");

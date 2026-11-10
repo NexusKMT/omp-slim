@@ -123,7 +123,6 @@ export type {
 	BashRenderContext,
 	ShellRendererConfig,
 } from "@oh-my-pi/pi-tui/tools/bash";
-export * from "./browser";
 export * from "./checkpoint";
 export * from "./computer";
 export * from "./computer/supervisor";

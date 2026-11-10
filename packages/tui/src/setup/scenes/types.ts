@@ -1,5 +1,4 @@
 import type { AuthStorage, Model } from "@oh-my-pi/pi-ai";
-import type { OAuthBrowserSessionRequest } from "@oh-my-pi/pi-ai/oauth/types";
 import type { SgrMouseEvent } from "../../mouse";
 import type { ComposerPreviewStatusSource } from "../../overlays/composer-shape-preview";
 import type { ComposerShape } from "../../overlays/composer-shape-registry";
@@ -46,7 +45,6 @@ export interface SetupHost extends SetupUiHost {
 	 */
 	canAutoUpdate(): Promise<boolean>;
 	saveAutoUpdate(enabled: boolean): Promise<void>;
-	captureBrowserSession(request: OAuthBrowserSessionRequest, signal?: AbortSignal): Promise<string>;
 	openInBrowser(url: string): void;
 	markComplete(version: number): Promise<void>;
 	playWelcomeIntro(): void;

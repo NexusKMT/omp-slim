@@ -47,7 +47,6 @@ export type McpManagerProtocol = {
 		MCPResourceReadResult | undefined
 	>;
 	serverInstructions: RpcMethod<[], Map<string, string>>;
-	reconcileBrowserFilter: RpcMethod<[enabled: boolean], void>;
 };
 
 /** Worker-side proxy of one main-thread `MCPManager`. */
@@ -114,9 +113,5 @@ export class RemoteMCPManager implements MCPManagerApi {
 
 	getServerInstructions(): Map<string, string> {
 		return this.#remote.callSync("serverInstructions");
-	}
-
-	reconcileBrowserFilter(enabled: boolean): Promise<void> {
-		return this.#remote.call("reconcileBrowserFilter", enabled);
 	}
 }

@@ -101,7 +101,7 @@ Contract:
 - If a handler **throws**, the tool is also blocked (fail-closed).
 - A non-blocking handler can return `additionalContext` carrying trusted handler-authored instructions for the next provider request. Distinct non-empty values from all handlers are preserved in registration order and emitted after the batch's tool results in assistant call order with developer/system priority where supported; a call whose joined context is identical to an earlier call's in the same batch is emitted once. They are delivered only when the call runs and returns a non-error result: a later block, approval denial, interrupt skip, or failed execution discards them. Raw tool output and other untrusted data must stay in the tool result.
 - A non-blocking handler can return `input` to replace the raw arguments passed to the tool. The last replacement wins, and handlers do not see earlier input revisions. Return real tool parameters, not derived gate-only fields from `event.input`. Computer-provider calls do not apply revisions. In the normal extension-backed agent loop, revisions are schema-validated before scheduling, display, persistence, and approval; the standalone `HookToolWrapper` instead passes the handler-owned raw replacement directly to execution.
-- Eval prelude calls such as `browser.open(...)`, direct `BrowserTab` helpers, `tab.run(...)`, direct `computer` helpers, and `computer.run(fnOrCode, options)` are not tool calls and do not emit these hooks.
+- Eval prelude calls are host bridge calls and do not emit these hooks.
 
 ## Post-tool override contract
 

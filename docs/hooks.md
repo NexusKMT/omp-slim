@@ -158,10 +158,7 @@ call. The extension wrapper emits the event for nested or direct dispatches
 the loop did not handle, and approval evaluates the revised input. This differs
 from the standalone `HookToolWrapper` described below.
 
-Eval prelude invocations such as `browser.open(...)`, direct `BrowserTab`
-helpers, `tab.run(...)`, direct `computer` helpers, and
-`computer.run(fnOrCode, options)` are host bridge calls, not AgentTool calls,
-so they do not emit `tool_call` or `tool_result`.
+Eval prelude invocations are host bridge calls, so they do not emit `tool_call` or `tool_result`.
 
 ```text
 Hook tool interception flow

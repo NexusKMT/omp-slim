@@ -5,7 +5,7 @@ This document describes how MCP servers are discovered, connected, exposed as to
 ## Lifecycle at a glance
 
 1. **SDK startup** kicks off MCP discovery (unless MCP is disabled or tool names are restricted): headless/SDK sessions await `discoverAndLoadMCPTools()`; interactive sessions (`hasUI: true`) create the manager up front and defer `discoverAndConnect()` until the session is live.
-2. **Discovery** (`loadAllMCPConfigs`) resolves MCP server configs from capability sources, filters disabled/project/Exa entries and browser MCP servers when the built-in browser prelude is callable, and preserves source metadata.
+2. **Discovery** (`loadAllMCPConfigs`) resolves MCP server configs from capability sources, filters disabled/project/Exa entries, and preserves source metadata.
 3. **Manager connect phase** (`MCPManager.connectServers`) starts per-server connect + `tools/list` in parallel.
 4. **Fast startup gate** waits up to 250ms, then may return:
    - fully loaded `MCPTool`s,
@@ -28,7 +28,7 @@ This document describes how MCP servers are discovered, connected, exposed as to
 
 Both paths:
 
-- pass `authStorage`, cache storage, `mcp.startupTimeoutMs`, and `mcp.enableProjectConfig`; browser-MCP filtering requires `browser.enabled`, registered and active Eval, and an unrestricted session,
+- pass `authStorage`, cache storage, `mcp.startupTimeoutMs`, and `mcp.enableProjectConfig`,
 - always set `filterExa: true`,
 - log per-server load/connect errors,
 - store the manager in `toolSession.mcpManager` and the session result.
@@ -43,7 +43,7 @@ Filtering behavior:
 
 - `enableProjectConfig: false` removes project-level entries (`_source.level === "project"`).
 - `enabled: false` entries are suppressed unless the active-profile user `enabledServers` allowlist names them; the user `disabledServers` denylist always suppresses a same-named entry.
-- Exa servers are filtered out by default and API keys are extracted for native Exa tool integration, unless the config explicitly requests Exa tools the native integration does not provide (`web_fetch_exa`, `web_search_advanced_exa`); browser automation MCP servers are filtered when `filterBrowser` is true.
+- Exa servers are filtered out by default and API keys are extracted for native Exa tool integration, unless the config explicitly requests Exa tools the native integration does not provide (`web_fetch_exa`, `web_search_advanced_exa`). Explicitly configured browser MCP servers remain available.
 
 Result includes both `configs` and `sources` (metadata used later for provider labeling).
 
@@ -167,14 +167,14 @@ Both preserve MCP content and metadata; `structuredContent` is retained in `deta
 
 1. `mcpManager.disconnectAll()`,
 2. clears stale MCP prompt commands,
-3. calls `mcpManager.discoverAndConnect()` with the same project/Exa/browser filters as startup,
+3. calls `mcpManager.discoverAndConnect()` with the same project/Exa filters as startup,
 4. calls `session.refreshMCPTools(mcpManager.getTools())`.
 
 `session.refreshMCPTools()` delegates to `src/session/session-tools.ts`, which serializes registry mutations, reconciles manager and extension-owned MCP tools, re-wraps the latest tools, and reapplies availability/presentation without restarting. Connected manager tools become enabled; extension-owned MCP tools preserve their previous selection. A failed refresh restores the previous MCP registry. The owning SDK session also installs `setOnToolsChanged`, so late initial connections, server `tools/list_changed` notifications, reconnects, and disconnects can trigger the same rebinding. Explicit `/mcp reconnect <name>` performs one final refresh after the manager reconnect completes.
 
 ### Live settings reconciliation
 
-The owning SDK session listens for `mcp.enableProjectConfig` changes: it disconnects affected project entries, restores user definitions they shadowed, or loads newly allowed project entries without `/mcp reload`. Browser-MCP reconciliation is serialized and follows whether the built-in browser prelude is actually callable. Borrowed managers keep the parent's single-slot tools/prompts/resources callbacks; each session still installs its own notification listener.
+The owning SDK session listens for `mcp.enableProjectConfig` changes: it disconnects affected project entries, restores user definitions they shadowed, or loads newly allowed project entries without `/mcp reload`. Borrowed managers keep the parent's single-slot tools/prompts/resources callbacks; each session still installs its own notification listener.
 
 ## Server-initiated notifications
 

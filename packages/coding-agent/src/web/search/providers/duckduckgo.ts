@@ -6,7 +6,7 @@ import { formatScraperQuery, parseSearchQuery } from "../query";
 import { clampNumResults, dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import { browserFetch } from "./browser-page";
+import { fetchHtmlPage } from "./http-page";
 import { classifyProviderHttpError, withHardTimeout } from "./utils";
 
 /**
@@ -303,10 +303,9 @@ function createDuckDuckGoForm(params: SearchParams): URLSearchParams {
 }
 
 async function callDuckDuckGoHtml(params: SearchParams, form: URLSearchParams, signal: AbortSignal): Promise<string> {
-	const page = await browserFetch(DUCKDUCKGO_HTML_URL, {
+	const page = await fetchHtmlPage(DUCKDUCKGO_HTML_URL, {
 		fetch: params.fetch ?? fetch,
 		signal,
-		timeoutMs: params.timeoutMs,
 		referer: "https://html.duckduckgo.com/",
 		init: {
 			method: "POST",

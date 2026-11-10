@@ -95,7 +95,6 @@ function installFatalCapture(): {
 describe("WorkerCore", () => {
 	it("keeps state and reports a late bridge rejection once without killing the worker", async () => {
 		const workerUrl = pathToFileURL(path.resolve(import.meta.dir, "../../src/eval/js/worker-core.ts")).href;
-		const browserPrelude = await Bun.file(path.resolve(import.meta.dir, "../../src/tools/browser/prelude.js")).text();
 		const probe = `
 import { WorkerCore } from ${JSON.stringify(workerUrl)};
 process.once("uncaughtException", () => process.exit(17));
@@ -122,12 +121,12 @@ const waitFor = predicate => {
 	return promise;
 };
 const snapshot = { cwd: process.cwd(), sessionId: "late-bridge",
-	preludes: [{ name: "browser", exports: ["browser"], source: ${JSON.stringify(browserPrelude)} }] };
+	preludes: [{ name: "test", exports: ["testCall"], source: 'globalThis.testCall = async () => await globalThis.__omp_prelude__("test", {});' }] };
 const core = new WorkerCore(transport, { mode: "isolated" });
 send({ type: "init", snapshot });
 const first = waitFor(message => message.type === "result" && message.runId === "first");
 send({ type: "run", runId: "first", filename: "[first].js", snapshot,
-	code: 'var kept = 42; var floating = Array.from({length: 13}, () => browser.tab("main").waitForDownload()); throw new Error("Tab is busy");' });
+	code: 'var kept = 42; var floating = Array.from({length: 13}, () => testCall()); throw new Error("Tab is busy");' });
 await first;
 for (let index = 0; index < 257; index++) {
 	const runId = "evict-" + index;
@@ -136,7 +135,7 @@ for (let index = 0; index < 257; index++) {
 	await result;
 }
 const calls = messages.filter(message => message.type === "tool-call");
-if (calls.length !== 13) throw new Error("expected thirteen pending browser calls");
+if (calls.length !== 13) throw new Error("expected thirteen pending prelude calls");
 const rejectCall = async pending => {
 	const warning = waitFor(message => message.type === "log" && message.msg.includes("finished eval cell"));
 	send({ type: "tool-reply", id: pending.id, reply: { ok: false,
@@ -184,7 +183,7 @@ console.log(JSON.stringify(messages));
 			{ runId: "fourth", ok: true },
 		]);
 		const text = messages.filter(message => message.type === "text");
-		const notices = text.filter(message => message.chunk.includes("at browser.call"));
+		const notices = text.filter(message => message.chunk.includes("test"));
 		expect(notices).toHaveLength(11);
 		expect(notices.filter(message => message.runId === "second")).toHaveLength(10);
 		expect(notices.filter(message => message.runId === "third")).toHaveLength(1);

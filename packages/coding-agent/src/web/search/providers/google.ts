@@ -6,15 +6,14 @@ import { formatScraperQuery } from "../query";
 import { clampNumResults } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import type { LoadedHtmlPage } from "./browser-page";
-import { browserFetch } from "./browser-page";
+import type { LoadedHtmlPage } from "./http-page";
+import { fetchHtmlPage } from "./http-page";
 import { normalizeSearchText, withHardTimeout } from "./utils";
 
 const GOOGLE_HOME_URL = "https://www.google.com/";
 const GOOGLE_SEARCH_URL = "https://www.google.com/search";
 const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 20;
-const RESULT_RENDER_TIMEOUT_MS = 10_000;
 
 const RECENCY_TO_GOOGLE_TBS: Record<NonNullable<SearchParams["recency"]>, string> = {
 	day: "qdr:d",
@@ -121,31 +120,25 @@ async function callGoogleHtml(params: SearchParams, numResults: number): Promise
 	const url = buildSearchUrl(params, numResults);
 	let page: LoadedHtmlPage;
 	try {
-		page = await browserFetch(url, {
+		page = await fetchHtmlPage(url, {
 			fetch: params.fetch,
 			signal,
-			timeoutMs: params.timeoutMs,
 			referer: GOOGLE_HOME_URL,
-			browser: {
-				homeUrl: GOOGLE_HOME_URL,
-				ready: { selector: "a h3", timeoutMs: RESULT_RENDER_TIMEOUT_MS },
-				shouldFallback: candidate => blockReason(candidate) !== undefined,
-			},
 		});
 	} catch (error) {
 		if (error instanceof SearchProviderError || params.signal?.aborted) throw error;
 		if (signal.aborted) {
-			throw new SearchProviderError("google", "Google browser search timed out.", 504);
+			throw new SearchProviderError("google", "Google search timed out.", 504);
 		}
 		const message = error instanceof Error ? error.message : String(error);
-		throw new SearchProviderError("google", `Google browser search failed: ${message}`, 503);
+		throw new SearchProviderError("google", `Google search failed: ${message}`, 503);
 	}
 
 	const blocked = blockReason(page);
 	if (blocked === "traffic") {
 		throw new SearchProviderError(
 			"google",
-			"Google blocked the browser search with an automated-traffic challenge. Try another web search provider or retry later.",
+			"Google blocked the search with an automated-traffic challenge. Try another web search provider or retry later.",
 			429,
 		);
 	}
@@ -162,7 +155,7 @@ async function callGoogleHtml(params: SearchParams, numResults: number): Promise
 	return page.html;
 }
 
-/** Execute a Google web search with fetch-first loading and a headless-browser fallback. */
+/** Execute a Google web search over HTTP. */
 export async function searchGoogle(params: SearchParams): Promise<SearchResponse> {
 	const numResults = clampNumResults(params.numSearchResults ?? params.limit, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
 	const html = await callGoogleHtml(params, numResults);
@@ -180,7 +173,7 @@ export async function searchGoogle(params: SearchParams): Promise<SearchResponse
 	return { provider: "google", sources };
 }
 
-/** Fetch-first Google Search provider with a headless-browser fallback; no API key is required. */
+/** HTTP Google Search provider; no API key is required. */
 export class GoogleProvider extends SearchProvider {
 	readonly id = "google";
 	readonly label = "Google";

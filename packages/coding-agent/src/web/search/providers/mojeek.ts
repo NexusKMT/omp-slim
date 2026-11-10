@@ -1,15 +1,13 @@
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import { untilAborted } from "@oh-my-pi/pi-utils";
 import { parseHTML } from "@oh-my-pi/pi-utils/dom";
-import type { Page } from "puppeteer-core";
 import type { SearchResponse, SearchSource } from "../types";
 import { SearchProviderError } from "../../../web/search/types";
 import { formatScraperQuery, type QuerySyntax } from "../query";
 import { clampNumResults } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import type { LoadedHtmlPage } from "./browser-page";
-import { browserFetch } from "./browser-page";
+import type { LoadedHtmlPage } from "./http-page";
+import { fetchHtmlPage } from "./http-page";
 import { classifyProviderHttpError, normalizeSearchText, withHardTimeout } from "./utils";
 
 const MOJEEK_ORIGIN = "https://www.mojeek.de";
@@ -17,11 +15,6 @@ const MOJEEK_HOME_URL = `${MOJEEK_ORIGIN}/?arc=none&lang=en&lb=en&theme=dark`;
 const MOJEEK_SEARCH_URL = `${MOJEEK_ORIGIN}/search`;
 const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 20;
-/**
- * ALTCHA can complete quickly, but its verified redirect is occasionally
- * delayed by queueing on the challenge backend.
- */
-const CAPTCHA_SOLVE_TIMEOUT_MS = 45_000;
 
 interface ParsedResult {
 	title: string;
@@ -110,23 +103,6 @@ function buildSearchUrl(params: SearchParams, numResults: number): string {
 	return url.href;
 }
 
-/** Solve Mojeek's ALTCHA interstitial and wait for its verified redirect to populate results. */
-async function solveCaptcha(page: Page, signal: AbortSignal): Promise<void> {
-	if (await untilAborted(signal, () => page.$("ul.results-standard li"))) return;
-
-	const checkbox = await untilAborted(signal, () => page.$("altcha-widget input[type=checkbox]"));
-	if (!checkbox) return;
-
-	const navigation = page
-		.waitForNavigation({ waitUntil: "domcontentloaded", timeout: CAPTCHA_SOLVE_TIMEOUT_MS })
-		.catch(() => null);
-	await untilAborted(signal, () => checkbox.click());
-	await untilAborted(signal, () => navigation);
-	await untilAborted(signal, () =>
-		page.waitForSelector("ul.results-standard li", { timeout: CAPTCHA_SOLVE_TIMEOUT_MS }).catch(() => null),
-	);
-}
-
 function isRobotPage(page: LoadedHtmlPage): boolean {
 	return (
 		(page.html.includes("altcha-widget") ||
@@ -141,19 +117,11 @@ async function callMojeekHtml(params: SearchParams, numResults: number): Promise
 	const url = buildSearchUrl(params, numResults);
 	let page: LoadedHtmlPage;
 	try {
-		page = await browserFetch(url, {
+		page = await fetchHtmlPage(url, {
 			fetch: params.fetch,
 			signal,
-			timeoutMs: params.timeoutMs,
 			randomizeHeaders: false,
 			referer: MOJEEK_HOME_URL,
-			browser: {
-				homeUrl: MOJEEK_HOME_URL,
-				afterNavigation: solveCaptcha,
-				shouldFallback: isRobotPage,
-				attempts: 2,
-				retryDelayMs: 1_000,
-			},
 		});
 	} catch (error) {
 		if (error instanceof SearchProviderError || params.signal?.aborted) throw error;

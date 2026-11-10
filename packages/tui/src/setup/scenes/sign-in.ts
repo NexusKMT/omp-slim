@@ -249,7 +249,6 @@ export class SignInScene implements SetupSceneController {
 		try {
 			await this.#authStorage.oauth.login(providerId as OAuthProvider, {
 				signal: AbortSignal.any([dialog.signal, this.#lifetime.signal]),
-				onBrowserSession: (request, signal) => ctx.captureBrowserSession(request, signal),
 				onAuth: info => dialog.showAuth(info.url, info.instructions, info.launchUrl),
 				onPrompt: prompt => dialog.showPrompt(prompt),
 				onProgress: message => dialog.showProgress(message),

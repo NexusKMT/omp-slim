@@ -84,7 +84,7 @@ describe("applyMcpToggleRuntime", () => {
 			name: "project-only",
 			enabled: true,
 			cwd: "/tmp/project",
-			discovery: { enableProjectConfig: false, filterExa: true, filterBrowser: true },
+			discovery: { enableProjectConfig: false, filterExa: true },
 			loadConfigs: async (cwd, options) => {
 				loads.push({ cwd, options });
 				return { configs: {}, sources: {}, exaApiKeys: [] };
@@ -104,7 +104,7 @@ describe("applyMcpToggleRuntime", () => {
 		expect(loads).toEqual([
 			{
 				cwd: "/tmp/project",
-				options: { enableProjectConfig: false, filterExa: true, filterBrowser: true },
+				options: { enableProjectConfig: false, filterExa: true },
 			},
 		]);
 		expect(connected).toEqual([]);

@@ -68,11 +68,6 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.benchHelp,
 	},
 	{
-		name: "browser-relay",
-		load: () => import("./commands/browser-relay").then(m => m.default),
-		help: commandHelp.browserRelayHelp,
-	},
-	{
 		name: "cleanse",
 		load: () => import("./commands/cleanse").then(m => m.default),
 		help: commandHelp.cleanseHelp,

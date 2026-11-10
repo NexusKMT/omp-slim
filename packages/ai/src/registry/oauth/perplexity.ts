@@ -1,6 +1,6 @@
 /**
- * Perplexity login via legacy macOS session borrowing, host-managed browser SSO,
- * or HTTP email OTP (including authenticator challenges).
+ * Perplexity login via legacy macOS session borrowing or HTTP email OTP
+ * (including authenticator challenges).
  */
 import * as os from "node:os";
 import { $env } from "@oh-my-pi/pi-utils";
@@ -263,77 +263,10 @@ async function httpEmailLogin(ctrl: OAuthController): Promise<OAuthCredentials> 
 }
 
 // ---------------------------------------------------------------------------
-// Browser SSO login
-// ---------------------------------------------------------------------------
-
-const SESSION_COOKIE_NAME = "__Secure-next-auth.session-token";
-const PERPLEXITY_BASE_URL = "https://www.perplexity.ai";
-
-async function browserSsoLogin(ctrl: OAuthController): Promise<OAuthCredentials> {
-	if (!ctrl.onBrowserSession) {
-		throw new AIError.OAuthError("Browser SSO is unavailable in this client", {
-			kind: "validation",
-			provider: "perplexity",
-		});
-	}
-	ctrl.onProgress?.("Complete Perplexity sign-in in the browser window. Choose SSO for your organization.");
-	const token = (
-		await ctrl.onBrowserSession(
-			{
-				url: `${PERPLEXITY_BASE_URL}/auth/signin`,
-				cookieNames: [SESSION_COOKIE_NAME, "next-auth.session-token"],
-			},
-			ctrl.signal,
-		)
-	).trim();
-	if (ctrl.signal?.aborted) throw new AIError.LoginCancelledError();
-	if (!token || /[\s;]/.test(token)) {
-		throw new AIError.OAuthError("Perplexity SSO captured an invalid session cookie", {
-			kind: "validation",
-			provider: "perplexity",
-		});
-	}
-
-	ctrl.onProgress?.("Validating Perplexity session...");
-	const response = await (ctrl.fetch ?? fetch)(`${PERPLEXITY_BASE_URL}/api/auth/session`, {
-		headers: {
-			Cookie: `${SESSION_COOKIE_NAME}=${token}`,
-			"User-Agent": APP_USER_AGENT,
-			"X-App-ApiVersion": API_VERSION,
-		},
-		redirect: "error",
-		signal: ctrl.signal,
-	});
-	if (!response.ok) {
-		throw new AIError.ProviderHttpError(`Perplexity session validation failed (${response.status})`, response.status);
-	}
-	let email: unknown;
-	try {
-		const session = (await response.json()) as { user?: { email?: unknown } } | null;
-		email = session?.user?.email;
-	} catch (error) {
-		if (ctrl.signal?.aborted) throw new AIError.LoginCancelledError();
-		if (!(error instanceof SyntaxError)) throw error;
-		throw new AIError.OAuthError("Perplexity returned an invalid session response", {
-			kind: "validation",
-			provider: "perplexity",
-		});
-	}
-	if (ctrl.signal?.aborted) throw new AIError.LoginCancelledError();
-	if (typeof email !== "string" || !email.trim()) {
-		throw new AIError.OAuthError("Perplexity session is invalid or expired. Sign in again.", {
-			kind: "validation",
-			provider: "perplexity",
-		});
-	}
-	return jwtToCredentials(token, email.trim());
-}
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Prefer legacy app borrowing, then offer browser SSO when the host supports it. */
+/** Prefer legacy app borrowing, then sign in through HTTP email OTP. */
 export async function loginPerplexity(ctrl: OAuthController): Promise<OAuthCredentials> {
 	if (!ctrl.onPrompt) throw new AIError.OnPromptRequiredError("Perplexity");
 	if (ctrl.signal?.aborted) throw new AIError.LoginCancelledError();
@@ -348,24 +281,5 @@ export async function loginPerplexity(ctrl: OAuthController): Promise<OAuthCrede
 		}
 	}
 
-	if (ctrl.onBrowserSession) {
-		const method = (
-			await ctrl.onPrompt({
-				message: "Login method: sso (browser) or email; blank for sso",
-				placeholder: "sso / email",
-				allowEmpty: true,
-			})
-		)
-			.trim()
-			.toLowerCase();
-		if (ctrl.signal?.aborted) throw new AIError.LoginCancelledError();
-		if (!method || method === "sso") return browserSsoLogin(ctrl);
-		if (method !== "email") {
-			throw new AIError.OAuthError("Choose sso or email for Perplexity login", {
-				kind: "validation",
-				provider: "perplexity",
-			});
-		}
-	}
 	return httpEmailLogin(ctrl);
 }

@@ -1,7 +1,7 @@
 /**
  * Indirect eval — runs in the host's global scope, isolating bindings declared with
  * `const`/`let` from this module's closure. Used by both the JS eval worker and the
- * browser tab worker to execute user-supplied source without `node:vm`.
+ * eval worker to execute user-supplied source without `node:vm`.
  *
  * Why not vm.runInContext: Bun crashes the parent process with SIGTRAP when
  * `Worker.terminate()` fires while a worker is mid-`vm.runInContext` synchronous loop.

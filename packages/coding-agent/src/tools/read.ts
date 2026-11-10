@@ -28,7 +28,6 @@ import {
 	parseHeifImageMimeType,
 	parseImageMetadata,
 	prompt,
-	readImageMetadata,
 } from "@oh-my-pi/pi-utils";
 import { peekFile } from "@oh-my-pi/pi-utils/peek-file";
 import {
@@ -137,12 +136,6 @@ import {
 	isRemoteMountPath,
 	type SuffixMatchCache,
 } from "./read-path-resolution";
-import {
-	type PdfImageReadTarget,
-	type PdfPageReadOptions,
-	renderPdfPageScreenshot,
-	splitPdfImageReadPath,
-} from "./read-pdf";
 import { ternShowsMedia } from "./tern-media";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize";
 import {
@@ -818,7 +811,7 @@ async function resolveFileTailSelector(
 }
 
 const IMAGE_QUESTION_SELECTOR_ERROR =
-	"The ?q= selector only supports images (raster files, .svg:img, file-backed image URLs, PDF page screenshots).";
+	"The ?q= selector only supports images (raster files, .svg:img, file-backed image URLs).";
 
 /** A routed URL located to a local file, read through the filesystem pipeline under the URL's identity. */
 interface LocatedRead {
@@ -877,7 +870,7 @@ export function splitImageQuestionTarget(readPath: string): { path: string; ques
 
 /** A `?q=` target whose path before the query names media a vision question applies to, never JSON. */
 const MEDIA_QUESTION_TARGET =
-	/(?::img|:page\d+\.png|\.(?:png|jpe?g|gif|webp|bmp|tiff?|svg|heic|heif|avif|ico|mp4|m4v|mov|webm|mkv|avi))$/i;
+	/(?::img|\.(?:png|jpe?g|gif|webp|bmp|tiff?|svg|heic|heif|avif|ico|mp4|m4v|mov|webm|mkv|avi))$/i;
 
 function isMediaQuestionTarget(readPath: string): boolean {
 	const queryIndex = readPath.indexOf("?");
@@ -1106,10 +1099,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		let readPath = "";
 		if (args && typeof args === "object" && "path" in args) readPath = String(args.path ?? "");
 		const urlTier = InternalUrlRouter.instance().readTier(readPath);
-		if (urlTier !== "read") return urlTier;
-		readPath = splitImageQuestionTarget(readPath).path;
-		const target = splitPathAndSel(readPath);
-		return target.sel === undefined && splitPdfImageReadPath(readPath) ? "exec" : "read";
+		return urlTier;
 	};
 	/**
 	 * `always-ask-cached` key: the file this read targets, with every selector
@@ -1118,9 +1108,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	 *
 	 * Public web reads (`http(s)://`, `www.`) report no key at all: their
 	 * contents are already public, so the cached mode allows them like a
-	 * listing instead of asking, and there is nothing to remember. The legacy
-	 * PDF image-member syntax keeps its target — that read is exec-tier, and
-	 * its remembered grant is what silences the prompt.
+	 * listing instead of asking, and there is nothing to remember.
 	 */
 	readonly approvalCacheTargets = (args: unknown): readonly string[] | undefined => {
 		const rawPath = args && typeof args === "object" && "path" in args ? String(args.path ?? "") : "";
@@ -1129,10 +1117,10 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const router = InternalUrlRouter.instance();
 		// Authorization must key what execution reads: an existing literal file like `notes:1` is
 		// read literally, so its grant belongs to `notes:1`, not to `notes`.
-		const { path: selectorless, sel } = router.canHandle(withoutImageQuestion)
+		const { path: selectorless } = router.canHandle(withoutImageQuestion)
 			? router.split(withoutImageQuestion)
 			: splitPathAndSelPreferringLiteralSync(withoutImageQuestion, this.session.cwd);
-		if (isReadableUrlPath(selectorless) && !(sel === undefined && splitPdfImageReadPath(withoutImageQuestion))) {
+		if (isReadableUrlPath(selectorless)) {
 			// Nobody needs permission to read a public page, so those stay ungated. A private host —
 			// loopback, a private or link-local address, a single-label intranet name — is reachable
 			// only from inside this machine or network, so it is gated like a file.
@@ -1508,36 +1496,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			.content([{ type: "text", text }, image])
 			.sourcePath(absolutePath)
 			.done();
-	}
-
-	async #readPdfPageScreenshot(options: PdfPageReadOptions): Promise<AgentToolResult<ReadToolDetails>> {
-		const { readPath, absolutePdfPath, page, pdfFileSize, question, suffixResolution, signal } = options;
-		const screenshot = await renderPdfPageScreenshot(this.session, absolutePdfPath, page, signal);
-		const screenshotFile = Bun.file(screenshot.dest);
-		const screenshotMetadata = await readImageMetadata(screenshot.dest);
-		const loaded = await this.#loadImageContent({
-			readPath,
-			absolutePath: screenshot.dest,
-			mimeType: screenshot.mimeType,
-			imageMetadata: screenshotMetadata,
-			fileSize: screenshotFile.size,
-			question,
-			questionPath: readPath,
-			signal,
-		});
-		if (suffixResolution) {
-			const firstText = loaded.content.find((entry): entry is TextContent => entry.type === "text");
-			if (firstText) firstText.text = prependSuffixResolutionNotice(firstText.text, suffixResolution);
-		}
-		const image = loaded.content.find((entry): entry is ImageContent => entry.type === "image");
-		const details: ReadToolDetails = {
-			...loaded.details,
-			resolvedPath: absolutePdfPath,
-			contentType: image?.mimeType ?? screenshot.mimeType,
-			fileSize: pdfFileSize,
-			suffixResolution,
-		};
-		return toolResult(details).content(loaded.content).sourcePath(loaded.sourcePath).done();
 	}
 
 	/**
@@ -1921,7 +1879,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		// Filesystem-backed reads choose JSON versus image questions after resolving
 		// the literal file and sniffing its content, not from its final extension.
 		// A `local://`/`artifact://` URL is resolved by its handler first, so a question
-		// on a media target (`:img`, an image, video or PDF page) is peeled here as before.
+		// on a media target (`:img`, an image or video) is peeled here as before.
 		const scheme = extractUriScheme(readPath);
 		const imageQuestion =
 			!scheme || ((scheme === "local" || scheme === "artifact") && !isMediaQuestionTarget(readPath))
@@ -2093,7 +2051,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 		// Prefer a literal filesystem match over selector interpretation so real
 		// POSIX filenames containing selector-looking suffixes win over structured
-		// archive / sqlite / unsupported PDF-image dispatch. A located URL's selector
+		// archive / sqlite dispatch. A located URL's selector
 		// stays separate so it cannot be mistaken for part of the resolved path.
 		let literalSplit = located
 			? { path: readPath, sel: located.sel }
@@ -2103,8 +2061,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			literalSplit.sel === undefined &&
 			(splitPathAndSel(readPath).sel !== undefined ||
 				(readPath.includes("?") && (await probeLiteralPathExists(readPath, this.session.cwd)) !== "missing"));
-
-		let pdfImageRead: PdfImageReadTarget | null = null;
 
 		if (!rawPathIsLiteral) {
 			const archivePath = await resolveArchiveReadPath(this.session, readPath, suffixCache, signal);
@@ -2122,7 +2078,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					located?.url ?? readPath,
 					archiveParsed,
 					{ ...archivePath, archiveSubPath: archiveSubPath.path },
-					options => this.#readPdfPageScreenshot(options),
 					signal,
 				);
 			}
@@ -2151,7 +2106,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			}
 
 			// JSON admission has ruled out this target (for example, raster image
-			// bytes or an SVG/PDF image selector). Preserve the existing vision route.
+			// bytes or an SVG image selector). Preserve the existing vision route.
 			const questionTarget = splitJsonQueryTarget(located?.url ?? readPath);
 			const imageQuestion = questionTarget ? new URLSearchParams(questionTarget.queryString).get("q") : null;
 			if (questionTarget && imageQuestion) {
@@ -2171,17 +2126,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					if (binaryView) return readBinary(this.session, binaryView, binaryParsed, signal);
 				}
 			}
-
-			const pdfCandidate = literalSplit.sel === undefined ? splitPdfImageReadPath(readPath) : null;
-			pdfImageRead =
-				pdfCandidate && (await probeLiteralPathExists(readPath, this.session.cwd)) === "missing"
-					? pdfCandidate
-					: null;
 		}
 
-		const localTarget = pdfImageRead
-			? { path: pdfImageRead.pdfPath, sel: undefined }
-			: await this.#applyVideoSelectorFallback(literalSplit, readPath);
+		const localTarget = await this.#applyVideoSelectorFallback(literalSplit, readPath);
 		const localReadPath = localTarget.path;
 		// Video frame selectors (`:412`, `:1h5m42s`, `:0:05`) are not line selectors;
 		// keep them out of the line parser so they reach the video reader intact.
@@ -2294,18 +2241,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 		if (parsed.kind === "conflicts") {
 			return this.#readFileConflicts(absolutePath, suffixResolution, signal);
-		}
-
-		if (pdfImageRead) {
-			return this.#readPdfPageScreenshot({
-				readPath,
-				absolutePdfPath: absolutePath,
-				page: pdfImageRead.page,
-				pdfFileSize: fileSize,
-				question,
-				suffixResolution,
-				signal,
-			});
 		}
 
 		// Located files are often large session storage (spilled tool output): a bare

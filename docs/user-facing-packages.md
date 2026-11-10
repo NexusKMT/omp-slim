@@ -28,7 +28,7 @@ Sources: [`packages/stats/README.md`](../packages/stats/README.md), [`packages/s
 
 - Package: `@oh-my-pi/omp-stats`; bin: `omp-stats`; main user path: `omp stats`.
 - Feature: local observability dashboard for AI usage statistics from session JSONL logs.
-- CLI modes: `omp stats` starts or reuses the dashboard at `http://127.0.0.1:3847` (a free port when another program holds that one), opens it in the browser, and keeps running. In a Tern pane it shows the dashboard in a browser block in place of that pane instead, with a Close button (Esc, or Ctrl+C with nothing selected) in its top bar, and exits when the block is closed; `/stats` inside omp opens it in a browser block beside omp's pane. `--port <port>` changes the port; `--host <host>` changes the bind address (loopback by default). `--summary` prints a console summary; `--json` prints JSON and exits. The standalone `omp-stats` uses `--sync` for its summary mode and does not automatically open a browser.
+- CLI modes: `omp stats` starts or reuses the dashboard at `http://127.0.0.1:3847` (a free port when another program holds that one), opens it in the browser, and keeps running. `--port <port>` changes the port; `--host <host>` changes the bind address (loopback by default). `--summary` prints a console summary; `--json` prints JSON and exits. The standalone `omp-stats` uses `--sync` for its summary mode and does not automatically open a browser.
 - Programmatic API: exports helpers such as `syncAllSessions()` and `getDashboardStats()` for embedding.
 - Inputs/storage: scans the active profile's session directory recursively, including nested subagent transcripts; stores aggregates in that profile's stats database. Default paths are `~/.omp/agent/sessions/` and `~/.omp/stats.db`; initialized XDG data roots and named profiles change them through the shared directory resolver.
 - Outputs: request/token/cost, provider, model, folder, tool, gain, and frustration dashboards. API endpoints include `/api/stats`, `/api/stats/models`, `/api/stats/folders`, `/api/stats/timeseries`, `/api/stats/tools`, `/api/stats/gain`, `/api/status`, `/api/events` (SSE), and `/api/sync` (POST).
@@ -68,22 +68,6 @@ Sources: [`packages/metaharness/README.md`](../packages/metaharness/README.md), 
 - Storage: normalized state lives under `<jobs-dir>/_manager/metaharness.sqlite`; benchmark-native artifacts remain the filesystem source of truth and historical runs are auto-discovered.
 - Outputs include Harbor trial directories, `_bench/<jobName>/report.md`, per-run logs, edit reports, normalized traces, dashboard metrics, and REST/SSE updates.
 - Limits: deleting an experiment or run also deletes its job directories and is rejected while the target is running. Harbor requires Docker or Apple Container plus the Harbor CLI; backend-specific network and mount constraints are documented in the package README.
-
-### `packages/browser-relay` — drive existing Chrome tabs
-
-Sources: [`packages/browser-relay/README.md`](../packages/browser-relay/README.md), [`packages/browser-relay/package.json`](../packages/browser-relay/package.json), [`packages/coding-agent/src/tools/browser/relay/`](../packages/coding-agent/src/tools/browser/relay/).
-
-- Package: private `@oh-my-pi/browser-relay`; user command: `omp browser-relay`.
-- Setup: run `omp browser-relay install`, load the unpacked extension from
-  `~/.omp/browser-relay/extension`, then opt in per call with `app.relay: true` — or set
-  `browser.relay`, which makes the relay the profile-wide default across projects (scope
-  details in the package README).
-- Behavior: the relay auto-starts through the profile-independent global daemon broker; consumers
-  across projects hold leases, and the relay stops after the last lease is released. `app.target`
-  borrows a tab by exact CDP target id or URL/title substring; otherwise omp opens its own background tab, which a URL
-  navigates and close removes. `omp browser-relay --no-group` disables automatic tab grouping.
-- Security/limits: it binds loopback; use `--token` when local processes are untrusted. Chrome
-  internal pages, DevTools, Web Store, extension pages, and tabs with DevTools open cannot attach.
 
 ### `packages/collab-web` — browser client for collaborative sessions
 

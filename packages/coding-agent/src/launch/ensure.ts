@@ -1,6 +1,6 @@
 /**
  * Quiet daemon-broker ensure helpers shared by broker-owned singleton daemons
- * (shared Chromium, browser relay, LSP mux). Each treats broker/daemon errors
+ * (LSP mux and other supervised services). Each treats broker/daemon errors
  * as "absent" so ensure loops can retry or adopt a cross-process race winner
  * instead of failing the caller; {@link describeDaemon} instead reports when
  * absence could not be established.

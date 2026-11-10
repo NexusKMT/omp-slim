@@ -17,7 +17,7 @@ describe("PdfConverter", () => {
 		expect(converter.accepts({ extension: ".txt", mimetype: "text/plain" })).toBe(false);
 	});
 
-	it("points pages without extractable text at the page image selector", async () => {
+	it("explains that pages without extractable text require external OCR", async () => {
 		vi.spyOn(piNatives, "pdfToMarkdown").mockResolvedValue({
 			markdown: "",
 			pageCount: 3,
@@ -28,7 +28,7 @@ describe("PdfConverter", () => {
 		const result = await new PdfConverter().convert(Buffer.from("image-only pdf"), { extension: ".pdf" });
 
 		expect(result.markdown).toBe(
-			"Text extraction is incomplete for PDF pages 2, 3. If this PDF is a file on disk, append `:page<N>.png` to its file path to read a page as an image (e.g. `doc.pdf:page2.png`).",
+			"Text extraction is incomplete for PDF pages 2, 3. OCR is required to read image-only pages; run an external OCR tool and read the resulting text file.",
 		);
 		expect(result.markdown.length).toBeGreaterThan(0);
 	});

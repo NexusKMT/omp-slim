@@ -22,7 +22,6 @@ import {
 } from "../../src/launch/protocol";
 import { BashTool } from "../../src/tools/bash";
 import { WriteTool } from "../../src/tools/write";
-import { sharedBrowserDaemonName } from "../../src/tools/browser/shared-daemon";
 import type { ToolSession } from "../../src/tools";
 import type { DaemonSnapshot } from "@oh-my-pi/pi-tui/tools/daemon";
 
@@ -1014,46 +1013,5 @@ describe("bash services via proc://", () => {
 		expect(result.details?.service).toBeUndefined();
 		expect(text).toContain("PLAIN\n");
 		expect(text.includes("Ignored ready:")).toBe(ignored);
-	});
-
-	it("refuses to detach the project-shared browser, which the broker would relaunch on an unprepared profile", async () => {
-		const name = sharedBrowserDaemonName(true);
-		const now = Date.now();
-		const daemon: DaemonSnapshot = {
-			name,
-			id: "shared",
-			state: "ready",
-			createdAt: now,
-			startedAt: now,
-			readyAt: now,
-			restartCount: 0,
-			outputBytes: 0,
-			persist: false,
-			detached: false,
-		};
-		const operations: DaemonOperation["op"][] = [];
-		const client = {
-			projectDir: process.cwd(),
-			onCompletion: () => () => {},
-			close() {},
-			async request(operation: DaemonOperation): Promise<DaemonRpcResult> {
-				operations.push(operation.op);
-				if (operation.op === "list") return { op: "list", daemons: [daemon] };
-				// The real broker answers by relaunching the browser as a detached process.
-				if (operation.op === "mode") return { op: "mode", daemon: { ...daemon, detached: true } };
-				throw new Error(`Unexpected broker op ${operation.op}`);
-			},
-		} as unknown as DaemonBrokerClient;
-		const spy = vi.spyOn(daemonClient, "daemonClientForProject").mockResolvedValue(client);
-		try {
-			await rejectionMessage(
-				new ProcProtocolHandler().write(parseInternalUrl(`proc://${name}/mode`), "detached", {
-					session: toolSession(process.cwd()),
-				}),
-			);
-			expect(operations).not.toContain("mode");
-		} finally {
-			spy.mockRestore();
-		}
 	});
 });

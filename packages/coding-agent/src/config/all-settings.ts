@@ -26,7 +26,6 @@ import * as goalsSettings from "../goals/settings";
 import * as titleSettings from "../utils/title-settings";
 import * as extensibilitySettings from "../extensibility/settings";
 import * as webSettings from "../web/settings";
-import * as toolsBrowserSettings from "../tools/browser/settings";
 import * as idaSettings from "../ida/settings";
 import * as mcpSettings from "../mcp/settings";
 import * as blobBrokerSettings from "../blob-broker/settings";
@@ -66,7 +65,6 @@ const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	titleSettings,
 	extensibilitySettings,
 	webSettings,
-	toolsBrowserSettings,
 	idaSettings,
 	mcpSettings,
 	blobBrokerSettings,

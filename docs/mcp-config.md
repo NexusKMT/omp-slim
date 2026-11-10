@@ -526,14 +526,6 @@ The JSON is valid, but the server may still be unreachable. Use `/mcp test <name
 
 Run `/mcp list`. OMP discovers many third-party MCP files, but project-level loading can also be disabled via the `mcp.enableProjectConfig` setting, and a user-level `disabledServers` entry can suppress a server by name.
 
-### A browser MCP server is configured but never loads
-
-OMP drops recognized browser-automation servers at config load, before any connection attempt, whenever the built-in browser prelude is callable: `browser.enabled` is true (the default), Eval is registered and active, and the session is not restricted to explicitly named tools. The filter matches servers named `playwright`, `puppeteer`, `browserbase`, `browser-tools`, `browser-use` or `browser`, stdio servers whose command or args match one of a fixed set of recognized browser-MCP package patterns (`@playwright/mcp`, `@modelcontextprotocol/server-puppeteer`, `@browserbasehq/mcp-server-browserbase`, `@agentdeskai/browser-tools-mcp`, `@agent-infra/mcp-server-browser`, `puppeteer-mcp`, `playwright-mcp`, `pptr-mcp`, `browser-use-mcp`, `mcp-browser-use`), or HTTP/SSE servers whose URL points at browserbase.com or browser-use.com. Any other package (for example `chrome-devtools-mcp` under a server name outside the list above) is not matched. This filter is separate from `disabledServers`.
-
-The drop is quiet, but not equally visible everywhere: servers from any source other than the two primary files (`~/.omp/agent/mcp.json` and `.omp/mcp.json`) never reach `/mcp list`. Third-party configs, root `mcp.json` / `.mcp.json` fallbacks, and servers from OMP extension packages all vanish once filtered. An entry in one of the two primary files still shows up there as `not connected`, so a missing server with a primary-file entry may have been filtered. No error or warning is recorded either way.
-
-To run a browser MCP server instead of the native browser tool, set `browser.enabled: false` in your settings. `omp read` does not apply this filter.
-
 ### A namespaced server works but the editor rejects its name
 
 The runtime/config writer accepts `:` and single internal spaces in names. The bundled JSON schema's `propertyNames` pattern currently does not; this is a schema/runtime mismatch rather than a connection failure.

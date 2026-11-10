@@ -6,17 +6,17 @@ import { formatScraperQuery } from "../query";
 import { clampNumResults } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import type { LoadedHtmlPage } from "./browser-page";
-import { browserFetch } from "./browser-page";
+import type { LoadedHtmlPage } from "./http-page";
+import { fetchHtmlPage } from "./http-page";
 import { classifyProviderHttpError, normalizeSearchText, withHardTimeout } from "./utils";
 
 /**
  * Ecosia serves a server-rendered Vue/Nuxt results page (no `__NUXT_DATA__`
- * JSON island — probed 2026-07), so both load paths parse the same markup:
+ * JSON island — probed 2026-07), the HTTP loader parses this markup:
  * `<article data-test-id="organic-result">` blocks whose title anchor carries
  * the final target URL directly (no redirect wrapper). The site fronts search
- * with Cloudflare. Requests start with a browser-profiled fetch and escalate
- * to the shared stealth browser only when the response is blocked or fails.
+ * with Cloudflare. Requests use HTTP navigation headers and report challenges
+ * to the provider fallback chain.
  *
  * Recency is ignored: Ecosia's web results expose no date filter in the UI
  * and the legacy Bing-era `freshness` param is a server-side no-op (verified
@@ -27,7 +27,6 @@ const ECOSIA_HOME_URL = "https://www.ecosia.org/";
 const ECOSIA_SEARCH_URL = "https://www.ecosia.org/search";
 const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 20;
-const RESULT_RENDER_TIMEOUT_MS = 10_000;
 
 interface ParsedResult {
 	title: string;
@@ -108,19 +107,10 @@ async function callEcosiaHtml(params: SearchParams): Promise<string> {
 
 	let page: LoadedHtmlPage;
 	try {
-		page = await browserFetch(url.href, {
+		page = await fetchHtmlPage(url.href, {
 			fetch: params.fetch,
 			signal,
-			timeoutMs: params.timeoutMs,
 			referer: ECOSIA_HOME_URL,
-			browser: {
-				homeUrl: ECOSIA_HOME_URL,
-				ready: {
-					selector: 'article[data-test-id="organic-result"]',
-					timeoutMs: RESULT_RENDER_TIMEOUT_MS,
-				},
-				shouldFallback: isBlockedPage,
-			},
 		});
 	} catch (error) {
 		if (error instanceof SearchProviderError || params.signal?.aborted) throw error;

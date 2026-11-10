@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- OMP Slim removes browser profile, Puppeteer cache and browser relay directory helpers.
+
 ## [18.18.2] - 2026-11-08
 
 ### Added

@@ -1,5 +1,5 @@
 /**
- * A fake Tern daemon for browser-backend tests: a Unix socket that speaks
+ * A fake Tern daemon for terminal session-fork tests: a Unix socket that speaks
  * Tern's JSON script protocol (`u32` LE length-prefixed JSON objects), records
  * the script's hellos and answers browser ops (and fork requests) through handlers.
  */

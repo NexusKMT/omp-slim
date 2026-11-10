@@ -7,7 +7,6 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ImageAttachmentEntry, ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
-import * as pdfRead from "@oh-my-pi/pi-coding-agent/tools/read-pdf";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
 import { cfgImagesAutoResize } from "@oh-my-pi/pi-coding-agent/modes/settings";
@@ -217,28 +216,6 @@ describe("read image questions", () => {
 		});
 		expect(result.content).toEqual([{ type: "text", text: "Raster image" }]);
 		expect(stub.calls).toHaveLength(1);
-	});
-
-	it("keeps PDF-page questions on the screenshot route instead of the JSON route", async () => {
-		const pdfPath = path.join(testDir, "question.pdf");
-		await Bun.write(pdfPath, "%PDF-fixture");
-		const render = vi.spyOn(pdfRead, "renderPdfPageScreenshot").mockResolvedValue({
-			dest: imagePath,
-			mimeType: "image/png",
-			bytes: Buffer.byteLength(TINY_PNG_BASE64, "base64"),
-			width: 1,
-			height: 1,
-		});
-		try {
-			const stub = createCompleteSimpleSuccessStub("PDF page two");
-			const result = await new ReadTool(createSession(testDir, visionModel), stub.fn).execute("pdf-question", {
-				path: `${pdfPath}:page2.png?q=Describe the page`,
-			});
-			expect(result.content).toEqual([{ type: "text", text: "PDF page two" }]);
-			expect(render).toHaveBeenCalledWith(expect.anything(), pdfPath, 2, undefined);
-		} finally {
-			render.mockRestore();
-		}
 	});
 
 	it("rasterizes selected SVGs before asking the vision model", async () => {

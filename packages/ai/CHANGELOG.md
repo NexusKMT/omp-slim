@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- OMP Slim removes the browser cookie-capture login callback; Perplexity email-code, token and API-key authentication remain supported.
+
 ## [18.18.2] - 2026-11-08
 
 ### Added
