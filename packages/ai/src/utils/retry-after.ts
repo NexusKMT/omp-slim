@@ -1,15 +1,13 @@
-import { retryResetTimezoneOffsetFor } from "@oh-my-pi/pi-catalog/compat/behavior";
 import { extractRetryHint } from "@oh-my-pi/pi-utils";
 
 export type HeadersLike = Headers | Record<string, string | undefined> | undefined | null;
 
-/** Extracts retry timing using the provider's catalog-declared timestamp timezone. */
+/** Extracts explicit retry timing from the returned error. */
 export function extractProviderRetryHint(
-	provider: string | undefined,
+	_provider: string | undefined,
 	message: string | undefined,
 ): number | undefined {
-	const naiveResetTimezoneOffset = provider === undefined ? undefined : retryResetTimezoneOffsetFor(provider);
-	return extractRetryHint(undefined, message, { naiveResetTimezoneOffset });
+	return extractRetryHint(undefined, message);
 }
 
 const RETRY_AFTER_HINT = "retry-after-ms=";
