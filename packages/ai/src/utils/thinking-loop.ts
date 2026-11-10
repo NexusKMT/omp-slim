@@ -139,12 +139,11 @@ export type LoopGuardLevel = "off" | "exact" | "semantic";
 
 /**
  * Loop-guard level for a model stream. `PI_NO_THINKING_LOOP_GUARD=1` and
- * `loopGuard.enabled: false` turn it off; otherwise the model line's
- * `thinking-loop-guard` catalog axis decides, and unassigned lines get `exact`.
+ * `loopGuard.enabled: false` turn it off; otherwise the explicit request level decides; the default is `exact`.
  */
 export function loopGuardLevel(_model: Model<Api>, options?: StreamOptions): LoopGuardLevel {
 	if (process.env.PI_NO_THINKING_LOOP_GUARD === "1" || options?.loopGuard?.enabled === false) return "off";
-	return "exact";
+	return options?.loopGuard?.level ?? "exact";
 }
 
 /**
@@ -514,7 +513,10 @@ export function guardThinkingLoopStream(
  * lives in the result-awaiting caller.
  */
 export function withThinkingLoopGuard<
-	O extends { signal?: AbortSignal; loopGuard?: { enabled?: boolean; checkAssistantContent?: boolean } },
+	O extends {
+		signal?: AbortSignal;
+		loopGuard?: { enabled?: boolean; level?: "exact" | "semantic"; checkAssistantContent?: boolean };
+	},
 >(
 	model: Model<Api>,
 	options: O | undefined,
