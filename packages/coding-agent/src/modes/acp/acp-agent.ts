@@ -2069,7 +2069,10 @@ export class AcpAgent implements Agent {
 			await this.#flushMissedFinalAssistantText(record, event);
 			await this.#flushUnreportedTurnError(record, event);
 			await this.#emitEndOfTurnUpdates(record);
-			await this.#waitForAcpPromptIdle(record);
+			await this.#waitForAcpPromptIdle(record, promptTurn);
+			// A follow-up can finish this prompt while an earlier agent_end is
+			// awaiting output. That stale handler must not finish the next prompt.
+			if (record.promptTurn !== promptTurn || promptTurn.settled) return;
 			record.liveMessageId = undefined;
 			record.liveMessageProgress = undefined;
 			this.#finishPrompt(record, {
@@ -2162,9 +2165,12 @@ export class AcpAgent implements Agent {
 		});
 	}
 
-	async #waitForAcpPromptIdle(record: ManagedSessionRecord): Promise<void> {
+	async #waitForAcpPromptIdle(record: ManagedSessionRecord, promptTurn: PromptTurnState): Promise<void> {
 		for (let pass = 0; pass < ACP_ASYNC_DELIVERY_DRAIN_MAX_PASSES; pass++) {
 			await record.session.waitForIdle();
+			// waitForIdle and output delivery can outlive the wire prompt. Do not
+			// reopen background turns after another agent_end already returned it.
+			if (record.promptTurn !== promptTurn || promptTurn.settled || promptTurn.cancelRequested) return;
 			const delivered = await record.session.drainAsyncJobDeliveriesForAcp({
 				timeoutMs: ACP_ASYNC_DELIVERY_DRAIN_TIMEOUT_MS,
 			});

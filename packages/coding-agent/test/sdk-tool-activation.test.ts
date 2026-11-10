@@ -1297,21 +1297,22 @@ describe("createAgentSession defaultInactive tool activation", () => {
 	it("releases a timed-out activation so later lifecycle registrations can proceed", async () => {
 		const tempDir = makeTempDir();
 		const registrationExtension: ExtensionFactory = pi => {
-			for (const name of ["stalled_registration_tool", "recovered_registration_tool"]) {
-				pi.on("session_start", async () => {
-					await Promise.resolve();
-					pi.registerTool({
-						name,
-						label: name,
-						description: `${name} lifecycle tool.`,
-						parameters: type({}),
-						loadMode: "essential",
-						async execute() {
-							return { content: [{ type: "text", text: name }] };
-						},
-					});
+			const names = ["stalled_registration_tool", "recovered_registration_tool"];
+			pi.on("session_start", async () => {
+				const name = names.shift();
+				if (!name) throw new Error("Unexpected lifecycle emission");
+				await Promise.resolve();
+				pi.registerTool({
+					name,
+					label: name,
+					description: `${name} lifecycle tool.`,
+					parameters: type({}),
+					loadMode: "essential",
+					async execute() {
+						return { content: [{ type: "text", text: name }] };
+					},
 				});
-			}
+			});
 		};
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
@@ -1320,32 +1321,46 @@ describe("createAgentSession defaultInactive tool activation", () => {
 
 		try {
 			const originalSetPresentation = session.setActiveToolPresentation.bind(session);
+			const stalledActivation = Promise.withResolvers<void>();
 			vi.spyOn(session, "setActiveToolPresentation")
-				.mockImplementationOnce((_toolNames, _mountedToolNames, _forcePromptRefresh, signal) =>
-					untilAborted(signal, Promise.withResolvers<void>().promise),
-				)
+				.mockImplementationOnce((_toolNames, _mountedToolNames, _forcePromptRefresh, signal) => {
+					stalledActivation.resolve();
+					return untilAborted(signal, Promise.withResolvers<void>().promise);
+				})
 				.mockImplementation(originalSetPresentation);
 			const runner = session.extensionRunner;
 			if (!runner) throw new Error("expected extension runner");
 			const errors: string[] = [];
 			const unsubscribe = runner.onError(error => {
 				errors.push(error.error);
-				// The 10ms budget exists only to reap the stalled first handler
-				// quickly; handlers run sequentially and the budget is read per
-				// handler, so restoring it here keeps machine load from timing out
-				// the genuine recovery registration too (flaked in full-suite runs).
-				testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
 			});
 			testSetExtensionHandlerTimeoutMs(10);
+			vi.useFakeTimers();
+			const firstEmission = initializeExtensions(session, {
+				reportSendError: vi.fn(),
+				reportRuntimeError: vi.fn(),
+			});
+			await stalledActivation.promise;
+			vi.advanceTimersByTime(10);
+			await firstEmission;
+			vi.useRealTimers();
+
+			expect(errors).toEqual(["handler timed out after 10ms"]);
+			expect(session.getToolByName("stalled_registration_tool")).toBeUndefined();
+			// An emission captures one budget for every handler. A fresh lifecycle
+			// emission exercises recovery with the normal budget, independent of load.
+			testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
 
 			await runner.emit({ type: "session_start" });
 			unsubscribe();
 
-			expect(errors).toContain("handler timed out after 10ms");
+			expect(errors).toEqual(["handler timed out after 10ms"]);
 			expect(session.getToolByName("stalled_registration_tool")).toBeUndefined();
 			expect(session.getToolByName("recovered_registration_tool")?.label).toBe("recovered_registration_tool");
 			expect(session.getEnabledToolNames()).toContain("recovered_registration_tool");
 		} finally {
+			vi.useRealTimers();
+			testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
 			await session.dispose();
 		}
 	});

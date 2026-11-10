@@ -5,6 +5,7 @@
 ### Fixed
 
 - Branching a session keeps late advisor completions out of the new conversation's transcript and cost total.
+- ACP ignores delayed end-of-turn handlers after their prompt finishes, so late background results stay in context until the next user prompt and a later prompt cannot be ended by an earlier turn.
 - HTML exports from OMP Slim binaries and npm installs embed the locally built viewer instead of requesting an unpublished asset from the upstream CDN.
 - Blocked HTTP reads now suggest saving page text from an external browser instead of recommending the removed browser tool.
 

@@ -2823,6 +2823,63 @@ describe("ACP agent", () => {
 		}
 	});
 
+	it("does not let an old agent_end drain or finish a later prompt after its idle wait", async () => {
+		const harness = await createHarness();
+		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		const session = harness.findSession(created.sessionId)!;
+		const idleBlocked = Promise.withResolvers<void>();
+		const releaseIdle = Promise.withResolvers<void>();
+		let firstIdleWait = true;
+		session.waitForIdleBlocker = async () => {
+			if (!firstIdleWait) return;
+			firstIdleWait = false;
+			idleBlocked.resolve();
+			await releaseIdle.promise;
+		};
+		const drain = vi.fn(async () => false);
+		session.asyncJobDrain = drain;
+		let finishSecondPrompt: (() => void) | undefined;
+		try {
+			const firstPrompt = harness.agent.prompt({
+				sessionId: created.sessionId,
+				prompt: [{ type: "text", text: "first prompt" }],
+			});
+			await idleBlocked.promise;
+			// A visible follow-up finishes the same wire prompt while its earlier
+			// agent_end is still waiting for idle cleanup.
+			for (const listener of session.listeners()) {
+				listener({ type: "agent_end", messages: [makeAssistantMessage("follow-up")] });
+			}
+			expect((await firstPrompt).stopReason).toBe("end_turn");
+			expect(drain).toHaveBeenCalledTimes(1);
+
+			finishSecondPrompt = holdPromptStreaming(session);
+			const promptStarted = Promise.withResolvers<void>();
+			const prompt = session.prompt.bind(session);
+			session.prompt = text => {
+				const pending = prompt(text);
+				promptStarted.resolve();
+				return pending;
+			};
+			const secondPrompt = harness.agent.prompt({
+				sessionId: created.sessionId,
+				prompt: [{ type: "text", text: "second prompt" }],
+			});
+			await promptStarted.promise;
+			releaseIdle.resolve();
+			const settledByOldEnd = await Promise.race([secondPrompt.then(() => true), Bun.sleep(0).then(() => false)]);
+			expect(settledByOldEnd).toBe(false);
+			expect(drain).toHaveBeenCalledTimes(1);
+
+			finishSecondPrompt();
+			expect((await secondPrompt).stopReason).toBe("end_turn");
+		} finally {
+			releaseIdle.resolve();
+			finishSecondPrompt?.();
+			await harness.agent.dispose();
+		}
+	});
+
 	it("streams the retried turn inside the /retry prompt turn", async () => {
 		const harness = await createHarness();
 		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
