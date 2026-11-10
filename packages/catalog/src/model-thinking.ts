@@ -1,10 +1,8 @@
 /**
  * Thinking metadata: runtime field-read helpers.
  *
- * Derivation lives in the compat engine (`compat/resolve`) and runs exactly
- * once per model — from `buildModel` for dynamic specs and from the catalog
- * generator for bundled entries. Everything here reads baked fields only: no
- * id parsing, no host matching, no compat detection per request.
+ * All capabilities come from explicit model metadata. No provider names,
+ * model ids, or endpoint hosts affect the available effort levels.
  */
 import { Effort, THINKING_EFFORTS } from "./effort";
 import type { Api, Model, ModelSpec, ThinkingConfig } from "./types";
@@ -99,65 +97,6 @@ export function requireSupportedEffort<TApi extends Api>(model: ApiModel<TApi>, 
 	return effort;
 }
 
-/** Maps a normalized thinking effort to Google's `thinkingLevel` enum values.
- * When a collapsed family routes `minimal` onto the same wire id as `low`
- * (Antigravity Gemini 3.6/3.7 Flash), emit `LOW` — Cloud Code Assist rejects
- * `MINIMAL` on those `-low` SKUs.
- */
-export function mapEffortToGoogleThinkingLevel<TApi extends Api>(
-	effort: Effort,
-	model?: ApiModel<TApi>,
-): "MINIMAL" | "LOW" | "MEDIUM" | "HIGH" {
-	if (effort === Effort.Minimal) {
-		const routing = model?.thinking?.effortRouting;
-		if (routing?.[Effort.Minimal] && routing[Effort.Minimal] === routing[Effort.Low]) {
-			return "LOW";
-		}
-		return "MINIMAL";
-	}
-	switch (effort) {
-		case Effort.Low:
-			return "LOW";
-		case Effort.Medium:
-			return "MEDIUM";
-		case Effort.High:
-		case Effort.XHigh:
-		case Effort.Max:
-			return "HIGH";
-	}
-}
-
-/**
- * Maps a normalized thinking effort to Anthropic adaptive effort values via
- * the model's baked `thinking.effortMap` (identity for unmapped efforts).
- *
- * The Anthropic adaptive wire vocabulary has no `minimal` tier (valid values:
- * `low`, `medium`, `high`, `xhigh`, `max`); a model ladder that exposes
- * `minimal` — custom `anthropic-messages` providers do, unlike the built-in
- * Claude ladders — would otherwise serialize `output_config.effort: "minimal"`
- * and 400 (`level "minimal" not supported`). Clamp it to the lowest real tier,
- * mirroring {@link mapEffortToGoogleThinkingLevel}'s `minimal` handling.
- */
-export function mapEffortToAnthropicAdaptiveEffort<TApi extends Api>(
-	model: ApiModel<TApi>,
-	effort: Effort,
-): "low" | "medium" | "high" | "xhigh" | "max" | "adaptive" {
-	const supported = requireSupportedEffort(model, effort);
-	const mapped = model.thinking?.effortMap?.[supported] ?? supported;
-	if (mapped === Effort.Minimal) return "low";
-	return mapped as "low" | "medium" | "high" | "xhigh" | "max" | "adaptive";
-}
-
-/**
- * Resolves the upstream wire model id for a request at the given effort
- * (`undefined` = thinking off). Collapsed effort-tier variants route through
- * `thinking.effortRouting`; everything else falls back to
- * `requestModelId ?? id`.
- */
-export function resolveWireModelId<TApi extends Api>(model: ApiModel<TApi>, effort: Effort | undefined): string {
-	return model.thinking?.effortRouting?.[effort ?? "off"] ?? model.requestModelId ?? model.id;
-}
-
 /**
  * Lowest supported effort in canonical order — the clamp target for
  * thinking-off requests on `thinking.requiresEffort` models.
@@ -171,24 +110,7 @@ export function minimumSupportedEffort<TApi extends Api>(model: ApiModel<TApi>):
 	return efforts[0];
 }
 
-/**
- * Clamp target for effort-less requests on `thinking.requiresEffort` models:
- * the effort whose wire route equals the model's default wire id
- * (`requestModelId`), so a collapsed row clamps to the tier it already
- * advertises as its default rather than the numerically lowest supported tier
- * (e.g. Cursor Grok 4.5/4.6 default to `medium`, the only tier the Start plan
- * serves). Falls back to {@link minimumSupportedEffort} when no route matches
- * the default id — families whose default already is the minimum, or that
- * expose no routing, are unaffected.
- */
+/** Default effort from explicit metadata, falling back to its least supported effort. */
 export function defaultSupportedEffort<TApi extends Api>(model: ApiModel<TApi>): Effort | undefined {
-	const routing = model.thinking?.effortRouting;
-	const defaultWireId = model.requestModelId;
-	if (routing !== undefined && defaultWireId !== undefined) {
-		const efforts = model.thinking?.efforts;
-		for (const effort of THINKING_EFFORTS) {
-			if (efforts?.includes(effort) && routing[effort] === defaultWireId) return effort;
-		}
-	}
-	return minimumSupportedEffort(model);
+	return model.thinking?.defaultLevel ?? minimumSupportedEffort(model);
 }
