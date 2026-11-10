@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 /**
  * What the executor does with a completion-probe estimate and with each
  * finished tool call: the estimate's percentage, stage and watch hint land on
@@ -108,6 +110,7 @@ describe("executor completion-probe stage and tool results", () => {
 		vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue({ session } as CreateAgentSessionResult);
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent,
 			task: "bench the decoder",

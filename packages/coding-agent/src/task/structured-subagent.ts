@@ -117,23 +117,11 @@ export interface StructuredSubagentRequest {
 	agent?: string;
 	/** Saved source session selected for the bundled seance agent. */
 	sourceSession?: string;
-	/**
-	 * Model chosen by host code (SDK callers, `omp cleanse --model`) or, for the
-	 * bundled seance agent, the override of its source session's saved model.
-	 * Not gated by `task.perCallModel`.
-	 */
+	/** Legacy model overrides are rejected; children inherit the current session model. */
 	model?: string | string[];
-	/**
-	 * Per-call `model` from the model-facing surfaces (task items, eval `agent()`
-	 * and `workpool()`): gated by `task.perCallModel`, exact-only, and limited to
-	 * operator-approved models.
-	 */
+	/** Legacy per-call model overrides are rejected. */
 	perCallModel?: string;
-	/**
-	 * The model-facing `model` of a task call naming the `seance` agent. Honoured as
-	 * the source-session override only when that name resolves to the bundled seance;
-	 * a project or user agent shadowing the name gets it as a {@link perCallModel}.
-	 */
+	/** Legacy source-session model overrides are rejected. */
 	seanceModel?: string | string[];
 
 	/** Presence, rather than truthiness, makes this the highest-priority schema. */

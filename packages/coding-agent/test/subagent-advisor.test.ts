@@ -13,7 +13,7 @@ import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/sessi
 import { createSubagentSettings } from "@oh-my-pi/pi-coding-agent/task/executor";
 
 import { cfgAdvisorEnabled } from "@oh-my-pi/pi-coding-agent/advisor/settings";
-import { cfgTaskAgentAdvisor, cfgTaskAgentPrewalk } from "@oh-my-pi/pi-coding-agent/task/settings";
+import { cfgTaskAgentAdvisor } from "@oh-my-pi/pi-coding-agent/task/settings";
 
 describe("per-agent settings migrations", () => {
 	let agentDir = "";
@@ -49,11 +49,10 @@ describe("per-agent settings migrations", () => {
 		expect(cfgTaskAgentAdvisor.get(settings)).toEqual({ task: "off" });
 	});
 
-	it("normalizes boolean per-agent prewalk and advisor overrides", async () => {
+	it("normalizes advisor toggles while retiring old prewalk fields", async () => {
 		const settings = await load(
 			"task:\n  agentPrewalk:\n    reviewer: true\n    task: false\n  agentAdvisor:\n    reviewer: false\n    task: true\n",
 		);
-		expect(cfgTaskAgentPrewalk.get(settings)).toEqual({ reviewer: "on", task: "off" });
 		expect(cfgTaskAgentAdvisor.get(settings)).toEqual({ reviewer: "off", task: "on" });
 	});
 });
@@ -64,16 +63,16 @@ describe("createSubagentSettings advisor default", () => {
 		expect(cfgAdvisorEnabled.get(createSubagentSettings(parent))).toBe(false);
 	});
 
-	it("lets a per-agent opt-in re-enable the advisor with its own advisor model role", () => {
+	it("lets a per-agent opt-in re-enable advice without a separate model", () => {
 		const parent = Settings.isolated({ "advisor.enabled": false, modelRoles: { smol: "openai/gpt-5-mini" } });
 		const child = createSubagentSettings(parent, {
 			"advisor.enabled": true,
 			modelRoles: { ...parent.getModelRoles(), advisor: "moonshot/k3" },
 		});
 		expect(cfgAdvisorEnabled.get(child)).toBe(true);
-		expect(child.getModelRole("advisor")).toBe("moonshot/k3");
+		expect(child.getModelRole("advisor")).toBeUndefined();
 		// Other roles from the parent snapshot survive the advisor override.
-		expect(child.getModelRole("smol")).toBe("openai/gpt-5-mini");
+		expect(child.getModelRole("smol")).toBeUndefined();
 	});
 });
 

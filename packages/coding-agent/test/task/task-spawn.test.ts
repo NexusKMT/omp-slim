@@ -15,10 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { type AsyncJob, AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import { createAgentsHubDeps } from "@oh-my-pi/pi-coding-agent/modes/agents-hub-deps";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { TaskTool } from "@oh-my-pi/pi-coding-agent/task";
@@ -30,8 +28,7 @@ import type { AgentProgress, SingleResult, TaskParams } from "@oh-my-pi/pi-tui/t
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { WaitTool } from "@oh-my-pi/pi-coding-agent/tools/wait";
 import { snapshotJobs } from "@oh-my-pi/pi-coding-agent/async/job-control";
-import { cfgTaskAgentModelOverrides, cfgTaskMaxConcurrency } from "@oh-my-pi/pi-coding-agent/task/settings";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { cfgTaskMaxConcurrency } from "@oh-my-pi/pi-coding-agent/task/settings";
 
 const taskAgent: AgentDefinition = {
 	name: "task",
@@ -47,6 +44,7 @@ function createSession(options: { manager?: AsyncJobManager; settings?: Record<s
 		settings: Settings.isolated(options.settings ?? {}),
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
+		getActiveModelString: () => "mock/current",
 		asyncJobManager: options.manager,
 	} as unknown as ToolSession;
 }
@@ -161,7 +159,7 @@ describe("task spawn routing", () => {
 		expect(job!.status).toBe("completed");
 		expect(job!.resultText).toContain("history://Spawnling");
 		expect(runSpy).toHaveBeenCalledTimes(1);
-		expect(runSpy.mock.calls[0]?.[0].modelOverride).toEqual(["openai/gpt-4.1-mini"]);
+		expect(runSpy.mock.calls[0]?.[0].modelOverride).toEqual(["mock/current"]);
 	});
 
 	it("owes the parent no reply once the spawn job of the child it messaged has delivered", async () => {
@@ -216,44 +214,6 @@ describe("task spawn routing", () => {
 		});
 	});
 
-	it("uses the persisted /agents model after replacing a session-only task selection", async () => {
-		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-			agents: [{ ...taskAgent, model: ["@task"] }],
-			projectAgentsDir: null,
-		});
-		const runSpy = vi
-			.spyOn(executorModule, "runSubprocess")
-			.mockImplementation(async options => makeResult(options.id ?? "?"));
-		const manager = createManager();
-		const session = createSession({ manager });
-		const auth = createInMemoryAuthStorage();
-		try {
-			const deps = createAgentsHubDeps(session.cwd, session.settings, new ModelRegistry(auth), () => ({
-				explicit: [],
-				configured: [],
-				configuredLevel: "user",
-				mode: "explicit-only",
-			}));
-			const tool = await TaskTool.create(session);
-
-			cfgTaskAgentModelOverrides.override(session.settings, { task: "anthropic/claude-opus-5" });
-			const first = await tool.execute("tc-old", { agent: "task", name: "Old", task: "First task" } as TaskParams);
-			const firstJob = manager.getJob(first.details?.async?.jobId ?? "");
-			if (!firstJob) throw new Error("First task did not spawn");
-			await firstJob.promise;
-			deps.setAgentOverride("model", "task", "anthropic/claude-opus-5-5");
-			await tool.execute("tc-new", { agent: "task", name: "New", task: "Second task" } as TaskParams);
-			await Promise.all(manager.getAllJobs().map(job => job.promise));
-
-			expect(runSpy.mock.calls.map(([options]) => options.modelOverride)).toEqual([
-				["anthropic/claude-opus-5"],
-				["anthropic/claude-opus-5-5"],
-			]);
-		} finally {
-			auth.close();
-		}
-	});
-
 	it("fires before_subagent_spawn once per child even though the task preflight resolves policy first", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [{ ...taskAgent, model: ["anthropic/claude-sonnet-4"] }],
@@ -267,7 +227,7 @@ describe("task spawn routing", () => {
 		const signals: Array<AbortSignal | undefined> = [];
 		session.emitBeforeSubagentSpawn = async (_event, signal) => {
 			signals.push(signal);
-			return { model: `openai/gpt-4.1-mini-${signals.length}`, note: `pool ${signals.length}` };
+			return { note: `pool ${signals.length}` };
 		};
 		const tool = await TaskTool.create(session);
 
@@ -276,8 +236,8 @@ describe("task spawn routing", () => {
 
 		expect(signals).toHaveLength(1);
 		expect(signals[0]).toBeInstanceOf(AbortSignal);
-		expect(runSpy.mock.calls[0]?.[0].modelOverride).toEqual(["openai/gpt-4.1-mini-1"]);
-		expect(runSpy.mock.calls[0]?.[0].modelRoute).toBe("pool 1");
+		expect(runSpy.mock.calls[0]?.[0].modelOverride).toEqual(["mock/current"]);
+		expect(runSpy.mock.calls[0]?.[0].modelRoute).toBeUndefined();
 	});
 
 	for (const { label, runnerOverrides, expectRetained } of [
@@ -984,6 +944,7 @@ describe("task spawn routing", () => {
 			settings,
 			getSessionFile: () => null,
 			getSessionSpawns: () => "*",
+			getActiveModelString: () => "mock/current",
 			asyncJobManager: manager,
 		} as unknown as ToolSession);
 
@@ -1035,6 +996,7 @@ describe("task spawn routing", () => {
 			settings,
 			getSessionFile: () => null,
 			getSessionSpawns: () => "*",
+			getActiveModelString: () => "mock/current",
 			asyncJobManager: manager,
 		} as unknown as ToolSession);
 

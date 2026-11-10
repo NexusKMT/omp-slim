@@ -1,7 +1,7 @@
 /**
  * Job captions: one plain-English line saying what a background command does
- * and when it ends, for people reading the jobs sheet. The `widget` role's
- * model writes it once per job, from the command and the intent it was
+ * and when it ends, for people reading the jobs sheet. The current session model
+ * writes it once per job, from the command and the intent it was
  * started with; it never sees the job's output.
  */
 import { instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
@@ -63,7 +63,7 @@ export function normalizeJobCaption(reply: string): string | undefined {
 	return caption ? truncate(shortenEmbeddedPaths(caption), MAX_CAPTION_CHARS) : undefined;
 }
 
-/** A {@link JobCaptionWriter} backed by the `widget` model role. */
+/** A {@link JobCaptionWriter} backed by the current session model. */
 export function createModelJobCaptionWriter(options: ModelJobWidgetAuthorOptions): JobCaptionWriter {
 	return async ({ command, intent, timeoutSec }, signal) => {
 		const sessionId = options.sessionId();
@@ -100,6 +100,7 @@ export function createModelJobCaptionWriter(options: ModelJobWidgetAuthorOptions
 			{ systemPrompt: [systemPrompt], messages: [message] },
 			{
 				apiKey: options.modelRegistry.resolver(model, sessionId),
+				disableServerSideFallback: true,
 				signal,
 				disableReasoning: true,
 				maxTokens: MAX_CAPTION_TOKENS,

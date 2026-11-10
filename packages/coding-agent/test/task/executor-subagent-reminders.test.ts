@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { AgentBusyError, type AgentTelemetryConfig, type Tracer } from "@oh-my-pi/pi-agent-core";
 import { type AssistantMessage, Effort } from "@oh-my-pi/pi-ai";
@@ -116,6 +118,7 @@ describe("runSubprocess yield reminders", () => {
 	};
 
 	const baseOptions = {
+		parentModel: EXECUTOR_PARENT_MODEL,
 		cwd: "/tmp",
 		agent: baseAgent,
 		task: "do work",
@@ -1348,6 +1351,7 @@ describe("runSubprocess telemetry propagation", () => {
 	};
 
 	const baseOptions = {
+		parentModel: EXECUTOR_PARENT_MODEL,
 		cwd: "/tmp",
 		agent: baseAgent,
 		task: "do work",

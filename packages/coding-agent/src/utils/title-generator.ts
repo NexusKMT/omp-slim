@@ -317,6 +317,7 @@ async function generateTitleOnlineWithModels(
 						},
 						{
 							apiKey: registry.resolver(model, sessionId),
+							disableServerSideFallback: true,
 							sessionId,
 							maxTokens,
 							disableReasoning: true,

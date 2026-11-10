@@ -19,10 +19,7 @@ import { getBundledAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { AgentCompactionThresholdOverride } from "@oh-my-pi/pi-coding-agent/config/compaction-threshold";
-import type {
-	BeforeSubagentSpawnEvent,
-	LoadExtensionsResult,
-} from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
+import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import {
 	artifactsDirsFromRegistry,
 	resetRegisteredArtifactDirsForTests,
@@ -54,8 +51,7 @@ import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 import { createSessionDefaults } from "../helpers/session-defaults";
 
-import { cfgRetryModelFallback } from "@oh-my-pi/pi-coding-agent/session/settings";
-import { cfgTaskAgentModelOverrides, cfgTaskEnableEffort } from "@oh-my-pi/pi-coding-agent/task/settings";
+import { cfgTaskEnableEffort } from "@oh-my-pi/pi-coding-agent/task/settings";
 
 const AGENT: AgentDefinition = {
 	name: "worker",
@@ -102,6 +98,7 @@ function session(
 					? { "task.agentCompactionThresholdOverrides": options.agentCompactionThresholdOverrides }
 					: {}),
 			}),
+		getActiveModelString: () => "anthropic/claude-sonnet-4-5",
 		getSessionFile: () => null,
 		getSessionSpawns: () => options.parentSpawns ?? "*",
 		getSessionAgents: () => options.sessionAgents ?? [],
@@ -155,7 +152,7 @@ describe("structured subagent primitive", () => {
 				request({ session: taggedSession, agent: "m1", invocationKind }),
 			);
 			expect(policy.agent.name).toBe("m1");
-			expect(policy.modelOverride).toEqual(["a/x"]);
+			expect(policy.modelOverride).toEqual(["anthropic/claude-sonnet-4-5"]);
 		}
 		await expect(resolveEffectiveSubagentPolicy(request({ session: taggedSession, agent: "m9" }))).rejects.toThrow(
 			'Unknown agent "m9". Available: worker, m1',
@@ -167,7 +164,7 @@ describe("structured subagent primitive", () => {
 		const taggedSession = session();
 		taggedSession.getSessionAgents = () => [{ ...AGENT, name: "m1", model: ["a/x"] }];
 		const policy = await resolveEffectiveSubagentPolicy(request({ session: taggedSession, agent: "m1" }));
-		expect(policy.modelOverride).toEqual(["b/y"]);
+		expect(policy.modelOverride).toEqual(["anthropic/claude-sonnet-4-5"]);
 	});
 
 	it("rescans agents when a plugin provider is disabled while an earlier discovery is in flight", async () => {
@@ -224,102 +221,6 @@ describe("structured subagent primitive", () => {
 		inheritedSession.outputSchemaMode = "strict";
 		const inherited = await resolveEffectiveSubagentPolicy(request({ session: inheritedSession }));
 		expect(inherited.schema).toMatchObject({ source: "session", mode: "strict", outputSchemaOverridesAgent: false });
-	});
-
-	it("uses saved seance models in active-role/default order and honors an explicit available override", async () => {
-		const seanceAgent = getBundledAgent("seance");
-		if (!seanceAgent) throw new Error("Expected the bundled seance agent");
-		mockDiscovery(seanceAgent);
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-seance-policy-"));
-		const authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		const modelRegistry = new ModelRegistry(authStorage);
-		const cwd = path.join(tempDir, "project");
-		const sourceFile = path.join(tempDir, "sessions", "source.jsonl");
-		await fs.mkdir(path.dirname(sourceFile), { recursive: true });
-		await Bun.write(
-			sourceFile,
-			`${[
-				{ type: "session", version: 3, id: "saved-source", timestamp: "2026-10-01T00:00:00.000Z", cwd },
-				{
-					type: "model_change",
-					id: "default-model",
-					parentId: null,
-					timestamp: "2026-10-01T00:00:01.000Z",
-					model: "anthropic/claude-sonnet-4-5",
-					role: "default",
-				},
-				{
-					type: "model_change",
-					id: "active-model",
-					parentId: "default-model",
-					timestamp: "2026-10-01T00:00:02.000Z",
-					model: "anthropic/claude-sonnet-4-6",
-					role: "fast",
-				},
-			]
-				.map(entry => JSON.stringify(entry))
-				.join("\n")}\n`,
-		);
-		const caller = Object.assign(session({ cwd }), { modelRegistry });
-		try {
-			const saved = await resolveEffectiveSubagentPolicy(
-				request({ session: caller, agent: "seance", sourceSession: sourceFile }),
-			);
-			expect(saved.preparedSession?.fork.sourceFile).toBe(sourceFile);
-
-			expect(saved.modelOverride).toEqual(["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-5"]);
-			expect(saved.enableLsp).toBe(false);
-			expect(saved.enableIrc).toBe(false);
-
-			const overridden = await resolveEffectiveSubagentPolicy(
-				request({
-					session: caller,
-					agent: "seance",
-					sourceSession: sourceFile,
-					model: "anthropic/claude-sonnet-4-5",
-				}),
-			);
-			expect(overridden.modelOverride).toEqual(["anthropic/claude-sonnet-4-5"]);
-		} finally {
-			authStorage.close();
-			await fs.rm(tempDir, { recursive: true, force: true });
-		}
-	});
-
-	it("fails closed when the source has no saved model or an explicit model is unavailable", async () => {
-		const seanceAgent = getBundledAgent("seance");
-		if (!seanceAgent) throw new Error("Expected the bundled seance agent");
-		mockDiscovery(seanceAgent);
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-seance-model-fail-"));
-		const authStorage = await AuthStorage.create(":memory:");
-		const modelRegistry = new ModelRegistry(authStorage);
-		const cwd = path.join(tempDir, "project");
-		const sourceFile = path.join(tempDir, "sessions", "no-model.jsonl");
-		await fs.mkdir(path.dirname(sourceFile), { recursive: true });
-		await Bun.write(
-			sourceFile,
-			`${JSON.stringify({ type: "session", version: 3, id: "no-model-source", timestamp: "2026-10-01T00:00:00.000Z", cwd })}\n`,
-		);
-		const caller = Object.assign(session({ cwd }), { modelRegistry });
-		try {
-			await expect(
-				resolveEffectiveSubagentPolicy(request({ session: caller, agent: "seance", sourceSession: sourceFile })),
-			).rejects.toThrow("The source session has no saved model.");
-			await expect(
-				resolveEffectiveSubagentPolicy(
-					request({
-						session: caller,
-						agent: "seance",
-						sourceSession: sourceFile,
-						model: "missing-provider/missing-model",
-					}),
-				),
-			).rejects.toThrow("No available saved model can serve this source.");
-		} finally {
-			authStorage.close();
-			await fs.rm(tempDir, { recursive: true, force: true });
-		}
 	});
 
 	it("gives task and eval invocations identical blocked-agent preflight errors", async () => {
@@ -409,9 +310,8 @@ describe("structured subagent primitive", () => {
 
 			const policy = await resolveEffectiveSubagentPolicy(request({ session: liveSession, agent: "hot-worker" }));
 
-			expect(policy.modelOverride).toEqual(["xai-oauth/grok-4.6:medium"]);
+			expect(policy.modelOverride).toEqual(["anthropic/claude-sonnet-4-5"]);
 			expect(cfgTaskEnableEffort.get(liveSettings)).toBe(false);
-			expect(cfgRetryModelFallback.get(liveSettings)).toBe(false);
 		} finally {
 			liveSettings.cancelPendingSaves();
 			// `Settings.loadIsolated` opened `<agentDir>/agent.db`; Windows cannot delete it while open.
@@ -490,7 +390,7 @@ describe("structured subagent primitive", () => {
 		expect(dispatched[0]?.inheritedSessionAgents).toEqual([inheritedAgent]);
 		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
-	it("starts a level-tagged agent at its tagged effort and other agents at the capped hint", async () => {
+	it("applies the same caller effort ceiling to every agent persona", async () => {
 		const model = buildModel({
 			id: "effort-target",
 			name: "Effort Target",
@@ -511,6 +411,7 @@ describe("structured subagent primitive", () => {
 		const settings = Settings.isolated({ "task.maxEffort": "low", "task.isolation.enabled": false });
 		const parent = Object.assign(session({ settings, sessionAgents: [tagged, untagged] }), {
 			modelRegistry: { authStorage: {}, refresh: async () => {}, getAvailable: () => [model] },
+			getActiveModel: () => model,
 			getApiKey: async () => "test-key",
 		});
 		const create = vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async () => {
@@ -552,11 +453,11 @@ describe("structured subagent primitive", () => {
 		}
 
 		expect(create.mock.calls.map(([options]) => options?.thinkingLevel)).toEqual([
-			Effort.High,
+			Effort.Low,
 			Effort.Low,
 			Effort.Low,
 		]);
-		expect(create.mock.calls[0]?.[0]?.thinkingLevelCeiling).toBeUndefined();
+		expect(create.mock.calls[0]?.[0]?.thinkingLevelCeiling).toBe(Effort.Low);
 	});
 	it("holds the parent on an inline child until it settles, but not on a detached one", async () => {
 		mockDiscovery();
@@ -577,25 +478,7 @@ describe("structured subagent primitive", () => {
 		await fs.rm(inline.artifactsDir, { recursive: true, force: true });
 		await fs.rm(detached.artifactsDir, { recursive: true, force: true });
 	});
-	it("propagates a custom thinking-suffixed role alias through policy, dispatch, and settlement", async () => {
-		const customAgent = { ...AGENT, model: ["@reviewer:high"] };
-		mockDiscovery(customAgent);
-		const childSession = session({ modelRoles: { reviewer: "openai/gpt-4o" } });
-		const dispatched: executorModule.ExecutorOptions[] = [];
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			dispatched.push(options);
-			return { ...result(), modelRole: options.modelRole };
-		});
 
-		const settled = await runStructuredSubagent(
-			request({ session: childSession, agent: "worker", retainArtifacts: true }),
-		);
-
-		expect(settled.policy.modelRole).toBe("reviewer");
-		expect(dispatched[0]?.modelRole).toBe("reviewer");
-		expect(settled.result.modelRole).toBe("reviewer");
-		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
-	});
 	it("does not treat a spawn handle as the HUD description", async () => {
 		mockDiscovery();
 		const dispatched: executorModule.ExecutorOptions[] = [];
@@ -623,111 +506,6 @@ describe("structured subagent primitive", () => {
 		await fs.rm(evalLabeled.artifactsDir, { recursive: true, force: true });
 	});
 
-	it("derives modelRole from the raw selector source in request, override, definition order", async () => {
-		const customAgent = { ...AGENT, model: ["@definition"] };
-		mockDiscovery(customAgent);
-		const roleSession = session({
-			modelRoles: {
-				request: "openai/gpt-4o",
-				override: "openai/gpt-4o",
-				definition: "openai/gpt-4o",
-			},
-		});
-		cfgTaskAgentModelOverrides.override(roleSession.settings, { worker: "@override" });
-
-		const requestPolicy = await resolveEffectiveSubagentPolicy(request({ session: roleSession, model: "@request" }));
-		expect(requestPolicy.modelRole).toBe("request");
-
-		const overridePolicy = await resolveEffectiveSubagentPolicy(request({ session: roleSession }));
-		expect(overridePolicy.modelRole).toBe("override");
-
-		const concreteOverrideSession = session({
-			modelRoles: {
-				override: "openai/gpt-4o",
-				definition: "openai/gpt-4o",
-			},
-		});
-		cfgTaskAgentModelOverrides.override(concreteOverrideSession.settings, { worker: "openai/gpt-4o" });
-		const concreteOverridePolicy = await resolveEffectiveSubagentPolicy(
-			request({ session: concreteOverrideSession }),
-		);
-		expect(concreteOverridePolicy.modelRole).toBeUndefined();
-
-		const definitionPolicy = await resolveEffectiveSubagentPolicy(
-			request({ session: session({ modelRoles: { definition: "openai/gpt-4o" } }) }),
-		);
-		expect(definitionPolicy.modelRole).toBe("definition");
-	});
-	it("falls through an empty request selector to the agent definition role", async () => {
-		const customAgent = { ...AGENT, model: ["@definition"] };
-		mockDiscovery(customAgent);
-		const childSession = session({ modelRoles: { definition: "openai/gpt-4o" } });
-
-		const policy = await resolveEffectiveSubagentPolicy(request({ session: childSession, model: "" }));
-
-		expect(policy.modelRole).toBe("definition");
-		expect(policy.modelOverride).toEqual(["openai/gpt-4o"]);
-	});
-
-	it("falls through an empty configured override to the agent definition role", async () => {
-		const customAgent = { ...AGENT, model: ["@definition"] };
-		mockDiscovery(customAgent);
-		const childSession = session({ modelRoles: { definition: "openai/gpt-4o" } });
-		cfgTaskAgentModelOverrides.override(childSession.settings, { worker: "" });
-
-		const policy = await resolveEffectiveSubagentPolicy(request({ session: childSession }));
-
-		expect(policy.modelRole).toBe("definition");
-		expect(policy.modelOverride).toEqual(["openai/gpt-4o"]);
-	});
-	it("falls through a configured alias that expands to no patterns", async () => {
-		const customAgent = { ...AGENT, model: ["@definition"] };
-		mockDiscovery(customAgent);
-		const childSession = session({ modelRoles: { empty: "", definition: "openai/gpt-4o" } });
-		cfgTaskAgentModelOverrides.override(childSession.settings, { worker: "@empty" });
-
-		const policy = await resolveEffectiveSubagentPolicy(request({ session: childSession }));
-
-		expect(policy.modelRole).toBe("definition");
-		expect(policy.modelOverride).toEqual(["openai/gpt-4o"]);
-	});
-
-	it("lets before_subagent_spawn replace model patterns at dispatch without dropping role identity", async () => {
-		mockDiscovery({ ...AGENT, model: ["@definition"] });
-		const childSession = session({ modelRoles: { definition: "anthropic/claude-opus-4-5" } });
-		const events: BeforeSubagentSpawnEvent[] = [];
-		childSession.emitBeforeSubagentSpawn = async event => {
-			events.push(event);
-			return { model: "openai/gpt-4o", note: "pool test" };
-		};
-		const dispatched: executorModule.ExecutorOptions[] = [];
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			dispatched.push(options);
-			return result();
-		});
-
-		// Frontend preflight is side-effect free: stateful routers must not advance.
-		await resolveEffectiveSubagentPolicy(request({ session: childSession }));
-		expect(events).toEqual([]);
-
-		const settled = await runStructuredSubagent(request({ session: childSession, retainArtifacts: true }));
-		expect(dispatched[0]).toMatchObject({
-			modelOverride: ["openai/gpt-4o"],
-			modelRole: "definition",
-			modelRoute: "pool test",
-		});
-		expect(events).toEqual([
-			{
-				type: "before_subagent_spawn",
-				agent: "worker",
-				invocationKind: "task",
-				modelRole: "definition",
-				patterns: ["anthropic/claude-opus-4-5"],
-			},
-		]);
-		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
-	});
-
 	it("rejects dispatch before leasing artifacts when an extension blocks the spawn", async () => {
 		mockDiscovery();
 		const blockedSession = session();
@@ -738,25 +516,6 @@ describe("structured subagent primitive", () => {
 		expect(error as StructuredSubagentError).toMatchObject({ kind: "preflight", message: "pool exhausted" });
 		expect(run).not.toHaveBeenCalled();
 		expect(artifactsDirsFromRegistry()).toEqual([]);
-	});
-
-	it("does not assign a role when a child uses an explicit model selector", async () => {
-		mockDiscovery();
-		const childSession = session({ modelRoles: { reviewer: "openai/gpt-4o" } });
-		const dispatched: executorModule.ExecutorOptions[] = [];
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			dispatched.push(options);
-			return result();
-		});
-
-		const settled = await runStructuredSubagent(
-			request({ session: childSession, model: "openai/gpt-4o", retainArtifacts: true }),
-		);
-
-		expect(settled.policy.modelRole).toBeUndefined();
-		expect(dispatched[0]?.modelRole).toBeUndefined();
-		expect(settled.result.modelRole).toBeUndefined();
-		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
 
 	it("leases temporary artifacts for a retained invocation and registers them for agent URLs", async () => {
@@ -852,6 +611,7 @@ describe("structured subagent primitive", () => {
 		const parentSession = Object.assign(session({ cwd }), {
 			authStorage,
 			modelRegistry,
+			getActiveModel: () => model,
 			restrictToolNames: true,
 			enableMCP: false,
 			enableLsp: false,
@@ -864,8 +624,9 @@ describe("structured subagent primitive", () => {
 			const settled = await runStructuredSubagent(
 				request({
 					session: parentSession,
+					invocationKind: "eval",
 					structured: false,
-					identity: { id: agentId },
+					identity: { id: agentId, label: "Unstructured worker" },
 					keepAlive: false,
 				}),
 			);
@@ -942,6 +703,7 @@ describe("structured subagent primitive", () => {
 			const parentSession = Object.assign(session({ cwd, settings, planMode: true, parentSpawns: "seance,scout" }), {
 				authStorage,
 				modelRegistry,
+				getActiveModel: () => model,
 				restrictToolNames: true,
 				enableMCP: false,
 				enableLsp: false,
@@ -1536,6 +1298,7 @@ describe("agent frontmatter structured opt-in", () => {
 				getSessionFile: () => null,
 				getSessionSpawns: () => "*",
 				modelRegistry,
+				getActiveModel: () => mock,
 				authStorage,
 				enableLsp: false,
 				enableMCP: false,
@@ -1574,217 +1337,4 @@ describe("agent frontmatter structured opt-in", () => {
 		},
 		30_000,
 	);
-});
-
-describe("per-call model preflight", () => {
-	const target = createMockModel({ id: "target" });
-	const painter = { ...createMockModel({ id: "painter" }), kind: "image" as const };
-	function perCallSession(settings: Record<string, unknown>, warm = true, refreshPending = false): ToolSession {
-		return Object.assign(
-			session({
-				settings: Settings.isolated({ "task.isolation.enabled": false, "task.maxRecursionDepth": 2, ...settings }),
-			}),
-			{
-				getActiveModelString: () => "mock/parent",
-				modelRegistry: {
-					getAll: () => [target, painter],
-					getAvailable: (kind?: string) => (!warm ? [] : kind === "chat" ? [target] : [target, painter]),
-					isBackgroundRefreshPending: () => refreshPending,
-				},
-			},
-		);
-	}
-
-	// `off` refuses every kind and `eval` refuses task calls. The selector is invalid on purpose:
-	// the disabled gate is reported first, so a caller is never told to fix a selector it may not send.
-	it.each([
-		["off", "eval"],
-		["eval", "task"],
-	] as const)("rejects model under task.perCallModel: %s for %s calls", async (mode, invocationKind) => {
-		mockDiscovery();
-		await expect(
-			resolveEffectiveSubagentPolicy(
-				request({
-					session: perCallSession({ "task.perCallModel": mode }),
-					invocationKind,
-					perCallModel: "@smol",
-				}),
-			),
-		).rejects.toThrow(`task.perCallModel: ${mode}`);
-	});
-
-	it.each([
-		["on", "task"],
-		["eval", "eval"],
-	] as const)("routes an approved model above the agent's own under %s for %s calls", async (mode, invocationKind) => {
-		mockDiscovery({ ...AGENT, model: ["mock/agent-own"] });
-		const policy = await resolveEffectiveSubagentPolicy(
-			request({
-				session: perCallSession({ "task.perCallModel": mode, modelRoles: { review: "mock/target" } }),
-				invocationKind,
-				perCallModel: "mock/target:high",
-			}),
-		);
-		expect(policy.modelOverride).toEqual(["mock/target:high"]);
-		// A requested model never falls back to the parent's.
-		expect(policy.parentActiveModelPattern).toBeUndefined();
-	});
-
-	it.each(["SDK overlay", "nested subagent"])("reloads removed on-disk role grants through an %s", async kind => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-task-grant-reload-"));
-		const projectDir = path.join(root, "project");
-		const agentDir = path.join(root, "agent");
-		await fs.mkdir(projectDir, { recursive: true });
-		const configPath = path.join(agentDir, "config.yml");
-		const taskConfig = 'task:\n  perCallModel: "on"\n  isolation:\n    enabled: false\n';
-		await Bun.write(configPath, `${taskConfig}modelRoles:\n  review: mock/target\n`);
-		const liveSettings = await Settings.loadIsolated({ cwd: projectDir, agentDir });
-		const child = executorModule.createSubagentSettings(liveSettings, {
-			modelRoles: { ...liveSettings.getModelRoles(), advisor: "mock/other" },
-		});
-		const settings = kind === "SDK overlay" ? liveSettings.overlay({}) : executorModule.createSubagentSettings(child);
-		const liveSession = Object.assign(perCallSession({}), { cwd: projectDir, settings });
-		const call = request({ session: liveSession, perCallModel: "mock/target:high" });
-		mockDiscovery();
-
-		try {
-			expect((await resolveEffectiveSubagentPolicy(call)).modelOverride).toEqual(["mock/target:high"]);
-			await Bun.write(configPath, taskConfig);
-			await expect(resolveEffectiveSubagentPolicy(call)).rejects.toThrow(
-				'Per-call model mock/target is not approved for agent "worker"',
-			);
-		} finally {
-			liveSettings.cancelPendingSaves();
-			AgentStorage.close();
-			await fs.rm(root, { recursive: true, force: true });
-		}
-	});
-
-	it.each([
-		["a selector that is not provider/model-id", "@smol", {}, false, /invalid `model`/],
-		// Shaped like provider/model-id, but names the configured custom role `review`.
-		["a legacy alias of a custom role", "pi/review", {}, false, /invalid `model`/],
-		["an unavailable model", "mock/missing", {}, false, /No available model matches/],
-		["a non-chat model", "mock/painter", {}, false, /image model; a subagent needs a chat model/],
-		["a non-chat model while discovery is running", "mock/painter", {}, true, /image model/],
-		["an unapproved model", "mock/target", { modelRoles: {} }, false, /not approved/],
-		[
-			"a model for an agent with an override",
-			"mock/target",
-			{ "task.agentModelOverrides": { worker: "mock/target" } },
-			false,
-			/conflicts with task\.agentModelOverrides/,
-		],
-	] as const)("rejects %s", async (_name, perCallModel, settings, refreshPending, error) => {
-		mockDiscovery();
-		await expect(
-			resolveEffectiveSubagentPolicy(
-				request({
-					session: perCallSession(
-						{ "task.perCallModel": "on", modelRoles: { review: "mock/x" }, ...settings },
-						true,
-						refreshPending,
-					),
-					perCallModel,
-				}),
-			),
-		).rejects.toThrow(error);
-	});
-
-	// Both defer to the executor's post-refresh check: an unloaded model while discovery runs,
-	// and availability plus approval while the registry is cold.
-	it.each([
-		["a model discovery has not loaded yet", "mock/missing", true, true],
-		["an unapproved model while the registry is cold", "mock/target", false, false],
-	] as const)("defers %s to the executor", async (_name, perCallModel, warm, refreshPending) => {
-		mockDiscovery();
-		const policy = await resolveEffectiveSubagentPolicy(
-			request({ session: perCallSession({ "task.perCallModel": "on" }, warm, refreshPending), perCallModel }),
-		);
-		expect(policy.modelOverride).toEqual([perCallModel]);
-		expect(policy.perCallModelGrants).toBeDefined();
-	});
-
-	it("leaves calls without model on their configured routing", async () => {
-		mockDiscovery({ ...AGENT, model: ["mock/agent-own"] });
-		const policy = await resolveEffectiveSubagentPolicy(
-			request({ session: perCallSession({ "task.perCallModel": "on" }) }),
-		);
-		expect(policy.modelOverride).toEqual(["mock/agent-own"]);
-		expect(policy.perCallModelGrants).toBeUndefined();
-		expect(policy.parentActiveModelPattern).toBe("mock/parent");
-	});
-
-	it("rejects a per-call model for a level-tagged agent, even its own selector", async () => {
-		mockDiscovery();
-		const tagged: AgentDefinition = { ...AGENT, name: "m1", model: ["mock/target:high"], thinkingLevel: Effort.High };
-		const taggedSession = Object.assign(perCallSession({ "task.perCallModel": "on", "task.maxEffort": "low" }), {
-			getSessionAgents: () => [tagged],
-		});
-		const error = await resolveEffectiveSubagentPolicy(
-			request({ session: taggedSession, agent: "m1", perCallModel: "mock/target:high" }),
-		).catch((cause: unknown) => cause);
-		expect(error).toBeInstanceOf(StructuredSubagentError);
-		expect((error as StructuredSubagentError).kind).toBe("preflight");
-		expect((error as Error).message).toContain('agent "m1"');
-		expect((error as Error).message).toContain("Omit model");
-	});
-
-	it("routes a per-call model for an untagged mention through its own model grant", async () => {
-		mockDiscovery();
-		const untagged: AgentDefinition = { ...AGENT, name: "m2", model: ["mock/target"], thinkingLevel: "auto" };
-		const untaggedSession = Object.assign(perCallSession({ "task.perCallModel": "on" }), {
-			getSessionAgents: () => [untagged],
-		});
-		const policy = await resolveEffectiveSubagentPolicy(
-			request({ session: untaggedSession, agent: "m2", perCallModel: "mock/target:low" }),
-		);
-		expect(policy.modelOverride).toEqual(["mock/target:low"]);
-	});
-
-	it("treats a discovered agent's frontmatter level as its own, not a user tag", async () => {
-		mockDiscovery({ ...AGENT, name: "m1", source: "project", thinkingLevel: Effort.High });
-		const tagged: AgentDefinition = { ...AGENT, name: "m1", model: ["mock/target:high"], thinkingLevel: Effort.High };
-		const shadowedSession = Object.assign(
-			perCallSession({ "task.perCallModel": "on", modelRoles: { review: "mock/target" } }),
-			{ getSessionAgents: () => [tagged] },
-		);
-		const policy = await resolveEffectiveSubagentPolicy(
-			request({ session: shadowedSession, agent: "m1", perCallModel: "mock/target:low" }),
-		);
-		expect(policy.modelOverride).toEqual(["mock/target:low"]);
-	});
-
-	describe("an agent shadowing the seance name", () => {
-		const shadow: AgentDefinition = { ...AGENT, name: "seance", source: "project", model: ["mock/agent-own"] };
-
-		it.each([
-			["the per-call gate", "off", "mock/target", "task.perCallModel: off"],
-			["exact-selector validation", "on", ["mock/target"], /invalid `model`/],
-		] as const)("holds its model to %s", async (_name, mode, seanceModel, error) => {
-			mockDiscovery(shadow);
-			await expect(
-				resolveEffectiveSubagentPolicy(
-					request({
-						session: perCallSession({ "task.perCallModel": mode, modelRoles: { review: "mock/target" } }),
-						agent: "seance",
-						seanceModel: typeof seanceModel === "string" ? seanceModel : [...seanceModel],
-					}),
-				),
-			).rejects.toThrow(error);
-		});
-
-		it("routes an approved model as a per-call worker", async () => {
-			mockDiscovery(shadow);
-			const policy = await resolveEffectiveSubagentPolicy(
-				request({
-					session: perCallSession({ "task.perCallModel": "on", modelRoles: { review: "mock/target" } }),
-					agent: "seance",
-					seanceModel: "mock/target",
-				}),
-			);
-			expect(policy.modelOverride).toEqual(["mock/target"]);
-			expect(policy.perCallModelGrants?.agentName).toBe("seance");
-		});
-	});
 });

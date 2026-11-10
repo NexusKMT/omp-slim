@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as ai from "@oh-my-pi/pi-ai";
-import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
+import { type Api, type Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { generateCommitMessage } from "@oh-my-pi/pi-coding-agent/utils/commit-message-generator";
@@ -32,8 +32,8 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe("role thinking helper propagation", () => {
-	it("passes smol-role thinking to commit message generation", async () => {
+describe("current-model background helper calls", () => {
+	it("uses the current model instead of a separate smol role for commit generation", async () => {
 		const model = getModelOrThrow("claude-sonnet-4-5");
 		const settings = createSettings({
 			default: `${model.provider}/${model.id}:high`,
@@ -45,10 +45,17 @@ describe("role thinking helper propagation", () => {
 			content: [{ type: "text", text: "fix scope handling" }],
 		} as never);
 
-		const message = await generateCommitMessage(`diff --git a/x b/x\n+change\n`, registry as never, settings);
+		const message = await generateCommitMessage(
+			`diff --git a/x b/x\n+change\n`,
+			registry as never,
+			settings,
+			undefined,
+			model,
+		);
 		expect(message).toBe("fix scope handling");
+		expect(completeSimpleMock.mock.calls[0]?.[0]).toBe(model);
 		expect(completeSimpleMock.mock.calls[0]?.[2]).toMatchObject({
-			reasoning: Effort.Minimal,
+			disableServerSideFallback: true,
 			maxTokens: 1024,
 		});
 	});
@@ -64,14 +71,20 @@ describe("role thinking helper propagation", () => {
 			content: [{ type: "text", text: "fix qwen title budget" }],
 		} as never);
 
-		const message = await generateCommitMessage(`diff --git a/x b/x\n+change\n`, registry as never, settings);
+		const message = await generateCommitMessage(
+			`diff --git a/x b/x\n+change\n`,
+			registry as never,
+			settings,
+			undefined,
+			model,
+		);
 		expect(message).toBe("fix qwen title budget");
 		expect(completeSimpleMock.mock.calls[0]?.[2]).toMatchObject({
 			maxTokens: 1024,
 		});
 	});
 
-	it("disables reasoning for title generation even when smol role has thinking", async () => {
+	it("disables reasoning for title formatting on the current model", async () => {
 		const model = getModelOrThrow("claude-sonnet-4-5");
 		const settings = createSettings({
 			default: `${model.provider}/${model.id}:high`,
@@ -83,7 +96,7 @@ describe("role thinking helper propagation", () => {
 			content: [{ type: "text", text: "<title>Investigate resolver</title>" }],
 		} as never);
 
-		const title = await generateSessionTitle("Investigate resolver", registry as never, settings);
+		const title = await generateSessionTitle("Investigate resolver", registry as never, settings, undefined, model);
 		expect(title).toBe("Investigate resolver");
 		expect(completeSimpleMock.mock.calls[0]?.[2]).toMatchObject({ disableReasoning: true });
 	});

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Effort } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { resolvePrimaryModel, resolveSmolModel } from "@oh-my-pi/pi-coding-agent/commit/model-selection";
+import { resolvePrimaryModel } from "@oh-my-pi/pi-coding-agent/commit/model-selection";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
@@ -11,8 +11,8 @@ function getModelOrThrow(id: string) {
 	return model;
 }
 
-describe("commit role thinking selection", () => {
-	it("returns explicit thinking for commit and smol roles, including alias overrides", async () => {
+describe("commit single-model selection", () => {
+	it("uses the configured primary model and its thinking level", async () => {
 		const defaultModel = getModelOrThrow("claude-sonnet-4-5");
 		const commitModel = getModelOrThrow("claude-opus-4-5");
 		const settings = Settings.isolated({
@@ -34,12 +34,8 @@ describe("commit role thinking selection", () => {
 			};
 
 			const primary = await resolvePrimaryModel(undefined, settings, registry);
-			expect(primary.model.id).toBe(commitModel.id);
-			expect(primary.thinkingLevel).toBe(Effort.Low);
-
-			const smol = await resolveSmolModel(settings, registry, commitModel, "fallback-key");
-			expect(smol.model.id).toBe(defaultModel.id);
-			expect(smol.thinkingLevel).toBe(Effort.Minimal);
+			expect(primary.model.id).toBe(defaultModel.id);
+			expect(primary.thinkingLevel).toBe(Effort.High);
 		} finally {
 			authStorage.close();
 		}

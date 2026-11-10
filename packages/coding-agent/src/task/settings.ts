@@ -537,7 +537,7 @@ export const cfgTaskMaxEffort = register({
 		group: "Subagents",
 		label: "Maximum Per-Spawn Effort",
 		description:
-			"Maximum reasoning effort allowed for the task tool's per-spawn effort hint or a per-call model. An explicit `:level` is clamped to the highest supported effort at or below this ceiling, and an omitted `:level` inherits the agent's thinking level capped at this value; cold revival re-applies the cap. Unset, `:inherit` and `:off` keep their existing meaning. A per-call model must support an effort at or below this ceiling; the default preserves the model's full range.",
+			"Maximum reasoning effort allowed for delegated tasks on the current session model. Per-spawn effort hints and agent thinking levels are capped at this value; cold revival re-applies the cap. The default preserves the model's full effort range.",
 		options: THINKING_EFFORTS.map(getThinkingLevelMetadata),
 	},
 });

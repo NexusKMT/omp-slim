@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -83,6 +85,7 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 	};
 
 	const baseOptions = {
+		parentModel: EXECUTOR_PARENT_MODEL,
 		cwd: "/tmp",
 		agent: baseAgent,
 		task: "do work",
@@ -700,10 +703,7 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 
 		expect(result.aborted).toBe(false);
 		expect(result.contextTokens).toBe(12345);
-		// contextWindow is only populated when the model registry resolves one;
-		// here we mock createAgentSession so it stays undefined. The async-task
-		// consumer's assignment is a straight copy, so undefined is acceptable.
-		expect(result.contextWindow).toBeUndefined();
+		expect(result.contextWindow).toBe(EXECUTOR_PARENT_MODEL.contextWindow);
 	});
 
 	it("attributes a budget hard-abort to the budget, not a timer that fires during teardown", async () => {

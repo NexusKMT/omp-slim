@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 /**
  * Acceptance-boundary contract (#11079): a subagent whose terminal `yield` was
  * accepted must leave `running` and carry its run lifecycle milestones without
@@ -231,6 +233,7 @@ describe("runSubprocess result acceptance", () => {
 		} as CreateAgentSessionResult);
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do the work",
@@ -264,6 +267,7 @@ describe("runSubprocess result acceptance", () => {
 		});
 		const jobId = manager.register("task", AGENT_ID, async ({ signal }) => {
 			const result = await runSubprocess({
+				parentModel: EXECUTOR_PARENT_MODEL,
 				cwd: "/tmp",
 				agent: baseAgent,
 				task: "do the work",

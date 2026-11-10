@@ -414,14 +414,15 @@ describe("createSettingsAwareStreamFn", () => {
 			["Fable 5", stubFableModel],
 			["Fable 5.1", stubFable51Model],
 			["Mythos 5.1", stubMythosModel],
-		])("injects an allowed Opus 5 fallback for %s when the setting is on", (_label, model) => {
+		])("ignores retired server-side fallback settings for %s", (_label, model) => {
 			const settings = Settings.isolated({ "providers.anthropic.serverSideFallback": true });
 			const { fn: base, calls } = captureBase();
 			const wrapped = createSettingsAwareStreamFn(settings, base);
 
 			wrapped(model, stubContext, { apiKey: "k" });
 
-			expect(calls[0]?.options?.fallbacks).toEqual([{ model: "claude-opus-5" }]);
+			expect(calls[0]?.options?.fallbacks).toBeUndefined();
+			expect(calls[0]?.options?.disableServerSideFallback).toBe(true);
 		});
 
 		it("does NOT inject fallbacks for Fable off first-party Anthropic even when the setting is on", () => {
@@ -447,14 +448,14 @@ describe("createSettingsAwareStreamFn", () => {
 		it("never injects fallbacks for a session that disables server-side fallback", () => {
 			const settings = Settings.isolated({ "providers.anthropic.serverSideFallback": true });
 			const { fn: base, calls } = captureBase();
-			const wrapped = createSettingsAwareStreamFn(settings, base, { disableServerSideFallback: true });
+			const wrapped = createSettingsAwareStreamFn(settings, base);
 
 			wrapped(stubFableModel, stubContext, { apiKey: "k" });
 
 			expect(calls[0]?.options?.fallbacks).toBeUndefined();
 		});
 
-		it("caller-supplied fallbacks always win over the settings default", () => {
+		it("rejects provider-side alternate models even when supplied by the caller", () => {
 			const settings = Settings.isolated({ "providers.anthropic.serverSideFallback": true });
 			const { fn: base, calls } = captureBase();
 			const wrapped = createSettingsAwareStreamFn(settings, base);
@@ -464,7 +465,8 @@ describe("createSettingsAwareStreamFn", () => {
 				fallbacks: [{ model: "claude-sonnet-5" }],
 			});
 
-			expect(calls[0]?.options?.fallbacks).toEqual([{ model: "claude-sonnet-5" }]);
+			expect(calls[0]?.options?.fallbacks).toBeUndefined();
+			expect(calls[0]?.options?.disableServerSideFallback).toBe(true);
 		});
 	});
 
@@ -612,18 +614,5 @@ describe("createSettingsAwareStreamFn", () => {
 				release();
 			}
 		});
-	});
-});
-
-// The Factory opt-out end to end is covered by agent-session-factory-server-side-fallback.test.ts.
-describe("per-call server-side fallback switch", () => {
-	it.each([false, true])("drops a caller-supplied fallback chain only for a per-call worker: %p", disabled => {
-		const base = captureBase();
-		createSettingsAwareStreamFn(Settings.isolated({}), base.fn, { disableServerSideFallback: disabled })(
-			{ api: "anthropic-messages", provider: "anthropic", id: "claude-fable-5" } as unknown as Model,
-			stubContext,
-			{ apiKey: "k", fallbacks: [{ model: "claude-opus-5" }] },
-		);
-		expect(base.calls[0]!.options?.fallbacks).toEqual(disabled ? undefined : [{ model: "claude-opus-5" }]);
 	});
 });

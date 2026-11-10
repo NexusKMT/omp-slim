@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -152,6 +154,7 @@ describe("runSubprocess incremental yield loops", () => {
 
 	function baseOptions(id: string, softRequestBudget: number) {
 		return {
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "inventory the api surface",

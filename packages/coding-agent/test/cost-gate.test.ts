@@ -184,7 +184,6 @@ describe("job widget authoring", () => {
 		const billed = response(1.2);
 		const spy = vi.spyOn(ai, "completeSimple").mockResolvedValue(billed);
 		const settings = Settings.isolated({ "session.maxCost": 1 });
-		settings.setModelRole("widget", "llama.cpp/cost-gate-model");
 		const modelRegistry = {
 			getAvailable: () => [model],
 			find: () => model,
@@ -193,6 +192,7 @@ describe("job widget authoring", () => {
 		} as unknown as ModelRegistry;
 		const costGate = new CostGate(settings, 0, () => {});
 		const author = createModelJobWidgetAuthor({
+			getModel: () => model,
 			settings,
 			modelRegistry,
 			sessionId: () => "sess",

@@ -182,7 +182,7 @@ export async function resolveWidgetModel(
 	return currentModel && (await registry.getApiKey(currentModel, sessionId, { signal })) ? currentModel : undefined;
 }
 
-/** A {@link JobWidgetAuthor} backed by the `widget` model role. */
+/** A {@link JobWidgetAuthor} backed by the current session model. */
 export function createModelJobWidgetAuthor(options: ModelJobWidgetAuthorOptions): JobWidgetAuthor {
 	return async (request, signal) => {
 		const sessionId = options.sessionId();
@@ -222,6 +222,7 @@ export function createModelJobWidgetAuthor(options: ModelJobWidgetAuthorOptions)
 			},
 			{
 				apiKey: options.modelRegistry.resolver(model, sessionId),
+				disableServerSideFallback: true,
 				signal,
 				// Spec writing is formatting work; a forced tool call also rules out thinking on some providers.
 				disableReasoning: true,

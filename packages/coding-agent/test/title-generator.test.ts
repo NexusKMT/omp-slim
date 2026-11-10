@@ -3,9 +3,7 @@ import type { Api, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { formatModelStringWithRouting, resolveModelOverride } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { tinyTitleClient } from "@oh-my-pi/pi-coding-agent/tiny/title-client";
 import { DEFAULT_SPINNER_INTERVAL_MS } from "@oh-my-pi/pi-tui/spinner-clock";
 import {
 	disposeTerminalTitleState,
@@ -34,8 +32,8 @@ function getModelFor(provider: GeneratedProvider, id: string): Model<Api> {
 	return model;
 }
 
-function createSettings(model: Model<Api>): Settings {
-	return Settings.isolated({ modelRoles: { tiny: `${model.provider}/${model.id}` } });
+function createSettings(_model: Model<Api>): Settings {
+	return Settings.isolated();
 }
 
 function createRegistry(model: Model<Api>, availableModels: Model<Api>[] = [model]) {
@@ -53,6 +51,30 @@ afterEach(() => {
 });
 
 describe("title generator", () => {
+	it("does not choose a replacement when the current model is absent or fails", async () => {
+		const model = getModelOrThrow("claude-sonnet-4-5");
+		const other = getModelOrThrow("claude-opus-4-8");
+		const complete = vi.spyOn(ai, "completeSimple").mockResolvedValue({
+			stopReason: "error",
+			errorStatus: 400,
+			errorMessage: "Unavailable",
+			content: [],
+		} as never);
+		const settings = Settings.isolated({
+			modelRoles: { tiny: `${other.provider}/${other.id}` },
+			"retry.modelFallback": true,
+			"retry.fallbackChains": { default: [`${other.provider}/${other.id}`] },
+		});
+		expect(await generateSessionTitle("Inspect the parser", createRegistry(other), settings)).toBeNull();
+		expect(complete).not.toHaveBeenCalled();
+		expect(
+			await generateSessionTitle("Inspect the parser", createRegistry(other), settings, undefined, model),
+		).toBeNull();
+		expect(complete).toHaveBeenCalledTimes(1);
+		expect(complete.mock.calls[0]?.[0]).toBe(model);
+		expect(complete.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
+	});
+
 	it("returns the marker-wrapped title without forcing a tool call", async () => {
 		const model = getModelOrThrow("claude-sonnet-4-5");
 		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
@@ -64,6 +86,8 @@ describe("title generator", () => {
 			"Investigate the resolver",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Structured Title");
@@ -76,45 +100,6 @@ describe("title generator", () => {
 		expect(options?.disableReasoning).toBe(true);
 		const messages = completeSimpleMock.mock.calls[0]?.[1].messages;
 		expect(messages?.map(message => message.role)).toEqual(["user"]);
-	});
-
-	it("selects an available local-inference model from the tiny role", async () => {
-		const localModel = getBundledModel("local", "lfm2.5-230m");
-		if (!localModel) throw new Error("Expected bundled local tiny model");
-		const paidModel = getModelOrThrow("claude-haiku-4-5");
-		const settings = createSettings(localModel);
-		const registry = createRegistry(localModel, [localModel, paidModel]);
-		const generateMock = vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Local Title");
-		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
-			stopReason: "error",
-			errorMessage: "unexpected remote fallback",
-			content: [],
-		} as never);
-
-		const title = await generateSessionTitle("Investigate the resolver", registry, settings);
-
-		expect(title).toBe("Local Title");
-		expect(generateMock).toHaveBeenCalledWith(localModel.id, "Investigate the resolver");
-		expect(completeSimpleMock).not.toHaveBeenCalled();
-	});
-
-	it("never falls back to a paid title model when local inference fails", async () => {
-		const localModel = getBundledModel("local", "lfm2.5-230m");
-		if (!localModel) throw new Error("Expected bundled local tiny model");
-		const paidModel = getModelOrThrow("claude-haiku-4-5");
-		const settings = createSettings(localModel);
-		const registry = createRegistry(localModel, [localModel, paidModel]);
-		vi.spyOn(tinyTitleClient, "generate").mockResolvedValue(null);
-		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
-			stopReason: "error",
-			errorMessage: "unexpected remote fallback",
-			content: [],
-		} as never);
-
-		const title = await generateSessionTitle("Investigate the resolver", registry, settings);
-
-		expect(title).toBeNull();
-		expect(completeSimpleMock).not.toHaveBeenCalled();
 	});
 
 	it("prefills the title marker as a trailing assistant turn for Ollama-hosted models", async () => {
@@ -143,6 +128,8 @@ describe("title generator", () => {
 			"the login button is broken on mobile",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Fix login button");
@@ -180,6 +167,8 @@ describe("title generator", () => {
 			"the login button is broken on mobile",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Fix login button");
@@ -196,6 +185,8 @@ describe("title generator", () => {
 			"fix title generation for <think> tag parsing",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Fix <think> tag parsing");
@@ -214,7 +205,7 @@ describe("title generator", () => {
 			createRegistry(model),
 			createSettings(model),
 			undefined,
-			undefined,
+			model,
 			undefined,
 			customPrompt,
 		);
@@ -237,6 +228,8 @@ describe("title generator", () => {
 			"optimize the CNPG kernel report pipeline",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Optimize CNPG kernel reports");
@@ -253,6 +246,8 @@ describe("title generator", () => {
 			"the login button is broken on mobile",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Fix login button on mobile");
@@ -269,6 +264,8 @@ describe("title generator", () => {
 			"add OAuth authentication to the API",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Add OAuth authentication");
@@ -285,6 +282,8 @@ describe("title generator", () => {
 			"the CI tests keep failing",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Debug failing CI tests");
@@ -298,7 +297,7 @@ describe("title generator", () => {
 			content: [],
 		} as never);
 
-		const title = await generateSessionTitle("hi", createRegistry(model), createSettings(model));
+		const title = await generateSessionTitle("hi", createRegistry(model), createSettings(model), undefined, model);
 
 		expect(title).toBeNull();
 		expect(completeSimpleMock).not.toHaveBeenCalled();
@@ -315,6 +314,8 @@ describe("title generator", () => {
 			"I have a quick question for you",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBeNull();
@@ -332,6 +333,8 @@ describe("title generator", () => {
 			"I have a quick question for you",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBeNull();
@@ -349,6 +352,8 @@ describe("title generator", () => {
 			"I have a quick question for you",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBeNull();
@@ -372,6 +377,7 @@ describe("title generator", () => {
 			} as never,
 			createSettings(model),
 			"session-1",
+			model,
 		);
 
 		expect(title).toBeNull();
@@ -406,6 +412,7 @@ describe("title generator", () => {
 			} as never,
 			createSettings(model),
 			"session-2",
+			model,
 		);
 
 		expect(title).toBeNull();
@@ -422,7 +429,7 @@ describe("title generator", () => {
 		);
 	});
 
-	it("stops title fallback traversal after cancellation", async () => {
+	it("stops current-model title generation after cancellation", async () => {
 		const primary = getModelOrThrow("claude-haiku-4-5");
 		const fallback = getModelOrThrow("claude-sonnet-4-5");
 		const controller = new AbortController();
@@ -459,7 +466,7 @@ describe("title generator", () => {
 				},
 			}),
 			"session-abort",
-			undefined,
+			primary,
 			undefined,
 			undefined,
 			controller.signal,
@@ -481,6 +488,8 @@ describe("title generator", () => {
 			"Investigate the resolver",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 		const maxTokens = (completeSimpleMock.mock.calls[0]?.[2] as { maxTokens?: number } | undefined)?.maxTokens;
 
@@ -504,6 +513,8 @@ describe("title generator", () => {
 			"Investigate the resolver",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 		const maxTokens = (completeSimpleMock.mock.calls[0]?.[2] as { maxTokens?: number } | undefined)?.maxTokens;
 
@@ -522,6 +533,8 @@ describe("title generator", () => {
 			"plan a setup screen\n```\nWelcome to Claude Code v2.1.158\n```\npick provider then theme",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		const sentMessages = (completeSimpleMock.mock.calls[0]?.[1] as { messages?: Array<{ content?: string }> })
@@ -542,6 +555,8 @@ describe("title generator", () => {
 			"the login button is broken on mobile",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Fix login button on mobile");
@@ -560,6 +575,8 @@ describe("title generator", () => {
 				"the login button is broken on mobile",
 				createRegistry(model),
 				createSettings(model),
+				undefined,
+				model,
 			);
 
 			expect(title).toBeNull();
@@ -577,6 +594,8 @@ describe("title generator", () => {
 			"fix title generation for <think> tag parsing",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Fix <think> tag parsing");
@@ -593,6 +612,8 @@ describe("title generator", () => {
 			"fix title generation for a ```thinking fence",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toContain("```thinking");
@@ -610,225 +631,11 @@ describe("title generator", () => {
 			"refactor the error handling in the api client",
 			createRegistry(model),
 			createSettings(model),
+			undefined,
+			model,
 		);
 
 		expect(title).toBe("Refactor API client error handling");
-	});
-
-	it("resolves the model roles in precedence order: tiny -> commit -> smol", async () => {
-		const tinyModel = getModelOrThrow("claude-haiku-4-5");
-		const commitModel = getModelOrThrow("claude-sonnet-4-5");
-		const smolModel = getModelOrThrow("claude-opus-4-8");
-
-		const mockComplete = vi.spyOn(ai, "completeSimple").mockResolvedValue({
-			stopReason: "stop",
-			content: [{ type: "text", text: "<title>Test Title</title>" }],
-		} as never);
-
-		// Case 1: All three roles configured. 'tiny' should be used.
-		let currentSettings = Settings.isolated({
-			modelRoles: {
-				tiny: `${tinyModel.provider}/${tinyModel.id}`,
-				commit: `${commitModel.provider}/${commitModel.id}`,
-				smol: `${smolModel.provider}/${smolModel.id}`,
-			},
-		});
-
-		const registry = {
-			getAvailable: () => [tinyModel, commitModel, smolModel],
-			getApiKey: async () => "test-key",
-			getApiKeyForProvider: async () => "test-key",
-			authStorage: { rotateSessionCredential: async () => false },
-			resolver: () => async () => "test-key",
-		} as never;
-
-		await generateSessionTitle("Some message", registry, currentSettings);
-		expect(mockComplete).toHaveBeenCalled();
-		expect(mockComplete.mock.calls[0]?.[0]).toBe(tinyModel);
-
-		mockComplete.mockClear();
-
-		// Case 2: 'tiny' role not configured, 'commit' and 'smol' configured. 'commit' should be used.
-		currentSettings = Settings.isolated({
-			modelRoles: {
-				commit: `${commitModel.provider}/${commitModel.id}`,
-				smol: `${smolModel.provider}/${smolModel.id}`,
-			},
-		});
-
-		await generateSessionTitle("Some message", registry, currentSettings);
-		expect(mockComplete).toHaveBeenCalled();
-		expect(mockComplete.mock.calls[0]?.[0]).toBe(commitModel);
-
-		mockComplete.mockClear();
-
-		// Case 3: Only 'smol' role configured. 'smol' should be used.
-		currentSettings = Settings.isolated({
-			modelRoles: { smol: `${smolModel.provider}/${smolModel.id}` },
-		});
-
-		await generateSessionTitle("Some message", registry, currentSettings);
-		expect(mockComplete).toHaveBeenCalled();
-		expect(mockComplete.mock.calls[0]?.[0]).toBe(smolModel);
-	});
-
-	it("does not attempt the current model when no registry models are available", async () => {
-		const model = getModelOrThrow("claude-sonnet-4-5");
-		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
-			stopReason: "stop",
-			content: [{ type: "text", text: "<title>Unexpected</title>" }],
-		} as never);
-		const registry = {
-			getAvailable: () => [],
-			getApiKey: async () => "test-key",
-			resolver: () => async () => "test-key",
-		};
-		expect(
-			await generateSessionTitle("Investigate", registry as never, createSettings(model), undefined, model),
-		).toBeNull();
-		expect(completeSimpleMock).not.toHaveBeenCalled();
-	});
-
-	it("preserves routed current-model title fallback for distinct @upstream routes", async () => {
-		const base = getModelFor("openrouter", "google/gemini-2.5-flash");
-		const registryLookup = { getAvailable: () => [base] };
-		const cerebras = resolveModelOverride(
-			["openrouter/google/gemini-2.5-flash@cerebras"],
-			registryLookup as never,
-		).model!;
-		const openaiRouted = resolveModelOverride(
-			["openrouter/google/gemini-2.5-flash@openai"],
-			registryLookup as never,
-		).model!;
-		expect(formatModelStringWithRouting(cerebras)).toBe("openrouter/google/gemini-2.5-flash@cerebras");
-		expect(formatModelStringWithRouting(openaiRouted)).toBe("openrouter/google/gemini-2.5-flash@openai");
-
-		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockImplementation(async model => {
-			if (formatModelStringWithRouting(model) === "openrouter/google/gemini-2.5-flash@cerebras") {
-				return {
-					stopReason: "error",
-					errorStatus: 400,
-					errorMessage: "upstream cerebras failed",
-					content: [],
-				} as never;
-			}
-			return {
-				stopReason: "stop",
-				content: [{ type: "text", text: "<title>Routed Recovery</title>" }],
-			} as never;
-		});
-		const settings = Settings.isolated({
-			modelRoles: { tiny: "openrouter/google/gemini-2.5-flash@cerebras" },
-			"retry.modelFallback": true,
-		});
-		const registry = {
-			getAvailable: () => [base],
-			getApiKey: async () => "test-key",
-			getApiKeyForProvider: async () => "test-key",
-			authStorage: { rotateSessionCredential: async () => false },
-			resolver: () => async () => "test-key",
-		} as never;
-
-		const title = await generateSessionTitle("Investigate routing", registry, settings, undefined, openaiRouted);
-		expect(title).toBe("Routed Recovery");
-		const attempted = completeSimpleMock.mock.calls.map(call => formatModelStringWithRouting(call[0] as Model<Api>));
-		expect(attempted).toEqual([
-			"openrouter/google/gemini-2.5-flash@cerebras",
-			"openrouter/google/gemini-2.5-flash@openai",
-		]);
-	});
-
-	it("expands appended currentModel fallbackChains without merging role chains", async () => {
-		const current = getModelOrThrow("claude-opus-4-8");
-		const currentFallback = getModelOrThrow("claude-sonnet-4-5");
-		const roleOnly = getModelFor("openai", "gpt-4o-mini");
-		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockImplementation(async model => {
-			if (model.id === current.id) {
-				return {
-					stopReason: "error",
-					errorStatus: 400,
-					errorMessage: "Model is not available in the active live catalog",
-					content: [],
-				} as never;
-			}
-			return {
-				stopReason: "stop",
-				content: [{ type: "text", text: `<title>From ${model.id}</title>` }],
-			} as never;
-		});
-		const settings = Settings.isolated({
-			"retry.modelFallback": true,
-			"retry.fallbackChains": {
-				[`${current.provider}/${current.id}`]: [`${currentFallback.provider}/${currentFallback.id}`],
-				// Role/default chains must not be merged onto the appended current model.
-				tiny: [`${roleOnly.provider}/${roleOnly.id}`],
-				default: [`${roleOnly.provider}/${roleOnly.id}`],
-			},
-		});
-		const registry = {
-			getAvailable: () => [current, currentFallback, roleOnly],
-			getApiKey: async () => "test-key",
-			getApiKeyForProvider: async () => "test-key",
-			authStorage: { rotateSessionCredential: async () => false },
-			resolver: () => async () => "test-key",
-		} as never;
-
-		const title = await generateSessionTitle("Investigate the resolver", registry, settings, undefined, current);
-		expect(title).toBe(`From ${currentFallback.id}`);
-		const attempted = completeSimpleMock.mock.calls.map(call => (call[0] as Model<Api>).id);
-		expect(attempted).toEqual([current.id, currentFallback.id]);
-		expect(attempted).not.toContain(roleOnly.id);
-	});
-
-	it.each([true, false])("honors modelFallback=%s when the title model returns a provider error", async enabled => {
-		const smolModel = getModelOrThrow("claude-opus-4-8");
-		const fallbackModel = getModelOrThrow("claude-sonnet-4-5");
-		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockImplementation(async model => {
-			if (model.id === smolModel.id) {
-				return {
-					stopReason: "error",
-					errorStatus: 400,
-					errorMessage: "Model is not available in the active live catalog",
-					content: [],
-				} as never;
-			}
-			return {
-				stopReason: "stop",
-				content: [{ type: "text", text: "<title>Recovered Title</title>" }],
-			} as never;
-		});
-		const settings = Settings.isolated({
-			modelRoles: { smol: `${smolModel.provider}/${smolModel.id}` },
-			"retry.fallbackChains": {
-				[`${smolModel.provider}/${smolModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`],
-			},
-			"retry.modelFallback": enabled,
-		});
-		const registry = {
-			getAvailable: () => [smolModel, fallbackModel],
-			getApiKey: async () => "test-key",
-			getApiKeyForProvider: async () => "test-key",
-			authStorage: { rotateSessionCredential: async () => false },
-			resolver: () => async () => "test-key",
-		} as never;
-
-		const title = await generateSessionTitle(
-			"Investigate the resolver",
-			registry,
-			settings,
-			undefined,
-			fallbackModel,
-		);
-		if (!enabled) {
-			expect(title).toBeNull();
-			expect(completeSimpleMock).toHaveBeenCalledTimes(1);
-			expect(completeSimpleMock.mock.calls[0]?.[0]).toBe(smolModel);
-			return;
-		}
-		expect(title).toBe("Recovered Title");
-		expect(completeSimpleMock).toHaveBeenCalledTimes(2);
-		expect(completeSimpleMock.mock.calls[0]?.[0]).toBe(smolModel);
-		expect(completeSimpleMock.mock.calls[1]?.[0]).toBe(fallbackModel);
 	});
 });
 

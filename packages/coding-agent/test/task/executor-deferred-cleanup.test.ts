@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 /**
  * Deferred-cleanup outcome contract (issue #9670).
  *
@@ -116,6 +118,7 @@ describe("runSubprocess deferred cleanup outcome (issue #9670)", () => {
 
 		let deferredCleanup: Promise<void> | undefined;
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do the work",

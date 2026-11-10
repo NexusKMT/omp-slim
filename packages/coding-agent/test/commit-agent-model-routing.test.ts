@@ -24,8 +24,7 @@ afterEach(() => {
 describe("agentic commit model routing", () => {
 	it("runs the parent commit agent on the selected commit model", async () => {
 		const primaryModel = getBundledModel("anthropic", "claude-opus-4-5");
-		const smolModel = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!primaryModel || !smolModel) throw new Error("Expected bundled commit test models");
+		if (!primaryModel) throw new Error("Expected bundled commit test models");
 
 		authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
 		await authStorage.credentials.reload();
@@ -38,11 +37,6 @@ describe("agentic commit model routing", () => {
 			model: primaryModel,
 			apiKey: "primary-key",
 			thinkingLevel: Effort.High,
-		});
-		vi.spyOn(modelSelection, "resolveSmolModel").mockResolvedValue({
-			model: smolModel,
-			apiKey: "smol-key",
-			thinkingLevel: Effort.Minimal,
 		});
 		vi.spyOn(vcs, "requireGit").mockReturnValue({
 			changedFiles: async () => ["src/a.ts"],

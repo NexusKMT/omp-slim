@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage, SyntheticToolResultDetails } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
@@ -120,6 +120,46 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
 
+	it("retries the selected model and ends at its budget even with legacy fallback chains", async () => {
+		const host = createHost(model, modelRegistry, { fallbackChains: { default: ["openai/gpt-4o"] } });
+		host.settings = Settings.isolated({
+			"retry.maxRetries": 1,
+			"retry.baseDelayMs": 1,
+			"retry.fallbackChains": { default: ["openai/gpt-4o"] },
+		});
+		let selected = model;
+		host.model = () => selected;
+		const changes: Model[] = [];
+		host.setModelWithProviderSessionReset = async next => {
+			changes.push(next);
+			selected = next;
+		};
+		const scheduled = vi.fn();
+		host.scheduleAgentContinue = scheduled;
+		const recovery = new TurnRecovery(host);
+		expect(await recovery.handleRetryableError(makeMessage([], model))).toBe(true);
+		const terminal = makeMessage([], model);
+		expect(await recovery.handleRetryableError(terminal)).toBe(false);
+		expect(terminal.errorMessage).toContain("Retry budget exhausted after 1 retry");
+		expect(scheduled).toHaveBeenCalledTimes(1);
+		expect(changes).toEqual([]);
+		expect(selected).toBe(model);
+		expect(recovery.servingModel?.isFallback).toBe(false);
+	});
+
+	it("accepts a visible final answer without an automatic judge under old smart settings", async () => {
+		const host = createHost(model, modelRegistry);
+		host.settings = Settings.isolated({ "features.unexpectedStopDetection": "smart" });
+		const scheduled = vi.fn();
+		host.scheduleAgentContinue = scheduled;
+		const message = {
+			...makeMessage([{ type: "text", text: "I will inspect that next." }], model),
+			stopReason: "stop" as const,
+		};
+		expect(await new TurnRecovery(host).handleUnexpectedAssistantStop(message)).toBe(false);
+		expect(scheduled).not.toHaveBeenCalled();
+	});
+
 	beforeAll(async () => {
 		tempDir = TempDir.createSync("@pi-turn-recovery-replay-");
 		authStorage = await AuthStorage.create(tempDir.join("testauth.db"));
@@ -133,152 +173,6 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 	afterAll(() => {
 		authStorage.close();
 		tempDir.removeSync();
-	});
-
-	it("rolls back a usage fallback cancelled during model reconciliation", async () => {
-		const fallback = getBundledModel("openai", "gpt-4o-mini");
-		if (!fallback) throw new Error("Expected bundled fallback model");
-		let activeModel = model;
-		const fallbackApplied = Promise.withResolvers<void>();
-		const releaseReconciliation = Promise.withResolvers<void>();
-		const modelChanges: string[] = [];
-		const emittedEvents: string[] = [];
-		const host = createHost(model, modelRegistry);
-		host.model = () => activeModel;
-		host.sessionManager = {
-			appendModelChange: (selector: string) => modelChanges.push(selector),
-			getSessionId: () => "replay-unsafe-session",
-		} as never;
-		host.setModelWithProviderSessionReset = async nextModel => {
-			activeModel = nextModel;
-			if (nextModel.provider === fallback.provider && nextModel.id === fallback.id) {
-				fallbackApplied.resolve();
-				await releaseReconciliation.promise;
-			}
-		};
-		host.emitSessionEvent = async event => {
-			emittedEvents.push(event.type);
-		};
-		const recovery = new TurnRecovery(host);
-		const controller = new AbortController();
-		const applying = recovery.applyRetryFallbackCandidate(
-			"default",
-			{
-				raw: `${fallback.provider}/${fallback.id}`,
-				provider: fallback.provider,
-				id: fallback.id,
-				thinkingLevel: undefined,
-			},
-			`${model.provider}/${model.id}`,
-			{ pinFallback: true, apiKey: "test-key", signal: controller.signal },
-		);
-
-		await fallbackApplied.promise;
-		controller.abort();
-		releaseReconciliation.resolve();
-		const committed = await applying;
-
-		expect(committed).toBe(false);
-		expect(activeModel).toBe(model);
-		expect(modelChanges).toEqual([]);
-		expect(emittedEvents).toEqual([]);
-	});
-
-	it("does not commit a fallback superseded during model reconciliation", async () => {
-		const fallback = getBundledModel("openai", "gpt-4o-mini");
-		if (!fallback) throw new Error("Expected bundled fallback race model");
-		const selectedModel = { ...fallback, baseUrl: "https://user-selected-route.example" };
-		let activeModel = model;
-		const fallbackApplied = Promise.withResolvers<void>();
-		const releaseReconciliation = Promise.withResolvers<void>();
-		const modelChanges: string[] = [];
-		const emittedEvents: string[] = [];
-		const thinkingChanges: unknown[] = [];
-		const host = createHost(model, modelRegistry);
-		host.model = () => activeModel;
-		host.sessionManager = {
-			appendModelChange: (selector: string) => modelChanges.push(selector),
-			getSessionId: () => "replay-unsafe-session",
-		} as never;
-		host.setThinkingLevel = level => thinkingChanges.push(level);
-		host.setModelWithProviderSessionReset = async nextModel => {
-			activeModel = nextModel;
-			if (nextModel.provider === fallback.provider && nextModel.id === fallback.id) {
-				fallbackApplied.resolve();
-				await releaseReconciliation.promise;
-			}
-		};
-		host.emitSessionEvent = async event => {
-			emittedEvents.push(event.type);
-		};
-		const recovery = new TurnRecovery(host);
-		const applying = recovery.applyRetryFallbackCandidate(
-			"default",
-			{
-				raw: `${fallback.provider}/${fallback.id}`,
-				provider: fallback.provider,
-				id: fallback.id,
-				thinkingLevel: undefined,
-			},
-			`${model.provider}/${model.id}`,
-			{ pinFallback: true, apiKey: "test-key" },
-		);
-
-		await fallbackApplied.promise;
-		activeModel = selectedModel;
-		releaseReconciliation.resolve();
-		const committed = await applying;
-
-		expect(committed).toBe(false);
-		expect(activeModel).toBe(selectedModel);
-		expect(modelChanges).toEqual([]);
-		expect(thinkingChanges).toEqual([]);
-		expect(emittedEvents).toEqual([]);
-	});
-	it("keeps a committed fallback when cancellation arrives during applied-event delivery", async () => {
-		const fallback = getBundledModel("openai", "gpt-4o-mini");
-		if (!fallback) throw new Error("Expected bundled fallback model");
-		let activeModel = model;
-		const eventStarted = Promise.withResolvers<void>();
-		const releaseEvent = Promise.withResolvers<void>();
-		const modelChanges: string[] = [];
-		const host = createHost(model, modelRegistry);
-		host.model = () => activeModel;
-		host.sessionManager = {
-			appendModelChange: (selector: string) => modelChanges.push(selector),
-			getSessionId: () => "replay-unsafe-session",
-		} as never;
-		host.setModelWithProviderSessionReset = async nextModel => {
-			activeModel = nextModel;
-		};
-		host.emitSessionEvent = async event => {
-			if (event.type !== "retry_fallback_applied") return;
-			eventStarted.resolve();
-			await releaseEvent.promise;
-		};
-		const recovery = new TurnRecovery(host);
-		const controller = new AbortController();
-		const applying = recovery.applyRetryFallbackCandidate(
-			"default",
-			{
-				raw: `${fallback.provider}/${fallback.id}`,
-				provider: fallback.provider,
-				id: fallback.id,
-				thinkingLevel: undefined,
-			},
-			`${model.provider}/${model.id}`,
-			{ pinFallback: true, apiKey: "test-key", signal: controller.signal },
-		);
-
-		await eventStarted.promise;
-		controller.abort();
-		releaseEvent.resolve();
-		const committed = await applying;
-
-		expect(committed).toBe(true);
-		expect(activeModel.provider).toBe(fallback.provider);
-		expect(activeModel.id).toBe(fallback.id);
-		expect(modelChanges).toEqual([`${fallback.provider}/${fallback.id}`]);
 	});
 
 	it("treats a failed turn with partial non-whitespace text as NOT retriable", () => {
@@ -382,18 +276,6 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		expect(recovery.isRetryableError(message)).toBe(false);
 	});
 
-	it("allows replay-safe hard fallback and excludes committed text with a configured chain", () => {
-		const fallbackChains = {
-			[`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"],
-		};
-		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
-		// Thinking-only output is replay-safe: nothing visible reached the user.
-		const message = makeMessage([{ type: "thinking", thinking: "safe reasoning before failing" }], model);
-		const visible = makeMessage([{ type: "text", text: "Already shown" }], model);
-		expect(recovery.isHardErrorFallbackEligible(visible)).toBe(false);
-		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
-	});
-
 	it("retries partial text while its buffered output remains uncommitted", () => {
 		const fallbackChains = {
 			[`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"],
@@ -403,64 +285,6 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		);
 		const message = makeMessage([{ type: "text", text: "Buffered partial answer" }], model);
 		expect(recovery.isRetryableError(message)).toBe(true);
-		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
-	});
-
-	it("excludes a Fireworks Fast failed turn with partial visible text from Fast→base fallback", () => {
-		const fastModel = getBundledModel("fireworks", "kimi-k3-fast");
-		if (!fastModel) throw new Error("Expected bundled model kimi-k3-fast");
-		const recovery = new TurnRecovery(createHost(fastModel, modelRegistry));
-		const message = makeMessage([{ type: "text", text: "partial visible output" }], fastModel);
-		expect(recovery.isFireworksFastFallbackEligible(message)).toBe(false);
-	});
-
-	it("keeps a Fireworks Fast empty/whitespace failed turn eligible for Fast→base fallback", () => {
-		const fastModel = getBundledModel("fireworks", "kimi-k3-fast");
-		if (!fastModel) throw new Error("Expected bundled model kimi-k3-fast");
-		const recovery = new TurnRecovery(createHost(fastModel, modelRegistry));
-		expect(recovery.isFireworksFastFallbackEligible(makeMessage([], fastModel))).toBe(true);
-		expect(recovery.isFireworksFastFallbackEligible(makeMessage([{ type: "text", text: "   \n" }], fastModel))).toBe(
-			true,
-		);
-	});
-
-	it("bars usage-backed payload-shaped overflows from the hard-error fallback chain", () => {
-		const fallbackChains = { [`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"] };
-		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
-		const message = {
-			...makeMessage([], model),
-			errorMessage: "request_too_large: image count exceeds the limit of 20",
-			usage: { ...USAGE, input: (model.contextWindow ?? 0) + 1_000 },
-		} as AssistantMessage;
-		message.errorId = AIError.classifyMessage(message);
-		expect(AIError.isPayloadRejection(message)).toBe(true);
-		expect(AIError.isUsageBackedContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
-		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
-	});
-
-	it("keeps text-ambiguous media-budget 413s eligible for the configured chain", () => {
-		const fallbackChains = { [`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"] };
-		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
-		const message = {
-			...makeMessage([], model),
-			errorMessage: "request_too_large: image count exceeds the limit of 20",
-		} as AssistantMessage;
-		message.errorId = AIError.classifyMessage(message);
-		expect(AIError.isContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
-		expect(recovery.isHardErrorFallbackEligible(message)).toBe(true);
-	});
-
-	it("keeps pure token-context overflows barred from the configured chain", () => {
-		const fallbackChains = { [`${model.provider}/${model.id}`]: ["openai/gpt-4o-mini"] };
-		const recovery = new TurnRecovery(createHost(model, modelRegistry, { fallbackChains }));
-		const message = {
-			...makeMessage([], model),
-			errorMessage: "prompt is too long: 250000 tokens > 200000 maximum",
-		} as AssistantMessage;
-		message.errorId = AIError.classifyMessage(message);
-		expect(AIError.isContextOverflow(message, model.contextWindow ?? 0)).toBe(true);
-		expect(AIError.isPayloadRejection(message)).toBe(false);
-		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
 	});
 
 	it("treats a thinking-only partial turn as still retriable", () => {
@@ -482,7 +306,6 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			model,
 		);
 		expect(recovery.isRetryableError(message)).toBe(false);
-		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
 	});
 
 	it("keeps side-effecting output replay-unsafe while text is uncommitted", () => {
@@ -495,7 +318,6 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			model,
 		);
 		expect(recovery.isRetryableError(message)).toBe(false);
-		expect(recovery.isHardErrorFallbackEligible(message)).toBe(false);
 	});
 
 	it("keeps an empty-content error retriable (baseline)", () => {
@@ -1037,88 +859,6 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			]);
 			expect(recovery.classifyResolvedInterruptedToolTurn(message)).toBeUndefined();
 		});
-	});
-
-	it("maps an ephemeral fallback hop to the default chain instead of a shared later-listed role", () => {
-		const vision = getBundledModel("openai", "gpt-4o-mini");
-		if (!vision) throw new Error("Expected bundled model gpt-4o-mini");
-		const selector = `${model.provider}/${model.id}`;
-		const recovery = new TurnRecovery(
-			createHost(model, modelRegistry, {
-				lastModelChangeRole: "fallback",
-				modelRoles: {
-					default: selector,
-					vision: selector,
-				},
-				fallbackChains: {
-					vision: [`${vision.provider}/${vision.id}`],
-					default: [`${vision.provider}/${vision.id}`],
-				},
-			}),
-		);
-		expect(recovery.resolveRetryFallbackRole(selector, model)).toBe("default");
-	});
-
-	it("uses the live vision role when that role shares a model with default", () => {
-		const visionFallback = getBundledModel("openai", "gpt-4o-mini");
-		if (!visionFallback) throw new Error("Expected bundled model gpt-4o-mini");
-		const selector = `${model.provider}/${model.id}`;
-		const recovery = new TurnRecovery(
-			createHost(model, modelRegistry, {
-				lastModelChangeRole: "vision",
-				modelRoles: {
-					default: selector,
-					vision: selector,
-				},
-				fallbackChains: {
-					vision: [`${visionFallback.provider}/${visionFallback.id}`],
-					default: [`${visionFallback.provider}/${visionFallback.id}`],
-				},
-			}),
-		);
-		expect(recovery.resolveRetryFallbackRole(selector, model)).toBe("vision");
-	});
-
-	it("ignores a recorded role whose assignment no longer matches the active model", () => {
-		const vision = getBundledModel("openai", "gpt-4o-mini");
-		if (!vision) throw new Error("Expected bundled model gpt-4o-mini");
-		const selector = `${model.provider}/${model.id}`;
-		const recovery = new TurnRecovery(
-			createHost(model, modelRegistry, {
-				lastModelChangeRole: "vision",
-				modelRoles: {
-					default: selector,
-					vision: `${vision.provider}/${vision.id}`,
-				},
-				fallbackChains: {
-					vision: [`${vision.provider}/${vision.id}`],
-					default: [`${vision.provider}/${vision.id}`],
-				},
-			}),
-		);
-		expect(recovery.resolveRetryFallbackRole(selector, model)).toBe("default");
-	});
-
-	it("attaches the default chain to an ephemeral-hopped model that is not default's primary (#12421)", () => {
-		const other = getBundledModel("openai", "gpt-4o-mini");
-		if (!other) throw new Error("Expected bundled model gpt-4o-mini");
-		const recovery = new TurnRecovery(
-			createHost(other, modelRegistry, {
-				lastModelChangeRole: "fallback",
-				modelRoles: {
-					default: `${model.provider}/${model.id}`,
-				},
-				fallbackChains: {
-					default: [`${model.provider}/${model.id}`],
-				},
-			}),
-		);
-		// Resolving no chain let a wait past retry.maxDelayMs fail-fast with no
-		// walk (#12421), for `/model`-chosen models and ephemeral hops alike. A
-		// walk that produced the hop stays reachable first through
-		// retryFallbackChainKeys' pinned `#activeRetryFallback.role`, so
-		// attaching `default` here cannot displace the owning chain.
-		expect(recovery.resolveRetryFallbackRole(`${other.provider}/${other.id}`, other)).toBe("default");
 	});
 
 	// Gemini reports MALFORMED_FUNCTION_CALL when the model transcribes the call

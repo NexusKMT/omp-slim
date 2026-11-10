@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 import { afterEach, expect, it, vi } from "bun:test";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -79,6 +81,7 @@ it("overlaps registry refresh with session-file opening and session setup", asyn
 	});
 
 	const run = runSubprocess({
+		parentModel: EXECUTOR_PARENT_MODEL,
 		cwd: tempDir.path(),
 		artifactsDir: tempDir.path(),
 		agent: { name: "task", description: "test", systemPrompt: "test", source: "bundled" },

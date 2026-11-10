@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 /**
  * Quiescence barrier fresh-yield contract (PR #6119 review): a terminal
  * `yield` recorded while owner background jobs are still pending parks the
@@ -202,6 +204,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 		mockCreateAgentSession(harness.session);
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do the work",
@@ -232,6 +235,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 		mockCreateAgentSession(harness.session);
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "verify the build",
@@ -255,6 +259,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 		mockCreateAgentSession(harness.session);
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do the work",
@@ -281,6 +286,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 		mockCreateAgentSession(harness.session);
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do the work",
@@ -311,6 +317,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 		mockCreateAgentSession(harness.session);
 
 		const run = runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do the work",
@@ -368,6 +375,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 		mockCreateAgentSession(harness.session);
 
 		const run = runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			asyncJobManager: manager,
 			agent: baseAgent,

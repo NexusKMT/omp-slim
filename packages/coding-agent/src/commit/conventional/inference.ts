@@ -123,6 +123,7 @@ export class OmpCommitInference implements CommitInference {
 					},
 					{
 						apiKey: target.apiKey,
+						disableServerSideFallback: true,
 						sessionId: this.#sessionId,
 						maxTokens: 16_384,
 						reasoning,

@@ -1,19 +1,7 @@
-/**
- * Contract: a vibe worker's spawn options carry the pre-expansion model role
- * and an id built from the worker name the user passed in.
- *
- * `#resolveWorker` expands the bundled worker's role alias (`good` -> `task` ->
- * `@task`, `fast` -> `sonic` -> `@smol`) into concrete patterns, so the role
- * survives only as a separate field forwarded across `ResolvedVibeWorker` ->
- * `VibeRecord` -> `#buildSpawnOptions` -> `runSubprocess`. The executor keys the
- * child's inherited `retry.fallbackChains` entry off it; drop any link in that
- * chain and vibe children silently retry on the `default` role's chain.
- *
- * The id keeps only `[A-Za-z0-9_-]` from that name and falls back to a
- * generated name when nothing survives.
- */
+/** Vibe workers retain their persona and inherit the current parent model. */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { ExecutorOptions } from "@oh-my-pi/pi-coding-agent/task/executor";
@@ -24,10 +12,14 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import type { VibeCli } from "@oh-my-pi/pi-tui/tools/vibe";
 import { VibeSessionRegistry } from "@oh-my-pi/pi-coding-agent/vibe/runtime";
 
+const activeModel = createMockModel({ id: "active-parent" });
+
 function makeParentSession(settings: Settings): ToolSession {
 	return {
 		cwd: "/tmp",
 		settings,
+		getActiveModel: () => activeModel,
+		getActiveModelString: () => "mock/active-parent",
 		asyncJobManager: new AsyncJobManager({ onJobComplete: () => {} }),
 		getSessionId: () => "parent-session",
 		// No session file: spawn skips lifecycle persistence and stays in-memory.
@@ -71,7 +63,7 @@ describe("vibe worker spawn options", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("forwards the `task` role behind the `good` worker's expanded patterns", async () => {
+	it("inherits the active model for the good worker", async () => {
 		const options = await spawnAndCaptureOptions(
 			"good",
 			Settings.isolated({
@@ -79,11 +71,11 @@ describe("vibe worker spawn options", () => {
 			}),
 		);
 
-		expect(options.modelOverride).toEqual(["anthropic/sonnet"]);
-		expect(options.modelRole).toBe("task");
+		expect(options.parentModel).toBe(activeModel);
+		expect(options.modelRole).toBeUndefined();
 	});
 
-	it("forwards the `smol` role behind the `fast` worker's expanded patterns", async () => {
+	it("inherits the same active model for the fast worker", async () => {
 		const options = await spawnAndCaptureOptions(
 			"fast",
 			Settings.isolated({
@@ -91,11 +83,11 @@ describe("vibe worker spawn options", () => {
 			}),
 		);
 
-		expect(options.modelOverride).toEqual(["fast/hy3"]);
-		expect(options.modelRole).toBe("smol");
+		expect(options.parentModel).toBe(activeModel);
+		expect(options.modelRole).toBeUndefined();
 	});
 
-	it("keeps the role identity when a per-agent model override replaces the alias", async () => {
+	it("ignores a retired per-agent model override", async () => {
 		// `task.agentModelOverrides` wins over the agent definition, and an explicit
 		// selector carries no role — the child must then inherit `default`, not
 		// capture the routing of whichever role happens to name the same model.
@@ -107,7 +99,7 @@ describe("vibe worker spawn options", () => {
 			}),
 		);
 
-		expect(options.modelOverride).toEqual(["openai-codex/sol"]);
+		expect(options.parentModel).toBe(activeModel);
 		expect(options.modelRole).toBeUndefined();
 	});
 

@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 /**
  * Event-sequence equivalence tests for `progress.recentOutput`.
  *
@@ -258,6 +260,7 @@ async function runScenario(
 	vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue({ session } as CreateAgentSessionResult);
 
 	const result = await runSubprocess({
+		parentModel: EXECUTOR_PARENT_MODEL,
 		cwd: "/tmp",
 		agent,
 		task: "equivalence scenario",

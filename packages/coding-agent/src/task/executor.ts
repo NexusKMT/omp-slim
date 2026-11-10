@@ -338,7 +338,7 @@ export interface ExecutorOptions {
 	 * the session did not start with a plan (or while plan mode is still active).
 	 */
 	planReference?: { path: string; content: string };
-	/** Pre-set UI label (e.g. eval bridge label). When absent, a tiny-model label is generated from the assignment. */
+	/** Pre-set UI label (e.g. eval bridge label). When absent, a current-model label is generated from the assignment. */
 	description?: string;
 	index: number;
 	id: string;
@@ -1179,7 +1179,7 @@ interface RunMonitorArgs {
 	task: string;
 	assignment?: string;
 	description?: string;
-	/** Parent model registry for tiny-model label generation; absent → skip labeling. */
+	/** Parent model registry for current-model label generation; absent → skip labeling. */
 	modelRegistry?: ModelRegistry;
 	parentModel?: Model;
 	/** Parent settings for label generation. */
@@ -1620,7 +1620,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 
 	// The task wire schema carries no description: when the caller didn't pre-set
 	// a UI label (e.g. the eval bridge's `label`), compress the assignment into a
-	// tiny-model one-sentence label off the spawn's critical path. Best-effort —
+	// one-sentence label using the current model off the spawn's critical path. Best-effort —
 	// a late label still lands via the finalize-time reads of `progress.description`;
 	// failures just leave the label unset.
 	const labelSource = assignment?.trim();

@@ -1,3 +1,5 @@
+import { createMockModel as createExecutorParentModel } from "@oh-my-pi/pi-ai/providers/mock";
+const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" });
 /**
  * Regression coverage for the `<id>.json` structured-output sidecar
  * lifecycle: a replacement write failure must not leave a stale sidecar from
@@ -107,6 +109,7 @@ describe("structured output sidecar lifecycle", () => {
 		}) as typeof Bun.write);
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do work",
@@ -160,6 +163,7 @@ describe("structured output sidecar lifecycle", () => {
 		}) as typeof JSON.stringify);
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do work",
@@ -189,6 +193,7 @@ describe("structured output sidecar lifecycle", () => {
 		vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
 
 		const result = await runSubprocess({
+			parentModel: EXECUTOR_PARENT_MODEL,
 			cwd: "/tmp",
 			agent: baseAgent,
 			task: "do work",

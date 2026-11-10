@@ -66,7 +66,13 @@ export async function generateChangelogEntries({
 					messages: [{ role: "user", content: userContent, timestamp: Date.now() }],
 					tools: [changelogTool],
 				},
-				{ apiKey, sessionId, maxTokens: 1200, reasoning: toReasoningEffort(thinkingLevel) },
+				{
+					apiKey,
+					sessionId,
+					disableServerSideFallback: true,
+					maxTokens: 1200,
+					reasoning: toReasoningEffort(thinkingLevel),
+				},
 			),
 		{ provider: model.provider },
 	);
