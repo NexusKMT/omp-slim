@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import {
 	chipLabel,
 	collapseImageMarkers,
-	collapseModelMentions,
 	collapseSkillTokens,
 	compactImageMarkers,
 	composerTokenRegex,
@@ -127,32 +126,6 @@ describe("renderPlaceholders", () => {
 		expect(mentions).toEqual([label]);
 		expect(refs).toHaveLength(0);
 		expect(out).toBe(`ask <model:${label}> now`);
-	});
-});
-
-describe("collapseModelMentions", () => {
-	const labelFor = (selector: string) =>
-		selector === "a/x" ? { label: modelMentionChipLabel("X One"), selector } : undefined;
-
-	it("collapses known whitespace-delimited selectors and registers their canonical expansion", () => {
-		const registered: Array<[string, string]> = [];
-		const out = collapseModelMentions("ask ^a/x now", labelFor, (label, expansion) =>
-			registered.push([label, expansion]),
-		);
-		expect(out).toBe(`ask ${modelMentionChipLabel("X One")} now`);
-		expect(registered).toEqual([[modelMentionChipLabel("X One"), "^a/x"]]);
-	});
-
-	it("keeps unknown and punctuation-attached selectors literal", () => {
-		expect(collapseModelMentions("^nope/z and ^a/x,", labelFor, () => {})).toBe("^nope/z and ^a/x,");
-	});
-
-	it("allows slash prompts but not local-execution drafts", () => {
-		expect(collapseModelMentions("/plan ask ^a/x now", labelFor, () => {})).toBe(
-			`/plan ask ${modelMentionChipLabel("X One")} now`,
-		);
-		expect(collapseModelMentions("!echo ^a/x", labelFor, () => {})).toBe("!echo ^a/x");
-		expect(collapseModelMentions("$ echo ^a/x", labelFor, () => {})).toBe("$ echo ^a/x");
 	});
 });
 

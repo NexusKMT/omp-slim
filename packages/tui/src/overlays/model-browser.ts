@@ -190,7 +190,7 @@ function modelItemComparator(options: SortModelItemsOptions): (a: ModelBrowserIt
 	};
 }
 
-/** Picker candidates and ordering inputs shared with composer model mentions. */
+/** Picker candidates and ordering inputs. */
 export interface SessionModelScope {
 	items: ModelBrowserItem[];
 	mruOrder: ReadonlyArray<string>;

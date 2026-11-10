@@ -31,8 +31,3 @@ export function allowsSkillTokens(text: string): boolean {
 	if (trimmedStart.startsWith("/")) return false;
 	return !startsWithLocalExecutionPrefix(trimmedStart);
 }
-
-/** Whether model mentions may collapse in this draft; local execution consumes its body verbatim. */
-export function allowsModelMentions(text: string): boolean {
-	return !startsWithLocalExecutionPrefix(text.trimStart());
-}

@@ -1,5 +1,4 @@
-import { allowsModelMentions, allowsSkillTokens, SKILL_TOKEN_RE } from "./skill-tokens";
-import { MODEL_MENTION_RE, modelMentionToken } from "./model-mention-syntax";
+import { allowsSkillTokens, SKILL_TOKEN_RE } from "./skill-tokens";
 import { SYMBOL_PRESETS } from "../theme/symbols";
 import { type ThemeColor, theme } from "../theme/theme";
 
@@ -15,7 +14,7 @@ export function skillChipLabel(name: string): string {
 	return `${icon} ${name}`;
 }
 
-/** Compact atomic composer token for a model mention in the active symbol preset. */
+/** Display label for a historical model mention in the active symbol preset. */
 export function modelMentionChipLabel(name: string): string {
 	const icon = typeof theme === "undefined" ? SYMBOL_PRESETS.unicode["icon.model"] : theme.symbol("icon.model");
 	return `${icon} ${name}`;
@@ -77,25 +76,6 @@ export function collapseSkillTokens(
 		const label = skillChipLabel(name);
 		register(label, skillToken(name));
 		return `${delimiter}${label}`;
-	});
-}
-
-/**
- * Replaces mentionable model selectors with their display chips and registers
- * each chip's canonical `^selector` as its atomic editor expansion.
- */
-export function collapseModelMentions(
-	text: string,
-	chipFor: (selector: string) => { label: string; selector: string } | undefined,
-	register: (label: string, expansion: string) => void,
-): string {
-	if (!text.includes("^") || !allowsModelMentions(text)) return text;
-	MODEL_MENTION_RE.lastIndex = 0;
-	return text.replace(MODEL_MENTION_RE, (match, delimiter: string, selector: string) => {
-		const chip = chipFor(selector);
-		if (chip === undefined) return match;
-		register(chip.label, modelMentionToken(chip.selector));
-		return `${delimiter}${chip.label}`;
 	});
 }
 
@@ -310,8 +290,8 @@ export interface PlaceholderRenderers {
 	renderReference: (label: string, kind: PlaceholderKind, index: number, form: "marker" | "chip") => string;
 	/** Renders one skill chip (`<icon> <name>`). */
 	renderSkill: (label: string, name: string) => string;
-	/** Renders one registered model mention chip. */
-	renderMention: (label: string) => string;
+	/** Renders a historical model tag; plain text is used by callers without tag styling. */
+	renderMention?: (label: string) => string;
 }
 
 /** Renders text while treating expanded markers, attachment chips, skill chips, and model mentions as distinct references. */
@@ -332,7 +312,7 @@ export function renderPlaceholders(
 		if (match.index > last) result += renderers.renderText(text.slice(last, match.index));
 		const label = match[0];
 		if (match.groups?.mention !== undefined) {
-			result += renderers.renderMention(label);
+			result += renderers.renderMention?.(label) ?? renderers.renderText(label);
 		} else if (label.startsWith("[")) {
 			const kind: PlaceholderKind = match[1] === "Paste" ? "paste" : match[1] === "Video" ? "video" : "image";
 			result += renderers.renderReference(label, kind, Number(match[2]), "marker");

@@ -148,3 +148,13 @@ describe("native user message image chips", () => {
 		expect(collectMarks(described).some(mark => mark.href !== undefined)).toBe(false);
 	});
 });
+
+describe("historical model tags", () => {
+	it("renders saved model names without recreating a model selection action", () => {
+		const user = new UserMessageComponent('Ask <model agent="m1" name="Earlier model"/> about this.');
+		const rendered = Bun.stripANSI(user.render(100).join("\n"));
+		expect(rendered).toContain("Earlier model");
+		expect(rendered).toContain("about this.");
+		expect(rendered).not.toContain("<model agent=");
+	});
+});

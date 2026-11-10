@@ -17,8 +17,7 @@ import { MAIN_AGENT_ID } from "../overlays/agent-hub-types";
 import { compact, keyed, node, row, span } from "../native/describe";
 import type { DescribeContext, NativeNode, NativeUiEvent } from "../native/node";
 import type { ComposerFacts, ComposerFactsSource } from "../status-line/types";
-import { allowsModelMentions, allowsSkillTokens, SKILL_TOKEN_RE } from "./skill-tokens";
-import { expandModelMentionTags, MODEL_MENTION_RE, modelMentionToken } from "./model-mention-syntax";
+import { allowsSkillTokens, SKILL_TOKEN_RE } from "./skill-tokens";
 import { isVideoPath } from "./video";
 import {
 	attachmentSgr,
@@ -26,10 +25,7 @@ import {
 	COMPOSER_TOKEN_REGEX,
 	chipLabel,
 	collapseImageMarkers,
-	collapseModelMentions,
 	collapseSkillTokens,
-	composerTokenRegex,
-	modelChipStyle,
 	PLACEHOLDER_REGEX,
 	referencedAttachments,
 	renderPlaceholders,
@@ -584,26 +580,17 @@ export class CustomEditor extends Editor {
 		void this.#materializeDraftLinks();
 	}
 
-	/** Set restored text with image, skill, and model references collapsed into atomic chips.
+	/** Set restored text with image and skill references collapsed into atomic chips.
 	 *  Leaves pending image/text state untouched — callers own that. */
 	setCollapsedText(text: string): void {
 		const register = (label: string, expansion: string) => this.registerAtom(label, expansion);
 		this.setText(
-			collapseModelMentions(
-				collapseSkillTokens(
-					collapseImageMarkers(
-						expandModelMentionTags(text, this.modelMentionSelector),
-						this.pendingImages.length,
-						register,
-					),
-					name => this.skillFilePath(name) !== undefined,
-					register,
-				),
-				selector => this.#mentionChipFor(selector),
+			collapseSkillTokens(
+				collapseImageMarkers(text, this.pendingImages.length, register),
+				name => this.skillFilePath(name) !== undefined,
 				register,
 			),
 		);
-		this.#syncComposerTokenPattern();
 	}
 
 	/**
@@ -613,22 +600,6 @@ export class CustomEditor extends Editor {
 	 * to "none known".
 	 */
 	skillFilePath: (name: string) => string | undefined = () => undefined;
-
-	/**
-	 * Host-owned model probe: a mentionable `provider/id[:level]` selector's chip label and
-	 * canonical selector, so equivalent spellings (`:hi`/`:high`, bare/`:auto`) share a chip.
-	 */
-	resolveModelMention: (selector: string) => { label: string; selector: string } | undefined = () => undefined;
-
-	/** Host-owned session probe: maps a persisted model pseudonym back to its selector. */
-	modelMentionSelector: (agent: string) => string | undefined = () => undefined;
-
-	#mentionChipFor(selector: string): { label: string; selector: string } | undefined {
-		const chip = this.resolveModelMention(selector);
-		if (chip === undefined) return undefined;
-		const registered = this.atoms.get(chip.label);
-		return registered === undefined || registered === modelMentionToken(chip.selector) ? chip : undefined;
-	}
 
 	/**
 	 * Late-bound OSC 8 file link renderer. Startup stays plain until the full
@@ -663,36 +634,6 @@ export class CustomEditor extends Editor {
 				line = this.getLines()[i];
 			}
 		}
-	}
-
-	/** Collapse every completed mentionable `^provider/id` selector into an atomic model chip. */
-	#collapseModelMentions(): void {
-		const lines = this.getLines();
-		if (!lines.some(line => line.includes("^")) || !allowsModelMentions(this.getText())) return;
-		let anyCollapsed = false;
-		for (let i = 0; i < lines.length; i++) {
-			let line = lines[i];
-			if (!line.includes("^")) continue;
-			for (;;) {
-				MODEL_MENTION_RE.lastIndex = 0;
-				let collapsed = false;
-				for (let match = MODEL_MENTION_RE.exec(line); match !== null; match = MODEL_MENTION_RE.exec(line)) {
-					const selector = match[2];
-					const start = match.index + match[1].length;
-					const end = match.index + match[0].length;
-					if (end === line.length && i === lines.length - 1) break;
-					const chip = this.#mentionChipFor(selector);
-					if (chip === undefined) continue;
-					this.collapseToAtom(i, start, end, chip.label, modelMentionToken(chip.selector));
-					collapsed = true;
-					anyCollapsed = true;
-					break;
-				}
-				if (!collapsed) break;
-				line = this.getLines()[i];
-			}
-		}
-		if (anyCollapsed) this.#syncComposerTokenPattern();
 	}
 
 	/** Stage `content` as a text-attachment chip: inserts the compact token at the cursor and
@@ -791,23 +732,6 @@ export class CustomEditor extends Editor {
 	 *  indivisible: a stray backspace deletes the whole token instead of corrupting it. */
 	override atomicTokenPattern = COMPOSER_TOKEN_REGEX;
 
-	/** Atom-table revision and pattern the composer token matcher was last built for. */
-	#tokenPatternAtomsRevision = -1;
-	#tokenPattern: RegExp | undefined;
-
-	#syncComposerTokenPattern(): void {
-		// Rebuild only when the atom table changed or someone replaced the pattern since the last sync.
-		if (this.#tokenPatternAtomsRevision === this.atomsRevision && this.#tokenPattern === this.atomicTokenPattern) {
-			return;
-		}
-		const labels: string[] = [];
-		for (const [label, expansion] of this.atoms) if (expansion.startsWith("^")) labels.push(label);
-		const next = composerTokenRegex(labels);
-		if (next.source !== this.atomicTokenPattern.source) this.atomicTokenPattern = next;
-		this.#tokenPatternAtomsRevision = this.atomsRevision;
-		this.#tokenPattern = this.atomicTokenPattern;
-	}
-
 	/** Magic-keyword shimmer cadence — drives one editor repaint every 70 ms while
 	 *  a keyword is on screen and the prompt is focused. ~14 frames/s is smooth
 	 *  without flooding the renderer. */
@@ -835,7 +759,6 @@ export class CustomEditor extends Editor {
 	 *  item markers use the accent color so separate follow-ups remain visible while composing.
 	 *  Called once per layout segment, so whole-buffer inputs are computed once per text revision. */
 	override decorateText = (text: string, context: EditorTextDecorationContext): string => {
-		this.#syncComposerTokenPattern();
 		if (this.#decorationRevision !== this.textRevision) {
 			this.#decorationRevision = this.textRevision;
 			const editorText = this.getText();
@@ -899,10 +822,6 @@ export class CustomEditor extends Editor {
 					const filePath = this.skillFilePath(name);
 					return filePath === undefined ? styled : this.fileHyperlink(filePath, styled);
 				},
-				renderMention: label => {
-					locateSource(label);
-					return modelChipStyle(label);
-				},
 				renderReference: (value, kind, index, form) => {
 					locateSource(value);
 					if (form === "chip") {
@@ -945,7 +864,6 @@ export class CustomEditor extends Editor {
 			const sigil = SHELL_SIGIL_RE.exec(text)?.[0].length ?? 0;
 			return sigil > 0 ? [{ from: 0, to: sigil, s: "hide" }] : [];
 		}
-		this.#syncComposerTokenPattern();
 		const decor: TspEditorDecoration[] = [];
 		let offset = 0;
 		const mark = (length: number, s: string): string => {
@@ -961,7 +879,6 @@ export class CustomEditor extends Editor {
 					return "";
 				},
 				renderSkill: label => mark(label.length, "customMessageLabel strong"),
-				renderMention: label => mark(label.length, "statusLineModel strong"),
 				renderReference: value => mark(value.length, "accent strong"),
 			},
 			this.atomicTokenPattern,
@@ -1749,7 +1666,6 @@ export class CustomEditor extends Editor {
 		if (this.#isSubmitKey(remaining)) this.pasteText(content, { submitAfterPaste: true });
 		else this.pasteText(content);
 		this.#collapseSkillTokens();
-		this.#collapseModelMentions();
 		// No async paste was started; drain the queued trailing bytes ourselves.
 		this.#drainPendingInput();
 		return true;
@@ -1803,10 +1719,9 @@ export class CustomEditor extends Editor {
 		this.#forwardInput(data);
 	}
 
-	/** Base text-editing pipeline, then snap any skill or model token the keystroke just completed. */
+	/** Base text-editing pipeline, then snap any skill token the keystroke just completed. */
 	#forwardInput(data: string): void {
 		super.handleInput(data);
 		this.#collapseSkillTokens();
-		this.#collapseModelMentions();
 	}
 }

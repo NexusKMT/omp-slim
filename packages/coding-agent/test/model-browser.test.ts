@@ -1,10 +1,8 @@
-import { cfgModelProviderOrder } from "../src/config/model-settings";
 import { createModelBrowserSource } from "../src/modes/model-browser-source";
 import { beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -18,10 +16,6 @@ import {
 	sortModelItems,
 } from "@oh-my-pi/pi-tui/overlays/model-browser";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
-import {
-	createModelMentionSource,
-	getModelMentionSuggestions,
-} from "@oh-my-pi/pi-tui/prompt/model-mention-autocomplete";
 
 /** Optional presentation metadata a catalog or discovery source may attach. */
 type NativeMetadata = Pick<Model, "description" | "isNew" | "isBeta" | "isRecommended" | "int" | "tps"> &
@@ -54,58 +48,6 @@ function makeBrowser(models: Model[], mruOrder: string[], options: { providerOrd
 	browser.setItems(items);
 	return browser;
 }
-
-describe("createModelMentionSource", () => {
-	test("refreshes candidates when provider order or availability change between queries", () => {
-		const a = makeModel("a", "example-2");
-		const b = makeModel("b", "example-2");
-		const available = [a, b];
-		const settings = Settings.isolated({ modelProviderOrder: ["b"] });
-		const candidates = createModelMentionSource({
-			source: createModelBrowserSource(settings),
-			registry: { getError: () => undefined, getAvailable: () => [...available], getAll: () => [...available] },
-			scopedModels: () => [],
-		});
-		const selectors = (query: string) => candidates(query).map(item => item.selector);
-
-		expect(selectors("example")).toEqual(["b/example-2", "a/example-2"]);
-
-		cfgModelProviderOrder.override(settings, ["a"]);
-		expect(selectors("example")).toEqual(["a/example-2", "b/example-2"]);
-
-		available.push(makeModel("c", "example-3"));
-		expect(selectors("example")).toContain("c/example-3");
-	});
-
-	test("hides an effort row whose selector names an available model outside the picker scope", async () => {
-		await initTheme();
-		const glm = buildModel({
-			id: "glm",
-			name: "GLM",
-			api: "ollama-chat",
-			provider: "a",
-			baseUrl: "https://example.com",
-			reasoning: true,
-			thinking: { mode: "budget", efforts: [Effort.Low, Effort.High, Effort.Max] },
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128_000,
-			maxTokens: 1024,
-		});
-		const glmMax = makeModel("a", "glm:max");
-		const candidates = createModelMentionSource({
-			source: createModelBrowserSource(Settings.isolated()),
-			registry: { getError: () => undefined, getAvailable: () => [glm, glmMax], getAll: () => [glm, glmMax] },
-			scopedModels: () => [glm],
-		});
-
-		const completion = getModelMentionSuggestions("^a/glm:", candidates);
-		expect(completion.kind === "matched" && completion.suggestions.items.map(item => item.value)).toEqual([
-			"a/glm:low",
-			"a/glm:high",
-		]);
-	});
-});
 
 describe("ModelBrowser search ranking", () => {
 	test("headless candidates preserve picker relevance and affinity ordering", () => {

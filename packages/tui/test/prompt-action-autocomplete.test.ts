@@ -1,53 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { KeybindingsManager as AppKeybindingsManager, setKeyHintPlatform } from "@oh-my-pi/pi-tui/app-keybindings";
-import type { ModelBrowserItem } from "@oh-my-pi/pi-tui/overlays/model-browser";
 import { setInternalUrlCompletionHost } from "@oh-my-pi/pi-tui/prompt/internal-url-autocomplete";
 import { Editor } from "@oh-my-pi/pi-tui/components/editor";
 import { createPromptActionAutocompleteProvider } from "@oh-my-pi/pi-tui/prompt/prompt-action-autocomplete";
-import { getSelectListTheme, initTheme, theme } from "@oh-my-pi/pi-tui/theme";
+import { getSelectListTheme, initTheme } from "@oh-my-pi/pi-tui/theme";
 import { defaultEditorTheme } from "./test-themes";
 import { KeybindingsManager, SelectList, setKeybindings, TUI_KEYBINDINGS } from "@oh-my-pi/pi-tui";
-
-function modelMentionItem(provider: string, id: string, name: string, efforts?: readonly Effort[]): ModelBrowserItem {
-	return {
-		provider,
-		id,
-		selector: `${provider}/${id}`,
-		model: buildModel({
-			id,
-			name,
-			api: "ollama-chat",
-			provider,
-			baseUrl: "https://example.com",
-			reasoning: efforts !== undefined,
-			...(efforts ? { thinking: { mode: "budget" as const, efforts } } : {}),
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128_000,
-			maxTokens: 1024,
-		}),
-	};
-}
-
-const FIVE_LEVELS = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max];
-
-function mentionProvider(candidates: readonly ModelBrowserItem[]) {
-	return createPromptActionAutocompleteProvider({
-		commands: [{ name: "btw", description: "By the way", allowArgs: true }],
-		basePath: "/tmp",
-		modelMentions: query => candidates.filter(candidate => candidate.selector.includes(query)),
-		keybindings: AppKeybindingsManager.inMemory(),
-		copyCurrentLine: () => {},
-		copyPrompt: () => {},
-		undo: () => {},
-		moveCursorToMessageEnd: () => {},
-		moveCursorToMessageStart: () => {},
-		moveCursorToLineStart: () => {},
-		moveCursorToLineEnd: () => {},
-	});
-}
 
 describe("prompt action autocomplete", () => {
 	beforeAll(async () => {
@@ -325,12 +283,11 @@ describe("prompt action autocomplete", () => {
 		expect(provider.trySyncSlashCompletion("hello")).toBeNull();
 	});
 
-	it("suggests model mentions and reanchors completion to the live token", async () => {
-		const candidate = modelMentionItem("a", "x", "X One");
+	it("leaves caret model selectors as literal prompt text", async () => {
+		setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS));
 		const provider = createPromptActionAutocompleteProvider({
 			commands: [],
 			basePath: "/tmp",
-			modelMentions: query => (query === "" || candidate.selector.includes(query) ? [candidate] : []),
 			keybindings: AppKeybindingsManager.inMemory(),
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
@@ -340,192 +297,18 @@ describe("prompt action autocomplete", () => {
 			moveCursorToLineStart: () => {},
 			moveCursorToLineEnd: () => {},
 		});
-
-		const suggestions = await provider.getSuggestions(["see ^a"], 0, 6);
-		expect(suggestions).toEqual({
-			prefix: "^a",
-			items: [
-				{
-					value: "a/x",
-					label: "a/x",
-					description: "X One",
-					icon: theme.symbol("icon.model"),
-					iconName: "model",
-				},
-			],
-		});
-		if (!suggestions) throw new Error("expected model mention suggestion");
-
-		const liveLine = "see ^a-extra";
-		const completion = provider.applyCompletion(
-			[liveLine],
-			0,
-			liveLine.length,
-			suggestions.items[0]!,
-			suggestions.prefix,
-		);
-		expect(completion).toEqual({
-			lines: ["see ^a/x "],
-			cursorLine: 0,
-			cursorCol: 9,
-		});
-	});
-
-	it("limits model mention suggestions to the first twenty ranked candidates", async () => {
-		const candidates = Array.from({ length: 21 }, (_, index) =>
-			modelMentionItem("demo", `model-${index + 1}`, `Model ${index + 1}`),
-		);
-		const provider = createPromptActionAutocompleteProvider({
-			commands: [],
-			basePath: "/tmp",
-			modelMentions: () => candidates,
-			keybindings: AppKeybindingsManager.inMemory(),
-			copyCurrentLine: () => {},
-			copyPrompt: () => {},
-			undo: () => {},
-			moveCursorToMessageEnd: () => {},
-			moveCursorToMessageStart: () => {},
-			moveCursorToLineStart: () => {},
-			moveCursorToLineEnd: () => {},
-		});
-
-		const suggestions = await provider.getSuggestions(["^"], 0, 1);
-		expect(suggestions?.items).toHaveLength(20);
-		expect(suggestions?.items[0]?.value).toBe("demo/model-1");
-		expect(suggestions?.items[19]?.value).toBe("demo/model-20");
-	});
-
-	it("does not suggest a model mention without a left token boundary", async () => {
-		const provider = createPromptActionAutocompleteProvider({
-			commands: [],
-			basePath: "/tmp",
-			modelMentions: () => [modelMentionItem("a", "x", "X One")],
-			keybindings: AppKeybindingsManager.inMemory(),
-			copyCurrentLine: () => {},
-			copyPrompt: () => {},
-			undo: () => {},
-			moveCursorToMessageEnd: () => {},
-			moveCursorToMessageStart: () => {},
-			moveCursorToLineStart: () => {},
-			moveCursorToLineEnd: () => {},
-		});
-
-		expect(await provider.getSuggestions(["a^b"], 0, 3)).toBeNull();
-	});
-
-	it("suggests model mentions inside slash command arguments", async () => {
-		const candidate = modelMentionItem("a", "x", "X One");
-		const provider = createPromptActionAutocompleteProvider({
-			commands: [{ name: "btw", description: "By the way", allowArgs: true }],
-			basePath: "/tmp",
-			modelMentions: query => (candidate.selector.includes(query) ? [candidate] : []),
-			keybindings: AppKeybindingsManager.inMemory(),
-			copyCurrentLine: () => {},
-			copyPrompt: () => {},
-			undo: () => {},
-			moveCursorToMessageEnd: () => {},
-			moveCursorToMessageStart: () => {},
-			moveCursorToLineStart: () => {},
-			moveCursorToLineEnd: () => {},
-		});
-
-		const line = "/btw ^a";
-		const suggestions = await provider.getSuggestions([line], 0, line.length);
-		expect(suggestions?.prefix).toBe("^a");
-		expect(suggestions?.items.map(item => item.value)).toEqual(["a/x"]);
-	});
-
-	it("lists the model's supported effort levels after a colon, filtered by the typed prefix", async () => {
-		const provider = mentionProvider([modelMentionItem("a", "x", "X One", FIVE_LEVELS)]);
-
-		const all = await provider.getSuggestions(["ask ^x:"], 0, 7);
-		expect(all?.items.map(item => [item.value, item.description])).toEqual([
-			["a/x:low", "X One · low"],
-			["a/x:medium", "X One · medium"],
-			["a/x:high", "X One · high"],
-			["a/x:xhigh", "X One · xhigh"],
-			["a/x:max", "X One · max"],
-		]);
-
-		const high = await provider.getSuggestions(["ask ^x:hi"], 0, 9);
-		expect(high?.items.map(item => item.value)).toEqual(["a/x:high"]);
-	});
-
-	it("lists model ids that contain the query ahead of effort rows", async () => {
-		const provider = mentionProvider([
-			modelMentionItem("a", "glm", "GLM", FIVE_LEVELS),
-			modelMentionItem("a", "glm:max", "GLM Max"),
-		]);
-
-		const suggestions = await provider.getSuggestions(["^glm:"], 0, 5);
-		expect(suggestions?.items.map(item => [item.value, item.description])).toEqual([
-			["a/glm:max", "GLM Max"],
-			["a/glm:low", "GLM · low"],
-			["a/glm:medium", "GLM · medium"],
-			["a/glm:high", "GLM · high"],
-			["a/glm:xhigh", "GLM · xhigh"],
-		]);
-	});
-
-	it("does not offer effort rows for a model without a controllable effort", async () => {
-		const provider = mentionProvider([modelMentionItem("a", "x", "X One")]);
-		expect(await provider.getSuggestions(["^x:hi"], 0, 5)).toBeNull();
-	});
-});
-
-describe("model mention effort rows in the editor", () => {
-	beforeAll(async () => {
-		await initTheme();
-	});
-
-	it("accepts the row for the text typed in the same input batch, not the list it replaced", async () => {
-		const acceptAfter = async (draft: string, typed: string) => {
-			const editor = new Editor(defaultEditorTheme);
-			editor.setAutocompleteProvider(mentionProvider([modelMentionItem("a", "x", "X One", FIVE_LEVELS)]));
-			editor.insertText(draft);
-			while (!editor.isShowingAutocomplete()) {
-				const { promise, resolve } = Promise.withResolvers<void>();
-				editor.onAutocompleteUpdate = resolve;
-				await promise;
-			}
-			editor.handleInput(typed);
-			editor.handleInput("\t");
-			return editor.getText();
-		};
-
-		expect(await acceptAfter("^x:", "h")).toBe("^a/x:high ");
-		expect(await acceptAfter("^x:", "\x7f")).toBe("^a/x ");
-	});
-
-	it("keeps a mention popup in slash-command arguments open while it refreshes", async () => {
+		const text = "ask ^provider/model:high";
+		expect(await provider.getSuggestions([text], 0, text.length)).toBeNull();
 		const editor = new Editor(defaultEditorTheme);
-		editor.setAutocompleteProvider(mentionProvider([modelMentionItem("a", "x", "X One", FIVE_LEVELS)]));
-		const nextUpdate = () => {
-			const { promise, resolve } = Promise.withResolvers<void>();
-			editor.onAutocompleteUpdate = resolve;
-			return promise;
+		editor.setAutocompleteProvider(provider);
+		for (const character of text) editor.handleInput(character);
+		expect(editor.getText()).toBe(text);
+		expect(editor.isShowingAutocomplete()).toBe(false);
+		let submitted: string | undefined;
+		editor.onSubmit = value => {
+			submitted = value;
 		};
-		editor.insertText("/btw ^x:");
-		while (!editor.isShowingAutocomplete()) await nextUpdate();
-
-		const refreshed = nextUpdate();
-		editor.handleInput("h");
-		expect(editor.isShowingAutocomplete()).toBe(true);
-		await refreshed;
-		editor.handleInput("\t");
-
-		expect(editor.getText()).toBe("/btw ^a/x:high ");
-	});
-
-	it("leaves `#` tokens inside a mention to their own completions", async () => {
-		const provider = mentionProvider([modelMentionItem("a", "x", "X One", FIVE_LEVELS)]);
-
-		const action = await provider.getSuggestions(["^x#copy"], 0, 7);
-		expect(action?.prefix).toBe("#copy");
-		expect(action?.items[0]?.label).toBe("Copy current line");
-
-		const reference = await provider.getSuggestions(["^x(#12"], 0, 6);
-		expect(reference?.prefix).toBe("#12");
-		expect(reference?.items.map(item => item.value)).toEqual(["pr://12", "issue://12"]);
+		editor.handleInput("\r");
+		expect(submitted).toBe(text);
 	});
 });

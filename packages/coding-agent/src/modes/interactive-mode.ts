@@ -142,7 +142,7 @@ import { HistoryStorage } from "../session/history-storage";
 import { USER_INTERRUPT_LABEL } from "../session/messages";
 import { resolveMarkdownLinkHrefs } from "../internal-urls/hyperlink-targets";
 import type { ResolveContext } from "../internal-urls/index";
-import { modelMentionChipLabel, shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
+import { shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
 import { isTranscriptEntry, type SessionContext } from "../session/session-context";
 import type { SessionManager } from "../session/session-manager";
 import { loadPinnedSessionIds } from "../session/session-pins";
@@ -1003,9 +1003,6 @@ const DEFERRED_PREVIEW_MIN_ROWS = 6;
 /** Ceiling for the preview as a share of the viewport, so the prompt stays visible. */
 const DEFERRED_PREVIEW_VIEWPORT_FRACTION = 0.4;
 
-/** How long the ctrl+p model-role cycle chip track lingers above the editor
- *  before it auto-clears, mirroring the todo HUD's auto-clear timer. */
-
 /** Active subagent sessions the anchored HUD jump-lists, sync or detached. Slots follow registry order. */
 function isHudSubagent(session: ObservableSession): boolean {
 	return session.kind === "subagent" && session.status === "active";
@@ -1525,10 +1522,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		const title = this.#workingTitleTrailer();
 		if (rate && title) return `${rate}  ${title}`;
 		return rate ?? title;
-	}
-	#resolveModelMentionChip(selector: string): { label: string; selector: string } | undefined {
-		const resolved = this.session.resolveModelMention(selector);
-		return resolved && { label: modelMentionChipLabel(resolved.name), selector: resolved.selector };
 	}
 	/** Idle stand-in for the working row: the last tok/s reading and the
 	 * band-mode title stay readable between turns, docked where the loader's
@@ -2081,8 +2074,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor.composerState = () => this.#composerNativeState();
 		this.editor.imageReferenceHyperlink = imageReferenceHyperlink;
 		this.editor.skillFilePath = name => this.skillCommands.get(`skill:${name}`)?.filePath;
-		this.editor.resolveModelMention = selector => this.#resolveModelMentionChip(selector);
-		this.editor.modelMentionSelector = agent => this.session.modelMentions.find(m => m.agent === agent)?.selector;
 		this.editor.fileHyperlink = (filePath, text) => fileHyperlink(filePath, text, { line: 1 });
 		this.#ownsStartedUi = wasStarted;
 		this.keybindings = KeybindingsManager.inMemory();
@@ -8058,8 +8049,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		nextEditor.attachmentChips = previousEditor.attachmentChips;
 		nextEditor.imageReferenceHyperlink = imageReferenceHyperlink;
 		nextEditor.skillFilePath = name => this.skillCommands.get(`skill:${name}`)?.filePath;
-		nextEditor.resolveModelMention = selector => this.#resolveModelMentionChip(selector);
-		nextEditor.modelMentionSelector = agent => this.session.modelMentions.find(m => m.agent === agent)?.selector;
 		nextEditor.fileHyperlink = (filePath, text) => fileHyperlink(filePath, text, { line: 1 });
 		nextEditor.onAutocompleteCancel = () => {
 			this.ui.requestRender(true);

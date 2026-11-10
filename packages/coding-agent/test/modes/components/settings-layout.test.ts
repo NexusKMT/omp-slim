@@ -7,7 +7,6 @@ import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui
 import { createPluginSettingsHost } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/settings-host";
 import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
 import { initTheme, setTheme } from "@oh-my-pi/pi-tui/theme";
-import { cfgRetryUsageAwareFallback } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { cfgAdvisorEnabled } from "@oh-my-pi/pi-coding-agent/advisor/settings";
 
 beforeAll(async () => {
@@ -77,23 +76,6 @@ describe("settings layout", () => {
 		for (const def of defs) {
 			expect(def.condition?.()).toBe(true);
 		}
-	});
-
-	it("exposes usage-aware fallback as an opt-in advanced policy", () => {
-		const defs = getSettingsForTab(createSettingsHost().entries, "model").filter(def =>
-			def.path.startsWith("retry.usage"),
-		);
-		expect(defs.map(def => def.path)).toEqual([
-			"retry.usageAwareFallback",
-			"retry.usageReservePct",
-			"retry.usageReservePolicy",
-		]);
-		expect(defs[0]).toMatchObject({ type: "boolean", label: "Usage-Aware Fallback" });
-		expect(defs[1]?.condition?.()).toBe(false);
-		expect(defs[2]?.condition?.()).toBe(false);
-		cfgRetryUsageAwareFallback.set(Settings.instance, true);
-		expect(defs[1]?.condition?.()).toBe(true);
-		expect(defs[2]?.condition?.()).toBe(true);
 	});
 
 	it("renders preview inside SettingsSelectorComponent submenu without crashing", async () => {

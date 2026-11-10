@@ -62,12 +62,10 @@ import {
 	formatMetricColumns,
 	formatMetricDuration,
 	formatMetrics,
-	formatRoleBadge,
 	metricsText,
 	modelBadge,
 	modelBadgeSpans,
 	modelChip,
-	roleBadgeSpan,
 	type RosterRender,
 	sanitizeLine,
 	statusGlyph,
@@ -82,7 +80,6 @@ import {
 } from "./agent-hub-renderer";
 import { sanitizeDisplaySingleLine } from "./extensions/display-text";
 import { AgentTranscriptViewer, type AgentTranscriptSource } from "./agent-transcript-viewer";
-import type { AgentRoleDisplay } from "./agent-hub-renderer";
 import { fuzzyMatch } from "../fuzzy";
 import { bottomBorder, divider, dividerSplit, PanelRows, row, topBorder, topBorderSplit } from "../chrome/overlay-box";
 import { SplitPane } from "../components/layout/split-pane";
@@ -286,8 +283,6 @@ export interface AgentHubRemote {
 export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike> {
 	/** Progress/status snapshot source (task lifecycle + progress channels). */
 	observers: SessionObserverRegistry;
-	/** Resolve the current display metadata for a model role. */
-	getRoleInfo?: (role: string) => AgentRoleDisplay;
 	/** Host-backed transcript parsing and local reads. */
 	transcript: AgentTranscriptSource;
 	/** Register persisted roster entries while the overlay remains alive. */
@@ -346,7 +341,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#registry: AgentHubRegistry<TRecord>;
 	#inSession: ((ref: AgentRecordLike) => boolean) | undefined;
 	#observers: SessionObserverRegistry;
-	#getRoleInfo: ((role: string) => AgentRoleDisplay) | undefined;
 	#transcript: AgentTranscriptSource;
 	#irc: IrcBusLike;
 	#lifecycle: () => AgentLifecycleLike<TRecord>;
@@ -497,7 +491,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		this.#registry = deps.registry;
 		this.#inSession = deps.inSession;
 		this.#observers = deps.observers;
-		this.#getRoleInfo = deps.getRoleInfo;
 		this.#transcript = deps.transcript;
 		this.#irc = deps.irc;
 		this.#lifecycle = deps.lifecycle;
@@ -949,11 +942,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		const metrics = this.#metricsFor(ref, observed);
 		const task = observed?.description ?? observed?.progress?.task ?? ref.activity;
 		const badges: { text: string; tone?: "warning" | "muted"; title?: string }[] = [];
-		const modelRole = observed?.progress?.modelRole ?? ref.history?.modelRole;
-		if (modelRole && this.#getRoleInfo) {
-			const info = this.#getRoleInfo(modelRole);
-			badges.push({ text: sanitizeDisplaySingleLine(info.tag ?? info.name ?? modelRole), title: "Model role" });
-		}
 		if (ref.kind === "advisor") badges.push({ text: "read-only", tone: "warning" });
 		const unread = this.#irc.unreadCount(ref.id);
 		if (unread > 0) badges.push({ text: `${unread} unread`, tone: "warning" });
@@ -1030,10 +1018,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			if (chip.fallback) model.push(span("fallback → ", "warning"));
 			model.push(span(chip.text, "mono"));
 			if (chip.level && chip.dot) model.push(span(theme.sep.dot, "dim"), span(chip.level, chip.dot));
-			const modelRole = observed?.progress?.modelRole ?? ref.history?.modelRole;
-			if (modelRole && this.#getRoleInfo) {
-				model.push(span(theme.sep.dot, "dim"), roleBadgeSpan(modelRole, this.#getRoleInfo(modelRole)));
-			}
 			facts.splice(facts[0]?.k === "Task" ? 1 : 0, 0, { k: "Model", v: model });
 		}
 		out.push(node("kv", { items: facts, layout: "grid", role: "omp.hub.kv" }, undefined, "facts"));
@@ -1274,8 +1258,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 	#modelSpans(ref: TRecord, observed: ObservableSession | undefined): TspSpan[] | undefined {
 		const spans: TspSpan[] = [];
-		const modelRole = observed?.progress?.modelRole ?? ref.history?.modelRole;
-		if (modelRole && this.#getRoleInfo) spans.push(roleBadgeSpan(modelRole, this.#getRoleInfo(modelRole)));
 		const model = modelBadgeSpans(ref, observed);
 		if (model) {
 			if (spans.length > 0) spans.push(span(theme.sep.dot, "dim"));
@@ -1455,11 +1437,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	}
 
 	#describeActivityItem(activity: AgentActivityRow): NativeNode {
-		const ref = this.#registry.get(activity.agentId);
-		const observed = this.#observedById.get(activity.agentId);
-		const role = observed?.progress?.modelRole ?? ref?.history?.modelRole;
 		const label = [activityGlyphSpan(activity), span(" ")];
-		if (role && this.#getRoleInfo) label.push(roleBadgeSpan(role, this.#getRoleInfo(role)), span(" "));
 		const title = activity.kind === "tool" ? (activity.toolName ?? activity.title) : activity.title;
 		label.push(
 			span(sanitizeDisplaySingleLine(activity.agentId), "strong"),
@@ -1789,10 +1767,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 	#formatActivityRow(activity: AgentActivityRow, selected: boolean, width: number): string {
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
-		const ref = this.#registry.get(activity.agentId);
-		const observed = this.#observedById.get(activity.agentId);
-		const role = observed?.progress?.modelRole ?? ref?.history?.modelRole;
-		const roleBadge = role && this.#getRoleInfo ? `${formatRoleBadge(role, this.#getRoleInfo(role))} ` : "";
 		const agent = sanitizeLine(activity.agentId, Math.max(8, Math.min(18, Math.floor(width * 0.18))));
 		const title = sanitizeLine(
 			activity.kind === "tool" ? (activity.toolName ?? activity.title) : activity.title,
@@ -1800,7 +1774,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		);
 		const prefix =
 			`${cursor} ${theme.fg("dim", activityClock(activity.timestamp))} ${activityGlyph(activity)} ` +
-			`${roleBadge}${theme.bold(agent)} ${theme.fg(activity.kind === "response" ? "success" : "muted", title)}`;
+			`${theme.bold(agent)} ${theme.fg(activity.kind === "response" ? "success" : "muted", title)}`;
 		const available = Math.max(1, width - visibleWidth(prefix) - visibleWidth(theme.sep.dot));
 		return `${prefix}${theme.fg("dim", theme.sep.dot)}${sanitizeLine(activity.summary, available)}`;
 	}
@@ -2088,8 +2062,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			`${statusText(ref.status, ref.status)}${theme.fg("dim", `${theme.sep.dot}${lifecycleDetails.join(theme.sep.dot)}`)}`,
 		);
 		const modelDetails: string[] = [];
-		const modelRole = progress?.modelRole ?? ref.history?.modelRole;
-		if (modelRole && this.#getRoleInfo) modelDetails.push(formatRoleBadge(modelRole, this.#getRoleInfo(modelRole)));
 		const badge = modelBadge(ref, observed);
 		if (badge) modelDetails.push(badge);
 		if (modelDetails.length > 0) add(modelDetails.join(theme.sep.dot));
@@ -2202,10 +2174,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		// can never mix with them.
 		const metrics = this.#metricsFor(ref, observed);
 		const meta: string[] = [];
-		const modelRole = observed?.progress?.modelRole ?? ref.history?.modelRole;
-		if (modelRole && this.#getRoleInfo) {
-			meta.push(formatRoleBadge(modelRole, this.#getRoleInfo(modelRole)));
-		}
 		const badge = modelBadge(ref, observed);
 		if (badge) meta.push(badge);
 		const right = meta.join(theme.sep.dot);

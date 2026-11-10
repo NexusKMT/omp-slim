@@ -106,7 +106,6 @@ function sameDecorations(a: readonly TspEditorDecoration[], b: readonly TspEdito
 	}
 	return true;
 }
-const MENTION_CONTEXT_RE = /(?:^|\s)\^[^\s]*$/;
 
 const AUTOCOMPLETE_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	overflowSearch: false,
@@ -3646,23 +3645,8 @@ export class Editor implements Component, Focusable {
 					this.#tryTriggerAutocomplete();
 				}
 			}
-			// Auto-trigger for "^" model mentions
-			else if (char === "^") {
-				const currentLine = this.#state.lines[this.#state.cursorLine] || "";
-				const textBeforeCursor = currentLine.slice(0, this.#state.cursorCol);
-				// Only trigger if ^ is after whitespace or at start of line
-				const charBeforeCaret = textBeforeCursor[textBeforeCursor.length - 2];
-				if (textBeforeCursor.length === 1 || charBeforeCaret === " " || charBeforeCaret === "\t") {
-					this.#tryTriggerAutocomplete();
-				}
-			}
 			// Auto-trigger for "#" prompt actions anywhere in the current token
 			else if (char === "#") {
-				this.#tryTriggerAutocomplete();
-			} else if (
-				char === ":" &&
-				MENTION_CONTEXT_RE.test((this.#state.lines[this.#state.cursorLine] || "").slice(0, this.#state.cursorCol))
-			) {
 				this.#tryTriggerAutocomplete();
 			}
 			// Argument providers may expose candidates only after a separator.
@@ -3679,10 +3663,6 @@ export class Editor implements Component, Focusable {
 				}
 				// Check if we're in an @ file reference context
 				else if (extractAtFilePrefix(textBeforeCursor)) {
-					this.#tryTriggerAutocomplete();
-				}
-				// Check if we're in a model mention context
-				else if (MENTION_CONTEXT_RE.test(textBeforeCursor)) {
 					this.#tryTriggerAutocomplete();
 				}
 				// Check if we're in a # prompt action context
@@ -3803,8 +3783,6 @@ export class Editor implements Component, Focusable {
 		if (this.#isInSlashAutocompleteContext()) {
 			this.#tryTriggerAutocomplete();
 		} else if (extractAtFilePrefix(textBeforeCursor)) {
-			this.#tryTriggerAutocomplete();
-		} else if (MENTION_CONTEXT_RE.test(textBeforeCursor)) {
 			this.#tryTriggerAutocomplete();
 		} else if (textBeforeCursor.match(/#[^\s#]*$/)) {
 			this.#tryTriggerAutocomplete();
@@ -4020,10 +3998,6 @@ export class Editor implements Component, Focusable {
 			else if (extractAtFilePrefix(textBeforeCursor)) {
 				this.#tryTriggerAutocomplete();
 			}
-			// model mention context
-			else if (MENTION_CONTEXT_RE.test(textBeforeCursor)) {
-				this.#tryTriggerAutocomplete();
-			}
 			// # prompt action context
 			else if (textBeforeCursor.match(/#[^\s#]*$/)) {
 				this.#tryTriggerAutocomplete();
@@ -4205,8 +4179,6 @@ export class Editor implements Component, Focusable {
 			if (this.#isInSlashAutocompleteContext()) {
 				this.#tryTriggerAutocomplete();
 			} else if (extractAtFilePrefix(textBeforeCursor)) {
-				this.#tryTriggerAutocomplete();
-			} else if (MENTION_CONTEXT_RE.test(textBeforeCursor)) {
 				this.#tryTriggerAutocomplete();
 			} else if (textBeforeCursor.match(/#[^\s#]*$/)) {
 				this.#tryTriggerAutocomplete();
@@ -4544,10 +4516,6 @@ export class Editor implements Component, Focusable {
 			else if (extractAtFilePrefix(textBeforeCursor)) {
 				this.#tryTriggerAutocomplete();
 			}
-			// model mention context
-			else if (MENTION_CONTEXT_RE.test(textBeforeCursor)) {
-				this.#tryTriggerAutocomplete();
-			}
 			// # prompt action context
 			else if (textBeforeCursor.match(/#[^\s#]*$/)) {
 				this.#tryTriggerAutocomplete();
@@ -4842,10 +4810,6 @@ export class Editor implements Component, Focusable {
 
 		if (this.#autocompletePrefix.startsWith("@")) {
 			return extractAtFilePrefix(currentTextBeforeCursor) !== null;
-		}
-
-		if (this.#autocompletePrefix.startsWith("^")) {
-			return MENTION_CONTEXT_RE.test(currentTextBeforeCursor);
 		}
 
 		return currentTextBeforeCursor.endsWith(this.#autocompletePrefix);
@@ -5239,7 +5203,7 @@ export class Editor implements Component, Focusable {
 	 */
 	#refreshAutocomplete(): void {
 		if (this.#autocompleteState === "assist") return;
-		if (this.#refreshSlashCommandListSync() || this.#refreshModelMentionListSync()) return;
+		if (this.#refreshSlashCommandListSync()) return;
 		this.#narrowAtFileList();
 		void this.#updateAutocomplete();
 	}
@@ -5270,25 +5234,6 @@ export class Editor implements Component, Focusable {
 		if (token.slice(1).includes("/")) return false;
 		this.#cancelAutocomplete();
 		this.onAutocompleteUpdate?.();
-		return true;
-	}
-
-	#refreshModelMentionListSync(): boolean {
-		const provider = this.#autocompleteProvider;
-		if (this.#autocompleteState !== "regular" || !provider?.trySyncModelMentionCompletion) return false;
-		const completion = provider.trySyncModelMentionCompletion(
-			this.#state.lines,
-			this.#state.cursorLine,
-			this.#state.cursorCol,
-		);
-		if (completion.kind === "unhandled") return false;
-		this.#invalidateAutocompleteRequests();
-		if (completion.kind === "matched") {
-			this.#showAutocompleteSuggestions(completion.suggestions, "regular");
-		} else {
-			this.#cancelAutocomplete();
-			this.onAutocompleteUpdate?.();
-		}
 		return true;
 	}
 

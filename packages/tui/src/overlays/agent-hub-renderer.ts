@@ -139,23 +139,6 @@ function thinkingToken(level: ThinkingLevel): ThemeColor {
 	}
 }
 
-/** Host-resolved model-role label and color. */
-export interface AgentRoleDisplay {
-	color?: ThemeColor;
-	tag?: string;
-	name?: string;
-}
-
-/** Textual model-role tag; color reinforces (but never replaces) the label. */
-export function formatRoleBadge(role: string, info: AgentRoleDisplay): string {
-	return theme.fg(info.color ?? "muted", sanitizeDisplaySingleLine(info.tag ?? info.name ?? role));
-}
-
-/** Native span of {@link formatRoleBadge}. */
-export function roleBadgeSpan(role: string, info: AgentRoleDisplay): TspSpan {
-	return span(sanitizeDisplaySingleLine(info.tag ?? info.name ?? role), info.color ?? "muted");
-}
-
 /** Model label and reasoning level a hub row reports; `fallback` marks a fallback model serving. */
 interface ResolvedModelBadge {
 	model: string;

@@ -4,7 +4,6 @@ import {
 	CombinedAutocompleteProvider,
 	findLeadingSlashCommandStart,
 	getKeybindings,
-	type ModelMentionCompletion,
 	type SlashCommand,
 } from "../index";
 import { formatKeyHints, type KeybindingsManager } from "../app-keybindings";
@@ -16,12 +15,7 @@ import {
 	type InternalUrlCallerContext,
 	isInternalUrlPrefix,
 } from "./internal-url-autocomplete";
-import {
-	applyModelMentionCompletion,
-	getModelMentionSuggestions,
-	isModelMentionPrefix,
-	type ModelMentionCandidateSource,
-} from "./model-mention-autocomplete";
+
 import { subsequenceMatch, subsequenceScore } from "../autocomplete";
 
 let emojiAutocompleteEnabled = true;
@@ -51,8 +45,6 @@ interface PromptActionAutocompleteOptions {
 	commandUsage?: (name: string) => number;
 	/** Read the receiving session at lookup time, following focus and session replacement. */
 	internalUrlCaller?: () => InternalUrlCallerContext;
-	/** Session-scoped models available for `^` mentions. */
-	modelMentions?: ModelMentionCandidateSource;
 	keybindings: KeybindingsManager;
 	copyCurrentLine: () => void;
 	copyPrompt: () => void;
@@ -114,7 +106,6 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 	#baseProvider: CombinedAutocompleteProvider;
 	#actions: PromptActionDefinition[];
 	#internalUrlCaller: () => InternalUrlCallerContext;
-	#modelMentions: ModelMentionCandidateSource | undefined;
 
 	constructor(
 		commands: SlashCommand[],
@@ -122,12 +113,10 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 		actions: PromptActionDefinition[],
 		commandUsage?: (name: string) => number,
 		internalUrlCaller?: () => InternalUrlCallerContext,
-		modelMentions?: ModelMentionCandidateSource,
 	) {
 		this.#commands = commands;
 		this.#baseProvider = new CombinedAutocompleteProvider(commands, basePath, { commandUsage });
 		this.#internalUrlCaller = internalUrlCaller ?? (() => ({ cwd: basePath }));
-		this.#modelMentions = modelMentions;
 		this.#actions = actions;
 	}
 
@@ -140,10 +129,6 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 	): Promise<{ items: AutocompleteItem[]; prefix: string } | null> {
 		if (signal?.aborted) return null;
 		const textBeforeCursor = (lines[cursorLine] || "").slice(0, cursorCol);
-		if (!this.#outranksModelMention(lines, cursorLine, textBeforeCursor)) {
-			const modelMention = getModelMentionSuggestions(textBeforeCursor, this.#modelMentions);
-			if (modelMention.kind === "matched") return modelMention.suggestions;
-		}
 		if (this.#isInSlashCommandArguments(lines, cursorLine, textBeforeCursor)) {
 			const argumentSuggestions = await this.#baseProvider.getSuggestions(
 				lines,
@@ -153,8 +138,6 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 				onPartial,
 			);
 			if (argumentSuggestions) return argumentSuggestions;
-			const modelMention = getModelMentionSuggestions(textBeforeCursor, this.#modelMentions);
-			if (modelMention.kind === "matched") return modelMention.suggestions;
 			// No slash-argument completion for this input: preserve numeric
 			// GitHub references and internal URLs while keeping prompt-action
 			// tokens such as `#copy` literal.
@@ -218,14 +201,6 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 		return command !== undefined && (!("allowArgs" in command) || command.allowArgs !== false);
 	}
 
-	#outranksModelMention(lines: string[], cursorLine: number, textBeforeCursor: string): boolean {
-		return (
-			this.#isInSlashCommandArguments(lines, cursorLine, textBeforeCursor) ||
-			getGithubRefContext(textBeforeCursor) !== null ||
-			getPromptActionPrefix(textBeforeCursor) !== null
-		);
-	}
-
 	applyCompletion(
 		lines: string[],
 		cursorLine: number,
@@ -262,10 +237,6 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 			};
 		}
 
-		if (isModelMentionPrefix(prefix)) {
-			return applyModelMentionCompletion(lines, cursorLine, cursorCol, item, prefix);
-		}
-
 		if (isInternalUrlPrefix(prefix)) {
 			return applyInternalUrlCompletion(lines, cursorLine, cursorCol, item, prefix);
 		}
@@ -281,11 +252,6 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 	}
 	trySyncSlashCompletion(textBeforeCursor: string): { items: AutocompleteItem[]; prefix: string } | null {
 		return this.#baseProvider.trySyncSlashCompletion?.(textBeforeCursor) ?? null;
-	}
-	trySyncModelMentionCompletion(lines: string[], cursorLine: number, cursorCol: number): ModelMentionCompletion {
-		const textBeforeCursor = (lines[cursorLine] || "").slice(0, cursorCol);
-		if (this.#outranksModelMention(lines, cursorLine, textBeforeCursor)) return { kind: "unhandled" };
-		return getModelMentionSuggestions(textBeforeCursor, this.#modelMentions);
 	}
 	trySyncInlineReplace(textBeforeCursor: string): { replaceLen: number; insert: string } | null {
 		if (!emojiAutocompleteEnabled) return null;
@@ -355,6 +321,5 @@ export function createPromptActionAutocompleteProvider(
 		actions,
 		options.commandUsage,
 		options.internalUrlCaller,
-		options.modelMentions,
 	);
 }
