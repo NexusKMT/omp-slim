@@ -15,6 +15,7 @@ import { Settings } from "../src/config/settings";
 import { releaseShellSessions } from "../src/exec/bash-executor";
 import type { ToolSession } from "../src/tools";
 import { BashTool } from "../src/tools/bash";
+import { waitForFile } from "./helpers/skill-image-vision";
 
 let cwd: string;
 let manager: AsyncJobManager;
@@ -44,10 +45,22 @@ function bashTool(settings: Record<string, unknown> = {}, overrides: Partial<Too
 	return new BashTool(session);
 }
 
-async function run(tool: BashTool, command: string) {
+async function start(tool: BashTool, command: string) {
 	const result = await tool.execute("bash-session-state", { command });
 	const text = result.content.find(block => block.type === "text")?.text ?? "";
 	return { text, async: result.details?.async };
+}
+
+async function run(tool: BashTool, command: string) {
+	const result = await start(tool, command);
+	if (result.async?.state !== "running") return { text: result.text };
+	// Even a printf can exceed the foreground wait under load. Await this
+	// command's result without waiting for unrelated, deliberately busy jobs.
+	const job = manager.getJob(result.async.jobId);
+	if (!job) throw new Error(`Missing bash job ${result.async.jobId}`);
+	await job.promise;
+	expect(["completed", "failed"]).toContain(job.status);
+	return { text: job.resultText ?? job.errorText ?? "" };
 }
 
 it.each([
@@ -83,7 +96,7 @@ it.skipIf(process.platform === "win32")(
 	"keeps state set by a call that moved to the background once it finishes",
 	async () => {
 		const tool = bashTool({ "bash.autoBackground.thresholdMs": 100 });
-		const started = await run(tool, "PI_STATE_VAR=from-bg; pi_bg_fn() { printf fn; }; sleep 1");
+		const started = await start(tool, "PI_STATE_VAR=from-bg; pi_bg_fn() { printf fn; }; sleep 1");
 		expect(started.async?.state).toBe("running");
 		await manager.waitForAll();
 		expect((await run(tool, 'printf "%s:" "$PI_STATE_VAR"; pi_bg_fn')).text).toBe("from-bg:fn");
@@ -103,15 +116,21 @@ it.skipIf(process.platform === "win32")(
 	async () => {
 		const tool = bashTool({ "bash.autoBackground.thresholdMs": 100 });
 		await run(tool, "PI_STATE_VAR=kept");
-		expect((await run(tool, "sleep 2")).async?.state).toBe("running");
-
-		const overlapping = await run(tool, 'printf "[%s]" "$PI_STATE_VAR"; PI_STATE_VAR=lost');
-		expect(overlapping.text).toStartWith("[kept]");
-		expect(overlapping.text).toContain("Ran in a copy of the busy session shell");
-		// An overlapping call that itself moves to the background says so in its start result.
-		const promoted = await run(tool, "sleep 0.5");
-		expect(promoted.async?.state).toBe("running");
-		expect(promoted.text).toContain("Ran in a copy of the busy session shell");
+		const owner = await start(tool, "touch owner.started; while [ ! -f owner.release ]; do sleep 0.02; done");
+		expect(owner.async?.state).toBe("running");
+		try {
+			await waitForFile(path.join(cwd, "owner.started"));
+			const overlapping = await run(tool, 'printf "[%s]" "$PI_STATE_VAR"; PI_STATE_VAR=lost');
+			expect(overlapping.text).toStartWith("[kept]");
+			expect(overlapping.text).toContain("Ran in a copy of the busy session shell");
+			expect(manager.getJob(owner.async!.jobId)?.status).toBe("running");
+			// An overlapping call that itself moves to the background says so in its start result.
+			const promoted = await start(tool, "sleep 0.5");
+			expect(promoted.async?.state).toBe("running");
+			expect(promoted.text).toContain("Ran in a copy of the busy session shell");
+		} finally {
+			await Bun.write(path.join(cwd, "owner.release"), "");
+		}
 
 		await manager.waitForAll();
 		expect((await run(tool, 'printf "%s" "$PI_STATE_VAR"')).text).toBe("kept");
@@ -135,7 +154,7 @@ it.skipIf(process.platform === "win32")(
 			},
 		);
 		try {
-			expect((await run(tool, "PI_STATE_VAR=from-first")).async?.state).toBe("running");
+			expect((await start(tool, "PI_STATE_VAR=from-first")).async?.state).toBe("running");
 			sessionId = second;
 			heldAllocation.resolve({});
 			await manager.waitForAll();
