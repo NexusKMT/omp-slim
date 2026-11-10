@@ -25,7 +25,7 @@ been removed from the product. Track the actual state below.
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
 | Other memory backends, browser, desktop and speech removal | Removed from source, registration, workers, UI, dedicated tests/docs and native backends; rebuilt addon export checks, full Rust checks and all 219 Mac TS groups passed |
 | Dependency cleanup | Cargo packages 979 → 799, Bun packages 462 → 396, Bazel repositories 962 → 783; no new package versions; two dedicated workspaces removed |
-| Single main model | Source integrated; verification in progress. `modelRoles.default` migrates to scalar `model`; plan/tasks/advisors/helpers use the current model; independent tiny/prediction runtimes and role routing removed. See [the single-model report](docs/slim-single-model.md). |
+| Single main model | Implemented and built at `d55687e514`; local binary/config/RPC verification passed. Cloud suite: 212/213 groups; the sole DAP fixture race was fixed in `34b93cb6a7`, and its full 10-file group passed locally (200 tests). Roles and automatic alternate-model routing removed. See [the single-model report](docs/slim-single-model.md). |
 | Intel macOS Actions build | Final native/CLI source `d7f1646f90` compiled in `42807753137`; local binary verification, 120 PTY output probes and actual spelling passed; complete TS validation `42819306007` passed 219/219 groups |
 
 As of 2026-11-10 (Asia/Shanghai), Codespace
@@ -146,6 +146,14 @@ update succeed. Codespace `Available` means the shell can connect, not that
 `postCreateCommand` succeeded; check the creation log and tool versions.
 
 ## Validation
+
+The latest single-model application build and hashes are in
+[the single-model report](docs/slim-single-model.md). Its recovered executable is
+`dist/actions/42867271630/artifact/reused-cli-d55687e51411da0d209adb1a0d746cbf236d0bec/extracted/omp`.
+Compilation and local verification passed. The full cloud run passed 212/213
+command groups; the unrelated DAP fixture race was then corrected and its
+complete failing group passed locally. The cloud run remains marked failed;
+the earlier green run documented below belongs to the four-feature removal.
 
 The build script checks the produced binary's version/help and worker smoke test.
 This does not replace feature regression tests. Follow upstream `AGENTS.md`:
