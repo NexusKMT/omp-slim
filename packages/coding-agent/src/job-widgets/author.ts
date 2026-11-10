@@ -1,7 +1,6 @@
 /**
- * The cheap-model side of job widgets: one toolless request to the `widget`
- * current session model with a forced `respond` call carrying the spec
- * schema, fed the job's brief and redacted output samples.
+ * Writes job-widget specs with the current session model and a forced `respond`
+ * call carrying the spec schema, job brief and redacted output samples.
  */
 import { type AgentTelemetryConfig, instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
 import type { Api, AssistantMessage, Model, UserMessage } from "@oh-my-pi/pi-ai";

@@ -102,6 +102,7 @@ describe("taskFile dispatch", () => {
 				...settings,
 			}),
 			getSessionFile: () => null,
+			getActiveModel: () => fileModel,
 			getSessionSpawns: () => "*",
 			modelRegistry: { getAll: () => [fileModel], getAvailable: () => [fileModel] },
 			localProtocolOptions: { getArtifactsDir: () => path.join(directory, "artifacts") },
@@ -123,45 +124,6 @@ describe("taskFile dispatch", () => {
 
 		expect(result.isError).toBe(true);
 		expect(textOf(result)).toContain("task.file");
-		expect(executions).toHaveLength(0);
-	});
-
-	it.each([false, true])("combines taskFile with an approved per-call model (batch=%s)", async batch => {
-		const source = "Complete the file-backed assignment.";
-		const taskFile = await writeTaskFile("approved-model.md", source);
-		const tool = await createTool(batch, undefined, {
-			"task.perCallModel": "on",
-			modelRoles: { review: "mock/file-worker" },
-		});
-		const item = { name: "FileModel", taskFile, model: "mock/file-worker", solutionSpace: "one defined change" };
-
-		const result = await tool.execute("file-model", batch ? { context: "Shared context.", tasks: [item] } : item);
-
-		expect(result.isError).not.toBe(true);
-		expect(executions).toHaveLength(1);
-		expect(executions[0]).toMatchObject({
-			assignment: source,
-			modelOverride: ["mock/file-worker"],
-			perCallModelGrants: { agentName: "task" },
-		});
-		expect(result.details?.results[0]).toMatchObject({
-			taskFile,
-			taskFileSha256: await sha256(new TextEncoder().encode(source)),
-		});
-	});
-
-	// `off` and `eval` refuse task calls through the same gate; one mode per shape covers it.
-	it.each([
-		["off", false],
-		["eval", true],
-	] as const)("checks the per-call gate before reading taskFile (mode=%s, batch=%s)", async (mode, batch) => {
-		const tool = await createTool(batch, undefined, { "task.perCallModel": mode });
-		const item = { taskFile: path.join(directory, "missing.md"), model: "@review" };
-
-		const result = await tool.execute("file-model-disabled", batch ? { context: "Context.", tasks: [item] } : item);
-
-		expect(result.isError).toBe(true);
-		expect(textOf(result)).toContain(`task.perCallModel: ${mode}`);
 		expect(executions).toHaveLength(0);
 	});
 

@@ -105,7 +105,7 @@ it.each([
 				task: "Read notes.txt and report.",
 				index: 0,
 				id: "Capped",
-				modelOverride: "mock/mock-model",
+				parentModel: mock,
 				parentAgentId: MAIN_AGENT_ID,
 				authStorage,
 				modelRegistry,

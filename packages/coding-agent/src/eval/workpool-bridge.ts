@@ -75,7 +75,6 @@ export async function runEvalWorkpool(args: unknown, options: EvalWorkpoolBridge
 			invocationKind: "eval",
 		});
 		if (modelProblem) throw new ToolError(modelProblem);
-		const model = typeof record.model === "string" ? record.model : undefined;
 		if (tools?.length && options.session.getPlanModeState?.()?.enabled === true) {
 			throw new ToolError("Eval-defined tools are unavailable in plan mode.");
 		}
@@ -84,7 +83,6 @@ export async function runEvalWorkpool(args: unknown, options: EvalWorkpoolBridge
 			invocationKind: "eval",
 			assignment: `Create workpool ${requestedName ?? agent ?? "worker"}`,
 			...(agent ? { agent } : {}),
-			...(model !== undefined ? { perCallModel: model } : {}),
 		});
 		const customTools = tools?.length
 			? createEvalCustomTools(options.session, await describeEvalTools(options.session, tools, options.signal))
@@ -102,7 +100,6 @@ export async function runEvalWorkpool(args: unknown, options: EvalWorkpoolBridge
 		const pool = registry.create(options.session, {
 			name,
 			policy,
-			...(model !== undefined ? { model } : {}),
 			...(context ? { context } : {}),
 			customTools,
 		});

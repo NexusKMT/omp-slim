@@ -48,8 +48,9 @@ function makeModelRegistry(authStorage: AuthStorage, modelsPath: string, model: 
 	return registry;
 }
 
-function revivalParent(cwd: string): AgentSession {
+function revivalParent(cwd: string, model: MockModel): AgentSession {
 	return {
+		model,
 		sessionManager: { getCwd: () => cwd, getArtifactManager: () => undefined },
 		effectiveExtensionRoots: {
 			explicit: [],
@@ -172,6 +173,7 @@ describe("seance artifact lifecycle", () => {
 
 		try {
 			const result = await runSubprocess({
+				description: "Consult saved history",
 				cwd,
 				agent,
 				task: "Consult the current host session.",
@@ -182,7 +184,7 @@ describe("seance artifact lifecycle", () => {
 				modelRegistry,
 				authStorage,
 				getApiKey: async () => "test-key",
-				modelOverride: [`${mock.model.provider}/${mock.model.id}`],
+				parentModel: mock,
 				preparedSession: preparedSession(sourceFile, "host-session"),
 				artifactsDir,
 				enableIrc: true,
@@ -205,7 +207,7 @@ describe("seance artifact lifecycle", () => {
 			await lifecycle.park(AGENT_ID);
 			AgentLifecycleManager.resetGlobalForTests();
 			const reviveFactory = createPersistedSubagentReviverFactory({
-				session: revivalParent(cwd),
+				session: revivalParent(cwd, mock),
 				authStorage,
 				modelRegistry,
 				settings,
@@ -291,6 +293,7 @@ describe("seance artifact lifecycle", () => {
 
 		try {
 			const result = await runSubprocess({
+				description: "Consult saved history",
 				cwd,
 				agent,
 				task: "Consult the current host session.",
@@ -301,7 +304,7 @@ describe("seance artifact lifecycle", () => {
 				modelRegistry,
 				authStorage,
 				getApiKey: async () => "test-key",
-				modelOverride: [`${mock.model.provider}/${mock.model.id}`],
+				parentModel: mock,
 				preparedSession: preparedSession(sourceFile, "unstructured-host"),
 				artifactsDir,
 				enableIrc: true,
@@ -329,7 +332,7 @@ describe("seance artifact lifecycle", () => {
 			await lifecycle.park(UNSTRUCTURED_AGENT_ID);
 			AgentLifecycleManager.resetGlobalForTests();
 			const reviveFactory = createPersistedSubagentReviverFactory({
-				session: revivalParent(cwd),
+				session: revivalParent(cwd, mock),
 				authStorage,
 				modelRegistry,
 				settings,
@@ -465,6 +468,7 @@ describe("seance artifact lifecycle", () => {
 		try {
 			for (const id of seanceIds) {
 				const result = await runSubprocess({
+					description: "Consult saved history",
 					cwd,
 					agent,
 					task: "Consult the current host session.",
@@ -475,7 +479,7 @@ describe("seance artifact lifecycle", () => {
 					modelRegistry,
 					authStorage,
 					getApiKey: async () => "test-key",
-					modelOverride: [`${mock.model.provider}/${mock.model.id}`],
+					parentModel: mock,
 					preparedSession: preparedSession(sourceFile, "host"),
 					artifactsDir,
 					enableLsp: false,

@@ -283,7 +283,7 @@ describe("persisted subagent revival", () => {
 		if (!revive) throw new Error("Expected a revivable session");
 		try {
 			expect((await revive(ref)).model).toBe(current);
-			expect(() => options?.assertDispatchModel?.(historical)).toThrow("current parent model");
+			expect(() => options?.assertDispatchModel?.(historical)).toThrow("inherited parent model");
 		} finally {
 			await options?.sessionManager?.close();
 		}

@@ -222,7 +222,6 @@ function renderDescription(options: TaskDescriptionOptions): string {
 		asyncEnabled: options.asyncEnabled,
 		hasBlockingAgents: renderedAgents.some(agent => agent.blocking),
 		hasStructuredAgents: renderedAgents.some(agent => agent.structured),
-		hasModelMentions: options.sessionAgents.length > 0,
 		seanceGuidance: seanceAgent && isBundledSeance(seanceAgent) ? seanceTaskGuidance : "",
 		ircEnabled: options.ircEnabled,
 		asyncGuidance: options.asyncGuidance,
@@ -757,9 +756,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (typeof params.name === "string" && params.name.trim()) {
 			lines.push(`Name: ${truncateForPrompt(params.name)}`);
 		}
-		if (typeof params.model === "string") {
-			lines.push(`Model: ${truncateForPrompt(params.model)}`);
-		}
 		if (typeof params.task === "string") {
 			lines.push(`Task:\n${truncateForPrompt(params.task)}`);
 		}
@@ -798,9 +794,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				}
 			}
 			for (const [index, item] of tasks.entries()) {
-				if (isRecord(item) && typeof item.model === "string") {
-					lines.push(`Task ${index + 1} model: ${truncateForPrompt(item.model)}`);
-				}
 				if (isRecord(item) && typeof item.taskFile === "string") {
 					lines.push(`Task ${index + 1} file: ${formatTaskFile(item.taskFile)}`);
 				}

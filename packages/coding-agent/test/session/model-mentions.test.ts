@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -128,13 +129,13 @@ describe("retired model mentions", () => {
 
 	test("reads canonical historical effort tags and ignores invalid effort records", () => {
 		for (const data of [
-			{ agent: "m1", selector: "p/model:high", name: "Historical high", thinkingLevel: "high" },
+			{ agent: "m1", selector: "p/model:high", name: "Historical high", thinkingLevel: Effort.High },
 			{ agent: "m2", selector: "p/model:low", name: "Noncanonical", thinkingLevel: "lo" },
-			{ agent: "m3", selector: "p/model:max", name: "Mismatched", thinkingLevel: "high" },
+			{ agent: "m3", selector: "p/model:max", name: "Mismatched", thinkingLevel: Effort.High },
 		])
 			session.appendCustomEntry(MODEL_MENTION_ENTRY_TYPE, data);
 		expect(readModelMentions(session.getBranch())).toEqual([
-			{ agent: "m1", selector: "p/model:high", name: "Historical high", thinkingLevel: "high" },
+			{ agent: "m1", selector: "p/model:high", name: "Historical high", thinkingLevel: Effort.High },
 		]);
 	});
 

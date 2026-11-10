@@ -150,7 +150,7 @@ async function startRun(options: {
 		parentAgentId: PARENT_ID,
 		asyncJobManager: manager,
 		structured: options.structured ?? false,
-		modelOverride: "mock/mock-model",
+		parentModel: mock,
 		authStorage,
 		modelRegistry,
 		settings: Settings.isolated({

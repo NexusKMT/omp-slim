@@ -339,39 +339,19 @@ describe("runEvalAgent", () => {
 		expect(secondOptions.structured).toBe(true);
 		expect(firstOptions.assignment).toBe("hello");
 		expect(firstOptions.description).toBe("My Agent");
-		// No per-call override: the agent's own frontmatter model applies.
+		// The current parent model wins over the agent's old role metadata.
 		expect(firstOptions.modelOverride).toEqual(["p/current"]);
 		expect(secondOptions.outputSchema).toBeUndefined();
 		expect(secondOptions.outputSchemaOverridesAgent).toBeUndefined();
 	});
 
-	it("routes an agent() model above a pinned agent in eval-only mode", async () => {
-		mockAgents();
-		const runSpy = vi.spyOn(taskExecutor, "runSubprocess").mockImplementation(async options => singleResult(options));
-
-		await runEvalAgentAndWait(
-			{ prompt: "work", agent: "reviewer", model: "p/requested:high" },
-			{
-				session: makeSession({
-					settings: Settings.isolated({ "task.perCallModel": "eval", "task.isolation.enabled": false }),
-				}),
-			},
-		);
-
-		expect(runSpy.mock.calls[0]?.[0]?.modelOverride).toEqual(["p/requested:high"]);
-	});
-
 	it.each([
-		// The gate wins over the selector check, so an invalid selector still reports the disabled gate.
-		{ mode: "off", model: "@smol", error: /task\.perCallModel: off/ },
-		{ mode: "on", model: "default", error: /invalid `model`/ },
-		// The argument schema accepts only a string, so a candidate array never reaches preflight.
-		{ mode: "on", model: ["p/preferred:high", "p/alternative"], error: /model must be a string/ },
-	])("rejects agent() model $model under $mode before dispatch", async ({ mode, model, error }) => {
+		{ model: "p/requested:high", error: /inherit the current session model/ },
+		{ model: ["p/preferred:high", "p/alternative"], error: /model must be a string/ },
+	])("rejects an agent() model override before dispatch: $model", async ({ model, error }) => {
 		mockAgents();
 		const runSpy = vi.spyOn(taskExecutor, "runSubprocess").mockImplementation(async options => singleResult(options));
-		const settings = Settings.isolated({ "task.perCallModel": mode, "task.isolation.enabled": false });
-
+		const settings = Settings.isolated({ "task.perCallModel": "on", "task.isolation.enabled": false });
 		await expect(
 			runEvalAgent({ prompt: "work", agent: "reviewer", model }, { session: makeSession({ settings }) }),
 		).rejects.toThrow(error);

@@ -128,7 +128,7 @@ it.each([
 				task: ASSIGNMENT,
 				index: 0,
 				id: AGENT_ID,
-				modelOverride: "mock/mock-model",
+				parentModel: mock,
 				parentAgentId: MAIN_AGENT_ID,
 				authStorage,
 				modelRegistry,

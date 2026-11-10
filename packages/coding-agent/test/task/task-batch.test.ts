@@ -2,7 +2,7 @@
  * Contracts: task.batch gating (batch spawning + shared context).
  *
  * 1. The wire schema is shape-swapped by `task.batch`: `{ context, tasks[] }`
- *    when on (per-spawn fields — including `model`, `isolated`, `outputSchema`, and
+ *    when on (per-spawn fields — including `isolated`, `outputSchema`, and
  *    `schemaMode` — live in the items), the flat form exposes those fields
  *    directly. The stale `schema` field is never accepted.
  * 2. Shape validation rejects stale `schema`, `tasks`/`context` while batch
@@ -14,7 +14,8 @@
  *    runtime for internal callers.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { Agent, type AgentTool, validateAgentToolArguments } from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { Model } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
@@ -25,12 +26,13 @@ import { TaskTool } from "@oh-my-pi/pi-coding-agent/task";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
-import { loadBundledAgents } from "@oh-my-pi/pi-coding-agent/task/agents";
 import type { SingleResult, TaskParams } from "@oh-my-pi/pi-tui/tools/task";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { isRecord } from "@oh-my-pi/pi-utils";
 
 import { cfgTaskDisabledAgents, cfgTaskEnableEffort, cfgTaskStructured } from "@oh-my-pi/pi-coding-agent/task/settings";
+
+const CURRENT_MODEL = createMockModel({ id: "current-task-model" });
 
 const taskAgent: AgentDefinition = {
 	name: "task",
@@ -52,6 +54,7 @@ function createSession(
 		cwd: "/tmp",
 		hasUI: false,
 		settings: Settings.isolated(options.settings ?? {}),
+		getActiveModel: () => CURRENT_MODEL,
 		getSessionFile: () => null,
 		getSessionSpawns: () => options.spawns ?? "*",
 		getAgentId: () => options.agentId ?? null,
@@ -390,29 +393,16 @@ describe("task.batch validation", () => {
 		expect(toolResult?.role === "toolResult" && toolResult.isError).toBe(false);
 	});
 
-	// The agent loop validates arguments against the wire schema before execute(),
-	// and that schema deletes undeclared keys. With per-call model off, `model` and
-	// `sourceSession` on an ordinary agent must still be refused by every call form
-	// instead of being dropped, leaving the child on its own model while the caller
-	// believes it pinned another.
-	// `task.structured` and `task.isolation.enabled` choose between the prebuilt and
-	// generated batch schemas, each with and without `isolated`.
+	// Source-session consultation is reserved for the seance persona in each wire shape.
 	it.each([
-		{ form: "batch", seance: "hidden", batch: true, structured: false, isolation: false, field: "model" },
-		{ form: "batch", seance: "hidden", batch: true, structured: true, isolation: false, field: "model" },
-		{ form: "batch", seance: "hidden", batch: true, structured: false, isolation: true, field: "model" },
-		{ form: "batch", seance: "hidden", batch: true, structured: true, isolation: true, field: "model" },
 		{ form: "batch", seance: "hidden", batch: true, structured: false, isolation: false, field: "sourceSession" },
 		{ form: "batch", seance: "hidden", batch: true, structured: true, isolation: false, field: "sourceSession" },
 		{ form: "batch", seance: "hidden", batch: true, structured: false, isolation: true, field: "sourceSession" },
 		{ form: "batch", seance: "hidden", batch: true, structured: true, isolation: true, field: "sourceSession" },
-		{ form: "batch", seance: "advertised", batch: true, structured: false, isolation: false, field: "model" },
-		{ form: "flat", seance: "hidden", batch: false, structured: false, isolation: false, field: "model" },
 	])(
 		"refuses $field on an ordinary agent in the $form form with seance $seance (structured: $structured, isolation: $isolation)",
-		async ({ seance, batch, structured, isolation, field }) => {
-			const bundledSeance = loadBundledAgents().find(agent => agent.name === "seance")!;
-			mockDiscovery(seance === "advertised" ? [taskAgent, bundledSeance] : taskAgent);
+		async ({ batch, structured, isolation, field }) => {
+			mockDiscovery(taskAgent);
 			const run = vi
 				.spyOn(executorModule, "runSubprocess")
 				.mockImplementation(async options => makeResult(options.id ?? "?"));
@@ -455,12 +445,7 @@ describe("task.batch validation", () => {
 
 			const toolResult = agent.state.messages.find(message => message.role === "toolResult");
 			const text = toolResult?.role === "toolResult" ? getFirstText(toolResult) : "";
-			// `model` doubles as the per-call selector, whose disabled gate is reported first.
-			expect(text).toContain(
-				field === "model"
-					? "Per-call model is disabled for task calls (task.perCallModel: off)."
-					: `\`${field}\` is only accepted for the \`seance\` agent.`,
-			);
+			expect(text).toContain(`\`${field}\` is only accepted for the \`seance\` agent.`);
 			expect(toolResult?.role === "toolResult" && toolResult.isError).toBe(true);
 			expect(run).not.toHaveBeenCalled();
 		},
@@ -490,7 +475,7 @@ describe("task.batch spawning", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("spawns one background job per task item and forwards independent models and schemas with shared context", async () => {
+	it("spawns one background job per task item and forwards independent schemas with shared context", async () => {
 		mockDiscovery({
 			...taskAgent,
 			output: { type: "object", properties: { staleAgentOutput: { type: "boolean" } } },
@@ -500,7 +485,7 @@ describe("task.batch spawning", () => {
 			context?: string;
 			assignment?: string;
 			parentAgentId?: string;
-			modelOverride?: string | string[];
+			parentModel?: Model;
 			outputSchema?: unknown;
 			outputSchemaMode?: "permissive" | "strict";
 			outputSchemaSource?: "caller" | "agent" | "session" | "none";
@@ -512,7 +497,7 @@ describe("task.batch spawning", () => {
 				context: options.context,
 				assignment: options.assignment,
 				parentAgentId: options.parentAgentId,
-				modelOverride: options.modelOverride,
+				parentModel: options.parentModel,
 				outputSchema: options.outputSchema,
 				outputSchemaMode: options.outputSchemaMode,
 				outputSchemaSource: options.outputSchemaSource,
@@ -605,7 +590,7 @@ describe("task.batch spawning", () => {
 		const seen: Array<{
 			id?: string;
 			agent: AgentDefinition;
-			modelOverride?: string | string[];
+			parentModel?: Model;
 			outputSchema?: unknown;
 			outputSchemaSource?: "caller" | "agent" | "session" | "none";
 			outputSchemaOverridesAgent?: boolean;
@@ -614,7 +599,7 @@ describe("task.batch spawning", () => {
 			seen.push({
 				id: options.id,
 				agent: options.agent,
-				modelOverride: options.modelOverride,
+				parentModel: options.parentModel,
 				outputSchema: options.outputSchema,
 				outputSchemaSource: options.outputSchemaSource,
 				outputSchemaOverridesAgent: options.outputSchemaOverridesAgent,
@@ -647,13 +632,13 @@ describe("task.batch spawning", () => {
 		const reviewerSpawn = byId.get("Review");
 		expect(scoutSpawn?.agent).toBe(scoutAgent);
 		expect(scoutSpawn?.agent.tools).toEqual(["read"]);
-		expect(scoutSpawn?.modelOverride).toEqual(["anthropic/claude-haiku-4-5:low"]);
+		expect(scoutSpawn?.parentModel).toBe(CURRENT_MODEL);
 		expect(scoutSpawn?.outputSchema).toBe(scoutSchema);
 		expect(scoutSpawn?.outputSchemaSource).toBe("agent");
 		expect(scoutSpawn?.outputSchemaOverridesAgent).toBe(false);
 		expect(reviewerSpawn?.agent).toBe(reviewerAgent);
 		expect(reviewerSpawn?.agent.tools).toEqual(["read", "bash"]);
-		expect(reviewerSpawn?.modelOverride).toEqual(["anthropic/claude-sonnet-4-6:medium"]);
+		expect(reviewerSpawn?.parentModel).toBe(CURRENT_MODEL);
 		expect(reviewerSpawn?.outputSchema).toBe(callerSchema);
 		expect(reviewerSpawn?.outputSchemaSource).toBe("caller");
 		expect(reviewerSpawn?.outputSchemaOverridesAgent).toBe(true);
@@ -694,7 +679,7 @@ describe("task.batch spawning", () => {
 		});
 		let captured:
 			| {
-					modelOverride?: string | string[];
+					parentModel?: Model;
 					outputSchema?: unknown;
 					outputSchemaMode?: "permissive" | "strict";
 					outputSchemaSource?: "caller" | "agent" | "session" | "none";
@@ -703,7 +688,7 @@ describe("task.batch spawning", () => {
 			| undefined;
 		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
 			captured = {
-				modelOverride: options.modelOverride,
+				parentModel: options.parentModel,
 				outputSchema: options.outputSchema,
 				outputSchemaMode: options.outputSchemaMode,
 				outputSchemaSource: options.outputSchemaSource,
@@ -738,7 +723,7 @@ describe("task.batch spawning", () => {
 		const job = manager.getJob(result.details!.async!.jobId)!;
 		await job.promise;
 		expect(job.status).toBe("completed");
-		expect(captured?.modelOverride).toEqual(["openai/gpt-4.1-mini"]);
+		expect(captured?.parentModel).toBe(CURRENT_MODEL);
 		expect(captured?.outputSchema).toEqual(callerSchema);
 		expect(captured?.outputSchemaMode).toBe("strict");
 		expect(captured?.outputSchemaSource).toBe("caller");
@@ -929,37 +914,19 @@ describe("batch model placement", () => {
 			model: "p/requested",
 			tasks: [{ task: "Do work" }],
 		});
-		expect(getFirstText(result)).toMatch(/model.*tasks|model.*item/i);
+		expect(getFirstText(result)).toContain("inherit the current session model");
 		expect(result.isError).toBe(true);
 		expect(run).not.toHaveBeenCalled();
 	});
 
-	// `off` and `eval` refuse task calls through the same gate; one mode per shape covers it.
-	it.each([
-		["off", "batch"],
-		["eval", "flat"],
-	] as const)(
-		"rejects a task call's model before dispatch while task.perCallModel is %s (%s call)",
-		async (mode, shape) => {
-			const batch = shape === "batch";
-			mockDiscovery();
-			const run = vi.spyOn(executorModule, "runSubprocess").mockResolvedValue(makeResult("Unexpected"));
-			const tool = await TaskTool.create(
-				createSession({ settings: { "task.batch": batch, "async.enabled": false, "task.perCallModel": mode } }),
-			);
-			// A role alias is not an exact selector, but the disabled gate is what the caller must hear first.
-			const work = { task: "Do work", solutionSpace: "c", model: "@smol" };
-			// Through shared argument validation, as a model's tool call arrives: `model` must reach preflight in both shapes.
-			const args = validateAgentToolArguments(tool as unknown as AgentTool, {
-				type: "toolCall",
-				id: "task-model",
-				name: tool.name,
-				arguments: batch ? { context: "Shared context", tasks: [work] } : work,
-			});
-			const result = await tool.execute("task-model", args as TaskParams);
-			expect(getFirstText(result)).toMatch(/per-call model is disabled/i);
-			expect(result.isError).toBe(true);
-			expect(run).not.toHaveBeenCalled();
-		},
-	);
+	it.each([false, true])("rejects a raw per-call model before dispatch (batch=%s)", async batch => {
+		mockDiscovery();
+		const run = vi.spyOn(executorModule, "runSubprocess").mockResolvedValue(makeResult("Unexpected"));
+		const tool = await TaskTool.create(createSession({ settings: { "task.batch": batch, "async.enabled": false } }));
+		const work = { task: "Do work", solutionSpace: "c", model: "@smol" };
+		const result = await tool.execute("task-model", batch ? { context: "Shared context", tasks: [work] } : work);
+		expect(getFirstText(result)).toContain("current session model");
+		expect(result.isError).toBe(true);
+		expect(run).not.toHaveBeenCalled();
+	});
 });

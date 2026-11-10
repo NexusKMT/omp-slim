@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AsyncJobManager } from "../../src/async";
 import { Settings } from "../../src/config/settings";
 import { runEvalWorkpool } from "../../src/eval/workpool-bridge";
 import { AgentRegistry } from "../../src/registry/agent-registry";
 import * as discovery from "../../src/task/discovery";
-import * as structured from "../../src/task/structured-subagent";
 import type { AgentDefinition } from "../../src/task/types";
 import { WorkPoolRegistry } from "../../src/task/workpool";
 import type { ToolSession } from "../../src/tools";
@@ -93,53 +91,13 @@ describe("runEvalWorkpool", () => {
 	});
 });
 
-describe("workpool model validation", () => {
-	it("eval mode admits an approved pinned worker and rejects an unapproved model before creating a pool", async () => {
-		const approved = createMockModel();
-		const unapproved = createMockModel({ id: "unapproved" });
-		// A project agent's frontmatter never grants its own model.
-		const agent: AgentDefinition = { ...SCOUT, source: "project", model: ["mock/unapproved"] };
-		vi.spyOn(discovery, "discoverAgents").mockResolvedValue({ agents: [agent], projectAgentsDir: null });
-		const session = Object.assign(
-			makeSession({ "task.perCallModel": "eval", modelRoles: { review: "mock/mock-model" } }),
-			{ modelRegistry: { getAll: () => [approved, unapproved], getAvailable: () => [approved, unapproved] } },
-		);
-		await expect(
-			runEvalWorkpool({ op: "create", name: "denied", agent: "scout", model: "mock/unapproved" }, { session }),
-		).rejects.toThrow(/not approved/);
-		expect(WorkPoolRegistry.global().get("Main", "denied")).toBeUndefined();
-		await expect(
-			runEvalWorkpool({ op: "create", name: "approved", agent: "scout", model: "mock/mock-model" }, { session }),
-		).resolves.toEqual({ name: "approved", agent: "scout", limit: 2 });
-	});
-
-	for (const { mode, model, reason } of [
-		// The gate wins over the selector check, so an invalid selector still reports the disabled gate.
-		{ mode: "off", model: "@smol", reason: /task\.perCallModel: off/ },
-		{ mode: "on", model: "@smol", reason: /invalid `model` value/ },
-	]) {
-		it(`rejects ${JSON.stringify(model)} under ${mode} before registering a pool`, async () => {
-			vi.spyOn(discovery, "discoverAgents").mockResolvedValue({ agents: [SCOUT], projectAgentsDir: null });
-			const session = makeSession({ "task.perCallModel": mode });
-			await expect(
-				runEvalWorkpool({ op: "create", name: "invalid", agent: "scout", model }, { session }),
-			).rejects.toThrow(reason);
-			expect(WorkPoolRegistry.global().get("Main", "invalid")).toBeUndefined();
-		});
-	}
-
-	// Losing the selector between bridge and pool would silently run workers on the agent's own model.
-	it("hands the pool selector to workers", async () => {
+describe("workpool model inheritance", () => {
+	it("rejects an explicit model before creating a pool despite legacy permission settings", async () => {
 		vi.spyOn(discovery, "discoverAgents").mockResolvedValue({ agents: [SCOUT], projectAgentsDir: null });
-		const requested = Promise.withResolvers<unknown>();
-		vi.spyOn(structured, "runStructuredSubagent").mockImplementation(async request => {
-			requested.resolve(request.perCallModel);
-			throw new Error("stop after dispatch");
-		});
-		const session = makeSession({ "task.perCallModel": "eval", modelRoles: { smol: "p/small" } });
-		const model = "p/small";
-		await runEvalWorkpool({ op: "create", name: "picked", agent: "scout", model }, { session });
-		await runEvalWorkpool({ op: "push", name: "picked", items: ["one"] }, { session });
-		expect(await requested.promise).toEqual(model);
+		const session = makeSession({ "task.perCallModel": "on", modelRoles: { review: "p/reviewer" } });
+		await expect(
+			runEvalWorkpool({ op: "create", name: "invalid", agent: "scout", model: "p/reviewer" }, { session }),
+		).rejects.toThrow("inherit the current session model");
+		expect(WorkPoolRegistry.global().get("Main", "invalid")).toBeUndefined();
 	});
 });

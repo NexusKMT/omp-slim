@@ -178,7 +178,7 @@ async function spawnAndPark() {
 			task: "report done",
 			index: 0,
 			id: AGENT_ID,
-			modelOverride: "mock/mock-model",
+			parentModel: mock,
 			authStorage,
 			modelRegistry,
 			preloadedPreparedExtensions: preparedExtensions,
@@ -198,6 +198,7 @@ async function spawnAndPark() {
 		/** The reviver a restarted process builds for the parked agent from its session file. */
 		async coldRevive(): Promise<AgentSession> {
 			const owner = {
+				model: mock,
 				sessionManager: { getCwd: () => cwd, getArtifactManager: () => undefined },
 				effectiveExtensionRoots: { explicit: [], mode: "merge", configured: [], configuredLevel: "user" },
 				preparedExtensions,

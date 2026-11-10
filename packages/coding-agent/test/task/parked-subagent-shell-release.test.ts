@@ -108,7 +108,7 @@ it("releases a parked subagent's persistent shell so a revive starts a fresh one
 			task: "report done",
 			index: 0,
 			id: AGENT_ID,
-			modelOverride: "mock/mock-model",
+			parentModel: mock,
 			authStorage,
 			modelRegistry,
 			settings: Settings.isolated({

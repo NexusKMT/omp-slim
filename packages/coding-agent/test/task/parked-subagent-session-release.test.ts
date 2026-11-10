@@ -12,6 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { closeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -95,7 +96,7 @@ async function collected(ref: WeakRef<object>, deadlineMs: number): Promise<bool
 /** Makes a settings write in the live session's own overlay, then observes the overlay weakly (outside the test body). */
 function writeAndObserveLiveSettings(id: string): WeakRef<Settings> {
 	const session = localSession(AgentRegistry.global().get(id)?.session);
-	cfgTaskMaxEffort.set(session, "high");
+	cfgTaskMaxEffort.set(session, Effort.High);
 	return new WeakRef(session.settings);
 }
 
@@ -193,7 +194,7 @@ it("parks without retaining the run's settings overlay and revives with the sett
 		expect(await collected(settingsRef, COLLECT_DEADLINE_MS)).toBe(true);
 
 		const revived = localSession(await AgentLifecycleManager.global().ensureLive(AGENT_ID));
-		expect(cfgTaskMaxEffort.get(revived)).toBe("high");
+		expect(cfgTaskMaxEffort.get(revived)).toBe(Effort.High);
 	} finally {
 		run.close();
 	}
