@@ -21,6 +21,8 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "15.0"
       OMP_SLIM_BUILD_JOBS: "4"
       HOMEBREW_NO_AUTO_UPDATE: "1"
+      OMP_TEST_CONCURRENCY: "2"
+      OMP_TEST_TIMEOUT: "120"
     steps:
       - name: Check out requested revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -76,17 +78,9 @@ jobs:
         shell: bash
         run: bun run check:ts 2>&1 | tee dist/validation/macos-intel/check.log
 
-      - name: Test configuration, memory removal and session replay
+      - name: Test retained TypeScript workspace behavior
         shell: bash
-        run: |
-          bun test \
-            packages/coding-agent/test/settings-manager.test.ts \
-            packages/coding-agent/test/advisor-memory.test.ts \
-            packages/coding-agent/test/agent-session-memory-backend.test.ts \
-            packages/coding-agent/test/memory-backend-resolve.test.ts \
-            packages/coding-agent/test/session-manager/build-context.test.ts \
-            packages/coding-agent/test/session-manager/signature-persistence.test.ts \
-            2>&1 | tee dist/validation/macos-intel/tests.log
+        run: bun run ci:test:ts 2>&1 | tee dist/validation/macos-intel/tests.log
 
       - name: Record artifact and source details
         if: always()

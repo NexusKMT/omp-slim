@@ -1,0 +1,100 @@
+name: Validate OMP Slim Rust
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slim-rust-checks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rust:
+    name: Rust formatting, lint, tests and doctests
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: "4"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      OMP_FORCE_RUST_TASKS: "1"
+      NEXTEST_PROFILE: ci
+      NEXTEST_TEST_THREADS: "4"
+      RUST_BACKTRACE: "1"
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set tool and build directories
+        shell: bash
+        run: |
+          printf '%s\n' "$HOME/.bun/bin" "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          printf 'CARGO_TARGET_DIR=%s/omp-slim-rust-checks\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          mkdir -p dist/validation/rust
+
+      - name: Restore dependency and Rust check caches
+        id: rust-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/omp-slim-rust-checks
+          key: slim-rust-ubuntu24-ci-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', '.cargo/**', 'rust-toolchain.toml', 'scripts/run-rs-task.ts', '.config/nextest.toml') }}
+          restore-keys: |
+            slim-rust-ubuntu24-ci-v1-
+
+      - name: Install pinned toolchains and dependencies
+        shell: bash
+        run: bash scripts/slim/bootstrap.sh 2>&1 | tee dist/validation/rust/bootstrap.log
+
+      - name: Install nextest
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-nextest@0.9.151
+
+      - name: Check Rust formatting and lint
+        shell: bash
+        run: bun run check:rs 2>&1 | tee dist/validation/rust/check.log
+
+      - name: Test Rust workspace and doctests
+        shell: bash
+        run: bun run test:rs 2>&1 | tee dist/validation/rust/tests.log
+
+      - name: Preserve Rust check caches
+        if: ${{ !cancelled() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/omp-slim-rust-checks
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+
+      - name: Record source and toolchain
+        if: always()
+        shell: bash
+        run: |
+          {
+            printf 'Source: %s\n' "$GITHUB_SHA"
+            git status --short
+            rustc --version
+            cargo nextest --version
+          } > dist/validation/rust/source.txt
+
+      - name: Upload Rust validation evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: omp-slim-rust-checks-${{ github.sha }}
+          retention-days: 7
+          path: dist/validation/rust/
