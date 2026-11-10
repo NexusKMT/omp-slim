@@ -6,7 +6,6 @@ import type { AssistantMessage, ImageContent, Message, Model, SimpleStreamOption
 import { isRecord, logger } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { ModelRegistry } from "../config/model-registry";
-import { formatModelString } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import { InternalUrlRouter, type LocalProtocolOptions } from "../internal-urls";
 import { deobfuscateSessionContext, obfuscateMessages } from "../secrets/message-transform";
@@ -307,7 +306,7 @@ export class SessionProviderBoundary {
 		return normalizeModelContextImages(images, { model: this.#host.model() });
 	}
 
-	/** Builds a hidden vision-model description for attachments sent to a text-only model. */
+	/** Saves attachments for text-only models and records how to read them after a model change. */
 	async buildImageDescriptionNotice(
 		normalizedImages: ImageContent[],
 		signal?: AbortSignal,
@@ -320,19 +319,12 @@ export class SessionProviderBoundary {
 			blocks = await describeAttachedImagesForTextModel(
 				normalizedImages,
 				{
-					activeModel: model,
-					modelRegistry: this.#host.modelRegistry,
-					settings: this.#host.settings,
 					localProtocolOptions: this.#host.localProtocolOptions(),
-					activeModelString: formatModelString(model),
-					telemetryConfig: this.#host.agent.telemetry,
-					sessionId: this.#host.sessionId(),
-					costGate: this.#host.costGate?.(),
 				},
 				signal,
 			);
 		} catch (error) {
-			logger.warn("image attachment vision fallback failed; image left undescribed", {
+			logger.warn("image attachment could not be saved for the text-only model", {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return undefined;

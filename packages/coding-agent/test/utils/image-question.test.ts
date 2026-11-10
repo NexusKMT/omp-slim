@@ -35,22 +35,24 @@ function makeSession(active: Model<Api>, available: Model<Api>[]): ToolSession {
 			getAvailable: () => available,
 		} as unknown as NonNullable<ToolSession["modelRegistry"]>,
 		getModelString: () => `${active.provider}/${active.id}`,
+		getActiveModel: () => active,
 		getActiveModelString: () => `${active.provider}/${active.id}`,
 	} as unknown as ToolSession;
 }
 
 describe("resolveImageQuestionModel wire truth (#9697)", () => {
-	it("skips a wire-stripped model that declares image input", () => {
+	it("rejects a wire-stripped current model even when another vision model is available", () => {
 		const stripped = makeProxyModel("deepseek-v4-flash", { stripImageInput: true });
 		const vision = makeProxyModel("qwen-vl", { stripImageInput: false });
-		const resolved = resolveImageQuestionModel(makeSession(stripped, [stripped, vision]));
-		expect(resolved.model.id).toBe("qwen-vl");
+		expect(() => resolveImageQuestionModel(makeSession(stripped, [stripped, vision]))).toThrow(
+			"does not support image input",
+		);
 	});
 
 	it("throws instead of returning the stripped model when nothing else can see", () => {
 		const stripped = makeProxyModel("deepseek-v4-flash", { stripImageInput: true });
 		expect(() => resolveImageQuestionModel(makeSession(stripped, [stripped]))).toThrow(
-			"Resolved model myproxy/deepseek-v4-flash does not support image input.",
+			"Current model myproxy/deepseek-v4-flash does not support image input.",
 		);
 	});
 });
@@ -77,14 +79,7 @@ describe("askImageQuestion cost cap", () => {
 		const image = { resolvedPath: "/x.png", mimeType: "image/png", data: "AAAA", textNote: "", bytes: 3 };
 
 		const refused = await rejectionOf(
-			askImageQuestion(
-				session,
-				{ model, selectedPattern: "myproxy/vision" } as ResolvedImageQuestionModel,
-				image,
-				"what?",
-				undefined,
-				completeImpl,
-			),
+			askImageQuestion(session, { model } as ResolvedImageQuestionModel, image, "what?", undefined, completeImpl),
 		);
 
 		expect(refused).toBeInstanceOf(CostCapError);

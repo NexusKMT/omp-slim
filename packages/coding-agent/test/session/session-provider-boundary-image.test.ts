@@ -64,7 +64,7 @@ describe("buildImageDescriptionNotice wire truth (#9697)", () => {
 			image,
 		]);
 		expect(notice).toBeDefined();
-		expect(JSON.stringify(notice)).toContain("No vision-capable model");
+		expect(JSON.stringify(notice)).toContain("current model does not support image input");
 
 		const optedOut = makeProxyModel("deepseek-v4-flash", { stripImageInput: false });
 		const silent = await new SessionProviderBoundary(makeHost(optedOut, testDir)).buildImageDescriptionNotice([

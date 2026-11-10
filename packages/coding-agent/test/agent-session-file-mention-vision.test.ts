@@ -1,5 +1,5 @@
 /**
- * `@image.png` mentions are image attachments: with `images.describeForTextModels`
+ * `@image.png` mentions are image attachments: text-only sessions receive saved-path notices
  * a text-only model must receive the vision-role description, same as images sent
  * as prompt content (#16853).
  */

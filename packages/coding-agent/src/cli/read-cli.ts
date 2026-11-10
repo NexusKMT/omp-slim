@@ -7,6 +7,7 @@
  */
 import { getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import { resolvePrimaryModelSelection } from "../config/model-resolver";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { initializeWithSettings } from "../discovery";
@@ -91,13 +92,7 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 			return mcpManager;
 		});
 
-		// `read <image>?q=<question>` delegates to a vision model, and X URLs read
-		// through Grok's X tools; both need a model registry to resolve models and
-		// fetch credentials. The lightweight session above omits it (other reads
-		// never touch a model), so build one on demand — otherwise image questions
-		// abort with "Model registry is unavailable for image questions." before
-		// resolving anything (issue #11338), and X reads report missing xAI
-		// credentials.
+		// Explicit image questions and X reads use only the configured primary model.
 		const urlTarget = parseReadUrlTarget(cmd.path);
 		if (splitImageQuestionTarget(cmd.path).question || (urlTarget && parseXUrl(urlTarget.path))) {
 			authStorage ??= await discoverAuthStorage(undefined, { settings });
@@ -105,6 +100,8 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 			await modelRegistry.hydrateCredentialScopedModelCaches();
 			await loadCliExtensionProviders(modelRegistry, settings, cwd);
 			session.modelRegistry = modelRegistry;
+			const model = resolvePrimaryModelSelection(settings, modelRegistry.getAvailable())?.model;
+			session.getActiveModel = () => model;
 		}
 
 		const tool = wrapToolWithMetaNotice(new ReadTool(session));

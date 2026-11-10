@@ -1532,7 +1532,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						? "- Alpha: no"
 						: "- Alpha: unknown",
 				"",
-				`To analyze the image, read \`${imageQuestionPath}?q=<question>\` — the question is answered by a vision model and returned as text.`,
+				`To analyze the image, read \`${imageQuestionPath}?q=<question>\` — first select a primary model that supports images; the question then uses that current model.`,
 			];
 			return { content: [{ type: "text", text: metadataLines.join("\n") }], details: {}, sourcePath: absolutePath };
 		}

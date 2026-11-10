@@ -3,14 +3,7 @@ import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import { type Api, type AssistantMessage, completeSimple, type Model, type Usage } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { extractTextContent } from "../commit/utils";
-import {
-	expandRoleAlias,
-	extractExplicitThinkingSelector,
-	getModelMatchPreferences,
-	resolveModelFromString,
-} from "../config/model-resolver";
 import imageQuestionSystemPromptTemplate from "../prompts/tools/image-question-system.md" with { type: "text" };
-import { concreteThinkingLevel, resolveThinkingLevelForModel, toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";
 import type { ToolSession } from "../tools";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { LoadedImageInput } from "./image-loading";
@@ -21,7 +14,6 @@ import { cfgImagesQuestionTimeoutMs } from "../tools/settings";
 /** Vision-capable model selected for an explicit image question. */
 export interface ResolvedImageQuestionModel {
 	model: Model<Api>;
-	selectedPattern: string | undefined;
 }
 
 /** Text and accounting returned by one explicit image question. */
@@ -31,51 +23,16 @@ export interface ImageQuestionResult {
 	usage: Usage;
 }
 
-/** Resolve the vision model used by `read <image>?q=<question>`. */
+/** Explicit image questions use the current model, with no vision role or model fallback. */
 export function resolveImageQuestionModel(session: ToolSession): ResolvedImageQuestionModel {
-	const modelRegistry = session.modelRegistry;
-	if (!modelRegistry) {
-		throw new ToolError("Model registry is unavailable for image questions.");
-	}
-
-	const availableModels = modelRegistry.getAvailable();
-	if (availableModels.length === 0) {
-		throw new ToolError("No models available for image questions.");
-	}
-
-	const matchPreferences = getModelMatchPreferences(session.settings);
-	const resolvePattern = (pattern: string | undefined): Model<Api> | undefined => {
-		if (!pattern) return undefined;
-		const expanded = expandRoleAlias(pattern, session.settings);
-		return resolveModelFromString(expanded, availableModels, matchPreferences);
-	};
-
-	const activeModelPattern = session.getActiveModelString?.() ?? session.getModelString?.();
-	let model: Model<Api> | undefined;
-	let selectedPattern: string | undefined;
-	for (const pattern of ["@vision", "@default", activeModelPattern]) {
-		const resolved = resolvePattern(pattern);
-		if (resolved && sendsImageInputOnWire(resolved)) {
-			model = resolved;
-			selectedPattern = pattern;
-			break;
-		}
-	}
-
-	const activeProvider = resolvePattern(activeModelPattern)?.provider;
-	model ??= availableModels.find(
-		candidate => candidate.provider === activeProvider && sendsImageInputOnWire(candidate),
-	);
-	model ??= availableModels.find(candidate => sendsImageInputOnWire(candidate));
-	if (!model) {
-		const textOnly = resolvePattern("@vision") ?? resolvePattern("@default") ?? resolvePattern(activeModelPattern);
-		if (!textOnly) throw new ToolError("Unable to resolve a model for image questions.");
+	const model = session.getActiveModel?.();
+	if (!model) throw new ToolError("No current session model is selected for image questions.");
+	if (!sendsImageInputOnWire(model)) {
 		throw new ToolError(
-			`Resolved model ${textOnly.provider}/${textOnly.id} does not support image input. Configure a vision-capable model for modelRoles.vision.`,
+			`Current model ${model.provider}/${model.id} does not support image input. Select a primary model that supports images to analyze this file.`,
 		);
 	}
-
-	return { model, selectedPattern };
+	return { model };
 }
 
 /** Ask the resolved vision model a question about an already-loaded image. */
@@ -97,13 +54,12 @@ export async function askImageQuestion(
 	if (!modelRegistry) {
 		throw new ToolError("Model registry is unavailable for image questions.");
 	}
-	const availableModels = modelRegistry.getAvailable();
-	if (availableModels.length === 0) {
-		throw new ToolError("No models available for image questions.");
-	}
-
-	const { model, selectedPattern } = resolved;
-	const apiKey = await modelRegistry.getApiKey(model);
+	const current = resolveImageQuestionModel(session).model;
+	if (resolved.model !== current)
+		throw new ToolError("The current model changed before the image question started; retry the read.");
+	const model = current;
+	const sessionId = session.getSessionId?.() ?? undefined;
+	const apiKey = await modelRegistry.getApiKey(model, sessionId, { signal });
 	if (!apiKey) {
 		throw new ToolError(
 			`No API key available for ${model.provider}/${model.id}. Configure credentials for this provider or choose another vision-capable model.`,
@@ -120,19 +76,6 @@ export async function askImageQuestion(
 		const seconds = timeoutMs % 1000 === 0 ? `${timeoutMs / 1000}` : (timeoutMs / 1000).toFixed(1);
 		return `Image question timed out after ${seconds}s. Increase images.questionTimeoutMs (currently ${timeoutMs}ms; 0 disables) or check the vision model provider.`;
 	};
-
-	const configuredThinking = concreteThinkingLevel(
-		extractExplicitThinkingSelector(selectedPattern, session.settings, {
-			isLiteralModelId: (provider, id) => {
-				if (provider !== undefined) {
-					return availableModels.some(candidate => candidate.provider === provider && candidate.id === id);
-				}
-				const lowerId = id.toLowerCase();
-				return availableModels.some(candidate => candidate.id.toLowerCase() === lowerId);
-			},
-		}),
-	);
-	const reasoning = toReasoningEffort(resolveThinkingLevelForModel(model, configuredThinking));
 
 	session.costGate?.admit();
 	let response: AssistantMessage;
@@ -155,7 +98,6 @@ export async function askImageQuestion(
 			{
 				apiKey: modelRegistry.resolver(model, session.getSessionId?.() ?? undefined),
 				signal: effectiveSignal,
-				reasoning,
 			},
 			{ telemetry, oneshotKind: "image_question", completeImpl },
 		);

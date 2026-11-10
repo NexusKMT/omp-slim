@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type completeSimple, Effort, type ImageContent, type Model } from "@oh-my-pi/pi-ai";
+import { type completeSimple, type ImageContent, type Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ImageAttachmentEntry, ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
@@ -35,17 +35,9 @@ const textOnlyModel: Model<"openai-responses"> = {
 	input: ["text"],
 };
 
-const reasoningVisionModel: Model<"openai-responses"> = {
-	...visionModel,
-	id: "gpt-5-vision",
-	reasoning: true,
-	thinking: { mode: "effort", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
-};
-
 interface CreateSessionOptions {
 	availableModels?: Model<"openai-responses">[];
 	activeModel?: Model<"openai-responses">;
-	configureVisionRole?: boolean;
 	imageAttachments?: ImageAttachmentEntry[];
 }
 
@@ -64,9 +56,6 @@ function createSession(
 	cfgImagesAutoResize.set(settings, false);
 	const availableModels = options.availableModels ?? [model];
 	const activeModel = options.activeModel ?? model;
-	if (options.configureVisionRole !== false) {
-		settings.setModelRole("vision", `${model.provider}/${model.id}`);
-	}
 
 	const session: ToolSession = {
 		cwd,
@@ -234,44 +223,25 @@ describe("read image questions", () => {
 		expect(parts[0]?.mimeType).toBe("image/png");
 	});
 
-	it("forwards configured thinking effort", async () => {
-		const settings = Settings.isolated();
-		settings.setModelRole("vision", `${reasoningVisionModel.provider}/${reasoningVisionModel.id}:high`);
+	it("uses the exact current model instead of another available vision model", async () => {
+		const current = { ...visionModel, id: "current:image", baseUrl: "https://current.example/v1" };
 		const stub = createCompleteSimpleSuccessStub("Red");
-		const session = createSession(testDir, reasoningVisionModel, "test-key", settings, {
-			configureVisionRole: false,
-			availableModels: [reasoningVisionModel],
+		const session = createSession(testDir, current, "test-key", Settings.isolated(), {
+			availableModels: [visionModel, current],
 		});
-
 		await new ReadTool(session, stub.fn).execute("call", { path: `${imagePath}?q=What color?` });
-
-		const options = stub.calls[0]?.[2] as { reasoning?: string } | undefined;
-		expect(options?.reasoning).toBe("high");
+		expect(stub.calls[0]?.[0]).toBe(current);
 	});
 
-	it("selects case-insensitive unqualified literal vision ids without inventing effort", async () => {
-		for (const [id, selector] of [
-			["a:max", "a:max"],
-			["a:auto", "a:auto"],
-			["a:max", "A:max"],
-			["a:auto", "A:auto"],
-		]) {
-			const literalVisionModel = { ...reasoningVisionModel, id };
-			const settings = Settings.isolated();
-			settings.setModelRole("vision", selector);
-			const stub = createCompleteSimpleSuccessStub("Red");
-			const session = createSession(testDir, literalVisionModel, "test-key", settings, {
-				configureVisionRole: false,
-				availableModels: [literalVisionModel],
-			});
-
-			await new ReadTool(session, stub.fn).execute("call", { path: `${imagePath}?q=What color?` });
-
-			const selected = stub.calls[0]?.[0] as Model<"openai-responses"> | undefined;
-			const options = stub.calls[0]?.[2] as { reasoning?: unknown } | undefined;
-			expect(selected?.id).toBe(id);
-			expect(options?.reasoning).toBeUndefined();
-		}
+	it("does not use another available vision model when the current model is text-only", async () => {
+		const stub = createCompleteSimpleForbiddenStub();
+		const session = createSession(testDir, textOnlyModel, "test-key", Settings.isolated(), {
+			availableModels: [textOnlyModel, visionModel],
+		});
+		await expect(
+			new ReadTool(session, stub.fn).execute("call", { path: `${imagePath}?q=What color?` }),
+		).rejects.toThrow("does not support image input");
+		expect(stub.calls).toHaveLength(0);
 	});
 
 	it("maps a stalled vision request to the image question timeout", async () => {

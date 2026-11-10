@@ -1,6 +1,6 @@
 /**
  * `omp read <image>?q=<question>` delegates to a vision model, which requires a
- * model registry to resolve modelRoles.vision / @default and fetch credentials.
+ * model registry to resolve the configured primary model and fetch credentials.
  * The read CLI built a lightweight session with no registry, so the read tool
  * aborted with "Model registry is unavailable for image questions." before any
  * resolution (issue #11338). This drives the real `omp read` command in an
@@ -53,7 +53,10 @@ describe("omp read <image>?q=", () => {
 			fs.mkdirSync(path.join(project, ".omp"), { recursive: true });
 			// Bound the completion attempt so a dead endpoint aborts quickly instead
 			// of running the provider SDK's full connection backoff.
-			fs.writeFileSync(path.join(project, ".omp", "config.yml"), "images:\n  questionTimeoutMs: 3000\n");
+			fs.writeFileSync(
+				path.join(project, ".omp", "config.yml"),
+				"model: testvision/vmodel\nimages:\n  questionTimeoutMs: 3000\n",
+			);
 			fs.writeFileSync(path.join(agentDir, "models.yml"), MODELS_YML);
 			const pngPath = path.join(project, "test.png");
 			fs.writeFileSync(pngPath, Buffer.from(PNG_1X1, "base64"));
@@ -91,6 +94,7 @@ describe("omp read <image>?q=", () => {
 				expect(exitCode).not.toBe(0);
 				expect(output).not.toContain("Model registry is unavailable for image questions.");
 				expect(output).not.toContain("No models available for image questions.");
+				expect(output).not.toContain("No current session model");
 			} finally {
 				fs.rmSync(runnerPath, { force: true });
 			}
