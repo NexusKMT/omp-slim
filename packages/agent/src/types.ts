@@ -20,8 +20,6 @@ import type {
 	ToolResultProviderMetadata,
 	TSchema,
 } from "@oh-my-pi/pi-ai";
-import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
-import type { HarmonyAuditEvent } from "@oh-my-pi/pi-ai/utils/harmony-leak";
 import type { AppendOnlyContextManager } from "./append-only-context";
 import type { AgentRunCoverage, AgentRunSummary } from "./run-collector";
 import type { SentToolDefinitions } from "./sent-tool-definitions";
@@ -328,14 +326,6 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	waitForSteeringMessages?: (signal?: AbortSignal) => Promise<void>;
 
 	/**
-	 * Called when live steering dequeues messages via {@link getSteeringMessages}
-	 * for the response being streamed. The loop records them in the transcript
-	 * after that response (or its tool batch); an abort before then leaves them
-	 * unrecorded for the host to requeue.
-	 */
-	onLiveSteeringTaken?: (messages: AgentMessage[]) => void;
-
-	/**
 	 * Peeks whether IRC messages should interrupt an interruptible waiting tool.
 	 *
 	 * Uses the same delivery rules as steering: the poll is non-consuming, only
@@ -485,33 +475,6 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 */
 	pruneToolDescriptions?: boolean;
 	/**
-	 * Owned tool calling dialect.
-	 *
-	 * Undefined keeps provider-native tool calling. A dialect value sends no
-	 * native `tools`, forces `toolChoice` off, appends that dialect's tool catalog
-	 * instructions, re-encodes prior tool calls/results as text, and parses the
-	 * model's text output back into canonical `toolCall` blocks.
-	 */
-	dialect?: Dialect;
-	/**
-	 * Per-call owned-dialect resolver, read once per LLM call with the model
-	 * being requested. Authoritative when set: its return value (including
-	 * `undefined` = native tool calling) replaces the static {@link dialect}.
-	 */
-	getDialect?: (model: Model) => Dialect | undefined;
-	/**
-	 * When owned (in-band) tool calling is active and the model starts
-	 * fabricating a tool result inside its own turn, control how the loop reacts:
-	 * - `true` (default): abort the provider request immediately so it stops
-	 *   generating the hallucinated continuation (cheaper, lower latency).
-	 * - `false`: let the request finish and silently discard everything past the
-	 *   fabrication boundary (keeps the connection alive but pays for the tokens
-	 *   the model spends on the discarded tail).
-	 * Only meaningful when {@link dialect} (or `PI_DIALECT`) selects an
-	 * owned dialect; native tool calling never fabricates results in text.
-	 */
-	abortOnFabricatedToolResult?: boolean;
-	/**
 	 * Append-only context mode — stabilizes system prompt + tool spec bytes
 	 * across turns so provider prefix caches hit at maximum rate.
 	 *
@@ -526,11 +489,6 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Callers may abort synchronously to stop consuming buffered provider events.
 	 */
 	onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
-
-	/**
-	 * Called when GPT-5 Harmony protocol leakage is detected and mitigated.
-	 */
-	onHarmonyLeak?: (event: HarmonyAuditEvent) => void | Promise<void>;
 
 	/**
 	 * Dynamic tool-choice directive, resolved once per turn. Returns a hard
@@ -1033,7 +991,7 @@ export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessag
  */
 export interface AgentState {
 	systemPrompt: string[];
-	model: Model;
+	model: Model | undefined;
 	thinkingLevel?: Effort;
 	disableReasoning?: boolean;
 	tools: AgentTool<any>[];

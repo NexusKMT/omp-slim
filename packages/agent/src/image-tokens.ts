@@ -1,55 +1,16 @@
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import {
-	type ImageSize,
-	type ImageTokenization,
-	imageTokens,
-	resolveImageTokenization,
-} from "@oh-my-pi/pi-catalog/compat/image-tokenization";
 import { parseImageMetadata } from "@oh-my-pi/pi-utils";
 
-/**
- * Dimension-based image token estimates shared by the local context counter
- * ({@link Tokenizer.countMessage}) and the native remote-compaction fit probe.
- * Both sides must price the same image the same way: when they disagreed
- * (1.2k flat locally vs a 12k flat worst case remotely) an image-heavy session
- * stayed under the local compaction trigger yet was refused as over-window by
- * the remote probe. Both price with the reading model's catalog image rule
- * ({@link Tokenizer.imageTokens}); a reader without one falls back to the
- * OpenAI Responses wire's rule (GPT-5.5's 32px patches, a per-detail pixel
- * limit and patch budget, x1.2 multiplier).
- */
-
-/** OpenAI image `detail` values; `undefined` means the provider default (`auto`). */
+/** Pixel dimensions read from ordinary image headers. */
+export interface ImageSize {
+	width: number;
+	height: number;
+}
 export type ImageDetail = ImageContent["detail"];
 
-export type { ImageSize };
-
-// Larger than every detail level's pixel limit, so an unknown size charges
-// the level's full patch budget.
-const UNKNOWN_SIZE: ImageSize = { width: 65_535, height: 65_535 };
-
-let wireRule: ImageTokenization | undefined;
-
-/** The OpenAI Responses wire's image rule, resolved from the catalog once. */
-function openAiWireRule(): ImageTokenization {
-	if (wireRule) return wireRule;
-	const rule = resolveImageTokenization({ api: "openai-responses" });
-	if (!rule) throw new Error("The catalog has no image-tokenization rule for the openai-responses wire");
-	wireRule = rule;
-	return rule;
-}
-
-/**
- * Estimated input tokens for one image under `rule`, the OpenAI Responses
- * wire's by default. Unknown dimensions (undecodable data, remote URLs,
- * provider file ids) charge the rule's most expensive size.
- */
-export function estimateImageTokens(
-	size: ImageSize | null | undefined,
-	detail?: ImageDetail,
-	rule: ImageTokenization = openAiWireRule(),
-): number {
-	return imageTokens(rule, size && size.width > 0 && size.height > 0 ? size : UNKNOWN_SIZE, detail);
+/** Conservative request budget without guessing a model vendor's billing rules. */
+export function estimateImageTokens(_size: ImageSize | null | undefined, detail?: ImageDetail): number {
+	return detail === "low" ? 1024 : 5024;
 }
 
 // Enough decoded bytes to reach a JPEG SOF marker behind typical EXIF/ICC
