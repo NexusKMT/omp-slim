@@ -563,7 +563,7 @@ FAKE_SERVER = textwrap.dedent(
         elif command_type == "handoff":
             data = None if command.get("customInstructions") == "decline" else {}
             print(json.dumps({"id": request_id, "type": "response", "command": "handoff", "success": True, "data": data}), flush=True)
-        elif command_type in {"predict_word", "slow_command"}:
+        elif command_type == "slow_command":
             time.sleep(0.6)
             respond(request_id, command_type, {"suffix": "ld"})
         elif command_type in {"prompt", "abort_and_prompt"}:
@@ -1220,9 +1220,8 @@ class RpcClientTests(unittest.TestCase):
         task = phases[0].tasks[0]
         self.assertEqual((task.status, task.blocker), ("blocked", "waiting on review"))
 
-    def test_predict_word_outlasts_request_timeout(self) -> None:
+    def test_raw_request_respects_request_timeout(self) -> None:
         with self.make_client(request_timeout=0.3) as client:
-            self.assertEqual(client.predict_word("hello wor", 9), "ld")
             with self.assertRaises(RpcTimeoutError):
                 client.request_raw("slow_command")
 

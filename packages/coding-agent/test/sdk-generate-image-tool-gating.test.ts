@@ -14,12 +14,8 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
-// Regression for issue #5305: image-gen is registered as a custom tool, and
-// custom tools are force-activated regardless of the `toolNames` filter. Before
-// the fix, `generate_image` survived `--no-tools` (an empty `toolNames`), any
-// explicit whitelist that omitted it, and had no `generate_image.enabled`
-// settings toggle. The SDK must honor the whitelist and the new setting.
-describe("generate_image tool gating", () => {
+// Custom tool visibility and device mounting are independent of removed image generation.
+describe("SDK custom tool gating", () => {
 	let registryDir: string;
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
@@ -126,41 +122,6 @@ describe("generate_image tool gating", () => {
 		expect(names).not.toContain("generate_image");
 	});
 
-	it("respects generate_image.enabled=false even when requested", async () => {
-		const names = await activeToolNames(Settings.isolated({ "generate_image.enabled": false }), [
-			"read",
-			"generate_image",
-		]);
-		expect(names).not.toContain("generate_image");
-	});
-
-	it("includes generate_image top-level when explicitly requested and enabled", async () => {
-		const names = await activeToolNames(Settings.isolated({ "generate_image.enabled": true }), [
-			"read",
-			"generate_image",
-		]);
-		expect(names).toContain("generate_image");
-	});
-
-	it("exposes generate_image as an xd:// device (not top-level) in a default session", async () => {
-		// Default session (no explicit --tools) with tools.xdev on: image-gen is a
-		// discoverable custom tool, so it mounts as an xd:// device instead of
-		// shipping its schema top-level.
-		const { session } = await createAgentSession({
-			...startupShortcuts(),
-			cwd: registryDir,
-			agentDir: registryDir,
-			modelRegistry,
-			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "generate_image.enabled": true }),
-			model: getBundledModel("openai", "gpt-4o-mini"),
-			disableExtensionDiscovery: true,
-		});
-		sessions.push(session);
-		expect(session.getActiveToolNames()).not.toContain("generate_image");
-		expect(session.getXdevToolEntries().map(entry => entry.name)).toContain("generate_image");
-	});
-
 	it("mounts ambient tools across runtime selection with a device-only write", async () => {
 		const ambientTool = customTool("ambient_search");
 		const session = await sessionWithCustomTools(["read"], [ambientTool]);
@@ -221,15 +182,14 @@ describe("generate_image tool gating", () => {
 			agentDir: registryDir,
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "generate_image.enabled": true }),
+			settings: Settings.isolated({}),
 			model: getBundledModel("openai", "gpt-4o-mini"),
 			disableExtensionDiscovery: true,
-			toolNames: ["read", "generate_image"],
+			toolNames: ["read"],
 			customTools: [mcpTool],
 		});
 		sessions.push(session);
 
-		expect(session.getActiveToolNames()).toContain("generate_image");
 		expect(session.getActiveToolNames()).toContain("write");
 		expect(session.getActiveToolNames()).not.toContain(mcpTool.name);
 		expect(session.getXdevToolEntries().map(entry => entry.name)).toContain(mcpTool.name);
@@ -371,7 +331,7 @@ describe("generate_image tool gating", () => {
 			agentDir: registryDir,
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "plan.enabled": false, "generate_image.enabled": false }),
+			settings: Settings.isolated({ "plan.enabled": false }),
 			model: getBundledModel("openai", "gpt-4o-mini"),
 			disableExtensionDiscovery: true,
 			enableMCP: false,

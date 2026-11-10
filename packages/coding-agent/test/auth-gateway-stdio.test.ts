@@ -10,19 +10,23 @@ const models = [fast, mini, vertex];
 const registry = { getAll: () => models, getAvailable: () => models };
 const key = (model: typeof fast) => `${model.provider}/${model.id}`;
 
-describe("auth-gateway stdio model selectors", () => {
-	it("skips comma entries that resolve to nothing and follows the chosen role's fallback chain", () => {
-		const settings = Settings.isolated({ "retry.fallbackChains": { smol: [key(vertex), key(fast)] } });
-		settings.setModelRole("smol", key(fast));
-		expect(selectorCandidates("@commit,@smol", settings, registry)).toEqual([fast, vertex]);
+describe("auth-gateway stdio primary model", () => {
+	it("only accepts the configured primary model identity", () => {
+		const settings = Settings.isolated({});
+		settings.setModel(key(fast));
+		expect(selectorCandidates(key(fast), settings, registry)).toEqual([fast]);
+		expect(selectorCandidates(fast.id, settings, registry)).toEqual([fast]);
+		expect(selectorCandidates(key(mini), settings, registry)).toEqual([]);
 	});
 
-	it("follows a concrete model's own chain and stops at the first resolvable entry", () => {
-		const settings = Settings.isolated({ "retry.fallbackChains": { [key(mini)]: [key(vertex)] } });
-		expect(selectorCandidates(`${key(mini)},${key(fast)}`, settings, registry)).toEqual([mini, vertex]);
+	it("rejects role and comma-list selection without trying alternatives", () => {
+		const settings = Settings.isolated({});
+		settings.setModel(key(fast));
+		expect(selectorCandidates("@commit,@smol", settings, registry)).toEqual([]);
+		expect(selectorCandidates(`${key(mini)},${key(fast)}`, settings, registry)).toEqual([]);
 	});
 
-	it("offers nothing when no entry resolves", () => {
-		expect(selectorCandidates("@commit", Settings.isolated({}), registry)).toEqual([]);
+	it("does not select a model when none is configured", () => {
+		expect(selectorCandidates(key(fast), Settings.isolated({}), registry)).toEqual([]);
 	});
 });

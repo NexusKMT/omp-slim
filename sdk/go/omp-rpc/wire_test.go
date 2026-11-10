@@ -278,16 +278,6 @@ func TestResultDecoding(t *testing.T) {
 	transport := &fakeTransport{}
 	commands := Commands{Transport: transport}
 
-	transport.data = json.RawMessage(`{"suffix":"ld"}`)
-	suffix, err := commands.PredictWord(ctx, PredictWordCommand{Text: "hello wor", Cursor: 9})
-	if err != nil || suffix == nil || *suffix != "ld" || transport.timeout != 155*time.Second {
-		t.Fatalf("predict_word: %v %v %v", suffix, err, transport.timeout)
-	}
-	transport.data = json.RawMessage(`{"suffix":null}`)
-	if suffix, err = commands.PredictWord(ctx, PredictWordCommand{}); err != nil || suffix != nil {
-		t.Fatalf("null suffix: %v %v", suffix, err)
-	}
-
 	transport.data = json.RawMessage(`{"cancelled":false}`)
 	if cancelled, err := commands.CancelSubagent(ctx, CancelSubagentCommand{SubagentID: "x"}); err != nil || cancelled {
 		t.Fatalf("cancel_subagent: %v %v", cancelled, err)

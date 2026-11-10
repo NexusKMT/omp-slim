@@ -3,9 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, setSystemTime, vi } from "
 import { AuthStorage, type FetchImpl, type Model, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { cfgModelProviderOrder } from "@oh-my-pi/pi-coding-agent/config/model-settings";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { rankXAIProviders, searchXAI, XAIProvider } from "@oh-my-pi/pi-coding-agent/web/search/providers/xai";
+import { searchXAI, XAIProvider } from "@oh-my-pi/pi-coding-agent/web/search/providers/xai";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
 
 type CapturedRequest = {
@@ -237,23 +235,6 @@ describe("xAI web search provider", () => {
 			]);
 		} finally {
 			setSystemTime();
-		}
-	});
-
-	it("ranks the xai-oauth login above an xai API key unless modelProviderOrder says otherwise", async () => {
-		const settings = await Settings.init({ inMemory: true });
-		try {
-			const engine = { ...xaiModel("parallel", "web"), webSearch: undefined };
-			const chain = [xaiModel("grok-4.5", "xai"), engine, xaiModel("grok-4.5", "xai-oauth")];
-			const order = () => rankXAIProviders(chain, model => model, settings).map(model => model.provider);
-
-			// xAI entries swap within their slots; the engine between them stays put.
-			expect(order()).toEqual(["xai-oauth", "web", "xai"]);
-
-			cfgModelProviderOrder.set(settings, ["xai"]);
-			expect(order()).toEqual(["xai", "web", "xai-oauth"]);
-		} finally {
-			resetSettingsForTest();
 		}
 	});
 

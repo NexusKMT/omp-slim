@@ -28,7 +28,7 @@ class RecordingProvider extends SearchProvider {
 	}
 }
 
-describe("default web chain", () => {
+describe("single-model web search", () => {
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
 	let attempted: string[];
@@ -70,57 +70,38 @@ describe("default web chain", () => {
 	}
 
 	it.each([
-		["anthropic", "claude-sonnet-4-5", "claude-haiku-4-5"],
-		["openai", "gpt-6.1-sol", "gpt-6-luna"],
-		["openai-codex", "gpt-6.1-sol", "gpt-6-luna"],
-	])("keeps hosted search and its fallback on the session's %s provider", async (host, sessionId, searchId) => {
-		await runSearchQuery(
-			{ query: "anything" },
-			{ authStorage, modelRegistry, sessionModel: sessionModel(host, sessionId) },
-		);
-
-		// The cheaper same-provider swap runs first; its failure falls back to the session model as-is.
-		expect(attempted.slice(0, 3)).toEqual(["web/parallel", `${host}/${searchId}`, `${host}/${sessionId}`]);
-		expect(attempted.filter(selector => !selector.startsWith("web/"))).toEqual([
-			`${host}/${searchId}`,
-			`${host}/${sessionId}`,
-		]);
-		for (const paid of ["web/perplexity", "web/tavily", "web/kagi", "web/brave", "web/zai"]) {
-			expect(attempted).not.toContain(paid);
-		}
-	});
-
-	it("advances past a failing self-targeted hosted model without retrying its registry instance", async () => {
-		const active = { ...sessionModel("openai-codex", "gpt-6-luna") };
-
-		await runSearchQuery({ query: "anything" }, { authStorage, modelRegistry, sessionModel: active });
-
-		expect(attempted.slice(0, 3)).toEqual(["web/parallel", "openai-codex/gpt-6-luna", "web/exa"]);
-		expect(attempted.filter(selector => !selector.startsWith("web/"))).toEqual(["openai-codex/gpt-6-luna"]);
-	});
-
-	it("uses the session model as-is when its host does not expose the swap target", async () => {
-		const proxied = { ...sessionModel("anthropic", "claude-sonnet-4-5"), webSearchModel: "not-exposed-here" };
-
-		await runSearchQuery(
-			{ query: "anything", model: "web/hosted" },
-			{ authStorage, modelRegistry, sessionModel: proxied },
-		);
-
-		expect(attempted).toEqual(["anthropic/claude-sonnet-4-5"]);
-	});
-
-	it("skips web/hosted when the session model has no search grounding", async () => {
-		const realtime = sessionModel("openai", "gpt-realtime-2.1");
-		expect(realtime.webSearch).toBeUndefined();
-
-		await runSearchQuery({ query: "anything" }, { authStorage, modelRegistry, sessionModel: realtime });
-
-		expect(attempted.every(selector => selector.startsWith("web/"))).toBe(true);
+		["anthropic", "claude-sonnet-4-5"],
+		["openai", "gpt-6.1-sol"],
+		["openai-codex", "gpt-6.1-sol"],
+	])("uses only the current %s chat model even when a cheaper search model exists", async (host, id) => {
+		const current = sessionModel(host, id);
+		await runSearchQuery({ query: "anything" }, { authStorage, modelRegistry, sessionModel: current });
+		expect(attempted.filter(selector => !selector.startsWith("web/"))).toEqual([`${host}/${id}`]);
+		expect(attempted).not.toContain("web/perplexity");
 		expect(attempted).not.toContain("web/hosted");
 	});
 
-	it("rejects a grounded answer without sources so a tool-dropping host cannot pass off a plain reply", async () => {
+	it("never injects xAI for an X query when the current model is not xAI", async () => {
+		await runSearchQuery({ query: "tern from:jack site:x.com" }, { authStorage, modelRegistry });
+		expect(attempted.length).toBeGreaterThan(0);
+		expect(attempted.every(selector => selector.startsWith("web/"))).toBe(true);
+		expect(attempted).not.toContain("web/perplexity");
+	});
+
+	it("uses ordinary HTTP search when the current model has no hosted search", async () => {
+		const current = { ...sessionModel("openai", "gpt-6.1-sol"), webSearch: undefined };
+		await runSearchQuery({ query: "anything" }, { authStorage, modelRegistry, sessionModel: current });
+		expect(attempted.every(selector => selector.startsWith("web/"))).toBe(true);
+	});
+
+	it("rejects retired model overrides rather than running another model", async () => {
+		await expect(
+			runSearchQuery({ query: "anything", model: "xai/grok-4.3" } as never, { authStorage, modelRegistry }),
+		).rejects.toThrow("model overrides are not supported");
+		expect(attempted).toEqual([]);
+	});
+
+	it("rejects a grounded answer without sources and retains the failure with HTTP fallback", async () => {
 		vi.spyOn(provider, "getGroundedSearchProvider").mockResolvedValue({
 			id: "anthropic",
 			label: "Anthropic",
@@ -128,19 +109,10 @@ describe("default web chain", () => {
 			isExplicitlyAvailable: () => true,
 			search: async () => ({ provider: "anthropic", answer: "from weights", sources: [] }),
 		});
-
 		const result = await runSearchQuery(
-			{ query: "anything", model: "web/hosted" },
+			{ query: "anything" },
 			{ authStorage, modelRegistry, sessionModel: sessionModel("anthropic", "claude-sonnet-4-5") },
 		);
-
-		expect(result.details.error).toContain("returned no sources");
-	});
-
-	it("fails an explicit web/hosted selection outside a session instead of substituting another engine", async () => {
-		const result = await runSearchQuery({ query: "anything", model: "web/hosted" }, { authStorage, modelRegistry });
-
-		expect(attempted).toEqual([]);
-		expect(result.details.error).toContain("no web search grounding");
+		expect(result.details.failures?.[0]?.reason).toContain("returned no sources");
 	});
 });

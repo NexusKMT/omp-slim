@@ -166,7 +166,7 @@ Enabled extension preludes add globals (such as `archive`) with documentation at
 
 ### `judge()` and judgment batches
 
-`await judge(state, questions)` returns answers keyed by question id. State is a nonempty string, JSON object, or JSON array. Questions have `type: "choice"`, `"bool"`, or `"score"` plus nonempty `instructions`: choice needs at least two label/rubric entries; score needs at least two ordered level descriptions; bool returns a probability in `.bool`, not a boolean. The session's `judge` role resolves the backend.
+`await judge(state, questions)` returns answers keyed by question id. State is a nonempty string, JSON object, or JSON array. Questions have `type: "choice"`, `"bool"`, or `"score"` plus nonempty `instructions`: choice needs at least two label/rubric entries; score needs at least two ordered level descriptions; bool returns a probability in `.bool`, not a boolean. The current session chat model answers every explicit judgment; no native, local, or alternate judge is selected. Image judgments require that same model to accept images. These calls incur the current model's normal request cost.
 
 For many states, Python's `await judge_batch(states, questions, concurrency=32, retries=1, min_ok=1, intent=None)` or JS's `await judgeBatch(states, questions, { concurrency?, retries?, minOk?, intent? })` creates a host-owned batch. States are a list/array (index keys) or keyed object. `await b.drain(...)` pulls newly settled `(key, item)` pairs with `item.answers` or `item.error`; Python takes `timeout` directly, JS takes `{ timeout }`. Item failures are retained, while whole-run failure raises after the drain cursor is exhausted. `status()`, `results()`, `failed()`, `cancel()`, and `close()` inspect/control the batch. Batches outlive cells and kernel resets; `judge_batch.attach(id)` / `judgeBatch.attach(id)` reconnects an owning session until close or owner disposal. Completion and judgment requests share a process-wide 32-request semaphore.
 
@@ -202,22 +202,19 @@ bare strings for text-only results without details.
 
 A stateless, tool-free one-shot model call that returns a `CompletionHandle` immediately:
 
-- JS: `completion(prompt, { model?, system?, schema? })`; Python: keyword form with `model`, `system`, and `schema`.
-- `model`: `"smol"`, `"default"`, or `"slow"` tier; default is the active/default tier.
-- For the `"slow"` tier, configured role selectors honor explicit concrete effort suffixes including `:max` and `:off`; `:max` is clamped to the target model's supported levels. Bare, `:auto`, and `:inherit` primary selectors retain tier-default behavior, including recomputing the default for root fallback models. With an explicit concrete or `:off` primary effort, bare and `:auto` root fallbacks inherit that effective setting and clamp it for their model. Nested fallbacks inherit their immediate parent candidate's effective setting. An explicit concrete effort or `:off` fallback suffix overrides inheritance. `"smol"` and `"default"` retain their existing provider-option behavior.
-- Effort extraction follows the shared selector grammar: strict suffixes such as `:low` and `:off` take precedence even when model matching retains that suffix in an exact model ID. Literal-ID protection applies to the ambiguous `:max` and `:auto` suffixes, with case-insensitive provider and model ID matching.
-- `attempts` lists the fallback candidates tried so far, in order, without waiting: JS `await handle.attempts()`, Python `handle.attempts`. Each entry is `{ model, effort, outcome, error? }`: `effort` is the reasoning effort sent (`"off"` = disabled, `null` = provider default); `outcome` is `running`, `no-credentials`, `succeeded`, `failed`, or `cancelled`. The `succeeded` entry is the model that answered.
-- `schema`: JSON Schema for a synthetic `respond` tool; `.wait()` then returns parsed data.
-- Unresolved tier and invalid arguments fail handle allocation; JS's immediate pending-handle wrapper exposes that rejection when awaited/used. Missing credentials, error/abort stops, empty output, and invalid structured output surface from `.wait()`.
-- Handles are process-local, owned by the calling agent, and evicted 30 minutes after settling (or when the owner session ends).
+- JS: `completion(prompt, { system?, schema? })`; Python: `completion(prompt, *, system=None, schema=None)`.
+- Every request uses the exact current session model. The former `model` argument and smol/default/slow tiers are removed; supplying a model override fails before a request starts.
+- A missing current model fails handle allocation. A model error or missing credentials surfaces through `.wait()` without switching to another model.
+- `attempts` reports the current request without waiting: JS `await handle.attempts()`, Python `handle.attempts`. Entries include the model, effective effort, outcome, and any error.
+- `schema` supplies JSON Schema for a synthetic `respond` tool; `.wait()` returns parsed data.
+- Handles preserve cancellation, cost accounting, shared request concurrency, and idle-watchdog suspension during waits. They belong to the calling session and expire 30 minutes after settling or when the owner session ends.
 
 ### `agent()`
 
 Registers one background subagent job and returns an `AgentHandle` immediately:
 
-- JS: `await agent(prompt, { agent?, label?, schema?, schemaMode?, isolated?, apply?, merge?, tools?, model? })`; Python uses keyword arguments (`schema_mode`).
+- JS: `await agent(prompt, { agent?, label?, schema?, schemaMode?, isolated?, apply?, merge?, tools? })`; Python uses keyword arguments (`schema_mode`).
 - Preflight (spawn policy, unknown agent, `task.maxRecursionDepth`, hard turn budget, plan-mode isolation controls, unknown `tools` names) fails handle allocation; Python raises directly, JS's pending handle rejects when awaited/used. Execution failures surface from `.wait()`.
-- `agent` defaults from the current spawn policy; `model` is the [per-call model](../task-agent-discovery.md#per-call-model): one exact operator-approved `provider/model-id[@upstream][:level]`, accepted when `task.perCallModel` is `eval` or `on`, rejected for an agent with a `task.agentModelOverrides` entry or a level-tagged `^provider/model:level` mention agent. `@upstream` pins an aggregator route and is part of the model identity. A workpool applies it to each worker's first turn (including every fresh worker); follow-up turns reuse that session. `schema` overrides agent/session schemas; `schemaMode`/`schema_mode` chooses `permissive` or `strict`.
 - `isolated` requests isolation. `apply` controls whether captured changes are integrated; `merge=false` selects patch mode while the normal setting controls branch mode.
 - `tools`: names of kernel-defined tools (see below) the child may call; each call executes inside the caller's kernel.
 - Handle surface: `.id`, `.agent`, `.handle` (`agent://<id>`), `.status`, `.done()`, `.wait(timeout?)`, `.send(message)`, `.cancel()`, `.output()`. Python handles are awaitable; JavaScript uses `await handle.wait()`.

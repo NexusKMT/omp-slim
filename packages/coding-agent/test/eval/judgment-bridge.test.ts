@@ -10,7 +10,6 @@ import { EVAL_HANDLE_CONCURRENCY, evalRequestSlots } from "../../src/eval/comple
 import { JAVASCRIPT_PRELUDE_SOURCE } from "../../src/eval/js/shared/prelude";
 import type { ToolSession } from "../../src/tools";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
-import { asGlobalFetch } from "../helpers/fetch-mock";
 import { rejectionOf } from "../helpers/rejection";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { CostCapError, CostGate } from "../../src/session/cost-gate";
@@ -33,27 +32,6 @@ const VISION: Model<Api> = {
 	input: ["text", "image"],
 } as Model<Api>;
 
-const JEV_PREVIEW: Model<Api> = {
-	...SMOL,
-	id: "jev-preview",
-	name: "JEV Preview",
-	api: "typesafe",
-	provider: "typesafe",
-	baseUrl: "https://judge.example.test/",
-	kind: "judge",
-} as Model<Api>;
-
-const OPENAI_DECISIONS: Model<Api> = {
-	...SMOL,
-	id: "gpt-6-luna-decisions",
-	requestModelId: "gpt-6-luna",
-	name: "GPT-6 Luna Decisions",
-	api: "openai-decisions",
-	provider: "openai",
-	baseUrl: "https://api.openai.com/v1",
-	input: ["text", "image"],
-} as Model<Api>;
-
 const IMAGE_ONE: ImageContent = {
 	type: "image",
 	data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
@@ -65,32 +43,22 @@ const IMAGE_TWO: ImageContent = {
 	mimeType: "image/png",
 };
 
-function makeSession(
-	opts: { typesafe?: boolean; decisions?: boolean; vision?: boolean; cwd?: string } = {},
-): ToolSession {
-	const selected = opts.decisions ? "openai/gpt-6-luna-decisions" : opts.typesafe ? "typesafe/jev-preview" : "p/smol";
+function makeSession(opts: { vision?: boolean; cwd?: string } = {}): ToolSession {
 	const settings = Settings.isolated({
 		"async.enabled": false,
 		"task.isolation.enabled": false,
-		modelRoles: { judge: selected },
-		"retry.fallbackChains": { judge: ["p/smol"] },
 	});
 	const authStorage = createInMemoryAuthStorage();
 	authStorage.keys.setRuntime("p", "test-key");
-	if (opts.typesafe) authStorage.keys.setRuntime("typesafe", "ts-key");
-	if (opts.decisions) authStorage.keys.setRuntime("openai", "openai-key");
 	const modelRegistry = new ModelRegistry(authStorage, "/nonexistent/judgment-bridge-models.yml");
-	const models = opts.decisions
-		? [OPENAI_DECISIONS]
-		: opts.typesafe
-			? [JEV_PREVIEW, SMOL]
-			: [opts.vision ? VISION : SMOL];
+	const models = [opts.vision ? VISION : SMOL];
 	vi.spyOn(modelRegistry, "getAvailable").mockReturnValue(models);
 	return {
 		cwd: opts.cwd ?? process.cwd(),
 		settings,
 		modelRegistry,
 		getSessionId: () => "sess-1",
+		getActiveModel: () => models[0],
 	} as unknown as ToolSession;
 }
 
@@ -180,7 +148,7 @@ describe("eval judge() bridge", () => {
 		expect(spy).toHaveBeenCalledTimes(1);
 	});
 
-	it("answers through the smol chat model and returns typed answers with the backend", async () => {
+	it("answers through the current chat model and returns typed answers with the backend", async () => {
 		const spy = vi.spyOn(ai, "completeSimple").mockResolvedValue(reply("bucket: hard\ntests: yes\ntone: 2"));
 		const result = await runEvalJudgment(
 			{ state: { request: "please add tests for the parser" }, questions: QUESTIONS },
@@ -196,32 +164,6 @@ describe("eval judge() bridge", () => {
 		const options = spy.mock.calls[0]?.[2] as { disableReasoning?: boolean; temperature?: number };
 		expect(options.disableReasoning).toBe(true);
 		expect(options.temperature).toBe(0);
-	});
-
-	it("routes to the selected TypeSafe judge and forwards questions verbatim", async () => {
-		const chat = vi.spyOn(ai, "completeSimple");
-		let body: { model: string; state: unknown; questions: unknown } | undefined;
-		vi.spyOn(globalThis, "fetch").mockImplementation(
-			asGlobalFetch(async (url, init) => {
-				expect(String(url)).toBe("https://judge.example.test/v1/systemone");
-				body = JSON.parse(String(init?.body));
-				expect(body).toEqual(expect.objectContaining({ model: "jev-preview" }));
-				return Response.json({
-					model: "jev-preview",
-					answers: { tests: { type: "noul", noul: 0.83 } },
-					usage: { input_tokens: 10, output_tokens: 1 },
-				});
-			}),
-		);
-		const result = await runEvalJudgment(
-			{ state: ["add tests"], questions: { tests: QUESTIONS.tests } },
-			{ session: makeSession({ typesafe: true }) },
-		);
-
-		expect(result.answers).toEqual({ tests: { type: "bool", bool: 0.83 } });
-		expect(body?.state).toEqual(["add tests"]);
-		expect(body?.questions).toEqual({ tests: { type: "noul", instructions: QUESTIONS.tests.instructions } });
-		expect(chat).not.toHaveBeenCalled();
 	});
 
 	it("passes local and embedded images to vision chat as real image blocks", async () => {
@@ -265,7 +207,7 @@ describe("eval judge() bridge", () => {
 				{ state: "classify this request", questions: { tests: QUESTIONS.tests }, images: [IMAGE_ONE] },
 				{ session: makeSession() },
 			),
-		).rejects.toThrow("no compatible judge candidate supports images");
+		).rejects.toThrow("the current model does not support images");
 
 		expect(complete).not.toHaveBeenCalled();
 		expect(fetch).not.toHaveBeenCalled();

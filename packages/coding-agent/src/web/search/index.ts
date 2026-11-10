@@ -23,7 +23,6 @@ import {
 	formatSearchProviderFailures,
 	getGroundedSearchProvider,
 	getSearchProvider,
-	HTTP_SEARCH_ENGINE_IDS,
 	isRegisteredSearchEngine,
 	type SearchProvider,
 	type SearchProviderFailure,
@@ -169,14 +168,20 @@ function searchCandidates(
 ): SearchCandidate[] {
 	if (Object.hasOwn(params, "model")) throw new Error("Web search model overrides are not supported.");
 	if (params.engine && !isRegisteredSearchEngine(params.engine)) throw new Error("Unknown HTTP search engine.");
-	const engines = params.engine ? [params.engine] : HTTP_SEARCH_ENGINE_IDS;
+	// Preserve the existing automatic retrieval routes; paid opt-in engines remain explicit.
+	const engines: readonly SearchEngineId[] = params.engine
+		? [params.engine]
+		: ["parallel", "exa", "firecrawl", "searxng", "startpage", "duckduckgo", "ecosia", "google", "mojeek", "public"];
 	const candidates: SearchCandidate[] = [];
 	if (!params.engine && sessionModel?.webSearch && modelKind(sessionModel) === "chat") {
 		candidates.push({ model: sessionModel, explicit: false });
 	}
 	for (const engine of engines) {
 		const model = modelRegistry.find("web", engine);
-		if (model) candidates.push({ model, engine, explicit: params.engine !== undefined });
+		if (!model) continue;
+		const candidate = { model, engine, explicit: params.engine !== undefined };
+		if (!params.engine && engine === "parallel") candidates.unshift(candidate);
+		else candidates.push(candidate);
 	}
 	return candidates;
 }

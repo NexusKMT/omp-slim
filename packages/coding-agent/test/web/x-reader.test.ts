@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { handleTwitter } from "@oh-my-pi/pi-coding-agent/web/scrapers/twitter";
 import { parseXUrl, type XTarget } from "@oh-my-pi/pi-coding-agent/web/x";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
@@ -30,10 +29,8 @@ describe("parseXUrl", () => {
 describe("handleTwitter", () => {
 	const authStorages: AuthStorage[] = [];
 
-	async function xaiRegistry(webRole?: string): Promise<ModelRegistry> {
+	async function xaiRegistry(): Promise<ModelRegistry> {
 		const settings = await Settings.init({ inMemory: true });
-		if (webRole) settings.setModelRole("web", webRole);
-		cfgRetryFallbackChains.set(settings, { web: [] });
 		const authStorage = createInMemoryAuthStorage();
 		authStorages.push(authStorage);
 		authStorage.keys.setRuntime("xai", "test-xai-key");
@@ -52,7 +49,7 @@ describe("handleTwitter", () => {
 		const result = await handleTwitter("https://x.com/jack/status/20", 10);
 
 		expect(result?.method).toBe("x-unavailable");
-		expect(result?.content).toContain("xai-oauth");
+		expect(result?.content).toContain("current model does not support X reads");
 		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 
@@ -69,7 +66,14 @@ describe("handleTwitter", () => {
 			}),
 		);
 
-		const result = await handleTwitter("https://x.com/jack", 10, undefined, null, modelRegistry);
+		const result = await handleTwitter(
+			"https://x.com/jack",
+			10,
+			undefined,
+			null,
+			modelRegistry,
+			modelRegistry.find("xai", "grok-4.7"),
+		);
 
 		expect(body?.tools).toEqual([{ type: "x_search", allowed_x_handles: ["jack"] }]);
 		expect(body?.max_turns).toBe(2);
@@ -78,8 +82,8 @@ describe("handleTwitter", () => {
 		expect(result?.notes[0]).toContain("10 posts, 1 profiles fetched");
 	});
 
-	it("falls back along the xAI model chain when a model is refused", async () => {
-		const modelRegistry = await xaiRegistry("xai/grok-4.7");
+	it("does not switch models when the current X model is refused", async () => {
+		const modelRegistry = await xaiRegistry();
 		const attempted: string[] = [];
 		vi.spyOn(globalThis, "fetch").mockImplementation(
 			asGlobalFetch(async (_input, init) => {
@@ -90,19 +94,31 @@ describe("handleTwitter", () => {
 			}),
 		);
 
-		const result = await handleTwitter("https://x.com/jack/status/20", 10, undefined, null, modelRegistry);
+		const result = await handleTwitter(
+			"https://x.com/jack/status/20",
+			10,
+			undefined,
+			null,
+			modelRegistry,
+			modelRegistry.find("xai", "grok-4.7"),
+		);
 
-		expect(result?.method).toBe("x-search");
-		expect(attempted[0]).toBe("grok-4.7");
-		expect(result?.notes[0]).toStartWith(`Read by xai/${attempted.at(-1)} `);
-		expect(attempted.at(-1)).not.toBe("grok-4.7");
+		expect(result?.method).toBe("x-unavailable");
+		expect(attempted).toEqual(["grok-4.7"]);
 	});
 
 	it("reports a failed Grok call instead of falling through to scraping", async () => {
 		const modelRegistry = await xaiRegistry();
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("upstream exploded", { status: 500 }));
 
-		const result = await handleTwitter("https://x.com/jack/status/20", 10, undefined, null, modelRegistry);
+		const result = await handleTwitter(
+			"https://x.com/jack/status/20",
+			10,
+			undefined,
+			null,
+			modelRegistry,
+			modelRegistry.find("xai", "grok-4.7"),
+		);
 
 		expect(result?.method).toBe("x-unavailable");
 		expect(result?.content).toContain("upstream exploded");

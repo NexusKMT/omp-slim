@@ -124,7 +124,7 @@ describe("eval js immediate-handle contract", () => {
 		});
 		const completion = sandbox.completion as (prompt: string, opts?: unknown) => { wait(): Promise<unknown> };
 
-		const handle = completion("Return OK", { model: "smol" });
+		const handle = completion("Return OK");
 		expect(typeof handle.wait).toBe("function");
 		expect(await handle.wait()).toBe("OK");
 	});

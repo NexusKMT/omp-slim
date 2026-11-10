@@ -466,7 +466,7 @@ describe("readArgsCollapseIntoGroup", () => {
 		["./relative/path.md"],
 		["https://example.com/file"],
 		["xd://"],
-		["xd://generate_image"],
+		["xd://custom_search"],
 	])("collapses %s into the read group", target => {
 		expect(readArgsCollapseIntoGroup({ path: target })).toBe(true);
 		expect(readArgsCollapseIntoGroup({ file_path: target })).toBe(true);

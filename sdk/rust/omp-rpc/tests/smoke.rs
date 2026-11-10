@@ -169,11 +169,6 @@ fn smoke_real_server() {
 	println!("cancel_subagent unknown: {cancelled}");
 	assert!(!cancelled);
 
-	let suffix = client
-		.call(&PredictWordCommand { text: "hello wor".into(), cursor: 9 })
-		.unwrap();
-	println!("predict_word: {suffix:?}");
-
 	let bash = client
 		.call(&BashCommand { command: "echo hi".into(), exclude_from_context: None })
 		.unwrap();

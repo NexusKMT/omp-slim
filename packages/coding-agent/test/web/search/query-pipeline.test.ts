@@ -1,6 +1,6 @@
 /**
  * Central directive pipeline: executeSearch parses the query once, hands the
- * StructuredQuery to the role-selected provider, then lenient-filters the
+ * StructuredQuery to the HTTP provider, then lenient-filters the
  * returned sources — enforcing constraints the provider ignored and relaxing
  * any dimension that would eliminate every result.
  */
@@ -14,8 +14,6 @@ import * as provider from "@oh-my-pi/pi-coding-agent/web/search/provider";
 import type { SearchProviderId, SearchResponse, SearchSource } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
 
-import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
-
 const SOURCES: SearchSource[] = [
 	{ title: "Docs page", url: "https://docs.example.com/guide" },
 	{ title: "Blog post", url: "https://blog.other.com/post" },
@@ -23,10 +21,8 @@ const SOURCES: SearchSource[] = [
 
 const openAuthStorages: AuthStorage[] = [];
 
-async function stubRoleProvider(id: SearchProviderId, behaviour: (params: SearchParams) => Promise<SearchResponse>) {
+async function stubProvider(id: SearchProviderId, behaviour: (params: SearchParams) => Promise<SearchResponse>) {
 	const settings = await Settings.init({ inMemory: true });
-	settings.setModelRole("web", `web/${id}`);
-	cfgRetryFallbackChains.set(settings, { web: [] });
 	const authStorage = createInMemoryAuthStorage();
 	openAuthStorages.push(authStorage);
 	const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
@@ -51,14 +47,14 @@ describe("web search directive pipeline", () => {
 		for (const authStorage of openAuthStorages.splice(0)) authStorage.close();
 	});
 
-	it("passes the parsed query to the role-selected provider and post-filters ignored constraints", async () => {
+	it("passes the parsed query to the HTTP provider and post-filters ignored constraints", async () => {
 		let seen: SearchParams | undefined;
-		const context = await stubRoleProvider("brave", async params => {
+		const context = await stubProvider("brave", async params => {
 			seen = params;
 			return { provider: "brave", sources: SOURCES };
 		});
 
-		const result = await runSearchQuery({ query: "guide site:docs.example.com" }, context);
+		const result = await runSearchQuery({ query: "guide site:docs.example.com", engine: "brave" }, context);
 
 		expect(seen?.model.provider).toBe("web");
 		expect(seen?.model.id).toBe("brave");
@@ -69,9 +65,9 @@ describe("web search directive pipeline", () => {
 	});
 
 	it("relaxes a constraint that matches nothing and leads the LLM text with a note", async () => {
-		const context = await stubRoleProvider("brave", async () => ({ provider: "brave", sources: SOURCES }));
+		const context = await stubProvider("brave", async () => ({ provider: "brave", sources: SOURCES }));
 
-		const result = await runSearchQuery({ query: "guide site:nowhere.example" }, context);
+		const result = await runSearchQuery({ query: "guide site:nowhere.example", engine: "brave" }, context);
 
 		expect(result.details.response.sources).toHaveLength(SOURCES.length);
 		expect(result.content[0]?.text).toStartWith(
@@ -80,10 +76,10 @@ describe("web search directive pipeline", () => {
 	});
 
 	it.each<[string, string, SearchProviderId]>([
-		["routes an X-only query to xAI ahead of the role's engine", "tern site:x.com", "xai"],
-		["keeps the role's engine for queries that are not X-only", "tern site:x.com site:github.com", "brave"],
+		["keeps X-only queries on the selected HTTP engine", "tern site:x.com", "brave"],
+		["keeps the HTTP engine for queries that are not X-only", "tern site:x.com site:github.com", "brave"],
 	])("%s", async (_caseName, query, expectedProvider) => {
-		const context = await stubRoleProvider("brave", async () => ({ provider: "brave", sources: SOURCES }));
+		const context = await stubProvider("brave", async () => ({ provider: "brave", sources: SOURCES }));
 		context.authStorage.keys.setRuntime("xai", "test-xai-key");
 		vi.spyOn(provider, "getGroundedSearchProvider").mockImplementation(async grounding => ({
 			id: "xai",
@@ -93,13 +89,13 @@ describe("web search directive pipeline", () => {
 			search: async () => ({ provider: "xai", sources: [{ title: "Post", url: "https://x.com/jack/status/20" }] }),
 		}));
 
-		const result = await runSearchQuery({ query }, context);
+		const result = await runSearchQuery({ query, engine: "brave" }, context);
 
 		expect(result.details.response.provider).toBe(expectedProvider);
 	});
 
-	it("uses a request model override instead of modelRoles.web", async () => {
-		const context = await stubRoleProvider("jina", async params => ({
+	it("allows explicit selection of an HTTP engine", async () => {
+		const context = await stubProvider("jina", async params => ({
 			provider: "jina",
 			sources: [{ title: params.model.id, url: "https://jina.example" }],
 		}));
@@ -118,7 +114,7 @@ describe("web search directive pipeline", () => {
 			throw new Error(`Unexpected provider: ${requested}`);
 		});
 
-		const result = await runSearchQuery({ query: "override", model: "web/exa" }, context);
+		const result = await runSearchQuery({ query: "override", engine: "exa" }, context);
 
 		expect(result.details.response.provider).toBe("exa");
 		expect(result.details.response.sources[0]?.title).toBe("exa");

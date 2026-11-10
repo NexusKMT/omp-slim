@@ -26,10 +26,7 @@ import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types"
 import { type SearchProviderId, type SearchResponse } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
 
-import {
-	cfgProvidersWebSearchTimeoutSeconds,
-	cfgRetryFallbackChains,
-} from "@oh-my-pi/pi-coding-agent/session/settings";
+import { cfgProvidersWebSearchTimeoutSeconds } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 const openAuthStorages: AuthStorage[] = [];
 
@@ -170,11 +167,13 @@ describe("executeSearch abort propagation", () => {
 		const primary = providers[0];
 		if (!primary) throw new Error("Provider chain must contain a primary candidate");
 		const config = await Settings.init({ inMemory: true });
-		config.setModelRole("web", `web/${primary.id}`);
-		cfgRetryFallbackChains.set(config, { web: providers.slice(1).map(candidate => `web/${candidate.id}`) });
 		const authStorage = createInMemoryAuthStorage();
 		openAuthStorages.push(authStorage);
 		const modelRegistry = new ModelRegistry(authStorage, undefined, { settings: config });
+		const find = modelRegistry.find.bind(modelRegistry);
+		vi.spyOn(modelRegistry, "find").mockImplementation((host, id) =>
+			host === "web" && providers.some(candidate => candidate.id === id) ? find(host, id) : undefined,
+		);
 		const getProvider = vi.spyOn(provider, "getSearchProvider").mockImplementation(async id => {
 			const match = providers.find(candidate => candidate.id === id);
 			if (!match) throw new Error(`Unexpected provider: ${id}`);
@@ -186,39 +185,35 @@ describe("executeSearch abort propagation", () => {
 	it("passes the configured provider-request timeout into the search adapter", async () => {
 		let timeoutMs: number | undefined;
 		const context = await configureProviderChain([
-			fakeProvider("brave", async params => {
+			fakeProvider("firecrawl", async params => {
 				timeoutMs = params.timeoutMs;
 				return {
-					provider: "brave",
+					provider: "firecrawl",
 					sources: [{ title: "Configured result", url: "https://example.com/configured" }],
 				};
 			}),
 		]);
 		const config = await Settings.init({ inMemory: true });
-		config.setModelRole("web", "web/brave");
-		cfgRetryFallbackChains.set(config, { web: [] });
 		cfgProvidersWebSearchTimeoutSeconds.set(config, 180);
 
 		const result = await runSearchQuery({ query: "anything" }, context);
 
-		expect(result.details.response.provider).toBe("brave");
+		expect(result.details.response.provider).toBe("firecrawl");
 		expect(timeoutMs).toBe(180_000);
 	});
 
 	it("caps the configured provider-request timeout at five minutes", async () => {
 		let timeoutMs: number | undefined;
 		const context = await configureProviderChain([
-			fakeProvider("brave", async params => {
+			fakeProvider("firecrawl", async params => {
 				timeoutMs = params.timeoutMs;
 				return {
-					provider: "brave",
+					provider: "firecrawl",
 					sources: [{ title: "Capped result", url: "https://example.com/capped" }],
 				};
 			}),
 		]);
 		const config = await Settings.init({ inMemory: true });
-		config.setModelRole("web", "web/brave");
-		cfgRetryFallbackChains.set(config, { web: [] });
 		cfgProvidersWebSearchTimeoutSeconds.set(config, 600);
 
 		await runSearchQuery({ query: "anything" }, context);
@@ -229,17 +224,15 @@ describe("executeSearch abort propagation", () => {
 	it("uses the default provider timeout for a non-positive setting", async () => {
 		let timeoutMs: number | undefined;
 		const context = await configureProviderChain([
-			fakeProvider("brave", async params => {
+			fakeProvider("firecrawl", async params => {
 				timeoutMs = params.timeoutMs;
 				return {
-					provider: "brave",
+					provider: "firecrawl",
 					sources: [{ title: "Default result", url: "https://example.com/default" }],
 				};
 			}),
 		]);
 		const config = await Settings.init({ inMemory: true });
-		config.setModelRole("web", "web/brave");
-		cfgRetryFallbackChains.set(config, { web: [] });
 		cfgProvidersWebSearchTimeoutSeconds.set(config, 0);
 
 		await runSearchQuery({ query: "anything" }, context);
@@ -247,10 +240,10 @@ describe("executeSearch abort propagation", () => {
 		expect(timeoutMs).toBe(60_000);
 	});
 
-	it("surfaces caller cancellation instead of falling through to the next role candidate", async () => {
+	it("surfaces caller cancellation instead of falling through to the next HTTP engine", async () => {
 		const fallbackSearch = vi.fn();
 		const context = await configureProviderChain([
-			fakeProvider("brave", async () => {
+			fakeProvider("firecrawl", async () => {
 				throw new DOMException("aborted", "AbortError");
 			}),
 			fakeProvider("exa", fallbackSearch),
@@ -266,7 +259,7 @@ describe("executeSearch abort propagation", () => {
 
 	it("still reports provider failures when the caller has not aborted", async () => {
 		const context = await configureProviderChain([
-			fakeProvider("brave", async () => {
+			fakeProvider("firecrawl", async () => {
 				throw new Error("upstream 500");
 			}),
 		]);
@@ -277,15 +270,15 @@ describe("executeSearch abort propagation", () => {
 		expect(result.details.error).toContain("upstream 500");
 	});
 
-	it("falls through when the configured role candidate returns no renderable content", async () => {
-		const emptySearch = vi.fn(async (): Promise<SearchResponse> => ({ provider: "searxng", sources: [] }));
+	it("falls through when the configured HTTP engine returns no renderable content", async () => {
+		const emptySearch = vi.fn(async (): Promise<SearchResponse> => ({ provider: "exa", sources: [] }));
 		const fallbackSearch = vi.fn(async (): Promise<SearchResponse> => ({
-			provider: "brave",
+			provider: "firecrawl",
 			sources: [{ title: "Fallback result", url: "https://example.com/fallback", snippet: "fallback body" }],
 		}));
 		const context = await configureProviderChain([
-			fakeProvider("searxng", emptySearch),
-			fakeProvider("brave", fallbackSearch),
+			fakeProvider("exa", emptySearch),
+			fakeProvider("firecrawl", fallbackSearch),
 		]);
 
 		const result = await runSearchQuery({ query: "anything" }, context);
@@ -293,10 +286,10 @@ describe("executeSearch abort propagation", () => {
 		expect(emptySearch).toHaveBeenCalledTimes(1);
 		expect(fallbackSearch).toHaveBeenCalledTimes(1);
 		expect(result.content[0]?.text).toContain("Fallback result");
-		expect(result.details.response.provider).toBe("brave");
+		expect(result.details.response.provider).toBe("firecrawl");
 	});
 
-	it("stops loading the role chain after the preferred candidate succeeds", async () => {
+	it("stops loading the HTTP engines after the preferred candidate succeeds", async () => {
 		const fallbackSearch = vi.fn();
 		const context = await configureProviderChain([
 			fakeProvider("exa", async () => ({
@@ -316,25 +309,25 @@ describe("executeSearch abort propagation", () => {
 		expect(Object.hasOwn(result.details, "failures")).toBe(false);
 	});
 
-	it("advances through retry.fallbackChains.web after the preferred candidate fails", async () => {
+	it("advances through the HTTP engine list after the preferred candidate fails", async () => {
 		const fallbackSearch = vi.fn(async (): Promise<SearchResponse> => ({
-			provider: "brave",
+			provider: "firecrawl",
 			sources: [{ title: "Fallback result", url: "https://example.com/fallback" }],
 		}));
 		const context = await configureProviderChain([
 			fakeProvider("exa", async () => {
 				throw new SearchProviderError("exa", "Preferred provider failed.", 500);
 			}),
-			fakeProvider("brave", fallbackSearch),
+			fakeProvider("firecrawl", fallbackSearch),
 		]);
 
 		const result = await runSearchQuery({ query: "anything" }, context);
 
-		expect(result.details.response.provider).toBe("brave");
+		expect(result.details.response.provider).toBe("firecrawl");
 		expect(context.getProvider).toHaveBeenCalledTimes(2);
 		expect(fallbackSearch).toHaveBeenCalledTimes(1);
 		expect(result.content[0]?.text).toStartWith(
-			"Note: answered by brave after exa failed (Preferred provider failed)\n",
+			"Note: answered by firecrawl after exa failed (Preferred provider failed)\n",
 		);
 		expect(result.details.failures).toEqual([
 			{ provider: "exa", label: "exa", reason: "Preferred provider failed", status: 500 },
@@ -346,7 +339,7 @@ describe("executeSearch abort propagation", () => {
 			fakeProvider("exa", async () => {
 				throw new SearchProviderError("exa", "Exa refused.", 204);
 			}),
-			fakeProvider("brave", async () => {
+			fakeProvider("firecrawl", async () => {
 				throw new Error("upstream 500");
 			}),
 		]);
@@ -356,18 +349,18 @@ describe("executeSearch abort propagation", () => {
 		expect(result.details.error).toContain("All web search providers failed");
 		expect(result.details.failures).toEqual([
 			{ provider: "exa", label: "exa", reason: "Exa refused", status: 204 },
-			{ provider: "brave", label: "brave", reason: "upstream 500" },
+			{ provider: "firecrawl", label: "firecrawl", reason: "upstream 500" },
 		]);
 	});
 
 	it("flattens and caps a long multi-line failure reason in the fallback note", async () => {
 		const htmlPage = `<html>\n<head><title>502 Bad Gateway</title></head>\n<body>${"x".repeat(2_000)}</body>\n</html>`;
 		const context = await configureProviderChain([
-			fakeProvider("searxng", async () => {
-				throw new SearchProviderError("searxng", `SearXNG API error (502): ${htmlPage}`, 502);
+			fakeProvider("exa", async () => {
+				throw new SearchProviderError("exa", `Exa API error (502): ${htmlPage}`, 502);
 			}),
-			fakeProvider("brave", async () => ({
-				provider: "brave",
+			fakeProvider("firecrawl", async () => ({
+				provider: "firecrawl",
 				sources: [{ title: "Fallback result", url: "https://example.com/fallback" }],
 			})),
 		]);
@@ -376,25 +369,25 @@ describe("executeSearch abort propagation", () => {
 
 		const [note = ""] = (result.content[0]?.text ?? "").split("\n");
 		expect(note).toStartWith(
-			"Note: answered by brave after searxng failed (SearXNG API error (502): <html> <head><title>502 Bad Gateway",
+			"Note: answered by firecrawl after exa failed (Exa API error (502): <html> <head><title>502 Bad Gateway",
 		);
 		expect(note).toEndWith("…)");
 		expect(note.length).toBeLessThan(320);
 	});
 
-	it("treats a request model override as a single explicit candidate", async () => {
+	it("treats a request HTTP engine selection as a single explicit candidate", async () => {
 		const fallbackSearch = vi.fn(async (): Promise<SearchResponse> => ({
-			provider: "brave",
+			provider: "firecrawl",
 			sources: [{ title: "Hidden fallback", url: "https://example.com/fallback" }],
 		}));
 		const context = await configureProviderChain([
 			fakeProvider("exa", async () => {
 				throw new SearchProviderError("exa", "Explicit Exa search failed.", 400);
 			}),
-			fakeProvider("brave", fallbackSearch),
+			fakeProvider("firecrawl", fallbackSearch),
 		]);
 
-		const result = await runSearchQuery({ query: "anything", model: "web/exa" }, context);
+		const result = await runSearchQuery({ query: "anything", engine: "exa" }, context);
 
 		expect(result.details.error).toContain("Explicit Exa search failed.");
 		expect(result.details.response.provider).toBe("exa");

@@ -2038,11 +2038,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 	it("keeps restricted host tool lists isolated from configured custom capabilities", async () => {
 		const restrictedDir = makeTempDir();
 		const normalDir = makeTempDir();
-		const configuredSettings = () =>
-			Settings.isolated({
-				modelRoles: { image: "openai/gpt-image-1" },
-				"generate_image.enabled": true,
-			});
+		const configuredSettings = () => Settings.isolated({});
 
 		const inheritedManager = {
 			getServerInstructions: () => new Map([["private-server", "must not reach restricted child"]]),
@@ -2110,14 +2106,14 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			settings: configuredSettings(),
 			extensions: [toolActivationExtension],
 			customTools: [sdkCustomTool],
-			toolNames: ["read", "generate_image"],
+			toolNames: ["read"],
 			requireYieldTool: true,
 			restrictToolNames: false,
 		});
 
 		try {
 			const activeToolNames = normal.getActiveToolNames();
-			expect(activeToolNames).toEqual(expect.arrayContaining(["read", "yield", "generate_image", "write"]));
+			expect(activeToolNames).toEqual(expect.arrayContaining(["read", "yield", "write"]));
 			// Explicit tools stay top-level. Ambient custom and
 			// extension capabilities mount through the device-only write transport.
 			const mountedNames = normal.getXdevToolEntries().map(entry => entry.name);
@@ -2126,7 +2122,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(activeToolNames).not.toContain("default_active_tool");
 			expect(activeToolNames).not.toContain("sdk_custom_tool");
 			expect(normal.getAllToolNames()).toEqual(
-				expect.arrayContaining(["generate_image", "read", "yield", "default_active_tool", "sdk_custom_tool"]),
+				expect.arrayContaining(["read", "yield", "default_active_tool", "sdk_custom_tool"]),
 			);
 		} finally {
 			await normal.dispose();

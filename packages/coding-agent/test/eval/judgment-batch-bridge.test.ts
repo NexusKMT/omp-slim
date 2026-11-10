@@ -69,7 +69,6 @@ function makeSession(opts: { agentId?: string; jobs?: boolean; vision?: boolean;
 	const settings = Settings.isolated({
 		"async.enabled": false,
 		"task.isolation.enabled": false,
-		modelRoles: { judge: "p/smol" },
 	});
 	const authStorage = createInMemoryAuthStorage();
 	authStorage.keys.setRuntime("p", "test-key");
@@ -80,6 +79,7 @@ function makeSession(opts: { agentId?: string; jobs?: boolean; vision?: boolean;
 		settings,
 		modelRegistry,
 		getSessionId: () => "sess-1",
+		getActiveModel: () => (opts.vision ? VISION : SMOL),
 		getAgentId: () => opts.agentId ?? "Main",
 	};
 	if (opts.jobs === false) return { session: session as unknown as ToolSession };
@@ -725,7 +725,7 @@ import { createInMemoryAuthStorage } from ${JSON.stringify(setupPath)};
 
 const SMOL = ${JSON.stringify(SMOL)};
 const VISION = { ...SMOL, input: ["text", "image"] };
-const settings = Settings.isolated({ "async.enabled": false, "task.isolation.enabled": false, modelRoles: { judge: "p/smol" } });
+const settings = Settings.isolated({ "async.enabled": false, "task.isolation.enabled": false });
 const authStorage = createInMemoryAuthStorage();
 authStorage.keys.setRuntime("p", "test-key");
 const modelRegistry = new ModelRegistry(authStorage, "/nonexistent/judgment-batch-py-models.yml");
@@ -748,6 +748,7 @@ vi.spyOn(ai, "completeSimple").mockImplementation(async (_model, context) => {
 	};
 });
 const session = {
+	getActiveModel: () => VISION,
 	cwd: ${JSON.stringify(tempDir.path())},
 	hasUI: false,
 	getSessionFile: () => ${JSON.stringify(path.join(tempDir.path(), "session.jsonl"))},
