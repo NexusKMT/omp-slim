@@ -54,7 +54,6 @@ async function createSession(
 	const sessionSettings = Settings.isolated({
 		"compaction.enabled": false,
 		"retry.enabled": false,
-		modelRoles: { tiny: `${model.provider}/${model.id}` },
 		// The default `nf+emoji` follows the global theme's symbol preset, which an
 		// earlier file in the suite can leave on nerd glyphs; the card under test is emoji.
 		"title.icons": "emoji",
@@ -240,11 +239,13 @@ describe("AgentSession title fork", () => {
 		expect(titleModel).toHaveBeenCalledTimes(1);
 	});
 
-	it("titles with the title model alone under title.generator tiny", async () => {
+	it("titles with a separate request to the current model under title.generator request", async () => {
 		const main = createMockModel({ responses: [{ content: ["Reading the park tests first."] }] });
 		const side = createMockModel({ handler: { content: [CARD_REPLY] } });
-		const target = await createSession(main, side, { "title.generator": "tiny" });
-		vi.spyOn(ai, "completeSimple").mockResolvedValue(createAssistantMessage("<title>Fix flaky park tests</title>"));
+		const target = await createSession(main, side, { "title.generator": "request" });
+		const titleRequest = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValue(createAssistantMessage("<title>Fix flaky park tests</title>"));
 		const titled = nextTitle(target);
 
 		await target.prompt(FIRST_MESSAGE);
@@ -252,6 +253,9 @@ describe("AgentSession title fork", () => {
 
 		expect(target.sessionName).toBe("Fix flaky park tests");
 		expect(side.calls).toHaveLength(0);
+		expect(titleRequest).toHaveBeenCalledTimes(1);
+		expect(titleRequest.mock.calls[0]?.[0]).toBe(target.model!);
+		expect(titleRequest.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
 	});
 
 	it("retitles from the steer an interrupt flushes after it cancelled the first message's fork", async () => {

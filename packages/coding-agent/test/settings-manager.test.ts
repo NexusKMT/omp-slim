@@ -72,6 +72,7 @@ import {
 import { cfgModel, cfgDisabledProviders, cfgEnabledModels } from "@oh-my-pi/pi-coding-agent/config/model-settings";
 import { cfgShellPath } from "@oh-my-pi/pi-coding-agent/exec/settings";
 import { cfgTtsr, cfgTtsrEnabled } from "@oh-my-pi/pi-coding-agent/export/ttsr-settings";
+import { cfgTitleGenerator, cfgTitleRefreshOnReplan } from "@oh-my-pi/pi-coding-agent/utils/title-settings";
 
 /** Lets microtask-coalesced setting listeners run. */
 const tick = () => Promise.resolve();
@@ -1608,6 +1609,32 @@ describe("Settings", () => {
 			expect(editVariantForModel(settings, "openai/gpt-5.2-codex")).toBe("apply_patch");
 		});
 	});
+
+	it.each(["nested", "dotted", "nested-precedence"])(
+		"migrates %s title settings to a current-model request without drift checks",
+		async shape => {
+			await writeSettings(
+				shape === "nested"
+					? { title: { generator: "tiny", refreshAfterPrompts: 3, refreshOnReplan: false } }
+					: {
+							title: { refreshOnReplan: false, ...(shape === "nested-precedence" ? { generator: "fork" } : {}) },
+							"title.generator": "tiny",
+							"title.refreshAfterPrompts": 3,
+						},
+			);
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			const generator = shape === "nested-precedence" ? "fork" : "request";
+			expect(cfgTitleGenerator.get(settings)).toBe(generator);
+			expect(cfgTitleRefreshOnReplan.get(settings)).toBe(false);
+			cfgDisplayShowTokenUsage.set(settings, true);
+			await settings.flush();
+			const saved = await readSettings();
+			expect(saved).not.toHaveProperty("title.refreshAfterPrompts");
+			expect(saved["title.refreshAfterPrompts"]).toBeUndefined();
+			expect(saved).toMatchObject({ title: { generator, refreshOnReplan: false } });
+			expect(saved["title.generator"]).toBeUndefined();
+		},
+	);
 
 	it("retires nested and dotted TTSR judgment settings while preserving pattern-rule controls", async () => {
 		await writeSettings({

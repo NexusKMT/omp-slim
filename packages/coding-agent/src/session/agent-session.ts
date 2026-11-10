@@ -484,7 +484,6 @@ const SESSION_STOP_CONTINUATION_CAP = 8;
 const DEFERRED_TITLE_MIN_WORDS = 40;
 /** Cap on the forked title request itself (measured p90 2.3s). */
 const TITLE_FORK_TIMEOUT_MS = 15_000;
-/** Cap on the judgment that decides whether a `title.refreshAfterPrompts` check regenerates the title. */
 
 import { LoopGuards, type StreamGuardsHost, StreamingEditGuard } from "./stream-guards";
 import { TodoTracker, type TodoTrackerHost } from "./todo-tracker";
@@ -535,13 +534,7 @@ import {
 	cfgExtendedContext,
 	cfgWorkspaceAdditionalDirectories,
 } from "./context-settings";
-import {
-	cfgTitleGenerator,
-	cfgTitleIcons,
-	cfgTitleRefreshAfterPrompts,
-	cfgTitleRefreshOnReplan,
-	type TitleIcons,
-} from "../utils/title-settings";
+import { cfgTitleGenerator, cfgTitleIcons, cfgTitleRefreshOnReplan, type TitleIcons } from "../utils/title-settings";
 import {
 	cfgArchiveEnabled,
 	cfgRatchetEnabled,
@@ -848,8 +841,8 @@ type ActiveAgentContinue = {
 };
 
 type SessionTitleSource = "auto" | "user";
-/** What refreshed an automatic title: a todo-init replan, or a judge finding it stale after `title.refreshAfterPrompts` operator prompts. */
-type SessionNameTrigger = "replan" | "drift";
+/** A todo-init replan refreshed an automatic title. */
+type SessionNameTrigger = "replan";
 type SetSessionNameWithTrigger = (
 	name: string,
 	source?: SessionTitleSource,
@@ -1151,8 +1144,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	#deferredTitle: { sessionId: string; declined: boolean; replied: boolean; words: number } | undefined;
 	/** What the next automatic title names (see {@link #maybeStartTitle}). */
 	#titleInput: TitleInput | undefined;
-	/** Operator prompts since the last title check, toward `title.refreshAfterPrompts`. */
-	#titleDrift: { sessionId: string; prompts: number } | undefined;
 	#titleProviderSessionId: string | undefined;
 	#titleProviderParentSessionId: string | undefined;
 	/** Host hook invoked when a typed user prompt is dropped before dispatch;
@@ -4296,7 +4287,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// reply before its first await.
 		if (event.type === "message_end") {
 			this.#noteTitleInput(event.message);
-			this.#noteTitleDrift(event.message);
 		} else if (event.type === "message_update" && this.#titleInput) {
 			const kind = event.assistantMessageEvent.type;
 			if (kind === "text_start" || kind === "toolcall_start") {
@@ -4670,7 +4660,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			}
 			// A turn that ended on its own (not the interrupt's aborted message) closes the stopped run.
 			if (!isUserInterruptAbort(msg)) this.#turnSettledSinceUserInterrupt = true;
-			if (msg.stopReason !== "aborted" && msg.stopReason !== "error") this.#maybeRefreshTitleAfterPrompts();
 
 			const yieldOnThisMessage = this.#assistantEndedWithSuccessfulYield(msg);
 			const successfulYieldMessage = yieldOnThisMessage
@@ -10703,15 +10692,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	}
 
 	/**
-	 * Retitle a generated title from recent conversation: after a todo-init
-	 * replan, or once `title.refreshAfterPrompts` operator prompts have run since
-	 * it was last refreshed and the judge finds it no longer fits. A title the
-	 * user set is never replaced.
+	 * Retitle a generated title from recent conversation after a todo-init replan.
+	 * A title the user set is never replaced.
 	 */
 	#scheduleTitleRefresh(trigger: SessionNameTrigger): void {
 		if ($env.PI_NO_TITLE) return;
 		// Headless subagent sessions have no operator-visible title, so a refresh
-		// only burns a tiny-model call whose result lands in JSONL and is never
+		// only spends a model request whose result lands in JSONL and is never
 		// shown (issue #5910). In an interactive host the operator can focus a
 		// live subagent from the Agent Hub, where the status line renders its
 		// session name — so keep the refresh there and only skip subagents when
@@ -10722,9 +10709,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// The first title is still being named: a refreshed title landing first would
 		// make that request, which carries the card, drop its reply.
 		if (this.#titleGenerationInFlightFor === sessionId) return;
-		if (!this.#titleRefreshable(sessionId, trigger)) return;
-		// A check consumes the prompts that triggered it whatever its verdict; prompts sent while it runs count toward the next.
-		if (trigger === "drift") this.#titleDrift = undefined;
+		if (!this.#titleRefreshable(sessionId)) return;
 		const refresh = this.#refreshTitle(sessionId, trigger)
 			.catch(err => {
 				logger.warn("title-generator: title refresh failed", {
@@ -10739,36 +10724,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#titleRefreshInFlight = refresh;
 	}
 
-	/** Whether a `trigger` refresh may still replace the title of `sessionId`. */
-	#titleRefreshable(sessionId: string, trigger: SessionNameTrigger): boolean {
+	/** Whether a replan refresh may still replace the title of `sessionId`. */
+	#titleRefreshable(sessionId: string): boolean {
 		return (
 			this.sessionManager.getSessionId() === sessionId &&
-			this.#titleRefreshEnabled(trigger) &&
+			cfgTitleRefreshOnReplan.get(this.settings) &&
 			this.sessionManager.titleSource !== "user"
 		);
-	}
-
-	#titleRefreshEnabled(trigger: SessionNameTrigger): boolean {
-		if (trigger === "replan") return cfgTitleRefreshOnReplan.get(this.settings);
-		return this.#autoTitle && cfgTitleRefreshAfterPrompts.get(this.settings) > 0;
-	}
-
-	/** Count an operator prompt toward `title.refreshAfterPrompts`. */
-	#noteTitleDrift(message: AgentMessage): void {
-		if (!this.sessionName || !this.#titleRefreshEnabled("drift")) return;
-		const text = operatorTitleText(message);
-		if (!text || isLowSignalTitleInput(text)) return;
-		const sessionId = this.sessionManager.getSessionId();
-		if (this.#titleDrift?.sessionId === sessionId) this.#titleDrift.prompts++;
-		else this.#titleDrift = { sessionId, prompts: 1 };
-	}
-
-	/** At a settled run's end, check the title once `title.refreshAfterPrompts` operator prompts have counted. */
-	#maybeRefreshTitleAfterPrompts(): void {
-		const drift = this.#titleDrift;
-		if (drift?.sessionId !== this.sessionManager.getSessionId()) return;
-		if (drift.prompts < cfgTitleRefreshAfterPrompts.get(this.settings)) return;
-		this.#scheduleTitleRefresh("drift");
 	}
 
 	/**
@@ -10800,9 +10762,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * from the streaming reply on the same model, system prompt, tools and
 	 * prompt-cache key, so it reads the whole prefix from cache, sees the model's
 	 * own reading of the task, and asks for a card (icon and code, unless
-	 * `title.icons` is `boring`) to head the title. The title model
-	 * ({@link generateTitle}) takes over when the fork fails, times out or
-	 * declines, and is the only path under `tiny` or a TITLE_SYSTEM.md override.
+	 * `title.icons` is `boring`) to head the title. A separate request to the same
+	 * model ({@link generateTitle}) takes over when the fork fails, times out or
+	 * declines, and is the only path under `request` or a TITLE_SYSTEM.md override.
 	 * Under `fork`, a title that comes back without a card gets one from a card
 	 * request ({@link #cardTitle}).
 	 *
@@ -10891,7 +10853,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 	/**
 	 * Whether automatic titles carry a card: the `fork` generator without a
-	 * TITLE_SYSTEM.md override. `tiny` and an override name plain titles.
+	 * TITLE_SYSTEM.md override. `request` and an override name plain titles.
 	 */
 	#cardsAutoTitles(): boolean {
 		return cfgTitleGenerator.get(this.settings) === "fork" && this.#titleSystemPrompt === undefined;
@@ -11106,31 +11068,17 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		return title && keepTitleCard(this.sessionName, title);
 	}
 
-	/**
-	 * Regenerate the title from recent conversation. A prompt-count check first
-	 * asks the judge, and regenerates only a title it finds stale.
-	 */
+	/** Regenerate the title from recent conversation after a todo replan. */
 	async #refreshTitle(sessionId: string, trigger: SessionNameTrigger): Promise<void> {
-		// A fitting title, one no judge could rate, or a session renamed or switched meanwhile keeps its title.
-		if (trigger === "drift" && !((await this.#titleDrifted()) && this.#titleRefreshable(sessionId, trigger))) return;
 		const context = this.#buildReplanTitleContext();
 		if (!context) return;
 		const retitled = await this.#retitle(context);
 		if (!retitled) return;
 		// A session first named without a card (a subagent, a title-model title) gets one here.
 		const title = this.#cardsAutoTitles() ? await this.#cardTitle(retitled) : retitled;
-		if (!this.#titleRefreshable(sessionId, trigger) || title === this.sessionName) return;
+		if (!this.#titleRefreshable(sessionId) || title === this.sessionName) return;
 		const setSessionName = this.sessionManager.setSessionName as SetSessionNameWithTrigger;
 		await setSessionName.call(this.sessionManager, title, "auto", trigger);
-	}
-
-	/**
-	 * Whether the session title no longer fits the latest conversation, per the
-	 * `judge` role; undefined when no judge answered. Interruption and disposal
-	 * cancel the judgment as they cancel title generation.
-	 */
-	async #titleDrifted(): Promise<undefined> {
-		return undefined;
 	}
 
 	/** Currently-applied {@link TITLE_SYSTEM.md} override, or undefined when the

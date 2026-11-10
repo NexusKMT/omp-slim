@@ -4,6 +4,7 @@
 
 ### Removed
 
+- Removed automatic title-drift checks and their inactive settings; title generation offers a fork or a separate request to the current model, with legacy `tiny` settings migrated to `request`.
 - Removed the inactive TTSR judged-rule setting; pattern rules remain active and existing question rules remain readable without automatic judgment requests.
 - Focused subagents inherit the main model and direct model-selection commands back to the main session; their thinking level remains adjustable.
 

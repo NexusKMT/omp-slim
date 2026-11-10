@@ -321,11 +321,12 @@ Create `TITLE_SYSTEM.md` in any generic config base:
 Generate a session name using lowercase `<type>:<primary-objective>`.
 ```
 
-- Missing `TITLE_SYSTEM.md` keeps the bundled title prompts. A new session's first title then comes from a fork of its first reply: when the reply's first text or tool-call block starts, the session's own model answers `src/prompts/system/title-fork.md` as a side turn on the cached prefix, naming the title plus a card index (Nerd Fonts icon, emoji, 1-6 character code) that the window title shows as `<icon> <CODE>: <title>`. A separate title request on the same model takes over when the fork fails, times out, declines, or the reply never starts.
+- Missing `TITLE_SYSTEM.md` keeps the bundled title prompts. With the default `title.generator: fork`, a new session's first title comes from a fork of its first reply: when the reply's first text or tool-call block starts, the session's own model answers `src/prompts/system/title-fork.md` as a side turn on the cached prefix, naming the title plus a card index (Nerd Fonts icon, emoji, 1-6 character code) that the window title shows as `<icon> <CODE>: <title>`. A separate title request on the same model takes over when the fork fails, times out, declines, or the reply never starts.
+- `title.generator: request` uses a separate request to the current model and produces a plain title without a card. The old value `tiny` migrates to `request`; it does not select another model. `title.refreshOnReplan` controls refresh after todo replans. Automatic title-drift checks and the old `title.refreshAfterPrompts` setting have been removed.
 - With `TITLE_SYSTEM.md` present, the first title skips the fork and uses the current main model with the override, as do replan refreshes.
 - Discovery checks the current project directory bases first (`<cwd>/.omp`, `.claude`, `.codex`, `.gemini`), then the user bases in the generic helper order. Unlike native `SYSTEM.md`, project title discovery does **not** walk ancestor directories.
 - The override replaces only the automatic session-title generation system prompt; normal `SYSTEM.md` / `APPEND_SYSTEM.md` prompt customization is unaffected.
-- The online path asks the title model to wrap the title in `<title>...</title>` and parses it leniently from text (a plain sentence, a truncated/unclosed tag, or a stray `{"title": "..."}` JSON echo all still work). A `TITLE_SYSTEM.md` override gets the wrap-in-`<title>` instruction appended after it.
+- The title request asks the current model to wrap the title in `<title>...</title>` and parses it leniently from text (a plain sentence, a truncated/unclosed tag, or a stray `{"title": "..."}` JSON echo all still work). A `TITLE_SYSTEM.md` override gets the wrap-in-`<title>` instruction appended after it.
 
 ## Skills subsystem
 

@@ -3407,9 +3407,17 @@ export class Settings {
 			["contextPromotion", "enabled"],
 			["judgment", "attemptTimeoutMs"],
 			["ttsr", "judge"],
+			["title", "refreshAfterPrompts"],
 		]) {
 			deleteByPath(raw, path);
 			delete raw[path.join(".")];
+		}
+		const titleSettings = isRecord(raw.title) ? raw.title : {};
+		if (titleSettings.generator === "tiny") titleSettings.generator = "request";
+		if (raw["title.generator"] === "tiny") {
+			if (titleSettings.generator === undefined) titleSettings.generator = "request";
+			raw.title = titleSettings;
+			delete raw["title.generator"];
 		}
 		// Retired task-specific selectors must not recreate independent model roles.
 		const providerSettings = isRecord(raw.providers) ? raw.providers : undefined;

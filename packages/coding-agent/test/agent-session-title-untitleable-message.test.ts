@@ -89,9 +89,6 @@ async function createSession(
 		settings: Settings.isolated({
 			"compaction.enabled": false,
 			"retry.enabled": false,
-			// One title model, so a failed attempt is one call rather than a chain walk.
-			"retry.modelFallback": false,
-			modelRoles: { tiny: `${model.provider}/${model.id}` },
 			...PLAIN_TITLES,
 			...settings,
 		}),
@@ -170,7 +167,7 @@ describe("AgentSession titles a session whose operator message cannot be titled"
 		const main = createMockModel({
 			responses: [{ content: [AUDIT_REPLY] }, { content: [AUDIT_REPLY] }],
 		});
-		const target = await createSession(main, [], { "title.generator": "tiny" });
+		const target = await createSession(main, [], { "title.generator": "request" });
 		const firstRequest = Promise.withResolvers<ai.AssistantMessage>();
 		let calls = 0;
 		vi.spyOn(ai, "completeSimple").mockImplementation(() => {
@@ -198,7 +195,7 @@ describe("AgentSession titles a session whose operator message cannot be titled"
 		const main = createMockModel({
 			responses: [{ content: [AUDIT_REPLY] }, { content: [AUDIT_REPLY] }],
 		});
-		const target = await createSession(main, [], { "title.generator": "tiny" });
+		const target = await createSession(main, [], { "title.generator": "request" });
 		const firstRetry = Promise.withResolvers<ai.AssistantMessage>();
 		let calls = 0;
 		vi.spyOn(ai, "completeSimple").mockImplementation(() => {

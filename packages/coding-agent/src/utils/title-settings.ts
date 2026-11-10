@@ -1,7 +1,6 @@
 /**
- * Automatic session-title settings: which generator names a session, how its
- * card icon shows, and what refreshes it: a todo replan, or the judge finding
- * it stale after a run of operator prompts since it last changed.
+ * Automatic session-title settings: how the current model names a session,
+ * how its card icon shows, and whether todo replans refresh it.
  */
 import { register } from "../config/registry";
 
@@ -35,13 +34,13 @@ export const cfgTitleIcons = register({
 export const cfgTitleGenerator = register({
 	id: "title.generator",
 	type: "enum",
-	values: ["fork", "tiny"] as const,
+	values: ["fork", "request"] as const,
 	default: "fork",
 	ui: {
 		tab: "tasks",
 		group: "Modes",
 		label: "Title Generator",
-		description: "What names an untitled session from the user's messages",
+		description: "How the current model names an untitled session from the user's messages",
 		options: [
 			{
 				value: "fork",
@@ -49,7 +48,11 @@ export const cfgTitleGenerator = register({
 				description:
 					"A side turn of the reply on the session's model: reads its prompt cache, adds the card icon (default)",
 			},
-			{ value: "tiny", label: "Tiny", description: "The title model role only; plain titles without a card" },
+			{
+				value: "request",
+				label: "Separate Request",
+				description: "A separate request to the current model; plain titles without a card",
+			},
 		],
 	},
 });
@@ -63,25 +66,5 @@ export const cfgTitleRefreshOnReplan = register({
 		group: "Modes",
 		label: "Refresh Title on Replan",
 		description: "Refresh generated session titles after todo init replans unless the title was set by the user",
-	},
-});
-
-export const cfgTitleRefreshAfterPrompts = register({
-	id: "title.refreshAfterPrompts",
-	type: "number",
-	default: 0,
-	ui: {
-		tab: "tasks",
-		group: "Modes",
-		label: "Refresh Title After Prompts",
-		description:
-			"Every this many operator prompts, ask the judge model whether a generated session title still fits the conversation, and regenerate it if not",
-		options: [
-			{ value: "0", label: "Off", description: "Default" },
-			{ value: "1", label: "Every prompt" },
-			{ value: "3", label: "Every 3 prompts" },
-			{ value: "5", label: "Every 5 prompts" },
-			{ value: "10", label: "Every 10 prompts" },
-		],
 	},
 });
