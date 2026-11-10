@@ -57,14 +57,14 @@ omp_binary="$omp_repo_root/packages/coding-agent/dist/omp"
 if [[ "$omp_platform" == darwin ]]; then
   omp_macho_arch="$omp_arch"
   [[ "$omp_arch" != x64 ]] || omp_macho_arch=x86_64
-  lipo -verify_arch "$omp_macho_arch" "$omp_binary"
+  lipo "$omp_binary" -verify_arch "$omp_macho_arch"
   codesign --verify --strict "$omp_binary"
   {
     file "$omp_binary"
     otool -L "$omp_binary"
     xcrun vtool -show-build "$omp_binary"
     for omp_addon in packages/natives/native/pi_natives."$omp_platform-$omp_arch"*.node; do
-      lipo -verify_arch "$omp_macho_arch" "$omp_addon"
+      lipo "$omp_addon" -verify_arch "$omp_macho_arch"
       file "$omp_addon"
       otool -L "$omp_addon"
       xcrun vtool -show-build "$omp_addon"
