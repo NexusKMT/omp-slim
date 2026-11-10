@@ -1,6 +1,6 @@
 # Advisor, WATCHDOG.md, and WATCHDOG.yml
 
-The advisor subsystem attaches one or more optional reviewer models to a session. Each advisor reviews primary-agent transcript updates, can inspect the workspace with its own tools, and injects concise advice back into the primary session.
+The advisor subsystem attaches one or more optional reviewers to a session, all using the current primary model. Each advisor reviews primary-agent transcript updates, can inspect the workspace with its own tools, and injects concise advice back into the primary session.
 
 An advisor does not approve actions or mutate primary session state directly. Its default investigative toolset is `read`, `grep`, and `glob`, but a `WATCHDOG.yml` roster entry may grant any built-in — including mutating tools such as `edit`, `write`, `bash`, and `eval`. Those tools run in an isolated advisor `ToolSession`, but they honor the session's normal approval mode and per-tool policies; grant them only when the advisor model and workspace are trusted (see [Tools and isolation](#tools-and-isolation)).
 
@@ -25,50 +25,30 @@ An advisor does not approve actions or mutate primary session state directly. It
 
 The subsystem requires `advisor.enabled: true`. RPC and ACP hosts use protocol defaults for `advisor.*` instead of inheriting local interactive preferences: the advisor starts disabled unless that host explicitly opts in.
 
-Model selection depends on the roster:
+Every advisor inherits the owning session’s current model and thinking level:
 
-- Without any discovered `WATCHDOG.yml` advisor entries, OMP creates the legacy/default advisor and resolves the `advisor` role.
-- With a roster, each enabled entry uses its explicit `model` when present, otherwise the `advisor` role. An unresolvable entry is reported as `no_model` without preventing other entries from running.
-- `advisors[].enabled: false` keeps an entry visible as paused but does not build its runtime.
+- Without a discovered `WATCHDOG.yml` roster, OMP creates the default advisor.
+- With a roster, each enabled entry uses that same model with its own tools, instructions, and review cadence.
+- `advisors[].enabled: false` keeps an entry visible as paused without building its runtime.
 
-Example:
+Example (`config.yml`):
 
 ```yaml
-modelRoles:
-   advisor: anthropic/claude-sonnet-4-5:medium
+model: anthropic/claude-sonnet-4-5:high
 
 advisor:
    enabled: true
 ```
 
-Model selectors use normal role/model resolution, including provider-prefixed ids, canonical ids, fallback lists, and optional thinking suffixes.
+A manual primary-model switch rebuilds the advisors for the new model. Thinking changes are synchronized at review boundaries, including explicit `off`; legacy `auto` follows the primary’s locally resolved effort. There is no independent advisor model, thinking selector, or classifier. Old `modelRoles.advisor` values and `WATCHDOG.yml` entry `model` fields do not override the primary selection.
 
-A configured `modelRoles.advisor` wins without silently falling back when it is invalid. When unset, advisor-role resolution uses a configured `slow` role, then the built-in slow priority chain; it does not simply inherit the primary model.
+### Request recovery
 
-Without an effort suffix, advisors request `medium`, clamped to the model's supported range. `:auto` follows the primary agent's resolved effort at review boundaries rather than running a separate advisor classifier. Models without controllable effort inherit their normal reasoning behavior.
+A failed advisor review stays on the same model. For an account-policy or usage-limit rejection, the host can try another eligible credential for that model, with a bounded account-rotation budget. Provider-timed rate limits and usage blocks can be waited out within the configured retry budget and delay policy. A longer or exhausted usage block pauses the advisor with its pending review retained.
 
-### Backup reviewer
+Other failures use the advisor runtime’s bounded retries and drop/halt rules described under [catch-up](#catch-up-with-advisorsyncbacklog). A refusal or unavailable endpoint does not trigger another model, and no fallback chain or cooldown restoration can change the selected model.
 
-When the advisor's model fails (outage, rate limit, unreachable endpoint), the advisor switches to the next model in its `retry.fallbackChains` entry and retries the same review. Key the chain on the `advisor` role, or on the advisor's exact model selector:
-
-```yaml
-modelRoles:
-   advisor: openai/gpt-5.5:medium
-
-retry:
-   fallbackChains:
-      advisor:
-         - anthropic/claude-sonnet-4-5:medium
-         - google-vertex/gemini-3-pro
-```
-
-This follows the same rules as the primary's fallback: `retry.enabled` and `retry.modelFallback` must be on, candidates still cooling down, without credentials, or incompatible with native advisor history are skipped, and `retry.fallbackRevertPolicy: cooldown-expiry` returns the advisor to its primary model once the cooldown ends. Credential rotation is attempted before switching models, at most once per sibling account for a failing review. Short usage-limit blocks can instead be waited out within `retry.maxDelayMs` and the retry budget; longer/exhausted blocks pause the advisor.
-
-A classifier refusal by the advisor's primary model (for example Anthropic's `Refusal (cyber)`) is treated as a judgment of the reviewed content rather than a model failure: it puts no cooldown on that model and pins the advisor to its fallback. The pin lasts until a compaction (the session's or the advisor's own), a handoff, or a new conversation replaces that content; the next review then retries the primary under `retry.fallbackRevertPolicy`. A fallback model that refuses is skipped with the usual cooldown and does not pin, so a primary that only failed for another reason still returns once its cooldown ends.
-
-`tier.advisor` controls service tier for all advisors. It defaults to `none` (standard processing); `inherit` follows the primary's live per-family tier, including `/fast` changes. Concrete values (`auto`, `default`, `flex`, `scale`, `priority`, `ultrafast`) are applied only when the advisor model's provider family supports them.
-
-`retry.fallbackOn` also decides which advisor failures may switch models: under `usage-limit` only a usage limit walks the chain, and any other failure stays on the advisor's own model with its usual retries before the review is dropped; under `except-usage-limit` a usage limit rotates credentials, waits, or pauses the advisor instead of switching.
+`tier.advisor` controls service tier for all advisors. It defaults to `none` (standard processing); `inherit` follows the primary’s live per-family tier, including `/fast` changes. Concrete values (`auto`, `default`, `flex`, `scale`, `priority`, `ultrafast`) apply only when the current model’s provider family supports them.
 
 ### Default advisor settings
 
@@ -83,7 +63,7 @@ Edits to these settings apply to the running advisor at its next primary boundar
 
 Roster entries set their own cadence: an omitted `reviewMode` means `turn` and an omitted `reviewInterval` means `1`, regardless of the settings above. An omitted `syncBacklog` inherits `advisor.syncBacklog`, and an omitted `maxNotesPerUpdate` inherits the shared `WATCHDOG.yml` top-level value, then `advisor.maxNotesPerUpdate`. An explicit `syncBacklog: off` overrides a global `strict`.
 
-Rebuilding advisors (saving `/advisor configure`, model-role or context changes) keeps updates the cadence skipped: each rebuilt advisor receives them with its next scheduled review.
+Rebuilding advisors (saving `/advisor configure`, primary-model or context changes) keeps updates the cadence skipped: each rebuilt advisor receives them with its next scheduled review.
 
 ### Headless runs
 
@@ -94,7 +74,7 @@ persisting `advisor.enabled`:
 omp -p --advisor "Review this task."
 ```
 
-While a primary prompt is running, eligible advisor notes can steer that run. After the final prompt settles, print mode preserves late advisor notes without starting hidden primary turns, sends updates the review cadence skipped (so an `agent-end` or interval reviewer still reviews the final answer), then waits up to ten minutes for final reviews before disposing the session. That wait covers a failing advisor's retries and [backup reviewer](#backup-reviewer) switch, so a review that fails on the advisor's model finishes on its fallback instead of being abandoned. Error exits use a 30-second drain budget so failed automation can terminate. An advisor whose catch-up policy is `strict` is waited on without either budget; aborts, halts, and quota pauses still end its wait. If a budget expires, or the advisor stops for good (halted or quota-paused), OMP logs the reviews that disposal will abandon; completed reviews retain their transcript and token/cost usage.
+While a primary prompt is running, eligible advisor notes can steer that run. After the final prompt settles, print mode preserves late advisor notes without starting hidden primary turns, sends updates the review cadence skipped (so an `agent-end` or interval reviewer still reviews the final answer), then waits up to ten minutes for final reviews before disposing the session. That wait includes [request recovery](#request-recovery) on the same model, so a transient failure can finish within the drain budget. Error exits use a 30-second drain budget so failed automation can terminate. An advisor whose catch-up policy is `strict` is waited on without either budget; aborts, halts, and quota pauses still end its wait. If a budget expires, or the advisor stops for good (halted or quota-paused), OMP logs the reviews that disposal will abandon; completed reviews retain their transcript and token/cost usage.
 
 Slash commands:
 
@@ -108,9 +88,9 @@ Slash commands:
 | `/advisor dump raw`  | Copy/return the full dump, including system prompt, tools, thinking, and calls.                                                       |
 | `/advisor configure` | Open the interactive TUI editor for project- or user-level `WATCHDOG.yml`. Non-TUI command hosts report that the editor is TUI-only.  |
 
-If the subsystem is enabled but no legacy/default or roster model resolves, status reports the configured advisors as inactive/`no_model`.
+If the subsystem is enabled but the owning session has no selected model, status reports its advisors as inactive/`no_model`.
 
-Entries left at `no_model` during startup are retried after background model discovery settles, so a model that arrives late in the catalog can start without a manual toggle.
+Entries left at `no_model` during startup are retried after background model discovery settles. Once the primary model becomes available or is explicitly selected, enabled advisors can start without a separate model assignment.
 
 ## What the advisor sees
 
@@ -237,9 +217,9 @@ advisors:
      syncBacklog: strict
 ```
 
-Advisor failures do not permanently stall the primary. The host first attempts its credential/fallback recovery. Retriable failures are attempted up to three times before that backlog is dropped; three dropped-backlog cycles halt the runtime until an explicit reset, and a permanent request rejection can halt it after one cycle. A quota/usage-limit failure that cannot recover through credential rotation, model fallback, or a bounded cooldown wait pauses the advisor with its batch retained until its runtime is reset or rebuilt: compaction, dropping images, a shake, a session switch or new session, an `/advisor` rebuild, a configuration reload, or a restart. Tool-output pruning keeps the pause, and no timer resumes it. The primary's catch-up waiters (`advisor.syncBacklog`) are released as soon as an advisor is failing; only the headless shutdown drain waits through recovery.
+Advisor failures do not permanently stall the primary. The host first attempts credential rotation or an admitted provider wait on the same model. Retriable failures are attempted up to three times before that backlog is dropped; three dropped-backlog cycles halt the runtime until an explicit reset, and a permanent request rejection can halt it after one cycle. A quota/usage-limit failure that cannot recover through credential rotation or an admitted provider wait pauses the advisor with its batch retained until its runtime is reset or rebuilt: compaction, dropping images, a shake, a session switch or new session, an `/advisor` rebuild, a configuration reload, or a restart. Tool-output pruning keeps the pause, and no timer resumes it. The primary's catch-up waiters (`advisor.syncBacklog`) are released as soon as an advisor is failing; only the headless shutdown drain waits through recovery.
 
-The advisor also uses `model.toolCallLoopGuard.*` to bound repeated identical tool calls. One detected loop injects a corrective; if the same bound trips again during that review, the review is aborted without treating the stop as a provider failure or starting fallback recovery. The detector resets at the next review/context boundary.
+The advisor also uses `toolCallLoopGuard.*` to bound repeated identical tool calls. One detected loop injects a corrective; if the same bound trips again during that review, the review is aborted without treating the stop as a provider failure or starting provider recovery. The detector resets at the next review/context boundary.
 
 Unsafe Advisor output follows a separate quarantine path rather than that
 three-attempt request-retry policy. Calls to tools not granted to the advisor receive `Tool <name> not found`
@@ -318,9 +298,9 @@ Later project files sit closer to the end of the advisor prompt, so narrower dir
 
 ## WATCHDOG.yml
 
-`WATCHDOG.yml` (or `WATCHDOG.yaml`) is the advisor roster. Each named entry can set its own enabled state, model, tools, and specialization prompt; `WATCHDOG.md` supplies shared review guidance.
+`WATCHDOG.yml` (or `WATCHDOG.yaml`) is the advisor roster. Each named entry can set its own enabled state, tools, cadence, and specialization prompt; `WATCHDOG.md` supplies shared review guidance.
 
-Discovery and `/advisor configure` use the same per-entry validation: malformed entries are skipped with named warnings while healthy advisors remain usable. Invalid YAML or a non-mapping document is skipped with a file warning. Problems appear in an aggregated startup/editor warning and remain visible inside the editor after switching project/user scope. Saving the editor document writes only valid entries.
+Discovery and `/advisor configure` use the same per-entry validation: malformed entries are skipped with named warnings while healthy advisors remain usable. Invalid YAML or a non-mapping document is skipped with a file warning. Problems appear in an aggregated startup/editor warning and remain visible inside the editor after switching project/user scope. Saving the editor document writes only valid entries. Legacy `model` fields are ignored when loading and omitted when the editor saves; every entry follows the primary model and effort.
 
 The editor's Project scope targets the repository-root `WATCHDOG.yml` (cwd when outside a repository); User scope targets the active agent directory. It edits an existing `.yaml` in place when no `.yml` exists at that scope, rather than creating a competing file.
 
@@ -333,14 +313,12 @@ instructions: |
 advisors:
    - name: Architecture
      enabled: true
-     model: anthropic/claude-sonnet-4-5:medium
      tools: [read, grep, glob]
      instructions: |
         Watch cross-module coupling and public-API growth.
 
    - name: Fixer
      enabled: false
-     model: anthropic/claude-sonnet-4-5:high
      tools: [read, grep, glob, edit, bash]
      instructions: |
         You may edit and run tests to prove a fix locally, then advise.
@@ -362,7 +340,6 @@ Fields:
 - `instructions` (top level): shared prompt prepended to every advisor's system prompt alongside `WATCHDOG.md`. Concatenated across all discovered `WATCHDOG.yml` files.
 - `advisors[].name`: human label; slugified for the session id and its `__advisor.<slug>.jsonl` filename. Duplicate slugs across files are resolved by the same specificity rule as `WATCHDOG.md` discovery (project leaf > project ancestor > user).
 - `advisors[].enabled`: optional per-advisor switch, default `true`. `false` leaves the advisor visible as paused in status/configuration.
-- `advisors[].model`: optional model selector with optional `:level` thinking suffix (e.g. `x-ai/grok-code-fast:high`). Omitted → the advisor uses `modelRoles.advisor`.
 - `advisors[].tools`: optional list of built-in tool names to grant. Omitted → `read`/`grep`/`glob`; explicit `[]` → no investigative tools. Any name in [`BUILTIN_TOOL_NAMES`](../packages/coding-agent/src/tools/builtin-names.ts) is accepted, including mutating tools. Legacy aliases (`search`→`grep`, `find`→`glob`) are normalized. Unknown names are dropped with a warning; if that leaves a nonempty input with no valid names, the implementation currently treats the result as omitted and uses the default subset.
 - `advisors[].reviewMode`: optional cadence mode. `turn` (default) reviews every primary turn — every tool-call round, including `willContinue: true` tool-loop continuations; `agent-end` reviews only final yields where `willContinue` is not true, i.e. once per run.
 - `advisors[].reviewInterval`: optional positive safe integer (at most `9007199254740991`), default `1`. Reviews every Nth eligible update; skipped updates accumulate and are sent in the next scheduled review. For a review every Nth completed run, combine `reviewMode: agent-end` with this field. Deferred advice still becomes eligible for delivery at final boundaries even when cadence skips that review.
@@ -382,38 +359,37 @@ At the same directory depth, `.yml` candidates precede `.yaml` candidates, and `
 
 ## Subagents
 
-Subagents run unadvised by default; advisors are opted in **per agent** instead of via a blanket toggle:
+Subagents run unadvised by default; advisors are enabled per agent:
 
-- Agent definition frontmatter `advisor`: `true` advises spawned sessions of that agent with the model resolved for the `advisor` role; a string (e.g. `advisor: "deepseek/deepseek-v4-flash"` or `advisor: "@smol:high"`) sets an explicit advisor model pattern with an optional `:level` thinking suffix.
-- The `task.agentAdvisor` settings record (agent name → `"on"` / `"off"` / model pattern) overrides the frontmatter, and is configured per agent from the `/agents` hub: Enter on an agent opens its property strip; the advisor strip offers on/off, a model-browser pick, or a raw pattern.
+- Agent definition frontmatter `advisor: true` enables reviews for spawned sessions of that agent.
+- The `task.agentAdvisor` settings record (agent name → `"on"` / `"off"`) overrides the frontmatter. The `/agents` hub exposes this enablement switch.
+- Legacy non-empty model strings are accepted as enablement only; they do not select a separate model or thinking level.
 
-The legacy `advisor.subagents: true` setting migrates to `task.agentAdvisor: { task: "on" }` — the bundled generic `task` agent keeps its advisor, other agents start unadvised.
+The legacy `advisor.subagents: true` setting migrates to `task.agentAdvisor: { task: "on" }` — the bundled generic `task` agent keeps its advisor, while other agents start unadvised.
 
-An advised subagent session builds its own advisor subsystem with the same settings/model-role resolution (an explicit pattern lands on the spawned session's `modelRoles.advisor`), then reruns both `WATCHDOG.md` and `WATCHDOG.yml` discovery for that subagent session's `cwd` and agent directory. Subagent advisors remain isolated from the subagent's primary tool session in the same way the main advisor is isolated from the main agent.
+An advised subagent builds its own reviewer subsystem using its inherited current model and effort, then reruns `WATCHDOG.md` and `WATCHDOG.yml` discovery for its own `cwd` and agent directory. The reviewer’s tools and transcript remain isolated from that subagent’s primary tool session in the same way a main-session advisor is isolated from the primary agent.
 
 ## Cost and context behavior
 
-Advisor usage is separate model usage. `/advisor status` computes token/context counts from the advisor's live transcript, while cost comes from a cumulative per-session ledger that survives advisor resets and is restored from persisted advisor transcripts on resume. Token counts can therefore reset or shrink independently of accumulated spend.
+Advisor requests incur additional usage on the same selected model. `/advisor status` computes token/context counts from the advisor's live transcript, while cost comes from a cumulative per-session ledger that survives advisor resets and is restored from persisted advisor transcripts on resume. Token counts can therefore reset or shrink independently of accumulated spend.
 
 `advisor.evictStaleResults` defaults to `true`. Before each review, investigative `read`/`grep`/`glob` results from older reviews are replaced with short placeholders; the latest review's results remain. Set it to `false` to retain those older tool results in the advisor's live context.
 
 On prefix-bound thinking models, that eviction also drops signed reasoning after the pruning boundary, including reasoning in the latest review. Primary deltas and advice notes are not evicted.
 
-The advisor has its own append-only context. Before each advisor prompt, `AgentSession` estimates incoming tokens and may maintain advisor context:
+The advisor has its own context. Before each review, `AgentSession` estimates incoming tokens and maintains that context when needed:
 
-1. try model-level context promotion when enabled and a larger compatible model is available
-2. if promotion cannot fit enough context, compact the advisor's own message history
-3. for readable history, re-prime from the current bounded primary transcript if compaction has no candidates or still cannot fit
+1. Compact the advisor’s message history using the same selected model and effort. The maintenance path uses provider-native compaction when eligible, or a text summary; it does not use a separate summarizer or promote to a larger model.
+2. For readable history, re-prime from the bounded primary transcript if summary maintenance cannot produce a usable result.
+3. For opaque native history, preserve it and report maintenance failure if the current model cannot safely compact it. Re-priming must not silently discard that history.
 
-Native compaction replaces advisor history only when the active model can replay its provider and Responses API format. A foreign native-enabled summarizer uses portable text summarization for readable history instead. Once the advisor holds native history, incompatible summarizers, retry fallbacks, cooldown restorations, and context promotions are skipped. Maintenance failure preserves that history rather than re-priming it away; normal advisor request-failure handling still applies.
+Creating native compaction requires `remote` in `compaction.methodOrder`, support on the current model, and a result that the same model can replay. Existing native history may remain replayable after native creation is disabled, but another model is never recruited to maintain it. If that history needs compaction and the current model cannot create a compatible native result, the failure leaves the history intact and normal advisor failure handling applies.
 
-Replay compatibility does not require new native compaction to be enabled. Same-provider Responses models can receive existing native history during fallback, cooldown restoration, or promotion even when their own compaction endpoint is disabled. Creating a new native result still requires `remote` in `compaction.methodOrder` and an eligible writer; a separate compatible writer can maintain a reader whose native endpoint is disabled.
-
-The advisor's live context is in-memory and append-only; it is retained while the session runs so `/advisor dump` can inspect it, and is independently promoted/compacted/re-primed (above). It is not a replacement for the primary persisted transcript.
+The advisor’s live context is kept in memory for `/advisor dump` and may be compacted or re-primed as above. Its persisted transcript remains append-only and separate from the primary transcript.
 
 ## Transcript persistence and observability
 
-The advisor is a passive reviewer with its own model usage, so — like a task subagent — every finalized advisor turn is appended to JSONL inside the owning session's artifacts directory:
+The advisor is a passive reviewer with separately accounted usage on the primary model, so — like a task subagent — every finalized advisor turn is appended to JSONL inside the owning session's artifacts directory:
 
 - legacy/default advisor: `<session>/__advisor.jsonl`
 - named advisor: `<session>/__advisor.<slug>.jsonl`
@@ -426,6 +402,6 @@ Why a file:
 - **Usage attribution.** `omp stats` scans each session folder recursively, so advisor assistant turns (with their usage/cost) are attributed to the same project/session like any other subagent. Advisor "session update" prompts are persisted as `synthetic`, agent-attributed user messages so they never inflate user-message metrics.
 - **Observability.** [Agent Hub](./agent-hub.md) discovers legacy and named `__advisor*.jsonl` files on open and shows each as a read-only `advisor`-kind transcript under its owning session.
 
-The file follows session switches: on `/new`, resume/switch, and branch the recorder reopens at the new session's path on the next advisor turn; before a `/delete` deletes the old artifacts dir the recorder feed is detached and drained so a queued write cannot recreate the deleted file. The on-disk log is append-only and independent of the in-memory context — re-primes and compaction never truncate it.
+The file follows session switches: on `/new`, resume/switch, and branch the recorder reopens at the new session's path on the next advisor turn; before a `/delete` deletes the old artifacts dir the recorder feed is detached and drained so a queued write cannot recreate the deleted file. A late completion from an old conversation does not enter the new branch’s advisor transcript or cost ledger. The on-disk log is append-only and independent of the in-memory context — re-primes and compaction never truncate it.
 
 The advisor is never a peer. The `advisor`-kind registry ref is excluded from agent-facing peer rosters and `agent://all` broadcasts, the subagent peer prompt, and the `history://` index/lookup/completions — and cannot be messaged through `write agent://<id>` or collab chat, nor [revived or killed from Agent Hub](./agent-hub.md#persisted-agents-and-advisors) or collab. It is not addressable as a peer, regardless of what tools it has been granted.
