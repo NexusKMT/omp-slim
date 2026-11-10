@@ -80,14 +80,9 @@ function createHost(
 		persistedAssistantEntryId: () => undefined,
 		settings,
 		modelRegistry,
-		configWarnings: [],
 		model: () => model,
-		contextFitsModel: () => true,
 		textOutputCommitted: () => options.textOutputCommitted !== false,
 		thinkingLevel: () => undefined,
-		configuredThinkingLevel: () => undefined,
-		setThinkingLevel: () => {},
-		thinkingLevelCeiling: () => undefined,
 		isDisposed: () => false,
 		isStreaming: () => false,
 		isCompacting: () => false,
@@ -101,9 +96,6 @@ function createHost(
 		waitForSessionMessagePersistence: async () => {},
 		appendSessionMessage: () => {},
 		sessionMessageAlreadyPersisted: () => false,
-		setModelWithProviderSessionReset: async () => {},
-		resolveActiveEditMode: () => "hashline",
-		syncAfterModelChange: async () => {},
 		resetCurrentResponsesProviderSession: () => {},
 		maybeAutoRedeemReset: async () => ({ restored: false }),
 		runAutoCompaction: async () => ({ continuationScheduled: false }) as RecoveryCompactionResult,
@@ -127,13 +119,6 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			"retry.baseDelayMs": 1,
 			"retry.fallbackChains": { default: ["openai/gpt-4o"] },
 		});
-		let selected = model;
-		host.model = () => selected;
-		const changes: Model[] = [];
-		host.setModelWithProviderSessionReset = async next => {
-			changes.push(next);
-			selected = next;
-		};
 		const scheduled = vi.fn();
 		host.scheduleAgentContinue = scheduled;
 		const recovery = new TurnRecovery(host);
@@ -142,8 +127,6 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		expect(await recovery.handleRetryableError(terminal)).toBe(false);
 		expect(terminal.errorMessage).toContain("Retry budget exhausted after 1 retry");
 		expect(scheduled).toHaveBeenCalledTimes(1);
-		expect(changes).toEqual([]);
-		expect(selected).toBe(model);
 		expect(recovery.servingModel?.isFallback).toBe(false);
 	});
 

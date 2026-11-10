@@ -10,7 +10,6 @@ import type {
 	AssistantRetryRecovery,
 	AssistantRetryRecoveryKind,
 	CodexCompactionContext,
-	Effort,
 	Model,
 	TextContent,
 	ToolChoice,
@@ -31,8 +30,6 @@ import malformedFunctionCallRetryTemplate from "../prompts/system/malformed-func
 import streamStallContinueTemplate from "../prompts/system/stream-stall-continue.md" with { type: "text" };
 import thinkingLoopRedirectTemplate from "../prompts/system/thinking-loop-redirect.md" with { type: "text" };
 import unexpectedStopRetryTemplate from "../prompts/system/unexpected-stop-retry.md" with { type: "text" };
-import { type ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
-import type { EditModeSetting } from "../edit/settings";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ResetRecoveryResult } from "./codex-auto-reset";
 import { assistantTurnProducedOutput, isEmptyAssistantStop, isEmptyErrorTurn, isUserAuthoredMessage } from "./messages";
@@ -203,24 +200,10 @@ export interface TurnRecoveryHost {
 	sessionManager: SessionManager;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
-	configWarnings: string[];
 	model(): Model | undefined;
-	/**
-	 * Whether the live context fits `model`'s usable window. `excludedMessage`
-	 * identifies a failed assistant turn that will be removed before retrying, so
-	 * selection judges the request that will actually be sent. See
-	 * `SessionMaintenance.contextFitsModel`.
-	 */
-	contextFitsModel(model: Model, excludedMessage?: AssistantMessage): boolean;
 	/** Whether streamed text has already been committed to the active output sink. */
 	textOutputCommitted(): boolean;
 	thinkingLevel(): ThinkingLevel | undefined;
-	configuredThinkingLevel(): ConfiguredThinkingLevel | undefined;
-	setThinkingLevel(level: ConfiguredThinkingLevel | undefined): void;
-	/** Hard per-session effort ceiling; fallback recovery must never raise thinking above it. */
-	thinkingLevelCeiling(): Effort | undefined;
-	/** The session never switches to a retry fallback model (a per-call `model` subagent). */
-	modelFallbackDisabled?(): boolean;
 	isDisposed(): boolean;
 	isStreaming(): boolean;
 	isCompacting(): boolean;
@@ -241,14 +224,6 @@ export interface TurnRecoveryHost {
 	appendSessionMessage(message: AssistantMessage): void;
 	persistedAssistantEntryId(message: AssistantMessage): string | undefined;
 	sessionMessageAlreadyPersisted(message: AssistantMessage): boolean;
-	setModelWithProviderSessionReset(model: Model): Promise<void>;
-	/** Edit mode resolved for the active model and settings, captured before a fallback swap. */
-	resolveActiveEditMode(): EditModeSetting;
-	/**
-	 * Rebuilds the model-dependent base system prompt after a swap. Retry fallback passes
-	 * `retryFallback`, which rebuilds only for an edit-mode change so the cached prompt survives.
-	 */
-	syncAfterModelChange(previousEditMode: EditModeSetting, options?: { retryFallback?: boolean }): Promise<void>;
 	resetCurrentResponsesProviderSession(reason: string): void;
 	/**
 	 * Spend an eligible saved reset for the blocked provider pool.

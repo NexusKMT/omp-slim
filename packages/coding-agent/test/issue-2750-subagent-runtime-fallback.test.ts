@@ -98,7 +98,6 @@ describe("subagent runtime model resolution", () => {
 					sessionManager: { getSessionId: () => "literal-model" },
 					settings: Settings.isolated({}),
 					modelRegistry: {},
-					configWarnings: [],
 				} as unknown as TurnRecoveryHost);
 				const session = createYieldingSession(async () => {
 					if (collide) {
