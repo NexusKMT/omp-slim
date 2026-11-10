@@ -116,69 +116,76 @@ describe("print-mode suggestions for a provider-qualified miss", () => {
 	}, 60_000);
 });
 
-describe("print mode with a stale configured default", () => {
-	test("warns on stderr naming the stale default and the model that runs instead", async () => {
-		const home = path.join(os.tmpdir(), `pi-cli-stale-default-${Snowflake.next()}`);
-		const agentDir = path.join(home, ".omp", "agent");
-		fs.mkdirSync(agentDir, { recursive: true });
-		fs.writeFileSync(
-			path.join(agentDir, "config.yml"),
-			"modelRoles:\n  default: anthropic/claude-sonnet-9-9\nretry:\n  enabled: false\n",
-		);
-		try {
-			const proc = Bun.spawn(
-				[
-					process.execPath,
-					path.resolve(import.meta.dir, "../src/cli.ts"),
-					"--no-title",
-					"--no-lsp",
-					"--no-extensions",
-					"--no-tools",
-					"--no-session",
-					"-p",
-					"hi",
-				],
-				{
-					cwd: home,
-					env: {
-						PATH: process.env.PATH,
-						HOME: home,
-						USERPROFILE: home,
-						TMPDIR: process.env.TMPDIR,
-						NO_COLOR: "1",
-						ANTHROPIC_API_KEY: "test-key",
-						// The fallback model's request never reaches Anthropic; the test stops the run once the warning is out.
-						ANTHROPIC_BASE_URL: "http://127.0.0.1:9",
-					},
-					stdin: "ignore",
-					stdout: "pipe",
-					stderr: "pipe",
+describe("print mode with a stale configured model", () => {
+	test.each([
+		{ name: "current model", config: "model: anthropic/claude-sonnet-9-9\n" },
+		{ name: "legacy default", config: "modelRoles:\n  default: anthropic/claude-sonnet-9-9\n" },
+	])(
+		"rejects an unavailable $name without sending a provider request",
+		async ({ config }) => {
+			const fixtureHome = path.join(os.tmpdir(), `pi-cli-stale-model-${Snowflake.next()}`);
+			const agentDir = path.join(fixtureHome, ".omp", "agent");
+			let providerRequests = 0;
+			const provider = Bun.serve({
+				hostname: "127.0.0.1",
+				port: 0,
+				fetch() {
+					providerRequests++;
+					return Response.json(
+						{ error: { type: "api_error", message: "Unexpected provider request" } },
+						{ status: 500 },
+					);
 				},
-			);
-			const warning = "Default model anthropic/claude-sonnet-9-9 not found. Using anthropic/";
-			const stderr = await readUntil(proc.stderr, warning);
-			proc.kill();
-			await proc.exited;
-			expect(stderr).toContain(warning);
-		} finally {
-			removeSyncWithRetries(home);
-		}
-	}, 60_000);
+			});
+			try {
+				await Bun.write(path.join(agentDir, "config.yml"), `${config}retry:\n  enabled: false\n`);
+				const proc = Bun.spawn(
+					[
+						process.execPath,
+						path.resolve(import.meta.dir, "../src/cli.ts"),
+						"--no-title",
+						"--no-lsp",
+						"--no-extensions",
+						"--no-tools",
+						"--no-session",
+						"-p",
+						"hi",
+					],
+					{
+						cwd: fixtureHome,
+						env: {
+							PATH: process.env.PATH,
+							HOME: fixtureHome,
+							USERPROFILE: fixtureHome,
+							TMPDIR: process.env.TMPDIR,
+							NO_COLOR: "1",
+							ANTHROPIC_API_KEY: "test-key",
+							ANTHROPIC_BASE_URL: provider.url.href,
+						},
+						stdin: "ignore",
+						stdout: "pipe",
+						stderr: "pipe",
+					},
+				);
+				try {
+					const [exitCode, stdout, stderr] = await Promise.all([
+						proc.exited,
+						new Response(proc.stdout).text(),
+						new Response(proc.stderr).text(),
+					]);
+					expect(exitCode).toBe(1);
+					expect(stderr).toContain("Configured model anthropic/claude-sonnet-9-9 is unavailable.");
+					expect(stdout).toBe("");
+					expect(providerRequests).toBe(0);
+				} finally {
+					proc.kill();
+					await proc.exited;
+				}
+			} finally {
+				provider.stop(true);
+				removeSyncWithRetries(fixtureHome);
+			}
+		},
+		60_000,
+	);
 });
-
-/** Stderr read until it contains `needle`, or all of it once the stream ends without it. */
-async function readUntil(stream: ReadableStream<Uint8Array>, needle: string): Promise<string> {
-	const reader = stream.getReader();
-	const decoder = new TextDecoder();
-	let text = "";
-	try {
-		while (!text.includes(needle)) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			text += decoder.decode(value, { stream: true });
-		}
-	} finally {
-		reader.releaseLock();
-	}
-	return text;
-}

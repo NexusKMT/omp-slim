@@ -60,29 +60,29 @@ describe("config CLI schema coverage", () => {
 
 		const lines = logSpy.mock.calls.map(call => String(call[0] ?? ""));
 		const plainLines = lines.map(line => Bun.stripANSI(line));
-		const modelRolesLine = plainLines.find(line => line.includes("modelRoles ="));
-		expect(modelRolesLine).toBeDefined();
-		const plainModelRolesLine = String(modelRolesLine);
-		expect(plainModelRolesLine).toContain("modelRoles =");
-		expect(plainModelRolesLine).toContain("(record)");
-		expect(plainModelRolesLine).toContain("{");
-		expect(plainModelRolesLine).toContain("}");
-		expect(plainModelRolesLine).not.toContain("[object Object]");
+		const advisorOverridesLine = plainLines.find(line => line.includes("task.agentAdvisor ="));
+		expect(advisorOverridesLine).toBeDefined();
+		const plainAdvisorOverridesLine = String(advisorOverridesLine);
+		expect(plainAdvisorOverridesLine).toContain("task.agentAdvisor =");
+		expect(plainAdvisorOverridesLine).toContain("(record)");
+		expect(plainAdvisorOverridesLine).toContain("{");
+		expect(plainAdvisorOverridesLine).toContain("}");
+		expect(plainAdvisorOverridesLine).not.toContain("[object Object]");
 	});
 
 	it("sets and gets record settings as JSON objects", async () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const recordValue = '{"default":"claude-opus-4-6"}';
+		const recordValue = '{"reviewer":"on"}';
 
-		await runConfigCommand({ action: "set", key: "modelRoles", value: recordValue, flags: { json: true } });
-		await runConfigCommand({ action: "get", key: "modelRoles", flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "task.agentAdvisor", value: recordValue, flags: { json: true } });
+		await runConfigCommand({ action: "get", key: "task.agentAdvisor", flags: { json: true } });
 
 		const payload = logSpy.mock.calls.at(-1)?.[0];
 		expect(typeof payload).toBe("string");
 		const parsed = JSON.parse(String(payload)) as { key: string; value: unknown; type: string };
-		expect(parsed.key).toBe("modelRoles");
+		expect(parsed.key).toBe("task.agentAdvisor");
 		expect(parsed.type).toBe("record");
-		expect(parsed.value).toEqual({ default: "claude-opus-4-6" });
+		expect(parsed.value).toEqual({ reviewer: "on" });
 	});
 
 	it("normalizes valid provider in-flight request limits from JSON objects", async () => {
@@ -216,7 +216,7 @@ describe("config CLI schema coverage", () => {
 		expect(error).toBe("");
 		expect(Buffer.byteLength(output)).toBeGreaterThan(65_536);
 		const parsed: unknown = JSON.parse(output);
-		expect(parsed).toMatchObject({ modelRoles: { type: "record" } });
+		expect(parsed).toMatchObject({ "task.agentAdvisor": { type: "record" } });
 	});
 	it("reports the value written to config.yml and the layer that still overrides it", async () => {
 		if (!testAgentDir) throw new Error("Test agent directory was not initialized");
