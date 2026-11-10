@@ -14,14 +14,14 @@ import type { Settings } from "../config/settings";
 export function formatRoleModelValue(
 	settings: Settings,
 	modelRegistry: ModelRegistry,
-	role: string,
+	_role: string,
 	model: Model,
 	selectorOverride?: string,
 	thinkingLevelOverride?: ThinkingLevel,
 ): string {
 	const modelKey = selectorOverride ?? `${model.provider}/${model.id}`;
 	if (thinkingLevelOverride !== undefined) return formatModelSelectorValue(modelKey, thinkingLevelOverride);
-	const existingRoleValue = settings.getModelRole(role);
+	const existingRoleValue = settings.getModel();
 	if (!existingRoleValue) return modelKey;
 	const thinkingLevel = extractExplicitThinkingSelector(existingRoleValue, settings, {
 		isLiteralModelId: (provider, id) => {
@@ -69,19 +69,14 @@ export function resolveCompactionConfiguredTarget(currentModel: Model, available
 /** Resolves a model role and its explicit thinking selection. */
 export function resolveRoleModelFull(
 	settings: Settings,
-	role: string,
+	_role: string,
 	availableModels: Model[],
 	currentModel: Model | undefined,
 ): ResolvedModelRoleValue {
-	const roleModelStr =
-		role === "default"
-			? (settings.getModelRole("default") ??
-				(currentModel ? `${currentModel.provider}/${currentModel.id}` : undefined))
-			: settings.getModelRole(role);
-	if (!roleModelStr) {
-		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
+	if (currentModel) {
+		return { model: currentModel, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
 	}
-	return resolveModelRoleValue(roleModelStr, availableModels, {
+	return resolveModelRoleValue(settings.getModel(), availableModels, {
 		settings,
 		matchPreferences: getModelMatchPreferences(settings),
 	});

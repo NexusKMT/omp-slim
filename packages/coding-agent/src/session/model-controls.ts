@@ -15,8 +15,6 @@ import { isFireworksFastModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id"
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { logger } from "@oh-my-pi/pi-utils";
-import { classifyDifficulty } from "../auto-thinking/classifier";
 import type { ModelRegistry } from "../config/model-registry";
 import {
 	filterAvailableModelsByEnabledPatterns,
@@ -25,7 +23,6 @@ import {
 	type ResolvedModelRoleValue,
 	resolveModelRoleValue,
 } from "../config/model-resolver";
-import { getKnownRoleIds } from "../config/model-roles";
 import { buildServiceTierByFamily } from "../config/service-tier";
 import type { Settings } from "../config/settings";
 import { containsMagicKeyword } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
@@ -43,7 +40,7 @@ import {
 } from "@oh-my-pi/pi-tui/thinking";
 import type { EditModeSetting } from "../edit/settings";
 import type { AgentSessionEvent } from "./agent-session-events";
-import type { ModelCycleResult, ResolvedRoleModel, RoleModelCycle, RoleModelCycleResult } from "./agent-session-types";
+import type { ModelCycleResult } from "./agent-session-types";
 import { formatRoleModelValue, resolveRoleModelFull } from "./role-models";
 import { EPHEMERAL_MODEL_CHANGE_ROLE, PREWALK_MODEL_CHANGE_ROLE } from "./session-entries";
 import type { SessionManager } from "./session-manager";
@@ -64,7 +61,7 @@ function takesPerMessageEffort(model: Model): boolean {
 }
 
 /**
- * Explicit thinking suffix of the first configured role that resolves to `model`
+ * Explicit thinking suffix of the primary selector when it resolves to `model`
  * among `availableModels`; what a temporary picker applies when it selects that model.
  */
 export function roleThinkingLevelForModel(
@@ -73,58 +70,15 @@ export function roleThinkingLevelForModel(
 	model: Model,
 ): ConfiguredThinkingLevel | undefined {
 	if (availableModels.length === 0) return undefined;
-	const matchPreferences = getModelMatchPreferences(settings);
-	for (const role of getKnownRoleIds(settings)) {
-		const roleValue = settings.getModelRole(role);
-		if (!roleValue) continue;
-		const resolved = resolveModelRoleValue(roleValue, availableModels, { settings, matchPreferences });
-		if (!resolved.explicitThinkingLevel || resolved.thinkingLevel === undefined || !resolved.model) continue;
-		if (modelsAreEqual(resolved.model, model)) return resolved.thinkingLevel;
-	}
-	return undefined;
-}
-
-/**
- * Role-model cycle in `roleOrder` for a session running `currentModel` whose
- * newest recorded model change used `lastRole`; see {@link ModelControls.getRoleModelCycle}.
- */
-export function resolveRoleModelCycle(
-	settings: Settings,
-	availableModels: Model[],
-	currentModel: Model | undefined,
-	lastRole: string | undefined,
-	roleOrder: readonly string[],
-): RoleModelCycle | undefined {
-	if (availableModels.length === 0 || !currentModel) return undefined;
-	const matchPreferences = getModelMatchPreferences(settings);
-	const models: ResolvedRoleModel[] = [];
-	for (const role of roleOrder) {
-		const roleModelStr =
-			role === "default"
-				? (settings.getModelRole("default") ?? `${currentModel.provider}/${currentModel.id}`)
-				: settings.getModelRole(role);
-		if (!roleModelStr) continue;
-		const resolved = resolveModelRoleValue(roleModelStr, availableModels, { settings, matchPreferences });
-		if (!resolved.model) continue;
-		models.push({
-			role,
-			model: resolved.model,
-			thinkingLevel: resolved.thinkingLevel,
-			explicitThinkingLevel: resolved.explicitThinkingLevel,
-		});
-	}
-	if (models.length === 0) return undefined;
-
-	// Trust the recorded role only while its resolved model still IS the
-	// active model. A model switch through another surface (alt+m, retry
-	// fallback, /model) or a role re-configuration leaves the recorded role
-	// pointing at a model the session no longer runs; cycling from that
-	// stale slot lands on the wrong neighbor and reads as a skipped entry.
-	let currentIndex = lastRole ? models.findIndex(entry => entry.role === lastRole) : -1;
-	if (currentIndex !== -1 && !modelsAreEqual(models[currentIndex].model, currentModel)) currentIndex = -1;
-	if (currentIndex === -1) currentIndex = models.findIndex(entry => modelsAreEqual(entry.model, currentModel));
-	if (currentIndex === -1) currentIndex = 0;
-	return { models, currentIndex };
+	const value = settings.getModel();
+	if (!value) return undefined;
+	const resolved = resolveModelRoleValue(value, availableModels, {
+		settings,
+		matchPreferences: getModelMatchPreferences(settings),
+	});
+	return resolved.explicitThinkingLevel && resolved.model && modelsAreEqual(resolved.model, model)
+		? resolved.thinkingLevel
+		: undefined;
 }
 
 /**
@@ -159,7 +113,6 @@ export interface ModelControlsHost {
 	resolveActiveEditMode(): EditModeSetting;
 	syncAfterModelChange(previousEditMode: EditModeSetting): Promise<void>;
 	setModelWithProviderSessionReset(model: Model, selection?: "explicit" | "automatic"): Promise<void>;
-	clearActiveRetryFallback(): void;
 	clearInheritedProviderPromptCacheKey(): void;
 	magicKeywordEnabled(keyword: MagicKeywordId): boolean;
 	emit(event: AgentSessionEvent): void;
@@ -167,7 +120,7 @@ export interface ModelControlsHost {
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
 }
 
-/** Owns model selection, thinking effort, role cycling, and service tiers. */
+/** Owns model selection, thinking effort, and service tiers. */
 export class ModelControls {
 	readonly #host: ModelControlsHost;
 	#scopedModels: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>;
@@ -223,17 +176,17 @@ export class ModelControls {
 		return this.#thinkingLevelCeiling;
 	}
 
-	/** Configured selector, preserving `auto` while classification is active. */
+	/** Configured selector, preserving the legacy `auto` selector. */
 	configuredThinkingLevel(): ConfiguredThinkingLevel | undefined {
 		return this.#autoThinking ? AUTO_THINKING : this.#thinkingLevel;
 	}
 
-	/** Whether per-turn automatic thinking classification is enabled. */
+	/** Whether the legacy automatic effort selector is enabled. */
 	get isAutoThinking(): boolean {
 		return this.#autoThinking;
 	}
 
-	/** Last concrete effort selected by automatic classification. */
+	/** Last concrete effort resolved locally. */
 	get autoResolvedThinkingLevel(): Effort | undefined {
 		return this.#autoResolvedLevel;
 	}
@@ -312,6 +265,8 @@ export class ModelControls {
 			persist?: boolean;
 		},
 	): Promise<{ switched: boolean }> {
+		if (role !== "default")
+			throw new Error(`Model role "${role}" has been removed; select the session model instead.`);
 		const previousEditMode = this.#host.resolveActiveEditMode();
 		if (!this.#host.modelRegistry.hasConfiguredAuth(model)) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
@@ -320,12 +275,10 @@ export class ModelControls {
 		const targetModel = await this.#host.modelRegistry.refreshSelectedModelMetadata(model);
 
 		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(targetModel));
-		this.#host.clearActiveRetryFallback();
 		await this.#host.setModelWithProviderSessionReset(targetModel);
 		this.#host.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`, role);
 		if (options?.persist) {
-			this.#host.settings.setModelRole(
-				role,
+			this.#host.settings.setModel(
 				formatRoleModelValue(
 					this.#host.settings,
 					this.#host.modelRegistry,
@@ -366,7 +319,6 @@ export class ModelControls {
 		const targetModel = await this.#host.modelRegistry.refreshSelectedModelMetadata(model);
 
 		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(targetModel));
-		this.#host.clearActiveRetryFallback();
 		await this.#host.setModelWithProviderSessionReset(targetModel, selection);
 		this.#host.sessionManager.appendModelChange(
 			`${targetModel.provider}/${targetModel.id}`,
@@ -395,60 +347,6 @@ export class ModelControls {
 			return this.#cycleScopedModel(direction);
 		}
 		return this.#cycleAvailableModel(direction);
-	}
-
-	/**
-	 * Resolve the configured role models in the given order plus the index of
-	 * the currently active one. Roles that have no configured model, or whose
-	 * configured model is not currently available, are skipped. The `default`
-	 * role falls back to the active model when no explicit assignment exists.
-	 *
-	 * Returns `undefined` only when there is no current model or no available
-	 * models at all; an empty `models` array is never returned (callers should
-	 * still guard on `models.length`).
-	 */
-	getRoleModelCycle(roleOrder: readonly string[]): RoleModelCycle | undefined {
-		const availableModels = this.#host.modelRegistry.getAvailable();
-		if (availableModels.length === 0 || !this.#model) return undefined;
-		return resolveRoleModelCycle(
-			this.#host.settings,
-			availableModels,
-			this.#model,
-			this.#host.sessionManager.getLastModelChangeRole(),
-			roleOrder,
-		);
-	}
-
-	/**
-	 * Apply a resolved role model as the active model without changing global
-	 * settings. Shared with role cycling and the plan-approval model slider.
-	 */
-	async applyRoleModel(entry: ResolvedRoleModel): Promise<void> {
-		await this.setModel(entry.model, entry.role);
-		if (entry.explicitThinkingLevel && entry.thinkingLevel !== undefined) {
-			this.setThinkingLevel(entry.thinkingLevel);
-		}
-	}
-
-	/**
-	 * Cycle through configured role models in a fixed order.
-	 * Skips missing roles and changes only the active session model.
-	 * @param roleOrder - Order of roles to cycle through (e.g., ["slow", "default", "smol"])
-	 * @param direction - "forward" (default) or "backward"
-	 */
-	async cycleRoleModels(
-		roleOrder: readonly string[],
-		direction: "forward" | "backward" = "forward",
-	): Promise<RoleModelCycleResult | undefined> {
-		const cycle = this.getRoleModelCycle(roleOrder);
-		if (!cycle || cycle.models.length <= 1) return undefined;
-
-		const step = direction === "backward" ? -1 : 1;
-		const next = cycle.models[(cycle.currentIndex + step + cycle.models.length) % cycle.models.length];
-
-		await this.applyRoleModel(next);
-
-		return { model: next.model, thinkingLevel: this.thinkingLevel, role: next.role };
 	}
 
 	async #getScopedModelsWithApiKey(): Promise<Array<{ model: Model; thinkingLevel?: ThinkingLevel }>> {
@@ -488,7 +386,6 @@ export class ModelControls {
 
 		// Apply model
 		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(next.model));
-		this.#host.clearActiveRetryFallback();
 		await this.#host.setModelWithProviderSessionReset(next.model);
 		this.#host.sessionManager.appendModelChange(`${next.model.provider}/${next.model.id}`);
 		this.#host.settings.getStorage()?.recordModelUsage(`${next.model.provider}/${next.model.id}`);
@@ -519,7 +416,6 @@ export class ModelControls {
 		}
 
 		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(nextModel));
-		this.#host.clearActiveRetryFallback();
 		await this.#host.setModelWithProviderSessionReset(nextModel);
 		this.#host.sessionManager.appendModelChange(`${nextModel.provider}/${nextModel.id}`);
 		this.#host.settings.getStorage()?.recordModelUsage(`${nextModel.provider}/${nextModel.id}`);
@@ -551,10 +447,10 @@ export class ModelControls {
 	}
 
 	/**
-	 * Set the thinking level. `auto` enables per-turn classification. Entering
+	 * Set the thinking level. `auto` uses the model's default effort. Entering
 	 * auto writes its provisional level plus `configured: "auto"` immediately,
 	 * giving external readers an authoritative selection receipt before the next
-	 * user turn. Later classifications persist only changed concrete resolutions.
+	 * user turn. Later resolutions persist only changed concrete efforts.
 	 */
 	setThinkingLevel(level: ConfiguredThinkingLevel | undefined, persist: boolean = false): void {
 		if (level === AUTO_THINKING) {
@@ -653,74 +549,17 @@ export class ModelControls {
 		return nextLevel;
 	}
 
-	/** Timeout (ms) for per-turn auto-thinking classification before falling back. */
-	static readonly #AUTO_THINKING_TIMEOUT_MS = 4000;
-
-	/**
-	 * Classify the current user turn and set the effective thinking level for it.
-	 * `solutionSpace` is a delegator's open-endedness description (task-spawned turns
-	 * only); when non-blank it is classified instead of `promptText`.
-	 * Bounded by a timeout + abort; on failure it preserves the last classified
-	 * level, or uses the provisional concrete level before the first resolution.
-	 * Never throws into the turn, and never clears `#autoThinking`.
-	 */
-	async applyAutoThinkingLevel(promptText: string, generation: number, solutionSpace?: string): Promise<void> {
+	/** Resolve legacy auto locally from the selected model and explicit user keywords. */
+	async applyAutoThinkingLevel(promptText: string, generation: number, _solutionSpace?: string): Promise<void> {
 		const model = this.#model;
-		if (!model?.reasoning || model.thinking?.unverified) return;
-		// Models with reasoning but no controllable effort surface (devin-agent
-		// Cascade routes effort via sibling model ids, not a wire param) have
-		// nothing to pick — skip classification rather than discard its result.
-		if (getSupportedEfforts(model).length === 0) return;
-
-		let resolved: Effort | undefined;
-		if (this.#host.magicKeywordEnabled("ultrathink") && containsMagicKeyword(promptText, "ultrathink")) {
-			// The user explicitly asked for maximum thinking; bypass the classifier
-			// (and the `providers.autoThinkingMaxEffort` ceiling) and jump straight
-			// to the highest supported level for this model.
-			resolved = clampAutoThinkingEffort(model, Effort.Max);
-		} else {
-			const controller = new AbortController();
-			const timer = setTimeout(() => controller.abort(), ModelControls.#AUTO_THINKING_TIMEOUT_MS);
-			const usageOwner = {
-				sessionId: this.#host.sessionManager.getSessionId(),
-				parentId: this.#host.sessionManager.getLeafId(),
-			};
-			try {
-				resolved = await classifyDifficulty(
-					{ request: promptText, solutionSpace },
-					{
-						settings: this.#host.settings,
-						registry: this.#host.modelRegistry,
-						model,
-						sessionId: this.#host.sessionId(),
-						signal: controller.signal,
-						metadataResolver: provider => this.#host.agent.metadataForProvider(provider),
-						onUsage: usage => {
-							const entryId = this.#host.sessionManager.appendModelUsage(usage, usageOwner);
-							if (entryId) usageOwner.parentId = entryId;
-						},
-						telemetry: this.#host.agent.telemetry,
-					},
-				);
-			} catch (error) {
-				logger.debug("auto-thinking: classification failed; using fallback level", {
-					error: error instanceof Error ? error.message : String(error),
-				});
-			} finally {
-				clearTimeout(timer);
-			}
-		}
-
-		// Drop the result if the turn was aborted/superseded while classifying.
+		if (!model?.reasoning || model.thinking?.unverified || getSupportedEfforts(model).length === 0) return;
 		if (this.#host.promptGeneration() !== generation || !this.#autoThinking) return;
-
-		const effort = clampThinkingLevelToCeiling(
-			model,
-			resolved ?? this.#autoResolvedLevel ?? resolveProvisionalAutoLevel(model),
-			this.#thinkingLevelCeiling,
-		);
-		if (effort === undefined) return;
-		this.#resolveAutoThinkingLevel(effort);
+		const requested =
+			this.#host.magicKeywordEnabled("ultrathink") && containsMagicKeyword(promptText, "ultrathink")
+				? clampAutoThinkingEffort(model, Effort.Max)
+				: resolveProvisionalAutoLevel(model);
+		const effort = clampThinkingLevelToCeiling(model, requested, this.#thinkingLevelCeiling);
+		if (effort !== undefined) this.#resolveAutoThinkingLevel(effort);
 	}
 
 	/**

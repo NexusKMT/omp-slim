@@ -39,7 +39,6 @@ import type {
 import { isUsageLimitOutcome, resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
-import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { extractHttpStatusFromError, logger, prompt } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import {
@@ -67,7 +66,6 @@ import {
 	formatAdvisorBatchContent,
 	getOrCreateAdvisorProviderSessionId,
 	isAdvisorInterruptImmuneTurnActive,
-	isClassifierRefusal,
 	meetsAdvisorSeverity,
 	quarantineAdvisorUnsafeOutput,
 	resolveAdvisorDeliveryChannel,
@@ -75,13 +73,7 @@ import {
 } from "../advisor";
 import { evictStaleToolResults } from "../advisor/tool-result-eviction";
 import type { ModelRegistry } from "../config/model-registry";
-import {
-	formatModelString,
-	formatModelStringWithRouting,
-	resolveAdvisorRoleSelection,
-	resolveModelOverride,
-} from "../config/model-resolver";
-import { MODEL_ROLES } from "../config/model-roles";
+import { formatModelString, formatModelStringWithRouting } from "../config/model-resolver";
 import { serviceTierForAllFamilies, serviceTierSettingToTier } from "../config/service-tier";
 import type { Settings } from "../config/settings";
 import { CursorExecHandlers, type CursorMcpResourceAdapter } from "../cursor";
@@ -91,27 +83,13 @@ import type { PlanModeState } from "../plan-mode/state";
 import advisorBoundaryGuidance from "../prompts/advisor/boundary-guidance.md" with { type: "text" };
 import advisorSystemPrompt from "../prompts/advisor/system.md" with { type: "text" };
 import type { SecretObfuscator } from "../secrets/obfuscator";
-import {
-	AUTO_THINKING,
-	concreteThinkingLevel,
-	resolveThinkingLevelForModel,
-	shouldDisableReasoning,
-	toReasoningEffort,
-	automaticThinkingLevel,
-} from "@oh-my-pi/pi-tui/thinking";
+import { resolveThinkingLevelForModel, shouldDisableReasoning, toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ClientBridge } from "./client-bridge";
 import { resolveCompactionMethodOrder, resolveMethodSettings } from "./compaction-methods";
 import { type CustomMessage, type CustomMessagePayload, isUserAuthoredMessage, isUserTurnInitiator } from "./messages";
 import { isAdvisorCard, isTerminalTextAssistantAnswer } from "./queued-messages";
-import {
-	calculateRetryBackoffDelayMs,
-	formatRetryFallbackSelector,
-	getRetryFallbackRevertPolicy,
-	parseRetryFallbackSelector,
-	type RetryFallbackSelector,
-	retryFallbackAdmits,
-} from "./retry-fallback-chains";
+import { calculateRetryBackoffDelayMs } from "./retry-fallback-chains";
 import { getOpenAiRemoteCompactionPayload } from "./session-context";
 import { formatSessionDumpText } from "./session-dump-format";
 import type { CompactionEntry, SessionEntry } from "./session-entries";
@@ -129,7 +107,7 @@ import {
 	cfgAdvisorReviewMode,
 	cfgAdvisorSyncBacklog,
 } from "../advisor/settings";
-import { cfgCompaction, cfgContextPromotionEnabled } from "./context-settings";
+import { cfgCompaction } from "./context-settings";
 import { resolveModelCompactionSettings } from "./model-compaction-threshold";
 import { cfgProvidersOpenaiCodexDaybreak, cfgRetry, cfgTierAdvisor } from "./settings";
 
@@ -305,17 +283,6 @@ export interface PerAdvisorStat {
 	sessionId?: string;
 }
 
-interface AdvisorRetryFallbackState {
-	role: string;
-	originalSelector: string;
-	originalThinkingLevel: ThinkingLevel;
-	lastAppliedThinkingLevel: ThinkingLevel;
-	/** Whether the active fallback selector explicitly follows the primary's effort. */
-	autoThinking: boolean;
-	/** Set by a classifier refusal: no cooldown restore until a compaction or new conversation replaces the context. */
-	pinned: boolean;
-}
-
 interface ActiveAdvisor {
 	name: string;
 	slug: string;
@@ -332,7 +299,6 @@ interface ActiveAdvisor {
 	 * runs for the primary turn, so the advisor tracks the level `auto` resolved
 	 * to there, retuned at each review boundary.
 	 */
-	autoThinking: boolean;
 	providerSessionId: string | undefined;
 	/** Cadence overrides resolved at each boundary; `undefined` (only the
 	 *  roster-less default advisor) follows `advisor.reviewMode` /
@@ -348,8 +314,6 @@ interface ActiveAdvisor {
 	 *  runs from it covers work up to this turn. Notes stamped with it so merged
 	 *  deliveries can show how many turns old each review was. */
 	pendingCoveredTurn: number;
-	retryFallback?: AdvisorRetryFallbackState;
-	retryFallbackPendingSuccess: boolean;
 	/**
 	 * Consecutive provider-block waits (usage limit or timed rate limit), bounded
 	 * by retry.maxRetries. Reset on turn success, abandonment, and conversation
@@ -402,7 +366,6 @@ interface AdvisorRuntimeDescriptor {
 	reviewMode: AdvisorReviewMode | undefined;
 	reviewInterval: number | undefined;
 	syncBacklog: AdvisorSyncBacklog | undefined;
-	autoThinking: boolean;
 	signature: string;
 }
 
@@ -477,6 +440,7 @@ export interface AdvisorMessageDeliveryOptions {
 
 /** Session capabilities borrowed by the advisor controller. */
 export interface SessionAdvisorsHost {
+	model(): Model | undefined;
 	agent: Agent;
 	sessionManager: SessionManager;
 	settings: Settings;
@@ -503,29 +467,6 @@ export interface SessionAdvisorsHost {
 	hasPendingNextTurnMessages(): boolean;
 	convertToLlmForSideRequest(messages: AgentMessage[]): Message[];
 	effectiveServiceTier(model: Model): ServiceTier | undefined;
-	resolveContextPromotionTarget(
-		currentModel: Model,
-		contextWindow: number,
-		signal: AbortSignal,
-	): Promise<Model | undefined>;
-	resolveCompactionModelCandidates(preferredModel: Model | null | undefined, availableModels: Model[]): Model[];
-	resolveRetryFallbackRole(
-		currentSelector: string,
-		currentModel?: Model | null,
-		roleHint?: string,
-	): string | undefined;
-	retryFallbackChainKeys(
-		currentSelector: string,
-		currentModel?: Model | null,
-		options?: { pinnedRole?: string; roleHint?: string },
-	): string[];
-	findRetryFallbackCandidates(
-		role: string,
-		currentSelector: string,
-		currentModel?: Model | null,
-	): RetryFallbackSelector[];
-	isRetryFallbackSelectorSuppressed(selector: RetryFallbackSelector): boolean;
-	noteRetryFallbackCooldown(currentSelector: string, retryAfterMs: number | undefined, errorMessage: string): void;
 	createCodexCompactionContext(options: {
 		trigger: CodexCompactionContext["trigger"];
 		reason: CodexCompactionContext["reason"];
@@ -660,7 +601,7 @@ export class SessionAdvisors {
 		// turn against completed work.
 		this.#advisorTerminalBoundaryOpen = !this.#advisorPrimaryWillContinue;
 		try {
-			this.#retuneAutoThinkingAdvisors();
+			this.#retuneAdvisorThinkingLevels();
 			if (!this.#advisorPrimaryWillContinue) {
 				// Flush notes deferred during tool-loop steps at every terminal boundary.
 				// Delivery never pauses: advice already produced against work the
@@ -1081,7 +1022,6 @@ export class SessionAdvisors {
 			// A reset aborts any pending provider-block wait; clear its budget so the new
 			// conversation starts with a fresh retry allowance (issue #11947).
 			this.#resetRecoveryBudgets(a);
-			this.#releaseRefusalPin(a);
 			// Resets the emission guard and every tool-side note state together.
 			a.adviseTool.resetDeliveredNotes();
 			a.eligibleUpdates = 0;
@@ -1151,60 +1091,15 @@ export class SessionAdvisors {
 					? config.syncBacklog
 					: undefined;
 
-			// Resolve the advisor's model: an explicit `model` override wins; else the
-			// `advisor` role chain. A model that fails to resolve skips just this advisor.
-			let model: Model | undefined;
-			let thinkingLevel: ThinkingLevel | undefined;
-			// `auto` is a session-level selector with no per-advisor classifier, so
-			// `concreteThinkingLevel` erases it. Remember the choice: the advisor
-			// then tracks whatever the primary turn's classifier resolved to.
-			let autoThinking = false;
-			if (config.model) {
-				const resolved = resolveModelOverride([config.model], this.#host.modelRegistry, this.#host.settings);
-				model = resolved.model;
-				autoThinking = resolved.thinkingLevel === AUTO_THINKING;
-				thinkingLevel = concreteThinkingLevel(resolved.thinkingLevel);
-				if (!model) {
-					this.#advisorStatuses.set(slug, { name: config.name, status: "no_model" });
-					if (emitWarnings) {
-						this.#host.emitNotice(
-							"warning",
-							`Advisor "${config.name}": no model matched "${config.model}"`,
-							"advisor",
-						);
-					}
-					continue;
-				}
-			} else {
-				const sel = resolveAdvisorRoleSelection(this.#host.settings, this.#host.modelRegistry.getAvailable());
-				if (!sel) {
-					this.#advisorStatuses.set(slug, { name: config.name, status: "no_model" });
-					if (emitWarnings) {
-						logger.debug("advisor enabled but no model assigned to the 'advisor' role; advisor inactive", {
-							advisor: config.name,
-						});
-					}
-					continue;
-				}
-				model = sel.model;
-				autoThinking = sel.thinkingLevel === AUTO_THINKING;
-				thinkingLevel = concreteThinkingLevel(sel.thinkingLevel);
+			const model = this.#host.model();
+			if (!model) {
+				this.#advisorStatuses.set(slug, { name: config.name, status: "no_model" });
+				if (emitWarnings)
+					logger.debug("advisor inactive because the session has no selected model", { advisor: config.name });
+				continue;
 			}
-			// Clamp the effort against the resolved model. Historically we defaulted
-			// to `ThinkingLevel.Medium` unconditionally, which threw at first stream
-			// on reasoning models that expose no controllable effort surface
-			// (e.g. `devin-agent`: Cascade routes by sibling model id, not a wire
-			// param; `getSupportedEfforts` returns `[]`). `resolveThinkingLevelForModel`
-			// preserves an explicit `off`, clamps a concrete effort into the model's
-			// supported range, and returns `undefined` for reasoning models without
-			// controllable efforts — for that case we forward `Inherit` so no effort
-			// is sent and reasoning stays enabled (matching the `auto`-path fix for
-			// Devin models via `clampAutoThinkingEffort`). See #4579.
-			const requestedLevel = autoThinking
-				? automaticThinkingLevel(model, this.#autoAdvisorThinkingLevel())
-				: (thinkingLevel ?? automaticThinkingLevel(model, ThinkingLevel.Medium));
-			const resolvedLevel = resolveThinkingLevelForModel(model, requestedLevel);
-			const advisorThinkingLevel: ThinkingLevel = resolvedLevel ?? ThinkingLevel.Inherit;
+			const advisorThinkingLevel =
+				resolveThinkingLevelForModel(model, this.#primaryThinkingLevel()) ?? ThinkingLevel.Inherit;
 			// Record the status entry now (in roster order) so the Map's insertion
 			// order matches the configured roster even when earlier advisors were
 			// skipped as paused/no_model. The build loop overwrites this to "running"
@@ -1219,29 +1114,17 @@ export class SessionAdvisors {
 				reviewMode,
 				reviewInterval,
 				syncBacklog,
-				autoThinking,
-				// An `auto` advisor's concrete level changes every turn; signing the
-				// resolved level would make each change look like a config edit and
-				// rebuild the advisor, losing its context. Sign the selector instead.
+				// Effort follows the primary at each boundary, so it does not
+				// belong in the signature that rebuilds advisor context.
 				// Cadence and catch-up resolve at each boundary rather than at build
 				// time, so they stay out of the signature.
-				signature: this.#advisorRuntimeSignature(
-					config,
-					slug,
-					model,
-					autoThinking ? AUTO_THINKING : advisorThinkingLevel,
-				),
+				signature: this.#advisorRuntimeSignature(config, slug, model),
 			});
 		}
 		return descriptors;
 	}
 
-	#advisorRuntimeSignature(
-		config: AdvisorConfig,
-		slug: string,
-		model: Model,
-		thinkingLevel: ThinkingLevel | typeof AUTO_THINKING,
-	): string {
+	#advisorRuntimeSignature(config: AdvisorConfig, slug: string, model: Model): string {
 		const tools = config.tools?.length ? config.tools.join("\u001e") : "";
 		const instructions = config.instructions?.trim() ?? "";
 		const budget = this.#advisorMaxNotesPerUpdate(config);
@@ -1253,7 +1136,6 @@ export class SessionAdvisors {
 			config.name,
 			slug,
 			formatModelStringWithRouting(model),
-			thinkingLevel,
 			tools,
 			instructions,
 			budget,
@@ -1324,7 +1206,6 @@ export class SessionAdvisors {
 				model: advisorModel,
 				name: advisorName,
 				thinkingLevel: advisorThinkingLevel,
-				autoThinking: advisorAutoThinking,
 				signature,
 			} = descriptor;
 			const budgetPerUpdate = this.#advisorMaxNotesPerUpdate(config);
@@ -1372,7 +1253,7 @@ export class SessionAdvisors {
 						...this.#host.agent.telemetry,
 						agent: {
 							id: advisorSessionLabel,
-							name: slug ? `${MODEL_ROLES.advisor.name}: ${advisorName}` : MODEL_ROLES.advisor.name,
+							name: slug ? `Advisor: ${advisorName}` : "Advisor",
 							description: formatModelString(advisorModel),
 						},
 						conversationId: undefined,
@@ -1613,14 +1494,6 @@ export class SessionAdvisors {
 					// A completed turn ended the provider-block episode — start the next
 					// block's bounded wait budget fresh.
 					this.#resetRecoveryBudgets(advisorRef);
-					const fallback = advisorRef.retryFallback;
-					if (!advisorRef.retryFallbackPendingSuccess || !fallback) return;
-					advisorRef.retryFallbackPendingSuccess = false;
-					await this.#host.emitSessionEvent({
-						type: "retry_fallback_succeeded",
-						model: formatRetryFallbackSelector(advisorRef.agent.state.model, advisorRef.thinkingLevel),
-						role: fallback.role,
-					});
 				},
 				onTurnAbandoned: () => {
 					advisorRef.recorder.abandonTurn();
@@ -1667,14 +1540,12 @@ export class SessionAdvisors {
 				recorderClosed: Promise.resolve(),
 				model: advisorModel,
 				thinkingLevel: advisorThinkingLevel,
-				autoThinking: advisorAutoThinking,
 				providerSessionId: advisorProviderSessionId,
 				reviewMode: descriptor.reviewMode,
 				reviewInterval: descriptor.reviewInterval,
 				syncBacklog: descriptor.syncBacklog,
 				eligibleUpdates: carried?.get(slug)?.eligibleUpdates ?? 0,
 				pendingCoveredTurn: 0,
-				retryFallbackPendingSuccess: false,
 				providerWaitRetries: 0,
 				credentialSwitches: undefined,
 				signature,
@@ -1900,13 +1771,12 @@ export class SessionAdvisors {
 	}
 
 	/** Re-prime every advisor's transcript view after an in-conversation history rewrite. */
-	#resetAllAdvisorRuntimes(reason: string | undefined, compacted: boolean): void {
+	#resetAllAdvisorRuntimes(reason: string | undefined, _compacted: boolean): void {
 		for (const a of this.#advisors) {
 			a.runtime.reset(reason);
 			// Match the conversation-boundary re-prime: a reset must not carry a
 			// pending wait's provider-block budget into the reset conversation.
 			this.#resetRecoveryBudgets(a);
-			if (compacted) this.#releaseRefusalPin(a);
 		}
 	}
 
@@ -1951,58 +1821,21 @@ export class SessionAdvisors {
 		});
 	}
 
-	/** Switch one advisor model while preserving its context and effort invariants. */
-	#setAdvisorModel(
-		advisor: ActiveAdvisor,
-		model: Model,
-		requestedThinkingLevel: ThinkingLevel | undefined,
-	): ThinkingLevel {
-		const resolvedThinkingLevel = resolveThinkingLevelForModel(model, requestedThinkingLevel);
-		const nextThinkingLevel = resolvedThinkingLevel ?? ThinkingLevel.Inherit;
-		advisor.agent.setModel(model);
-		advisor.agent.setThinkingLevel(toReasoningEffort(nextThinkingLevel));
-		advisor.agent.setDisableReasoning(shouldDisableReasoning(nextThinkingLevel));
-		advisor.agent.appendOnlyContext?.invalidateForModelChange();
-		advisor.model = model;
-		advisor.thinkingLevel = nextThinkingLevel;
-		return nextThinkingLevel;
+	/** Advisors always share the primary session's explicit effort. */
+	#primaryThinkingLevel(): ThinkingLevel {
+		if (this.#host.agent.state.disableReasoning) return ThinkingLevel.Off;
+		return this.#host.agent.state.thinkingLevel ?? ThinkingLevel.Inherit;
 	}
 
-	/**
-	 * The level an `auto` advisor runs at: the effort the primary agent is
-	 * running at — the classifier's pick under `auto`, the pinned level
-	 * otherwise — so the advisor follows a mid-session switch in either
-	 * direction. When the primary has no effort (`off`, `inherit`, unset) it is
-	 * the `medium` default an advisor without a configured level gets. One
-	 * source for build, review-boundary retune and fallback restore, so a live
-	 * advisor always matches what a fresh build would give it.
-	 */
-	#autoAdvisorThinkingLevel(): ThinkingLevel {
-		return this.#host.agent.state.thinkingLevel ?? ThinkingLevel.Medium;
-	}
-
-	/**
-	 * Re-point every `auto` advisor at {@link #autoAdvisorThinkingLevel} — the
-	 * primary turn's level, or the build-time default while the primary is off.
-	 *
-	 * Deliberately not {@link #setAdvisorModel}: the model is unchanged, and that
-	 * path invalidates the append-only context, which would throw away the
-	 * advisor's cached prefix on every turn. Only the effort moves here.
-	 */
-	#retuneAutoThinkingAdvisors(): void {
-		const requested = this.#autoAdvisorThinkingLevel();
+	#retuneAdvisorThinkingLevels(): void {
+		const requested = this.#primaryThinkingLevel();
 		for (const advisor of this.#advisors) {
-			// Concrete and bare fallback selectors keep their applied effort.
-			const autoThinking = advisor.retryFallback?.autoThinking ?? advisor.autoThinking;
-			if (!autoThinking || advisor.runtime.disposed) continue;
-			const next =
-				resolveThinkingLevelForModel(advisor.model, automaticThinkingLevel(advisor.model, requested)) ??
-				ThinkingLevel.Inherit;
+			if (advisor.runtime.disposed) continue;
+			const next = resolveThinkingLevelForModel(advisor.model, requested) ?? ThinkingLevel.Inherit;
 			if (next === advisor.thinkingLevel) continue;
 			advisor.agent.setThinkingLevel(toReasoningEffort(next));
 			advisor.agent.setDisableReasoning(shouldDisableReasoning(next));
 			advisor.thinkingLevel = next;
-			if (advisor.retryFallback) advisor.retryFallback.lastAppliedThinkingLevel = next;
 		}
 	}
 
@@ -2014,63 +1847,7 @@ export class SessionAdvisors {
 		);
 	}
 
-	/** Release refusal pins so the next review may retry the configured primary. */
-	#releaseRefusalPin(advisor: ActiveAdvisor): void {
-		if (advisor.retryFallback) advisor.retryFallback.pinned = false;
-	}
-
-	/** Restore an advisor's configured primary once its fallback cooldown expires. */
-	async #maybeRestoreAdvisorRetryFallbackPrimary(advisor: ActiveAdvisor, signal: AbortSignal): Promise<void> {
-		const fallback = advisor.retryFallback;
-		if (!fallback || fallback.pinned || getRetryFallbackRevertPolicy(this.#host.settings) !== "cooldown-expiry") {
-			return;
-		}
-
-		const originalSelector = parseRetryFallbackSelector(fallback.originalSelector, this.#host.modelRegistry);
-		if (!originalSelector) {
-			advisor.retryFallback = undefined;
-			advisor.retryFallbackPendingSuccess = false;
-			return;
-		}
-		const currentSelector = formatRetryFallbackSelector(advisor.agent.state.model, advisor.thinkingLevel);
-		if (currentSelector === originalSelector.raw) {
-			if (!this.#host.isRetryFallbackSelectorSuppressed(originalSelector)) {
-				advisor.retryFallback = undefined;
-				advisor.retryFallbackPendingSuccess = false;
-			}
-			return;
-		}
-		if (this.#host.isRetryFallbackSelectorSuppressed(originalSelector)) return;
-
-		const resolvedPrimary = resolveModelOverride(
-			[originalSelector.raw],
-			this.#host.modelRegistry,
-			this.#host.settings,
-		);
-		const primaryModel =
-			resolvedPrimary.model ?? this.#host.modelRegistry.find(originalSelector.provider, originalSelector.id);
-		if (!primaryModel || !this.#canReplayAdvisorHistory(advisor, primaryModel)) return;
-		const apiKey = await this.#host.modelRegistry.getApiKey(primaryModel, advisor.providerSessionId, { signal });
-		if (!apiKey) return;
-		signal.throwIfAborted();
-
-		// Rejoin the primary's live level for an auto advisor, or restore the
-		// fixed effort it had before falling back.
-		const thinkingToApply = advisor.autoThinking
-			? this.#autoAdvisorThinkingLevel()
-			: advisor.thinkingLevel === fallback.lastAppliedThinkingLevel
-				? fallback.originalThinkingLevel
-				: advisor.thinkingLevel;
-		this.#setAdvisorModel(advisor, primaryModel, thinkingToApply);
-		this.#host.settings.getStorage()?.recordModelUsage(formatModelStringWithRouting(primaryModel));
-		advisor.retryFallback = undefined;
-		advisor.retryFallbackPendingSuccess = false;
-	}
-
-	/**
-	 * Apply the advisor's configured provider-failure fallback chain after
-	 * same-provider credential rotation has no usable sibling.
-	 */
+	/** Retry with credentials for this same model, or wait for its provider. */
 	async #recoverAdvisorTurn(
 		advisor: ActiveAdvisor,
 		error: unknown,
@@ -2153,8 +1930,6 @@ export class SessionAdvisors {
 		const timedRateLimit = !usageLimit && retryAfterMs !== undefined && AIError.is(errorId, AIError.Flag.Transient);
 		if (!assistantFailure && !accountPolicyDenial && !usageLimit && !timedRateLimit) return false;
 
-		const currentSelector = formatRetryFallbackSelector(currentModel, advisor.thinkingLevel);
-
 		const retrySettings = cfgRetry.get(this.#host.settings);
 		// A usage-limit or timed rate-limit error with no sibling credential and no
 		// usable model fallback is not automatically fatal: wait out the block and
@@ -2178,73 +1953,7 @@ export class SessionAdvisors {
 						signal,
 					)
 				: Promise.resolve(false);
-		if (!retrySettings.enabled || !retrySettings.modelFallback) return waitOrDecline();
-		if (!retryFallbackAdmits(retrySettings.fallbackOn, usageLimit)) return waitOrDecline();
-		// Same two-key walk the main loop uses: the chain that owns this advisor's
-		// active fallback, then the chain the current model owns. Without the
-		// second key an advisor that lands on the last entry of one chain never
-		// reaches that entry's own chain and re-hits the dead model instead.
-		const chainKeys = this.#host.retryFallbackChainKeys(currentSelector, currentModel, {
-			pinnedRole: advisor.retryFallback?.role,
-			roleHint: "advisor",
-		});
-		if (
-			!chainKeys.some(role => this.#host.findRetryFallbackCandidates(role, currentSelector, currentModel).length > 0)
-		) {
-			return waitOrDecline();
-		}
 
-		// A refusal by the advisor's primary judges this context, not the model's health:
-		// skip its cooldown and pin the switch. A refusing fallback gets the usual cooldown.
-		const primaryRefused =
-			assistantFailure !== undefined &&
-			isClassifierRefusal(assistantFailure) &&
-			(advisor.retryFallback === undefined || advisor.retryFallback.originalSelector === currentSelector);
-		if (!primaryRefused) this.#host.noteRetryFallbackCooldown(currentSelector, retryAfterMs, message);
-		for (const role of chainKeys) {
-			for (const selector of this.#host.findRetryFallbackCandidates(role, currentSelector, currentModel)) {
-				if (this.#host.isRetryFallbackSelectorSuppressed(selector)) continue;
-				const resolved = resolveModelOverride([selector.raw], this.#host.modelRegistry, this.#host.settings);
-				const candidate = resolved.model ?? this.#host.modelRegistry.find(selector.provider, selector.id);
-				if (!candidate || modelsAreEqual(candidate, currentModel)) continue;
-				if (!this.#canReplayAdvisorHistory(advisor, candidate)) continue;
-				const apiKey = await this.#host.modelRegistry.getApiKey(candidate, advisor.providerSessionId, { signal });
-				if (!apiKey) continue;
-				signal.throwIfAborted();
-
-				const originalThinkingLevel = advisor.thinkingLevel;
-				// A `:auto` fallback entry follows the primary's resolved effort, like an `auto` advisor.
-				const requestedThinkingLevel =
-					selector.thinkingLevel === AUTO_THINKING
-						? automaticThinkingLevel(candidate, this.#autoAdvisorThinkingLevel())
-						: (selector.thinkingLevel ?? originalThinkingLevel);
-				const nextThinkingLevel = this.#setAdvisorModel(advisor, candidate, requestedThinkingLevel);
-				if (advisor.retryFallback) {
-					advisor.retryFallback.lastAppliedThinkingLevel = nextThinkingLevel;
-					advisor.retryFallback.autoThinking = selector.thinkingLevel === AUTO_THINKING;
-					advisor.retryFallback.pinned ||= primaryRefused;
-				} else {
-					advisor.retryFallback = {
-						role,
-						originalSelector: currentSelector,
-						originalThinkingLevel,
-						lastAppliedThinkingLevel: nextThinkingLevel,
-						autoThinking: selector.thinkingLevel === AUTO_THINKING,
-						pinned: primaryRefused,
-					};
-				}
-				advisor.retryFallbackPendingSuccess = true;
-				this.#host.settings.getStorage()?.recordModelUsage(formatModelStringWithRouting(candidate));
-				await this.#host.emitSessionEvent({
-					type: "retry_fallback_applied",
-					from: currentSelector,
-					to: selector.raw,
-					role,
-					reason: `Advisor request failed: ${message}`,
-				});
-				return true;
-			}
-		}
 		return waitOrDecline();
 	}
 
@@ -2325,46 +2034,11 @@ export class SessionAdvisors {
 		return true;
 	}
 
-	async #promoteAdvisorContextModel(
-		advisor: ActiveAdvisor,
-		currentModel: Model,
-		signal: AbortSignal,
-	): Promise<boolean> {
-		if (!cfgContextPromotionEnabled.get(this.#host.settings)) return false;
-		const contextWindow = currentModel.contextWindow ?? 0;
-		if (contextWindow <= 0) return false;
-		const targetModel = await this.#host.resolveContextPromotionTarget(currentModel, contextWindow, signal);
-		if (!targetModel || !this.#canReplayAdvisorHistory(advisor, targetModel)) return false;
-		signal.throwIfAborted();
-
-		// Preserve this advisor's own thinking level (a configured `model:...:high`
-		// keeps its suffix across a promotion); only the model changes.
-		const advisorThinkingLevel = advisor.thinkingLevel;
-		try {
-			this.#setAdvisorModel(advisor, targetModel, advisorThinkingLevel);
-			logger.debug("Advisor context promotion switched model on overflow", {
-				advisor: advisor.name,
-				from: `${currentModel.provider}/${currentModel.id}`,
-				to: `${targetModel.provider}/${targetModel.id}`,
-			});
-			return true;
-		} catch (error) {
-			logger.warn("Advisor context promotion failed", {
-				advisor: advisor.name,
-				from: `${currentModel.provider}/${currentModel.id}`,
-				to: `${targetModel.provider}/${targetModel.id}`,
-				error: String(error),
-			});
-			return false;
-		}
-	}
-
 	async #maintainAdvisorContext(
 		advisor: ActiveAdvisor,
 		incoming: AgentMessage,
 		signal: AbortSignal,
 	): Promise<boolean> {
-		await this.#maybeRestoreAdvisorRetryFallbackPrimary(advisor, signal);
 		const agent = advisor.agent;
 		// Prior reviews' `read`/`grep`/`glob` output is re-sent on every later
 		// request; the deltas the advisor reviews and the notes it wrote (carried
@@ -2396,7 +2070,7 @@ export class SessionAdvisors {
 		}
 		const compactionMethod = methods.includes("remote") ? "remote" : "soft";
 		let advisorModel = agent.state.model;
-		let compactionSettings = resolveMethodSettings(
+		const compactionSettings = resolveMethodSettings(
 			resolveModelCompactionSettings(this.#host.settings, advisorModel),
 			compactionMethod,
 		);
@@ -2432,19 +2106,7 @@ export class SessionAdvisors {
 		}
 
 		// 1. Try promotion first
-		if (await this.#promoteAdvisorContextModel(advisor, advisorModel, signal)) {
-			// Promotion succeeded, check if new model has enough space under its own compaction point
-			const newModel = agent.state.model;
-			compactionSettings = resolveMethodSettings(
-				resolveModelCompactionSettings(this.#host.settings, newModel),
-				compactionMethod,
-			);
-			const newWindow = newModel.contextWindow ?? 0;
-			if (newWindow > 0) {
-				const stillNeedsCompaction = shouldCompact(contextTokensFor(newModel), newWindow, compactionSettings);
-				if (!stillNeedsCompaction) return false;
-			}
-		}
+
 		advisorModel = agent.state.model;
 		const previousSummary = messages.findLast(
 			(message): message is AdvisorCompactionSummaryMessage => message.role === "compactionSummary",
@@ -2487,8 +2149,7 @@ export class SessionAdvisors {
 			} satisfies SessionMessageEntry;
 		});
 
-		const availableModels = this.#host.modelRegistry.getAvailable();
-		let candidates = this.#host.resolveCompactionModelCandidates(advisorModel, availableModels);
+		let candidates = [advisorModel];
 		if (hasNativeHistory) {
 			candidates = candidates.filter(
 				candidate =>
@@ -2670,7 +2331,6 @@ export class SessionAdvisors {
 		} satisfies AdvisorCompactionSummaryMessage;
 
 		agent.replaceMessages([summaryMessage, ...recentMessages]);
-		this.#releaseRefusalPin(advisor);
 		return false;
 	}
 	/**
@@ -3047,14 +2707,14 @@ export class SessionAdvisors {
 		const stats = this.getAdvisorStats();
 		if (!stats.active && stats.advisors.length === 0) {
 			return stats.configured
-				? "Advisor setting is enabled, but no model is assigned to the 'advisor' role."
+				? "Advisor setting is enabled, but the session has no selected model."
 				: "Advisor is disabled.";
 		}
 		if (stats.advisors.length <= 1) {
 			const s = stats.advisors[0];
 			if (s && s.status === "no_model") {
 				return stats.configured
-					? "Advisor setting is enabled, but no model is assigned to the 'advisor' role."
+					? "Advisor setting is enabled, but the session has no selected model."
 					: "Advisor is disabled.";
 			}
 			const contextLine =
