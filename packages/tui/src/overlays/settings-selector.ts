@@ -22,7 +22,6 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../index";
-import type { ShapeTarget } from "@oh-my-pi/snapcompact";
 import type {
 	ContextLineMode,
 	StatusLinePreset,
@@ -574,8 +573,6 @@ export interface SettingsRuntimeContext {
 	availableThemes: string[];
 	/** Provider/source ids shown in /model. */
 	providers: string[];
-	/** Active model (api + id); resolves what the snapcompact `auto` shape maps to. */
-	model?: ShapeTarget;
 	/** Shared TUI image budget (graphics ids + transmit-once) for image previews. */
 	imageBudget?: ImageBudget;
 	/** Schedules a re-render after async preview work completes. */
@@ -1639,7 +1636,6 @@ export class SettingsSelectorComponent implements Component {
 			};
 		} else if (def.path === "snapcompact.shape") {
 			const shapePreview = new SnapcompactShapePreview(currentValue, {
-				model: this.#context.model,
 				imageBudget: this.#context.imageBudget,
 				requestRender: this.#context.requestRender,
 			});

@@ -11,7 +11,6 @@ import { $env, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { formatModelStringWithRouting } from "../config/model-resolver";
-import { type OAuthAccountPools, validateAgentAccountPools } from "../config/account-pools";
 import {
 	type CompactionThresholdPair,
 	validateAgentCompactionThresholdOverrides,
@@ -68,7 +67,6 @@ import { parseIsolationBackend } from "./worktree";
 
 import {
 	cfgIsolationBackend,
-	cfgTaskAgentAccountPools,
 	cfgTaskAgentCompactionThresholdOverrides,
 	cfgTaskAgentServiceTierOverrides,
 	cfgTaskDisabledAgents,
@@ -192,7 +190,6 @@ export interface EffectiveSubagentPolicy {
 	/** Exact-name entry normalized to both child compaction threshold fields. */
 	compactionThresholdOverride?: CompactionThresholdPair;
 	/** Exact-name `task.agentAccountPools` entry: the only OAuth accounts the child may use, per listed provider. */
-	oauthAccountPools?: OAuthAccountPools;
 	/** Absent for a per-call `model`: a requested model that cannot run fails instead of falling back to the parent's. */
 	parentActiveModelPattern?: string;
 	/** Whether the child gets the `yield` tool; see {@link StructuredSubagentRequest.structured}. */
@@ -467,8 +464,6 @@ export async function resolveEffectiveSubagentPolicy(
 	const compactionThresholdOverride = Object.hasOwn(compactionThresholdOverrides, agentName)
 		? compactionThresholdOverrides[agentName]
 		: undefined;
-	const agentAccountPools = validateAgentAccountPools(cfgTaskAgentAccountPools.get(request.session.settings));
-	const oauthAccountPools = Object.hasOwn(agentAccountPools, agentName) ? agentAccountPools[agentName] : undefined;
 	const parentModel = request.session.getActiveModel?.();
 	const parentActiveModelPattern = parentModel
 		? formatModelStringWithRouting(parentModel)
@@ -491,7 +486,7 @@ export async function resolveEffectiveSubagentPolicy(
 		preparedSession: preparedSeance?.session,
 		serviceTierOverride,
 		compactionThresholdOverride,
-		oauthAccountPools,
+
 		parentActiveModelPattern,
 		parentModel,
 		structured,
@@ -652,7 +647,7 @@ function buildExecutorOptions(
 		modelRoute: policy.modelRoute,
 		serviceTierOverride: policy.serviceTierOverride,
 		compactionThresholdOverride: policy.compactionThresholdOverride,
-		oauthAccountPools: policy.oauthAccountPools,
+
 		parentActiveModelPattern: policy.parentActiveModelPattern,
 		parentModel: policy.parentModel,
 		thinkingLevel: policy.effectiveAgent.thinkingLevel,

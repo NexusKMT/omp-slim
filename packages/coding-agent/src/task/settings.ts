@@ -3,7 +3,6 @@ import type { Settings } from "../config/settings";
  * Settings declared by this domain (see `config/registry.ts`). Declaration order is the
  * settings-panel order; `config/all-settings.ts` registers every domain.
  */
-import { type OAuthAccountPools, validateAgentAccountPools } from "../config/account-pools";
 import {
 	type AgentCompactionThresholdOverride,
 	validateAgentCompactionThresholdOverrides,
@@ -17,7 +16,7 @@ import { getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 
 const EMPTY_AGENT_SERVICE_TIER_OVERRIDES: Record<string, ServiceTierInheritSettingValue> = {};
 const EMPTY_AGENT_COMPACTION_THRESHOLD_OVERRIDES: Record<string, AgentCompactionThresholdOverride> = {};
-const EMPTY_AGENT_ACCOUNT_POOLS: Record<string, OAuthAccountPools> = {};
+
 const EMPTY_AGENT_SOFT_REQUEST_BUDGET: Record<string, number | null> = {};
 
 // Delegation. Task and isolation settings declare `protocolDefault`: protocol hosts get neutral
@@ -563,14 +562,6 @@ export const cfgTaskAgentCompactionThresholdOverrides = register({
 	type: "record",
 	default: EMPTY_AGENT_COMPACTION_THRESHOLD_OVERRIDES,
 	validate: validateAgentCompactionThresholdOverrides,
-});
-
-export const cfgTaskAgentAccountPools = register({
-	id: "task.agentAccountPools",
-	protocolDefault: ["rpc", "acp"],
-	type: "record",
-	default: EMPTY_AGENT_ACCOUNT_POOLS,
-	validate: validateAgentAccountPools,
 });
 
 export const cfgTaskAgentAdvisor = register({

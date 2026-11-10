@@ -43,7 +43,7 @@
  */
 
 import { spyOn } from "bun:test";
-import * as streamModule from "../stream";
+import * as chatModule from "./openai-completions";
 import * as AIError from "../error";
 import type {
 	Api,
@@ -62,7 +62,7 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream";
 
 /** The API string this provider serves. */
-export const MOCK_API = "mock" as const;
+export const MOCK_API = "openai-completions" as const;
 export type MockApi = typeof MOCK_API;
 
 /** Shorthand for a single content block. Strings become text blocks. */
@@ -267,19 +267,13 @@ export function streamMock(
 }
 
 /** Convenience: register the mock provider with the global custom API registry. */
-const productionStream = streamModule.stream;
-const productionStreamSimple = streamModule.streamSimple;
-/** Install a Bun-test-only interceptor; production dispatch imports no mock code. */
+const productionChatStream = chatModule.streamOpenAICompletions;
+/** Intercept only the transport in Bun tests, preserving real runtime guards. */
 export function registerMockApi(_sourceId = "pi-ai/mock"): void {
-	spyOn(streamModule, "stream").mockImplementation((model, context, options) =>
+	spyOn(chatModule, "streamOpenAICompletions").mockImplementation((model, context, options) =>
 		model instanceof MockModel
 			? streamMock(model, context, options as SimpleStreamOptions)
-			: productionStream(model, context, options),
-	);
-	spyOn(streamModule, "streamSimple").mockImplementation((model, context, options) =>
-		model instanceof MockModel
-			? streamMock(model, context, options)
-			: productionStreamSimple(model, context, options),
+			: productionChatStream(model, context, options),
 	);
 }
 

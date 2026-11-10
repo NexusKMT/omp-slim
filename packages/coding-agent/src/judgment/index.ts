@@ -135,9 +135,7 @@ export class ChainJudge implements Judge {
 			throw new Error("judgment: the current model does not support images");
 		}
 		const prepared =
-			images.length === 0
-				? request
-				: { ...request, images: (await normalizeModelContextImages([...images], { model })) ?? [] };
+			images.length === 0 ? request : { ...request, images: (await normalizeModelContextImages([...images])) ?? [] };
 		return this.withCandidate(judge => judge.judge(prepared, options), options);
 	}
 

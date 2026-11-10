@@ -1,8 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Api, AssistantMessage, Message, Model, ToolCall } from "../types";
+import type { Api, AssistantMessage, Message, Model, ToolCall, ToolResultMessage, UserMessage } from "../types";
+import { kSyntheticUser, type SyntheticUserCarrier } from "../utils/block-symbols";
 export const MAX_TOOL_CALL_ID_LENGTH = 64;
 export function normalizeToolCallId(id: string, maxLength = MAX_TOOL_CALL_ID_LENGTH): string {
 	return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, maxLength);
+}
+/** Append a deterministic duplicate suffix without exceeding the wire id limit. */
+export function appendDuplicateSuffix(originalId: string, suffix: string, maxLength: number): string {
+	return originalId.slice(0, Math.max(0, maxLength - suffix.length)) + suffix;
 }
 export function isValidToolCallId(id: string): boolean {
 	return /^[a-zA-Z0-9_-]{1,64}$/.test(id);
@@ -137,77 +142,159 @@ export function transformMessages<TApi extends Api>(
 	maxLength = MAX_TOOL_CALL_ID_LENGTH,
 	suffixPrefix = "_dup",
 ): Message[] {
-	const result: Message[] = [];
-	const seen = new Set<string>();
-	const pending = new Map<string, string>();
+	const normalized: Message[] = [];
 	const aliases = new Map<string, string>();
-	const flush = () => {
-		for (const [toolCallId, toolName] of pending)
-			result.push({
-				role: "toolResult",
-				toolCallId,
-				toolName,
-				content: [{ type: "text", text: "Tool execution was interrupted; no result is available." }],
-				isError: true,
-				timestamp: Date.now(),
-			});
-		pending.clear();
-	};
+	const malformedQueues = new Map<string, boolean[]>();
+	const redactContent = (content: ToolResultMessage["content"]): ToolResultMessage["content"] =>
+		content.map(block =>
+			block.type === "text" ? { ...block, text: redactSensitiveCredentials(block.text.toWellFormed()) } : block,
+		);
 	for (const message of messages) {
 		if (message.role === "assistant") {
-			flush();
+			malformedQueues.clear();
 			const content: AssistantMessage["content"] = [];
 			for (const block of message.content) {
 				if (block.type === "text") {
 					content.push({ type: "text", text: redactSensitiveCredentials(block.text.toWellFormed()) });
 					continue;
 				}
-				if (block.type !== "toolCall" || !block.id.trim() || isMalformedToolCallName(block.name)) continue;
-				let id = normalizeId ? normalizeId(block.id, model, message) : block.id;
-				const original = id;
-				let suffix = 1;
-				while (seen.has(id)) {
-					const tail = `${suffixPrefix}${suffix++}`;
-					id = original.slice(0, maxLength - tail.length) + tail;
-				}
-				seen.add(id);
+				if (block.type !== "toolCall") continue;
+				const malformed = !block.id.trim() || isMalformedToolCallName(block.name);
+				const queue = malformedQueues.get(block.id) ?? [];
+				queue.push(malformed);
+				malformedQueues.set(block.id, queue);
+				if (malformed) continue;
+				const id = normalizeId ? normalizeId(block.id, model, message) : block.id;
 				aliases.set(block.id, id);
-				pending.set(id, block.name);
-				const argumentsValue = redactSensitiveInObject(block.arguments).result as ToolCall["arguments"];
-				content.push({ type: "toolCall", id, name: block.name, arguments: argumentsValue });
+				let args: unknown = block.arguments;
+				if (typeof args === "string") {
+					try {
+						args = JSON.parse(args);
+					} catch {
+						args = {};
+					}
+				}
+				if (!args || typeof args !== "object" || Array.isArray(args)) args = {};
+				content.push({
+					type: "toolCall",
+					id,
+					name: block.name,
+					arguments: redactSensitiveInObject(args).result as ToolCall["arguments"],
+				});
 			}
 			if (content.length)
-				result.push({ ...message, content, providerPayload: undefined, requestControls: undefined });
+				normalized.push({ ...message, content, providerPayload: undefined, requestControls: undefined });
 		} else if (message.role === "toolResult") {
-			const toolCallId = aliases.get(message.toolCallId) ?? message.toolCallId;
-			if (!pending.has(toolCallId)) continue;
-			pending.delete(toolCallId);
-			result.push({
+			const queue = malformedQueues.get(message.toolCallId);
+			if (queue?.shift()) continue;
+			normalized.push({
 				...message,
-				toolCallId,
-				content: message.content.map(block =>
-					block.type === "text"
-						? { ...block, text: redactSensitiveCredentials(block.text.toWellFormed()) }
-						: block,
-				),
+				toolCallId: aliases.get(message.toolCallId) ?? message.toolCallId,
+				content: redactContent(message.content),
 				providerMetadata: undefined,
 			});
 		} else {
-			flush();
-			result.push({
+			malformedQueues.clear();
+			normalized.push({
 				...message,
 				content:
 					typeof message.content === "string"
 						? redactSensitiveCredentials(message.content.toWellFormed())
-						: message.content.map(block =>
-								block.type === "text"
-									? { ...block, text: redactSensitiveCredentials(block.text.toWellFormed()) }
-									: block,
-							),
+						: redactContent(message.content),
 				providerPayload: undefined,
 			});
 		}
 	}
-	flush();
+	// An id may repeat in one turn or be reused after compaction. Queue rewrites
+	// within a turn; a later turn reusing the id supersedes an unfinished call.
+	const seen = new Set<string>();
+	const rewrites = new Map<string, string[]>();
+	const validIds = new Set<string>();
+	const realResults = new Map<string, { index: number; message: ToolResultMessage }[]>();
+	const transformed = normalized.map((message, index): Message => {
+		if (message.role === "toolResult") {
+			const id = rewrites.get(message.toolCallId)?.shift() ?? message.toolCallId;
+			const rewritten = { ...message, toolCallId: id };
+			const entries = realResults.get(id) ?? [];
+			entries.push({ index, message: rewritten });
+			realResults.set(id, entries);
+			return rewritten;
+		}
+		if (message.role !== "assistant") return message;
+		const touched = new Set<string>();
+		const content = message.content.map(block => {
+			if (block.type !== "toolCall") return block;
+			if (!touched.has(block.id)) {
+				touched.add(block.id);
+				rewrites.delete(block.id);
+			}
+			let id = block.id;
+			let duplicate = 1;
+			while (seen.has(id)) id = appendDuplicateSuffix(block.id, `${suffixPrefix}${duplicate++}`, maxLength);
+			seen.add(id);
+			validIds.add(id);
+			const queue = rewrites.get(block.id) ?? [];
+			queue.push(id);
+			rewrites.set(block.id, queue);
+			return { ...block, id };
+		});
+		return { ...message, content };
+	});
+	// Chat requires every tool call's results before the next conversational
+	// message. Pull a delayed real result forward, but never steal an earlier
+	// orphan or a later turn's reused-id result.
+	const result: Message[] = [];
+	let openWindow = new Set<string>();
+	for (let index = 0; index < transformed.length; index++) {
+		const message = transformed[index]!;
+		if (message.role === "assistant") {
+			result.push(message);
+			const calls = message.content.filter((block): block is ToolCall => block.type === "toolCall");
+			openWindow = new Set(calls.map(call => call.id));
+			for (const call of calls) {
+				const real = realResults.get(call.id)?.find(entry => entry.index > index);
+				result.push(
+					real?.message ?? {
+						role: "toolResult",
+						toolCallId: call.id,
+						toolName: call.name,
+						content: [
+							{
+								type: "text",
+								text:
+									message.stopReason === "error" || message.stopReason === "aborted"
+										? "aborted"
+										: "No result provided",
+							},
+						],
+						isError: true,
+						timestamp: message.timestamp,
+					},
+				);
+			}
+		} else if (message.role === "toolResult") {
+			if (validIds.has(message.toolCallId)) {
+				openWindow.delete(message.toolCallId);
+				continue;
+			}
+			if (openWindow.size) continue;
+			const text = message.content
+				.filter(block => block.type === "text" && block.text.trim())
+				.map(block => (block.type === "text" ? block.text : ""))
+				.join("\n");
+			if (!text) continue;
+			const errorAttr = message.isError ? ' is-error="true"' : "";
+			const note: UserMessage & SyntheticUserCarrier = {
+				role: "user",
+				content: `<stale-tool-result tool="${message.toolName}" id="${message.toolCallId}"${errorAttr}>\n${text}\n</stale-tool-result>`,
+				timestamp: message.timestamp,
+			};
+			note[kSyntheticUser] = true;
+			result.push(note);
+		} else {
+			openWindow.clear();
+			result.push(message);
+		}
+	}
 	return result;
 }

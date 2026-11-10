@@ -1966,27 +1966,6 @@ func (v *QueuedMessageQueue) UnmarshalJSON(data []byte) error {
 	return unknownValue("QueuedMessageQueue", s)
 }
 
-type CacheWarmingMode string
-
-const (
-	CacheWarmingModeOff       CacheWarmingMode = "off"
-	CacheWarmingModeStreaming CacheWarmingMode = "streaming"
-	CacheWarmingModeIdle      CacheWarmingMode = "idle"
-)
-
-func (v *CacheWarmingMode) UnmarshalJSON(data []byte) error {
-	s, err := decodeString(data, "CacheWarmingMode")
-	if err != nil {
-		return err
-	}
-	switch value := CacheWarmingMode(s); value {
-	case CacheWarmingModeOff, CacheWarmingModeStreaming, CacheWarmingModeIdle:
-		*v = value
-		return nil
-	}
-	return unknownValue("CacheWarmingMode", s)
-}
-
 // `set_event_filter` projection: `delta` replaces the accumulated snapshots with the block a start/end event touches.
 type MessageUpdates string
 
@@ -2410,130 +2389,6 @@ func (v *GoalResult) decodeFrom(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// Where `/slow` lives: persisted config shared by every session, or this session's flex tier.
-type SlowModeScope string
-
-const (
-	SlowModeScopeSession SlowModeScope = "session"
-	SlowModeScopeGlobal  SlowModeScope = "global"
-)
-
-func (v *SlowModeScope) UnmarshalJSON(data []byte) error {
-	s, err := decodeString(data, "SlowModeScope")
-	if err != nil {
-		return err
-	}
-	switch value := SlowModeScope(s); value {
-	case SlowModeScopeSession, SlowModeScopeGlobal:
-		*v = value
-		return nil
-	}
-	return unknownValue("SlowModeScope", s)
-}
-
-// Requests are served on the provider's low-priority (slow) lane.
-type UsageLimitLowPriority struct {
-	// Epoch seconds when the limit that was hit resets.
-	ResetsAtSec float64 `json:"resetsAtSec"`
-	// Percent of the low-priority allowance still available, when reported.
-	AllowanceLeftPercent *int64 `json:"allowanceLeftPercent,omitempty"`
-}
-
-func (v *UsageLimitLowPriority) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "UsageLimitLowPriority", v.decodeFrom)
-}
-
-func (v *UsageLimitLowPriority) decodeFrom(raw map[string]json.RawMessage) error {
-	var out UsageLimitLowPriority
-	d := fieldDecoder{raw: raw, owner: "UsageLimitLowPriority"}
-	d.constant("stage", "low_priority")
-	d.required("resetsAtSec", &out.ResetsAtSec)
-	d.optional("allowanceLeftPercent", &out.AllowanceLeftPercent)
-	if d.err != nil {
-		return d.err
-	}
-	*v = out
-	return nil
-}
-
-func (v UsageLimitLowPriority) MarshalJSON() ([]byte, error) {
-	type plain UsageLimitLowPriority
-	return encodeObject(plain(v), `"stage":"low_priority"`, nil)
-}
-
-// Requests run on a short wrap-up allowance past the limit.
-type UsageLimitWrapUp struct {
-	// Whether paid extra usage serves requests once the allowance is spent.
-	ExtraUsage bool `json:"extraUsage"`
-	// Epoch seconds when the limit that was hit resets, if reported.
-	ResetsAtSec *float64 `json:"resetsAtSec,omitempty"`
-}
-
-func (v *UsageLimitWrapUp) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "UsageLimitWrapUp", v.decodeFrom)
-}
-
-func (v *UsageLimitWrapUp) decodeFrom(raw map[string]json.RawMessage) error {
-	var out UsageLimitWrapUp
-	d := fieldDecoder{raw: raw, owner: "UsageLimitWrapUp"}
-	d.constant("stage", "wrap_up")
-	d.required("extraUsage", &out.ExtraUsage)
-	d.optional("resetsAtSec", &out.ResetsAtSec)
-	if d.err != nil {
-		return d.err
-	}
-	*v = out
-	return nil
-}
-
-func (v UsageLimitWrapUp) MarshalJSON() ([]byte, error) {
-	type plain UsageLimitWrapUp
-	return encodeObject(plain(v), `"stage":"wrap_up"`, nil)
-}
-
-// Provider-neutral state of an account past its usage limit, discriminated by `stage`.
-type UsageLimitState struct {
-	// Value holds one variant, chosen by "stage" on decode.
-	Value UsageLimitStateVariant
-}
-
-// UsageLimitStateVariant is implemented by the types UsageLimitState can hold.
-type UsageLimitStateVariant interface {
-	isUsageLimitState()
-}
-
-func (UsageLimitLowPriority) isUsageLimitState() {}
-func (UsageLimitWrapUp) isUsageLimitState()      {}
-
-func (v UsageLimitState) MarshalJSON() ([]byte, error) {
-	return encodeVariant("UsageLimitState", v.Value)
-}
-
-func (v *UsageLimitState) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "UsageLimitState", v.decodeFrom)
-}
-
-func (v *UsageLimitState) decodeFrom(raw map[string]json.RawMessage) error {
-	tag, err := unionTag(raw, "UsageLimitState", "stage")
-	if err != nil {
-		return err
-	}
-	var value UsageLimitStateVariant
-	switch tag {
-	case "low_priority":
-		value, err = decodeVariant[UsageLimitLowPriority](raw)
-	case "wrap_up":
-		value, err = decodeVariant[UsageLimitWrapUp](raw)
-	default:
-		return unknownValue("UsageLimitState.stage", tag)
-	}
-	if err != nil {
-		return err
-	}
-	v.Value = value
-	return nil
-}
-
 type SessionState struct {
 	SessionID             string         `json:"sessionId"`
 	Model                 *ModelInfo     `json:"model,omitempty"`
@@ -2548,17 +2403,9 @@ type SessionState struct {
 	AutoCompactionEnabled bool           `json:"autoCompactionEnabled"`
 	FastModeEnabled       bool           `json:"fastModeEnabled"`
 	FastModeActive        bool           `json:"fastModeActive"`
-	// `/slow` applies to the active model.
-	SlowModeSupported bool `json:"slowModeSupported"`
-	// `/slow` is on for the active model; always `false` when `slowModeSupported` is `false`.
-	SlowModeEnabled bool `json:"slowModeEnabled"`
-	// Where the active model's `/slow` lives; absent when unsupported.
-	SlowModeScope *SlowModeScope `json:"slowModeScope,omitempty"`
-	// Usage-limit stage of the active model's account; absent outside wrap-up and low priority.
-	UsageLimit         *UsageLimitState `json:"usageLimit,omitempty"`
-	TokensPerSecond    *float64         `json:"tokensPerSecond"`
-	MessageCount       int64            `json:"messageCount"`
-	QueuedMessageCount int64            `json:"queuedMessageCount"`
+	TokensPerSecond       *float64       `json:"tokensPerSecond"`
+	MessageCount          int64          `json:"messageCount"`
+	QueuedMessageCount    int64          `json:"queuedMessageCount"`
 	// Background jobs or deliveries can still inject a follow-up and wake the session.
 	HasPendingAsyncWork bool `json:"hasPendingAsyncWork"`
 	// Idle with nothing queued or pending; same predicate as `session_settled`.
@@ -2593,10 +2440,6 @@ func (v *SessionState) decodeFrom(raw map[string]json.RawMessage) error {
 	d.defaulted("autoCompactionEnabled", &out.AutoCompactionEnabled, `false`)
 	d.defaulted("fastModeEnabled", &out.FastModeEnabled, `false`)
 	d.defaulted("fastModeActive", &out.FastModeActive, `false`)
-	d.defaulted("slowModeSupported", &out.SlowModeSupported, `false`)
-	d.defaulted("slowModeEnabled", &out.SlowModeEnabled, `false`)
-	d.optional("slowModeScope", &out.SlowModeScope)
-	d.optional("usageLimit", &out.UsageLimit)
 	d.defaulted("tokensPerSecond", &out.TokensPerSecond, `null`)
 	d.defaulted("messageCount", &out.MessageCount, `0`)
 	d.defaulted("queuedMessageCount", &out.QueuedMessageCount, `0`)
@@ -3571,48 +3414,6 @@ func (v *AutoCompactionAction) UnmarshalJSON(data []byte) error {
 	return unknownValue("AutoCompactionAction", s)
 }
 
-type CacheWarmingPhase string
-
-const (
-	CacheWarmingPhaseStreaming CacheWarmingPhase = "streaming"
-	CacheWarmingPhaseIdle      CacheWarmingPhase = "idle"
-)
-
-func (v *CacheWarmingPhase) UnmarshalJSON(data []byte) error {
-	s, err := decodeString(data, "CacheWarmingPhase")
-	if err != nil {
-		return err
-	}
-	switch value := CacheWarmingPhase(s); value {
-	case CacheWarmingPhaseStreaming, CacheWarmingPhaseIdle:
-		*v = value
-		return nil
-	}
-	return unknownValue("CacheWarmingPhase", s)
-}
-
-type CacheWarmingOutcome string
-
-const (
-	CacheWarmingOutcomeHit     CacheWarmingOutcome = "hit"
-	CacheWarmingOutcomeMiss    CacheWarmingOutcome = "miss"
-	CacheWarmingOutcomeError   CacheWarmingOutcome = "error"
-	CacheWarmingOutcomeAborted CacheWarmingOutcome = "aborted"
-)
-
-func (v *CacheWarmingOutcome) UnmarshalJSON(data []byte) error {
-	s, err := decodeString(data, "CacheWarmingOutcome")
-	if err != nil {
-		return err
-	}
-	switch value := CacheWarmingOutcome(s); value {
-	case CacheWarmingOutcomeHit, CacheWarmingOutcomeMiss, CacheWarmingOutcomeError, CacheWarmingOutcomeAborted:
-		*v = value
-		return nil
-	}
-	return unknownValue("CacheWarmingOutcome", s)
-}
-
 type NotifyType string
 
 const (
@@ -4149,74 +3950,6 @@ func (v AutoRetryEndEvent) MarshalJSON() ([]byte, error) {
 	return encodeObject(plain(v), `"type":"auto_retry_end"`, nil)
 }
 
-// A prompt-cache refresh was handed to the provider.
-type CacheWarmingStartEvent struct {
-	Phase    CacheWarmingPhase `json:"phase"`
-	Provider string            `json:"provider"`
-	Model    string            `json:"model"`
-}
-
-func (v *CacheWarmingStartEvent) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "CacheWarmingStartEvent", v.decodeFrom)
-}
-
-func (v *CacheWarmingStartEvent) decodeFrom(raw map[string]json.RawMessage) error {
-	var out CacheWarmingStartEvent
-	d := fieldDecoder{raw: raw, owner: "CacheWarmingStartEvent"}
-	d.constant("type", "cache_warming_start")
-	d.required("phase", &out.Phase)
-	d.required("provider", &out.Provider)
-	d.required("model", &out.Model)
-	if d.err != nil {
-		return d.err
-	}
-	*v = out
-	return nil
-}
-
-func (v CacheWarmingStartEvent) MarshalJSON() ([]byte, error) {
-	type plain CacheWarmingStartEvent
-	return encodeObject(plain(v), `"type":"cache_warming_start"`, nil)
-}
-
-// Outcome of the refresh announced by the matching `cache_warming_start`.
-type CacheWarmingEndEvent struct {
-	Phase    CacheWarmingPhase   `json:"phase"`
-	Provider string              `json:"provider"`
-	Model    string              `json:"model"`
-	Outcome  CacheWarmingOutcome `json:"outcome"`
-	// Present only when the refresh was billed.
-	Usage *Usage `json:"usage,omitempty"`
-	// Why warming stopped; absent while it continues.
-	WarmingStopReason *string `json:"warmingStopReason,omitempty"`
-}
-
-func (v *CacheWarmingEndEvent) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "CacheWarmingEndEvent", v.decodeFrom)
-}
-
-func (v *CacheWarmingEndEvent) decodeFrom(raw map[string]json.RawMessage) error {
-	var out CacheWarmingEndEvent
-	d := fieldDecoder{raw: raw, owner: "CacheWarmingEndEvent"}
-	d.constant("type", "cache_warming_end")
-	d.required("phase", &out.Phase)
-	d.required("provider", &out.Provider)
-	d.required("model", &out.Model)
-	d.required("outcome", &out.Outcome)
-	d.optional("usage", &out.Usage)
-	d.optional("warmingStopReason", &out.WarmingStopReason)
-	if d.err != nil {
-		return d.err
-	}
-	*v = out
-	return nil
-}
-
-func (v CacheWarmingEndEvent) MarshalJSON() ([]byte, error) {
-	type plain CacheWarmingEndEvent
-	return encodeObject(plain(v), `"type":"cache_warming_end"`, nil)
-}
-
 type RetryFallbackAppliedEvent struct {
 	From   string  `json:"from"`
 	To     string  `json:"to"`
@@ -4614,8 +4347,6 @@ func (ManualCompactionStartEvent) isRpcAgentEvent()  {}
 func (ManualCompactionEndEvent) isRpcAgentEvent()    {}
 func (AutoRetryStartEvent) isRpcAgentEvent()         {}
 func (AutoRetryEndEvent) isRpcAgentEvent()           {}
-func (CacheWarmingStartEvent) isRpcAgentEvent()      {}
-func (CacheWarmingEndEvent) isRpcAgentEvent()        {}
 func (RetryFallbackAppliedEvent) isRpcAgentEvent()   {}
 func (RetryFallbackSucceededEvent) isRpcAgentEvent() {}
 func (ModelChangedEvent) isRpcAgentEvent()           {}
@@ -4685,10 +4416,6 @@ func (v *RpcAgentEvent) decodeFrom(raw map[string]json.RawMessage) error {
 		value, err = decodeVariant[AutoRetryStartEvent](raw)
 	case "auto_retry_end":
 		value, err = decodeVariant[AutoRetryEndEvent](raw)
-	case "cache_warming_start":
-		value, err = decodeVariant[CacheWarmingStartEvent](raw)
-	case "cache_warming_end":
-		value, err = decodeVariant[CacheWarmingEndEvent](raw)
 	case "retry_fallback_applied":
 		value, err = decodeVariant[RetryFallbackAppliedEvent](raw)
 	case "retry_fallback_succeeded":
@@ -6524,8 +6251,6 @@ func (ManualCompactionStartEvent) isRpcNotification()   {}
 func (ManualCompactionEndEvent) isRpcNotification()     {}
 func (AutoRetryStartEvent) isRpcNotification()          {}
 func (AutoRetryEndEvent) isRpcNotification()            {}
-func (CacheWarmingStartEvent) isRpcNotification()       {}
-func (CacheWarmingEndEvent) isRpcNotification()         {}
 func (RetryFallbackAppliedEvent) isRpcNotification()    {}
 func (RetryFallbackSucceededEvent) isRpcNotification()  {}
 func (ModelChangedEvent) isRpcNotification()            {}
@@ -6618,10 +6343,6 @@ func (v *RpcNotification) UnmarshalJSON(data []byte) error {
 		value, err = decodeVariant[AutoRetryStartEvent](raw)
 	case "auto_retry_end":
 		value, err = decodeVariant[AutoRetryEndEvent](raw)
-	case "cache_warming_start":
-		value, err = decodeVariant[CacheWarmingStartEvent](raw)
-	case "cache_warming_end":
-		value, err = decodeVariant[CacheWarmingEndEvent](raw)
 	case "retry_fallback_applied":
 		value, err = decodeVariant[RetryFallbackAppliedEvent](raw)
 	case "retry_fallback_succeeded":
@@ -6708,8 +6429,6 @@ func (ManualCompactionStartEvent) isRpcServerFrame()   {}
 func (ManualCompactionEndEvent) isRpcServerFrame()     {}
 func (AutoRetryStartEvent) isRpcServerFrame()          {}
 func (AutoRetryEndEvent) isRpcServerFrame()            {}
-func (CacheWarmingStartEvent) isRpcServerFrame()       {}
-func (CacheWarmingEndEvent) isRpcServerFrame()         {}
 func (RetryFallbackAppliedEvent) isRpcServerFrame()    {}
 func (RetryFallbackSucceededEvent) isRpcServerFrame()  {}
 func (ModelChangedEvent) isRpcServerFrame()            {}
@@ -6812,10 +6531,6 @@ func (v *RpcServerFrame) UnmarshalJSON(data []byte) error {
 		value, err = decodeVariant[AutoRetryStartEvent](raw)
 	case "auto_retry_end":
 		value, err = decodeVariant[AutoRetryEndEvent](raw)
-	case "cache_warming_start":
-		value, err = decodeVariant[CacheWarmingStartEvent](raw)
-	case "cache_warming_end":
-		value, err = decodeVariant[CacheWarmingEndEvent](raw)
 	case "retry_fallback_applied":
 		value, err = decodeVariant[RetryFallbackAppliedEvent](raw)
 	case "retry_fallback_succeeded":
@@ -6866,25 +6581,6 @@ func (v *NegotiateProtocolResult) decodeFrom(raw map[string]json.RawMessage) err
 	var out NegotiateProtocolResult
 	d := fieldDecoder{raw: raw, owner: "NegotiateProtocolResult"}
 	d.required("protocolVersion", &out.ProtocolVersion)
-	if d.err != nil {
-		return d.err
-	}
-	*v = out
-	return nil
-}
-
-type SetSlowModeResult struct {
-	Enabled bool `json:"enabled"`
-}
-
-func (v *SetSlowModeResult) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "SetSlowModeResult", v.decodeFrom)
-}
-
-func (v *SetSlowModeResult) decodeFrom(raw map[string]json.RawMessage) error {
-	var out SetSlowModeResult
-	d := fieldDecoder{raw: raw, owner: "SetSlowModeResult"}
-	d.required("enabled", &out.Enabled)
 	if d.err != nil {
 		return d.err
 	}
@@ -7096,25 +6792,6 @@ func (v *GetAvailableThinkingLevelsResult) decodeFrom(raw map[string]json.RawMes
 	var out GetAvailableThinkingLevelsResult
 	d := fieldDecoder{raw: raw, owner: "GetAvailableThinkingLevelsResult"}
 	d.required("levels", &out.Levels)
-	if d.err != nil {
-		return d.err
-	}
-	*v = out
-	return nil
-}
-
-type SetCacheWarmingResult struct {
-	Mode CacheWarmingMode `json:"mode"`
-}
-
-func (v *SetCacheWarmingResult) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "SetCacheWarmingResult", v.decodeFrom)
-}
-
-func (v *SetCacheWarmingResult) decodeFrom(raw map[string]json.RawMessage) error {
-	var out SetCacheWarmingResult
-	d := fieldDecoder{raw: raw, owner: "SetCacheWarmingResult"}
-	d.required("mode", &out.Mode)
 	if d.err != nil {
 		return d.err
 	}
@@ -7480,18 +7157,6 @@ func (c Commands) SetFastMode(ctx context.Context, p SetFastModeCommand) (FastMo
 	return out, err
 }
 
-// SetSlowModeCommand holds the parameters of "set_slow_mode".
-type SetSlowModeCommand struct {
-	Enabled bool `json:"enabled"`
-}
-
-// SetSlowMode sends "set_slow_mode": Turn `/slow` on or off for the active model; returns whether it is now on.
-func (c Commands) SetSlowMode(ctx context.Context, p SetSlowModeCommand) (bool, error) {
-	var out SetSlowModeResult
-	err := c.call(ctx, "set_slow_mode", p, 0, &out)
-	return out.Enabled, err
-}
-
 // GoalCommand holds the parameters of "goal".
 type GoalCommand struct {
 	Op          GoalOp  `json:"op"`
@@ -7749,18 +7414,6 @@ type SetAutoCompactionCommand struct {
 // SetAutoCompaction sends "set_auto_compaction": Enable or disable auto-compaction.
 func (c Commands) SetAutoCompaction(ctx context.Context, p SetAutoCompactionCommand) error {
 	return c.call(ctx, "set_auto_compaction", p, 0, nil)
-}
-
-// SetCacheWarmingCommand holds the parameters of "set_cache_warming".
-type SetCacheWarmingCommand struct {
-	Mode CacheWarmingMode `json:"mode"`
-}
-
-// SetCacheWarming sends "set_cache_warming": Override cache warming for this session only; returns the effective mode.
-func (c Commands) SetCacheWarming(ctx context.Context, p SetCacheWarmingCommand) (CacheWarmingMode, error) {
-	var out SetCacheWarmingResult
-	err := c.call(ctx, "set_cache_warming", p, 0, &out)
-	return out.Mode, err
 }
 
 // SetAutoRetryCommand holds the parameters of "set_auto_retry".

@@ -19,25 +19,10 @@
  * `types.ts` via the `export *` below — pi-ai still exports both as types,
  * only the runtime `Type` builder and `StringEnum()` helper were removed.
  */
-import {
-	type Api,
-	type AssistantMessage,
-	type AssistantMessageEventStream,
-	type Context,
-	type Model,
-	type SimpleStreamOptions,
-	streamSimple,
-} from "@oh-my-pi/pi-ai";
-import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/register-builtins";
+import { type Api, type AssistantMessage, type Model } from "@oh-my-pi/pi-ai";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
-import {
-	calculateCost,
-	getBundledModel,
-	getBundledModels,
-	getBundledProviders,
-	modelsAreEqual,
-} from "@oh-my-pi/pi-catalog/models";
+import { calculateCost, modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { type TSchema, Type } from "./legacy-typebox";
 
 export interface StringEnumOptions<T extends string> {
@@ -136,51 +121,7 @@ export function isRetryableAssistantError(message: AssistantMessage): boolean {
 }
 
 export * from "@oh-my-pi/pi-ai";
-/**
- * Compatibility re-exports for catalog symbols that pi-ai historically exposed
- * from its own barrel prior to the `refactor(catalog)!: split model catalog
- * from pi-ai` change. Legacy extensions still import these from the pi-ai
- * root, so the shim bridges them through to their new home in
- * `@oh-my-pi/pi-catalog/models`. `getModel`/`getModels` are the historical
- * pi-ai names for `getBundledModel`/`getBundledModels`; the remaining symbols
- * kept their names across the move.
- */
-export { calculateCost, getBundledModel, getBundledModels, getBundledProviders, modelsAreEqual, Type };
-export const getModel = getBundledModel;
-export const getModels = getBundledModels;
-
-const ANTHROPIC_MESSAGES_API = {
-	// Loads the Anthropic transport on first invocation, not extension setup.
-	stream: streamAnthropic,
-	streamSimple: (model: Model<"anthropic-messages">, context: Context, options?: SimpleStreamOptions) =>
-		streamSimple(model, context, options),
-};
-
-/**
- * Expose OMP's Anthropic transport through the legacy `/compat` provider
- * factory used by extensions such as `pi-background-tasks`.
- */
-export function anthropicMessagesApi() {
-	return ANTHROPIC_MESSAGES_API;
-}
-
-/**
- * Stream OpenAI Responses through the historical simple-options contract.
- *
- * Legacy `/compat` callers pass {@link SimpleStreamOptions}; routing through
- * `streamSimple` preserves option normalization before provider dispatch.
- *
- * Transient-failure retry (overload, rate-limit, 5xx) is the **caller's
- * responsibility**. Oneshot callers that collect the full result before acting
- * should wrap with `retryTransientCompletion` from `@oh-my-pi/pi-ai`.
- */
-export function streamSimpleOpenAIResponses(
-	model: Model<"openai-responses">,
-	context: Context,
-	options?: SimpleStreamOptions,
-): AssistantMessageEventStream {
-	return streamSimple(model, context, options);
-}
+export { calculateCost, modelsAreEqual, Type };
 /**
  * Compatibility re-exports for runtime helpers that upstream
  * `@earendil-works/pi-ai` exposed from its package root but omp's

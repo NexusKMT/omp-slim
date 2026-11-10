@@ -36,7 +36,11 @@ describe("explicit Chat Completions transport", () => {
 	it("sends the configured model, endpoint, dynamic headers, key and standard fields", async () => {
 		const requests: { url: string; headers: Headers; body: Record<string, unknown> }[] = [];
 		const model = fixture(async request => {
-			requests.push({ url: request.url, headers: request.headers, body: await request.json() });
+			requests.push({
+				url: request.url,
+				headers: request.headers,
+				body: (await request.json()) as Record<string, unknown>,
+			});
 			return answer();
 		});
 		model.headers = { "X-Static": "static", "X-Collision": "static" };
@@ -67,7 +71,11 @@ describe("explicit Chat Completions transport", () => {
 	it("does not infer protocol, headers, route or model variants from provider/model names", async () => {
 		const requests: { url: string; headers: Headers; body: Record<string, unknown> }[] = [];
 		const model = fixture(async request => {
-			requests.push({ url: request.url, headers: request.headers, body: await request.json() });
+			requests.push({
+				url: request.url,
+				headers: request.headers,
+				body: (await request.json()) as Record<string, unknown>,
+			});
 			return answer();
 		});
 		model.provider = "anthropic";
@@ -161,7 +169,7 @@ describe("explicit Chat Completions transport", () => {
 	it("accepts a non-streaming JSON completion with tool calls", async () => {
 		let sent: Record<string, unknown> | undefined;
 		const model = fixture(async request => {
-			sent = await request.json();
+			sent = (await request.json()) as Record<string, unknown>;
 			return Response.json({
 				id: "json-1",
 				choices: [
@@ -188,7 +196,7 @@ describe("explicit Chat Completions transport", () => {
 	it("preserves image inputs and sends image tool results as attached user content", async () => {
 		let body: Record<string, unknown> = {};
 		const model = fixture(async request => {
-			body = await request.json();
+			body = (await request.json()) as Record<string, unknown>;
 			return answer();
 		});
 		const image = { type: "image" as const, data: "aGk=", mimeType: "image/png", detail: "high" as const };
@@ -249,7 +257,7 @@ describe("explicit Chat Completions transport", () => {
 	it("reports terminal HTTP errors without changing the requested model", async () => {
 		const bodies: Record<string, unknown>[] = [];
 		const model = fixture(async request => {
-			bodies.push(await request.json());
+			bodies.push((await request.json()) as Record<string, unknown>);
 			return Response.json({ error: { message: "fixture rejected request" } }, { status: 400 });
 		});
 		const result = await completeSimple(model, context, { apiKey: "key" });

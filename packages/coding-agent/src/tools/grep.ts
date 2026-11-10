@@ -25,7 +25,6 @@ import {
 	type TruncationResult,
 	truncateHead,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
-import { sessionDelegationBias } from "../task/prompt-policy";
 import { isScoutSpawnable } from "../task/spawn-policy";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import type { ToolSession } from ".";
@@ -603,7 +602,7 @@ export class GrepTool implements AgentTool<typeof searchSchema, GrepToolDetails>
 		const isHlMode = displayMode.hashLines;
 		const isLineNumberMode = !displayMode.hashLines && displayMode.lineNumbers;
 		const hasFind = this.session.isToolActive?.("find") ?? isFindEnabled(this.session);
-		const eagerDelegation = sessionDelegationBias(this.session) === "eager";
+		const eagerDelegation = false;
 		const scoutAvailable = isScoutSpawnable(
 			cfgTaskDisabledAgents.get(this.session.settings),
 			this.session.getSessionSpawns?.() ?? "*",

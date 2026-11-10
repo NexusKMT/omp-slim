@@ -6,8 +6,17 @@ describe("completion event retention", () => {
 		for (const outcome of ["success", "failure"]) {
 			test(`${completion} releases events before ${outcome} settles the response`, async () => {
 				const child = Bun.spawn(
-					[process.execPath, path.join(import.meta.dir, "fixtures/completion-retention.ts"), completion, outcome],
-					{ stdout: "pipe", stderr: "pipe" },
+					[
+						process.execPath,
+						"test",
+						path.join(import.meta.dir, "fixtures/completion-retention.ts"),
+						"--timeout=10000",
+					],
+					{
+						stdout: "pipe",
+						stderr: "pipe",
+						env: { ...process.env, OMP_COMPLETION_FIXTURE: completion, OMP_COMPLETION_OUTCOME: outcome },
+					},
 				);
 				const timeout = setTimeout(() => child.kill(), 10_000);
 				try {
@@ -16,7 +25,9 @@ describe("completion event retention", () => {
 						new Response(child.stderr).text(),
 						child.exited,
 					]);
-					expect({ exitCode, stderr, stdout }).toEqual({ exitCode: 0, stderr: "", stdout: "verified\n" });
+					expect(exitCode).toBe(0);
+					expect(stdout).toContain("verified\n");
+					expect(stderr).toContain("0 fail");
 				} finally {
 					clearTimeout(timeout);
 					child.kill();
