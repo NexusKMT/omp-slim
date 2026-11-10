@@ -1,14 +1,10 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { searchZai, ZaiProvider } from "@oh-my-pi/pi-coding-agent/web/search/providers/zai";
 import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
 
 const authStorage = createInMemoryAuthStorage();
 authStorage.keys.setRuntime("zai", "zai-test-key");
-const modelRegistry = new ModelRegistry(authStorage);
-const zaiModel = modelRegistry.find("web", "zai");
-if (!zaiModel) throw new Error("Expected bundled web/zai model");
 
 afterAll(() => {
 	authStorage.close();
@@ -172,10 +168,9 @@ describe("Z.AI web search provider", () => {
 		const { fetchImpl, capturedRequests } = createMcpFetch();
 		await new ZaiProvider().search({
 			query: 'pytest "fixture scope" site:docs.pytest.org -inurl:changelog filetype:html after:2024-01-01',
-			systemPrompt: "",
+
 			authStorage,
-			model: zaiModel,
-			modelRegistry,
+
 			fetch: fetchImpl,
 		});
 

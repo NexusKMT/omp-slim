@@ -1,19 +1,12 @@
-/**
- * Unified Web Search Tool
- *
- * Single tool supporting Anthropic, Perplexity, Exa, Brave, DeepSeek, Jina, Kimi, Gemini, Codex, Tavily, Kagi, Z.AI, SearXNG, and Synthetic
- * providers with provider-specific parameters exposed conditionally.
- */
+/** Unified HTTP web search tool. */
 
 import { type } from "@oh-my-pi/omptype";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { Api, AuthStorage, Model } from "@oh-my-pi/pi-ai";
-import { modelKind } from "@oh-my-pi/pi-catalog/types";
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { formatAge, formatCount, prompt, truncate } from "@oh-my-pi/pi-utils";
-import { ModelRegistry } from "../../config/model-registry";
+import type { ModelRegistry } from "../../config/model-registry";
 import { settings } from "../../config/settings";
 import type { CustomTool, CustomToolContext } from "../../extensibility/custom-tools/types";
-import webSearchSystemPrompt from "../../prompts/system/web-search.md" with { type: "text" };
 import webSearchDescription from "../../prompts/tools/web-search.md" with { type: "text" };
 import { discoverAuthStorage } from "../../sdk";
 import type { ToolSession } from "../../tools";
@@ -21,7 +14,6 @@ import { throwIfAborted } from "../../tools/tool-errors";
 import {
 	formatSearchProviderFailure,
 	formatSearchProviderFailures,
-	getGroundedSearchProvider,
 	getSearchProvider,
 	isRegisteredSearchEngine,
 	type SearchProvider,
@@ -29,6 +21,7 @@ import {
 } from "./provider";
 import { applyQueryConstraints, parseSearchQuery } from "./query";
 import {
+	getSearchProviderLabel,
 	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
 	MAX_WEB_SEARCH_TIMEOUT_SECONDS,
 	SearchProviderError,
@@ -38,15 +31,13 @@ import {
 	type SearchResultDetails,
 } from "./types";
 
-import { cfgProvidersAntigravityEndpoint, cfgProvidersWebSearchTimeoutSeconds } from "../../session/settings";
+import { cfgProvidersWebSearchTimeoutSeconds } from "../../session/settings";
 
 /** Web search tool parameters schema */
 export const webSearchSchema = type({
 	query: "string",
 	recency: "'day' | 'week' | 'month' | 'year'?",
 	limit: "number?",
-	max_tokens: "number?",
-	temperature: "number?",
 	num_search_results: "number?",
 });
 
@@ -128,8 +119,7 @@ function failureDetails(failures: readonly SearchProviderFailure[]): SearchFailu
 
 /**
  * Note naming the candidates that failed before `served` answered. Without it a
- * fallback engine's results read as the preferred provider's, e.g. web pages
- * standing in for an X search.
+ * fallback engine's results read as the preferred provider's.
  */
 function fallbackNotes(failed: readonly SearchFailureDetail[], served: { label: string }): string[] {
 	if (failed.length === 0) return [];
@@ -147,43 +137,24 @@ function hasRenderableSearchContent(response: SearchResponse): boolean {
 
 interface ExecuteSearchOptions {
 	authStorage: AuthStorage;
-	modelRegistry?: ModelRegistry;
 	sessionId?: string;
-	/** The only chat model hosted search may use. */
-	sessionModel?: Model<Api>;
 	signal?: AbortSignal;
 }
 
 interface SearchCandidate {
-	model: Model<Api>;
-	engine?: SearchEngineId;
+	engine: SearchEngineId;
 	explicit: boolean;
 }
 
-/** Search transports never select another chat model or honor retired model-role settings. */
-function searchCandidates(
-	params: SearchQueryParams,
-	modelRegistry: ModelRegistry,
-	sessionModel: Model<Api> | undefined,
-): SearchCandidate[] {
+/** Search uses independent HTTP endpoints; model configuration does not select an engine. */
+function searchCandidates(params: SearchQueryParams): SearchCandidate[] {
 	if (Object.hasOwn(params, "model")) throw new Error("Web search model overrides are not supported.");
 	if (params.engine && !isRegisteredSearchEngine(params.engine)) throw new Error("Unknown HTTP search engine.");
-	// Preserve the existing automatic retrieval routes; paid opt-in engines remain explicit.
+	// Preserve the automatic retrieval routes; other paid engines require explicit selection.
 	const engines: readonly SearchEngineId[] = params.engine
 		? [params.engine]
 		: ["parallel", "exa", "firecrawl", "searxng", "startpage", "duckduckgo", "ecosia", "google", "mojeek", "public"];
-	const candidates: SearchCandidate[] = [];
-	if (!params.engine && sessionModel?.webSearch && modelKind(sessionModel) === "chat") {
-		candidates.push({ model: sessionModel, explicit: false });
-	}
-	for (const engine of engines) {
-		const model = modelRegistry.find("web", engine);
-		if (!model) continue;
-		const candidate = { model, engine, explicit: params.engine !== undefined };
-		if (!params.engine && engine === "parallel") candidates.unshift(candidate);
-		else candidates.push(candidate);
-	}
-	return candidates;
+	return engines.map(engine => ({ engine, explicit: params.engine !== undefined }));
 }
 
 /** Execute web search */
@@ -193,17 +164,8 @@ async function executeSearch(
 	options: ExecuteSearchOptions,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: SearchResultDetails }> {
 	const { authStorage, sessionId, signal } = options;
-	const modelRegistry = options.modelRegistry ?? new ModelRegistry(authStorage, undefined, { settings });
-	const candidates = searchCandidates(params, modelRegistry, options.sessionModel);
+	const candidates = searchCandidates(params);
 	const parsedQuery = parseSearchQuery(params.query);
-
-	// Invariant across candidates; resolve once before trying the search transports.
-	let antigravityEndpointMode: "auto" | "production" | "sandbox" | undefined;
-	try {
-		antigravityEndpointMode = cfgProvidersAntigravityEndpoint.get(settings);
-	} catch {
-		antigravityEndpointMode = undefined;
-	}
 
 	let timeoutMs = DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS * 1_000;
 	try {
@@ -222,21 +184,14 @@ async function executeSearch(
 	for (const candidate of candidates) {
 		throwIfAborted(signal);
 		let provider: SearchProvider | undefined;
-		const candidateMeta = { id: candidate.model.id, label: candidate.model.name };
+		const candidateMeta = { id: candidate.engine, label: getSearchProviderLabel(candidate.engine) };
 		lastProvider = candidateMeta;
 		try {
-			const model = candidate.model;
-			if (candidate.engine) {
-				provider = await getSearchProvider(candidate.engine);
-			} else if (model.webSearch) {
-				provider = await getGroundedSearchProvider(model.webSearch);
-			} else {
-				throw new Error(`Current model ${model.provider}/${model.id} does not support web search`);
-			}
+			provider = await getSearchProvider(candidate.engine);
 			lastProvider = provider;
 			const available = candidate.explicit
-				? await provider.isExplicitlyAvailable(authStorage, model)
-				: await provider.isAvailable(authStorage, model);
+				? await provider.isExplicitlyAvailable(authStorage)
+				: await provider.isAvailable(authStorage);
 			if (!available && !candidate.explicit) continue;
 			if (!available && candidate.explicit) {
 				throw new SearchProviderError(
@@ -252,29 +207,13 @@ async function executeSearch(
 				parsedQuery,
 				limit: params.limit,
 				recency: params.recency,
-				systemPrompt: webSearchSystemPrompt,
-				maxOutputTokens: params.max_tokens,
 				numSearchResults: params.num_search_results,
-				temperature: params.temperature,
 				signal,
 				timeoutMs,
 				authStorage,
-				model,
-				modelRegistry,
 				explicit: candidate.explicit,
 				sessionId,
-				antigravityEndpointMode,
 			});
-
-			// A host that silently drops the hosted search tool still answers from the
-			// model's weights; without sources that answer is not a search result.
-			if (!candidate.engine && response.sources.length === 0 && !response.citations?.length) {
-				throw new SearchProviderError(
-					provider.id,
-					`${provider.label} returned no sources; ${model.provider}/${model.id} may not support hosted web search.`,
-					204,
-				);
-			}
 
 			// Lenient constraint pass over whatever the provider returned: enforce
 			// site:/inurl:/intitle:/filetype:/date directives the provider could
@@ -316,7 +255,7 @@ async function executeSearch(
 	}
 
 	if (availableProviderCount === 0 && failures.length === 0) {
-		const message = "No HTTP search engine or supported current-model search is available.";
+		const message = "No HTTP search engine is available.";
 		return {
 			content: [{ type: "text" as const, text: `Error: ${message}` }],
 			details: { response: { provider: "none", sources: [] }, error: message },
@@ -344,8 +283,7 @@ async function executeSearch(
  * Execute a web search query for CLI/testing workflows.
  *
  * `authStorage` may be omitted; in that case we discover one via the standard
- * factory (`discoverAuthStorage`), which honours `OMP_AUTH_BROKER_URL` and
- * otherwise opens the local SQLite credential store.
+ * factory (`discoverAuthStorage`), which opens the local credential store.
  */
 export async function runSearchQuery(
 	params: SearchQueryParams,
@@ -353,7 +291,6 @@ export async function runSearchQuery(
 		authStorage?: AuthStorage;
 		modelRegistry?: ModelRegistry;
 		sessionId?: string;
-		sessionModel?: Model<Api>;
 		signal?: AbortSignal;
 	} = {},
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: SearchResultDetails }> {
@@ -365,9 +302,7 @@ export async function runSearchQuery(
 	try {
 		return await executeSearch("cli-web-search", params, {
 			authStorage,
-			modelRegistry: options.modelRegistry,
 			sessionId: options.sessionId,
-			sessionModel: options.sessionModel,
 			signal: options.signal,
 		});
 	} finally {
@@ -375,10 +310,10 @@ export async function runSearchQuery(
 	}
 }
 
-/** Description without the X operators, for hosts without a model registry. */
+/** Shared description for built-in and embedded search tools. */
 const plainDescription = prompt.render(webSearchDescription);
 
-/** Search HTTP engines or the current model's hosted search capability. */
+/** Search independent HTTP engines. */
 export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchResultDetails> {
 	readonly name = "web_search";
 	readonly approval = "read" as const;
@@ -394,10 +329,7 @@ export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchRe
 		this.#session = session;
 	}
 
-	/** X-only operators are advertised only when this session itself uses an X-capable model. */
-	get description(): string {
-		return prompt.render(webSearchDescription, { xSearch: this.#session.getActiveModel?.()?.webSearch === "xai" });
-	}
+	readonly description = plainDescription;
 
 	async execute(
 		_toolCallId: string,
@@ -406,13 +338,10 @@ export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchRe
 		_onUpdate?: AgentToolUpdateCallback<SearchResultDetails>,
 		_context?: AgentToolContext,
 	): Promise<AgentToolResult<SearchResultDetails>> {
-		const authStorage = this.#session.authStorage ?? (await discoverAuthStorage());
-		const sessionId = this.#session.getSessionId?.() ?? undefined;
-		return executeSearch(_toolCallId, params, {
-			authStorage,
+		return runSearchQuery(params, {
+			authStorage: this.#session.authStorage,
 			modelRegistry: this.#session.modelRegistry,
-			sessionId,
-			sessionModel: this.#session.getActiveModel?.(),
+			sessionId: this.#session.getSessionId?.() ?? undefined,
 			signal,
 		});
 	}
@@ -427,19 +356,15 @@ export const webSearchCustomTool: CustomTool<typeof webSearchSchema, SearchResul
 
 	approval: "read",
 	async execute(
-		toolCallId: string,
+		_toolCallId: string,
 		params: SearchToolParams,
 		_onUpdate,
 		ctx: CustomToolContext,
 		signal?: AbortSignal,
 	) {
-		const authStorage = ctx.modelRegistry?.authStorage ?? (await discoverAuthStorage());
-		const sessionId = ctx.sessionManager.getSessionId();
-		return executeSearch(toolCallId, params, {
-			authStorage,
+		return runSearchQuery(params, {
 			modelRegistry: ctx.modelRegistry,
-			sessionId,
-			sessionModel: ctx.model,
+			sessionId: ctx.sessionManager.getSessionId(),
 			signal,
 		});
 	},

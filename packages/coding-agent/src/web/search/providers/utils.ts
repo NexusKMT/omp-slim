@@ -33,9 +33,6 @@ export function findCredential(
 				if (credential.type === "api_key" && credential.key.trim().length > 0) {
 					return credential.key;
 				}
-				if (credential.type === "oauth" && credential.access.trim().length > 0) {
-					return credential.access;
-				}
 			}
 		}
 	} catch {
@@ -45,13 +42,7 @@ export function findCredential(
 	return null;
 }
 
-/**
- * The 60-second default tolerates legitimate slow LLM-mediated responses
- * (Anthropic web_search_20250305, Perplexity, Gemini, Codex) while bounding
- * Windows stalls when Bun's `AbortSignal` fails to propagate. Callers may
- * configure a longer provider deadline, capped at five minutes by the
- * dispatcher; pure search APIs typically settle far faster.
- */
+/** Default deadline for HTTP search requests; the dispatcher caps overrides at five minutes. */
 export const SEARCH_HARD_TIMEOUT_MS = DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS * 1_000;
 
 /**

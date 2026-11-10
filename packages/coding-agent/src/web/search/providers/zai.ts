@@ -417,7 +417,7 @@ export async function searchZai(params: ZaiSearchParams): Promise<SearchResponse
 
 	const rawResult = await withAuth(keyOrResolver, key => callZaiSearch(key, params), {
 		signal: params.signal,
-		missingKeyMessage: "Z.AI credentials not found. Set ZAI_API_KEY or login with 'omp /login zai'.",
+		missingKeyMessage: "Z.AI credentials not found. Set ZAI_API_KEY or configure the stored zai API key.",
 	});
 	const payload = parseSearchPayload(rawResult);
 	let sources = toSources(payload.results);

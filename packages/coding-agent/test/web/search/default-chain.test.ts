@@ -1,120 +1,82 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import type { Api, AuthStorage, Model } from "@oh-my-pi/pi-ai";
+import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search";
 import * as provider from "@oh-my-pi/pi-coding-agent/web/search/provider";
-import { SearchProvider } from "@oh-my-pi/pi-coding-agent/web/search/provider";
-import type { SearchParams } from "@oh-my-pi/pi-coding-agent/web/search/providers/base";
-import type { SearchResponse } from "@oh-my-pi/pi-coding-agent/web/search/types";
+import type { SearchProviderId } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
 
-/** Records each attempted `provider/id` and fails so the chain keeps walking. */
-class RecordingProvider extends SearchProvider {
-	readonly id = "openai";
-	readonly label = "Recording";
-
-	constructor(private readonly attempted: string[]) {
-		super();
-	}
-
-	isAvailable(): boolean {
-		return true;
-	}
-
-	async search(params: SearchParams): Promise<SearchResponse> {
-		this.attempted.push(`${params.model.provider}/${params.model.id}`);
-		throw new Error("try next");
-	}
-}
-
-describe("single-model web search", () => {
+describe("HTTP web search selection", () => {
 	let authStorage: AuthStorage;
-	let modelRegistry: ModelRegistry;
 	let attempted: string[];
 
 	beforeEach(() => {
-		const settings = Settings.isolated({});
 		authStorage = createInMemoryAuthStorage();
-		// Paid credentials the chain must never spend unless the session already runs on them.
-		for (const paid of [
-			"openai",
-			"openai-codex",
-			"anthropic",
-			"xai",
-			"perplexity",
-			"tavily",
-			"kagi",
-			"brave",
-			"zai",
-		]) {
-			authStorage.keys.setRuntime(paid, `test-${paid}-key`);
-		}
-		modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
 		attempted = [];
-		const recorder = new RecordingProvider(attempted);
-		vi.spyOn(provider, "getGroundedSearchProvider").mockResolvedValue(recorder);
-		vi.spyOn(provider, "getSearchProvider").mockResolvedValue(recorder);
+		vi.spyOn(provider, "getSearchProvider").mockImplementation(async id => ({
+			id: id as SearchProviderId,
+			label: id,
+			isAvailable: () => true,
+			isExplicitlyAvailable: () => true,
+			search: async params => {
+				expect(params).not.toHaveProperty("model");
+				expect(params).not.toHaveProperty("modelRegistry");
+				attempted.push(id);
+				throw new Error("try next");
+			},
+		}));
 	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
-		resetSettingsForTest();
 		authStorage.close();
 	});
 
-	function sessionModel(provider: string, id: string): Model<Api> {
-		const model = modelRegistry.find(provider, id);
-		if (!model) throw new Error(`Missing catalog model: ${provider}/${id}`);
-		return model;
-	}
-
-	it.each([
-		["anthropic", "claude-sonnet-4-5"],
-		["openai", "gpt-6.1-sol"],
-		["openai-codex", "gpt-6.1-sol"],
-	])("uses only the current %s chat model even when a cheaper search model exists", async (host, id) => {
-		const current = sessionModel(host, id);
-		await runSearchQuery({ query: "anything" }, { authStorage, modelRegistry, sessionModel: current });
-		expect(attempted.filter(selector => !selector.startsWith("web/"))).toEqual([`${host}/${id}`]);
-		expect(attempted).not.toContain("web/perplexity");
-		expect(attempted).not.toContain("web/hosted");
+	it("walks the HTTP engine chain without any configured chat models", async () => {
+		await runSearchQuery({ query: "anything" }, { authStorage });
+		expect(attempted).toEqual([
+			"parallel",
+			"exa",
+			"firecrawl",
+			"searxng",
+			"startpage",
+			"duckduckgo",
+			"ecosia",
+			"google",
+			"mojeek",
+			"public",
+		]);
 	});
 
-	it("never injects xAI for an X query when the current model is not xAI", async () => {
-		await runSearchQuery({ query: "tern from:jack site:x.com" }, { authStorage, modelRegistry });
-		expect(attempted.length).toBeGreaterThan(0);
-		expect(attempted.every(selector => selector.startsWith("web/"))).toBe(true);
-		expect(attempted).not.toContain("web/perplexity");
+	it("uses a supplied registry only as the credential source", async () => {
+		const modelRegistry = new ModelRegistry(authStorage, "/nonexistent/omp-web-search-models.yml", {
+			settings: Settings.isolated({}),
+		});
+		const find = vi.spyOn(modelRegistry, "find").mockImplementation(() => {
+			throw new Error("HTTP search must not select a chat model");
+		});
+		await runSearchQuery({ query: "anything", engine: "brave" }, { modelRegistry });
+		expect(attempted).toEqual(["brave"]);
+		expect(find).not.toHaveBeenCalled();
 	});
 
-	it("uses ordinary HTTP search when the current model has no hosted search", async () => {
-		const current = { ...sessionModel("openai", "gpt-6.1-sol"), webSearch: undefined };
-		await runSearchQuery({ query: "anything" }, { authStorage, modelRegistry, sessionModel: current });
-		expect(attempted.every(selector => selector.startsWith("web/"))).toBe(true);
+	it("keeps an explicit engine for X site queries", async () => {
+		await runSearchQuery({ query: "tern site:x.com", engine: "brave" }, { authStorage });
+		expect(attempted).toEqual(["brave"]);
 	});
 
-	it("rejects retired model overrides rather than running another model", async () => {
+	it("rejects retired model overrides before attempting a search", async () => {
 		await expect(
-			runSearchQuery({ query: "anything", model: "xai/grok-4.3" } as never, { authStorage, modelRegistry }),
+			runSearchQuery({ query: "anything", model: "other/model" } as never, { authStorage }),
 		).rejects.toThrow("model overrides are not supported");
 		expect(attempted).toEqual([]);
 	});
 
-	it("rejects a grounded answer without sources and retains the failure with HTTP fallback", async () => {
-		vi.spyOn(provider, "getGroundedSearchProvider").mockResolvedValue({
-			id: "anthropic",
-			label: "Anthropic",
-			isAvailable: () => true,
-			isExplicitlyAvailable: () => true,
-			search: async () => ({ provider: "anthropic", answer: "from weights", sources: [] }),
-		});
-		const result = await runSearchQuery(
-			{ query: "anything" },
-			{ authStorage, modelRegistry, sessionModel: sessionModel("anthropic", "claude-sonnet-4-5") },
+	it("rejects removed hosted-grounding identifiers", async () => {
+		await expect(runSearchQuery({ query: "anything", engine: "openai" } as never, { authStorage })).rejects.toThrow(
+			"Unknown HTTP search engine",
 		);
-		expect(result.details.failures).toContainEqual(
-			expect.objectContaining({ reason: expect.stringContaining("returned no sources") }),
-		);
+		expect(attempted).toEqual([]);
 	});
 });

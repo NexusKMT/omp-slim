@@ -1,7 +1,6 @@
 import type { BodyInit } from "bun";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import {
@@ -268,15 +267,11 @@ describe("searchExa", () => {
 	});
 	it("maps site:/before: directives to native Exa params with an operator-free query", async () => {
 		await withInMemoryAuthStorage(authStorage => {
-			const modelRegistry = new ModelRegistry(authStorage);
-			const model = modelRegistry.find("web", "exa");
-			if (!model) throw new Error("Expected bundled web/exa model");
 			return new ExaProvider().search({
 				query: "vector db benchmarks site:qdrant.tech before:2025-01-01",
-				systemPrompt: "",
+
 				authStorage,
-				model,
-				modelRegistry,
+
 				fetch: mockFetch(makeMockExaResponse()),
 			});
 		});
@@ -289,15 +284,11 @@ describe("searchExa", () => {
 
 	it("sends directive-free queries byte-identical with no domain/date params", async () => {
 		await withInMemoryAuthStorage(authStorage => {
-			const modelRegistry = new ModelRegistry(authStorage);
-			const model = modelRegistry.find("web", "exa");
-			if (!model) throw new Error("Expected bundled web/exa model");
 			return new ExaProvider().search({
 				query: "plain natural language question",
-				systemPrompt: "",
+
 				authStorage,
-				model,
-				modelRegistry,
+
 				fetch: mockFetch(makeMockExaResponse()),
 			});
 		});

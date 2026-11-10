@@ -1,17 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { searchTavily } from "@oh-my-pi/pi-coding-agent/web/search/providers/tavily";
 import type { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 
 const authStorage = createInMemoryAuthStorage();
-const { modelRegistry, model: tavilyModel } = (() => {
-	const modelRegistry = new ModelRegistry(authStorage);
-	const model = modelRegistry.find("web", "tavily");
-	if (!model) throw new Error("Expected bundled web/tavily model");
-	return { modelRegistry, model };
-})();
 
 afterAll(() => authStorage.close());
 
@@ -33,9 +26,6 @@ describe("Tavily web search provider", () => {
 		return {
 			query,
 			authStorage,
-			model: tavilyModel,
-			modelRegistry,
-			systemPrompt: "Tavily test prompt",
 		} as const;
 	}
 

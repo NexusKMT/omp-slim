@@ -71,7 +71,6 @@ import { handleSpotify } from "./spotify";
 import { handleStackOverflow } from "./stackoverflow";
 import { handleTerraform } from "./terraform";
 import { handleTldr } from "./tldr";
-import { handleTwitter } from "./twitter";
 import type { SpecialHandler } from "./types";
 import { handleVimeo } from "./vimeo";
 import { handleVscodeMarketplace } from "./vscode-marketplace";
@@ -94,7 +93,6 @@ export const specialHandlers: SpecialHandler[] = [
 	// Games
 	handleRawg,
 	// Social/News
-	handleTwitter,
 	handleBluesky,
 	handleMastodon,
 	handleLemmy,

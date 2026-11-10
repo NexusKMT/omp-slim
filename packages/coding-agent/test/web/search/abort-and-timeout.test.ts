@@ -8,17 +8,15 @@
  * provider's outbound fetch (via the shared `withHardTimeout` helper), and
  * an abort re-throw in the provider-fallback loop so the session sees a real
  * cancellation instead of "all providers failed". The provider wiring is
- * spot-checked on anthropic (LLM-backed) and brave (pure search API); the
+ * spot-checked on Brave; the
  * helper itself is exercised directly.
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { runSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search";
 import * as provider from "@oh-my-pi/pi-coding-agent/web/search/provider";
-import { searchAnthropic } from "@oh-my-pi/pi-coding-agent/web/search/providers/anthropic";
 import type { SearchParams } from "@oh-my-pi/pi-coding-agent/web/search/providers/base";
 import { searchBrave } from "@oh-my-pi/pi-coding-agent/web/search/providers/brave";
 import { withHardTimeout } from "@oh-my-pi/pi-coding-agent/web/search/providers/utils";
@@ -30,13 +28,10 @@ import { cfgProvidersWebSearchTimeoutSeconds } from "@oh-my-pi/pi-coding-agent/s
 
 const openAuthStorages: AuthStorage[] = [];
 
-function createSearchContext(modelProvider: string, modelId: string) {
+function createSearchContext() {
 	const authStorage = createInMemoryAuthStorage();
 	openAuthStorages.push(authStorage);
-	const modelRegistry = new ModelRegistry(authStorage);
-	const model = modelRegistry.find(modelProvider, modelId);
-	if (!model) throw new Error(`Missing catalog model: ${modelProvider}/${modelId}`);
-	return { authStorage, modelRegistry, model };
+	return { authStorage };
 }
 
 describe("withHardTimeout", () => {
@@ -62,66 +57,14 @@ describe("withHardTimeout", () => {
 	});
 });
 
-describe("Anthropic provider hard-timeout wiring", () => {
-	afterEach(() => {
-		vi.restoreAllMocks();
-		for (const authStorage of openAuthStorages.splice(0)) authStorage.close();
-	});
-
-	it("passes a composed signal to fetch even when the caller did not supply one", async () => {
-		const context = createSearchContext("anthropic", "claude-sonnet-4-5");
-		context.authStorage.keys.setRuntime("anthropic", "sk-test");
-
-		let capturedSignal: AbortSignal | null | undefined;
-		const fetchMock: FetchImpl = async (_input, init) => {
-			capturedSignal = init?.signal;
-			return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: {} }), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			});
-		};
-
-		await searchAnthropic({ query: "ping", systemPrompt: "", fetch: fetchMock, ...context });
-
-		// Without the hard-timeout wrapper, init.signal would be undefined when
-		// the caller didn't supply one — leaving fetch with no cancellation at
-		// all on a stalled WinHTTP connection.
-		expect(capturedSignal).toBeInstanceOf(AbortSignal);
-		expect(capturedSignal?.aborted).toBe(false);
-	});
-
-	it("composes the caller signal with the hard timeout instead of forwarding it directly", async () => {
-		const context = createSearchContext("anthropic", "claude-sonnet-4-5");
-		context.authStorage.keys.setRuntime("anthropic", "sk-test");
-
-		const ac = new AbortController();
-		let capturedSignal: AbortSignal | null | undefined;
-		const fetchMock: FetchImpl = async (_input, init) => {
-			capturedSignal = init?.signal;
-			return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: {} }), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			});
-		};
-
-		await searchAnthropic({ query: "ping", systemPrompt: "", signal: ac.signal, fetch: fetchMock, ...context });
-
-		// The signal handed to fetch must be a *composed* one, not the raw
-		// caller signal: that's what guarantees the hard timeout fires even
-		// when Bun fails to honour the caller's abort.
-		expect(capturedSignal).toBeInstanceOf(AbortSignal);
-		expect(capturedSignal).not.toBe(ac.signal);
-	});
-});
-
 describe("Brave provider hard-timeout wiring", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		for (const authStorage of openAuthStorages.splice(0)) authStorage.close();
 	});
 
-	it("hands fetch a composed signal even with no caller signal — confirms the rollout reaches non-Anthropic providers", async () => {
-		const context = createSearchContext("web", "brave");
+	it("hands fetch a composed signal even with no caller signal", async () => {
+		const context = createSearchContext();
 		context.authStorage.keys.setRuntime("brave", "brave-test-key");
 		let capturedSignal: AbortSignal | null | undefined;
 		const fetchMock: FetchImpl = async (_input, init) => {
@@ -166,20 +109,23 @@ describe("executeSearch abort propagation", () => {
 	async function configureProviderChain(providers: provider.SearchProvider[]) {
 		const primary = providers[0];
 		if (!primary) throw new Error("Provider chain must contain a primary candidate");
-		const config = await Settings.init({ inMemory: true });
-		const authStorage = createInMemoryAuthStorage();
-		openAuthStorages.push(authStorage);
-		const modelRegistry = new ModelRegistry(authStorage, undefined, { settings: config });
-		const find = modelRegistry.find.bind(modelRegistry);
-		vi.spyOn(modelRegistry, "find").mockImplementation((host, id) =>
-			host === "web" && providers.some(candidate => candidate.id === id) ? find(host, id) : undefined,
-		);
+		await Settings.init({ inMemory: true });
+		const { authStorage } = createSearchContext();
 		const getProvider = vi.spyOn(provider, "getSearchProvider").mockImplementation(async id => {
 			const match = providers.find(candidate => candidate.id === id);
-			if (!match) throw new Error(`Unexpected provider: ${id}`);
-			return match;
+			return (
+				match ?? {
+					id: id as SearchProviderId,
+					label: id,
+					isAvailable: () => false,
+					isExplicitlyAvailable: () => false,
+					search: async () => {
+						throw new Error(`Unavailable provider: ${id}`);
+					},
+				}
+			);
 		});
-		return { authStorage, modelRegistry, getProvider };
+		return { authStorage, getProvider };
 	}
 
 	it("passes the configured provider-request timeout into the search adapter", async () => {
@@ -321,8 +267,8 @@ describe("executeSearch abort propagation", () => {
 		const result = await runSearchQuery({ query: "anything" }, context);
 
 		expect(result.details.response.provider).toBe("exa");
-		expect(context.getProvider).toHaveBeenCalledTimes(1);
-		expect(context.getProvider).toHaveBeenCalledWith("exa");
+		expect(context.getProvider).toHaveBeenCalledTimes(2);
+		expect(context.getProvider).toHaveBeenLastCalledWith("exa");
 		expect(fallbackSearch).not.toHaveBeenCalled();
 		expect(result.content[0]?.text).not.toContain("Note: answered by");
 		expect(Object.hasOwn(result.details, "failures")).toBe(false);
@@ -343,7 +289,7 @@ describe("executeSearch abort propagation", () => {
 		const result = await runSearchQuery({ query: "anything" }, context);
 
 		expect(result.details.response.provider).toBe("firecrawl");
-		expect(context.getProvider).toHaveBeenCalledTimes(2);
+		expect(context.getProvider).toHaveBeenCalledTimes(3);
 		expect(fallbackSearch).toHaveBeenCalledTimes(1);
 		expect(result.content[0]?.text).toStartWith(
 			"Note: answered by firecrawl after exa failed (Preferred provider failed)\n",

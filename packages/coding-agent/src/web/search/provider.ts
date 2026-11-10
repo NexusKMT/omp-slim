@@ -1,16 +1,10 @@
-import type { WebSearchGrounding } from "@oh-my-pi/pi-catalog/types";
 import type { SearchProvider } from "./providers/base";
 import { getSearchProviderLabel, type SearchEngineId, SearchProviderError } from "./types";
 
 export type { SearchParams } from "./providers/base";
 export { SearchProvider } from "./providers/base";
 
-/**
- * Search-first-use boundary: every provider module (and its HTTP/MCP/browser
- * dependencies) loads only when a search actually selects it, so the ~40
- * provider modules stay out of interactive startup. Instances are memoized
- * per id, matching the previous singleton-per-provider behavior.
- */
+/** Search adapters load on first use; their instances are memoized by engine id. */
 type ProviderLoader = () => Promise<SearchProvider>;
 
 type ProviderRegistry<TId extends string> = { [Id in TId]: ProviderLoader };
@@ -39,15 +33,6 @@ const PROVIDER_LOADERS: ProviderRegistry<SearchEngineId> = {
 	public: () => import("./providers/public").then(m => new m.PublicWebProvider()),
 };
 
-const GROUNDED_PROVIDER_LOADERS: ProviderRegistry<WebSearchGrounding> = {
-	gemini: () => import("./providers/gemini").then(m => new m.GeminiProvider()),
-	anthropic: () => import("./providers/anthropic").then(m => new m.AnthropicProvider()),
-	codex: () => import("./providers/codex").then(m => new m.CodexProvider()),
-	xai: () => import("./providers/xai").then(m => new m.XAIProvider()),
-	openrouter: () => import("./providers/openrouter").then(m => new m.OpenRouterGroundedProvider()),
-	openai: () => import("./providers/openai").then(m => new m.OpenAIProvider()),
-};
-
 const providerInstances = new Map<string, Promise<SearchProvider>>();
 
 function loadProvider(id: string, loader: ProviderLoader): Promise<SearchProvider> {
@@ -71,9 +56,6 @@ export interface SearchProviderFailure {
 /** Format one provider failure for the user-facing fallback summary. */
 export function formatSearchProviderFailure(error: unknown, provider: { id: string; label: string }): string {
 	if (error instanceof SearchProviderError) {
-		if (error.provider === "anthropic" && error.status === 404) {
-			return "Anthropic web search returned 404 (model or endpoint not found).";
-		}
 		if (error.status === 401 || error.status === 403) {
 			if (error.provider === "zai") {
 				return error.message;
@@ -91,18 +73,13 @@ export function formatSearchProviderFailures(failures: readonly SearchProviderFa
 	return failures.map(f => `${f.provider.id}: ${formatSearchProviderFailure(f.error, f.provider)}`).join("; ");
 }
 
-/** Whether `id` names a pure search engine exposed as a `web/<id>` catalog model. */
+/** Whether `id` names a supported HTTP search engine. */
 export function isRegisteredSearchEngine(id: string): id is SearchEngineId {
 	return Object.hasOwn(PROVIDER_LOADERS, id);
 }
 
-/** Resolve a pure search engine after validating its catalog model id. */
+/** Resolve an HTTP search adapter after validating its engine id. */
 export function getSearchProvider(id: string): Promise<SearchProvider> {
 	if (!isRegisteredSearchEngine(id)) return Promise.reject(new Error(`Unknown search provider: ${id}`));
 	return loadProvider(id, PROVIDER_LOADERS[id]);
-}
-
-/** Resolve the grounding backend declared by a selected chat model. */
-export function getGroundedSearchProvider(grounding: WebSearchGrounding): Promise<SearchProvider> {
-	return loadProvider(`grounded:${grounding}`, GROUNDED_PROVIDER_LOADERS[grounding]);
 }

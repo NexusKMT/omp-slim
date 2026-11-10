@@ -1,22 +1,13 @@
 import { afterAll, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { searchTinyFish } from "@oh-my-pi/pi-coding-agent/web/search/providers/tinyfish";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 
 const TEST_KEY = "test-tinyfish-key";
 
-function createTinyFishFixture(authStorage: AuthStorage) {
-	const modelRegistry = new ModelRegistry(authStorage);
-	const model = modelRegistry.find("web", "tinyfish");
-	if (!model) throw new Error("Expected bundled web/tinyfish model");
-	return { model, modelRegistry };
-}
-
 const providerAuthStorage = createInMemoryAuthStorage();
 providerAuthStorage.keys.setRuntime("tinyfish", TEST_KEY);
-const providerFixture = createTinyFishFixture(providerAuthStorage);
 const providerResolverSpy = vi.spyOn(providerAuthStorage.keys, "resolver").mockImplementation((provider, options) => {
 	expect(provider).toBe("tinyfish");
 	expect(options?.sessionId).toBe("session-tinyfish-test");
@@ -24,7 +15,6 @@ const providerResolverSpy = vi.spyOn(providerAuthStorage.keys, "resolver").mockI
 });
 
 const missingAuthStorage = createInMemoryAuthStorage();
-const missingFixture = createTinyFishFixture(missingAuthStorage);
 const missingResolverSpy = vi.spyOn(missingAuthStorage.keys, "resolver").mockImplementation((provider, options) => {
 	expect(provider).toBe("tinyfish");
 	expect(options?.sessionId).toBe("session-tinyfish-test");
@@ -39,17 +29,10 @@ afterAll(() => {
 });
 
 function makeParams(query: string, authStorage: AuthStorage = providerAuthStorage) {
-	const fixture =
-		authStorage === providerAuthStorage
-			? providerFixture
-			: authStorage === missingAuthStorage
-				? missingFixture
-				: createTinyFishFixture(authStorage);
 	return {
 		query,
 		authStorage,
-		...fixture,
-		systemPrompt: "TinyFish test prompt",
+
 		sessionId: "session-tinyfish-test",
 	} as const;
 }

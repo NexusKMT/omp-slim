@@ -1,6 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, setSystemTime, vi } from "bun:test";
 import { AuthStorage, type FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resolveConfigValue } from "@oh-my-pi/pi-coding-agent/config/resolve-config-value";
 import type { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { searchWithParallel } from "@oh-my-pi/pi-coding-agent/web/parallel";
@@ -9,9 +8,6 @@ import { USER_AGENT } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 
 const anonymousAuthStorage = createInMemoryAuthStorage();
-const modelRegistry = new ModelRegistry(anonymousAuthStorage);
-const parallelModel = modelRegistry.find("web", "parallel");
-if (!parallelModel) throw new Error("Expected bundled web/parallel model");
 
 afterAll(() => {
 	anonymousAuthStorage.close();
@@ -23,10 +19,8 @@ describe("Parallel web search", () => {
 			{
 				id: 1,
 				credential: {
-					type: "oauth",
-					access: "test-access-token",
-					expires: Date.now() + 600_000,
-					accountId: "acct-test",
+					type: "api_key",
+					key: "test-access-token",
 				},
 			},
 		],
@@ -40,9 +34,6 @@ describe("Parallel web search", () => {
 			get: async () => process.env.PARALLEL_API_KEY ?? undefined,
 			source: () => (process.env.PARALLEL_API_KEY ? { kind: "env", concrete: true } : undefined),
 			resolver: (_provider: string) => async () => process.env.PARALLEL_API_KEY ?? undefined,
-		},
-		limits: {
-			rotate: async () => ({ switched: false }),
 		},
 	} as unknown as AuthStorage;
 
@@ -293,10 +284,9 @@ describe("Parallel web search", () => {
 
 		await new ParallelProvider().search({
 			query: "session-aware search",
-			systemPrompt: "",
+
 			authStorage: anonymousAuthStorage,
-			model: parallelModel,
-			modelRegistry,
+
 			explicit: true,
 			sessionId: "stable-session-123",
 			fetch: fetchMock,

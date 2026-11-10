@@ -1,19 +1,8 @@
-import type { Api, AuthStorage, FetchImpl, Model } from "@oh-my-pi/pi-ai";
-import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
-import type { ModelRegistry } from "../../../config/model-registry";
+import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
 import type { StructuredQuery } from "../query";
 import type { SearchProviderId, SearchResponse } from "../types";
 
-/**
- * Shared web search parameters passed to providers.
- *
- * `authStorage` is the **only** credential source providers may consult.
- * Opening a sibling SQLite handle or calling provider-direct refresh helpers
- * (e.g. `refreshOpenAICodexToken`, `refreshGoogleCloudToken`) is prohibited:
- * it races the broker's per-credential refresh and POSTs the broker sentinel
- * (`REMOTE_REFRESH_SENTINEL`) to the upstream token endpoint, which classifies
- * as `invalid_grant` and disables the row.
- */
+/** Shared parameters for independent HTTP search endpoints. */
 export interface SearchParams {
 	query: string;
 	/**
@@ -46,40 +35,17 @@ export interface SearchParams {
 	 * any other request parameter.
 	 */
 	recency?: "day" | "week" | "month" | "year";
-	systemPrompt: string;
 	signal?: AbortSignal;
 	/** Hard timeout for this provider's search transport, in milliseconds. */
 	timeoutMs?: number;
 	fetch?: FetchImpl;
-	maxOutputTokens?: number;
 	numSearchResults?: number;
-	temperature?: number;
-	googleSearch?: Record<string, unknown>;
-	codeExecution?: Record<string, unknown>;
-	urlContext?: Record<string, unknown>;
-	/**
-	 * The single source of truth for credentials. Providers MUST consult this
-	 * handle exclusively (`getApiKey` for bearer-style auth, `getOAuthAccess`
-	 * when identity metadata is required). Do not open `AgentStorage` or any
-	 * `AuthCredentialStore` directly — that bypasses the broker pipeline and
-	 * the per-credential single-flight refresh.
-	 */
+	/** API keys are resolved through the caller's credential store. */
 	authStorage: AuthStorage;
-	/** Selected catalog model that chose this engine or grounding backend. */
-	model: Model<Api>;
-	/** Thinking selector resolved from the model-role candidate. */
-	thinkingLevel?: ConfiguredThinkingLevel;
-	/** Provider/model transport settings used by native search endpoints. */
-	modelRegistry: ModelRegistry;
-	/** Whether the selected model came from an explicit role-chain entry. */
+	/** Whether the caller explicitly selected this HTTP engine. */
 	explicit?: boolean;
-	/**
-	 * Optional session id used as the round-robin / sticky key when selecting
-	 * among multiple credentials for the same provider. Pass through from the
-	 * caller's agent session when available; otherwise omit.
-	 */
+	/** Optional session id for the search service's request metadata. */
 	sessionId?: string;
-	antigravityEndpointMode?: "auto" | "production" | "sandbox";
 }
 
 /** Base class for web search providers. */
@@ -92,23 +58,21 @@ export abstract class SearchProvider {
 	 * service a request right now. Implementations consult the passed
 	 * {@link AuthStorage} — never a sibling store.
 	 *
-	 * Drives role-chain admission: providers that return `false` are skipped.
-	 * Explicit selection uses {@link isExplicitlyAvailable} instead. The model
-	 * is supplied for providers whose authentication depends on its transport.
+	 * Controls automatic admission: providers that return `false` are skipped.
+	 * Explicit selection uses {@link isExplicitlyAvailable} instead.
 	 */
-	abstract isAvailable(authStorage: AuthStorage, model?: Model<Api>): Promise<boolean> | boolean;
+	abstract isAvailable(authStorage: AuthStorage): Promise<boolean> | boolean;
 
 	/**
 	 * Returns `true` when this provider should run when the user explicitly
 	 * selects it, even if {@link isAvailable} would reject it for the auto
 	 * chain. Providers with an unauthenticated fallback kept out of the auto
-	 * chain (e.g. Perplexity's anonymous ask endpoint) override this so explicit
-	 * selection still routes through it rather than failing.
+	 * chain override this so explicit selection still routes through it.
 	 *
 	 * Defaults to mirroring {@link isAvailable}.
 	 */
-	isExplicitlyAvailable(authStorage: AuthStorage, model?: Model<Api>): Promise<boolean> | boolean {
-		return this.isAvailable(authStorage, model);
+	isExplicitlyAvailable(authStorage: AuthStorage): Promise<boolean> | boolean {
+		return this.isAvailable(authStorage);
 	}
 
 	/**

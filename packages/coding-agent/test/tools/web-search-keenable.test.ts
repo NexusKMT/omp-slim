@@ -1,6 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { getSearchProvider } from "@oh-my-pi/pi-coding-agent/web/search/provider";
 import { searchKeenable } from "@oh-my-pi/pi-coding-agent/web/search/providers/keenable";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
@@ -28,10 +27,7 @@ afterAll(() => {
 });
 
 function makeParams(query: string, authStorage: AuthStorage) {
-	const modelRegistry = new ModelRegistry(authStorage);
-	const model = modelRegistry.find("web", "keenable");
-	if (!model) throw new Error("Expected bundled web/keenable model");
-	return { query, authStorage, model, modelRegistry, systemPrompt: "Keenable test prompt" } as const;
+	return { query, authStorage } as const;
 }
 
 interface Captured {

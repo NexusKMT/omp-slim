@@ -393,7 +393,7 @@ async function callExaMcpSearch(params: ExaSearchParams): Promise<ExaSearchRespo
 export async function searchExa(params: ExaSearchParams): Promise<SearchResponse> {
 	// AuthStorage-backed key takes precedence (existing behavior); probe it once
 	// so the env-key and keyless-MCP fallbacks below stay intact, then drive the
-	// authStorage path through the central force-refresh/rotate retry policy.
+	// authStorage path through the central key resolver.
 	const storedKey = params.authStorage
 		? await params.authStorage.keys.get("exa", params.sessionId, { signal: params.signal })
 		: undefined;
