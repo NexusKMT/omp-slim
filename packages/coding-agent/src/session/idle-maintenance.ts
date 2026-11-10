@@ -10,7 +10,6 @@
  * be announced.
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { isPromptCachePersistent } from "@oh-my-pi/pi-catalog/compat/prompt-cache-persistent";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import { combine } from "../config/registry";
 import { cfgRecap } from "../modes/settings";
@@ -18,7 +17,6 @@ import idleRecapPrompt from "../prompts/system/recap-user.md" with { type: "text
 import { nextActionableTask } from "../tools/todo";
 import type { AgentSession } from "./agent-session";
 import type { AgentSessionEvent } from "./agent-session-events";
-import { getCacheWarmingDelayMs } from "./cache-warmer";
 import {
 	cfgCompactionIdleEnabled,
 	cfgCompactionIdleThresholdTokens,
@@ -53,7 +51,6 @@ export type IdleMaintenanceSession = SessionSettleHost &
 		| "getGoalModeState"
 		| "getTodoPhases"
 		| "runIdleCompaction"
-		| "promptCacheEntry"
 		| "runEphemeralTurn"
 	>;
 
@@ -61,11 +58,6 @@ const RECAP_MIN_SECONDS = 1;
 const RECAP_MAX_SECONDS = 3600;
 const COMPACTION_MIN_SECONDS = 60;
 const COMPACTION_MAX_SECONDS = 3600;
-/**
- * Idle compaction fires this long before the warmer's own refresh point, so the
- * compaction request (not a one-token warm replay) reads the still-warm prefix.
- */
-const COMPACTION_CACHE_LEAD_MS = 5_000;
 
 /** Only the idle-compaction inputs: unrelated `compaction.*` changes must not restart a deadline. */
 const cfgIdleCompaction = combine({
@@ -241,12 +233,7 @@ export class IdleMaintenance {
 	#armCompaction(): void {
 		if (!this.#pending?.compaction) return;
 		const idle = cfgIdleCompaction.get(this.#session.settings);
-		if (
-			idle.enabled &&
-			idle.thresholdTokens > 0 &&
-			!this.#promptCachePersistent() &&
-			this.#contextTokens() >= idle.thresholdTokens
-		) {
+		if (idle.enabled && idle.thresholdTokens > 0 && this.#contextTokens() >= idle.thresholdTokens) {
 			this.#compactionTimer = setTimeout(
 				() => this.#onCompactionDue(),
 				this.#compactionDelayMs(idle.timeoutSeconds),
@@ -266,14 +253,6 @@ export class IdleMaintenance {
 	 * re-time short entries to dodge it.
 	 */
 	#compactionDelayMs(timeoutSeconds: number): number {
-		const entry = this.#session.promptCacheEntry;
-		const now = Date.now();
-		if (entry?.tier === "long" && entry.touchedAt + entry.ttlMs > now) {
-			const refreshDelayMs = getCacheWarmingDelayMs(entry.ttlMs);
-			if (refreshDelayMs !== undefined) {
-				return Math.max(0, entry.touchedAt + refreshDelayMs - COMPACTION_CACHE_LEAD_MS - now);
-			}
-		}
 		return Math.max(COMPACTION_MIN_SECONDS, Math.min(COMPACTION_MAX_SECONDS, timeoutSeconds)) * 1000;
 	}
 
@@ -289,26 +268,11 @@ export class IdleMaintenance {
 		}
 		// Pruning may have run since arming and dropped usage back below the threshold.
 		const idle = cfgIdleCompaction.get(this.#session.settings);
-		if (
-			!idle.enabled ||
-			idle.thresholdTokens <= 0 ||
-			this.#promptCachePersistent() ||
-			this.#contextTokens() < idle.thresholdTokens
-		) {
+		if (!idle.enabled || idle.thresholdTokens <= 0 || this.#contextTokens() < idle.thresholdTokens) {
 			return;
 		}
 		this.#complete(pending, "compaction");
 		this.#session.runIdleCompaction().catch(error => logger.warn("Idle compaction failed", { error: String(error) }));
-	}
-
-	/**
-	 * A never-expiring prompt cache (logged-in Codex) stays warm across any idle
-	 * gap, so idle compaction would only discard it and force a cold prefix on
-	 * the next turn. Threshold compaction still runs.
-	 */
-	#promptCachePersistent(): boolean {
-		const model = this.#session.model;
-		return model !== undefined && isPromptCachePersistent(model);
 	}
 
 	#onRecapDue(): void {

@@ -1,5 +1,5 @@
 import { type Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model, ProviderSessionState, ServiceTier, ServiceTierByFamily, ServiceTierFamily } from "@oh-my-pi/pi-ai";
+import type { Model, ServiceTier, ServiceTierByFamily, ServiceTierFamily } from "@oh-my-pi/pi-ai";
 import {
 	Effort,
 	realizesPriorityServiceTier,
@@ -7,11 +7,6 @@ import {
 	serviceTierFamily,
 	shouldSendServiceTier,
 } from "@oh-my-pi/pi-ai";
-import {
-	clearAnthropicFastModeFallback,
-	isAnthropicFastModeFallbackDisabled,
-} from "@oh-my-pi/pi-ai/providers/anthropic-state";
-import { isFireworksFastModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
@@ -45,13 +40,7 @@ import { formatRoleModelValue, resolveRoleModelFull } from "./role-models";
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 
-import {
-	cfgDefaultThinkingLevel,
-	cfgProvidersFireworksTier,
-	cfgTierAnthropic,
-	cfgTierGoogle,
-	cfgTierOpenai,
-} from "./settings";
+import { cfgDefaultThinkingLevel, cfgTierOpenai } from "./settings";
 import { cfgDisabledProviders, cfgEnabledModels } from "../config/model-settings";
 
 /** Whether `model` takes effort per message, so changing it mid-conversation keeps the cached prefix. */
@@ -92,11 +81,6 @@ export function serviceTierForModel(
 	model: Model,
 	tiers: ServiceTierByFamily,
 ): ServiceTier | undefined {
-	if (model.provider === "fireworks") {
-		return cfgProvidersFireworksTier.get(settings) === "priority" && !isFireworksFastModelId(model.id)
-			? "priority"
-			: undefined;
-	}
 	return resolveModelServiceTier(tiers, model);
 }
 
@@ -106,7 +90,6 @@ export interface ModelControlsHost {
 	settings: Settings;
 	modelRegistry: ModelRegistry;
 	sessionManager: SessionManager;
-	providerSessionState: Map<string, ProviderSessionState>;
 	model(): Model | undefined;
 	sessionId(): string;
 	promptGeneration(): number;
@@ -272,9 +255,7 @@ export class ModelControls {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
 
-		const targetModel = await this.#host.modelRegistry.refreshSelectedModelMetadata(model);
-
-		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(targetModel));
+		const targetModel = this.#host.modelRegistry.fitContextWindow(model, this.#host.settings);
 		await this.#host.setModelWithProviderSessionReset(targetModel);
 		this.#host.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`, role);
 		if (options?.persist) {
@@ -316,9 +297,7 @@ export class ModelControls {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
 
-		const targetModel = await this.#host.modelRegistry.refreshSelectedModelMetadata(model);
-
-		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(targetModel));
+		const targetModel = this.#host.modelRegistry.fitContextWindow(model, this.#host.settings);
 		await this.#host.setModelWithProviderSessionReset(targetModel, selection);
 		this.#host.sessionManager.appendModelChange(
 			`${targetModel.provider}/${targetModel.id}`,
@@ -385,7 +364,6 @@ export class ModelControls {
 		const next = scopedModels[nextIndex];
 
 		// Apply model
-		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(next.model));
 		await this.#host.setModelWithProviderSessionReset(next.model);
 		this.#host.sessionManager.appendModelChange(`${next.model.provider}/${next.model.id}`);
 		this.#host.settings.getStorage()?.recordModelUsage(`${next.model.provider}/${next.model.id}`);
@@ -414,8 +392,6 @@ export class ModelControls {
 		if (!apiKey) {
 			throw new Error(`No API key for ${nextModel.provider}/${nextModel.id}`);
 		}
-
-		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(nextModel));
 		await this.#host.setModelWithProviderSessionReset(nextModel);
 		this.#host.sessionManager.appendModelChange(`${nextModel.provider}/${nextModel.id}`);
 		this.#host.settings.getStorage()?.recordModelUsage(`${nextModel.provider}/${nextModel.id}`);
@@ -644,9 +620,7 @@ export class ModelControls {
 	isFastModeActive(): boolean {
 		const model = this.#model;
 		if (!model || !this.#realizesFastTier(model, this.#serviceTierByFamily)) return false;
-		return (
-			model.provider !== "anthropic" || !isAnthropicFastModeFallbackDisabled(this.#host.providerSessionState, model)
-		);
+		return true;
 	}
 
 	/**
@@ -656,17 +630,13 @@ export class ModelControls {
 	 */
 	isFastModeConfiguredFor(model: Model): boolean {
 		const settings = this.#host.settings;
-		const tiers = buildServiceTierByFamily(
-			cfgTierOpenai.get(settings),
-			cfgTierAnthropic.get(settings),
-			cfgTierGoogle.get(settings),
-		);
+		const tiers = buildServiceTierByFamily(cfgTierOpenai.get(settings));
 		return this.#realizesFastTier(model, tiers);
 	}
 
 	#realizesFastTier(model: Model, tiers: ServiceTierByFamily): boolean {
 		const tier = serviceTierForModel(this.#host.settings, model, tiers);
-		return tier === "ultrafast" ? shouldSendServiceTier(tier, model) : realizesPriorityServiceTier(tier, model);
+		return tier === "ultrafast" ? shouldSendServiceTier(tier) : realizesPriorityServiceTier(tier);
 	}
 
 	/**
@@ -698,9 +668,7 @@ export class ModelControls {
 	#applyServiceTierByFamily(next: ServiceTierByFamily): void {
 		// Re-arming Anthropic priority clears the per-session fast-mode auto-disable
 		// so the next request actually carries `speed: "fast"` again.
-		if (next.anthropic === "priority" && this.#serviceTierByFamily.anthropic !== "priority") {
-			clearAnthropicFastModeFallback(this.#host.providerSessionState);
-		}
+
 		this.#serviceTierByFamily = next;
 		this.#host.sessionManager.appendServiceTierChange(this.serviceTierEntry());
 	}
@@ -729,7 +697,7 @@ export class ModelControls {
 			if (tier === "priority" || tier === "ultrafast") this.setServiceTierFamily(family, undefined);
 			return true;
 		}
-		if (family === "openai" && !shouldSendServiceTier("priority", model)) {
+		if (family === "openai" && !shouldSendServiceTier("priority")) {
 			this.#host.emitNotice(
 				"info",
 				"The current model does not offer the priority (Fast) service tier.",
@@ -737,9 +705,7 @@ export class ModelControls {
 			);
 			return false;
 		}
-		if (family === "anthropic" && this.#serviceTierByFamily.anthropic === "priority") {
-			clearAnthropicFastModeFallback(this.#host.providerSessionState);
-		}
+
 		this.setServiceTierFamily(family, "priority");
 		return true;
 	}
@@ -756,7 +722,7 @@ export class ModelControls {
 			if (this.#serviceTierByFamily.openai === "ultrafast") this.setServiceTierFamily("openai", undefined);
 			return true;
 		}
-		if (!model || serviceTierFamily(model) !== "openai" || !shouldSendServiceTier("ultrafast", model)) {
+		if (!model || serviceTierFamily(model) !== "openai" || !shouldSendServiceTier("ultrafast")) {
 			this.#host.emitNotice("info", "The current model does not offer the Ultrafast service tier.", "priority");
 			return false;
 		}
