@@ -9775,7 +9775,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	}
 
 	/** @returns true iff `agent.prompt` was actually invoked. An abort or session-generation
-	 *  change racing the usage-aware preflight can return before dispatch — callers that treat
+	 *  change racing turn preparation can return before dispatch — callers that treat
 	 *  this as proof of agent work (e.g. suppressing a local prompt_result because agent events
 	 *  are expected) must not assume dispatch happened just because this was awaited. */
 	async #promptAgentInitiatedMessage(
@@ -9793,7 +9793,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			}
 			this.#recovery.setAcceptTerminalEmptyStop(acceptTerminalEmptyStop);
 			const prepared = await this.#prepareUserAuthoredWake(message, setupAbort.signal, sessionGeneration);
-			if (!prepared) return false;
+			// Agent-attributed wakes skip user preparation, but its await still admits an abort.
+			if (!prepared || setupAbort.signal.aborted) return false;
 			const run = this.agent.prompt(prepared.length > 1 ? prepared : message);
 			// No dispatch-live wake here: an agent-initiated turn has no
 			// client promptTurn, so steers parked on a dispatching CLIENT

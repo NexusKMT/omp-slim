@@ -879,69 +879,70 @@ describe("AgentSession aside delivery", () => {
 		expect(persisted).toBe(true);
 	});
 
-	it("sendCustomMessage(deliverAs: 'aside'/'nextTurn') reports false when the agent-initiated turn never dispatches", async () => {
-		// Regression: #promptAgentInitiatedMessage used to return void, so its callers hard-coded
-		// `return true` unconditionally. If an abort races the usage-aware preflight (which
-		// registers an AbortController and captures the prompt generation before its first real
-		// await), the helper returns before ever calling agent.prompt — callers that treat the
-		// boolean as proof of dispatched agent work (e.g. RPC's hasAgentMessageTask gate) must see
-		// `false`, not a stale `true` that leaves them waiting on events that never arrive.
-		const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
-		const modelRegistry = new ModelRegistry(authStorage);
-		const contexts: Context[] = [];
+	it.each(["aside", "nextTurn"] as const)(
+		"sendCustomMessage(deliverAs: '%s') reports false when aborted before agent.prompt",
+		async deliverAs => {
+			// A background wake may be aborted while its setup owns the session but before
+			// the agent loop starts. Its callers use false to avoid waiting for agent events
+			// that will never arrive; neither the loop nor the provider may start afterward.
+			const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+			const modelRegistry = new ModelRegistry(authStorage);
+			const contexts: Context[] = [];
 
-		const agent = new Agent({
-			getApiKey: () => "test-key",
-			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
-			convertToLlm,
-			streamFn: (_model, context) => {
-				contexts.push(context);
-				const message: AssistantMessage = {
-					role: "assistant",
-					content: [{ type: "text", text: "Acknowledged." }],
-					api: model.api,
-					provider: model.provider,
-					model: model.id,
-					usage: zeroUsage,
-					stopReason: "stop",
-					timestamp: Date.now(),
-				};
-				const stream = new AssistantMessageEventStream();
-				queueMicrotask(() => {
-					stream.push({ type: "start", partial: message });
-					stream.push({ type: "done", reason: "stop", message });
-				});
-				return stream;
-			},
-		});
-		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(tempDir.path()),
-			settings,
-			modelRegistry,
-			toolRegistry: new Map(),
-		});
+			const agent = new Agent({
+				getApiKey: () => "test-key",
+				initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+				convertToLlm,
+				streamFn: (_model, context) => {
+					contexts.push(context);
+					const message: AssistantMessage = {
+						role: "assistant",
+						content: [{ type: "text", text: "Acknowledged." }],
+						api: model.api,
+						provider: model.provider,
+						model: model.id,
+						usage: zeroUsage,
+						stopReason: "stop",
+						timestamp: Date.now(),
+					};
+					const stream = new AssistantMessageEventStream();
+					queueMicrotask(() => {
+						stream.push({ type: "start", partial: message });
+						stream.push({ type: "done", reason: "stop", message });
+					});
+					return stream;
+				},
+			});
+			const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+			settings.setModelRole("default", `${model.provider}/${model.id}`);
+			session = new AgentSession({
+				agent,
+				sessionManager: SessionManager.inMemory(tempDir.path()),
+				settings,
+				modelRegistry,
+				toolRegistry: new Map(),
+			});
 
-		const dispatchedPromise = session.sendCustomMessage(
-			{ customType: "ext-aside", content: "PREFLIGHT_RACE_ASIDE", display: false, attribution: "agent" },
-			{ deliverAs: "aside" },
-		);
-		// #beginInFlight() (which flips isStreaming) and the usage-aware preflight's abort
-		// controller registration + generation capture run synchronously together with no
-		// intervening await; poll until the first observable side effect (isStreaming) confirms
-		// that stretch has run, then abort — landing inside the preflight's own first await,
-		// exactly the race the fix covers.
-		while (!session.isStreaming) {
-			await Promise.resolve();
-		}
-		await session.abort({ reason: "internal" });
+			const promptSpy = spyOn(agent, "prompt");
+			const dispatchedPromise = session.sendCustomMessage(
+				{ customType: "ext-aside", content: "CANCELLED_WAKE", display: false, attribution: "agent" },
+				{ deliverAs, triggerTurn: true },
+			);
+			// In-flight setup sets session.isStreaming before its first await. Confirm
+			// the agent loop has not started before aborting in that preparation window.
+			while (!session.isStreaming) {
+				await Promise.resolve();
+			}
+			expect(agent.state.isStreaming).toBe(false);
+			expect(promptSpy).not.toHaveBeenCalled();
+			await session.abort({ reason: "internal" });
 
-		expect(await dispatchedPromise).toBe(false);
-		await session.waitForIdle();
-		expect(contexts).toHaveLength(0);
-	});
+			expect(await dispatchedPromise).toBe(false);
+			await session.waitForIdle();
+			expect(promptSpy).not.toHaveBeenCalled();
+			expect(contexts).toHaveLength(0);
+		},
+	);
 
 	it("marks parent IRC but not peer IRC across idle wake and plan-mode persistence", async () => {
 		const manager = SessionManager.inMemory();
@@ -1715,7 +1716,7 @@ describe("AgentSession aside delivery", () => {
 		expect(JSON.stringify(mock.calls[1]!.context.messages)).toContain("build ok");
 	});
 
-	it("a mid-stream steer mention rides the hidden session-agent notice like an idle prompt (#14093)", async () => {
+	it("a mid-stream caret selector is delivered literally without creating a model agent", async () => {
 		const modelRegistry = new ModelRegistry(authStorage);
 		const started = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();
@@ -1750,12 +1751,10 @@ describe("AgentSession aside delivery", () => {
 		const run = session.prompt("go");
 		await started.promise;
 
-		// Mid-stream steer with a `^` mention: the alias must ride the same
-		// hidden session-agent notice an idle prompt produces, so the model
-		// learns the m<N> pseudonym when the steer is delivered.
 		spyOn(modelRegistry, "getAvailable").mockReturnValue([mock.model]);
 		await session.prompt("delegate to ^openai/gpt-test", { streamingBehavior: "steer" });
-		expect(session.getSessionAgents().map(agentDef => agentDef.name)).toContain("m1");
+		expect(session.getSessionAgents()).toEqual([]);
+		expect(session.modelMentions).toEqual([]);
 
 		release.resolve();
 		await run;
@@ -1765,13 +1764,10 @@ describe("AgentSession aside delivery", () => {
 			(message): message is CustomMessage =>
 				message.role === "custom" && message.customType === "session-agent-notice",
 		);
-		expect(notice).toBeDefined();
-		expect(notice && typeof notice.content === "string" ? notice.content : "").toContain("m1");
-		// One-at-a-time steering must deliver the notice and the steer it announces
-		// in the same model call; split, the model answers the notice alone first.
+		expect(notice).toBeUndefined();
 		expect(mock.calls.length).toBe(2);
 		const steerCall = JSON.stringify(mock.calls[1]!.context.messages);
-		expect(steerCall).toContain("Now available:");
-		expect(steerCall).toContain("delegate to");
+		expect(steerCall).toContain("delegate to ^openai/gpt-test");
+		expect(agent.state.model).toBe(mock.model);
 	});
 });
