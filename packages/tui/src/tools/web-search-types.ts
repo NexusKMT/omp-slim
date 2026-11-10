@@ -5,19 +5,11 @@
  */
 
 /**
- * Display label for every search implementation: `web/*` engines and the
- * chat-model groundings. Keys are the ids providers report in
+ * Display labels for HTTP search engines. Keys are the ids providers report in
  * {@link SearchResponse.provider} and search errors.
  */
 export const SEARCH_PROVIDER_LABELS = {
 	parallel: "Parallel",
-	perplexity: "Perplexity",
-	gemini: "Gemini",
-	anthropic: "Anthropic",
-	codex: "OpenAI Codex",
-	openai: "OpenAI API",
-	xai: "xAI",
-	openrouter: "OpenRouter",
 	zai: "Z.AI",
 	exa: "Exa",
 	tinyfish: "TinyFish",
@@ -44,8 +36,8 @@ export const SEARCH_PROVIDER_LABELS = {
 export type SearchProviderId = keyof typeof SEARCH_PROVIDER_LABELS;
 
 /** Label for a provider id; ids from older transcripts fall back to the raw id. */
-export function getSearchProviderLabel(id: SearchProviderId): string {
-	return SEARCH_PROVIDER_LABELS[id] ?? id;
+export function getSearchProviderLabel(id: string): string {
+	return Object.hasOwn(SEARCH_PROVIDER_LABELS, id) ? SEARCH_PROVIDER_LABELS[id as SearchProviderId] : id;
 }
 
 /** Source returned by search (all providers) */
@@ -71,22 +63,22 @@ export interface SearchCitation {
 export interface SearchUsage {
 	inputTokens?: number;
 	outputTokens?: number;
-	/** Anthropic: number of web search requests made */
+	/** Number of web search requests made */
 	searchRequests?: number;
-	/** Perplexity: combined token count */
+	/** Combined token count */
 	totalTokens?: number;
 }
 
 /** Unified response across providers */
 export interface SearchResponse {
-	provider: SearchProviderId | "none";
+	provider: SearchProviderId | (string & {});
 	/** Synthesized answer text (LLM-mediated providers) */
 	answer?: string;
 	/** Search result sources */
 	sources: SearchSource[];
 	/** Text citations with context */
 	citations?: SearchCitation[];
-	/** Intermediate search queries (anthropic) */
+	/** Intermediate search queries */
 	searchQueries?: string[];
 	/** Follow-up question suggestions (provider-dependent) */
 	relatedQuestions?: string[];
@@ -96,6 +88,6 @@ export interface SearchResponse {
 	model?: string;
 	/** Request ID for debugging */
 	requestId?: string;
-	/** Authentication mode used by the provider (e.g. oauth, api-key) */
+	/** Authentication mode recorded by the provider */
 	authMode?: string;
 }

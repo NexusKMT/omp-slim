@@ -21,31 +21,26 @@ import {
 	type CompactionResult,
 	type CompactionSummaryMessage,
 	calculateContextTokens,
-	canReplayRemoteCompactionFrom,
 	collectShakeRegions,
 	COMPACTION_RECOVERY_BAND,
 	compact,
 	compactionContextTokens,
-	countResponsesHistoryTokens,
 	createCompactionSummaryMessage,
 	DEFAULT_SHAKE_CONFIG,
 	type CompactionSettings as EngineCompactionSettings,
 	effectiveReserveTokens,
 	invalidateMessageCache,
 	isTranscriptUsageAnchor,
-	NativeCompactionError,
 	prepareCompaction,
 	promptBudgetTokens,
 	RESCUE_SHAKE_CONFIG,
-	remoteCompactionPolicyModel,
-	remotePreserveReusable,
 	resolveBudgetReserveTokens,
 	resolveThresholdTokens,
 	type ShakeConfig,
 	type ShakeRegion,
 	type SummaryOptions,
 	shouldCompact,
-	shouldUseProviderNativeCompaction,
+	stripLegacyCompactionData,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import {
 	DEFAULT_PRUNE_CONFIG,
@@ -55,20 +50,9 @@ import {
 	readToolSupersedeKey,
 } from "@oh-my-pi/pi-agent-core/compaction/pruning";
 import type { ProtectedToolMatcher } from "@oh-my-pi/pi-agent-core/compaction/tool-protection";
-import type {
-	AssistantMessage,
-	CodexCompactionContext,
-	Context,
-	Message,
-	Model,
-	ProviderSessionState,
-} from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Message, Model } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { replaysNativeResponsesHistory } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import { openAIResponsesReplaysNativeHistory } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
-import { resolvePromptCacheLookback } from "@oh-my-pi/pi-catalog/compat/prompt-cache-lookback";
-import type { CatalogPolicyInputs } from "@oh-my-pi/pi-catalog/types";
 import { isRecord, logger, prompt, Snowflake, toError } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { writeArtifact } from "./artifacts";
@@ -81,13 +65,11 @@ import { customMessageEntryMessage } from "@oh-my-pi/pi-tui/chat/transcript-entr
 import { computeNonMessageTokens, type NonMessageTokenSource } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import { createPlanReadMatcher } from "../plan-mode/plan-protection";
 import { isCompleteReadResult } from "../tools/read-supersede";
-import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ContextUsageBreakdown, HandoffResult, SessionHandoffOptions } from "./agent-session-types";
 import { findCompactMode } from "./compact-modes";
 import {
 	type CompactionMethod,
-	canUseRemoteCompaction,
 	DEFAULT_COMPACTION_METHOD_ORDER,
 	resolveCompactionMethodOrder,
 	resolveMethodSettings,
@@ -97,17 +79,11 @@ import {
 	assistantTurnDelivered,
 	convertToLlm,
 	invalidateConvertToLlmArrayCache,
-	isUserAuthoredMessage,
 	stripImagesFromMessage,
 } from "./messages";
 import { isTerminalTextAssistantAnswer } from "./queued-messages";
 import type { BuildSessionContextOptions, SessionContext } from "./session-context";
-import {
-	buildSessionContext,
-	getLatestCompactionEntry,
-	getOpenAiRemoteCompactionPayload,
-	getReadableCompactionEntry,
-} from "./session-context";
+import { buildSessionContext, getLatestCompactionEntry } from "./session-context";
 import type { CompactionEntry, SessionEntry } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 import type { ShakeMode, ShakeResult } from "./shake-types";
@@ -124,7 +100,7 @@ import {
 	cfgSnapcompactShape,
 } from "./context-settings";
 import { resolveModelCompactionSettings } from "./model-compaction-threshold";
-import { cfgProvidersOpenaiCodexDaybreak, cfgRetry } from "./settings";
+import { cfgRetry } from "./settings";
 
 export type CompactionCheckResult = Readonly<{
 	continuationScheduled: boolean;
@@ -160,20 +136,6 @@ function hasConfiguredCompactionMethod(settings: CompactionSettings): boolean {
 	return resolveCompactionMethodOrder(settings.methodOrder).length > 0;
 }
 
-/** Kept Claude thinking (Anthropic Messages or Bedrock Converse) requires compaction by the same live model. */
-function canUseLiveProviderNativeCompaction(
-	candidate: Model,
-	liveModel: Model,
-	settings: EngineCompactionSettings,
-): boolean {
-	const requiresSameModel = candidate.api === "anthropic-messages" || candidate.api === "bedrock-converse-stream";
-	return (
-		candidate.provider === liveModel.provider &&
-		(!requiresSameModel || (candidate.api === liveModel.api && candidate.id === liveModel.id)) &&
-		shouldUseProviderNativeCompaction(candidate, settings)
-	);
-}
-
 /**
  * Whether `candidate` is actually selectable for `reason` on `model` — mirrors the
  * per-candidate availability check in {@link SessionMaintenance.runAutoCompaction}'s
@@ -192,13 +154,11 @@ function isCompactionMethodUsable(
 	settings: CompactionSettings,
 	excludeMedia = false,
 ): boolean {
-	return candidate === "remote"
-		? canUseRemoteCompaction(model, resolveMethodSettings(settings, candidate))
-		: candidate === "snapcompact"
-			? !excludeMedia && model !== undefined && sendsImageInputOnWire(model)
-			: candidate === "handoff"
-				? reason !== "overflow"
-				: true;
+	return candidate === "snapcompact"
+		? !excludeMedia && model !== undefined && sendsImageInputOnWire(model)
+		: candidate === "handoff"
+			? reason !== "overflow"
+			: true;
 }
 
 /**
@@ -285,21 +245,6 @@ function usageOverflowDeadEndNotice(reportedInputTokens: number, contextWindow: 
 	);
 }
 
-/** Creates one provider-scoped compaction lifecycle descriptor. */
-export function createCodexCompactionContext(options: {
-	trigger: CodexCompactionContext["trigger"];
-	reason: CodexCompactionContext["reason"];
-	phase: CodexCompactionContext["phase"];
-}): CodexCompactionContext {
-	return {
-		operationId: crypto.randomUUID(),
-		trigger: options.trigger,
-		reason: options.reason,
-		phase: options.phase,
-		strategy: "memento",
-	};
-}
-
 /**
  * Per-turn prune cache window. A tool result whose all-message suffix exceeds
  * this is in the warm, already-sent prompt-cache prefix: re-writing it costs the
@@ -309,12 +254,7 @@ export function createCodexCompactionContext(options: {
  */
 const PRUNE_CACHE_WARM_SUFFIX_TOKENS = 8_000;
 
-/**
- * Idle gap after which the supersede pass may flush the whole sent region (the
- * provider cache is cold, so re-writing it is free). MUST exceed the maximum
- * Anthropic prompt-cache TTL — "long" retention (the OAuth default) is 1h — or a
- * still-warm prefix is busted by the flush. 90 min leaves margin over the 1h TTL.
- */
+/** Idle gap after which stale sent results become eligible for pruning. */
 const PRUNE_IDLE_FLUSH_MS = 90 * 60_000;
 
 /** Share of the room under the compaction trigger a snapcompact archive may fill; the rest is left for new turns. */
@@ -334,9 +274,8 @@ const PAYLOAD_REJECTION_OCCUPANCY_CEILING = 0.9;
 /** A speculation-produced compaction result, ready to commit at threshold. */
 interface ArmedSpeculation {
 	result: CompactionResult;
-	action: "context-full" | "handoff" | "remote";
+	action: "context-full" | "handoff";
 	method: CompactionMethod;
-	codexCompaction?: CodexCompactionContext;
 	/** Last branch entry covered by the speculated summary's source snapshot. */
 	snapshotLeafId: string;
 	/** Context size when speculation started; drives refresh-on-growth. */
@@ -351,7 +290,6 @@ type CompactionProjectionArgs = {
 	preserveData?: Record<string, unknown>;
 	details?: unknown;
 	method?: CompactionMethod;
-	providerReplayThroughEntryId?: string;
 };
 
 /** One background speculative-compaction run and (once resolved) its armed result. */
@@ -367,7 +305,9 @@ function mergeLlmCompactionPreserveData(
 	resultPreserveData: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
 	const preserveData = { ...hookPreserveData, ...resultPreserveData };
-	return snapcompact.stripPreservedArchive(Object.keys(preserveData).length > 0 ? preserveData : undefined);
+	return snapcompact.stripPreservedArchive(
+		stripLegacyCompactionData(Object.keys(preserveData).length > 0 ? preserveData : undefined),
+	);
 }
 
 /** Wrap a handoff document as a compaction summary: append the cumulative file-operations tag and derive entry details. */
@@ -404,14 +344,9 @@ export interface SessionMaintenanceHost {
 	modelRegistry: ModelRegistry;
 	extensionRunner: ExtensionRunner | undefined;
 	sideStreamFn: StreamFn;
-	providerSessionState: Map<string, ProviderSessionState>;
-	/** Codex-only request preference from the live session setting. */
-	preferWebsockets(model: Model): boolean | undefined;
 	model(): Model | undefined;
 	thinkingLevel(): ThinkingLevel | undefined;
 	isDisposed(): boolean;
-	/** Model fallback is disabled (a per-call `model` subagent): no context promotion. */
-	modelFallbackDisabled?(): boolean;
 	isStreaming(): boolean;
 	isGeneratingHandoff(): boolean;
 	promptGeneration(): number;
@@ -459,19 +394,10 @@ export interface SessionMaintenanceHost {
 	/** Preserve the eval runtime snapshot at the history rewrite boundary for replay. */
 	persistEvalStateContext(): void;
 	convertToLlmForSideRequest(messages: AgentMessage[]): Message[];
-	/** The provider context a live turn sends for `summarized` + `retained`, cut to the `summarized` range, as `model` reads it. */
-	buildLiveProviderContext(
-		summarized: AgentMessage[],
-		retained: AgentMessage[],
-		signal: AbortSignal | undefined,
-		model: Model,
-	): Promise<Context>;
 	obfuscateTextForProvider(text: string | undefined): string | undefined;
 	obfuscatePreparationForProvider(preparation: CompactionPreparation): CompactionPreparation;
 	/** Gated cache identity: the agent's explicit key, else the Task family key when `model` opts in. */
-	getPromptCacheKeyForModel(model: CatalogPolicyInputs | undefined): string | undefined;
-	closeCodexProviderSessionsForHistoryRewrite(): void;
-	resetCodexProviderAfterCompaction(compaction: CodexCompactionContext): void;
+	getPromptCacheKeyForModel(model: Model | undefined): string | undefined;
 	resetPlanReference(): void;
 	syncTodoPhasesFromBranch(): void;
 	/** `compacted` marks a rewrite that replaced history with a summary. */
@@ -504,11 +430,6 @@ export interface SessionMaintenanceHost {
 		options: { autoContinue: boolean; triggerContextTokens?: number; excludeMediaMethods?: boolean },
 	): Promise<CompactionCheckResult>;
 	parseRetryAfterMsFromError(errorMessage: string): number | undefined;
-	setModelTemporary(
-		model: Model,
-		thinkingLevel?: ConfiguredThinkingLevel,
-		options?: { ephemeral?: boolean },
-	): Promise<void>;
 	abort(options?: {
 		goalReason?: "interrupted" | "internal";
 		reason?: string;
@@ -519,7 +440,7 @@ export interface SessionMaintenanceHost {
 
 /** How a model reads a snapcompact archive: whether it may read reasoning and whether it takes images. */
 interface ArchiveReader {
-	/** Its classifier refuses quoted reasoning ({@link snapcompact.readerIncludesThinking}). */
+	/** Archives omit private reasoning. */
 	excludeThinking: boolean;
 	/** It takes no image input, so frames would reach it as placeholders. */
 	withoutFrames: boolean;
@@ -528,7 +449,7 @@ interface ArchiveReader {
 }
 
 function archiveReader(model: Model): ArchiveReader {
-	const excludeThinking = !snapcompact.readerIncludesThinking(model);
+	const excludeThinking = true;
 	const withoutFrames = !sendsImageInputOnWire(model);
 	return { excludeThinking, withoutFrames, key: `${excludeThinking}:${withoutFrames}` };
 }
@@ -572,14 +493,6 @@ export class SessionMaintenance {
 	#fixedContextDeadEndNotifiedSessionId: string | undefined;
 	/** In-flight or armed background speculative compaction, if any. */
 	#speculation: SpeculationRun | undefined;
-	/**
-	 * {@link #nativeSpeculationKey} of the session and model whose native
-	 * speculative compaction failed for a reason a retry would hit again (an
-	 * exhausted output budget, a tool call, a refusal). Until a compaction
-	 * commits, speculation does not re-send the request and the threshold pass
-	 * falls back to the next method instead.
-	 */
-	#failedNativeSpeculation: string | undefined;
 	#skipPostTurnMaintenanceAssistantTimestamp: number | undefined;
 	/**
 	 * Consecutive no-progress `response.incomplete` (length-stop) recoveries in
@@ -633,9 +546,8 @@ export class SessionMaintenance {
 	/** Frame budget, blob resolution and reading model that rebuild a branch's context as the live session sends it. */
 	get #contextBuildOptions(): BuildSessionContextOptions {
 		return {
-			maxFrameDataBytes: snapcompact.frameDataBytesBudget(this.#model),
+			maxFrameDataBytes: snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET,
 			resolveFrameData: data => this.#host.sessionManager.resolveFrameData(data),
-			model: this.#model,
 		};
 	}
 
@@ -756,7 +668,6 @@ export class SessionMaintenance {
 	async #pruneToolOutputs(): Promise<{ prunedCount: number; tokensSaved: number } | undefined> {
 		const branchEntries = this.#host.sessionManager.getBranchView();
 		const keepBoundaryId = getLatestCompactionEntry(branchEntries)?.firstKeptEntryId;
-		const model = this.#host.model();
 		const result = pruneToolOutputs(
 			branchEntries,
 			this.#tokenizer,
@@ -766,9 +677,7 @@ export class SessionMaintenance {
 				// Cache-stable boundary: never re-write the warm, already-sent prefix
 				// (deep stale/age victims) or summarized-away entries every turn.
 				keepBoundaryId,
-				// Prefix-bound thinking cannot survive rewrites inside a warm provider prefix.
-				cacheWarmSuffixTokens: model?.thinking?.prefixBinding === true ? 0 : PRUNE_CACHE_WARM_SUFFIX_TOKENS,
-				cacheLookbackPositions: model ? resolvePromptCacheLookback(model) : undefined,
+				cacheWarmSuffixTokens: PRUNE_CACHE_WARM_SUFFIX_TOKENS,
 				convertToLlm,
 			}),
 		);
@@ -781,7 +690,6 @@ export class SessionMaintenance {
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
 		this.#host.rebaseAdvisorPrefix("prune-tool-outputs");
 		this.#host.syncTodoPhasesFromBranch();
-		this.#host.closeCodexProviderSessionsForHistoryRewrite();
 		return result;
 	}
 
@@ -803,7 +711,6 @@ export class SessionMaintenance {
 		if (!supersedeReads && !dropUseless) return undefined;
 		const branchEntries = this.#host.sessionManager.getBranchView();
 		const keepBoundaryId = getLatestCompactionEntry(branchEntries)?.firstKeptEntryId;
-		const model = this.#host.model();
 		const result = pruneSupersededToolResults(
 			branchEntries,
 			this.#tokenizer,
@@ -816,9 +723,6 @@ export class SessionMaintenance {
 				// region once the cache is genuinely cold (idle exceeds the 1h TTL).
 				keepBoundaryId,
 				idleFlushMs: PRUNE_IDLE_FLUSH_MS,
-				// Prefix-bound thinking cannot survive rewrites inside a warm provider prefix.
-				suffixTokenLimit: model?.thinking?.prefixBinding === true ? 0 : undefined,
-				cacheLookbackPositions: model ? resolvePromptCacheLookback(model) : undefined,
 				convertToLlm,
 			}),
 		);
@@ -831,7 +735,6 @@ export class SessionMaintenance {
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
 		this.#host.rebaseAdvisorPrefix("prune-stale-tool-results");
 		this.#host.syncTodoPhasesFromBranch();
-		this.#host.closeCodexProviderSessionsForHistoryRewrite();
 		return result;
 	}
 
@@ -858,7 +761,6 @@ export class SessionMaintenance {
 		const countOptions = { excludeEncryptedReasoning: true } as const;
 		const latestCompaction = getLatestCompactionEntry(branchEntries);
 		const compactionIndex = latestCompaction ? branchEntries.lastIndexOf(latestCompaction) : -1;
-		const hasRemoteReplacementHistory = getOpenAiRemoteCompactionPayload(latestCompaction) !== undefined;
 		const anchorIndex = findUsageAnchorIndex(branchEntries, compactionIndex);
 		let removed = 0;
 		let tokensFreed = 0;
@@ -867,7 +769,7 @@ export class SessionMaintenance {
 			// Only entries the anchor's provider-reported prompt already carried may
 			// be subtracted from it, and a remote compaction's replacement history
 			// hides everything before its cutoff from the wire.
-			const anchored = index < anchorIndex && (!hasRemoteReplacementHistory || index > compactionIndex);
+			const anchored = index < anchorIndex;
 			if (entry.type === "message") {
 				const before = this.#tokenizer.countMessage(entry.message, countOptions);
 				const dropped = stripImagesFromMessage(entry.message);
@@ -915,39 +817,20 @@ export class SessionMaintenance {
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
 		this.#host.resetAdvisorRuntimes("drop-images");
-		this.#host.closeCodexProviderSessionsForHistoryRewrite();
 		return { removed, tokensFreed };
-	}
-
-	/**
-	 * Whether the next request replays this turn's native Responses payload, so
-	 * its reasoning travels on the wire regardless of what `content` holds. The
-	 * same decision the tokenizer counts with, resolved from the live provider
-	 * session state exactly as the request resolves it.
-	 */
-	#replaysNativeHistory(message: AssistantMessage, nativeHistoryReplay: boolean): boolean {
-		return replaysNativeResponsesHistory(message, this.#model, { nativeHistoryReplay });
 	}
 
 	/**
 	 * Surgically reduce context by dropping heavy content ("shake").
 	 *
 	 * - `images` delegates to {@link dropImages}.
-	 * - `thinking` removes assistant reasoning blocks without replacement text
-	 *   and credits their tokens. A turn whose native payload the request
-	 *   replays is left untouched instead: those blocks are not on the wire, so
-	 *   removing them would change nothing the model receives and would credit
-	 *   tokens that stay billed. Kept blocks are reported through
-	 *   {@link ShakeResult.thinkingBlocksKept}.
+	 * - `thinking` removes stored assistant reasoning blocks without replacement text.
 	 * - `elide` replaces whole tool-call results and large fenced/XML blocks
 	 *   with short placeholders that embed an `artifact://` recovery link.
 	 *
 	 * Mutates the branch in place, persists via `rewriteEntries`, replays the
-	 * rebuilt context through the agent, and tears down provider sessions that
-	 * cache message identity — same rewrite contract as {@link dropImages}.
-	 *
-	 * No-op (zero counts) when nothing is eligible, and a `thinking` run whose
-	 * every turn is replayed returns without rewriting anything at all.
+	 * rebuilt context through the agent, following the same rewrite contract as {@link dropImages}.
+	 * Returns zero counts when nothing is eligible.
 	 */
 	async shake(
 		mode: ShakeMode,
@@ -968,15 +851,11 @@ export class SessionMaintenance {
 			const branchEntries = this.#host.sessionManager.getBranch();
 			const latestCompaction = getLatestCompactionEntry(branchEntries);
 			const compactionIndex = latestCompaction ? branchEntries.lastIndexOf(latestCompaction) : -1;
-			const hasRemoteReplacementHistory = getOpenAiRemoteCompactionPayload(latestCompaction) !== undefined;
 			const anchorIndex = findUsageAnchorIndex(branchEntries, compactionIndex);
 			let removed = 0;
-			let replayedBlocks = 0;
 			let tokensFreed = 0;
 			let anchoredTokensRemoved = 0;
 			const countOptions = { excludeEncryptedReasoning: true } as const;
-			const model = this.#host.model();
-			const nativeHistoryReplay = openAIResponsesReplaysNativeHistory(model, this.#host.providerSessionState);
 			for (const [index, entry] of branchEntries.entries()) {
 				if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 				const message = entry.message;
@@ -984,14 +863,6 @@ export class SessionMaintenance {
 					block.type === "thinking" || block.type === "redactedThinking";
 				const dropped = message.content.filter(isReasoning).length;
 				if (dropped === 0) continue;
-				// Native Responses replay uses the stored payload instead of content.
-				// Leave those blocks intact: stripping them cannot save wire tokens
-				// and needlessly invalidates the provider's prompt cache. They are
-				// reported as kept, and a run that only keeps blocks rewrites nothing.
-				if (this.#replaysNativeHistory(message, nativeHistoryReplay)) {
-					replayedBlocks += dropped;
-					continue;
-				}
 				const kept = message.content.filter(block => !isReasoning(block));
 				// Match the stored-context floor: opaque signatures and encrypted
 				// reasoning bytes do not have a reliable provider-token equivalent.
@@ -1001,7 +872,7 @@ export class SessionMaintenance {
 				invalidateMessageCache(message);
 				const saved = Math.max(0, before - this.#tokenizer.countMessage(message, countOptions));
 				tokensFreed += saved;
-				if (index < anchorIndex && (!hasRemoteReplacementHistory || index > compactionIndex)) {
+				if (index < anchorIndex) {
 					anchoredTokensRemoved += saved;
 				}
 				removed += dropped;
@@ -1012,7 +883,6 @@ export class SessionMaintenance {
 					toolResultsDropped: 0,
 					blocksDropped: 0,
 					thinkingBlocksDropped: 0,
-					thinkingBlocksKept: replayedBlocks,
 					tokensFreed: 0,
 				};
 			}
@@ -1021,13 +891,11 @@ export class SessionMaintenance {
 			const sessionContext = this.#host.buildDisplaySessionContext();
 			this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
 			this.#host.resetAdvisorRuntimes("shake");
-			this.#host.closeCodexProviderSessionsForHistoryRewrite();
 			return {
 				mode,
 				toolResultsDropped: 0,
 				blocksDropped: 0,
 				thinkingBlocksDropped: removed,
-				thinkingBlocksKept: replayedBlocks,
 				tokensFreed,
 			};
 		}
@@ -1096,7 +964,6 @@ export class SessionMaintenance {
 		}
 
 		assertCurrent();
-		const hasRemoteReplacementHistory = getOpenAiRemoteCompactionPayload(latestCompaction) !== undefined;
 		const compactionIndex = latestCompaction ? branchEntries.lastIndexOf(latestCompaction) : -1;
 		const anchorIndex = findUsageAnchorIndex(branchEntries, compactionIndex);
 		const entryIndexes = new Map(branchEntries.map((entry, index) => [entry, index]));
@@ -1114,11 +981,7 @@ export class SessionMaintenance {
 			const replacementTokenCount = replacementTokenCounts[index] ?? 0;
 			replacementTokens += replacementTokenCount;
 			const entryIndex = entryIndexes.get(region.entry) ?? -1;
-			if (
-				entryIndex >= 0 &&
-				entryIndex < anchorIndex &&
-				(!hasRemoteReplacementHistory || entryIndex > compactionIndex)
-			) {
+			if (entryIndex >= 0 && entryIndex < anchorIndex) {
 				anchoredTokensRemoved += Math.max(0, region.tokens - replacementTokenCount);
 			}
 			return { region, replacement, replacementTokens: replacementTokenCount };
@@ -1144,7 +1007,6 @@ export class SessionMaintenance {
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
 		this.#host.resetAdvisorRuntimes("shake");
-		this.#host.closeCodexProviderSessionsForHistoryRewrite();
 
 		return {
 			mode,
@@ -1330,19 +1192,10 @@ export class SessionMaintenance {
 			}
 
 			const compactionSettings = this.#compactionSettings;
-			// A reader that cannot replay the active model's native payload rules out the remote method; its
-			// native lanes run before a configured endpoint, so an endpoint does not make it portable.
-			const readerModel = options?.readerModel;
-			methods = resolveCompactionMethodOrder(
-				compactMode?.overrides.methodOrder ?? compactionSettings.methodOrder,
-			).filter(
-				method => method !== "remote" || !readerModel || canReplayRemoteCompactionFrom(activeModel, readerModel),
-			);
+			methods = resolveCompactionMethodOrder(compactMode?.overrides.methodOrder ?? compactionSettings.methodOrder);
 			const explicitSnapcompact = compactMode?.name === "snapcompact";
 			const runsManually = (method: CompactionMethod): boolean => {
 				switch (method) {
-					case "remote":
-						return canUseRemoteCompaction(activeModel, resolveMethodSettings(compactionSettings, method));
 					case "snapcompact":
 						return (
 							explicitSnapcompact ||
@@ -1373,36 +1226,7 @@ export class SessionMaintenance {
 			};
 
 			const effectiveSettings = resolveMethodSettings(compactionSettings, selectedMethod);
-			const availableModels = this.#host.modelRegistry.getAvailable();
-			const requireProviderRemote = selectedMethod === "remote" && !effectiveSettings.remoteEndpoint;
-			const remoteReader = selectedMethod === "remote" ? options?.readerModel : undefined;
-			const compactionCandidates = this.#getCompactionModelCandidates(
-				availableModels,
-				requireProviderRemote || remoteReader
-					? candidate =>
-							(!requireProviderRemote ||
-								canUseLiveProviderNativeCompaction(candidate, activeModel, effectiveSettings)) &&
-							(!remoteReader || canReplayRemoteCompactionFrom(candidate, remoteReader))
-					: undefined,
-			);
-			if ((requireProviderRemote || remoteReader) && compactionCandidates.length === 0) {
-				this.#host.emitNotice(
-					"warning",
-					`remote compaction is unavailable for ${activeModel.id}; trying the next preferred method`,
-					"compaction",
-				);
-				// The nested call runs on this controller, so it never owns the resume;
-				// it reports its commit back here instead.
-				return finish(
-					await this.compact(
-						customInstructions,
-						options,
-						selectedMethodIndex + 1,
-						compactionAbortController,
-						markCommitted,
-					),
-				);
-			}
+			const compactionCandidates = this.#getCompactionModelCandidates();
 			const pathEntries = this.#host.sessionManager.getBranch();
 			const preparation = prepareCompaction(pathEntries, effectiveSettings, activeModel, this.#tokenizer);
 			if (!preparation) {
@@ -1417,7 +1241,6 @@ export class SessionMaintenance {
 			let hookCompaction: CompactionResult | undefined;
 			let fromExtension = false;
 			let preserveData: Record<string, unknown> | undefined;
-			let providerReplayThroughEntryId: string | undefined;
 
 			if (this.#host.extensionRunner?.hasHandlers("session_before_compact")) {
 				const result = (await this.#host.extensionRunner.emit({
@@ -1447,7 +1270,7 @@ export class SessionMaintenance {
 			const snapcompactReady = wantsSnapcompact;
 			const snapcompactShapeSetting = cfgSnapcompactShape.get(this.#host.settings);
 			let snapcompactShape: snapcompact.Shape | undefined;
-			const snapcompactIncludeThinking = snapcompact.readerIncludesThinking(this.#model);
+			const snapcompactIncludeThinking = false;
 			if (wantsSnapcompact && !sendsImageInputOnWire(this.#model)) {
 				const reason = this.#model.input.includes("image")
 					? `${this.#model.id}'s provider strips image input`
@@ -1463,7 +1286,7 @@ export class SessionMaintenance {
 					preparation.previousPreserveData,
 					preparation.previousSummary,
 				);
-				snapcompactShape = snapcompact.resolveShapeForText(probeText, this.#model, snapcompactShapeSetting);
+				snapcompactShape = snapcompact.resolveShapeForText(probeText, snapcompactShapeSetting);
 				const renderScan = snapcompact.scanRenderability(probeText, { shape: snapcompactShape });
 				if (!renderScan.isSafe) {
 					const percent = (renderScan.unrenderableRatio * 100).toFixed(1);
@@ -1478,7 +1301,6 @@ export class SessionMaintenance {
 			let firstKeptEntryId: string;
 			let tokensBefore: number;
 			let details: unknown;
-			let codexCompaction: CodexCompactionContext | undefined;
 
 			// Snapcompact runs locally first. The frame cap is sized from the room
 			// under the compaction trigger via #computeSnapcompactMaxFrames (and
@@ -1501,7 +1323,6 @@ export class SessionMaintenance {
 						preparation,
 						{
 							convertToLlm,
-							model: this.#model,
 							...(snapcompactShapeSetting === "auto" ? {} : { shape }),
 							maxFrames,
 							includeThinking: snapcompactIncludeThinking,
@@ -1511,7 +1332,7 @@ export class SessionMaintenance {
 					);
 					snapcompactResult = rendered.result;
 					const framePayloadBytes = rendered.framePayloadBytes;
-					const frameByteBudget = snapcompact.frameDataBytesBudget(this.#model);
+					const frameByteBudget = snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET;
 					if (framePayloadBytes > frameByteBudget) {
 						logger.warn("Snapcompact exceeded the per-request frame payload budget", {
 							model: this.#model?.id,
@@ -1561,7 +1382,6 @@ export class SessionMaintenance {
 				tokensBefore = compactionPrep.tokensBefore;
 				details = compactionPrep.details;
 				preserveData = compactionPrep.preserveData;
-				providerReplayThroughEntryId = compactionPrep.providerReplayThroughEntryId;
 			} else if (snapcompactResult) {
 				summary = snapcompactResult.summary;
 				shortSummary = snapcompactResult.shortSummary;
@@ -1570,11 +1390,6 @@ export class SessionMaintenance {
 				details = snapcompactResult.details;
 				preserveData = { ...compactionPrep.preserveData, ...snapcompactResult.preserveData };
 			} else {
-				codexCompaction = createCodexCompactionContext({
-					trigger: "manual",
-					reason: "user_requested",
-					phase: "standalone_turn",
-				});
 				// Generate compaction result. Only convert known abort-shaped
 				// rejections (AbortError raised while the abort signal is set,
 				// or an already-typed sentinel) into `CompactionCancelledError`
@@ -1587,19 +1402,14 @@ export class SessionMaintenance {
 				// block because every catch path throws — the post-try reads
 				// of the result-derived locals are reachable only on success.
 				try {
-					const result = await this.#compactWithFallbackModel(
+					const result = await this.#compactWithCurrentModel(
 						preparation,
 						options?.internalGuidance ?? customInstructions,
 						compactionAbortController.signal,
 						{
 							promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
 							extraContext: compactionPrep.hookContext,
-							// The prompt the live turn actually sent — a per-turn
-							// `before_agent_start` override included — so a provider-native
-							// compaction shares the live request's cached prefix.
-							remoteSystemPrompt: this.#host.agent.state.systemPrompt,
 							convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
-							codexCompaction,
 						},
 						compactionCandidates,
 					);
@@ -1609,7 +1419,6 @@ export class SessionMaintenance {
 					tokensBefore = result.tokensBefore;
 					details = result.details;
 					preserveData = mergeLlmCompactionPreserveData(compactionPrep.preserveData, result.preserveData);
-					providerReplayThroughEntryId = result.providerReplayThroughEntryId;
 				} catch (err) {
 					if (err instanceof CompactionCancelledError) {
 						if (!compactionAbortController.signal.aborted || err.cause !== undefined) throw err;
@@ -1642,8 +1451,6 @@ export class SessionMaintenance {
 				fromExtension,
 				preserveData,
 				method: fromExtension ? undefined : selectedMethod,
-				codexCompaction,
-				providerReplayThroughEntryId,
 				advisorResetReason: "compact",
 			});
 
@@ -1654,7 +1461,6 @@ export class SessionMaintenance {
 				tokensBefore,
 				details,
 				preserveData: snapcompact.stripPreservedArchive(preserveData),
-				...(providerReplayThroughEntryId ? { providerReplayThroughEntryId } : {}),
 			};
 			options?.onComplete?.(compactionResult);
 			return finish(compactionResult);
@@ -1821,7 +1627,6 @@ export class SessionMaintenance {
 							hookDetails: prepared.details,
 						},
 						preserveData: prepared.preserveData,
-						providerReplayThroughEntryId: prepared.providerReplayThroughEntryId,
 					}
 				: {
 						summary: experimentalContextRolloverPrompt,
@@ -1840,7 +1645,6 @@ export class SessionMaintenance {
 			...result,
 			fromExtension,
 			method: undefined,
-			codexCompaction: undefined,
 			advisorResetReason: "experimental-context-rollover",
 		});
 		this.#experimentalNotesReminderBoundaryId = undefined;
@@ -1996,7 +1800,6 @@ export class SessionMaintenance {
 								hookDetails: prepared.details,
 							},
 							preserveData: prepared.preserveData,
-							providerReplayThroughEntryId: prepared.providerReplayThroughEntryId,
 						}
 					: {
 							summary: experimentalContextRolloverPrompt,
@@ -2010,7 +1813,6 @@ export class SessionMaintenance {
 				...result,
 				fromExtension,
 				method: undefined,
-				codexCompaction: undefined,
 				advisorResetReason: "experimental-context-rollover",
 				detachExtensionEmit: detachPostCommit,
 			});
@@ -2236,7 +2038,6 @@ export class SessionMaintenance {
 				fromExtension: false,
 				preserveData: undefined,
 				method: "handoff",
-				codexCompaction: undefined,
 				advisorResetReason: "handoff",
 			});
 			return result;
@@ -2251,7 +2052,7 @@ export class SessionMaintenance {
 	 * pre-threshold band `[threshold − lead, threshold)`. The produced summary
 	 * is held (armed) and committed instantly by the next real maintenance
 	 * pass, hiding summarization latency. Only LLM-backed methods
-	 * (remote/handoff/soft) are speculated — shake and snapcompact are local
+	 * (handoff/soft) are speculated — shake and snapcompact are local
 	 * and effectively instant. Never rewrites history itself; stale results are
 	 * discarded by apply-time branch validation in {@link #claimArmedSpeculation}.
 	 * A turn that jumps past the threshold before a run armed is handled by
@@ -2280,29 +2081,20 @@ export class SessionMaintenance {
 			// reclaims materially more context at apply time.
 			const growth = contextTokens - current.armed.contextTokensAtStart;
 			const refreshBudget = Math.max(settings.keepRecentTokens, SPECULATION_LEAD_MIN_TOKENS);
-			if (
-				(growth <= refreshBudget || isRecord(current.armed.result.preserveData?.anthropicCompaction)) &&
-				this.#armedSpeculationValid(current.armed, contextTokens)
-			)
-				return;
+			if (growth <= refreshBudget && this.#armedSpeculationValid(current.armed, contextTokens)) return;
 			this.cancelSpeculation();
 		}
 		const model = this.#model;
 		if (!model) return;
-		const method = resolveSpeculationMethod(model, settings, {
-			skipRemote: this.#nativeSpeculationFailed(model),
-		});
+		const method = resolveSpeculationMethod(model, settings);
 		if (!method) return;
 		this.#startSpeculationRun(contextTokens, method);
 	}
 
 	/** Install and launch one background speculation run for `method`. */
-	#startSpeculationRun(contextTokens: number, method: "remote" | "handoff" | "soft"): void {
+	#startSpeculationRun(contextTokens: number, method: "handoff" | "soft"): void {
 		const controller = new AbortController();
 		const run: SpeculationRun = { controller, promise: Promise.resolve(), contextTokensAtStart: contextTokens };
-		const model = this.#model;
-		// Keyed now: the session can switch before the run settles.
-		const nativeKey = model && this.#nativeSpeculationKey(model);
 		this.#speculation = run;
 		run.promise = this.#runSpeculation(run, method, contextTokens).catch(error => {
 			logger.debug("Speculative compaction failed", {
@@ -2310,31 +2102,7 @@ export class SessionMaintenance {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			if (this.#speculation === run) this.#speculation = undefined;
-			// Keyed by the live model even when a compaction-model candidate made the
-			// failing request: every consumer checks the live model, and a false hit
-			// only moves this cycle to the next configured method. Errors with no
-			// HTTP status classify by message text, so an unrecognised transient
-			// failure costs the same single early fallback.
-			if (
-				method === "remote" &&
-				model &&
-				!controller.signal.aborted &&
-				error instanceof NativeCompactionError &&
-				!AIError.retriable(AIError.classify(error.cause, model.api))
-			) {
-				this.#failedNativeSpeculation = nativeKey;
-			}
 		});
-	}
-
-	/** Identity of `model`'s native speculation in the current session. */
-	#nativeSpeculationKey(model: Model): string {
-		return `${this.#host.sessionManager.getSessionId()}/${model.provider}/${model.id}`;
-	}
-
-	/** Whether `model`'s native speculation already failed for good this cycle. */
-	#nativeSpeculationFailed(model: Model): boolean {
-		return this.#failedNativeSpeculation === this.#nativeSpeculationKey(model);
 	}
 
 	/**
@@ -2364,9 +2132,7 @@ export class SessionMaintenance {
 		if (this.#host.extensionRunner?.hasHandlers("session_before_compact")) return false;
 		const model = this.#model;
 		if (!model) return false;
-		const method = resolveSpeculationMethod(model, settings, {
-			skipRemote: this.#nativeSpeculationFailed(model),
-		});
+		const method = resolveSpeculationMethod(model, settings);
 		if (!method) return false;
 		const thresholdTokens = resolveThresholdTokens(contextWindow, settings);
 		const graceCapTokens = Math.min(
@@ -2390,11 +2156,7 @@ export class SessionMaintenance {
 	}
 
 	/** Produce and arm one speculative compaction result off a branch snapshot. */
-	async #runSpeculation(
-		run: SpeculationRun,
-		method: "remote" | "handoff" | "soft",
-		contextTokens: number,
-	): Promise<void> {
+	async #runSpeculation(run: SpeculationRun, method: "handoff" | "soft", contextTokens: number): Promise<void> {
 		const clear = () => {
 			if (this.#speculation === run) this.#speculation = undefined;
 		};
@@ -2434,32 +2196,17 @@ export class SessionMaintenance {
 			// No hookCompaction is passed above, so "fromHook" is unreachable;
 			// the guard just narrows the union.
 			if (compactionPrep.kind === "fromHook") return clear();
-			const candidates = this.#getCompactionModelCandidates(
-				this.#host.modelRegistry.getAvailable(),
-				method === "remote" && !effectiveSettings.remoteEndpoint
-					? candidate => canUseLiveProviderNativeCompaction(candidate, model, effectiveSettings)
-					: undefined,
-			);
+			const candidates = this.#getCompactionModelCandidates();
 			if (candidates.length === 0) return clear();
-			const codexCompaction = createCodexCompactionContext({
-				trigger: "auto",
-				reason: "context_limit",
-				phase: "standalone_turn",
-			});
-			const result = await this.#compactWithFallbackModel(
+			const result = await this.#compactWithCurrentModel(
 				preparation,
 				undefined,
 				signal,
 				{
 					promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
 					extraContext: compactionPrep.hookContext,
-					remoteSystemPrompt: this.#host.agent.state.systemPrompt,
-					codexCompaction,
-					// Isolate from the live turn: remote compaction transports key
-					// sticky provider sessions by sessionId, and a speculation
-					// overlapping the live stream must never interleave with it.
+					// Give background summary telemetry its own request identity.
 					sessionId: `${this.#host.sessionId()}:spec:${Snowflake.next()}`,
-					preferWebsockets: false,
 				},
 				candidates,
 			);
@@ -2468,9 +2215,8 @@ export class SessionMaintenance {
 					...result,
 					preserveData: mergeLlmCompactionPreserveData(compactionPrep.preserveData, result.preserveData),
 				},
-				action: method === "remote" ? "remote" : "context-full",
+				action: "context-full",
 				method,
-				codexCompaction,
 				snapshotLeafId,
 				contextTokensAtStart: contextTokens,
 			};
@@ -2487,8 +2233,7 @@ export class SessionMaintenance {
 	/**
 	 * An armed result is committable only when the branch prefix it summarized
 	 * is still intact: its snapshot leaf is on the active path with no later
-	 * compaction or reset boundary, and any provider-native replay payload is
-	 * still readable by the active model.
+	 * compaction or reset boundary.
 	 *
 	 * When the branch has grown past the snapshot leaf, the speculation is only
 	 * valid if applying it would still create sufficient headroom under the
@@ -2502,12 +2247,6 @@ export class SessionMaintenance {
 		const model = this.#model;
 		if (!model) return false;
 		const settings = this.#compactionSettings;
-		if (
-			armed.result.preserveData &&
-			!remotePreserveReusable(armed.result.preserveData, model, resolveMethodSettings(settings, armed.method))
-		) {
-			return false;
-		}
 		const branch = this.#host.sessionManager.getBranch();
 		const leafIdx = branch.findIndex(entry => entry.id === armed.snapshotLeafId);
 		if (leafIdx < 0) return false;
@@ -2515,20 +2254,13 @@ export class SessionMaintenance {
 			const type = branch[i].type;
 			if (type === "compaction" || type === "reset_boundary") return false;
 		}
-		const nativeAnthropic = isRecord(armed.result.preserveData?.anthropicCompaction);
 		if (leafIdx < branch.length - 1) {
 			const keptIdx = branch.findIndex(entry => entry.id === armed.result.firstKeptEntryId);
-			if (keptIdx < 0 && !(nativeAnthropic && armed.result.firstKeptEntryId === "")) return false;
+			if (keptIdx < 0) return false;
 		}
 		const projected = this.#projectCompactedContextTokens({
 			...armed.result,
 			method: armed.method,
-			providerReplayThroughEntryId:
-				armed.result.providerReplayThroughEntryId ??
-				(isRecord(armed.result.preserveData?.openaiRemoteCompaction) ||
-				(nativeAnthropic && leafIdx < branch.length - 1)
-					? armed.snapshotLeafId
-					: undefined),
 		});
 		const branchCurrentTokens = this.#projectCurrentBranchContextTokens(branch);
 		const nonMessageTokens = computeNonMessageTokens(
@@ -2551,7 +2283,7 @@ export class SessionMaintenance {
 		if (branchCurrentTokens - nonMessageTokens > emptyWrapperTokens && projected >= branchCurrentTokens) {
 			return false;
 		}
-		if (leafIdx < branch.length - 1 && !nativeAnthropic) {
+		if (leafIdx < branch.length - 1) {
 			const pendingTokens = Math.max(0, pendingContextTokens ?? 0);
 			const projectedWithPending = projected + pendingTokens;
 			const contextWindow = model.contextWindow ?? 0;
@@ -2622,8 +2354,6 @@ export class SessionMaintenance {
 		fromExtension: boolean;
 		preserveData: Record<string, unknown> | undefined;
 		method: CompactionMethod | undefined;
-		codexCompaction: CodexCompactionContext | undefined;
-		providerReplayThroughEntryId?: string;
 		advisorResetReason: string;
 		detachExtensionEmit?: boolean;
 	}): Promise<CompactionEntry | undefined> {
@@ -2635,9 +2365,8 @@ export class SessionMaintenance {
 			{
 				details: args.details,
 				fromExtension: args.fromExtension,
-				preserveData: args.preserveData,
+				preserveData: stripLegacyCompactionData(args.preserveData),
 				method: args.method,
-				providerReplayThroughEntryId: args.providerReplayThroughEntryId,
 				tokensAfter:
 					isRecord(args.details) && args.details.kind === "experimental-context-rollover"
 						? this.#projectExperimentalContextRolloverTokens(args)
@@ -2645,8 +2374,6 @@ export class SessionMaintenance {
 			},
 		);
 		this.#host.persistEvalStateContext();
-		// A committed compaction starts a new cycle; native compaction gets a fresh try.
-		this.#failedNativeSpeculation = undefined;
 		const newEntries = this.#host.sessionManager.getEntries();
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
@@ -2657,11 +2384,6 @@ export class SessionMaintenance {
 		this.#host.resetPlanReference();
 		this.#host.resetAdvisorRuntimes(args.advisorResetReason, { compacted: true });
 		this.#host.syncTodoPhasesFromBranch();
-		if (args.codexCompaction) {
-			this.#host.resetCodexProviderAfterCompaction(args.codexCompaction);
-		} else {
-			this.#host.closeCodexProviderSessionsForHistoryRewrite();
-		}
 		const savedCompactionEntry = newEntries.find(e => e.type === "compaction" && e.id === entryId) as
 			| CompactionEntry
 			| undefined;
@@ -2832,7 +2554,6 @@ export class SessionMaintenance {
 			triggerContextTokens: contextTokens,
 			pendingContextTokens: this.#tokenizer.countMessages(messages, { excludeEncryptedReasoning: true }),
 			preparedContextTokens: this.#estimateStoredContextTokens(),
-			phase: "pre_turn",
 		});
 	}
 
@@ -2885,7 +2606,6 @@ export class SessionMaintenance {
 			const result = await this.runAutoCompaction("threshold", false, {
 				autoContinue: false,
 				suppressContinuation: true,
-				phase: "mid_turn",
 				detachPostCommit: true,
 				explicitNewContextRequest: true,
 			});
@@ -2957,7 +2677,6 @@ export class SessionMaintenance {
 			autoContinue: false,
 			suppressContinuation: true,
 			triggerContextTokens: contextTokens,
-			phase: "mid_turn",
 			detachPostCommit: true,
 		});
 		if (result.automaticContinuationBlocked) {
@@ -3431,7 +3150,6 @@ export class SessionMaintenance {
 		const thresholdTokens = resolveThresholdTokens(contextWindow, compactionSettings);
 		const shouldThresholdCompact = shouldCompact(contextTokens, contextWindow, compactionSettings);
 		logger.debug("Auto-compaction threshold decision", {
-			phase: "post-agent-end",
 			goalModeEnabled: this.#goalModeState?.enabled === true,
 			goalStatus: this.#goalModeState?.goal.status,
 			stopReason: assistantMessage.stopReason,
@@ -3461,7 +3179,6 @@ export class SessionMaintenance {
 			return await this.runAutoCompaction("threshold", false, {
 				autoContinue,
 				triggerContextTokens: postMaintenanceContextTokens,
-				phase: "pre_turn",
 				terminalTextAnswer: isTerminalTextAssistantAnswer(assistantMessage),
 			});
 		} else {
@@ -3470,19 +3187,13 @@ export class SessionMaintenance {
 		return COMPACTION_CHECK_NONE;
 	}
 
-	#getCompactionModelCandidates(availableModels: Model[], filter?: (model: Model) => boolean): Model[] {
-		return this.resolveCompactionModelCandidates(this.#model, availableModels, filter);
+	#getCompactionModelCandidates(): Model[] {
+		return this.resolveCompactionModelCandidates(this.#model, []);
 	}
 
-	resolveCompactionModelCandidates(
-		preferredModel: Model | null | undefined,
-		_availableModels: Model[],
-		filter?: (model: Model) => boolean,
-	): Model[] {
+	resolveCompactionModelCandidates(preferredModel: Model | null | undefined, _availableModels: Model[]): Model[] {
 		const current = this.#model ?? preferredModel;
-		if (!current) return [];
-		const candidate = this.#host.modelRegistry.fitContextWindow(current, this.#host.settings);
-		return filter && !filter(candidate) ? [] : [candidate];
+		return current ? [this.#host.modelRegistry.fitContextWindow(current, this.#host.settings)] : [];
 	}
 
 	#buildCompactionAuthError(): Error {
@@ -3498,91 +3209,41 @@ export class SessionMaintenance {
 		);
 	}
 
-	async #compactWithFallbackModel(
+	async #compactWithCurrentModel(
 		preparation: CompactionPreparation,
 		customInstructions: string | undefined,
 		signal: AbortSignal,
 		options?: SummaryOptions,
 		precomputedCandidates?: Model[],
 	): Promise<CompactionResult> {
-		const candidates =
-			precomputedCandidates ?? this.#getCompactionModelCandidates(this.#host.modelRegistry.getAvailable());
-		const telemetry = resolveTelemetry(this.#host.agent.telemetry, this.#host.sessionId());
-		let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
-
-		for (const candidate of candidates) {
-			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
-			if (!apiKey) continue;
-			if (
-				nativeCompactionFailure &&
-				(candidate.provider !== nativeCompactionFailure.provider ||
-					!shouldUseProviderNativeCompaction(candidate, preparation.settings))
-			) {
-				throw nativeCompactionFailure.error;
-			}
-
-			try {
-				return await compact(
-					this.#host.obfuscatePreparationForProvider(preparation),
-					candidate,
-					this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
-					this.#host.obfuscateTextForProvider(customInstructions),
-					signal,
-					{
-						...options,
-						metadata: this.#host.agent.metadataForProvider(candidate.provider),
-						convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
-						buildProviderContext: (summarized, retained, signal, model) =>
-							this.#host.buildLiveProviderContext(summarized, retained, signal, model),
-						isUserAuthored: isUserAuthoredMessage,
-						onPayload: this.#host.extensionRunner?.hasHandlers("before_provider_request")
-							? (payload, model, signal) =>
-									this.#host.extensionRunner?.emitBeforeProviderRequest(payload, model, signal)
-							: undefined,
-						telemetry,
-						// Honor the user's /model thinking selection (incl. `off`) on
-						// the manual `/compact` path. Clamped per-model inside compact()
-						// via resolveCompactionEffort so unsupported-effort models
-						// (xai-oauth/grok-build) don't trip requireSupportedEffort.
-						thinkingLevel: this.#host.thinkingLevel(),
-						tools: this.#host.agent.state.tools,
-						sessionId: this.#host.sessionId(),
-						// Explicit cache keys only (never a sessionId fallback): V2
-						// treats any truthy key as provenance for x-opencode-session.
-						// Conventional summaries run on `candidate`; remote compaction
-						// may send a different api/model, so it is gated separately.
-						promptCacheKey: this.#host.getPromptCacheKeyForModel(candidate),
-						remotePromptCacheKey: this.#host.getPromptCacheKeyForModel(remoteCompactionPolicyModel(candidate)),
-						providerSessionState: this.#host.providerSessionState,
-						preferWebsockets: this.#host.preferWebsockets(candidate),
-						codexAccessPrograms: cfgProvidersOpenaiCodexDaybreak.get(this.#host.settings),
-						// Route every summarization HTTP request through the
-						// session's side-stream transport so the provider
-						// concurrency cap (e.g. providers.ollama-cloud.maxConcurrency)
-						// brackets compaction the same way it brackets the live
-						// agent turn — without this, multiple ollama-cloud
-						// subagents auto/manually compacting issued uncapped
-						// summary requests in parallel (chatgpt-codex review on
-						// #3751).
-						completeImpl: async (requestModel, requestContext, requestOptions) => {
-							const stream = await this.#host.sideStreamFn(requestModel, requestContext, requestOptions);
-							return stream.result();
-						},
-					},
-				);
-			} catch (error) {
-				const id = AIError.classify(error instanceof NativeCompactionError ? error.cause : error, candidate.api);
-				if (AIError.is(id, AIError.Flag.AuthFailed)) continue;
-				if (error instanceof NativeCompactionError) {
-					nativeCompactionFailure ??= { error, provider: candidate.provider };
-					continue;
-				}
-				throw error;
-			}
+		const candidate = (precomputedCandidates ?? this.#getCompactionModelCandidates())[0];
+		if (!candidate || !(await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId(), { signal }))) {
+			throw this.#buildCompactionAuthError();
 		}
-
-		if (nativeCompactionFailure) throw nativeCompactionFailure.error;
-		throw this.#buildCompactionAuthError();
+		return compact(
+			this.#host.obfuscatePreparationForProvider(preparation),
+			candidate,
+			this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
+			this.#host.obfuscateTextForProvider(customInstructions),
+			signal,
+			{
+				...options,
+				metadata: this.#host.agent.metadataForProvider(candidate.provider),
+				convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
+				onPayload: this.#host.extensionRunner?.hasHandlers("before_provider_request")
+					? (payload, model, signal) =>
+							this.#host.extensionRunner?.emitBeforeProviderRequest(payload, model, signal)
+					: undefined,
+				telemetry: resolveTelemetry(this.#host.agent.telemetry, this.#host.sessionId()),
+				thinkingLevel: this.#host.thinkingLevel(),
+				sessionId: options?.sessionId ?? this.#host.sessionId(),
+				promptCacheKey: this.#host.getPromptCacheKeyForModel(candidate),
+				completeImpl: async (model, context, requestOptions) => {
+					const stream = await this.#host.sideStreamFn(model, context, requestOptions);
+					return stream.result();
+				},
+			},
+		);
 	}
 
 	async #prepareCompactionFromHooks(
@@ -3597,7 +3258,6 @@ export class SessionMaintenance {
 				tokensBefore: number;
 				details: unknown;
 				preserveData: Record<string, unknown> | undefined;
-				providerReplayThroughEntryId: string | undefined;
 		  }
 		| {
 				kind: "needsLlm";
@@ -3633,7 +3293,6 @@ export class SessionMaintenance {
 				tokensBefore: hookCompaction.tokensBefore,
 				details: hookCompaction.details,
 				preserveData,
-				providerReplayThroughEntryId: hookCompaction.providerReplayThroughEntryId,
 			};
 		}
 
@@ -3687,12 +3346,12 @@ export class SessionMaintenance {
 		pendingTokens: number,
 	): number {
 		const ctxWindow = this.#model?.contextWindow ?? 0;
-		const shape = snapcompact.resolveShape(this.#model, cfgSnapcompactShape.get(this.#host.settings));
+		const shape = snapcompact.resolveShape(cfgSnapcompactShape.get(this.#host.settings));
 		if (ctxWindow <= 0) {
 			return Math.min(
 				snapcompact.MAX_FRAMES_DEFAULT,
-				snapcompact.maxFramesForDataBudget(shape, snapcompact.frameDataBytesBudget(this.#model)),
-				snapcompact.providerFrameBudget(this.#model),
+				snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
+				snapcompact.DEFAULT_IMAGE_BUDGET,
 			);
 		}
 		const reserve = effectiveReserveTokens(ctxWindow, settings);
@@ -3757,8 +3416,8 @@ export class SessionMaintenance {
 		return Math.min(
 			Math.floor(frameBudget / frameCost),
 			snapcompact.MAX_FRAMES_DEFAULT,
-			snapcompact.maxFramesForDataBudget(shape, snapcompact.frameDataBytesBudget(this.#model)),
-			snapcompact.providerFrameBudget(this.#model),
+			snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
+			snapcompact.DEFAULT_IMAGE_BUDGET,
 		);
 	}
 
@@ -3781,7 +3440,7 @@ export class SessionMaintenance {
 	 * Render the snapcompact archive at `options.maxFrames`, then re-render it
 	 * with the oldest frames dropped while it breaks either budget, at most
 	 * twice (the second pass absorbs per-frame variance):
-	 * - {@link snapcompact.frameDataBytesBudget} for the active model: the cap from
+	 * - the generic frame byte budget: the cap from
 	 *   {@link #computeSnapcompactMaxFrames} sizes bytes from a per-shape
 	 *   estimate, and denser frames (CJK prose drawn with fallback glyphs) run
 	 *   heavier, so the fit is `frames × budget / payload`;
@@ -3803,7 +3462,7 @@ export class SessionMaintenance {
 		let result = await snapcompact.compact(preparation, options);
 		let framePayloadBytes = this.#snapcompactFramePayloadBytes(result);
 		const ctxWindow = this.#model?.contextWindow ?? 0;
-		const frameByteBudget = snapcompact.frameDataBytesBudget(this.#model);
+		const frameByteBudget = snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET;
 		const targetTokens =
 			ctxWindow > 0
 				? Math.floor(SNAPCOMPACT_POST_COMPACTION_TARGET * resolveThresholdTokens(ctxWindow, settings))
@@ -3876,7 +3535,7 @@ export class SessionMaintenance {
 	): number {
 		const archive = snapcompact.getPreservedArchive(result.preserveData);
 		const blocks = archive
-			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.frameDataBytesBudget(this.#model) })
+			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET })
 			: undefined;
 		const summaryMessage = createCompactionSummaryMessage(
 			result.summary,
@@ -3916,7 +3575,7 @@ export class SessionMaintenance {
 		const leaf = branch.at(-1);
 		const archive = snapcompact.getPreservedArchive(args.preserveData);
 		const blocks = archive
-			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.frameDataBytesBudget(this.#model) })
+			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET })
 			: undefined;
 		if (!leaf) {
 			const summaryMessage = createCompactionSummaryMessage(
@@ -3943,7 +3602,6 @@ export class SessionMaintenance {
 			method: args.method,
 			details: args.details,
 			preserveData: args.preserveData,
-			providerReplayThroughEntryId: args.providerReplayThroughEntryId,
 		};
 		const projected = [...branch, pending];
 		const rebuilt = buildSessionContext(projected, undefined, undefined, this.#contextBuildOptions);
@@ -3965,20 +3623,13 @@ export class SessionMaintenance {
 		const options = { excludeEncryptedReasoning: true } as const;
 		const archives: AgentMessage[] = [];
 		const rest: AgentMessage[] = [];
-		let nativeHistoryTokens = 0;
 		for (const message of messages) {
-			if (message.role === "compactionSummary" && message.providerPayload?.type === "openaiResponsesHistory") {
-				nativeHistoryTokens += countResponsesHistoryTokens(message.providerPayload.items, this.#tokenizer);
-				continue;
-			}
 			const hasFrames =
 				message.role === "compactionSummary" && (message.blocks !== undefined || message.images !== undefined);
 			(hasFrames ? archives : rest).push(message);
 		}
 		return (
-			nativeHistoryTokens +
-			this.#tokenizer.countMessages(archives, options) +
-			this.#tokenizer.countMessages(convertToLlm(rest), options)
+			this.#tokenizer.countMessages(archives, options) + this.#tokenizer.countMessages(convertToLlm(rest), options)
 		);
 	}
 
@@ -4161,61 +3812,13 @@ export class SessionMaintenance {
 		// model's natively replayed reasoning, a cold session drops its own, and
 		// a reader without image input gets each archive as text.
 		const providerExcludedTokens = activeExcludedMessage ? this.#tokenizer.countMessage(activeExcludedMessage) : 0;
-		const tokenizerOptions = {
-			nativeHistoryReplay: openAIResponsesReplaysNativeHistory(model, this.#host.providerSessionState),
-		};
-		const tokenizer = this.#tokenizer.countsAlike(model, tokenizerOptions)
-			? this.#tokenizer
-			: new Tokenizer(model, tokenizerOptions);
+		const tokenizer = this.#tokenizer.countsAlike(model) ? this.#tokenizer : new Tokenizer(model);
 		const storedExcludedTokens = activeExcludedMessage
 			? tokenizer.countMessage(activeExcludedMessage, { excludeEncryptedReasoning: true })
 			: 0;
-		const branch = this.#host.sessionManager.getBranch();
-		if (
-			this.#model &&
-			getReadableCompactionEntry(branch, model) !== getReadableCompactionEntry(branch, this.#model)
-		) {
-			// `model` stands on another compaction boundary than the active model
-			// (it cannot replay a provider-native compaction, or can replay one the
-			// active model cannot), so neither the provider usage nor the live
-			// messages describe what it would be sent: count its own context.
-			const readerMessages = this.#host.buildDisplaySessionContext(model).messages;
-			// The rebuild can return copies (secret deobfuscation), so the failed turn also matches by what
-			// it holds; at most one message is dropped, newest first, so an earlier reply sharing its
-			// millisecond stays counted.
-			const excludedIndex = activeExcludedMessage
-				? readerMessages.findLastIndex(
-						message =>
-							message === activeExcludedMessage ||
-							(message.role === "assistant" &&
-								message.timestamp === activeExcludedMessage.timestamp &&
-								Bun.deepEquals(message.content, activeExcludedMessage.content)),
-					)
-				: -1;
-			const sentMessages =
-				excludedIndex === -1 ? readerMessages : readerMessages.filter((_, index) => index !== excludedIndex);
-			const readerTokens =
-				computeNonMessageTokens(this.#host.nonMessageTokenSource(), tokenizer, this.#host.settings.revision) +
-				tokenizer.countMessages(sentMessages, { excludeEncryptedReasoning: true });
-			return readerTokens <= fitBudget;
-		}
-		// Provider usage carries the reasoning the active model's request replayed,
-		// so it moves into `model`'s domain by the difference in replayed
-		// reasoning. Usage leaves out the anchor turn's own output, so this may
-		// subtract reasoning it never held; the local floor below still bounds it.
-		let replayedReasoningShift = 0;
-		if (tokenizer !== this.#tokenizer) {
-			const retained = activeExcludedMessage ? messages.filter(m => m !== activeExcludedMessage) : messages;
-			replayedReasoningShift =
-				tokenizer.replayedReasoningTokens(retained) - this.#tokenizer.replayedReasoningTokens(retained);
-		}
+
 		const residualTokens = compactionContextTokens(
-			Math.max(
-				0,
-				(this.#host.getContextUsage({ contextWindow })?.tokens ?? 0) -
-					providerExcludedTokens +
-					replayedReasoningShift,
-			),
+			Math.max(0, (this.#host.getContextUsage({ contextWindow })?.tokens ?? 0) - providerExcludedTokens),
 			Math.max(
 				0,
 				this.#estimateStoredContextTokens(
@@ -4350,12 +3953,12 @@ export class SessionMaintenance {
 	 */
 	#computeSnapcompactRescueMaxFrames(settings: EngineCompactionSettings, keptTailTokens: number): number {
 		const ctxWindow = this.#model?.contextWindow ?? 0;
-		const shape = snapcompact.resolveShape(this.#model, cfgSnapcompactShape.get(this.#host.settings));
+		const shape = snapcompact.resolveShape(cfgSnapcompactShape.get(this.#host.settings));
 		if (ctxWindow <= 0) {
 			return Math.min(
 				snapcompact.MAX_FRAMES_DEFAULT,
-				snapcompact.maxFramesForDataBudget(shape, snapcompact.frameDataBytesBudget(this.#model)),
-				snapcompact.providerFrameBudget(this.#model),
+				snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
+				snapcompact.DEFAULT_IMAGE_BUDGET,
 			);
 		}
 		const thresholdTokens = resolveThresholdTokens(ctxWindow, settings);
@@ -4378,8 +3981,8 @@ export class SessionMaintenance {
 		return Math.min(
 			Math.floor(frameBudget / frameCost),
 			snapcompact.MAX_FRAMES_DEFAULT,
-			snapcompact.maxFramesForDataBudget(shape, snapcompact.frameDataBytesBudget(this.#model)),
-			snapcompact.providerFrameBudget(this.#model),
+			snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
+			snapcompact.DEFAULT_IMAGE_BUDGET,
 		);
 	}
 
@@ -4479,7 +4082,6 @@ export class SessionMaintenance {
 			},
 		);
 		this.#host.persistEvalStateContext();
-		this.#failedNativeSpeculation = undefined;
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
 		this.#host.rebaseAfterCompaction();
@@ -4490,7 +4092,6 @@ export class SessionMaintenance {
 		this.#host.resetPlanReference();
 		this.#host.resetAdvisorRuntimes("compaction-rescue", { compacted: true });
 		this.#host.syncTodoPhasesFromBranch();
-		this.#host.closeCodexProviderSessionsForHistoryRewrite();
 		// Extensions must see the entry that is now active, not (only) the one
 		// this rebuild just superseded — mirror the regular append path's hook.
 		const rebuiltEntry = this.#host.sessionManager.getEntries().find(e => e.id === rebuiltEntryId) as
@@ -4514,7 +4115,7 @@ export class SessionMaintenance {
 	/**
 	 * Re-render `entry`'s snapcompact archive from its kept source text for
 	 * `model`, at most `maxFrames` frames: the reader's frame shape and its
-	 * reasoning policy ({@link snapcompact.readerIncludesThinking}). Local: no model call.
+	 * explicit archive settings. Local: no model call.
 	 */
 	async #rerenderSnapcompactArchive(
 		entry: CompactionEntry,
@@ -4527,7 +4128,7 @@ export class SessionMaintenance {
 		for (const file of details?.readFiles ?? []) fileOps.read.add(file);
 		for (const file of details?.modifiedFiles ?? []) fileOps.edited.add(file);
 		const shapeSetting = cfgSnapcompactShape.get(this.#host.settings);
-		const shape = snapcompact.resolveShapeForText(archiveText, model, shapeSetting);
+		const shape = snapcompact.resolveShapeForText(archiveText, shapeSetting);
 		return await snapcompact.compact(
 			{
 				firstKeptEntryId: entry.firstKeptEntryId,
@@ -4540,10 +4141,9 @@ export class SessionMaintenance {
 			},
 			{
 				convertToLlm,
-				model,
 				...(shapeSetting === "auto" ? {} : { shape }),
 				maxFrames,
-				includeThinking: snapcompact.readerIncludesThinking(model),
+				includeThinking: false,
 			},
 		);
 	}
@@ -4903,7 +4503,6 @@ export class SessionMaintenance {
 			/** Stored context before pending messages, measured before preparation rewrites its representation. */
 			preparedContextTokens?: number;
 			suppressContinuation?: boolean;
-			phase?: CodexCompactionContext["phase"];
 			terminalTextAnswer?: boolean;
 			/** Mid-turn: splice history then return; do not await UI/extension fan-out. */
 			detachPostCommit?: boolean;
@@ -4965,30 +4564,6 @@ export class SessionMaintenance {
 				)
 			)
 				continue;
-			// Re-sending a native request that just failed for good only delays the
-			// fallback. Skip it while a later method can still run.
-			const liveModel = this.#model;
-			if (
-				candidate === "remote" &&
-				liveModel &&
-				this.#nativeSpeculationFailed(liveModel) &&
-				methods
-					.slice(index + 1)
-					.some(next =>
-						isCompactionMethodUsable(
-							next,
-							reason,
-							liveModel,
-							compactionSettings,
-							options.excludeMediaMethods === true,
-						),
-					)
-			) {
-				logger.debug("Skipping native compaction after a failed speculative attempt", {
-					model: `${liveModel.provider}/${liveModel.id}`,
-				});
-				continue;
-			}
 			method = candidate;
 			methodIndex = index;
 			break;
@@ -5033,15 +4608,9 @@ export class SessionMaintenance {
 			});
 		}
 
-		const action: "context-full" | "handoff" | "snapcompact" | "remote" =
+		const action: "context-full" | "handoff" | "snapcompact" =
 			armedSpec?.action ??
-			(method === "remote"
-				? "remote"
-				: method === "snapcompact"
-					? "snapcompact"
-					: method === "handoff"
-						? "handoff"
-						: "context-full");
+			(method === "snapcompact" ? "snapcompact" : method === "handoff" ? "handoff" : "context-full");
 		// Abort any older auto-compaction before installing this run's controller.
 		this.#autoCompactionAbortController?.abort();
 		const autoCompactionAbortController = new AbortController();
@@ -5080,15 +4649,7 @@ export class SessionMaintenance {
 					details: armedSpec.result.details,
 					preserveData: armedSpec.result.preserveData,
 					fromExtension: false,
-					codexCompaction: armedSpec.codexCompaction,
 					method: armedSpec.method,
-					providerReplayThroughEntryId:
-						armedSpec.result.providerReplayThroughEntryId ??
-						(armedSpec.result.preserveData?.openaiRemoteCompaction ||
-						(armedSpec.result.preserveData?.anthropicCompaction &&
-							this.#host.sessionManager.getBranch().at(-1)?.id !== armedSpec.snapshotLeafId)
-							? armedSpec.snapshotLeafId
-							: undefined),
 					action,
 					reason,
 					willRetry,
@@ -5120,8 +4681,8 @@ export class SessionMaintenance {
 				return COMPACTION_CHECK_NONE;
 			}
 
-			const availableModels = this.#host.modelRegistry.getAvailable();
-			if (availableModels.length === 0) {
+			const currentModel = this.#model;
+			if (!currentModel || !(await this.#host.modelRegistry.getApiKey(currentModel, this.#host.sessionId()))) {
 				await this.#emitLifecycleEvent(
 					{
 						type: "auto_compaction_end",
@@ -5280,8 +4841,6 @@ export class SessionMaintenance {
 			let hookCompaction: CompactionResult | undefined;
 			let fromExtension = false;
 			let preserveData: Record<string, unknown> | undefined;
-			let codexCompaction: CodexCompactionContext | undefined;
-			let providerReplayThroughEntryId: string | undefined;
 
 			if (this.#host.extensionRunner?.hasHandlers("session_before_compact")) {
 				const hookResult = (await this.#host.extensionRunner.emit({
@@ -5379,7 +4938,7 @@ export class SessionMaintenance {
 			let snapcompactResult: snapcompact.CompactionResult | undefined;
 			let snapcompactBlocker: string | undefined;
 			if (action === "snapcompact" && compactionPrep.kind !== "fromHook") {
-				const snapcompactIncludeThinking = snapcompact.readerIncludesThinking(this.#model);
+				const snapcompactIncludeThinking = false;
 				const text = snapcompact.serializeConversation(
 					convertToLlm(preparation.messagesToSummarize.concat(preparation.turnPrefixMessages)),
 					{ includeThinking: snapcompactIncludeThinking },
@@ -5390,7 +4949,7 @@ export class SessionMaintenance {
 					preparation.previousSummary,
 				);
 				const shapeSetting = cfgSnapcompactShape.get(this.#host.settings);
-				const shape = snapcompact.resolveShapeForText(probeText, this.#model, shapeSetting);
+				const shape = snapcompact.resolveShapeForText(probeText, shapeSetting);
 				const renderScan = snapcompact.scanRenderability(probeText, { shape });
 				if (!renderScan.isSafe) {
 					const percent = (renderScan.unrenderableRatio * 100).toFixed(1);
@@ -5413,7 +4972,6 @@ export class SessionMaintenance {
 							preparation,
 							{
 								convertToLlm,
-								model: this.#model,
 								...(shapeSetting === "auto" ? {} : { shape }),
 								maxFrames,
 								includeThinking: snapcompactIncludeThinking,
@@ -5423,7 +4981,7 @@ export class SessionMaintenance {
 						);
 						snapcompactResult = rendered.result;
 						const framePayloadBytes = rendered.framePayloadBytes;
-						const frameByteBudget = snapcompact.frameDataBytesBudget(this.#model);
+						const frameByteBudget = snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET;
 						if (framePayloadBytes > frameByteBudget) {
 							logger.warn("Snapcompact exceeded the per-request frame payload budget", {
 								model: this.#model?.id,
@@ -5572,7 +5130,6 @@ export class SessionMaintenance {
 				tokensBefore = compactionPrep.tokensBefore;
 				details = compactionPrep.details;
 				preserveData = compactionPrep.preserveData;
-				providerReplayThroughEntryId = compactionPrep.providerReplayThroughEntryId;
 			} else if (handoffDocument) {
 				const handoffSummary = handoffSummaryFromDocument(handoffDocument.document, preparation);
 				summary = handoffSummary.summary;
@@ -5589,205 +5146,46 @@ export class SessionMaintenance {
 				details = snapcompactResult.details;
 				preserveData = { ...compactionPrep.preserveData, ...snapcompactResult.preserveData };
 			} else {
-				const liveModel = this.#model;
-				const candidates = this.#getCompactionModelCandidates(
-					availableModels,
-					method === "remote" && !effectiveSettings.remoteEndpoint && liveModel
-						? candidate => canUseLiveProviderNativeCompaction(candidate, liveModel, effectiveSettings)
-						: undefined,
-				);
 				const retrySettings = cfgRetry.get(this.#host.settings);
-				const telemetry = resolveTelemetry(this.#host.agent.telemetry, this.#host.sessionId());
-				let compactResult: CompactionResult | undefined;
-				let lastError: unknown;
-				let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
-				codexCompaction = createCodexCompactionContext({
-					trigger: "auto",
-					reason: "context_limit",
-					phase:
-						options.phase ??
-						(reason === "threshold" ? "pre_turn" : reason === "idle" ? "standalone_turn" : "mid_turn"),
-				});
-
-				for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
-					const candidate = candidates[candidateIndex];
-					const hasMoreCandidates = candidateIndex < candidates.length - 1;
-					const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
-					if (!apiKey) continue;
-					if (
-						nativeCompactionFailure &&
-						(candidate.provider !== nativeCompactionFailure.provider ||
-							!shouldUseProviderNativeCompaction(candidate, preparation.settings))
-					) {
-						throw nativeCompactionFailure.error;
-					}
-
-					let attempt = 0;
-					while (true) {
-						try {
-							compactResult = await compact(
-								this.#host.obfuscatePreparationForProvider(preparation),
-								candidate,
-								this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
-								undefined,
-								autoCompactionSignal,
-								{
-									promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
-									extraContext: compactionPrep.hookContext,
-									remoteSystemPrompt: this.#host.agent.state.systemPrompt,
-									metadata: this.#host.agent.metadataForProvider(candidate.provider),
-									initiatorOverride: "agent",
-									convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
-									buildProviderContext: (summarized, retained, signal, model) =>
-										this.#host.buildLiveProviderContext(summarized, retained, signal, model),
-									isUserAuthored: isUserAuthoredMessage,
-									telemetry,
-									// Honor the user's /model thinking selection on the
-									// auto-compaction path — the most-fired compaction
-									// site. Clamped per-model inside compact() via
-									// resolveCompactionEffort.
-									thinkingLevel: this.#host.thinkingLevel(),
-									tools: this.#host.agent.state.tools,
-									sessionId: this.#host.sessionId(),
-									// Same key split as the manual callsite in
-									// #compactWithFallbackModel.
-									promptCacheKey: this.#host.getPromptCacheKeyForModel(candidate),
-									remotePromptCacheKey: this.#host.getPromptCacheKeyForModel(
-										remoteCompactionPolicyModel(candidate),
-									),
-									providerSessionState: this.#host.providerSessionState,
-									preferWebsockets: this.#host.preferWebsockets(candidate),
-									codexAccessPrograms: cfgProvidersOpenaiCodexDaybreak.get(this.#host.settings),
-									codexCompaction,
-									// This loop already retries the whole compaction attempt on
-									// transient errors, so the summarization oneshots must not
-									// retry too — the budgets would multiply and each outer
-									// wait would stack on top of an inner backoff.
-									oneshotRetry: false,
-								},
-							);
-							break;
-						} catch (error) {
-							if (autoCompactionSignal.aborted) {
-								throw error;
-							}
-
-							const message = error instanceof Error ? error.message : String(error);
-							const id = AIError.classify(
-								error instanceof NativeCompactionError ? error.cause : error,
-								candidate.api,
-							);
-							if (AIError.is(id, AIError.Flag.AuthFailed)) {
-								if (!nativeCompactionFailure) lastError = this.#buildCompactionAuthError();
-								break;
-							}
-							if (AIError.is(id, AIError.Flag.Timeout)) {
-								const nativeFailure = error instanceof NativeCompactionError;
-								logger.warn(
-									nativeFailure
-										? "Provider-native auto-compaction timed out, preserving native failure"
-										: hasMoreCandidates
-											? "Auto-compaction summarization timed out, trying next model"
-											: "Auto-compaction summarization timed out, not retrying same model",
-									{
-										error: message,
-										model: `${candidate.provider}/${candidate.id}`,
-									},
-								);
-								if (nativeFailure) {
-									nativeCompactionFailure ??= { error, provider: candidate.provider };
-									lastError = nativeCompactionFailure.error;
-								} else {
-									lastError = error;
-								}
-								break;
-							}
-
-							const retryAfterMs = this.#host.parseRetryAfterMsFromError(message);
-							// An input the summarizer cannot fit is deterministic: the same
-							// prompt fails identically every attempt, so the retry budget is
-							// pure latency and the next candidate (a larger window) is the
-							// only move that can succeed. Overflow therefore vetoes the
-							// transient/usage-limit arms, which a provider blob can trip on
-							// coincidence alone.
-							const shouldRetry =
-								retrySettings.enabled &&
-								attempt < retrySettings.maxRetries &&
-								!AIError.is(id, AIError.Flag.ContextOverflow) &&
-								(retryAfterMs !== undefined ||
-									AIError.is(id, AIError.Flag.Transient) ||
-									AIError.is(id, AIError.Flag.UsageLimit));
-							if (!shouldRetry) {
-								if (error instanceof NativeCompactionError) {
-									nativeCompactionFailure ??= { error, provider: candidate.provider };
-									lastError = nativeCompactionFailure.error;
-								} else {
-									lastError = error;
-								}
-								break;
-							}
-
-							const baseDelayMs = retrySettings.baseDelayMs * 2 ** attempt;
-							const delayMs = retryAfterMs !== undefined ? Math.max(baseDelayMs, retryAfterMs) : baseDelayMs;
-
-							// With another candidate available, a long wait is not worth it. The
-							// last candidate waits within the user's provider-wait cap
-							// (`retry.maxDelayMs`, 0 = uncapped); past it, the outer method
-							// cascade can still recover or report the failure (#15311).
-							// `retry.waitForUsageReset` opts into sleeping through a provider-
-							// stated usage-limit reset, as turn recovery does: only on the last
-							// candidate, only with the provider's own retry hint, and never
-							// longer than that hint.
-							const waitForUsageReset =
-								!hasMoreCandidates &&
-								retrySettings.waitForUsageReset === true &&
-								AIError.is(id, AIError.Flag.UsageLimit) &&
-								retryAfterMs !== undefined &&
-								delayMs <= retryAfterMs;
-							const maxAcceptableDelayMs = hasMoreCandidates
-								? 30_000
-								: retrySettings.maxDelayMs > 0 && !waitForUsageReset
-									? retrySettings.maxDelayMs
-									: Number.POSITIVE_INFINITY;
-							if (delayMs > maxAcceptableDelayMs) {
-								if (error instanceof NativeCompactionError) {
-									nativeCompactionFailure ??= { error, provider: candidate.provider };
-									lastError = nativeCompactionFailure.error;
-									break;
-								}
-								logger.warn("Auto-compaction retry delay too long, advancing fallback", {
-									delayMs,
-									retryAfterMs,
-									error: message,
-									model: `${candidate.provider}/${candidate.id}`,
-								});
-								lastError = error;
-								break; // Exit retry loop; try the next candidate or preferred method.
-							}
-
-							attempt++;
-							logger.warn("Auto-compaction failed, retrying", {
-								attempt,
-								maxRetries: retrySettings.maxRetries,
-								delayMs,
-								retryAfterMs,
-								error: message,
-								model: `${candidate.provider}/${candidate.id}`,
-							});
-							await scheduler.wait(delayMs, { signal: autoCompactionSignal });
-						}
-					}
-
-					if (compactResult) {
+				let attempt = 0;
+				let compactResult: CompactionResult;
+				while (true) {
+					try {
+						compactResult = await this.#compactWithCurrentModel(preparation, undefined, autoCompactionSignal, {
+							promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
+							extraContext: compactionPrep.hookContext,
+							initiatorOverride: "agent",
+							oneshotRetry: false,
+						});
 						break;
+					} catch (error) {
+						if (autoCompactionSignal.aborted) throw error;
+						const message = error instanceof Error ? error.message : String(error);
+						const id = AIError.classify(error, this.#model?.api);
+						const retryAfterMs = this.#host.parseRetryAfterMsFromError(message);
+						const shouldRetry =
+							retrySettings.enabled &&
+							attempt < retrySettings.maxRetries &&
+							!AIError.is(id, AIError.Flag.ContextOverflow) &&
+							!AIError.is(id, AIError.Flag.AuthFailed) &&
+							!AIError.is(id, AIError.Flag.Timeout) &&
+							(retryAfterMs !== undefined ||
+								AIError.is(id, AIError.Flag.Transient) ||
+								AIError.is(id, AIError.Flag.UsageLimit));
+						if (!shouldRetry) throw error;
+						const baseDelayMs = retrySettings.baseDelayMs * 2 ** attempt;
+						const delayMs = Math.max(baseDelayMs, retryAfterMs ?? 0);
+						const waitForUsageReset =
+							retrySettings.waitForUsageReset === true &&
+							AIError.is(id, AIError.Flag.UsageLimit) &&
+							retryAfterMs !== undefined &&
+							delayMs <= retryAfterMs;
+						if (retrySettings.maxDelayMs > 0 && !waitForUsageReset && delayMs > retrySettings.maxDelayMs)
+							throw error;
+						attempt++;
+						logger.warn("Auto-compaction failed, retrying current model", { attempt, delayMs, error: message });
+						await scheduler.wait(delayMs, { signal: autoCompactionSignal });
 					}
-				}
-
-				if (!compactResult) {
-					if (lastError) {
-						throw lastError;
-					}
-					throw new Error("Compaction failed: no available model");
 				}
 
 				summary = compactResult.summary;
@@ -5796,7 +5194,6 @@ export class SessionMaintenance {
 				tokensBefore = compactResult.tokensBefore;
 				details = compactResult.details;
 				preserveData = mergeLlmCompactionPreserveData(compactionPrep.preserveData, compactResult.preserveData);
-				providerReplayThroughEntryId = compactResult.providerReplayThroughEntryId;
 			}
 
 			const liveTriggerTokensBefore =
@@ -5814,7 +5211,6 @@ export class SessionMaintenance {
 				details,
 				preserveData,
 				method: fromExtension ? undefined : method,
-				providerReplayThroughEntryId,
 			});
 			if (
 				compactionPrep.kind !== "fromHook" &&
@@ -5884,9 +5280,7 @@ export class SessionMaintenance {
 				details,
 				preserveData,
 				fromExtension,
-				codexCompaction,
 				method: fromExtension ? undefined : method,
-				providerReplayThroughEntryId,
 				action,
 				reason,
 				willRetry,
@@ -5977,10 +5371,8 @@ export class SessionMaintenance {
 		details: unknown;
 		preserveData: Record<string, unknown> | undefined;
 		fromExtension: boolean;
-		codexCompaction: CodexCompactionContext | undefined;
 		method: CompactionMethod | undefined;
-		providerReplayThroughEntryId?: string;
-		action: "context-full" | "handoff" | "snapcompact" | "remote";
+		action: "context-full" | "handoff" | "snapcompact";
 		reason: "overflow" | "threshold" | "idle" | "incomplete";
 		willRetry: boolean;
 		generation: number;
@@ -6016,9 +5408,7 @@ export class SessionMaintenance {
 			details: args.details,
 			fromExtension: args.fromExtension,
 			preserveData: args.preserveData,
-			codexCompaction: args.codexCompaction,
 			method: args.method,
-			providerReplayThroughEntryId: args.providerReplayThroughEntryId,
 			advisorResetReason: "auto-compaction",
 			detachExtensionEmit: detachPostCommit,
 		});
@@ -6030,9 +5420,6 @@ export class SessionMaintenance {
 			tokensBefore: args.tokensBefore,
 			details: args.details,
 			preserveData: snapcompact.stripPreservedArchive(args.preserveData),
-			...(args.providerReplayThroughEntryId
-				? { providerReplayThroughEntryId: args.providerReplayThroughEntryId }
-				: {}),
 		};
 		// Post-maintenance progress guard — evaluated BEFORE emitting
 		// auto_compaction_end so the TUI rebuild triggered by that event

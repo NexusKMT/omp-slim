@@ -18,6 +18,7 @@ import {
 	type OneshotRetryOptions,
 	type SimpleStreamOptions,
 	type Usage,
+	type Tool,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { isSurvivingAssistant } from "@oh-my-pi/pi-ai/providers/transform-messages";
@@ -29,12 +30,7 @@ import { ThinkingLevel } from "../thinking";
 import { Tokenizer } from "../tokenizer";
 import type { AgentMessage } from "../types";
 import type { CompactionEntry, SessionEntry } from "./entries";
-import {
-	type ConvertToLlm,
-	createCompactionSummaryMessage,
-	defaultConvertToLlm,
-	getMessageFromEntry,
-} from "./messages";
+import { type ConvertToLlm, defaultConvertToLlm, getMessageFromEntry } from "./messages";
 import autoHandoffThresholdFocusPrompt from "./prompts/auto-handoff-threshold-focus.md" with { type: "text" };
 import compactionShortSummaryPrompt from "./prompts/compaction-short-summary.md" with { type: "text" };
 import compactionSummaryPrompt from "./prompts/compaction-summary.md" with { type: "text" };
@@ -877,6 +873,7 @@ async function summarizeConversationWindow(
 			initiatorOverride: options?.initiatorOverride,
 			metadata: options?.metadata,
 			fetch: options?.fetch,
+			onPayload: options?.onPayload,
 			sessionId: options?.sessionId,
 			promptCacheKey: options?.promptCacheKey,
 		},
@@ -1089,6 +1086,7 @@ async function generateShortSummary(
 				initiatorOverride: options?.initiatorOverride,
 				metadata: options?.metadata,
 				fetch: options?.fetch,
+				onPayload: options?.onPayload,
 				sessionId: options?.sessionId,
 				promptCacheKey: options?.promptCacheKey,
 			},
@@ -1527,6 +1525,7 @@ async function generateTurnPrefixSummary(
 			initiatorOverride: options?.initiatorOverride,
 			metadata: options?.metadata,
 			fetch: options?.fetch,
+			onPayload: options?.onPayload,
 			sessionId: options?.sessionId,
 			promptCacheKey: options?.promptCacheKey,
 		},

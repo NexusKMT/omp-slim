@@ -22,9 +22,6 @@ function createContext(loopMode: SegmentContext["loopMode"]): SegmentContext {
 		goalMode: null,
 		vibeMode: null,
 		vim: null,
-		collab: null,
-		stream: null,
-		recording: false,
 		usageStats: {
 			input: 0,
 			output: 0,
@@ -50,7 +47,6 @@ function createContext(loopMode: SegmentContext["loopMode"]): SegmentContext {
 		activeRepo: null,
 		worktree: null,
 		git: { branch: null, status: null, pr: null },
-		usage: null,
 	};
 }
 

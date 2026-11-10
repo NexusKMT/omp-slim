@@ -263,23 +263,6 @@ function activityClock(timestamp: number): string {
 	}
 	return text;
 }
-/** Result of one host-backed transcript read for the Agent Hub viewer. */
-export interface AgentHubRemoteTranscript {
-	text: string;
-	newSize: number;
-	/** Terminal read failure reported by the host; guests should surface it instead of retrying hot. */
-	error?: string;
-}
-
-/** Guest-side proxy for hub actions executed on the collab host. */
-export interface AgentHubRemote {
-	chat(id: string, text: string): void;
-	kill(id: string): void;
-	revive(id: string): void;
-	/** Mirrors readFileIncremental: text from fromByte (complete JSONL lines), newSize = next fromByte base; null = temporarily unavailable. */
-	readTranscript(id: string, fromByte: number): Promise<AgentHubRemoteTranscript | null>;
-}
-
 export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike> {
 	/** Progress/status snapshot source (task lifecycle + progress channels). */
 	observers: SessionObserverRegistry;
@@ -319,19 +302,16 @@ export interface AgentHubDeps<TRecord extends AgentRecordLike = AgentRecordLike>
 	expandThinkingBlocks?: () => boolean;
 	/** Keys toggling tool output expansion (app.tools.expand). */
 	expandKeys?: KeyId[];
-	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent (collab guest, tests), Enter opens the in-hub chat view instead. */
+	/** Focus the main view on this agent's live session (ctx.focusAgentSession). When absent, Enter opens the in-hub chat view instead. */
 	focusAgent?: (id: string) => Promise<void>;
 	/** Current main session file; used to seed parked historical subagents after restart. */
 	sessionFile?: string | null;
 	/** Initial top-level projection; slash commands deep-link into this surface. */
 	initialSection?: AgentHubSection;
-	/** Unified local or remote activity source. */
+	/** Local activity source. */
 	activity: AgentActivitySource;
 	/** Whether observer progress should update live activity rows. */
 	manageActivityLive?: boolean;
-
-	/** Collab guest: route actions/transcripts to the host instead of local sessions. */
-	remote?: AgentHubRemote;
 }
 
 export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRecordLike>
@@ -350,7 +330,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#unsubscribers: Array<() => void> = [];
 	#ageTimer: NodeJS.Timeout | undefined;
 	#dataChangeTimer?: NodeJS.Timeout;
-	#remote: AgentHubRemote | undefined;
 	#disposed = false;
 	/** Resolves after persisted historical subagents have been registered and rows refreshed. */
 	readonly persistedSubagentsReady: Promise<void>;
@@ -500,8 +479,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			deps.requestRender();
 		};
 		this.#hubKeys = deps.hubKeys;
-		this.#remote = deps.remote;
-		this.#loadingPersistedSubagents = !this.#remote && Boolean(deps.sessionFile?.endsWith(".jsonl"));
+		this.#loadingPersistedSubagents = Boolean(deps.sessionFile?.endsWith(".jsonl"));
 		this.#ui =
 			deps.ui ??
 			({
@@ -528,20 +506,18 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		}, AGE_TICK_MS);
 		this.#ageTimer.unref?.();
 
-		this.persistedSubagentsReady = this.#remote
-			? Promise.resolve()
-			: deps
-					.loadPersisted(() => !this.#disposed)
-					.catch((error: unknown) => {
-						logger.warn("Failed to register persisted subagents", { error });
-					})
-					.finally(() => {
-						if (this.#disposed) return;
-						// Rank what the scan found before its end turns later arrivals into spawns.
-						this.#refreshRows();
-						this.#loadingPersistedSubagents = false;
-						this.#requestRender();
-					});
+		this.persistedSubagentsReady = deps
+			.loadPersisted(() => !this.#disposed)
+			.catch((error: unknown) => {
+				logger.warn("Failed to register persisted subagents", { error });
+			})
+			.finally(() => {
+				if (this.#disposed) return;
+				// Rank what the scan found before its end turns later arrivals into spawns.
+				this.#refreshRows();
+				this.#loadingPersistedSubagents = false;
+				this.#requestRender();
+			});
 		this.#refreshRows();
 	}
 
@@ -657,9 +633,8 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			transcript: this.#transcript,
 			initialEntryId: entryId,
 			registry: this.#registry,
-			remote: this.#remote,
 			observers: this.#observers,
-			lifecycle: this.#remote ? undefined : this.#lifecycle,
+			lifecycle: this.#lifecycle,
 			ui: this.#ui,
 			getTool: this.#getTool,
 			isBuiltInTool: this.#isBuiltInTool,
@@ -1629,7 +1604,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		const generation = ++this.#activitySyncGeneration;
 		const pending: Promise<void>[] = [];
 		for (const ref of refs) {
-			if (!this.#remote && !ref.sessionFile) continue;
+			if (!ref.sessionFile) continue;
 			const stamp = `${ref.sessionFile ?? ""}:${ref.lastActivity}`;
 			if (this.#activitySyncStamp.get(ref.id) === stamp) continue;
 			this.#activitySyncStamp.set(ref.id, stamp);
@@ -2486,15 +2461,14 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	/**
 	 * Enter on a row: focus the main view on the agent's live session and close
 	 * the hub. The transcript then renders through the regular session pipeline —
-	 * exact parity by construction. Collab guests (no local sessions) keep the
-	 * in-hub chat view.
+	 * with the same rendering as the main transcript.
 	 */
 	#activateAgent(ref: TRecord): void {
 		this.#notice = undefined;
 		const focusAgent = this.#focusAgent;
 		// Advisor refs are read-only transcripts with no revivable session; open
 		// the in-hub viewer instead of failing ensureLive.
-		if (ref.kind === "advisor" || this.#remote || !focusAgent) {
+		if (ref.kind === "advisor" || !focusAgent) {
 			this.openChat(ref.id);
 			return;
 		}
@@ -2523,11 +2497,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			return;
 		}
 		this.#notice = undefined;
-		if (this.#remote) {
-			this.#remote.revive(ref.id);
-			this.#requestRender();
-			return;
-		}
 		// Fire-and-forget; failures surface as an inline notice
 		this.#lifecycle()
 			.ensureLive(ref.id)
@@ -2547,12 +2516,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			return;
 		}
 		this.#notice = undefined;
-		if (this.#remote) {
-			this.#remote.kill(ref.id);
-			this.#refreshRows();
-			this.#requestRender();
-			return;
-		}
 		void (async () => {
 			try {
 				if (ref.status === "running" && ref.session) {

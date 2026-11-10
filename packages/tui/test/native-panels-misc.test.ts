@@ -6,8 +6,7 @@ import { AnnotationOverlay } from "../src/overlays/annotation-overlay";
 import { AgentTranscriptViewer, type AgentTranscriptViewerDeps } from "../src/overlays/agent-transcript-viewer";
 import { BtwHistoryPanel } from "../src/overlays/btw-history-panel";
 import type { BtwHistoryRecord } from "../src/overlays/btw-history";
-import { CodexResetFireworksController } from "../src/overlays/codex-reset-fireworks";
-import { type Component, Input, type OverlayHandle, type TUI } from "../src/index";
+import { Input, type TUI } from "../src/index";
 import type { NativeChild, NativeNode, NativeUiEvent } from "../src/native/node";
 import { setNativeRendering } from "../src/native/state";
 import { initTheme, theme } from "../src/theme/theme";
@@ -495,29 +494,5 @@ describe("BtwHistoryPanel native events", () => {
 		// ICU's date/time joiner varies by platform (" at " on macOS, ", " on Linux); pin the date and time, not the glue.
 		expect(metas[1]).toMatch(/^Follow-up · Nov 5, 2026\D+09:15$/);
 		expect(metas[2]).toMatch(/^Follow-up · Nov 5, 2026\D+11:00$/);
-	});
-});
-
-describe("CodexResetFireworks under a native surface", () => {
-	it("does not run the frame repaint loop", () => {
-		vi.useFakeTimers();
-		setNativeRendering(true);
-		let renders = 0;
-		const handle: OverlayHandle = { hide: () => {}, setHidden: () => {}, isHidden: () => false };
-		const controller = new CodexResetFireworksController({
-			ui: {
-				showOverlay: (_component: Component) => handle,
-				setFocus: () => {},
-				requestRender: () => {
-					renders++;
-				},
-				terminal: { rows: 30 },
-			},
-		});
-		expect(controller.show({ kind: "unscheduled-weekly-reset" })).toBe(true);
-		vi.advanceTimersByTime(1_000);
-		controller.dispose();
-		// One paint to show the overlay; no 85ms frame ticks.
-		expect(renders).toBe(1);
 	});
 });

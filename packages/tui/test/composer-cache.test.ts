@@ -16,7 +16,6 @@ function statusFor(thinkingLevel: ThinkingLevel): ComposerStatusCache {
 			thinkingLevel,
 			autoThinking: false,
 			fastMode: false,
-			usingSubscription: true,
 			autoCompactEnabled: true,
 			compactionBoundaries: { thresholdPercent: 80, speculationPercent: null },
 		},

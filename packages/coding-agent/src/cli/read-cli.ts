@@ -19,11 +19,9 @@ import { MCPManager } from "../mcp/manager";
 import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
 import type { AuthStorage } from "../session/auth-storage";
 import type { ToolSession } from "../tools";
-import { parseReadUrlTarget } from "../tools/fetch";
 import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { ReadTool, splitImageQuestionTarget } from "../tools/read";
 import { renderError } from "../tools/tool-errors";
-import { parseXUrl } from "../web/x";
 
 import { cfgDisabledExtensions, cfgExtensions, cfgSkills } from "../extensibility/settings";
 import { cfgMcpEnableProjectConfig } from "../mcp/settings";
@@ -92,12 +90,10 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 			return mcpManager;
 		});
 
-		// Explicit image questions and X reads use only the configured primary model.
-		const urlTarget = parseReadUrlTarget(cmd.path);
-		if (splitImageQuestionTarget(cmd.path).question || (urlTarget && parseXUrl(urlTarget.path))) {
+		// Explicit image questions use the configured primary model.
+		if (splitImageQuestionTarget(cmd.path).question) {
 			authStorage ??= await discoverAuthStorage(undefined, { settings });
 			const modelRegistry = new ModelRegistry(authStorage);
-			await modelRegistry.hydrateCredentialScopedModelCaches();
 			await loadCliExtensionProviders(modelRegistry, settings, cwd);
 			session.modelRegistry = modelRegistry;
 			const model = resolvePrimaryModelSelection(settings, modelRegistry.getAvailable())?.model;

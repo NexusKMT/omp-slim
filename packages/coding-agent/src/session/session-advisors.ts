@@ -3,7 +3,6 @@ import {
 	Agent,
 	type AgentMessage,
 	type AgentTool,
-	type AgentToolContext,
 	AppendOnlyContextManager,
 	type CompactionSummaryMessage,
 	resolveTelemetry,
@@ -12,34 +11,20 @@ import {
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import {
-	canReplayRemoteCompaction,
 	type CompactionResult,
 	compact,
 	compactionContextTokens,
 	createCompactionSummaryMessage,
 	estimateTranscriptTokens,
-	getAnthropicCompactionPayload,
-	isOpenAiRemoteCompactionApi,
-	NativeCompactionError,
 	prepareCompaction,
 	type SessionMessageEntry,
 	shouldCompact,
-	shouldUseProviderNativeCompaction,
 } from "@oh-my-pi/pi-agent-core/compaction";
-import type {
-	AssistantMessage,
-	CodexCompactionContext,
-	Context,
-	Message,
-	Model,
-	ProviderSessionState,
-	ServiceTier,
-	SimpleStreamOptions,
-} from "@oh-my-pi/pi-ai";
-import { isUsageLimitOutcome, resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Context, Message, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
+import { streamSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
-import { extractHttpStatusFromError, logger, prompt } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import {
 	ADVISOR_DEFAULT_BUDGET_PER_UPDATE,
@@ -74,11 +59,8 @@ import {
 import { evictStaleToolResults } from "../advisor/tool-result-eviction";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelString, formatModelStringWithRouting } from "../config/model-resolver";
-import { serviceTierForAllFamilies, serviceTierSettingToTier } from "../config/service-tier";
 import type { Settings } from "../config/settings";
-import { CursorExecHandlers, type CursorMcpResourceAdapter } from "../cursor";
-import { bridgeToolMap } from "../cursor-bridge-tools";
-import { estimateContextToolSchemaTokens } from "@oh-my-pi/pi-tui/status-line/context-usage";
+import { estimateToolSchemaTokens } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import type { PlanModeState } from "../plan-mode/state";
 import advisorBoundaryGuidance from "../prompts/advisor/boundary-guidance.md" with { type: "text" };
 import advisorSystemPrompt from "../prompts/advisor/system.md" with { type: "text" };
@@ -87,10 +69,9 @@ import { resolveThinkingLevelForModel, shouldDisableReasoning, toReasoningEffort
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ClientBridge } from "./client-bridge";
 import { resolveCompactionMethodOrder, resolveMethodSettings } from "./compaction-methods";
-import { type CustomMessage, type CustomMessagePayload, isUserAuthoredMessage, isUserTurnInitiator } from "./messages";
+import { type CustomMessage, type CustomMessagePayload, isUserTurnInitiator } from "./messages";
 import { isAdvisorCard, isTerminalTextAssistantAnswer } from "./queued-messages";
 import { calculateRetryBackoffDelayMs } from "./retry-fallback-chains";
-import { getOpenAiRemoteCompactionPayload } from "./session-context";
 import { formatSessionDumpText } from "./session-dump-format";
 import type { CompactionEntry, SessionEntry } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
@@ -109,107 +90,19 @@ import {
 } from "../advisor/settings";
 import { cfgCompaction } from "./context-settings";
 import { resolveModelCompactionSettings } from "./model-compaction-threshold";
-import { cfgProvidersOpenaiCodexDaybreak, cfgRetry, cfgTierAdvisor } from "./settings";
+import { cfgRetry } from "./settings";
 
-const ADVISOR_CODEX_SSE_MAX_ATTEMPTS = 1;
-
-/**
- * Buffer added to a sibling credential's unblock deadline before the advisor
- * retries, so the next `getApiKey` re-rank sees the block already expired.
- * Mirrors turn-recovery's `SIBLING_UNBLOCK_BUFFER_MS`.
- */
-const ADVISOR_SIBLING_UNBLOCK_BUFFER_MS = 1_000;
-
-/**
- * Decide whether an advisor should wait out a usage-limit block and retry the
- * turn instead of latching {@link AdvisorRuntime}'s permanent quota state.
- *
- * Mirrors the primary turn-recovery wait: a transient credential block (a short
- * provider retry-after / `blockedUntilMs`, or a sibling that frees soon via
- * `retryAtMs`) is waited out; a wait past `retry.maxDelayMs`, an exhausted retry
- * budget, or an error with no authoritative timing at all falls through to the
- * permanent latch (a genuine multi-hour quota window). Uses the block window,
- * not the classification, so a per-minute burst limit misclassified as
- * `QUOTA_EXHAUSTED` still recovers.
- *
- * @returns the wait in ms (≥0) when the advisor should sleep and retry, or
- *   `undefined` when it should decline (latch).
- */
+/** Wait only on an explicit retry hint from this endpoint, bounded by the user's retry policy. */
 export function planAdvisorUsageLimitWait(args: {
-	retryAtMs?: number;
-	blockedUntilMs?: number;
 	retryAfterMs?: number;
-	reportResetAtMs?: number;
-	requestedBlockedUntilMs?: number;
-	priorBlockedUntilMs?: number;
-	priorBlockedUntilTimed?: boolean;
 	retry: { enabled: boolean; baseDelayMs: number; maxDelayMs: number; maxRetries: number };
 	attempt: number;
-	nowMs: number;
 }): number | undefined {
-	const {
-		retryAtMs,
-		blockedUntilMs,
-		retryAfterMs,
-		reportResetAtMs,
-		requestedBlockedUntilMs,
-		priorBlockedUntilMs,
-		priorBlockedUntilTimed,
-		retry,
-		attempt,
-		nowMs,
-	} = args;
-	if (!retry.enabled) return undefined;
-	// A direct compare keeps maxRetries=0 meaning "no retries" (latch immediately),
-	// matching the primary retry path's exhausted-budget semantics.
-	if (attempt >= retry.maxRetries) return undefined;
-	// Retry as soon as either the just-blocked credential frees or a temporarily
-	// blocked sibling does. The sibling's post-deadline buffer makes selection
-	// see an expired block, but does not extend the provider wait budget.
-	let credentialUnblockAtMs: number | undefined;
-	if (retryAfterMs !== undefined) {
-		// Provider-stated retry hint, merged with any longer persisted/shared block.
-		credentialUnblockAtMs = blockedUntilMs ?? nowMs + retryAfterMs;
-	} else if (reportResetAtMs !== undefined) {
-		// A complete usage report is authoritative for a hintless failure and
-		// replaces this call's heuristic block in either direction. Preserve a
-		// prior provider-timed block, which remains independently authoritative.
-		credentialUnblockAtMs = reportResetAtMs;
-		if (
-			priorBlockedUntilTimed === true &&
-			priorBlockedUntilMs !== undefined &&
-			priorBlockedUntilMs > credentialUnblockAtMs
-		) {
-			credentialUnblockAtMs = priorBlockedUntilMs;
-		}
-		if (
-			blockedUntilMs !== undefined &&
-			requestedBlockedUntilMs !== undefined &&
-			blockedUntilMs > requestedBlockedUntilMs &&
-			blockedUntilMs > credentialUnblockAtMs
-		) {
-			// A merged deadline beyond this call's initial block belongs to a
-			// persisted/shared block (or a longer report) that credential
-			// selection still enforces; never wake before it.
-			credentialUnblockAtMs = blockedUntilMs;
-		}
-	}
-	// Hintless with no complete report → blockedUntilMs is only the default
-	// heuristic (e.g. a permanent 402 balance/spend cap). Never wait on it: a
-	// sibling unblock (retryAtMs) may still authorize a wait, otherwise decline
-	// instead of retrying the dead credential until the budget drains.
-	const credentialWaitMs =
-		credentialUnblockAtMs === undefined ? undefined : Math.max(0, credentialUnblockAtMs - nowMs);
-	const siblingWaitMs = retryAtMs === undefined ? undefined : Math.max(0, retryAtMs - nowMs);
-	if (credentialWaitMs === undefined && siblingWaitMs === undefined) return undefined;
-	const retryBackoffMs = calculateRetryBackoffDelayMs(retry.baseDelayMs, attempt + 1);
-	const earliestUnblockMs = Math.min(credentialWaitMs ?? Infinity, siblingWaitMs ?? Infinity);
-	if (retry.maxDelayMs > 0 && Math.max(earliestUnblockMs, retryBackoffMs) > retry.maxDelayMs) return undefined;
-	const providerWaitMs = Math.min(
-		credentialWaitMs ?? Infinity,
-		siblingWaitMs === undefined ? Infinity : siblingWaitMs + ADVISOR_SIBLING_UNBLOCK_BUFFER_MS,
-	);
-	return Math.max(providerWaitMs, retryBackoffMs);
+	const { retryAfterMs, retry, attempt } = args;
+	if (!retry.enabled || attempt >= retry.maxRetries || retryAfterMs === undefined || !Number.isFinite(retryAfterMs))
+		return undefined;
+	const delayMs = Math.max(0, retryAfterMs, calculateRetryBackoffDelayMs(retry.baseDelayMs, attempt + 1));
+	return retry.maxDelayMs > 0 && delayMs > retry.maxDelayMs ? undefined : delayMs;
 }
 /**
  * Header prepended to the merged terminal-boundary delivery, sourced from
@@ -321,15 +214,6 @@ interface ActiveAdvisor {
 	 * 3-strike drop can fire.
 	 */
 	providerWaitRetries: number;
-	/**
-	 * Credential switches spent on the current failing batch, bounded by one
-	 * traversal of `provider`'s account pool. A switch only predicts a free
-	 * sibling; when retries keep landing on the same capped account, the spent
-	 * budget hands recovery to model fallback, a bounded wait, or the quota
-	 * latch (issue #17472). A fallback to another provider starts that provider's
-	 * own budget. Reset with {@link providerWaitRetries}.
-	 */
-	credentialSwitches: { provider: string; count: number } | undefined;
 	signature: string;
 }
 /** First index whose provider usage may anchor the advisor's context estimate. */
@@ -347,13 +231,7 @@ function advisorAnchorSearchStart(messages: readonly AgentMessage[]): number {
 interface AdvisorCompactionSummaryMessage extends CompactionSummaryMessage {
 	firstKeptEntryId?: string;
 	advisorUsageAnchorStartIndex?: number;
-	/**
-	 * Provider-native replay state from `compact()` (e.g. the Anthropic
-	 * compaction block), mirroring entry `preserveData` on the primary
-	 * session. The message payload replays it on later requests; the next
-	 * maintenance run persists it back into the reconstructed entry so the
-	 * following preparation keeps the opaque state and cache continuity.
-	 */
+	/** Extra compaction state retained for local history reconstruction. */
 	preserveData?: CompactionEntry["preserveData"];
 }
 
@@ -387,37 +265,6 @@ export interface AdvisorCatchupOptions {
 export interface SessionAdvisorsOptions {
 	enabled: boolean;
 	tools?: AgentTool[];
-	/**
-	 * Build a `grep` honoring a Cursor `pi_grep` frame's own context width and
-	 * match cap. The advisor's tools are fixed instances carrying session
-	 * defaults, so without this an advisor running against Cursor silently
-	 * drops both fields — the same gap the primary bridge closes.
-	 */
-	createGrepTool?(options: { context?: number; totalMatchLimit?: number }): AgentTool | undefined;
-	/**
-	 * Build the `replace`-mode `edit` a Cursor `pi_edit` frame needs. The
-	 * advisor's own instance follows the configured `edit.mode` (`hashline` by
-	 * default), whose schema the frame's `old_string`/`new_string` args do not
-	 * match, so without this every native advisor edit fails validation.
-	 */
-	createEditTool?(): AgentTool | undefined;
-	/**
-	 * The execute-time context the bridge's tools resolve approval from.
-	 *
-	 * `ExtensionToolWrapper` reads the approval mode, per-tool policies and
-	 * `autoApprove` only from here; with none it fails closed to `always-ask`
-	 * with empty policies (no user grant), so a native frame that needs a
-	 * prompt cannot run unattended.
-	 */
-	getToolContext?: () => AgentToolContext | undefined;
-	/**
-	 * The live MCP connections Cursor's resource frames answer from.
-	 *
-	 * Advisors share the session's connections and may hold tools from those
-	 * same servers, so without this their frames report that every server
-	 * advertises nothing.
-	 */
-	mcpResources?: CursorMcpResourceAdapter;
 	watchdogPrompt?: string;
 	sharedInstructions?: string;
 	sharedMaxNotesPerUpdate?: number;
@@ -447,9 +294,6 @@ export interface SessionAdvisorsHost {
 	modelRegistry: ModelRegistry;
 	yieldQueue: YieldQueue;
 	obfuscator(): SecretObfuscator | undefined;
-	providerSessionState: Map<string, ProviderSessionState>;
-	/** Per-model WebSocket preference from the live transport settings (Codex and standard Responses). */
-	preferWebsockets(model: Model): boolean | undefined;
 	onPayload: SimpleStreamOptions["onPayload"] | undefined;
 	onResponse: SimpleStreamOptions["onResponse"] | undefined;
 	onSseEvent: SimpleStreamOptions["onSseEvent"] | undefined;
@@ -466,15 +310,7 @@ export interface SessionAdvisorsHost {
 	preserveAdvisorCard(card: CustomMessage): void;
 	hasPendingNextTurnMessages(): boolean;
 	convertToLlmForSideRequest(messages: AgentMessage[]): Message[];
-	effectiveServiceTier(model: Model): ServiceTier | undefined;
-	createCodexCompactionContext(options: {
-		trigger: CodexCompactionContext["trigger"];
-		reason: CodexCompactionContext["reason"];
-		phase: CodexCompactionContext["phase"];
-	}): CodexCompactionContext;
 	sessionId(): string;
-	/** Put an advisor's provider session under the primary session's account pools. */
-	restrictOAuthAccounts(providerSessionId: string): void;
 	/** Whether the owning session is the top-level main session or a spawned subagent (`"main"` when omitted). */
 	agentKind?(): "main" | "sub";
 }
@@ -497,10 +333,6 @@ export class SessionAdvisors {
 	readonly #host: SessionAdvisorsHost;
 	#advisorEnabled: boolean;
 	#advisorTools: AgentTool[] | undefined;
-	#advisorCreateGrepTool: SessionAdvisorsOptions["createGrepTool"];
-	#advisorCreateEditTool: SessionAdvisorsOptions["createEditTool"];
-	#advisorGetToolContext: SessionAdvisorsOptions["getToolContext"];
-	#advisorMcpResources: SessionAdvisorsOptions["mcpResources"];
 	#advisorWatchdogPrompt: string | undefined;
 	#advisorSharedInstructions: string | undefined;
 	#advisorSharedMaxNotesPerUpdate: number | undefined;
@@ -513,13 +345,6 @@ export class SessionAdvisors {
 	#advisorStatuses = new Map<string, { name: string; status: AdvisorRuntimeStatus }>();
 	#advisorProviderSessionIds = new Map<string, string>();
 	#advisorCosts = new Map<string, number>();
-	/**
-	 * Slugs whose recorded spend ran on a subscription model. Kept in
-	 * lockstep with {@link #advisorCosts} so {@link isUsingSubscription} can
-	 * attribute historical advisor spend without rescanning the model catalog
-	 * once the advisor runtime is gone (#10131).
-	 */
-	#advisorSubscriptionSlugs = new Set<string>();
 	#advisorRecorderClosed: Promise<void> = Promise.resolve();
 	/** Holds recorder writes behind the active resume-cost byte snapshot. */
 	#advisorCostSnapshotBarrier: Promise<void> | undefined;
@@ -569,10 +394,6 @@ export class SessionAdvisors {
 		this.#host = host;
 		this.#advisorEnabled = options.enabled;
 		this.#advisorTools = options.tools;
-		this.#advisorCreateGrepTool = options.createGrepTool;
-		this.#advisorCreateEditTool = options.createEditTool;
-		this.#advisorGetToolContext = options.getToolContext;
-		this.#advisorMcpResources = options.mcpResources;
 		this.#advisorWatchdogPrompt = options.watchdogPrompt;
 		this.#advisorSharedInstructions = options.sharedInstructions;
 		this.#advisorSharedMaxNotesPerUpdate = options.sharedMaxNotesPerUpdate;
@@ -763,41 +584,11 @@ export class SessionAdvisors {
 	/** Drop the recorded spend once a conversation boundary has committed. */
 	clearCost(): void {
 		this.#advisorCosts.clear();
-		this.#advisorSubscriptionSlugs.clear();
 	}
 
-	/**
-	 * Replace the ledger with the spend recorded for the session becoming active.
-	 * `providersBySlug` (from {@link loadAdvisorTranscriptCosts}) re-derives the
-	 * subscription attribution the torn-down runtime can no longer report.
-	 */
-	restoreCost(costs: ReadonlyMap<string, number>, providersBySlug?: ReadonlyMap<string, ReadonlySet<string>>): void {
+	/** Replace the ledger with spend recorded for the session becoming active. */
+	restoreCost(costs: ReadonlyMap<string, number>): void {
 		this.#advisorCosts = new Map(costs);
-		this.#advisorSubscriptionSlugs = this.#deriveSubscriptionSlugs(costs, providersBySlug);
-	}
-
-	/**
-	 * Slugs whose restored spend ran on a provider currently using subscription
-	 * credentials — the persisted-spend equivalent of the live {@link isUsingSubscription}
-	 * check, so resumed sessions attribute subscription usage without a catalog scan.
-	 */
-	#deriveSubscriptionSlugs(
-		costs: ReadonlyMap<string, number>,
-		providersBySlug: ReadonlyMap<string, ReadonlySet<string>> | undefined,
-	): Set<string> {
-		const slugs = new Set<string>();
-		if (!providersBySlug) return slugs;
-		const auth = this.#host.modelRegistry.authStorage;
-		for (const [slug, providers] of providersBySlug) {
-			if ((costs.get(slug) ?? 0) <= 0) continue;
-			for (const provider of providers) {
-				if (auth.credentials.hasSubscription(provider)) {
-					slugs.add(slug);
-					break;
-				}
-			}
-		}
-		return slugs;
 	}
 
 	/** Capture the current per-advisor spend ledger. */
@@ -836,22 +627,14 @@ export class SessionAdvisors {
 	 * completed while the background scan runs without double-counting entries
 	 * the scan already includes.
 	 */
-	restoreInitialCost(
-		costs: ReadonlyMap<string, number>,
-		costsAtSnapshot: ReadonlyMap<string, number>,
-		providersBySlug?: ReadonlyMap<string, ReadonlySet<string>>,
-	): void {
+	restoreInitialCost(costs: ReadonlyMap<string, number>, costsAtSnapshot: ReadonlyMap<string, number>): void {
 		const restored = new Map(costs);
-		const subscription = this.#deriveSubscriptionSlugs(costs, providersBySlug);
 		for (const [slug, current] of this.#advisorCosts) {
 			const accrued = current - (costsAtSnapshot.get(slug) ?? 0);
 			if (accrued <= 0) continue;
 			restored.set(slug, (restored.get(slug) ?? 0) + accrued);
-			// The delta billed after the snapshot carries its own live attribution.
-			if (this.#advisorSubscriptionSlugs.has(slug)) subscription.add(slug);
 		}
 		this.#advisorCosts = restored;
-		this.#advisorSubscriptionSlugs = subscription;
 	}
 
 	/**
@@ -960,7 +743,6 @@ export class SessionAdvisors {
 			this.#host.sessionId(),
 			slug,
 		);
-		if (providerSessionId) this.#host.restrictOAuthAccounts(providerSessionId);
 		return providerSessionId;
 	}
 
@@ -972,11 +754,7 @@ export class SessionAdvisors {
 		advisor.agent.sessionId = providerSessionId;
 		advisor.agent.promptCacheKey = this.#host.agent.promptCacheKey ?? providerSessionId;
 		advisor.agent.getApiKey = requestModel => this.#host.modelRegistry.resolver(requestModel, providerSessionId);
-		advisor.agent.setMetadataResolver(
-			providerSessionId
-				? provider => buildSessionMetadata(providerSessionId, provider, this.#host.modelRegistry.authStorage)
-				: undefined,
-		);
+		advisor.agent.setMetadataResolver(providerSessionId ? () => buildSessionMetadata(providerSessionId) : undefined);
 
 		const telemetry = advisor.agent.telemetry;
 		if (telemetry?.agent) {
@@ -1010,7 +788,6 @@ export class SessionAdvisors {
 	#resetAdvisorSessionState(preserveCost: boolean): void {
 		if (!preserveCost) {
 			this.#advisorCosts.clear();
-			this.#advisorSubscriptionSlugs.clear();
 		}
 		// Mute the recorder across the re-prime: AdvisorRuntime.reset() aborts the advisor
 		// loop, and that abort can emit an `aborted` message_end we must not attribute to
@@ -1128,8 +905,6 @@ export class SessionAdvisors {
 		const tools = config.tools?.length ? config.tools.join("\u001e") : "";
 		const instructions = config.instructions?.trim() ?? "";
 		const budget = this.#advisorMaxNotesPerUpdate(config);
-		// The service tier is bound at build time, so a `tier.advisor` edit must rebuild.
-		const tier = cfgTierAdvisor.get(this.#host.settings);
 		const scope = config.scope ?? "all";
 		const includeReasoning = config.includeReasoning !== false ? "1" : "0";
 		return [
@@ -1139,7 +914,6 @@ export class SessionAdvisors {
 			tools,
 			instructions,
 			budget,
-			tier,
 			scope,
 			includeReasoning,
 		].join("\u001f");
@@ -1195,15 +969,6 @@ export class SessionAdvisors {
 		// tiers per request (like the main agent, including /fast toggles); a
 		// concrete value is broadcast across families and applied to the advisor
 		// model's family. One value for all advisors.
-		const advisorTierSetting = cfgTierAdvisor.get(this.#host.settings);
-		const advisorTierMap =
-			advisorTierSetting === "inherit"
-				? undefined
-				: serviceTierForAllFamilies(serviceTierSettingToTier(advisorTierSetting));
-		const advisorServiceTierResolver = (model: Model): ServiceTier | undefined =>
-			advisorTierSetting === "inherit"
-				? this.#host.effectiveServiceTier(model)
-				: resolveModelServiceTier(advisorTierMap, model);
 
 		for (const descriptor of descriptors) {
 			const {
@@ -1266,71 +1031,14 @@ export class SessionAdvisors {
 					}
 				: undefined;
 			// Mirror the SDK's provider-shaping options (streamFn/onPayload/...,
-			// providerSessionState, promptCacheKey, transformProviderContext) so each
+			// promptCacheKey, transformProviderContext) so each
 			// advisor's requests cache, route, and obfuscate like the main turn.
 			// `promptCacheKey` preserves an explicitly pinned provider cache key
 			// unchanged so tan/shared-session advisor calls read the exact shard the
 			// parent turn populated. Otherwise the advisor uses its provider UUIDv7 so
-			// Codex request identity remains UUID-shaped while local labels keep the
-			// `-advisor` suffix.
+			// request identity is independent of the display label.
 			const advisorPromptCacheKey = this.#host.agent.promptCacheKey ?? advisorProviderSessionId;
-			// On the Cursor provider every tool runs server-side and is dispatched
-			// back through `cursorExecHandlers`; without this bridge the advisor's
-			// own tools (including the MCP `advise` tool) return `toolNotFound` and
-			// no advice is ever routed (issue #5680). Mirrors the primary agent's
-			// bridge (`sdk.ts`), scoped to this advisor's granted tool set.
-			// Cursor's native `delete` frame removes files directly, bypassing the
-			// tool map, so gate it on the advisor actually holding a file-mutating
-			// tool. A default read-only advisor (advise/read/grep/glob) never gets
-			// to delete workspace files it was never granted (issue #5680 review).
-			const advisorCanMutateFiles = advisorToolMap.has("write") || advisorToolMap.has("edit");
-			// `pi_edit` speaks `replace`'s `old_string`/`new_string` schema, which the
-			// advisor's ordinary `EditTool` (built at the session's configured
-			// `edit.mode`, `hashline` by default) does not accept. The bridge map
-			// swaps in a `replace` instance for the exec channel only — the
-			// advisor's own loop keeps the tool it was given — and only when
-			// `edit` was actually granted.
-			const advisorCursorExecHandlers = new CursorExecHandlers({
-				cwd: this.#host.sessionManager.getCwd(),
-				getCwd: () => this.#host.sessionManager.getCwd(),
-				tools: bridgeToolMap(advisorToolMap, this.#advisorCreateEditTool),
-				// Approval mode, per-tool policies and `autoApprove` live only on
-				// this context; without it every bridge tool fails closed to
-				// `always-ask`.
-				getToolContext: this.#advisorGetToolContext,
-				allowDirectFileMutation: advisorCanMutateFiles,
-				// Gated on the advisor's own grant: the factory builds a fresh
-				// tool, so handing it over unconditionally would give a roster
-				// without `grep` a search tool it was denied.
-				createGrepTool: advisorToolMap.has("grep") ? this.#advisorCreateGrepTool : undefined,
-				// Advisors share the session's live MCP connections, so their
-				// resource frames answer from the same catalog the primary sees.
-				// Not gated on a tool grant: reading what a server advertises is
-				// not the same permission as calling one of its tools.
-				mcpResources: this.#advisorMcpResources,
-			});
-			const baseAdvisorStreamFn = this.#advisorStreamFn ?? streamSimple;
-			const advisorStreamFn: StreamFn = (requestModel, context, streamOptions) => {
-				// Read per request so transport setting changes reach existing advisors.
-				const options = {
-					...streamOptions,
-					preferWebsockets: streamOptions?.preferWebsockets ?? this.#host.preferWebsockets(requestModel),
-				};
-				if (requestModel.api === "openai-codex-responses") {
-					return baseAdvisorStreamFn(requestModel, context, {
-						...options,
-						codexSseMaxAttempts: ADVISOR_CODEX_SSE_MAX_ATTEMPTS,
-					});
-				}
-				if (
-					requestModel.api === "google-generative-ai" ||
-					requestModel.api === "google-gemini-cli" ||
-					requestModel.api === "google-vertex"
-				) {
-					return baseAdvisorStreamFn(requestModel, context, { ...options, acceptEmptyResponse: true });
-				}
-				return baseAdvisorStreamFn(requestModel, context, options);
-			};
+			const advisorStreamFn = this.#advisorStreamFn ?? streamSimple;
 			const advisorAgent = new Agent({
 				initialState: {
 					systemPrompt,
@@ -1341,11 +1049,10 @@ export class SessionAdvisors {
 				appendOnlyContext,
 				sessionId: advisorProviderSessionId,
 				promptCacheKey: advisorPromptCacheKey,
-				providerSessionState: this.#host.providerSessionState,
-				cursorExecHandlers: advisorCursorExecHandlers,
 				cwdResolver: () => this.#host.sessionManager.getCwd(),
 				getApiKey: requestModel => this.#host.modelRegistry.resolver(requestModel, advisorProviderSessionId),
 				streamFn: advisorStreamFn,
+				serviceTierResolver: () => this.#host.agent.serviceTier,
 				// Maintenance installs compactionSummary messages; the core Agent's
 				// default converter drops custom roles and would discard their replay.
 				convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
@@ -1384,8 +1091,6 @@ export class SessionAdvisors {
 					return undefined;
 				},
 				telemetry: advisorTelemetry,
-				serviceTier: undefined,
-				serviceTierResolver: advisorServiceTierResolver,
 			});
 			advisorAgent.setDisableReasoning(shouldDisableReasoning(advisorThinkingLevel));
 			advisorAgent.setModelResolver(model => this.#host.modelRegistry.fitContextWindow(model, this.#host.settings));
@@ -1553,7 +1258,6 @@ export class SessionAdvisors {
 				eligibleUpdates: carried?.get(slug)?.eligibleUpdates ?? 0,
 				pendingCoveredTurn: 0,
 				providerWaitRetries: 0,
-				credentialSwitches: undefined,
 				signature,
 			};
 			this.#refreshAdvisorProviderIdentity(advisorRef);
@@ -1809,11 +1513,6 @@ export class SessionAdvisors {
 	#recordAdvisorCost(advisor: ActiveAdvisor, message: AssistantMessage): void {
 		const cost = message.usage.cost.total;
 		this.#advisorCosts.set(advisor.slug, (this.#advisorCosts.get(advisor.slug) ?? 0) + cost);
-		// Capture credential attribution now so subscription spend survives
-		// the advisor runtime being torn down (#10131).
-		if (cost > 0 && Number.isFinite(cost) && this.#host.modelRegistry.isUsingSubscription(advisor.model)) {
-			this.#advisorSubscriptionSlugs.add(advisor.slug);
-		}
 	}
 
 	/** Subscribe the advisor agent's finalized messages into the transcript recorder.
@@ -1843,14 +1542,6 @@ export class SessionAdvisors {
 			advisor.agent.setDisableReasoning(shouldDisableReasoning(next));
 			advisor.thinkingLevel = next;
 		}
-	}
-
-	#canReplayAdvisorHistory(advisor: ActiveAdvisor, model: Model): boolean {
-		return advisor.agent.state.messages.every(
-			message =>
-				message.role !== "compactionSummary" ||
-				canReplayRemoteCompaction((message as AdvisorCompactionSummaryMessage).preserveData, model),
-		);
 	}
 
 	/** Retry with credentials for this same model, or wait for its provider. */
@@ -1889,98 +1580,18 @@ export class SessionAdvisors {
 			return false;
 		}
 
-		const accountPolicyDenial = AIError.is(errorId, AIError.Flag.AccountPolicy);
-		if (accountPolicyDenial) {
-			const rotation = await this.#host.modelRegistry.authStorage.limits.rotate(
-				currentModel.provider,
-				advisor.providerSessionId,
-				{ error: message, modelId: currentModel.id, signal },
-			);
-			if (rotation.switched && this.#spendCredentialSwitch(advisor, currentModel.provider)) return true;
-		}
-
 		const retryAfterMs = extractProviderRetryHint(currentModel.provider, message);
-		const usageLimit =
-			AIError.is(errorId, AIError.Flag.UsageLimit) ||
-			isUsageLimitOutcome(extractHttpStatusFromError(error), message);
-		let usageRetryAtMs: number | undefined;
-		let usageBlockedUntilMs: number | undefined;
-		let usageRequestedBlockedUntilMs: number | undefined;
-		let usageReportResetAtMs: number | undefined;
-		let usagePriorBlockedUntilMs: number | undefined;
-		let usagePriorBlockedUntilTimed: boolean | undefined;
-		if (usageLimit) {
-			const outcome = await this.#host.modelRegistry.authStorage.limits.markReached(
-				currentModel.provider,
-				advisor.providerSessionId,
-				{
-					retryAfterMs,
-					providerTimed: retryAfterMs !== undefined,
-					baseUrl: currentModel.baseUrl,
-					modelId: currentModel.id,
-					signal,
-				},
-			);
-			if (outcome.switched && this.#spendCredentialSwitch(advisor, currentModel.provider)) return true;
-			usageRetryAtMs = outcome.retryAtMs;
-			usageBlockedUntilMs = outcome.blockedUntilMs;
-			usageRequestedBlockedUntilMs = outcome.requestedBlockedUntilMs;
-			usageReportResetAtMs = outcome.reportResetAtMs;
-			usagePriorBlockedUntilMs = outcome.priorBlockedUntilMs;
-			usagePriorBlockedUntilTimed = outcome.priorBlockedUntilTimed;
-		}
-		// A provider-timed transient rejection (Codex `turn_rate_limit_exceeded`
-		// "Codex is at capacity" with Retry-After) clears on its own: wait out the
-		// stated window like the primary retry loop instead of burning the
-		// runtime's three 1s retries and dropping the batch.
+		const usageLimit = AIError.is(errorId, AIError.Flag.UsageLimit);
 		const timedRateLimit = !usageLimit && retryAfterMs !== undefined && AIError.is(errorId, AIError.Flag.Transient);
-		if (!assistantFailure && !accountPolicyDenial && !usageLimit && !timedRateLimit) return false;
+		if (!usageLimit && !timedRateLimit) return false;
 
 		const retrySettings = cfgRetry.get(this.#host.settings);
-		// A usage-limit or timed rate-limit error with no sibling credential and no
-		// usable model fallback is not automatically fatal: wait out the block and
-		// retry, mirroring the primary turn-recovery. Only a wait past
-		// retry.maxDelayMs / an exhausted budget falls through to the runtime.
-		const waitOrDecline = (): Promise<boolean> =>
-			usageLimit || timedRateLimit
-				? this.#waitOutAdvisorProviderBlock(
-						advisor,
-						retrySettings,
-						usageLimit,
-						{
-							retryAtMs: usageRetryAtMs,
-							blockedUntilMs: usageBlockedUntilMs,
-							requestedBlockedUntilMs: usageRequestedBlockedUntilMs,
-							retryAfterMs,
-							reportResetAtMs: usageReportResetAtMs,
-							priorBlockedUntilMs: usagePriorBlockedUntilMs,
-							priorBlockedUntilTimed: usagePriorBlockedUntilTimed,
-						},
-						signal,
-					)
-				: Promise.resolve(false);
-
-		return waitOrDecline();
+		return this.#waitOutAdvisorProviderBlock(advisor, retrySettings, usageLimit, { retryAfterMs }, signal);
 	}
 
-	/**
-	 * Spend one credential switch from the advisor's one-pool-traversal budget
-	 * (stored accounts minus the failing one), the bound the main agent puts on
-	 * account-policy rotation. Returns false once spent: the auth layer's
-	 * `switched` only says a sibling looks unblocked, not that the next request
-	 * will use it.
-	 */
-	#spendCredentialSwitch(advisor: ActiveAdvisor, provider: string): boolean {
-		const spent = advisor.credentialSwitches?.provider === provider ? advisor.credentialSwitches.count : 0;
-		if (spent >= this.#host.modelRegistry.authStorage.credentials.list(provider).length - 1) return false;
-		advisor.credentialSwitches = { provider, count: spent + 1 };
-		return true;
-	}
-
-	/** Start the next failing batch with fresh provider-wait and credential-switch budgets. */
+	/** Start the next failing batch with a fresh provider-wait budget. */
 	#resetRecoveryBudgets(advisor: ActiveAdvisor): void {
 		advisor.providerWaitRetries = 0;
-		advisor.credentialSwitches = undefined;
 	}
 
 	/**
@@ -1996,28 +1607,13 @@ export class SessionAdvisors {
 		advisor: ActiveAdvisor,
 		retry: { enabled: boolean; baseDelayMs: number; maxDelayMs: number; maxRetries: number },
 		latchesOnDecline: boolean,
-		timing: {
-			retryAtMs?: number;
-			blockedUntilMs?: number;
-			requestedBlockedUntilMs?: number;
-			retryAfterMs?: number;
-			reportResetAtMs?: number;
-			priorBlockedUntilMs?: number;
-			priorBlockedUntilTimed?: boolean;
-		},
+		timing: { retryAfterMs?: number },
 		signal: AbortSignal,
 	): Promise<boolean> {
 		const waitMs = planAdvisorUsageLimitWait({
-			retryAtMs: timing.retryAtMs,
-			blockedUntilMs: timing.blockedUntilMs,
-			requestedBlockedUntilMs: timing.requestedBlockedUntilMs,
 			retryAfterMs: timing.retryAfterMs,
-			reportResetAtMs: timing.reportResetAtMs,
-			priorBlockedUntilMs: timing.priorBlockedUntilMs,
-			priorBlockedUntilTimed: timing.priorBlockedUntilTimed,
 			retry,
 			attempt: advisor.providerWaitRetries,
-			nowMs: Date.now(),
 		});
 		if (waitMs === undefined) {
 			// A wait past retry.maxDelayMs or an exhausted budget. A latching usage
@@ -2074,8 +1670,8 @@ export class SessionAdvisors {
 		if (!configuredCompaction.enabled || methods.length === 0) {
 			return false;
 		}
-		const compactionMethod = methods.includes("remote") ? "remote" : "soft";
-		let advisorModel = agent.state.model;
+		const compactionMethod = "soft";
+		const advisorModel = agent.state.model;
 		const compactionSettings = resolveMethodSettings(
 			resolveModelCompactionSettings(this.#host.settings, advisorModel),
 			compactionMethod,
@@ -2090,15 +1686,13 @@ export class SessionAdvisors {
 		// delta to that arm. Floor it by a full local estimate — fixed advisor system
 		// prompt, tool schemas, stored messages, and incoming delta — so provider
 		// under-reporting or payload transforms cannot suppress maintenance.
-		// Schema overhead depends on the model, so promotion re-evaluates the
-		// local arm against the promoted model's schema policy.
 		const providerContextTokens = this.#estimateAdvisorContextTokens(advisor) + incomingTokens;
 		const fixedPromptTokens = agent.tokenizer.countTokens(agent.state.systemPrompt);
 		const contextTokensFor = (model: Model): number =>
 			compactionContextTokens(
 				providerContextTokens,
 				fixedPromptTokens +
-					estimateContextToolSchemaTokens(agent.state.tools, agent.tokenizer, model, {
+					estimateToolSchemaTokens(agent.state.tools, agent.tokenizer, {
 						sourceRevision: this.#host.settings.revision,
 						pruneDescriptions: agent.prunesToolDescriptions(model),
 					}) +
@@ -2111,18 +1705,6 @@ export class SessionAdvisors {
 			return false;
 		}
 
-		// 1. Try promotion first
-
-		advisorModel = agent.state.model;
-		const previousSummary = messages.findLast(
-			(message): message is AdvisorCompactionSummaryMessage => message.role === "compactionSummary",
-		);
-		const hasNativeHistory = previousSummary?.providerPayload?.type === "openaiResponsesHistory";
-		if (!this.#canReplayAdvisorHistory(advisor, advisorModel)) {
-			throw new NativeCompactionError(new Error("Advisor model cannot replay its native compaction history"));
-		}
-
-		// 2. Run compaction on advisor messages
 		const pathEntries: SessionEntry[] = messages.map((message, i) => {
 			const id = `msg-${i}`;
 			const parentId = i > 0 ? `msg-${i - 1}` : null;
@@ -2155,133 +1737,35 @@ export class SessionAdvisors {
 			} satisfies SessionMessageEntry;
 		});
 
-		let candidates = [advisorModel];
-		if (hasNativeHistory) {
-			candidates = candidates.filter(
-				candidate =>
-					this.#canReplayAdvisorHistory(advisor, candidate) &&
-					shouldUseProviderNativeCompaction(candidate, compactionSettings),
-			);
-		}
-		if (candidates.length === 0) {
-			if (hasNativeHistory) {
-				throw new NativeCompactionError(new Error("No compaction model can preserve advisor native history"));
-			}
-			// No compaction candidates, fallback to re-prime
-			return true;
-		}
 		const advisorProviderSessionId = this.#advisorProviderSessionId(advisor.slug);
-		// Advisors no longer retain the pre-compaction originals. Prepare opaque
-		// history only for an eligible native writer, independently of whether the
-		// advisor reader itself can create a new compaction. Without such a writer,
-		// the empty-candidate failure above preserves the existing history.
-		const preparation = prepareCompaction(
-			pathEntries,
-			compactionSettings,
-			hasNativeHistory ? candidates[0] : advisorModel,
-			agent.tokenizer,
-		);
-		if (!preparation) {
-			if (hasNativeHistory) {
-				throw new NativeCompactionError(new Error("Cannot prepare advisor native history for compaction"));
-			}
-			// Cannot prepare compaction, fallback to re-prime
-			return true;
-		}
-
-		const advisorCompactionThinkingLevel: ThinkingLevel | undefined = agent.state.disableReasoning
-			? ThinkingLevel.Off
-			: agent.state.thinkingLevel;
-
-		// Advisor maintenance uses LLM/native compaction rather than snapcompact's
-		// image renderer, but native creation still requires the remote method.
-
-		let compactResult: CompactionResult | undefined;
-		let lastError: unknown;
-		let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
-		// Instrument the advisor's overflow-compaction one-shot like the primary
-		// compaction path so the advisor model's maintenance call also emits spans.
-		const telemetry = resolveTelemetry(agent.telemetry, advisorProviderSessionId);
-
-		const codexCompaction = this.#host.createCodexCompactionContext({
-			trigger: "auto",
-			reason: "context_limit",
-			phase: "pre_turn",
-		});
-
-		for (const candidate of candidates) {
-			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, advisorProviderSessionId, { signal });
-			if (!apiKey) continue;
-			if (
-				nativeCompactionFailure &&
-				(candidate.provider !== nativeCompactionFailure.provider ||
-					!shouldUseProviderNativeCompaction(candidate, compactionSettings))
-			) {
-				throw nativeCompactionFailure.error;
-			}
-			// A foreign native target can summarize readable history, but its opaque
-			// output cannot replace history consumed by this advisor's active model.
-			const candidatePreparation =
-				candidate.provider === advisorModel.provider && isOpenAiRemoteCompactionApi(advisorModel.api)
-					? preparation
-					: { ...preparation, settings: { ...compactionSettings, remoteEnabled: false } };
-
-			// The advisor overflow-compaction one-shot bypasses the advisor `Agent`,
-			// so its installed metadata resolver never runs. Emit the same
-			// `metadata.user_id` identity here (resolved per candidate provider,
-			// after the session-sticky credential is selected) so summarization
-			// requests carry the advisor session id like every other advisor call
-			// (issue #6625).
-			const advisorMetadata = advisorProviderSessionId
-				? buildSessionMetadata(advisorProviderSessionId, candidate.provider, this.#host.modelRegistry.authStorage)
-				: undefined;
-			try {
-				compactResult = await compact(
-					candidatePreparation,
-					candidate,
-					this.#host.modelRegistry.resolver(candidate, advisorProviderSessionId),
-					undefined,
-					signal,
-					{
-						thinkingLevel: advisorCompactionThinkingLevel,
-						convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
-						isUserAuthored: isUserAuthoredMessage,
-						telemetry,
-						tools: agent.state.tools,
-						// The advisor's own live prompt, so a provider-native compaction
-						// re-issues the advisor's request shape and reads its cached prefix.
-						remoteSystemPrompt: agent.state.systemPrompt,
-						sessionId: advisorProviderSessionId,
-						promptCacheKey: advisorProviderSessionId,
-						metadata: advisorMetadata,
-						providerSessionState: this.#host.providerSessionState,
-						preferWebsockets: this.#host.preferWebsockets(candidate),
-						codexAccessPrograms: cfgProvidersOpenaiCodexDaybreak.get(this.#host.settings),
-						codexCompaction,
+		const preparation = prepareCompaction(pathEntries, compactionSettings, advisorModel, agent.tokenizer);
+		if (!preparation) return true;
+		const apiKey = await this.#host.modelRegistry.getApiKey(advisorModel, advisorProviderSessionId, { signal });
+		if (!apiKey) return true;
+		let compactResult: CompactionResult;
+		try {
+			compactResult = await compact(
+				preparation,
+				advisorModel,
+				this.#host.modelRegistry.resolver(advisorModel, advisorProviderSessionId),
+				undefined,
+				signal,
+				{
+					thinkingLevel: agent.state.disableReasoning ? ThinkingLevel.Off : agent.state.thinkingLevel,
+					convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
+					telemetry: resolveTelemetry(agent.telemetry, advisorProviderSessionId),
+					sessionId: advisorProviderSessionId,
+					promptCacheKey: this.#host.agent.promptCacheKey,
+					metadata: advisorProviderSessionId ? buildSessionMetadata(advisorProviderSessionId) : undefined,
+					completeImpl: async (model, context, options) => {
+						const stream = await (this.#advisorStreamFn ?? streamSimple)(model, context, options);
+						return stream.result();
 					},
-				);
-				break;
-			} catch (error) {
-				if (signal.aborted) throw error;
-				const id = AIError.classify(error, candidate.api);
-				if (error instanceof NativeCompactionError && !AIError.is(id, AIError.Flag.AuthFailed)) {
-					nativeCompactionFailure ??= { error, provider: candidate.provider };
-					lastError = nativeCompactionFailure.error;
-					continue;
-				}
-				lastError = error;
-			}
-		}
-
-		if (!compactResult && nativeCompactionFailure) throw nativeCompactionFailure.error;
-
-		if (!compactResult) {
-			if (hasNativeHistory) {
-				throw new NativeCompactionError(
-					lastError ?? new Error("No compaction model can preserve advisor native history"),
-				);
-			}
-			logger.warn("Advisor compaction failed, falling back to re-prime", { error: String(lastError) });
+				},
+			);
+		} catch (error) {
+			if (signal.aborted) throw error;
+			logger.warn("Advisor compaction failed, falling back to re-prime", { error: String(error) });
 			return true;
 		}
 
@@ -2289,47 +1773,15 @@ export class SessionAdvisors {
 		const shortSummary = compactResult.shortSummary;
 		const firstKeptEntryId = compactResult.firstKeptEntryId;
 		const tokensBefore = compactResult.tokensBefore;
-		const providerPayload = getOpenAiRemoteCompactionPayload(compactResult);
-		if (hasNativeHistory && !providerPayload) {
-			throw new NativeCompactionError(new Error("Compaction result did not preserve advisor native history"));
-		}
-		if (!canReplayRemoteCompaction(compactResult.preserveData, advisorModel)) {
-			throw new NativeCompactionError(new Error("Compaction result cannot be replayed by the advisor model"));
-		}
-		// Native replacement history already contains the retained tail. Replaying
-		// that tail again as raw messages duplicates turns and tool-call IDs. A
-		// prefix-only compaction (`providerReplayThroughEntryId`: the tail could not
-		// fit the window) stops before the tail, so the tail replays as raw messages.
-		const recentMessages =
-			providerPayload && compactResult.providerReplayThroughEntryId === undefined ? [] : preparation.recentMessages;
+		const recentMessages = preparation.recentMessages;
 
 		// The retained messages still carry provider usage from before this
 		// compaction. Record their exact array boundary on the in-memory summary so
 		// only assistants appended afterward can become the next usage anchor.
 		const advisorUsageAnchorStartIndex = recentMessages.length + 1;
-		const anthropicPayload = getAnthropicCompactionPayload(compactResult.preserveData);
-		// A native summary replays its block on later requests, so its rewrite
-		// marker must precede the retained tail: the commit time would make
-		// `historyRewriteAt` newer than the tail and strip its bound thinking
-		// on the very next request. Reuse the previous compaction's marker when
-		// one exists, else sit just before the retained tail. Local summaries
-		// use the commit time, which the summary always keeps as its timestamp.
-		const firstRetained = preparation.recentMessages[0];
-		const historyRewriteAt =
-			anthropicPayload === undefined
-				? undefined
-				: preparation.previousSummaryTimestamp !== undefined
-					? new Date(preparation.previousSummaryTimestamp).getTime()
-					: firstRetained
-						? firstRetained.timestamp - 1
-						: undefined;
 		const summaryMessage = {
 			...createCompactionSummaryMessage(summary, tokensBefore, new Date().toISOString(), {
 				shortSummary,
-				historyRewriteAt,
-				// Carry provider-native replay state on the in-memory summary so
-				// later advisor requests replay it instead of ordinary summary text.
-				providerPayload: anthropicPayload ?? providerPayload,
 			}),
 			firstKeptEntryId,
 			advisorUsageAnchorStartIndex,
@@ -2578,18 +2030,6 @@ export class SessionAdvisors {
 		let cost = 0;
 		for (const advisorCost of this.#advisorCosts.values()) cost += advisorCost;
 		return cost;
-	}
-	/**
-	 * Whether advisor spend should be attributed to a subscription plan.
-	 * With live advisors it reflects their current models; once the runtime is
-	 * gone it consults the attribution recorded as spend accrued, so the status
-	 * line never rescans the model catalog per render (#10131).
-	 */
-	isUsingSubscription(): boolean {
-		if (this.#advisors.length > 0) {
-			return this.#advisors.some(a => this.#host.modelRegistry.isUsingSubscription(a.model));
-		}
-		return this.#advisorSubscriptionSlugs.size > 0;
 	}
 	/**
 	 * Return structured advisor stats for the status command and TUI panel.

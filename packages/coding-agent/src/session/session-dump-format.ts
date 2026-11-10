@@ -9,7 +9,7 @@
  */
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, ToolExample, TSchema } from "@oh-my-pi/pi-ai";
-import { renderDelimitedThinking, renderToolInventory } from "@oh-my-pi/pi-ai/dialect";
+import { renderToolInventory } from "../utils/tool-inventory";
 import { formatDuration } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { YAML } from "bun";
@@ -197,7 +197,7 @@ function appendAssistantContent(lines: string[], content: AssistantMessage["cont
 			if (thinking.length === 0) continue;
 			// Unwrap any literal `<thinking>` envelope already present in the
 			// block (e.g. Opus 4.5 — issue #2700) so the dump never nests tags.
-			lines.push(`${renderDelimitedThinking("<thinking>", "</thinking>", thinking)}\n`);
+			lines.push(`<thinking>\n${thinking}\n</thinking>\n`);
 		} else if (c.type === "toolCall") {
 			lines.push(`### Tool Call: ${c.name}`);
 			const rawArgs = c.arguments as Record<string, unknown> | undefined;

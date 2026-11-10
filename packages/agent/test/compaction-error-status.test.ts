@@ -10,7 +10,7 @@ import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel } from "../../catalog/test/fixtures/models";
 
 // Pins the fix for the "raw 401 surfaced as Compaction failed:" bug.
 //
@@ -81,7 +81,7 @@ function makeAssistantLength(content: AssistantMessage["content"]): AssistantMes
 }
 
 function getAnthropicModel(): Model {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = getTestModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("Expected built-in anthropic/claude-sonnet-4-5 to exist");
 	return model;
 }

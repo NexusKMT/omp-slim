@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import type { ImageContent, Message } from "@oh-my-pi/pi-ai";
-import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { EvalPreludeDefinition } from "@oh-my-pi/pi-coding-agent/eval/preludes";
 import { executeJs } from "@oh-my-pi/pi-coding-agent/eval/js/executor";
@@ -94,8 +93,6 @@ describe("eval prelude runtime", () => {
 			const result = await tool.execute(`frame-fidelity-${language}`, { language, code, timeout: 30 });
 			expect(result.details?.cells?.[0]?.status).toBe("complete");
 			expect(calls).toHaveLength(1);
-			const model = getBundledModels("openai")[0];
-			if (!model) throw new Error("Missing bundled OpenAI model");
 			const messages: Message[] = [
 				{
 					role: "toolResult",
@@ -106,7 +103,7 @@ describe("eval prelude runtime", () => {
 					timestamp: 1,
 				},
 			];
-			const normalized = await normalizeModelContextMessages(messages, model);
+			const normalized = await normalizeModelContextMessages(messages);
 			const message = normalized[0];
 			if (!message || message.role !== "toolResult") throw new Error("Missing provider-bound Eval result");
 			const images = message.content.filter((part): part is ImageContent => part.type === "image");

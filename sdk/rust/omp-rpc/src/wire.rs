@@ -2711,27 +2711,6 @@ impl QueuedMessageQueue {
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum CacheWarmingMode {
-	#[serde(rename = "off")]
-	Off,
-	#[serde(rename = "streaming")]
-	Streaming,
-	#[serde(rename = "idle")]
-	Idle,
-}
-
-impl CacheWarmingMode {
-	/// Wire value.
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Off => "off",
-			Self::Streaming => "streaming",
-			Self::Idle => "idle",
-		}
-	}
-}
-
 /// `set_event_filter` projection: `delta` replaces the accumulated snapshots with the block a start/end event touches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MessageUpdates {
@@ -3017,85 +2996,6 @@ pub struct GoalResult {
 	pub state: Option<GoalModeState>,
 }
 
-/// Where `/slow` lives: persisted config shared by every session, or this session's flex tier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum SlowModeScope {
-	#[serde(rename = "session")]
-	Session,
-	#[serde(rename = "global")]
-	Global,
-}
-
-impl SlowModeScope {
-	/// Wire value.
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Session => "session",
-			Self::Global => "global",
-		}
-	}
-}
-
-/// Requests are served on the provider's low-priority (slow) lane.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UsageLimitLowPriority {
-	/// Epoch seconds when the limit that was hit resets.
-	#[serde(rename = "resetsAtSec")]
-	pub resets_at_sec: f64,
-	/// Percent of the low-priority allowance still available, when reported.
-	#[serde(rename = "allowanceLeftPercent", default, skip_serializing_if = "Option::is_none")]
-	pub allowance_left_percent: Option<i64>,
-}
-
-/// Requests run on a short wrap-up allowance past the limit.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UsageLimitWrapUp {
-	/// Whether paid extra usage serves requests once the allowance is spent.
-	#[serde(rename = "extraUsage")]
-	pub extra_usage: bool,
-	/// Epoch seconds when the limit that was hit resets, if reported.
-	#[serde(rename = "resetsAtSec", default, skip_serializing_if = "Option::is_none")]
-	pub resets_at_sec: Option<f64>,
-}
-
-/// Provider-neutral state of an account past its usage limit, discriminated by `stage`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum UsageLimitState {
-	/// Requests are served on the provider's low-priority (slow) lane.
-	LowPriority(UsageLimitLowPriority),
-	/// Requests run on a short wrap-up allowance past the limit.
-	WrapUp(UsageLimitWrapUp),
-}
-
-impl UsageLimitState {
-	/// Decodes from JSON, dispatching on `stage`.
-	pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-		let decode: fn(Value) -> Result<Self, serde_json::Error> = match value.get("stage").and_then(Value::as_str) {
-			Some("low_priority") => |value| serde_json::from_value(value).map(Self::LowPriority),
-			Some("wrap_up") => |value| serde_json::from_value(value).map(Self::WrapUp),
-			other => {
-				return Err(serde_json::Error::custom(format!("unknown UsageLimitState stage {other:?}")));
-			}
-		};
-		decode(value)
-	}
-}
-
-impl Serialize for UsageLimitState {
-	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		match self {
-			Self::LowPriority(member) => serialize_tagged(member, &[("stage", "low_priority")], serializer),
-			Self::WrapUp(member) => serialize_tagged(member, &[("stage", "wrap_up")], serializer),
-		}
-	}
-}
-
-impl<'de> Deserialize<'de> for UsageLimitState {
-	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-		Self::from_value(Value::deserialize(deserializer)?).map_err(D::Error::custom)
-	}
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionState {
 	#[serde(rename = "sessionId")]
@@ -3124,18 +3024,6 @@ pub struct SessionState {
 	pub fast_mode_enabled: bool,
 	#[serde(rename = "fastModeActive", default = "default_session_state_fast_mode_active")]
 	pub fast_mode_active: bool,
-	/// `/slow` applies to the active model.
-	#[serde(rename = "slowModeSupported", default = "default_session_state_slow_mode_supported")]
-	pub slow_mode_supported: bool,
-	/// `/slow` is on for the active model; always `false` when `slowModeSupported` is `false`.
-	#[serde(rename = "slowModeEnabled", default = "default_session_state_slow_mode_enabled")]
-	pub slow_mode_enabled: bool,
-	/// Where the active model's `/slow` lives; absent when unsupported.
-	#[serde(rename = "slowModeScope", default, skip_serializing_if = "Option::is_none")]
-	pub slow_mode_scope: Option<SlowModeScope>,
-	/// Usage-limit stage of the active model's account; absent outside wrap-up and low priority.
-	#[serde(rename = "usageLimit", default, skip_serializing_if = "Option::is_none")]
-	pub usage_limit: Option<UsageLimitState>,
 	#[serde(rename = "tokensPerSecond", default = "default_session_state_tokens_per_second")]
 	pub tokens_per_second: Option<f64>,
 	#[serde(rename = "messageCount", default = "default_session_state_message_count")]
@@ -3638,48 +3526,6 @@ impl AutoCompactionAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum CacheWarmingPhase {
-	#[serde(rename = "streaming")]
-	Streaming,
-	#[serde(rename = "idle")]
-	Idle,
-}
-
-impl CacheWarmingPhase {
-	/// Wire value.
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Streaming => "streaming",
-			Self::Idle => "idle",
-		}
-	}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum CacheWarmingOutcome {
-	#[serde(rename = "hit")]
-	Hit,
-	#[serde(rename = "miss")]
-	Miss,
-	#[serde(rename = "error")]
-	Error,
-	#[serde(rename = "aborted")]
-	Aborted,
-}
-
-impl CacheWarmingOutcome {
-	/// Wire value.
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Hit => "hit",
-			Self::Miss => "miss",
-			Self::Error => "error",
-			Self::Aborted => "aborted",
-		}
-	}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NotifyType {
 	#[serde(rename = "info")]
 	Info,
@@ -3879,29 +3725,6 @@ pub struct AutoRetryEndEvent {
 	pub retry_errors: Vec<Map<String, Value>>,
 }
 
-/// A prompt-cache refresh was handed to the provider.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CacheWarmingStartEvent {
-	pub phase: CacheWarmingPhase,
-	pub provider: String,
-	pub model: String,
-}
-
-/// Outcome of the refresh announced by the matching `cache_warming_start`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CacheWarmingEndEvent {
-	pub phase: CacheWarmingPhase,
-	pub provider: String,
-	pub model: String,
-	pub outcome: CacheWarmingOutcome,
-	/// Present only when the refresh was billed.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub usage: Option<Usage>,
-	/// Why warming stopped; absent while it continues.
-	#[serde(rename = "warmingStopReason", default, skip_serializing_if = "Option::is_none")]
-	pub warming_stop_reason: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RetryFallbackAppliedEvent {
 	pub from: String,
@@ -4014,10 +3837,6 @@ pub enum RpcAgentEvent {
 	ManualCompactionEnd(ManualCompactionEndEvent),
 	AutoRetryStart(AutoRetryStartEvent),
 	AutoRetryEnd(AutoRetryEndEvent),
-	/// A prompt-cache refresh was handed to the provider.
-	CacheWarmingStart(CacheWarmingStartEvent),
-	/// Outcome of the refresh announced by the matching `cache_warming_start`.
-	CacheWarmingEnd(CacheWarmingEndEvent),
 	RetryFallbackApplied(RetryFallbackAppliedEvent),
 	RetryFallbackSucceeded(RetryFallbackSucceededEvent),
 	ModelChanged(ModelChangedEvent),
@@ -4059,8 +3878,6 @@ impl RpcAgentEvent {
 			Some("manual_compaction_end") => |value| serde_json::from_value(value).map(Self::ManualCompactionEnd),
 			Some("auto_retry_start") => |value| serde_json::from_value(value).map(Self::AutoRetryStart),
 			Some("auto_retry_end") => |value| serde_json::from_value(value).map(Self::AutoRetryEnd),
-			Some("cache_warming_start") => |value| serde_json::from_value(value).map(Self::CacheWarmingStart),
-			Some("cache_warming_end") => |value| serde_json::from_value(value).map(Self::CacheWarmingEnd),
 			Some("retry_fallback_applied") => |value| serde_json::from_value(value).map(Self::RetryFallbackApplied),
 			Some("retry_fallback_succeeded") => |value| serde_json::from_value(value).map(Self::RetryFallbackSucceeded),
 			Some("model_changed") => |value| serde_json::from_value(value).map(Self::ModelChanged),
@@ -4103,8 +3920,6 @@ impl Serialize for RpcAgentEvent {
 			Self::ManualCompactionEnd(member) => serialize_tagged(member, &[("type", "manual_compaction_end")], serializer),
 			Self::AutoRetryStart(member) => serialize_tagged(member, &[("type", "auto_retry_start")], serializer),
 			Self::AutoRetryEnd(member) => serialize_tagged(member, &[("type", "auto_retry_end")], serializer),
-			Self::CacheWarmingStart(member) => serialize_tagged(member, &[("type", "cache_warming_start")], serializer),
-			Self::CacheWarmingEnd(member) => serialize_tagged(member, &[("type", "cache_warming_end")], serializer),
 			Self::RetryFallbackApplied(member) => serialize_tagged(member, &[("type", "retry_fallback_applied")], serializer),
 			Self::RetryFallbackSucceeded(member) => serialize_tagged(member, &[("type", "retry_fallback_succeeded")], serializer),
 			Self::ModelChanged(member) => serialize_tagged(member, &[("type", "model_changed")], serializer),
@@ -5005,7 +4820,7 @@ impl RpcNotification {
 			Some("session_info_update") => |value| serde_json::from_value(value).map(Self::SessionInfoUpdate),
 			Some("config_update") => |value| serde_json::from_value(value).map(Self::ConfigUpdate),
 			Some("rpc_frame_error") => |value| serde_json::from_value(value).map(Self::RpcFrameError),
-			Some("agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "manual_compaction_start" | "manual_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcAgentEvent),
+			Some("agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "manual_compaction_start" | "manual_compaction_end" | "auto_retry_start" | "auto_retry_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcAgentEvent),
 			_ => |value| Ok(Self::Unknown(value)),
 		};
 		decode(value)
@@ -5061,7 +4876,7 @@ impl RpcServerFrame {
 		let decode: fn(Value) -> Result<Self, serde_json::Error> = match value.get("type").and_then(Value::as_str) {
 			Some("response") => |value| serde_json::from_value(value).map(Self::Response),
 			Some("host_tool_call" | "host_tool_cancel" | "host_uri_request" | "host_uri_cancel") => |value| serde_json::from_value(value).map(Self::RpcHostRequest),
-			Some("ready" | "prompt_result" | "session_settled" | "extension_error" | "extension_ui_request" | "available_commands_update" | "subagent_lifecycle" | "subagent_progress" | "subagent_event" | "btw_delta" | "btw_record" | "command_output" | "session_info_update" | "config_update" | "rpc_frame_error" | "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "manual_compaction_start" | "manual_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcNotification),
+			Some("ready" | "prompt_result" | "session_settled" | "extension_error" | "extension_ui_request" | "available_commands_update" | "subagent_lifecycle" | "subagent_progress" | "subagent_event" | "btw_delta" | "btw_record" | "command_output" | "session_info_update" | "config_update" | "rpc_frame_error" | "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "manual_compaction_start" | "manual_compaction_end" | "auto_retry_start" | "auto_retry_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcNotification),
 			_ => |value| Ok(Self::Unknown(value)),
 		};
 		decode(value)
@@ -5160,16 +4975,6 @@ pub struct OpenSessionParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetFastModeParams {
-	pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetSlowModeParams {
-	pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetSlowModeResult {
 	pub enabled: bool,
 }
 
@@ -5343,16 +5148,6 @@ pub struct SetAutoCompactionParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetCacheWarmingParams {
-	pub mode: CacheWarmingMode,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetCacheWarmingResult {
-	pub mode: CacheWarmingMode,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetAutoRetryParams {
 	pub enabled: bool,
 }
@@ -5374,17 +5169,6 @@ pub struct GetSessionLeaseParams {
 pub struct GetSessionLeaseResult {
 	pub held: Vec<String>,
 	pub unknown: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExportHtmlParams {
-	#[serde(rename = "outputPath", default, skip_serializing_if = "Option::is_none")]
-	pub output_path: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExportHtmlResult {
-	pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -5876,14 +5660,6 @@ fn default_session_state_fast_mode_active() -> bool {
 	serde_json::from_str("false").expect("valid wire default")
 }
 
-fn default_session_state_slow_mode_supported() -> bool {
-	serde_json::from_str("false").expect("valid wire default")
-}
-
-fn default_session_state_slow_mode_enabled() -> bool {
-	serde_json::from_str("false").expect("valid wire default")
-}
-
 fn default_session_state_tokens_per_second() -> Option<f64> {
 	serde_json::from_str("null").expect("valid wire default")
 }
@@ -6171,22 +5947,6 @@ impl Command for SetFastModeCommand {
 
 	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
 		serde_json::from_value::<FastModeResult>(data.unwrap_or_else(|| Value::Object(Map::new())))
-	}
-}
-
-/// Turn `/slow` on or off for the active model; returns whether it is now on.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetSlowModeCommand {
-	pub enabled: bool,
-}
-
-impl Command for SetSlowModeCommand {
-	const NAME: &'static str = "set_slow_mode";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = bool;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<SetSlowModeResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.enabled)
 	}
 }
 
@@ -6605,22 +6365,6 @@ impl Command for SetAutoCompactionCommand {
 	}
 }
 
-/// Override cache warming for this session only; returns the effective mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetCacheWarmingCommand {
-	pub mode: CacheWarmingMode,
-}
-
-impl Command for SetCacheWarmingCommand {
-	const NAME: &'static str = "set_cache_warming";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = CacheWarmingMode;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<SetCacheWarmingResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.mode)
-	}
-}
-
 /// Enable or disable auto-retry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetAutoRetryCommand {
@@ -6714,23 +6458,6 @@ impl Command for GetSessionLeaseCommand {
 
 	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
 		serde_json::from_value::<GetSessionLeaseResult>(data.unwrap_or_else(|| Value::Object(Map::new())))
-	}
-}
-
-/// Export the session as HTML; returns the written path.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct ExportHtmlCommand {
-	#[serde(rename = "outputPath", default, skip_serializing_if = "Option::is_none")]
-	pub output_path: Option<String>,
-}
-
-impl Command for ExportHtmlCommand {
-	const NAME: &'static str = "export_html";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = String;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<ExportHtmlResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.path)
 	}
 }
 

@@ -11,7 +11,6 @@ import { previewLine, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-ut
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AdvisorMessageDetails } from "../../advisor";
 import { InternalUrlRouter } from "../../internal-urls";
-import { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "../../collab/protocol";
 import { settings } from "../../config/settings";
 import { continuesConversation } from "./conversation-position";
 import { createAdvisorMessageCard } from "@oh-my-pi/pi-tui/chat/advisor-message";
@@ -21,7 +20,6 @@ import { createBackgroundTanDispatchBlock } from "@oh-my-pi/pi-tui/chat/backgrou
 import { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-execution";
 import { detectCacheInvalidation } from "@oh-my-pi/pi-tui/chat/cache-invalidation-marker";
 import { ServedModelTracker } from "@oh-my-pi/pi-tui/chat/served-model-marker";
-import { CollabPromptMessageComponent } from "@oh-my-pi/pi-tui/chat/collab-prompt-message";
 import {
 	BranchSummaryMessageComponent,
 	CompactionSummaryMessageComponent,
@@ -353,11 +351,6 @@ export class UiHelpers {
 					if (message.customType === LAUNCH_COMPLETION_MESSAGE_TYPE) {
 						const component = new PresentedBlock(buildLaunchCompletionBlock(message), messageBlock(message));
 						component.setExpanded(this.ctx.toolOutputExpanded);
-						this.ctx.chatContainer.addChild(component);
-						break;
-					}
-					if (message.customType === COLLAB_PROMPT_MESSAGE_TYPE) {
-						const component = new CollabPromptMessageComponent(message as CustomMessage<CollabPromptDetails>);
 						this.ctx.chatContainer.addChild(component);
 						break;
 					}

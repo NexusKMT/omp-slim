@@ -230,18 +230,6 @@ export const cfgCompactionHandoffSaveToDisk = register({
 	},
 });
 
-export const cfgCompactionRemoteStreamingV2Enabled = register({
-	id: "compaction.remoteStreamingV2Enabled",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "context",
-		group: "Compaction",
-		label: "Remote Compaction V2",
-		description: "Use Responses streaming compaction for compatible remote compaction models",
-	},
-});
-
 export const cfgCompactionAsyncEnabled = register({
 	id: "compaction.asyncEnabled",
 	type: "boolean",
@@ -272,18 +260,6 @@ export const cfgCompactionKeepRecentTokens = register({
 });
 
 export const cfgCompactionAutoContinue = register({ id: "compaction.autoContinue", type: "boolean", default: true });
-
-export const cfgCompactionRemoteEndpoint = register({
-	id: "compaction.remoteEndpoint",
-	type: "string",
-	default: undefined,
-});
-
-export const cfgCompactionV2RetainedMessageBudget = register({
-	id: "compaction.v2RetainedMessageBudget",
-	type: "number",
-	default: 64000,
-});
 
 // Idle compaction
 export const cfgCompactionIdleEnabled = register({
@@ -380,9 +356,6 @@ export const cfgCompaction = combine({
 	asyncEnabled: cfgCompactionAsyncEnabled,
 	handoffSaveToDisk: cfgCompactionHandoffSaveToDisk,
 	autoContinue: cfgCompactionAutoContinue,
-	remoteEndpoint: cfgCompactionRemoteEndpoint,
-	remoteStreamingV2Enabled: cfgCompactionRemoteStreamingV2Enabled,
-	v2RetainedMessageBudget: cfgCompactionV2RetainedMessageBudget,
 	idleEnabled: cfgCompactionIdleEnabled,
 	idleThresholdTokens: cfgCompactionIdleThresholdTokens,
 	idleTimeoutSeconds: cfgCompactionIdleTimeoutSeconds,

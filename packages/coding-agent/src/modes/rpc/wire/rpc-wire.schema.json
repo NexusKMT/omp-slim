@@ -153,17 +153,6 @@
 				"clientOmit": []
 			},
 			{
-				"name": "set_slow_mode",
-				"doc": "Turn `/slow` on or off for the active model; returns whether it is now on.",
-				"params": "SetSlowModeParams",
-				"result": "SetSlowModeResult",
-				"nullable": false,
-				"unwrap": "enabled",
-				"timeoutMs": null,
-				"completion": null,
-				"clientOmit": []
-			},
-			{
 				"name": "goal",
 				"doc": "Read or change goal mode with the lifecycle of the interactive `/goal` command.",
 				"params": "GoalParams",
@@ -271,9 +260,7 @@
 				"unwrap": "events",
 				"timeoutMs": null,
 				"completion": null,
-				"clientOmit": [
-					"messageUpdates"
-				]
+				"clientOmit": ["messageUpdates"]
 			},
 			{
 				"name": "get_subagents",
@@ -441,17 +428,6 @@
 				"clientOmit": []
 			},
 			{
-				"name": "set_cache_warming",
-				"doc": "Override cache warming for this session only; returns the effective mode.",
-				"params": "SetCacheWarmingParams",
-				"result": "SetCacheWarmingResult",
-				"nullable": false,
-				"unwrap": "mode",
-				"timeoutMs": null,
-				"completion": null,
-				"clientOmit": []
-			},
-			{
 				"name": "set_auto_retry",
 				"doc": "Enable or disable auto-retry.",
 				"params": "SetAutoRetryParams",
@@ -513,17 +489,6 @@
 				"result": "GetSessionLeaseResult",
 				"nullable": false,
 				"unwrap": null,
-				"timeoutMs": null,
-				"completion": null,
-				"clientOmit": []
-			},
-			{
-				"name": "export_html",
-				"doc": "Export the session as HTML; returns the written path.",
-				"params": "ExportHtmlParams",
-				"result": "ExportHtmlResult",
-				"nullable": false,
-				"unwrap": "path",
 				"timeoutMs": null,
 				"completion": null,
 				"clientOmit": []
@@ -741,21 +706,12 @@
 	},
 	"$defs": {
 		"Attribution": {
-			"enum": [
-				"user",
-				"agent"
-			],
+			"enum": ["user", "agent"],
 			"type": "string",
 			"description": "Who initiated a message, for billing and attribution."
 		},
 		"StopReason": {
-			"enum": [
-				"stop",
-				"length",
-				"toolUse",
-				"error",
-				"aborted"
-			],
+			"enum": ["stop", "length", "toolUse", "error", "aborted"],
 			"type": "string"
 		},
 		"TextContent": {
@@ -771,10 +727,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"text"
-			],
+			"required": ["type", "text"],
 			"x-open": true
 		},
 		"ThinkingContent": {
@@ -797,10 +750,7 @@
 					"description": "Prose the model addressed to the user, returned by the provider as thinking; present it as answer text."
 				}
 			},
-			"required": [
-				"type",
-				"thinking"
-			],
+			"required": ["type", "thinking"],
 			"x-open": true
 		},
 		"RedactedThinkingContent": {
@@ -813,10 +763,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"data"
-			],
+			"required": ["type", "data"],
 			"x-open": true
 		},
 		"ImageContent": {
@@ -833,12 +780,7 @@
 					"type": "string"
 				},
 				"detail": {
-					"enum": [
-						"auto",
-						"low",
-						"high",
-						"original"
-					],
+					"enum": ["auto", "low", "high", "original"],
 					"type": "string"
 				},
 				"url": {
@@ -850,11 +792,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"type",
-				"data",
-				"mimeType"
-			],
+			"required": ["type", "data", "mimeType"],
 			"description": "Inline image; also the shape hosts send with prompts.",
 			"x-open": true
 		},
@@ -893,12 +831,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"name",
-				"arguments"
-			],
+			"required": ["type", "id", "name", "arguments"],
 			"x-open": true
 		},
 		"FallbackContent": {
@@ -918,11 +851,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"type",
-				"from",
-				"to"
-			],
+			"required": ["type", "from", "to"],
 			"description": "Anthropic server-side fallback boundary marker; consumers other than Anthropic ignore it.",
 			"x-open": true
 		},
@@ -938,10 +867,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"type",
-				"block"
-			],
+			"required": ["type", "block"],
 			"x-open": true
 		},
 		"UserContent": {
@@ -1012,13 +938,7 @@
 					"type": "number"
 				}
 			},
-			"required": [
-				"input",
-				"output",
-				"cacheRead",
-				"cacheWrite",
-				"total"
-			],
+			"required": ["input", "output", "cacheRead", "cacheWrite", "total"],
 			"x-open": true
 		},
 		"Usage": {
@@ -1072,14 +992,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"input",
-				"output",
-				"cacheRead",
-				"cacheWrite",
-				"totalTokens",
-				"cost"
-			],
+			"required": ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"],
 			"x-open": true
 		},
 		"ParentIrc": {
@@ -1094,10 +1007,7 @@
 					"description": "Message body as the parent wrote it."
 				}
 			},
-			"required": [
-				"from",
-				"body"
-			],
+			"required": ["from", "body"],
 			"description": "Parent-agent IRC message carried by a steer; render it instead of the model-facing `content` envelope.",
 			"x-open": true
 		},
@@ -1137,11 +1047,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"role",
-				"content",
-				"timestamp"
-			],
+			"required": ["role", "content", "timestamp"],
 			"x-open": true
 		},
 		"DeveloperMessage": {
@@ -1171,11 +1077,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"role",
-				"content",
-				"timestamp"
-			],
+			"required": ["role", "content", "timestamp"],
 			"x-open": true
 		},
 		"AssistantMessage": {
@@ -1241,16 +1143,7 @@
 					"type": "number"
 				}
 			},
-			"required": [
-				"role",
-				"content",
-				"api",
-				"provider",
-				"model",
-				"usage",
-				"stopReason",
-				"timestamp"
-			],
+			"required": ["role", "content", "api", "provider", "model", "usage", "stopReason", "timestamp"],
 			"x-open": true
 		},
 		"ToolResultMessage": {
@@ -1288,14 +1181,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"role",
-				"toolCallId",
-				"toolName",
-				"content",
-				"isError",
-				"timestamp"
-			],
+			"required": ["role", "toolCallId", "toolName", "content", "isError", "timestamp"],
 			"x-open": true
 		},
 		"BashExecutionMessage": {
@@ -1337,14 +1223,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"role",
-				"command",
-				"output",
-				"cancelled",
-				"truncated",
-				"timestamp"
-			],
+			"required": ["role", "command", "output", "cancelled", "truncated", "timestamp"],
 			"x-open": true
 		},
 		"PythonExecutionMessage": {
@@ -1380,14 +1259,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"role",
-				"code",
-				"output",
-				"cancelled",
-				"truncated",
-				"timestamp"
-			],
+			"required": ["role", "code", "output", "cancelled", "truncated", "timestamp"],
 			"x-open": true
 		},
 		"CustomMessage": {
@@ -1413,13 +1285,7 @@
 					"$ref": "#/$defs/Attribution"
 				}
 			},
-			"required": [
-				"role",
-				"customType",
-				"content",
-				"display",
-				"timestamp"
-			],
+			"required": ["role", "customType", "content", "display", "timestamp"],
 			"x-open": true
 		},
 		"HookMessage": {
@@ -1445,13 +1311,7 @@
 					"$ref": "#/$defs/Attribution"
 				}
 			},
-			"required": [
-				"role",
-				"customType",
-				"content",
-				"display",
-				"timestamp"
-			],
+			"required": ["role", "customType", "content", "display", "timestamp"],
 			"x-open": true
 		},
 		"BranchSummaryMessage": {
@@ -1470,12 +1330,7 @@
 					"type": "number"
 				}
 			},
-			"required": [
-				"role",
-				"summary",
-				"fromId",
-				"timestamp"
-			],
+			"required": ["role", "summary", "fromId", "timestamp"],
 			"x-open": true
 		},
 		"CompactionSummaryMessage": {
@@ -1508,12 +1363,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"role",
-				"summary",
-				"tokensBefore",
-				"timestamp"
-			],
+			"required": ["role", "summary", "tokensBefore", "timestamp"],
 			"x-open": true
 		},
 		"FileMentionItem": {
@@ -1532,20 +1382,14 @@
 					"type": "integer"
 				},
 				"skippedReason": {
-					"enum": [
-						"tooLarge",
-						"binary"
-					],
+					"enum": ["tooLarge", "binary"],
 					"type": "string"
 				},
 				"image": {
 					"$ref": "#/$defs/ImageContent"
 				}
 			},
-			"required": [
-				"path",
-				"content"
-			],
+			"required": ["path", "content"],
 			"x-open": true
 		},
 		"FileMentionMessage": {
@@ -1564,11 +1408,7 @@
 					"type": "number"
 				}
 			},
-			"required": [
-				"role",
-				"files",
-				"timestamp"
-			],
+			"required": ["role", "files", "timestamp"],
 			"x-open": true
 		},
 		"AgentMessage": {
@@ -1619,10 +1459,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"partial"
-			],
+			"required": ["type", "partial"],
 			"x-open": true
 		},
 		"AssistantTextStartEvent": {
@@ -1638,11 +1475,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "partial"],
 			"x-open": true
 		},
 		"AssistantTextDeltaEvent": {
@@ -1661,12 +1494,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"delta",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "delta", "partial"],
 			"x-open": true
 		},
 		"AssistantTextEndEvent": {
@@ -1685,12 +1513,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"content",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "content", "partial"],
 			"x-open": true
 		},
 		"AssistantThinkingStartEvent": {
@@ -1706,11 +1529,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "partial"],
 			"x-open": true
 		},
 		"AssistantThinkingDeltaEvent": {
@@ -1729,12 +1548,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"delta",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "delta", "partial"],
 			"x-open": true
 		},
 		"AssistantThinkingEndEvent": {
@@ -1753,12 +1567,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"content",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "content", "partial"],
 			"x-open": true
 		},
 		"AssistantImageEndEvent": {
@@ -1777,12 +1586,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"content",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "content", "partial"],
 			"x-open": true
 		},
 		"AssistantToolCallStartEvent": {
@@ -1798,11 +1602,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "partial"],
 			"x-open": true
 		},
 		"AssistantToolCallDeltaEvent": {
@@ -1821,12 +1621,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"delta",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "delta", "partial"],
 			"x-open": true
 		},
 		"AssistantToolCallEndEvent": {
@@ -1845,12 +1640,7 @@
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"contentIndex",
-				"toolCall",
-				"partial"
-			],
+			"required": ["type", "contentIndex", "toolCall", "partial"],
 			"x-open": true
 		},
 		"AssistantDoneEvent": {
@@ -1860,22 +1650,14 @@
 					"const": "done"
 				},
 				"reason": {
-					"enum": [
-						"stop",
-						"length",
-						"toolUse"
-					],
+					"enum": ["stop", "length", "toolUse"],
 					"type": "string"
 				},
 				"message": {
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"reason",
-				"message"
-			],
+			"required": ["type", "reason", "message"],
 			"x-open": true
 		},
 		"AssistantErrorEvent": {
@@ -1885,21 +1667,14 @@
 					"const": "error"
 				},
 				"reason": {
-					"enum": [
-						"aborted",
-						"error"
-					],
+					"enum": ["aborted", "error"],
 					"type": "string"
 				},
 				"error": {
 					"$ref": "#/$defs/AssistantMessage"
 				}
 			},
-			"required": [
-				"type",
-				"reason",
-				"error"
-			],
+			"required": ["type", "reason", "error"],
 			"x-open": true
 		},
 		"AssistantMessageEvent": {
@@ -1947,42 +1722,16 @@
 			"description": "Streaming update for one assistant message, discriminated by `type`."
 		},
 		"Effort": {
-			"enum": [
-				"minimal",
-				"low",
-				"medium",
-				"high",
-				"xhigh",
-				"max"
-			],
+			"enum": ["minimal", "low", "medium", "high", "xhigh", "max"],
 			"type": "string"
 		},
 		"ThinkingLevel": {
-			"enum": [
-				"inherit",
-				"off",
-				"minimal",
-				"low",
-				"medium",
-				"high",
-				"xhigh",
-				"max"
-			],
+			"enum": ["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"],
 			"type": "string",
 			"description": "Thinking selector; `inherit` defers to a higher-level selector."
 		},
 		"ConfiguredThinkingLevel": {
-			"enum": [
-				"auto",
-				"inherit",
-				"off",
-				"minimal",
-				"low",
-				"medium",
-				"high",
-				"xhigh",
-				"max"
-			],
+			"enum": ["auto", "inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"],
 			"type": "string",
 			"description": "User-configured thinking selector, including automatic selection."
 		},
@@ -2002,12 +1751,7 @@
 					"type": "number"
 				}
 			},
-			"required": [
-				"input",
-				"output",
-				"cacheRead",
-				"cacheWrite"
-			],
+			"required": ["input", "output", "cacheRead", "cacheWrite"],
 			"description": "Per-million-token USD rates."
 		},
 		"ThinkingConfig": {
@@ -2059,10 +1803,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"mode",
-				"efforts"
-			]
+			"required": ["mode", "efforts"]
 		},
 		"ModelInfo": {
 			"type": "object",
@@ -2160,115 +1901,53 @@
 			"description": "Model descriptor: the client-relevant subset of the server's model record."
 		},
 		"QueueMode": {
-			"enum": [
-				"all",
-				"one-at-a-time"
-			],
+			"enum": ["all", "one-at-a-time"],
 			"type": "string"
 		},
 		"InterruptMode": {
-			"enum": [
-				"immediate",
-				"wait"
-			],
+			"enum": ["immediate", "wait"],
 			"type": "string"
 		},
 		"StreamingBehavior": {
-			"enum": [
-				"steer",
-				"followUp"
-			],
+			"enum": ["steer", "followUp"],
 			"type": "string"
 		},
 		"QueuedMessageQueue": {
-			"enum": [
-				"steering",
-				"followUp"
-			],
-			"type": "string"
-		},
-		"CacheWarmingMode": {
-			"enum": [
-				"off",
-				"streaming",
-				"idle"
-			],
+			"enum": ["steering", "followUp"],
 			"type": "string"
 		},
 		"MessageUpdates": {
-			"enum": [
-				"full",
-				"delta"
-			],
+			"enum": ["full", "delta"],
 			"type": "string",
 			"description": "`set_event_filter` projection: `delta` replaces the accumulated snapshots with the block a start/end event touches."
 		},
 		"TodoStatus": {
-			"enum": [
-				"pending",
-				"in_progress",
-				"completed",
-				"abandoned",
-				"blocked"
-			],
+			"enum": ["pending", "in_progress", "completed", "abandoned", "blocked"],
 			"type": "string"
 		},
 		"GoalOp": {
-			"enum": [
-				"get",
-				"create",
-				"resume",
-				"pause",
-				"drop"
-			],
+			"enum": ["get", "create", "resume", "pause", "drop"],
 			"type": "string"
 		},
 		"GoalStatus": {
-			"enum": [
-				"active",
-				"paused",
-				"budget-limited",
-				"complete",
-				"dropped"
-			],
+			"enum": ["active", "paused", "budget-limited", "complete", "dropped"],
 			"type": "string"
 		},
 		"SlashCommandSource": {
-			"enum": [
-				"builtin",
-				"skill",
-				"extension",
-				"custom",
-				"mcp_prompt",
-				"file"
-			],
+			"enum": ["builtin", "skill", "extension", "custom", "mcp_prompt", "file"],
 			"type": "string"
 		},
 		"SubagentSubscriptionLevel": {
-			"enum": [
-				"off",
-				"progress",
-				"events"
-			],
+			"enum": ["off", "progress", "events"],
 			"type": "string",
 			"description": "Forwarded subagent frames: none, lifecycle and progress, or also raw session events."
 		},
 		"AgentSource": {
-			"enum": [
-				"bundled",
-				"user",
-				"project"
-			],
+			"enum": ["bundled", "user", "project"],
 			"type": "string"
 		},
 		"SubagentStatus": {
-			"enum": [
-				"pending",
-				"running",
-				"completed",
-				"failed",
-				"aborted"
-			],
+			"enum": ["pending", "running", "completed", "failed", "aborted"],
 			"type": "string"
 		},
 		"TodoItem": {
@@ -2294,10 +1973,7 @@
 					}
 				}
 			},
-			"required": [
-				"content",
-				"status"
-			]
+			"required": ["content", "status"]
 		},
 		"TodoPhase": {
 			"type": "object",
@@ -2312,10 +1988,7 @@
 					}
 				}
 			},
-			"required": [
-				"name",
-				"tasks"
-			]
+			"required": ["name", "tasks"]
 		},
 		"ContextUsage": {
 			"type": "object",
@@ -2330,11 +2003,7 @@
 					"type": "number"
 				}
 			},
-			"required": [
-				"tokens",
-				"contextWindow",
-				"percent"
-			]
+			"required": ["tokens", "contextWindow", "percent"]
 		},
 		"QueuedMessagesState": {
 			"type": "object",
@@ -2357,10 +2026,7 @@
 					"default": 0
 				}
 			},
-			"required": [
-				"steering",
-				"followUp"
-			],
+			"required": ["steering", "followUp"],
 			"description": "Displayable queue-chip text for pending user-authored messages; accepted verbatim by `remove_queued_message`."
 		},
 		"ToolDescriptor": {
@@ -2378,10 +2044,7 @@
 					"items": {}
 				}
 			},
-			"required": [
-				"name",
-				"description"
-			]
+			"required": ["name", "description"]
 		},
 		"Goal": {
 			"type": "object",
@@ -2411,15 +2074,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"id",
-				"objective",
-				"status",
-				"tokensUsed",
-				"timeUsedSeconds",
-				"createdAt",
-				"updatedAt"
-			],
+			"required": ["id", "objective", "status", "tokensUsed", "timeUsedSeconds", "createdAt", "updatedAt"],
 			"description": "A tracked goal: its objective, lifecycle status, and resource accounting."
 		},
 		"GoalModeState": {
@@ -2429,10 +2084,7 @@
 					"type": "boolean"
 				},
 				"mode": {
-					"enum": [
-						"active",
-						"exiting"
-					],
+					"enum": ["active", "exiting"],
 					"type": "string"
 				},
 				"goal": {
@@ -2442,11 +2094,7 @@
 					"const": "completed"
 				}
 			},
-			"required": [
-				"enabled",
-				"mode",
-				"goal"
-			],
+			"required": ["enabled", "mode", "goal"],
 			"description": "Session goal mode; `mode` is `\"exiting\"` while a completed goal unwinds."
 		},
 		"GoalResult": {
@@ -2473,72 +2121,8 @@
 					]
 				}
 			},
-			"required": [
-				"goal",
-				"state"
-			],
+			"required": ["goal", "state"],
 			"description": "Outcome of every `goal` op; both fields are null when the session has no goal."
-		},
-		"SlowModeScope": {
-			"enum": [
-				"session",
-				"global"
-			],
-			"type": "string",
-			"description": "Where `/slow` lives: persisted config shared by every session, or this session's flex tier."
-		},
-		"UsageLimitLowPriority": {
-			"type": "object",
-			"properties": {
-				"stage": {
-					"const": "low_priority"
-				},
-				"resetsAtSec": {
-					"type": "number",
-					"description": "Epoch seconds when the limit that was hit resets."
-				},
-				"allowanceLeftPercent": {
-					"type": "integer",
-					"description": "Percent of the low-priority allowance still available, when reported."
-				}
-			},
-			"required": [
-				"stage",
-				"resetsAtSec"
-			],
-			"description": "Requests are served on the provider's low-priority (slow) lane."
-		},
-		"UsageLimitWrapUp": {
-			"type": "object",
-			"properties": {
-				"stage": {
-					"const": "wrap_up"
-				},
-				"extraUsage": {
-					"type": "boolean",
-					"description": "Whether paid extra usage serves requests once the allowance is spent."
-				},
-				"resetsAtSec": {
-					"type": "number",
-					"description": "Epoch seconds when the limit that was hit resets, if reported."
-				}
-			},
-			"required": [
-				"stage",
-				"extraUsage"
-			],
-			"description": "Requests run on a short wrap-up allowance past the limit."
-		},
-		"UsageLimitState": {
-			"anyOf": [
-				{
-					"$ref": "#/$defs/UsageLimitLowPriority"
-				},
-				{
-					"$ref": "#/$defs/UsageLimitWrapUp"
-				}
-			],
-			"description": "Provider-neutral state of an account past its usage limit, discriminated by `stage`."
 		},
 		"SessionState": {
 			"type": "object",
@@ -2589,24 +2173,6 @@
 				"fastModeActive": {
 					"type": "boolean",
 					"default": false
-				},
-				"slowModeSupported": {
-					"type": "boolean",
-					"description": "`/slow` applies to the active model.",
-					"default": false
-				},
-				"slowModeEnabled": {
-					"type": "boolean",
-					"description": "`/slow` is on for the active model; always `false` when `slowModeSupported` is `false`.",
-					"default": false
-				},
-				"slowModeScope": {
-					"$ref": "#/$defs/SlowModeScope",
-					"description": "Where the active model's `/slow` lives; absent when unsupported."
-				},
-				"usageLimit": {
-					"$ref": "#/$defs/UsageLimitState",
-					"description": "Usage-limit stage of the active model's account; absent outside wrap-up and low priority."
 				},
 				"tokensPerSecond": {
 					"anyOf": [
@@ -2684,9 +2250,7 @@
 					"default": null
 				}
 			},
-			"required": [
-				"sessionId"
-			]
+			"required": ["sessionId"]
 		},
 		"BashResult": {
 			"type": "object",
@@ -2774,15 +2338,7 @@
 					"description": "The embedded shell's final `ShellTrace` of the run; only when the caller asked for one."
 				}
 			},
-			"required": [
-				"output",
-				"cancelled",
-				"truncated",
-				"totalLines",
-				"totalBytes",
-				"outputLines",
-				"outputBytes"
-			]
+			"required": ["output", "cancelled", "truncated", "totalLines", "totalBytes", "outputLines", "outputBytes"]
 		},
 		"LineRange": {
 			"type": "object",
@@ -2794,10 +2350,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"first",
-				"last"
-			]
+			"required": ["first", "last"]
 		},
 		"FastModeResult": {
 			"type": "object",
@@ -2809,10 +2362,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"enabled",
-				"active"
-			]
+			"required": ["enabled", "active"]
 		},
 		"CompactionResult": {
 			"type": "object",
@@ -2839,11 +2389,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"summary",
-				"firstKeptEntryId",
-				"tokensBefore"
-			]
+			"required": ["summary", "firstKeptEntryId", "tokensBefore"]
 		},
 		"ModelCycleResult": {
 			"type": "object",
@@ -2858,10 +2404,7 @@
 					"$ref": "#/$defs/ThinkingLevel"
 				}
 			},
-			"required": [
-				"model",
-				"isScoped"
-			]
+			"required": ["model", "isScoped"]
 		},
 		"ThinkingLevelCycleResult": {
 			"type": "object",
@@ -2870,9 +2413,7 @@
 					"$ref": "#/$defs/Effort"
 				}
 			},
-			"required": [
-				"level"
-			]
+			"required": ["level"]
 		},
 		"CancellationResult": {
 			"type": "object",
@@ -2881,9 +2422,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"cancelled"
-			]
+			"required": ["cancelled"]
 		},
 		"OpenSessionResult": {
 			"type": "object",
@@ -2901,11 +2440,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"cancelled",
-				"resumed",
-				"sessionId"
-			],
+			"required": ["cancelled", "resumed", "sessionId"],
 			"description": "`open_session` outcome; `resumed` is false when a fresh session was started."
 		},
 		"RemoveQueuedMessageResult": {
@@ -2926,9 +2461,7 @@
 					"description": "Only ever `true`: the images exceeded the transport limit and were omitted; the removal still happened."
 				}
 			},
-			"required": [
-				"removed"
-			]
+			"required": ["removed"]
 		},
 		"PromoteQueuedMessageResult": {
 			"type": "object",
@@ -2937,9 +2470,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"promoted"
-			]
+			"required": ["promoted"]
 		},
 		"RestoredQueuedMessage": {
 			"type": "object",
@@ -2954,9 +2485,7 @@
 					}
 				}
 			},
-			"required": [
-				"text"
-			],
+			"required": ["text"],
 			"description": "Queued user content withdrawn from the queue, as the editor would restore it."
 		},
 		"AbortAndRestoreQueueResult": {
@@ -2983,10 +2512,7 @@
 					"description": "Only ever `true`: even the text-only result exceeded the limit, so only an oldest-first prefix is listed."
 				}
 			},
-			"required": [
-				"steering",
-				"followUp"
-			],
+			"required": ["steering", "followUp"],
 			"description": "User-authored queued input withdrawn before the abort, oldest first."
 		},
 		"BranchMessage": {
@@ -2999,10 +2525,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"entryId",
-				"text"
-			]
+			"required": ["entryId", "text"]
 		},
 		"BranchResult": {
 			"type": "object",
@@ -3014,10 +2537,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"text",
-				"cancelled"
-			]
+			"required": ["text", "cancelled"]
 		},
 		"NavigateTreeResult": {
 			"type": "object",
@@ -3034,9 +2554,7 @@
 					"description": "The target was a user message: its text, for the editor; the leaf moved to its parent."
 				}
 			},
-			"required": [
-				"cancelled"
-			]
+			"required": ["cancelled"]
 		},
 		"TokenUsage": {
 			"type": "object",
@@ -3061,13 +2579,7 @@
 					"default": 0
 				}
 			},
-			"required": [
-				"input",
-				"output",
-				"cacheRead",
-				"cacheWrite",
-				"total"
-			]
+			"required": ["input", "output", "cacheRead", "cacheWrite", "total"]
 		},
 		"SessionCredits": {
 			"type": "object",
@@ -3082,11 +2594,7 @@
 					"type": "number"
 				}
 			},
-			"required": [
-				"cost",
-				"committedCost",
-				"acuCost"
-			]
+			"required": ["cost", "committedCost", "acuCost"]
 		},
 		"SessionStats": {
 			"type": "object",
@@ -3172,10 +2680,7 @@
 					"description": "Opaque cursor for the next page; absent on the last page."
 				}
 			},
-			"required": [
-				"messages",
-				"totalMessages"
-			]
+			"required": ["messages", "totalMessages"]
 		},
 		"SlashCommandInput": {
 			"type": "object",
@@ -3198,9 +2703,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"name"
-			]
+			"required": ["name"]
 		},
 		"AvailableSlashCommand": {
 			"type": "object",
@@ -3230,10 +2733,7 @@
 					}
 				}
 			},
-			"required": [
-				"name",
-				"source"
-			]
+			"required": ["name", "source"]
 		},
 		"SessionEntries": {
 			"type": "object",
@@ -3257,10 +2757,7 @@
 					]
 				}
 			},
-			"required": [
-				"entries",
-				"leafId"
-			],
+			"required": ["entries", "leafId"],
 			"description": "OMP-native session entries in append order."
 		},
 		"SessionTree": {
@@ -3285,10 +2782,7 @@
 					]
 				}
 			},
-			"required": [
-				"tree",
-				"leafId"
-			],
+			"required": ["tree", "leafId"],
 			"description": "Raw session tree roots."
 		},
 		"SubagentSnapshot": {
@@ -3334,14 +2828,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"id",
-				"index",
-				"agent",
-				"agentSource",
-				"status",
-				"lastUpdate"
-			]
+			"required": ["id", "index", "agent", "agentSource", "status", "lastUpdate"]
 		},
 		"SubagentMessages": {
 			"type": "object",
@@ -3375,24 +2862,11 @@
 					}
 				}
 			},
-			"required": [
-				"sessionFile",
-				"fromByte",
-				"nextByte",
-				"reset",
-				"entries",
-				"messages"
-			],
+			"required": ["sessionFile", "fromByte", "nextByte", "reset", "entries", "messages"],
 			"description": "Incremental subagent transcript read."
 		},
 		"BtwStatus": {
-			"enum": [
-				"running",
-				"complete",
-				"cancelled",
-				"error",
-				"interrupted"
-			],
+			"enum": ["running", "complete", "cancelled", "error", "interrupted"],
 			"type": "string",
 			"description": "Side-question turn lifecycle; `interrupted` marks a turn whose process died while it ran."
 		},
@@ -3425,13 +2899,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"question",
-				"answer",
-				"status",
-				"createdAt",
-				"updatedAt"
-			],
+			"required": ["question", "answer", "status", "createdAt", "updatedAt"],
 			"description": "One question and its answer within a side-question topic."
 		},
 		"BtwHistoryRecord": {
@@ -3482,15 +2950,7 @@
 					}
 				}
 			},
-			"required": [
-				"question",
-				"answer",
-				"status",
-				"createdAt",
-				"updatedAt",
-				"id",
-				"leafId"
-			],
+			"required": ["question", "answer", "status", "createdAt", "updatedAt", "id", "leafId"],
 			"description": "A side-question topic: its first turn's fields plus follow-ups; the latest turn is the last follow-up, else the record."
 		},
 		"LoginProvider": {
@@ -3509,12 +2969,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"id",
-				"name",
-				"available",
-				"authenticated"
-			]
+			"required": ["id", "name", "available", "authenticated"]
 		},
 		"LogoutAccount": {
 			"type": "object",
@@ -3532,24 +2987,14 @@
 					"type": "string"
 				},
 				"type": {
-					"enum": [
-						"api_key",
-						"oauth"
-					],
+					"enum": ["api_key", "oauth"],
 					"type": "string"
 				},
 				"active": {
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"credentialId",
-				"provider",
-				"label",
-				"detail",
-				"type",
-				"active"
-			],
+			"required": ["credentialId", "provider", "label", "detail", "type", "active"],
 			"description": "A stored credential `logout` can remove; `active` marks credentials the session may be using."
 		},
 		"HandoffResult": {
@@ -3570,46 +3015,15 @@
 			"description": "`agentInvoked: false` means the prompt completed locally and no `prompt_result` follows."
 		},
 		"AutoCompactionReason": {
-			"enum": [
-				"threshold",
-				"overflow",
-				"idle",
-				"incomplete"
-			],
+			"enum": ["threshold", "overflow", "idle", "incomplete"],
 			"type": "string"
 		},
 		"AutoCompactionAction": {
-			"enum": [
-				"context-full",
-				"remote",
-				"handoff",
-				"shake",
-				"snapcompact"
-			],
-			"type": "string"
-		},
-		"CacheWarmingPhase": {
-			"enum": [
-				"streaming",
-				"idle"
-			],
-			"type": "string"
-		},
-		"CacheWarmingOutcome": {
-			"enum": [
-				"hit",
-				"miss",
-				"error",
-				"aborted"
-			],
+			"enum": ["context-full", "remote", "handoff", "shake", "snapcompact"],
 			"type": "string"
 		},
 		"NotifyType": {
-			"enum": [
-				"info",
-				"warning",
-				"error"
-			],
+			"enum": ["info", "warning", "error"],
 			"type": "string"
 		},
 		"AgentStartEvent": {
@@ -3626,9 +3040,7 @@
 					"description": "Calls of an unpaired assistant tail a continued run executes before its first model request."
 				}
 			},
-			"required": [
-				"type"
-			]
+			"required": ["type"]
 		},
 		"AgentEndEvent": {
 			"type": "object",
@@ -3670,10 +3082,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"type",
-				"messages"
-			]
+			"required": ["type", "messages"]
 		},
 		"TurnStartEvent": {
 			"type": "object",
@@ -3682,9 +3091,7 @@
 					"const": "turn_start"
 				}
 			},
-			"required": [
-				"type"
-			]
+			"required": ["type"]
 		},
 		"TurnEndEvent": {
 			"type": "object",
@@ -3702,11 +3109,7 @@
 					}
 				}
 			},
-			"required": [
-				"type",
-				"message",
-				"toolResults"
-			]
+			"required": ["type", "message", "toolResults"]
 		},
 		"MessageStartEvent": {
 			"type": "object",
@@ -3722,10 +3125,7 @@
 					"description": "Shared by the start, updates, and end of one message; unique per process."
 				}
 			},
-			"required": [
-				"type",
-				"message"
-			]
+			"required": ["type", "message"]
 		},
 		"MessageUpdateEvent": {
 			"type": "object",
@@ -3744,11 +3144,7 @@
 					"description": "Shared by the start, updates, and end of one message; unique per process."
 				}
 			},
-			"required": [
-				"type",
-				"message",
-				"assistantMessageEvent"
-			]
+			"required": ["type", "message", "assistantMessageEvent"]
 		},
 		"MessageEndEvent": {
 			"type": "object",
@@ -3764,10 +3160,7 @@
 					"description": "Shared by the start, updates, and end of one message; unique per process."
 				}
 			},
-			"required": [
-				"type",
-				"message"
-			]
+			"required": ["type", "message"]
 		},
 		"ToolExecutionStartEvent": {
 			"type": "object",
@@ -3786,11 +3179,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"toolCallId",
-				"toolName"
-			]
+			"required": ["type", "toolCallId", "toolName"]
 		},
 		"ToolExecutionUpdateEvent": {
 			"type": "object",
@@ -3807,11 +3196,7 @@
 				"args": {},
 				"partialResult": {}
 			},
-			"required": [
-				"type",
-				"toolCallId",
-				"toolName"
-			]
+			"required": ["type", "toolCallId", "toolName"]
 		},
 		"ToolStreamUpdateEvent": {
 			"type": "object",
@@ -3827,11 +3212,7 @@
 				},
 				"update": {}
 			},
-			"required": [
-				"type",
-				"toolCallId",
-				"toolName"
-			]
+			"required": ["type", "toolCallId", "toolName"]
 		},
 		"ToolExecutionEndEvent": {
 			"type": "object",
@@ -3850,11 +3231,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"type",
-				"toolCallId",
-				"toolName"
-			]
+			"required": ["type", "toolCallId", "toolName"]
 		},
 		"AutoCompactionStartEvent": {
 			"type": "object",
@@ -3869,11 +3246,7 @@
 					"$ref": "#/$defs/AutoCompactionAction"
 				}
 			},
-			"required": [
-				"type",
-				"reason",
-				"action"
-			]
+			"required": ["type", "reason", "action"]
 		},
 		"AutoCompactionEndEvent": {
 			"type": "object",
@@ -3901,12 +3274,7 @@
 					"description": "Compaction was skipped for a benign reason."
 				}
 			},
-			"required": [
-				"type",
-				"action",
-				"aborted",
-				"willRetry"
-			]
+			"required": ["type", "action", "aborted", "willRetry"]
 		},
 		"ManualCompactionStartEvent": {
 			"type": "object",
@@ -3919,9 +3287,7 @@
 					"description": "The `/compact <mode>` subcommand, when one was given."
 				}
 			},
-			"required": [
-				"type"
-			],
+			"required": ["type"],
 			"description": "A manual compaction (`compact` command, `/compact`, extension `ctx.compact()`) began; the live turn is already aborted."
 		},
 		"ManualCompactionEndEvent": {
@@ -3946,10 +3312,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"aborted"
-			],
+			"required": ["type", "aborted"],
 			"description": "Outcome of the compaction announced by the matching `manual_compaction_start`."
 		},
 		"AutoRetryStartEvent": {
@@ -3974,13 +3337,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"type",
-				"attempt",
-				"maxAttempts",
-				"delayMs",
-				"errorMessage"
-			]
+			"required": ["type", "attempt", "maxAttempts", "delayMs", "errorMessage"]
 		},
 		"AutoRetryEndEvent": {
 			"type": "object",
@@ -4008,71 +3365,7 @@
 					"default": []
 				}
 			},
-			"required": [
-				"type",
-				"success",
-				"attempt"
-			]
-		},
-		"CacheWarmingStartEvent": {
-			"type": "object",
-			"properties": {
-				"type": {
-					"const": "cache_warming_start"
-				},
-				"phase": {
-					"$ref": "#/$defs/CacheWarmingPhase"
-				},
-				"provider": {
-					"type": "string"
-				},
-				"model": {
-					"type": "string"
-				}
-			},
-			"required": [
-				"type",
-				"phase",
-				"provider",
-				"model"
-			],
-			"description": "A prompt-cache refresh was handed to the provider."
-		},
-		"CacheWarmingEndEvent": {
-			"type": "object",
-			"properties": {
-				"type": {
-					"const": "cache_warming_end"
-				},
-				"phase": {
-					"$ref": "#/$defs/CacheWarmingPhase"
-				},
-				"provider": {
-					"type": "string"
-				},
-				"model": {
-					"type": "string"
-				},
-				"outcome": {
-					"$ref": "#/$defs/CacheWarmingOutcome"
-				},
-				"usage": {
-					"$ref": "#/$defs/Usage",
-					"description": "Present only when the refresh was billed."
-				},
-				"warmingStopReason": {
-					"type": "string",
-					"description": "Why warming stopped; absent while it continues."
-				}
-			},
-			"required": [
-				"type",
-				"phase",
-				"provider",
-				"model",
-				"outcome"
-			],
-			"description": "Outcome of the refresh announced by the matching `cache_warming_start`."
+			"required": ["type", "success", "attempt"]
 		},
 		"RetryFallbackAppliedEvent": {
 			"type": "object",
@@ -4093,12 +3386,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"from",
-				"to",
-				"role"
-			]
+			"required": ["type", "from", "to", "role"]
 		},
 		"RetryFallbackSucceededEvent": {
 			"type": "object",
@@ -4113,11 +3401,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"model",
-				"role"
-			]
+			"required": ["type", "model", "role"]
 		},
 		"ModelChangedEvent": {
 			"type": "object",
@@ -4126,9 +3410,7 @@
 					"const": "model_changed"
 				}
 			},
-			"required": [
-				"type"
-			]
+			"required": ["type"]
 		},
 		"ConfigWarningsChangedEvent": {
 			"type": "object",
@@ -4137,9 +3419,7 @@
 					"const": "config_warnings_changed"
 				}
 			},
-			"required": [
-				"type"
-			]
+			"required": ["type"]
 		},
 		"AdvisorCostChangedEvent": {
 			"type": "object",
@@ -4148,9 +3428,7 @@
 					"const": "advisor_cost_changed"
 				}
 			},
-			"required": [
-				"type"
-			]
+			"required": ["type"]
 		},
 		"AdvisorYieldedEvent": {
 			"type": "object",
@@ -4159,9 +3437,7 @@
 					"const": "advisor_yielded"
 				}
 			},
-			"required": [
-				"type"
-			]
+			"required": ["type"]
 		},
 		"TtsrTriggeredEvent": {
 			"type": "object",
@@ -4178,10 +3454,7 @@
 					}
 				}
 			},
-			"required": [
-				"type",
-				"rules"
-			],
+			"required": ["type", "rules"],
 			"description": "Rule injection: a TTSR rule matched the stream and its text was injected. Each rule carries at least `name`, `path`, and `content`."
 		},
 		"TodoReminderEvent": {
@@ -4203,12 +3476,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"type",
-				"todos",
-				"attempt",
-				"maxAttempts"
-			]
+			"required": ["type", "todos", "attempt", "maxAttempts"]
 		},
 		"TodoAutoClearEvent": {
 			"type": "object",
@@ -4217,9 +3485,7 @@
 					"const": "todo_auto_clear"
 				}
 			},
-			"required": [
-				"type"
-			]
+			"required": ["type"]
 		},
 		"IrcMessageEvent": {
 			"type": "object",
@@ -4231,10 +3497,7 @@
 					"$ref": "#/$defs/CustomMessage"
 				}
 			},
-			"required": [
-				"type",
-				"message"
-			]
+			"required": ["type", "message"]
 		},
 		"NoticeEvent": {
 			"type": "object",
@@ -4252,11 +3515,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"level",
-				"message"
-			]
+			"required": ["type", "level", "message"]
 		},
 		"ThinkingLevelChangedEvent": {
 			"type": "object",
@@ -4276,9 +3535,7 @@
 					"description": "The level `auto` resolved to this turn, once classified."
 				}
 			},
-			"required": [
-				"type"
-			],
+			"required": ["type"],
 			"description": "The effective thinking level changed."
 		},
 		"GoalUpdatedEvent": {
@@ -4301,10 +3558,7 @@
 					"$ref": "#/$defs/GoalModeState"
 				}
 			},
-			"required": [
-				"type",
-				"goal"
-			],
+			"required": ["type", "goal"],
 			"description": "Goal mode changed, by a host `goal` command or the agent's `goal` tool."
 		},
 		"QueueUpdateEvent": {
@@ -4331,11 +3585,7 @@
 					"default": 0
 				}
 			},
-			"required": [
-				"type",
-				"steering",
-				"followUp"
-			],
+			"required": ["type", "steering", "followUp"],
 			"description": "Coalesced snapshot of the displayable steering/follow-up queue, sent whenever it changes."
 		},
 		"RpcAgentEvent": {
@@ -4390,12 +3640,6 @@
 				},
 				{
 					"$ref": "#/$defs/AutoRetryEndEvent"
-				},
-				{
-					"$ref": "#/$defs/CacheWarmingStartEvent"
-				},
-				{
-					"$ref": "#/$defs/CacheWarmingEndEvent"
 				},
 				{
 					"$ref": "#/$defs/RetryFallbackAppliedEvent"
@@ -4468,17 +3712,11 @@
 					"description": "`bash` accepts `excludeFromContext`; require exactly true before sending excluded commands."
 				}
 			},
-			"required": [
-				"type"
-			],
+			"required": ["type"],
 			"description": "First frame after startup; transport fields are absent on servers without protocol v2."
 		},
 		"PromptStatus": {
-			"enum": [
-				"completed",
-				"aborted",
-				"error"
-			],
+			"enum": ["completed", "aborted", "error"],
 			"type": "string"
 		},
 		"PromptError": {
@@ -4505,10 +3743,7 @@
 					"description": "`cost_cap`: the session reached `session.maxCost` (`--max-cost`) and omp did not send the next request."
 				}
 			},
-			"required": [
-				"message",
-				"retryable"
-			],
+			"required": ["message", "retryable"],
 			"description": "Failure detail of a `prompt_result` with `status: \"error\"`."
 		},
 		"PromptResultEvent": {
@@ -4534,12 +3769,7 @@
 					"$ref": "#/$defs/PromptError"
 				}
 			},
-			"required": [
-				"type",
-				"agentInvoked",
-				"status",
-				"sessionSettled"
-			],
+			"required": ["type", "agentInvoked", "status", "sessionSettled"],
 			"description": "Terminal outcome of one accepted `prompt` / `abort_and_prompt`, keyed by request `id`."
 		},
 		"SessionSettledEvent": {
@@ -4549,9 +3779,7 @@
 					"const": "session_settled"
 				}
 			},
-			"required": [
-				"type"
-			],
+			"required": ["type"],
 			"description": "The session went quiet: the last run yielded and no background work can wake it."
 		},
 		"ExtensionError": {
@@ -4570,12 +3798,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"extensionPath",
-				"event",
-				"error"
-			]
+			"required": ["type", "extensionPath", "event", "error"]
 		},
 		"AvailableCommandsUpdateEvent": {
 			"type": "object",
@@ -4590,19 +3813,11 @@
 					}
 				}
 			},
-			"required": [
-				"type",
-				"commands"
-			],
+			"required": ["type", "commands"],
 			"description": "Slash-command catalog, pushed at startup and whenever command metadata changes."
 		},
 		"SubagentLifecycleStatus": {
-			"enum": [
-				"started",
-				"completed",
-				"failed",
-				"aborted"
-			],
+			"enum": ["started", "completed", "failed", "aborted"],
 			"type": "string"
 		},
 		"SubagentLifecyclePayload": {
@@ -4637,13 +3852,7 @@
 					"description": "The subagent runs as a detached background job."
 				}
 			},
-			"required": [
-				"id",
-				"agent",
-				"agentSource",
-				"status",
-				"index"
-			]
+			"required": ["id", "agent", "agentSource", "status", "index"]
 		},
 		"SubagentProgressPayload": {
 			"type": "object",
@@ -4679,13 +3888,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"index",
-				"agent",
-				"agentSource",
-				"task",
-				"progress"
-			]
+			"required": ["index", "agent", "agentSource", "task", "progress"]
 		},
 		"SubagentEventPayload": {
 			"type": "object",
@@ -4698,10 +3901,7 @@
 					"x-unknown-fallback": true
 				}
 			},
-			"required": [
-				"id",
-				"event"
-			]
+			"required": ["id", "event"]
 		},
 		"SubagentLifecycleEvent": {
 			"type": "object",
@@ -4713,10 +3913,7 @@
 					"$ref": "#/$defs/SubagentLifecyclePayload"
 				}
 			},
-			"required": [
-				"type",
-				"payload"
-			],
+			"required": ["type", "payload"],
 			"description": "A subagent started or ended; sent at subscription level \"progress\" or \"events\"."
 		},
 		"SubagentProgressEvent": {
@@ -4729,10 +3926,7 @@
 					"$ref": "#/$defs/SubagentProgressPayload"
 				}
 			},
-			"required": [
-				"type",
-				"payload"
-			],
+			"required": ["type", "payload"],
 			"description": "Aggregated subagent progress; sent at subscription level \"progress\" or \"events\"."
 		},
 		"SubagentEvent": {
@@ -4745,10 +3939,7 @@
 					"$ref": "#/$defs/SubagentEventPayload"
 				}
 			},
-			"required": [
-				"type",
-				"payload"
-			],
+			"required": ["type", "payload"],
 			"description": "A subagent's own session event; sent only at subscription level \"events\"."
 		},
 		"BtwDeltaEvent": {
@@ -4764,11 +3955,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"recordId",
-				"delta"
-			],
+			"required": ["type", "recordId", "delta"],
 			"description": "Text appended to the running side question's latest answer."
 		},
 		"BtwRecordEvent": {
@@ -4781,10 +3968,7 @@
 					"$ref": "#/$defs/BtwHistoryRecord"
 				}
 			},
-			"required": [
-				"type",
-				"record"
-			],
+			"required": ["type", "record"],
 			"description": "Full side-question record on every lifecycle change (started, complete, cancelled, error); the last one per id wins."
 		},
 		"CommandOutputEvent": {
@@ -4797,10 +3981,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"text"
-			],
+			"required": ["type", "text"],
 			"description": "Output of a builtin slash command."
 		},
 		"SessionInfoUpdateEvent": {
@@ -4816,10 +3997,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"sessionId"
-			],
+			"required": ["type", "sessionId"],
 			"description": "A builtin slash command changed the session title."
 		},
 		"ConfigUpdateEvent": {
@@ -4835,9 +4013,7 @@
 					"$ref": "#/$defs/ThinkingLevel"
 				}
 			},
-			"required": [
-				"type"
-			],
+			"required": ["type"],
 			"description": "A builtin slash command changed the model configuration."
 		},
 		"RpcFrameErrorEvent": {
@@ -4853,17 +4029,11 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"error"
-			],
+			"required": ["type", "error"],
 			"description": "An event could not fit within the transport limits and was dropped."
 		},
 		"WidgetPlacement": {
-			"enum": [
-				"aboveEditor",
-				"belowEditor"
-			],
+			"enum": ["aboveEditor", "belowEditor"],
 			"type": "string"
 		},
 		"SelectOptionDetail": {
@@ -4889,9 +4059,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"label"
-			]
+			"required": ["label"]
 		},
 		"AskQuestion": {
 			"type": "object",
@@ -4920,11 +4088,7 @@
 					"description": "Index into `options` of the recommended choice."
 				}
 			},
-			"required": [
-				"id",
-				"question",
-				"options"
-			],
+			"required": ["id", "question", "options"],
 			"description": "One question of an `ask` request; hosts always offer free text besides `options`."
 		},
 		"SelectUiRequest": {
@@ -4958,13 +4122,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"title",
-				"options"
-			]
+			"required": ["type", "id", "method", "title", "options"]
 		},
 		"ConfirmUiRequest": {
 			"type": "object",
@@ -4988,13 +4146,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"title",
-				"message"
-			]
+			"required": ["type", "id", "method", "title", "message"]
 		},
 		"InputUiRequest": {
 			"type": "object",
@@ -5021,12 +4173,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"title"
-			]
+			"required": ["type", "id", "method", "title"]
 		},
 		"EditorUiRequest": {
 			"type": "object",
@@ -5050,12 +4197,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"title"
-			]
+			"required": ["type", "id", "method", "title"]
 		},
 		"AskUiRequest": {
 			"type": "object",
@@ -5079,12 +4221,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"questions"
-			],
+			"required": ["type", "id", "method", "questions"],
 			"description": "Every question of one `ask` tool call; sent only after `set_ask_dialog` enables it."
 		},
 		"CancelUiRequest": {
@@ -5103,12 +4240,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"targetId"
-			],
+			"required": ["type", "id", "method", "targetId"],
 			"description": "Close the dialog opened by request `targetId`; a later answer to it is ignored."
 		},
 		"NotifyUiRequest": {
@@ -5130,12 +4262,7 @@
 					"$ref": "#/$defs/NotifyType"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"message"
-			]
+			"required": ["type", "id", "method", "message"]
 		},
 		"SetStatusUiRequest": {
 			"type": "object",
@@ -5156,12 +4283,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"statusKey"
-			]
+			"required": ["type", "id", "method", "statusKey"]
 		},
 		"SetWidgetUiRequest": {
 			"type": "object",
@@ -5188,12 +4310,7 @@
 					"$ref": "#/$defs/WidgetPlacement"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"widgetKey"
-			]
+			"required": ["type", "id", "method", "widgetKey"]
 		},
 		"SetTitleUiRequest": {
 			"type": "object",
@@ -5211,12 +4328,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"title"
-			]
+			"required": ["type", "id", "method", "title"]
 		},
 		"SetEditorTextUiRequest": {
 			"type": "object",
@@ -5234,12 +4346,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"text"
-			]
+			"required": ["type", "id", "method", "text"]
 		},
 		"OpenUrlUiRequest": {
 			"type": "object",
@@ -5264,12 +4371,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"method",
-				"url"
-			]
+			"required": ["type", "id", "method", "url"]
 		},
 		"ExtensionUiRequest": {
 			"anyOf": [
@@ -5328,10 +4430,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"id",
-				"selectedOptions"
-			],
+			"required": ["id", "selectedOptions"],
 			"description": "Answer to one `ask` question: exact option labels, plus optional free text."
 		},
 		"ValueUiResponse": {
@@ -5347,11 +4446,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"value"
-			],
+			"required": ["type", "id", "value"],
 			"description": "Answers a `select`, `input`, or `editor` request."
 		},
 		"ConfirmUiResponse": {
@@ -5367,11 +4462,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"confirmed"
-			],
+			"required": ["type", "id", "confirmed"],
 			"description": "Answers a `confirm` request."
 		},
 		"CancelUiResponse": {
@@ -5390,11 +4481,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"cancelled"
-			],
+			"required": ["type", "id", "cancelled"],
 			"description": "Dismisses a dialog; `timedOut` reports the host's own deadline (an `ask` then takes its recommended answers)."
 		},
 		"AnswersUiResponse": {
@@ -5413,11 +4500,7 @@
 					}
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"answers"
-			],
+			"required": ["type", "id", "answers"],
 			"description": "Answers an `ask` request: one `AskAnswer` per question, in question order."
 		},
 		"ExtensionUiResponse": {
@@ -5458,13 +4541,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"toolCallId",
-				"toolName",
-				"arguments"
-			]
+			"required": ["type", "id", "toolCallId", "toolName", "arguments"]
 		},
 		"HostToolCancelRequest": {
 			"type": "object",
@@ -5479,11 +4556,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"targetId"
-			]
+			"required": ["type", "id", "targetId"]
 		},
 		"HostToolResultPayload": {
 			"type": "object",
@@ -5507,9 +4580,7 @@
 					"additionalProperties": {}
 				}
 			},
-			"required": [
-				"content"
-			],
+			"required": ["content"],
 			"description": "Tool output: content blocks plus optional details."
 		},
 		"HostToolUpdate": {
@@ -5525,11 +4596,7 @@
 					"$ref": "#/$defs/HostToolResultPayload"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"partialResult"
-			],
+			"required": ["type", "id", "partialResult"],
 			"description": "Streams partial output of a pending host tool call."
 		},
 		"HostToolResult": {
@@ -5548,18 +4615,11 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"result"
-			],
+			"required": ["type", "id", "result"],
 			"description": "Completes a pending host tool call; `isError` surfaces the content as a tool error."
 		},
 		"HostUriOperation": {
-			"enum": [
-				"read",
-				"write"
-			],
+			"enum": ["read", "write"],
 			"type": "string"
 		},
 		"HostUriRequest": {
@@ -5582,12 +4642,7 @@
 					"description": "Present for write operations."
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"operation",
-				"url"
-			]
+			"required": ["type", "id", "operation", "url"]
 		},
 		"HostUriCancelRequest": {
 			"type": "object",
@@ -5602,11 +4657,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id",
-				"targetId"
-			]
+			"required": ["type", "id", "targetId"]
 		},
 		"HostUriResult": {
 			"type": "object",
@@ -5622,11 +4673,7 @@
 					"description": "Required for a successful read."
 				},
 				"contentType": {
-					"enum": [
-						"text/markdown",
-						"application/json",
-						"text/plain"
-					],
+					"enum": ["text/markdown", "application/json", "text/plain"],
 					"type": "string"
 				},
 				"notes": {
@@ -5645,10 +4692,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"type",
-				"id"
-			],
+			"required": ["type", "id"],
 			"description": "Completes a pending host URI request."
 		},
 		"RpcHostRequest": {
@@ -5713,18 +4757,11 @@
 					"description": "Machine-readable failure reason, when one applies."
 				}
 			},
-			"required": [
-				"type",
-				"command",
-				"success"
-			],
+			"required": ["type", "command", "success"],
 			"description": "Response to a command, correlated by `id`."
 		},
 		"ToolLoadMode": {
-			"enum": [
-				"essential",
-				"discoverable"
-			],
+			"enum": ["essential", "discoverable"],
 			"type": "string"
 		},
 		"HostToolDefinition": {
@@ -5754,11 +4791,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"name",
-				"description",
-				"parameters"
-			]
+			"required": ["name", "description", "parameters"]
 		},
 		"HostUriSchemeDefinition": {
 			"type": "object",
@@ -5776,9 +4809,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"scheme"
-			]
+			"required": ["scheme"]
 		},
 		"RpcNotification": {
 			"anyOf": [
@@ -5854,9 +4885,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"protocolVersion"
-			]
+			"required": ["protocolVersion"]
 		},
 		"NegotiateProtocolResult": {
 			"type": "object",
@@ -5865,9 +4894,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"protocolVersion"
-			]
+			"required": ["protocolVersion"]
 		},
 		"PromptParams": {
 			"type": "object",
@@ -5886,9 +4913,7 @@
 					"$ref": "#/$defs/StreamingBehavior"
 				}
 			},
-			"required": [
-				"message"
-			]
+			"required": ["message"]
 		},
 		"SteerParams": {
 			"type": "object",
@@ -5904,9 +4929,7 @@
 					"description": "Images attached to the message."
 				}
 			},
-			"required": [
-				"message"
-			]
+			"required": ["message"]
 		},
 		"FollowUpParams": {
 			"type": "object",
@@ -5922,9 +4945,7 @@
 					"description": "Images attached to the message."
 				}
 			},
-			"required": [
-				"message"
-			]
+			"required": ["message"]
 		},
 		"RemoveQueuedMessageParams": {
 			"type": "object",
@@ -5936,10 +4957,7 @@
 					"$ref": "#/$defs/QueuedMessageQueue"
 				}
 			},
-			"required": [
-				"message",
-				"queue"
-			]
+			"required": ["message", "queue"]
 		},
 		"PromoteQueuedMessageParams": {
 			"type": "object",
@@ -5948,9 +4966,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"message"
-			]
+			"required": ["message"]
 		},
 		"AbortAndPromptParams": {
 			"type": "object",
@@ -5966,9 +4982,7 @@
 					"description": "Images attached to the message."
 				}
 			},
-			"required": [
-				"message"
-			]
+			"required": ["message"]
 		},
 		"NewSessionParams": {
 			"type": "object",
@@ -5991,9 +5005,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"sessionDir"
-			]
+			"required": ["sessionDir"]
 		},
 		"SetFastModeParams": {
 			"type": "object",
@@ -6002,31 +5014,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"enabled"
-			]
-		},
-		"SetSlowModeParams": {
-			"type": "object",
-			"properties": {
-				"enabled": {
-					"type": "boolean"
-				}
-			},
-			"required": [
-				"enabled"
-			]
-		},
-		"SetSlowModeResult": {
-			"type": "object",
-			"properties": {
-				"enabled": {
-					"type": "boolean"
-				}
-			},
-			"required": [
-				"enabled"
-			]
+			"required": ["enabled"]
 		},
 		"GoalParams": {
 			"type": "object",
@@ -6041,9 +5029,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"op"
-			]
+			"required": ["op"]
 		},
 		"SetAskDialogParams": {
 			"type": "object",
@@ -6052,9 +5038,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"enabled"
-			]
+			"required": ["enabled"]
 		},
 		"SetAskDialogResult": {
 			"type": "object",
@@ -6063,9 +5047,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"enabled"
-			]
+			"required": ["enabled"]
 		},
 		"GetAvailableCommandsResult": {
 			"type": "object",
@@ -6077,9 +5059,7 @@
 					}
 				}
 			},
-			"required": [
-				"commands"
-			]
+			"required": ["commands"]
 		},
 		"GetEntriesParams": {
 			"type": "object",
@@ -6099,9 +5079,7 @@
 					}
 				}
 			},
-			"required": [
-				"phases"
-			]
+			"required": ["phases"]
 		},
 		"SetTodosResult": {
 			"type": "object",
@@ -6113,9 +5091,7 @@
 					}
 				}
 			},
-			"required": [
-				"todoPhases"
-			]
+			"required": ["todoPhases"]
 		},
 		"SetHostToolsParams": {
 			"type": "object",
@@ -6127,9 +5103,7 @@
 					}
 				}
 			},
-			"required": [
-				"tools"
-			]
+			"required": ["tools"]
 		},
 		"SetHostToolsResult": {
 			"type": "object",
@@ -6141,9 +5115,7 @@
 					}
 				}
 			},
-			"required": [
-				"toolNames"
-			]
+			"required": ["toolNames"]
 		},
 		"SetHostUriSchemesParams": {
 			"type": "object",
@@ -6155,9 +5127,7 @@
 					}
 				}
 			},
-			"required": [
-				"schemes"
-			]
+			"required": ["schemes"]
 		},
 		"SetHostUriSchemesResult": {
 			"type": "object",
@@ -6169,9 +5139,7 @@
 					}
 				}
 			},
-			"required": [
-				"schemes"
-			]
+			"required": ["schemes"]
 		},
 		"SetSubagentSubscriptionParams": {
 			"type": "object",
@@ -6180,9 +5148,7 @@
 					"$ref": "#/$defs/SubagentSubscriptionLevel"
 				}
 			},
-			"required": [
-				"level"
-			]
+			"required": ["level"]
 		},
 		"SetSubagentSubscriptionResult": {
 			"type": "object",
@@ -6191,9 +5157,7 @@
 					"$ref": "#/$defs/SubagentSubscriptionLevel"
 				}
 			},
-			"required": [
-				"level"
-			]
+			"required": ["level"]
 		},
 		"SetEventFilterParams": {
 			"type": "object",
@@ -6215,9 +5179,7 @@
 					"$ref": "#/$defs/MessageUpdates"
 				}
 			},
-			"required": [
-				"events"
-			]
+			"required": ["events"]
 		},
 		"SetEventFilterResult": {
 			"type": "object",
@@ -6239,9 +5201,7 @@
 					"$ref": "#/$defs/MessageUpdates"
 				}
 			},
-			"required": [
-				"events"
-			]
+			"required": ["events"]
 		},
 		"GetSubagentsResult": {
 			"type": "object",
@@ -6253,9 +5213,7 @@
 					}
 				}
 			},
-			"required": [
-				"subagents"
-			]
+			"required": ["subagents"]
 		},
 		"GetSubagentMessagesParams": {
 			"type": "object",
@@ -6278,9 +5236,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"subagentId"
-			]
+			"required": ["subagentId"]
 		},
 		"CancelSubagentResult": {
 			"type": "object",
@@ -6289,9 +5245,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"cancelled"
-			]
+			"required": ["cancelled"]
 		},
 		"SteerSubagentParams": {
 			"type": "object",
@@ -6303,10 +5257,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"subagentId",
-				"message"
-			]
+			"required": ["subagentId", "message"]
 		},
 		"SetModelParams": {
 			"type": "object",
@@ -6318,10 +5269,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"provider",
-				"modelId"
-			]
+			"required": ["provider", "modelId"]
 		},
 		"GetAvailableModelsResult": {
 			"type": "object",
@@ -6333,9 +5281,7 @@
 					}
 				}
 			},
-			"required": [
-				"models"
-			]
+			"required": ["models"]
 		},
 		"SetThinkingLevelParams": {
 			"type": "object",
@@ -6344,9 +5290,7 @@
 					"$ref": "#/$defs/ThinkingLevel"
 				}
 			},
-			"required": [
-				"level"
-			]
+			"required": ["level"]
 		},
 		"GetAvailableThinkingLevelsResult": {
 			"type": "object",
@@ -6358,9 +5302,7 @@
 					}
 				}
 			},
-			"required": [
-				"levels"
-			]
+			"required": ["levels"]
 		},
 		"SetSteeringModeParams": {
 			"type": "object",
@@ -6369,9 +5311,7 @@
 					"$ref": "#/$defs/QueueMode"
 				}
 			},
-			"required": [
-				"mode"
-			]
+			"required": ["mode"]
 		},
 		"SetFollowUpModeParams": {
 			"type": "object",
@@ -6380,9 +5320,7 @@
 					"$ref": "#/$defs/QueueMode"
 				}
 			},
-			"required": [
-				"mode"
-			]
+			"required": ["mode"]
 		},
 		"SetInterruptModeParams": {
 			"type": "object",
@@ -6391,9 +5329,7 @@
 					"$ref": "#/$defs/InterruptMode"
 				}
 			},
-			"required": [
-				"mode"
-			]
+			"required": ["mode"]
 		},
 		"CompactParams": {
 			"type": "object",
@@ -6410,31 +5346,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"enabled"
-			]
-		},
-		"SetCacheWarmingParams": {
-			"type": "object",
-			"properties": {
-				"mode": {
-					"$ref": "#/$defs/CacheWarmingMode"
-				}
-			},
-			"required": [
-				"mode"
-			]
-		},
-		"SetCacheWarmingResult": {
-			"type": "object",
-			"properties": {
-				"mode": {
-					"$ref": "#/$defs/CacheWarmingMode"
-				}
-			},
-			"required": [
-				"mode"
-			]
+			"required": ["enabled"]
 		},
 		"SetAutoRetryParams": {
 			"type": "object",
@@ -6443,9 +5355,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"enabled"
-			]
+			"required": ["enabled"]
 		},
 		"BashParams": {
 			"type": "object",
@@ -6457,9 +5367,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"command"
-			]
+			"required": ["command"]
 		},
 		"GetSessionLeaseParams": {
 			"type": "object",
@@ -6471,9 +5379,7 @@
 					}
 				}
 			},
-			"required": [
-				"sessionIds"
-			]
+			"required": ["sessionIds"]
 		},
 		"GetSessionLeaseResult": {
 			"type": "object",
@@ -6491,29 +5397,7 @@
 					}
 				}
 			},
-			"required": [
-				"held",
-				"unknown"
-			]
-		},
-		"ExportHtmlParams": {
-			"type": "object",
-			"properties": {
-				"outputPath": {
-					"type": "string"
-				}
-			}
-		},
-		"ExportHtmlResult": {
-			"type": "object",
-			"properties": {
-				"path": {
-					"type": "string"
-				}
-			},
-			"required": [
-				"path"
-			]
+			"required": ["held", "unknown"]
 		},
 		"SwitchSessionParams": {
 			"type": "object",
@@ -6528,9 +5412,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"sessionPath"
-			]
+			"required": ["sessionPath"]
 		},
 		"BranchParams": {
 			"type": "object",
@@ -6539,9 +5421,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"entryId"
-			]
+			"required": ["entryId"]
 		},
 		"ForkParams": {
 			"type": "object",
@@ -6566,9 +5446,7 @@
 					"description": "Instructions for the summarizer."
 				}
 			},
-			"required": [
-				"entryId"
-			]
+			"required": ["entryId"]
 		},
 		"SetLabelParams": {
 			"type": "object",
@@ -6580,9 +5458,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"entryId"
-			]
+			"required": ["entryId"]
 		},
 		"GetBranchMessagesResult": {
 			"type": "object",
@@ -6594,9 +5470,7 @@
 					}
 				}
 			},
-			"required": [
-				"messages"
-			]
+			"required": ["messages"]
 		},
 		"GetLastAssistantTextResult": {
 			"type": "object",
@@ -6612,9 +5486,7 @@
 					]
 				}
 			},
-			"required": [
-				"text"
-			]
+			"required": ["text"]
 		},
 		"SetSessionNameParams": {
 			"type": "object",
@@ -6623,9 +5495,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"name"
-			]
+			"required": ["name"]
 		},
 		"HandoffParams": {
 			"type": "object",
@@ -6645,9 +5515,7 @@
 					}
 				}
 			},
-			"required": [
-				"messages"
-			]
+			"required": ["messages"]
 		},
 		"GetMessagesPageParams": {
 			"type": "object",
@@ -6670,9 +5538,7 @@
 					}
 				}
 			},
-			"required": [
-				"providers"
-			]
+			"required": ["providers"]
 		},
 		"LoginParams": {
 			"type": "object",
@@ -6681,9 +5547,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"providerId"
-			]
+			"required": ["providerId"]
 		},
 		"LoginResult": {
 			"type": "object",
@@ -6692,9 +5556,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"providerId"
-			]
+			"required": ["providerId"]
 		},
 		"GetLogoutAccountsParams": {
 			"type": "object",
@@ -6703,9 +5565,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"providerId"
-			]
+			"required": ["providerId"]
 		},
 		"GetLogoutAccountsResult": {
 			"type": "object",
@@ -6717,9 +5577,7 @@
 					}
 				}
 			},
-			"required": [
-				"accounts"
-			]
+			"required": ["accounts"]
 		},
 		"LogoutParams": {
 			"type": "object",
@@ -6731,10 +5589,7 @@
 					"type": "integer"
 				}
 			},
-			"required": [
-				"providerId",
-				"credentialId"
-			]
+			"required": ["providerId", "credentialId"]
 		},
 		"LogoutResult": {
 			"type": "object",
@@ -6754,9 +5609,7 @@
 					"type": "string"
 				}
 			},
-			"required": [
-				"question"
-			]
+			"required": ["question"]
 		},
 		"BtwResult": {
 			"type": "object",
@@ -6765,9 +5618,7 @@
 					"$ref": "#/$defs/BtwHistoryRecord"
 				}
 			},
-			"required": [
-				"record"
-			]
+			"required": ["record"]
 		},
 		"BtwCancelParams": {
 			"type": "object",
@@ -6784,9 +5635,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": [
-				"cancelled"
-			]
+			"required": ["cancelled"]
 		},
 		"GetBtwHistoryResult": {
 			"type": "object",
@@ -6798,9 +5647,7 @@
 					}
 				}
 			},
-			"required": [
-				"records"
-			]
+			"required": ["records"]
 		}
 	}
 }

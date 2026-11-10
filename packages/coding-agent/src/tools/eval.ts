@@ -45,11 +45,9 @@ import {
 	type OutputSummary,
 	TailBuffer,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
-import { sessionDelegationBias } from "../task/prompt-policy";
 import { resolveSpawnPolicy } from "../task/spawn-policy";
 import { canSpawnAtDepth } from "../task/types";
-import { webpExclusionForModel } from "@oh-my-pi/pi-tui/chat/image-loading";
-import { formatDimensionNote, resizeImage } from "../utils/image-resize";
+import { formatDimensionNote, isWebPExcluded, resizeImage } from "../utils/image-resize";
 import type { ToolSession } from ".";
 import { truncateForPrompt } from "./approval";
 import { type EvalBackendsAllowance, resolveAdvertisedEvalBackends, resolveEvalBackends } from "./eval-backends";
@@ -390,7 +388,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 			spawns: depthAllowsSpawning ? (session.getSessionSpawns?.() ?? "*") : false,
 			autoBackgroundEnabled: cfgEvalAutoBackgroundEnabled.get(session.settings),
 			evalTools: cfgEvalToolsEnabled.get(session.settings),
-			eagerDelegation: sessionDelegationBias(session) === "eager",
+			eagerDelegation: false,
 			waitTool: hasWaitTool(session),
 			preludes: this.#advertisedPreludes(session),
 			inlineTopics: session.isToolActive?.("read") === false,
@@ -506,7 +504,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 			throw new ToolError("Eval tool requires a session when not using proxy executor");
 		}
 		const session = this.session;
-		const excludeWebP = webpExclusionForModel(session.getActiveModel?.());
+		const excludeWebP = isWebPExcluded();
 
 		const cellLanguage: EvalLanguage = params.language === "py" ? "python" : params.language;
 		// Bound backend discovery by the eval cell's own timeout and abort signal:

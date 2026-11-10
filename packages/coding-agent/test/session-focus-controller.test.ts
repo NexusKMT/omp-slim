@@ -127,7 +127,6 @@ function makeHarness(options: { renderInitialMessages?: () => void | Promise<voi
 		syncIdleMaintenanceView() {},
 		ui: { requestRender() {}, requestComponentRender() {} },
 		showStatus() {},
-		collabGuest: undefined,
 	} as unknown as InteractiveModeContext;
 
 	const registry = new AgentRegistry();

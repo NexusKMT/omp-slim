@@ -3151,6 +3151,12 @@ export class Settings {
 			if (retiredMemorySettings.some(prefix => key === prefix || key.startsWith(`${prefix}.`))) delete raw[key];
 		}
 
+		// Sharing transports are retired; existing captures and replicas remain on disk.
+		const retiredSharingSettings = ["collab", "stream", "share"];
+		for (const key of Object.keys(raw)) {
+			if (retiredSharingSettings.some(prefix => key === prefix || key.startsWith(`${prefix}.`))) delete raw[key];
+		}
+
 		// power.preventIdleSleep / power.preventSystemSleep / power.declareUserActive
 		// / power.preventDisplaySleep (four booleans) → power.sleepPrevention enum.
 		// The enum is cumulative: each level adds the flags of all lower levels.

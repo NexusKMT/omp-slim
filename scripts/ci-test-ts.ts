@@ -97,12 +97,7 @@ const fastWorkspacePackages = [
 // These suites cover the native package, TUI/browser-ish behavior, local servers,
 // or coding-agent-adjacent benchmark paths. Keep them low-concurrency and in jobs
 // that have downloaded the Linux x64 native addon artifacts.
-const nativeAndIntegrationPackages = [
-	"packages/natives",
-	"packages/tui",
-	"packages/collab-web",
-	"packages/typescript-edit-benchmark",
-];
+const nativeAndIntegrationPackages = ["packages/natives", "packages/tui", "packages/typescript-edit-benchmark"];
 
 const projectToolTestCommand: TestCommand = {
 	label: ".omp/tests (project-local TUI debug tool)",
@@ -140,7 +135,7 @@ const codingAgentUiPathPatterns = [
 const codingAgentRuntimePathPatterns = [
 	/^test\/agent-session[^/]*\.test\.ts$/,
 	/^test\/(acp|mcp|rpc|sdk)[^/]*\.test\.ts$/,
-	/^test\/(session|session-manager|task|collab|internal-urls)\//,
+	/^test\/(session|session-manager|task|internal-urls)\//,
 	/^test\/session[^/]*\.test\.ts$/,
 	/^test\/session-manager[^/]*\.test\.ts$/,
 	/^test\/(extensions?|plugin|skills|marketplace|oauth)[^/]*\.test\.ts$/,

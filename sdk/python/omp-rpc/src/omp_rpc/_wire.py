@@ -82,11 +82,6 @@ _QUEUED_MESSAGE_QUEUE_VALUES: Final[frozenset[str]] = frozenset({"steering", "fo
 _decode_queued_message_queue = cast("Decoder[QueuedMessageQueue]", literal(_QUEUED_MESSAGE_QUEUE_VALUES))
 
 
-CacheWarmingMode: TypeAlias = Literal["off", "streaming", "idle"]
-_CACHE_WARMING_MODE_VALUES: Final[frozenset[str]] = frozenset({"off", "streaming", "idle"})
-_decode_cache_warming_mode = cast("Decoder[CacheWarmingMode]", literal(_CACHE_WARMING_MODE_VALUES))
-
-
 MessageUpdates: TypeAlias = Literal["full", "delta"]
 """`set_event_filter` projection: `delta` replaces the accumulated snapshots with the block a start/end event touches."""
 _MESSAGE_UPDATES_VALUES: Final[frozenset[str]] = frozenset({"full", "delta"})
@@ -129,12 +124,6 @@ _SUBAGENT_STATUS_VALUES: Final[frozenset[str]] = frozenset({"pending", "running"
 _decode_subagent_status = cast("Decoder[SubagentStatus]", literal(_SUBAGENT_STATUS_VALUES))
 
 
-SlowModeScope: TypeAlias = Literal["session", "global"]
-"""Where `/slow` lives: persisted config shared by every session, or this session's flex tier."""
-_SLOW_MODE_SCOPE_VALUES: Final[frozenset[str]] = frozenset({"session", "global"})
-_decode_slow_mode_scope = cast("Decoder[SlowModeScope]", literal(_SLOW_MODE_SCOPE_VALUES))
-
-
 BtwStatus: TypeAlias = Literal["running", "complete", "cancelled", "error", "interrupted"]
 """Side-question turn lifecycle; `interrupted` marks a turn whose process died while it ran."""
 _BTW_STATUS_VALUES: Final[frozenset[str]] = frozenset({"running", "complete", "cancelled", "error", "interrupted"})
@@ -149,16 +138,6 @@ _decode_auto_compaction_reason = cast("Decoder[AutoCompactionReason]", literal(_
 AutoCompactionAction: TypeAlias = Literal["context-full", "remote", "handoff", "shake", "snapcompact"]
 _AUTO_COMPACTION_ACTION_VALUES: Final[frozenset[str]] = frozenset({"context-full", "remote", "handoff", "shake", "snapcompact"})
 _decode_auto_compaction_action = cast("Decoder[AutoCompactionAction]", literal(_AUTO_COMPACTION_ACTION_VALUES))
-
-
-CacheWarmingPhase: TypeAlias = Literal["streaming", "idle"]
-_CACHE_WARMING_PHASE_VALUES: Final[frozenset[str]] = frozenset({"streaming", "idle"})
-_decode_cache_warming_phase = cast("Decoder[CacheWarmingPhase]", literal(_CACHE_WARMING_PHASE_VALUES))
-
-
-CacheWarmingOutcome: TypeAlias = Literal["hit", "miss", "error", "aborted"]
-_CACHE_WARMING_OUTCOME_VALUES: Final[frozenset[str]] = frozenset({"hit", "miss", "error", "aborted"})
-_decode_cache_warming_outcome = cast("Decoder[CacheWarmingOutcome]", literal(_CACHE_WARMING_OUTCOME_VALUES))
 
 
 NotifyType: TypeAlias = Literal["info", "warning", "error"]
@@ -613,26 +592,6 @@ class GoalResult:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
-class UsageLimitLowPriority:
-    """Requests are served on the provider's low-priority (slow) lane."""
-    stage: Literal["low_priority"] = "low_priority"
-    resets_at_sec: float
-    """Epoch seconds when the limit that was hit resets."""
-    allowance_left_percent: int | None = None
-    """Percent of the low-priority allowance still available, when reported."""
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class UsageLimitWrapUp:
-    """Requests run on a short wrap-up allowance past the limit."""
-    stage: Literal["wrap_up"] = "wrap_up"
-    extra_usage: bool
-    """Whether paid extra usage serves requests once the allowance is spent."""
-    resets_at_sec: float | None = None
-    """Epoch seconds when the limit that was hit resets, if reported."""
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
 class SessionState:
     session_id: str
     model: ModelInfo | None = None
@@ -647,14 +606,6 @@ class SessionState:
     auto_compaction_enabled: bool = False
     fast_mode_enabled: bool = False
     fast_mode_active: bool = False
-    slow_mode_supported: bool = False
-    """`/slow` applies to the active model."""
-    slow_mode_enabled: bool = False
-    """`/slow` is on for the active model; always `false` when `slowModeSupported` is `false`."""
-    slow_mode_scope: SlowModeScope | None = None
-    """Where the active model's `/slow` lives; absent when unsupported."""
-    usage_limit: UsageLimitState | None = None
-    """Usage-limit stage of the active model's account; absent outside wrap-up and low priority."""
     tokens_per_second: float | None = None
     message_count: int = 0
     queued_message_count: int = 0
@@ -1130,29 +1081,6 @@ class AutoRetryEndEvent:
     final_error: str | None = None
     retry_errors: tuple[JsonObject, ...] = ()
     """Persisted retry errors whose presentation changed when the retry settled."""
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class CacheWarmingStartEvent:
-    """A prompt-cache refresh was handed to the provider."""
-    type: Literal["cache_warming_start"] = "cache_warming_start"
-    phase: CacheWarmingPhase
-    provider: str
-    model: str
-
-
-@dataclass(slots=True, frozen=True, kw_only=True)
-class CacheWarmingEndEvent:
-    """Outcome of the refresh announced by the matching `cache_warming_start`."""
-    type: Literal["cache_warming_end"] = "cache_warming_end"
-    phase: CacheWarmingPhase
-    provider: str
-    model: str
-    outcome: CacheWarmingOutcome
-    usage: Usage | None = None
-    """Present only when the refresh was billed."""
-    warming_stop_reason: str | None = None
-    """Why warming stopped; absent while it continues."""
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1635,11 +1563,7 @@ AssistantMessageEvent: TypeAlias = AssistantStartEvent | AssistantTextStartEvent
 """Streaming update for one assistant message, discriminated by `type`."""
 
 
-UsageLimitState: TypeAlias = UsageLimitLowPriority | UsageLimitWrapUp
-"""Provider-neutral state of an account past its usage limit, discriminated by `stage`."""
-
-
-RpcAgentEvent: TypeAlias = AgentStartEvent | AgentEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolStreamUpdateEvent | ToolExecutionEndEvent | AutoCompactionStartEvent | AutoCompactionEndEvent | ManualCompactionStartEvent | ManualCompactionEndEvent | AutoRetryStartEvent | AutoRetryEndEvent | CacheWarmingStartEvent | CacheWarmingEndEvent | RetryFallbackAppliedEvent | RetryFallbackSucceededEvent | ModelChangedEvent | ConfigWarningsChangedEvent | AdvisorCostChangedEvent | AdvisorYieldedEvent | TtsrTriggeredEvent | TodoReminderEvent | TodoAutoClearEvent | IrcMessageEvent | NoticeEvent | ThinkingLevelChangedEvent | GoalUpdatedEvent | QueueUpdateEvent
+RpcAgentEvent: TypeAlias = AgentStartEvent | AgentEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolStreamUpdateEvent | ToolExecutionEndEvent | AutoCompactionStartEvent | AutoCompactionEndEvent | ManualCompactionStartEvent | ManualCompactionEndEvent | AutoRetryStartEvent | AutoRetryEndEvent | RetryFallbackAppliedEvent | RetryFallbackSucceededEvent | ModelChangedEvent | ConfigWarningsChangedEvent | AdvisorCostChangedEvent | AdvisorYieldedEvent | TtsrTriggeredEvent | TodoReminderEvent | TodoAutoClearEvent | IrcMessageEvent | NoticeEvent | ThinkingLevelChangedEvent | GoalUpdatedEvent | QueueUpdateEvent
 """A session event, discriminated by `type`; `set_event_filter` selects which are sent."""
 
 
@@ -1939,24 +1863,6 @@ def parse_goal_result(value: object, path: str = "GoalResult") -> GoalResult:
     )
 
 
-def parse_usage_limit_low_priority(value: object, path: str = "UsageLimitLowPriority") -> UsageLimitLowPriority:
-    payload = expect_object(value, path)
-    required(payload, "stage", cast('Decoder[Literal["low_priority"]]', literal(frozenset({"low_priority"}))), path)
-    return UsageLimitLowPriority(
-        resets_at_sec=required(payload, "resetsAtSec", decode_float, path),
-        allowance_left_percent=optional(payload, "allowanceLeftPercent", decode_int, path),
-    )
-
-
-def parse_usage_limit_wrap_up(value: object, path: str = "UsageLimitWrapUp") -> UsageLimitWrapUp:
-    payload = expect_object(value, path)
-    required(payload, "stage", cast('Decoder[Literal["wrap_up"]]', literal(frozenset({"wrap_up"}))), path)
-    return UsageLimitWrapUp(
-        extra_usage=required(payload, "extraUsage", decode_bool, path),
-        resets_at_sec=optional(payload, "resetsAtSec", decode_float, path),
-    )
-
-
 def parse_session_state(value: object, path: str = "SessionState") -> SessionState:
     payload = expect_object(value, path)
     return SessionState(
@@ -1973,10 +1879,6 @@ def parse_session_state(value: object, path: str = "SessionState") -> SessionSta
         auto_compaction_enabled=defaulted(payload, "autoCompactionEnabled", decode_bool, path, False),
         fast_mode_enabled=defaulted(payload, "fastModeEnabled", decode_bool, path, False),
         fast_mode_active=defaulted(payload, "fastModeActive", decode_bool, path, False),
-        slow_mode_supported=defaulted(payload, "slowModeSupported", decode_bool, path, False),
-        slow_mode_enabled=defaulted(payload, "slowModeEnabled", decode_bool, path, False),
-        slow_mode_scope=optional(payload, "slowModeScope", _decode_slow_mode_scope, path),
-        usage_limit=optional(payload, "usageLimit", parse_usage_limit_state, path),
         tokens_per_second=defaulted(payload, "tokensPerSecond", nullable(decode_float), path, None),
         message_count=defaulted(payload, "messageCount", decode_int, path, 0),
         queued_message_count=defaulted(payload, "queuedMessageCount", decode_int, path, 0),
@@ -2499,29 +2401,6 @@ def parse_auto_retry_end_event(value: object, path: str = "AutoRetryEndEvent") -
         attempt=required(payload, "attempt", decode_int, path),
         final_error=optional(payload, "finalError", decode_str, path),
         retry_errors=defaulted(payload, "retryErrors", array(decode_json_object), path, ()),
-    )
-
-
-def parse_cache_warming_start_event(value: object, path: str = "CacheWarmingStartEvent") -> CacheWarmingStartEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["cache_warming_start"]]', literal(frozenset({"cache_warming_start"}))), path)
-    return CacheWarmingStartEvent(
-        phase=required(payload, "phase", _decode_cache_warming_phase, path),
-        provider=required(payload, "provider", decode_str, path),
-        model=required(payload, "model", decode_str, path),
-    )
-
-
-def parse_cache_warming_end_event(value: object, path: str = "CacheWarmingEndEvent") -> CacheWarmingEndEvent:
-    payload = expect_object(value, path)
-    required(payload, "type", cast('Decoder[Literal["cache_warming_end"]]', literal(frozenset({"cache_warming_end"}))), path)
-    return CacheWarmingEndEvent(
-        phase=required(payload, "phase", _decode_cache_warming_phase, path),
-        provider=required(payload, "provider", decode_str, path),
-        model=required(payload, "model", decode_str, path),
-        outcome=required(payload, "outcome", _decode_cache_warming_outcome, path),
-        usage=optional(payload, "usage", parse_usage, path),
-        warming_stop_reason=optional(payload, "warmingStopReason", decode_str, path),
     )
 
 
@@ -3062,10 +2941,6 @@ def parse_logout_result(value: object, path: str = "LogoutResult") -> LogoutResu
     )
 
 
-def parse_usage_limit_state(value: object, path: str = "UsageLimitState") -> UsageLimitState:
-    return dispatch("stage", _USAGE_LIMIT_STATE_CASES)(value, path)
-
-
 def parse_rpc_agent_event(value: object, path: str = "RpcAgentEvent") -> RpcAgentEvent:
     return dispatch("type", _RPC_AGENT_EVENT_CASES)(value, path)
 
@@ -3077,12 +2952,6 @@ def parse_notification(value: object, path: str = "notification") -> RpcNotifica
     if not isinstance(tag, str) or tag not in _RPC_NOTIFICATION_CASES:
         return UnknownNotification(decode_json_object(payload, path))
     return _RPC_NOTIFICATION_CASES[tag](payload, tag)
-
-
-_USAGE_LIMIT_STATE_CASES: Final[dict[str, Decoder[UsageLimitState]]] = {
-        "low_priority": parse_usage_limit_low_priority,
-        "wrap_up": parse_usage_limit_wrap_up,
-}
 
 
 _RPC_AGENT_EVENT_CASES: Final[dict[str, Decoder[RpcAgentEvent]]] = {
@@ -3103,8 +2972,6 @@ _RPC_AGENT_EVENT_CASES: Final[dict[str, Decoder[RpcAgentEvent]]] = {
         "manual_compaction_end": parse_manual_compaction_end_event,
         "auto_retry_start": parse_auto_retry_start_event,
         "auto_retry_end": parse_auto_retry_end_event,
-        "cache_warming_start": parse_cache_warming_start_event,
-        "cache_warming_end": parse_cache_warming_end_event,
         "retry_fallback_applied": parse_retry_fallback_applied_event,
         "retry_fallback_succeeded": parse_retry_fallback_succeeded_event,
         "model_changed": parse_model_changed_event,
@@ -3155,8 +3022,6 @@ _RPC_NOTIFICATION_CASES: Final[dict[str, Decoder[RpcNotification]]] = {
         "manual_compaction_end": parse_rpc_agent_event,
         "auto_retry_start": parse_rpc_agent_event,
         "auto_retry_end": parse_rpc_agent_event,
-        "cache_warming_start": parse_rpc_agent_event,
-        "cache_warming_end": parse_rpc_agent_event,
         "retry_fallback_applied": parse_rpc_agent_event,
         "retry_fallback_succeeded": parse_rpc_agent_event,
         "model_changed": parse_rpc_agent_event,
@@ -3251,12 +3116,6 @@ class WireClient:
         params: dict[str, object] = {}
         params["enabled"] = enabled
         return parse_fast_mode_result(self._command("set_fast_mode", params), "set_fast_mode")
-
-    def set_slow_mode(self, enabled: bool) -> bool:
-        """Turn `/slow` on or off for the active model; returns whether it is now on."""
-        params: dict[str, object] = {}
-        params["enabled"] = enabled
-        return required(expect_object(self._command("set_slow_mode", params), "set_slow_mode"), "enabled", decode_bool, "set_slow_mode")
 
     def goal(self, op: GoalOp, *, objective: str | None = None, token_budget: int | None = None) -> GoalResult:
         """Read or change goal mode with the lifecycle of the interactive `/goal` command."""
@@ -3398,12 +3257,6 @@ class WireClient:
         params["enabled"] = enabled
         self._command("set_auto_compaction", params)
 
-    def set_cache_warming(self, mode: CacheWarmingMode) -> CacheWarmingMode:
-        """Override cache warming for this session only; returns the effective mode."""
-        params: dict[str, object] = {}
-        params["mode"] = mode
-        return required(expect_object(self._command("set_cache_warming", params), "set_cache_warming"), "mode", _decode_cache_warming_mode, "set_cache_warming")
-
     def set_auto_retry(self, enabled: bool) -> None:
         """Enable or disable auto-retry."""
         params: dict[str, object] = {}
@@ -3438,13 +3291,6 @@ class WireClient:
         params: dict[str, object] = {}
         params["sessionIds"] = list(session_ids)
         return parse_get_session_lease_result(self._command("get_session_lease", params), "get_session_lease")
-
-    def export_html(self, output_path: str | Path | None = None) -> Path:
-        """Export the session as HTML; returns the written path."""
-        params: dict[str, object] = {}
-        if output_path is not None:
-            params["outputPath"] = str(output_path)
-        return Path(required(expect_object(self._command("export_html", params), "export_html"), "path", decode_str, "export_html"))
 
     def switch_session(self, session_path: str | Path, *, provider: str | None = None, model_id: str | None = None) -> CancellationResult:
         """Switch to another session file. Give provider and modelId together to override the saved model; otherwise an unavailable saved model fails the request and keeps the current session."""
@@ -3697,14 +3543,6 @@ class WireClient:
         """Subscribe to `auto_retry_end` frames."""
         return self._listen("auto_retry_end", listener)
 
-    def on_cache_warming_start(self, listener: Callable[[CacheWarmingStartEvent], None]) -> Callable[[], None]:
-        """Subscribe to `cache_warming_start`: A prompt-cache refresh was handed to the provider."""
-        return self._listen("cache_warming_start", listener)
-
-    def on_cache_warming_end(self, listener: Callable[[CacheWarmingEndEvent], None]) -> Callable[[], None]:
-        """Subscribe to `cache_warming_end`: Outcome of the refresh announced by the matching `cache_warming_start`."""
-        return self._listen("cache_warming_end", listener)
-
     def on_retry_fallback_applied(self, listener: Callable[[RetryFallbackAppliedEvent], None]) -> Callable[[], None]:
         """Subscribe to `retry_fallback_applied` frames."""
         return self._listen("retry_fallback_applied", listener)
@@ -3810,11 +3648,6 @@ __all__ = [
     "BtwHistoryTurn",
     "BtwRecordEvent",
     "BtwStatus",
-    "CacheWarmingEndEvent",
-    "CacheWarmingMode",
-    "CacheWarmingOutcome",
-    "CacheWarmingPhase",
-    "CacheWarmingStartEvent",
     "CancelUiRequest",
     "CancellationResult",
     "CommandOutputEvent",
@@ -3910,7 +3743,6 @@ __all__ = [
     "SlashCommandInput",
     "SlashCommandSource",
     "SlashSubcommand",
-    "SlowModeScope",
     "StopReason",
     "StreamingBehavior",
     "SubagentEvent",
@@ -3949,9 +3781,6 @@ __all__ = [
     "TurnStartEvent",
     "Usage",
     "UsageCost",
-    "UsageLimitLowPriority",
-    "UsageLimitState",
-    "UsageLimitWrapUp",
     "UserContent",
     "UserMessage",
     "WidgetPlacement",
@@ -3997,8 +3826,6 @@ __all__ = [
     "parse_btw_history_record",
     "parse_btw_history_turn",
     "parse_btw_record_event",
-    "parse_cache_warming_end_event",
-    "parse_cache_warming_start_event",
     "parse_cancel_ui_request",
     "parse_cancellation_result",
     "parse_command_output_event",
@@ -4111,9 +3938,6 @@ __all__ = [
     "parse_turn_start_event",
     "parse_usage",
     "parse_usage_cost",
-    "parse_usage_limit_low_priority",
-    "parse_usage_limit_state",
-    "parse_usage_limit_wrap_up",
     "parse_user_content",
     "parse_user_message",
 ]

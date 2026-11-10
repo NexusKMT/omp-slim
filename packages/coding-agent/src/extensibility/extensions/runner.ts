@@ -11,14 +11,7 @@ import {
 	isNonBlankContext,
 	joinAdditionalContext,
 } from "@oh-my-pi/pi-agent-core";
-import type {
-	AssistantMessage,
-	CredentialDisabledEvent,
-	ImageContent,
-	Model,
-	ProviderResponseMetadata,
-	TextContent,
-} from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Model, ProviderResponseMetadata, TextContent } from "@oh-my-pi/pi-ai";
 import {
 	clearContextHistoryIndex,
 	getContextHistoryIndex,
@@ -85,9 +78,6 @@ import type {
 	ExtensionUIDialogOptions,
 	InputEvent,
 	InputEventResult,
-	CacheWarmingAction,
-	CacheWarmingDecisionEvent,
-	CacheWarmingDecisionEventResult,
 	LinkActivateEvent,
 	McpNotificationEvent,
 	MessageRenderer,
@@ -412,8 +402,6 @@ async function awaitDeliveryTurn(ready: Promise<void>, deadline: number): Promis
 	}
 }
 
-const MAX_PENDING_CREDENTIAL_DISABLED = 32;
-
 /**
  * Buffer cap for `mcp_notification` events received before {@link ExtensionRunner.initialize}
  * has run. Sized to match the manager-side buffer in `MCPManager.NOTIFICATION_BUFFER_CAP` so
@@ -432,7 +420,6 @@ type RunnerEmitEvent = Exclude<
 	| ToolResultEvent
 	| UserBashEvent
 	| ContextEvent
-	| CacheWarmingDecisionEvent
 	| BeforeProviderRequestEvent
 	| AfterProviderResponseEvent
 	| BeforeAgentStartEvent
@@ -611,14 +598,6 @@ export class ExtensionRunner {
 	#guardedPresenters = new WeakMap<TranscriptPresenter, TranscriptPresenter>();
 	/** Main runner whose suspensions this runner's drawing follows; see {@link followSuspension}. */
 	#suspensionParent: ExtensionRunner | undefined;
-	/**
-	 * Buffer for `credential_disabled` events received via {@link emitCredentialDisabled}
-	 * before {@link initialize} has run. Drained through {@link emit} once initialize sets
-	 * up the runtime context, so extension handlers see a populated UI/runtime context
-	 * rather than the constructor's no-op default. Bounded at
-	 * {@link MAX_PENDING_CREDENTIAL_DISABLED}; oldest entries are dropped under pressure.
-	 */
-	#pendingCredentialDisabled: CredentialDisabledEvent[] = [];
 
 	/**
 	 * Buffer for `mcp_notification` events received via {@link emitMcpNotification} before
@@ -936,22 +915,6 @@ export class ExtensionRunner {
 		// Suspended extensions keep a (gated) trampoline so resuming them needs no rewire.
 		for (const ext of this.getLoadedExtensions()) this.#installFileFallbacks(ext);
 
-		// Drain events buffered by emitCredentialDisabled() before initialize ran. The
-		// spread adds the `type` discriminator — `event` is the pi-ai shape (no `type`).
-		// Deferred by one microtask so callers that register an onError listener
-		// synchronously after initialize() see handler errors routed through it.
-		const pending = this.#pendingCredentialDisabled.splice(0);
-		queueMicrotask(() => {
-			for (const event of pending) {
-				this.emit({ type: "credential_disabled", ...event }).catch((error: unknown) => {
-					logger.warn("credential_disabled handler threw during initialize flush", {
-						provider: event.provider,
-						error: error instanceof Error ? error.message : String(error),
-					});
-				});
-			}
-		});
-
 		// Drain events buffered by emitMcpNotification() before initialize ran, using the
 		// same deferred-microtask ordering as the credential-disabled drain above so any
 		// onError listener registered synchronously after initialize() still catches
@@ -968,31 +931,6 @@ export class ExtensionRunner {
 				});
 			}
 		});
-	}
-
-	/**
-	 * Forward a `credential_disabled` event from `AuthStorage` to extension handlers.
-	 *
-	 * If {@link initialize} has not yet run, the event is buffered and replayed once
-	 * initialize wires the runtime/UI context. This matters because mode controllers
-	 * (interactive, RPC, ACP, print, subagent) call `initialize()` AFTER `createAgentSession`
-	 * returns, but `AuthStorage` can fire `credential_disabled` during startup model probes
-	 * inside `createAgentSession()`. Without deferral, extension handlers would observe
-	 * `hasUI=false`, an unset model, and no-op runtime actions on exactly the headline
-	 * "OAuth invalid_grant during startup" path the event was designed to surface.
-	 *
-	 * Always returns; never throws. Errors from handlers are routed through
-	 * {@link onError} via {@link emit}'s normal isolation.
-	 */
-	async emitCredentialDisabled(event: CredentialDisabledEvent): Promise<void> {
-		if (!this.#initialized) {
-			if (this.#pendingCredentialDisabled.length >= MAX_PENDING_CREDENTIAL_DISABLED) {
-				this.#pendingCredentialDisabled.shift();
-			}
-			this.#pendingCredentialDisabled.push(event);
-			return;
-		}
-		await this.emit({ type: "credential_disabled", ...event });
 	}
 
 	/**
@@ -1027,30 +965,6 @@ export class ExtensionRunner {
 		return await this.emit({ type: "session_stop", ...event });
 	}
 
-	/**
-	 * Asks extensions to override a prompt-cache warming decision. The last
-	 * handler returning an action wins; handler failures are reported through
-	 * the extension error listeners and leave the warmer's decision standing.
-	 */
-	async emitCacheWarmingDecision(event: CacheWarmingDecisionEvent): Promise<CacheWarmingAction> {
-		let action = event.action;
-		for (const ext of this.extensions) {
-			const handlers = ext.handlers.get(event.type);
-			if (!handlers || handlers.length === 0) continue;
-			const ctx = this.createContext();
-			for (const handler of handlers) {
-				const result = (await this.#runHandlerWithTimeout(
-					handler,
-					event,
-					ctx,
-					ext,
-					handlerTimeoutForEvent(event.type),
-				)) as CacheWarmingDecisionEventResult | undefined;
-				if (result?.action !== undefined) action = result.action;
-			}
-		}
-		return action;
-	}
 	/** Registers the interactive transcript gate that must settle before a tool approval is presented. */
 	setToolApprovalPreviewWaiter(waiter: (toolCallId: string) => Promise<void>): () => void {
 		this.#toolApprovalPreviewWaiter = waiter;

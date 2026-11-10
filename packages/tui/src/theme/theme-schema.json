@@ -378,25 +378,6 @@
 			},
 			"additionalProperties": false
 		},
-		"export": {
-			"type": "object",
-			"description": "Optional colors for HTML export (defaults derived from userMessageBg if not specified)",
-			"properties": {
-				"pageBg": {
-					"$ref": "#/$defs/colorValue",
-					"description": "Page background color"
-				},
-				"cardBg": {
-					"$ref": "#/$defs/colorValue",
-					"description": "Card/container background color"
-				},
-				"infoBg": {
-					"$ref": "#/$defs/colorValue",
-					"description": "Info sections background (system prompt, notices)"
-				}
-			},
-			"additionalProperties": false
-		},
 		"terminal": {
 			"type": "object",
 			"description": "The terminal this theme was made for, for hosts that paint the terminal themselves (Tern); omp never sets the terminal's colors. Absent fields are derived from colors.",
@@ -420,7 +401,9 @@
 				"ansi": {
 					"type": "array",
 					"description": "ANSI colors 0-15; also the palette colorful Markdown (tui.colorfulMarkdown) paints headings, emphasis, inline code and table headers from",
-					"items": { "$ref": "#/$defs/colorValue" },
+					"items": {
+						"$ref": "#/$defs/colorValue"
+					},
 					"minItems": 16,
 					"maxItems": 16
 				}
@@ -449,7 +432,10 @@
 						{
 							"type": "array",
 							"minItems": 1,
-							"items": { "type": "string", "minLength": 1 }
+							"items": {
+								"type": "string",
+								"minLength": 1
+							}
 						},
 						{
 							"type": "object",
@@ -457,18 +443,28 @@
 								"status": {
 									"type": "array",
 									"minItems": 1,
-									"items": { "type": "string", "minLength": 1 }
+									"items": {
+										"type": "string",
+										"minLength": 1
+									}
 								},
 								"activity": {
 									"type": "array",
 									"minItems": 1,
-									"items": { "type": "string", "minLength": 1 }
+									"items": {
+										"type": "string",
+										"minLength": 1
+									}
 								}
 							},
 							"additionalProperties": false,
 							"anyOf": [
-								{ "required": ["status"] },
-								{ "required": ["activity"] }
+								{
+									"required": ["status"]
+								},
+								{
+									"required": ["activity"]
+								}
 							]
 						}
 					]

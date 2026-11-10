@@ -8,7 +8,6 @@
  * journaling, provider replay — runs it unchanged.
  */
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { mintToolCallId } from "@oh-my-pi/pi-ai/dialect";
 import { extractInlineSloppyRegions } from "@oh-my-pi/pi-natives";
 
 /**
@@ -43,7 +42,7 @@ export function recoverInlineSloppyEdit(message: AssistantMessage): number {
 	const input = payloads.join("\n");
 	message.content.push({
 		type: "toolCall",
-		id: mintToolCallId(),
+		id: Bun.randomUUIDv7(),
 		name: "edit",
 		arguments: { input },
 		rawBlock: input,

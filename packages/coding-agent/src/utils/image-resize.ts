@@ -234,7 +234,7 @@ function readImageHeaderDimensions(buffer: Uint8Array): ImageHeaderDimensions | 
  * Only `"1"` and `"true"` (case-insensitive) enable exclusion — an empty string
  * or `"0"` MUST be treated as disabled.
  */
-function isWebPExcluded(): boolean {
+export function isWebPExcluded(): boolean {
 	const raw = Bun.env.OMP_NO_WEBP;
 	if (raw === undefined) return false;
 	const v = raw.toLowerCase();

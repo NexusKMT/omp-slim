@@ -18,7 +18,6 @@ import {
 	getSessionsDir,
 	getStatsDbPath,
 	getTerminalSessionsDir,
-	hashPath,
 	isPidAlive,
 	normalizePathForComparison,
 	readLines,
@@ -161,8 +160,6 @@ export interface StaleGcResult {
 	staleBreadcrumbs: number;
 	/** Debug report bundles beyond the retention window. */
 	expiredReports: number;
-	/** Collab guest replicas beyond the retention window. */
-	expiredReplicas: number;
 	wouldDelete: number;
 	deleted: number;
 	bytes: number;
@@ -704,28 +701,26 @@ async function runBlobGc(options: ResolvedGcOptions, archiveSessionsRoot: string
 }
 
 interface StaleCandidate {
-	kind: "danglingMarkers" | "staleBreadcrumbs" | "expiredReports" | "expiredReplicas";
+	kind: "danglingMarkers" | "staleBreadcrumbs" | "expiredReports";
 	/** Removed together; the first path is the entry itself. */
 	paths: string[];
 	bytes: number;
-	/** Session file whose ownership lease must be free (no running writer) to remove it. */
-	ownedSession?: string;
 }
 
 /**
- * Config-root stores (`reports/`, `collab/`) live beside the agent dir, not in
+ * Config-root reports live beside the agent dir, not in
  * it. The default agent dir resolves them through the dirs resolver (XDG-aware);
  * a custom agent dir named `agent` owns its parent as config root; any other
  * custom agent dir has no config root for gc to maintain.
  */
-function resolveConfigRootStores(agentDir: string): { reportsDir: string; collabDir: string } | undefined {
+function resolveConfigRootStores(agentDir: string): { reportsDir: string } | undefined {
 	const configRoot = getConfigRootDir();
 	if (normalizePathForComparison(agentDir) === normalizePathForComparison(path.join(configRoot, "agent"))) {
-		return { reportsDir: getReportsDir(), collabDir: path.join(configRoot, "collab") };
+		return { reportsDir: getReportsDir() };
 	}
 	if (path.basename(agentDir) !== "agent") return undefined;
 	const root = path.dirname(agentDir);
-	return { reportsDir: path.join(root, "reports"), collabDir: path.join(root, "collab") };
+	return { reportsDir: path.join(root, "reports") };
 }
 
 async function listFilesIfPresent(dir: string): Promise<string[]> {
@@ -814,50 +809,27 @@ async function runStaleGc(options: ResolvedGcOptions): Promise<StaleGcResult> {
 		for (const { file, bytes } of await collectExpiredFiles(stores.reportsDir, ".tar.gz", options)) {
 			candidates.push({ kind: "expiredReports", paths: [file], bytes });
 		}
-		// A replica a terminal's breadcrumb points at is what `--continue` resumes
-		// there; one a running guest holds is skipped at removal (ownership lease).
-		const resumable = new Set(
-			(await collectBreadcrumbSessionFiles(breadcrumbDir)).map(file => normalizePathForComparison(file)),
-		);
-		for (const { file, bytes } of await collectExpiredFiles(stores.collabDir, SESSION_SUFFIX, options)) {
-			if (resumable.has(normalizePathForComparison(file))) continue;
-			candidates.push({
-				kind: "expiredReplicas",
-				// The replica's custom-session marker would only dangle once it is gone.
-				paths: [file, sessionArtifactsPath(file), path.join(markersDir, hashPath(file))],
-				bytes,
-				ownedSession: file,
-			});
-		}
 	}
 
 	const result: StaleGcResult = {
 		danglingMarkers: 0,
 		staleBreadcrumbs: 0,
 		expiredReports: 0,
-		expiredReplicas: 0,
 		wouldDelete: 0,
 		deleted: 0,
 		bytes: 0,
 		errors: [],
 	};
 	for (const candidate of options.track.each("Scanning stale entries", candidates)) {
-		const lease = candidate.ownedSession ? await tryAcquireSessionFileLease(candidate.ownedSession) : undefined;
-		if (lease === null) continue;
+		result[candidate.kind] += 1;
+		result.wouldDelete += 1;
+		result.bytes += candidate.bytes;
+		if (!options.apply) continue;
 		try {
-			result[candidate.kind] += 1;
-			result.wouldDelete += 1;
-			result.bytes += candidate.bytes;
-			if (!options.apply) continue;
-			try {
-				for (const target of candidate.paths) await fs.rm(target, { recursive: true, force: true });
-				result.deleted += 1;
-			} catch (error) {
-				result.errors.push(`${candidate.paths[0]}: ${errorMessage(error)}`);
-			}
-		} finally {
-			// Held through the removal so a guest cannot reopen the replica mid-delete.
-			lease?.release();
+			for (const target of candidate.paths) await fs.rm(target, { recursive: true, force: true });
+			result.deleted += 1;
+		} catch (error) {
+			result.errors.push(`${candidate.paths[0]}: ${errorMessage(error)}`);
 		}
 	}
 	return result;
@@ -1813,7 +1785,7 @@ async function cleanupStatsRowsForArchivedSessions(
 /**
  * Staging temps ({@link SESSION_STAGING_RE}) of `.jsonl` transcripts under
  * `sessionsRoot`, plus those beside exact session files recorded elsewhere
- * (`--session` paths, collab replicas).
+ * (`--session` paths).
  */
 async function collectSessionStagingFiles(sessionsRoot: string, exactSessionFiles: string[]): Promise<string[]> {
 	const files = new Map<string, string>();
@@ -2465,7 +2437,7 @@ function renderText(result: GcResult): string {
 	if (result.stale) {
 		const stale = result.stale;
 		lines.push(
-			`stale: ${stale.deleted}/${stale.wouldDelete} entries, ${formatBytes(stale.bytes)} (${stale.danglingMarkers} session markers, ${stale.staleBreadcrumbs} breadcrumbs, ${stale.expiredReports} reports, ${stale.expiredReplicas} collab replicas)`,
+			`stale: ${stale.deleted}/${stale.wouldDelete} entries, ${formatBytes(stale.bytes)} (${stale.danglingMarkers} session markers, ${stale.staleBreadcrumbs} breadcrumbs, ${stale.expiredReports} reports)`,
 		);
 		if (stale.errors.length > 0) lines.push(`stale errors: ${stale.errors.length}`);
 	}
@@ -2532,7 +2504,6 @@ export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
 		const registeredSessionPaths = options.runArchive
 			? await collectRegisteredSessionPaths(getCustomSessionFilesDir(options.agentDir))
 			: [];
-		// Pruned collab replicas release their blobs to this run's sweep.
 		if (options.runStale) next.stale = await runStaleGc(options);
 		// Before archiving and compressing, which then store the stripped transcripts.
 		if (options.runStrip) next.strip = await runStripGc(options, archiveRoot);

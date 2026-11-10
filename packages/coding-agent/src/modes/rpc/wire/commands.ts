@@ -92,13 +92,6 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		result: "FastModeResult",
 	},
 	{
-		name: "set_slow_mode",
-		doc: "Turn `/slow` on or off for the active model; returns whether it is now on.",
-		params: { enabled: "boolean" },
-		result: { enabled: "boolean" },
-		unwrap: "enabled",
-	},
-	{
 		name: "goal",
 		doc: "Read or change goal mode with the lifecycle of the interactive `/goal` command.",
 		params: { op: "GoalOp", "objective?": "string", "token_budget?": "number.integer" },
@@ -220,13 +213,6 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		result: "CompactionResult",
 	},
 	{ name: "set_auto_compaction", doc: "Enable or disable auto-compaction.", params: { enabled: "boolean" } },
-	{
-		name: "set_cache_warming",
-		doc: "Override cache warming for this session only; returns the effective mode.",
-		params: { mode: "CacheWarmingMode" },
-		result: { mode: "CacheWarmingMode" },
-		unwrap: "mode",
-	},
 	{ name: "set_auto_retry", doc: "Enable or disable auto-retry.", params: { enabled: "boolean" } },
 	{ name: "abort_retry", doc: "Abort a pending auto-retry." },
 	{
@@ -243,13 +229,6 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		doc: "Which of these sessions a running process (this one included) owns, probed without taking ownership. Ids in neither list are free; `unknown` could not be probed.",
 		params: { sessionIds: "string[]" },
 		result: { held: "string[]", unknown: "string[]" },
-	},
-	{
-		name: "export_html",
-		doc: "Export the session as HTML; returns the written path.",
-		params: { "outputPath?": "string" },
-		result: { path: "string" },
-		unwrap: "path",
 	},
 	{
 		name: "switch_session",

@@ -72,9 +72,6 @@ import {
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { restartArgv } from "../cli/flag-tables";
-import type { CollabGuestLink } from "../collab/guest";
-import { CollabController } from "../collab/controller";
-import type { CollabHost } from "../collab/host";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { appKey, editorKey, rawKeyHint } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
 import { formatModelString, resolveModelRoleValue } from "../config/model-resolver";
@@ -172,9 +169,6 @@ import { isMCPToolName } from "../tools/builtin-names";
 import type { LspStartupServerInfo } from "../tools";
 import { resolvePlanFilePath } from "../plan-mode/plan-files";
 import { resolveToCwd } from "../tools/path-utils";
-import { StreamPublisher } from "../stream/publisher";
-import { newRecordingPath, SessionRecorder } from "../stream/recording";
-import { StreamRedactor } from "../stream/redactor";
 import {
 	FEED_MODEL_BADGE_WIDTH,
 	formatFeedModelBadge,
@@ -329,7 +323,6 @@ import { hintUsage } from "../utils/usage-counter";
 import {
 	getInspectableSubagentCount,
 	getRunningSubagentBadgeAgentIds,
-	getRunningSubagentBadgeRegistry,
 } from "@oh-my-pi/pi-tui/overlays/running-subagent-badge";
 import {
 	type ObservableSession,
@@ -436,7 +429,6 @@ import { cfgExtensionHandlersModeControl } from "../extensibility/settings";
 import { cfgGoalContinuationModes, cfgGoalEnabled } from "../goals/settings";
 import { goalContinuationActivity, goalFromModeData } from "../goals/state";
 import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "../plan-mode/settings";
-import { cfgStreamRedactPatterns } from "../stream/settings";
 import { combine, type SettingValueOf } from "../config/registry";
 import { cfgAdvisorEnabled, cfgAdvisorMaxNotesPerUpdate } from "../advisor/settings";
 import { cfgExtensionAssistantTextRenderers, cfgExtensionTranscriptPresenters } from "../extensibility/settings";
@@ -1713,27 +1705,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	fileSlashCommands: Set<string> = new Set();
 	skillCommands: Map<string, Skill> = new Map();
 	oauthManualInput: OAuthManualInputManager = new OAuthManualInputManager();
-	/** Owns hosting: manual `/collab`, `collab.autoStart`, and room rotation on session switch. */
-	readonly collabController: CollabController;
-	/** Owned room; use {@link collabController}.host for current-session reuse and links. */
-	collabHost?: CollabHost;
-	#collabGuest: CollabGuestLink | undefined;
-	/** Set with {@link setCollabGuest}. */
-	get collabGuest(): CollabGuestLink | undefined {
-		return this.#collabGuest;
-	}
-	/**
-	 * A guest's transcript is the host's and draws stock cards. Joining replays the host's next, so
-	 * the local blocks are left as drawn; leaving restored the local transcript while the guest still
-	 * held it, so its blocks are asked again.
-	 */
-	setCollabGuest(guest: CollabGuestLink | undefined): void {
-		this.#collabGuest = guest;
-		if (this.#applyTranscriptPresenters() && !guest) this.refreshTranscriptPresentation();
-	}
-	#streamPublisher: StreamPublisher | undefined;
-	#recorder: SessionRecorder | undefined;
-	#recorderStarting = false;
 
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
@@ -2276,7 +2247,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#selectorController = new SelectorController(this);
 		this.#focusController = new SessionFocusController(this);
 		this.#inputController = new InputController(this);
-		this.collabController = new CollabController(this);
 		this.session.setPromptDropped?.(prompt => this.#restoreDroppedPrompt(prompt));
 		this.#observerRegistry = new SessionObserverRegistry();
 	}
@@ -2664,40 +2634,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// TUI's multiplexer, output-backlog, and image safety gates.
 		this.ui.renderNow();
 
-		const streamCwd = this.sessionManager.getCwd();
-		this.#streamPublisher =
-			(await StreamPublisher.connectLazy({
-				cwd: streamCwd,
-				sessionId: this.sessionManager.getSessionId(),
-				title: path.basename(streamCwd),
-				tui: this.ui,
-				loadRedactor: () => StreamRedactor.load(streamCwd, cfgStreamRedactPatterns.get(this.settings)),
-				onStatus: status => {
-					this.statusLine.setStreamStatus(status);
-					this.ui.requestRender();
-				},
-				onChat: message => {
-					const chat = truncateToWidth(
-						replaceTabs(sanitizeText(`${message.name}: ${message.text}`)).replace(/[\r\n]+/g, " "),
-						TRUNCATE_LENGTHS.LINE,
-					);
-					this.showStatus(chat);
-				},
-			})) ?? undefined;
-		if (this.#streamPublisher) {
-			this.ui.renderNow();
-			// Live stream redaction follows `stream.redactPatterns` edits; only the
-			// newest edit's load applies, however the async loads interleave.
-			let redactorLoads = 0;
-			this.#eventBusUnsubscribers.push(
-				cfgStreamRedactPatterns.listen(this.settings, async patterns => {
-					const load = ++redactorLoads;
-					const redactor = await StreamRedactor.load(streamCwd, patterns);
-					if (load === redactorLoads) this.#streamPublisher?.setRedactor(redactor);
-				}),
-			);
-		}
-
 		// Warm rendering and the current model connection after the first frame.
 		setImmediate(() => {
 			// Resumed sessions paint their restored transcript (code blocks, diffs)
@@ -2708,13 +2644,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			// Open the model API connection while the user reads the first frame.
 			this.session.prewarmModelConnection();
 		});
-
-		// Host the session before extension hooks run: a dialog raised from a
-		// `session_start` hook is then retained for the first writer that joins.
-		// The relay connection proceeds in the background and never blocks init.
-		// The owning caller keeps guest mutations gated through its full outer
-		// startup; early dialog answers do not require that readiness signal.
-		if (options.autoStartCollab === true) this.collabController.autoStart();
 
 		// Initialize hooks with TUI-based UI context
 		await logger.time("InteractiveMode.init:hooks", () => this.initHooksAndCustomTools());
@@ -4551,10 +4480,10 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/**
 	 * Install the main session's transcript presenters (what its runner leaves active); true when
-	 * they changed. A focused subagent's transcript and a collab guest's draw stock cards instead.
+	 * they changed. A focused subagent's transcript draws stock cards instead.
 	 */
 	#applyTranscriptPresenters(): boolean {
-		const runner = this.viewSession === this.session && !this.collabGuest ? this.session.extensionRunner : undefined;
+		const runner = this.viewSession === this.session ? this.session.extensionRunner : undefined;
 		return setTranscriptPresenters(runner?.getTranscriptPresenters() ?? []);
 	}
 
@@ -4693,13 +4622,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.requestRender();
 	}
 
-	/**
-	 * Refresh the running-subagents status badge from the active local or collab
-	 * registry, and the cost segment's subagent-tree spend (local sessions only:
-	 * a collab guest's registry mirrors host transcripts outside this root).
-	 */
+	/** Refresh the local subagent badge and the current session tree's spend. */
 	syncRunningSubagentBadge(options: { requestRender?: boolean } = {}): boolean {
-		const registry = getRunningSubagentBadgeRegistry(this.collabGuest, AgentRegistry.global());
+		const registry = AgentRegistry.global();
 		if (this.#agentRegistrySubscriptionTarget !== registry) {
 			this.#agentRegistryUnsubscribe?.();
 			this.#agentRegistrySubscriptionTarget = registry;
@@ -4715,17 +4640,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		const inspectableChanged = inspectable !== this.#inspectableSubagentCount;
 		this.#inspectableSubagentCount = inspectable;
 		const agentsChanged = this.statusLine.setRunningSubagents(agentIds);
-		let treeCost = 0;
-		if (!this.collabGuest) {
-			const rootSessionFile = this.sessionManager.getSessionFile() ?? undefined;
-			this.#hydratePersistedSubagentCosts(rootSessionFile);
-			treeCost = sumSubagentTreeCost({
-				refs: AgentRegistry.global().list(),
-				observers: this.#observerRegistry,
-				rootSessionFile,
-				sessionCosts: this.#subagentSessionCosts,
-			});
-		}
+		const rootSessionFile = this.sessionManager.getSessionFile() ?? undefined;
+		this.#hydratePersistedSubagentCosts(rootSessionFile);
+		const treeCost = sumSubagentTreeCost({
+			refs: AgentRegistry.global().list(),
+			observers: this.#observerRegistry,
+			rootSessionFile,
+			sessionCosts: this.#subagentSessionCosts,
+		});
 		const costChanged = this.statusLine.setSubagentTreeCost(treeCost);
 		const changed = agentsChanged || costChanged || inspectableChanged;
 		if (changed && options.requestRender !== false) this.ui.requestRender();
@@ -7619,7 +7541,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	];
 
 	/**
-	 * Show the report_tool_issue consent popup (mirrored to writable `/collab` guests)
+	 * Show the report_tool_issue consent popup
 	 * and return the user's decision.
 	 * Invoked by the process-global consent handler the tool dispatches to;
 	 * subagent invocations bubble up here through the shared module state.
@@ -7627,15 +7549,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	async #promptAutoQaConsent(): Promise<boolean | null> {
 		const pool = InteractiveMode.#AUTOQA_CONSENT_PROMPTS;
 		const [headline, body] = pool[Math.floor(Math.random() * pool.length)];
-		const choice = await this.#extensionUiController.showCollabAwareSelector(`${headline}\n${body}`, ["Yes", "No"]);
+		const choice = await this.#extensionUiController.showHookSelector(`${headline}\n${body}`, ["Yes", "No"]);
 		return choice === "Yes";
 	}
 
 	/**
-	 * Ask the user to approve one `cfg://` settings change; writable `/collab` guests get the
-	 * same prompt and the first answer wins. Dismissing the dialog denies it, as does
+	 * Ask the user to approve one `cfg://` settings change. Dismissing the dialog denies it, as does
 	 * aborting the calling turn or stopping the mode. The wait honors `ask.timeout`
-	 * (seconds, 0 waits indefinitely); while a deadline is armed, any host
+	 * (seconds, 0 waits indefinitely); while a deadline is armed, any
 	 * keypress restarts the countdown, and an unanswered prompt drops the write as `timeout`.
 	 */
 	async #promptCfgChange(request: CfgChangeRequest, callerSignal?: AbortSignal): Promise<CfgApproval> {
@@ -7647,13 +7568,12 @@ export class InteractiveMode implements InteractiveModeContext {
 			: "";
 		let timedOut = false;
 		const timeout = askTimeoutMs(this.session.settings);
-		// Settle dismissed when the caller's turn aborts (a collab guest
-		// interrupting the agent) or when the mode stops, whichever first.
+		// Settle dismissed when the caller's turn aborts or the mode stops, whichever first.
 		const signal =
 			callerSignal === undefined
 				? this.#dialogLifetime.signal
 				: AbortSignal.any([callerSignal, this.#dialogLifetime.signal]);
-		const choice = await this.#extensionUiController.showCollabAwareSelector(
+		const choice = await this.#extensionUiController.showHookSelector(
 			`${headline}\n${request.previous} → ${request.value}${warning}`,
 			[CFG_APPROVE_SESSION, CFG_APPROVE_ONCE, CFG_DENY],
 			{
@@ -7683,10 +7603,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// mutex deny on arrival instead of prompting a torn-down UI. `init`
 		// installs a fresh one.
 		this.#dialogLifetime.abort();
-		this.#streamPublisher?.dispose();
-		this.#streamPublisher = undefined;
-		void this.#recorder?.stop();
-		this.#recorder = undefined;
 		// Last chance to refresh the startup status placeholder for the next launch.
 		clearTimeout(this.#composerStatusPersistTimer);
 		this.#composerStatusPersistTimer = undefined;
@@ -7925,13 +7841,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.showStatus("Still closing… (waiting for pending work / network)");
 		}, STILL_CLOSING_DELAY_MS);
 		try {
-			this.#streamPublisher?.dispose();
-			this.#streamPublisher = undefined;
-			await this.#recorder?.stop();
-			this.#recorder = undefined;
-			// Guests get goodbye and the registry entry disappears before the
-			// session is disposed, under the same still-closing progress notice.
-			await this.collabController.shutdown("host exited");
 			await this.#btwController.dispose();
 			this.#omfgController.dispose();
 			this.#cleanseController.dispose();
@@ -8585,7 +8494,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * dispatched by the editor to `InputController.handleRetry`.
 	 */
 	syncRetryHintRow(): void {
-		const show = !this.collabGuest && !this.viewSession.isStreaming && this.viewSession.hasAbortedToolCallTail;
+		const show = !this.viewSession.isStreaming && this.viewSession.hasAbortedToolCallTail;
 		if (this.#retryHintRow) {
 			const mounted = this.statusContainer.children.includes(this.#retryHintRow);
 			if (mounted && show) return;
@@ -8625,9 +8534,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	// Command handling
-	handleExportCommand(text: string): Promise<void> {
-		return this.#commandController.handleExportCommand(text);
-	}
 	handleTraceCommand(): Promise<void> {
 		return this.#commandController.handleTraceCommand();
 	}
@@ -8650,10 +8556,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleDebugTranscriptCommand(): Promise<void> {
 		return this.#commandController.handleDebugTranscriptCommand();
-	}
-
-	handleShareCommand(): Promise<void> {
-		return this.#commandController.handleShareCommand();
 	}
 
 	handleTodoCommand(args: string): Promise<void> {
@@ -8803,39 +8705,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleRenameCommand(title: string): Promise<void> {
 		return this.#commandController.handleRenameCommand(title);
-	}
-
-	/** Start a `/record` screen capture, or stop the running one and report where it was saved. */
-	async toggleRecording(): Promise<void> {
-		const active = this.#recorder;
-		if (active) {
-			this.#recorder = undefined;
-			const elapsed = active.elapsedMs;
-			await active.stop();
-			this.statusLine.setRecording(false);
-			this.showStatus(
-				`Saved ${formatDuration(elapsed)} recording to ${active.path} · replay: omp play · share: omp clip`,
-			);
-			return;
-		}
-		if (this.#recorderStarting) return;
-		this.#recorderStarting = true;
-		const cwd = this.sessionManager.getCwd();
-		try {
-			this.#recorder = await SessionRecorder.start({
-				tui: this.ui,
-				redactor: await StreamRedactor.load(cwd, cfgStreamRedactPatterns.get(this.settings)),
-				title: this.sessionManager.getSessionName() || path.basename(cwd),
-				path: newRecordingPath(this.sessionManager.getSessionId()),
-			});
-		} catch (error) {
-			this.showError(`Could not start recording: ${error instanceof Error ? error.message : String(error)}`);
-			return;
-		} finally {
-			this.#recorderStarting = false;
-		}
-		this.statusLine.setRecording(true);
-		this.showStatus(`Recording to ${this.#recorder.path} · /record again to stop`);
 	}
 
 	async showDebugSelector(): Promise<void> {

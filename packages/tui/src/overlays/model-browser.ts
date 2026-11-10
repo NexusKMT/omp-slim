@@ -9,7 +9,7 @@
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { getEffectiveTokenCost, getFactoryDroidCreditRate, getModelPricingStatus } from "@oh-my-pi/pi-catalog/models";
+import { getEffectiveTokenCost, getModelPricingStatus } from "@oh-my-pi/pi-catalog/models";
 import { modelKind, type ModelKind, type ModelPricingStatus } from "@oh-my-pi/pi-catalog/types";
 import type { Component } from "../tui";
 import { FuzzyCorpus, fuzzyRank } from "../fuzzy";
@@ -156,7 +156,7 @@ function modelItemComparator(options: SortModelItemsOptions): (a: ModelBrowserIt
 		const providerCmp = a.provider.localeCompare(b.provider);
 		if (providerCmp !== 0) return providerCmp;
 
-		// Priority field (lower = better, e.g. Codex priority values)
+		// Priority field (lower = earlier)
 		const aPri = a.model.priority ?? Number.MAX_SAFE_INTEGER;
 		const bPri = b.model.priority ?? Number.MAX_SAFE_INTEGER;
 		if (aPri !== bPri) return aPri - bPri;
@@ -432,13 +432,12 @@ function declaredPricingStatus(model: Model): Exclude<ModelPricingStatus, "fixed
 	const status = getModelPricingStatus(model);
 	return status === "fixed" ? undefined : status;
 }
-/** No token price and no subscription-credit charge (unless a pricing state is declared). */
+/** No token price, unless an explicit pricing state is declared. */
 function isFreeModel(model: Model): boolean {
 	const declared = declaredPricingStatus(model);
 	if (declared !== undefined) return declared === "free";
 	const cost = model.cost ? getEffectiveTokenCost(model.cost) : undefined;
-	const credits = getFactoryDroidCreditRate(model)?.rate;
-	return (!cost || (cost.input === 0 && cost.output === 0)) && (credits === undefined || credits === 0);
+	return !cost || (cost.input === 0 && cost.output === 0);
 }
 
 /** One per-million price leg: `3`, `0.25`, `12.5`; `?` when unknown. */
@@ -451,26 +450,6 @@ function formatCostLeg(n: number): string {
 	return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
 }
 
-/** `2× from 2026-11-22` when a dated Factory Droid credit card changes the rate in force now; undefined otherwise. */
-function nextCreditRateNote(model: Model): string | undefined {
-	const next = getFactoryDroidCreditRate(model)?.next;
-	return next ? `${formatCostLeg(next.rate)}× from ${new Date(next.at).toISOString().slice(0, 10)}` : undefined;
-}
-
-/**
- * Adds Factory Droid's `N×` Standard Credits rate in force now (its dated
- * `credit-rates` card applied) to a dollar price, replacing the price when the
- * model has no dollar reference. The dollar reference never includes vendor
- * promotions; the preview and detail facts name the next rate (`nextCreditRateNote`).
- */
-function withCreditBadge(model: Model, price: string): string {
-	const credits = getFactoryDroidCreditRate(model);
-	if (credits === undefined) return price;
-	const badge = `${formatCostLeg(credits.rate)}×`;
-	const cost = getEffectiveTokenCost(model.cost);
-	return cost.input !== 0 || cost.output !== 0 ? `${price} ${badge}` : badge;
-}
-
 const PRICING_STATUS_LABELS: Record<Exclude<ModelPricingStatus, "fixed">, { short: string; detail: string }> = {
 	free: { short: "free", detail: "free" },
 	included: { short: "included", detail: "included" },
@@ -478,13 +457,13 @@ const PRICING_STATUS_LABELS: Record<Exclude<ModelPricingStatus, "fixed">, { shor
 	unknown: { short: "unknown", detail: "pricing unknown" },
 };
 
-/** `$in/out` per-million cost pair with any credit badge; `free` when nothing is charged; a declared pricing state otherwise. */
+/** `$in/out` per-million cost pair; `free` when nothing is charged; a declared pricing state otherwise. */
 function formatCostPair(model: Model): string {
 	const declared = declaredPricingStatus(model);
 	if (declared !== undefined) return PRICING_STATUS_LABELS[declared].short;
 	if (isFreeModel(model)) return "free";
 	const cost = getEffectiveTokenCost(model.cost);
-	return withCreditBadge(model, `$${formatCostLeg(cost.input)}/${formatCostLeg(cost.output)}`);
+	return `$${formatCostLeg(cost.input)}/${formatCostLeg(cost.output)}`;
 }
 
 /** Detail-pane price fact: `$3/15 per M`, or the declared pricing state in words. */
@@ -507,7 +486,7 @@ function pickerPrice(model: Model): string {
 	if (declared !== undefined) return PRICING_STATUS_LABELS[declared].short;
 	if (isFreeModel(model)) return "free";
 	const cost = getEffectiveTokenCost(model.cost);
-	return withCreditBadge(model, `$${formatCostLeg(cost.input)}·${formatCostLeg(cost.output)}`);
+	return `$${formatCostLeg(cost.input)}·${formatCostLeg(cost.output)}`;
 }
 
 /** `$2 in · $10 out · $0.2 cache` for a model preview. */
@@ -517,9 +496,7 @@ function previewPrice(model: Model): string {
 	const cost = getEffectiveTokenCost(model.cost);
 	const parts = [`$${formatCostLeg(cost.input)} in`, `$${formatCostLeg(cost.output)} out`];
 	if (cost.cacheRead > 0) parts.push(`$${formatCostLeg(cost.cacheRead)} cache`);
-	const priced = withCreditBadge(model, parts.join(" · "));
-	const note = nextCreditRateNote(model);
-	return note ? `${priced} (${note})` : priced;
+	return parts.join(" · ");
 }
 
 /**
@@ -723,8 +700,6 @@ export class ModelBrowser implements Component {
 		| undefined;
 	/** Theme-formatted catalog metric cells per item; rebuilt when the item's model or the theme changes. */
 	#metricCells = new WeakMap<ModelBrowserItem, MetricCells>();
-	/** Earliest dated credit-rate change among models whose rows are memoized; passing it rebuilds them. */
-	#nextCreditChange = Number.POSITIVE_INFINITY;
 	/** Non-separator items of the last ranked visible list, for {@link queryMatches}. */
 	#queryMatches: { visible: readonly ModelBrowserItem[]; matches: readonly ModelBrowserItem[] } | undefined;
 	#hoveredIndex: number | null = null;
@@ -809,7 +784,6 @@ export class ModelBrowser implements Component {
 
 	/** Replace the scope's base items; the live query re-applies and selection is pinned by selector. */
 	setItems(items: ModelBrowserItem[]): void {
-		for (const item of items) this.#noteCreditChange(item.model);
 		const selectedKey = this.getSelected()?.selector;
 		this.#menu.setItems(this.#insertSeparator(items), selectedKey);
 		this.onSelectionChange?.(this.getSelected());
@@ -1195,7 +1169,6 @@ export class ModelBrowser implements Component {
 	#metricCellsFor(item: ModelBrowserItem): MetricCells {
 		const cached = this.#metricCells.get(item);
 		if (cached?.model === item.model && cached.theme === theme) return cached;
-		this.#noteCreditChange(item.model);
 		const intelligence = formatIntelligence(item.model);
 		const ctx = formatContext(item.model);
 		const cost = formatCostPair(item.model);
@@ -1312,9 +1285,6 @@ export class ModelBrowser implements Component {
 		} else if (model.tps != null && Number.isFinite(model.tps) && model.tps > 0) {
 			facts.push(`~${formatTps(model.tps)}`);
 		}
-		// Last fact before prose, so narrow widths cut it before capability and perf facts.
-		const nextCredits = nextCreditRateNote(model);
-		if (nextCredits) facts.push(nextCredits);
 		if (model.description) {
 			const description = formatDescription(model.description);
 			if (description) facts.push(description);
@@ -1335,7 +1305,6 @@ export class ModelBrowser implements Component {
 	}
 
 	render(width: number): string[] {
-		this.#syncCreditClock();
 		const lines: string[] = [];
 
 		const searchIcon = theme.fg("accent", theme.symbol("icon.search"));
@@ -1427,30 +1396,6 @@ export class ModelBrowser implements Component {
 
 	invalidate(): void {}
 
-	/** Called for every listed model and before a row is memoized: its credit rate changes at its next dated card. */
-	#noteCreditChange(model: Model): void {
-		const at = getFactoryDroidCreditRate(model)?.next?.at;
-		if (at !== undefined && at < this.#nextCreditChange) this.#nextCreditChange = at;
-	}
-
-	/**
-	 * A dated credit rate took effect since rows were memoized: rebuild every
-	 * memoized row, and re-rank the list, whose `free` search word follows the
-	 * rate too.
-	 */
-	#syncCreditClock(): void {
-		if (Date.now() < this.#nextCreditChange) return;
-		this.#nextCreditChange = Number.POSITIVE_INFINITY;
-		this.#metricCells = new WeakMap();
-		this.#pickerPreview = undefined;
-		this.#bumpPickerEpoch();
-		this.#ranker = undefined;
-		this.#menu.setItems(this.#menu.items);
-		for (const item of this.#menu.items) {
-			if (item.id !== "separator") this.#noteCreditChange(item.model);
-		}
-	}
-
 	#bumpNativeEpoch(): void {
 		this.#nativeEpoch++;
 		this.#itemNodes.clear();
@@ -1469,7 +1414,6 @@ export class ModelBrowser implements Component {
 	 * scrolls), and the selection's facts and current-model marker.
 	 */
 	describe(): NativeNode {
-		this.#syncCreditClock();
 		this.#nativeSearch ??= row([text([span(theme.symbol("icon.search"), "accent")]), this.#searchInput], {
 			gap: "sm",
 			align: "center",
@@ -1540,7 +1484,6 @@ export class ModelBrowser implements Component {
 		if (item.id === "separator") return node("rule", undefined, undefined, "separator");
 		const cached = this.#itemNodes.get(item.selector);
 		if (cached?.item === item) return cached.node;
-		this.#noteCreditChange(item.model);
 
 		const label: TspSpan[] = [];
 		if (this.#showProvider) label.push(span(`${item.provider}/`, "dim"));
@@ -1583,7 +1526,6 @@ export class ModelBrowser implements Component {
 			return prev.node;
 		}
 
-		if (selected) this.#noteCreditChange(selected.model);
 		const children: NativeChild[] = [];
 		if (selected) {
 			const model = selected.model;
@@ -1608,8 +1550,6 @@ export class ModelBrowser implements Component {
 			} else if (model.tps != null && Number.isFinite(model.tps) && model.tps > 0) {
 				facts.push(`~${formatTps(model.tps)}`);
 			}
-			const nextCredits = nextCreditRateNote(model);
-			if (nextCredits) facts.push(nextCredits);
 			children.push(text([span(facts.join(" · "), "muted")], { wrap: "word" }));
 			const description = model.description ? formatDescription(model.description) : "";
 			if (description) children.push(text([span(description, "dim")], { wrap: "word", lines: 2 }));
@@ -1672,7 +1612,6 @@ export class ModelBrowser implements Component {
 	 * model changing) keeps the last whole `items` and patches it.
 	 */
 	pickerItems(catalogue: readonly ModelBrowserItem[]): ModelPickerCatalogue {
-		this.#syncCreditClock();
 		const memo = this.#pickerItems;
 		if (memo?.catalogue === catalogue && memo.epoch === this.#pickerEpoch) {
 			return memo.value;
@@ -1715,7 +1654,6 @@ export class ModelBrowser implements Component {
 		if (cached?.model === model && cached.label === item.id && cached.epoch === this.#pickerEpoch) {
 			return cached.value;
 		}
-		this.#noteCreditChange(model);
 		const facts: Record<string, TspText | number> = {};
 		const int = model.int != null && Number.isFinite(model.int) ? model.int : undefined;
 		if (int !== undefined) facts.int = String(Math.round(int));
@@ -1831,7 +1769,6 @@ export class ModelBrowser implements Component {
 	 * below the list): one inline fact line and the held-current-model marker.
 	 */
 	pickerPreview(mode: "full" | "compact", current?: string): readonly NativeChild[] {
-		this.#syncCreditClock();
 		const selected = this.getSelected();
 		const item = selected && !this.#isDisabled(selected) ? selected : undefined;
 		const key = `${mode}\0${current ?? ""}\0${this.#settings.revision}`;
@@ -1839,7 +1776,6 @@ export class ModelBrowser implements Component {
 		if (memo !== undefined && memo.item === item && memo.epoch === this.#pickerEpoch && memo.key === key) {
 			return memo.children;
 		}
-		if (item) this.#noteCreditChange(item.model);
 		const children = item ? this.modelPreview(item, mode, current) : [];
 		this.#pickerPreview = { item, epoch: this.#pickerEpoch, key, children };
 		return children;
@@ -1870,8 +1806,6 @@ export class ModelBrowser implements Component {
 			if (ctx > 0) facts.push({ k: "ctx", v: formatNumber(ctx).toLowerCase() });
 			if (out > 0) facts.push({ k: "out", v: formatNumber(out).toLowerCase() });
 			facts.push({ k: "price", v: isFreeModel(model) ? "free" : formatCostDetail(model) });
-			const nextCredits = nextCreditRateNote(model);
-			if (nextCredits) facts.push({ k: "then", v: nextCredits });
 			facts.push({ k: "reasoning", v: model.reasoning ? "yes" : "no" });
 			const children: NativeChild[] = [node("kv", { items: facts, layout: "inline" })];
 			const chips: NativeChild[] = [];

@@ -19,7 +19,6 @@ import {
 import githubDescription from "../prompts/tools/github.md" with { type: "text" };
 import { github } from "../utils/github";
 import { loadImageAttachmentInput } from "../utils/image-loading";
-import { webpExclusionForModel } from "@oh-my-pi/pi-tui/chat/image-loading";
 import type { ToolSession } from ".";
 import {
 	buildTextResult,
@@ -264,7 +263,6 @@ async function executeFileRead(
 			label: filePath,
 			uri: sourceUrl,
 			autoResize: cfgImagesAutoResize.get(session.settings),
-			excludeWebP: webpExclusionForModel(session.getActiveModel?.()),
 		});
 		if (image) {
 			const dimensions =

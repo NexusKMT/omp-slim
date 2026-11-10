@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
-// Regression: `omp config set collab.autoStart control` on a fresh Windows profile over WinRM
+// Regression: `omp config set display.showTokenUsage true` on a fresh Windows profile over WinRM
 // exited 0 with no output and never wrote config.yml. The CLI entry is a floating `runCli()`
 // call (top-level await breaks `--bytecode` builds), so a one-shot command whose await never
 // settles and holds no live handle let the event loop drain, and Bun exited 0: an unfinished
@@ -79,7 +79,7 @@ async function runConfigSet(tempDir: TempDir, settingsInit: SettingsInitMode): P
 	delete env.XDG_DATA_HOME;
 	delete env.XDG_STATE_HOME;
 	const proc = Bun.spawn(
-		[process.execPath, ...preloadArgs, cliEntry, "config", "set", "collab.autoStart", "control"],
+		[process.execPath, ...preloadArgs, cliEntry, "config", "set", "display.showTokenUsage", "true"],
 		{ cwd: tempDir.path(), env, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
 	);
 	const [exitCode, stdout, stderr] = await Promise.all([
@@ -99,7 +99,7 @@ describe("one-shot CLI command settlement", () => {
 		expect(run.exitCode, run.stderr).toBe(1);
 		// Names the stalled subcommand so automation logs show what failed, without its arguments.
 		expect(run.stderr).toContain(`\`omp config\` ${DIAGNOSTIC}`);
-		expect(run.stderr).not.toContain("collab.autoStart");
+		expect(run.stderr).not.toContain("display.showTokenUsage");
 		expect(run.stdout).toBe("");
 		expect(fs.existsSync(run.configPath)).toBe(false);
 	}, 30_000);
@@ -109,9 +109,11 @@ describe("one-shot CLI command settlement", () => {
 		const run = await runConfigSet(tempDir, "real");
 
 		expect(run.exitCode, run.stderr).toBe(0);
-		expect(run.stdout).toContain("Set collab.autoStart = control");
+		expect(run.stdout).toContain("Set display.showTokenUsage = true");
 		expect(run.stderr).not.toContain(DIAGNOSTIC);
-		expect(Bun.YAML.parse(await Bun.file(run.configPath).text())).toMatchObject({ collab: { autoStart: "control" } });
+		expect(Bun.YAML.parse(await Bun.file(run.configPath).text())).toMatchObject({
+			display: { showTokenUsage: true },
+		});
 	}, 30_000);
 
 	it("keeps exit 0 when the loop resumes after a premature beforeExit and the command completes", async () => {
@@ -119,9 +121,11 @@ describe("one-shot CLI command settlement", () => {
 		const run = await runConfigSet(tempDir, "resume-after-drain");
 
 		expect(run.exitCode, run.stderr).toBe(0);
-		expect(run.stdout).toContain("Set collab.autoStart = control");
+		expect(run.stdout).toContain("Set display.showTokenUsage = true");
 		expect(run.stderr).not.toContain(DIAGNOSTIC);
-		expect(Bun.YAML.parse(await Bun.file(run.configPath).text())).toMatchObject({ collab: { autoStart: "control" } });
+		expect(Bun.YAML.parse(await Bun.file(run.configPath).text())).toMatchObject({
+			display: { showTokenUsage: true },
+		});
 	}, 30_000);
 
 	it("keeps an explicit exit's code when the loop resumed after a premature beforeExit", async () => {

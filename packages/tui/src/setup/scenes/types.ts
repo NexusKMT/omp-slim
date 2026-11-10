@@ -1,4 +1,4 @@
-import type { AuthStorage, Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
 import type { SgrMouseEvent } from "../../mouse";
 import type { ComposerPreviewStatusSource } from "../../overlays/composer-shape-preview";
 import type { ComposerShape } from "../../overlays/composer-shape-registry";
@@ -25,16 +25,13 @@ export interface SetupHost extends SetupUiHost {
 	readonly composerShape: ComposerShape;
 	readonly symbolPreset: SymbolPreset;
 	readonly colorBlindMode: boolean;
-	readonly disabledProviders: readonly string[];
 	/** Whether background self-update (`update.auto`) is on. */
 	readonly autoUpdate: boolean;
-	readonly authStorage: AuthStorage;
 	readonly modelSource: ModelBrowserSource;
-	/** Available and catalog models of every kind; role chips resolve over all of them, rows list chat models. */
+	/** Configured chat models available to the session. */
 	getModels(): { available: Model[]; all: Model[]; current: Model | undefined };
 	refreshModels(): Promise<void>;
 	selectModel(model: Model, selector: string): Promise<void>;
-	refreshProvider(provider: string): Promise<void>;
 	saveComposerShape(shape: ComposerShape): Promise<void>;
 	saveSymbolPreset(preset: SymbolPreset): void;
 	saveColorBlindMode(enabled: boolean): void;
@@ -45,7 +42,6 @@ export interface SetupHost extends SetupUiHost {
 	 */
 	canAutoUpdate(): Promise<boolean>;
 	saveAutoUpdate(enabled: boolean): Promise<void>;
-	openInBrowser(url: string): void;
 	markComplete(version: number): Promise<void>;
 	playWelcomeIntro(): void;
 	showError(message: string): void;

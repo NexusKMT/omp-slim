@@ -385,8 +385,6 @@ export type StreamingBehavior = "steer" | "followUp";
 
 export type QueuedMessageQueue = "steering" | "followUp";
 
-export type CacheWarmingMode = "off" | "streaming" | "idle";
-
 /** `set_event_filter` projection: `delta` replaces the accumulated snapshots with the block a start/end event touches. */
 export type MessageUpdates = "full" | "delta";
 
@@ -466,30 +464,6 @@ export interface GoalResult {
 	state: GoalModeState | null;
 }
 
-/** Where `/slow` lives: persisted config shared by every session, or this session's flex tier. */
-export type SlowModeScope = "session" | "global";
-
-/** Requests are served on the provider's low-priority (slow) lane. */
-export interface UsageLimitLowPriority {
-	stage: "low_priority";
-	/** Epoch seconds when the limit that was hit resets. */
-	resetsAtSec: number;
-	/** Percent of the low-priority allowance still available, when reported. */
-	allowanceLeftPercent?: number;
-}
-
-/** Requests run on a short wrap-up allowance past the limit. */
-export interface UsageLimitWrapUp {
-	stage: "wrap_up";
-	/** Whether paid extra usage serves requests once the allowance is spent. */
-	extraUsage: boolean;
-	/** Epoch seconds when the limit that was hit resets, if reported. */
-	resetsAtSec?: number;
-}
-
-/** Provider-neutral state of an account past its usage limit, discriminated by `stage`. */
-export type UsageLimitState = UsageLimitLowPriority | UsageLimitWrapUp;
-
 export interface SessionState {
 	sessionId: string;
 	model?: ModelInfo;
@@ -504,14 +478,6 @@ export interface SessionState {
 	autoCompactionEnabled?: boolean;
 	fastModeEnabled?: boolean;
 	fastModeActive?: boolean;
-	/** `/slow` applies to the active model. */
-	slowModeSupported?: boolean;
-	/** `/slow` is on for the active model; always `false` when `slowModeSupported` is `false`. */
-	slowModeEnabled?: boolean;
-	/** Where the active model's `/slow` lives; absent when unsupported. */
-	slowModeScope?: SlowModeScope;
-	/** Usage-limit stage of the active model's account; absent outside wrap-up and low priority. */
-	usageLimit?: UsageLimitState;
 	tokensPerSecond?: number | null;
 	messageCount?: number;
 	queuedMessageCount?: number;
@@ -808,10 +774,6 @@ export type AutoCompactionReason = "threshold" | "overflow" | "idle" | "incomple
 
 export type AutoCompactionAction = "context-full" | "remote" | "handoff" | "shake" | "snapcompact";
 
-export type CacheWarmingPhase = "streaming" | "idle";
-
-export type CacheWarmingOutcome = "hit" | "miss" | "error" | "aborted";
-
 export type NotifyType = "info" | "warning" | "error";
 
 export interface AgentStartEvent {
@@ -953,27 +915,6 @@ export interface AutoRetryEndEvent {
 	retryErrors?: Record<string, unknown>[];
 }
 
-/** A prompt-cache refresh was handed to the provider. */
-export interface CacheWarmingStartEvent {
-	type: "cache_warming_start";
-	phase: CacheWarmingPhase;
-	provider: string;
-	model: string;
-}
-
-/** Outcome of the refresh announced by the matching `cache_warming_start`. */
-export interface CacheWarmingEndEvent {
-	type: "cache_warming_end";
-	phase: CacheWarmingPhase;
-	provider: string;
-	model: string;
-	outcome: CacheWarmingOutcome;
-	/** Present only when the refresh was billed. */
-	usage?: Usage;
-	/** Why warming stopped; absent while it continues. */
-	warmingStopReason?: string;
-}
-
 export interface RetryFallbackAppliedEvent {
 	type: "retry_fallback_applied";
 	from: string;
@@ -1060,7 +1001,7 @@ export interface QueueUpdateEvent {
 }
 
 /** A session event, discriminated by `type`; `set_event_filter` selects which are sent. */
-export type RpcAgentEvent = AgentStartEvent | AgentEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolStreamUpdateEvent | ToolExecutionEndEvent | AutoCompactionStartEvent | AutoCompactionEndEvent | ManualCompactionStartEvent | ManualCompactionEndEvent | AutoRetryStartEvent | AutoRetryEndEvent | CacheWarmingStartEvent | CacheWarmingEndEvent | RetryFallbackAppliedEvent | RetryFallbackSucceededEvent | ModelChangedEvent | ConfigWarningsChangedEvent | AdvisorCostChangedEvent | AdvisorYieldedEvent | TtsrTriggeredEvent | TodoReminderEvent | TodoAutoClearEvent | IrcMessageEvent | NoticeEvent | ThinkingLevelChangedEvent | GoalUpdatedEvent | QueueUpdateEvent;
+export type RpcAgentEvent = AgentStartEvent | AgentEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolStreamUpdateEvent | ToolExecutionEndEvent | AutoCompactionStartEvent | AutoCompactionEndEvent | ManualCompactionStartEvent | ManualCompactionEndEvent | AutoRetryStartEvent | AutoRetryEndEvent | RetryFallbackAppliedEvent | RetryFallbackSucceededEvent | ModelChangedEvent | ConfigWarningsChangedEvent | AdvisorCostChangedEvent | AdvisorYieldedEvent | TtsrTriggeredEvent | TodoReminderEvent | TodoAutoClearEvent | IrcMessageEvent | NoticeEvent | ThinkingLevelChangedEvent | GoalUpdatedEvent | QueueUpdateEvent;
 
 /** First frame after startup; transport fields are absent on servers without protocol v2. */
 export interface ReadyEvent {
@@ -1547,14 +1488,6 @@ export interface SetFastModeParams {
 	enabled: boolean;
 }
 
-export interface SetSlowModeParams {
-	enabled: boolean;
-}
-
-export interface SetSlowModeResult {
-	enabled: boolean;
-}
-
 export interface GoalParams {
 	op: GoalOp;
 	objective?: string;
@@ -1679,14 +1612,6 @@ export interface SetAutoCompactionParams {
 	enabled: boolean;
 }
 
-export interface SetCacheWarmingParams {
-	mode: CacheWarmingMode;
-}
-
-export interface SetCacheWarmingResult {
-	mode: CacheWarmingMode;
-}
-
 export interface SetAutoRetryParams {
 	enabled: boolean;
 }
@@ -1703,14 +1628,6 @@ export interface GetSessionLeaseParams {
 export interface GetSessionLeaseResult {
 	held: string[];
 	unknown: string[];
-}
-
-export interface ExportHtmlParams {
-	outputPath?: string;
-}
-
-export interface ExportHtmlResult {
-	path: string;
 }
 
 export interface SwitchSessionParams {
@@ -1830,7 +1747,6 @@ export interface RpcWireCommands {
 	open_session: { params: OpenSessionParams; result: OpenSessionResult };
 	get_state: { params: undefined; result: SessionState };
 	set_fast_mode: { params: SetFastModeParams; result: FastModeResult };
-	set_slow_mode: { params: SetSlowModeParams; result: SetSlowModeResult };
 	goal: { params: GoalParams; result: GoalResult };
 	set_ask_dialog: { params: SetAskDialogParams; result: SetAskDialogResult };
 	get_available_commands: { params: undefined; result: GetAvailableCommandsResult };
@@ -1856,14 +1772,12 @@ export interface RpcWireCommands {
 	set_interrupt_mode: { params: SetInterruptModeParams; result: undefined };
 	compact: { params: CompactParams; result: CompactionResult };
 	set_auto_compaction: { params: SetAutoCompactionParams; result: undefined };
-	set_cache_warming: { params: SetCacheWarmingParams; result: SetCacheWarmingResult };
 	set_auto_retry: { params: SetAutoRetryParams; result: undefined };
 	abort_retry: { params: undefined; result: undefined };
 	bash: { params: BashParams; result: BashResult };
 	abort_bash: { params: undefined; result: undefined };
 	get_session_stats: { params: undefined; result: SessionStats };
 	get_session_lease: { params: GetSessionLeaseParams; result: GetSessionLeaseResult };
-	export_html: { params: ExportHtmlParams; result: ExportHtmlResult };
 	switch_session: { params: SwitchSessionParams; result: CancellationResult };
 	branch: { params: BranchParams; result: BranchResult };
 	fork: { params: ForkParams; result: CancellationResult };

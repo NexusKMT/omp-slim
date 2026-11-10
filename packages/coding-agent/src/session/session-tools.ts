@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Agent, AgentMessage, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { resolveDelegationBias } from "@oh-my-pi/pi-catalog/compat/delegation";
 import { isRecord, prompt, stringProperty, structuredCloneJSON, untilAborted } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
@@ -1102,7 +1101,7 @@ export class SessionTools {
 	#currentInlineDescriptors(): boolean | undefined {
 		const activeModel = this.#host.model();
 		if (!activeModel) return undefined;
-		return shouldInlineToolDescriptors(cfgInlineToolDescriptors.get(this.#host.settings), activeModel.id);
+		return shouldInlineToolDescriptors(cfgInlineToolDescriptors.get(this.#host.settings));
 	}
 
 	#currentPromptModelKey(): string | undefined {
@@ -1111,7 +1110,7 @@ export class SessionTools {
 		if (cfgIncludeModelInPrompt.get(this.#host.settings)) return formatModelString(activeModel);
 		// The inline-descriptor decision is per model and selects both the prompt's
 		// tool catalog and provider-side description pruning (see `sdk.ts`).
-		return `delegation-bias:${resolveDelegationBias(activeModel)}|inline-descriptors:${this.#currentInlineDescriptors()}`;
+		return `inline-descriptors:${this.#currentInlineDescriptors()}`;
 	}
 
 	/**

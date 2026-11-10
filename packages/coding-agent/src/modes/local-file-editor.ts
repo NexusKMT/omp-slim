@@ -107,10 +107,6 @@ async function pickLocalFile(
 
 /** `/local [target]` and the `app.local.open` key: picker when target is blank, else open target directly. */
 export async function openLocalFileInEditor(ctx: InteractiveModeContext, target?: string): Promise<void> {
-	if (ctx.collabGuest) {
-		ctx.showStatus("/local is host-only during a collab session");
-		return;
-	}
 	const editorCmd = getEditorCommand();
 	if (!editorCmd) {
 		ctx.showWarning("No editor configured. Set $VISUAL or $EDITOR environment variable.");

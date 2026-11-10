@@ -424,22 +424,6 @@ describe("InputController keybinding setup", () => {
 		expect(spies.retry).not.toHaveBeenCalled();
 	});
 
-	it("keeps retry host-only for collab guests", async () => {
-		const { InputController, ctx, editor, spies } = await createContext();
-		const showStatus = ctx.showStatus as unknown as Mock<(message: string) => void>;
-		(ctx as unknown as { collabGuest: { readOnly: boolean } }).collabGuest = { readOnly: true };
-		const controller = new InputController(ctx);
-
-		controller.setupKeyHandlers();
-		editor.setText("guest draft");
-		editor.onRetry?.();
-		await Promise.resolve();
-
-		expect(spies.retry).not.toHaveBeenCalled();
-		expect(showStatus).toHaveBeenCalledWith("/retry is host-only during a collab session");
-		expect(editor.getText()).toBe("guest draft");
-	});
-
 	it("keeps the draft when there is nothing to retry", async () => {
 		const { InputController, ctx, editor, spies } = await createContext();
 		spies.retry.mockResolvedValueOnce(false);
@@ -1458,17 +1442,6 @@ describe("InputController global editor actions", () => {
 		context.setFocused(selector);
 		expect(dispatchInput(listeners, ALT_G)).toBeUndefined();
 		expect(openLocalFilePicker).toHaveBeenCalledTimes(1);
-	});
-
-	it("refuses Alt+G when collabGuest is active", async () => {
-		const context = await createContext();
-		Object.assign(context.ctx, { collabGuest: {} });
-		const controller = new context.InputController(context.ctx);
-		controller.setupKeyHandlers();
-		const listeners = registeredInputListeners(context.spies.addInputListener);
-
-		expect(dispatchInput(listeners, ALT_G)).toEqual({ consume: true });
-		expect(context.ctx.showStatus).toHaveBeenCalledWith("/local is host-only during a collab session");
 	});
 
 	it("defers the tree selector's Ctrl+Shift+O filter binding", async () => {

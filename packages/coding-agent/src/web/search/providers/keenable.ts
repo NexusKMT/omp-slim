@@ -139,7 +139,7 @@ export async function searchKeenable(params: SearchParamsWithFetch): Promise<Sea
 	const apiKey = await resolveApiKeyOnce(keyResolver, params.signal);
 	let data: KeenableSearchResponse;
 	if (apiKey) {
-		// Reuse the preflight credential, then let withAuth refresh / rotate on 401/402.
+		// Reuse the credential already resolved by the preflight check.
 		data = await withAuth(seedApiKeyResolver(apiKey, keyResolver), key => callKeenableSearch(key, body, params), {
 			signal: params.signal,
 		});

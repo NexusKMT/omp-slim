@@ -3,7 +3,7 @@ import type { PresetDef, StatusLinePreset } from "./types";
 
 export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	default: {
-		leftSegments: ["pi", "vim", "model", "mode", "collab", "stream", "path", "git", "pr", "context_pct", "cost"],
+		leftSegments: ["pi", "vim", "model", "mode", "path", "git", "pr", "context_pct", "cost"],
 		rightSegments: ["session_name"],
 		separator: "powerline-thin",
 		segmentOptions: {
@@ -42,7 +42,6 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 			"token_out",
 			"token_rate",
 			"cache_read",
-			"cache",
 			"cost",
 			"context_pct",
 			"time_spent",
@@ -67,7 +66,6 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 			"cache_read",
 			"cache_write",
 			"token_rate",
-			"cache",
 			"cost",
 			"context_pct",
 			"context_total",

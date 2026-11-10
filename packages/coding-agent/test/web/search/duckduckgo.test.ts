@@ -1,20 +1,10 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { localeToKl, searchDuckDuckGo } from "@oh-my-pi/pi-coding-agent/web/search/providers/duckduckgo";
 import { parseSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search/query";
 import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
 
 const authStorage = createInMemoryAuthStorage();
-const modelRegistry = new ModelRegistry(authStorage);
-
-function requireDuckDuckGoModel() {
-	const model = modelRegistry.find("web", "duckduckgo");
-	if (!model) throw new Error("Expected bundled web/duckduckgo model");
-	return model;
-}
-
-const duckDuckGoModel = requireDuckDuckGoModel();
 
 afterAll(() => {
 	authStorage.close();
@@ -67,10 +57,9 @@ describe("searchDuckDuckGo kl parameter (integration)", () => {
 		await searchDuckDuckGo({
 			query,
 			parsedQuery: withParsedQuery ? parseSearchQuery(query) : undefined,
-			systemPrompt: "",
+
 			authStorage,
-			model: duckDuckGoModel,
-			modelRegistry,
+
 			fetch: fetchMock,
 		});
 		return new URLSearchParams(body ?? "");

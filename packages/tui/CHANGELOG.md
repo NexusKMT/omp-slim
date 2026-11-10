@@ -8,6 +8,8 @@
 
 ### Removed
 
+- Removed shared-session viewers, sharing and recording status controls, provider login, account quota dashboards and subscription-specific billing UI; local history, token counts and configured token costs remain.
+
 - Removed retired Prewalk status labels, theme symbols, and settings groups.
 
 - Removed Spotlight experiment controls, result notices, and the output comparison sheet.
