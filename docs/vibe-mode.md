@@ -1,6 +1,6 @@
 # Vibe mode
 
-Vibe mode turns the top-level interactive session into a **director** for persistent background worker sessions instead of letting it edit or execute commands itself. The director's active tools are reduced to `read`, optional parent-owned `todo`, and five worker-control tools. Workers do the searching, editing, running, and building; the director verifies their claims by reading touched files. The parent owns the main todo list; workers normally omit `todo`, except when their own prewalk handoff requires it.
+Vibe mode turns the top-level interactive session into a **director** for persistent background worker sessions instead of letting it edit or execute commands itself. The director's active tools are reduced to `read`, optional parent-owned `todo`, and five worker-control tools. Workers do the searching, editing, running, and building; the director verifies their claims by reading touched files. The parent owns the main todo list; workers normally omit `todo`. All workers inherit the director's current model.
 
 ## Enabling and disabling
 
@@ -27,12 +27,12 @@ Switching to a saved session suspends the source scope: running worker turns are
 
 Every worker is a real, keep-alive task-executor subagent with the normal coding tool surface and its own persisted child transcript. Choose a tier when spawning:
 
-| Tier   | Bundled agent | Default role | Use for                                             |
-| ------ | ------------- | ------------ | --------------------------------------------------- |
-| `fast` | `sonic`       | `@smol`      | Mechanical execution, drafts, high-volume work      |
-| `good` | `task`        | `@task`      | Design, judgment calls, and reviewing `fast` output |
+| Tier | Bundled agent | Model | Use for |
+| --- | --- | --- | --- |
+| `fast` | `sonic` | Current parent model | Mechanical execution, drafts, bounded tasks |
+| `good` | `task` | Current parent model | Design, judgment calls, and reviewing work |
 
-The tier always selects the bundled `sonic` or `task` definition, not a same-named discovered custom agent. Model resolution otherwise matches task-agent routing: `task.agentModelOverrides.sonic` / `.task` wins over the bundled agent model, and role aliases resolve through `modelRoles`, with the parent active/default model as fallback.
+The tier selects the bundled `sonic` or `task` definition. It changes the worker's instructions and execution constraints. Both tiers use the director's selected model, including its provider route. Legacy role and per-agent model settings cannot choose a different worker model, and a failed request does not trigger automatic model switching.
 
 ## Worker-control tools
 
@@ -59,7 +59,7 @@ Worker ids are scoped to the owning agent and parent session; a worker from anot
 3. Keep directing other workers while turns are in flight. Use `vibe_wait` only when blocked; a timed-out wait can be reissued.
 4. Use `vibe_send` naturally for corrections and next steps. A mid-turn send steers when possible; otherwise it becomes the worker's next turn automatically.
 5. When a result arrives, `read` touched files and inspect full output when the preview is insufficient. Reconcile verified work through the optional parent `todo`.
-6. Route by difficulty: draft with `fast`, escalate to `good` when mechanical execution stalls or judgment is required.
+6. Choose the worker definition that fits the assignment: `fast` for bounded execution, `good` for broader analysis. Both use the same current model.
 7. Use `vibe_kill` for a finished/stuck worker. Exiting the mode kills the entire remaining scope.
 
 The director remains responsible for the final outcome: worker completion means the turn settled, not that its claims are correct.

@@ -2524,13 +2524,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		const tempDir = makeTempDir();
 		const target = path.join(tempDir, "advisor-write.txt");
 
-		// An advisor only builds once a model resolves for it, and both the
-		// explicit override and the `advisor` role chain resolve against
-		// `modelRegistry.getAvailable()` — the models this machine holds auth
-		// for. Grant the suite's isolated storage a key and name the model
-		// outright, or the roster silently resolves to `no_model` wherever no
-		// provider is configured (CI) while passing on a developer box whose
-		// environment happens to carry provider keys.
+		// The advisor uses the parent's selected model with isolated test credentials.
 		await withProviderAuth(["openai"], async () => {
 			const { session } = await createAgentSession({
 				...baseOptions(tempDir),
@@ -2539,7 +2533,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			try {
 				// The default advisor roster is read-only (read/grep/glob); the
 				// reviewed hole needs one actually granted a mutating tool.
-				session.applyAdvisorConfigs([{ name: "writer", tools: ["write"], model: "gpt-4o-mini" }], undefined);
+				session.applyAdvisorConfigs([{ name: "writer", tools: ["write"] }], undefined);
 				const advisor = session.getAdvisorAgent();
 				if (!advisor) throw new Error("expected an advisor agent");
 				const writeTool = advisor.state.tools?.find(tool => tool.name === "write");
@@ -2570,7 +2564,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				toolNames: ["read"],
 			});
 			try {
-				session.applyAdvisorConfigs([{ name: "writer", tools: ["write"], model: "gpt-4o-mini" }], undefined);
+				session.applyAdvisorConfigs([{ name: "writer", tools: ["write"] }], undefined);
 				const advisor = session.getAdvisorAgent();
 				if (!advisor) throw new Error("expected an advisor agent");
 				const writeTool = advisor.state.tools?.find(tool => tool.name === "write");
