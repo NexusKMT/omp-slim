@@ -1,21 +1,12 @@
 /** Ordered automatic context-maintenance methods and their settings metadata. */
 
-import {
-	type CompactionSettings as EngineCompactionSettings,
-	shouldUseProviderNativeCompaction,
-} from "@oh-my-pi/pi-agent-core/compaction";
+import type { CompactionSettings as EngineCompactionSettings } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import type { CompactionSettings } from "./context-settings";
 
 /** Choices presented by the ordered compaction-method setting. */
 export const COMPACTION_METHOD_CHOICES = [
-	{
-		value: "remote",
-		label: "Server compaction",
-		description:
-			"Use provider-native server compaction (OpenAI Responses compact, Anthropic compaction beta, including on Bedrock) when the active route supports it",
-	},
 	{
 		value: "snapcompact",
 		label: "Snapcompact",
@@ -29,7 +20,7 @@ export const COMPACTION_METHOD_CHOICES = [
 	{
 		value: "soft",
 		label: "Soft compaction",
-		description: "Summarize in place with a compaction model without using server compaction",
+		description: "Summarize in place with the current model",
 	},
 	{
 		value: "shake",
@@ -41,17 +32,10 @@ export const COMPACTION_METHOD_CHOICES = [
 /** One selectable automatic context-maintenance method. */
 export type CompactionMethod = (typeof COMPACTION_METHOD_CHOICES)[number]["value"];
 
-/** Default fallback order: server-native first, portable summary last. */
-export const DEFAULT_COMPACTION_METHOD_ORDER: CompactionMethod[] = [
-	"remote",
-	"snapcompact",
-	"handoff",
-	"shake",
-	"soft",
-];
+/** Default order for local maintenance and portable summaries. */
+export const DEFAULT_COMPACTION_METHOD_ORDER: CompactionMethod[] = ["snapcompact", "handoff", "shake", "soft"];
 
 const COMPACTION_METHODS: Record<CompactionMethod, true> = {
-	remote: true,
 	snapcompact: true,
 	handoff: true,
 	soft: true,
@@ -78,7 +62,6 @@ export function resolveCompactionMethodOrder(value: unknown): CompactionMethod[]
 }
 
 const STRATEGY_BY_COMPACTION_METHOD: Record<CompactionMethod, "context-full" | "handoff" | "shake" | "snapcompact"> = {
-	remote: "context-full",
 	snapcompact: "snapcompact",
 	handoff: "handoff",
 	soft: "context-full",
@@ -97,16 +80,7 @@ export function resolveMethodSettings(
 	return {
 		...settings,
 		strategy: STRATEGY_BY_COMPACTION_METHOD[method],
-		remoteEnabled: method === "remote",
 	};
-}
-
-/** Whether server compaction has either a configured endpoint or an active native route. */
-export function canUseRemoteCompaction(model: Model | null | undefined, settings: EngineCompactionSettings): boolean {
-	return (
-		(typeof settings.remoteEndpoint === "string" && settings.remoteEndpoint.length > 0) ||
-		(model !== null && model !== undefined && shouldUseProviderNativeCompaction(model, settings))
-	);
 }
 
 /**
@@ -114,23 +88,15 @@ export function canUseRemoteCompaction(model: Model | null | undefined, settings
  * local (snapcompact/shake) — local methods are effectively instant, so there
  * is nothing to speculate. Shared by the maintenance loop's speculation gate
  * and the status line's annotated context gauge (speculation marker).
- * `skipRemote` passes over native compaction, e.g. after it failed for good.
  */
 export function resolveSpeculationMethod(
 	model: Model | null | undefined,
 	settings: CompactionSettings,
-	{ skipRemote = false }: { skipRemote?: boolean } = {},
-): "remote" | "handoff" | "soft" | undefined {
+): "handoff" | "soft" | undefined {
 	for (const candidate of resolveCompactionMethodOrder(settings.methodOrder)) {
-		if (skipRemote && candidate === "remote") continue;
-		const available =
-			candidate === "remote"
-				? canUseRemoteCompaction(model, resolveMethodSettings(settings, candidate))
-				: candidate === "snapcompact"
-					? !!model && sendsImageInputOnWire(model)
-					: true;
+		const available = candidate !== "snapcompact" || (!!model && sendsImageInputOnWire(model));
 		if (!available) continue;
-		return candidate === "remote" || candidate === "handoff" || candidate === "soft" ? candidate : undefined;
+		return candidate === "handoff" || candidate === "soft" ? candidate : undefined;
 	}
 	return undefined;
 }
