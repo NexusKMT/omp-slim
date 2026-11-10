@@ -3,6 +3,8 @@
 > memory have been removed. Session history, editing, shell, HTTP search and MCP
 > remain. See [SLIM.md](SLIM.md) for build procedures and
 > [the removal report](docs/slim-removal-2026-11-10.md) for validation and artifacts.
+> This fork also uses [one selected main model](docs/slim-single-model.md) for
+> planning, subagents and helpers, with no role-based or automatic model switching.
 > The upstream installation commands and feature overview below describe OMP;
 > they do not install this downstream build.
 
