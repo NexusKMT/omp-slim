@@ -163,17 +163,23 @@ describe("ast_grep parse errors", () => {
 				filePath,
 				"---- MODULE Algo ----\n(*--algorithm Demo\nvariables x = 0;\nbegin\n  x := x + 1;\nend algorithm;*)\n====\n",
 			);
-			const tools = await createTools(createTestSession(tempDir), ["ast_grep"]);
-			const tool = tools.find(entry => entry.name === "ast_grep");
-			expect(tool).toBeDefined();
-
-			const result = await tool!.execute("ast-grep-pluscal", {
-				pat: "x",
-				path: filePath,
-				lang: "pluscal",
-			});
-			const details = result.details as { matchCount?: number } | undefined;
-			expect(details?.matchCount).toBeGreaterThan(0);
+			// The real wasm grammar is pinned locally. Isolate its native cache in
+			// a child process so neither downloads nor other tests supply it.
+			const child = Bun.spawn(
+				[process.execPath, path.join(import.meta.dir, "../fixtures/tlaplus-tools.ts"), filePath, "grep"],
+				{
+					env: { ...process.env, PI_GRAMMARS_URL: "http://127.0.0.1:1" },
+					stdout: "pipe",
+					stderr: "pipe",
+				},
+			);
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
+			expect(JSON.parse(stdout)).toEqual({ tlaplus: 1, pluscal: 1, pcal: 1 });
 		} finally {
 			await removeWithRetries(tempDir);
 		}

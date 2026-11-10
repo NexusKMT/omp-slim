@@ -250,23 +250,23 @@ describe("ast_edit tool schema", () => {
 		try {
 			const filePath = path.join(tempDir, "Spec.tla");
 			await Bun.write(filePath, `---- MODULE Spec ----\nVARIABLE x\n\nInit == x = 0\n\nNext == x' = x + 1\n====\n`);
-			const queue = new ToolChoiceQueue();
-
-			const tools = await createTools(
-				createTestSession(tempDir, {
-					getToolChoiceQueue: () => queue,
-					buildToolChoice: () => ({ type: "tool" as const, name: "resolve" }),
-					steer: () => {},
-				}),
-				["ast_edit"],
+			// Use the pinned grammar in an isolated process, even with an empty
+			// user cache and unavailable grammar downloads.
+			const child = Bun.spawn(
+				[process.execPath, path.join(import.meta.dir, "../fixtures/tlaplus-tools.ts"), filePath, "edit"],
+				{
+					env: { ...process.env, PI_GRAMMARS_URL: "http://127.0.0.1:1" },
+					stdout: "pipe",
+					stderr: "pipe",
+				},
 			);
-			const tool = tools.find(entry => entry.name === "ast_edit");
-			expect(tool).toBeDefined();
-
-			const previewResult = await tool!.execute("ast-edit-tlaplus", {
-				ops: [{ pat: "Init", out: "Start" }],
-				paths: [filePath],
-			});
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
+			const previewResult = JSON.parse(stdout) as InvokedToolResult;
 
 			const text = previewResult.content.find(content => content.type === "text")?.text ?? "";
 			const details = previewResult.details as { totalReplacements?: number; parseErrors?: string[] } | undefined;
@@ -274,8 +274,6 @@ describe("ast_edit tool schema", () => {
 			expect(details?.totalReplacements).toBe(1);
 			expect(details?.parseErrors).toBeUndefined();
 
-			const invoker = queue.peekPendingInvoker()!;
-			await invoker({ action: "apply", reason: "apply tlaplus AST edit" });
 			expect(await Bun.file(filePath).text()).toContain("Start == x = 0");
 		} finally {
 			await removeWithRetries(tempDir);
