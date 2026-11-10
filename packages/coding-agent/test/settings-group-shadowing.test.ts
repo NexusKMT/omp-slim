@@ -16,10 +16,10 @@ describe("dropSettingsGroupShadows", () => {
 
 	it("drops nested non-object shadows without discarding valid siblings", () => {
 		const result = dropSettingsGroupShadows(
-			{ auth: { broker: "nonsense" }, autoResume: true },
+			{ github: { cache: "nonsense" }, autoResume: true },
 			"/proj/.claude/settings.json",
 		);
-		expect(result).toEqual({ auth: {}, autoResume: true });
+		expect(result).toEqual({ github: {}, autoResume: true });
 	});
 
 	it("preserves the scalar primary model setting", () => {

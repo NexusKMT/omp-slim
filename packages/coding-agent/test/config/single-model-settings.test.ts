@@ -12,10 +12,7 @@ import {
 	cfgModelToolCallLoopGuardThreshold,
 	cfgModelToolCallLoopGuardExemptTools,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
-import {
-	cfgRetryUsageReservePct,
-	cfgFeaturesUnexpectedStopDetection,
-} from "@oh-my-pi/pi-coding-agent/session/settings";
+import { cfgFeaturesUnexpectedStopDetection } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
@@ -118,7 +115,7 @@ describe("single model settings", () => {
 		expect(cfgModelToolCallLoopGuardThreshold.get(dotted)).toBe(7);
 	});
 
-	it("retires automatic selectors while preserving local guards and credential reserve settings", () => {
+	it("retires automatic selectors and credential reserve settings while preserving local guards", () => {
 		const settings = Settings.isolated({
 			retry: {
 				modelFallback: true,
@@ -145,7 +142,8 @@ describe("single model settings", () => {
 			prewalk: { enabled: true, auto: true },
 			"prewalk.armed": true,
 		});
-		expect(cfgRetryUsageReservePct.get(settings)).toBe(12);
+		expect(lookup("retry.usageReservePct")).toBeUndefined();
+		expect(settings.getGlobalSettings()).not.toHaveProperty("retry.usageReservePct");
 		expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("mechanical");
 		expect(settings.getModel()).toBeUndefined();
 		expect(lookup("judgment.attemptTimeoutMs")).toBeUndefined();
