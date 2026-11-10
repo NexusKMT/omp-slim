@@ -138,10 +138,12 @@ describe("read URL answered by a bot wall", () => {
 		if (method === "jina") {
 			expect(result.text).toContain("Neural networks are not just another classifier");
 			expect(result.finalUrl).toEndWith("/canonical");
-			expect(result.remoteCalls[0]).toEndWith("/canonical");
+			expect(result.remoteCalls.find(url => url.startsWith("https://r.jina.ai/"))).toEndWith("/canonical");
 		} else {
 			expect(result.text).not.toMatch(/blocked by network security|(Enable|Turn on) JavaScript/);
-			expect(result.notes).toContain("the browser tool");
+			expect(result.notes).toContain("no reader backend got past it");
+			expect(result.notes).toContain("external browser, save its text to a local file");
+			expect(result.notes).not.toContain("browser tool");
 		}
 	});
 

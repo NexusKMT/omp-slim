@@ -5,6 +5,7 @@
 ### Removed
 
 - OMP Slim removes browser profile, Puppeteer cache and browser relay directory helpers.
+- OMP Slim removes the dedicated Chrome-for-Testing downloader and its browser installation API.
 
 ## [18.18.2] - 2026-11-08
 

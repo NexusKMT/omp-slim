@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Blocked HTTP reads now suggest saving page text from an external browser instead of recommending the removed browser tool.
+
 ### Removed
 
 - OMP Slim removes bundled browser automation, relay, Chromium PDF page screenshots and browser cookie login; HTTP search, PDF text extraction, normal OAuth and external MCP remain available.

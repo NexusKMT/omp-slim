@@ -1247,9 +1247,9 @@ async function renderUrl(
 			content: "",
 			fetchedAt,
 			truncated: false,
-			// A challenge served with 200 is passed by running its script, which a browser does.
+			// All HTTP readers failed; the page can still be provided as a local text file.
 			notes: [
-				`Blocked by ${wall}: the site served a challenge instead of the page, and no reader backend got past it; the browser tool runs the page's JavaScript like Chrome and may get through`,
+				`Blocked by ${wall}: the site served a challenge instead of the page, and no reader backend got past it. Open the page in an external browser, save its text to a local file, then read that file.`,
 			],
 		};
 	}
