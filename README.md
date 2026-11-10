@@ -1,7 +1,8 @@
 > **OMP Slim — downstream of OMP v18.18.3.**
-> This project is removing built-in browser automation, desktop control, speech
-> and automatic long-term memory. Work is in progress. See [SLIM.md](SLIM.md)
-> for the actual removal status, pinned source and Codespace build procedure.
+> Built-in browser automation, desktop control, speech and automatic long-term
+> memory have been removed. Session history, editing, shell, HTTP search and MCP
+> remain. See [SLIM.md](SLIM.md) for build procedures and
+> [the removal report](docs/slim-removal-2026-11-10.md) for validation and artifacts.
 > The upstream installation commands and feature overview below describe OMP;
 > they do not install this downstream build.
 

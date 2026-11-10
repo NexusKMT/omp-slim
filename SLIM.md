@@ -23,9 +23,9 @@ been removed from the product. Track the actual state below.
 | Public repository and pinned upstream baseline | Established; made public at the user's request on 2026-11-10 |
 | Repeatable Codespace bootstrap/build/artifact procedure | Baseline built; binary and archive recovered and SHA-256 verified |
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
-| Other memory backends, browser, desktop and speech removal | Source, registration, workers, UI, dedicated tests/docs and native backends removed; rebuilt addon export checks passed; full Rust validation passed; Mac integration fixes are being verified |
+| Other memory backends, browser, desktop and speech removal | Removed from source, registration, workers, UI, dedicated tests/docs and native backends; rebuilt addon export checks, full Rust checks and all 219 Mac TS groups passed |
 | Dependency cleanup | Cargo packages 979 → 799, Bun packages 462 → 396, Bazel repositories 962 → 783; no new package versions; two dedicated workspaces removed |
-| Intel macOS Actions build | Trimmed run `42786339677` compiled and passed local binary verification; its full TS suite exposed remaining integration/fixture failures, so a corrected full run is required |
+| Intel macOS Actions build | Final native/CLI source `d7f1646f90` compiled in `42807753137`; local binary verification, 120 PTY output probes and actual spelling passed; complete TS validation `42819306007` passed 219/219 groups |
 
 As of 2026-11-10 (Asia/Shanghai), Codespace
 `omp-slim-build-vrxqgpxrj7gfp579` was verified **Shutdown** after both Linux builds
@@ -152,24 +152,38 @@ This does not replace feature regression tests. Follow upstream `AGENTS.md`:
 baseline failures separately from regressions. Never treat a passing build as
 proof of real provider authentication or of completed feature removal.
 
-The fully trimmed tree uses two manual public workflows: `slim-macos-intel.yml`
+The fully trimmed tree uses manual public workflows: `slim-macos-intel.yml`
 rebuilds and tests the macOS artifact and retained TypeScript workspace;
 `slim-rust-checks.yml` runs Rust formatting/lint plus nextest and doctests on
-Ubuntu 24.04. Both are gated on public visibility. The Rust job uses the
+Ubuntu 24.04. `slim-macos-tests.yml` verifies and reuses a compatible addon for
+TS-only iteration. All are gated on public visibility. The Rust job uses the
 repository's `check:rs` / `test:rs` wrappers and does not need a Codespace.
 
 [Rust run 42806432208](https://github.com/NexusKMT/omp-slim/actions/runs/42806432208)
 passed formatting, Clippy, all 6,367 runnable nextest tests (16 skipped), and
-all six runnable doctests (28 ignored). The trimmed Mac binary from
-`42786339677` passed local checksums, version/help, worker smoke, shell/file
-behavior and compiled HTML session export. Its newly built addon also passed
-the actual AppleSpell service test locally; the hosted Mac workflow explicitly
-skips that one service integration because NSSpellServer times out there.
-The first full Mac test suite was not green: 210 of 219 command groups passed.
-The second run passed 217 groups and exposed a macOS PTY output race and a
-grammar-download-dependent test. Both have been corrected. Final Mac run
-`42807753137` includes native PTY regressions on macOS, all TS groups and
-separate native-addon artifacts. See the removal report for validation status.
+all six runnable doctests (28 ignored). Final Mac build
+[42807753137](https://github.com/NexusKMT/omp-slim/actions/runs/42807753137)
+passed native/CLI compilation, signing/load-path checks, worker smoke and all
+ten selected native PTY regressions. The recovered executable passed local
+checksums, version/help, worker smoke, shell/file behavior and compiled HTML
+session export. The final addon passed 120 concurrent PTY output probes with
+zero failures and both actual AppleSpell checks locally. The hosted workflow
+explicitly skips one spelling service integration because NSSpellServer times
+out there.
+
+Complete TypeScript verification passed as
+[42819306007](https://github.com/NexusKMT/omp-slim/actions/runs/42819306007):
+219/219 command groups, zero failures, with the same verified native addon.
+The entire TS validation job took 28m41s, including 11s to recover and verify
+the addon. The full build's earlier TS run passed 218/219 groups; its remaining
+TUI minute-boundary fixture was corrected without changing product code before
+the successful complete rerun. Earlier run failures and their fixes are recorded
+in the removal report alongside timings and hashes.
+
+Final recovered executable:
+`dist/actions/42807753137/artifact/builds/macos-intel-20261110T113211Z/extracted/omp`.
+The archive is 116,129,219 bytes and the executable is 227,887,216 bytes, 6.17%
+and 6.24% smaller than the pre-removal baseline, respectively.
 
 The historical Sharpshooter-only removal was verified with:
 
@@ -263,6 +277,27 @@ Use Chrome DevTools MCP to inspect live Actions logs. `gh` supports status
 checks and recovery of completed logs/artifacts: `watch` reports job/step
 progress, but full job logs may remain unavailable until the job finishes.
 Use `run view --json status,jobs` for supporting status checks.
+
+For a TS-only change with an available Intel addon, run the separate manual
+test workflow. The supplied build must have a successful native build step;
+the workflow compares native build inputs and verifies artifact digests,
+bindings and exports before running the same complete TS checks/tests:
+
+```sh
+gh workflow run slim-macos-tests.yml --repo NexusKMT/omp-slim --ref main \
+  -f build_run_id=42807753137
+```
+
+Use a new full build if native inputs changed or the seven-day artifacts have
+expired. The test workflow records both the current source and native source.
+It does not produce a new CLI executable for changed application code.
+
+Update this downstream through the pinned repository and its build artifacts.
+The retained `omp update` command and update check still target upstream's
+build service; they do not distribute this fork. Keep `update.auto` false
+(its default), and set `startup.checkUpdate` false for this downstream profile
+to suppress upstream update notices. These are application settings, separate
+from plugin marketplace updates. No local user settings were changed here.
 
 Use the resulting `omp-darwin-x64.tar.gz`, verify `ARCHIVE-SHA256SUMS`, extract it,
 then verify `SHA256SUMS` with `shasum -a 256 -c`. Test the extracted binary from

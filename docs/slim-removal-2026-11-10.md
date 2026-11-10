@@ -107,9 +107,9 @@ Both jobs require a public repository. Native compilation runs in Actions;
 the local Intel Mac only prepares metadata, checks TypeScript/formatting and
 validates recovered artifacts. The Codespace remains stopped.
 
-The final Rust workflow has passed. The first rebuilt Mac artifact also passed
-local execution checks, but its complete TypeScript suite exposed remaining
-integration and fixture defects. A corrected full Mac run is still required.
+The final Rust workflow, rebuilt Mac artifact and complete Mac TypeScript
+validation passed. Earlier full TypeScript runs exposed integration and fixture
+defects documented below; all have been corrected and verified.
 
 The first integrated runs, Mac `42783413828` and Rust `42783420636`, stopped
 during dependency installation because the export viewer manifest had not
@@ -214,7 +214,8 @@ notification wakes the wait; cancellation, timeout, reader disconnect and
 failed readiness queries can all terminate it. The existing JS/backpressure
 drain still delivers bytes already read. Three deterministic Unix regressions
 and a concurrent fast-exit JS regression cover the change. Independent review
-found no blocking issue; a rebuilt Mac verification remains necessary.
+found no blocking issue. The later Mac build passed the native regressions and
+120 local concurrent output probes with the rebuilt addon, as recorded below.
 
 The grammar failure was reproduced with an empty cache and an unavailable
 download endpoint. Both the AST search alias test and the related `.tla`
@@ -236,7 +237,69 @@ fix before compiling. The final Mac run is
 [42807753137](https://github.com/NexusKMT/omp-slim/actions/runs/42807753137),
 from `d7f1646f90182a27353b8c38455e2d1c4a892f15`. It also runs
 `bun run test:rs:pty` on macOS with the native `ci` profile, then the complete
-TypeScript suite. Results and local artifact verification are pending.
+TypeScript suite. Native addon/CLI compilation and verification passed in
+23m01s. The macOS PTY step passed all ten selected tests in 3.359s, with 379
+unselected tests excluded by its filter. Building that test program took
+27m08s; the complete PTY step took 27m22s. The whole job took 79m57s. Native
+compilation took 21m08s (1,279s including bindings); CLI packaging took 78s.
+TypeScript checks passed in 54s, and the complete TS suite finished in 20m42s:
+218 command groups passed and one failed, described next.
+
+The full suite exposed a pre-existing minute-boundary assumption in the TUI
+session-picker test: its catalogue deliberately rebuilds age labels each
+minute, while the typing test required the same object reference across two
+renders without controlling the clock. Advancing a controlled clock by one
+millisecond across the boundary reproduced the exact CI failure. Commit
+`12e180c0a0` fixes only that test's synchronous clock scope and adds coverage
+for the expected `now` to `1m` refresh while preserving selection. The full
+TUI package passed with CI's `--parallel=4 --timeout=120000`: 4,464 passed,
+eight skipped, zero failed, 62,151 assertions across 342 files in 89.74s.
+There are no product or native-code differences from the built revision.
+
+The final artifact was recovered and verified on the local Intel Core
+m3-8100Y / macOS 15.7.5 host:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `omp-darwin-x64.tar.gz` | 116,129,219 | `e8cf8149a9cd474debe690a5a41a151222b33ae782672420d1c382bdb7172077` |
+| Extracted `omp` | 227,887,216 | `e81db81c72083d2aaa8b63bb3715a5939e15a9b610f7cc0faa0dd6e5b1e70cd5` |
+| Native addon | 106,473,304 | `315841239ccae5a7bbf91a4bbacaf2f022ccbe79544795b06c088090b7543508` |
+
+The archive is 6.17% smaller than the baseline; the executable is 6.24%
+smaller. Generated bindings exactly match the committed files. Archive/binary
+checksums, clean source records, x86_64 architecture, ad-hoc signature,
+version/help, worker smoke, shell pipeline, file roundtrip, preserved exit
+status and compiled HTML export all passed. The HTML rendered the expected
+message in an isolated browser context without console errors. It embeds the
+viewer while retaining the two existing fixed marked/highlight script URLs.
+
+The final addon passed the actual AppleSpell service test locally: two tests,
+three assertions, zero failures. The raw export gate confirmed the retired
+desktop/audio/vector symbols are absent and retained core exports are present.
+The same 30 batches of four concurrent fast-exiting PTY children that previously
+lost ten outputs now passed all 120 probes, covering stream, awaited and
+synchronous writes. Both `count == 120` and an empty failure list were checked.
+Evidence and the extracted executable are under
+`dist/actions/42807753137/`; the build directory is
+`artifact/builds/macos-intel-20261110T113211Z/`, with `extracted/omp` inside it.
+
+The manual `slim-macos-tests.yml` workflow supports TS-only iteration without
+recompiling Rust. It checks the source build's repository/workflow/job, requires
+a successful native build, compares all native build inputs, verifies the
+exact artifacts' SHA-256 digests and file inventories, compares generated
+bindings, and checks architecture, version and retired exports before reuse.
+Run [42819306007](https://github.com/NexusKMT/omp-slim/actions/runs/42819306007),
+from `f497d4bf22ca555c2f501b5c8d6637a55af79937`, passed all 219 TS command groups
+with zero failures using native artifacts from `42807753137`. The whole job
+took 28m41s; native reuse verification took 11s, frozen install 9s, TypeScript
+checks 1m08s and the complete TS step 26m43s (runner-reported test time
+1,601.5s). The hosted AppleSpell service integration is the one explicit
+workflow-specific skip, covered by the real local service test above.
+
+Full logs, source metadata, artifact digests and matching native hashes were
+recovered under `dist/actions/42819306007/`. The test-only fixture and separate
+validation workflow are the only non-documentation differences from the
+compiled source; final report changes do not affect those validated inputs.
 
 ## Maintaining the downstream
 
@@ -245,6 +308,12 @@ review shared registration/lifecycle files carefully: CLI dispatch, SDK,
 AgentSession, settings/tool registries, native exports and build manifests were
 touched by several removals. A future upstream merge can otherwise restore a
 retired capability or a dependency without recreating its whole directory.
+
+The retained CLI updater still targets upstream's build service. Automatic
+updates default to false; keep `update.auto` false for this fork and disable
+`startup.checkUpdate` notices in its profile. Use this repository's build
+artifacts to update the downstream. A fork-specific update service was not
+part of the four feature removals, and existing user settings were not changed.
 
 Dependency changes require Bun/Cargo lock updates and regeneration of both
 Nix and Bazel metadata. RPC changes require `gen:rpc`; export renderer changes
@@ -257,3 +326,11 @@ still require a substantial Rust toolchain. Source deletion and fewer locked
 packages do not imply a proportionate reduction in compilation time. Public
 manual Actions keep validation under explicit control; cache and artifact
 timings above provide the measured basis for future maintenance estimates.
+
+The added macOS PTY check currently uses Cargo's implicit host target, while
+N-API passes an explicit target triple. Those builds use different target
+layouts despite sharing the `ci` profile and parent cache directory. Aligning
+the target selection is a candidate for reducing duplicate compilation;
+its benefit has not been measured. The first PTY check compiled for 27m08s
+and executed its ten tests in 3.359s. The resulting combined cache was
+1,846,845,729 bytes.
