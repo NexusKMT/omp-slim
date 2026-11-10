@@ -208,8 +208,35 @@ Concurrent reproduction confirmed output loss even with awaited or synchronous
 child writes, so changing the fixture's write API would not fix the issue.
 A minimal system-PTY probe showed that macOS can discard unread output when
 the last slave descriptor closes. The existing `pi-shell` zpty implementation
-already accounts for that behavior. The corresponding native PTY fix and a
-fresh Rust/Mac validation are in progress; this second build is intermediate.
+already accounts for that behavior. The native PTY fix now retains that
+descriptor until the reader accepts the available bytes. A bounded progress
+notification wakes the wait; cancellation, timeout, reader disconnect and
+failed readiness queries can all terminate it. The existing JS/backpressure
+drain still delivers bytes already read. Three deterministic Unix regressions
+and a concurrent fast-exit JS regression cover the change. Independent review
+found no blocking issue; a rebuilt Mac verification remains necessary.
+
+The grammar failure was reproduced with an empty cache and an unavailable
+download endpoint. Both the AST search alias test and the related `.tla`
+editing test now parse the pinned official grammar in isolated child
+processes. Its compressed fixture is 123,099 bytes, accompanied by the MIT
+license and provenance; decompressed size/hash must match the native
+manifest. The same ten-file CI group passed 275 tests / 1,145 assertions
+offline, preserving real matching, preview and file-write checks.
+
+[Rust run 42806432208](https://github.com/NexusKMT/omp-slim/actions/runs/42806432208)
+passed from `159a36becd6363a99d5b7ee9c3da9d77af20107f` in 13m05s.
+Formatting/Clippy passed; compilation took 3m30s, and all 6,367 runnable tests
+passed in 403.875s, with 16 skipped. All six runnable doctests passed, with
+28 ignored. The subsequent grammar-fixture commit changes no Rust inputs.
+The full log is recovered under `dist/actions/42806432208/`.
+
+Mac run `42806441116` was cancelled during setup to include the grammar-test
+fix before compiling. The final Mac run is
+[42807753137](https://github.com/NexusKMT/omp-slim/actions/runs/42807753137),
+from `d7f1646f90182a27353b8c38455e2d1c4a892f15`. It also runs
+`bun run test:rs:pty` on macOS with the native `ci` profile, then the complete
+TypeScript suite. Results and local artifact verification are pending.
 
 ## Maintaining the downstream
 

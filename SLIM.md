@@ -158,15 +158,18 @@ rebuilds and tests the macOS artifact and retained TypeScript workspace;
 Ubuntu 24.04. Both are gated on public visibility. The Rust job uses the
 repository's `check:rs` / `test:rs` wrappers and does not need a Codespace.
 
-[Rust run 42788678239](https://github.com/NexusKMT/omp-slim/actions/runs/42788678239)
-passed formatting, Clippy, all 6,364 runnable nextest tests (16 skipped), and
+[Rust run 42806432208](https://github.com/NexusKMT/omp-slim/actions/runs/42806432208)
+passed formatting, Clippy, all 6,367 runnable nextest tests (16 skipped), and
 all six runnable doctests (28 ignored). The trimmed Mac binary from
 `42786339677` passed local checksums, version/help, worker smoke, shell/file
 behavior and compiled HTML session export. Its newly built addon also passed
 the actual AppleSpell service test locally; the hosted Mac workflow explicitly
 skips that one service integration because NSSpellServer times out there.
 The first full Mac test suite was not green: 210 of 219 command groups passed.
-See the removal report for the corrections and final validation status.
+The second run passed 217 groups and exposed a macOS PTY output race and a
+grammar-download-dependent test. Both have been corrected. Final Mac run
+`42807753137` includes native PTY regressions on macOS, all TS groups and
+separate native-addon artifacts. See the removal report for validation status.
 
 The historical Sharpshooter-only removal was verified with:
 
