@@ -60,50 +60,55 @@ afterEach(() => {
 });
 
 describe("/seance", () => {
-	it("opens the model picker directly for a picked session with no saved model", async () => {
-		const picked = sourceSession("/elsewhere/.omp/sessions/no-model.jsonl");
-		const resolve = vi.spyOn(seanceResolver, "resolveSeanceSource").mockResolvedValue({
-			file: picked.path,
-			id: picked.id,
-			modelSelectors: [],
-		});
+	it.each([{ modelSelectors: [] }, { modelSelectors: ["openai/saved-model"] }])(
+		"consults a picked session with inherited model when history records %j",
+		async ({ modelSelectors }) => {
+			const picked = sourceSession("/elsewhere/.omp/sessions/source.jsonl");
+			const resolve = vi.spyOn(seanceResolver, "resolveSeanceSource").mockResolvedValue({
+				file: picked.path,
+				id: picked.id,
+				modelSelectors: [...modelSelectors],
+			});
+			const ctx = createInteractiveModeContext();
+			const execute = vi.fn(async (_callId: string, _params: TaskParams) =>
+				taskResult({ results: [{ id: "consultation", exitCode: 0 } as never] }),
+			);
+			registerTaskTool(ctx, execute as AgentTool["execute"]);
+			let onSelected: ((session: SessionInfo) => Promise<void> | void) | undefined;
+			ctx.showSessionSelector = vi.fn((_title, onSelect) => {
+				onSelected = onSelect as (session: SessionInfo) => Promise<void>;
+			}) as InteractiveModeContext["showSessionSelector"];
+			ctx.showHookSelector = vi.fn();
+			ctx.showModelSelector = vi.fn();
+
+			await runSeanceCommand(ctx, "");
+			await onSelected?.(picked);
+
+			expect(resolve).toHaveBeenCalledWith(picked.path, expect.objectContaining({ includeGlobal: true }));
+			expect(execute).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({ agent: "seance", sourceSession: picked.path }),
+				undefined,
+				expect.any(Function),
+			);
+			const params = execute.mock.calls[0]?.[1];
+			expect(params).not.toHaveProperty("model");
+			expect(ctx.showHookSelector).not.toHaveBeenCalled();
+			expect(ctx.showModelSelector).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each(["--model openai/other", "--model=openai/other"])("rejects retired model override %s", async args => {
 		const ctx = createInteractiveModeContext();
-		let onSelected: ((session: SessionInfo) => Promise<void> | void) | undefined;
-		ctx.showSessionSelector = vi.fn((_title, onSelect) => {
-			onSelected = onSelect as (session: SessionInfo) => Promise<void>;
-		}) as InteractiveModeContext["showSessionSelector"];
-		ctx.showHookSelector = vi.fn();
-		ctx.showModelSelector = vi.fn();
+		const execute = vi.fn();
+		registerTaskTool(ctx, execute as AgentTool["execute"]);
 
-		await runSeanceCommand(ctx, "");
-		await onSelected?.(picked);
+		await runSeanceCommand(ctx, `session-id ${args}`);
 
-		expect(resolve).toHaveBeenCalledWith(picked.path, expect.objectContaining({ includeGlobal: true }));
-		expect(ctx.showHookSelector).not.toHaveBeenCalled();
-		expect(ctx.showModelSelector).toHaveBeenCalledWith(expect.objectContaining({ selectOnly: expect.anything() }));
+		expect(execute).not.toHaveBeenCalled();
+		expect(ctx.showError).toHaveBeenCalledWith(expect.stringContaining("Unknown /seance option: --model"));
 	});
-	it("offers the saved model when the picked session recorded one", async () => {
-		const picked = sourceSession("/repo/.omp/sessions/with-model.jsonl");
-		vi.spyOn(seanceResolver, "resolveSeanceSource").mockResolvedValue({
-			file: picked.path,
-			id: picked.id,
-			modelSelectors: ["openai/saved-model"],
-		});
-		const ctx = createInteractiveModeContext();
-		let onSelected: ((session: SessionInfo) => Promise<void> | void) | undefined;
-		ctx.showSessionSelector = vi.fn((_title, onSelect) => {
-			onSelected = onSelect as (session: SessionInfo) => Promise<void>;
-		}) as InteractiveModeContext["showSessionSelector"];
-		ctx.showHookSelector = vi.fn(async () => undefined);
-		ctx.showModelSelector = vi.fn();
-
-		await runSeanceCommand(ctx, "");
-		await onSelected?.(picked);
-
-		expect(ctx.showHookSelector).toHaveBeenCalled();
-		expect(ctx.showModelSelector).not.toHaveBeenCalled();
-	});
-	it("bypasses model pickers for an override and reports completed IDs with the actual model", async () => {
+	it("consults an explicit session and reports completed IDs with the actual model", async () => {
 		const resolved = sourceSession("/repo/.omp/sessions/old.jsonl");
 		vi.spyOn(seanceResolver, "resolveSeanceSource").mockResolvedValue({
 			file: resolved.path,
@@ -133,7 +138,7 @@ describe("/seance", () => {
 		ctx.showHookSelector = vi.fn();
 		ctx.showModelSelector = vi.fn();
 
-		await runSeanceCommand(ctx, `${resolved.path} --model openai/requested-model`);
+		await runSeanceCommand(ctx, resolved.path);
 
 		expect(ctx.showSessionSelector).not.toHaveBeenCalled();
 		expect(ctx.showHookSelector).not.toHaveBeenCalled();
@@ -167,7 +172,7 @@ describe("/seance", () => {
 		);
 		registerTaskTool(ctx, execute as AgentTool["execute"]);
 
-		await runSeanceCommand(ctx, `${resolved.path} --model openai/requested-model`);
+		await runSeanceCommand(ctx, resolved.path);
 
 		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("Seance running"));
 		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("live-seance-id"));
@@ -204,7 +209,7 @@ describe("/seance", () => {
 		);
 		registerTaskTool(ctx, execute as AgentTool["execute"]);
 
-		await runSeanceCommand(ctx, `${resolved.path} --model openai/requested-model`);
+		await runSeanceCommand(ctx, resolved.path);
 
 		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("openai/latest-streamed-model"));
 		expect(ctx.showStatus).not.toHaveBeenCalledWith(expect.stringContaining("anthropic/primary-model"));
@@ -244,7 +249,7 @@ describe("/seance", () => {
 		);
 		registerTaskTool(ctx, execute as AgentTool["execute"]);
 
-		await runSeanceCommand(ctx, `${resolved.path} --model openai/requested-model`);
+		await runSeanceCommand(ctx, resolved.path);
 
 		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("openai/settled-fallback"));
 		expect(ctx.showStatus).not.toHaveBeenCalledWith(expect.stringContaining("anthropic/primary-model"));
@@ -281,7 +286,7 @@ describe("/seance", () => {
 			vi.fn(async () => taskResult({ results: [abortedResult] }, renderedResult)) as AgentTool["execute"],
 		);
 
-		await runSeanceCommand(ctx, `${resolved.path} --model openai/requested-model`);
+		await runSeanceCommand(ctx, resolved.path);
 
 		expect(ctx.showError).toHaveBeenCalledWith(sanitizeErrorLine(abortReason));
 		expect(ctx.showStatus).not.toHaveBeenCalledWith(expect.stringContaining("Seance completed"));
@@ -295,10 +300,9 @@ describe("/seance", () => {
 			modelSelectors: [],
 		});
 		const ctx = createInteractiveModeContext();
-		ctx.showHookSelector = vi.fn(async () => "Use saved model");
 		const preflight = "Source session is missing\n\u001b[31m";
 		registerTaskTool(ctx, vi.fn(async () => taskResult({}, preflight)) as AgentTool["execute"]);
-		await runSeanceCommand(ctx, `${resolved.path} --model openai/model`);
+		await runSeanceCommand(ctx, resolved.path);
 		expect(ctx.showError).toHaveBeenCalledWith(sanitizeErrorLine(preflight));
 
 		const thrown = new Error("Session fork failed\n\u001b[31m");
@@ -308,7 +312,7 @@ describe("/seance", () => {
 				throw thrown;
 			}) as AgentTool["execute"],
 		);
-		await runSeanceCommand(ctx, `${resolved.path} --model openai/model`);
+		await runSeanceCommand(ctx, resolved.path);
 		expect(ctx.showError).toHaveBeenCalledWith(sanitizeErrorLine(thrown));
 	});
 });

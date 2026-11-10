@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import {
+	buildTuiBuiltinSlashCommands,
+	executeBuiltinSlashCommand,
+} from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 
 const MODELS = [
 	{ provider: "anthropic", id: "claude-opus-4-5", contextWindow: 200_000 },
@@ -40,7 +45,7 @@ function createRuntime() {
 }
 
 describe("/model slash command", () => {
-	it("opens the model setup picker for role and thinking assignment", async () => {
+	it("opens the current model and thinking selector", async () => {
 		const harness = createRuntime();
 
 		const handled = await executeBuiltinSlashCommand("/model", harness.runtime);
@@ -73,13 +78,13 @@ describe("/switch slash command", () => {
 		expect(harness.setText).toHaveBeenCalledWith("");
 	});
 
-	it("/switch @smol resolves the configured role alias", async () => {
+	it("/switch refuses retired role aliases", async () => {
 		const harness = createRuntime();
-		harness.settings.setModelRole("smol", "openai/gpt-5.2");
 
 		await executeBuiltinSlashCommand("/switch @smol", harness.runtime);
 
-		expect(harness.switchSessionModel).toHaveBeenCalledWith(MODELS[2], undefined);
+		expect(harness.showError).toHaveBeenCalledWith("Unknown model: @smol");
+		expect(harness.switchSessionModel).not.toHaveBeenCalled();
 	});
 
 	it("/switch unknown surfaces an error without opening the picker or switching", async () => {
@@ -90,5 +95,35 @@ describe("/switch slash command", () => {
 		expect(harness.showError).toHaveBeenCalledWith("Unknown model: nope-9000");
 		expect(harness.switchSessionModel).not.toHaveBeenCalled();
 		expect(harness.showModelSelector).not.toHaveBeenCalled();
+	});
+
+	it("completes the available main models with an explicit thinking suffix and tracks catalog changes", async () => {
+		const first = createMockModel({ provider: "openai", id: "main-chat" }).model;
+		const second = createMockModel({ provider: "anthropic", id: "other-chat" }).model;
+		let available = [first];
+		const focus: { agentId?: string } = {};
+		const ctx = createInteractiveModeContext({
+			get focusedAgentId() {
+				return focus.agentId;
+			},
+			settings: Settings.isolated(),
+			session: {
+				scopedModels: [],
+				modelRegistry: {
+					getAvailable: () => available,
+					getAll: () => available,
+					getError: () => undefined,
+				},
+			},
+		});
+		const command = buildTuiBuiltinSlashCommands({ ctx }).find(item => item.name === "switch")!;
+		const choices = await command.getArgumentCompletions?.("main:high");
+		expect(choices?.map(item => item.value)).toEqual(["openai/main-chat:high "]);
+		available = [second];
+		expect((await command.getArgumentCompletions?.("other"))?.map(item => item.value)).toEqual([
+			"anthropic/other-chat ",
+		]);
+		focus.agentId = "Worker";
+		expect(await command.getArgumentCompletions?.("")).toBeNull();
 	});
 });

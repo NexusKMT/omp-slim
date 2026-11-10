@@ -12,31 +12,20 @@ import { clearSubmittedText } from "./helpers/draft";
 import type { SlashCommandSpec } from "./types";
 import type { InteractiveModeContext } from "../modes/types";
 
-type ParsedSeanceArgs = { source: string | undefined; model: string | undefined } | { error: string };
+type ParsedSeanceArgs = { source: string | undefined } | { error: string };
 
 function parseSeanceArgs(args: string): ParsedSeanceArgs {
 	const tokens = parseCommandArgs(args, { strict: false });
 	let source: string | undefined;
-	let model: string | undefined;
-	for (let index = 0; index < tokens.length; index++) {
-		const token = tokens[index]!;
-		if (token === "--model" || token.startsWith("--model=")) {
-			if (model !== undefined) return { error: "Use --model only once." };
-			const selector = token === "--model" ? tokens[++index] : token.slice("--model=".length);
-			if (!selector || selector.startsWith("--")) {
-				return { error: "Usage: /seance [session id|path] [--model selector]" };
-			}
-			model = selector;
-			continue;
-		}
+	for (const token of tokens) {
 		if (token.startsWith("-")) return { error: `Unknown /seance option: ${token}` };
-		if (source !== undefined) return { error: "Usage: /seance [session id|path] [--model selector]" };
+		if (source !== undefined) return { error: "Usage: /seance [session id|path]" };
 		source = token;
 	}
-	return { source, model };
+	return { source };
 }
 
-async function launchSeance(ctx: InteractiveModeContext, sourceSession: string, model?: string): Promise<void> {
+async function launchSeance(ctx: InteractiveModeContext, sourceSession: string): Promise<void> {
 	const taskTool = ctx.session.agent.state.tools.find(tool => tool.name === "task");
 	if (!taskTool) {
 		ctx.showError("The task tool is not available for /seance.");
@@ -47,7 +36,6 @@ async function launchSeance(ctx: InteractiveModeContext, sourceSession: string, 
 		sourceSession,
 		task: seanceCommandPrompt,
 		solutionSpace: seanceCommandSolutionSpace.trim(),
-		...(model !== undefined ? { model } : {}),
 	};
 	const taskIds = new Set<string>();
 	let jobId: string | undefined;
@@ -97,12 +85,7 @@ async function launchSeance(ctx: InteractiveModeContext, sourceSession: string, 
 	}
 }
 
-async function chooseSeanceModel(
-	ctx: InteractiveModeContext,
-	selector: string,
-	model: string | undefined,
-	sessionDirHint?: string,
-): Promise<void> {
+async function consultSeance(ctx: InteractiveModeContext, selector: string, sessionDirHint?: string): Promise<void> {
 	try {
 		const { agents } = await discoverAgents(
 			ctx.sessionManager.getCwd(),
@@ -118,31 +101,7 @@ async function chooseSeanceModel(
 			sessionDirHint,
 			includeGlobal: true,
 		});
-		const sourceSession = source.file;
-		if (model !== undefined) {
-			void launchSeance(ctx, sourceSession, model);
-			return;
-		}
-		// No saved model to offer: go straight to the one-off model picker.
-		const choice =
-			source.modelSelectors.length === 0
-				? "Choose another model"
-				: await ctx.showHookSelector("Consult this session with", [
-						{
-							label: "Use saved model",
-							description: "Use the active role or default model saved with this session",
-						},
-						{ label: "Choose another model", description: "Select a one-off model for this consultation" },
-					]);
-		if (choice === "Use saved model") {
-			void launchSeance(ctx, sourceSession);
-		} else if (choice === "Choose another model") {
-			ctx.showModelSelector({
-				selectOnly: {
-					onSelect: picked => launchSeance(ctx, sourceSession, picked),
-				},
-			});
-		}
+		void launchSeance(ctx, source.file);
 	} catch (error) {
 		ctx.showError(sanitizeErrorLine(error));
 	}
@@ -152,7 +111,7 @@ export const SEANCE_SLASH_COMMAND: SlashCommandSpec = {
 	name: "seance",
 	icon: "ghost",
 	description: "Consult a saved session without resuming it",
-	inlineHint: "[session id|path] [--model selector]",
+	inlineHint: "[session id|path]",
 	allowArgs: true,
 	handleTui: async (command, runtime) => {
 		clearSubmittedText(runtime);
@@ -162,11 +121,9 @@ export const SEANCE_SLASH_COMMAND: SlashCommandSpec = {
 			return;
 		}
 		if (!parsed.source) {
-			runtime.ctx.showSessionSelector(undefined, session =>
-				chooseSeanceModel(runtime.ctx, session.path, parsed.model),
-			);
+			runtime.ctx.showSessionSelector(undefined, session => consultSeance(runtime.ctx, session.path));
 			return;
 		}
-		await chooseSeanceModel(runtime.ctx, parsed.source, parsed.model, runtime.ctx.sessionManager.getSessionDir());
+		await consultSeance(runtime.ctx, parsed.source, runtime.ctx.sessionManager.getSessionDir());
 	},
 };

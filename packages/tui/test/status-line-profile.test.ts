@@ -20,7 +20,6 @@ function createContext(overrides: Partial<SegmentContext> = {}): SegmentContext 
 		options: {},
 		planMode: null,
 		loopMode: null,
-		prewalk: null,
 		goalMode: null,
 		vibeMode: null,
 		vim: null,

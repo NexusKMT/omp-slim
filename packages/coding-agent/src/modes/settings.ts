@@ -497,13 +497,12 @@ export const cfgTuiAutoGraph = register({
 			{
 				value: "auto",
 				label: "Auto",
-				description: "Smart when the judge role resolves to a native TypeSafe jev model, else Always",
+				description: "Chart numeric tables using local layout heuristics",
 			},
 			{
 				value: "smart",
 				label: "Smart",
-				description:
-					"The judge model refines each chart: kind, columns, row names and grouping, scales, which way is better, and its title",
+				description: "Chart numeric tables using local layout heuristics (same as Auto)",
 			},
 			{
 				value: "always",

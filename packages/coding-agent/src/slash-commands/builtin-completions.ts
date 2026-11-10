@@ -10,9 +10,11 @@ import { replaceTabs } from "@oh-my-pi/pi-tui/render/render-utils";
 import { encodeLocalPath, sessionLocalProtocolOptions } from "../modes/local-file-editor";
 import { createModelBrowserSource } from "../modes/model-browser-source";
 import {
-	createModelMentionSource,
-	type ModelMentionCandidateSource,
-} from "@oh-my-pi/pi-tui/prompt/model-mention-autocomplete";
+	buildSearchAffinity,
+	ModelItemRanker,
+	SessionModelScopeCache,
+	type ModelBrowserSource,
+} from "@oh-my-pi/pi-tui/overlays/model-browser";
 import { getConfiguredThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 import { expandTilde } from "../tools/path-utils";
 import type { SubcommandDef, TuiSlashCommandRuntime } from "./types";
@@ -272,25 +274,33 @@ export function buildStaticInlineHint(hint: string): (argumentText: string) => s
 export function buildModelSelectorCompletions(
 	runtime: TuiSlashCommandRuntime,
 ): (argumentPrefix: string) => AutocompleteItem[] | null {
-	let rankModels: ModelMentionCandidateSource | undefined;
+	let source: ModelBrowserSource | undefined;
+	let cache: SessionModelScopeCache | undefined;
+	let ranker: ModelItemRanker | undefined;
+	let providerOrder: readonly string[] | undefined;
 	return (argumentPrefix: string) => {
-		if (argumentPrefix.includes(" ")) return null;
+		if (runtime.ctx.focusedAgentId || argumentPrefix.includes(" ")) return null;
 		const suffixIndex = argumentPrefix.indexOf(":");
 		const suffix = suffixIndex === -1 ? "" : argumentPrefix.slice(suffixIndex);
 		const query = suffixIndex === -1 ? argumentPrefix : argumentPrefix.slice(0, suffixIndex);
-		const matches: AutocompleteItem[] = [];
-		{
-			rankModels ??= createModelMentionSource({
-				source: createModelBrowserSource(runtime.ctx.settings, model =>
-					runtime.ctx.session.effectiveServiceTier(model),
-				),
-				registry: runtime.ctx.session.modelRegistry,
-				scopedModels: () => runtime.ctx.session.scopedModels.map(entry => entry.model),
+		source ??= createModelBrowserSource(runtime.ctx.settings, model =>
+			runtime.ctx.session.effectiveServiceTier(model),
+		);
+		cache ??= new SessionModelScopeCache(source, runtime.ctx.session.modelRegistry);
+		const scope = cache.get(runtime.ctx.session.scopedModels.map(entry => entry.model));
+		if (ranker?.items !== scope.items || providerOrder !== source.modelProviderOrder) {
+			providerOrder = source.modelProviderOrder;
+			ranker = new ModelItemRanker(scope.items, {
+				mruOrder: scope.mruOrder,
+				affinity: buildSearchAffinity(providerOrder, scope.mruOrder),
 			});
-			for (const { selector, model } of rankModels(query)) {
-				matches.push({ value: `${selector}${suffix} `, label: selector, description: model.name });
-			}
 		}
+		const items = query.trim() ? ranker.rank(query) : scope.items;
+		const matches = items.map(({ selector, model }) => ({
+			value: `${selector}${suffix} `,
+			label: selector,
+			description: model.name,
+		}));
 		return matches.length > 0 ? matches : null;
 	};
 }

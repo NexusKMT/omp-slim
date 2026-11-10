@@ -169,8 +169,8 @@ const OMP_STATUS_LINE_RE = /^\s*in:\s+\d+\s+out:\s+\d+(?:\s+cache\s+\S+)?\s+t:\s
 
 /**
  * Slash commands that also run from a focused subagent view, keyed by canonical name to
- * a check on their arguments: viewer-scoped reads, plus the model and effort controls,
- * which act on the focused agent's session. Every other command (and mutating forms such
+ * a check on their arguments: viewer-scoped reads, plus effort controls, which act
+ * on the focused agent's session. Every other command (and mutating forms such
  * as `/usage reset`, which spends a saved rate-limit reset, or `/jobs kill`, which cancels
  * a running job) still needs the main session.
  */
@@ -182,8 +182,6 @@ const FOCUSED_VIEW_COMMANDS: Record<string, (args: string) => boolean> = {
 		const { verb, rest } = parseSubcommand(args);
 		return !verb || (verb === "full" && !rest);
 	},
-	model: () => true,
-	switch: () => true,
 	usage: args => {
 		const { verb, rest } = parseSubcommand(args);
 		return !verb || (verb === "show" && !rest);
@@ -1612,11 +1610,15 @@ export class InputController {
 		if (text?.startsWith("/")) {
 			const parsed = parseSlashCommand(text);
 			const name = parsed && lookupBuiltinSlashCommand(parsed.name)?.name;
+			if (name === "model" || name === "switch") {
+				this.ctx.showStatus("Subagents inherit the main session's model. Return to the main session to change it.");
+				return;
+			}
 			if (parsed && name && FOCUSED_VIEW_COMMANDS[name]?.(parsed.args)) {
 				// Viewer-scoped commands: /btw asks about the focused transcript, /export
 				// writes it (with its own subagents), /jobs lists the focused agent's jobs
 				// without a way to cancel them, /usage reports account-wide limits, and
-				// /model, /switch, /effort change the focused agent's model and thinking.
+				// /effort changes the focused agent's thinking level.
 				this.#recordSlashCommandUsage(text);
 				const input = images ? { images, imageLinks } : undefined;
 				if ((await executeBuiltinSlashCommand(text, { ctx: this.ctx, input })) === true) {

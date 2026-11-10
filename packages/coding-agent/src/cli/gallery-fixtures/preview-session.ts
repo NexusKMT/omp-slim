@@ -127,7 +127,6 @@ export function createGallerySession(options: GallerySessionOptions = {}): Agent
 				: { configured: false, advisors: [] },
 		getAdvisorCost: () => options.advisorCost ?? 0.08,
 		isAdvisorUsingSubscription: () => false,
-		getPrewalkState: () => false,
 		getPromptCacheStatus: () => options.promptCache,
 		compactionSpeculation: "idle",
 	} as unknown as AgentSession;

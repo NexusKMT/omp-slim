@@ -652,7 +652,6 @@ export class Theme {
 		return {
 			model: this.#symbols["icon.model"],
 			plan: this.#symbols["icon.plan"],
-			prewalk: this.#symbols["icon.prewalk"],
 			goal: this.#symbols["icon.goal"],
 			pause: this.#symbols["icon.pause"],
 			loop: this.#symbols["icon.loop"],
@@ -755,7 +754,6 @@ export class Theme {
 			cart: this.#symbols["cmd.cart"],
 			model: this.#symbols["icon.model"],
 			plan: this.#symbols["icon.plan"],
-			prewalk: this.#symbols["icon.prewalk"],
 			goal: this.#symbols["icon.goal"],
 			pause: this.#symbols["icon.pause"],
 			loop: this.#symbols["icon.loop"],

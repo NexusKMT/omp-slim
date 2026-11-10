@@ -29,7 +29,6 @@ export interface ModelPickerCallbacks {
 export interface ModelPickerOptions {
 	currentContextTokens?: number;
 	currentSelector?: string;
-	selectOnly?: boolean;
 }
 const CHROME_ROWS = 4;
 export const BROWSER_FRAME_ROWS = 5;
@@ -59,7 +58,7 @@ export class ModelPickerComponent implements Component {
 	) {
 		this.#browser = new ModelBrowser(settings, {
 			currentContextTokens: options.currentContextTokens,
-			markOverContext: !options.selectOnly,
+			markOverContext: true,
 		});
 		this.#browser.setCurrentSelector(options.currentSelector);
 		this.#browser.onActivate = item =>
@@ -100,7 +99,7 @@ export class ModelPickerComponent implements Component {
 		this.#browser.setMaxVisible(
 			Math.max(MIN_VISIBLE, Math.floor(rows * HEIGHT_FRACTION) - CHROME_ROWS - BROWSER_FRAME_ROWS),
 		);
-		const title = this.options.selectOnly ? "Select Model" : "Switch Model";
+		const title = "Switch Model";
 		const footer = `${editorKeys("tui.select.up", "tui.select.down")} models · ${formatKeyHint("enter")} select · ${editorKey("tui.select.cancel")} close`;
 		return [
 			topBorder(width, title),
@@ -154,7 +153,7 @@ export class ModelPickerComponent implements Component {
 			return cached.node;
 		const root = picker(
 			{
-				title: this.options.selectOnly ? "Select model" : "Switch model",
+				title: "Switch model",
 				subtitle: this.#configError ? [span(this.#configError, "error")] : "Choose the current chat model",
 				icon: "cpu",
 				noun: "models",

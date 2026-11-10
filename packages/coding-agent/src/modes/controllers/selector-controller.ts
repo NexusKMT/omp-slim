@@ -43,7 +43,6 @@ import type {
 	AgentHubOpenOptions,
 	InteractiveModeContext,
 	ResumeSessionOptions,
-	SelectOnlyModelSelectorOptions,
 	SessionPickHandler,
 } from "../../modes/types";
 import type { SessionOAuthAccountList } from "../../session/agent-session-types";
@@ -159,14 +158,7 @@ async function loadProviderAuthUi() {
 }
 
 /** Menus that open at most once: a repeat request focuses the open one. */
-type MenuKind =
-	| "settings"
-	| "model-picker"
-	| "model-picker-select"
-	| "model-hub"
-	| "agents-dashboard"
-	| "agent-hub"
-	| "usage-dashboard";
+type MenuKind = "settings" | "model-picker" | "model-hub" | "agents-dashboard" | "agent-hub" | "usage-dashboard";
 
 /** An open menu: registered when the request runs, filled once its component mounts. */
 interface OpenMenu {
@@ -682,17 +674,16 @@ export class SelectorController {
 		this.ctx.session.setThinkingLevel(level);
 	}
 
-	/**
-	 * Open a model selector. A focused subagent always gets the session-only
-	 * picker: the hub saves the current model, which configures the main session
-	 * and future spawns rather than the agent being viewed.
-	 */
-	showModelSelector(options?: { temporaryOnly?: boolean; selectOnly?: SelectOnlyModelSelectorOptions }): void {
-		if (options?.selectOnly) {
-			this.#showModelPicker({ selectOnly: options.selectOnly });
-			return;
-		}
-		if (options?.temporaryOnly || this.ctx.focusedAgentId) {
+	#modelSelectionBlocked(): boolean {
+		if (!this.ctx.focusedAgentId) return false;
+		this.ctx.showStatus("Subagents inherit the main session's model. Return to the main session to change it.");
+		return true;
+	}
+
+	/** Open the main session's model selector. Subagents inherit that model. */
+	showModelSelector(options?: { temporaryOnly?: boolean }): void {
+		if (this.#modelSelectionBlocked()) return;
+		if (options?.temporaryOnly) {
 			this.#showModelPicker();
 			return;
 		}
@@ -700,13 +691,14 @@ export class SelectorController {
 	}
 
 	/**
-	 * Session-only model switch (`/switch <selector>`) for the viewed session:
+	 * Session-only model switch (`/switch <selector>`) for the main session:
 	 * applies the resolved model without persisting it. Compacts first when the
 	 * transcript exceeds the target's context window, mirroring an over-context
 	 * pick in the alt+p picker. Failures surface as status errors.
 	 */
 	async switchSessionModel(model: Model, thinkingLevel?: ConfiguredThinkingLevel): Promise<void> {
-		const contextTokens = this.ctx.viewSession.getContextUsage()?.tokens ?? 0;
+		if (this.#modelSelectionBlocked()) return;
+		const contextTokens = this.ctx.session.getContextUsage()?.tokens ?? 0;
 		const contextWindow = model.contextWindow ?? 0;
 		const overContext = contextWindow > 0 && contextTokens > contextWindow;
 		try {
@@ -717,15 +709,13 @@ export class SelectorController {
 	}
 
 	/**
-	 * Apply a session-only model to the viewed session: update agent state but
+	 * Apply a session-only model to the main session: update agent state but
 	 * never persist to settings. `compactFirst` runs compaction with the current
 	 * model before switching (the target cannot fit the transcript); the switch
 	 * runs in the before-flush hook so any prompt queued during compaction
 	 * executes on the target model, and the idempotent post-return call covers
 	 * the early "nothing to compact" return that skips the hook. A cancelled or
-	 * failed compaction keeps the current model. A focused subagent switches
-	 * directly: `/compact` drives the main session, and the agent's own context
-	 * maintenance recovers an oversized transcript on its next turn.
+	 * failed compaction keeps the current model.
 	 */
 	async #applySessionModel(
 		model: Model,
@@ -733,21 +723,18 @@ export class SelectorController {
 		thinkingLevel: ConfiguredThinkingLevel | undefined,
 		compactFirst: boolean,
 	): Promise<void> {
-		const target = this.ctx.viewSession;
-		const focusedAgentId = this.ctx.focusedAgentId;
+		if (this.#modelSelectionBlocked()) return;
+		const target = this.ctx.session;
 		const apply = async () => {
+			if (this.#modelSelectionBlocked()) return;
 			const level = thinkingLevel ?? target.resolveTemporaryModelThinkingLevel(model);
 			await target.setModelTemporary(model, level);
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorBorderColor();
-			if (focusedAgentId) {
-				this.ctx.showStatus(`Agent ${focusedAgentId} model: ${selector}`);
-				return;
-			}
 			const modelSelectorHint = appKey(this.ctx.keybindings, "app.model.select") || formatKeyHint("alt+m");
 			this.ctx.showStatus(`Session-only model: ${selector}. Use ${modelSelectorHint} or /model to save the model.`);
 		};
-		if (!compactFirst || focusedAgentId) {
+		if (!compactFirst) {
 			await apply();
 			return;
 		}
@@ -769,30 +756,13 @@ export class SelectorController {
 	 * bottom-anchored overlay over the transcript. The current model is
 	 * highlighted and preselected.
 	 */
-	#showModelPicker(options?: { selectOnly?: SelectOnlyModelSelectorOptions }): void {
-		const selectOnly = options?.selectOnly;
-		const menuKind = selectOnly ? "model-picker-select" : "model-picker";
-		const closeOpenMenu = (kind: MenuKind) => {
-			const open = this.#openMenus.get(kind);
-			if (!open) return;
-			open.handle?.hide();
-			this.#releaseMenu(kind, open);
-		};
-		if (selectOnly) {
-			closeOpenMenu("model-picker");
-			closeOpenMenu("model-picker-select");
-		} else {
-			closeOpenMenu("model-picker-select");
-			if (this.#focusOpenMenu("model-picker")) return;
-		}
-		const viewed = this.ctx.viewSession;
+	#showModelPicker(): void {
+		const menuKind = "model-picker";
+		if (this.#focusOpenMenu(menuKind)) return;
+		const viewed = this.ctx.session;
 		const currentContextTokens = viewed.getContextUsage()?.tokens ?? 0;
 		const current = viewed.model;
-		const currentSelector = selectOnly
-			? selectOnly.currentSelector
-			: current
-				? `${current.provider}/${current.id}`
-				: undefined;
+		const currentSelector = current ? `${current.provider}/${current.id}` : undefined;
 		const menu = this.#claimMenu(menuKind);
 		const done = () => {
 			if (this.#openMenus.get(menuKind) !== menu) return;
@@ -810,15 +780,6 @@ export class SelectorController {
 			{
 				onPick: async (model, selector, { overContext }) => {
 					if (!isCurrent()) return;
-					if (selectOnly) {
-						done();
-						try {
-							await selectOnly.onSelect(selector);
-						} catch (error) {
-							this.ctx.showError(sanitizeErrorLine(error));
-						}
-						return;
-					}
 					try {
 						// Over-context pick: close the picker first so the compaction
 						// loader is visible.
@@ -834,7 +795,6 @@ export class SelectorController {
 			{
 				currentContextTokens,
 				currentSelector,
-				selectOnly: selectOnly !== undefined,
 			},
 		);
 		this.#mountMenu(menu, picker, () => {
@@ -877,6 +837,7 @@ export class SelectorController {
 			this.ctx.session.scopedModels,
 			{
 				onSelect: async (model, thinkingLevel, selector) => {
+					if (this.#modelSelectionBlocked()) return false;
 					try {
 						const project = cfgModelStorage.get(this.ctx.settings) === "project";
 						const isAuto = thinkingLevel === AUTO_THINKING;

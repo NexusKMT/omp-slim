@@ -26,7 +26,7 @@ The double-`←` gesture is not a keybinding action. While focused on a subagent
 The roster updates from the session's agent registry and progress events. Its responsive rows show:
 
 - status (`running`, `idle`, `parked`, or `aborted`), agent identity, parent, and unread IRC count;
-- model role, resolved model, and age since last activity;
+- current model and age since last activity;
 - assigned task or current activity;
 - cost, active time or elapsed span, request count, tool-call count, and tokens.
 
@@ -74,7 +74,7 @@ For a normal local subagent, `Enter` or click focuses the main TUI on that agent
 
 1. Read its live transcript and tool activity.
 2. Type a message and press `Enter` to steer a running turn or prompt an idle agent.
-3. Change its model or thinking level with `Alt+P`, `/switch`, `Ctrl+P`, `Shift+Tab`, or `/effort`. These switches are session-only and leave the main session alone. `/model` and `Alt+M` open the same session-only picker, because role assignments configure the main session.
+3. Adjust its thinking level with `Shift+Tab` or `/effort`. Subagents inherit the main session's model; return to the main session to change that model with `/model`, `/switch`, or their shortcuts.
 4. Press `Esc` with an empty editor, or double-tap `←`, to return to the main session.
 
 Steering uses the normal prompt path, so the message and response are written to the subagent's persisted session history. While a subagent is focused, `Esc` returns to the main session; it does not interrupt the subagent.
@@ -110,7 +110,7 @@ Collab does not replicate advisor rows or serve their transcripts to guests; the
 
 Agent Hub is the human-facing live session view. Adjacent commands and internal URLs serve narrower purposes:
 
-`/agents` is a separate agent-definition/settings hub, not the live roster. It manages discovered agents, enable/disable state, model overrides, prewalk, and advisor selection.
+`/agents` is a separate agent-definition/settings hub, not the live roster. It manages discovered agent personas, enable/disable state, advisor selection, and creating or saving definitions. These agents and advisors use the current main model.
 
 - `/jobs` prints a snapshot of running and recently settled asynchronous tool jobs. It does not replace the per-agent transcript or control view. `/jobs kill <id>|all` cancels running jobs from the command line.
 - `history://<id>` gives the coding agent a concise transcript for a live/parked subagent or a retained on-disk transcript.

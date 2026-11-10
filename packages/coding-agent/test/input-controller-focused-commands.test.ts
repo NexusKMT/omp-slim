@@ -2,14 +2,14 @@
  * Focused subagent views are chat-only, except for viewer-scoped commands: `/btw`
  * asks a side question about the focused transcript, `/export` writes the focused
  * agent's own transcript (with its nested subagents), `/jobs` lists the focused
- * agent's background jobs, `/usage` reports account-wide limits, and the model and
- * thinking controls (`/model`, `/switch`, `/effort`, their keys) act on the focused
- * agent's session. Everything else, and mutating forms such as `/usage reset` and
+ * agent's background jobs, `/usage` reports account-wide limits, and `/effort`
+ * adjusts the focused agent's thinking. Model selection belongs to the main
+ * session. Everything else, and mutating forms such as `/usage reset` and
  * `/jobs kill`, still requires returning to main.
  *
  * Failure mode if this regresses: these commands silently do nothing (or steer the
  * agent) in a focused view, `/export` writes the main session instead of the viewed
- * one, or a model/thinking change lands on the main session instead of the agent.
+ * one, an agent selects a different model, or its thinking change lands on main.
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -188,19 +188,27 @@ describe("focused subagent view slash commands", () => {
 		expect(focused.prompt).not.toHaveBeenCalled();
 	});
 
-	it("opens the model selector for /model aliases from the focused view", async () => {
-		const focused = createFocusedContext();
-		const showModelSelector = vi.fn();
-		Object.assign(focused.raw, { showModelSelector });
-		const controller = new InputController(focused.ctx);
-		controller.setupEditorSubmitHandler();
-		focused.editor.setText("/models");
-		await focused.ctx.editor.onSubmit?.("/models");
+	it.each(["/model", "/models", "/switch", "/switch other/model"])(
+		"refuses %s from the focused view and keeps the draft",
+		async text => {
+			const focused = createFocusedContext();
+			const showModelSelector = vi.fn();
+			const switchSessionModel = vi.fn();
+			Object.assign(focused.raw, { showModelSelector, switchSessionModel });
+			const controller = new InputController(focused.ctx);
+			controller.setupEditorSubmitHandler();
+			focused.editor.setText(text);
+			await focused.ctx.editor.onSubmit?.(text);
 
-		expect(showModelSelector).toHaveBeenCalledTimes(1);
-		expect(focused.prompt).not.toHaveBeenCalled();
-		expect(focused.editor.getText()).toBe("");
-	});
+			expect(showModelSelector).not.toHaveBeenCalled();
+			expect(switchSessionModel).not.toHaveBeenCalled();
+			expect(focused.prompt).not.toHaveBeenCalled();
+			expect(focused.editor.getText()).toBe(text);
+			expect(focused.raw.showStatus).toHaveBeenCalledWith(
+				"Subagents inherit the main session's model. Return to the main session to change it.",
+			);
+		},
+	);
 
 	it("cycles the focused agent's thinking level", async () => {
 		const focused = createFocusedContext();

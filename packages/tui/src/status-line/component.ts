@@ -2715,10 +2715,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			hookStatuses: this.#sortedHookStatuses,
 			planMode: this.#planModeStatus,
 			loopMode: this.#loopModeStatus,
-			prewalk:
-				typeof this.session.getPrewalkState === "function" && this.session.getPrewalkState()
-					? { enabled: true }
-					: null,
 			goalMode: this.#goalModeStatus,
 			goalStatusInFooter: this.#goalModeStatus ? this.host.goalStatusInFooter(this.session) : false,
 			vibeMode: this.#vibeModeStatus,
