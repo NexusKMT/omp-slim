@@ -106,8 +106,9 @@ Both jobs require a public repository. Native compilation runs in Actions;
 the local Intel Mac only prepares metadata, checks TypeScript/formatting and
 validates recovered artifacts. The Codespace remains stopped.
 
-Final workflow runs, rebuilt artifact sizes/hashes and local verification are
-pending. They will be recorded here after completion.
+The final Rust workflow has passed. The first rebuilt Mac artifact also passed
+local execution checks, but its complete TypeScript suite exposed remaining
+integration and fixture defects. A corrected full Mac run is still required.
 
 The first integrated runs, Mac `42783413828` and Rust `42783420636`, stopped
 during dependency installation because the export viewer manifest had not
@@ -126,8 +127,52 @@ uses the existing `wait_raw` before sending the same key and checking the
 same exit status/deadline. Production shell behavior was unchanged. Rust was
 restarted as `42788678239` from `d76c2adad081b90c8b86202ac6e93cfeddbf7707`.
 
+[Rust run 42788678239](https://github.com/NexusKMT/omp-slim/actions/runs/42788678239)
+passed in 16m29s. Formatting/Clippy took 1m15s, test compilation 4m26s, and
+nextest ran 6,364 tests in 421.128s: all passed, with 16 skipped. The separate
+doctest pass also passed all six runnable examples (28 ignored). The source
+record and full Actions log were recovered under
+`dist/actions/42788678239/`.
+
 The Intel Mac rebuild is run `42786339677`, from
 `ee212e46ba0734b4f4fefaa9518cfbc377bb0f6f`, including the packaged-viewer fix.
+Native compilation, standalone packaging, the retired-export gate, worker smoke
+and the full TypeScript check passed. The full retained TypeScript suite ran
+219 commands in 22m17s: 210 passed and nine failed. The whole job took 52m42s.
+Native compilation took 23m39s (1,424s including binding generation), and CLI
+packaging took 60s. This did not improve on the baseline's 22m27s native compile;
+the different dependency graph and cache state prevent a controlled timing
+comparison.
+
+The Mac test failures identified a real advisor recorder transition regression
+after removing the memory reset await, stale memory-role expectations and an
+essential-tool registration, a settings test tied to the old tab order, shell
+fixtures assuming completion within 100ms, and ACP/SDK lifecycle issues. These
+are being corrected before repeating the complete run. NSSpellServer also
+timed out on the hosted runner. Its platform check remains enabled; one
+explicit AppleSpell service integration is skipped only by that workflow.
+The new native addon passed the real spelling integration on the local Mac,
+including UTF-16 ranges and filtering whole-string orthography results.
+
+The first trimmed archive and binary were recovered and verified locally:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `omp-darwin-x64.tar.gz` | 116,107,286 | `7760989b10419d4860f868cf8bf92353bf4afdb106c0448dc3a0e7ebbbfdff80` |
+| Extracted `omp` | 227,854,192 | `26cc00d7d9350040a22c2223cb31159cc6848bf339f0c497e5a3317ccac41659` |
+| Native addon | 106,469,112 | `69d6286d39197ff576425a4cce874fc95c65b4e056cdaf90ac1758954f72564f` |
+
+The archive is 6.19% smaller than the baseline's 123,766,511 bytes; the binary
+is 6.25% smaller than 243,045,232 bytes. Generated native bindings exactly
+matched the committed files, and both source-status records were clean.
+Checksums, Mach-O architecture, ad-hoc signature, version/help, worker smoke,
+shell pipelines, file roundtrip and exit-status preservation passed on the
+Intel Core m3-8100Y / macOS 15.7.5 host. The compiled CLI exported a real test
+session; its HTML rendered the expected message in an isolated Chrome context
+without console errors. The viewer was inline, with only the existing fixed
+marked/highlight resources external. Evidence is under
+`dist/actions/42786339677/`; this intermediate binary predates the subsequent
+session lifecycle fixes and is not the final validated source.
 
 ## Maintaining the downstream
 

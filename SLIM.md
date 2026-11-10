@@ -23,9 +23,9 @@ been removed from the product. Track the actual state below.
 | Public repository and pinned upstream baseline | Established; made public at the user's request on 2026-11-10 |
 | Repeatable Codespace bootstrap/build/artifact procedure | Baseline built; binary and archive recovered and SHA-256 verified |
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
-| Other memory backends, browser, desktop and speech removal | Source, registration, workers, UI, dedicated tests/docs and native backends removed; integrated TypeScript and Rust formatting checks passed; final compiled validation pending |
-| Dependency cleanup | Cargo packages 979 → 799, Bun packages 462 → 396; no new package versions; two dedicated workspaces removed |
-| Intel macOS Actions build | Baseline run `42763829793` passed and was verified locally; the fully trimmed source requires a new run |
+| Other memory backends, browser, desktop and speech removal | Source, registration, workers, UI, dedicated tests/docs and native backends removed; rebuilt addon export checks passed; full Rust validation passed; Mac integration fixes are being verified |
+| Dependency cleanup | Cargo packages 979 → 799, Bun packages 462 → 396, Bazel repositories 962 → 783; no new package versions; two dedicated workspaces removed |
+| Intel macOS Actions build | Trimmed run `42786339677` compiled and passed local binary verification; its full TS suite exposed remaining integration/fixture failures, so a corrected full run is required |
 
 As of 2026-11-10 (Asia/Shanghai), Codespace
 `omp-slim-build-vrxqgpxrj7gfp579` was verified **Shutdown** after both Linux builds
@@ -157,6 +157,16 @@ rebuilds and tests the macOS artifact and retained TypeScript workspace;
 `slim-rust-checks.yml` runs Rust formatting/lint plus nextest and doctests on
 Ubuntu 24.04. Both are gated on public visibility. The Rust job uses the
 repository's `check:rs` / `test:rs` wrappers and does not need a Codespace.
+
+[Rust run 42788678239](https://github.com/NexusKMT/omp-slim/actions/runs/42788678239)
+passed formatting, Clippy, all 6,364 runnable nextest tests (16 skipped), and
+all six runnable doctests (28 ignored). The trimmed Mac binary from
+`42786339677` passed local checksums, version/help, worker smoke, shell/file
+behavior and compiled HTML session export. Its newly built addon also passed
+the actual AppleSpell service test locally; the hosted Mac workflow explicitly
+skips that one service integration because NSSpellServer times out there.
+The first full Mac test suite was not green: 210 of 219 command groups passed.
+See the removal report for the corrections and final validation status.
 
 The historical Sharpshooter-only removal was verified with:
 
