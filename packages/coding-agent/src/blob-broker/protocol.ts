@@ -95,7 +95,7 @@ export interface EnsureBlobResponse {
 	missing?: boolean;
 }
 
-/** Maximum number of fetch-attribution events retained by a blob store. */
+/** Maximum number of fetch events retained by a blob store. */
 export const BLOB_FETCH_EVENT_LIMIT = 100;
 
 /** Cumulative and instantaneous counters reported by the blob store. */
@@ -120,12 +120,8 @@ export interface BlobBrokerMetrics {
 	duplicateTokenGets: number;
 }
 
-/** One bounded telemetry record attributing a public fetch. */
+/** One bounded telemetry record describing a public fetch. */
 export interface BlobFetchAttributionEvent {
-	/** Catalog fetcher identifier, or `null` when unrecognized. */
-	fetcherId: string | null;
-	/** Whether multiple request signals corroborated the identification. */
-	corroborated: boolean;
 	/** Unix epoch milliseconds when the request reached the store. */
 	timestamp: number;
 	/** Public read method used by the fetcher. */
@@ -140,7 +136,7 @@ export interface BlobFetchAttributionEvent {
 export interface BlobStoreStatus {
 	/** Current aggregate counters. */
 	metrics: BlobBrokerMetrics;
-	/** Newest retained fetch-attribution events in chronological order. */
+	/** Newest retained fetch events in chronological order. */
 	recentFetches: readonly BlobFetchAttributionEvent[];
 }
 

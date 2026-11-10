@@ -161,9 +161,6 @@ export function createConfiguredUploader(
 		createDiscordUploader(destination, config);
 	if (uploader) return uploader;
 
-	if (destination === "provider-files") {
-		throw new DestinationUnavailableError(destination, "provider-native files must use the provider file channel");
-	}
 	if (metadata.family === "local-serving" || metadata.family === "tunnel") return null;
 	throw new DestinationUnavailableError(destination, "no built-in uploader or serving adapter is implemented");
 }
