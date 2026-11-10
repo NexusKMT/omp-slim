@@ -63,7 +63,7 @@ export interface TtsrCoordinatorHost {
 	schedulePostPromptTask(task: (signal: AbortSignal) => Promise<void>, options?: { delayMs?: number }): void;
 	scheduleAgentContinue(options: TtsrContinueOptions): void;
 	promptGeneration(): number;
-	/** Judge for `question` rules, or `undefined` while judged rules are off (`ttsr.judge`). */
+	/** Optional judge for question rules; OMP Slim sessions leave automatic judgment disabled. */
 	ruleJudge(): Judge | undefined;
 	/** Delivers a judged-rule warning without interrupting the run. */
 	deliverRuleWarning(content: string, ruleNames: string[]): Promise<void>;

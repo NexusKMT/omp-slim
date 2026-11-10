@@ -283,27 +283,14 @@ During the timer window, state can change. The retry is guarded by retry token, 
 - Repeat-after-gap depends on turn count increments at `turn_end`; after reload, restored injection ages restart at zero.
 - Judged (`question`) rules never appear in `checkDelta`/`checkSnapshot`/`checkAstSnapshot` results; see §10.
 
-## 10. Judged rules (`question`)
+## 10. Historical question rules (`question`)
 
-A rule with `question` is judged: its natural-language question goes to the `judge` model role after an output completes, never while it streams, so it cannot interrupt.
+OMP Slim preserves `question` fields when loading existing rule files, but does not automatically evaluate them. Completed replies, reasoning, and tool calls therefore cause no judgment requests or question-rule warnings. The retired `ttsr.judge` setting is removed during configuration migration and is no longer offered in settings.
 
-### When judgment runs
+Pattern rules using `condition` or `astCondition` without `question` continue to match and inject according to the lifecycle above. A historical rule that also has `question` remains a question rule: its patterns are prefilters, so they are not reinterpreted as standalone violations. To activate such a rule, replace its question with a suitable pattern trigger.
 
-- `ttsr.judge`: `auto` (default) judges only when the judge role resolves to a native System One model (TypeSafe jev); `on` judges with whatever the role resolves to, including the session's chat model; `off` never judges. Question rules still register either way.
-- On `message_end` of an assistant message whose `stopReason` is neither `aborted` nor `error`, `TtsrCoordinator` splits the message into outputs: all text blocks as one `text` output, all thinking blocks as one `thinking` output, and each tool call as a `tool` output. Tools exposing `matcherEntries` yield one output per file, with the `{ path, digest }` digest as content; otherwise the `matcherDigest` or the raw JSON arguments.
-- For each output, `TtsrManager.judgedCandidates()` selects question rules that pass scope, `globs`, the repeat policy, and — when the rule also declares `condition`/`astCondition` — that prefilter against the completed content. No candidates → no request.
-- One judge request per output carries every candidate's question as a `noul` question over a shared state `{ output, content }` (content cut to its longest prefix within 32,000 Jev tokens, counted locally with `Encoding.Jev`, so each branch stays under Jev's ~33k-token limit). Jev bills the state once per request, so rules sharing an output share its cost. Usage is journaled as `model_usage` with purpose `ttsr`.
+`/omfg` still reads question candidates and checks their scope and prefilters against conversation history. Automatic confirmation is disabled; its feedback recommends a `condition` or `astCondition` rule for active matching. A saved question candidate remains inactive.
 
-### Delivery
+`omp ttsr list` shows each rule's `question`. `omp ttsr test` does not call a model, so question rules report as not triggered, with their question shown. `omp ttsr scan` skips question rules.
 
-- A yes-probability ≥ 0.7 flags the rule. Flagged rules pass through `TtsrManager.claim()`, which drops rules another verdict already claimed or that the repeat policy blocks, and marks the rest injected in memory; one rule flagged by several outputs is therefore delivered once.
-- Verdicts arriving after a session replacement (`/new`, session switch) are dropped.
-- Survivors emit `ttsr_triggered` and are rendered with `ttsr-warning.md` into a hidden `ttsr-injection` custom message (`details.rules`), sent with `deliverAs: "aside"`: mid-run it joins the next step without interrupting (a running interruptible `wait` ends); on an idle session it starts a turn. Its `message_end` persists the `ttsr_injection` entry.
-- The session's `onBeforeYield` hook awaits in-flight judgments (up to 5s) before the agent loop drains asides and stops, so a warning about the final reply or last tool call lands in the same run. Later verdicts still arrive as asides.
-- Judge failures (no credentials, timeouts, parse errors) are logged and deliver nothing.
-
-### `/omfg` and CLI
-
-`/omfg` generates `condition`, `astCondition`, or `question` rules, instructed to prefer the pattern triggers. It validates candidates against conversation history through the same completed-output view (`TtsrToolInspector.outputs`); a `question` candidate must pass its scope/prefilter and get a yes from the judge on one of the 8 most recent in-scope outputs. With no judge available, the user decides whether to save it unconfirmed.
-
-`omp ttsr list` shows each rule's `question`. `omp ttsr test` never calls the judge, so question rules report as not triggered, with their question shown. `omp ttsr scan` skips question rules: their conditions are prefilters, not violations.
+Explicit `find` and eval judgment requests remain available and use the current main model without a separate judge role or automatic model fallback. They do not enable automatic TTSR judgment.

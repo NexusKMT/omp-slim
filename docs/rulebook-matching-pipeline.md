@@ -276,7 +276,7 @@ After rule discovery in `createAgentSession` (`sdk.ts`), `bucketRules(...)` appl
 
 - `condition` is the regex TTSR trigger field; legacy `ttsr_trigger` / `ttsrTrigger` are accepted as fallback inputs during parsing. A leading `(?i)`, `(?m)`, or `(?s)` inline flag group is translated to the equivalent JavaScript `RegExp` flags.
 - `astCondition` is the ast-grep trigger field: a string or YAML sequence of structural patterns, kept verbatim (no glob inference). It matches finalized source snapshots from tools exposing `matcherEntries` or `matcherDigest` (built-in edit/write do), with language inferred from the file path. It does not run on partial streaming deltas. A rule may set `condition`, `astCondition`, or both.
-- `question` makes the rule **judged**: a single natural-language yes/no question the `judge` model role answers about each completed in-scope output (reply, reasoning, or tool call). It never matches mid-stream and never interrupts; a yes delivers the rule as a warning (see `ttsr-injection-lifecycle.md` §10). When `condition`/`astCondition` are also set they only gate whether the question is asked, which keeps judge cost down. Runs per `ttsr.judge` (`auto` requires a native TypeSafe jev judge).
+- `question` identifies a historical judged rule. OMP Slim preserves the question but does not evaluate it automatically or deliver warnings from it (see `ttsr-injection-lifecycle.md` §10). Its `condition`/`astCondition`, when present, remain prefilters and do not become standalone violations; use a pattern rule without `question` for active matching.
 
    ```yaml
    question: "Does the reply claim tests pass without showing they were run?"

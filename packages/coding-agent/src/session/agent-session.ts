@@ -3444,12 +3444,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		});
 	}
 
-	/**
-	 * Judge for TTSR `question` rules per `ttsr.judge`, used by live judging and
-	 * `/omfg` validation. `auto` requires the judge role to resolve to a native
-	 * System One model, since every completed output may cost a request. Rebuilt
-	 * per call so model, credential, and session switches apply.
-	 */
 	/** Automatic judgment is retired; pattern-based rules remain active. */
 	ruleJudge(): Judge | undefined {
 		return undefined;

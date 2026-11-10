@@ -71,6 +71,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 import { cfgModel, cfgDisabledProviders, cfgEnabledModels } from "@oh-my-pi/pi-coding-agent/config/model-settings";
 import { cfgShellPath } from "@oh-my-pi/pi-coding-agent/exec/settings";
+import { cfgTtsr, cfgTtsrEnabled } from "@oh-my-pi/pi-coding-agent/export/ttsr-settings";
 
 /** Lets microtask-coalesced setting listeners run. */
 const tick = () => Promise.resolve();
@@ -1606,6 +1607,21 @@ describe("Settings", () => {
 			expect(editVariantForModel(settings, "openrouter/moonshotai/Kimi-K2-Instruct")).toBeUndefined();
 			expect(editVariantForModel(settings, "openai/gpt-5.2-codex")).toBe("apply_patch");
 		});
+	});
+
+	it("retires nested and dotted TTSR judgment settings while preserving pattern-rule controls", async () => {
+		await writeSettings({
+			ttsr: { judge: "on", enabled: true, repeatMode: "after-gap", repeatGap: 5 },
+			"ttsr.judge": "auto",
+		});
+		const settings = await Settings.init({ cwd: projectDir, agentDir });
+		expect(cfgTtsr.get(settings)).toMatchObject({ enabled: true, repeatMode: "after-gap", repeatGap: 5 });
+		expect(cfgTtsr.get(settings)).not.toHaveProperty("judge");
+		cfgTtsrEnabled.set(settings, false);
+		await settings.flush();
+		const saved = await readSettings();
+		expect(saved.ttsr).toEqual({ enabled: false, repeatMode: "after-gap", repeatGap: 5 });
+		expect(saved["ttsr.judge"]).toBeUndefined();
 	});
 
 	it("preserves retired speech and ranking configuration when saving unrelated settings", async () => {

@@ -63,7 +63,7 @@ Each judged phase drains through a dispatcher with 16 requests in flight before 
 ## Side Effects
 
 - Filesystem: reads up to 20 candidate files (4 MB each); never writes.
-- Network: judgment requests through the session's judge role; usage is summarized in the result footer.
+- Network: judgment requests use the current main model, with no separate judge model or automatic model fallback; usage is summarized in the result footer.
 - Cancellation: the tool abort signal stops the native scan and in-flight judgments.
 
 ## Limits & Caps

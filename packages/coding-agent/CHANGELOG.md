@@ -4,6 +4,7 @@
 
 ### Removed
 
+- Removed the inactive TTSR judged-rule setting; pattern rules remain active and existing question rules remain readable without automatic judgment requests.
 - Focused subagents inherit the main model and direct model-selection commands back to the main session; their thinking level remains adjustable.
 
 - Removed Spotlight background ranking, output rewriting, and model settings; tools retain ordinary output limits and explicit find judgments use the current model.

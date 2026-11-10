@@ -31,7 +31,7 @@ export interface RuleFrontmatter {
 	condition?: string | string[];
 	/** TTSR match condition(s) expressed as ast-grep patterns (edit/write streams only). */
 	astCondition?: string | string[];
-	/** Natural-language yes/no question a judge model answers on each completed in-scope output. */
+	/** Legacy natural-language rule question; OMP Slim does not evaluate it automatically. */
 	question?: string;
 	/** New key for TTSR stream scope. */
 	scope?: string | string[];
@@ -63,9 +63,9 @@ export interface Rule {
 	/** ast-grep pattern condition(s) that can trigger TTSR interruption (edit/write streams only). */
 	astCondition?: string[];
 	/**
-	 * Judged-rule question: asked of the `judge` model role once an in-scope output completes,
-	 * never mid-stream. A yes delivers the rule as a non-interrupting warning; `condition` /
-	 * `astCondition`, when also set, only gate whether the question is asked.
+	 * Legacy judged-rule question, preserved when reading existing rule files. OMP Slim does not
+	 * evaluate it automatically; `condition` / `astCondition` on these rules remain prefilters,
+	 * not standalone violations.
 	 */
 	question?: string;
 	/** Optional stream scope tokens (for example: text, thinking, tool:edit(*.ts)). */

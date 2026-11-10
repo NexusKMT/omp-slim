@@ -352,7 +352,8 @@ async function validateQuestionRule(
 		return {
 			matched: false,
 			judgeUnavailable: true,
-			feedback: "No judge model is available (see `ttsr.judge`), so the question could not be confirmed.",
+			feedback:
+				"Automatic question-rule judgment is disabled in OMP Slim, so the question could not be confirmed. Use a condition or astCondition rule for active matching.",
 		};
 	}
 

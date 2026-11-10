@@ -136,7 +136,6 @@ interface InjectionRecord {
 
 const DEFAULT_SETTINGS: TtsrSettings = {
 	enabled: true,
-	judge: "auto",
 	contextMode: "discard",
 	interruptMode: "always",
 	repeatMode: "once",

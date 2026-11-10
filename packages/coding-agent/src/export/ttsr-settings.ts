@@ -17,29 +17,6 @@ export const cfgTtsrEnabled = register({
 	},
 });
 
-export const cfgTtsrJudge = register({
-	id: "ttsr.judge",
-	type: "enum",
-	values: ["auto", "on", "off"] as const,
-	default: "auto",
-	ui: {
-		tab: "context",
-		group: "Rules (TTSR)",
-		label: "Judged Rules",
-		description:
-			"Ask the judge model role each `question` rule about completed replies, reasoning, and tool calls; a yes injects the rule as a warning",
-		options: [
-			{
-				value: "auto",
-				label: "Auto",
-				description: "Judge only when the judge role resolves to a native TypeSafe jev model",
-			},
-			{ value: "on", label: "On", description: "Always judge, whichever model the judge role resolves to" },
-			{ value: "off", label: "Off", description: "Never judge; question rules stay inactive" },
-		],
-	},
-});
-
 export const cfgTtsrContextMode = register({
 	id: "ttsr.contextMode",
 	type: "enum",
@@ -131,7 +108,6 @@ export const cfgTtsrDisabledRules = register({
 /** Time-traveling stream rules configuration (`ttsr.*`). */
 export const cfgTtsr = combine({
 	enabled: cfgTtsrEnabled,
-	judge: cfgTtsrJudge,
 	contextMode: cfgTtsrContextMode,
 	interruptMode: cfgTtsrInterruptMode,
 	repeatMode: cfgTtsrRepeatMode,

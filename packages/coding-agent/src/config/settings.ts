@@ -3406,6 +3406,7 @@ export class Settings {
 			["composer", "predictions"],
 			["contextPromotion", "enabled"],
 			["judgment", "attemptTimeoutMs"],
+			["ttsr", "judge"],
 		]) {
 			deleteByPath(raw, path);
 			delete raw[path.join(".")];
