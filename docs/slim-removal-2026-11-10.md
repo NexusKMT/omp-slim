@@ -33,10 +33,11 @@ Four isolated worktrees handled the feature removals. The user capped
 concurrency at five agents including the coordinator; existing workers were
 reused for integration reviews and could not spawn further workers.
 
-The integrated feature commits and follow-ups, before the final lock/report
-commit, change 1,021 files with 1,803 additions and 238,929 deletions relative to
-`c3b3c3dd12`. These counts include implementation, dedicated tests, generated
-schemas and documentation; they are not a binary-size measurement.
+The integrated source at `6647801a3ecfb36d046ebc0a07363e7277d5c15e`
+changes 1,042 files with 3,611 additions and 245,158 deletions relative to
+`c3b3c3dd12`, a net reduction of 241,547 lines. These counts include
+implementation, dedicated tests, generated schemas, lockfiles and
+documentation; they are not a binary-size measurement.
 
 | Lockfile metric | Before | After |
 | --- | ---: | ---: |
@@ -147,8 +148,9 @@ comparison.
 The Mac test failures identified a real advisor recorder transition regression
 after removing the memory reset await, stale memory-role expectations and an
 essential-tool registration, a settings test tied to the old tab order, shell
-fixtures assuming completion within 100ms, and ACP/SDK lifecycle issues. These
-are being corrected before repeating the complete run. NSSpellServer also
+fixtures assuming completion within 100ms, and ACP/SDK lifecycle issues. All
+nine failing groups have corresponding fixes with focused validation; the
+corrected source is `6647801a3e`. NSSpellServer also
 timed out on the hosted runner. Its platform check remains enabled; one
 explicit AppleSpell service integration is skipped only by that workflow.
 The new native addon passed the real spelling integration on the local Mac,
@@ -173,6 +175,41 @@ without console errors. The viewer was inline, with only the existing fixed
 marked/highlight resources external. Evidence is under
 `dist/actions/42786339677/`; this intermediate binary predates the subsequent
 session lifecycle fixes and is not the final validated source.
+
+The advisor fix keeps recorder feeds detached until the existing mode
+transition completes, preserving old-session costs while excluding late
+events from the new branch. The ACP fix checks the captured prompt identity
+and settled state after asynchronous waits, so an old end handler cannot
+drain late results or finish a newer request. Its deterministic regression
+fails against the earlier implementation and passes after the fix. The SDK
+timeout fixture now tests recovery in a separate lifecycle emission with the
+normal budget, using a fake timer only for the intentionally stalled call.
+Shell-state fixtures await the individual job's final result and use an
+explicit release marker to establish overlap. The complete affected ACP,
+async-delivery and SDK files passed 190 tests with 838 assertions in isolated
+processes/configuration. The merged workspace also passed `check:ts` locally
+with the newly built native addon.
+
+The second Mac workflow is
+[run 42797373269](https://github.com/NexusKMT/omp-slim/actions/runs/42797373269),
+from `6647801a3ecfb36d046ebc0a07363e7277d5c15e`. Compilation and binary
+verification passed in 27m56s, including 26m03s of native compilation despite
+restoring a 1.35 GB cache. TypeScript checks passed. The job finished in 60m42s;
+the full TS suite ran for 24m59s with 217 of 219 command groups passing. All
+nine groups that failed in the previous run passed. The new failures were the
+native PTY argument test and a PlusCal AST-search test returning no matches.
+The full Actions log was recovered under `dist/actions/42797373269/`.
+The full suite exposed a
+previously passing native PTY test intermittently receiving no complete JSON
+output from a fast-exiting child.
+
+The PTY implementation and original test were unchanged from the baseline.
+Concurrent reproduction confirmed output loss even with awaited or synchronous
+child writes, so changing the fixture's write API would not fix the issue.
+A minimal system-PTY probe showed that macOS can discard unread output when
+the last slave descriptor closes. The existing `pi-shell` zpty implementation
+already accounts for that behavior. The corresponding native PTY fix and a
+fresh Rust/Mac validation are in progress; this second build is intermediate.
 
 ## Maintaining the downstream
 

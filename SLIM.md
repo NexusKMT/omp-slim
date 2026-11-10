@@ -223,8 +223,10 @@ Mach-O architecture and ad-hoc signature, rejects Homebrew/runner-specific
 dynamic library paths, runs the worker smoke test, checks TypeScript, and runs
 the complete retained TypeScript CI suite in bounded subprocess groups. Rust intermediates and dependency
 downloads are cached; cache saving also runs after validation failures. Runs
-time out at 120 minutes; verified archives are retained for 7 days. A failed
-run also uploads any unverified binary/addon separately for 2 days. No provider
+time out at 120 minutes; verified archives and the separately downloadable
+native addon are retained for 7 days. Compilation or binary-verification
+failures also preserve partial binary/addon files for 2 days. Generated native
+bindings are uploaded for comparison with the committed files. No provider
 credentials are required.
 
 [Run 42763829793](https://github.com/NexusKMT/omp-slim/actions/runs/42763829793)
