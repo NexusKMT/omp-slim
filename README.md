@@ -1,9 +1,9 @@
-> **OMP Slim — private downstream of OMP v18.18.3.**
+> **OMP Slim — downstream of OMP v18.18.3.**
 > This project is removing built-in browser automation, desktop control, speech
 > and automatic long-term memory. Work is in progress. See [SLIM.md](SLIM.md)
 > for the actual removal status, pinned source and Codespace build procedure.
 > The upstream installation commands and feature overview below describe OMP;
-> they do not install this private build.
+> they do not install this downstream build.
 
 <p align="center">
   <img src="https://github.com/can1357/oh-my-pi/blob/main/assets/hero.png?raw=true" alt="omp">

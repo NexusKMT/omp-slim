@@ -13,6 +13,7 @@ concurrency:
 jobs:
   build:
     name: macOS 15 Intel build and smoke test
+    if: ${{ github.event.repository.private == false }}
     runs-on: macos-15-intel
     timeout-minutes: 120
     env:
@@ -81,7 +82,7 @@ jobs:
           {
             printf 'Source: `%s`\n\n' "$GITHUB_SHA"
             printf 'Runner: `macos-15-intel`; Xcode: `16.4`; deployment target: `15.0`.\n\n'
-            printf 'Builds use ad-hoc signing for private testing.\n\n'
+            printf 'Builds use ad-hoc signing for local testing.\n\n'
             if [ -f dist/builds/latest ]; then
               omp_run_dir="dist/builds/$(cat dist/builds/latest)"
               if [ -f "$omp_run_dir/ARCHIVE-SHA256SUMS" ]; then

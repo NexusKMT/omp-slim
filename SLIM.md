@@ -1,11 +1,11 @@
 # OMP Slim
 
-Private downstream: https://github.com/NexusKMT/omp-slim
+Public downstream: https://github.com/NexusKMT/omp-slim
 
 The source baseline is upstream v18.18.3, commit
 `21f1188cf88b2f534c092181968cd5a4d1a9c296`. The original MIT license and
 third-party notices are retained. `upstream` points to can1357/oh-my-pi;
-`origin` points to this private repository.
+`origin` points to this downstream repository.
 
 The requested scope is removal of built-in browser automation, host desktop
 control, speech/live audio, and automatic long-term memory. Session storage,
@@ -18,7 +18,7 @@ a component has been removed from the product. Track the actual state below.
 
 | Stage | State |
 | --- | --- |
-| Private repository and pinned upstream baseline | Established |
+| Public repository and pinned upstream baseline | Established; made public at the user's request on 2026-11-10 |
 | Repeatable Codespace bootstrap/build/artifact procedure | Baseline built; binary and archive recovered and SHA-256 verified |
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
 | Other memory backends, browser, desktop and speech removal | Pending |
@@ -160,6 +160,15 @@ cross-platform or older-x64 release. Produce a macOS addon/binary separately
 before installing this downstream on the local Mac.
 
 ## Intel macOS through GitHub Actions
+
+The user chose public visibility to use free standard GitHub-hosted runners.
+The initial private run `42750509166` was cancelled, and repository visibility
+was switched to public while preserving its address and commits. The job
+requires `github.event.repository.private == false` to prevent private runs.
+According to [GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
+Intel macOS has 4 CPUs and 14 GB RAM for both public and private repositories;
+Linux/Windows standard runners increase from 2 CPUs / 8 GB privately to
+4 CPUs / 16 GB publicly. Standard public runners are free to use.
 
 The manual workflow is `.github/workflows/slim-macos-intel.yml`. Upstream
 workflows are archived in `.github/upstream-workflows/`, outside GitHub's

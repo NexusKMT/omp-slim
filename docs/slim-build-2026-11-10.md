@@ -1,6 +1,7 @@
 # 首次构建与裁剪记录 · 2026-11-10
 
-私有仓库：<https://github.com/NexusKMT/omp-slim>。GitHub 账号为 NexusKMT。
+仓库：<https://github.com/NexusKMT/omp-slim>。GitHub 账号为 NexusKMT。
+创建时为 private；同日按用户要求改为 public，以使用免费标准 Actions runner。
 本地工作目录为 `~/Projects/omp-slim`，原始上游克隆单独保留在
 `~/Projects/oh-my-pi`。上游发布 Actions 在本仓库中已禁用。
 

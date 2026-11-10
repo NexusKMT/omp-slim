@@ -1,7 +1,7 @@
-> **OMP Slim：基于 OMP v18.18.3 的私有裁剪项目。**
+> **OMP Slim：基于 OMP v18.18.3 的裁剪项目。**
 > 正在移除内置浏览器自动化、桌面控制、语音和自动长期记忆。
 > 实际完成状态、源码基线和 Codespace 构建方法见 [SLIM.md](SLIM.md)。
-> 下方保留的上游安装命令和功能介绍描述的是原版 OMP，不会安装本项目的私有构建。
+> 下方保留的上游安装命令和功能介绍描述的是原版 OMP，不会安装本项目的裁剪构建。
 
 <p align="center">
   <img src="https://github.com/can1357/oh-my-pi/blob/main/assets/hero.png?raw=true" alt="omp">

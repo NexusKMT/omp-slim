@@ -1,14 +1,16 @@
-# Private OMP Slim Project
+# OMP Slim Project
 
-This checkout is the private `NexusKMT/omp-slim` downstream. Read `SLIM.md` for
+This checkout is the public `NexusKMT/omp-slim` downstream. Read `SLIM.md` for
 the pinned baseline, requested removal scope, build commands and Codespace
 lifecycle. Use the NexusKMT GitHub account for this project. Keep upstream
 publishing workflows archived outside `.github/workflows`; downstream Linux
-builds use Codespaces, and Intel macOS builds use the manual private GitHub
+builds use Codespaces, and Intel macOS builds use the manual public GitHub
 Actions workflow described in `SLIM.md`. Record actual build and removal status, recover artifacts
 with checksums, and verify the Codespace is stopped when the task ends unless
 the user asks to keep it running. Preserve the core session/edit/shell behavior
 while removing browser, desktop, speech and long-term-memory integrations.
+The user chose public visibility to use free standard Actions runners. Keep
+Actions build jobs gated on a public repository; do not run them privately.
 
 # Development Rules
 
