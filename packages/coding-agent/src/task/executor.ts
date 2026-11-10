@@ -53,7 +53,6 @@ import {
 	type ServiceTierInheritSettingValue,
 } from "../config/service-tier";
 import type { CompactionThresholdPair } from "../config/compaction-threshold";
-import { type OAuthAccountPools, validateAgentAccountPools } from "../config/account-pools";
 import { type OverlayLayers, Settings } from "../config/settings";
 
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
@@ -156,7 +155,6 @@ import {
 	cfgTaskMaxRuntimeMs,
 	cfgTaskMaxRecursionDepth,
 	cfgTaskAgentAdvisor,
-	cfgTaskAgentAccountPools,
 } from "./settings";
 import {
 	cfgTierSubagent,
@@ -482,7 +480,6 @@ export interface ExecutorOptions {
 	/** Exact-name `task.agentCompactionThresholdOverrides` pair selected by dispatch. */
 	compactionThresholdOverride?: CompactionThresholdPair;
 	/** Exact-name `task.agentAccountPools` entry selected by dispatch; see `CreateAgentSessionOptions.oauthAccountPools`. */
-	oauthAccountPools?: OAuthAccountPools;
 	/** Override local:// protocol options so subagent shares parent's local:// root */
 	localProtocolOptions?: LocalProtocolOptions;
 	/**
@@ -4216,7 +4213,6 @@ function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 		let revived: AgentSession;
 		// Account pools are owner policy: take the live exact-name entry, as
 		// dispatch and persisted revival do, never the spawn-time copy.
-		const agentAccountPools = validateAgentAccountPools(cfgTaskAgentAccountPools.get(capture.settings.parent));
 		capture.spec.prompt.reviving = true;
 		try {
 			try {
@@ -4235,9 +4231,6 @@ function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 					...options,
 					model,
 					assertDispatchModel: inheritedModelGuard(model, options.thinkingLevelCeiling),
-					oauthAccountPools: Object.hasOwn(agentAccountPools, capture.agentName)
-						? agentAccountPools[capture.agentName]
-						: undefined,
 				}));
 			} catch (error) {
 				mcpFollower?.dispose();
@@ -4696,7 +4689,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 					modelRegistry,
 					getApiKey: options.getApiKey,
 					credentialSourceSessionId: options.credentialSourceSessionId,
-					oauthAccountPools: options.oauthAccountPools,
+
 					inheritedSessionAgents: options.inheritedSessionAgents,
 					model,
 					thinkingLevel: effectiveThinkingLevel,
@@ -4705,7 +4698,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 					assertDispatchModel: inheritedModelGuard(model, spawnEffortCeiling),
 					thinkingLevelCeiling: spawnEffortCeiling,
 					// Subagents are short-lived; never schedule background warm requests.
-					cacheWarming: false,
+
 					toolNames,
 					outputSchema,
 					outputSchemaMode: options.outputSchemaMode,

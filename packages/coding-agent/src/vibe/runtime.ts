@@ -26,7 +26,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import type { AsyncJob, AsyncJobManagerApi, AsyncJobRunResult } from "../async/job-manager";
-import { validateAgentAccountPools } from "../config/account-pools";
 import { sessionLocalProtocolOptions } from "../internal-urls/context";
 import { registerArtifactsDir } from "../internal-urls/registry-helpers";
 import { MCPManager } from "../mcp/manager";
@@ -1270,7 +1269,6 @@ export class VibeSessionRegistry {
 		const localProtocolOptions = sessionLocalProtocolOptions(session);
 		// Same exact-name pool task dispatch and persisted revival apply, so a
 		// worker is restricted from its first turn, not only after a revive.
-		const agentAccountPools = validateAgentAccountPools(cfgTaskAgentAccountPools.get(session.settings));
 		return {
 			cwd: session.cwd,
 			costGate: session.costGate,
@@ -1315,9 +1313,7 @@ export class VibeSessionRegistry {
 			parentAgentId: session.getAgentId?.() ?? MAIN_AGENT_ID,
 			parentPromptCacheKey: session.getPromptCacheKey?.(),
 			parentServiceTier: session.getServiceTierByFamily ? (session.getServiceTierByFamily() ?? null) : undefined,
-			oauthAccountPools: Object.hasOwn(agentAccountPools, record.agent.name)
-				? agentAccountPools[record.agent.name]
-				: undefined,
+
 			keepAlive: true,
 		};
 	}

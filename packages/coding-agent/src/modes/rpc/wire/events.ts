@@ -11,8 +11,7 @@ const MESSAGE_ID = doc("string", "Shared by the start, updates, and end of one m
 export const eventDefs = {
 	AutoCompactionReason: "'threshold' | 'overflow' | 'idle' | 'incomplete'",
 	AutoCompactionAction: "'context-full' | 'remote' | 'handoff' | 'shake' | 'snapcompact'",
-	CacheWarmingPhase: "'streaming' | 'idle'",
-	CacheWarmingOutcome: "'hit' | 'miss' | 'error' | 'aborted'",
+
 	NotifyType: "'info' | 'warning' | 'error'",
 
 	AgentStartEvent: {
@@ -124,22 +123,7 @@ export const eventDefs = {
 			[],
 		),
 	},
-	CacheWarmingStartEvent: doc(
-		{ type: "'cache_warming_start'", phase: "CacheWarmingPhase", provider: "string", model: "string" },
-		"A prompt-cache refresh was handed to the provider.",
-	),
-	CacheWarmingEndEvent: doc(
-		{
-			type: "'cache_warming_end'",
-			phase: "CacheWarmingPhase",
-			provider: "string",
-			model: "string",
-			outcome: "CacheWarmingOutcome",
-			"usage?": doc("Usage", "Present only when the refresh was billed."),
-			"warmingStopReason?": doc("string", "Why warming stopped; absent while it continues."),
-		},
-		"Outcome of the refresh announced by the matching `cache_warming_start`.",
-	),
+
 	RetryFallbackAppliedEvent: {
 		type: "'retry_fallback_applied'",
 		from: "string",
@@ -213,8 +197,6 @@ export const eventDefs = {
 			"ManualCompactionEndEvent",
 			"AutoRetryStartEvent",
 			"AutoRetryEndEvent",
-			"CacheWarmingStartEvent",
-			"CacheWarmingEndEvent",
 			"RetryFallbackAppliedEvent",
 			"RetryFallbackSucceededEvent",
 			"ModelChangedEvent",
