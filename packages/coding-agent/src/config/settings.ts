@@ -35,7 +35,7 @@ import { type Settings as SettingsCapabilityItem, settingsCapability } from "../
 import type { ModelRole } from "../config/model-roles";
 import { loadCapability } from "../discovery";
 import { AgentStorage, type AgentStorageApi } from "../session/agent-storage";
-import { type CompactionMethod, DEFAULT_COMPACTION_METHOD_ORDER } from "../session/compaction-methods";
+
 import { writeFileAtomically } from "../utils/atomic-file";
 import { stringifyYamlConfig } from "@oh-my-pi/pi-utils/yaml-config";
 import {
@@ -2992,47 +2992,36 @@ export class Settings {
 			raw["edit.mode"] = "hashline";
 		}
 
-		// compaction.strategy / compaction.remoteEnabled → compaction.methodOrder.
-		// The old single strategy could not express a capability-dependent fallback
-		// chain. Preserve explicit legacy intent while new installs use the
-		// server → snapcompact → handoff → shake → soft default.
+		// Retain local legacy compaction choices while removing provider-native compaction.
 		const compactionObj = isRecord(raw.compaction) ? raw.compaction : undefined;
 		const configuredMethodOrder = compactionObj?.methodOrder ?? raw["compaction.methodOrder"];
 		const legacyStrategy = compactionObj?.strategy ?? raw["compaction.strategy"];
-		const legacyRemoteEnabled = compactionObj?.remoteEnabled ?? raw["compaction.remoteEnabled"];
-		if (!Array.isArray(configuredMethodOrder)) {
-			const remoteEnabled = legacyRemoteEnabled !== false;
-			const strategy = legacyStrategy === "shake-summary" ? "shake" : legacyStrategy;
-			let methodOrder: CompactionMethod[] | undefined;
-			switch (strategy) {
+		let methodOrder: unknown[] | undefined;
+		if (Array.isArray(configuredMethodOrder)) {
+			methodOrder = configuredMethodOrder.filter(method => method !== "remote");
+		} else {
+			switch (legacyStrategy) {
 				case "context-full":
-					methodOrder = remoteEnabled ? ["remote", "soft"] : ["soft"];
+					methodOrder = ["soft"];
 					break;
 				case "handoff":
-					methodOrder = remoteEnabled ? ["handoff", "remote", "soft"] : ["handoff", "soft"];
+					methodOrder = ["handoff", "soft"];
 					break;
+				case "shake-summary":
 				case "shake":
-					methodOrder = remoteEnabled ? ["shake", "remote", "soft"] : ["shake", "soft"];
+					methodOrder = ["shake", "soft"];
 					break;
 				case "snapcompact":
-					methodOrder = remoteEnabled ? ["snapcompact", "remote", "soft"] : ["snapcompact", "soft"];
+					methodOrder = ["snapcompact", "soft"];
 					break;
 				case "off":
 					methodOrder = [];
 					break;
-				default:
-					if (legacyRemoteEnabled === false) {
-						methodOrder = DEFAULT_COMPACTION_METHOD_ORDER.filter(method => method !== "remote");
-					}
 			}
-			if (methodOrder) {
-				const root = compactionObj ?? {};
-				root.methodOrder = methodOrder;
-				raw.compaction = root;
-			}
-		} else if (!compactionObj || compactionObj.methodOrder === undefined) {
+		}
+		if (methodOrder) {
 			const root = compactionObj ?? {};
-			root.methodOrder = configuredMethodOrder;
+			root.methodOrder = methodOrder;
 			raw.compaction = root;
 		}
 		if (compactionObj) {
@@ -3279,14 +3268,11 @@ export class Settings {
 			switch (raw.serviceTier) {
 				case "priority":
 					setTier("openai", "priority");
-					setTier("anthropic", "priority");
-					setTier("google", "priority");
 					break;
 				case "openai-only":
 					setTier("openai", "priority");
 					break;
 				case "claude-only":
-					setTier("anthropic", "priority");
 					break;
 				case "auto":
 				case "default":
@@ -3447,6 +3433,57 @@ export class Settings {
 			delete raw[`providers.${key}`];
 		}
 		if (providerSettings && Object.keys(providerSettings).length === 0) delete raw.providers;
+
+		// Provider subscriptions, discovery hints and alternate transports are retired.
+		const retiredProviderSettings = [
+			"auth.broker",
+			"auth.accountPolicies",
+			"task.agentAccountPools",
+			"providers.anthropic",
+			"providers.ollama-cloud",
+			"providers.antigravityEndpoint",
+			"providers.fireworksTier",
+			"providers.kimiApiFormat",
+			"providers.openaiWebsockets",
+			"providers.openaiResponsesWebsockets",
+			"providers.openaiLiveSteering",
+			"providers.muse-code",
+			"providers.openai-codex",
+			"providers.cacheRetention",
+			"providers.cacheWarming",
+			"providers.openrouterVariant",
+			"codexResets",
+			"claudeResets",
+			"tui.codexResetFireworks",
+			"retry.waitForUsageReset",
+			"retry.usageReservePct",
+			"tier.anthropic",
+			"tier.google",
+			"tools.format",
+			"tools.abortOnFabricatedResult",
+			"compaction.remote",
+			"compaction.remoteEndpoint",
+			"compaction.remoteStreamingV2Enabled",
+			"images.urls.options.provider-files",
+			"images.urls.credentials.provider-files",
+		];
+		for (const prefix of retiredProviderSettings) {
+			deleteByPath(raw, prefix.split("."));
+			for (const key of Object.keys(raw)) {
+				if (key === prefix || key.startsWith(`${prefix}.`)) delete raw[key];
+			}
+		}
+		for (const key of ["images.urls.options", "images.urls.credentials"]) {
+			const value = raw[key];
+			if (isRecord(value)) delete value["provider-files"];
+		}
+		const imageUrls = getByPath(raw, ["images", "urls"]);
+		if (isRecord(imageUrls) && Array.isArray(imageUrls.backends)) {
+			imageUrls.backends = imageUrls.backends.filter(backend => backend !== "provider-files");
+		}
+		if (Array.isArray(raw["images.urls.backends"])) {
+			raw["images.urls.backends"] = raw["images.urls.backends"].filter(backend => backend !== "provider-files");
+		}
 
 		// The old model namespace held stream/tool loop guards. Keep those controls
 		// under their own roots before reserving model for the primary selector.

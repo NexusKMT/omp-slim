@@ -1597,15 +1597,7 @@ export class AcpAgent implements Agent {
 				const sorted = sessions.sort((l, r) => r.modified.getTime() - l.modified.getTime()).slice(0, limit);
 				return { sessions: sorted.map(s => this.#toSessionInfo(s)) };
 			}
-			case "_omp/usage": {
-				const [firstRecord] = this.#sessions.values();
-				const target = firstRecord?.session ?? this.#initialSession;
-				if (!target) {
-					return { reports: [] };
-				}
-				const reports = await target.fetchUsageReports();
-				return { reports: reports ?? [] };
-			}
+
 			case "_omp/extensions": {
 				const cwd = typeof params.cwd === "string" ? (params.cwd as string) : undefined;
 				const sm = cwd ? await Settings.loadReadOnly({ cwd }) : await Settings.init();

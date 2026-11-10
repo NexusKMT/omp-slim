@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AuthStorage } from "@oh-my-pi/pi-ai";
 import type {
 	BlobBrokerDoctorResponse,
 	BlobBrokerProbeResponse,
@@ -10,7 +9,6 @@ import type {
 	BlobBrokerPurgeResponse,
 	BlobBrokerStatus,
 } from "@oh-my-pi/pi-coding-agent/blob-broker/protocol";
-import { ProviderFileCache } from "@oh-my-pi/pi-coding-agent/blob-broker/provider-file-types";
 import {
 	type ImagesCliDependencies,
 	type ImagesCommandArgs,
@@ -18,7 +16,6 @@ import {
 	runImagesCommand,
 } from "@oh-my-pi/pi-coding-agent/cli/images-cli";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { FetchImpl } from "@oh-my-pi/pi-utils";
 
 interface CapturedRequest {
 	readonly method: string;
@@ -58,7 +55,7 @@ const status: BlobBrokerStatus = {
 				referenceBytes: 400,
 				savedBytes: 9_600,
 			},
-			"provider-files": {
+			"amazon-s3": {
 				entries: 1,
 				imageCount: 1,
 				inlineBytes: 5_000,
@@ -80,16 +77,12 @@ const status: BlobBrokerStatus = {
 	},
 	recentFetches: [
 		{
-			fetcherId: "openai",
-			corroborated: true,
 			timestamp: 1_777_000_000_000,
 			method: "GET",
 			found: true,
 			tokenSuffix: "safe-tail",
 		},
 		{
-			fetcherId: null,
-			corroborated: false,
 			timestamp: 1_777_000_000_001,
 			method: "HEAD",
 			found: false,
@@ -170,7 +163,6 @@ function resolvedConfig(): ImagesResolvedConfig {
 				bindHost: "127.0.0.1",
 			},
 		],
-		providerFileCachePath: path.join(root, "provider-files.json"),
 		savingsJournalPath: path.join(root, "savings.jsonl"),
 	};
 }
@@ -217,7 +209,7 @@ async function writeSavings(): Promise<void> {
 				timestamp: 2,
 				provider: "anthropic",
 				model: "claude-test",
-				destination: "provider-files",
+				destination: "amazon-s3",
 				imageCount: 1,
 				inlineBytes: 5_000,
 				referenceBytes: 200,
@@ -228,26 +220,8 @@ async function writeSavings(): Promise<void> {
 	);
 }
 
-async function writeProviderFile(credential: string): Promise<string> {
-	const contentHash = "a".repeat(64);
-	const cache = new ProviderFileCache(resolvedConfig().providerFileCachePath, { saveDebounceMs: 60_000 });
-	cache.set("openai", credential, contentHash, {
-		provider: "openai",
-		id: "file-test-1",
-		mimeType: "image/png",
-		bytes: 321,
-		delete: {
-			method: "DELETE",
-			url: "https://api.openai.com/v1/files/file-test-1",
-			headers: { Authorization: `Bearer ${credential}` },
-		},
-	});
-	cache.save();
-	return contentHash;
-}
-
 describe("images status", () => {
-	test("renders fetcher attribution, duplicate GETs, and aggregate savings as text and one JSON document", async () => {
+	test("renders fetch results, duplicate GETs, and aggregate savings as text and one JSON document", async () => {
 		routes.set("/status", () => status);
 		await writeSavings();
 
@@ -255,8 +229,8 @@ describe("images status", () => {
 
 		expect(textResult.action).toBe("status");
 		expect(output()).toContain("2 duplicate GETs");
-		expect(output()).toContain("Recent fetch: openai; corroborated=yes; GET hit");
-		expect(output()).toContain("Recent fetch: unknown; corroborated=no; HEAD miss");
+		expect(output()).toContain("Recent fetch: GET hit");
+		expect(output()).toContain("Recent fetch: HEAD miss");
 		expect(output()).toContain("14.1KB");
 		expect(output()).toContain("14.6KB inline → 600B references");
 		expect(output()).not.toContain("never-render-this");
@@ -270,7 +244,7 @@ describe("images status", () => {
 		expect("daemon" in parsed).toBe(true);
 		if (parsed.action === "status" && "daemon" in parsed) {
 			expect(parsed.daemon.metrics?.duplicateTokenGets).toBe(2);
-			expect(parsed.daemon.recentFetches?.map(event => event.fetcherId)).toEqual(["openai", null]);
+			expect(parsed.daemon.recentFetches?.map(event => event.method)).toEqual(["GET", "HEAD"]);
 			expect(parsed.savings).toMatchObject({
 				entries: 2,
 				imageCount: 3,
@@ -341,8 +315,6 @@ describe("images probe", () => {
 
 describe("images purge", () => {
 	test("is a dry-run by default and sends the apply mutation boundary explicitly", async () => {
-		const credential = "dry-run-secret";
-		await writeProviderFile(credential);
 		let remoteDeletes = 0;
 		routes.set("/purge", request => {
 			const purge = request.body as BlobBrokerPurgeRequest;
@@ -358,34 +330,19 @@ describe("images purge", () => {
 				errors: [],
 			};
 		});
-		let authOpened = 0;
-
-		const dryRun = await runImagesCommand(
-			args("purge", { all: true }),
-			dependencies({
-				openAuthStorage: async () => {
-					authOpened++;
-					return AuthStorage.create(":memory:");
-				},
-			}),
-		);
+		const dryRun = await runImagesCommand(args("purge", { all: true }), dependencies());
 
 		expect(dryRun).toMatchObject({
 			action: "purge",
 			exitCode: 0,
 			applied: false,
-			providerFiles: { selected: 1, deleted: 0 },
 		});
 		expect(requests.at(-1)?.body).toEqual({ apply: false, all: true, expiredOnly: false });
-		expect(authOpened).toBe(0);
 		expect(remoteDeletes).toBe(0);
-		expect(new ProviderFileCache(resolvedConfig().providerFileCachePath).status().entries).toBe(1);
 		expect(output()).toContain("dry-run; pass --apply to delete");
 	});
 
-	test("--apply performs daemon and provider-native deletion when matching credentials resolve", async () => {
-		const credential = "openai-native-delete-secret";
-		await writeProviderFile(credential);
+	test("--apply forwards the explicit daemon deletion request and renders its result", async () => {
 		routes.set("/purge", request => {
 			const purge = request.body as BlobBrokerPurgeRequest;
 			return {
@@ -399,75 +356,16 @@ describe("images purge", () => {
 				errors: [],
 			};
 		});
-		const providerRequests: Array<{ url: string; method: string; authorization: string | null }> = [];
-		const providerFetch: FetchImpl = async (input, init) => {
-			const headers = new Headers(init?.headers);
-			providerRequests.push({
-				url: String(input),
-				method: init?.method ?? "GET",
-				authorization: headers.get("authorization"),
-			});
-			return Response.json({ deleted: true });
-		};
-
-		const result = await runImagesCommand(
-			args("purge", { apply: true, all: true, json: true }),
-			dependencies({
-				openAuthStorage: async () => {
-					const storage = await AuthStorage.create(":memory:");
-					storage.keys.setRuntime("openai", credential);
-					return storage;
-				},
-				fetch: providerFetch,
-			}),
-		);
-
+		const result = await runImagesCommand(args("purge", { apply: true, all: true, json: true }), dependencies());
 		expect(result).toMatchObject({
 			action: "purge",
 			exitCode: 0,
 			applied: true,
-			providerFiles: { selected: 1, deleted: 1, skippedAuth: 0 },
+			daemon: { deleted: 1, reclaimedBytes: 321 },
 		});
 		expect(requests.at(-1)?.body).toEqual({ apply: true, all: true, expiredOnly: false });
-		expect(providerRequests).toEqual([
-			{
-				url: "https://api.openai.com/v1/files/file-test-1",
-				method: "DELETE",
-				authorization: `Bearer ${credential}`,
-			},
-		]);
-		expect(new ProviderFileCache(resolvedConfig().providerFileCachePath).status().entries).toBe(0);
 		expect(JSON.parse(output())).toEqual(result);
-		expect(output()).not.toContain(credential);
 		expect(stderr).toEqual([]);
-	});
-
-	test("keeps provider-file metadata and fails safely when the matching credential is unavailable", async () => {
-		await writeProviderFile("unavailable-secret");
-		routes.set("/purge", () => ({
-			applied: true,
-			purgedBlobs: 0,
-			reclaimedBytes: 0,
-			publications: [],
-			remoteDeletes: [],
-			attempted: 0,
-			deleted: 0,
-			errors: [],
-		}));
-
-		const result = await runImagesCommand(
-			args("purge", { apply: true, all: true }),
-			dependencies({ openAuthStorage: () => AuthStorage.create(":memory:") }),
-		);
-
-		expect(result).toMatchObject({
-			action: "purge",
-			exitCode: 1,
-			providerFiles: { selected: 1, deleted: 0, skippedAuth: 1 },
-		});
-		expect(new ProviderFileCache(resolvedConfig().providerFileCachePath).status().entries).toBe(1);
-		expect(output()).toContain("matching authentication was unavailable");
-		expect(output()).not.toContain("unavailable-secret");
 	});
 
 	test("redacts daemon remote-deletion credentials and capability URLs from text and JSON errors", async () => {

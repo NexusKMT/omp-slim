@@ -1,7 +1,8 @@
+import { resolveConfigValue } from "./config/resolve-config-value";
+import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import * as path from "node:path";
 import {
 	Agent,
-	type AgentEvent,
 	type AgentMessage,
 	type AgentOptions,
 	type AgentTelemetryConfig,
@@ -14,7 +15,6 @@ import {
 } from "@oh-my-pi/pi-agent-core";
 import type {
 	Context,
-	CredentialDisabledEvent,
 	Effort,
 	Message,
 	Model,
@@ -22,23 +22,19 @@ import type {
 	ServiceTierByFamily,
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
-import { resolveApiKeyOnce } from "@oh-my-pi/pi-ai/auth-retry";
-import type { DiscoverAuthStorageOptions } from "@oh-my-pi/pi-ai/auth-broker/discover";
-import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
-import { prewarmModelConnection } from "@oh-my-pi/pi-ai/providers/connection-prewarm";
-import { isOpenAICodexWebSocketPreferred } from "@oh-my-pi/pi-ai/providers/openai-codex-transport";
+
 import { withCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
-import { FALLBACK_DIALECT, preferredDialect } from "@oh-my-pi/pi-catalog/identity";
+
 import type { Component } from "@oh-my-pi/pi-tui";
 import { $env } from "@oh-my-pi/pi-utils/env";
-import { getAgentDir, getModelDbPath, getProjectDir } from "@oh-my-pi/pi-utils/dirs";
+import { getAgentDir, getProjectDir } from "@oh-my-pi/pi-utils/dirs";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import * as prompt from "@oh-my-pi/pi-utils/prompt";
 import { Snowflake } from "@oh-my-pi/pi-utils/snowflake";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
-import { DEFAULT_FRAME_DATA_BYTES_BUDGET, frameDataBytesBudget } from "@oh-my-pi/snapcompact";
+
 import {
 	discoverAdvisorConfigs,
 	discoverWatchdogFiles,
@@ -57,12 +53,11 @@ import {
 } from "./capability/rule";
 import { bucketRules } from "./capability/rule-buckets";
 import type { EffectiveExtensionRoots } from "./capability/types";
-import { type OAuthAccountPools, SessionAccountPoolScope } from "./config/account-pools";
+
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
 import { shouldInlineToolDescriptors } from "./config/inline-tool-descriptors-mode";
 import { ModelRegistry } from "./config/model-registry";
 import {
-	disabledProviderIds,
 	formatModelString,
 	getModelMatchPreferences,
 	pickDefaultAvailableModel,
@@ -72,14 +67,12 @@ import {
 	resolveConfiguredModelPatterns,
 	resolveModelRoleValue,
 	resolveSessionModelSelector,
-	sessionModelDiscoveryProviders,
 } from "./config/model-resolver";
 import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./config/prompt-templates";
 import { buildServiceTierByFamily } from "./config/service-tier";
 import { bindEffects, combine } from "./config/registry";
 import { Settings } from "./config/settings";
-import { CursorExecHandlers, type CursorMcpResourceAdapter } from "./cursor";
-import { createBridgeEditTool, createBridgeGrepFactory } from "./cursor-bridge-tools";
+
 import "./discovery";
 import { LiveImageUrlService } from "./blob-broker/service";
 import { wrapStreamFnWithBlobUrlFallback } from "./blob-broker/stream-fallback";
@@ -174,18 +167,10 @@ import {
 } from "./secrets";
 import { AgentSession, MCP_DISCOVERY_TURN_WAIT_MS } from "./session/agent-session";
 import type { AgentSessionDisposeOptions } from "./session/agent-session-types";
-import {
-	createAuthStorageSettingsSync,
-	discoverAuthStorage as discoverAuthStorageFromConfig,
-	type EffectiveSettingsScope,
-	loadEffectiveAuthAccountPolicyConfig,
-} from "./session/auth-broker-config";
-import type { AuthStorage } from "./session/auth-storage";
+
+import { AuthStorage } from "./session/auth-storage";
 import { CostCapError, type CostGateApi, guardStreamFn } from "./session/cost-gate";
-import {
-	CREDENTIAL_DISABLED_NOTICE_SOURCE,
-	formatCredentialDisabledNotice,
-} from "./session/credential-disabled-notice";
+
 import {
 	createSessionDateCwdReminderJournal,
 	type DateCwdReminderJournal,
@@ -207,7 +192,7 @@ import {
 	clampProviderContextImages,
 	dropUnreadableContextImages,
 } from "./session/provider-image-budget";
-import { getReadableCompactionEntry, getRestorableSessionModels } from "./session/session-context";
+import { getRestorableSessionModels } from "./session/session-context";
 import { SessionManager } from "./session/session-manager";
 import {
 	collectMountedMCPToolRoutes,
@@ -215,8 +200,7 @@ import {
 	type SettingsGatedToolDelta,
 	type SystemPromptRebuilder,
 } from "./session/session-tools";
-import { anthropicSlowModeHasNoSiblingHeadroom } from "./session/anthropic-slow-mode";
-import { CacheWarmer } from "./session/cache-warmer";
+
 import { createSettingsAwareStreamFn } from "./session/settings-stream-fn";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
@@ -233,8 +217,7 @@ import {
 } from "./system-prompt";
 import type { AgentDefinition } from "./task/types";
 import { AgentOutputManager } from "./task/output-manager";
-import { wrapStreamFnWithProviderConcurrency } from "./task/provider-concurrency";
-import { sessionDelegationBias } from "./task/prompt-policy";
+
 import { isScoutSpawnable } from "./task/spawn-policy";
 import { isMainThread } from "./thread/identity";
 import type { StructuredSubagentSchemaMode } from "@oh-my-pi/pi-tui/tools/task";
@@ -301,7 +284,7 @@ import { isAutoQaEnabled } from "./tools/report-tool-issue";
 import { queueResolveHandler } from "./tools/resolve";
 import { resolveActiveRepoContext } from "./utils/active-repo-context";
 import { EventBus } from "./utils/event-bus";
-import { normalizeProviderContextImagesForModel } from "./utils/image-loading";
+import { normalizeProviderContextImages } from "./utils/image-loading";
 import { formatLocalCalendarDate } from "@oh-my-pi/pi-tui/chrome/local-date";
 import { normalizePromptPath } from "./utils/prompt-path";
 import { buildNamedToolChoice } from "./utils/tool-choice";
@@ -314,7 +297,6 @@ import {
 	cfgAsyncWidgets,
 	cfgRatchetEnabled,
 	cfgSecurityEnabled,
-	cfgToolsAbortOnFabricatedResult,
 	cfgToolsIntentTracing,
 	cfgToolsMaxTimeout,
 	cfgToolsXdev,
@@ -322,7 +304,7 @@ import {
 	cfgToolsXdevInlineDevices,
 	cfgSessionToolGates,
 } from "./tools/settings";
-import { cfgToolsFormat } from "./session/context-settings";
+
 import {
 	cfgDefaultThinkingLevel,
 	cfgExternalThinking,
@@ -331,13 +313,9 @@ import {
 	cfgInlineToolDescriptors,
 	cfgPersonality,
 	cfgProviderAppendOnlyContext,
-	cfgProvidersCacheWarming,
-	cfgProvidersKimiApiFormat,
 	cfgSampling,
 	cfgSkillful,
 	cfgThinkingBudgets,
-	cfgTierAnthropic,
-	cfgTierGoogle,
 	cfgTierOpenai,
 } from "./session/settings";
 import { cfgInterruptMode } from "./modes/settings";
@@ -391,7 +369,6 @@ import {
 /** Agent-level tool-call switches, snapshotted by the agent loop per prompt run. */
 const cfgToolCallSwitches = combine({
 	intentTracing: cfgToolsIntentTracing,
-	abortOnFabricatedResult: cfgToolsAbortOnFabricatedResult,
 });
 
 /** Settings skill and file slash-command discovery reads (foreign sources gated by the provider lists). */
@@ -542,84 +519,30 @@ export interface CreateAgentSessionOptions {
 	authStorage?: AuthStorage;
 	/** Model registry. Default: discoverModels(authStorage, agentDir) */
 	modelRegistry?: ModelRegistry;
-	/**
-	 * Request credential resolver. Defaults to the model registry's normal
-	 * session-affine resolver. Security scans use this narrow seam to keep one
-	 * durable OAuth row pinned for the operation without changing ordinary
-	 * provider routing.
-	 */
+	/** Request credential resolver. Defaults to the configured model registry resolver. */
 	getApiKey?: AgentOptions["getApiKey"];
-	/**
-	 * Session whose stored credential affinities are copied into this session
-	 * before any child credential operation: explicit pins always, automatic
-	 * affinity only for providers this session's own transcript has not pinned.
-	 * @internal
-	 */
-	credentialSourceSessionId?: string;
-	/**
-	 * OAuth account pools for this session: provider id → identity keys (see
-	 * `AuthStorage.sessions.restrict`). A listed provider authenticates only with
-	 * those accounts, never another account or an API key, and requests fail
-	 * when none of them can serve. Applied after {@link credentialSourceSessionId}
-	 * affinity is copied, and enforced on every key lookup through the session's
-	 * model registry, whatever provider session id it carries (title generation,
-	 * advisors, subagents this session spawns). A custom {@link getApiKey}
-	 * bypasses it.
-	 */
-	oauthAccountPools?: OAuthAccountPools;
 
 	/** Model to use. Default: from settings, else first available */
 	model?: Model;
-	/**
-	 * Allow an explicit {@link model} to be rebound to its same-selector registry
-	 * entry after initial background discovery. The CLI enables this for models
-	 * it resolved from the registry; SDK-supplied model objects default to false
-	 * so caller-owned routing and limits remain authoritative.
-	 */
-	rebindModelAfterDiscovery?: boolean;
-	/**
-	 * Skip retry.fallbackChains validation while building the session; the host
-	 * MUST call `session.validateRetryFallbackChains()` once its first frame is
-	 * up. Validation composes the catalog slice of every provider a chain names,
-	 * so interactive startup keeps it off the first-frame path.
-	 */
-	deferRetryFallbackValidation?: boolean;
+
 	/** Raw model pattern(s) (e.g. from --model CLI flag) to resolve after extensions load.
 	 * Used when model lookup is deferred because extension-provided models aren't registered yet. */
 	modelPattern?: string | string[];
-	/** Authenticated fallback selector for deferred subagent model patterns. */
-	modelPatternAuthFallback?: string;
-	/** Role name used to install retry fallbacks after deferred subagent patterns resolve. */
-	modelPatternFallbackRole?: string;
-	/** Validated inherited retry chain for a deferred singleton pattern; empty explicitly disables fallbacks. */
-	modelPatternDefaultFallbackChain?: string[];
+
 	/**
 	 * Called with the model of every main-loop request before it is sent; throw to
 	 * refuse it. Per-call `model` subagents use it so no switch reaches a model the
 	 * operator did not approve.
 	 */
 	assertDispatchModel?: (model: Model) => void;
-	/**
-	 * Disable retry fallback, context promotion and usage-aware fallback: the turn retries on, or fails
-	 * with, its own model instead. Startup model selection, and the return to the primary after a
-	 * startup fallback, are not affected. Per-call `model` subagents set it.
-	 */
-	disableModelFallback?: boolean;
-	/** Never opt requests into a provider's optional server-side model fallback. Per-call `model` subagents set it. */
-	disableServerSideFallback?: boolean;
+
 	/** Thinking selector. Default: from settings, else unset */
 	thinkingLevel?: ConfiguredThinkingLevel;
 	/** Hard ceiling on the session's thinking effort (e.g. a task spawn's `task.maxEffort`-capped hint); retry-fallback recovery re-clamps to it. */
 	thinkingLevelCeiling?: Effort;
 	/** OpenAI service-tier override for this session. `null` omits `service_tier`. */
 	openAIServiceTier?: ServiceTier | null;
-	/**
-	 * Enable prompt-cache warming for this session's main loop. Defaults to
-	 * `true`; one-shot and spawned sessions (task subagents, standalone
-	 * compaction, agentic commit) pass `false` so short-lived sessions never
-	 * schedule background warm requests.
-	 */
-	cacheWarming?: boolean;
+
 	/**
 	 * Per-family service tiers for this session, replacing the `tier.*` settings
 	 * and any persisted tier history. Called once the initial model is final —
@@ -918,11 +841,6 @@ export interface CreateAgentSessionOptions {
 	 * Default: false, which starts it once the session (and so its cost gate) exists.
 	 */
 	deferSkillDescriptionCompression?: boolean;
-	/**
-	 * Defer `confirm` reserve-policy fallback until AgentSession prompt-time UI is configured.
-	 * ACP uses this while capabilities are negotiated without enabling UI-only tools.
-	 */
-	deferUsageReserveConfirmation?: boolean;
 
 	/**
 	 * Opt-in OpenTelemetry instrumentation forwarded to the underlying Agent.
@@ -971,28 +889,11 @@ export interface CreateAgentSessionResult {
 	modelFallbackMessage?: string;
 	/** LSP servers detected for startup; warmup may continue in the background */
 	lspServers?: LspStartupServerInfo[];
-	/** Start cache-aware online runtime model discovery after the first UI paint. */
-	startBackgroundModelDiscovery?: () => Promise<void>;
+
 	/** Shared event bus for tool/extension communication */
 	eventBus: EventBus;
 	/** Root-scoped bus carrying this session tree's `task:subagent:*` frames. */
 	subagentEventBus?: EventBus;
-}
-
-export type DialectFormat = "auto" | "native" | Dialect;
-
-export function resolveDialect(
-	format: DialectFormat,
-	model: (Pick<Model, "supportsTools"> & Partial<Pick<Model, "id">>) | undefined,
-): Dialect | undefined {
-	if (format === "native") return undefined;
-	if (format === "auto") {
-		if (model?.supportsTools !== false) return undefined;
-		if (!model.id) return "glm";
-		const preferred = preferredDialect(model.id);
-		return preferred === FALLBACK_DIALECT ? "glm" : preferred;
-	}
-	return format;
 }
 
 // Re-exports
@@ -1030,43 +931,9 @@ export {
 	WriteTool,
 };
 
-// Helper Functions
-
-// Discovery Functions
-
-/**
- * Create an AuthStorage instance.
- *
- * Default: local SQLite store at `<agentDir>/agent.db`.
- *
- * Broker mode: when `OMP_AUTH_BROKER_URL` is set, credentials are pulled from
- * a remote auth-broker over the wire. Refresh tokens never leave the broker;
- * the client receives access tokens with `refresh = "__remote__"` and calls
- * back into the broker through the {@link AuthStorageOptions.refreshOAuthCredential}
- * override to re-mint access tokens when needed.
- *
- * Account routing (`auth.accountPolicies`, `retry.usageReservePct`) comes from
- * effective settings: `options.settings` when given, else the matching global
- * instance, else a read-only load for `options.cwd`; explicit option values win.
- *
- * Delegates to {@link ./session/auth-broker-config} so the TUI and the catalog
- * generator share the same credential-discovery logic.
- */
-export async function discoverAuthStorage(
-	agentDir: string = getAgentDir(),
-	options: Omit<DiscoverAuthStorageOptions, "agentDir" | "configValueResolver"> &
-		Omit<EffectiveSettingsScope, "agentDir"> = {},
-): Promise<AuthStorage> {
-	const { settings, cwd, ...discoveryOptions } = options;
-	const policy = await loadEffectiveAuthAccountPolicyConfig({ settings, cwd, agentDir });
-	return discoverAuthStorageFromConfig(agentDir, {
-		...discoveryOptions,
-		accountPolicies: discoveryOptions.accountPolicies ?? policy.accountPolicies,
-		authStorageOptions: {
-			...discoveryOptions.authStorageOptions,
-			defaultReservePct: discoveryOptions.authStorageOptions?.defaultReservePct ?? policy.defaultReservePct,
-		},
-	});
+/** Open the local API-key store without remote credential brokers or provider discovery. */
+export function discoverAuthStorage(agentDir: string = getAgentDir()): Promise<AuthStorage> {
+	return AuthStorage.create(getAgentDbPath(agentDir), { configValueResolver: resolveConfigValue });
 }
 
 /**
@@ -1174,7 +1041,6 @@ export async function loadCliExtensionProviders(
 		modelRegistry.registerProvider(name, config, sourceId);
 	}
 	extensionsResult.runtime.pendingProviderRegistrations = [];
-	if (options.discoverModels !== false) await modelRegistry.refreshRuntimeProviders();
 }
 
 /**
@@ -1610,17 +1476,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		extensionRoots?.configuredLevel ?? settings.extensionsSourceLevel(),
 	);
 
-	// Pin authStorage to modelRegistry.authStorage: ModelRegistry.getApiKey() routes refresh
-	// failures through that instance, so any divergent storage handed to the bridge / mcpManager
-	// / session would silently miss credential_disabled events.
-	let modelRegistry =
+	// Every session subsystem uses the registry-owned API-key store.
+	const modelRegistry =
 		options.modelRegistry ??
 		new ModelRegistry(
-			options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir, { settings, cwd })),
+			options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir)),
 			path.join(agentDir, "models.yml"),
 			{
 				settings,
-				cacheDbPath: getModelDbPath(agentDir),
 			},
 		);
 	// Track whether we internally created the authStorage so we can close it
@@ -1632,32 +1495,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			"options.authStorage and options.modelRegistry.authStorage must be the same instance when both are provided",
 		);
 	}
-	// Subscribe before any getApiKey() call so startup model probes can't fire a
-	// credential_disabled event past us. An embedder's constructor handler makes the
-	// listener set non-empty from construction, which defeats AuthStorage's no-listener
-	// buffer — so we can't rely on it to catch startup events for the extension runner.
-	const startupCredentialDisabledEvents: CredentialDisabledEvent[] = [];
-	let credentialDisabledTarget: ExtensionRunner | undefined;
-	// Set once the session exists; the built-in warning covers disables from then on.
-	let credentialNoticeSession: AgentSession | undefined;
-	const unsubscribeCredentialDisabled = authStorage.credentials.onDisabled(event => {
-		if (credentialNoticeSession) {
-			const notice = formatCredentialDisabledNotice(event);
-			if (notice) credentialNoticeSession.emitNotice("warning", notice, CREDENTIAL_DISABLED_NOTICE_SOURCE);
-		}
-		if (credentialDisabledTarget) {
-			// Discard return: any handler error is routed through runner.onError listeners.
-			void credentialDisabledTarget.emitCredentialDisabled(event);
-		} else {
-			startupCredentialDisabledEvents.push(event);
-		}
-	});
-	startupCleanup.defer(unsubscribeCredentialDisabled);
-	// Local-only and never rejects; awaited just before the first catalog read so
-	// its credential/cache I/O overlaps the cwd-scoped discoveries started below.
-	const credentialScopedCacheHydration = logger.time("hydrateCredentialScopedModelCaches", () =>
-		modelRegistry.hydrateCredentialScopedModelCaches(),
-	);
+
 	// Kick off workspace tree discovery early. The native workspace scan returns
 	// both the rendered-tree input and the AGENTS.md directory-context index, so
 	// startup does not perform a second recursive filesystem search. Subagents
@@ -1757,28 +1595,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
 	const taskPromptCacheKey = options.taskPromptCacheKey ?? sessionManager.getHeader()?.taskPromptCacheKey;
 	if (taskPromptCacheKey !== undefined) await sessionManager.setTaskPromptCacheKey(taskPromptCacheKey);
-	if (options.credentialSourceSessionId) {
-		// A revived or resumed child already pins, in its own transcript, the accounts that
-		// hold its conversation cache. Inheriting the parent's automatic sticky for those
-		// providers would make seedCredentialPins defer to it (a live sticky for another
-		// account wins) and cold-miss the child's whole prefix. An explicit parent pin is
-		// the user's choice and still reaches the child.
-		const ownPins = sessionManager.getCredentialPins();
-		modelRegistry.authStorage.sessions.inherit(
-			options.credentialSourceSessionId,
-			providerSessionId,
-			(provider, explicit) => explicit || !ownPins.has(provider),
-		);
-	}
-	// From here on the session resolves every key through its pools; see
-	// SessionAccountPoolScope. A startup failure leaves no session to lift them.
-	const accountPoolScope = options.oauthAccountPools
-		? new SessionAccountPoolScope(modelRegistry.authStorage, options.oauthAccountPools, providerSessionId)
-		: undefined;
-	if (accountPoolScope) {
-		modelRegistry = accountPoolScope.registry(modelRegistry);
-		startupCleanup.defer(() => accountPoolScope.release());
-	}
+
 	const forkCacheShapeChanged =
 		options.model !== undefined ||
 		options.modelPattern !== undefined ||
@@ -1804,14 +1621,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			: providerPromptCacheKey !== undefined
 				? "fork"
 				: undefined;
-	// Startup model *selection* only needs to know whether auth is configured for
-	// a candidate's provider — never the resolved key bytes. Use the synchronous,
-	// side-effect-free probe (`hasConfiguredAuth`): it refreshes no OAuth tokens,
-	// executes no `!command` keys, and issues no auth-broker requests. Resolving the
-	// real key here (`getApiKey`) blocks resume on those network paths — a slow or
-	// unreachable OAuth/broker endpoint stalls startup for the full ~10s refresh
-	// timeout per candidate (observed as a hang in `restoreSessionModel`). The real
-	// key is resolved lazily per request via ModelRegistry.resolver.
+	// Selection reads configured auth metadata; keys resolve only when a request is sent.
 	const hasModelAuth = (candidate: Model): boolean => modelRegistry.hasConfiguredAuth(candidate);
 
 	// Load and create secret obfuscator early so resumed session state and prompt warnings
@@ -1864,10 +1674,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (providers.size > 0) explicitDefaultProviders = providers;
 		}
 	}
-	await credentialScopedCacheHydration;
-	if (!options.modelRegistry) {
-		modelRegistry.refreshInBackground();
-	}
+
 	const allowedModels = await logger.time("resolveAllowedModels", () =>
 		explicitDefaultProviders
 			? modelRegistry.getAvailableForProviders(explicitDefaultProviders)
@@ -1965,31 +1772,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
 			resolveConfiguredThinkingLevel(resolvedModel, thinkingLevel),
 		);
-		// Fire-and-forget connection warm-up so the handshake overlaps the rest
-		// of session setup (extension/skill load, tool registry, system prompt
-		// build). Effective for endpoints known before any request (official
-		// Anthropic); others warm once a request has revealed their real origin.
-		// Every mode benefits (interactive, print, rpc, acp).
-		void prewarmModelConnection(model);
-		// Usage-aware credential selection may need a cold remote usage report.
-		// Start only that metadata read while tools/extensions/context are loading;
-		// the selector owns eligibility and still chooses/pins the account at request
-		// time. A preliminary model can change after extensions register, so this
-		// must never validate or commit credentials for it.
-		void logger
-			.time("prefetchCredentialUsage", () =>
-				modelRegistry.authStorage.keys.prefetchUsage(resolvedModel.provider, providerSessionId, {
-					baseUrl: resolvedModel.baseUrl,
-					modelId: resolvedModel.id,
-					accountIds: resolvedModel.accountAccess && Object.keys(resolvedModel.accountAccess),
-				}),
-			)
-			.catch(error => {
-				logger.debug("Startup credential usage prefetch failed", {
-					provider: resolvedModel.provider,
-					error: String(error),
-				});
-			});
 	}
 
 	// Re-derives the thinking level whenever startup settles on a different
@@ -2687,28 +2469,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 			extensionsResult.runtime.pendingProviderRegistrations = [];
 		}
-		// Hydrate cached runtime (extension) provider catalogs before model
-		// resolution. Dynamic-only providers have no synchronous registration side
-		// effect, so a cold --model/provider resume must see the same fresh SQLite
-		// cache that `omp models find` uses before the online refresh continues in
-		// the background.
-		await modelRegistry.refreshRuntimeProviders("offline");
-		// Online runtime discovery must not steal the event loop from the first UI
-		// frame. Explicit deferred model selectors still start it immediately
-		// because they await it below; normal UI startup receives a one-shot
-		// starter in CreateAgentSessionResult and calls it after mode.init paints.
-		let runtimeDiscoveryPromise: Promise<void> | undefined;
-		const startRuntimeDiscovery = (): Promise<void> => {
-			runtimeDiscoveryPromise ??= modelRegistry.refreshRuntimeProviders().catch(error => {
-				logger.warn("runtime provider discovery failed", {
-					error: error instanceof Error ? error.message : String(error),
-				});
-			});
-			return runtimeDiscoveryPromise;
-		};
-		if (!options.hasUI || deferredModelPatterns.length > 0) {
-			void startRuntimeDiscovery();
-		}
 
 		// Retry session-model candidates now that extension providers are
 		// registered. The initial restore runs before extensions load, so a role
@@ -2732,35 +2492,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						// model: any value derived from the earlier fallback model's
 						// `thinking.defaultLevel` must not become sticky.
 						adoptThinkingForModel(restoredModel);
-						void prewarmModelConnection(restoredModel);
+
 						return true;
 					}
 				}
 				return false;
 			};
-			if (!restoreSessionModel()) {
-				// The saved candidates weren't in the static+cached catalog. If any
-				// belongs to a discovery-backed provider that hasn't been fetched
-				// yet (models.yml `discovery:` or extension `fetchDynamicModels`),
-				// trigger a cache-aware, provider-scoped discovery pass and retry
-				// before resume silently downgrades to the default role. The
-				// registry coalesces this with any matching request already running
-				// in the SDK's startup background refresh.
-				const candidateProviders = sessionModelDiscoveryProviders(
-					modelRegistry,
-					sessionModelStrings.slice(0, sessionRetryLimit),
-					disabledProviderIds(settings),
-				);
-				if (candidateProviders.size > 0) {
-					// This skips the static reload and all-other-runtime restore
-					// performed by `refreshProvider`, so unrelated runtime providers
-					// continue independently.
-					await logger.time("restoreSessionModelDiscoveryFallback", () =>
-						modelRegistry.refreshDiscoverableProviders(candidateProviders, "online-if-uncached"),
-					);
-					restoreSessionModel();
-				}
-			}
+			restoreSessionModel();
 		}
 		// Exhaust persisted candidates (including configured and extension discovery)
 		// before permitting a settings-default or first-available substitution.
@@ -2771,49 +2509,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// registered. Use the same CLI resolver as the immediate path so bare role
 		// names, exact model names, and provider selectors keep one precedence rule.
 		if (!model && deferredModelPatterns.length > 0) {
-			// Deferred `--model` patterns almost always failed at the immediate
-			// path (main.ts:881) precisely because discovery-backed providers
-			// hadn't populated yet. Await the in-flight runtime discovery
-			// already kicked off above (stash + reuse avoids a second concurrent
-			// `#refreshRuntimeDiscoveries` pass for the same runtime model
-			// managers; it resolves instantly when no runtime managers are
-			// registered). `refreshRuntimeProviders()` only covers runtime model
-			// managers, not config-discovery providers (e.g. user-configured
-			// ollama); fall back to a full cache-aware refresh only when the
-			// runtime pass didn't surface a match AND config-discovery providers
-			// exist to fetch from. By then runtime managers short-circuit on the
-			// fresh cache written by the awaited pass, closing the double-fetch
-			// window.
-			await logger.time("resolveModelDiscoveryDeferredRetry", startRuntimeDiscovery);
 			const matchPreferences = getModelMatchPreferences(settings);
 			const disabledProviders = new Set(cfgDisabledProviders.get(settings));
-			const runtimeResolved = deferredModelPatterns.some(pattern =>
-				pattern.split(",").some(selector => {
-					const trimmedSelector = selector.trim();
-					if (!trimmedSelector) return false;
-					const resolved = resolveCliModel({
-						cliModel: trimmedSelector,
-						modelRegistry,
-						settings,
-						preferences: matchPreferences,
-					});
-					// Only a concretely resolved model counts as a runtime match. A role
-					// alias that expanded to `configuredPatterns` but resolved no model
-					// (its discoverable provider hasn't been fetched yet) must NOT
-					// short-circuit the fallback refresh below — otherwise `@role`
-					// selectors pointing at discovery-backed models never trigger the
-					// fetch and fail with `Model "@role" not found`. A disabled provider
-					// is unreachable, so a match on one likewise must not count: otherwise
-					// a disabled first selector suppresses the discovery refresh an enabled
-					// later selector still needs.
-					return resolved.model !== undefined && !disabledProviders.has(resolved.model.provider);
-				}),
-			);
-			if (!runtimeResolved && modelRegistry.getDiscoverableProviders().length > 0) {
-				await logger.time("resolveModelDiscoveryFallbackNonRuntime", () =>
-					modelRegistry.refresh("online-if-uncached"),
-				);
-			}
 			const allEnabledModels =
 				disabledProviders.size === 0
 					? modelRegistry.getAll()
@@ -2836,7 +2533,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				modelFallbackMessage = undefined;
 				if (resolved.thinkingLevel !== undefined) restoredSessionThinkingLevel = resolved.thinkingLevel;
 				adoptThinkingForModel(model);
-				void prewarmModelConnection(model);
+
 				break;
 			}
 			if (!model) {
@@ -2885,40 +2582,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				// `pickInitialThinkingLevel` closes over `defaultRoleSpec`,
 				// so the role's explicit selector (e.g. `:max`) now applies.
 				adoptThinkingForModel(resolvedDefaultModel);
-				void prewarmModelConnection(resolvedDefaultModel);
+
 				return true;
 			};
 
 			await tryResolveDefaultRole();
 
 			if (!model) {
-				let fallbackCandidates = await resolveAllowedModels(modelRegistry, settings, modelMatchPreferences);
-				let pick = pickDefaultAvailableModel(fallbackCandidates.filter(hasModelAuth), provider =>
+				const fallbackCandidates = await resolveAllowedModels(modelRegistry, settings, modelMatchPreferences);
+				const pick = pickDefaultAvailableModel(fallbackCandidates.filter(hasModelAuth), provider =>
 					modelRegistry.hasConcreteAuth(provider),
 				);
-
-				// Cold-cache discovery race (issues #6114, #6162): a discovery
-				// provider (models.yml openai-models-list, LM Studio/Ollama/
-				// llama.cpp, or an openai-compat proxy) ships no static models, so
-				// the static+cached catalog resolved nothing above. Background
-				// discovery in main.ts fires only AFTER createAgentSession returns,
-				// so on a cache-cold boot the configured default stays unresolved.
-				// Await one cache-aware discovery pass before choosing either its
-				// configured retry fallback or an unrelated provider default.
-				const defaultRoleConfigured = Boolean(settings.getModelRole("default"));
-				if (
-					!hasExplicitModel &&
-					(defaultRoleConfigured || !pick) &&
-					modelRegistry.getDiscoverableProviders().length > 0
-				) {
-					await logger.time("resolveModelDiscoveryFallback", () => modelRegistry.refresh("online-if-uncached"));
-					if (!(await tryResolveDefaultRole()) && !model) {
-						fallbackCandidates = await resolveAllowedModels(modelRegistry, settings, modelMatchPreferences);
-						pick = pickDefaultAvailableModel(fallbackCandidates.filter(hasModelAuth), provider =>
-							modelRegistry.hasConcreteAuth(provider),
-						);
-					}
-				}
 
 				if (!model && !settings.getModel() && pick) {
 					model = pick;
@@ -2935,20 +2609,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					? `Configured model ${settings.getModel()} is unavailable. Configure its credentials or explicitly select a model with /model.`
 					: patterns && patterns.length > 0
 						? `No model available matching enabledModels (${patterns.join(", ")}) with usable credentials. Configure auth for an allowed provider or adjust enabledModels.`
-						: "No default model selected. Use /login, set an API key environment variable, or select a local model with /model or --model.";
-			}
-		}
-
-		// A child inherits its parent's resolved runtime metadata and transport.
-		// Lazy-provider refresh may replace it with a same-selector catalog object.
-		if (model && !(isSubagentSession && options.model !== undefined)) {
-			const selectedModel = model;
-			const refreshedModel = await logger.time("refreshInitialModelMetadata", () =>
-				modelRegistry.refreshSelectedModelMetadata(selectedModel),
-			);
-			if (refreshedModel !== selectedModel) {
-				model = refreshedModel;
-				adoptThinkingForModel(refreshedModel);
+						: "No default model selected. Configure an endpoint and model in models.yml, then select it with /model or --model.";
 			}
 		}
 
@@ -3009,12 +2670,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Register user input waits so peer agents can observe the session's waiting state.
 		const trackUserWait: UserWaitTracker = dialog => (hasSession ? session.waitForUser(dialog) : dialog());
 		extensionRunner.setUserWaitTracker(trackUserWait);
-
-		credentialDisabledTarget = extensionRunner;
-		for (const event of startupCredentialDisabledEvents.splice(0)) {
-			// Discard return: any handler error is routed through runner.onError listeners.
-			void extensionRunner.emitCredentialDisabled(event);
-		}
 
 		const getSessionContext = () => ({
 			sessionManager,
@@ -3130,32 +2785,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		for (const tool of toolRegistry.values()) {
 			toolRegistry.set(tool.name, new ExtensionToolWrapper(tool, extensionRunner));
 		}
-		// Hashline `edit` stays in the registry so Cursor can call it as MCP.
-		// Native StrReplace arrives as `editToolCall` and materializes through
-		// exec `readArgs`/`writeArgs`; `pi_edit` still needs a `replace`-mode
-		// instance because `PiEditExecArgs` carries `old_string`/`new_string`,
-		// which is exactly `replace`'s schema and nothing else's. The registry
-		// instance follows the session's configured mode, so the bridge builds
-		// its own and serves it through `getEditReplaceTool` — not `getTool`,
-		// which doubles as the agent loop's fallback for unadvertised calls.
-		//
-		// The grant is captured here, independently of the session's provider:
-		// a session that starts on another provider can switch to Cursor later,
-		// and the roster is built once, at session creation.
-		const editWasGranted = toolRegistry.has("edit");
-		// Built on first use rather than eagerly: a session that never reaches
-		// Cursor never constructs it.
-		let cursorBridgeEditTool: AgentTool | undefined;
-		const getCursorBridgeEditTool = (): AgentTool | undefined => {
-			// Only when the session actually granted `edit`. `createTools` omits
-			// it entirely for a restricted tool set, and the bridge answers native
-			// frames that arrive regardless of the advertised catalog — so
-			// building one unconditionally would hand a read-only agent a
-			// mutating tool it was denied (the issue #5680 escalation).
-			if (!editWasGranted) return undefined;
-			cursorBridgeEditTool ??= createBridgeEditTool(toolSession, extensionRunner);
-			return cursorBridgeEditTool;
-		};
 
 		let writeRegistration: Promise<boolean> | undefined;
 		const ensureWriteRegistered = (): Promise<boolean> => {
@@ -3272,8 +2901,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			await ensureWriteRegistered();
 		}
 
-		// oxlint-disable-next-line prefer-const -- captured by device closures before assignment
-		let cursorEventEmitter: ((event: AgentEvent) => void) | undefined;
 		// Cursor and the agent loop may call a mounted device by its top-level
 		// name. Resolve that name from the canonical map and apply the same
 		// execution-only ACP decorator used by `write xd://<tool>`; docs and
@@ -3315,64 +2942,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Mounted devices are absent from the advertised tool set, so a miss on a
 		// device name has nothing to suggest unless the loop is told they exist.
 		const suggestDeviceToolNames = (): Iterable<string> => toolSession.xdev?.mountedNames ?? [];
-		// Cursor's resource frames ask what THIS client's servers advertise; only
-		// live connections have any. Built once: the advisor bridges answer from
-		// the same connections the primary does.
-		const cursorMcpResources: CursorMcpResourceAdapter | undefined = mcpManager && {
-			serverNames: () => mcpManager.getConnectedServers(),
-			getServerResources: async name => {
-				// The manager registers a server's tools before its background
-				// resource load finishes, so a frame arriving in that window
-				// would read an empty cache and report "advertises nothing".
-				await mcpManager.ensureServerResources(name);
-				return mcpManager.getServerResources(name);
-			},
-			readServerResource: (name, uri) => mcpManager.readServerResource(name, uri),
-		};
-		const cursorExecHandlers = new CursorExecHandlers({
-			cwd,
-			// The session's cwd moves (`/cd`, resume, branch restore) while this
-			// bridge is built once at startup. Path-confining frames — the native
-			// `delete` and a `download_path` resource read — resolve against
-			// whichever of the two they are given, so without the live resolver the
-			// primary would write into the workspace the session has left while
-			// reporting success for the path the server asked about. The advisor
-			// bridge already passes one.
-			getCwd: () => sessionManager.getCwd(),
-			tools: toolRegistry,
-			getExecutableTool: resolveDeviceTool,
-			// `pi_edit` needs the `replace`-mode instance specifically, and the
-			// registry may still hold the session's own `edit` (any mode) when
-			// this session did not start on Cursor.
-			getEditReplaceTool: getCursorBridgeEditTool,
-			getToolContext: () => toolContextStore.getContext(),
-			mcpResources: cursorMcpResources,
-			emitEvent: event => cursorEventEmitter?.(event),
-			getTodoPhases: () => session.getTodoPhases(),
-			commitTodoPhases: phases => session.commitTodoPhases(phases),
-			// `pi_grep` carries its own context width and match cap, which the
-			// shared grep instance fixed at construction cannot express. Gated on
-			// the grant: the factory builds a fresh tool and `executeTool` prefers
-			// it over the registry, so installing it unconditionally would let a
-			// session without `grep` search anyway.
-			createGrepTool: toolRegistry.has("grep") ? createBridgeGrepFactory(toolSession, extensionRunner) : undefined,
-			// Native delete and resource-download frames mutate files without a
-			// registry tool. Resolve both the transactional active predicate and
-			// live access mode: Agent.state.tools commits only after prompt rebuilding,
-			// while this predicate revokes before the await and rolls back on failure.
-			allowDirectFileMutation: () =>
-				(editWasGranted && toolSession.isToolActive?.("edit") === true) ||
-				(toolSession.isToolActive?.("write") === true &&
-					toolRegistry.has("write") &&
-					toolSession.deviceOnlyWrite !== true),
-		});
 
-		// Resolve the live inline-descriptors setting against the active model.
-		// `auto` enforces the per-model policy (inline for Gemini, off otherwise), so
-		// a mid-session model switch re-decides it. Prompt and agent (description
-		// pruning) must agree: every prompt rebuild re-syncs the agent's pruning.
+		// Prompt descriptors and request-tool pruning use the same explicit setting.
 		const resolveInlineToolDescriptors = (): boolean =>
-			shouldInlineToolDescriptors(cfgInlineToolDescriptors.get(settings), (agent?.state.model ?? model)?.id);
+			shouldInlineToolDescriptors(cfgInlineToolDescriptors.get(settings));
 		// The process agent dir uses the process-wide store; a session rooted in
 		// another agent dir keeps its own, closed when the session is disposed.
 		const ownedSkillDescriptionStore =
@@ -3525,9 +3098,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				}
 			}
 			const appendPrompt = composeAppendPrompt(appendParts, options.appendSystemPrompt);
-			// Owned/in-band tool dialects (non-native) require the full functions-
-			// namespace catalog; native tool calling lets the compact name list suffice.
-			const nativeTools = resolveDialect(cfgToolsFormat.get(settings), agent?.state.model ?? model) === undefined;
 			const includeWorkspaceTree = cfgIncludeWorkspaceTree.get(settings);
 			if (includeWorkspaceTree && !workspaceTreePromise) {
 				const scan = scanWorkspaceTree();
@@ -3545,7 +3115,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const mountedPromptToolNames = xdev ? xdevEntries(xdev).map(entry => entry.name) : [];
 			const promptTools = projectSystemPromptToolMetadata(
 				tools,
-				nativeTools && !inlineToolDescriptors
+				!inlineToolDescriptors
 					? { mode: "compact", toolNames: [...toolNames, ...mountedPromptToolNames] }
 					: { mode: "full" },
 			);
@@ -3568,7 +3138,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				resolvedAppendSystemPrompt: appendPrompt,
 				skillsSettings: cfgSkills.get(settings),
 				inlineToolDescriptors,
-				nativeTools,
+				nativeTools: true,
 				intentField: cfgToolsIntentTracing.get(settings) ? INTENT_FIELD : undefined,
 				// task.eager steers the top-level agent only; subagents keep the model's own delegation policy.
 				eagerTasks: agentKind === "main" && cfgTaskEager.get(settings) !== "default",
@@ -3576,7 +3146,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				taskBatch: cfgTaskBatch.get(settings),
 				taskMaxConcurrency: cfgTaskMaxConcurrency.get(settings),
 				scoutAvailable: isScoutSpawnable(cfgTaskDisabledAgents.get(settings), options.spawns ?? "*"),
-				delegationBias: sessionDelegationBias(toolSession),
+
 				taskIrcEnabled: !restrictToolNames && isIrcEnabled(settings, options.taskDepth ?? 0),
 				autoQaEnabled: !restrictToolNames && isAutoQaEnabled(settings),
 				ovnfs: ovnfsCommand(settings),
@@ -3812,11 +3382,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// instead of inline base64. Decoration runs LAST among image transforms so
 		// the served bytes are exactly the bytes that would have shipped inline.
 		// Live-bound: `images.urls.*` changes rebuild the service between requests.
-		const blobBroker = new LiveImageUrlService(
-			settings,
-			() => sessionManager.getCwd(),
-			model => modelRegistry.getApiKey(model, providerSessionId),
-		);
+		const blobBroker = new LiveImageUrlService(settings, () => sessionManager.getCwd());
 		disposeCallbacks.add(() => blobBroker.dispose());
 		// Always installed; the getter-backed options are snapshotted per request,
 		// so `snapcompact.*` changes apply on the next call (a no-op while both are off).
@@ -3850,7 +3416,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				transformed = capArchiveFrameBytes(transformed, transformModel);
 				transformed = await snapcompactInline.transform(transformed, transformModel);
 				transformed = clampProviderContextImages(transformed, transformModel);
-				transformed = await normalizeProviderContextImagesForModel(transformed, transformModel);
+				transformed = await normalizeProviderContextImages(transformed);
 				// After the model-specific normalizers: they carry better wording for the
 				// cases they own (STB WebP), so this stays the backstop for everything
 				// else, and it runs before the blob broker uploads any of these bytes.
@@ -3886,18 +3452,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			.map(name => toolRegistry.get(name))
 			.filter((tool): tool is AgentTool => tool !== undefined);
 
-		// `model` is final here: deferred patterns, auth fallback, and extension
-		// role reclaim have all run, so a resolver can scope tiers to its family.
+		// Resolve the explicitly configured service tier for the selected model.
 		const resolvedServiceTierByFamily = options.resolveServiceTierByFamily?.(model);
 		const configuredServiceTierByFamily =
 			resolvedServiceTierByFamily ??
 			(hasServiceTierEntry
 				? (existingSession.serviceTier ?? {})
-				: buildServiceTierByFamily(
-						cfgTierOpenai.get(settings),
-						cfgTierAnthropic.get(settings),
-						cfgTierGoogle.get(settings),
-					));
+				: buildServiceTierByFamily(cfgTierOpenai.get(settings)));
 		const persistInitialServiceTier =
 			options.openAIServiceTier !== undefined || resolvedServiceTierByFamily !== undefined;
 		const initialServiceTierByFamily = { ...configuredServiceTierByFamily };
@@ -3912,27 +3473,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		let notifyFirstChatDispatch = options.onFirstChatDispatch;
 		// Shared, settings-aware stream wrapper used by the main agent, advisor,
 		// and side-channel requests (`/btw`, `/omfg`, IRC auto-replies, handoff).
-		// Keeps OpenRouter sticky-routing variants, antigravity endpoint routing,
-		// in-flight caps, and the loop guard consistent across every provider call
+		// Keeps in-flight caps and the loop guard consistent across every provider call
 		// the session drives. Wrapped in a per-provider concurrency limiter so
 		// each LLM HTTP request — not the whole subagent lifecycle — holds the
 		// slot, preventing the nested-spawn deadlock from issue #3749.
-		// Every attempt this session sends (primary, side-channel, advisor, cache warming,
-		// image-source retries) passes the session tree's cost gate once it holds its
+		// Every attempt this session sends (primary, side-channel, and advisor) passes the session tree's cost gate once it holds its
 		// concurrency slot, and adds its cost to the gate before releasing the slot.
 		const settingsBoundStreamFn = wrapStreamFnWithBlobUrlFallback(
-			wrapStreamFnWithProviderConcurrency(
-				settings,
-				guardStreamFn(
-					createSettingsAwareStreamFn(settings, undefined, {
-						canAutoAccept: streamModel =>
-							anthropicSlowModeHasNoSiblingHeadroom(modelRegistry.authStorage, streamModel, session?.sessionId),
-						notify: (level, message) => session?.emitNotice(level, message, "anthropic-slow-mode"),
-						onLane: lane => session?.noteAnthropicSlowModeLane(lane),
-					}),
-					currentCostGate,
-				),
-			),
+			guardStreamFn(createSettingsAwareStreamFn(settings), currentCostGate),
 			() => blobBroker.current,
 		);
 		// Outbound credential-pattern redaction follows THIS session's `secrets.enabled` per
@@ -3943,29 +3491,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				settingsBoundStreamFn(streamModel, context, streamOptions),
 			);
 		// Primary-agent provider options read per
-		// request, so `/settings` changes to budgets, Kimi format, or the Codex
-		// websocket policy reach the next call without a session recreate.
-		const primaryStreamFn: StreamFn = (streamModel, context, streamOptions) => {
-			const kimiApiFormat = cfgProvidersKimiApiFormat.get(settings);
-			return settingsAwareStreamFn(streamModel, context, {
+		// request, so `/settings` budget changes reach the next call.
+		const primaryStreamFn: StreamFn = (streamModel, context, streamOptions) =>
+			settingsAwareStreamFn(streamModel, context, {
 				...streamOptions,
 				thinkingBudgets: streamOptions?.thinkingBudgets ?? cfgThinkingBudgets.get(settings),
-				kimiApiFormat: streamOptions?.kimiApiFormat ?? (kimiApiFormat === "auto" ? undefined : kimiApiFormat),
 			});
-		};
-		// Prompt-cache warmer for the main agent loop only: replays the last
-		// request through the same primary wrapper just before the entry would
-		// expire, so idle gaps do not force a full-prefix cache re-write.
-		// Spawned/one-shot sessions opt out via `cacheWarming: false`.
-		const cacheWarmer: CacheWarmer | undefined =
-			options.cacheWarming === false
-				? undefined
-				: new CacheWarmer({
-						stream: (model, context, streamOptions) => primaryStreamFn(model, context, streamOptions),
-						getPromptTokens: () => session.lastPromptTokens(),
-						getMode: () => cfgProvidersCacheWarming.get(settings),
-						decide: event => extensionRunner.emitCacheWarmingDecision(event),
-					});
 		const transformToolCallArguments = (args: Record<string, unknown>): Record<string, unknown> => {
 			let result = args;
 			const maxTimeout = cfgToolsMaxTimeout.get(settings);
@@ -4042,31 +3573,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					promptCacheKey: streamOptions?.promptCacheKey ?? session?.getPromptCacheKeyForModel(streamModel),
 					forceReasoningOff: externalThinking || streamOptions?.forceReasoningOff,
 				};
-				// The provider calls `onPayload` as it sends, past any wait for an in-flight
-				// slot: the prompt cache entry's lifetime starts there, not here.
-				const onPayload = merged.onPayload;
-				const stream = primaryStreamFn(streamModel, context, {
-					...merged,
-					onPayload: (payload, payloadModel, signal) => {
-						session.markPromptCacheDispatched(context);
-						return onPayload?.(payload, payloadModel, signal);
-					},
-				});
+				const stream = primaryStreamFn(streamModel, context, merged);
 				// A request that waited for a provider slot is checked again when it goes out.
 				if (stream instanceof Promise) {
 					stream.catch(error => {
 						if (error instanceof CostCapError) session.reportCostCapRefusal(error.refusal);
 					});
 				}
-				// Every request through this streamFn is this session's own main
-				// loop (side-channel, advisor, and maintenance requests use
-				// dedicated wrappers), so it owns the warmer. The replay omits the
-				// one-shot fallback-credit redemption.
-				session.startCacheWarming(streamModel, context, merged);
+
 				return stream;
 			},
-			cursorExecHandlers,
-			getCursorTools: () => (toolSession.xdev ? listXdevTools(toolSession.xdev) : []),
+
 			transformToolCallArguments,
 			// A stray sloppy payload in plain text becomes a real edit tool call so
 			// the normal pipeline (validation, approval, rendering) executes it.
@@ -4093,42 +3610,21 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			suggestFallbackToolNames: suggestDeviceToolNames,
 			intentTracing: cfgToolsIntentTracing.get(settings),
 			pruneToolDescriptions: resolveInlineToolDescriptors(),
-			// Per request against the model actually requested, so `tools.format`
-			// changes and model switches reach the next provider call.
-			dialectResolver: dialectModel => resolveDialect(cfgToolsFormat.get(settings), dialectModel),
-			abortOnFabricatedToolResult: cfgToolsAbortOnFabricatedResult.get(settings),
+
 			speculativeToolExecution,
 			getToolChoice: () => session?.nextToolChoiceDirective(),
 			onToolChoiceUnavailable: () => session?.toolChoiceQueue.reject("unavailable"),
 			telemetry: options.telemetry,
 			appendOnlyContext: model
-				? shouldEnableAppendOnlyContext(cfgProviderAppendOnlyContext.get(settings), model)
+				? shouldEnableAppendOnlyContext(cfgProviderAppendOnlyContext.get(settings))
 					? new AppendOnlyContextManager()
 					: undefined
 				: undefined,
 		});
-		// Catalog rows carry the registry settings' extended-window opt-ins; this
-		// session adopts every model with the window its own settings select (a
-		// subagent with a compaction override must not inherit the parent's).
-		agent.setModelResolver(next => modelRegistry.fitContextWindow(next, settings));
-
-		cursorEventEmitter = event => agent.emitExternalEvent(event);
 
 		// Restore messages if session has existing data
 		if (hasExistingSession) {
-			// The restore above built its context before the session model was known: at the default frame
-			// payload budget, standing on the newest compaction. Rebuild only when that model sizes the archive
-			// differently or cannot replay that compaction.
-			const frameBudget = frameDataBytesBudget(model);
-			const branch = sessionManager.getBranch();
-			const restored =
-				frameBudget === DEFAULT_FRAME_DATA_BYTES_BUDGET &&
-				getReadableCompactionEntry(branch, model) === getReadableCompactionEntry(branch, undefined)
-					? existingSession
-					: deobfuscateSessionContext(
-							sessionManager.buildSessionContext({ maxFrameDataBytes: frameBudget, model }),
-							obfuscator,
-						);
+			const restored = existingSession;
 			agent.replaceMessages(restored.messages);
 			if (persistInitialServiceTier) {
 				sessionManager.appendServiceTierChange(
@@ -4235,7 +3731,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// block createAgentSession for tens of seconds while the whole file is
 		// streamed and parsed on the main thread.
 		session = new AgentSession({
-			cacheWarmer,
 			costGate: options.costGate,
 			advisorWatchdogPrompt,
 			advisorContextPrompt,
@@ -4278,7 +3773,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			modelRegistry,
 			allowSessionModelFallback: false,
 			interactivePrompts: options.interactivePrompts,
-			rebindModelAfterDiscovery: options.model === undefined || options.rebindModelAfterDiscovery === true,
+
 			toolRegistry,
 			createThinkTool: async () => (await HIDDEN_TOOLS.think(toolSession)) ?? null,
 			createVibeTools:
@@ -4332,30 +3827,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			agentKind,
 			agentRegistry,
 			providerSessionId: options.providerSessionId,
-			accountPoolScope,
+
 			providerPromptCacheKeySource,
 			advisorTools,
-			// Same per-call `grep` seam the primary bridge gets, built against the
-			// advisor's own tool session so a `pi_grep` frame's context width and
-			// match cap are honored there too.
-			advisorCreateGrepTool: createBridgeGrepFactory(advisorToolSession, extensionRunner, advisorAgent),
-			// Same `replace`-mode requirement as the primary bridge; the advisor
-			// path gates it on the advisor's own `edit` grant.
-			advisorCreateEditTool: () => createBridgeEditTool(advisorToolSession, extensionRunner, advisorAgent),
-			// The advisor's bridge tools are wrapped for approval, but the wrapper
-			// reads the mode and per-tool policies only from the execute-time
-			// context — the primary bridge passes the same store.
-			advisorGetToolContext: () => toolContextStore.getContext(),
-			// Same live connections the primary bridge reads; an advisor's
-			// resource frame would otherwise report every server as empty.
-			advisorMcpResources: cursorMcpResources,
+
 			titleSystemPrompt: options.titleSystemPrompt,
 			autoTitle: options.autoTitle === true && !isSubagentSession,
 		});
 		hasSession = true;
 		// The session now owns its cost gate; the interactive TUI starts compression after its first frame.
 		if (options.deferSkillDescriptionCompression !== true) skillDescriptions.startCompression();
-		credentialNoticeSession = session;
+
 		// Hashline snapshots are session-scoped: /new and switchSession fire the
 		// change callbacks, so clear the tool-side store there — stale tags would
 		// otherwise surface as "issued in this session" in mismatch diagnostics
@@ -4368,8 +3850,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				() => void skillDescriptions.waitForPending().finally(() => ownedSkillDescriptionStore.close()),
 			);
 		}
-		// A caller-supplied store belongs to the caller (the CLI keeps it in sync itself).
-		if (ownsAuthStorage) createAuthStorageSettingsSync(session, authStorage);
+
 		// One coalesced prompt rebuild for every prompt input (rule bucketing, the
 		// `tools.format` catalog dialect, personality, …), so a bulk change rebuilds once.
 		// Hide Secrets first switches outbound obfuscation on the live obfuscator (earlier
@@ -4400,9 +3881,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Agent-level tool-call switches: the loop snapshots them per prompt run, so a
 		// change applies from the next run without splitting one response's schema/strip.
 		// The prompt listener above republishes the intent-field guidance.
-		cfgToolCallSwitches.listen(session, ({ intentTracing, abortOnFabricatedResult }) => {
+		cfgToolCallSwitches.listen(session, ({ intentTracing }) => {
 			agent.intentTracing = intentTracing;
-			agent.abortOnFabricatedToolResult = abortOnFabricatedResult;
 		});
 		// Tool-gating settings add or remove the tools they gate and refresh the
 		// prompt once per coalesced change. Restricted (structured) sessions keep the
@@ -4682,7 +4162,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					await originalDispose(disposeOptions);
 				} finally {
 					unregisterUnlessParked();
-					unsubscribeCredentialDisabled();
+
 					unbindSessionEffects?.();
 					restoreProviderToggles?.();
 					unsubscribeMcpNotifications?.();
@@ -4695,41 +4175,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					unregisterMcpPostmortem = undefined;
 				}
 			};
-		}
-
-		const prewarmModel = session.model;
-		if (prewarmModel?.api === "openai-codex-responses") {
-			// `.api` equality doesn't narrow the generic; the guard makes this cast sound.
-			const codexModel = prewarmModel as Model<"openai-codex-responses">;
-			if (isOpenAICodexWebSocketPreferred(codexModel, { preferWebsockets: session.preferWebsockets })) {
-				void (async () => {
-					try {
-						const codexPrewarmApiKey = options.getApiKey
-							? // `getApiKey` returns a value-or-promise union; unwrap the promise,
-								// then resolve the result if it is itself an ApiKeyResolver.
-								await resolveApiKeyOnce(await options.getApiKey(codexModel))
-							: await modelRegistry.getApiKey(codexModel, providerSessionId);
-						if (!codexPrewarmApiKey) return;
-						// Load the transport only for an actual Codex prewarm, not unrelated session setup.
-						const { prewarmOpenAICodexResponses } =
-							await import("@oh-my-pi/pi-ai/providers/openai-codex-responses");
-						await logger.time("prewarmOpenAICodexResponses", prewarmOpenAICodexResponses, codexModel, {
-							apiKey: codexPrewarmApiKey,
-							sessionId: providerSessionId,
-							preferWebsockets: session.preferWebsockets,
-							providerSessionState: session.providerSessionState,
-							serviceTier: session.effectiveServiceTier(codexModel),
-						});
-					} catch (error) {
-						const errorMessage = error instanceof Error ? error.message : String(error);
-						logger.debug("Codex websocket prewarm failed", {
-							error: errorMessage,
-							provider: codexModel.provider,
-							model: codexModel.id,
-						});
-					}
-				})();
-			}
 		}
 
 		// Broker-shared language servers (see lsp/mux/protocol.ts). The mode is
@@ -4952,7 +4397,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			mcpManager: ownedMcpManager ?? (mcpManager instanceof MCPManager ? mcpManager : undefined),
 			modelFallbackMessage,
 			lspServers,
-			startBackgroundModelDiscovery: startRuntimeDiscovery,
+
 			eventBus,
 			subagentEventBus,
 		};

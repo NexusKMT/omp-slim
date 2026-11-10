@@ -1,3 +1,5 @@
+import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
+import { ModelRegistry } from "../config/model-registry";
 /**
  * `omp __complete <kind> [-- <prefix>]` — dynamic completion candidates.
  *
@@ -8,7 +10,7 @@
  * first field. The import surface is kept deliberately narrow so a TAB press
  * doesn't pay for the full agent boot.
  */
-import { type GeneratedProvider, getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/models";
+
 import { Command } from "@oh-my-pi/pi-utils/cli";
 import { completeHelp as commandHelp } from "../cli/command-help";
 import { SessionManager } from "../session/session-manager";
@@ -22,7 +24,7 @@ export default class Complete extends Command {
 		const kind = argv[0];
 		const prefix = argv.length > 1 ? argv[argv.length - 1] : "";
 		if (kind === "models") {
-			completeModels(prefix);
+			await completeModels(prefix);
 		} else if (kind === "sessions") {
 			await completeSessions(prefix);
 		}
@@ -34,12 +36,14 @@ function clean(text: string): string {
 	return text.replace(/[\t\r\n]+/g, " ").trim();
 }
 
-function completeModels(prefix: string): void {
+async function completeModels(prefix: string): Promise<void> {
 	const needle = prefix.toLowerCase();
 	const seen = new Set<string>();
 	const lines: string[] = [];
-	for (const provider of getBundledProviders()) {
-		for (const model of getBundledModels(provider as GeneratedProvider)) {
+	const authStorage = await AuthStorage.create(":memory:");
+	try {
+		const registry = new ModelRegistry(authStorage);
+		for (const model of registry.getAll()) {
 			// Offer both the fully-qualified `provider/id` and the bare `id`
 			// (matches the fuzzy resolution `--model` accepts).
 			const candidates = [`${model.provider}/${model.id}`, model.id];
@@ -50,6 +54,8 @@ function completeModels(prefix: string): void {
 				lines.push(`${candidate}\t${model.provider}`);
 			}
 		}
+	} finally {
+		authStorage.close();
 	}
 	lines.sort();
 	if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);

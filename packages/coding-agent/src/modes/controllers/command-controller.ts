@@ -2,20 +2,11 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { CompactionCancelledError, type CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import {
-	getEnvApiKey,
-	getProviderDetails,
-	type Model,
-	type ProviderDetails,
-	resolveUsedFraction,
-	type UsageLimit,
-	type UsageReport,
-} from "@oh-my-pi/pi-ai";
+import { type Model } from "@oh-my-pi/pi-ai";
 import {
 	type Component,
 	Loader,
 	Markdown,
-	padding,
 	parseSgrMouse,
 	Spacer,
 	Text,
@@ -31,11 +22,11 @@ import type { CompactOptions } from "../../extensibility/extensions/types";
 import { BashExecutionComponent, bashPtyViewport } from "@oh-my-pi/pi-tui/chat/bash-execution";
 import { appKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
 import { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
-import { promptCacheDetails } from "@oh-my-pi/pi-tui/status-line/prompt-cache";
+
 import { messageBlock, PresentedBlock } from "@oh-my-pi/pi-tui/chat/transcript-presentation";
 import { MoveOverlay, type MoveOverlayResult } from "@oh-my-pi/pi-tui/overlays/move-overlay";
 import { moveDirectorySource } from "../move-directory-source";
-import { getMarkdownTheme, getSymbolTheme, theme, type Theme } from "@oh-my-pi/pi-tui/theme";
+import { getMarkdownTheme, getSymbolTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "../../modes/types";
 import { continuesConversation } from "../utils/conversation-position";
 import { ContextViewer } from "@oh-my-pi/pi-tui/overlays/context-viewer";
@@ -49,7 +40,7 @@ import { isNativeRendering } from "@oh-my-pi/pi-tui/native/state";
 import { buildToolsMarkdown } from "@oh-my-pi/pi-tui/prompt/tools-markdown";
 import type { AsyncJobSnapshotItem } from "../../session/agent-session";
 import { buildJobTree, jobTreeGuide, jobTreeIndent } from "@oh-my-pi/pi-tui/overlays/job-tree";
-import type { AuthStorage, OAuthAccountIdentity } from "../../session/auth-storage";
+
 import type { CompactMode } from "../../session/compact-modes";
 import {
 	currentRuntimeIdentity,
@@ -66,19 +57,12 @@ import {
 	type SessionWorktree,
 } from "../../session/session-worktree";
 import { formatShakeSummary, type ShakeMode, type ShakeResult } from "../../session/shake-types";
-import {
-	codexUsagePlan,
-	formatActiveAccountLabel,
-	formatCodexUsageReportLabel,
-	limitMatchesActiveAccount,
-} from "../../slash-commands/helpers/active-oauth-account";
-import { formatProviderName } from "@oh-my-pi/pi-tui/chrome/format";
-import { formatCompactQuota } from "@oh-my-pi/pi-tui/overlays/advisor-config";
+
 import { resolveTernPane } from "../../utils/tern/kind";
 import { TernError, type TernErrorKind, TernSocketClient } from "../../utils/tern/wire";
 import { outputMeta } from "../../tools/output-meta";
 import { resolveToCwd, stripOuterDoubleQuotes } from "../../tools/path-utils";
-import { replaceTabs, shortenEmbeddedPaths, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
+import { replaceTabs, shortenEmbeddedPaths } from "@oh-my-pi/pi-tui/render/render-utils";
 import {
 	getChangelogPath,
 	parseChangelog,
@@ -91,13 +75,6 @@ import { formatDumpArchiveReport, type SessionDumpArchive } from "../../session/
 import { openPath } from "../../utils/open";
 import { resumeCommand } from "../../utils/resume-command";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
-import {
-	collapseSharedUsageReports,
-	formatLimitTitle,
-	summarizeUsageResetCredits,
-} from "@oh-my-pi/pi-tui/overlays/usage-display";
-import { formatRemainingOnlyTotal, isUsedOnlyAbsoluteAmount } from "@oh-my-pi/pi-tui/prompt/usage-amounts";
-import type { UnavailableUsageAccount } from "@oh-my-pi/pi-tui/overlays/usage-dashboard";
 
 import { cfgTerminalShowImages } from "../settings";
 import { cfgProviderAppendOnlyContext } from "../../session/settings";
@@ -487,20 +464,10 @@ export class CommandController {
 		if (!model) {
 			info += `${theme.fg("dim", "No model selected")}\n`;
 		} else {
-			const authMode = resolveProviderAuthMode(this.ctx.session.modelRegistry.authStorage, model.provider);
-			const credentialSource = this.ctx.session.modelRegistry.authStorage.keys.describe(
-				model.provider,
-				stats.sessionId,
-			);
-			const providerDetails = getProviderDetails({
-				model,
-				sessionId: stats.sessionId,
-				authMode,
-				credentialSource,
-				preferWebsockets: this.ctx.session.preferWebsockets,
-				providerSessionState: this.ctx.session.providerSessionState,
-			});
-			info += renderProviderSection(providerDetails, theme);
+			info += `${theme.fg("dim", "Model:")} ${model.provider}/${model.id}\n`;
+			info += `${theme.fg("dim", "Endpoint:")} ${model.baseUrl}\n`;
+			const source = this.ctx.session.modelRegistry.authStorage.keys.describe(model.provider, stats.sessionId);
+			if (source) info += `${theme.fg("dim", "Credential:")} ${source}\n`;
 			if (stats.routedModels !== undefined) {
 				const routed = Object.entries(stats.routedModels)
 					.sort(([aId, aCount], [bId, bCount]) => bCount - aCount || aId.localeCompare(bId))
@@ -530,10 +497,9 @@ export class CommandController {
 		// Append-only context
 		{
 			const setting = cfgProviderAppendOnlyContext.get(this.ctx.settings);
-			const model = this.ctx.session.model;
-			const mode = shouldEnableAppendOnlyContext(setting, model);
+			const mode = shouldEnableAppendOnlyContext(setting);
 			const activeLabel = mode ? theme.fg("success", "active") : theme.fg("dim", "inactive");
-			const settingLabel = setting === "auto" ? `${setting} (${model?.provider ?? "?"})` : setting;
+			const settingLabel = setting;
 			info += `${theme.fg("dim", "Append-Only:")} ${activeLabel} (setting: ${settingLabel})\n`;
 		}
 		info += `${theme.bold("Tokens")}\n`;
@@ -546,15 +512,6 @@ export class CommandController {
 			info += `${theme.fg("dim", "Cache Write:")} ${stats.tokens.cacheWrite.toLocaleString()}\n`;
 		}
 		info += `${theme.fg("dim", "Total:")} ${stats.tokens.total.toLocaleString()}\n`;
-
-		const cacheStatus = this.ctx.session.getPromptCacheStatus();
-		if (cacheStatus) {
-			info += `\n${theme.bold("Prompt Cache")}\n`;
-			for (const row of promptCacheDetails(cacheStatus, Date.now())) {
-				const value = row.tone === "warning" ? theme.fg("warning", row.value) : row.value;
-				info += `${theme.fg("dim", `${row.label}:`)} ${value}\n`;
-			}
-		}
 
 		if (stats.cost > 0 || normalizedPremiumRequests > 0 || stats.credits !== undefined) {
 			info += `\n${theme.bold("Cost")}\n`;
@@ -627,21 +584,6 @@ export class CommandController {
 			this.showCommandReport({ title: "Advisor Status", body: new Text("Advisor is disabled.", 0, 0) });
 			return;
 		}
-		// Render cached quota data without waiting for the network. Quota lines
-		// are optional, and the refresh below serves the next invocation.
-		const usageProvider = this.ctx.session as {
-			cachedUsageReports?: UsageReport[];
-			fetchUsageReports?: () => Promise<UsageReport[] | null>;
-		};
-		const usageReports: UsageReport[] | null = usageProvider.cachedUsageReports ?? null;
-		// Warm the snapshot for the next invocation. The fetch logs its own
-		// failures, and a missing quota line is non-fatal by design.
-		void usageProvider.fetchUsageReports?.().catch(() => {});
-		// Resolve the active OAuth identity for each advisor's provider so quota
-		// filtering matches the credential actually in use (not sibling accounts).
-		const resolveActiveAdvisorAccount = (provider: string, sessionId?: string): OAuthAccountIdentity | undefined =>
-			this.ctx.session.modelRegistry.authStorage.oauth.identity(provider, sessionId ?? this.ctx.session.sessionId);
-		const nowMs = Date.now();
 		// Roster view: show every configured advisor with its status, even when
 		// none are live (all paused/no-model). The old code returned a generic
 		// message that hid the per-advisor state the user needs to act on.
@@ -660,16 +602,7 @@ export class CommandController {
 				if (a.model) {
 					info += `${theme.fg("dim", "Model:")} ${a.model.provider}/${a.model.id}\n`;
 				}
-				if (a.model && usageReports) {
-					const identity = resolveActiveAdvisorAccount(a.model.provider, a.sessionId);
-					const quota = formatCompactQuota(
-						a.model.provider,
-						collapseSharedUsageReports(usageReports),
-						nowMs,
-						(report, limit) => !identity || limitMatchesActiveAccount(report, limit, identity),
-					);
-					if (quota) info += `${theme.fg("dim", quota)}\n`;
-				}
+
 				if (a.status === "running" || a.status === "quota_exhausted") {
 					const ctx =
 						a.contextWindow > 0
@@ -706,19 +639,7 @@ export class CommandController {
 			info += `${theme.bold("Provider")}\n`;
 			info += `${theme.fg("dim", "Model:")} ${model.provider}/${model.id}\n`;
 		}
-		if (model && usageReports) {
-			const identity = resolveActiveAdvisorAccount(model.provider, stats.advisors[0]?.sessionId);
-			const quota = formatCompactQuota(
-				model.provider,
-				collapseSharedUsageReports(usageReports),
-				nowMs,
-				(report, limit) => !identity || limitMatchesActiveAccount(report, limit, identity),
-			);
-			if (quota) {
-				info += `\n${theme.bold("Quota")}\n`;
-				info += `${theme.fg("dim", quota)}\n`;
-			}
-		}
+
 		info += `\n${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.messages.user.toLocaleString()}\n`;
 		info += `${theme.fg("dim", "Assistant:")} ${stats.messages.assistant.toLocaleString()}\n`;
@@ -801,24 +722,6 @@ export class CommandController {
 		}
 
 		this.showCommandReport({ title: "Background Jobs", body: new Text(info.trimEnd(), 0, 0) });
-	}
-
-	async handleUsageCommand(reports?: UsageReport[] | null): Promise<void> {
-		let usageReports = reports ?? null;
-		if (!usageReports) {
-			const provider = this.ctx.session as { fetchUsageReports?: () => Promise<UsageReport[] | null> };
-			if (!provider.fetchUsageReports) {
-				this.ctx.showWarning("Usage reporting is not configured for this session.");
-				return;
-			}
-			try {
-				usageReports = await provider.fetchUsageReports();
-			} catch (error) {
-				this.ctx.showError(`Failed to fetch usage data: ${error instanceof Error ? error.message : String(error)}`);
-			}
-		}
-
-		this.ctx.showUsageDashboard(usageReports ?? []);
 	}
 
 	async handleChangelogCommand(args = ""): Promise<void> {
@@ -1972,9 +1875,6 @@ export class CommandController {
 	}
 }
 
-const BAR_WIDTH_MAX = 24;
-const COLUMN_WIDTH_MIN = 4;
-
 function renderJobLine(job: AsyncJobSnapshotItem, now: number): string {
 	const duration = formatDuration(Math.max(0, (job.endTime ?? now) - job.startTime));
 	const status = formatJobStatus(job.status);
@@ -2000,562 +1900,4 @@ function truncateJobLabel(label: string, maxWidth: number): string {
 	}
 
 	return `${out}…`;
-}
-
-function formatNumber(value: number, maxFractionDigits = 1): string {
-	return new Intl.NumberFormat("en-US", { maximumFractionDigits: maxFractionDigits }).format(value);
-}
-
-function resolveProviderAuthMode(authStorage: AuthStorage, provider: string): string {
-	if (authStorage.credentials.hasOAuth(provider)) {
-		return "oauth";
-	}
-	if (authStorage.credentials.has(provider)) {
-		return "api key";
-	}
-	if (getEnvApiKey(provider)) {
-		return "env api key";
-	}
-	if (authStorage.keys.source(provider) !== undefined) {
-		return "runtime/fallback";
-	}
-	return "unknown";
-}
-
-export function renderProviderSection(details: ProviderDetails, uiTheme: Pick<Theme, "fg">): string {
-	const lines: string[] = [];
-	lines.push(`${uiTheme.fg("dim", "Name:")} ${details.provider}`);
-	for (const field of details.fields) {
-		lines.push(`${uiTheme.fg("dim", `${field.label}:`)} ${field.value}`);
-	}
-	return `${lines.join("\n")}\n`;
-}
-
-function resolveProviderUsageTotal(reports: UsageReport[]): number {
-	return reports
-		.flatMap(report => report.limits)
-		.map(limit => resolveUsedFraction(limit) ?? 0)
-		.reduce((sum, value) => sum + value, 0);
-}
-
-function formatWindowSuffix(label: string, windowLabel: string, uiTheme: Theme): string {
-	const normalizedLabel = label.toLowerCase();
-	const normalizedWindow = windowLabel.toLowerCase();
-	if (normalizedWindow === "quota window") return "";
-	if (normalizedLabel.includes(normalizedWindow)) return "";
-	return uiTheme.fg("dim", `(${windowLabel})`);
-}
-
-/** ` (org)` suffix for providers whose orgName is an organization. */
-function orgSuffix(report: UsageReport): string {
-	const orgName = report.metadata?.orgName;
-	const orgId = report.metadata?.orgId;
-	const org = typeof orgName === "string" && orgName ? orgName : typeof orgId === "string" ? orgId : undefined;
-	return org ? ` (${org})` : "";
-}
-
-/** Keep the existing TUI `(plan)` layout while using the live Codex usage plan. */
-function formatCodexTuiLabel(report: UsageReport, peers: readonly UsageReport[], base: string): string {
-	const identity = formatCodexUsageReportLabel(report, peers, base, undefined, false);
-	const plan = codexUsagePlan(report);
-	return plan ? `${identity} (${plan})` : identity;
-}
-
-function formatAccountLabel(
-	limit: UsageLimit,
-	report: UsageReport,
-	peers: readonly UsageReport[],
-	index: number,
-): string {
-	const codex = report.provider === "openai-codex";
-	const email = report.metadata?.email;
-	if (typeof email === "string" && email)
-		return codex ? formatCodexTuiLabel(report, peers, email) : `${email}${orgSuffix(report)}`;
-	const accountId =
-		typeof report.metadata?.accountId === "string" && report.metadata.accountId
-			? report.metadata.accountId
-			: limit.scope.accountId || undefined;
-	if (accountId) return codex ? formatCodexTuiLabel(report, peers, accountId) : `${accountId}${orgSuffix(report)}`;
-	const projectId =
-		typeof report.metadata?.projectId === "string" && report.metadata.projectId
-			? report.metadata.projectId
-			: limit.scope.projectId || undefined;
-	const base = typeof projectId === "string" && projectId ? projectId : `account ${index + 1}`;
-	return codex ? formatCodexTuiLabel(report, peers, base) : base;
-}
-
-function formatUnlimitedReportLabel(report: UsageReport, peers: readonly UsageReport[], index: number): string {
-	const email = report.metadata?.email;
-	if (typeof email === "string" && email)
-		return report.provider === "openai-codex"
-			? formatCodexTuiLabel(report, peers, email)
-			: `${email}${orgSuffix(report)}`;
-	const accountId = report.metadata?.accountId;
-	if (typeof accountId === "string" && accountId)
-		return report.provider === "openai-codex"
-			? formatCodexTuiLabel(report, peers, accountId)
-			: `${accountId}${orgSuffix(report)}`;
-	const projectId = report.metadata?.projectId;
-	const base = typeof projectId === "string" && projectId ? projectId : `account ${index + 1}`;
-	return report.provider === "openai-codex" ? formatCodexTuiLabel(report, peers, base) : base;
-}
-
-function formatResetShort(limit: UsageLimit, nowMs: number): string | undefined {
-	const resetsAt = limit.window?.resetsAt;
-	if (resetsAt === undefined) return undefined;
-	// Codex returns the prior window's reset_at until a new request opens a fresh window —
-	// rendering a negative delta is meaningless, so drop the suffix in that case.
-	if (resetsAt <= nowMs) return undefined;
-	return formatDuration(resetsAt - nowMs);
-}
-
-function formatAccountHeaderRow(
-	limits: UsageLimit[],
-	reports: UsageReport[],
-	peers: readonly UsageReport[],
-	nowMs: number,
-	columnWidth: number,
-	uiTheme: Theme,
-	activeAccount?: OAuthAccountIdentity,
-): string[] {
-	const parts = limits.map((limit, index) => {
-		const reset = formatResetShort(limit, nowMs);
-		const report = reports[index];
-		const active = report !== undefined && limitMatchesActiveAccount(report, limit, activeAccount);
-		const label = formatAccountLabel(limit, report, peers, index);
-		return {
-			label: active ? `● ${label}` : label,
-			suffix: reset ? `(${reset})` : "",
-			active,
-			daybreak: report?.metadata?.daybreak === true,
-		};
-	});
-	const maxSuffixWidth = parts.reduce((max, p) => Math.max(max, visibleWidth(p.suffix)), 0);
-	const gap = maxSuffixWidth > 0 ? 1 : 0;
-	const prefixBudget = columnWidth - maxSuffixWidth - gap;
-
-	// If suffix can't share the cell with at least `x…`, fall back to whole-label truncation.
-	if (prefixBudget < 2) {
-		return parts.map(p => {
-			const full = `${p.label}${p.daybreak ? " daybreak" : ""}${p.suffix ? ` ${p.suffix}` : ""}`;
-			const cell = padColumn(truncateJobLabel(full, columnWidth), columnWidth);
-			return p.active ? uiTheme.fg("accent", cell) : cell;
-		});
-	}
-
-	return parts.map(p => {
-		// Keep the full badge visible by taking its columns from the account label.
-		const badge = p.daybreak && prefixBudget >= 10 ? " daybreak" : "";
-		const label = truncateJobLabel(p.label, prefixBudget - visibleWidth(badge));
-		const prefix = `${p.active ? uiTheme.fg("accent", label) : label}${badge ? uiTheme.fg("success", badge) : ""}`;
-		const prefixCell = prefix + " ".repeat(prefixBudget - visibleWidth(prefix));
-		if (!p.suffix) return prefixCell + " ".repeat(maxSuffixWidth + gap);
-		const suffixPad = " ".repeat(maxSuffixWidth - visibleWidth(p.suffix));
-		return `${prefixCell} ${suffixPad}${uiTheme.fg("dim", p.suffix)}`;
-	});
-}
-
-function padColumn(text: string, width: number): string {
-	const visible = visibleWidth(text);
-	if (visible >= width) return text;
-	return `${text}${padding(width - visible)}`;
-}
-
-type AggregateDisplayStatus = NonNullable<UsageLimit["status"]> | "neutral";
-
-function resolveAggregateStatus(limits: UsageLimit[]): AggregateDisplayStatus {
-	const hasOk = limits.some(limit => limit.status === "ok");
-	const hasWarning = limits.some(limit => limit.status === "warning");
-	const hasExhausted = limits.some(limit => limit.status === "exhausted");
-	if (!hasOk && !hasWarning && !hasExhausted) {
-		return limits.length > 0 && limits.every(isUsedOnlyAbsoluteAmount) ? "neutral" : "unknown";
-	}
-	if (hasOk) {
-		return hasWarning || hasExhausted ? "warning" : "ok";
-	}
-	if (hasWarning) return "warning";
-	return "exhausted";
-}
-
-function formatAggregateAmount(limits: UsageLimit[]): string {
-	const fractions = limits
-		.map(limit => resolveUsedFraction(limit))
-		.filter((value): value is number => value !== undefined);
-	if (fractions.length === limits.length && fractions.length > 0) {
-		const sum = fractions.reduce((total, value) => total + value, 0);
-		const avgRemaining = Math.max(0, ((limits.length - sum) / limits.length) * 100);
-		return `${formatNumber(avgRemaining)}% free`;
-	}
-
-	const amounts = limits
-		.map(limit => limit.amount)
-		.filter(amount => amount.used !== undefined && amount.limit !== undefined && amount.limit > 0);
-	if (amounts.length === limits.length && amounts.length > 0) {
-		const totalUsed = amounts.reduce((sum, amount) => sum + (amount.used ?? 0), 0);
-		const totalLimit = amounts.reduce((sum, amount) => sum + (amount.limit ?? 0), 0);
-		const remainingPct = totalLimit > 0 ? Math.max(0, 100 - (totalUsed / totalLimit) * 100) : 0;
-		return `${formatNumber(remainingPct)}% free`;
-	}
-
-	if (limits.length > 0 && limits.every(isUsedOnlyAbsoluteAmount)) return "";
-
-	// Prepaid balances have no total to divide by. `totalRemainingOnly`
-	// collapses account-wide pools seen once per stored key and sums only
-	// genuinely distinct ones, so a multi-key provider is never double-counted.
-	const remaining = formatRemainingOnlyTotal(limits);
-	if (remaining !== undefined) return remaining;
-
-	// Count unique accounts from limit scopes — not limits.length.
-	const uniqueAccountIds = new Set(
-		limits.map(limit => limit.scope.accountId).filter((id): id is string => typeof id === "string" && id.length > 0),
-	);
-	if (uniqueAccountIds.size > 0) return `${uniqueAccountIds.size} ${uniqueAccountIds.size === 1 ? "acct" : "accts"}`;
-	// No account IDs available — keep the pre-existing fallback so providers
-	// that don't populate scope.accountId still show a summary.
-	return `${limits.length} accts`;
-}
-
-function resolveResetRange(limits: UsageLimit[], nowMs: number): string | null {
-	const windows = limits
-		.map(limit => limit.window)
-		.filter(
-			(window): window is NonNullable<UsageLimit["window"]> =>
-				window?.resetsAt !== undefined && Number.isFinite(window.resetsAt) && window.resetsAt > nowMs,
-		);
-	if (windows.length === 0) return null;
-	// Use the shared verb when every contributing window agrees (e.g. all "tick");
-	// mixed or absent labels fall back to the generic "resets".
-	const labels = new Set(windows.map(window => window.resetLabel ?? "resets"));
-	const verb = labels.size === 1 ? [...labels][0]! : "resets";
-	const offsets = windows.map(window => window.resetsAt! - nowMs);
-	const minReset = Math.min(...offsets);
-	const maxReset = Math.max(...offsets);
-	if (maxReset - minReset > 60_000) {
-		return `${verb} in ${formatDuration(minReset)}–${formatDuration(maxReset)}`;
-	}
-	return `${verb} in ${formatDuration(minReset)}`;
-}
-
-function resolveStatusIcon(status: AggregateDisplayStatus, uiTheme: Theme): string {
-	if (status === "neutral") return uiTheme.fg("dim", uiTheme.status.info);
-	if (status === "exhausted") return uiTheme.fg("error", uiTheme.status.error);
-	if (status === "warning") return uiTheme.fg("warning", uiTheme.status.warning);
-	if (status === "ok") return uiTheme.fg("success", uiTheme.status.success);
-	return uiTheme.fg("dim", uiTheme.status.pending);
-}
-
-function resolveStatusColor(status: UsageLimit["status"]): "success" | "warning" | "error" | "dim" {
-	if (status === "exhausted") return "error";
-	if (status === "warning") return "warning";
-	if (status === "ok") return "success";
-	return "dim";
-}
-
-function renderUsageBar(limit: UsageLimit, uiTheme: Theme, barWidth: number): string {
-	const usedAmount = limit.amount.used;
-	if (usedAmount !== undefined && isUsedOnlyAbsoluteAmount(limit)) {
-		const used =
-			limit.amount.unit === "usd"
-				? `$${usedAmount.toFixed(2)}`
-				: `${formatNumber(usedAmount, 2)} ${limit.amount.unit}`;
-		return uiTheme.fg("dim", truncateJobLabel(`${used} used`, barWidth));
-	}
-	const fraction = resolveUsedFraction(limit);
-	if (fraction === undefined) {
-		return uiTheme.fg("dim", "·".repeat(barWidth));
-	}
-	const clamped = Math.min(Math.max(fraction, 0), 1);
-	const exact = clamped * barWidth;
-	const fullCells = Math.floor(exact);
-	const remainder = exact - fullCells;
-	let partial = "";
-	if (remainder >= 2 / 3) partial = "▓";
-	else if (remainder >= 1 / 3) partial = "▒";
-	const leading = "█".repeat(fullCells) + partial;
-	const empty = "░".repeat(Math.max(0, barWidth - fullCells - (partial ? 1 : 0)));
-	const color = resolveStatusColor(limit.status);
-	return `${uiTheme.fg(color, leading)}${uiTheme.fg("dim", empty)}`;
-}
-
-/**
- * Pick a per-account column width so the columns and trailing amount fit in `available`.
- * Falls back to the minimum when the terminal is too narrow rather than wrapping.
- */
-function resolveColumnWidth(count: number, available: number, trailing: number): number {
-	if (count <= 0) return BAR_WIDTH_MAX;
-	const indent = 2;
-	const gaps = count - 1;
-	const spaceForBars = available - indent - gaps - (trailing > 0 ? trailing + 1 : 0);
-	const ideal = Math.floor(spaceForBars / count);
-	if (ideal < COLUMN_WIDTH_MIN) return COLUMN_WIDTH_MIN;
-	return ideal;
-}
-
-export function renderUsageReports(
-	reports: UsageReport[],
-	uiTheme: Theme,
-	nowMs: number,
-	availableWidth: number,
-	resolveActiveAccount?: (provider: string) => OAuthAccountIdentity | undefined,
-	usageModelSelectors: readonly string[] = [],
-	unavailableAccounts: readonly UnavailableUsageAccount[] = [],
-): string {
-	const displayReports = collapseSharedUsageReports(reports);
-	const lines: string[] = [];
-	const latestFetchedAt = Math.max(0, ...reports.map(report => report.fetchedAt ?? 0));
-	const headerSuffix = latestFetchedAt ? ` (${formatDuration(nowMs - latestFetchedAt)} ago)` : "";
-	lines.push(uiTheme.bold(uiTheme.fg("accent", `Usage${headerSuffix}`)));
-	const grouped = new Map<string, UsageReport[]>();
-	for (const report of displayReports) {
-		const list = grouped.get(report.provider) ?? [];
-		list.push(report);
-		grouped.set(report.provider, list);
-	}
-	for (const account of unavailableAccounts) {
-		if (!grouped.has(account.provider)) grouped.set(account.provider, []);
-	}
-	const providerEntries = Array.from(grouped.entries())
-		.map(([provider, providerReports]) => ({
-			provider,
-			providerReports,
-			totalUsage: resolveProviderUsageTotal(providerReports),
-		}))
-		.sort((a, b) => {
-			if (a.totalUsage !== b.totalUsage) return a.totalUsage - b.totalUsage;
-			return a.provider.localeCompare(b.provider);
-		});
-
-	for (const { provider, providerReports } of providerEntries) {
-		lines.push("");
-		const providerName = formatProviderName(provider);
-		const activeAccount = resolveActiveAccount?.(provider);
-
-		const limitGroups = new Map<
-			string,
-			{ label: string; windowLabel: string; limits: UsageLimit[]; reports: UsageReport[] }
-		>();
-		for (const report of providerReports) {
-			for (const limit of report.limits) {
-				const windowId = limit.window?.id ?? limit.scope.windowId ?? "default";
-				// Distinct buckets can share a label and window (Antigravity's Gemini
-				// vs Gemini (Argon) weekly) and must stay separate rows instead of
-				// averaging into "50% free", so the id joins the key. Label and window
-				// stay in it too: some providers build ids positionally or per plan
-				// (kimi's `${index}`, copilot's allowance), where ids differ across
-				// accounts for the same quota. `sharedGroup` keeps the routing copies
-				// of one shared bucket together.
-				const key = limit.scope.sharedGroup ?? `${formatLimitTitle(limit)}|${windowId}|${limit.id}`;
-				const windowLabel = limit.window?.label ?? windowId;
-				const entry = limitGroups.get(key) ?? {
-					label: formatLimitTitle(limit),
-					windowLabel,
-					limits: [],
-					reports: [],
-				};
-				entry.limits.push(limit);
-				entry.reports.push(report);
-				limitGroups.set(key, entry);
-			}
-		}
-
-		lines.push(uiTheme.bold(uiTheme.fg("accent", providerName)));
-		const activeReport =
-			provider === "openai-codex" && activeAccount
-				? ((activeAccount.accountId
-						? providerReports.find(
-								report =>
-									report.metadata?.orgId === activeAccount.orgId &&
-									report.metadata?.accountId === activeAccount.accountId,
-							)
-						: undefined) ??
-					providerReports.find(
-						report =>
-							report.metadata?.orgId === activeAccount.orgId &&
-							!!activeAccount.email &&
-							report.metadata?.email === activeAccount.email &&
-							(!activeAccount.accountId || !report.metadata?.accountId),
-					))
-				: undefined;
-		const activeAccountLabel =
-			provider === "openai-codex"
-				? activeReport
-					? formatCodexTuiLabel(
-							activeReport,
-							providerReports,
-							activeAccount?.email || activeAccount?.accountId || "account",
-						)
-					: activeAccount?.email || activeAccount?.accountId || activeAccount?.projectId
-				: formatActiveAccountLabel(activeAccount);
-		if (activeAccountLabel) {
-			lines.push(`  ${uiTheme.fg("accent", "in use by this session:")} ${activeAccountLabel}`);
-		}
-		const reportingModels = usageModelSelectors.filter(selector => selector.startsWith(`${provider}/`));
-		if (reportingModels.length > 0) {
-			lines.push(`  ${uiTheme.fg("accent", "Models with usage data")}`);
-			for (const selector of reportingModels) {
-				lines.push(`    ${replaceTabs(truncateToWidth(sanitizeText(selector), availableWidth - 4))}`);
-			}
-		}
-		for (const account of unavailableAccounts) {
-			if (account.provider !== provider) continue;
-			const label = replaceTabs(sanitizeText(account.label.replace(/[\r\n]+/g, " ")));
-			const status = " — usage unavailable";
-			const boundedLabel = truncateToWidth(label, Math.max(0, availableWidth - 2 - visibleWidth(status)));
-			lines.push(`  ${uiTheme.fg("dim", truncateToWidth(`${boundedLabel}${status}`, availableWidth - 2))}`);
-		}
-
-		// Provider-wide disclaimers (e.g. "OMP-observed spend only") render once
-		// above the per-account sections instead of duplicating onto every limit.
-		const providerNotes = [...new Set(providerReports.flatMap(report => report.notes ?? []))];
-		if (providerNotes.length > 0) {
-			lines.push(
-				`  ${uiTheme.fg("dim", replaceTabs(truncateToWidth(sanitizeText(providerNotes.map(n => n.replace(/[\r\n]+/g, " ")).join(" • ")), 110)))}`.trimEnd(),
-			);
-		}
-
-		const resetAccountLines: string[] = [];
-		for (const report of providerReports) {
-			const resets = summarizeUsageResetCredits(report.resetCredits, nowMs);
-			if (!resets || resets.bankedCount <= 0) continue;
-			const identityLabel =
-				typeof report.metadata?.email === "string" && report.metadata.email
-					? report.metadata.email
-					: typeof report.metadata?.accountId === "string" && report.metadata.accountId
-						? report.metadata.accountId
-						: "account";
-			const orgName = report.metadata?.orgName;
-			const orgId = report.metadata?.orgId;
-			const orgLabel =
-				typeof orgName === "string" && orgName ? orgName : typeof orgId === "string" ? orgId : undefined;
-			const rawLabel =
-				provider === "openai-codex"
-					? formatCodexTuiLabel(report, providerReports, identityLabel)
-					: orgLabel && orgLabel !== identityLabel
-						? `${identityLabel} (${orgLabel})`
-						: identityLabel;
-			const label = sanitizeText(rawLabel.replace(/[\r\n\t]+/g, " "));
-			const activeOrg = activeAccount?.orgId;
-			const reportOrg = typeof report.metadata?.orgId === "string" ? report.metadata.orgId : undefined;
-			const orgMatches = !activeOrg && !reportOrg ? true : activeOrg === reportOrg;
-			const isActive =
-				provider === "openai-codex"
-					? activeReport === report
-					: orgMatches &&
-						!!activeAccount &&
-						((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
-							(!!activeAccount.email && activeAccount.email === report.metadata?.email));
-			const availability =
-				resets.redeemableCount === resets.bankedCount ? "" : ` · ${resets.redeemableCount} usable now`;
-			resetAccountLines.push(
-				`    • ${label}: ${resets.bankedCount} saved reset${resets.bankedCount === 1 ? "" : "s"}${availability}${isActive ? " (active)" : ""}`,
-			);
-			if (resets.soonestExpiry) {
-				const expiryMs = Date.parse(resets.soonestExpiry);
-				const remaining = expiryMs - nowMs;
-				const expiryDate = resets.soonestExpiry.slice(0, 10);
-				if (remaining > 0) {
-					resetAccountLines.push(`        soonest expires in ${formatDuration(remaining)} (${expiryDate})`);
-				} else {
-					resetAccountLines.push(`        expired (${expiryDate})`);
-				}
-			}
-			if (resets.redeemableCount === 0 && resets.unavailableReason) {
-				const reason = sanitizeText(resets.unavailableReason.replace(/[\r\n\t]+/g, " "));
-				resetAccountLines.push(`        unavailable: ${reason}`);
-			}
-		}
-		if (resetAccountLines.length > 0) {
-			lines.push(
-				`  ${uiTheme.fg("accent", "Saved rate-limit resets")} ${uiTheme.fg("dim", "(/usage reset to spend)")}`,
-			);
-			for (const line of resetAccountLines) lines.push(uiTheme.fg("dim", line));
-		}
-
-		// Order account columns ONCE per provider (worst-first), then apply that
-		// same order to every window group. Sorting each group independently by
-		// its own used fraction (issue #6067) desynchronized the columns: an
-		// account exhausted on its 5h window but light on the weekly window would
-		// land in different column positions on each row, so the positional
-		// `account N` labels denoted different credentials per row and an
-		// exhausted limit appeared under a sibling that still had quota.
-		const accountRank = new Map<UsageReport, number>();
-		providerReports.forEach((report, position) => {
-			const worst = report.limits.reduce((max, limit) => {
-				const fraction = resolveUsedFraction(limit) ?? -1;
-				return fraction > max ? fraction : max;
-			}, -1);
-			// Encode worst-first primary key with the stable position as tiebreak
-			// so accounts tied on pressure keep their discovery order.
-			accountRank.set(report, -worst * 1000 + position);
-		});
-
-		const renderableGroups = Array.from(limitGroups.values()).map(group => {
-			const entries = group.limits.map((limit, index) => ({
-				limit,
-				report: group.reports[index],
-				index,
-			}));
-			entries.sort((a, b) => {
-				const aRank = accountRank.get(a.report) ?? a.index;
-				const bRank = accountRank.get(b.report) ?? b.index;
-				if (aRank !== bRank) return aRank - bRank;
-				return a.index - b.index;
-			});
-			const sortedLimits = entries.map(entry => entry.limit);
-			const sortedReports = entries.map(entry => entry.report);
-			return { group, sortedLimits, sortedReports, amountText: formatAggregateAmount(sortedLimits) };
-		});
-
-		const sectionCount = renderableGroups.reduce((max, g) => Math.max(max, g.sortedLimits.length), 0);
-		const sectionTrailing = renderableGroups.reduce((max, g) => Math.max(max, visibleWidth(g.amountText)), 0);
-		const sectionColumnWidth = resolveColumnWidth(sectionCount, availableWidth, sectionTrailing);
-		const sectionBarWidth = Math.min(sectionColumnWidth, BAR_WIDTH_MAX);
-
-		for (const { group, sortedLimits, sortedReports, amountText } of renderableGroups) {
-			const status = resolveAggregateStatus(sortedLimits);
-			const statusIcon = resolveStatusIcon(status, uiTheme);
-
-			const windowSuffix = formatWindowSuffix(group.label, group.windowLabel, uiTheme);
-			lines.push(`${statusIcon} ${uiTheme.bold(group.label)} ${windowSuffix}`.trim());
-			const accountLabels = formatAccountHeaderRow(
-				sortedLimits,
-				sortedReports,
-				providerReports,
-				nowMs,
-				sectionColumnWidth,
-				uiTheme,
-				activeAccount,
-			);
-			lines.push(`  ${accountLabels.join(" ")}`.trimEnd());
-			const bars = sortedLimits.map(limit =>
-				padColumn(renderUsageBar(limit, uiTheme, sectionBarWidth), sectionColumnWidth),
-			);
-			lines.push(`  ${bars.join(" ")} ${amountText}`.trimEnd());
-			const resetText = sortedLimits.length <= 1 ? resolveResetRange(sortedLimits, nowMs) : null;
-			if (resetText) {
-				lines.push(`  ${uiTheme.fg("dim", resetText)}`.trimEnd());
-			}
-			const notes = [...new Set(sortedLimits.flatMap(limit => limit.notes ?? []))];
-			if (notes.length > 0) {
-				lines.push(
-					`  ${uiTheme.fg("dim", replaceTabs(truncateToWidth(sanitizeText(notes.map(n => n.replace(/[\r\n]+/g, " ")).join(" • ")), 110)))}`.trimEnd(),
-				);
-			}
-		}
-
-		// Render accounts with no rate limits (e.g. business/enterprise plans).
-		const unlimitedReports = providerReports.filter(report => report.limits.length === 0);
-		for (const report of unlimitedReports) {
-			const label = formatUnlimitedReportLabel(report, providerReports, 0);
-			const tier = report.provider === "openai-codex" ? undefined : report.metadata?.planType;
-			const tierSuffix = typeof tier === "string" && tier ? ` ${uiTheme.fg("dim", `(${tier})`)}` : "";
-			const daybreakSuffix = report.metadata?.daybreak === true ? uiTheme.fg("success", " daybreak") : "";
-			lines.push(
-				`${uiTheme.fg("success", uiTheme.status.success)} ${label}${daybreakSuffix}${tierSuffix} ${uiTheme.fg("dim", "-- no limits")}`,
-			);
-		}
-		// No per-provider footer; global header shows last check.
-	}
-
-	return lines.join("\n");
 }

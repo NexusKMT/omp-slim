@@ -7,7 +7,6 @@
  */
 import { runFollowUpTurnOnThisThread, runSubagentFollowUpTurn, runSubagentRunRequest } from "../../task/executor";
 import { revivePersistedSubagent } from "../../task/persisted-revive";
-import { invalidateRemoteAuthAvailability } from "./auth-remote";
 import { setWorkerMainLink } from "../executor-routing";
 import type { ThreadService } from "../services";
 
@@ -22,12 +21,7 @@ export const executorThreadService: ThreadService = {
 
 	installWorker(link) {
 		setWorkerMainLink(link);
-		link.handle("runSubprocess", request => {
-			// Main may have changed key overrides (e.g. `--api-key` on a session switch) since the last run here.
-			const storage = request.options.modelRegistry?.authStorage ?? request.options.authStorage;
-			if (storage) invalidateRemoteAuthAvailability(storage);
-			return runSubagentRunRequest(request);
-		});
+		link.handle("runSubprocess", request => runSubagentRunRequest(request));
 		// Main resolved the home already; running here never bounces the turn back.
 		link.handle("runFollowUpTurn", options => runFollowUpTurnOnThisThread(options));
 		link.handle("revivePersisted", (spec, expected) => revivePersistedSubagent(spec, expected));

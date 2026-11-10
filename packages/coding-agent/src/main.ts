@@ -105,7 +105,7 @@ import {
 	SessionModelRestoreError,
 } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
-import { createAuthStorageSettingsSync, describeAuthBrokerStartupError } from "./session/auth-broker-config";
+
 import type { AuthStorage } from "./session/auth-storage";
 import { describePendingToolCalls } from "./session/exit-diagnostics";
 import {
@@ -585,7 +585,7 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 			// ACP defers the `ask` capability and reserve-policy confirmation until
 			// client capabilities are known, without enabling other UI-only behavior.
 			interactivePrompts: factoryOptions?.interactivePrompts,
-			deferUsageReserveConfirmation: true,
+
 			enableMCP: false,
 			titleSystemPrompt,
 			eventBus,
@@ -1030,7 +1030,7 @@ function notifyResumeCwdFallback(
  */
 export async function resolveScopedModels(
 	parsed: Args,
-	modelRegistry: Pick<ModelRegistry, "getAvailable" | "getDiscoverableProviders" | "refresh">,
+	modelRegistry: Pick<ModelRegistry, "getAvailable">,
 	activeSettings: Settings,
 ): Promise<ScopedModel[]> {
 	const modelPatterns = parsed.models ?? cfgEnabledModels.get(activeSettings);
@@ -1038,12 +1038,7 @@ export async function resolveScopedModels(
 		return [];
 	}
 	const preferences = getModelMatchPreferences(activeSettings);
-	const scopedModels = await resolveModelScope(modelPatterns, modelRegistry, preferences, activeSettings);
-	if (scopedModels.length > 0 || modelRegistry.getDiscoverableProviders().length === 0) {
-		return scopedModels;
-	}
-	await modelRegistry.refresh("online-if-uncached");
-	return await resolveModelScope(modelPatterns, modelRegistry, preferences, activeSettings);
+	return resolveModelScope(modelPatterns, modelRegistry, preferences, activeSettings);
 }
 
 /**
@@ -1080,30 +1075,6 @@ export interface ScopedModelSink {
 	readonly isDisposed: boolean;
 	readonly scopedModels: ReadonlyArray<{ model: Model; thinkingLevel?: ThinkingLevel }>;
 	setScopedModels(scopedModels: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>): void;
-}
-
-/**
- * Startup resolves the `--models`/`enabledModels` scope from the model registry
- * before background provider discovery runs — `createSession` fires
- * `refreshInBackground()` only after the session is built — so a scoped selector
- * whose model first materializes through runtime discovery (e.g.
- * `opencode-go/ox-alpha-free` on a fresh launch with no cache row) is absent from
- * the frozen scoped `/models` list even though it is in `enabledModels`, invokable
- * via `--model`, and listed by `omp models find`. Once the initial refresh settles,
- * re-resolve the scope and, when the set changed, push the fuller list into the
- * session so the scoped picker and Ctrl+P cycle include it. A scope that resolved
- * to zero models may become active here when the startup discovery pass returned
- * no models but the background pass succeeded. Fire-and-forget — never blocks the
- * prompt on background discovery latency. Issue #9220.
- */
-export async function rebuildScopedModelsAfterDiscovery(
-	session: ScopedModelSink,
-	parsed: Args,
-	modelRegistry: Pick<ModelRegistry, "getAvailable" | "awaitBackgroundRefresh">,
-	activeSettings: Settings,
-): Promise<void> {
-	await modelRegistry.awaitBackgroundRefresh();
-	await rebuildScopedModels(session, parsed, modelRegistry, activeSettings);
 }
 
 /**
@@ -1150,13 +1121,12 @@ const cfgScopedModelInputs = combine({ enabledModels: cfgEnabledModels, disabled
 export function watchScopedModelSettings(
 	session: ScopedModelSink & Pick<AgentSession, "addDisposer">,
 	parsed: Args,
-	modelRegistry: Pick<ModelRegistry, "getAvailable" | "reapplyModelPolicies">,
+	modelRegistry: Pick<ModelRegistry, "getAvailable">,
 	activeSettings: Settings,
 ): void {
 	const stop = cfgScopedModelInputs.listen(activeSettings, async (next, previous) => {
 		const providersChanged = !Bun.deepEquals(next.disabledProviders, previous.disabledProviders);
 		if (parsed.models && !providersChanged) return;
-		if (providersChanged) await modelRegistry.reapplyModelPolicies();
 		if (session.isDisposed) return;
 		const patterns = parsed.models ?? cfgEnabledModels.get(activeSettings);
 		const rebuilt =
@@ -1516,7 +1486,7 @@ export async function buildSessionOptions(
 			}
 		} else if (resolved.model) {
 			options.model = resolved.model;
-			options.rebindModelAfterDiscovery = true;
+
 			// The recorded role must carry the effort the session actually starts
 			// at, or the first cycle back into `default` overrides it.
 			activeSettings.overrideModelRoles({
@@ -1550,7 +1520,7 @@ export async function buildSessionOptions(
 				: scopedModels.find(scopedModel => scopedModel.model.id.toLowerCase() === remembered.toLowerCase());
 			if (rememberedModel) {
 				options.model = rememberedModel.model;
-				options.rebindModelAfterDiscovery = true;
+
 				// Apply explicit thinking level from remembered role value
 				if (!parsed.thinking && rememberedSpec.explicitThinkingLevel && rememberedSpec.thinkingLevel) {
 					options.thinkingLevel = rememberedSpec.thinkingLevel;
@@ -1572,7 +1542,6 @@ export async function buildSessionOptions(
 		deferredDefaultRole = !options.model && Boolean(remembered) && !((parsed.models?.length ?? 0) > 0);
 		if (!options.model && !deferredDefaultRole) {
 			options.model = scopedModels[0].model;
-			options.rebindModelAfterDiscovery = true;
 		}
 	} else if ((parsed.models?.length ?? 0) > 0 && !restoringSession) {
 		// A CLI `--models` scope that resolved to zero models at startup: its
@@ -1826,22 +1795,13 @@ export async function runRootCommand(
 			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });
 		settingsPromise.catch(() => {});
 		const authStoragePromise = logger.time("discoverAuthStorage", async () =>
-			(deps.discoverAuthStorage ?? discoverAuthStorage)(undefined, { settings: await settingsPromise }),
+			(deps.discoverAuthStorage ?? discoverAuthStorage)(),
 		);
 		authStoragePromise.catch(() => {});
-		let authStorage: AuthStorage;
-		try {
-			authStorage = await authStoragePromise;
-		} catch (error) {
-			const message = await describeAuthBrokerStartupError(error);
-			if (message === null) throw error;
-			process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
-			process.exit(1);
-		}
+		const authStorage = await authStoragePromise;
 
 		const settingsInstance = await settingsPromise;
-		// Process-lifetime: broker/account-policy edits reconfigure the shared credential store.
-		createAuthStorageSettingsSync(settingsInstance, authStorage);
+
 		if (parsedArgs.approvalMode) {
 			// Runtime override (not persisted): every `tools.approvalMode` read downstream
 			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
@@ -1866,15 +1826,7 @@ export async function runRootCommand(
 			"modelRegistry:init",
 			() => new ModelRegistry(authStorage, undefined, { settings: settingsInstance }),
 		);
-		// Credential-scoped catalogs (e.g. GitHub Copilot) load from their cache
-		// rows only after credentials resolve. `--model` and `enabledModels` below
-		// resolve against the registry before `createAgentSession` hydrates it, so
-		// without this a cached-only model is absent and its selector fuzzy-matches
-		// a bundled sibling (issue #14075). Local-only and never rejects; awaited
-		// right before the first catalog read so its I/O overlaps theme setup.
-		const credentialScopedCacheHydration = logger.time("hydrateCredentialScopedModelCaches", () =>
-			modelRegistry.hydrateCredentialScopedModelCaches(),
-		);
+
 		if (parsedArgs.noPty || parsedArgs.mode === "rpc-ui") {
 			Bun.env.PI_NO_PTY = "1";
 		}
@@ -1953,7 +1905,6 @@ export async function runRootCommand(
 			},
 		});
 
-		await credentialScopedCacheHydration;
 		let scopedModels = await logger.time(
 			"resolveModelScope",
 			resolveScopedModels,
@@ -2293,7 +2244,6 @@ export async function runRootCommand(
 			// discovery arms; running these concurrently contends for the event loop and stretches
 			// every parallel arm by ~30ms. Interactive startup defers it further, behind the first
 			// frame (see `startDeferredStartupWork`), for the same reason.
-			if (!isInteractive) modelRegistry.refreshInBackground();
 			return result;
 		};
 
@@ -2497,14 +2447,7 @@ export async function runRootCommand(
 					message: `Auto resume skipped: ${sanitizeDisplayWarnings([error.message])[0]}. Started a new session without the saved history.`,
 				});
 			}
-			const {
-				session,
-				setToolUIContext,
-				modelFallbackMessage,
-				lspServers,
-				mcpManager,
-				startBackgroundModelDiscovery,
-			} = createdSession;
+			const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = createdSession;
 
 			const sessionToolNames = session.getAllToolNames();
 			try {
@@ -2583,14 +2526,7 @@ export async function runRootCommand(
 				}
 				void session.loadDeferredExtensions();
 				session.startSkillDescriptionCompression();
-				modelRegistry.refreshInBackground();
-				if (configuredScope.length > 0) {
-					// Must follow refreshInBackground: it waits on the in-flight refresh.
-					void rebuildScopedModelsAfterDiscovery(session, parsedArgs, modelRegistry, settingsInstance).catch(
-						error => logger.warn("Scoped model rebuild after discovery failed", { error: String(error) }),
-					);
-				}
-				void startBackgroundModelDiscovery?.();
+
 				if (cfgGcAutoCompress.get(settingsInstance)) {
 					void scheduleGcAutoCompress(getAgentDir()).catch(error =>
 						logger.warn("Background session compression failed to start", { error: String(error) }),
@@ -2613,10 +2549,7 @@ export async function runRootCommand(
 			}
 
 			const modelRegistryError = modelRegistry.getError();
-			for (const warning of modelRegistry.drainConfigWarnings()) {
-				if (isInteractive) notifs.push({ kind: "warn", message: warning });
-				else process.stderr.write(`${chalk.yellow(`Warning: ${warning}`)}\n`);
-			}
+
 			if (modelRegistryError) {
 				notifs.push({ kind: "error", message: modelRegistryError.message });
 			}
