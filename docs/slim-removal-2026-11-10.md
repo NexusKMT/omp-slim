@@ -33,9 +33,9 @@ Four isolated worktrees handled the feature removals. The user capped
 concurrency at five agents including the coordinator; existing workers were
 reused for integration reviews and could not spawn further workers.
 
-The integrated source at `6647801a3ecfb36d046ebc0a07363e7277d5c15e`
-changes 1,042 files with 3,611 additions and 245,158 deletions relative to
-`c3b3c3dd12`, a net reduction of 241,547 lines. These counts include
+The integrated source at `d7f1646f90182a27353b8c38455e2d1c4a892f15`
+changes 1,051 files with 3,988 additions and 245,196 deletions relative to
+`c3b3c3dd12`, a net reduction of 241,208 lines. These counts include
 implementation, dedicated tests, generated schemas, lockfiles and
 documentation; they are not a binary-size measurement.
 

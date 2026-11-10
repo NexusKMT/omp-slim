@@ -252,8 +252,17 @@ hashes, cold/cache build timings and the validation-script fixes are in
 gh workflow run slim-macos-intel.yml --repo NexusKMT/omp-slim --ref main
 gh run list --repo NexusKMT/omp-slim --workflow slim-macos-intel.yml
 gh run view RUN_ID --repo NexusKMT/omp-slim
+gh run watch RUN_ID --repo NexusKMT/omp-slim
+gh run view RUN_ID --repo NexusKMT/omp-slim --log-failed
+gh run view RUN_ID --repo NexusKMT/omp-slim --log > actions.log
+rg -n -i 'error|failed|exception' actions.log
 gh run download RUN_ID --repo NexusKMT/omp-slim --dir dist/actions/RUN_ID
 ```
+
+Use Chrome DevTools MCP to inspect live Actions logs. `gh` supports status
+checks and recovery of completed logs/artifacts: `watch` reports job/step
+progress, but full job logs may remain unavailable until the job finishes.
+Use `run view --json status,jobs` for supporting status checks.
 
 Use the resulting `omp-darwin-x64.tar.gz`, verify `ARCHIVE-SHA256SUMS`, extract it,
 then verify `SHA256SUMS` with `shasum -a 256 -c`. Test the extracted binary from
