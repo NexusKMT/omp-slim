@@ -1995,7 +1995,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 			runAutoCompaction: (reason, willRetry, options) =>
 				this.#maintenance.runAutoCompaction(reason, willRetry, options),
-			shakeForRequestBodyReadTimeout: generation => this.#maintenance.shakeForRequestBodyReadTimeout(generation),
 			withBashBranchTransition: operation => this.#bash.withBranchTransition(operation),
 		};
 		this.#recovery = new TurnRecovery(recoveryHost);
@@ -4520,7 +4519,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			// Record quota exhaustion before deciding whether this failed turn may be
 			// replayed. Visible/side-effecting output then remains terminal while its
 			// credential is still blocked or rotated exactly once.
-			await this.#recovery.recordUsageLimitOutcome(msg);
 
 			let compactionResult = COMPACTION_CHECK_NONE;
 			let checkedCompaction = false;
@@ -4577,15 +4575,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				await emitAgentEndNotification(ttsrAbortPendingAtAgentEnd ? { willContinue: true } : undefined);
 				return;
 			}
-			const requestBodyTimeoutRecovery = await this.#recovery.handleResponsesRequestBodyReadTimeout(msg);
-			if (requestBodyTimeoutRecovery === "handled-retry") {
-				maintenanceRoute("responses-request-body-timeout-retry");
-				await emitAgentEndNotification({ willContinue: true });
-				return;
-			}
-			const requestBodyTimeoutTerminal = requestBodyTimeoutRecovery === "handled-terminal";
 			const resumeResolvedStreamStall = resolvedInterruptedToolTurn === "stream-stall";
-			if (!requestBodyTimeoutTerminal && (resumeResolvedStreamStall || this.#recovery.isRetryableError(msg))) {
+			if (resumeResolvedStreamStall || this.#recovery.isRetryableError(msg)) {
 				const didRetry = await this.#recovery.handleRetryableError(
 					msg,
 					resumeResolvedStreamStall ? { preserveFailedTurn: true } : undefined,
@@ -4594,14 +4585,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 					await emitAgentEndNotification({ willContinue: true });
 					return;
 				}
-			} else if (!requestBodyTimeoutTerminal && this.#recovery.handleMalformedFunctionCallStop(msg)) {
+			} else if (this.#recovery.handleMalformedFunctionCallStop(msg)) {
 				// A malformed call with committed text cannot be replayed, but it
 				// never executed anything either: keep the turn and continue with a
 				// corrective reminder rather than stopping on a pinned error.
 				maintenanceRoute("malformed-function-call-handled");
 				await emitAgentEndNotification({ willContinue: true });
 				return;
-			} else if (!requestBodyTimeoutTerminal && this.#recovery.handleCommittedTextStreamStall(msg)) {
+			} else if (this.#recovery.handleCommittedTextStreamStall(msg)) {
 				// The stream died after text rendered: replay would duplicate it and
 				// a trailing assistant prefill is rejected, so keep the partial turn
 				// and continue from where it stopped.
@@ -12307,11 +12298,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				.getBranch()
 				.some(entry => entry.type === "service_tier_change");
 			const defaultThinkingLevel = parseConfiguredThinkingLevel(cfgDefaultThinkingLevel.get(this.settings));
-			const configuredServiceTierByFamily = buildServiceTierByFamily(
-				cfgTierOpenai.get(this.settings),
-				cfgTierAnthropic.get(this.settings),
-				cfgTierGoogle.get(this.settings),
-			);
+			const configuredServiceTierByFamily = buildServiceTierByFamily(cfgTierOpenai.get(this.settings));
 			// Restore the thinking selector. Each change persists the configured
 			// selector (`auto` or a concrete level), so prefer it: an `auto` session
 			// resumes in auto mode (reclassifying the next turn) instead of freezing at
