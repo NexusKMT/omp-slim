@@ -1268,9 +1268,6 @@ export class ModelBrowser implements Component {
 		const facts: string[] = [model.name];
 		// Upstream badges sit next to the name; the provider blurb goes last so
 		// width truncation eats prose before context, cost, or perf facts.
-		if (model.isNew) facts.push("new");
-		if (model.isBeta) facts.push("beta");
-		if (model.isRecommended) facts.push("recommended");
 		if (model.contextWindow) facts.push(`${formatNumber(model.contextWindow).toLowerCase()} ctx`);
 		if (model.maxTokens) facts.push(`${formatNumber(model.maxTokens).toLowerCase()} out`);
 		facts.push(formatCostDetail(model));
@@ -1530,9 +1527,6 @@ export class ModelBrowser implements Component {
 		if (selected) {
 			const model = selected.model;
 			const head: NativeChild[] = [text([span(model.name, "strong")])];
-			if (model.isNew) head.push(node("badge", { text: "new", tone: "accent" }));
-			if (model.isBeta) head.push(node("badge", { text: "beta", tone: "warning" }));
-			if (model.isRecommended) head.push(node("badge", { text: "recommended", tone: "success" }));
 			children.push(row(head, { gap: "sm", align: "center", wrap: true }));
 
 			const facts: string[] = [];
@@ -1671,8 +1665,6 @@ export class ModelBrowser implements Component {
 				title: `Context ${formatNumber(this.#currentContextTokens).toLowerCase()} exceeds this model's limit; picking it compacts first`,
 			});
 		}
-		if (model.isNew) badges.push({ text: "new", tone: "accent" });
-		if (model.isBeta) badges.push({ text: "beta", tone: "warning" });
 		if (isFreeModel(model)) badges.push({ text: "free", tone: "success" });
 		const value: TspPickerItem = {
 			id: item.selector,
@@ -1821,9 +1813,6 @@ export class ModelBrowser implements Component {
 		];
 		const badges: NativeChild[] = [];
 		if (item.selector === current) badges.push(node("badge", { text: "current", tone: "success" }));
-		if (model.isNew) badges.push(node("badge", { text: "new", tone: "accent" }));
-		if (model.isBeta) badges.push(node("badge", { text: "beta", tone: "warning" }));
-		if (model.isRecommended) badges.push(node("badge", { text: "recommended", tone: "success" }));
 		if (model.reasoning) badges.push(node("badge", { text: "reasoning" }));
 		if (model.input.includes("image")) badges.push(node("badge", { text: "vision" }));
 		if (badges.length > 0) children.push(row(badges, { gap: "xs", wrap: true }));

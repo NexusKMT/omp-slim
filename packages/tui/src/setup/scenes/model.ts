@@ -33,8 +33,8 @@ class ModelSceneController implements SetupSceneController {
 	/** Base rows (available chat models), the picker's catalogue. */
 	#items: ModelBrowserItem[] = [];
 	#current: string | undefined;
-	#discovering = false;
-	#discoveryError: string | undefined;
+	#reloading = false;
+	#reloadError: string | undefined;
 	/** Selector being saved as the default. */
 	#saving: string | undefined;
 	#saveError: string | undefined;
@@ -72,7 +72,7 @@ class ModelSceneController implements SetupSceneController {
 
 	handleInput(data: string): void {
 		if (this.#saving !== undefined) return;
-		// With nothing to pick after a failed discovery, Enter retries it (the sheet's primary action).
+		// With nothing to pick after a failed reload, Enter retries it (the sheet's primary action).
 		if (this.#canRetry() && (matchesKey(data, "enter") || matchesKey(data, "return"))) {
 			void this.#refreshModels();
 			return;
@@ -138,7 +138,7 @@ class ModelSceneController implements SetupSceneController {
 				this.#host.finish("skipped");
 				return;
 			case "retry":
-				if (this.#discoveryError !== undefined) void this.#refreshModels();
+				if (this.#reloadError !== undefined) void this.#refreshModels();
 				return;
 			case "save": {
 				const selected = this.#browser.pickerSelected;
@@ -157,14 +157,14 @@ class ModelSceneController implements SetupSceneController {
 			return { text: `Saving ${this.#saving} as the default model…`, color: "muted", busy: true };
 		}
 		if (this.#saveError !== undefined) return { text: this.#saveError, color: "error", busy: false };
-		if (this.#discoveryError !== undefined) return { text: this.#discoveryError, color: "error", busy: false };
-		if (this.#discovering) return { text: "Discovering available models…", color: "muted", busy: true };
+		if (this.#reloadError !== undefined) return { text: this.#reloadError, color: "error", busy: false };
+		if (this.#reloading) return { text: "Reloading configured models…", color: "muted", busy: true };
 		return undefined;
 	}
 
-	/** Discovery failed and nothing is listed: Enter and the primary action retry it. */
+	/** Configuration reload failed and nothing is listed: Enter and the primary action retry it. */
 	#canRetry(): boolean {
-		return this.#discoveryError !== undefined && this.#browser.pickerSelected === null;
+		return this.#reloadError !== undefined && this.#browser.pickerSelected === null;
 	}
 
 	#describeSheet(): NativeNode {
@@ -183,8 +183,8 @@ class ModelSceneController implements SetupSceneController {
 			browser.cursor,
 			browser.pickerSelected,
 			this.#current,
-			this.#discovering,
-			this.#discoveryError,
+			this.#reloading,
+			this.#reloadError,
 			this.#saving,
 			this.#saveError,
 		];
@@ -193,9 +193,9 @@ class ModelSceneController implements SetupSceneController {
 			const listed = view.count > 0 || query.length > 0;
 			const state: TspPickerProps["state"] = listed
 				? "ready"
-				: this.#discoveryError !== undefined
+				: this.#reloadError !== undefined
 					? "error"
-					: this.#discovering
+					: this.#reloading
 						? "loading"
 						: "ready";
 			const saving = this.#saving !== undefined;
@@ -224,7 +224,7 @@ class ModelSceneController implements SetupSceneController {
 					placeholder: "Search models…",
 					...rows,
 					state,
-					...(state === "error" && this.#discoveryError !== undefined ? { message: this.#discoveryError } : {}),
+					...(state === "error" && this.#reloadError !== undefined ? { message: this.#reloadError } : {}),
 					empty: "No models configured. Add a Chat Completions endpoint and API key in models.yml, then reopen /model.",
 					actions: [pickerAction("skip", "Skip", "escape", { end: true }), primary],
 				},
@@ -239,8 +239,8 @@ class ModelSceneController implements SetupSceneController {
 		if (this.#saving !== undefined)
 			return [span("Saving "), span(this.#saving, "mono"), span(" as your default model…")];
 		if (this.#saveError !== undefined) return [span(`Couldn't save the default model: ${this.#saveError}`, "error")];
-		if (this.#discoveryError !== undefined && this.#items.length > 0) return [span(this.#discoveryError, "error")];
-		if (this.#discovering && this.#items.length > 0) return "Looking for more models…";
+		if (this.#reloadError !== undefined && this.#items.length > 0) return [span(this.#reloadError, "error")];
+		if (this.#reloading && this.#items.length > 0) return "Reloading models.yml…";
 		return SHEET_SUBTITLE;
 	}
 
@@ -280,9 +280,9 @@ class ModelSceneController implements SetupSceneController {
 	}
 
 	async #refreshModels(): Promise<void> {
-		if (this.#discovering) return;
-		this.#discovering = true;
-		this.#discoveryError = undefined;
+		if (this.#reloading) return;
+		this.#reloading = true;
+		this.#reloadError = undefined;
 		this.#host.requestRender();
 		try {
 			await this.#host.ctx.refreshModels();
@@ -290,9 +290,9 @@ class ModelSceneController implements SetupSceneController {
 			this.#syncModels();
 		} catch (error) {
 			if (this.#disposed) return;
-			this.#discoveryError = error instanceof Error ? error.message : String(error);
+			this.#reloadError = error instanceof Error ? error.message : String(error);
 		} finally {
-			this.#discovering = false;
+			this.#reloading = false;
 		}
 		this.#host.requestRender();
 	}
