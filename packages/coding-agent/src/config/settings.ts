@@ -3405,6 +3405,7 @@ export class Settings {
 			["spelling", "autocomplete"],
 			["composer", "predictions"],
 			["contextPromotion", "enabled"],
+			["judgment", "attemptTimeoutMs"],
 		]) {
 			deleteByPath(raw, path);
 			delete raw[path.join(".")];
@@ -3423,6 +3424,8 @@ export class Settings {
 			"autoThinkingMaxEffort",
 			"unexpectedStopModel",
 			"tinyModel",
+			"tinyModelDevice",
+			"tinyModelDtype",
 			"memoryModel",
 		]) {
 			if (providerSettings) delete providerSettings[key];
@@ -3455,7 +3458,14 @@ export class Settings {
 		if (!Object.hasOwn(raw, "model") && legacyModel !== undefined) raw.model = legacyModel;
 		if (!Object.hasOwn(raw, "modelStorage") && raw.modelRoleStorage !== undefined)
 			raw.modelStorage = raw.modelRoleStorage;
-		const retiredModelSettings = ["modelRoles", "modelRoleStorage", "modelTags", "modelPresets", "cycleOrder"];
+		const retiredModelSettings = [
+			"modelRoles",
+			"modelRoleStorage",
+			"modelTags",
+			"modelPresets",
+			"cycleOrder",
+			"prewalk",
+		];
 		for (const key of Object.keys(raw)) {
 			if (retiredModelSettings.some(prefix => key === prefix || key.startsWith(`${prefix}.`))) delete raw[key];
 		}

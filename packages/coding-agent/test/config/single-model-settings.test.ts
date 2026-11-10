@@ -70,14 +70,16 @@ describe("single model settings", () => {
 		cfgThemeDark.set(settings, "titanium");
 		await settings.flush();
 		const saved = YAML.parse(await Bun.file(file).text());
-		expect(saved.model).toBe("anthropic/claude-sonnet-4-5:high");
-		expect(saved.modelStorage).toBe("project");
+		expect(saved).toMatchObject({
+			model: "anthropic/claude-sonnet-4-5:high",
+			modelStorage: "project",
+		});
 		for (const key of ["modelRoles", "modelRoleStorage", "modelTags", "modelPresets", "cycleOrder"]) {
-			expect(saved[key]).toBeUndefined();
+			expect(saved).not.toHaveProperty(key);
 			expect(lookup(key)).toBeUndefined();
 		}
-		expect(saved.retry).toEqual({});
-		expect(saved.task).toEqual({});
+		expect(saved).toHaveProperty("retry", {});
+		expect(saved).toHaveProperty("task", {});
 	});
 
 	it("migrates legacy loop guards without losing the primary model or persisted controls", async () => {
@@ -128,16 +130,25 @@ describe("single model settings", () => {
 				fallbackChains: { default: ["other/model"] },
 				usageReservePct: 12,
 			},
-			providers: { anthropic: { serverSideFallback: true }, autoThinkingMaxEffort: "max" },
+			providers: {
+				anthropic: { serverSideFallback: true },
+				autoThinkingMaxEffort: "max",
+				tinyModelDevice: "cpu",
+				tinyModelDtype: "fp16",
+			},
 			features: { unexpectedStopDetection: "smart" },
 			images: { describeForTextModels: true },
 			contextPromotion: { enabled: true },
 			spelling: { autocomplete: "auto" },
 			composer: { predictions: "on" },
+			judgment: { attemptTimeoutMs: 3000 },
+			prewalk: { enabled: true, auto: true },
+			"prewalk.armed": true,
 		});
 		expect(cfgRetryUsageReservePct.get(settings)).toBe(12);
 		expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("mechanical");
 		expect(settings.getModel()).toBeUndefined();
+		expect(lookup("judgment.attemptTimeoutMs")).toBeUndefined();
 	});
 
 	it("keeps canonical model ownership including tombstones ahead of legacy values", () => {
@@ -170,7 +181,7 @@ describe("single model settings", () => {
 		project.clearProjectModel();
 		expect(project.getModel()).toBe("p/profile");
 		await project.flush();
-		expect(YAML.parse(await Bun.file(path.join(cwd, ".omp/config.yml")).text()).model).toBeNull();
+		expect(YAML.parse(await Bun.file(path.join(cwd, ".omp/config.yml")).text())).toMatchObject({ model: null });
 	});
 
 	it("restores the original runtime model when moving after a project edit", async () => {
@@ -205,6 +216,6 @@ describe("single model settings", () => {
 		settings.setModel("p/saved");
 		expect(cfgModel.get(settings)).toBe("p/saved");
 		await settings.flush();
-		expect(YAML.parse(await Bun.file(file).text()).model).toBe("p/saved");
+		expect(YAML.parse(await Bun.file(file).text())).toMatchObject({ model: "p/saved" });
 	});
 });
