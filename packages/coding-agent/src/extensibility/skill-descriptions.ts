@@ -14,13 +14,6 @@ import {
 	prompt,
 } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
-import {
-	resolveConfiguredModelPatterns,
-	resolveProviderModelReference,
-	resolveRoleChain,
-	resolveRoleSelection,
-} from "../config/model-resolver";
-import type { Settings } from "../config/settings";
 import { CostCapError, type CostGateApi } from "../session/cost-gate";
 import compressDescriptionPrompt from "../prompts/skills/compress-description.md" with { type: "text" };
 import { Semaphore } from "../task/parallel";
@@ -38,7 +31,7 @@ const STORE_CLOSE_GRACE_MS = 4_000;
 const inFlight = new Map<string, Promise<void>>();
 const compressionSlots = new Semaphore(4);
 
-/** Background compression through a fast model; the model key scopes cached unusable answers. */
+/** Background compression through the active model; the model key scopes cached unusable answers. */
 export interface SkillDescriptionCompressor {
 	/** `provider/id` of the model the next request would use; `undefined` when none is available. */
 	modelKey(): string | undefined;
@@ -49,48 +42,17 @@ export interface SkillDescriptionCompressor {
 /** A completed request exhausted its output budget, rather than failing in transit. */
 class SkillDescriptionLengthError extends Error {}
 
-/**
- * Resolve the fast role for each background request the way `/models` shows it — configured `smol`,
- * the inherited `default` when `smol` is unset, then the built-in chain — before a configured `tiny`.
- * Never uses the session's foreground model. `getCostGate` returns the session tree's gate per request,
- * following it across new sessions and switches; each provider attempt is admitted and metered there.
- */
+/** Compress through the current model, with the session cost gate applied to each attempt. */
 export function createSkillDescriptionCompressor(
 	registry: ModelRegistry,
-	settings: Settings,
 	options: {
+		getModel: () => Model<Api> | undefined;
 		sessionId?: string;
 		getTelemetry?: () => AgentTelemetry | undefined;
 		getCostGate?: () => CostGateApi | undefined;
-	} = {},
+	},
 ): SkillDescriptionCompressor {
-	const select = (): Model<Api> | undefined => {
-		// The first exact provider/id match wins before every other matching phase.
-		// Resolve only that provider when possible: rendering uncached skill hints
-		// must not expand unrelated account catalogs for every background request.
-		// On a miss, use the complete pool below. A slash can instead belong to a
-		// raw aggregator id, and suffixes, aliases and fallbacks still need the
-		// ordinary resolver's full precedence rules.
-		const firstPattern = resolveConfiguredModelPatterns(
-			settings.getModelRole("smol")?.trim() || "@smol",
-			settings,
-		)[0];
-		const slash = firstPattern?.indexOf("/") ?? -1;
-		if (firstPattern && slash > 0) {
-			const provider = firstPattern.slice(0, slash).trim();
-			const id = firstPattern.slice(slash + 1).trim();
-			if (provider && id) {
-				const scoped = registry.getAvailableForProviders(new Set([provider]));
-				const exact = resolveProviderModelReference(provider, id, scoped);
-				if (exact) return exact;
-			}
-		}
-		const available = registry.getAvailable();
-		return (
-			resolveRoleChain("smol", settings, available)[0]?.model ??
-			resolveRoleSelection(["tiny"], settings, available)?.model
-		);
-	};
+	const select = options.getModel;
 	return {
 		modelKey() {
 			const model = select();
@@ -98,7 +60,7 @@ export function createSkillDescriptionCompressor(
 		},
 		async compress(_name, _description, request) {
 			const model = select();
-			if (!model) throw new Error("No smol or tiny model available");
+			if (!model) throw new Error("No active model available");
 			const apiKey = await registry.getApiKey(model, options.sessionId);
 			if (!apiKey) throw new Error(`No credential for ${model.provider}/${model.id}`);
 			const gate = options.getCostGate?.();
@@ -125,6 +87,7 @@ export function createSkillDescriptionCompressor(
 						sessionId: options.sessionId,
 						maxTokens: 1024,
 						disableReasoning: true,
+						disableServerSideFallback: true,
 						temperature: 0,
 						signal: AbortSignal.any([AbortSignal.timeout(30_000), refused.signal]),
 						beforeDispatch: gate ? refuseAttempt : undefined,

@@ -39,7 +39,6 @@ import {
 	type BeforeToolCallContext,
 	type BeforeToolCallResult,
 	type QueuedMessagePreparation,
-	type QueuedMessageQueue,
 	resolveTelemetry,
 	type StreamFn,
 	TERMINAL_TOOL_RESULT_ABORT_REASON,
@@ -2136,7 +2135,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			getEnabledToolNames: () => this.getEnabledToolNames(),
 			toolRegistry: () => this.#tools.registry,
 			planModeEnabled: () => this.#planModeState?.enabled === true,
-			prewalkWillHandoff: () => false,
 			consumeLastServedToolChoiceLabel: () => this.#toolChoiceQueue.consumeLastServedLabel(),
 		};
 		this.#todo = new TodoTracker(todoHost);
@@ -2919,16 +2917,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/**
 	 * `disabledProviders`: reads filter at use time; the catalog rebuild re-seeds
 	 * re-enabled providers (implicit local servers, cached discoveries).
-	 * `prewalk.enabled` (top-level sessions): arms the default hand-off or drops a
-	 * pending one, effective from the next turn.
 	 */
 	#watchModelAvailabilitySettings(): void {
 		cfgDisabledProviders.listen(this, () => this.#modelRegistry.reapplyModelPolicies());
 	}
-
-	/** Resolves a prewalk target selector like `--prewalk-into`: role aliases, scoped models, match preferences. */
-
-	/** Resolve the configured startup/new-session handoff using the settings-change selection path. */
 
 	/**
 	 * Applies session-level settings (queue modes, sampling, service tiers,
@@ -7405,11 +7397,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		return this.#planModeState;
 	}
 
-	/** Prewalk state, if armed and active */
-	getPrewalkState(): undefined {
-		return undefined;
-	}
-
 	setPlanModeState(state: PlanModeState | undefined): void {
 		this.#planModeState = state;
 		if (state?.enabled) {
@@ -8502,7 +8489,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	#prepareQueuedUserMessages = (
 		messages: readonly AgentMessage[],
 		signal: AbortSignal,
-		queue: QueuedMessageQueue,
 	): Promise<QueuedMessagePreparation> | undefined => {
 		const userMessages = messages.filter(isUserAuthoredQueuedMessage);
 		const first = userMessages[0];
@@ -12242,7 +12228,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			}
 		}
 		this.agent.setModel(model);
-		// Model mutations driven through ModelControls (explicit /model, prewalk
+		// Model mutations driven through ModelControls (explicit /model, manual
 		// hand-offs, retry-fallback, model cycling) funnel through this method,
 		// so this is the single point that notifies subscribers (ACP config
 		// sync, RPC, TUI status line) — callers that bypass ModelControls never
@@ -13168,7 +13154,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				this.sessionManager.getLastModelChangeRole(),
 			).slice(0, 1);
 			let targetModel = explicitModel;
-			let modelFallbackWarning: string | undefined;
 			if (!targetModel && !options?.keepModel && targetModelStrings.length > 0) {
 				targetModel = await this.#resolveSessionModel(targetModelStrings);
 				if (!targetModel && switchingToDifferentSession) {
@@ -13331,10 +13316,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			}
 			generationSettled.resolve();
 			this.#sessionGenerationSettled = previousSessionGenerationSettled;
-			if (modelFallbackWarning) {
-				if (options?.onModelFallback) options.onModelFallback(modelFallbackWarning);
-				else this.emitNotice("warning", modelFallbackWarning);
-			}
 			return true;
 		} catch (error) {
 			this.sessionManager.restoreState(previousSessionState);

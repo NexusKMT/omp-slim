@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import * as ai from "@oh-my-pi/pi-ai";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -12,10 +13,8 @@ import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-
 import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import type { SlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
-import { DEFAULT_TINY_TITLE_LOCAL_MODEL_KEY } from "@oh-my-pi/pi-coding-agent/tiny/models";
-import { tinyTitleClient } from "@oh-my-pi/pi-coding-agent/tiny/title-client";
 import { cfgTitleIcons } from "@oh-my-pi/pi-coding-agent/utils/title-settings";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createAssistantMessage, createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 
 let session: AgentSession | undefined;
@@ -32,7 +31,6 @@ function createRuntime(
 	const settings = Settings.isolated({
 		"compaction.enabled": false,
 		"title.icons": "boring",
-		modelRoles: { tiny: `local/${DEFAULT_TINY_TITLE_LOCAL_MODEL_KEY}` },
 	});
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
@@ -85,9 +83,9 @@ function createRuntime(
 function deferTitle() {
 	const started = Promise.withResolvers<void>();
 	const response = Promise.withResolvers<string | null>();
-	const generate = vi.spyOn(tinyTitleClient, "generate").mockImplementation(() => {
+	const generate = vi.spyOn(ai, "completeSimple").mockImplementation(() => {
 		started.resolve();
-		return response.promise;
+		return response.promise.then(text => createAssistantMessage(text ?? ""));
 	});
 	return { started, response, generate };
 }
@@ -130,13 +128,15 @@ for (const mode of ["TUI", "headless"] as const) {
 		it("replaces a manual title from conversation context and protects the result from automatic titles", async () => {
 			const { session, sessionManager, execute } = createRuntime(mode);
 			await sessionManager.setSessionName("Old manually chosen title", "user");
-			const generate = vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Cache invalidation repair");
+			const generate = vi
+				.spyOn(ai, "completeSimple")
+				.mockResolvedValue(createAssistantMessage("Cache invalidation repair"));
 
 			await execute("/rename   ");
 
 			expect(session.sessionName).toBe("Cache invalidation repair");
 			expect(generate).toHaveBeenCalledTimes(1);
-			const context = generate.mock.calls[0]?.[1];
+			const context = JSON.stringify(generate.mock.calls[0]?.[1]);
 			expect(context).toContain("Repair cache invalidation after writes");
 			await sessionManager.setSessionName("Later automatic title", "auto");
 			expect(session.sessionName).toBe("Cache invalidation repair");
@@ -146,7 +146,9 @@ for (const mode of ["TUI", "headless"] as const) {
 			const { session, sessionManager, runtime, execute } = createRuntime(mode);
 			cfgTitleIcons.override(runtime.settings, "emoji");
 			await sessionManager.setSessionName("🧪 CACHE: Fix cache writes", "auto");
-			const generate = vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Cache invalidation repair");
+			const generate = vi
+				.spyOn(ai, "completeSimple")
+				.mockResolvedValue(createAssistantMessage("Cache invalidation repair"));
 
 			await execute("/rename");
 
@@ -158,17 +160,16 @@ for (const mode of ["TUI", "headless"] as const) {
 			const { session, runtime, execute } = createRuntime(mode);
 			cfgTitleIcons.override(runtime.settings, "emoji");
 			const generate = vi
-				.spyOn(tinyTitleClient, "generate")
-				.mockImplementation(async (_model, _message, options) =>
-					options && "systemPrompt" in options ? "🗄 CACHE" : "Cache invalidation repair",
-				);
+				.spyOn(ai, "completeSimple")
+				.mockResolvedValueOnce(createAssistantMessage("Cache invalidation repair"))
+				.mockResolvedValue(createAssistantMessage("🗄 CACHE"));
 
 			await execute("/rename");
 			expect(session.sessionName).toBe("🗄️ CACHE: Cache invalidation repair");
 
 			await execute("/rename Cache ownership");
 			expect(session.sessionName).toBe("🗄️ CACHE: Cache ownership");
-			expect(generate.mock.calls.at(-1)?.[1]).toBe("Cache ownership");
+			expect(generate.mock.calls.at(-1)?.[1].messages.at(-1)?.content).toContain("Cache ownership");
 
 			await execute("/rename 🐳 DOCKER: Docker builds");
 			expect(session.sessionName).toBe("🐳 DOCKER: Docker builds");
@@ -194,7 +195,9 @@ for (const mode of ["TUI", "headless"] as const) {
 
 		it("persists an explicit title without asking the model", async () => {
 			const { session, execute } = createRuntime(mode);
-			const generate = vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Unrequested generated title");
+			const generate = vi
+				.spyOn(ai, "completeSimple")
+				.mockResolvedValue(createAssistantMessage("Unrequested generated title"));
 
 			await execute("/rename   Cache ownership   ");
 
@@ -206,7 +209,7 @@ for (const mode of ["TUI", "headless"] as const) {
 			const { session, sessionManager, execute } = createRuntime(mode, null);
 			await sessionManager.setSessionName("Keep this title", "user");
 			const entries = sessionManager.getEntries();
-			const generate = vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Invented topic");
+			const generate = vi.spyOn(ai, "completeSimple").mockResolvedValue(createAssistantMessage("Invented topic"));
 
 			await execute("/rename");
 
@@ -227,7 +230,7 @@ for (const mode of ["TUI", "headless"] as const) {
 					session.agent.replaceMessages(
 						context === "empty" ? [] : [{ role: "user", content: "hello", timestamp: 2 }],
 					);
-					generate.mockResolvedValueOnce(null);
+					generate.mockResolvedValueOnce(createAssistantMessage(""));
 					await execute("/rename");
 					expect(generate).toHaveBeenCalledTimes(1);
 
@@ -248,9 +251,9 @@ for (const mode of ["TUI", "headless"] as const) {
 				const { session, sessionManager, execute } = createRuntime(mode);
 				await sessionManager.setSessionName("Keep this title", "user");
 				const entries = sessionManager.getEntries();
-				const generate = vi.spyOn(tinyTitleClient, "generate");
+				const generate = vi.spyOn(ai, "completeSimple");
 				if (outcome === "failure") generate.mockRejectedValue(new Error("Title model unavailable"));
-				else generate.mockResolvedValue(null);
+				else generate.mockResolvedValue(createAssistantMessage(""));
 
 				await execute("/rename");
 
@@ -267,7 +270,7 @@ for (const mode of ["TUI", "headless"] as const) {
 				const output = mode === "TUI" ? vi.spyOn(ctx, "showStatus") : vi.spyOn(runtime, "output");
 				const notify = vi.fn();
 				runtime.notifyTitleChanged = notify;
-				vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Generated title");
+				vi.spyOn(ai, "completeSimple").mockResolvedValue(createAssistantMessage("Generated title"));
 				const started = Promise.withResolvers<void>();
 				const persisted = Promise.withResolvers<void>();
 				const store = sessionManager.setSessionName.bind(sessionManager);
@@ -386,7 +389,7 @@ it("suppresses confirmation when the prompt is cancelled during title notificati
 		started.resolve();
 		return notified.promise;
 	};
-	vi.spyOn(tinyTitleClient, "generate").mockResolvedValue("Generated title");
+	vi.spyOn(ai, "completeSimple").mockResolvedValue(createAssistantMessage("Generated title"));
 	const pending = execute("/rename");
 	try {
 		await Promise.race([started.promise, pending]);
@@ -447,7 +450,7 @@ it("aborts a background RPC rename silently and allows a later rename", async ()
 		expect(session.sessionName).toBeUndefined();
 		expect(output).not.toHaveBeenCalled();
 
-		generate.mockResolvedValue("Fresh RPC title");
+		generate.mockResolvedValue(createAssistantMessage("Fresh RPC title"));
 		await executeAcpBuiltinSlashCommand("/rename", runtime);
 		await backgroundTask;
 		expect(session.sessionName).toBe("Fresh RPC title");
@@ -461,17 +464,26 @@ it.each([true, false])("keeps the latest RPC rename request when older finishes 
 	const { session, sessionManager, runtime } = createRuntime("headless");
 	await sessionManager.setSessionName("Original title", "user");
 	const responses = [Promise.withResolvers<string | null>(), Promise.withResolvers<string | null>()];
+	const started = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
 	const generate = vi
-		.spyOn(tinyTitleClient, "generate")
-		.mockImplementationOnce(() => responses[0].promise)
-		.mockImplementationOnce(() => responses[1].promise);
+		.spyOn(ai, "completeSimple")
+		.mockImplementationOnce(() => {
+			started[0].resolve();
+			return responses[0].promise.then(text => createAssistantMessage(text ?? ""));
+		})
+		.mockImplementationOnce(() => {
+			started[1].resolve();
+			return responses[1].promise.then(text => createAssistantMessage(text ?? ""));
+		});
 	const pending: Promise<void>[] = [];
 	runtime.runCommandInBackground = task => {
 		pending.push(task());
 	};
 	try {
 		await executeAcpBuiltinSlashCommand("/rename", runtime);
+		await started[0].promise;
 		await executeAcpBuiltinSlashCommand("/rename", runtime);
+		await started[1].promise;
 		expect(generate).toHaveBeenCalledTimes(2);
 		const first = olderFirst ? 0 : 1;
 		const titles = ["Stale generated title", "Latest generated title"];
@@ -493,21 +505,31 @@ it.each(["TUI", "headless"] as const)(
 		const { session, sessionManager, execute } = createRuntime(mode);
 		const previousNoTitle = Bun.env.PI_NO_TITLE;
 		delete Bun.env.PI_NO_TITLE;
+		const automaticStarted = Promise.withResolvers<void>();
+		const manualStarted = Promise.withResolvers<void>();
 		const automatic = Promise.withResolvers<string | null>();
 		const manual = Promise.withResolvers<string | null>();
 		const applied = Promise.withResolvers<void>();
 		const unsubscribe = sessionManager.onSessionNameChanged(() => applied.resolve());
 		const generate = vi
-			.spyOn(tinyTitleClient, "generate")
-			.mockImplementationOnce(() => automatic.promise)
-			.mockImplementationOnce(() => manual.promise);
+			.spyOn(ai, "completeSimple")
+			.mockImplementationOnce(() => {
+				automaticStarted.resolve();
+				return automatic.promise.then(text => createAssistantMessage(text ?? ""));
+			})
+			.mockImplementationOnce(() => {
+				manualStarted.resolve();
+				return manual.promise.then(text => createAssistantMessage(text ?? ""));
+			});
 		let pending: Promise<unknown> | undefined;
 		try {
 			// A TITLE_SYSTEM.md override keeps the automatic title on the title model
 			// (no reply fork), so both titles race through `generate`.
 			session.setTitleSystemPrompt("Name the session in 3-6 words.");
 			await session.prompt("Repair cache invalidation after writes");
+			await automaticStarted.promise;
 			pending = execute("/rename");
+			await manualStarted.promise;
 			expect(generate).toHaveBeenCalledTimes(2);
 			automatic.resolve("Initial automatic title");
 			await applied.promise;

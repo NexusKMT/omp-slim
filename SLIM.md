@@ -8,7 +8,7 @@ third-party notices are retained. `upstream` points to can1357/oh-my-pi;
 `origin` points to this downstream repository.
 
 The requested scope is removal of built-in browser automation, host desktop
-control, speech/live audio, and automatic long-term memory. Session storage,
+control, speech/live audio, and automatic long-term memory, followed by independent model roles and automatic alternate-model routing. Session storage,
 resume/history, context compaction, file editing, shell execution, subagents,
 ordinary HTTP search, MCP and manually maintained instructions remain core.
 
@@ -25,6 +25,7 @@ been removed from the product. Track the actual state below.
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
 | Other memory backends, browser, desktop and speech removal | Removed from source, registration, workers, UI, dedicated tests/docs and native backends; rebuilt addon export checks, full Rust checks and all 219 Mac TS groups passed |
 | Dependency cleanup | Cargo packages 979 → 799, Bun packages 462 → 396, Bazel repositories 962 → 783; no new package versions; two dedicated workspaces removed |
+| Single main model | Source integrated; verification in progress. `modelRoles.default` migrates to scalar `model`; plan/tasks/advisors/helpers use the current model; independent tiny/prediction runtimes and role routing removed. See [the single-model report](docs/slim-single-model.md). |
 | Intel macOS Actions build | Final native/CLI source `d7f1646f90` compiled in `42807753137`; local binary verification, 120 PTY output probes and actual spelling passed; complete TS validation `42819306007` passed 219/219 groups |
 
 As of 2026-11-10 (Asia/Shanghai), Codespace
@@ -290,7 +291,7 @@ gh workflow run slim-macos-tests.yml --repo NexusKMT/omp-slim --ref main \
 
 Use a new full build if native inputs changed or the seven-day artifacts have
 expired. The test workflow records both the current source and native source.
-It does not produce a new CLI executable for changed application code.
+It also rebuilds and verifies the current standalone CLI, then uploads a separate archive with both application and native source provenance. Only the generated standalone Rust RPC SDK is excluded from native-input matching; native crate sources and dependencies remain guarded.
 
 Update this downstream through the pinned repository and its build artifacts.
 The retained `omp update` command and update check still target upstream's

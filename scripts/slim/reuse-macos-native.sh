@@ -40,6 +40,8 @@ git diff --no-renames --name-only -z "$omp_source_sha" "$omp_target_sha" > "$omp
 : > "$omp_report/changed-native-inputs.txt"
 while IFS= read -r -d '' omp_path; do
   case "$omp_path" in
+    # Generated standalone RPC SDK Rust is not linked into the native addon.
+    sdk/rust/*) continue ;;
     *.rs|Cargo.toml|Cargo.lock|*/Cargo.toml|*/Cargo.lock|rust-toolchain*|*/rust-toolchain*|.cargo/*|*/.cargo/*|crates/*) ;;
     packages/natives/test/*|packages/natives/bench/*|packages/natives/README.md|packages/natives/CHANGELOG.md|packages/natives/THIRD-PARTY-NOTICES.txt) continue ;;
     packages/natives/*|package.json|bun.lock|bunfig.toml|.npmrc|patches/*) ;;

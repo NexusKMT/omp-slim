@@ -72,6 +72,4 @@ describe("--model role override thinking suffix", () => {
 			"anthropic/claude-opus-4-5:high",
 		);
 	});
-
-
 });

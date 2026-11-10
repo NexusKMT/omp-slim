@@ -222,8 +222,6 @@ describe("AgentSession model persistence", () => {
 		expect(created.settings.getModelRole("default")).toBe(modelValue(nextModel));
 	});
 
-
-
 	it("cycles available models without persisting the default role", async () => {
 		const created = await createSession({
 			selectInitialModel: availableModels => {

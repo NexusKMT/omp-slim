@@ -2339,7 +2339,6 @@ describe("AgentSession retry delay cap", () => {
 		expect(lastAssistant(session).errorMessage).toContain(modelDenial);
 	});
 
-
 	it("waits for the earliest sibling unblock instead of failing the delay cap", async () => {
 		// Regression: with every sibling credential momentarily blocked (e.g. a
 		// short post-401 or usage-probe block), a usage-limit 429 with a

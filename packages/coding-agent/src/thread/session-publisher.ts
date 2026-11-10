@@ -504,7 +504,6 @@ export class SessionPublisher {
 			serviceTierByFamily: toWireData(session.serviceTierByFamily),
 			fastModeActive: session.isFastModeActive(),
 			anthropicSlowModeLabel: session.getAnthropicSlowModeLabel(),
-			prewalk: toWireData(session.getPrewalkState()),
 			goalMode: toWireData(session.getGoalModeState()),
 			advisorCost: session.getAdvisorCost(),
 			advisorUsingSubscription: session.isAdvisorUsingSubscription(),

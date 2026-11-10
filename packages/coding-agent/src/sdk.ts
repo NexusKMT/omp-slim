@@ -887,16 +887,7 @@ export interface CreateAgentSessionOptions {
 
 	/** Whether UI is available (enables interactive tools like ask). Default: false */
 	hasUI?: boolean;
-	/**
-	 * When a resumed session's saved models cannot be restored even after
-	 * discovery, allow continuing with a warning on another model: the settings
-	 * default at startup (`modelFallbackMessage`), or the current model when
-	 * `switchSession` later opens another session. Applies only when `hasUI` is
-	 * true and `retry.modelFallback` is on; otherwise `createAgentSession` and
-	 * `switchSession` throw `Could not restore model <provider/id>`. Hosts whose
-	 * `hasUI` only enables tool dialogs and cannot show the warning (rpc-ui) set
-	 * this to false. Default: true.
-	 */
+	/** @deprecated Ignored. An unavailable saved model always makes restoration fail. */
 	allowSessionModelFallback?: boolean;
 	/**
 	 * A human can answer synchronous prompts even without a terminal UI (e.g. an
@@ -3411,7 +3402,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// Held until AgentSession exists: before then the root cost gate does not, so a request
 			// sent from the startup prompt render could go out ungated (see `startCompression` below).
 			deferCompression: true,
-			compress: createSkillDescriptionCompressor(modelRegistry, settings, {
+			compress: createSkillDescriptionCompressor(modelRegistry, {
+				getModel: () => agent?.state.model ?? model,
 				getCostGate: currentCostGate,
 				getTelemetry: () =>
 					agent

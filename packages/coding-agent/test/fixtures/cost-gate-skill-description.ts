@@ -42,7 +42,6 @@ try {
 		"providers.maxInFlightRequests": mode === "queued" ? { denied: 1 } : {},
 	});
 	settings.setModelRole("default", "denied/probe");
-	settings.setModelRole("smol", "denied/probe");
 	const registry = new ModelRegistry(auth, path.join(dir.path(), "models.yml"), { settings });
 	const api = mode === "metered" || mode === "queued" ? "test-skill-metered" : "openai-completions";
 	const firstStarted = Promise.withResolvers<void>();
@@ -112,7 +111,7 @@ try {
 		mode === "root" ? undefined : new CostGate(settings, mode === "supplied" ? 1 : 0, () => recorded.resolve());
 	if (mode === "queued") {
 		if (!gate) throw new Error("Missing queued request gate");
-		const compressor = createSkillDescriptionCompressor(registry, settings, { getCostGate: () => gate });
+		const compressor = createSkillDescriptionCompressor(registry, { getModel: () => model, getCostGate: () => gate });
 		const compression = compressor.compress("attribution", "Plan migrations.", "Compress this.").then(
 			() => false,
 			error => error instanceof CostCapError,

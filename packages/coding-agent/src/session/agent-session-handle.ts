@@ -324,8 +324,6 @@ export interface AgentViewSession extends AgentSessionHandle {
 	isFastModeActive(): boolean;
 	/** Anthropic usage-limit label, when one applies. */
 	getAnthropicSlowModeLabel(): string | undefined;
-	/** Active prewalk state. */
-	getPrewalkState(): undefined;
 	/** Goal-mode state. */
 	getGoalModeState(): GoalModeState | undefined;
 	/** Total advisor cost. */

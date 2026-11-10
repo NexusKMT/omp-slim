@@ -4,11 +4,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as agentCore from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { __resetProfileSnapshotForTests, getAgentDir, Snowflake, setAgentDir } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../src/config/model-registry";
-import { resolveRoleChain, resolveRoleSelection } from "../src/config/model-resolver";
-import { cfgDisabledProviders } from "../src/config/model-settings";
 import { Settings } from "../src/config/settings";
 import {
 	createSkillDescriptionCompressor,
@@ -153,13 +151,15 @@ describe("skill description failure caching and shutdown", () => {
 		const authStorage = createInMemoryAuthStorage();
 		authStorages.push(authStorage);
 		authStorage.keys.setRuntime("anthropic", "test-key");
-		const settings = Settings.isolated({ modelRoles: { smol: "anthropic/claude-sonnet-4-5" } });
+		const settings = Settings.isolated({ modelRoles: { default: "anthropic/claude-sonnet-4-5" } });
 		const registry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"), { settings });
 		vi.spyOn(agentCore, "instrumentedCompleteSimple").mockResolvedValue({
 			...createAssistantMessage(compressed),
 			stopReason,
 		});
-		const compressor = createSkillDescriptionCompressor(registry, settings);
+		const compressor = createSkillDescriptionCompressor(registry, {
+			getModel: () => registry.find("anthropic", "claude-sonnet-4-5"),
+		});
 		vi.spyOn(compressor, "compress");
 		return compressor;
 	}
@@ -409,116 +409,32 @@ describe("skill description compressor model selection", () => {
 		for (const storage of authStorages.splice(0)) storage.close();
 	});
 
-	function fixture(modelRoles: Record<string, string>) {
+	it("uses the current model object and follows a manual selection without discovering other catalogs", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		authStorages.push(authStorage);
 		authStorage.keys.setRuntime("anthropic", "test-key");
-		const settings = Settings.isolated({ modelRoles });
-		const registry = new ModelRegistry(
-			authStorage,
-			path.join(os.tmpdir(), `omp-skill-models-${Snowflake.next()}.yml`),
-			{
-				settings,
-			},
+		const settings = Settings.isolated({ model: "anthropic/claude-opus-4-5", modelRoles: { smol: "missing/cheap" } });
+		const registry = new ModelRegistry(authStorage, undefined, { settings });
+		const base = registry.find("anthropic", "claude-sonnet-4-5");
+		if (!base) throw new Error("Missing fixture model");
+		let selected: Model | undefined = { ...base, baseUrl: "https://selected.invalid/v1" };
+		const request = spyOn(agentCore, "instrumentedCompleteSimple").mockResolvedValue(
+			createAssistantMessage("Use for migrations."),
 		);
-		return { registry, settings, authStorage, compressor: createSkillDescriptionCompressor(registry, settings) };
-	}
-
-	it("does not materialize unrelated catalogs for the first exact role selection", () => {
-		const { registry, compressor } = fixture({ default: "anthropic/claude-opus-4-5" });
-		const all = spyOn(registry, "getAvailable").mockImplementation(() => {
-			throw new Error("Unrelated catalogs must stay lazy");
+		const discovery = spyOn(registry, "getAvailable").mockImplementation(() => {
+			throw new Error("Unexpected discovery");
 		});
-		const scoped = spyOn(registry, "getAvailableForProviders");
-		expect(compressor.modelKey()).toBe("anthropic/claude-opus-4-5");
-		expect(compressor.modelKey()).toBe("anthropic/claude-opus-4-5");
-		expect(scoped).toHaveBeenCalledWith(new Set(["anthropic"]));
-		expect(all).not.toHaveBeenCalled();
-	});
-
-	it("keeps complete selector and fallback precedence when a scoped exact match misses", () => {
-		const { registry, settings, compressor } = fixture({});
-		registry.registerProvider("skill-custom", {
-			baseUrl: "https://example.invalid/v1",
-			api: "openai-completions",
-			apiKey: "test-key",
-			models: [
-				{
-					id: "anthropic/claude-opus-4-5:high",
-					name: "Literal suffix",
-					reasoning: false,
-					input: ["text"],
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-					contextWindow: 8192,
-					maxTokens: 1024,
-				},
-			],
-		});
-		for (const selector of [
-			"anthropic/claude-opus-4-5:high",
-			"missing-provider/missing,anthropic/claude-haiku-4-5",
-			"claude-haiku-4-5",
-			"skill-custom/anthropic/claude-opus-4-5:high",
-			"missing-provider/missing",
-		]) {
-			settings.setModelRole("smol", selector);
-			const available = registry.getAvailable();
-			const expected =
-				resolveRoleChain("smol", settings, available)[0]?.model ??
-				resolveRoleSelection(["tiny"], settings, available)?.model;
-			expect(compressor.modelKey()).toBe(expected ? `${expected.provider}/${expected.id}` : undefined);
-		}
-		settings.setModelRole("smol", "anthropic/claude-opus-4-5:high");
-		expect(compressor.modelKey()).toBe("skill-custom/anthropic/claude-opus-4-5:high");
-	});
-
-	it("observes live role, disabled-provider and runtime catalog changes after a scoped lookup", () => {
-		const { registry, settings, compressor } = fixture({ smol: "anthropic/claude-haiku-4-5" });
-		expect(compressor.modelKey()).toBe("anthropic/claude-haiku-4-5");
-		settings.setModelRole("smol", "anthropic/claude-opus-4-5");
-		expect(compressor.modelKey()).toBe("anthropic/claude-opus-4-5");
-		cfgDisabledProviders.set(settings, ["anthropic"]);
-		const available = registry.getAvailable();
-		const expected =
-			resolveRoleChain("smol", settings, available)[0]?.model ??
-			resolveRoleSelection(["tiny"], settings, available)?.model;
-		expect(compressor.modelKey()).toBe(expected ? `${expected.provider}/${expected.id}` : undefined);
-		cfgDisabledProviders.set(settings, []);
-		expect(compressor.modelKey()).toBe("anthropic/claude-opus-4-5");
-
-		settings.setModelRole("smol", "skill-runtime/first");
-		const register = (id: string) =>
-			registry.registerProvider("skill-runtime", {
-				baseUrl: "https://example.invalid/v1",
-				api: "openai-completions",
-				apiKey: "test-key",
-				models: [
-					{
-						id,
-						name: id,
-						reasoning: false,
-						input: ["text"],
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-						contextWindow: 8192,
-						maxTokens: 1024,
-					},
-				],
-			});
-		register("first");
-		expect(compressor.modelKey()).toBe("skill-runtime/first");
-		register("second");
-		settings.setModelRole("smol", "skill-runtime/second");
-		expect(compressor.modelKey()).toBe("skill-runtime/second");
-	});
-
-	it("uses the configured default for an unset smol role instead of the built-in smol chain", () => {
-		expect(fixture({ default: "anthropic/claude-opus-4-5" }).compressor.modelKey()).toBe("anthropic/claude-opus-4-5");
-	});
-
-	it("prefers a configured smol role over the configured default", () => {
-		expect(
-			fixture({ default: "anthropic/claude-opus-4-5", smol: "anthropic/claude-haiku-4-5" }).compressor.modelKey(),
-		).toBe("anthropic/claude-haiku-4-5");
+		const compressor = createSkillDescriptionCompressor(registry, { getModel: () => selected });
+		await compressor.compress("migration", "Plan migrations", "Compress");
+		expect(request.mock.calls[0][0]).toBe(selected);
+		expect(request.mock.calls[0][2]).toMatchObject({ disableServerSideFallback: true });
+		selected = { ...base, baseUrl: "https://manually-selected.invalid/v1" };
+		await compressor.compress("migration", "Plan migrations", "Compress again");
+		expect(request.mock.calls[1][0]).toBe(selected);
+		selected = undefined;
+		await expect(compressor.compress("migration", "Plan migrations", "Compress")).rejects.toThrow("No active model");
+		expect(request).toHaveBeenCalledTimes(2);
+		expect(discovery).not.toHaveBeenCalled();
 	});
 });
 
@@ -533,7 +449,7 @@ describe("skill description compressor cost gate", () => {
 	it("ends at the first provider attempt refused after admission, without transport retries", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		authStorages.push(authStorage);
-		const settings = Settings.isolated({ modelRoles: { smol: "skill-gate/probe" } });
+		const settings = Settings.isolated({ modelRoles: { default: "skill-gate/probe" } });
 		const registry = new ModelRegistry(
 			authStorage,
 			path.join(os.tmpdir(), `omp-skill-models-${Snowflake.next()}.yml`),
@@ -570,7 +486,10 @@ describe("skill description compressor cost gate", () => {
 			record: () => {},
 			meter: stream => stream,
 		};
-		const compressor = createSkillDescriptionCompressor(registry, settings, { getCostGate: () => gate });
+		const compressor = createSkillDescriptionCompressor(registry, {
+			getModel: () => registry.find("skill-gate", "probe"),
+			getCostGate: () => gate,
+		});
 
 		const started = Date.now();
 		const error = await compressor.compress("migrations", "Plan migrations.", "Compress this.").catch(e => e);

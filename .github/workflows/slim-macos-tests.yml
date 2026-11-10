@@ -1,4 +1,4 @@
-name: Test OMP Slim on Intel Mac
+name: Build and test OMP Slim with a verified Intel Mac addon
 
 on:
   workflow_dispatch:
@@ -54,6 +54,21 @@ jobs:
       - name: Check TypeScript workspace
         shell: bash
         run: bun run check:ts 2>&1 | tee dist/validation/macos-tests/check.log
+
+      - name: Compile and verify current standalone CLI
+        shell: bash
+        run: bash scripts/slim/package-reused-cli.sh
+
+      - name: Upload current CLI archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: omp-slim-single-model-macos-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist/builds/reused-cli-*/omp-darwin-x64.tar.gz
+            dist/builds/reused-cli-*/ARCHIVE-SHA256SUMS
+            dist/builds/reused-cli-*/build.log
 
       - name: Test retained TypeScript workspace behavior
         shell: bash

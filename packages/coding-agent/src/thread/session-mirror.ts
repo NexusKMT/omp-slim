@@ -182,7 +182,6 @@ export interface SessionViewState {
 	serviceTierByFamily: ServiceTierByFamily;
 	fastModeActive: boolean;
 	anthropicSlowModeLabel: string | undefined;
-	prewalk: undefined;
 	goalMode: GoalModeState | undefined;
 	advisorCost: number;
 	advisorUsingSubscription: boolean;

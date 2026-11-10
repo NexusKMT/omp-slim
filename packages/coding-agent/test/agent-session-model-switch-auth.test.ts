@@ -10,7 +10,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
-// Switching the active model (Ctrl+P role cycling, /models selection) must be a
+// Selecting the active main model must be a
 // cheap, synchronous operation. It used to call the async `getApiKey`, which can
 // block the event loop on a command-backed key program (`execSync`) or stall on
 // a network OAuth refresh. The real key is resolved lazily per request via the
@@ -49,11 +49,8 @@ describe("AgentSession model switch auth pre-flight", () => {
 		return model;
 	}
 
-	function makeSession(initialModel: Model<Api>, roles?: Record<string, string>): AgentSession {
+	function makeSession(initialModel: Model<Api>): AgentSession {
 		const settings = Settings.isolated();
-		if (roles) {
-			for (const role in roles) settings.setModelRole(role, roles[role]);
-		}
 		const agent = new Agent({
 			initialState: {
 				model: initialModel,
@@ -87,7 +84,6 @@ describe("AgentSession model switch auth pre-flight", () => {
 		expect(hasAuthSpy).toHaveBeenCalled();
 		expect(getApiKeySpy).not.toHaveBeenCalled();
 	});
-
 
 	it("temporary switch also avoids the resolver", async () => {
 		const from = modelOrThrow("claude-sonnet-4-5");

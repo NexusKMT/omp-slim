@@ -103,7 +103,7 @@ macOS · Linux · Windows · bun ≥ 1.4.4
 
 ### Shell 补全
 
-`omp` 会根据实时的命令/参数元数据，为 **bash**、**zsh** 和 **fish** 生成自己的补全脚本，因此永远不会与实际 CLI 脱节。子命令、参数和枚举值是静态补全的；模型名（`--model`、`--smol`、`--slow`、`--plan`）会根据内置模型目录解析，`--resume` 则根据磁盘上的会话解析。
+`omp` 会根据实时的命令/参数元数据，为 **bash**、**zsh** 和 **fish** 生成自己的补全脚本，因此永远不会与实际 CLI 脱节。子命令、参数和枚举值是静态补全的；模型名（`--model`）会根据内置模型目录解析，`--resume` 则根据磁盘上的会话解析。
 
 ```sh
 # zsh — add to ~/.zshrc (or write the output into a file on your $fpath)
@@ -288,7 +288,6 @@ _[观看录屏 ↗](https://omp.sh/clips/codemod.mp4)_
 
 - `web_search` — 一次查询覆盖所有已配置的提供商，返回答案和引用。
 - `github` — GitHub CLI 操作——仓库、PR、issue、代码搜索、Actions 运行监视。
-- `generate_image` — 通过 Gemini、GPT 或 xAI Grok 图像模型生成或编辑位图。
 
 **技能**
 
@@ -296,7 +295,7 @@ _[观看录屏 ↗](https://omp.sh/clips/codemod.mp4)_
 - `rewind` — 剪除探索性上下文，只保留简洁的报告。
 - `manage_skill` — 创建、更新或删除一个独立的托管技能。
 
-需在设置中开启、默认关闭的工具：`github`、`security_scan`、`generate_image`、`checkpoint`、`rewind`。
+需在设置中开启、默认关闭的工具：`github`、`security_scan`、`checkpoint`、`rewind`。
 
 [完整参考 →](https://omp.sh/docs/tools)
 
@@ -320,7 +319,7 @@ _[观看录屏 ↗](https://omp.sh/clips/codemod.mp4)_
 
 ## 六十多个提供商、上千个模型，_只需一次 /model_。
 
-九种角色按用途分配模型。`default` 用于常规对话；`smol` 用于低成本地批量派发子智能体；`slow` 用于深度推理；`plan` 用于计划模式；`commit` 用于生成变更日志；此外还有 `vision`、`task`、`advisor` 和 `tiny`，各司其职。启动时可用 `--smol`、`--slow` 或 `--plan` 覆盖；用 `Ctrl+P` 在当前角色已配置的模型间循环切换。会话中可用 `/model` 斜杠命令切换当前模型。
+OMP Slim 只使用一个当前主模型。计划、子代理、顾问、标题及其他模型辅助功能都沿用它。通过 `--model` 或 `/model` 手动选择；进入计划模式不会更换模型。自动跨模型回退、角色预设、本地 tiny 和预测运行时已删除。
 
 下文的认证标签：`oauth` 表示用你在该提供商的账号登录，`plan` 表示通过编程套餐订阅使用，`local` 表示连接本地服务器，密钥可选。
 
@@ -359,19 +358,17 @@ providers:
            maxTokens: 32000
 ```
 
-运行 `omp models spark` 确认能发现该提供商的模型。然后运行 `omp setup` 并在选择默认模型的步骤中选中它，或在会话中打开 `/model` 将其分配给 `default` 角色。
+运行 `omp models spark` 确认能发现该提供商的模型。然后运行 `omp setup` 并在选择默认模型的步骤中选中它，或在会话中打开 `/model` 选择它。
 
 如果不想通过选择器，也可以直接在 `~/.omp/agent/config.yml` 中预先配置默认模型：
 
 ```yaml
-modelRoles:
-   default: spark/minimax-m3
+model: spark/minimax-m3
 ```
 
-### 让路由真正好用的四个开关
+### 提供商与凭据配置
 
 - **自定义提供商** — 在 `~/.omp/agent/models.yml` 中声明任何支持以下协议的服务：`openai-completions`、`openai-responses`、`openai-codex-responses`、`azure-openai-responses`、`anthropic-messages`、`bedrock-converse-stream`、`google-generative-ai`、`google-gemini-cli`、`google-vertex`、`typesafe`、`openrouter-decisions`、`openai-decisions` 或 `workers-ai-systemone`（后几个为评判类 API）。
-- **回退链** — 在 `retry.fallbackChains` 下按角色或按模型配置回退链。当主模型返回 429 或触及配额上限时，链中下一项接管本轮剩余部分——冷却后自动恢复。
 - **按路径限定模型** — 给 `enabledModels` 和 `disabledProviders` 条目加上 `path:` 前缀，即可在某个仓库固定一组不同的模型，而无需改动全局配置。限定条目覆盖该路径及其下所有内容。
 - **轮换凭据** — 为每个提供商叠加多个 API 密钥，运行时会按会话亲和性轮换，并对每个凭据单独退避。适合一个密钥中午前就会把配额烧光的情况。
 

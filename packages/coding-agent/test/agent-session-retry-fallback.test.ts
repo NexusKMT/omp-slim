@@ -3,51 +3,34 @@ import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import { createCompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction";
 import {
-	type AnthropicFallbackCreditHandle,
 	type Api,
 	type AssistantMessage,
-	Effort,
 	type Message,
 	type Model,
-	type ModelUsageHealth,
 	type ProviderSessionState,
 	type ToolCall,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
-import { CodexApiError } from "@oh-my-pi/pi-ai/providers/openai-codex/response-handler";
-import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { resolveModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
-import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { parseModelString } from "@oh-my-pi/pi-tui/overlays/model-selector";
-import { parseModelPattern } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { editVariantForModel } from "@oh-my-pi/pi-coding-agent/utils/edit-mode";
-import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { type ServingModel } from "@oh-my-pi/pi-coding-agent/session/retry-fallback-chains";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { __resetDirsFromEnvForTests, setAgentDir, TempDir, withTimeout } from "@oh-my-pi/pi-utils";
-import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { __resetDirsFromEnvForTests, TempDir } from "@oh-my-pi/pi-utils";
 import { mockSchedulerWaitWithClock } from "./helpers/mock-scheduler-clock";
 import { restoreEnvValue } from "./helpers/settings-test-state";
 
 type AutoRetryStartEvent = Extract<AgentSessionEvent, { type: "auto_retry_start" }>;
 type AutoRetryEndEvent = Extract<AgentSessionEvent, { type: "auto_retry_end" }>;
-
-const FALLBACK_TEST_RETRY_AFTER_MS = 60_000;
 
 function trackRetryEvents(session: AgentSession): {
 	retryStartEvents: AutoRetryStartEvent[];
@@ -74,36 +57,6 @@ function getLastAssistantMessage(session: AgentSession): AssistantMessage {
 	return lastMessage;
 }
 
-function createFallbackAgent(
-	primaryModel: Model,
-	requestedModels: string[],
-	options: { retryAfterMs?: number; firstError?: string | Error } = {},
-): Agent {
-	const retryAfterMs = options.retryAfterMs ?? FALLBACK_TEST_RETRY_AFTER_MS;
-	const firstError = options.firstError ?? `rate limit exceeded retry-after-ms=${retryAfterMs}`;
-	const mock = createMockModel();
-	let primaryAttempts = 0;
-	return new Agent({
-		getApiKey: model => `${model.provider}-test-key`,
-		initialState: {
-			model: primaryModel,
-			systemPrompt: ["Test"],
-			tools: [],
-			messages: [],
-		},
-		streamFn: (model, context, options) => {
-			requestedModels.push(`${model.provider}/${model.id}`);
-			if (model.provider === primaryModel.provider && model.id === primaryModel.id && primaryAttempts === 0) {
-				primaryAttempts += 1;
-				mock.push({ throw: firstError });
-			} else {
-				mock.push({ content: [`ok:${model.provider}/${model.id}`] });
-			}
-			return mock.stream(model, context, options);
-		},
-	});
-}
-
 function emptyUsage(): AssistantMessage["usage"] {
 	return {
 		input: 0,
@@ -112,25 +65,6 @@ function emptyUsage(): AssistantMessage["usage"] {
 		cacheWrite: 0,
 		totalTokens: 0,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-	};
-}
-
-function advisorNativeSummary(provider: string) {
-	const compactionItem = { type: "compaction", encrypted_content: "native-advisor-transition-state" };
-	const replacementHistory = [
-		{
-			type: "message",
-			role: "user",
-			content: [{ type: "input_text", text: "retained-advisor-transition-decision" }],
-		},
-		compactionItem,
-	];
-	return {
-		...createCompactionSummaryMessage("Native advisor history", 100_000, new Date().toISOString(), {
-			providerPayload: { type: "openaiResponsesHistory", provider, items: replacementHistory },
-		}),
-		preserveData: { openaiRemoteCompaction: { provider, replacementHistory, compactionItem } },
-		advisorUsageAnchorStartIndex: 1,
 	};
 }
 
@@ -150,54 +84,6 @@ function thinkingLoopErrorStream(model: Model<Api>): AssistantMessageEventStream
 			errorMessage:
 				"Thinking loop detected: the model repeated near-identical content (4 near-identical segments within the last 16). Treating as a stream stall and retrying.",
 			errorId: AIError.create(AIError.Flag.ThinkingLoop),
-			timestamp: Date.now(),
-		};
-		stream.push({ type: "error", reason: "error", error: partial });
-	});
-	return stream;
-}
-
-/** Finalize a real Codex `turn_rate_limit_exceeded` 429 the way the provider does. */
-async function finalizeCodexCapacityError(retryAfterSeconds: string): Promise<AIError.FinalizeResult> {
-	const response = new Response(
-		JSON.stringify({
-			error: {
-				type: "rate_limit_error",
-				code: "turn_rate_limit_exceeded",
-				message: "Codex is at capacity, please try again later",
-			},
-		}),
-		{
-			status: 429,
-			headers: {
-				"retry-after": retryAfterSeconds,
-				"x-codex-primary-used-percent": "14",
-				"x-codex-primary-reset-at": String(Math.floor(Date.now() / 1000) + 3 * 60 * 60),
-			},
-		},
-	);
-	return AIError.finalize(await CodexApiError.fromResponse(response), {
-		api: "openai-codex-responses",
-		provider: "openai-codex",
-		model: "gpt-5.6-sol",
-	});
-}
-
-/** A stream that ends with a finalized provider error, as a provider stream does. */
-function finalizedErrorStream(model: Model<Api>, failure: AIError.FinalizeResult): AssistantMessageEventStream {
-	const stream = new AssistantMessageEventStream();
-	queueMicrotask(() => {
-		const partial: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			usage: emptyUsage(),
-			stopReason: failure.stopReason,
-			errorMessage: failure.message,
-			errorStatus: failure.status,
-			errorId: failure.id,
 			timestamp: Date.now(),
 		};
 		stream.push({ type: "error", reason: "error", error: partial });

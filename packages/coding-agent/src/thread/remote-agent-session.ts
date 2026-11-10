@@ -198,7 +198,6 @@ function emptyViewState(): SessionViewState {
 		serviceTierByFamily: {},
 		fastModeActive: false,
 		anthropicSlowModeLabel: undefined,
-		prewalk: undefined,
 		goalMode: undefined,
 		advisorCost: 0,
 		advisorUsingSubscription: false,
@@ -598,10 +597,6 @@ export class RemoteAgentSession implements AgentViewSession {
 
 	getAnthropicSlowModeLabel(): string | undefined {
 		return this.#view.anthropicSlowModeLabel;
-	}
-
-	getPrewalkState(): undefined {
-		return undefined;
 	}
 
 	getGoalModeState(): GoalModeState | undefined {
