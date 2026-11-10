@@ -37,12 +37,12 @@ function acceptedIds(role: string, settings: Settings): string[] {
 }
 
 describe("getRoleInfo", () => {
-	test("built-in roles accept models by capability", () => {
+	test("roles restrict model selection by capability", () => {
 		const settings = Settings.isolated({});
 
 		expect(acceptedIds("default", settings)).toEqual(["chat", "explicit-chat", "grounded-chat"]);
 		expect(acceptedIds("tiny", settings)).toEqual(["chat", "explicit-chat", "grounded-chat", "tiny"]);
-		expect(acceptedIds("memory", settings)).toEqual(["chat", "explicit-chat", "grounded-chat", "tiny"]);
+		expect(acceptedIds("memory", settings)).toEqual(["chat", "explicit-chat", "grounded-chat"]);
 		expect(acceptedIds("image", settings)).toEqual(["image"]);
 		expect(acceptedIds("web", settings)).toEqual(["grounded-chat", "search"]);
 		expect(acceptedIds("judge", settings)).toEqual(["chat", "explicit-chat", "grounded-chat", "tiny", "judge"]);

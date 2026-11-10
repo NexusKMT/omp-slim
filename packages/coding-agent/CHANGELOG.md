@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Branching a session keeps late advisor completions out of the new conversation's transcript and cost total.
 - HTML exports from OMP Slim binaries and npm installs embed the locally built viewer instead of requesting an unpublished asset from the upstream CDN.
 - Blocked HTTP reads now suggest saving page text from an external browser instead of recommending the removed browser tool.
 

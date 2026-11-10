@@ -880,8 +880,11 @@ describe("AgentSession advisor toggle", () => {
 
 		expect((await loadAdvisorTranscriptCosts(previousSessionFile)).get("")).toBeCloseTo(0.75, 8);
 	});
-	it("does not record a late advisor turn into a branched session", async () => {
+	it.each(["branch", "btw"] as const)("does not record a late advisor turn into a %s session", async reason => {
 		const advisor = enableAdvisor();
+		const previousSessionFile = session.sessionFile;
+		if (!previousSessionFile) throw new Error("Expected the previous session to be persisted");
+		appendAdvisorCost(advisor, 0.5, 1);
 		sessionManager.appendMessage({ role: "user", content: "ancestor", timestamp: 1 });
 		sessionManager.appendMessage({ role: "user", content: "branch point", timestamp: 2 });
 		const entryId = sessionManager.getLeafId();
@@ -893,13 +896,48 @@ describe("AgentSession advisor toggle", () => {
 			return result;
 		});
 
-		await expect(session.branch(entryId)).resolves.toMatchObject({ cancelled: false });
+		const operation =
+			reason === "branch"
+				? session.branch(entryId)
+				: session.branchFromBtw("question", advisorMessage(0, 2), entryId, sessionManager.getSessionId());
+		await expect(operation).resolves.toMatchObject({ cancelled: false });
+		const replacementSessionFile = session.sessionFile;
+		if (!replacementSessionFile) throw new Error("Expected the replacement session to be persisted");
+		expect(advisor.state.messages).toHaveLength(0);
+		appendAdvisorCost(advisor, 0.25, 4);
+		expect(session.getAdvisorCost()).toBeCloseTo(0.25, 8);
+		await session.dispose();
+
+		expect((await loadAdvisorTranscriptCosts(previousSessionFile)).get("")).toBeCloseTo(0.5, 8);
+		expect((await loadAdvisorTranscriptCosts(replacementSessionFile)).get("")).toBeCloseTo(0.25, 8);
+	});
+	it("keeps advisor recording paused until branch mode restoration finishes", async () => {
+		const advisor = enableAdvisor();
+		sessionManager.appendMessage({ role: "user", content: "ancestor", timestamp: 1 });
+		sessionManager.appendMessage({ role: "user", content: "branch point", timestamp: 2 });
+		const entryId = sessionManager.getLeafId();
+		if (!entryId) throw new Error("Expected a branchable entry");
+		const restoringMode = Promise.withResolvers<void>();
+		const finishRestore = Promise.withResolvers<void>();
+		session.setSessionSwitchReconciler(async () => {
+			restoringMode.resolve();
+			await finishRestore.promise;
+		});
+		const operation = session.branch(entryId);
+		try {
+			await restoringMode.promise;
+			appendAdvisorCost(advisor, 9, 3);
+			expect(session.getAdvisorCost()).toBe(0);
+		} finally {
+			finishRestore.resolve();
+			await operation;
+		}
+		expect(advisor.state.messages).toHaveLength(0);
 		const replacementSessionFile = session.sessionFile;
 		if (!replacementSessionFile) throw new Error("Expected the replacement session to be persisted");
 		appendAdvisorCost(advisor, 0.25, 4);
 		expect(session.getAdvisorCost()).toBeCloseTo(0.25, 8);
 		await session.dispose();
-
 		expect((await loadAdvisorTranscriptCosts(replacementSessionFile)).get("")).toBeCloseTo(0.25, 8);
 	});
 	it("keeps advisor cost across a fork of the same conversation", async () => {

@@ -14003,13 +14003,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 			if (!skipConversationRestore) {
 				this.replaceMessagesFromSessionContext(sessionContext.messages);
-				this.#advisors.resetSessionState();
 				this.#closeCodexProviderSessionsForHistoryRewrite();
 			}
 
+			// Keep the outgoing advisor feeds detached until the new session's mode is
+			// ready. Late completions queued during the synchronous branch must not
+			// become part of its transcript or cost ledger.
+			await this.#reconcileModeAfterTransition();
+			if (!skipConversationRestore) this.#advisors.resetSessionState();
 			this.#advisors.reattachRecorderFeeds();
 			advisorRecordersDetached = false;
-			await this.#reconcileModeAfterTransition();
 			return true;
 		} finally {
 			if (advisorRecordersDetached) {
@@ -14130,10 +14133,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			}
 
 			this.replaceMessagesFromSessionContext(sessionContext.messages);
-			this.#advisors.resetSessionState();
 			this.#closeCodexProviderSessionsForHistoryRewrite();
-			advisorRecordersDetached = false;
 			await this.#reconcileModeAfterTransition();
+			this.#advisors.resetSessionState();
+			advisorRecordersDetached = false;
 
 			return { cancelled: false, sessionFile: this.sessionFile };
 		} finally {
