@@ -3,8 +3,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { getMCPConfigPath, getProjectDir, logger, sanitizeText } from "@oh-my-pi/pi-utils";
-import { formatModelRoleAlias, getKnownRoleIds } from "../config/model-roles";
-import { cfgCycleOrder } from "../config/model-settings";
 import { readMCPConfigFile } from "../mcp/config-writer";
 import { collectMcpServerNames } from "../modes/controllers/mcp-command-controller";
 import { InternalUrlRouter } from "../internal-urls";
@@ -270,16 +268,7 @@ export function buildStaticInlineHint(hint: string): (argumentText: string) => s
 	return (argumentText: string) => (argumentText.trim().length === 0 ? hint : null);
 }
 
-/**
- * Build getArgumentCompletions for `/switch <model>`, ordered like the alt+p
- * picker for the same query: a leading `@` lists configured role aliases
- * (ctrl+p cycle roles first, in cycle order); anything else lists the
- * session's cycle scope (or every authenticated model) as `provider/id`,
- * fuzzy-ranked with the picker's role/MRU/provider affinity. Any `:level`
- * suffix already typed is kept out of the match and re-appended. Returning
- * role matches also keeps `@smol` from falling through to `@`-file mention
- * completion.
- */
+/** Complete explicit main-model selectors, preserving an optional thinking suffix. */
 export function buildModelSelectorCompletions(
 	runtime: TuiSlashCommandRuntime,
 ): (argumentPrefix: string) => AutocompleteItem[] | null {
@@ -290,17 +279,7 @@ export function buildModelSelectorCompletions(
 		const suffix = suffixIndex === -1 ? "" : argumentPrefix.slice(suffixIndex);
 		const query = suffixIndex === -1 ? argumentPrefix : argumentPrefix.slice(0, suffixIndex);
 		const matches: AutocompleteItem[] = [];
-		if (query.startsWith("@")) {
-			const { settings } = runtime.ctx;
-			const lower = query.toLowerCase();
-			for (const role of new Set([...cfgCycleOrder.get(settings), ...getKnownRoleIds(settings)])) {
-				const configured = settings.getModelRole(role);
-				if (!configured) continue;
-				const alias = formatModelRoleAlias(role);
-				if (!alias.toLowerCase().includes(lower)) continue;
-				matches.push({ value: `${alias}${suffix} `, label: alias, description: configured });
-			}
-		} else {
+		{
 			rankModels ??= createModelMentionSource({
 				source: createModelBrowserSource(runtime.ctx.settings, model =>
 					runtime.ctx.session.effectiveServiceTier(model),
