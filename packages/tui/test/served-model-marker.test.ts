@@ -11,8 +11,8 @@ function turn(parts: {
 	return {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: parts.provider ?? "openrouter",
+		api: "openai-completions",
+		provider: parts.provider ?? "custom",
 		model: parts.model,
 		...(parts.served ? { upstreamModel: parts.served } : {}),
 		...(parts.upstreamProvider ? { upstreamProvider: parts.upstreamProvider } : {}),
@@ -30,58 +30,50 @@ function turn(parts: {
 }
 
 describe("detectServedModelMismatch", () => {
-	it("flags a different family served under the requested id, naming the route", () => {
+	it("reports a different response id with its configured endpoint", () => {
 		expect(
 			detectServedModelMismatch(
 				turn({
-					model: "anthropic/claude-opus-5",
-					served: "claude-haiku-4-5-20251001",
-					upstreamProvider: "Amazon Bedrock",
+					model: "requested-main",
+					served: "served-snapshot",
+					upstreamProvider: "reported-host",
 				}),
 			),
 		).toEqual({
-			requested: "anthropic/claude-opus-5",
-			served: "claude-haiku-4-5-20251001",
-			provider: "openrouter",
-			upstreamProvider: "Amazon Bedrock",
+			requested: "requested-main",
+			served: "served-snapshot",
+			provider: "custom",
+			upstreamProvider: "reported-host",
 		});
 	});
 
-	it("flags a different revision of the same family", () => {
-		expect(detectServedModelMismatch(turn({ model: "claude-opus-4-6", served: "claude-opus-4-7" }))?.served).toBe(
-			"claude-opus-4-7",
-		);
+	it("reports a different version id", () => {
+		expect(detectServedModelMismatch(turn({ model: "model-v1", served: "model-v2" }))?.served).toBe("model-v2");
 	});
 
-	it("treats a dated snapshot or gateway prefix of the requested model as the same model", () => {
-		expect(
-			detectServedModelMismatch(turn({ model: "anthropic/claude-haiku-4.5", served: "claude-haiku-4-5-20251001" })),
-		).toBeUndefined();
+	it("does not guess that a configured alias and response snapshot are equivalent", () => {
+		expect(detectServedModelMismatch(turn({ model: "configured-alias", served: "served-snapshot" }))).toBeDefined();
 	});
 
-	it("treats an unclassifiable served id (first-party A/B codename) as unverifiable, not a substitution", () => {
+	it("reports opaque response ids without a provider catalogue", () => {
 		expect(
-			detectServedModelMismatch(
-				turn({ model: "claude-opus-4-6", served: "numbat-v6-efforts-20-40-80-ab-prod", provider: "anthropic" }),
-			),
-		).toBeUndefined();
+			detectServedModelMismatch(turn({ model: "model-v1", served: "internal-snapshot-id", provider: "custom" })),
+		).toBeDefined();
 	});
 
 	it("stays silent when no served id was recovered", () => {
-		expect(detectServedModelMismatch(turn({ model: "claude-fable-5-1" }))).toBeUndefined();
+		expect(detectServedModelMismatch(turn({ model: "main-model" }))).toBeUndefined();
 	});
 });
 
 describe("ServedModelTracker", () => {
 	it("reports each substitution pair once, and a new pair after a model switch", () => {
 		const tracker = new ServedModelTracker();
-		const swapped = turn({ model: "claude-opus-5", served: "claude-haiku-4-5" });
+		const swapped = turn({ model: "model-a", served: "model-b" });
 		expect(tracker.check(swapped)).toBeDefined();
 		expect(tracker.check(swapped)).toBeUndefined();
-		expect(tracker.check(turn({ model: "claude-opus-5", served: "claude-opus-5" }))).toBeUndefined();
-		expect(tracker.check(turn({ model: "claude-sonnet-5", served: "claude-haiku-4-5" }))?.requested).toBe(
-			"claude-sonnet-5",
-		);
+		expect(tracker.check(turn({ model: "model-a", served: "model-a" }))).toBeUndefined();
+		expect(tracker.check(turn({ model: "model-c", served: "model-b" }))?.requested).toBe("model-c");
 		expect(tracker.check(swapped)).toBeUndefined();
 	});
 });
