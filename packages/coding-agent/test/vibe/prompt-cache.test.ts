@@ -25,9 +25,6 @@ afterEach(() => {
 it("shares Vibe sibling cache routing by worker type while keeping conversations separate", async () => {
 	using directory = TempDir.createSync("@omp-vibe-cache-");
 	vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network is disabled in this test"));
-	// Task workers classify each turn's difficulty through the judge role, whose native backends
-	// retry a failed request with backoff; fail the classification outright, as offline, so each
-	// worker falls back to its provisional level at once.
 	const authStorage = await AuthStorage.create(directory.join("auth.db"));
 	authStorage.keys.setRuntime("muse-code", JSON.stringify({ oauthAccessToken: "test-oauth", apiKey: "test-key" }));
 	const modelId = "muse-spark-1.3-contributor";
@@ -35,8 +32,10 @@ it("shares Vibe sibling cache routing by worker type while keeping conversations
 		fetch: async () => Response.json({ data: [{ id: modelId, object: "model", created: 0, owned_by: "meta" }] }),
 	});
 	await modelRegistry.refreshProvider("muse-code", "online");
+	const activeModel = modelRegistry.find("muse-code", modelId);
+	if (!activeModel) throw new Error("Missing fixture parent model");
 	const settings = Settings.isolated({
-		modelRoles: { default: `muse-code/${modelId}`, task: `muse-code/${modelId}`, smol: `muse-code/${modelId}` },
+		model: `muse-code/${modelId}`,
 		"task.structured": true,
 		"task.enableLsp": false,
 		"marketplace.autoUpdate": "off",
@@ -53,6 +52,7 @@ it("shares Vibe sibling cache routing by worker type while keeping conversations
 		getSessionFile: () => null,
 		getArtifactsDir: () => null,
 		getPromptCacheKey: () => "parent-cache-lineage",
+		getActiveModel: () => activeModel,
 		taskDepth: 0,
 		enableLsp: false,
 		contextFiles: [],
@@ -69,7 +69,7 @@ it("shares Vibe sibling cache routing by worker type while keeping conversations
 		sessions.push(result.session);
 		return result;
 	});
-	const requests: Array<{ key: unknown; sessionId: string | undefined }> = [];
+	const requests: Array<{ key: unknown; sessionId: string | undefined; model: string }> = [];
 	const mock = createMockModel({
 		handler: { content: [{ type: "toolCall", name: "yield", arguments: { data: { findings: [] } } }] },
 	});
@@ -83,7 +83,11 @@ it("shares Vibe sibling cache routing by worker type while keeping conversations
 					promptCacheKey: options?.promptCacheKey,
 				};
 				const body = buildParams(model as Model<"openai-responses">, context, cacheOptions, undefined).params;
-				requests.push({ key: body.prompt_cache_key, sessionId: options?.sessionId });
+				requests.push({
+					key: body.prompt_cache_key,
+					sessionId: options?.sessionId,
+					model: `${model.provider}/${model.id}`,
+				});
 				return mock.stream(model, context, options);
 			},
 			slow,
@@ -108,6 +112,7 @@ it("shares Vibe sibling cache routing by worker type while keeping conversations
 			"parent-cache-lineage:sonic",
 		]);
 		expect(new Set(requests.map(request => request.sessionId)).size).toBe(3);
+		expect(new Set(requests.map(request => request.model))).toEqual(new Set([`muse-code/${modelId}`]));
 	} finally {
 		await manager.dispose({ timeoutMs: 100 });
 		await Promise.all(sessions.map(session => session.dispose()));
