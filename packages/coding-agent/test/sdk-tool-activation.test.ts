@@ -26,6 +26,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { StencilCredential } from "@oh-my-pi/pi-coding-agent/stencil/credential";
 import { VIBE_TOOL_NAMES } from "@oh-my-pi/pi-coding-agent/tools/vibe";
 import { resetYieldTurnState } from "@oh-my-pi/pi-coding-agent/tools/yield";
 import { logger, removeSyncWithRetries, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
@@ -140,6 +141,33 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		// Close the isolated auth store and remove this suite's model cache.
 		modelRegistry.authStorage.close();
 		removeSyncWithRetries(registryAuthDir);
+	});
+
+	it("ignores retired Spotlight settings without starting a background ranking request", async () => {
+		const tempDir = makeTempDir();
+		await Bun.write(
+			path.join(tempDir, "config.yml"),
+			JSON.stringify({
+				spotlight: {
+					experiment: { enabled: true },
+					model: "retired-ranking-model",
+					url: "https://spotlight.invalid/v1/spotlight",
+				},
+			}),
+		);
+		vi.spyOn(StencilCredential.prototype, "resolve").mockResolvedValue("test-spotlight-credential");
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ scores: {} }));
+		const options = baseOptions(tempDir);
+		const { session } = await createAgentSession({
+			...options,
+			settings: await Settings.loadIsolated({ cwd: tempDir, agentDir: tempDir }),
+		});
+		try {
+			expect(fetchSpy).not.toHaveBeenCalled();
+			expect(session.model).toBe(options.model);
+		} finally {
+			await session.dispose();
+		}
 	});
 
 	it("excludes defaultInactive extension tools from the initial active set unless explicitly requested", async () => {

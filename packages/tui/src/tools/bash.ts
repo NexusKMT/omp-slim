@@ -28,7 +28,6 @@ import type {
 	ToolRenderer,
 } from "./renderer";
 import { INTENT_FIELD, type ShellTrace, type ShellVizPresentation, type TspTone } from "@oh-my-pi/pi-wire";
-import type { SpotlightDetails } from "../chat/spotlight";
 import { plainText } from "../native/spans";
 import {
 	RUN_INPUT_PREVIEW_LINES,
@@ -96,8 +95,6 @@ export interface BashToolDetails {
 	cwd?: string;
 	/** `;` when the hoisted leading cd was `cd <dir>;`, so the card redraws it as written; absent means `&&`. */
 	cdSeparator?: ";";
-	/** What the session's Spotlight shaping did to the output. */
-	spotlight?: SpotlightDetails;
 	/** Live ACP update only; completed results refer to released terminals. */
 	terminalId?: string;
 	service?: {

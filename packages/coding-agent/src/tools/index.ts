@@ -1,6 +1,6 @@
 import type { AgentOptions, AgentTelemetryConfig, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { EditStore } from "@oh-my-pi/pi-natives";
-import type { FetchImpl, ImageContent, Message, Model, ServiceTierByFamily, ToolChoice } from "@oh-my-pi/pi-ai";
+import type { FetchImpl, ImageContent, Model, ServiceTierByFamily, ToolChoice } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AsyncJobManagerApi } from "../async/job-manager";
 import type { Rule } from "../capability/rule";
@@ -24,7 +24,6 @@ import type { DaemonCompletionNotification } from "../launch/protocol";
 import { LspTool } from "../lsp";
 import type { MCPManagerApi, MCPToolScope } from "../mcp";
 import type { PlanModeState } from "../plan-mode/state";
-import type { CallContext, SpotlightSession } from "../spotlight/types";
 import type { AgentLifecycleApi } from "../registry/agent-lifecycle";
 import type { AgentRegistryApi } from "../registry/agent-registry";
 import type { ArtifactManagerApi } from "../session/artifacts";
@@ -475,19 +474,6 @@ export interface ToolSession {
 	getYieldReportText?: (toolCallId: string) => string | undefined;
 	/** The `i` intent the model wrote on a tool call of the current turn, by call ID. */
 	getToolCallIntent?: (toolCallId: string) => string | undefined;
-	/**
-	 * What the agent is doing at a tool call, as the Spotlight experiment ranks output for it: the session's task,
-	 * the call's intent, the turn's text before the call and the last bash commands, each cut to
-	 * `CONTEXT_FIELD_CHARS`. `source` is the command/code/`read <path>` that produced the output.
-	 */
-	getCallContext?: (toolCallId: string, source: string) => CallContext;
-	/**
-	 * The model's context as it stands, converted as it is sent: the Spotlight experiment counts as already seen only
-	 * the lines still in it (whatever a compaction, prune, clear or branch move took out does not count).
-	 */
-	getContextMessages?: () => readonly Message[];
-	/** The Spotlight experiment's handle on this session; present only while `spotlight.experiment.enabled`. */
-	spotlight?: SpotlightSession;
 	/** Replace the active workpool item contract and refresh its provider-facing prompt. */
 	setWorkPoolYieldItems?: (items: readonly WorkPoolYieldItem[]) => Promise<void>;
 	/** The tool-choice queue used to force forthcoming tool invocations and carry invocation handlers. */

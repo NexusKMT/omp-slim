@@ -105,8 +105,8 @@ export interface BashExecutorOptions {
 	 */
 	isSessionCurrent?: () => boolean;
 	/**
-	 * `false` skips the shell output minimizer (`shellMinimizer.*`) for this run: the session's Spotlight
-	 * experiment shapes the output instead. Default: the setting decides.
+	 * `false` skips the shell output minimizer (`shellMinimizer.*`) for this run.
+	 * Default: the setting decides.
 	 */
 	minimize?: boolean;
 	/** Artifact path/id for full output storage */

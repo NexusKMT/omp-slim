@@ -14,7 +14,6 @@ import { sessionResolveContext } from "../../internal-urls/context";
 import { InternalUrlFilesystem } from "../../internal-urls/url-filesystem";
 import { hasNativeJudge, journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "../../judgment";
 import findDescription from "../../prompts/tools/find.md" with { type: "text" };
-import { SPOTLIGHT_ENTRY } from "../../spotlight/types";
 import type { ToolSession } from "..";
 import { resolveToolTier } from "../approval";
 import {
@@ -109,7 +108,6 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			cache: sharedJudgmentCache(),
 			costGate: this.session.costGate,
 		});
-		const experiment = this.session.spotlight;
 		const started = performance.now();
 		const deadline = AbortSignal.timeout(FIND_TIMEOUT_MS);
 		// The phase the deadline interrupts, named when nothing was verified before it.
@@ -122,7 +120,6 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				query,
 				extraKeywords: params.grep_keywords,
 				judge,
-				spotlight: experiment ? { client: experiment.client, thinking: experiment.thinking } : undefined,
 				includeHidden: false,
 				signal,
 				deadline,
@@ -140,22 +137,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			);
 		}
 		const elapsedMs = performance.now() - started;
-		const { stats, threshold, keywords, coverage, ranking, timeout } = result;
-		experiment?.log(SPOTLIGHT_ENTRY.find, {
-			toolCallId,
-			ranker: ranking.ranker,
-			candidates: ranking.candidates,
-			read: ranking.read,
-			hits: result.hits.length,
-			spotlightMs: ranking.spotlight?.ms,
-			spotlightTokens: ranking.spotlight?.inputTokens,
-			spotlightCostUsd: ranking.spotlight?.costUsd,
-			spotlightError: ranking.spotlight?.error,
-			judgeRequests: stats.requests,
-			judgeRequestsSaved: ranking.judgeRequestsSaved,
-			judgeCostUsd: stats.cost - (ranking.spotlight?.costUsd ?? 0),
-			elapsedMs: Math.round(elapsedMs),
-		});
+		const { stats, threshold, keywords, coverage, timeout } = result;
 		// Cascade paths are root-relative; the model and renderer want paths
 		// `read` resolves (cwd-relative files, URLs under URL scopes, including
 		// with `:start-end` selectors) without knowing the scope.

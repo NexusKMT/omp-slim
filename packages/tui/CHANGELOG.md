@@ -6,6 +6,7 @@
 
 - Removed retired Prewalk status labels, theme symbols, and settings groups.
 
+- Removed Spotlight experiment controls, result notices, and the output comparison sheet.
 - Removed composer `^model` completions and model assignment chips; historical model tags still render in saved conversations.
 - Removed plan-specific model switching and approval model tiers; planning, compaction and execution retain the current model and thinking level.
 - Removed model roles, model presets, per-agent model selection and predictive composer text; model menus now select one current chat model and its thinking level.

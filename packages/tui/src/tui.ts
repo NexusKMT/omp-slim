@@ -314,7 +314,7 @@ export interface Component {
 
 	/**
 	 * Native transcript blocks drawn right after this one as siblings (a `TranscriptContainer` child only): notes
-	 * about the block that must show while it is collapsed, such as a tool card's Spotlight notice. The terminal
+	 * about the block that must show while it is collapsed, such as a tool card's late diagnostics. The terminal
 	 * rows never show them. Return the same array while unchanged.
 	 */
 	nativeTrailers?(): readonly Component[];

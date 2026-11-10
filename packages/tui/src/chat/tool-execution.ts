@@ -62,7 +62,6 @@ import type { XdevMountedState } from "../tools/xdev";
 import { isFramedBlockComponent, markFramedBlockComponent, renderStatusLine, WidthAwareText } from "../render/index";
 import { cachedPngConversion, convertImageToPngShared, imagePayloadKey } from "./image-loading";
 import { FenceFigure } from "./fence-figure";
-import { SpotlightNotices } from "./spotlight";
 import { sanitizeWithOptionalSixelPassthrough } from "../render/sixel";
 import { renderDiff } from "../chrome/diff";
 import { type AnimationFrame, trimBlankEdges } from "../chrome/transcript-container";
@@ -534,8 +533,6 @@ export class ToolExecutionComponent extends Container {
 		this,
 	);
 	readonly #nativeImages = new NativeImageCache();
-	// The Spotlight notice drawn after the card in a native transcript (see nativeTrailers).
-	readonly #spotlight = new SpotlightNotices();
 	// Wall clock captured whenever a task card is rebuilt.
 	#taskRenderNowMs = Date.now();
 	// Set on each `render()` when the last painted pending shape must be
@@ -882,9 +879,6 @@ export class ToolExecutionComponent extends Container {
 		// A final frame can land after the card retired to scrollback, which is never drawn again.
 		if (!isPartial) this.#presentation.recheck();
 		this.#displaceableByToolName = displaceableToolName(this.#toolName, result, isPartial);
-		if (!isPartial && this.#toolCallId !== undefined) {
-			this.#spotlight.set(this.#toolCallId, result.details, resultText(result));
-		}
 		// When tool is complete, ensure args are marked complete so spinner stops
 		if (!isPartial) {
 			this.#argsComplete = true;
@@ -1217,23 +1211,20 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	/**
-	 * Blocks of their own right after the card: the result's Spotlight notice (visible while it is
-	 * collapsed), and late diagnostics the card absorbed while a presenter compacts or hides it, so
-	 * they stay visible.
+	 * Late diagnostics the card absorbed stay visible after a presenter compacts or hides it.
 	 */
 	nativeTrailers(): readonly Component[] {
 		const mode = this.#presentation.shown.mode;
 		const late = this.#lateDiagnostics;
-		// Drawn in full, the card shows its diagnostics itself: the notices' own (stable) list.
-		if (mode === "full" || late === undefined) return mode === "hidden" ? EMPTY_TRAILERS : this.#spotlight.list();
+		// Drawn in full, the card shows its diagnostics itself.
+		if (mode === "full" || late === undefined) return EMPTY_TRAILERS;
 		if (this.#lateDiagnosticsBlock?.files !== late) {
 			this.#lateDiagnosticsBlock = { files: late, block: new LateDiagnosticsMessageComponent([...late]) };
 		}
 		const diagnostics = this.#lateDiagnosticsBlock.block;
 		// Not a transcript child: the transcript-wide visibility reaches it only through this card.
 		diagnostics.setToolActivityVisible(this.#toolActivityVisible);
-		// A call a presenter hides takes its notice with it.
-		return mode === "hidden" ? [diagnostics] : [...this.#spotlight.list(), diagnostics];
+		return [diagnostics];
 	}
 
 	refreshTranscriptPresentation(ids?: ReadonlySet<string>): boolean {
@@ -1622,7 +1613,6 @@ export class ToolExecutionComponent extends Container {
 
 	setToolActivityVisible(visible: boolean): void {
 		this.#toolActivityVisible = visible;
-		this.#spotlight.setHidden(!visible);
 		this.#lateDiagnosticsBlock?.block.setToolActivityVisible(visible);
 		super.invalidate();
 	}

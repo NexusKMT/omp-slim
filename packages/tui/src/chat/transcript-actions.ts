@@ -4,7 +4,6 @@
  * the interactive host registers the one handler that runs omp's existing
  * commands for them, so a click and the key binding take the same path.
  */
-import type { SpotlightDetails } from "./spotlight";
 
 export type TranscriptAction =
 	/** Retry the last failed turn (`app.retry`). */
@@ -16,17 +15,7 @@ export type TranscriptAction =
 	/** Resume the session stored at `path` (a welcome card's recent session). */
 	| { readonly act: "resume"; readonly path: string }
 	/** Put `text` on the clipboard. */
-	| { readonly act: "copy"; readonly text: string }
-	/**
-	 * Open the Spotlight sheet of a shaped tool result: its original beside `reduced`, the text the model saw (a
-	 * held-out result's sheet shows the would-be text its trace's `shapedUrl` names instead).
-	 */
-	| {
-			readonly act: "spotlight";
-			readonly toolCallId: string;
-			readonly spotlight: SpotlightDetails;
-			readonly reduced: string;
-	  };
+	| { readonly act: "copy"; readonly text: string };
 
 type Handler = (action: TranscriptAction) => void;
 

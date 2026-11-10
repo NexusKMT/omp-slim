@@ -1608,7 +1608,7 @@ describe("Settings", () => {
 		});
 	});
 
-	it("preserves retired speech configuration when saving unrelated settings", async () => {
+	it("preserves retired speech and ranking configuration when saving unrelated settings", async () => {
 		const retired = {
 			stt: { enabled: true, modelName: "fast", language: "zh" },
 			tts: { localModel: "kokoro", localVoice: "af_heart" },
@@ -1616,6 +1616,8 @@ describe("Settings", () => {
 			speechgen: { enabled: true },
 			live: { voice: "alloy" },
 			providers: { tts: "local" },
+			spotlight: { experiment: { enabled: true }, model: "retired-ranking-model" },
+			"spotlight.url": "https://spotlight.invalid/v1/spotlight",
 		};
 		await writeSettings(retired);
 		const settings = await Settings.init({ cwd: projectDir, agentDir });

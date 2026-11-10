@@ -2,7 +2,6 @@ import type { AgentToolContext, ToolCallContext } from "@oh-my-pi/pi-agent-core"
 import type { CustomToolContext } from "../extensibility/custom-tools/types";
 import type { ExtensionUIContext } from "../extensibility/extensions/types";
 import { trackUserWaits, type UserWaitTracker } from "../extensibility/extensions/user-wait";
-import type { CalledToolShaper } from "../spotlight";
 
 declare module "@oh-my-pi/pi-agent-core" {
 	interface AgentToolContext extends CustomToolContext {
@@ -29,14 +28,11 @@ declare module "@oh-my-pi/pi-agent-core" {
 		 *  drop line gutters. `read` then still returns image files as images
 		 *  instead of their bytes decoded as text, which Cursor rejects (#15630). */
 		rawImages?: boolean;
-		/** Set while the session runs the Spotlight experiment: the tool wrapper passes the final result of each of
-		 *  the agent's own calls (`toolCall` lists it under the tool's name) through it. */
-		spotlightShape?: CalledToolShaper;
 	}
 }
 
-/** What every tool context of a session starts from: the custom-tool context and the session-wide hooks. */
-export type ToolBaseContext = CustomToolContext & Pick<AgentToolContext, "spotlightShape">;
+/** What every tool context of a session starts from: the custom-tool context. */
+export type ToolBaseContext = CustomToolContext;
 
 export class ToolContextStore {
 	#uiContext: ExtensionUIContext | undefined;

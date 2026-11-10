@@ -6,6 +6,7 @@
 
 - Focused subagents inherit the main model and direct model-selection commands back to the main session; their thinking level remains adjustable.
 
+- Removed Spotlight background ranking, output rewriting, and model settings; tools retain ordinary output limits and explicit find judgments use the current model.
 - Removed composer `^model` completions and model assignment chips; historical model tags still render in saved conversations.
 - Removed plan-specific model switching and approval model tiers; planning, compaction and execution retain the current model and thinking level.
 - Removed model roles, model presets, per-agent model selection and predictive composer text; model menus now select one current chat model and its thinking level.

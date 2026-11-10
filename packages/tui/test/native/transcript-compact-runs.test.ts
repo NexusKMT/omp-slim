@@ -111,7 +111,7 @@ describe("native compact runs", () => {
 	});
 
 	it("keeps a compact block's trailers inside its run and a full block's trailers out of it", async () => {
-		// Regression guard: a compact call's Spotlight notice splitting its run with a gap in Tern.
+		// Regression guard: an interleaved notice must not split a compact run with a gap in Tern.
 		const trailer = (label: string): Component => {
 			const node = text(label);
 			return { render: () => [], describe: () => node, invalidate: () => {} };

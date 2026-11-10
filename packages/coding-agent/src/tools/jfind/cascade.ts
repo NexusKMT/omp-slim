@@ -2,8 +2,7 @@
  * Cascade search: semantic passage maps before full-source reading.
  *
  * 1. Lexical scan ranks every eligible file by query keywords.
- * 2. Filename ranking judges the top candidates by name and place in the tree,
- *    or Spotlight scores them all in one request (the `spotlight` ranker).
+ * 2. Filename ranking judges the top candidates by name and place in the tree.
  * 3. Passage scoring reads the strongest files, cuts them into byte-bounded
  *    windows, and judges a budgeted verbatim sketch of each window.
  * 4. Verification judges the complete text of the sketches that survived.
@@ -18,23 +17,11 @@ import type { Judge, JudgmentResult, NoulQuestion } from "@oh-my-pi/pi-ai";
 import type { FindCoverage, FindHit, FindStats, FindTimeout } from "@oh-my-pi/pi-tui/tools/find";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import type { InternalUrlFilesystem } from "../../internal-urls/url-filesystem";
-import { type SpotlightClient, SpotlightError } from "../../spotlight/client";
-import type { SpotlightThinking } from "../../spotlight/types";
 import { throwIfAborted } from "../tool-errors";
 import { fileScore, grepIndex, idf } from "./lexical";
 import { keywords as deriveKeywords } from "./keywords";
 import { type HeatRange, mergeHeat, type Passage, plainContent, selectWindows, sketch, windows } from "./passages";
-import {
-	entryKey,
-	nameBatch,
-	passageBatch,
-	passageKey,
-	type Request,
-	SPOTLIGHT_FILES,
-	type SketchCard,
-	sketchBatch,
-	spotlightNames,
-} from "./questions";
+import { entryKey, nameBatch, passageBatch, passageKey, type Request, type SketchCard, sketchBatch } from "./questions";
 import { lines, readText, ReadTextError, takeChars } from "./text";
 import { type FileEntry, listFiles, type SearchRoot } from "./tree";
 
@@ -70,30 +57,12 @@ const VERIFY_STATE_BYTES = 24 * 1024;
 const SCAN_TIMEOUT_MS = 30_000;
 /** Distinct failure messages retained for the report. */
 const FAILURES_KEPT = 5;
-/**
- * Budget of the Spotlight ranking request; past it the judge ranks instead,
- * while the call's own budget still has room for it.
- */
-const SPOTLIGHT_TIMEOUT_MS = 6_000;
-
-/** Ranks the filename shortlist with Spotlight instead of the judge's name batches. */
-export interface CascadeSpotlight {
-	client: Pick<SpotlightClient, "rank">;
-	thinking: SpotlightThinking;
-}
-
-/** How the filename shortlist was ranked, for the experiment journal. */
+/** The filename shortlist and the files selected for content verification. */
 export interface CascadeRanking {
-	/** The ranker whose scores chose the read set: `judge` also when Spotlight failed and the judge took over. */
-	ranker: "judge" | "spotlight";
 	/** Files on the shortlist. */
 	candidates: number;
 	/** Root-relative paths whose content was read, in selection order. */
 	read: string[];
-	/** The Spotlight request, when one was sent. */
-	spotlight?: { ms: number; inputTokens: number; costUsd: number; error?: string };
-	/** Filename batches the judge did not have to answer. */
-	judgeRequestsSaved: number;
 }
 
 export interface CascadeOptions {
@@ -104,8 +73,6 @@ export interface CascadeOptions {
 	/** Caller-supplied lexical keywords, added to those derived from the query. */
 	extraKeywords: readonly string[];
 	judge: Judge;
-	/** Rank filenames with Spotlight; the judge ranks them when absent or when Spotlight fails. */
-	spotlight?: CascadeSpotlight;
 	includeHidden: boolean;
 	signal?: AbortSignal;
 	/**
@@ -269,41 +236,25 @@ class Cascade {
 			),
 		}));
 		const ranking: CascadeRanking = {
-			ranker: "judge",
 			candidates: ranked.length,
 			read: [],
-			judgeRequestsSaved: 0,
 		};
-		if (this.#options.spotlight && ranked.length > 0) {
-			ranking.spotlight = await this.#spotlightNames(
-				this.#options.spotlight,
-				ranked.map(candidate => candidate.node),
-				entries,
-				nameScore,
-			);
-			if (ranking.spotlight.error === undefined) {
-				ranking.ranker = "spotlight";
-				ranking.judgeRequestsSaved = nameJobs.length;
-			}
-		}
-		if (ranking.ranker === "judge") {
-			let named = 0;
-			onProgress?.(`filename ranking 0/${ranked.length}`);
-			await this.#dispatch(nameJobs, (job, outcome) => {
-				named += job.batch.length;
-				if (!outcome.ok) this.#fail("filenames", outcome.error);
-				job.batch.forEach((node, k) => {
-					const p = noul(outcome, entryKey(k));
-					nameScore[node] = p;
-					if (p === undefined) {
-						if (outcome.ok) this.stats.unanswered++;
-					} else {
-						this.stats.judged++;
-					}
-				});
-				onProgress?.(`filename ranking ${named}/${ranked.length}`);
+		let named = 0;
+		onProgress?.(`filename ranking 0/${ranked.length}`);
+		await this.#dispatch(nameJobs, (job, outcome) => {
+			named += job.batch.length;
+			if (!outcome.ok) this.#fail("filenames", outcome.error);
+			job.batch.forEach((node, k) => {
+				const p = noul(outcome, entryKey(k));
+				nameScore[node] = p;
+				if (p === undefined) {
+					if (outcome.ok) this.stats.unanswered++;
+				} else {
+					this.stats.judged++;
+				}
 			});
-		}
+			onProgress?.(`filename ranking ${named}/${ranked.length}`);
+		});
 
 		// The two strongest lexical candidates are read regardless of the name
 		// judgment; the rest of the budget follows name score, then lexical rank.
@@ -446,51 +397,6 @@ class Cascade {
 		const coverage: FindCoverage =
 			failed > 0 && failed === requests ? "unavailable" : failed > 0 || timeout ? "partial" : "complete";
 		return { hits, coverage, threshold: THRESHOLD, keywords, stats: this.stats, ranking, timeout };
-	}
-
-	/**
-	 * Scores every shortlisted path in one Spotlight request into `nameScore`,
-	 * listed sorted as `git ls-files` prints them. A failure leaves the scores
-	 * unset, is reported in `stats.failures`, and is returned so the judge ranks
-	 * instead.
-	 */
-	async #spotlightNames(
-		spotlight: CascadeSpotlight,
-		nodes: readonly number[],
-		entries: readonly FileEntry[],
-		nameScore: (number | undefined)[],
-	): Promise<NonNullable<CascadeRanking["spotlight"]>> {
-		const { query, onProgress } = this.#options;
-		const signal = this.#signal;
-		const order = [...nodes].sort((a, b) => compareRel(entries[a]!, entries[b]!));
-		onProgress?.(`spotlight ranking ${order.length} files`);
-		const started = performance.now();
-		try {
-			const reply = await spotlight.client.rank(
-				spotlightNames(
-					query,
-					order.map(node => entries[node]!.rel),
-					spotlight.thinking,
-				),
-				signal,
-				SPOTLIGHT_TIMEOUT_MS,
-			);
-			const scores = reply.scores[SPOTLIGHT_FILES]!;
-			order.forEach((node, k) => {
-				nameScore[node] = scores[k];
-			});
-			this.stats.judged += order.length;
-			// Spend shows in the report's totals; `requests` stays the judge's, since it decides coverage.
-			this.stats.inputTokens += reply.inputTokens;
-			this.stats.cost += reply.costUsd;
-			this.stats.apiMs += reply.ms;
-			return { ms: reply.ms, inputTokens: reply.inputTokens, costUsd: reply.costUsd };
-		} catch (error) {
-			throwIfAborted(signal);
-			if (!(error instanceof SpotlightError)) throw error;
-			this.#fail("filenames", error);
-			return { ms: Math.round(performance.now() - started), inputTokens: 0, costUsd: 0, error: error.message };
-		}
 	}
 }
 
