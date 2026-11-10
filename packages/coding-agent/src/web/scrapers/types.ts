@@ -1,6 +1,7 @@
 /**
  * Shared types and utilities for web-fetch handlers
  */
+import type { Model } from "@oh-my-pi/pi-ai";
 import { scheduler } from "node:timers/promises";
 import { ptree } from "@oh-my-pi/pi-utils";
 import { decodeEntities } from "@oh-my-pi/pi-utils/dom/parser";
@@ -35,6 +36,7 @@ export type SpecialHandler = (
 	signal?: AbortSignal,
 	storage?: AgentStorageApi | null,
 	modelRegistry?: ModelRegistry,
+	sessionModel?: Model,
 ) => Promise<RenderResult | null>;
 
 /** Network read bound for a fetched body; the only size limit on rendered URL content. */

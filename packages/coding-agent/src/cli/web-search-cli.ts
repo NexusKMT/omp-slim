@@ -1,11 +1,13 @@
 /**
  * Web search CLI command handlers.
  *
- * Handles `omp q`/`omp web-search` subcommands for testing web search models.
+ * Handles `omp q`/`omp web-search` subcommands for HTTP web search.
  */
 
 import { APP_NAME, getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import { isRegisteredSearchEngine } from "../web/search/provider";
+import type { SearchEngineId } from "../web/search/types";
 import { Settings } from "../config/settings";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import { renderSearchResult } from "@oh-my-pi/pi-tui/tools/web-search";
@@ -13,7 +15,7 @@ import { runSearchQuery, type SearchQueryParams } from "../web/search/index";
 
 export interface SearchCommandArgs {
 	query: string;
-	model?: string;
+	engine?: SearchEngineId;
 	recency?: "day" | "week" | "month" | "year";
 	limit?: number;
 	expanded: boolean;
@@ -39,10 +41,12 @@ export function parseSearchArgs(args: string[]): SearchCommandArgs | undefined {
 
 	for (let i = 1; i < args.length; i++) {
 		const arg = args[i];
-		if (arg === "--model") {
-			result.model = args[++i];
-		} else if (arg.startsWith("--model=")) {
-			result.model = arg.slice("--model=".length);
+		if (arg === "--engine") {
+			result.engine = args[++i] as SearchEngineId;
+		} else if (arg.startsWith("--engine=")) {
+			result.engine = arg.slice("--engine=".length) as SearchEngineId;
+		} else if (arg === "--model" || arg.startsWith("--model=")) {
+			throw new Error("Web search model overrides are not supported; use --engine for an HTTP search engine.");
 		} else if (arg === "--recency") {
 			result.recency = args[++i] as SearchCommandArgs["recency"];
 		} else if (arg === "--limit" || arg === "-l") {
@@ -67,6 +71,10 @@ export async function runSearchCommand(cmd: SearchCommandArgs): Promise<void> {
 		process.exit(1);
 	}
 
+	if (cmd.engine && !isRegisteredSearchEngine(cmd.engine)) {
+		throw new Error(`Unknown HTTP search engine: ${cmd.engine}`);
+	}
+
 	if (cmd.recency && !RECENCY_OPTIONS.includes(cmd.recency)) {
 		process.stderr.write(`${chalk.red(`Error: Invalid recency "${cmd.recency}"`)}\n`);
 		process.stderr.write(`${chalk.dim(`Valid recency values: ${RECENCY_OPTIONS.join(", ")}`)}\n`);
@@ -84,7 +92,7 @@ export async function runSearchCommand(cmd: SearchCommandArgs): Promise<void> {
 
 	const params: SearchQueryParams = {
 		query: cmd.query,
-		model: cmd.model,
+		engine: cmd.engine,
 		recency: cmd.recency,
 		limit: cmd.limit,
 	};
@@ -104,7 +112,7 @@ export async function runSearchCommand(cmd: SearchCommandArgs): Promise<void> {
 }
 
 export function printSearchHelp(): void {
-	process.stdout.write(`${chalk.bold(`${APP_NAME} q`)} - Test web search models
+	process.stdout.write(`${chalk.bold(`${APP_NAME} q`)} - Search the web with HTTP engines
 
 ${chalk.bold("Usage:")}
   ${APP_NAME} q [options] <query>
@@ -114,7 +122,7 @@ ${chalk.bold("Arguments:")}
   query      Search query text
 
 ${chalk.bold("Options:")}
-  --model <selector>  Catalog model selector (for example, web/duckduckgo)
+  --engine <name>     HTTP search engine (for example, duckduckgo)
   --recency <value>   Recency filter (when supported): ${RECENCY_OPTIONS.join(", ")}
   -l, --limit <n>     Max results to return
   --compact           Render condensed output
@@ -127,8 +135,8 @@ ${chalk.bold("Query directives:")}
   lenient post-filter (a constraint matching nothing is relaxed, not fatal).
 
 ${chalk.bold("Examples:")}
-  ${APP_NAME} q --model=web/duckduckgo "what's the color of the sky"
-  ${APP_NAME} q --model=openrouter/google/gemini-2.5-flash --recency=week "latest TypeScript changes"
+  ${APP_NAME} q --engine=duckduckgo "what's the color of the sky"
+  ${APP_NAME} q --engine=public --recency=week "latest TypeScript changes"
   ${APP_NAME} q 'transformer scaling site:arxiv.org after:2024 -site:reddit.com'
 `);
 }

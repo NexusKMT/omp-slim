@@ -139,17 +139,6 @@ export type RpcCommand =
 	| { id?: string; type: "get_logout_accounts"; providerId: string }
 	| { id?: string; type: "logout"; providerId: string; credentialId: number }
 
-	// Word prediction (composer ghost text); `cursor` is a UTF-16 offset into `text`
-	| { id?: string; type: "predict_word"; text: string; cursor: number }
-	| {
-			id?: string;
-			type: "predict_word_feedback";
-			text: string;
-			cursor: number;
-			suggestion: string;
-			accepted: boolean;
-	  }
-
 	// Side questions (/btw); answers stream as `btw_delta` / `btw_record` frames
 	| { id?: string; type: "btw"; question: string; recordId?: string }
 	| { id?: string; type: "btw_cancel"; recordId?: string }
@@ -573,10 +562,6 @@ export type RpcResponse =
 			data: { accounts: LogoutAccount[] };
 	  }
 	| { id?: string; type: "response"; command: "logout"; success: true; data: { remainingSource?: string } }
-
-	// Word prediction
-	| { id?: string; type: "response"; command: "predict_word"; success: true; data: { suffix: string | null } }
-	| { id?: string; type: "response"; command: "predict_word_feedback"; success: true }
 
 	// Side questions (/btw)
 	| { id?: string; type: "response"; command: "btw"; success: true; data: { record: RpcBtwHistoryRecord } }

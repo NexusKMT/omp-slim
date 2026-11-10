@@ -1,10 +1,10 @@
 ```
-{{#if py}}completion(prompt, *, model?="default"|"smol"|"slow", system?=None, schema?=None){{else}}await completion(prompt, { model?: "default"|"smol"|"slow", system?, schema? }){{/if}} → handle
+{{#if py}}completion(prompt, *, system?=None, schema?=None){{else}}await completion(prompt, { system?, schema? }){{/if}} → handle
     Returns at once; `.wait()` returns text (parsed with `schema`). Stateless, no tools/history.{{#ifAll py js}}
     JS: ONE trailing object — `h = await completion(prompt, { model, system, schema })`; without `await`, `.id` is undefined. `.wait()` returns a Promise.{{else}}{{#if js}}
     Without `await completion(…)`, `.id` is undefined. `.wait()` returns a Promise.{{/if}}{{/ifAll}}
 {{#if py}}await judge(state, questions, *, images?=[path | ImageContent, …]){{else}}await judge(state, questions, { images?: [path | ImageContent, …] }){{/if}} → `{id: answer}`
-    Typed judgment over one `state` (non-empty {{#if py}}str{{else}}string{{/if}} | JSON object | JSON array). Every question sees the same state and is answered independently: batch independent questions into one call. Cheap and fast (TypeSafe when credentialed, else the tiny/smol chat model); prefer over `completion()` for classification, yes/no, ranking. Two or more states → `{{#if py}}judge_batch{{else}}judgeBatch{{/if}}`, never a loop of `judge()`.
+    Typed judgment over one `state` (non-empty {{#if py}}str{{else}}string{{/if}} | JSON object | JSON array). Every question sees the same state and is answered independently: batch independent questions into one call. Uses the current session model and its normal request cost; use for explicit classification, yes/no, or ranking. Two or more states → `{{#if py}}judge_batch{{else}}judgeBatch{{/if}}`, never a loop of `judge()`.
     `questions`: `{id: q}` where q is one of
       `{type: "choice", instructions, criteria: {label: rubric | {{#if py}}None{{else}}null{{/if}}, …}}` → `{choice, probabilities: {label: p}, confidence}` (≥2 labels)
       `{type: "bool", instructions, criteria?: {true?: {{#if py}}str{{else}}string{{/if}}, false?: {{#if py}}str{{else}}string{{/if}}}}` → `{bool: P(yes)}`

@@ -42,13 +42,6 @@ import {
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
-import {
-	type WordCompletionEngine,
-	type WordCompletionMethod,
-	type WordCompletionQuery,
-	wordCompletionQuery,
-} from "@oh-my-pi/pi-tui/prompt/word-completion";
-import { requestTextPrediction, textPredictionBackend } from "../../predict/client";
 import { type AgentSession, type NavigateTreeResult, SessionBusyError } from "../../session/agent-session";
 import type { AgentSessionHandle } from "../../session/agent-session-handle";
 import type { MCPManager } from "../../mcp/manager";
@@ -71,7 +64,6 @@ import {
 	formatPersistenceNotice,
 } from "../persistence-failure";
 import { initializeExtensions } from "../runtime-init";
-import { cfgSpellingAutocomplete } from "../settings";
 import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./host-tools";
 import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameEncoder } from "./rpc-frame";
@@ -110,84 +102,6 @@ import type {
 	RpcSessionState,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
-
-const INVALID_TEXT_CURSOR_ERROR = "cursor must be an integer UTF-16 offset within text";
-
-function isTextCursor(text: unknown, cursor: unknown): text is string {
-	return (
-		typeof text === "string" &&
-		typeof cursor === "number" &&
-		Number.isInteger(cursor) &&
-		cursor >= 0 &&
-		cursor <= text.length
-	);
-}
-
-/**
- * Composer ghost-text query at a UTF-16 cursor offset, gated like the TUI
- * editor's: only at the end of a line, and only for a prose word.
- */
-function wordQueryAt(text: string, cursor: number): WordCompletionQuery | undefined {
-	if (cursor < text.length && text[cursor] !== "\n") return undefined;
-	const lines = text.split("\n");
-	let cursorLine = 0;
-	let lineStart = 0;
-	while (lineStart + lines[cursorLine]!.length < cursor) lineStart += lines[cursorLine++]!.length + 1;
-	return wordCompletionQuery(lines, cursorLine, cursor - lineStart);
-}
-
-interface QueuedWordPrediction {
-	engine: WordCompletionEngine;
-	query: WordCompletionQuery;
-	resolve(suffix: string | null): void;
-	reject(error: unknown): void;
-}
-
-/**
- * `predict_word` answers for one RPC session, with the TUI provider's flow
- * control: one engine request in flight, and a newer request replaces the one
- * waiting behind it (the replaced request answers `null`), so a burst of
- * typing costs the shared daemon at most two inferences.
- */
-export class RpcWordPredictor {
-	#busy = false;
-	#queued: QueuedWordPrediction | undefined;
-	readonly #request: typeof requestTextPrediction;
-
-	/** `request` is a test seam. */
-	constructor(request: typeof requestTextPrediction = requestTextPrediction) {
-		this.#request = request;
-	}
-
-	/**
-	 * Ghost-text suffix for the word ending at `cursor`, or `null` when the
-	 * engine is off, nothing applies, or a newer request superseded this one.
-	 * Rejects when the prediction daemon cannot answer.
-	 */
-	predict(method: WordCompletionMethod, text: string, cursor: number): Promise<string | null> {
-		if (method === "off") return Promise.resolve(null);
-		const query = wordQueryAt(text, cursor);
-		if (!query) return Promise.resolve(null);
-		if (!this.#busy) return this.#run(method, query);
-		this.#queued?.resolve(null);
-		const { promise, resolve, reject } = Promise.withResolvers<string | null>();
-		this.#queued = { engine: method, query, resolve, reject };
-		return promise;
-	}
-
-	async #run(engine: WordCompletionEngine, query: WordCompletionQuery): Promise<string | null> {
-		this.#busy = true;
-		try {
-			const { suggestion } = await this.#request(engine, query.before, query.prefix);
-			return suggestion?.suffix || null;
-		} finally {
-			this.#busy = false;
-			const next = this.#queued;
-			this.#queued = undefined;
-			if (next) void this.#run(next.engine, next.query).then(next.resolve, next.reject);
-		}
-	}
-}
 
 // Re-export types for consumers
 export type * from "./rpc-types";
@@ -429,7 +343,6 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
  */
 const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
 	"bash",
-	"predict_word",
 	"btw_cancel",
 	"abort_branch_summary",
 ]);
@@ -437,7 +350,7 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
 /**
  * Dispatch a single parsed frame from the RPC input stream.
  *
- * `bash`, `predict_word`, `prompt` and `steer_subagent` are dispatched in the
+ * `bash`, `prompt` and `steer_subagent` are dispatched in the
  * background so the caller can keep reading subsequent frames while one is
  * still settling: a `bash` command can run for a long time, and a `prompt`
  * command's response is held until the message is admitted, which can span
@@ -446,15 +359,13 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
  * message, which for a subagent between turns includes its whole
  * pre-`agent_start` setup. Backgrounding them lets a client send `abort_bash`
  * while a shell command runs, or `abort` (and `steer`/`follow_up`/`get_state`)
- * while a `prompt` or `steer_subagent` is still admitting. `predict_word` is
- * backgrounded too, so a cold prediction engine never stalls the command queue
- * behind a keystroke.
+ * while a `prompt` or `steer_subagent` is still admitting.
  * Response correlation is preserved via each command's `id`; ordering across
  * concurrent commands is not guaranteed and clients MUST match on `id`.
  *
  * @returns `undefined` when the frame was routed to a side-channel handler
  *   (extension UI response, host tool/URI frames) or dispatched in the
- *   background (`bash`, `predict_word`, `prompt`, `steer`, `follow_up`, `steer_subagent`). Otherwise a promise that
+ *   background (`bash`, `prompt`, `steer`, `follow_up`, `steer_subagent`). Otherwise a promise that
  *   resolves once the response for the command has been emitted via `output`.
  *   Errors from `handleCommand` on a command dispatched inline propagate; the
  *   caller is expected to wrap them.
@@ -473,8 +384,7 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
 	// Dispatch them in the background so a subsequent frame — `abort_bash` for
 	// a running `bash`, or `abort`/`steer`/`follow_up`/`get_state` for an
 	// admitting `prompt` — can be read and handled without waiting for the
-	// earlier command to finish on its own. `predict_word` is backgrounded so a
-	// cold prediction engine never stalls the command queue behind a keystroke.
+	// earlier command to finish on its own. Background commands do not block the input queue.
 	// The response is emitted when `handleCommand` resolves; clients correlate
 	// via `command.id`.
 	if (
@@ -571,7 +481,7 @@ export class RpcUserInputGate {
 }
 
 /** Starts prompts, steers, follow-ups and `steer_subagent` after earlier ordinary commands, without
- * awaiting admission. Control frames, `bash` and `predict_word` dispatch immediately (see
+ * awaiting admission. Control frames, `bash` dispatch immediately (see
  * dispatchRpcInputFrame). `acceptInput` runs synchronously in {@link dispatch}, before the
  * handler is queued, so an abort can invalidate a frame that has not started yet. */
 export class RpcInputDispatcher {
@@ -597,7 +507,7 @@ export class RpcInputDispatcher {
 			if (dispatchRpcControlFrame(parsed, this.#deps)) return;
 			const command = parsed as RpcCommand;
 			this.#acceptInput?.(command);
-			// Bash and predict_word retain their immediate side channel. Prompts,
+			// Bash retains its immediate side channel. Prompts,
 			// steers, follow-ups and steer_subagent start through the serial tail, but
 			// dispatchRpcInputFrame backgrounds their admission.
 			if (BACKGROUND_COMMANDS.has(command.type)) {
@@ -644,7 +554,7 @@ export class RpcInputDispatcher {
  * Coordinates deferred shutdown with in-flight background input tasks.
  *
  * `pi.shutdown()` from an extension only *requests* shutdown; the process must
- * not exit while a background-dispatched command (`bash`, `predict_word`,
+ * not exit while a background-dispatched command (`bash`,
  * `prompt` or `steer_subagent`, see
  * {@link dispatchRpcInputFrame}) still owes the client a response frame. The
  * coordinator tracks those tasks, re-checks the shutdown request whenever one
@@ -1427,7 +1337,6 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	};
 
 	const extensionUserMessageTracker = new RpcExtensionUserMessageTracker();
-	const wordPredictor = new RpcWordPredictor();
 	const btw = new RpcBtwController(session, output);
 	// A continuation abandoned while waiting leaves nothing to end the activity stretch: re-check settlement.
 	const goalController = new RpcGoalController(session, () => void settleWatcher.check());
@@ -2743,45 +2652,6 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 
 			case "get_btw_history":
 				return success(id, "get_btw_history", { records: await btw.history() });
-
-			// =================================================================
-			// Word prediction
-			// =================================================================
-
-			case "predict_word": {
-				if (!isTextCursor(command.text, command.cursor)) {
-					return error(id, "predict_word", INVALID_TEXT_CURSOR_ERROR);
-				}
-				try {
-					const method = cfgSpellingAutocomplete.get(session.settings);
-					const suffix = await wordPredictor.predict(method, command.text, command.cursor);
-					return success(id, "predict_word", { suffix });
-				} catch (err: unknown) {
-					return error(id, "predict_word", err instanceof Error ? err.message : String(err));
-				}
-			}
-
-			case "predict_word_feedback": {
-				if (!isTextCursor(command.text, command.cursor)) {
-					return error(id, "predict_word_feedback", INVALID_TEXT_CURSOR_ERROR);
-				}
-				if (typeof command.suggestion !== "string" || typeof command.accepted !== "boolean") {
-					return error(id, "predict_word_feedback", "suggestion must be a string and accepted a boolean");
-				}
-				const method = cfgSpellingAutocomplete.get(session.settings);
-				if (method !== "off") {
-					const query = wordQueryAt(command.text, command.cursor);
-					if (query) {
-						textPredictionBackend(method).feedback(
-							query.before,
-							query.prefix,
-							command.suggestion,
-							command.accepted,
-						);
-					}
-				}
-				return success(id, "predict_word_feedback");
-			}
 
 			default: {
 				const unknownCommand = command as { type: string };

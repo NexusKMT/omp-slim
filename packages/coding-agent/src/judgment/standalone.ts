@@ -3,6 +3,7 @@
  * the git TUI's AI staging): project settings, a fresh auth store, the model
  * registry, and CLI extension providers, resolved the same way everywhere.
  */
+import { resolvePrimaryModelSelection } from "../config/model-resolver";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
@@ -17,7 +18,7 @@ export interface StandaloneJudge {
 }
 
 /**
- * Resolve the `judge` role chain for `cwd`'s project settings and extensions.
+ * Resolve the configured primary chat model for `cwd`'s project settings and extensions.
  * No session ledger exists here, so `purpose` only labels telemetry; native
  * answers still go through the shared answer cache.
  */
@@ -32,6 +33,7 @@ export async function openStandaloneJudge(cwd: string, purpose: string): Promise
 			judge: resolveJudge({
 				settings,
 				registry,
+				sessionModel: resolvePrimaryModelSelection(settings, registry.getAvailable())?.model,
 				sessionId: Bun.randomUUIDv7(),
 				purpose,
 				cache: sharedJudgmentCache(),

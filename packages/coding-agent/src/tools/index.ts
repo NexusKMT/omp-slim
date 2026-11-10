@@ -127,7 +127,6 @@ export * from "./glob";
 export * from "./grep";
 export * from "./jfind";
 export type { AgentActivitySnapshot, CoordinationDetails, JobSnapshot } from "@oh-my-pi/pi-tui/tools/wait";
-export * from "./image-gen";
 export * from "./manage-skill";
 export * from "./read";
 export * from "./report-tool-issue";

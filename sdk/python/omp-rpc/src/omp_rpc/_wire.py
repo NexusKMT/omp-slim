@@ -3549,22 +3549,6 @@ class WireClient:
         params["credentialId"] = credential_id
         return parse_logout_result(self._command("logout", params), "logout")
 
-    def predict_word(self, text: str, cursor: int) -> str | None:
-        """Ghost-text suffix for the prose word ending at `cursor` (a UTF-16 offset); null when none applies."""
-        params: dict[str, object] = {}
-        params["text"] = text
-        params["cursor"] = cursor
-        return required(expect_object(self._command("predict_word", params, timeout=155), "predict_word"), "suffix", nullable(decode_str), "predict_word")
-
-    def predict_word_feedback(self, text: str, cursor: int, suggestion: str, *, accepted: bool) -> None:
-        """Report a shown suggestion as accepted or typed past."""
-        params: dict[str, object] = {}
-        params["text"] = text
-        params["cursor"] = cursor
-        params["suggestion"] = suggestion
-        params["accepted"] = accepted
-        self._command("predict_word_feedback", params)
-
     def btw(self, question: str, *, record_id: str | None = None) -> BtwHistoryRecord:
         """Ask a side question, or a follow-up in topic `recordId`; returns the record once it is running."""
         params: dict[str, object] = {}

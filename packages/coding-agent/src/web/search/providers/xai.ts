@@ -1,13 +1,6 @@
 import { type Api, type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
 import { resolveXaiBaseUrl, XAI_DEFAULT_BASE_URL } from "@oh-my-pi/pi-ai/providers/xai-base-url";
-import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
-import type { ModelRegistry } from "../../../config/model-registry";
-import { pickDefaultAvailableModel, resolveRoleChain } from "../../../config/model-resolver";
-import { roleCandidatePool } from "../../../config/model-roles";
-import { cfgModelProviderOrder } from "../../../config/model-settings";
-import type { Settings } from "../../../config/settings";
 import type { XAIHttpTransport } from "../../../lib/xai-http";
-import { resolveConfiguredModelTarget } from "../../../session/role-models";
 import { isXHost, xHandle } from "../../x";
 import type { SearchCitation, SearchResponse, SearchSource, SearchUsage } from "../types";
 import { SearchProviderError } from "../../../web/search/types";
@@ -165,17 +158,6 @@ function xHandleFilter(parsed: StructuredQuery): { allowed: string[]; excluded: 
  */
 export function targetsX(parsed: StructuredQuery): boolean {
 	return xHandleFilter(parsed).allowed.length > 0 || (parsed.sites.length > 0 && parsed.sites.every(isXSite));
-}
-
-/** Providers serving xAI models; a Set because `getAvailableForProviders` takes one. */
-const XAI_PROVIDERS: ReadonlySet<string> = new Set(["xai", "xai-oauth"]);
-
-/**
- * Whether X search can run: an xAI-grounded model with credentials exists.
- * Gates the X operators in the `web_search` tool description.
- */
-export function xSearchAvailable(modelRegistry: ModelRegistry): boolean {
-	return modelRegistry.getAvailableForProviders(XAI_PROVIDERS).some(model => model.webSearch === "xai");
 }
 
 /** UTC start date (`YYYY-MM-DD`) of a `recency` window ending now. */
@@ -578,41 +560,6 @@ export async function requestXAIResponses(
 			? "oauth"
 			: "api_key";
 	return { response, authMode };
-}
-
-/**
- * Reorder the xAI-grounded entries of a model chain by provider priority:
- * `modelProviderOrder`, then the built-in order, which ranks the `xai-oauth`
- * login above an `xai` API key. Other entries keep their slots; same-provider
- * entries keep their relative order.
- */
-export function rankXAIProviders<T>(items: readonly T[], modelOf: (item: T) => Model<Api>, settings: Settings): T[] {
-	const priority = buildModelProviderPriorityRank(cfgModelProviderOrder.get(settings));
-	const rank = (item: T): number => priority.get(modelOf(item).provider.toLowerCase()) ?? Number.POSITIVE_INFINITY;
-	const ranked = items.filter(item => modelOf(item).webSearch === "xai").sort((a, b) => rank(a) - rank(b));
-	let next = 0;
-	return items.map(item => (modelOf(item).webSearch === "xai" ? ranked[next++] : item));
-}
-
-/**
- * xAI models for X reads and X-only searches, in attempt order: the `web` role
- * chain's xAI-grounded candidates plus the provider default swapped to its
- * cheaper `webSearchModel`, ranked by {@link rankXAIProviders}. Empty without
- * xAI credentials.
- */
-export function xaiModelChain(modelRegistry: ModelRegistry, settings: Settings): Model<Api>[] {
-	const pool = roleCandidatePool("web", settings, modelRegistry);
-	const chain = resolveRoleChain("web", settings, pool)
-		.map(candidate => candidate.model)
-		.filter(model => model.webSearch === "xai");
-	const grounded = pool.filter(model => model.webSearch === "xai");
-	const fallback = pickDefaultAvailableModel(grounded);
-	const runner = fallback && (resolveConfiguredModelTarget(fallback.webSearchModel, fallback, grounded) ?? fallback);
-	const models =
-		runner && !chain.some(model => model.provider === runner.provider && model.id === runner.id)
-			? [...chain, runner]
-			: chain;
-	return rankXAIProviders(models, model => model, settings);
 }
 
 /** Execute xAI Responses API web and X search. */

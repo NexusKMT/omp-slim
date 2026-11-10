@@ -349,21 +349,6 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 	},
 
 	{
-		name: "predict_word",
-		doc: "Ghost-text suffix for the prose word ending at `cursor` (a UTF-16 offset); null when none applies.",
-		params: { text: "string", cursor: "number.integer" },
-		result: { suffix: "string | null" },
-		unwrap: "suffix",
-		// One prediction runs per session with one more held behind it: a request may wait
-		// out a cold daemon start (~150 s) before its own completion.
-		timeoutMs: 155_000,
-	},
-	{
-		name: "predict_word_feedback",
-		doc: "Report a shown suggestion as accepted or typed past.",
-		params: { text: "string", cursor: "number.integer", suggestion: "string", accepted: "boolean" },
-	},
-	{
 		name: "btw",
 		doc: "Ask a side question, or a follow-up in topic `recordId`; returns the record once it is running.",
 		params: { question: "string", "recordId?": "string" },

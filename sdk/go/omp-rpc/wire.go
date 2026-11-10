@@ -7295,25 +7295,6 @@ func (v *LogoutResult) decodeFrom(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-type PredictWordResult struct {
-	Suffix *string `json:"suffix"`
-}
-
-func (v *PredictWordResult) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "PredictWordResult", v.decodeFrom)
-}
-
-func (v *PredictWordResult) decodeFrom(raw map[string]json.RawMessage) error {
-	var out PredictWordResult
-	d := fieldDecoder{raw: raw, owner: "PredictWordResult"}
-	d.nullable("suffix", &out.Suffix)
-	if d.err != nil {
-		return d.err
-	}
-	*v = out
-	return nil
-}
-
 type BtwResult struct {
 	Record BtwHistoryRecord `json:"record"`
 }
@@ -8033,32 +8014,6 @@ func (c Commands) Logout(ctx context.Context, p LogoutCommand) (LogoutResult, er
 	var out LogoutResult
 	err := c.call(ctx, "logout", p, 0, &out)
 	return out, err
-}
-
-// PredictWordCommand holds the parameters of "predict_word".
-type PredictWordCommand struct {
-	Text   string `json:"text"`
-	Cursor int64  `json:"cursor"`
-}
-
-// PredictWord sends "predict_word": Ghost-text suffix for the prose word ending at `cursor` (a UTF-16 offset); null when none applies.
-func (c Commands) PredictWord(ctx context.Context, p PredictWordCommand) (*string, error) {
-	var out PredictWordResult
-	err := c.call(ctx, "predict_word", p, 155*time.Second, &out)
-	return out.Suffix, err
-}
-
-// PredictWordFeedbackCommand holds the parameters of "predict_word_feedback".
-type PredictWordFeedbackCommand struct {
-	Text       string `json:"text"`
-	Cursor     int64  `json:"cursor"`
-	Suggestion string `json:"suggestion"`
-	Accepted   bool   `json:"accepted"`
-}
-
-// PredictWordFeedback sends "predict_word_feedback": Report a shown suggestion as accepted or typed past.
-func (c Commands) PredictWordFeedback(ctx context.Context, p PredictWordFeedbackCommand) error {
-	return c.call(ctx, "predict_word_feedback", p, 0, nil)
 }
 
 // BtwCommand holds the parameters of "btw".

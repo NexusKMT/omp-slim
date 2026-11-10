@@ -105,10 +105,6 @@ export const playHelp = {
 	description: "Replay a /record session recording in the terminal (space pauses, q quits)",
 } satisfies CommandMetadata;
 
-export const predictHelp = {
-	description: "Type a prompt and compare every word-completion engine's ghost text live",
-} satisfies CommandMetadata;
-
 export const psHelp = {
 	description: "List and control daemon-supervised background processes (logs, stop, kill, restart)",
 } satisfies CommandMetadata;
@@ -120,7 +116,7 @@ export const renderHelp = {
 	description: "Draw a session's entire thread through the production transcript pipeline (with repaint timing)",
 } satisfies CommandMetadata;
 
-export const searchHelp = { description: "Test web search providers" } satisfies CommandMetadata;
+export const searchHelp = { description: "Search the web with HTTP engines" } satisfies CommandMetadata;
 
 export const sessionHelp = {
 	description:
@@ -167,10 +163,6 @@ export const statsHelp = { description: "View usage statistics" } satisfies Comm
 
 export const streamHelp = {
 	description: "Broadcast local omp session screens and chat to your public live channel",
-} satisfies CommandMetadata;
-
-export const tinyModelsHelp = {
-	description: "Download tiny local models (session titles, judgments, word completion)",
 } satisfies CommandMetadata;
 
 export const tokenHelp = { description: "Get the API key or OAuth token for a provider" } satisfies CommandMetadata;

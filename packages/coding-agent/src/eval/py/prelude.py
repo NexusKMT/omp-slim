@@ -882,9 +882,9 @@ if "__omp_prelude_loaded__" not in globals():
                     raise result
         return results
 
-    def completion(prompt, *, model="default", system=None, schema=None):
+    def completion(prompt, *, system=None, schema=None):
         """Start a stateless completion and return its handle."""
-        args = {"prompt": prompt, "model": model}
+        args = {"prompt": prompt}
         if system is not None:
             args["system"] = system
         if schema is not None:
@@ -1069,7 +1069,6 @@ if "__omp_prelude_loaded__" not in globals():
         apply=None,
         merge=None,
         tools=None,
-        model=None,
     ):
         """Start a background subagent and return its handle."""
         args = {"prompt": prompt}
@@ -1089,8 +1088,6 @@ if "__omp_prelude_loaded__" not in globals():
             args["merge"] = bool(merge)
         if tools is not None:
             args["tools"] = list(tools)
-        if model is not None:
-            args["model"] = model
         result = _bridge_call("__agent__", args)
         if not isinstance(result, dict) or not isinstance(result.get("id"), str):
             raise RuntimeError("agent() did not return a handle")
@@ -1136,7 +1133,7 @@ if "__omp_prelude_loaded__" not in globals():
         def __repr__(self):
             return f"<workpool {self.name} ({self.agent}) {self.limit} agents>"
 
-    def workpool(agent=None, *, name=None, context=None, tools=None, model=None):
+    def workpool(agent=None, *, name=None, context=None, tools=None):
         """Create a pool of keep-alive subagents."""
         args = {"op": "create"}
         if agent is not None:
@@ -1147,8 +1144,6 @@ if "__omp_prelude_loaded__" not in globals():
             args["context"] = context
         if tools is not None:
             args["tools"] = list(tools)
-        if model is not None:
-            args["model"] = model
         result = _bridge_call("__workpool__", args)
         if not isinstance(result, dict) or not isinstance(result.get("name"), str):
             raise RuntimeError("workpool() did not return a pool")

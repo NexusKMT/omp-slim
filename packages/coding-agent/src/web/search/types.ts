@@ -28,7 +28,7 @@ export const DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS = 60;
 export const MAX_WEB_SEARCH_TIMEOUT_SECONDS = 300;
 
 /** Pure search engines represented by `web/*` catalog models. */
-export type SearchEngineId = Exclude<SearchProviderId, WebSearchGrounding>;
+export type SearchEngineId = Exclude<SearchProviderId, WebSearchGrounding | "perplexity">;
 
 /** Provider-specific error with optional HTTP status */
 export class SearchProviderError extends Error {

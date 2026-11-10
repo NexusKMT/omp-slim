@@ -596,19 +596,6 @@ export const cfgLaunchEnabled = register({
 	},
 });
 
-export const cfgGenerateImageEnabled = register({
-	id: "generate_image.enabled",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "tools",
-		group: "Available Tools",
-		label: "Generate Image",
-		description:
-			"Enable the generate_image tool (text-to-image generation and editing). Exposed as an xd:// device when tools.xdev is on.",
-	},
-});
-
 export const cfgRatchetEnabled = register({
 	id: "ratchet.enabled",
 	type: "boolean",
@@ -1065,6 +1052,5 @@ export const cfgBuiltinToolGates = combine({
 /** Settings that add or remove the built-in tools they gate (`AgentSession.reconcileBuiltinTools`). */
 export const cfgSessionToolGates = combine({
 	builtins: cfgBuiltinToolGates,
-	generateImage: cfgGenerateImageEnabled,
 	xdev: cfgToolsXdev,
 });

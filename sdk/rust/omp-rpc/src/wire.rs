@@ -5507,26 +5507,6 @@ pub struct LogoutResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PredictWordParams {
-	pub text: String,
-	pub cursor: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PredictWordResult {
-	#[serde(deserialize_with = "Deserialize::deserialize")]
-	pub suffix: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PredictWordFeedbackParams {
-	pub text: String,
-	pub cursor: i64,
-	pub suggestion: String,
-	pub accepted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BtwParams {
 	pub question: String,
 	#[serde(rename = "recordId", default, skip_serializing_if = "Option::is_none")]
@@ -7029,43 +7009,6 @@ impl Command for LogoutCommand {
 
 	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
 		serde_json::from_value::<LogoutResult>(data.unwrap_or_else(|| Value::Object(Map::new())))
-	}
-}
-
-/// Ghost-text suffix for the prose word ending at `cursor` (a UTF-16 offset); null when none applies.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PredictWordCommand {
-	pub text: String,
-	pub cursor: i64,
-}
-
-impl Command for PredictWordCommand {
-	const NAME: &'static str = "predict_word";
-	const TIMEOUT_MS: Option<u64> = Some(155000);
-	type Output = Option<String>;
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		serde_json::from_value::<PredictWordResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.suffix)
-	}
-}
-
-/// Report a shown suggestion as accepted or typed past.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PredictWordFeedbackCommand {
-	pub text: String,
-	pub cursor: i64,
-	pub suggestion: String,
-	pub accepted: bool,
-}
-
-impl Command for PredictWordFeedbackCommand {
-	const NAME: &'static str = "predict_word_feedback";
-	const TIMEOUT_MS: Option<u64> = None;
-	type Output = ();
-
-	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
-		let _ = data;
-		Ok(())
 	}
 }
 

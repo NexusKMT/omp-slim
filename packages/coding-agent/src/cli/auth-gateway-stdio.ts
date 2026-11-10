@@ -6,50 +6,31 @@
  * Unlike `serve` it runs on this omp's own credentials (the broker when one is
  * configured, else the local store), models (`models.yml` and extension
  * providers included) and settings. A request's `model` is an omp model
- * selector, as `--model` takes it ({@link selectorCandidates}); an attempt
- * that fails before its reply starts moves on to the next candidate. Serving
- * ends when stdin does.
+ * selector matching the configured primary model ({@link selectorCandidates}).
+ * Requests never select another model or use a fallback. Serving ends when stdin does.
  */
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { createAuthGatewayRouter, serveAuthGatewayStdio } from "@oh-my-pi/pi-ai/auth-gateway";
 import { getProjectDir, isRecord, logger, postmortem, VERSION } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../config/model-registry";
-import { formatModelStringWithRouting, normalizeModelPatternList, resolveCliModel } from "../config/model-resolver";
+import { formatModelStringWithRouting, resolvePrimaryModelSelection } from "../config/model-resolver";
 import { Settings } from "../config/settings";
 import { claimRpcInput } from "../modes/rpc/rpc-input";
 import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
-import { collectOnlineTinyCandidates, expandOnlineTinyModelFallbacks } from "../tiny/online-candidates";
 
 /** Names the caller in the gateway's logs. */
 const STDIO_PEER = "stdio";
 
-/**
- * The models a request naming `selector` may run on, in order: the model
- * `--model` would pick (the first entry of a comma list that resolves), then
- * that model's `retry.fallbackChains` (its role's chain when the entry named a
- * role). Empty when no entry resolves.
- */
+/** Resolve only the configured primary model; request selectors cannot change it. */
 export function selectorCandidates(
 	selector: string,
 	settings: Settings,
 	registry: Pick<ModelRegistry, "getAll" | "getAvailable">,
 ): Model<Api>[] {
-	const available = registry.getAvailable();
-	for (const pattern of normalizeModelPatternList(selector)) {
-		const { model, configuredRole } = resolveCliModel({ cliModel: pattern, modelRegistry: registry, settings });
-		if (!model) continue;
-		const chain = configuredRole
-			? collectOnlineTinyCandidates([configuredRole], settings, available).map(candidate => candidate.model)
-			: expandOnlineTinyModelFallbacks(model, settings, available);
-		const seen = new Set<string>();
-		return [model, ...chain].filter(candidate => {
-			const key = formatModelStringWithRouting(candidate);
-			if (seen.has(key)) return false;
-			seen.add(key);
-			return true;
-		});
-	}
-	return [];
+	const model = resolvePrimaryModelSelection(settings, registry.getAvailable())?.model;
+	if (!model) return [];
+	const requested = selector.trim();
+	return requested === model.id || requested === formatModelStringWithRouting(model) ? [model] : [];
 }
 
 /** Serves the gateway on stdin/stdout until stdin ends, then exits. */
@@ -83,7 +64,12 @@ export async function runAuthGatewayStdio(): Promise<void> {
 		const selector = body.model;
 		const candidates = selectorCandidates(selector, settings, registry);
 		let response = Response.json(
-			{ error: { message: `No available model matches "${selector}"`, type: "invalid_request_error" } },
+			{
+				error: {
+					message: `Request model "${selector}" does not match the configured primary model`,
+					type: "invalid_request_error",
+				},
+			},
 			{ status: 404 },
 		);
 		for (const model of candidates) {

@@ -11,13 +11,10 @@ import type { Api, AuthStorage, Model } from "@oh-my-pi/pi-ai";
 import { modelKind } from "@oh-my-pi/pi-catalog/types";
 import { formatAge, formatCount, prompt, truncate } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../../config/model-registry";
-import { type RoleChainCandidate, resolveModelRoleValue, resolveRoleChain } from "../../config/model-resolver";
-import { roleCandidatePool } from "../../config/model-roles";
 import { settings } from "../../config/settings";
 import type { CustomTool, CustomToolContext } from "../../extensibility/custom-tools/types";
 import webSearchSystemPrompt from "../../prompts/system/web-search.md" with { type: "text" };
 import webSearchDescription from "../../prompts/tools/web-search.md" with { type: "text" };
-import { resolveConfiguredModelTarget } from "../../session/role-models";
 import { discoverAuthStorage } from "../../sdk";
 import type { ToolSession } from "../../tools";
 import { throwIfAborted } from "../../tools/tool-errors";
@@ -26,16 +23,18 @@ import {
 	formatSearchProviderFailures,
 	getGroundedSearchProvider,
 	getSearchProvider,
+	HTTP_SEARCH_ENGINE_IDS,
+	isRegisteredSearchEngine,
 	type SearchProvider,
 	type SearchProviderFailure,
 } from "./provider";
-import { rankXAIProviders, targetsX, xaiModelChain, xSearchAvailable } from "./providers/xai";
 import { applyQueryConstraints, parseSearchQuery } from "./query";
 import {
 	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
 	MAX_WEB_SEARCH_TIMEOUT_SECONDS,
 	SearchProviderError,
 	type SearchFailureDetail,
+	type SearchEngineId,
 	type SearchResponse,
 	type SearchResultDetails,
 } from "./types";
@@ -55,7 +54,7 @@ export const webSearchSchema = type({
 export type SearchToolParams = typeof webSearchSchema.infer;
 
 export interface SearchQueryParams extends SearchToolParams {
-	model?: string;
+	engine?: SearchEngineId;
 }
 
 /** Format response for LLM consumption. `notes` lead the output (e.g. relaxed-constraint warnings). */
@@ -151,44 +150,35 @@ interface ExecuteSearchOptions {
 	authStorage: AuthStorage;
 	modelRegistry?: ModelRegistry;
 	sessionId?: string;
-	/** The session's active model; `web/hosted` searches through it. */
+	/** The only chat model hosted search may use. */
 	sessionModel?: Model<Api>;
 	signal?: AbortSignal;
 }
 
-function isHostedPlaceholder(model: Model<Api>): boolean {
-	return model.provider === "web" && model.id === "hosted";
+interface SearchCandidate {
+	model: Model<Api>;
+	engine?: SearchEngineId;
+	explicit: boolean;
 }
 
-/**
- * Expand the `web/hosted` placeholder into models on the session's own
- * provider, which bill the credential the session already uses: first the
- * session model's cheaper `webSearchModel` swap, then the session model itself.
- * A swap the host does not expose is skipped; a failing swap falls through to
- * the session model. Left unexpanded when neither can search.
- */
-function expandHostedCandidate(
-	candidate: RoleChainCandidate,
+/** Search transports never select another chat model or honor retired model-role settings. */
+function searchCandidates(
+	params: SearchQueryParams,
+	modelRegistry: ModelRegistry,
 	sessionModel: Model<Api> | undefined,
-	pool: Model<Api>[],
-): RoleChainCandidate[] {
-	if (!isHostedPlaceholder(candidate.model) || !sessionModel) return [candidate];
-	const swap = resolveConfiguredModelTarget(sessionModel.webSearchModel, sessionModel, pool);
-	const distinctSwap = swap?.provider === sessionModel.provider && swap.id === sessionModel.id ? undefined : swap;
-	const models = [distinctSwap, sessionModel].filter((model): model is Model<Api> => !!model?.webSearch);
-	if (models.length === 0) return [candidate];
-	return models.map(model => ({ ...candidate, model }));
-}
-
-/**
- * Move the chain's xAI-grounded candidates to the front, keeping their order,
- * or prepend {@link xaiModelChain} when the chain has none. Unchanged without
- * xAI credentials.
- */
-function preferXAI(chain: RoleChainCandidate[], modelRegistry: ModelRegistry): RoleChainCandidate[] {
-	const xai = chain.filter(candidate => candidate.model.webSearch === "xai");
-	if (xai.length > 0) return [...xai, ...chain.filter(candidate => candidate.model.webSearch !== "xai")];
-	return [...xaiModelChain(modelRegistry, settings).map(model => ({ model, explicit: false })), ...chain];
+): SearchCandidate[] {
+	if (Object.hasOwn(params, "model")) throw new Error("Web search model overrides are not supported.");
+	if (params.engine && !isRegisteredSearchEngine(params.engine)) throw new Error("Unknown HTTP search engine.");
+	const engines = params.engine ? [params.engine] : HTTP_SEARCH_ENGINE_IDS;
+	const candidates: SearchCandidate[] = [];
+	if (!params.engine && sessionModel?.webSearch && modelKind(sessionModel) === "chat") {
+		candidates.push({ model: sessionModel, explicit: false });
+	}
+	for (const engine of engines) {
+		const model = modelRegistry.find("web", engine);
+		if (model) candidates.push({ model, engine, explicit: params.engine !== undefined });
+	}
+	return candidates;
 }
 
 /** Execute web search */
@@ -199,23 +189,8 @@ async function executeSearch(
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: SearchResultDetails }> {
 	const { authStorage, sessionId, signal } = options;
 	const modelRegistry = options.modelRegistry ?? new ModelRegistry(authStorage, undefined, { settings });
-	const pool = roleCandidatePool("web", settings, modelRegistry);
-	const candidates = params.model
-		? (() => {
-				const resolved = resolveModelRoleValue(params.model, pool, { settings });
-				return resolved.model
-					? [{ model: resolved.model, explicit: true, thinkingLevel: resolved.thinkingLevel }]
-					: [];
-			})()
-		: resolveRoleChain("web", settings, pool);
+	const candidates = searchCandidates(params, modelRegistry, options.sessionModel);
 	const parsedQuery = parseSearchQuery(params.query);
-	let expanded = rankXAIProviders(
-		candidates.flatMap(candidate => expandHostedCandidate(candidate, options.sessionModel, pool)),
-		candidate => candidate.model,
-		settings,
-	);
-	// Only xAI reaches X posts; X-only queries try it first even when the role prefers another engine.
-	if (!params.model && targetsX(parsedQuery)) expanded = preferXAI(expanded, modelRegistry);
 
 	// Invariant across candidates; resolve once before walking the role chain.
 	let antigravityEndpointMode: "auto" | "production" | "sandbox" | undefined;
@@ -239,22 +214,18 @@ async function executeSearch(
 	let availableProviderCount = 0;
 	let lastProvider: { id: string; label: string } | undefined;
 	let failedResponseProvider: SearchResponse["provider"] = "none";
-	for (const candidate of expanded) {
+	for (const candidate of candidates) {
 		let provider: SearchProvider | undefined;
 		const candidateMeta = { id: candidate.model.id, label: candidate.model.name };
 		lastProvider = candidateMeta;
 		try {
 			const model = candidate.model;
-			if (isHostedPlaceholder(model)) {
-				if (!candidate.explicit) continue;
-				throw new Error("The session model has no web search grounding.");
-			}
-			if (modelKind(model) === "search") {
-				provider = await getSearchProvider(model.id);
+			if (candidate.engine) {
+				provider = await getSearchProvider(candidate.engine);
 			} else if (model.webSearch) {
 				provider = await getGroundedSearchProvider(model.webSearch);
 			} else {
-				throw new Error(`Model ${model.provider}/${model.id} does not support web search`);
+				throw new Error(`Current model ${model.provider}/${model.id} does not support web search`);
 			}
 			lastProvider = provider;
 			const available = candidate.explicit
@@ -264,7 +235,7 @@ async function executeSearch(
 			if (!available && candidate.explicit) {
 				throw new SearchProviderError(
 					provider.id,
-					`${provider.label} web search is unavailable. Configure its credentials or select the automatic provider chain.`,
+					`${provider.label} web search is unavailable. Configure its credentials or use automatic HTTP search.`,
 				);
 			}
 			availableProviderCount++;
@@ -283,7 +254,6 @@ async function executeSearch(
 				timeoutMs,
 				authStorage,
 				model,
-				thinkingLevel: candidate.thinkingLevel,
 				modelRegistry,
 				explicit: candidate.explicit,
 				sessionId,
@@ -292,7 +262,7 @@ async function executeSearch(
 
 			// A host that silently drops the hosted search tool still answers from the
 			// model's weights; without sources that answer is not a search result.
-			if (modelKind(model) !== "search" && response.sources.length === 0 && !response.citations?.length) {
+			if (!candidate.engine && response.sources.length === 0 && !response.citations?.length) {
 				throw new SearchProviderError(
 					provider.id,
 					`${provider.label} returned no sources; ${model.provider}/${model.id} may not support hosted web search.`,
@@ -340,9 +310,7 @@ async function executeSearch(
 	}
 
 	if (availableProviderCount === 0 && failures.length === 0) {
-		const message = params.model
-			? `No web search model matches selector "${params.model}".`
-			: "No web search model configured.";
+		const message = "No HTTP search engine or supported current-model search is available.";
 		return {
 			content: [{ type: "text" as const, text: `Error: ${message}` }],
 			details: { response: { provider: "none", sources: [] }, error: message },
@@ -404,18 +372,7 @@ export async function runSearchQuery(
 /** Description without the X operators, for hosts without a model registry. */
 const plainDescription = prompt.render(webSearchDescription);
 
-/**
- * Description rendered on first read with a model registry, then reused for
- * the process: re-checking xAI auth per read would rewrite the tool
- * description, and invalidate the prompt cache, whenever auth changes.
- */
-let registryDescription: string | undefined;
-
-/**
- * Web search tool implementation.
- *
- * Supports the configured web model role chain with automatic fallback.
- */
+/** Search HTTP engines or the current model's hosted search capability. */
 export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchResultDetails> {
 	readonly name = "web_search";
 	readonly approval = "read" as const;
@@ -431,12 +388,9 @@ export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchRe
 		this.#session = session;
 	}
 
-	/** Advertises X search operators when xAI credentials existed at the process's first read. */
+	/** X-only operators are advertised only when this session itself uses an X-capable model. */
 	get description(): string {
-		const modelRegistry = this.#session.modelRegistry;
-		if (!modelRegistry) return plainDescription;
-		registryDescription ??= prompt.render(webSearchDescription, { xSearch: xSearchAvailable(modelRegistry) });
-		return registryDescription;
+		return prompt.render(webSearchDescription, { xSearch: this.#session.getActiveModel?.()?.webSearch === "xai" });
 	}
 
 	async execute(

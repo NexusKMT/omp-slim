@@ -1794,22 +1794,6 @@ export interface LogoutResult {
 	remainingSource?: string;
 }
 
-export interface PredictWordParams {
-	text: string;
-	cursor: number;
-}
-
-export interface PredictWordResult {
-	suffix: string | null;
-}
-
-export interface PredictWordFeedbackParams {
-	text: string;
-	cursor: number;
-	suggestion: string;
-	accepted: boolean;
-}
-
 export interface BtwParams {
 	question: string;
 	recordId?: string;
@@ -1896,8 +1880,6 @@ export interface RpcWireCommands {
 	login: { params: LoginParams; result: LoginResult };
 	get_logout_accounts: { params: GetLogoutAccountsParams; result: GetLogoutAccountsResult };
 	logout: { params: LogoutParams; result: LogoutResult };
-	predict_word: { params: PredictWordParams; result: PredictWordResult };
-	predict_word_feedback: { params: PredictWordFeedbackParams; result: undefined };
 	btw: { params: BtwParams; result: BtwResult };
 	btw_cancel: { params: BtwCancelParams; result: BtwCancelResult };
 	get_btw_history: { params: undefined; result: GetBtwHistoryResult };

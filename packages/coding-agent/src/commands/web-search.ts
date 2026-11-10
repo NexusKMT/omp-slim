@@ -1,5 +1,5 @@
 /**
- * Test web search models.
+ * Search HTTP engines.
  */
 
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
@@ -17,7 +17,7 @@ export default class Search extends Command {
 	};
 
 	static flags = {
-		model: Flags.string({ description: "Catalog model selector" }),
+		engine: Flags.string({ description: "HTTP search engine" }),
 		recency: Flags.string({ description: "Recency filter", options: RECENCY }),
 		limit: Flags.integer({ char: "l", description: "Max results to return" }),
 		compact: Flags.boolean({ description: "Render condensed output" }),
@@ -29,7 +29,7 @@ export default class Search extends Command {
 
 		const cmd: SearchCommandArgs = {
 			query,
-			model: flags.model,
+			engine: flags.engine as SearchCommandArgs["engine"],
 			recency: flags.recency as SearchCommandArgs["recency"],
 			limit: flags.limit,
 			expanded: !flags.compact,

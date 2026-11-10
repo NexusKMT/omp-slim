@@ -101,6 +101,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 		const judge = resolveJudge({
 			settings: this.session.settings,
 			registry,
+			sessionModel: this.session.getActiveModel?.(),
 			sessionId: this.session.getSessionId?.() ?? undefined,
 			purpose: "find",
 			onUsage: journalJudgmentUsage(this.session.sessionManager),
