@@ -1,7 +1,7 @@
 /**
  * Regression: issue #6114.
  *
- * `modelRoles.default` set to a discovery-only local provider model (LM Studio,
+ * `model` set to a discovery-only local provider model (LM Studio,
  * Ollama, llama.cpp) was ignored on fresh interactive launches, surfacing as
  * "No models available". Those providers ship no bundled models, so the
  * static+cached catalog the SDK resolves against at startup is empty on a
@@ -23,7 +23,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 
-describe("issue #6114 fresh launch default role from discovery-only local provider", () => {
+describe("issue #6114 fresh launch configured primary from discovery-only local provider", () => {
 	let tempDir: string;
 	let originalLmStudioBaseUrl: string | undefined;
 	const authStoragesToClose: AuthStorage[] = [];
@@ -74,7 +74,7 @@ describe("issue #6114 fresh launch default role from discovery-only local provid
 		});
 
 		const settings = Settings.isolated();
-		settings.setModelRole("default", "lm-studio/qwen3-coder-30b");
+		settings.setModel("lm-studio/qwen3-coder-30b");
 
 		const { session } = await createAgentSession({
 			cwd: tempDir,

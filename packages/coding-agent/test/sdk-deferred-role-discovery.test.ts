@@ -11,13 +11,8 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
-// Regression for #8863: a deferred `--model @<role>` whose role maps to a model
-// on a discovery-backed provider (ollama/oMLX/llama-swap) must trigger the
-// online-if-uncached discovery refresh. Before the fix the deferred guard in
-// sdk.ts treated the role's expanded `configuredPatterns` as a resolved runtime
-// match, so `runtimeResolved` was `true`, the fallback refresh was skipped, and
-// resolution failed with `Model "@<role>" not found`.
-describe("createAgentSession deferred role alias on discoverable provider (#8863)", () => {
+// A cache-cold primary on a discovery-backed provider must be found before startup.
+describe("createAgentSession deferred primary selection on discoverable provider", () => {
 	let tempDir: string;
 	let modelsJsonPath: string;
 	let authStorage: AuthStorage;
@@ -63,7 +58,7 @@ describe("createAgentSession deferred role alias on discoverable provider (#8863
 		};
 	};
 
-	it("refreshes discoverable providers so @smol resolves to the discovered model", async () => {
+	it("refreshes discoverable providers for the explicit primary selector", async () => {
 		fs.writeFileSync(
 			modelsJsonPath,
 			JSON.stringify({
@@ -83,7 +78,7 @@ describe("createAgentSession deferred role alias on discoverable provider (#8863
 			fetch: mockOllamaDiscovery(["phi3"]),
 		});
 		const settings = Settings.isolated({
-			modelRoles: { smol: "ollama/phi3" },
+			model: "ollama/phi3",
 			"compaction.enabled": false,
 		});
 
@@ -96,7 +91,7 @@ describe("createAgentSession deferred role alias on discoverable provider (#8863
 				authStorage,
 				modelRegistry,
 				settings,
-				modelPattern: "@smol",
+				modelPattern: "ollama/phi3",
 				disableExtensionDiscovery: true,
 				skills: [],
 				contextFiles: [],

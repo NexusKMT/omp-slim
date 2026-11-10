@@ -1,7 +1,7 @@
 /**
  * Regression: issue #6162.
  *
- * `modelRoles.default` set to a `models.yml` discovery provider model
+ * `model` set to a `models.yml` discovery provider model
  * (a custom OpenAI-compatible endpoint with `discovery.type: openai-models-list`)
  * was silently replaced on a cache-cold interactive launch by an unrelated
  * authenticated provider's default. The configured provider ships no static
@@ -11,7 +11,7 @@
  * the fallback resolved nothing and the later discovery-retry gate fired), here
  * a competing bundled provider key resolves `pickDefaultAvailableModel` first,
  * so the `!model` discovery-retry gate never runs and the configured default is
- * lost. The SDK now runs the discovery pass whenever the configured default role
+ * lost. The SDK now runs the discovery pass whenever the configured configured primary
  * is still unresolved and discoverable providers exist, before accepting the
  * bundled-provider fallback.
  */
@@ -28,7 +28,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
-describe("issue #6162 fresh launch default role from models.yml discovery provider", () => {
+describe("issue #6162 fresh launch configured primary from models.yml discovery provider", () => {
 	let tempDir: string;
 	const authStoragesToClose: AuthStorage[] = [];
 
@@ -78,7 +78,7 @@ describe("issue #6162 fresh launch default role from models.yml discovery provid
 
 		const authStorage = createInMemoryAuthStorage();
 		authStoragesToClose.push(authStorage);
-		// The configured provider's key resolves the role model; a competing
+		// The configured provider's key resolves the primary model; a competing
 		// bundled provider key would otherwise win the startup fallback via
 		// `pickDefaultAvailableModel`.
 		authStorage.keys.setRuntime("my-provider", "test-provider-key");
@@ -91,7 +91,7 @@ describe("issue #6162 fresh launch default role from models.yml discovery provid
 		});
 
 		const settings = Settings.isolated();
-		settings.setModelRole("default", "my-provider/some-model");
+		settings.setModel("my-provider/some-model");
 
 		const { session } = await createAgentSession({
 			cwd: tempDir,

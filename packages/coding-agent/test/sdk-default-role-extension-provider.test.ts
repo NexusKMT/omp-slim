@@ -1,13 +1,13 @@
 /**
  * Regression: issue #3569.
  *
- * `modelRoles.default` set to a model from an extension-registered provider was
+ * `model` set to a model from an extension-registered provider was
  * ignored on fresh interactive launches (no `-c`/`--resume`, no `--model`).
  * Extensions register their providers AFTER the SDK's early `defaultRoleSpec`
  * resolution, so the role-pointed model wasn't visible there. The post-extension
  * fallback then went straight to `pickDefaultAvailableModel`, which prefers a
  * bundled provider's default (e.g. `openai/gpt-5.5` when `OPENAI_API_KEY` is set)
- * over the configured default role.
+ * over the configured configured primary.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
@@ -22,7 +22,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
-describe("issue #3569 fresh launch default role from extension provider", () => {
+describe("issue #3569 fresh launch configured primary from extension provider", () => {
 	let tempDir: string;
 	const authStoragesToClose: AuthStorage[] = [];
 
@@ -60,49 +60,57 @@ describe("issue #3569 fresh launch default role from extension provider", () => 
 		});
 	};
 
-	test("honors modelRoles.default pointing at an extension model when a bundled provider key is present", async () => {
-		const bundledOpenAiDefault = getBundledModel("openai", "gpt-5.5");
-		if (!bundledOpenAiDefault) {
-			throw new Error("Expected bundled OpenAI GPT-5.5 default");
-		}
+	test.each(["model", "legacy default"])(
+		"honors %s selecting an extension despite competing credentials",
+		async setting => {
+			const bundledOpenAiDefault = getBundledModel("openai", "gpt-5.5");
+			if (!bundledOpenAiDefault) {
+				throw new Error("Expected bundled OpenAI GPT-5.5 default");
+			}
 
-		const authStorage = createInMemoryAuthStorage();
-		authStoragesToClose.push(authStorage);
-		// Mirrors the reporter's environment: `OPENAI_API_KEY` is configured for a
-		// bundled provider whose `pickDefaultAvailableModel` entry would otherwise
-		// win the startup fallback.
-		authStorage.keys.setRuntime("openai", "test-openai-key");
-		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
+			const authStorage = createInMemoryAuthStorage();
+			authStoragesToClose.push(authStorage);
+			// Mirrors the reporter's environment: `OPENAI_API_KEY` is configured for a
+			// bundled provider whose `pickDefaultAvailableModel` entry would otherwise
+			// win the startup fallback.
+			authStorage.keys.setRuntime("openai", "test-openai-key");
+			const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
 
-		const settings = Settings.isolated();
-		settings.setModelRole("default", "runtime-provider/runtime-model");
+			const selected = "runtime-provider/runtime-model";
+			const settings = Settings.isolated(
+				setting === "model"
+					? { model: selected }
+					: { modelRoles: { default: selected, smol: "openai/gpt-4o-mini" } },
+			);
 
-		const { session } = await createAgentSession({
-			cwd: tempDir,
-			agentDir: tempDir,
-			authStorage,
-			modelRegistry,
-			settings,
-			sessionManager: SessionManager.inMemory(),
-			disableExtensionDiscovery: true,
-			extensions: [providerExtension],
-			skills: [],
-			contextFiles: [],
-			promptTemplates: [],
-			slashCommands: [],
-			enableMCP: false,
-			enableLsp: false,
-			skipPythonPreflight: true,
-			rules: [],
-			preloadedCustomToolPaths: [],
-			toolNames: ["read"],
-		});
+			const { session } = await createAgentSession({
+				cwd: tempDir,
+				agentDir: tempDir,
+				authStorage,
+				modelRegistry,
+				settings,
+				sessionManager: SessionManager.inMemory(),
+				disableExtensionDiscovery: true,
+				extensions: [providerExtension],
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				skipPythonPreflight: true,
+				rules: [],
+				preloadedCustomToolPaths: [],
+				toolNames: ["read"],
+			});
 
-		try {
-			expect(session.model?.provider).toBe("runtime-provider");
-			expect(session.model?.id).toBe("runtime-model");
-		} finally {
-			await session.dispose();
-		}
-	});
+			try {
+				expect(settings.getModel()).toBe(selected);
+				expect(session.model?.provider).toBe("runtime-provider");
+				expect(session.model?.id).toBe("runtime-model");
+			} finally {
+				await session.dispose();
+			}
+		},
+	);
 });
