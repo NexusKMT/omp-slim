@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { TspKind } from "@oh-my-pi/pi-wire";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Container, Text } from "@oh-my-pi/pi-tui";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
 import { describeWorkingRow, type WorkingRowSpec } from "@oh-my-pi/pi-tui/components/loader";
@@ -265,7 +265,6 @@ describe("native composer thinking level in the model chip", () => {
 			gitEnabled: false,
 			autoThinking: false,
 			fastMode: false,
-			usingSubscription: false,
 			autoCompactEnabled: false,
 			compactionBoundaries: null,
 		});
@@ -458,7 +457,6 @@ describe("native composer without a status strip", () => {
 					gitEnabled: false,
 					autoThinking: false,
 					fastMode: false,
-					usingSubscription: false,
 					autoCompactEnabled: false,
 					compactionBoundaries: null,
 				},
@@ -508,7 +506,6 @@ describe("native composer without a status strip", () => {
 			gitEnabled: false,
 			autoThinking: false,
 			fastMode: false,
-			usingSubscription: false,
 			autoCompactEnabled: false,
 			compactionBoundaries: null,
 		});
@@ -531,11 +528,21 @@ describe("native composer first frame", () => {
 				statusLine: {
 					settings: { preset: "custom", leftSegments: ["model"], rightSegments: [], compactThinkingLevel: true },
 					gitEnabled: false,
-					model: getBundledModel("anthropic", "claude-sonnet-4-5"),
+					model: buildModel({
+						id: "chat",
+						name: "Chat",
+						provider: "custom",
+						api: "openai-completions",
+						baseUrl: "http://localhost:8000/v1",
+						reasoning: true,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 32000,
+						maxTokens: 4096,
+					}),
 					thinkingLevel: ThinkingLevel.High,
 					autoThinking: false,
 					fastMode: false,
-					usingSubscription: false,
 					autoCompactEnabled: false,
 					compactionBoundaries: null,
 				},

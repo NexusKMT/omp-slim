@@ -138,7 +138,7 @@ test("a rejected asynchronous selection keeps the current model and cannot be du
 	act(hub, "close");
 	expect(props(hub).current).toEqual(["one/first"]);
 });
-test("a locked catalogue provider forwards to login while configured discovery endpoints stay visible", async () => {
+test("an endpoint without credentials explains API key setup while configured discovery stays visible", async () => {
 	const locked = model("locked", "remote");
 	const r = registry([a]);
 	r.getAll = () => [a, locked];
@@ -150,14 +150,13 @@ test("a locked catalogue provider forwards to login while configured discovery e
 			: provider === "custom"
 				? { optional: false, status: "empty" }
 				: undefined;
-	const logins: string[] = [];
-	const hub = open({ registry: r, scoped: [], callbacks: { onLoginRequest: p => logins.push(p) } });
+	const hub = open({ registry: r, scoped: [] });
 	await settle();
 	expect(props(hub).scopes?.map(scope => scope.id)).not.toContain("provider:implicit");
 	expect(props(hub).scopes?.map(scope => scope.id)).toContain("provider:custom");
 	act(hub, "scope", "provider:locked");
-	act(hub, "login");
-	expect(logins).toEqual(["locked"]);
+	expect(props(hub).empty).toContain("API key in models.yml");
+	expect(props(hub).actions?.find(action => action.id === "use")?.disabled).toBe(true);
 	act(hub, "scope", "provider:custom");
 	expect(props(hub).empty).toContain("returned 0 models");
 });

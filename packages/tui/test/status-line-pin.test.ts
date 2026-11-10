@@ -18,7 +18,6 @@ function createSession(id: string, name: string): StatusLineSession {
 	return {
 		state: { messages: [] },
 		isFastModeEnabled: () => false,
-		modelRegistry: { isUsingSubscription: () => false },
 		sessionManager: {
 			getSessionId: () => id,
 			getSessionName: () => name,
@@ -42,16 +41,11 @@ function createSession(id: string, name: string): StatusLineSession {
 const HOST = {
 	getSettings: () => SETTINGS,
 	gitEnabled: () => false,
-	codexResetFireworksEnabled: () => false,
 	getSettingsRevision: () => 0,
 	getSessionSettingsIdentity: () => null,
 	getSessionSettingsRevision: () => 0,
 	goalStatusInFooter: () => false,
-	activeAccount: () => undefined,
-	canFetchUsageReports: () => false,
-	fetchUsageReports: () => Promise.resolve(null),
 	calculateTokensPerSecond: () => null,
-	limitMatchesActiveAccount: () => false,
 	computeCompactionBoundaries: () => null,
 	lookupPullRequest: () => Promise.resolve({ stdout: "", exitCode: 0 }),
 	resolveActiveRepo: () => null,

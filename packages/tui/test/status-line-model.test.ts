@@ -54,7 +54,6 @@ function createModelContext(advisorActive: boolean): SegmentContext {
 		activeRepo: null,
 		worktree: null,
 		git: { branch: null, status: null, pr: null },
-		usage: null,
 	};
 }
 

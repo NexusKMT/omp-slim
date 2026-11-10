@@ -166,32 +166,8 @@ export interface SegmentContext {
 	 * the worktree/branch is already shown by the git segment.
 	 */
 	worktree: { projectName: string; worktreeName: string } | null;
-	usage: {
-		tier?: string;
-		fiveHour?: { percent: number; resetMinutes?: number };
-		daily?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number };
-		monthly?: { percent: number; resetHours?: number };
-		resetCredits?: {
-			bankedCount: number;
-			redeemableCount: number;
-			expiryHours?: number;
-			expired?: boolean;
-			unavailableReason?: string;
-			expiring?: StatusResetExpiry;
-		};
-	} | null;
 	/** What the next request finds in the prompt cache; read only when the `cache` segment is configured. */
 	promptCache?: PromptCacheStatus;
-}
-
-/** How close an account's saved resets are to expiring, when it is worth a warning. */
-export interface StatusResetExpiry {
-	/** `soon`: within 7 days; `imminent`: within 24 hours. */
-	tier: "soon" | "imminent";
-	count: number;
-	/** Expiry of the reset the warning is about (epoch ms); it can be later than the soonest banked one. */
-	expiresAtMs: number;
 }
 
 export interface RenderedSegment {

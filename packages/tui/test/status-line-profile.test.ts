@@ -48,7 +48,6 @@ function createContext(overrides: Partial<SegmentContext> = {}): SegmentContext 
 		activeRepo: null,
 		worktree: null,
 		git: { branch: null, status: null, pr: null },
-		usage: null,
 		...overrides,
 	};
 }
