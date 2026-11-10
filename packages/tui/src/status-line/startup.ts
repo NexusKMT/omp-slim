@@ -2,7 +2,7 @@
  * Status line for the speculative first frame, before any session exists.
  *
  * InteractiveMode persists {@link StatusLineStartupData} (settings plus the
- * resolved default role model and status inputs); the next launch renders it
+ * resolved current model and status inputs); the next launch renders it
  * through the real {@link StatusLineComponent} as a fresh, unnamed session at
  * the live terminal width. Path and git branch are read live; context usage is
  * reported unknown so the gauge shows the window without a percent.
@@ -34,13 +34,11 @@ import type { StatusLineSettings } from "./types";
 export interface StatusLineStartupData {
 	readonly settings: StatusLineSettings;
 	readonly gitEnabled: boolean;
-	/** Model resolved for the next fresh session's default role. */
+	/** Model resolved for the next fresh session. */
 	readonly model?: Model;
 	readonly thinkingLevel?: ThinkingLevel;
 	readonly autoThinking: boolean;
 	readonly fastMode: boolean;
-	/** Whether `model` bills through a subscription (drives the cost segment's prefix). */
-	readonly usingSubscription: boolean;
 	readonly autoCompactEnabled: boolean;
 	readonly compactionBoundaries: CompactionBoundaries | null;
 }
@@ -72,7 +70,6 @@ function startupSession(data: StatusLineStartupData): StatusLineSession {
 			getSessionId: () => "",
 			getUsageStatistics: () => NO_USAGE,
 		},
-		modelRegistry: { isUsingSubscription: () => data.usingSubscription },
 		getContextUsage: () =>
 			data.model?.contextWindow ? { tokens: 0, contextWindow: data.model.contextWindow, percent: null } : undefined,
 		autoResolvedThinkingLevel: () => undefined,
@@ -99,18 +96,13 @@ export function createStartupStatusLine(data: StatusLineStartupData): StatusLine
 	const host: StatusLineHost = {
 		getSettings: () => data.settings,
 		gitEnabled: () => data.gitEnabled,
-		codexResetFireworksEnabled: () => false,
 		getSettingsRevision: () => 0,
 		getSessionSettingsIdentity: () => undefined,
 		getSessionSettingsRevision: () => 0,
 		goalStatusInFooter: () => false,
-		activeAccount: () => undefined,
-		canFetchUsageReports: () => false,
-		fetchUsageReports: async () => null,
 		resolveActiveRepo: () => null,
 		lookupPullRequest: async () => ({ stdout: "", exitCode: 1 }),
 		calculateTokensPerSecond: () => null,
-		limitMatchesActiveAccount: () => false,
 		computeCompactionBoundaries: () => data.compactionBoundaries,
 	};
 	const statusLine = new StatusLineComponent(startupSession(data), host);
@@ -143,7 +135,6 @@ const StartupDataShape = type({
 	"thinkingLevel?": "string",
 	autoThinking: "boolean",
 	fastMode: "boolean",
-	usingSubscription: "boolean",
 	autoCompactEnabled: "boolean",
 	compactionBoundaries: type({ "+": "delete", thresholdPercent: "number", speculationPercent: "number | null" }).or(
 		"null",

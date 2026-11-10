@@ -13,7 +13,7 @@ import {
 } from "@oh-my-pi/pi-utils";
 import { type SymbolKey, type Theme, type ThemeColor, theme } from "../theme";
 import { SYMBOL_PRESETS } from "../theme/symbols";
-import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
+import { shortenPath, TRUNCATE_LENGTHS } from "../render/render-utils";
 import { fileHyperlink } from "../render/hyperlink";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { summarizeLoopCondition } from "./loop";
@@ -383,10 +383,6 @@ const modelSegment: StatusLineSegment = {
 			content += accentFg(ctx, "statusLineModel", tail);
 		}
 
-		// Anthropic usage-limit stage (wrap-up allowance or low priority): a
-		// warning-colored badge so past-the-limit service is never mistaken for normal.
-		const slowModeLabel = ctx.session.getAnthropicSlowModeLabel?.();
-		if (slowModeLabel) content += theme.fg("warning", `${theme.sep.dot}${slowModeLabel}`);
 		return { content, visible: true };
 	},
 	describe(ctx) {
@@ -399,9 +395,7 @@ const modelSegment: StatusLineSegment = {
 		if (ctx.session.isFastModeActive() && theme.icon.fast) spans.push(span(` ${theme.icon.fast}`, token));
 		const level = ctx.options.model?.showThinkingLevel === false ? undefined : thinkingLevelWord(ctx.session);
 		if (level !== undefined) spans.push(span(" · ", "dim"), span(level, thinkingLevelToken(level)));
-		const slowModeLabel = ctx.session.getAnthropicSlowModeLabel?.();
-		if (slowModeLabel) spans.push(span(`${theme.sep.dot}${slowModeLabel}`, "warning"));
-		return segView(spans, "model", slowModeLabel ? "warning" : undefined);
+		return segView(spans, "model");
 	},
 };
 
@@ -784,7 +778,7 @@ const tokenRateSegment: StatusLineSegment = {
 
 /** Billing summary for the `cost` segment, or undefined when there is nothing to bill. */
 function costSummary(ctx: SegmentContext): string | undefined {
-	const { cost, premiumRequests } = ctx.usageStats;
+	const { cost } = ctx.usageStats;
 	// `cost` folds in completed task results; show the session's own spend and
 	// the subagent tree separately. The hub-projected tree total also covers
 	// grandchildren and running/async agents, but it lags persisted-roster
@@ -797,24 +791,13 @@ function costSummary(ctx: SegmentContext): string | undefined {
 	const pricingPeriod = state.model?.cost
 		? getTimeBasedPricingPeriod(state.model.cost, ctx.now?.getTime())
 		: undefined;
-	const usingSubscription = state.model
-		? (ctx.session.modelRegistry?.isUsingSubscription(state.model) ?? false)
-		: false;
-	// Resolve the advisor subscription flag lazily: with no active advisor
-	// it walks the whole model catalog (getAvailable → hasAuth per provider
-	// → credential-file reads), and the status line re-renders at the
-	// working-spinner cadence, so an eager per-frame probe pinned CPU (#10129).
 	return formatBillingSummary(
 		{
 			cost: ownCost,
 			subagentCost,
-			usingSubscription,
-			premiumRequests,
 			fractionDigits: 2,
 			pricingPeriod,
-			advisor: advisorCost
-				? { cost: advisorCost, usingSubscription: ctx.session.isAdvisorUsingSubscription?.() ?? false }
-				: undefined,
+			advisor: advisorCost ? { cost: advisorCost } : undefined,
 		},
 		theme,
 	);
@@ -1135,158 +1118,6 @@ const vimSegment: StatusLineSegment = {
 	},
 };
 
-function pickUsageColor(percent: number): "muted" | "warning" | "error" {
-	if (percent >= 80) return "error";
-	if (percent >= 50) return "warning";
-	return "muted";
-}
-
-/**
- * One quota window (`5h`, `1d`, `7d`, `mo`). The integer policy (round vs
- * floor) and the reset unit (minutes vs hours) stay explicit at each call site:
- * monthly floors like the Cursor/OpenCode dashboards, the rest round, and
- * short windows reset in minutes while long windows reset in hours.
- */
-function formatQuotaWindow(
-	ctx: SegmentContext,
-	label: string,
-	percent: number,
-	reset: number | undefined,
-	resetUnit: "m" | "h",
-	integer: "round" | "floor",
-): string {
-	const whole = integer === "floor" ? Math.floor(percent) : Math.round(percent);
-	const pctText = theme.fg(pickUsageColor(percent), `${whole}%`);
-	const resetText = reset !== undefined ? theme.fg("muted", ` (${formatUsageReset(reset, resetUnit)})`) : "";
-	return `${label} ${pctText}${resetText}`;
-}
-
-/** Native twin of {@link formatQuotaWindow}. */
-function describeQuotaWindow(
-	label: string,
-	percent: number,
-	reset: number | undefined,
-	resetUnit: "m" | "h",
-	integer: "round" | "floor",
-): TspSpan[] {
-	const whole = integer === "floor" ? Math.floor(percent) : Math.round(percent);
-	const spans = [span(`${label} `), span(`${whole}%`, pickUsageColor(percent))];
-	if (reset !== undefined) spans.push(span(` (${formatUsageReset(reset, resetUnit)})`, "muted"));
-	return spans;
-}
-
-function formatUsageReset(value: number, unit: "m" | "h"): string {
-	if (unit === "m") {
-		// Short-window reset timers retain minute precision.
-		if (value < 60) return `${value}m`;
-		const hours = Math.floor(value / 60);
-		const mins = value % 60;
-		return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-	}
-	// total hours (7d window: max 168)
-	if (value < 24) return `${value}h`;
-	const days = Math.floor(value / 24);
-	const hours = value % 24;
-	return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
-}
-
-/** Expiring saved resets outrank the usable/unusable color: red within 24 hours, yellow within 7 days. */
-function resetCreditsColor(resets: NonNullable<NonNullable<SegmentContext["usage"]>["resetCredits"]>): ThemeColor {
-	if (resets.expiring) return resets.expiring.tier === "imminent" ? "error" : "warning";
-	return resets.redeemableCount > 0 ? "success" : "warning";
-}
-
-const usageSegment: StatusLineSegment = {
-	id: "usage",
-	render(ctx) {
-		const u = ctx.usage;
-		if (!u || (!u.fiveHour && !u.daily && !u.sevenDay && !u.monthly && !u.resetCredits)) {
-			return { content: "", visible: false };
-		}
-		const parts: string[] = [];
-		if (u.tier) {
-			const tier = truncateToWidth(sanitizeStatusText(u.tier), TRUNCATE_LENGTHS.SHORT);
-			if (tier) parts.push(accentFg(ctx, "accent", tier));
-		}
-		if (u.fiveHour) {
-			parts.push(formatQuotaWindow(ctx, "5h", u.fiveHour.percent, u.fiveHour.resetMinutes, "m", "round"));
-		}
-		if (u.daily) {
-			parts.push(formatQuotaWindow(ctx, "1d", u.daily.percent, u.daily.resetMinutes, "m", "round"));
-		}
-		if (u.sevenDay) {
-			parts.push(formatQuotaWindow(ctx, "7d", u.sevenDay.percent, u.sevenDay.resetHours, "h", "round"));
-		}
-		if (u.monthly) {
-			// Monthly-subscription providers only (the normalizer gates the class).
-			// Cursor and QwenCloud floor used percents upstream (Cursor's dashboard
-			// shows 1.88 → "1% used"; OpenCode's endpoint emits floored integers).
-			parts.push(formatQuotaWindow(ctx, "mo", u.monthly.percent, u.monthly.resetHours, "h", "floor"));
-		}
-		if (u.resetCredits) {
-			const resets = u.resetCredits;
-			let resetText = `✦ ${resets.bankedCount}`;
-			if (resets.redeemableCount !== resets.bankedCount) {
-				resetText += ` (${resets.redeemableCount} usable)`;
-			}
-			if (resets.expiryHours !== undefined) {
-				const expiring = resets.expiring ? `▲ ${resets.expiring.count} ` : "";
-				resetText += ` ${expiring}exp ${formatUsageReset(resets.expiryHours, "h")}`;
-			} else if (resets.expired) {
-				resetText += " expired";
-			}
-			if (resets.redeemableCount === 0 && resets.unavailableReason) {
-				const reason = truncateToWidth(sanitizeStatusText(resets.unavailableReason), TRUNCATE_LENGTHS.SHORT);
-				if (reason) resetText += ` ${reason}`;
-			}
-			parts.push(theme.fg(resetCreditsColor(resets), resetText));
-		}
-		const content = withIcon(theme.icon.time, parts.join(theme.sep.dot));
-		return { content, visible: true };
-	},
-	describe(ctx) {
-		const u = ctx.usage;
-		if (!u || (!u.fiveHour && !u.daily && !u.sevenDay && !u.monthly && !u.resetCredits)) return null;
-		const parts: TspSpan[][] = [];
-		if (u.tier) {
-			const tier = sanitizeStatusText(u.tier);
-			if (tier) parts.push([span(tier, accentToken(ctx, "accent"))]);
-		}
-		if (u.fiveHour) {
-			parts.push(describeQuotaWindow("5h", u.fiveHour.percent, u.fiveHour.resetMinutes, "m", "round"));
-		}
-		if (u.daily) parts.push(describeQuotaWindow("1d", u.daily.percent, u.daily.resetMinutes, "m", "round"));
-		if (u.sevenDay) {
-			parts.push(describeQuotaWindow("7d", u.sevenDay.percent, u.sevenDay.resetHours, "h", "round"));
-		}
-		if (u.monthly) parts.push(describeQuotaWindow("mo", u.monthly.percent, u.monthly.resetHours, "h", "floor"));
-		if (u.resetCredits) {
-			const resets = u.resetCredits;
-			let resetText = `✦ ${resets.bankedCount}`;
-			if (resets.redeemableCount !== resets.bankedCount) resetText += ` (${resets.redeemableCount} usable)`;
-			if (resets.expiryHours !== undefined) {
-				const expiring = resets.expiring ? `▲ ${resets.expiring.count} ` : "";
-				resetText += ` ${expiring}exp ${formatUsageReset(resets.expiryHours, "h")}`;
-			} else if (resets.expired) resetText += " expired";
-			if (resets.redeemableCount === 0 && resets.unavailableReason) {
-				const reason = sanitizeStatusText(resets.unavailableReason);
-				if (reason) resetText += ` ${reason}`;
-			}
-			parts.push([span(resetText, resetCreditsColor(resets))]);
-		}
-		const spans: TspSpan[] = [];
-		for (const part of parts) {
-			if (spans.length > 0) spans.push(span(theme.sep.dot, "dim"));
-			spans.push(...part);
-		}
-		return segView(spans, "time");
-	},
-};
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Segment Registry
-// ═══════════════════════════════════════════════════════════════════════════
-
 export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	pi: piSegment,
 	status: statusSegment,
@@ -1312,7 +1143,6 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	cache_hit: cacheHitSegment,
 	cache: cacheSegment,
 	session_name: sessionNameSegment,
-	usage: usageSegment,
 	vim: vimSegment,
 };
 

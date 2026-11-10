@@ -18,18 +18,18 @@ function contrastRatio(foreground: string | number, background: string | number)
 }
 
 describe("Obsidian muted text contrast (#9712)", () => {
-	test("task instructions and usage limits remain readable on their backgrounds", async () => {
+	test("task instructions and status text remain readable on their backgrounds", async () => {
 		const [theme, themeJson] = await Promise.all([
 			loadTheme("obsidian", { mode: "truecolor" }),
 			loadThemeJson("obsidian"),
 		]);
-		const pageBgToken = themeJson.export?.pageBg;
-		if (pageBgToken === undefined) throw new Error("Obsidian does not define export.pageBg");
+		const pageBgToken = themeJson.terminal?.background;
+		if (pageBgToken === undefined) throw new Error("Obsidian does not define terminal.background");
 
 		const muted = theme.getColorHex("muted");
 		const surfaces: [string, string | number][] = [
-			["task/page", resolveVarRefs(pageBgToken, themeJson.vars ?? {})],
-			["usage/status", theme.getBgHex("statusLineBg")],
+			["task/terminal", resolveVarRefs(pageBgToken, themeJson.vars ?? {})],
+			["status", theme.getBgHex("statusLineBg")],
 		];
 		for (const [name, background] of surfaces) {
 			expect(contrastRatio(muted, background), name).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);

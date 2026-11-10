@@ -26,12 +26,12 @@ describe("code fence border contrast (#6334)", () => {
 		test(`${name}: mdCodeBlockBorder is legible against the theme page background`, async () => {
 			const [theme, themeJson] = await Promise.all([loadTheme(name, { mode: "truecolor" }), loadThemeJson(name)]);
 			const border = theme.getColorHex("mdCodeBlockBorder");
-			const pageBgToken = themeJson.export?.pageBg;
+			const pageBgToken = themeJson.terminal?.background;
 			expect(pageBgToken).toBeDefined();
-			if (pageBgToken === undefined) throw new Error(`${name} does not define export.pageBg`);
+			if (pageBgToken === undefined) throw new Error(`${name} does not define terminal.background`);
 			const pageBg = resolveVarRefs(pageBgToken, themeJson.vars ?? {});
 			expect(typeof pageBg).toBe("string");
-			if (typeof pageBg !== "string") throw new Error(`${name} export.pageBg is not an RGB color`);
+			if (typeof pageBg !== "string") throw new Error(`${name} terminal.background is not an RGB color`);
 
 			const borderLuminance = relativeLuminance(border);
 			const pageBgLuminance = relativeLuminance(pageBg);

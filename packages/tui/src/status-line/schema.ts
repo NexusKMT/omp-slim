@@ -24,7 +24,6 @@ export const STATUS_LINE_SEGMENT_IDS = [
 	"cache_hit",
 	"cache",
 	"session_name",
-	"usage",
 	"vim",
 ] as const;
 

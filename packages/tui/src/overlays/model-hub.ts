@@ -1,6 +1,6 @@
 /** Provider catalogue and current chat model/thinking selection. */
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { KeysApi, Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelKind } from "@oh-my-pi/pi-catalog/types";
 import type { Component, TUI } from "../tui";
@@ -34,7 +34,7 @@ export interface ModelHubSource extends ModelBrowserSource {
 	readonly disabledProviders: readonly string[];
 }
 export interface ModelHubRegistry extends ModelBrowserRegistry {
-	readonly authStorage: { readonly keys: Pick<KeysApi, "source"> };
+	readonly authStorage: { readonly keys: { source(provider: string): unknown } };
 	getDiscoverableProviders(): string[];
 	getProviderDiscoveryState(provider: string):
 		| {
@@ -69,7 +69,6 @@ export interface ModelHubCallbacks {
 		thinkingLevel: ConfiguredThinkingLevel | undefined,
 		selector: string,
 	) => void | boolean | Promise<void | boolean>;
-	onLoginRequest?: (providerId: string) => void;
 	onCatalogRefreshed?: (
 		providerId?: string,
 	) => ReadonlyArray<ScopedModelItem> | undefined | Promise<ReadonlyArray<ScopedModelItem> | undefined>;
@@ -170,7 +169,7 @@ export class ModelHubComponent implements Component {
 					: this.#thinking
 						? this.#thinking.render(width)
 						: this.#scope()?.locked
-							? [truncateToWidth("Sign in to use this provider", width)]
+							? [truncateToWidth("Configure an API key in models.yml to use this endpoint", width)]
 							: this.#browser.render(width);
 			},
 			{ bodyMinWidth: 28, preserveSidebar: true },
@@ -263,7 +262,7 @@ export class ModelHubComponent implements Component {
 		if (this.#error) return sanitizeDisplayWarning(this.#error);
 		const scope = this.#scope();
 		if (scope?.kind === "recent") return "No recently used models yet";
-		if (scope?.locked) return "Sign in to use this provider";
+		if (scope?.locked) return "Configure an API key in models.yml to use this endpoint";
 		const state = scope?.providerId ? this.registry.getProviderDiscoveryState(scope.providerId) : undefined;
 		if (state?.status === "empty")
 			return "Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.";
@@ -276,7 +275,7 @@ export class ModelHubComponent implements Component {
 			return state.error ? sanitizeDisplayWarning(`Discovery failed: ${state.error}`) : "Provider unavailable.";
 		}
 		if (state?.status === "unauthenticated")
-			return "Provider requires authentication before models can be discovered.";
+			return "Configure the endpoint API key in models.yml before refreshing its models.";
 		if (state?.status === "cached") return "Using cached model list. Live refresh is still pending.";
 		if (state?.status === "idle") return "Provider has not been refreshed yet.";
 		return "No models available";
@@ -483,12 +482,8 @@ export class ModelHubComponent implements Component {
 				return;
 			}
 			if (matchesKey(data, "enter") || matchesKey(data, "right")) {
-				const scope = this.#scope();
-				if (scope?.locked && scope.providerId) this.callbacks.onLoginRequest?.(scope.providerId);
-				else {
-					this.#sidebar = false;
-					this.#browser.setFocused(true);
-				}
+				this.#sidebar = false;
+				this.#browser.setFocused(true);
 				return;
 			}
 			if (matchesKey(data, "escape")) {
@@ -497,10 +492,6 @@ export class ModelHubComponent implements Component {
 			}
 			this.#sidebar = false;
 			this.#browser.setFocused(true);
-		}
-		if (this.#scope()?.locked && matchesKey(data, "enter")) {
-			this.callbacks.onLoginRequest?.(this.#scope()!.providerId!);
-			return;
 		}
 		this.#browser.handleInput(data);
 	}
@@ -554,7 +545,7 @@ export class ModelHubComponent implements Component {
 					annotation: entry.annotation ?? "",
 					muted: entry.locked,
 				})),
-				scope?.locked ? text("Sign in to use this provider") : this.#browser,
+				scope?.locked ? text("Configure an API key in models.yml to use this endpoint") : this.#browser,
 				hintsRow([
 					actionHint("tui.select.cancel", "close"),
 					{ keys: ["tab"], label: "providers" },
@@ -592,9 +583,10 @@ export class ModelHubComponent implements Component {
 				...this.#browser.pickerRows(this.#browser.pickerItems(this.#items), view, this.#currentSelector),
 				empty: this.#emptyStateMessage(),
 				actions: [
-					scope?.locked
-						? pickerAction("login", "Sign in", "enter", { primary: true })
-						: pickerAction("use", "Select model and thinking", "enter", { primary: true }),
+					pickerAction("use", "Select model and thinking", "enter", {
+						primary: true,
+						disabled: scope?.locked || undefined,
+					}),
 					...(this.callbacks.onCompactionPointChange
 						? [pickerAction("compaction", "Compaction limit", "ctrl+l")]
 						: []),
@@ -631,8 +623,6 @@ export class ModelHubComponent implements Component {
 		}
 		if (picked.act === "compaction") this.#openCompaction();
 		else if (picked.act === "refresh") this.#scheduleRefresh(this.#scope()?.providerId, true);
-		else if (picked.act === "login" && this.#scope()?.providerId)
-			this.callbacks.onLoginRequest?.(this.#scope()!.providerId!);
 		else if (picked.act === "use") {
 			const item = this.#browser.getSelected();
 			if (item) this.#chooseThinking(item);
