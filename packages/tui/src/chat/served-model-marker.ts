@@ -1,44 +1,23 @@
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { classifyModel } from "@oh-my-pi/pi-catalog/identity";
 import { MessageDividerComponent } from "../chrome/message-divider";
 import { theme } from "../theme";
 
-/** A turn whose response provably came from a different model than was requested. */
+/** A turn whose response reported a model id different from the requested id. */
 export interface ServedModelMismatch {
 	/** Model id the request asked for. */
 	requested: string;
-	/** Model id recovered from the response (signed thinking block or router report). */
+	/** Model id reported by the Chat response. */
 	served: string;
 	/** Configured provider the request went to. */
 	provider: string;
-	/** Upstream host the provider routed to, when it reported one (OpenRouter's `provider`). */
+	/** Historical upstream host, when present in a saved response. */
 	upstreamProvider?: string;
 }
 
-/**
- * Decide whether `message` was served by a model other than the one requested.
- *
- * Compares the requested and served ids through `classifyModel` rather than
- * textually: a snapshot suffix (`claude-haiku-4-5` → `claude-haiku-4-5-20251001`)
- * or a gateway prefix (`anthropic/claude-opus-5`) is the same model, while a
- * different family or revision (`claude-opus-5` → `claude-haiku-4-5`) is a
- * substitution. Ids either side cannot classify — Anthropic's internal A/B
- * codenames (`numbat-v6-…`) show up as served ids on first-party traffic —
- * are unverifiable, not mismatches, so they yield `undefined`.
- */
+/** Report a response model id different from the requested id, without guessing aliases. */
 export function detectServedModelMismatch(message: AssistantMessage): ServedModelMismatch | undefined {
 	const served = message.upstreamModel;
 	if (!served || served === message.model) return undefined;
-	const requested = classifyModel(message.provider, message.model, { lenient: true });
-	const actual = classifyModel(message.provider, served, { lenient: true });
-	if (requested.class === "unknown" || actual.class === "unknown") return undefined;
-	if (
-		requested.class === actual.class &&
-		requested.family === actual.family &&
-		(requested.revision === undefined || actual.revision === undefined || requested.revision === actual.revision)
-	) {
-		return undefined;
-	}
 	return {
 		requested: message.model,
 		served,
@@ -49,7 +28,7 @@ export function detectServedModelMismatch(message: AssistantMessage): ServedMode
 
 /**
  * Per-transcript memory that surfaces each distinct (requested → served)
- * substitution once. A gateway that swaps models does so for every turn, so
+ * reported difference once. A gateway that swaps models does so for every turn, so
  * repeating the marker would only add noise; a new pair after a model switch
  * still gets its own marker. Replaced wholesale on rebuild so replaying history
  * re-derives the same first occurrence.
@@ -70,10 +49,10 @@ export class ServedModelTracker {
 
 /**
  * Slim left-aligned divider rendered after the first assistant turn whose
- * response came from a different model than requested. Same shape as the
- * cache-miss divider, in the warning color:
+ * response reported a different model id. Same shape as the
+ * message divider, in the warning color:
  *
- *   ────────── ⚠ served claude-haiku-4-5-20251001 · requested claude-opus-5 · via openrouter/Amazon Bedrock
+ *   ────────── ⚠ response model endpoint-snapshot · requested main-model · via custom
  */
 export class ServedModelMarkerComponent extends MessageDividerComponent {
 	constructor(info: ServedModelMismatch) {
@@ -81,7 +60,7 @@ export class ServedModelMarkerComponent extends MessageDividerComponent {
 			label: () => {
 				const dot = theme.sep.dot.trim();
 				const via = info.upstreamProvider ? `${info.provider}/${info.upstreamProvider}` : info.provider;
-				return `${theme.status.warning} served ${info.served} ${dot} requested ${info.requested} ${dot} via ${via}`;
+				return `${theme.status.warning} response model ${info.served} ${dot} requested ${info.requested} ${dot} via ${via}`;
 			},
 			labelColor: "warning",
 			ruleColor: "dim",
@@ -91,7 +70,7 @@ export class ServedModelMarkerComponent extends MessageDividerComponent {
 				icon: "warn",
 				label: () => {
 					const via = info.upstreamProvider ? `${info.provider}/${info.upstreamProvider}` : info.provider;
-					return `Served ${info.served} · requested ${info.requested} · via ${via}`;
+					return `Response model ${info.served} · requested ${info.requested} · via ${via}`;
 				},
 			},
 		});
