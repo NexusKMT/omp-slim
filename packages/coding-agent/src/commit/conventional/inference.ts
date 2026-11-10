@@ -56,8 +56,6 @@ export class OmpCommitInference implements CommitInference {
 
 	constructor(options: {
 		primary: ResolvedCommitModel;
-		smol: ResolvedCommitModel;
-		forcePrimaryForEveryRole?: boolean;
 		config: ConventionalGenerationConfig;
 		cache: CommitInferenceCache | null;
 		/** Closed on dispose; broker-backed storage runs a background sync loop that pins the event loop. */
@@ -65,12 +63,11 @@ export class OmpCommitInference implements CommitInference {
 		onProgress?: CommitProgress;
 		signal?: AbortSignal;
 	}) {
-		const secondary = options.forcePrimaryForEveryRole ? options.primary : options.smol;
 		this.#targets = {
 			analysis: options.primary,
-			summary: secondary,
-			map: secondary,
-			fast: secondary,
+			summary: options.primary,
+			map: options.primary,
+			fast: options.primary,
 		};
 		this.#config = options.config;
 		this.#cache = options.cache;

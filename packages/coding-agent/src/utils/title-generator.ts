@@ -1,5 +1,5 @@
 /**
- * Generate session titles using a smol, fast model.
+ * Generate session titles using the current session model.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import * as os from "node:os";
@@ -22,17 +22,12 @@ import { SPINNER_FRAMES } from "@oh-my-pi/pi-tui/theme/symbols";
 import { $env, isTerminalHeadless, isWsl, logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 
-import { roleCandidatePool } from "../config/model-roles";
-import { formatModelStringWithRouting } from "../config/model-resolver";
-import { collectOnlineTinyCandidates, expandOnlineTinyModelFallbacks } from "../tiny/online-candidates";
 import type { Settings } from "../config/settings";
 import titleMarkerInstruction from "../prompts/system/title-marker-instruction.md" with { type: "text" };
 import titleSystemPrompt from "../prompts/system/title-system.md" with { type: "text" };
 import { formatTitleUserMessage } from "../tiny/message-preproc";
 import { isLowSignalTitleInput, normalizeGeneratedTitle } from "../tiny/text";
-import { tinyTitleClient } from "../tiny/title-client";
 
-import { cfgRetryModelFallback } from "../session/settings";
 import { DEFAULT_SPINNER_INTERVAL_MS, SPINNER_INTERVAL_STATIC } from "@oh-my-pi/pi-tui/spinner-clock";
 
 const TITLE_SYSTEM_PROMPT = prompt.render(titleSystemPrompt);
@@ -153,29 +148,8 @@ const LEADING_THINKING_FENCE_RE = /^\s*```(?:thinking|reasoning)\b[\s\S]*?```\s*
 const LEADING_PROSE_THINKING_PREAMBLE_RE =
 	/^[ \t]*(?:(?:here(?:['’]s| is)[ \t]+(?:a|the|my)[ \t]+)|my[ \t]+)?(?:thinking|thought|reasoning)[ \t]+process[ \t]*:?[ \t]*(?:\r?\n|$)/i;
 
-function getTitleModels(registry: ModelRegistry, settings: Settings, currentModel?: Model<Api>): Model<Api>[] {
-	const availableModels = roleCandidatePool("tiny", settings, registry);
-	if (availableModels.length === 0) return [];
-
-	const models = collectOnlineTinyCandidates(["tiny", "commit", "smol"], settings, availableModels).map(
-		candidate => candidate.model,
-	);
-	if (
-		currentModel &&
-		(models.length === 0 || cfgRetryModelFallback.get(settings) !== false) &&
-		!models.some(model => formatModelStringWithRouting(model) === formatModelStringWithRouting(currentModel))
-	) {
-		// Append currentModel and expand its own chain separately — never merge it
-		// into the tiny/commit/smol role collection (that would apply role defaults).
-		const seen = new Set(models.map(formatModelStringWithRouting));
-		for (const model of expandOnlineTinyModelFallbacks(currentModel, settings, availableModels)) {
-			const key = formatModelStringWithRouting(model);
-			if (seen.has(key)) continue;
-			seen.add(key);
-			models.push(model);
-		}
-	}
-	return models;
+function getTitleModels(_registry: ModelRegistry, _settings: Settings, currentModel?: Model<Api>): Model<Api>[] {
+	return currentModel ? [currentModel] : [];
 }
 
 /**
@@ -183,9 +157,9 @@ function getTitleModels(registry: ModelRegistry, settings: Settings, currentMode
  *
  * @param firstMessage The first user message
  * @param registry Model registry
- * @param settings Settings used to resolve the smol role
+ * @param settings Session settings
  * @param sessionId Optional session id for sticky API key selection
- * @param currentModel Current model (used to derive title model)
+ * @param currentModel Current session model; no other model is selected
  * @param metadataResolver Optional resolver evaluated after credential selection
  *   to produce request metadata (e.g. user_id for session attribution). Using a
  *   resolver instead of a pre-evaluated value ensures the metadata's account_uuid
@@ -222,55 +196,16 @@ export async function generateSessionTitle(
 		return null;
 	}
 
-	const titleSystemPrompt = customSystemPrompt?.trim() || undefined;
-	if (firstModel.api !== "local-inference") {
-		return generateTitleOnlineWithModels(
-			firstMessage,
-			models,
-			registry,
-			sessionId,
-			metadataResolver,
-			signal,
-			titleSystemPrompt,
-			credentialSourceSessionId,
-		);
-	}
-
-	// A local role selection is an explicit no-billing boundary. If the worker
-	// fails (download missing, runtime crash, abort, or no output), leave the
-	// session untitled rather than advancing into a paid fallback candidate.
-	try {
-		let localTitle: string | null;
-		if (signal) {
-			localTitle = await tinyTitleClient.generate(
-				firstModel.id,
-				firstMessage,
-				titleSystemPrompt ? { signal, systemPrompt: titleSystemPrompt } : { signal },
-			);
-		} else if (titleSystemPrompt) {
-			localTitle = await tinyTitleClient.generate(firstModel.id, firstMessage, {
-				systemPrompt: titleSystemPrompt,
-			});
-		} else {
-			localTitle = await tinyTitleClient.generate(firstModel.id, firstMessage);
-		}
-		if (!localTitle) {
-			logger.warn("title-generator: local tiny model produced no title; skipping (no online fallback)", {
-				titleSessionId: sessionId,
-				model: firstModel.id,
-				reason: "local-no-output",
-			});
-			return null;
-		}
-		return localTitle;
-	} catch (err) {
-		logger.warn("title-generator: local tiny model errored; skipping (no online fallback)", {
-			titleSessionId: sessionId,
-			model: firstModel.id,
-			error: err instanceof Error ? err.message : String(err),
-		});
-		return null;
-	}
+	return generateTitleOnlineWithModels(
+		firstMessage,
+		models,
+		registry,
+		sessionId,
+		metadataResolver,
+		signal,
+		customSystemPrompt?.trim() || undefined,
+		credentialSourceSessionId,
+	);
 }
 
 export async function generateTitleOnline(

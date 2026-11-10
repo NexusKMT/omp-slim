@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { prompt } from "@oh-my-pi/pi-utils";
-import { resolveModelOverrideWithAuthFallback, resolveSessionModelSelector } from "../config/model-resolver";
+import { formatModelStringWithRouting } from "../config/model-resolver";
 import { sessionFilesFromDisk } from "../internal-urls/registry-helpers";
 import seanceAssignmentTemplate from "../prompts/system/seance-assignment.md" with { type: "text" };
 import seanceTaskGuidanceTemplate from "../prompts/tools/seance-task-guidance.md" with { type: "text" };
@@ -156,10 +156,8 @@ export async function resolveSeanceSource(
 	}
 	throw new Error(`Session "${label}" was not found.`);
 }
-const modelSelectorInputSchema = type("string | string[]");
 export const seanceTaskSchemaFields = {
 	"sourceSession?": type("string"),
-	"model?": modelSelectorInputSchema,
 } satisfies Required<SeanceTaskSchemaFields>;
 export const seanceTaskGuidance = seanceTaskGuidanceTemplate;
 
@@ -182,18 +180,7 @@ function validateSeanceFields(
 	}
 	if ("tools" in item && item.tools?.length)
 		return `${label} cannot pass custom tools to the read-only \`${SEANCE_AGENT_NAME}\` agent.`;
-	const model: unknown = item.model;
-	if (
-		model !== undefined &&
-		!(
-			(typeof model === "string" && model.trim().length > 0) ||
-			(Array.isArray(model) &&
-				model.length > 0 &&
-				model.every(value => typeof value === "string" && value.trim().length > 0))
-		)
-	) {
-		return `${label} has an invalid \`model\` selector. Provide a non-empty selector or selector array.`;
-	}
+	if (item.model !== undefined) return "Seance inherits the current session model; model overrides are not supported.";
 	return undefined;
 }
 
@@ -245,39 +232,12 @@ export async function prepareSeance(context: {
 		sessionDirHint: sessionFile ? path.dirname(sessionFile) : undefined,
 		artifactsDirHint: context.session.getArtifactsDir?.() ?? undefined,
 	});
-	const modelRegistry = context.session.modelRegistry;
-	if (!modelRegistry) throw new Error("Seance cannot resolve a model in this session.");
-	await modelRegistry.awaitBackgroundRefresh().catch(() => {});
-	const requestedModel = context.model;
-	const requestedModels =
-		requestedModel === undefined
-			? source.modelSelectors
-			: typeof requestedModel === "string"
-				? [requestedModel]
-				: requestedModel;
-	if (requestedModels.length === 0) {
-		throw new Error("The source session has no saved model. Select a model explicitly with `--model`.");
-	}
-	const modelPatterns: string[] = [];
-	for (const selector of requestedModels) {
-		if (requestedModel === undefined) {
-			if (resolveSessionModelSelector(modelRegistry, selector)) modelPatterns.push(selector);
-			continue;
-		}
-		const resolved = await resolveModelOverrideWithAuthFallback(
-			[selector],
-			undefined,
-			modelRegistry,
-			context.session.settings,
-			context.session.getSessionId?.() ?? undefined,
-		);
-		if (resolved.model && modelRegistry.hasConfiguredAuth(resolved.model)) modelPatterns.push(selector);
-	}
-	if (modelPatterns.length === 0) {
-		throw new Error(
-			"No available saved model can serve this source. Select an available model explicitly with `--model`.",
-		);
-	}
+	if (context.model !== undefined)
+		throw new Error("Seance inherits the current session model; model overrides are not supported.");
+	const model = context.session.getActiveModel?.();
+	const selector = model ? formatModelStringWithRouting(model) : context.session.getActiveModelString?.();
+	if (!selector) throw new Error("Seance requires the current session model.");
+	const modelPatterns = [selector];
 	return {
 		modelPatterns,
 		session: {
@@ -298,7 +258,7 @@ export async function restoreSeanceSession(context: {
 	cwd: string;
 	modelRegistry: ModelRegistry;
 }): Promise<RestoredSeanceSession | undefined> {
-	const { init, cwd, modelRegistry } = context;
+	const { init, cwd } = context;
 	const readOnlyTools = new Set([...(getBundledAgent(SEANCE_AGENT_NAME)?.tools ?? []), "yield"]);
 	if (
 		!init ||
@@ -323,8 +283,6 @@ export async function restoreSeanceSession(context: {
 		return undefined;
 	}
 	const modelPattern = init.resolvedModel.trim();
-	await modelRegistry.awaitBackgroundRefresh().catch(() => {});
-	if (!resolveSessionModelSelector(modelRegistry, modelPattern)) return undefined;
 	return {
 		cwd,
 		modelPattern,

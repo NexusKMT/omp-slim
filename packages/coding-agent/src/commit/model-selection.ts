@@ -1,15 +1,7 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, ApiKey, Model } from "@oh-my-pi/pi-ai";
-import { roleDefaultModels } from "@oh-my-pi/pi-catalog/compat/behavior";
 import type { ApiKeyResolverRegistry } from "../config/api-key-resolver";
-import {
-	getModelMatchPreferences,
-	type ModelLookupRegistry,
-	parseModelPattern,
-	resolveModelRoleValue,
-	resolveRoleSelection,
-} from "../config/model-resolver";
-import { CHAT_MODEL_ROLE_IDS } from "../config/model-roles";
+import { getModelMatchPreferences, type ModelLookupRegistry, resolveModelRoleValue } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import { concreteThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 
@@ -41,9 +33,8 @@ export async function resolvePrimaryModel(
 ): Promise<ResolvedCommitModel> {
 	const available = modelRegistry.getAvailable();
 	const matchPreferences = getModelMatchPreferences(settings);
-	const resolved = override
-		? resolveModelRoleValue(override, available, { settings, matchPreferences })
-		: resolveRoleSelection(["commit", "smol", ...CHAT_MODEL_ROLE_IDS], settings, available);
+	const selector = override ?? settings.getModelRole("default");
+	const resolved = selector ? resolveModelRoleValue(selector, available, { settings, matchPreferences }) : undefined;
 	const model = resolved?.model;
 	if (!model) {
 		throw new Error("No model available for commit generation");
@@ -57,39 +48,4 @@ export async function resolvePrimaryModel(
 		apiKey: modelRegistry.resolver(model),
 		thinkingLevel: concreteThinkingLevel(resolved?.thinkingLevel),
 	};
-}
-
-export async function resolveSmolModel(
-	settings: Settings,
-	modelRegistry: CommitModelRegistry,
-	fallbackModel: Model<Api>,
-	fallbackApiKey: ApiKey,
-): Promise<ResolvedCommitModel> {
-	const available = modelRegistry.getAvailable();
-	const resolvedSmol = resolveRoleSelection(["smol"], settings, available);
-	if (resolvedSmol?.model) {
-		const apiKey = await modelRegistry.getApiKey(resolvedSmol.model);
-		if (apiKey) {
-			return {
-				model: resolvedSmol.model,
-				apiKey: modelRegistry.resolver(resolvedSmol.model),
-				thinkingLevel: concreteThinkingLevel(resolvedSmol.thinkingLevel),
-			};
-		}
-	}
-
-	const matchPreferences = getModelMatchPreferences(settings);
-	for (const pattern of roleDefaultModels().smol) {
-		const candidate = parseModelPattern(pattern, available, matchPreferences).model;
-		if (!candidate) continue;
-		const apiKey = await modelRegistry.getApiKey(candidate);
-		if (apiKey) {
-			return {
-				model: candidate,
-				apiKey: modelRegistry.resolver(candidate),
-			};
-		}
-	}
-
-	return { model: fallbackModel, apiKey: fallbackApiKey };
 }

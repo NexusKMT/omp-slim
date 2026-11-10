@@ -50,7 +50,7 @@ const effortRule = '"lo" | "med" | "hi"' as const;
 // Per-spawn fields the seance schema adds or widens. Typed against
 // SeanceTaskSchemaFields so a field added there fails to compile until it is
 // listed here too; a missed key would be dropped on batch items.
-const SEANCE_ITEM_KEY_SET = { sourceSession: true, model: true } as const satisfies Record<SeanceItemKey, true>;
+const SEANCE_ITEM_KEY_SET = { sourceSession: true } as const satisfies Record<SeanceItemKey, true>;
 const SEANCE_ITEM_KEYS = Object.keys(SEANCE_ITEM_KEY_SET);
 
 /**
@@ -80,7 +80,6 @@ export const taskItemSchema = type({
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
 	"tools?": "string[]",
-	"model?": "string",
 	"+": "delete",
 });
 const taskItemSchemaIsolated = type({
@@ -91,7 +90,6 @@ const taskItemSchemaIsolated = type({
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
 	"tools?": "string[]",
-	"model?": "string",
 	"isolated?": "boolean",
 	"+": "delete",
 });
@@ -104,7 +102,6 @@ export const taskSchema = type({
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
 	"tools?": "string[]",
-	"model?": "string",
 	"isolated?": "boolean",
 	"+": "delete",
 });
@@ -116,7 +113,6 @@ const taskSchemaNoIsolation = type({
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
 	"tools?": "string[]",
-	"model?": "string",
 	"+": "delete",
 });
 function guardBatchAgent(schema: BaseType): BaseType {
@@ -166,7 +162,6 @@ function taskAgentSchemaRule(defaultAgent: string): string {
 /** Task fields the seance schema adds or widens; `seanceTaskSchemaFields` in ./seance must match it exactly. */
 export type SeanceTaskSchemaFields = {
 	"sourceSession?"?: FluentType<string>;
-	"model?"?: FluentType<string | string[]>;
 };
 
 type SeanceItemKey = {
@@ -190,9 +185,7 @@ function createTaskSchema(options: {
 		? { "outputSchema?": outputSchemaInputSchema, "schemaMode?": '"permissive" | "strict"' }
 		: {};
 	const toolsField = options.evalToolsEnabled ? { "tools?": "string[]" } : {};
-	// `model` is always declared, and preflight decides whether a per-call model
-	// is allowed; seance widens it to a list.
-	const seanceFields = { "model?": "string", ...options.seanceFields };
+	const seanceFields = options.seanceFields;
 	if (options.batchEnabled) {
 		if (options.isolationEnabled) {
 			const item = type.raw({

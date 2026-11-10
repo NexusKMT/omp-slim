@@ -7,7 +7,7 @@ import { ModelRegistry } from "../../config/model-registry";
 import { Settings } from "../../config/settings";
 import { cfgCommit } from "../settings";
 import { discoverAuthStorage, loadCliExtensionProviders } from "../../sdk";
-import { resolvePrimaryModel, resolveSmolModel } from "../model-selection";
+import { resolvePrimaryModel } from "../model-selection";
 import type { ConventionalCommit } from "../types";
 import { renderStat } from "../utils";
 import { CommitInferenceCache } from "./cache";
@@ -94,16 +94,11 @@ async function createOmpInference(
 		await registry.refresh();
 		await loadCliExtensionProviders(registry, settings, options.cwd);
 		const primary = await resolvePrimaryModel(options.modelOverride, settings, registry);
-		const smol = options.modelOverride
-			? primary
-			: await resolveSmolModel(settings, registry, primary.model, primary.apiKey);
 		const cache = config.cacheEnabled
 			? await CommitInferenceCache.open(getCommitCacheDbPath(), config.cacheTtlDays)
 			: null;
 		return new OmpCommitInference({
 			primary,
-			smol,
-			forcePrimaryForEveryRole: options.modelOverride !== undefined,
 			config,
 			cache,
 			authStorage,

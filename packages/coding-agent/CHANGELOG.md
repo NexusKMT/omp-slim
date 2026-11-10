@@ -11,6 +11,8 @@
 
 ### Removed
 
+- Subagents, task titles, job widgets and commit helpers reuse the current main model. Agent personas and permissions remain available; agent model overrides, per-call model selection, task prewalk and automatic model fallback routing are removed.
+
 - OMP Slim removes bundled browser automation, relay, Chromium PDF page screenshots and browser cookie login; HTTP search, PDF text extraction, normal OAuth and external MCP remain available.
 - OMP Slim removes the built-in computer eval prelude, desktop control workers, `/computer`, desktop settings, and native window, screenshot, input, accessibility, and application-control APIs. Clipboard paste/copy and provider session replay remain available.
 - OMP Slim removes speech recognition, speech synthesis, live voice sessions, their commands/settings/tool/UI and RPC/ACP surfaces, and on-demand audio runtimes. Existing speech configuration and cached user files are preserved.

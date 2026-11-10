@@ -27,7 +27,6 @@ import * as path from "node:path";
 import { logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import type { AsyncJob, AsyncJobManagerApi, AsyncJobRunResult } from "../async/job-manager";
 import { validateAgentAccountPools } from "../config/account-pools";
-import { resolveAgentModelSelection } from "../config/model-resolver";
 import { sessionLocalProtocolOptions } from "../internal-urls/context";
 import { registerArtifactsDir } from "../internal-urls/registry-helpers";
 import { MCPManager } from "../mcp/manager";
@@ -57,7 +56,7 @@ import {
 } from "./lifecycle";
 import { type VibeCli } from "@oh-my-pi/pi-tui/tools/vibe";
 
-import { cfgTaskAgentAccountPools, cfgTaskAgentModelOverrides, cfgTaskEnableLsp } from "../task/settings";
+import { cfgTaskAgentAccountPools, cfgTaskEnableLsp } from "../task/settings";
 /**
  * CLI flavor → bundled agent type. This IS the model-tier mapping: `sonic`
  * carries `model: "@smol"` (the configured fast/low-latency role) and `task`
@@ -356,18 +355,7 @@ export class VibeSessionRegistry {
 		if (!agent) {
 			throw new ToolError(`Bundled agent "${agentName}" for vibe cli "${cli}" is unavailable.`);
 		}
-		const agentModelOverrides = cfgTaskAgentModelOverrides.get(session.settings);
-		// Same contract as the task spawn path: the expansion discards the role
-		// alias (`@task`, `@smol`), so patterns and role identity come from one
-		// call — the child's inherited retry-fallback chain is keyed off the role.
-		const { patterns, role } = resolveAgentModelSelection({
-			settingsOverride: agentModelOverrides[agentName],
-			agentModel: agent.model,
-			settings: session.settings,
-			activeModelPattern: session.getActiveModelString?.(),
-			fallbackModelPattern: session.getModelString?.(),
-		});
-		return { agent, modelOverride: patterns, modelRole: role };
+		return { agent, modelOverride: session.getActiveModelString?.() ? [session.getActiveModelString!()!] : [] };
 	}
 
 	async #appendLifecycleEvent(
@@ -1294,8 +1282,7 @@ export class VibeSessionRegistry {
 			id: record.id,
 			taskDepth: session.taskDepth ?? 0,
 			detached: true,
-			modelOverride: record.modelOverride,
-			modelRole: record.modelRole,
+			parentModel: session.getActiveModel?.(),
 			parentActiveModelPattern: session.getActiveModelString?.(),
 			thinkingLevel: record.agent.thinkingLevel,
 			sessionFile,

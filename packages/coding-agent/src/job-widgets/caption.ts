@@ -67,7 +67,13 @@ export function normalizeJobCaption(reply: string): string | undefined {
 export function createModelJobCaptionWriter(options: ModelJobWidgetAuthorOptions): JobCaptionWriter {
 	return async ({ command, intent, timeoutSec }, signal) => {
 		const sessionId = options.sessionId();
-		const model = await resolveWidgetModel(options.settings, options.modelRegistry, sessionId, signal);
+		const model = await resolveWidgetModel(
+			options.settings,
+			options.modelRegistry,
+			sessionId,
+			signal,
+			options.getModel(),
+		);
 		if (!model) return undefined;
 		const costGate = options.costGate?.();
 		costGate?.admit();

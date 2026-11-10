@@ -67,7 +67,6 @@ import {
 	taskFileMatchesApproval,
 	taskFileRestrictionPaths,
 } from "./file-approval";
-import { getPerCallModelAdvertisement, type PerCallModelAdvertisement } from "./model-approval";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
 import { mapWithConcurrencyLimitAllSettled, Semaphore } from "./parallel";
@@ -101,7 +100,6 @@ import {
 	cfgTaskMaxRuntimeMs,
 	cfgTaskSpeculativeLaunch,
 	cfgTaskStructured,
-	perCallModelEnabled,
 } from "./settings";
 
 function createUsageTotals(): Usage {
@@ -167,8 +165,6 @@ interface TaskDescriptionOptions {
 	disabledAgents: string[];
 	batchEnabled: boolean;
 	effortEnabled: boolean;
-	perCallModelEnabled: boolean;
-	perCallModelAdvertisement?: PerCallModelAdvertisement;
 	evalToolsEnabled: boolean;
 	structured: boolean;
 	file: boolean;
@@ -220,8 +216,6 @@ function renderDescription(options: TaskDescriptionOptions): string {
 		applyIsolatedChanges: options.applyIsolatedChanges,
 		batchEnabled: options.batchEnabled,
 		effortEnabled: options.effortEnabled,
-		perCallModelEnabled: options.perCallModelEnabled,
-		perCallModelAdvertisement: options.perCallModelAdvertisement,
 		evalToolsEnabled: options.evalToolsEnabled,
 		structured: options.structured,
 		file: options.file,
@@ -928,7 +922,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const sessionAgents = this.session.advertisedSessionAgents?.() ?? this.session.getSessionAgents?.() ?? [];
 		const planMode = this.session.getPlanModeState?.()?.enabled === true;
 		const isolationEnabled = cfgTaskIsolationEnabled.get(this.session.settings);
-		const perCallModel = perCallModelEnabled(this.session.settings, "task");
 		return renderDescription({
 			agents,
 			sessionAgents,
@@ -937,14 +930,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			disabledAgents,
 			batchEnabled: this.#isBatchEnabled(),
 			effortEnabled: cfgTaskEnableEffort.get(this.session.settings),
-			perCallModelEnabled: perCallModel,
-			perCallModelAdvertisement: perCallModel
-				? getPerCallModelAdvertisement(
-						this.session.settings,
-						this.session.getActiveModel?.(),
-						this.session.modelRegistry,
-					)
-				: undefined,
 			evalToolsEnabled: evalToolsEnabled(this.session),
 			structured: this.#isStructured(),
 			file: cfgTaskFile.get(this.session.settings),

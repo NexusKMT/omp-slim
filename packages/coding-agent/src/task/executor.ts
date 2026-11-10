@@ -10,7 +10,7 @@ import * as fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
 import { AgentBusyError, recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
-import type { Api, Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
+import type { Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
 import { isCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import {
 	isRecord,
@@ -41,13 +41,8 @@ import {
 import { type EditMode, getEditInputPaths } from "@oh-my-pi/pi-tui/tools/edit";
 import {
 	formatModelStringWithRouting,
-	resolveAgentAdvisorRolePattern,
 	resolveAgentAdvisorSelection,
-	resolveAgentPrewalkPattern,
-	resolveConfiguredModelPatterns,
-	resolveExplicitModelRole,
 	resolveModelOverride,
-	resolveModelOverrideWithAuthFallback,
 } from "../config/model-resolver";
 import type { PromptTemplate } from "../config/prompt-templates";
 import {
@@ -84,7 +79,6 @@ import {
 import {
 	type AgentSession,
 	type AgentSessionEvent,
-	type Prewalk,
 	PromptDroppedError,
 	type PromptOptions,
 } from "../session/agent-session";
@@ -99,11 +93,8 @@ import { SKILL_PROMPT_MESSAGE_TYPE } from "../session/messages";
 import { hasConversationalHistory, SessionManager } from "../session/session-manager";
 import { truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import {
-	AUTO_THINKING,
 	assertModelSupportsEffortCeiling,
 	type ConfiguredThinkingLevel,
-	clampThinkingLevelToCeiling,
-	prewalkWouldBeNoop,
 	resolveTaskEffortLevel,
 	type TaskEffort,
 } from "@oh-my-pi/pi-tui/thinking";
@@ -129,7 +120,6 @@ import { TextTap } from "../job-widgets/text-tap";
 import { TOOLS_SOURCE_ID } from "../job-widgets/types";
 import { attributeSubagentError } from "./error-attribution";
 import { generateTaskLabel } from "./label";
-import { resolveAgentPrewalkDefault } from "./prewalk";
 import { isReadOnlyAgent } from "./read-only-policy";
 import { formatTaskResultSummary } from "./result-summary";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
@@ -154,11 +144,9 @@ import {
 	type YieldItem,
 } from "@oh-my-pi/pi-tui/tools/task";
 import { yieldSectionShapes } from "./yield-assembly";
-import { assertPerCallModelApproved, PerCallModelError, type PerCallModelGrants } from "./model-approval";
+
 import { assembleYieldResult } from "@oh-my-pi/pi-tui/tools/task-yield-assembly";
 import {
-	cfgTaskPrewalk,
-	cfgTaskAgentPrewalk,
 	cfgTaskMaxEffort,
 	cfgTaskSoftRequestBudgetNotice,
 	cfgTaskSoftRequestBudget,
@@ -174,11 +162,8 @@ import {
 	cfgTierGoogle,
 	cfgTierAnthropic,
 	cfgTierOpenai,
-	cfgRetryFallbackChains,
 	cfgDefaultThinkingLevel,
 } from "../session/settings";
-import { cfgDisabledProviders } from "../config/model-settings";
-import { getRetryFallbackRole, installRetryFallbackRole } from "../session/retry-fallback-chains";
 import {
 	cfgCompactionModelThresholdsEnabled,
 	cfgCompactionThresholdPercent,
@@ -272,111 +257,6 @@ const agentEventTypes = new Set<AgentEvent["type"]>([
 
 const isAgentEvent = (event: AgentSessionEvent): event is AgentEvent =>
 	agentEventTypes.has(event.type as AgentEvent["type"]);
-
-function normalizeModelPatterns(value: string | string[] | undefined): string[] {
-	if (!value) return [];
-	if (Array.isArray(value)) {
-		return value.map(entry => entry.trim()).filter(Boolean);
-	}
-	return value
-		.split(",")
-		.map(entry => entry.trim())
-		.filter(Boolean);
-}
-
-/** Session-scoped role owning subagent `id`'s retry fallback chain; cold revival reinstalls it under this name. */
-export function subagentRetryFallbackRole(id: string): string {
-	return `subagent:${id}`;
-}
-
-interface SubagentRetryFallbackCandidate {
-	model: Model<Api>;
-	selector: string;
-}
-
-function resolveSubagentRetryFallbackCandidates(
-	modelPatterns: string[],
-	modelRegistry: ModelRegistry,
-	settings: Settings,
-): SubagentRetryFallbackCandidate[] {
-	const candidates: SubagentRetryFallbackCandidate[] = [];
-	const seen = new Set<string>();
-	const disabledProviders = new Set(cfgDisabledProviders.get(settings));
-	for (const pattern of modelPatterns) {
-		const resolved = resolveModelOverride([pattern], modelRegistry, settings);
-		if (!resolved.model) continue;
-		if (disabledProviders.has(resolved.model.provider)) continue;
-		const selector = resolved.explicitThinkingLevel
-			? formatModelSelectorValue(formatModelStringWithRouting(resolved.model), resolved.thinkingLevel)
-			: formatModelStringWithRouting(resolved.model);
-		if (seen.has(selector)) continue;
-		seen.add(selector);
-		candidates.push({ model: resolved.model, selector });
-	}
-	return candidates;
-}
-
-/**
- * Chain a single-model subagent inherits when its own model patterns supply no
- * fallbacks of their own. The child is pinned to a `subagent:<id>` role whose
- * chain shadows every configured role chain (see
- * {@link installSubagentRetryFallbackChain}), so a role-alias request (`@smol`,
- * the bundled `task` agent's `@task`) MUST inherit that role's chain —
- * otherwise the pin silently re-routes the child onto the `default` role's
- * chain. Explicit model selectors keep inheriting `default`: they carry no role
- * identity, and a role that happens to be assigned the same model must not
- * capture the child's fallback routing.
- *
- * Spawn paths preserve the pre-expansion alias as `modelRole` because their
- * model patterns are already expanded. Direct callers may still supply an
- * unexpanded alias through `modelOverride` or `agent.model`; retain that
- * existing path by deriving the role only when no preserved role was supplied.
- */
-function resolveSubagentInheritedRetryFallbackChain(
-	settings: Settings,
-	modelRegistry: ModelRegistry,
-	role: string | undefined,
-): string[] | undefined {
-	const configuredChains = cfgRetryFallbackChains.get(settings);
-	// An explicitly emptied role chain means "no fallbacks", not "inherit
-	// default" — mirrors expandDefaultRetryFallbackChains.
-	const fallbackChain = (role !== undefined ? configuredChains?.[role] : undefined) ?? configuredChains?.default;
-	if (!Array.isArray(fallbackChain) || !fallbackChain.every(entry => typeof entry === "string")) {
-		return undefined;
-	}
-	const disabledProviders = new Set(cfgDisabledProviders.get(settings));
-	return fallbackChain.filter(entry => {
-		const resolved = resolveModelOverride([entry], modelRegistry, settings);
-		return !resolved.model || !disabledProviders.has(resolved.model.provider);
-	});
-}
-
-function installSubagentRetryFallbackChain(args: {
-	settings: Settings;
-	id: string;
-	candidates: SubagentRetryFallbackCandidate[];
-	inheritedFallbackChain: string[] | undefined;
-	model: Model<Api> | undefined;
-	authFallbackUsed: boolean;
-}): string | undefined {
-	const { settings, id, candidates, inheritedFallbackChain, model, authFallbackUsed } = args;
-	if (!model || authFallbackUsed || candidates.length === 0) return undefined;
-
-	const selectedIndex = candidates.findIndex(
-		candidate => candidate.model.provider === model.provider && candidate.model.id === model.id,
-	);
-	if (selectedIndex < 0) return undefined;
-	const fallbackSelectors = candidates.slice(selectedIndex + 1).map(candidate => candidate.selector);
-	// A single configured model may reuse its role's (or the default) configured chain, but never an implicit parent fallback.
-	const fallbackChain = fallbackSelectors.length > 0 ? fallbackSelectors : inheritedFallbackChain;
-	if (!Array.isArray(fallbackChain) || !fallbackChain.every(entry => typeof entry === "string")) {
-		return undefined;
-	}
-
-	const role = subagentRetryFallbackRole(id);
-	installRetryFallbackRole(settings, role, { primary: candidates[selectedIndex].selector, chain: fallbackChain });
-	return role;
-}
 
 export interface IrcPeerRosterRow {
 	id: string;
@@ -481,7 +361,8 @@ export interface ExecutorOptions {
 	 */
 	parentActiveModelPattern?: string;
 	/** Set for a per-call `model`; every model the child sends to must stay approved by these grants. */
-	perCallModelGrants?: PerCallModelGrants;
+	/** Exact model inherited from the current parent session. */
+	parentModel?: Model;
 	thinkingLevel?: ConfiguredThinkingLevel;
 	/** Caller-requested coarse effort (`lo`/`med`/`hi`); maps onto the resolved model's supported thinking range and wins over {@link thinkingLevel}. */
 	effort?: TaskEffort;
@@ -1300,7 +1181,8 @@ interface RunMonitorArgs {
 	description?: string;
 	/** Parent model registry for tiny-model label generation; absent → skip labeling. */
 	modelRegistry?: ModelRegistry;
-	/** Parent settings for tiny-model label generation. */
+	parentModel?: Model;
+	/** Parent settings for label generation. */
 	settings?: Settings;
 	modelOverride?: string | string[];
 	/** Explicit pre-expansion model role alias selected for this run. */
@@ -1743,7 +1625,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	// failures just leave the label unset.
 	const labelSource = assignment?.trim();
 	if (!args.description && args.modelRegistry && args.settings && labelSource) {
-		generateTaskLabel(labelSource, args.modelRegistry, args.settings, id, abortSignal)
+		generateTaskLabel(labelSource, args.modelRegistry, args.settings, id, abortSignal, args.parentModel)
 			.then(label => {
 				if (!label || abortSignal.aborted || progress.description) return;
 				progress.description = label;
@@ -4248,12 +4130,10 @@ function restoreSubagentSettings(recipe: SubagentSettingsRecipe): Settings {
 interface WarmReviveCapture {
 	sessionFile: string;
 	spec: SubagentSessionSpec;
-	/** A per-call worker never switches models; its warm revive keeps only the exact saved model. */
-	perCallModel: boolean;
 	/** Re-captured whenever the live session is disposed, so a revive restores its latest settings writes. */
 	settings: SubagentSettingsRecipe;
 	parentArtifactManager: ArtifactManagerApi | undefined;
-	/** Todos are parent-owned and stripped from subagents, except under prewalk (its todo gate needs them). */
+	/** Todos are parent-owned and stripped from subagents. */
 	keepTodo: boolean;
 	wake: IrcWakeTurnMonitorOptions;
 	/** Exact agent name the live `task.agentAccountPools` entry is looked up by on revive. */
@@ -4337,15 +4217,6 @@ function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 		// dispatch and persisted revival do, never the spawn-time copy.
 		const agentAccountPools = validateAgentAccountPools(cfgTaskAgentAccountPools.get(capture.settings.parent));
 		capture.spec.prompt.reviving = true;
-		// A session-local switch since spawn (a prewalk handoff) owns the model and effort: the
-		// transcript restores the effort, and the spawn selection only backs the model up when it is
-		// unavailable. The spawn's prewalk stays configured; the coordinator sees it was spent. A seance
-		// fork's selections belong to its source run, never to the consult.
-		// A per-call worker never switches models, so its warm revive never prepends a session-local switch.
-		const sessionLocalModel =
-			capture.spec.preparedSession || capture.perCallModel
-				? undefined
-				: reopened.getSessionLocalModelChange()?.model;
 		try {
 			try {
 				const options = buildSubagentSessionOptions(
@@ -4355,24 +4226,20 @@ function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 					expectedAgentRef,
 					mcpFollower,
 				);
+				const model =
+					AgentRegistry.global().get(options.parentAgentId ?? MAIN_AGENT_ID)?.session?.model ?? options.model;
+				if (!model) throw new Error("Subagent revival requires the current parent session model.");
+				capture.spec.prompt.model = formatModelStringWithRouting(model);
 				({ session: revived } = await createAgentSession({
 					...options,
-					...(sessionLocalModel
-						? {
-								model: undefined,
-								modelPattern: [
-									sessionLocalModel,
-									...(options.model
-										? [formatModelStringWithRouting(options.model)]
-										: options.modelPattern === undefined
-											? []
-											: [options.modelPattern].flat()),
-								],
-								modelPatternFallbackRole: undefined,
-								modelPatternDefaultFallbackChain: undefined,
-								thinkingLevel: undefined,
-							}
-						: undefined),
+					model,
+					assertDispatchModel: dispatchModel => {
+						if (formatModelStringWithRouting(dispatchModel) !== formatModelStringWithRouting(model)) {
+							throw new Error("Subagents must use the inherited parent model.");
+						}
+						if (options.thinkingLevelCeiling)
+							assertModelSupportsEffortCeiling(dispatchModel, options.thinkingLevelCeiling);
+					},
 					oauthAccountPools: Object.hasOwn(agentAccountPools, capture.agentName)
 						? agentAccountPools[capture.agentName]
 						: undefined,
@@ -4505,23 +4372,12 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 	}
 
 	const settings = options.settings ?? Settings.isolated();
-	// Per-agent advisor: the agent definition's `advisor` frontmatter or the
-	// `task.agentAdvisor` settings override (agent name → "on"/"off"/model
-	// pattern) pairs the spawned session with an advisor. Subagents default to
-	// no advisor (createSubagentSettings forces `advisor.enabled` off); an
-	// explicit model pattern is expanded against this owner's roles (a nested
-	// spawn's owner is its parent subagent) and lands on the child's
-	// `modelRoles.advisor`. The expanded pattern is also what the session
-	// contract persists, so cold revival under root settings reuses it.
 	const advisorSelection = preparedSession
 		? undefined
 		: resolveAgentAdvisorSelection({
 				settingsOverride: cfgTaskAgentAdvisor.get(settings)[agent.name],
 				agentAdvisor: agent.advisor,
 			});
-	const advisorRolePattern = advisorSelection?.model
-		? resolveAgentAdvisorRolePattern(advisorSelection.model, settings)
-		: undefined;
 	const subagentSettings = createSubagentSettings(
 		settings,
 		{
@@ -4530,9 +4386,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			// Isolated runs must not expose roots outside the worktree.
 			...(worktree !== undefined ? { "workspace.additionalDirectories": [] } : undefined),
 			...(advisorSelection ? { "advisor.enabled": true } : undefined),
-			...(advisorRolePattern
-				? { modelRoles: { ...settings.getModelRoles(), advisor: advisorRolePattern } }
-				: undefined),
 		},
 		options.parentServiceTier,
 	);
@@ -4587,7 +4440,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 		isIrcEnabled(subagentSettings, childDepth) &&
 		(toolNames === undefined || toolNames.includes("write"));
 
-	const modelPatterns = normalizeModelPatterns(modelOverride ?? agent.model);
 	const sessionFile = subtaskSessionFile ?? null;
 	const spawnsEnv = atMaxDepth
 		? ""
@@ -4609,6 +4461,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 		assignment,
 		description: options.description,
 		modelRegistry: options.modelRegistry,
+		parentModel: options.parentModel,
 		settings,
 		modelOverride,
 		modelRole,
@@ -4724,58 +4577,14 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			}
 			checkAbort();
 
-			if (options.perCallModelGrants) {
-				await awaitAbortable(modelRegistry.awaitBackgroundRefresh());
-			}
-			const configuredModelPatterns = resolveConfiguredModelPatterns(modelPatterns, settings);
-			const inheritedRetryFallbackChain =
-				configuredModelPatterns.length === 1
-					? resolveSubagentInheritedRetryFallbackChain(
-							subagentSettings,
-							modelRegistry,
-							modelRole ?? resolveExplicitModelRole(modelPatterns, subagentSettings),
-						)
-					: undefined;
-			const {
-				model,
-				thinkingLevel: resolvedThinkingLevel,
-				explicitThinkingLevel,
-				authFallbackUsed,
-				warning: modelResolutionWarning,
-			} = await awaitAbortable(
-				resolveModelOverrideWithAuthFallback(
-					modelPatterns,
-					options.parentActiveModelPattern,
-					modelRegistry,
-					settings,
-					id,
-					options.perCallModelGrants ? { exactOnly: true } : undefined,
-				),
-			);
-			if (options.perCallModelGrants && !model) {
-				throw new PerCallModelError(
-					`Requested exact model ${JSON.stringify(modelPatterns)} is unavailable. Use an exact provider/model[:level] selector; do not substitute another model.`,
-				);
-			}
-			if (modelResolutionWarning) {
-				logger.warn("Subagent model resolution warning", {
-					warning: modelResolutionWarning,
-					requested: modelPatterns,
-				});
-			}
-			if (authFallbackUsed && model) {
-				logger.warn("Subagent model has no working credentials; falling back to parent session model", {
-					requested: modelPatterns,
-					parentModel: options.parentActiveModelPattern,
-					resolvedProvider: model.provider,
-					resolvedModel: model.id,
-				});
-			}
-			// Preflight skips these checks while the registry is cold, so hold the model
-			// a per-call child actually starts on to them before its session exists.
-			if (options.perCallModelGrants && model) {
-				assertPerCallModelApproved(model, options.perCallModelGrants, modelRegistry);
-			}
+			// Never resolve agent frontmatter, per-call selectors or fallback roles.
+			const model =
+				options.parentModel ??
+				(options.parentActiveModelPattern
+					? resolveModelOverride([options.parentActiveModelPattern], modelRegistry, settings, { exactOnly: true })
+							.model
+					: undefined);
+			if (!model) throw new Error("Subagent requires the current parent session model.");
 			// The exact-name `task.agentServiceTierOverrides` entry dispatch resolved
 			// for this agent. The session evaluates it against its final model —
 			// including patterns only it can resolve — so a concrete tier lands on
@@ -4791,20 +4600,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 								resolvedModel,
 								inheritedSubagentServiceTiers(settings, options.parentServiceTier),
 							);
-			const retryFallbackRole = installSubagentRetryFallbackChain({
-				settings: subagentSettings,
-				id,
-				candidates: resolveSubagentRetryFallbackCandidates(modelPatterns, modelRegistry, subagentSettings),
-				inheritedFallbackChain: inheritedRetryFallbackChain,
-				model,
-				authFallbackUsed,
-			});
-			if (retryFallbackRole) {
-				logger.debug("Configured subagent runtime model fallback chain", {
-					role: retryFallbackRole,
-					requested: modelPatterns,
-				});
-			}
 			if (model?.contextWindow && model.contextWindow > 0) {
 				progress.contextWindow = model.contextWindow;
 			}
@@ -4817,31 +4612,19 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			// A per-call `model` is caller-chosen too, so its `:level` is held to the same
 			// ceiling, and a model whose lowest effort is above it fails the spawn
 			// exactly as an `effort` hint does.
-			const spawnEffortCeiling =
-				options.effort !== undefined || options.perCallModelGrants ? cfgTaskMaxEffort.get(settings) : undefined;
+			const spawnEffortCeiling = options.effort !== undefined ? cfgTaskMaxEffort.get(settings) : undefined;
 			if (model && spawnEffortCeiling) assertModelSupportsEffortCeiling(model, spawnEffortCeiling);
 			const effortLevel =
 				options.effort !== undefined
 					? resolveTaskEffortLevel(model, options.effort, spawnEffortCeiling)
 					: undefined;
-			const explicitLevel =
-				explicitThinkingLevel && resolvedThinkingLevel !== AUTO_THINKING
-					? clampThinkingLevelToCeiling(model, resolvedThinkingLevel, spawnEffortCeiling)
-					: resolvedThinkingLevel;
-			if (model) {
-				const displayLevel = effortLevel ?? (explicitThinkingLevel ? explicitLevel : undefined);
-				progress.resolvedModelIdentity = formatModelStringWithRouting(model);
-				progress.resolvedThinkingLevel = displayLevel;
-				progress.resolvedModel =
-					displayLevel !== undefined
-						? formatModelSelectorValue(progress.resolvedModelIdentity, displayLevel)
-						: progress.resolvedModelIdentity;
-			}
-			// Precedence: caller `effort` > explicit `:level` suffix on the resolved
-			// model pattern > agent-definition default (e.g. task's `auto`) >
-			// pattern-derived level.
-			const effectiveThinkingLevel =
-				effortLevel ?? (explicitThinkingLevel ? explicitLevel : (thinkingLevel ?? resolvedThinkingLevel));
+			const effectiveThinkingLevel = effortLevel ?? thinkingLevel;
+			progress.resolvedModelIdentity = formatModelStringWithRouting(model);
+			progress.resolvedThinkingLevel = effectiveThinkingLevel;
+			progress.resolvedModel =
+				effectiveThinkingLevel !== undefined
+					? formatModelSelectorValue(progress.resolvedModelIdentity, effectiveThinkingLevel)
+					: progress.resolvedModelIdentity;
 			resolvedAt = performance.now();
 			const effectiveCwd = worktree ?? cwd;
 			const fork = preparedSession?.fork;
@@ -4867,44 +4650,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			// Setup below can fail before this promise's consumption boundary.
 			// Observe rejection immediately while preserving it for the later await.
 			sessionManagerPromise.catch(() => {});
-			// Per-agent prewalk: the agent definition's `prewalk` frontmatter or the
-			// `task.agentPrewalk` settings override hands the subagent off to a
-			// fast/cheap target at its first edit/write — the same mechanism as the
-			// session-level --prewalk. The bundled generic `task` agent has no
-			// frontmatter default; the `task.prewalk` toggle (default off) arms it.
-			// Resolution failures skip prewalk instead of failing the spawn. A per-call
-			// worker never switches models, so it never prewalks.
-			const perCallModelGrants = options.perCallModelGrants;
-			let prewalk: Prewalk | undefined;
-			const prewalkPattern =
-				preparedSession || perCallModelGrants
-					? undefined
-					: resolveAgentPrewalkPattern({
-							settingsOverride: cfgTaskAgentPrewalk.get(settings)[agent.name],
-							agentPrewalk: resolveAgentPrewalkDefault(agent, cfgTaskPrewalk.get(settings)),
-						});
-			if (prewalkPattern) {
-				await awaitAbortable(modelRegistry.awaitBackgroundRefresh());
-				const resolvedPrewalk = resolveModelOverride([prewalkPattern], modelRegistry, settings);
-				const target = resolvedPrewalk.model;
-				if (!target || !modelRegistry.hasConfiguredAuth(target)) {
-					logger.warn("Subagent prewalk target unavailable; skipping prewalk", {
-						agent: agent.name,
-						pattern: prewalkPattern,
-						warning: resolvedPrewalk.warning,
-					});
-				} else if (prewalkWouldBeNoop(model, effectiveThinkingLevel, target, resolvedPrewalk.thinkingLevel)) {
-					// Same model AND same effective thinking level: switching would only
-					// inject the plan/checklist nudges for no gain — skip. An effort-only
-					// delta on the same model still arms (it is a real cheapening hand-off).
-					logger.debug("Subagent prewalk target matches starting model and thinking level; skipping prewalk", {
-						agent: agent.name,
-						pattern: prewalkPattern,
-					});
-				} else {
-					prewalk = { target, thinkingLevel: resolvedPrewalk.thinkingLevel };
-				}
-			}
 
 			const enableMCP = !restrictToolNames && (options.enableMCP ?? true);
 			const mcpManager = enableMCP ? options.mcpManager : undefined;
@@ -4959,25 +4704,15 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 					oauthAccountPools: options.oauthAccountPools,
 					inheritedSessionAgents: options.inheritedSessionAgents,
 					model,
-					modelPattern: model || modelOverride === undefined ? undefined : modelPatterns,
-					modelPatternAuthFallback:
-						model || modelOverride === undefined ? undefined : options.parentActiveModelPattern,
-					modelPatternFallbackRole:
-						model || modelOverride === undefined ? undefined : subagentRetryFallbackRole(id),
-					modelPatternDefaultFallbackChain:
-						model || modelOverride === undefined ? undefined : inheritedRetryFallbackChain,
 					thinkingLevel: effectiveThinkingLevel,
-					...(perCallModelGrants
-						? {
-								// Every request stays on an approved model that can run at or below the spawn's effort ceiling.
-								assertDispatchModel: (dispatchModel: Model) => {
-									assertPerCallModelApproved(dispatchModel, perCallModelGrants, modelRegistry);
-									if (spawnEffortCeiling) assertModelSupportsEffortCeiling(dispatchModel, spawnEffortCeiling);
-								},
-								disableModelFallback: true,
-								disableServerSideFallback: true,
-							}
-						: {}),
+					disableModelFallback: true,
+					disableServerSideFallback: true,
+					assertDispatchModel: (dispatchModel: Model) => {
+						if (formatModelStringWithRouting(dispatchModel) !== formatModelStringWithRouting(model)) {
+							throw new Error("Subagents must use the inherited parent model.");
+						}
+						if (spawnEffortCeiling) assertModelSupportsEffortCeiling(dispatchModel, spawnEffortCeiling);
+					},
 					thinkingLevelCeiling: spawnEffortCeiling,
 					// Subagents are short-lived; never schedule background warm requests.
 					cacheWarming: false,
@@ -4999,7 +4734,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 					preloadedPreparedExtensions: options.preloadedPreparedExtensions,
 					preloadedCustomToolPaths: restrictToolNames ? [] : options.preloadedCustomToolPaths,
 					hasUI: false,
-					prewalk,
 					spawns: spawnsEnv,
 					taskDepth: childDepth,
 					// The whole spawn tree shares the root session's observability bus,
@@ -5051,9 +4785,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			sessionOpenedAt = performance.now();
 			await refreshSubagentIrcRoot(sessionSpec.prompt, sessionManager, sessionFile);
 
-			// A seance fork inherits the source's model roles; they describe the
-			// source run, not this consult, so the consult still pins its own chain.
-			const hasExistingModelRole = !preparedSession && sessionManager.getLastModelChangeRole() !== undefined;
 			// Subscribe before the builder mints proxies so a manager change during
 			// session startup is replayed on bind instead of lost.
 			const mcpFollower = mcpManager
@@ -5108,18 +4839,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 				throw err;
 			}
 			mcpFollower?.bind(session);
-			// The SDK records a new session's initial model as the default role.
-			// Pin the child's own chain so a parent default sharing that model
-			// cannot steal its fallback routing. Resumed history keeps its role.
-			if (
-				!hasExistingModelRole &&
-				retryFallbackRole &&
-				model &&
-				session.model &&
-				formatModelStringWithRouting(session.model) === formatModelStringWithRouting(model)
-			) {
-				sessionManager.appendModelChange(formatModelStringWithRouting(model), retryFallbackRole);
-			}
 			sessionCreatedAt = performance.now();
 
 			monitor.setActiveSession(session);
@@ -5144,17 +4863,15 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 				if (runRef.status === "aborted") monitor.requestAbort("signal");
 			}
 			// Todos are parent-owned bookkeeping and stripped from subagents —
-			// except under prewalk, whose plan nudge + todo gate require the
-			// subagent to commit its own todo list before the hand-off.
-			const isParentOwnedTool = (name: string): boolean => !prewalk && name === "todo";
+
+			const isParentOwnedTool = (name: string): boolean => name === "todo";
 			if (sessionFile !== null) {
 				const reviveCapture: WarmReviveCapture = {
 					sessionFile,
 					spec: sessionSpec,
-					perCallModel: perCallModelGrants !== undefined,
 					settings: captureSubagentSettings(settings, subagentSettings),
 					parentArtifactManager: preparedSession ? undefined : options.parentArtifactManager,
-					keepTodo: prewalk !== undefined,
+					keepTodo: false,
 					wake: wakeOptions,
 					agentName: agent.name,
 					pendingCacheCandidate: undefined,
@@ -5204,23 +4921,11 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 				tools: persistedSubagentTools,
 				mountedTools: session.getMountedXdevToolNames(),
 				agent: agent.name,
-				modelRole: modelRole ?? resolveExplicitModelRole(modelOverride ?? agent.model, subagentSettings),
 				resolvedModel: progress.resolvedModel,
-				...(perCallModelGrants
-					? {
-							perCallModel: true,
-							// Display selectors can conflate literal :level ids with effort, so revival records each separately.
-							perCallModelIdentity: formatModelStringWithRouting(session.model!),
-							perCallThinkingLevel: session.configuredThinkingLevel() ?? null,
-						}
-					: {}),
-				// Deferred model resolution installs this role inside createAgentSession,
-				// so read it back from the settings both install paths write.
-				retryFallback: getRetryFallbackRole(subagentSettings, subagentRetryFallbackRole(id)),
 				readOnly: isReadOnlyAgent(agent),
 				spawns: spawnsEnv,
 				readSummarize: agent.readSummarize,
-				advisor: advisorSelection ? (advisorRolePattern ?? "on") : undefined,
+				advisor: advisorSelection ? "on" : undefined,
 				compactionThreshold: options.compactionThresholdOverride,
 				outputSchema,
 				outputSchemaMode: options.outputSchemaMode,

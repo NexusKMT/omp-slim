@@ -1,6 +1,7 @@
 /**
  * Tiny-model UI labels for spawned subagents.
  */
+import type { Model } from "@oh-my-pi/pi-ai";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
@@ -27,6 +28,7 @@ export async function generateTaskLabel(
 	settings: Settings,
 	sessionId?: string,
 	signal?: AbortSignal,
+	currentModel?: Model,
 ): Promise<string | null> {
 	const text = assignment.trim();
 	if (!text) return null;
@@ -36,7 +38,7 @@ export async function generateTaskLabel(
 			registry,
 			settings,
 			sessionId,
-			undefined,
+			currentModel,
 			undefined,
 			TASK_LABEL_SYSTEM_PROMPT,
 			signal,

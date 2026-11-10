@@ -53,7 +53,6 @@ const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
 			name: "task",
 			description: "General-purpose subagent with full capabilities for delegated multi-step tasks",
 			spawns: "*",
-			model: "@task",
 			thinkingLevel: AUTO_THINKING,
 			// No `prewalk` frontmatter: the generic task hand-off (strong model
 			// plans, then hands off to the smol role) is armed by the
@@ -67,7 +66,6 @@ const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
 		frontmatter: {
 			name: "sonic",
 			description: "Low-reasoning agent for strictly mechanical updates or data collection only",
-			model: "@smol",
 			thinkingLevel: Effort.Medium,
 		},
 		template: taskMd,

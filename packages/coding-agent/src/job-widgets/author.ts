@@ -6,11 +6,8 @@
 import { type AgentTelemetryConfig, instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
 import type { Api, AssistantMessage, Model, UserMessage } from "@oh-my-pi/pi-ai";
 import { markPerCallContextMessage } from "@oh-my-pi/pi-ai/utils/block-symbols";
-import { roleDefaultModels } from "@oh-my-pi/pi-catalog/compat/behavior";
 import { formatBytes, prompt, truncate } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
-import { getModelMatchPreferences, parseModelPattern, resolveModelRoleValue } from "../config/model-resolver";
-import { formatModelRoleAlias } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import { extractTextContent, extractToolCall, parseJsonPayload } from "../commit/utils";
 import systemPrompt from "../prompts/system/job-widget-system.md" with { type: "text" };
@@ -159,6 +156,8 @@ export function renderJobWidgetPrompt(request: JobWidgetAuthorRequest, redact: (
 }
 
 export interface ModelJobWidgetAuthorOptions {
+	/** Current foreground model, read for every request. */
+	getModel: () => Model<Api> | undefined;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
 	/** The root session id, for session-sticky credentials and telemetry. */
@@ -172,37 +171,28 @@ export interface ModelJobWidgetAuthorOptions {
 	costGate?: () => CostGateApi | undefined;
 }
 
-/**
- * The `widget` role's model with a usable credential: the role (configured,
- * or resolved like `smol`), then the built-in `smol` defaults. Job captions
- * use it too.
- */
+/** Use only the current session model for job widgets and captions. */
 export async function resolveWidgetModel(
-	settings: Settings,
+	_settings: Settings,
 	registry: ModelRegistry,
 	sessionId: string | undefined,
 	signal: AbortSignal,
+	currentModel?: Model<Api>,
 ): Promise<Model<Api> | undefined> {
-	const available = registry.getAvailable();
-	const matchPreferences = getModelMatchPreferences(settings);
-	const candidates: Model<Api>[] = [];
-	const role = resolveModelRoleValue(formatModelRoleAlias("widget"), available, { settings, matchPreferences }).model;
-	if (role) candidates.push(role);
-	for (const pattern of roleDefaultModels().smol ?? []) {
-		const model = parseModelPattern(pattern, available, matchPreferences).model;
-		if (model) candidates.push(model);
-	}
-	for (const model of candidates) {
-		if (await registry.getApiKey(model, sessionId, { signal })) return model;
-	}
-	return undefined;
+	return currentModel && (await registry.getApiKey(currentModel, sessionId, { signal })) ? currentModel : undefined;
 }
 
 /** A {@link JobWidgetAuthor} backed by the `widget` model role. */
 export function createModelJobWidgetAuthor(options: ModelJobWidgetAuthorOptions): JobWidgetAuthor {
 	return async (request, signal) => {
 		const sessionId = options.sessionId();
-		const model = await resolveWidgetModel(options.settings, options.modelRegistry, sessionId, signal);
+		const model = await resolveWidgetModel(
+			options.settings,
+			options.modelRegistry,
+			sessionId,
+			signal,
+			options.getModel(),
+		);
 		if (!model) return undefined;
 		const costGate = options.costGate?.();
 		costGate?.admit();

@@ -1,3 +1,4 @@
+import type { Settings } from "../config/settings";
 /**
  * Settings declared by this domain (see `config/registry.ts`). Declaration order is the
  * settings-panel order; `config/all-settings.ts` registers every domain.
@@ -8,7 +9,6 @@ import {
 	validateAgentCompactionThresholdOverrides,
 } from "../config/compaction-threshold";
 import { effect, register } from "../config/registry";
-import type { Settings } from "../config/settings";
 import { type ServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../config/service-tier";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { $which, isRecord, logger, setWorktreesDir } from "@oh-my-pi/pi-utils";
@@ -19,8 +19,6 @@ const EMPTY_AGENT_SERVICE_TIER_OVERRIDES: Record<string, ServiceTierInheritSetti
 const EMPTY_AGENT_COMPACTION_THRESHOLD_OVERRIDES: Record<string, AgentCompactionThresholdOverride> = {};
 const EMPTY_AGENT_ACCOUNT_POOLS: Record<string, OAuthAccountPools> = {};
 const EMPTY_AGENT_SOFT_REQUEST_BUDGET: Record<string, number | null> = {};
-
-const DEFAULT_AGENT_MODEL_OVERRIDES: Record<string, string | string[]> = {};
 
 // Delegation. Task and isolation settings declare `protocolDefault`: protocol hosts get neutral
 // defaults instead of the local user's interactive preferences.
@@ -334,73 +332,6 @@ export const cfgTaskEnableEffort = register({
 	},
 });
 
-export const cfgTaskPerCallModel = register({
-	id: "task.perCallModel",
-	type: "enum",
-	values: ["off", "eval", "on"] as const,
-	default: "off",
-	ui: {
-		tab: "tasks",
-		group: "Subagents",
-		label: "Per-Call Model",
-		description:
-			"Whether a subagent call may pick its model with one exact provider/model-id[@upstream][:level] selector. An @upstream pin is part of the model identity and is supported only by aggregators. Only models the configuration already routes to are accepted. Project settings can turn it off but not on, and never approve a model.",
-		options: [
-			{ value: "off", label: "Off", description: "Reject `model` on task items and eval agent()/workpool()" },
-			{ value: "eval", label: "Eval only", description: "Accept `model` in eval agent() and workpool() only" },
-			{ value: "on", label: "On", description: "Accept `model` on task items and in eval agent()/workpool()" },
-		],
-	},
-});
-
-/**
- * Whether `task.perCallModel` accepts a per-call `model` for this invocation kind. The operator's
- * layers ({@link Settings.grantAuthority}) must enable it; project and subagent-injected settings,
- * which the live merged value includes, can only turn it off.
- */
-export function perCallModelEnabled(settings: Settings, invocationKind: "task" | "eval"): boolean {
-	return [settings.grantAuthority(), settings].every(layers => {
-		const mode = cfgTaskPerCallModel.get(layers);
-		return mode === "on" || (mode === "eval" && invocationKind === "eval");
-	});
-}
-
-/**
- * Validates `task.perCallModelAllow`: a list of exact `provider/model-id` strings. A non-string
- * entry fails load and writes instead of reaching approval as an entry that matches nothing.
- */
-function validatePerCallModelAllow(value: unknown): void {
-	if (value === undefined || value === null) return;
-	if (!Array.isArray(value)) {
-		throw new Error(
-			`Invalid task.perCallModelAllow: expected a list of provider/model-id strings, got ${Bun.inspect(value)}.`,
-		);
-	}
-	for (const [index, entry] of value.entries()) {
-		if (typeof entry === "string") continue;
-		throw new Error(
-			`Invalid task.perCallModelAllow[${index}]: expected a provider/model-id string, got ${Bun.inspect(entry)}.`,
-		);
-	}
-}
-
-export const cfgTaskPerCallModelAllow = register({
-	id: "task.perCallModelAllow",
-	type: "array",
-	default: [] as string[],
-	validate: validatePerCallModelAllow,
-	ui: {
-		tab: "tasks",
-		group: "Subagents",
-		label: "Per-Call Model Allowlist",
-		editor: "json",
-		// The editor writes the global layer; hide a project-supplied list so the repository cannot promote it.
-		condition: "perCallModelAllowNotProject",
-		description:
-			"Exact selectors: `provider/model-id`, including `@upstream` only for a pinned OpenRouter/Vercel route (e.g. `openrouter/x@y`). When set, a per-call model must also be listed here. Empty: every model the configuration grants. A project list can only narrow this one.",
-	},
-});
-
 export const cfgTaskMaxConcurrency = register({
 	id: "task.maxConcurrency",
 	protocolDefault: ["rpc", "acp"],
@@ -618,13 +549,6 @@ export const cfgTaskDisabledAgents = register({
 	default: [] as string[],
 });
 
-export const cfgTaskAgentModelOverrides = register({
-	id: "task.agentModelOverrides",
-	protocolDefault: ["rpc", "acp"],
-	type: "record",
-	default: DEFAULT_AGENT_MODEL_OVERRIDES,
-});
-
 export const cfgTaskAgentServiceTierOverrides = register({
 	id: "task.agentServiceTierOverrides",
 	protocolDefault: ["rpc", "acp"],
@@ -649,31 +573,11 @@ export const cfgTaskAgentAccountPools = register({
 	validate: validateAgentAccountPools,
 });
 
-export const cfgTaskAgentPrewalk = register({
-	id: "task.agentPrewalk",
-	protocolDefault: ["rpc", "acp"],
-	type: "record",
-	default: {} as Record<string, string>,
-});
-
 export const cfgTaskAgentAdvisor = register({
 	id: "task.agentAdvisor",
 	protocolDefault: ["rpc", "acp"],
 	type: "record",
 	default: {} as Record<string, string>,
-});
-
-export const cfgTaskPrewalk = register({
-	id: "task.prewalk",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "tasks",
-		group: "Subagents",
-		label: "Generic Task Prewalk",
-		description:
-			"Arm prewalk for the bundled generic `task` subagent: it starts on its resolved model, plans and begins the implementation, then hands off to the 'smol' role at its first edit/write. Per-agent overrides (task.agentPrewalk, configured from the /agents hub) and user agent `prewalk` frontmatter apply regardless of this toggle.",
-	},
 });
 
 export const cfgTaskShowResolvedModelBadge = register({
