@@ -1,24 +1,29 @@
-# @oh-my-pi/pi-agent
+# @oh-my-pi/pi-agent-core
 
 Stateful agent with tool execution and event streaming. Built on `@oh-my-pi/pi-ai`.
 
 ## Installation
 
 ```bash
-npm install @oh-my-pi/pi-agent
+bun add @oh-my-pi/pi-agent-core
 ```
 
 ## Quick Start
 
 ```typescript
-import { Agent } from "@oh-my-pi/pi-agent";
-import { getModel } from "@oh-my-pi/pi-ai";
+import { Agent } from "@oh-my-pi/pi-agent-core";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 const agent = new Agent({
 	initialState: {
 		systemPrompt: ["You are a helpful assistant."],
-		model: getModel("anthropic", "claude-sonnet-4-20250514"),
+		model: buildModel({
+			id: "your-model-id",
+			provider: "gateway",
+			baseUrl: "https://your-gateway.example/v1",
+		}),
 	},
+	getApiKey: () => process.env.GATEWAY_API_KEY,
 });
 
 agent.subscribe(event => {
@@ -148,10 +153,7 @@ const agent = new Agent({
   // How to handle queued messages: "one-at-a-time" (default) or "all"
   queueMode: "one-at-a-time",
 
-  // Custom stream function (for proxy backends)
-  streamFn: streamProxy,
-
-  // Dynamic model-scoped API key resolution (for expiring OAuth tokens)
+  // API key for the configured endpoint
   getApiKey: async (model) => tokenForModel(model),
 
   // Tool execution context (late-bound UI/session access). Surface the loop's
@@ -165,7 +167,7 @@ const agent = new Agent({
 ```typescript
 interface AgentState {
 	systemPrompt: string[];
-	model: Model;
+	model: Model | undefined;
 	thinkingLevel: ThinkingLevel;
 	tools: AgentTool<any>[];
 	messages: AgentMessage[];
@@ -175,6 +177,8 @@ interface AgentState {
 	error?: string;
 }
 ```
+
+An agent can be constructed before configuration. Set its model before calling `prompt()` or continuing queued work; requests with no configured model fail before network dispatch.
 
 Access via `agent.state`. During streaming, `streamMessage` contains the partial assistant message.
 
@@ -260,7 +264,7 @@ remain separate. `replaceQueue("steering" | "followUp", messages)` replaces only
 Extend `AgentMessage` via declaration merging:
 
 ```typescript
-declare module "@oh-my-pi/pi-agent" {
+declare module "@oh-my-pi/pi-agent-core" {
 	interface CustomAgentMessages {
 		notification: { role: "notification"; text: string; timestamp: number };
 	}
@@ -328,29 +332,12 @@ execute: async (toolCallId, params, signal, onUpdate) => {
 
 Thrown errors are caught by the agent and reported to the LLM as tool errors with `isError: true`.
 
-## Proxy Usage
-
-For browser apps that proxy through a backend:
-
-```typescript
-import { Agent, streamProxy } from "@oh-my-pi/pi-agent";
-
-const agent = new Agent({
-	streamFn: (model, context, options) =>
-		streamProxy(model, context, {
-			...options,
-			authToken: "...",
-			proxyUrl: "https://your-server.com",
-		}),
-});
-```
-
 ## Low-Level API
 
 For direct control without the Agent class:
 
 ```typescript
-import { agentLoop, agentLoopContinue } from "@oh-my-pi/pi-agent";
+import { agentLoop, agentLoopContinue } from "@oh-my-pi/pi-agent-core";
 
 const context: AgentContext = {
 	systemPrompt: ["You are helpful."],
@@ -359,7 +346,7 @@ const context: AgentContext = {
 };
 
 const config: AgentLoopConfig = {
-	model: getModel("openai", "gpt-4o"),
+	model: buildModel({ id: "your-model-id", provider: "gateway", baseUrl: "https://your-gateway.example/v1" }),
 	convertToLlm: msgs => msgs.filter(m => ["user", "assistant", "toolResult"].includes(m.role)),
 };
 
@@ -448,7 +435,7 @@ Callers that drive the loop multiple times (verify pass, benchmark harness)
 fold N summaries with `aggregateAgentRunSummaries` / `aggregateAgentRunCoverage`:
 
 ```typescript
-import { aggregateAgentRunSummaries, aggregateAgentRunCoverage } from "@oh-my-pi/pi-agent";
+import { aggregateAgentRunSummaries, aggregateAgentRunCoverage } from "@oh-my-pi/pi-agent-core";
 
 const summaries: AgentRunSummary[] = [];
 const coverages: AgentRunCoverage[] = [];

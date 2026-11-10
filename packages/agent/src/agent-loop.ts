@@ -47,12 +47,7 @@ import {
 } from "./telemetry";
 import { renderToolExamples } from "./tool-examples";
 import { validateAgentToolArguments } from "./tool-arguments";
-import {
-	createAdditionalContextMessage,
-	isNonBlankContext,
-	joinAdditionalContext,
-	type ToolResultWithAdditionalContext,
-} from "./tool-context";
+import { createAdditionalContextMessage, isNonBlankContext, joinAdditionalContext } from "./tool-context";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -177,16 +172,13 @@ function snapshotAssistantContentBlock(block: AssistantContentBlock): AssistantC
 		case "toolCall": {
 			const snap = {
 				...block,
-				// Providers mutate streaming arguments in place (owned-stream, GLM)
+				// Providers can mutate streaming arguments in place
 				// as well as replacing them, so containers are always copied; the
 				// strings inside are immutable and shared, keeping the per-delta
 				// cost independent of the argument payload size.
 				arguments: cloneJsonTree(block.arguments),
 				providerMetadata: undefined,
 			};
-			// Object spread copies enumerable symbols in Bun, but the Cursor
-			// exec-resolved marker is load-bearing for skip-on-dispatch — copy
-			// it explicitly so a projector/snapshot path cannot drop it.
 			return snap;
 		}
 	}
@@ -215,9 +207,7 @@ function snapshotAssistantMessage(message: AssistantMessage): AssistantMessage {
  * within a turn. A fresh snapshot therefore only needs to re-clone:
  *
  * - the block the current event targets (`changedIndex`),
- * - blocks still open (started but not ended) — Cursor's edit block merges
- *   `path`/`stream_content` into a live block without an event, so open blocks
- *   are re-cloned on every delta,
+ * - blocks still open (started but not ended),
  * - blocks appended since the previous snapshot.
  *
  * Every other (finalized) block is carried over from the previous snapshot by
@@ -424,8 +414,7 @@ export function agentLoop(
  * A harness that strips failed/aborted tool results in order to re-execute
  * the calls (e.g. `AgentSession.retry`'s tool replay) leaves the transcript
  * in this shape; {@link agentLoopContinue} resumes it by running those calls
- * before the next model call. Cursor exec-resolved blocks are excluded — the
- * provider already executed those server-side. `length`-truncated turns never
+ * before the next model call. `length`-truncated turns never
  * qualify: their trailing call arguments may be incomplete.
  */
 export function unpairedToolCallTail(messages: readonly AgentMessage[]): AssistantMessage | undefined {
@@ -1028,9 +1017,8 @@ async function runLoopBody(
 
 		// Soft tool requirement lifecycle (reminder then escalation; see SoftToolRequirement).
 		// The host-owned state survives only a gate stop between Agent.prompt calls.
-		// Resolved once per logical turn at the fetch site below and reused across
-		// Harmony-leak re-samples (which re-enter the same turn) so the consuming
-		// getToolChoice is never advanced twice; the flag resets at the message boundary.
+		// Resolve once per logical turn so the consuming getToolChoice is never
+		// advanced twice; reset the flag at the message boundary.
 		let hostToolChoice: ToolChoice | undefined;
 		let softRequiredTool: string | undefined;
 		let softSatisfies: SoftToolRequirement["satisfies"];
@@ -1271,17 +1259,13 @@ async function runLoopBody(
 				// only the single escalation turn carries the forced choice.
 				softRequirementState.forcedToolChoice = undefined;
 
-				// A fresh logical turn re-resolves the directive next iteration; a Harmony
-				// retry `continue`s before this line and keeps the cached value.
+				// A fresh logical turn re-resolves the directive next iteration.
 				directiveResolvedForTurn = false;
 
 				if (message.stopReason === "error" || message.stopReason === "aborted") {
 					// Create placeholder tool results for any tool calls in the aborted message
 					// This maintains the tool_use/tool_result pairing that the API requires
 					type ToolCallContent = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
-					// Cursor exec-resolved blocks already have their toolResult buffered
-					// for out-of-band emission; a placeholder aborted result here would
-					// pair a duplicate to the same toolCallId (issue #4348 codex review).
 					const toolCalls = message.content.filter((c): c is ToolCallContent => c.type === "toolCall");
 					// Provider-built aborted messages (stream error events) carry no
 					// per-tool labels; derive them from a tool-scoped abort signal so
@@ -1317,24 +1301,9 @@ async function runLoopBody(
 				}
 
 				// Run tools whenever the turn carries tool_use blocks AND was not truncated.
-				// `stop_reason` is provider metadata that never goes back on the wire, so it
-				// does not gate continuation validity: replaying a tool_use turn with the
-				// tool_results appended is accepted whether the turn ended on `tool_use` or
-				// `end_turn` (adaptive/interleaved-thinking Opus routinely emits tool calls
-				// under `end_turn`; verified against the live Anthropic API). The only
-				// continuation hazard is a thinking block carrying a stale/invalid signature,
-				// which `transformMessages` already neutralizes — it strips the signature on
-				// non-`toolUse` turns and the encoder downgrades the unsigned block to text,
-				// which the API accepts. So treat `stop` (end_turn/pause_turn) the same as
-				// `toolUse`. `length` (max_tokens) is the one reason we must NOT run: the
-				// trailing tool_use may be truncated with incomplete arguments — those calls
-				// are abandoned below. (`error`/`aborted` already returned above.)
+				// Completed tool calls can arrive with either a stop or tool-use reason.
+				// A length-truncated turn may contain incomplete arguments and cannot run.
 				type ToolCallContent = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
-				// A Cursor exec-channel synthesized `toolCall` block carries
-				// `kCursorExecResolved` because Cursor already executed the tool
-				// server-side (via the bridge) and buffered the result for
-				// out-of-band emission — running it here again would duplicate the
-				// same side-effecting call (issue #4348 review by @chatgpt-codex-connector).
 				const toolCalls = message.content.filter((c): c is ToolCallContent => c.type === "toolCall");
 				const runnableStop = message.stopReason === "toolUse" || message.stopReason === "stop";
 				hasMoreToolCalls = runnableStop && toolCalls.length > 0;
@@ -1703,7 +1672,7 @@ async function streamAssistantResponse(
 			let turnSnapshot: AssistantMessage | null = null;
 			// Content indices of blocks that started streaming but have not ended
 			// yet — re-cloned on every delta because live blocks may be patched
-			// without a paired event (Cursor's silent edit-block merge).
+			// without a paired event.
 			const openBlocks = new Set<number>();
 			const completedToolCallIds = new Set<string>();
 			const argStreams = new Map<number, { id: string; stream: AgentToolArgStream }>();
@@ -1794,9 +1763,6 @@ async function streamAssistantResponse(
 							context.tools ?? [],
 						);
 						finalMessage = snapshotAssistantMessage(finalMessage);
-						// Unhealed DSML markup must not reach history, including reasoning
-						// and turns with a valid structured call. Only a failed text-only
-						// call needs the recovery nudge.
 						// Expand inline macros (and any other registered rewrite) on the
 						// finalized message before it reaches the context, the UI, or tool
 						// dispatch — so a single mutation is the source of truth for all three.
@@ -2315,13 +2281,11 @@ interface PreparedToolCall {
 	prepareError?: unknown;
 }
 
-/** Committed assistant messages whose unhealed DSML tool-call markup was stripped; the loop answers them with a failure nudge. */
-
 /**
  * Prepare results computed in the stream-done branch (before `message_start`/
  * `message_end`) so a `beforeToolCall` args revision is baked into the message
  * every consumer snapshots. `executeToolCalls` consumes them; a message that
- * bypassed the streamed path (e.g. Harmony-recovered) is prepared at dispatch
+ * bypassed the streamed path is prepared at dispatch
  * time instead.
  */
 const preparedDispatchByMessage = new WeakMap<AssistantMessage, Map<string, PreparedToolCall>>();
@@ -2331,10 +2295,7 @@ function resolveToolForCall(
 	toolCall: AgentToolCall,
 	resolveFallbackTool: AgentLoopConfig["resolveFallbackTool"],
 ): AgentTool<any> | undefined {
-	// Tools emitted via OpenAI's custom-tool path (e.g. `apply_patch` on GPT-5)
-	// come back under their wire-level name, which may differ from the
-	// harness-internal `name`. Match on either, preferring `name` for
-	// determinism if both somehow collide.
+	// Match the configured tool name before its explicit legacy alias.
 	return (
 		tools?.find(t => t.name === toolCall.name) ??
 		tools?.find(t => t.customWireName !== undefined && t.customWireName === toolCall.name) ??
@@ -2442,12 +2403,8 @@ function formatToolNotFoundMessage(
  * trim test (`isMalformedToolCallId`): a whitespace-only id is minted like an
  * empty one, never kept — it would be dropped from provider replay together
  * with its result, the live/replay divergence this repair exists to close.
- * Cursor server-resolved blocks are never re-keyed (the provider correlates
- * their results out-of-band under its own ids) but their ids still join the
- * registry so no minted candidate collides with one. Idempotent: the message is
- * marked repaired and re-entry is a no-op, so the Harmony path can repair
- * before its snapshots while the dispatch-time prepare sees the already-minted
- * ids and leaves them alone.
+ * Idempotent: the message is marked repaired and re-entry is a no-op, so
+ * dispatch preparation retains the ids observed by prior snapshots.
  */
 const kToolCallIdsRepaired = Symbol("agent-loop.toolCallIdsRepaired");
 
@@ -2456,11 +2413,11 @@ type ToolCallIdsRepairedCarrier = AssistantMessage & { [kToolCallIdsRepaired]?: 
 
 /**
  * Run-scoped registry of every tool-call id {@link ensureUniqueToolCallIds} has
- * kept, minted, or seen on a server-resolved block under one
+ * kept or minted under one
  * {@link AgentContext}. Keyed by the dispatch context (the same object every
  * `prepareToolCallDispatch` receives) so the uniqueness window spans every
  * assistant turn of the run rather than resetting per message. Each run gets a
- * fresh loop context, so minted ids use the process-unique `mintToolCallId`.
+ * fresh loop context, so minted ids use random UUIDs.
  */
 const dispatchedToolCallIdsByContext = new WeakMap<AgentContext, Set<string>>();
 

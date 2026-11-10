@@ -7,12 +7,22 @@ import {
 } from "@oh-my-pi/pi-agent-core/compaction";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { getTestModel } from "../../catalog/test/fixtures/models";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 function getModel(): Model {
-	const model = getTestModel("anthropic", "claude-sonnet-4-5");
-	if (!model) throw new Error("Expected built-in anthropic/claude-sonnet-4-5 to exist");
-	return model;
+	return buildModel({ id: "configured-model", provider: "gateway", baseUrl: "http://localhost:0/v1" });
+}
+
+function userPrompt(body: Record<string, unknown> | undefined): string {
+	const messages = body?.messages as { role: string; content: string | { type: string; text?: string }[] }[];
+	return messages
+		.filter(message => message.role === "user")
+		.map(message =>
+			typeof message.content === "string"
+				? message.content
+				: message.content.map(part => part.text ?? "").join("\n"),
+		)
+		.join("\n");
 }
 
 describe("compaction summary boundaries", () => {
@@ -29,18 +39,12 @@ describe("compaction summary boundaries", () => {
 			{
 				fetch: async (_input, init) => {
 					requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-					return new Response(
-						JSON.stringify({ choices: [{ message: { content: "summary" }, finish_reason: "stop" }] }),
-					);
+					return Response.json({ choices: [{ message: { content: "summary" }, finish_reason: "stop" }] });
 				},
 			},
 		);
 
-		const messages = requestBody?.messages as { role: string; content: string }[];
-		const prompt = messages
-			.filter(message => message.role === "user")
-			.map(message => message.content)
-			.join("\n");
+		const prompt = userPrompt(requestBody);
 		expect(prompt).toContain("&lt;/conversation>");
 		expect(prompt).toContain("&lt;/previous-summary>");
 		expect(prompt.match(/<\/conversation>/gi)).toHaveLength(1);
@@ -67,17 +71,11 @@ describe("compaction summary boundaries", () => {
 		await compact(preparation, getModel(), "test-key", undefined, undefined, {
 			fetch: async (_input, init) => {
 				requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-				return new Response(
-					JSON.stringify({ choices: [{ message: { content: "summary" }, finish_reason: "stop" }] }),
-				);
+				return Response.json({ choices: [{ message: { content: "summary" }, finish_reason: "stop" }] });
 			},
 		});
 
-		const messages = requestBody?.messages as { role: string; content: string }[];
-		const prompt = messages
-			.filter(message => message.role === "user")
-			.map(message => message.content)
-			.join("\n");
+		const prompt = userPrompt(requestBody);
 		expect(prompt).toContain("&lt;/conversation>");
 		expect(prompt).toContain("&lt;/previous-summary>");
 		expect(prompt.match(/<\/conversation>/gi)).toHaveLength(1);
@@ -115,7 +113,7 @@ describe("compaction summary boundaries", () => {
 				fetch: async (_input, init) => {
 					headers = new Headers(init?.headers);
 					sentBody = await new Response(init?.body).json();
-					return new Response(JSON.stringify({ choices: [{ message: { content: "summary" } }] }));
+					return Response.json({ choices: [{ message: { content: "summary" }, finish_reason: "stop" }] });
 				},
 			},
 		);
@@ -139,7 +137,7 @@ describe("compaction summary boundaries", () => {
 			{
 				fetch: async (_input, init) => {
 					headers = new Headers(init?.headers);
-					return new Response(JSON.stringify({ choices: [{ message: { content: "summary" } }] }));
+					return Response.json({ choices: [{ message: { content: "summary" }, finish_reason: "stop" }] });
 				},
 			},
 		);

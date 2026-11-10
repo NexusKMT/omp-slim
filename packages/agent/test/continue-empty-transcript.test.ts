@@ -13,7 +13,7 @@ import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 describe("Agent.continue() on an empty transcript", () => {
 	it("runs a queued steer as the opening turn and drains the queue", async () => {
 		const mock = createMockModel({ responses: [{ content: ["Answer"] }] });
-		const agent = new Agent({ streamFn: mock.stream });
+		const agent = new Agent({ initialState: { model: mock.model }, streamFn: mock.stream });
 
 		agent.steer({
 			role: "user",
@@ -37,7 +37,7 @@ describe("Agent.continue() on an empty transcript", () => {
 
 	it("runs a queued follow-up as the opening turn and drains the queue", async () => {
 		const mock = createMockModel({ responses: [{ content: ["Answer"] }] });
-		const agent = new Agent({ streamFn: mock.stream });
+		const agent = new Agent({ initialState: { model: mock.model }, streamFn: mock.stream });
 
 		agent.followUp({
 			role: "user",

@@ -29,8 +29,9 @@ export async function resolveApiKeyOnce(
 	signal?: AbortSignal,
 	onResolved?: (value: ApiKeyResolution) => void,
 ): Promise<string | undefined> {
+	if (!isApiKeyResolver(key)) return resolvedApiKeyBearer(key);
 	signal?.throwIfAborted();
-	const value = isApiKeyResolver(key) ? await key({ error: undefined, lastChance: false, signal }) : key;
+	const value = await key({ error: undefined, lastChance: false, signal });
 	signal?.throwIfAborted();
 	onResolved?.(value);
 	return resolvedApiKeyBearer(value);
