@@ -24,15 +24,18 @@ entries and model tags remain readable.
 Advisors follow the current main model and its effort. Titles, job widgets,
 skill-description compression, enabled edit repair, explicit judgments and
 image questions use the current model object. Failed requests do not select a
-second model. Same-model retries, credential rotation, bounded quota waits and
-context compaction remain. An unavailable saved session model reports an error;
+second model. Title generation offers a fork or a separate request to this
+same model; legacy `title.generator: tiny` migrates to `request`. Automatic
+title-drift and unexpected-stop classification requests are removed. Mechanical
+recovery of empty or thinking-only replies remains, alongside same-model retries,
+credential rotation, bounded quota waits and context compaction. An unavailable saved session model reports an error;
 an explicit user model choice remains possible. A text-only model preserves
 image attachments and reports its capability limit instead of calling another
 vision model.
 
 The independent tiny/MLX/ONNX inference installers and workers, predictive
-composer runtime, automatic judge routing, Spotlight ranking/output rewriting and image-generation product tool
-are removed. Generic provider protocols, catalog metadata and historical data
+composer runtime, automatic judge routing, Spotlight ranking/output rewriting
+and the image-generation product tool are removed. Generic provider protocols, catalog metadata and historical data
 formats are retained for compatibility. Native prediction crate removal is
 outside this application-level pass; no native addon input has changed.
 
