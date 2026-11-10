@@ -182,7 +182,8 @@ and [macOS 15 image contents](https://github.com/actions/runner-images/blob/main
 
 This workflow selects `macos-15-intel`, Xcode 16.4 / SDK 15.5, and deployment
 target 15.0 for the local Intel Mac running macOS 15.7.5. Bun remains 1.4.4;
-Rust uses `rust-toolchain.toml`. It builds the native addon and CLI, checks the
+Rust uses `rust-toolchain.toml`, with four parallel Cargo jobs on the four-core
+runner. It builds the native addon and CLI, checks the
 Mach-O architecture and ad-hoc signature, rejects Homebrew/runner-specific
 dynamic library paths, runs the worker smoke test, checks TypeScript, and runs
 the six focused regression files listed above. Rust intermediates and dependency
