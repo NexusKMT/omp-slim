@@ -49,17 +49,20 @@ describe("edit auto-repair cost cap", () => {
 			maxTokens: 1024,
 		} as Model<Api>;
 		const settings = Settings.isolated({ "edit.autoRepair.enabled": true, "session.maxCost": 1 });
-		settings.setModelRole("smol", "llama.cpp/repair-model");
+		settings.setModel("other/persisted-model");
 		const costGate = new CostGate(settings, 0, () => {});
 		const session = {
 			settings,
 			costGate,
 			modelRegistry: {
-				getAvailable: () => [model],
+				getAvailable: () => {
+					throw new Error("repair must use the active model without catalog selection");
+				},
 				getApiKey: async () => "test-key",
 				resolver: () => async () => "test-key",
 			} as unknown as ModelRegistry,
 			getSessionId: () => "sess",
+			getActiveModel: () => model,
 		} as unknown as ToolSession;
 
 		// The first attempt is billed $0.40 and fails transiently, so the repair
@@ -67,7 +70,7 @@ describe("edit auto-repair cost cap", () => {
 		// Only a repair that records the failed attempt's cost before deciding to
 		// retry sees $1.10 against the $1 cap and refuses the second request.
 		let providerCalls = 0;
-		vi.spyOn(ai, "completeSimple").mockImplementation(() => {
+		const complete = vi.spyOn(ai, "completeSimple").mockImplementation(() => {
 			providerCalls += 1;
 			if (providerCalls === 1) costGate.record(0.7);
 			return Promise.resolve(billedOverload(0.4));
@@ -84,6 +87,8 @@ describe("edit auto-repair cost cap", () => {
 		);
 
 		expect(providerCalls).toBe(1);
+		expect(complete.mock.calls[0]?.[0]).toBe(model);
+		expect(complete.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
 		expect(error).toBeInstanceOf(CostCapError);
 		expect(costGate.spent).toBeCloseTo(1.1, 10);
 	}, 20_000);

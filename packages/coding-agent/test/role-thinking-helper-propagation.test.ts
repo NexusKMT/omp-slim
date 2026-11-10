@@ -3,6 +3,8 @@ import * as ai from "@oh-my-pi/pi-ai";
 import { type Api, type Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { generateTextReviewContextSummary } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/annotate/text-summary";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { generateCommitMessage } from "@oh-my-pi/pi-coding-agent/utils/commit-message-generator";
 import { generateSessionTitle } from "@oh-my-pi/pi-coding-agent/utils/title-generator";
 
@@ -33,6 +35,24 @@ afterEach(() => {
 });
 
 describe("current-model background helper calls", () => {
+	it("keeps annotation summaries on the exact current model without server-side replacement", async () => {
+		const model = { ...getModelOrThrow("claude-sonnet-4-5"), baseUrl: "https://custom.invalid" };
+		const registry = createRegistry(model);
+		const complete = vi.spyOn(ai, "completeSimple").mockResolvedValue({
+			stopReason: "end_turn",
+			content: [{ type: "text", text: "Preserve the original request and edit constraints." }],
+		} as never);
+		const sessionManager = SessionManager.inMemory();
+		const summary = await generateTextReviewContextSummary(
+			{ model, modelRegistry: registry as never, sessionManager },
+			"An older message with edit constraints.",
+		);
+		expect(summary).toBe("Preserve the original request and edit constraints.");
+		expect(complete.mock.calls[0]?.[0]).toBe(model);
+		expect(complete.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
+		expect(registry.resolver).toHaveBeenCalledWith(model, sessionManager.getSessionId());
+	});
+
 	it("uses the current model instead of a separate smol role for commit generation", async () => {
 		const model = getModelOrThrow("claude-sonnet-4-5");
 		const settings = createSettings({

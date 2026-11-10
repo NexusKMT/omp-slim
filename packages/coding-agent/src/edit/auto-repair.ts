@@ -4,7 +4,7 @@
  * When an applied edit turns a file that parsed into one that no longer does,
  * this module localizes the breakage to the smallest hunk set whose reversion
  * restores the parse, hands that region (with its parseable pre-image as
- * reference) to the `smol` model, and accepts a candidate only when the
+ * reference) to the current session model, and accepts a candidate only when the
  * repaired file re-parses and the candidate is not a plain revert of the
  * intended change.
  *
@@ -16,7 +16,6 @@
 import { completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
 import { diffLineRuns, editDiffString, parseCodeStatus } from "@oh-my-pi/pi-natives";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
-import { resolveRoleSelection } from "../config/model-resolver";
 import type { WritethroughCallback } from "../lsp";
 import type { ToolSession } from "../tools";
 import repairPromptSource from "./auto-repair.md" with { type: "text" };
@@ -26,7 +25,7 @@ import { cfgEditAutoRepairEnabled } from "./settings";
 
 /** Context lines shown around the culprit hunks. */
 const CONTEXT_LINES = 6;
-/** Largest repair region worth sending to a small model. */
+/** Largest repair region to include in one request. */
 const MAX_REGION_LINES = 150;
 /** Hunk count above which the O(n²) pair search is skipped for the O(n) greedy peel. */
 const MAX_PAIR_SEARCH_HUNKS = 24;
@@ -331,8 +330,8 @@ export interface EditAutoRepairOutcome {
 /**
  * Attempt to auto-repair a committed edit that introduced a parse failure,
  * writing the repaired content through the edit tool's LSP writethrough.
- * Gated on `edit.autoRepair.enabled` and the `smol` role resolving to an
- * authenticated model. Returns `undefined` whenever repair is unavailable,
+ * Gated on `edit.autoRepair.enabled` and an authenticated current session
+ * model. Returns `undefined` whenever repair is unavailable,
  * unsafe (file changed or recovered on its own), or rejected by validation.
  */
 export async function attemptEditAutoRepair(options: {
@@ -345,11 +344,11 @@ export async function attemptEditAutoRepair(options: {
 	if (!cfgEditAutoRepairEnabled.get(session.settings)) return undefined;
 	const registry = session.modelRegistry;
 	if (!registry) return undefined;
-	const model = resolveRoleSelection(["smol"], session.settings, registry.getAvailable())?.model;
+	const model = session.getActiveModel?.();
 	if (!model) return undefined;
 	const sessionId = session.getSessionId?.() ?? undefined;
 	// Resolve the key eagerly so the session-sticky credential is recorded and
-	// an unauthenticated smol role bails before any region work.
+	// an unauthenticated current model bails before any region work.
 	const apiKey = await registry.getApiKey(model, sessionId);
 	if (!apiKey) return undefined;
 
@@ -382,6 +381,7 @@ export async function attemptEditAutoRepair(options: {
 						sessionId,
 						maxTokens: COMPLETION_MAX_TOKENS,
 						disableReasoning: true,
+						disableServerSideFallback: true,
 						signal,
 					},
 				);
