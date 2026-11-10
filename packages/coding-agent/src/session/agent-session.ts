@@ -253,7 +253,7 @@ import { SubagentSpawnSignal } from "../thread/subagent-spawn-signal";
 import type { WorkPoolYieldItem } from "../task/workpool-yield";
 import type { AgentDefinition } from "../task/types";
 import type { ModelMention } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
-import { ModelMentionRegistry, type ResolvedModelMention } from "./model-mentions";
+import { readModelMentions } from "./model-mentions";
 import { parseCommandArgs } from "../utils/command-args";
 import type { EditModeSetting } from "../edit/settings";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
@@ -1123,7 +1123,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	#planModeReminderCount = 0;
 	#planModeReminderAwaitingProgress = false;
 	readonly #todo: TodoTracker;
-	readonly #modelMentions: ModelMentionRegistry;
+	readonly #inheritedSessionAgents: readonly AgentDefinition[];
 	#workPoolYieldItems: readonly WorkPoolYieldItem[] = [];
 	/** Item set matching the last successfully rebuilt provider prompt. The base
 	 *  prompt starts consistent with the empty set; every later value is a
@@ -2140,12 +2140,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			consumeLastServedToolChoiceLabel: () => this.#toolChoiceQueue.consumeLastServedLabel(),
 		};
 		this.#todo = new TodoTracker(todoHost);
-		this.#modelMentions = new ModelMentionRegistry({
-			sessionManager: this.sessionManager,
-			modelRegistry: this.#modelRegistry,
-			scopedModels: () => this.scopedModels.map(s => s.model),
-			inheritedAgents: config.inheritedSessionAgents,
-		});
+		this.#inheritedSessionAgents = config.inheritedSessionAgents ?? [];
 		this.#ownedAsyncJobManager = config.ownedAsyncJobManager;
 		this.#asyncJobManager = config.asyncJobManager ?? config.ownedAsyncJobManager;
 		const modelControlsHost: ModelControlsHost = {
@@ -2570,7 +2565,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		};
 		this.#syncAgentSessionId();
 		this.#todo.syncFromBranch();
-		this.#modelMentions.syncFromBranch();
 		this.#goalRuntime = new GoalRuntime({
 			getState: () => this.#goalModeState,
 			setState: state => {
@@ -2771,7 +2765,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			},
 			syncTodoPhasesFromBranch: () => {
 				this.#todo.syncFromBranch();
-				this.#modelMentions.syncFromBranch();
 			},
 			resetAdvisorRuntimes: (reason, options) => this.#advisors.resetAllRuntimes(reason, options),
 			rebaseAdvisorPrefix: reason => this.#advisors.rebaseDeliveredPrefixes(reason),
@@ -8131,7 +8124,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 		// Expand file-based prompt templates if requested
 		const templated = expandPromptTemplates ? expandPromptTemplate(text, [...this.#promptTemplates]) : text;
-		const expandedText = options?.synthetic ? templated : this.#modelMentions.expandMentions(templated);
+		const expandedText = templated;
 
 		// Magic keywords (see modes/magic-keywords.ts): append hidden system notices after the
 		// user's message that steer this turn. User-authored prompts only — synthetic /
@@ -10597,9 +10590,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		input: SkillPromptInput,
 		body: string,
 	): BuiltSkillPromptMessage {
-		return renderSkillPromptMessage(skill, input, body, "user", {
-			expandUserArgs: args => this.#modelMentions.expandMentions(args),
-		});
+		return renderSkillPromptMessage(skill, input, body, "user");
 	}
 
 	/** Descriptions frozen when this session's system prompt was built. */
@@ -10627,19 +10618,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		return this.#tools.skillWarnings;
 	}
 
-	/** Session-local general-purpose agents pinned to user-tagged models. */
+	/** Inherited session-local personas; execution uses the active model. */
 	getSessionAgents(): AgentDefinition[] {
-		return this.#modelMentions.sessionAgents();
+		return [...this.#inheritedSessionAgents];
 	}
 
-	/** Registered model pseudonyms on the active branch. */
+	/** Historical model pseudonyms, retained only for rendering saved messages. */
 	get modelMentions(): readonly ModelMention[] {
-		return this.#modelMentions.mentions;
-	}
-
-	/** Resolve a `provider/id[:level]` mention within the session picker's scope. */
-	resolveModelMention(selector: string): ResolvedModelMention | undefined {
-		return this.#modelMentions.resolve(selector);
+		return readModelMentions(this.sessionManager.getBranch());
 	}
 
 	getTodoPhases(): TodoPhase[] {
@@ -11638,7 +11624,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		role: string = "default",
 		options?: {
 			selector?: string;
-			thinkingLevel?: ThinkingLevel;
+			thinkingLevel?: ConfiguredThinkingLevel;
 			persist?: boolean;
 		},
 	): Promise<{ switched: boolean }> {
@@ -11658,12 +11644,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	cycleModel(direction: "forward" | "backward" = "forward"): Promise<ModelCycleResult | undefined> {
 		return this.#models.cycleModel(direction);
 	}
-
-	/** Resolves configured role models and the currently active role index. */
-
-	/** Applies a resolved role model without changing global settings. */
-
-	/** Cycles the configured role models in the supplied order. */
 
 	/** Lists available models after applying the configured enabled-model filter. */
 	getAvailableModels(): Model[] {
@@ -12148,7 +12128,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.replaceMessagesFromSessionContext(activeMessages ?? sessionContext.messages);
 		this.#advisors.resetSessionState({ preserveCost: true });
 		this.#todo.syncFromBranch();
-		this.#modelMentions.syncFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 		this.#checkpointState = undefined;
 		this.#pendingRewindReport = undefined;
@@ -13232,7 +13211,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#reseedTokenRate();
 			this.#advisors.resetSessionState({ preserveCost: true });
 			this.#todo.syncFromBranch();
-			this.#modelMentions.syncFromBranch();
 			if (switchingToDifferentSession) {
 				this.#closeAllProviderSessions("session switch");
 			} else if (didReloadConversationChange) {
@@ -13409,7 +13387,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				this.#emit({ type: "model_changed" });
 			}
 			this.#todo.syncFromBranch();
-			this.#modelMentions.syncFromBranch();
 			this.#advisors.resetAllRuntimes();
 			this.#advisors.reattachRecorderFeeds();
 			this.#reconnectToAgent();
@@ -13576,7 +13553,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#clearSessionScopedToolState();
 			this.#rehydrateCheckpointRewindState();
 			this.#todo.syncFromBranch();
-			this.#modelMentions.syncFromBranch();
 			this.#freshProviderSessionId = undefined;
 			this.#clearInheritedProviderPromptCacheKey();
 			this.#syncAgentSessionId();
@@ -13709,7 +13685,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			});
 			this.sessionManager.appendMessage(sanitizeAssistantForReparentedHistory(assistantMessage));
 			this.#todo.syncFromBranch();
-			this.#modelMentions.syncFromBranch();
 			this.#freshProviderSessionId = undefined;
 			this.#syncAgentSessionId();
 
@@ -14042,7 +14017,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#rehydrateCheckpointRewindState();
 		this.#advisors.resetSessionState({ preserveCost: true });
 		this.#todo.syncFromBranch();
-		this.#modelMentions.syncFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
 
 		this.#branchSummaryAbortController = undefined;
