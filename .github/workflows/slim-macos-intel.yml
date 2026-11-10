@@ -48,11 +48,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ${{ runner.temp }}/omp-slim-cargo
-          key: slim-macos15-intel-xcode16.4-ci-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', '.cargo/**', 'rust-toolchain.toml', 'bun.lock', 'scripts/slim/**', 'packages/natives/scripts/**') }}
+          key: slim-macos15-intel-xcode16.4-ci-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', '.cargo/**', 'rust-toolchain.toml', 'bun.lock', 'scripts/slim/**', 'packages/natives/scripts/**', '.github/workflows/slim-macos-intel.yml') }}
           restore-keys: |
             slim-macos15-intel-xcode16.4-ci-v1-
 
       - name: Install pinned toolchains and dependencies
+        id: toolchains
         shell: bash
         run: |
           mkdir -p dist/validation/macos-intel
@@ -63,7 +64,7 @@ jobs:
         run: bash scripts/slim/build.sh macos-intel
 
       - name: Preserve build cache even if validation fails
-        if: ${{ !cancelled() && steps.build-cache.outputs.cache-hit != 'true' && steps.build-cache.outputs.cache-primary-key != '' }}
+        if: ${{ !cancelled() && steps.toolchains.outcome == 'success' && steps.build-cache.outputs.cache-hit != 'true' && steps.build-cache.outputs.cache-primary-key != '' }}
         continue-on-error: true
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:

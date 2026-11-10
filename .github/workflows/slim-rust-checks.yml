@@ -47,11 +47,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ${{ runner.temp }}/omp-slim-rust-checks
-          key: slim-rust-ubuntu24-ci-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', '.cargo/**', 'rust-toolchain.toml', 'scripts/run-rs-task.ts', '.config/nextest.toml') }}
+          key: slim-rust-ubuntu24-ci-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', '.cargo/**', 'rust-toolchain.toml', 'scripts/run-rs-task.ts', '.config/nextest.toml', '.github/workflows/slim-rust-checks.yml') }}
           restore-keys: |
             slim-rust-ubuntu24-ci-v1-
 
       - name: Install pinned toolchains and dependencies
+        id: toolchains
         shell: bash
         run: bash scripts/slim/bootstrap.sh 2>&1 | tee dist/validation/rust/bootstrap.log
 
@@ -69,7 +70,7 @@ jobs:
         run: bun run test:rs 2>&1 | tee dist/validation/rust/tests.log
 
       - name: Preserve Rust check caches
-        if: ${{ !cancelled() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
+        if: ${{ !cancelled() && steps.toolchains.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
         continue-on-error: true
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -88,7 +89,7 @@ jobs:
             printf 'Source: %s\n' "$GITHUB_SHA"
             git status --short
             rustc --version
-            cargo nextest --version
+            if command -v cargo-nextest >/dev/null; then cargo nextest --version; fi
           } > dist/validation/rust/source.txt
 
       - name: Upload Rust validation evidence
