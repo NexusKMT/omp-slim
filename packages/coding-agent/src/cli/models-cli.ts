@@ -363,19 +363,7 @@ export async function runModelsListing(options: RunModelsListingOptions): Promis
 			modelRegistry.registerProvider(name, config, sourceId);
 		}
 		extensionsResult.runtime.pendingProviderRegistrations = [];
-		// Discover runtime (extension) provider catalogs now that they are registered.
-		await modelRegistry.refreshRuntimeProviders(action === "refresh" ? "online" : "online-if-uncached");
 
-		for (const warning of modelRegistry.drainConfigWarnings()) {
-			process.stderr.write(`${chalk.yellow(`Warning: ${warning}`)}\n`);
-		}
-		// A failed fetch otherwise looks identical to a provider with no models.
-		for (const { provider, status, error } of modelRegistry.getRuntimeDiscoveryFailures()) {
-			const detail = error?.replace(/\s+/g, " ").trim();
-			process.stderr.write(
-				`${chalk.yellow(`Warning: ${provider} model discovery failed (${status}): ${detail}`)}\n`,
-			);
-		}
 		renderProviderModels(modelRegistry, action, pattern, json, kind);
 	} finally {
 		await emitSessionShutdownEvent(extensionRunner);
@@ -400,7 +388,7 @@ export async function runModelsCommand(command: ModelsCommandArgs): Promise<void
 
 	const cwd = getProjectDir();
 	const settings = await Settings.init({ cwd, configFiles: command.flags.config });
-	const authStorage = await discoverAuthStorage(undefined, { settings });
+	const authStorage = await discoverAuthStorage(undefined);
 	try {
 		const modelRegistry = new ModelRegistry(authStorage);
 

@@ -4,6 +4,8 @@
 
 ### Removed
 
+- Removed provider login, account pools, quota dashboards, auth brokers/gateways, dry-balance, slow mode and cache warming. CLI and worker sessions use explicit endpoint models and generic API keys; retired settings are removed during migration.
+
 - Removed session sharing, collaboration hosting and joining, live broadcast, screen recording and replay, and HTML session export. Local history, resume, transcript diagnostics and the stats dashboard remain available.
 
 - Removed automatic title-drift checks and their inactive settings; title generation offers a fork or a separate request to the current model, with legacy `tiny` settings migrated to `request`.

@@ -181,10 +181,6 @@ const FOCUSED_VIEW_COMMANDS: Record<string, (args: string) => boolean> = {
 		const { verb, rest } = parseSubcommand(args);
 		return !verb || (verb === "full" && !rest);
 	},
-	usage: args => {
-		const { verb, rest } = parseSubcommand(args);
-		return !verb || (verb === "show" && !rest);
-	},
 };
 const FOCUSED_VIEW_COMMAND_LIST = Object.keys(FOCUSED_VIEW_COMMANDS)
 	.map(name => `/${name}`)
@@ -757,9 +753,6 @@ export class InputController {
 		this.ctx.editor.onChange = (text: string) => {
 			const wasComposing = (this.#draftText ?? "").trim() !== "";
 			this.#draftText = text;
-			// Typing signals an imminent turn; refresh the API connection now so
-			// the handshake overlaps composition instead of delaying the send.
-			if (text) this.ctx.session.prewarmModelConnection();
 			if (wasComposing !== (text.trim() !== "")) this.ctx.syncIdleMaintenanceView();
 			const wasBashMode = this.ctx.isBashMode;
 			const wasPythonMode = this.ctx.isPythonMode;

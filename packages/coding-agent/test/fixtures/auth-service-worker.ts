@@ -1,20 +1,18 @@
 import { type MessagePort, parentPort } from "node:worker_threads";
-import { AuthStorage, type SessionRestrictionLease } from "@oh-my-pi/pi-ai";
+import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { MissingApiKeyError } from "@oh-my-pi/pi-ai/error";
 import { ModelRegistry } from "../../src/config/model-registry";
-import { anthropicSlowModeLanes } from "../../src/session/anthropic-slow-mode";
+
 import type { WorkerThreadLink } from "../../src/thread/protocol";
 import { type RpcFrame, RpcLink } from "../../src/thread/rpc";
 import { authService } from "../../src/thread/services/auth";
-import { RemoteSlowModeLane } from "../../src/thread/services/auth-remote";
 
 /** Worker-side operations the test drives; each crosses to main as an async function. */
 export interface AuthProbe {
+	resolvedKey(provider: string): Promise<string | undefined>;
 	key(provider: string, sessionId: string): Promise<string | undefined>;
 	keyError(provider: string, sessionId: string): Promise<{ missingApiKey: boolean; message: string }>;
-	accountId(provider: string, sessionId: string): Promise<string | undefined>;
-	restrict(provider: string, sessionId: string, identityKeys: string[]): Promise<number>;
-	unrestrict(provider: string, sessionId: string, handle: number): Promise<void>;
+
 	sameStorage(storage: AuthStorage): Promise<boolean>;
 	watchGenerations(): Promise<void>;
 	generations(): Promise<number[]>;
@@ -28,7 +26,6 @@ export interface AuthProbe {
 		hasModel: boolean;
 		apiKey: string | undefined;
 	}>;
-	observeWrapUp(lane: string): Promise<{ remoteLane: boolean; stage: string | undefined }>;
 }
 
 /** Test-only boot globals next to the services' own. */
@@ -47,12 +44,15 @@ function isTestGlobals(value: unknown): value is AuthTestGlobals {
 }
 
 function buildProbe(storage: AuthStorage): AuthProbe {
-	const leases: SessionRestrictionLease[] = [];
 	const seen: number[] = [];
 	let unwatch: (() => void) | undefined;
 	let firstRegistry: ModelRegistry | undefined;
 	return {
 		key: (provider, sessionId) => storage.keys.get(provider, sessionId),
+		resolvedKey: async provider => {
+			const value = await storage.keys.resolver(provider)({ error: undefined, lastChance: false });
+			return typeof value === "string" ? value : value?.apiKey;
+		},
 		keyError: async (provider, sessionId) => {
 			try {
 				await storage.keys.get(provider, sessionId);
@@ -64,14 +64,7 @@ function buildProbe(storage: AuthStorage): AuthProbe {
 				};
 			}
 		},
-		accountId: async (provider, sessionId) => storage.oauth.identity(provider, sessionId)?.accountId,
-		restrict: async (provider, sessionId, identityKeys) =>
-			leases.push(storage.sessions.restrict(provider, sessionId, identityKeys)) - 1,
-		unrestrict: async (provider, sessionId, handle) => {
-			const lease = leases[handle];
-			if (lease === undefined) throw new Error(`no lease ${handle}`);
-			storage.sessions.unrestrict(provider, sessionId, lease);
-		},
+
 		sameStorage: async other => other === storage,
 		watchGenerations: async () => {
 			unwatch = storage.credentials.onGeneration(generation => {
@@ -93,21 +86,6 @@ function buildProbe(storage: AuthStorage): AuthProbe {
 				hasModel: registry.find("unit-mirror", "mirror-model") !== undefined,
 				apiKey: await registry.getApiKeyForProvider("unit-mirror"),
 			};
-		},
-		observeWrapUp: async lane => {
-			const nowSec = Math.floor(Date.now() / 1000);
-			anthropicSlowModeLanes.hooks({}).observe(
-				{
-					graceUtilization: { fiveHour: 0.3, sevenDay: 0 },
-					fiveHourResetAtSec: nowSec + 3_600,
-					weeklyResetAtSec: nowSec + 400_000,
-					unifiedLimitClaim: false,
-					overageInUse: false,
-				},
-				lane,
-			);
-			const controller = anthropicSlowModeLanes.lane(lane);
-			return { remoteLane: controller instanceof RemoteSlowModeLane, stage: controller.status()?.stage };
 		},
 	};
 }

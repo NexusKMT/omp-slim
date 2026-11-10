@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Model, Usage } from "@oh-my-pi/pi-ai";
 import type { Component, Container, EditorTheme, KeyId, Loader, TUI } from "@oh-my-pi/pi-tui";
 import type { TspText } from "@oh-my-pi/pi-wire";
 import type { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
@@ -365,6 +365,7 @@ export interface InteractiveModeContext {
 	fileSlashCommands: Set<string>;
 	skillCommands: Map<string, Skill>;
 	oauthManualInput: OAuthManualInputManager;
+
 	todoPhases: TodoPhase[];
 
 	// Lifecycle
@@ -531,7 +532,7 @@ export interface InteractiveModeContext {
 	handleSessionCommand(): Promise<void>;
 	handleAdvisorStatusCommand(): Promise<void>;
 	handleJobsCommand(options?: { full?: boolean }): Promise<void>;
-	handleUsageCommand(reports?: UsageReport[] | null): Promise<void>;
+
 	handleChangelogCommand(args?: string): Promise<void>;
 	handleHotkeysCommand(): void;
 	handleToolsCommand(): void;
@@ -577,8 +578,7 @@ export interface InteractiveModeContext {
 
 	// Selector handling
 	showSettingsSelector(): void;
-	/** Open the fullscreen `/usage` dashboard overlay for the given reports. */
-	showUsageDashboard(reports: UsageReport[]): void;
+
 	showAdvisorConfigure(): void;
 	showHistorySearch(): void;
 	showExtensionsDashboard(): void;
@@ -599,10 +599,7 @@ export interface InteractiveModeContext {
 	prepareSessionSwitch(): Promise<void>;
 	handleResumeSession(sessionPath: string, options?: ResumeSessionOptions): Promise<void>;
 	handleSessionDeleteCommand(): Promise<void>;
-	showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void>;
-	showSessionPinSelector(): Promise<void>;
-	showResetUsageSelector(): Promise<void>;
-	showProviderSetup(): Promise<void>;
+
 	showHookConfirm(title: string, message: string, dialogOptions?: InteractiveSelectorDialogOptions): Promise<boolean>;
 	showDebugSelector(): Promise<void>;
 	showAgentHub(options?: AgentHubOpenOptions): void;

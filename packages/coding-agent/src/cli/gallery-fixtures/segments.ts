@@ -75,11 +75,7 @@ export function createGallerySegmentContext(sessionOptions?: GallerySessionOptio
 			pr: { number: 1842, url: "https://github.com/can1357/oh-my-pi/pull/1842" },
 		},
 		worktree: null,
-		usage: {
-			tier: "Pro",
-			fiveHour: { percent: 32, resetMinutes: 71 },
-			sevenDay: { percent: 68, resetHours: 52 },
-		},
+
 		promptCache: sessionOptions?.promptCache,
 	};
 }
@@ -211,33 +207,7 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 				{ label: "24-hour with seconds" },
 				{ label: "12-hour", context: { options: { time: { format: "12h", showSeconds: false } } } },
 			];
-		case "usage":
-			return [
-				{
-					label: "all windows",
-					context: {
-						usage: {
-							tier: "Pro",
-							fiveHour: { percent: 32, resetMinutes: 71 },
-							daily: { percent: 44, resetMinutes: 310 },
-							sevenDay: { percent: 68, resetHours: 52 },
-							monthly: { percent: 77, resetHours: 216 },
-						},
-					},
-				},
-				{
-					label: "normal",
-					context: { usage: { tier: "Pro", fiveHour: { percent: 24, resetMinutes: 75 } } },
-				},
-				{
-					label: "warning",
-					context: { usage: { tier: "Pro", fiveHour: { percent: 65, resetMinutes: 75 } } },
-				},
-				{
-					label: "error",
-					context: { usage: { tier: "Pro", fiveHour: { percent: 92, resetMinutes: 75 } } },
-				},
-			];
+
 		case "vim":
 			return [
 				{

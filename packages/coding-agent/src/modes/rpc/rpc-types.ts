@@ -21,14 +21,14 @@ import type { ContextUsage } from "../../extensibility/extensions/types";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
 import type { SessionLeaseReport } from "../../session/session-storage";
 import type { RestoredQueuedMessage } from "../../session/agent-session-types";
-import type { CacheWarmingMode } from "../../session/cache-warmer";
+
 import type { FileEntry, SessionEntry, SessionTreeNode } from "../../session/session-entries";
-import type { UsageLimitState } from "../../session/usage-limit";
+
 import type { AvailableSlashCommandSource } from "../../slash-commands/available-commands";
 import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
 import type { SubagentEventPayload, SubagentLifecyclePayload, SubagentProgressPayload } from "../../task";
 import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
-import type { LogoutAccount } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
+
 import type { RpcMessagesPage } from "./rpc-messages";
 import type { GoalModeState } from "../../goals/state";
 import type { RpcGoalOp, RpcGoalResult } from "./rpc-goal";
@@ -63,7 +63,6 @@ export type RpcCommand =
 	// State
 	| { id?: string; type: "get_state" }
 	| { id?: string; type: "set_fast_mode"; enabled: boolean }
-	| { id?: string; type: "set_slow_mode"; enabled: boolean }
 	| {
 			id?: string;
 			type: "goal";
@@ -104,7 +103,6 @@ export type RpcCommand =
 	| { id?: string; type: "set_auto_compaction"; enabled: boolean }
 
 	// Cache warming
-	| { id?: string; type: "set_cache_warming"; mode: CacheWarmingMode }
 
 	// Retry
 	| { id?: string; type: "set_auto_retry"; enabled: boolean }
@@ -133,10 +131,6 @@ export type RpcCommand =
 	| { id?: string; type: "get_messages_page"; cursor?: string; limit?: number }
 
 	// Login
-	| { id?: string; type: "get_login_providers" }
-	| { id?: string; type: "login"; providerId: string }
-	| { id?: string; type: "get_logout_accounts"; providerId: string }
-	| { id?: string; type: "logout"; providerId: string; credentialId: number }
 
 	// Side questions (/btw); answers stream as `btw_delta` / `btw_record` frames
 	| { id?: string; type: "btw"; question: string; recordId?: string }
@@ -161,17 +155,7 @@ export interface RpcSessionState {
 	autoCompactionEnabled: boolean;
 	fastModeEnabled: boolean;
 	fastModeActive: boolean;
-	/** `/slow` applies to the active model (flex tier on OpenAI/Google, low priority on Claude subscriptions). */
-	slowModeSupported: boolean;
-	/** `/slow` is on for the active model; always `false` when `slowModeSupported` is `false`. */
-	slowModeEnabled: boolean;
-	/**
-	 * Where the active model's `/slow` lives: `global` (persisted config shared by every
-	 * session, e.g. Claude low priority) or `session` (this session's flex tier). Absent when unsupported.
-	 */
-	slowModeScope?: "session" | "global";
-	/** Usage-limit stage of the active model's account; absent outside wrap-up and low priority. */
-	usageLimit?: UsageLimitState;
+
 	tokensPerSecond: number | null;
 	messageCount: number;
 	queuedMessageCount: number;
@@ -389,7 +373,6 @@ export type RpcResponse =
 			success: true;
 			data: { enabled: boolean; active: boolean };
 	  }
-	| { id?: string; type: "response"; command: "set_slow_mode"; success: true; data: { enabled: boolean } }
 	| { id?: string; type: "response"; command: "goal"; success: true; data: RpcGoalResult }
 	| { id?: string; type: "response"; command: "set_ask_dialog"; success: true; data: { enabled: boolean } }
 	| {
@@ -503,7 +486,6 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "set_auto_compaction"; success: true }
 
 	// Cache warming
-	| { id?: string; type: "response"; command: "set_cache_warming"; success: true; data: { mode: CacheWarmingMode } }
 
 	// Retry
 	| { id?: string; type: "response"; command: "set_auto_retry"; success: true }
@@ -544,22 +526,6 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "get_messages_page"; success: true; data: RpcMessagesPage }
 
 	// Login
-	| {
-			id?: string;
-			type: "response";
-			command: "get_login_providers";
-			success: true;
-			data: { providers: Array<{ id: string; name: string; available: boolean; authenticated: boolean }> };
-	  }
-	| { id?: string; type: "response"; command: "login"; success: true; data: { providerId: string } }
-	| {
-			id?: string;
-			type: "response";
-			command: "get_logout_accounts";
-			success: true;
-			data: { accounts: LogoutAccount[] };
-	  }
-	| { id?: string; type: "response"; command: "logout"; success: true; data: { remainingSource?: string } }
 
 	// Side questions (/btw)
 	| { id?: string; type: "response"; command: "btw"; success: true; data: { record: RpcBtwHistoryRecord } }

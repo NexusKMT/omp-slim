@@ -1,8 +1,8 @@
 import { clearSubmittedText } from "./helpers/draft";
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
+
 import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "../judgment";
 import type { AgentSession } from "../session/agent-session";
-import type { SessionOAuthAccountList } from "../session/agent-session-types";
+
 import {
 	getChangelogPath,
 	parseChangelog,
@@ -10,7 +10,7 @@ import {
 	renderChangelogEntries,
 	selectChangelogEntries,
 } from "../utils/changelog";
-import { formatTokenCount, refreshStatusLine } from "./builtin-modes";
+import { formatTokenCount } from "./builtin-modes";
 import { buildContextReportText } from "./helpers/context-report";
 import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
 import { shortenEmbeddedPaths, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
@@ -21,15 +21,7 @@ import { handleMcpAcp } from "./helpers/mcp";
 import { markdownFenceFor } from "../utils/markdown-fence";
 import { openLocalFileInEditor } from "../modes/local-file-editor";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./helpers/parse";
-import {
-	describeRedeemOutcome,
-	formatResetUsageAccountLine,
-	oneLine,
-	resolveResetUsageTarget,
-	toResetUsageAccounts,
-} from "./helpers/reset-usage";
-import type { ResetUsageAccount } from "@oh-my-pi/pi-tui/overlays/reset-usage-selector";
-import { matchSessionPinAccounts, toSessionPinAccounts } from "./helpers/session-pin";
+
 import {
 	launchStatsDashboard,
 	parseStatsDashboardArgs,
@@ -38,39 +30,8 @@ import {
 } from "./helpers/stats-dashboard";
 import { StatsNotice } from "@oh-my-pi/pi-tui/overlays/stats-notice";
 import { handleTodoAcp } from "./helpers/todo";
-import { buildUsageReportText } from "./helpers/usage-report";
-import type { SlashCommandRuntime, SlashCommandSpec } from "./types";
 
-async function handleUsageResetCommand(
-	arg: string,
-	session: AgentSession,
-	output: SlashCommandRuntime["output"],
-): Promise<void> {
-	let accounts: ResetUsageAccount[];
-	try {
-		accounts = toResetUsageAccounts(await session.listResetCredits());
-	} catch (error) {
-		await output(`Could not load saved resets: ${oneLine(errorMessage(error))}`);
-		return;
-	}
-	if (accounts.length === 0) {
-		await output("No provider accounts found. Use /login to add one.");
-		return;
-	}
-	if (!arg.trim()) {
-		const lines = ["Saved rate-limit resets:", ...accounts.map(formatResetUsageAccountLine)];
-		lines.push("", "Spend one with `/usage reset <provider>/<credential id>` or `/usage reset <provider>/active`.");
-		await output(lines.join("\n"));
-		return;
-	}
-	const resolved = resolveResetUsageTarget(accounts, arg, "/usage reset");
-	if ("error" in resolved) {
-		await output(resolved.error);
-		return;
-	}
-	const outcome = await session.redeemResetCredit(resolved.account.target);
-	await output(oneLine(describeRedeemOutcome(outcome, resolved.account.label)));
-}
+import type { SlashCommandRuntime, SlashCommandSpec } from "./types";
 
 /**
  * `/jobs kill <id>|all`: cancel one running background job this session owns,
@@ -115,71 +76,6 @@ async function handleJobsKillCommand(
 			? `Cancelled background job ${safeTarget}.`
 			: `Could not cancel background job ${safeTarget}.`,
 	);
-}
-
-async function handleSessionPinCommand(
-	arg: string,
-	session: AgentSession,
-	output: SlashCommandRuntime["output"],
-): Promise<void> {
-	if (session.isStreaming) {
-		await output("Cannot pin an account while the session is streaming.");
-		return;
-	}
-	let accountList: SessionOAuthAccountList | undefined;
-	try {
-		accountList = await session.listCurrentProviderOAuthAccounts();
-	} catch (error) {
-		await output(`Could not load provider accounts: ${errorMessage(error)}`);
-		return;
-	}
-	if (!accountList) {
-		await output("Select a model before pinning a provider account.");
-		return;
-	}
-	const provider = getOAuthProviders().find(candidate => candidate.id === accountList.provider);
-	const providerName = provider?.name ?? accountList.provider;
-	const accounts = toSessionPinAccounts(accountList.accounts);
-	if (accounts.length === 0) {
-		const source = session.modelRegistry.authStorage.keys.describe(accountList.provider, session.sessionId);
-		await output(
-			source
-				? `No stored OAuth accounts for ${providerName}. Current auth comes from ${source}.`
-				: `No stored OAuth accounts for ${providerName}. Use /login to add one.`,
-		);
-		return;
-	}
-
-	const selector = arg.trim();
-	if (!selector) {
-		const lines = [`OAuth accounts for ${providerName}:`];
-		for (const account of accounts) {
-			lines.push(`${account.position + 1}. ${account.label}${account.active ? " (active)" : ""}`);
-		}
-		lines.push("", "Pin one with `/session pin <number|email|account id>`.");
-		await output(lines.join("\n"));
-		return;
-	}
-
-	const matches = matchSessionPinAccounts(accounts, selector);
-	if (matches.length === 0) {
-		await output(`No ${providerName} account matches "${selector}".`);
-		return;
-	}
-	if (matches.length > 1) {
-		await output(
-			`"${selector}" matches multiple ${providerName} accounts: ${matches
-				.map(account => `${account.position + 1}. ${account.label}`)
-				.join(", ")}. Use the account number.`,
-		);
-		return;
-	}
-	const account = matches[0];
-	if (!account || !session.pinCurrentProviderOAuthAccount(account.credentialId)) {
-		await output(`${account?.label ?? selector} is no longer available to pin.`);
-		return;
-	}
-	await output(`Pinned ${account.label} to this session for ${providerName}.`);
 }
 
 /**
@@ -247,15 +143,10 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		icon: "session",
 		description: "Session management commands",
 		acpDescription: "Show or configure the current session",
-		acpInputHint: "[info|delete|pin [account]]",
+		acpInputHint: "[info|delete]",
 		subcommands: [
 			{ name: "info", description: "Show session info and stats" },
 			{ name: "delete", description: "Delete current session and return to selector" },
-			{
-				name: "pin",
-				description: "Pin a stored OAuth account to the current provider for this session",
-				usage: "[account]",
-			},
 		],
 		allowArgs: true,
 		handle: async (command, runtime) => {
@@ -289,11 +180,8 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 				);
 				return commandConsumed();
 			}
-			if (verb === "pin") {
-				await handleSessionPinCommand(rest, runtime.session, runtime.output);
-				return commandConsumed();
-			}
-			return usage("Usage: /session [info|delete|pin [account]]", runtime);
+
+			return usage("Usage: /session [info|delete]", runtime);
 		},
 		handleTui: async (command, runtime) => {
 			const { verb, rest } = parseSubcommand(command.args);
@@ -302,20 +190,11 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 				await runtime.ctx.handleSessionDeleteCommand();
 				return;
 			}
-			if (verb === "pin") {
-				if (rest) {
-					await handleSessionPinCommand(rest, runtime.ctx.session, text => runtime.ctx.showStatus(text));
-					refreshStatusLine(runtime.ctx);
-				} else {
-					await runtime.ctx.showSessionPinSelector();
-				}
-				clearSubmittedText(runtime);
-				return;
-			}
+
 			if (!verb || (verb === "info" && !rest)) {
 				await runtime.ctx.handleSessionCommand();
 			} else {
-				runtime.ctx.showStatus("Usage: /session [info|delete|pin [account]]");
+				runtime.ctx.showStatus("Usage: /session [info|delete]");
 			}
 			clearSubmittedText(runtime);
 		},
@@ -396,53 +275,7 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			clearSubmittedText(runtime);
 		},
 	},
-	{
-		name: "usage",
-		icon: "gauge",
-		description: "Show provider usage and limits",
-		acpDescription: "Show token usage",
-		acpInputHint: "[show|reset [provider/credential-id|provider/active]]",
-		subcommands: [
-			{ name: "show", description: "Show provider usage and limits" },
-			{
-				name: "reset",
-				description: "Spend a saved provider rate-limit reset",
-				usage: "[provider/credential-id|provider/active]",
-			},
-		],
-		allowArgs: true,
-		handle: async (command, runtime) => {
-			const { verb, rest } = parseSubcommand(command.args);
-			if (!verb || (verb === "show" && !rest)) {
-				await runtime.output(await buildUsageReportText(runtime));
-				return commandConsumed();
-			}
-			if (verb === "reset") {
-				await handleUsageResetCommand(rest, runtime.session, runtime.output);
-				return commandConsumed();
-			}
-			return usage("Usage: /usage [show|reset [provider/credential-id|provider/active]]", runtime);
-		},
-		handleTui: async (command, runtime) => {
-			const { verb, rest } = parseSubcommand(command.args);
-			if (!verb || (verb === "show" && !rest)) {
-				await runtime.ctx.handleUsageCommand();
-				clearSubmittedText(runtime);
-				return;
-			}
-			if (verb === "reset") {
-				if (rest) {
-					await handleUsageResetCommand(rest, runtime.ctx.session, text => runtime.ctx.showStatus(text));
-				} else {
-					await runtime.ctx.showResetUsageSelector();
-				}
-				clearSubmittedText(runtime);
-				return;
-			}
-			runtime.ctx.showStatus("Usage: /usage [show|reset [provider/credential-id|provider/active]]");
-			clearSubmittedText(runtime);
-		},
-	},
+
 	{
 		name: "stats",
 		icon: "stats",
@@ -677,82 +510,7 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			clearSubmittedText(runtime);
 		},
 	},
-	{
-		name: "login",
-		icon: "signIn",
-		description: "Login with OAuth provider",
-		inlineHint: "[provider|redirect URL]",
-		allowArgs: true,
-		getTuiAutocompleteDescription: runtime =>
-			runtime.ctx.oauthManualInput.hasPending()
-				? `Login: waiting for ${runtime.ctx.oauthManualInput.pendingProviderId ?? "OAuth"} callback`
-				: "Login: choose provider",
-		handleTui: (command, runtime) => {
-			const manualInput = runtime.ctx.oauthManualInput;
-			const args = command.args.trim();
-			if (args.length > 0) {
-				const matchedProvider = getOAuthProviders().find(provider => provider.id === args);
-				if (matchedProvider) {
-					if (manualInput.hasPending()) {
-						const pendingProvider = manualInput.pendingProviderId;
-						const message = pendingProvider
-							? `OAuth login already in progress for ${pendingProvider}. Paste the redirect URL with /login <url>.`
-							: "OAuth login already in progress. Paste the redirect URL with /login <url>.";
-						runtime.ctx.showWarning(message);
-						clearSubmittedText(runtime);
-						return;
-					}
-					void runtime.ctx.showOAuthSelector("login", matchedProvider.id);
-					clearSubmittedText(runtime);
-					return;
-				}
-				const submitted = manualInput.submit(args);
-				if (submitted) {
-					runtime.ctx.showStatus("OAuth callback received; completing login…");
-				} else {
-					runtime.ctx.showWarning("No OAuth login is waiting for a manual callback.");
-				}
-				clearSubmittedText(runtime);
-				return;
-			}
 
-			if (manualInput.hasPending()) {
-				const provider = manualInput.pendingProviderId;
-				const message = provider
-					? `OAuth login already in progress for ${provider}. Paste the redirect URL with /login <url>.`
-					: "OAuth login already in progress. Paste the redirect URL with /login <url>.";
-				runtime.ctx.showWarning(message);
-				clearSubmittedText(runtime);
-				return;
-			}
-
-			void runtime.ctx.showOAuthSelector("login");
-			clearSubmittedText(runtime);
-		},
-	},
-	{
-		name: "logout",
-		icon: "signOut",
-		description: "Logout from OAuth provider",
-		inlineHint: "[provider]",
-		allowArgs: true,
-		handleTui: (command, runtime) => {
-			const providerId = command.args.trim();
-			if (providerId) {
-				const matchedProvider = getOAuthProviders().find(provider => provider.id === providerId);
-				if (!matchedProvider) {
-					runtime.ctx.showWarning(`Unknown OAuth provider: ${providerId}`);
-					clearSubmittedText(runtime);
-					return;
-				}
-				void runtime.ctx.showOAuthSelector("logout", matchedProvider.id);
-				clearSubmittedText(runtime);
-				return;
-			}
-			void runtime.ctx.showOAuthSelector("logout");
-			clearSubmittedText(runtime);
-		},
-	},
 	{
 		name: "mcp",
 		icon: "mcp",

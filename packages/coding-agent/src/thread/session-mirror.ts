@@ -20,7 +20,7 @@
  * travel back to main as references to the originals.
  */
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Effort, ImageContent, Model, ServiceTierByFamily, ToolResultMessage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { Effort, ImageContent, Model, ServiceTierByFamily } from "@oh-my-pi/pi-ai";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
@@ -158,7 +158,7 @@ export interface SessionViewState {
 	toolNames: string[];
 	/** The registered names that came from a built-in factory. */
 	builtInTools: string[];
-	pendingToolResults: ToolResultMessage[];
+
 	/** Tool calls emitted by the current run (kept live by a mid-turn transcript rebuild). */
 	runToolCallIds: string[];
 	systemPrompt: string[];
@@ -182,10 +182,10 @@ export interface SessionViewState {
 	availableEffortSelectors: ConfiguredThinkingLevel[];
 	serviceTierByFamily: ServiceTierByFamily;
 	fastModeActive: boolean;
-	anthropicSlowModeLabel: string | undefined;
+
 	goalMode: GoalModeState | undefined;
 	advisorCost: number;
-	advisorUsingSubscription: boolean;
+
 	todoPhases: TodoPhase[];
 	queuedMessages: SessionQueuedMessages;
 	restorableQueue: SessionRestorableQueue;
@@ -274,7 +274,7 @@ export type SessionHostProtocol = {
 		[model: Model, thinkingLevel?: ConfiguredThinkingLevel, options?: { ephemeral?: boolean }],
 		void
 	>;
-	fetchUsageReports: RpcMethod<[signal?: AbortSignal], UsageReport[] | null>;
+
 	runEphemeralTurn: RpcMethod<[args: EphemeralTurnOptions], EphemeralTurnResult>;
 	enableIdleMaintenance: RpcMethod<[options: IdleMaintenanceOptions], void>;
 	refreshIdleMaintenance: RpcMethod<[], void>;

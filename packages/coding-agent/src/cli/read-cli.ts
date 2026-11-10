@@ -78,7 +78,7 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 		// MCP servers start only when a read reaches an MCP resource — `mcp://`, a scheme with no
 		// registered handler, or a skill:// URL no loaded skill owns — in any list entry.
 		MCPManager.setDeferredInstance(async () => {
-			authStorage ??= await discoverAuthStorage(undefined, { settings });
+			authStorage ??= await discoverAuthStorage(undefined);
 			const result = await discoverAndLoadMCPTools(cwd, {
 				enableProjectConfig: cfgMcpEnableProjectConfig.get(settings),
 				filterExa: true,
@@ -92,8 +92,9 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 
 		// Explicit image questions use the configured primary model.
 		if (splitImageQuestionTarget(cmd.path).question) {
-			authStorage ??= await discoverAuthStorage(undefined, { settings });
+			authStorage ??= await discoverAuthStorage(undefined);
 			const modelRegistry = new ModelRegistry(authStorage);
+
 			await loadCliExtensionProviders(modelRegistry, settings, cwd);
 			session.modelRegistry = modelRegistry;
 			const model = resolvePrimaryModelSelection(settings, modelRegistry.getAvailable())?.model;

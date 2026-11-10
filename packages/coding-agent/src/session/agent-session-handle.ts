@@ -9,7 +9,7 @@
  * view additionally reads {@link AgentViewSession}.
  */
 import type { AgentMessage, AgentTool, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Effort, ImageContent, Model, ServiceTier, ToolResultMessage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { Effort, ImageContent, Model, ServiceTier } from "@oh-my-pi/pi-ai";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import type { JobWidgetEntry } from "@oh-my-pi/pi-tui/tools/job-widget";
@@ -210,8 +210,6 @@ export interface AgentViewLoopState extends AgentSessionLoopStateHandle {
 export interface AgentViewLoop extends AgentSessionLoopHandle {
 	/** Live loop state, including registered tools. */
 	readonly state: AgentViewLoopState;
-	/** Tool results recorded for calls not yet folded into the transcript. */
-	getPendingToolResults(): readonly ToolResultMessage[];
 }
 
 /** Agent state the status line reads on the session it shows. */
@@ -322,16 +320,12 @@ export interface AgentViewSession extends AgentSessionHandle {
 	effectiveServiceTier(model: Model): ServiceTier | undefined;
 	/** Whether fast mode is active. */
 	isFastModeActive(): boolean;
-	/** Anthropic usage-limit label, when one applies. */
-	getAnthropicSlowModeLabel(): string | undefined;
+
 	/** Goal-mode state. */
 	getGoalModeState(): GoalModeState | undefined;
 	/** Total advisor cost. */
 	getAdvisorCost(): number;
-	/** Whether advisors bill through a subscription. */
-	isAdvisorUsingSubscription(): boolean;
-	/** Provider usage reports for the active account. */
-	fetchUsageReports(signal?: AbortSignal): Promise<UsageReport[] | null>;
+
 	/** Snapshot of the session's async jobs. */
 	getAsyncJobSnapshot(options?: { recentLimit?: number }): AsyncJobSnapshot | null;
 	/** Tree of the session's async jobs. */
