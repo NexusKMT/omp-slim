@@ -34,10 +34,7 @@ const SUBMIT_JUDGMENT: Tool = {
 	strict: true,
 };
 
-export type ChatTextBackendOptions = Pick<
-	SimpleStreamOptions,
-	"apiKey" | "sessionId" | "metadata"
-> & {
+export type ChatTextBackendOptions = Pick<SimpleStreamOptions, "apiKey" | "sessionId" | "metadata"> & {
 	/** Receives every completed attempt (including transient failures) for usage accounting. */
 	onAttempt?: (message: AssistantMessage) => void;
 };

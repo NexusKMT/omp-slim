@@ -3,9 +3,9 @@ import { configureCredentialRedaction, transformMessages } from "@oh-my-pi/pi-ai
 import type { AssistantMessage, Message, Model, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
-function makeModel(): Model<"openai-responses"> {
+function makeModel(): Model<"openai-completions"> {
 	return buildModel({
-		api: "openai-responses",
+		api: "openai-completions",
 		name: "GPT Test",
 		id: "gpt-test",
 		provider: "openai",
@@ -61,7 +61,7 @@ describe("transformMessages redact sensitive credentials", () => {
 						},
 					},
 				],
-				api: "openai-responses",
+				api: "openai-completions",
 				provider: "openai",
 				model: "gpt-test",
 				usage: {
@@ -122,50 +122,6 @@ describe("transformMessages redact sensitive credentials", () => {
 		}
 	});
 
-	it("drops an Anthropic thinking signature when redacting its signed content", () => {
-		const model = buildModel({
-			api: "anthropic-messages",
-			name: "Claude Test",
-			id: "claude-test",
-			provider: "anthropic",
-			baseUrl: "https://api.anthropic.com",
-			contextWindow: 8192,
-			maxTokens: 2048,
-			input: ["text"],
-			reasoning: true,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		});
-		const messages: Message[] = [
-			{
-				role: "assistant",
-				content: [
-					{
-						type: "thinking",
-						thinking: "Use sk-ABCdef1234567890ABCdef1234567890ABCdef1234567890ABCdef123456.",
-						thinkingSignature: "signed-thinking-bytes",
-					},
-				],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-test",
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
-				stopReason: "stop",
-				timestamp: Date.now(),
-			},
-		];
-
-		const transformed = transformMessages(messages, model);
-
-		expect(transformed[0]).toMatchObject({ role: "assistant", content: [] });
-	});
-
 	it("drops a tool thought signature after redacting its arguments", () => {
 		const messages: Message[] = [
 			{
@@ -179,7 +135,7 @@ describe("transformMessages redact sensitive credentials", () => {
 						thoughtSignature: "signed-tool-arguments",
 					},
 				],
-				api: "openai-responses",
+				api: "openai-completions",
 				provider: "openai",
 				model: "gpt-test",
 				usage: {

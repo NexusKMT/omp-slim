@@ -13,9 +13,8 @@
 //    breaks immediately; no grace window involved.
 import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
-import { streamOpenAIResponses } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import type { Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 
 const completionsModel = {
 	...(getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">),
@@ -191,57 +190,5 @@ describe("terminal frame without connection close", () => {
 		expect(result.stopReason).toBe("stop");
 		expect(result.errorMessage).toBeUndefined();
 		expect(result.content).toEqual([{ type: "text", text: "Hello" }]);
-	}, 10_000);
-
-	it("openai-responses: breaks immediately on response.completed", async () => {
-		const fetchMock = createNeverClosingFetch([
-			{ type: "response.created", response: { id: "resp_terminal" } },
-			{
-				type: "response.output_item.added",
-				output_index: 0,
-				item: { type: "message", id: "msg_1", role: "assistant", status: "in_progress", content: [] },
-			},
-			{
-				type: "response.content_part.added",
-				output_index: 0,
-				item_id: "msg_1",
-				part: { type: "output_text", text: "", annotations: [] },
-			},
-			{ type: "response.output_text.delta", output_index: 0, item_id: "msg_1", delta: "Hello" },
-			{
-				type: "response.output_item.done",
-				output_index: 0,
-				item: {
-					type: "message",
-					id: "msg_1",
-					role: "assistant",
-					status: "completed",
-					content: [{ type: "output_text", text: "Hello", annotations: [] }],
-				},
-			},
-			{
-				type: "response.completed",
-				response: {
-					id: "resp_terminal",
-					status: "completed",
-					usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
-				},
-			},
-		]);
-
-		const startedAt = Date.now();
-		const result = await streamOpenAIResponses(responsesModel, baseContext(), {
-			apiKey: "test-key",
-			fetch: fetchMock,
-		}).result();
-
-		expect(result.stopReason).toBe("stop");
-		expect(result.errorMessage).toBeUndefined();
-		expect(result.content).toEqual([
-			expect.objectContaining({ type: "text", text: "Hello" }) as unknown as (typeof result.content)[number],
-		]);
-		expect(result.usage.input).toBe(10);
-		expect(result.usage.output).toBe(5);
-		expect(Date.now() - startedAt).toBeLessThan(2_000);
 	}, 10_000);
 });

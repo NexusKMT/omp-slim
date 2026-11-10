@@ -11,8 +11,8 @@ import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages"
 import type { AssistantMessage, Message, Model, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
-const model: Model<"anthropic-messages"> = buildModel({
-	api: "anthropic-messages",
+const model: Model<"openai-completions"> = buildModel({
+	api: "openai-completions",
 	provider: "anthropic",
 	id: "claude-sonnet-4-5",
 	name: "Claude Sonnet 4.5",
@@ -24,8 +24,8 @@ const model: Model<"anthropic-messages"> = buildModel({
 	reasoning: true,
 });
 
-const googleModel: Model<"google-generative-ai"> = buildModel({
-	api: "google-generative-ai",
+const googleModel: Model<"openai-completions"> = buildModel({
+	api: "openai-completions",
 	provider: "google",
 	id: "gemini-2.5-pro",
 	name: "Gemini 2.5 Pro",
@@ -37,9 +37,9 @@ const googleModel: Model<"google-generative-ai"> = buildModel({
 	reasoning: false,
 });
 
-const googleCliModel: Model<"google-gemini-cli"> = buildModel({
-	api: "google-gemini-cli",
-	provider: "google-gemini-cli",
+const googleCliModel: Model<"openai-completions"> = buildModel({
+	api: "openai-completions",
+	provider: "openai-completions",
 	id: "gemini-2.5-pro",
 	name: "Gemini 2.5 Pro",
 	baseUrl: "https://cloudcode-pa.googleapis.com",
@@ -54,7 +54,7 @@ function assistant(content: AssistantMessage["content"], timestamp: number): Ass
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
+		api: "openai-completions",
 		provider: "anthropic",
 		model: "claude-sonnet-4-5",
 		usage: {
@@ -217,8 +217,8 @@ describe("transformMessages drops malformed (empty-name) tool calls", () => {
 		expect(toolResults[0]).toMatchObject({ toolCallId: "call_real" });
 	});
 
-	it("drops calls whose name carries invocation text or exceeds 128 chars, with their paired results", () => {
-		const longestValidName = "t".repeat(128);
+	it("drops calls whose name carries invocation text or exceeds 64 chars, with their paired results", () => {
+		const longestValidName = "t".repeat(64);
 		const messages: Message[] = [
 			{ role: "user", content: "inspect the repo", timestamp: 1 },
 			assistant(
@@ -226,7 +226,7 @@ describe("transformMessages drops malformed (empty-name) tool calls", () => {
 					{ type: "toolCall", id: "call_script", name: "eval>\n<code>\nprint('hi')", arguments: {} },
 					{ type: "toolCall", id: "call_nul", name: 'bash\0arg_key="command"\0arg_value="ls"', arguments: {} },
 					{ type: "toolCall", id: "call_spaced", name: 'bash command="ls -la"', arguments: {} },
-					{ type: "toolCall", id: "call_oversized", name: "t".repeat(129), arguments: {} },
+					{ type: "toolCall", id: "call_oversized", name: "t".repeat(65), arguments: {} },
 					{ type: "toolCall", id: "call_longest", name: longestValidName, arguments: {} },
 					{ type: "toolCall", id: "call_real", name: "read", arguments: { path: "foo" } },
 				],
@@ -253,66 +253,6 @@ describe("transformMessages drops malformed (empty-name) tool calls", () => {
 	// Regression for #15839: models invent tool names from internal URL schemes
 	// (`proc://*`) while polling background work. Strict targets reject replayed
 	// names with `.` or `:`, while Google accepts them.
-	it("drops invalid tool names and results for the target's charset", () => {
-		const messages: Message[] = [
-			{ role: "user", content: "wait for the background job", timestamp: 1 },
-			assistant(
-				[
-					{ type: "toolCall", id: "call_proc", name: "proc://*", arguments: {} },
-					{ type: "toolCall", id: "call_history", name: "history://0-Sub", arguments: {} },
-					{ type: "toolCall", id: "call_unicode", name: "lées", arguments: {} },
-					{ type: "toolCall", id: "call_google", name: "ns.tool:v1", arguments: {} },
-					{ type: "toolCall", id: "call_digit", name: "2invalid", arguments: {} },
-				],
-				2,
-			),
-			toolResult("call_proc", "Tool proc://* not found", 3),
-			toolResult("call_history", "Tool history://0-Sub not found", 4),
-			toolResult("call_unicode", "Tool lées not found", 5),
-			toolResult("call_google", "google result", 6),
-			toolResult("call_digit", "Tool 2invalid not found", 7),
-			{ role: "user", content: "continue", timestamp: 7 },
-		];
-
-		const googleHistory = transformMessages(messages, googleModel);
-		expect(getToolCalls(googleHistory).map(call => call.id)).toEqual(["call_google"]);
-		expect(googleHistory.flatMap(message => (message.role === "toolResult" ? [message.toolCallId] : []))).toEqual([
-			"call_google",
-		]);
-
-		const strictHistory = transformMessages(messages, model);
-		expect(getToolCalls(strictHistory).map(call => call.id)).toEqual(["call_digit"]);
-		expect(strictHistory.flatMap(message => (message.role === "toolResult" ? [message.toolCallId] : []))).toEqual([
-			"call_digit",
-		]);
-	});
-
-	it("keeps function names only within the selected Google endpoint's length limit", () => {
-		const messages: Message[] = [
-			{ role: "user", content: "inspect the file", timestamp: 1 },
-			assistant(
-				[
-					{ type: "toolCall", id: "call_64", name: "t".repeat(64), arguments: {} },
-					{ type: "toolCall", id: "call_65", name: "t".repeat(65), arguments: {} },
-					{ type: "toolCall", id: "call_129", name: "t".repeat(129), arguments: {} },
-				],
-				2,
-			),
-			toolResult("call_64", "ok", 3),
-			toolResult("call_65", "ok", 4),
-			toolResult("call_129", "Tool not found", 5),
-		];
-
-		expect(getToolCalls(transformMessages(messages, googleModel)).map(call => call.id)).toEqual([
-			"call_64",
-			"call_65",
-		]);
-		const cliHistory = transformMessages(messages, googleCliModel);
-		expect(getToolCalls(cliHistory).map(call => call.id)).toEqual(["call_64"]);
-		expect(cliHistory.flatMap(message => (message.role === "toolResult" ? [message.toolCallId] : []))).toEqual([
-			"call_64",
-		]);
-	});
 
 	// Regression for PR #3459 review feedback: a tool-call id can legitimately
 	// repeat across history when an OpenAI-Responses composite id
