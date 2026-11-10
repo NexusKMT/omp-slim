@@ -14,7 +14,7 @@ import type {
 } from "@oh-my-pi/pi-coding-agent/dap/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { DebugTool } from "@oh-my-pi/pi-coding-agent/tools/debug";
-import { removeWithRetries, withTimeout } from "@oh-my-pi/pi-utils";
+import { ptree, readLines, removeWithRetries, withTimeout } from "@oh-my-pi/pi-utils";
 
 const TEST_ADAPTER: DapResolvedAdapter = {
 	name: "lldb-dap",
@@ -567,11 +567,20 @@ describe("DAP launch failure handling", () => {
 			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-tcp-leak-"));
 			try {
 				const adapterPath = path.join(cwd, "wedged-tcp-adapter.mjs");
-				const pidFilePath = path.join(cwd, "adapter.pid");
-				await fs.writeFile(
-					adapterPath,
-					`await Bun.write(${JSON.stringify(pidFilePath)}, String(process.pid));\nawait Bun.sleep(60_000);\n`,
-				);
+				await fs.writeFile(adapterPath, "console.log(process.pid);\nawait Bun.sleep(60_000);\n");
+				// Establish readiness before DAP starts its short connection deadline:
+				// a loaded runner can take longer than 300ms just to boot the child.
+				using proc = ptree.spawn([process.execPath, adapterPath], { cwd, stdin: "pipe", detached: true });
+				let adapterPid: number | undefined;
+				for await (const line of readLines(proc.stdout, AbortSignal.timeout(5_000))) {
+					adapterPid = Number(new TextDecoder().decode(line));
+					break;
+				}
+				expect(adapterPid).toBe(proc.pid);
+				expect(() => process.kill(proc.pid, 0)).not.toThrow();
+				// Keep the timeout and process termination real; only supply the
+				// already-running adapter at the synchronous spawn boundary.
+				const spawnSpy = spyOn(ptree, "spawn").mockReturnValue(proc);
 				const adapter: DapResolvedAdapter = {
 					...TEST_ADAPTER,
 					name: "wedged-tcp-adapter",
@@ -583,16 +592,10 @@ describe("DAP launch failure handling", () => {
 				await expect(DapClient.spawn({ adapter, cwd, socketReadyTimeoutMs: 300 })).rejects.toThrow(
 					/did not connect within/,
 				);
-				await Bun.sleep(500);
-				const adapterPid = Number(await Bun.file(pidFilePath).text());
-				expect(Number.isFinite(adapterPid)).toBe(true);
-				let alive = true;
-				try {
-					process.kill(adapterPid, 0);
-				} catch {
-					alive = false;
-				}
-				expect(alive).toBe(false);
+				expect(spawnSpy).toHaveBeenCalledTimes(1);
+				expect(spawnSpy.mock.calls[0]?.[1]?.detached).toBe(true);
+				await withTimeout(proc.exited, 5_000, "Timed-out adapter remained alive");
+				expect(() => process.kill(proc.pid, 0)).toThrow();
 			} finally {
 				await removeWithRetries(cwd);
 			}
