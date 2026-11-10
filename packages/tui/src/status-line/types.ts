@@ -1,5 +1,4 @@
-import type { Model } from "@oh-my-pi/pi-ai";
-import type { SessionState, TspSpan, TspTone } from "@oh-my-pi/pi-wire";
+import type { TspSpan, TspTone } from "@oh-my-pi/pi-wire";
 import type { NativeNode, NativeUiEvent } from "../native/node";
 import type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle } from "./schema";
 import type { ActiveRepoContext, PromptCacheStatus, StatusLineSession } from "./host";
@@ -14,25 +13,6 @@ export interface ContextUsage {
 	contextWindow: number;
 	/** Context usage as percentage of context window. */
 	percent: number;
-}
-
-/** Debounced footer snapshot a collab host broadcasts to guests. */
-export type CollabSessionState = SessionState & {
-	/**
-	 * Host model (full catalog object). Guests apply it to their replica
-	 * agent state so model display and context-window math are native.
-	 */
-	model?: Model;
-	/** Host status-line context numbers (guest system prompt/tools differ, so local estimates drift). */
-	contextUsage?: ContextUsage;
-};
-
-/** Collab session indicator + (guest-only) host-state override for segments. */
-export interface CollabStatus {
-	role: "host" | "guest";
-	participantCount: number;
-	/** Guest only: host footer snapshot that overrides locally computed values. */
-	stateOverride?: CollabSessionState | null;
 }
 
 export interface StatusLineSegmentOptions {
@@ -122,10 +102,6 @@ export interface SegmentContext {
 		/** `tui.vimModeDisplay`: how the mode renders in the status line. */
 		display: "text" | "icon" | "none";
 	} | null;
-	collab: CollabStatus | null;
-	stream: { viewers: number } | null;
-	/** A `/record` capture of this screen is running. */
-	recording: boolean;
 	// Cached values for performance (computed once per render)
 	usageStats: {
 		input: number;

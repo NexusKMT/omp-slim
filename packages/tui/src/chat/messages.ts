@@ -1,6 +1,5 @@
 import type { AssistantMessage, ImageContent, MessageAttribution, TextContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { COLLAB_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-wire";
 import type { OutputMeta } from "../tools/output-meta";
 import type { BranchSummaryMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
 
@@ -15,7 +14,6 @@ declare module "@oh-my-pi/pi-agent-core" {
 		fileMention: FileMentionMessage;
 	}
 }
-export { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "@oh-my-pi/pi-wire";
 export type { BranchSummaryMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
 
 export const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
@@ -276,14 +274,11 @@ export function isUserInvokedSkillPrompt(message: CustomMessage): boolean {
 
 /**
  * True for a custom message that initiates a user-attributed turn: a directly
- * invoked `/skill:` prompt or a writable-collab peer's prompt. Agent redirects,
+ * invoked `/skill:` prompt. Agent redirects,
  * reminders, and auto-continues are not turn starts.
  */
 export function isUserTurnInitiator(message: CustomMessage): boolean {
-	return (
-		isUserInvokedSkillPrompt(message) ||
-		(message.customType === COLLAB_PROMPT_MESSAGE_TYPE && message.attribution === "user")
-	);
+	return isUserInvokedSkillPrompt(message);
 }
 
 /** Advisor note severities, weakest first; ranks severity thresholds such as `advisor.continueSeverity`. */

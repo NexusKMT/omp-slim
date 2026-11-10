@@ -1071,40 +1071,6 @@ const sessionNameSegment: StatusLineSegment = {
 	},
 };
 
-const collabSegment: StatusLineSegment = {
-	id: "collab",
-	render(ctx) {
-		if (!ctx.collab) return { content: "", visible: false };
-		const participants = `${ctx.collab.participantCount}`;
-		const label = ctx.collab.role === "host" ? `⇄ collab:${participants}` : `⇄ collab guest:${participants}`;
-		return { content: accentFg(ctx, "accent", label), visible: true };
-	},
-	describe(ctx) {
-		if (!ctx.collab) return null;
-		const participants = `${ctx.collab.participantCount}`;
-		const label = ctx.collab.role === "host" ? `collab:${participants}` : `collab guest:${participants}`;
-		return segView([span(label, accentToken(ctx, "accent"))], "collab");
-	},
-};
-
-const streamSegment: StatusLineSegment = {
-	id: "stream",
-	render(ctx) {
-		const badges: string[] = [];
-		if (ctx.stream) badges.push(`● LIVE ${ctx.stream.viewers}`);
-		if (ctx.recording) badges.push("● REC");
-		if (badges.length === 0) return { content: "", visible: false };
-		return { content: theme.fg("thinkingHigh", badges.join(" ")), visible: true };
-	},
-	describe(ctx) {
-		const badges: string[] = [];
-		if (ctx.stream) badges.push(`LIVE ${ctx.stream.viewers}`);
-		if (ctx.recording) badges.push("REC");
-		if (badges.length === 0) return null;
-		return segView([span(badges.join(" "), "thinkingHigh")], "live", "error");
-	},
-};
-
 /**
  * Vim modal state, in the shape Vim itself uses: the mode, the half-typed command echoed beside it
  * (`showcmd`), and the Visual selection size. Hidden entirely when `tui.vimMode` is off, so it
@@ -1347,8 +1313,6 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	cache: cacheSegment,
 	session_name: sessionNameSegment,
 	usage: usageSegment,
-	collab: collabSegment,
-	stream: streamSegment,
 	vim: vimSegment,
 };
 
