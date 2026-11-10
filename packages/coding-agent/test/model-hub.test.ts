@@ -6,7 +6,6 @@ import type { DescribeContext } from "@oh-my-pi/pi-tui/native/node";
 import type { TspPickerProps } from "@oh-my-pi/pi-wire";
 import {
 	ModelHubComponent,
-	resetProviderAutoRefreshGuard,
 	type ModelHubRegistry,
 	type ModelHubSource,
 	type ModelHubCallbacks,
@@ -42,12 +41,7 @@ function registry(models: Model[] = [a, b]): ModelHubRegistry {
 		getAvailable: () => models,
 		getAll: () => models,
 		getError: () => undefined,
-		authStorage: { keys: { source: () => ({ kind: "env", concrete: true }) } },
-		getDiscoverableProviders: () => [],
-		getProviderDiscoveryState: () => undefined,
-		find: (provider, id) => models.find(m => m.provider === provider && m.id === id),
 		refresh: async () => {},
-		refreshProvider: async () => {},
 	};
 }
 const hubs: ModelHubComponent[] = [];
@@ -84,7 +78,6 @@ beforeAll(async () => {
 });
 afterEach(() => {
 	for (const hub of hubs.splice(0)) hub.dispose();
-	resetProviderAutoRefreshGuard();
 });
 
 test("keeps provider search scoped until it loses every match, then searches the whole chat catalogue", () => {
@@ -138,56 +131,46 @@ test("a rejected asynchronous selection keeps the current model and cannot be du
 	act(hub, "close");
 	expect(props(hub).current).toEqual(["one/first"]);
 });
-test("an endpoint without credentials explains API key setup while configured discovery stays visible", async () => {
+test("an endpoint without credentials explains API key setup and only configured endpoints are listed", async () => {
 	const locked = model("locked", "remote");
 	const r = registry([a]);
 	r.getAll = () => [a, locked];
-	r.authStorage.keys.source = provider => (provider === "one" ? { kind: "env", concrete: true } : undefined);
-	r.getDiscoverableProviders = () => ["implicit", "custom"];
-	r.getProviderDiscoveryState = provider =>
-		provider === "implicit"
-			? { optional: true, status: "unavailable" }
-			: provider === "custom"
-				? { optional: false, status: "empty" }
-				: undefined;
 	const hub = open({ registry: r, scoped: [] });
 	await settle();
-	expect(props(hub).scopes?.map(scope => scope.id)).not.toContain("provider:implicit");
-	expect(props(hub).scopes?.map(scope => scope.id)).toContain("provider:custom");
+	expect(props(hub).scopes?.map(scope => scope.id)).toEqual(["recent", "all", "provider:locked", "provider:one"]);
 	act(hub, "scope", "provider:locked");
 	expect(props(hub).empty).toContain("API key in models.yml");
 	expect(props(hub).actions?.find(action => action.id === "use")?.disabled).toBe(true);
-	act(hub, "scope", "provider:custom");
-	expect(props(hub).empty).toContain("returned 0 models");
 });
-test("F5 queues credential refresh behind an in-flight catalogue refresh and keeps it after leaving the provider", async () => {
+test("F5 reloads local configuration once while pending, without refreshing on mount or scope changes", async () => {
 	const pending = Promise.withResolvers<void>();
-	const started = Promise.withResolvers<void>();
-	const calls: (boolean | undefined)[] = [];
+	let calls = 0;
 	const r = registry();
-	r.refreshProvider = async (_p, _s, options) => {
-		calls.push(options?.refreshCommandCredentials);
-		if (calls.length === 1) {
-			started.resolve();
-			await pending.promise;
-		}
+	r.refresh = async () => {
+		calls++;
+		await pending.promise;
 	};
 	const hub = open({ registry: r, scoped: [] });
-	await settle();
 	act(hub, "scope", "provider:one");
-	await started.promise;
+	await settle();
+	expect(calls).toBe(0);
+	act(hub, "refresh");
 	act(hub, "refresh");
 	act(hub, "scope", "all");
+	expect(calls).toBe(1);
 	pending.resolve();
 	await settle();
-	expect(calls).toEqual([undefined, true]);
+	act(hub, "refresh");
+	await settle();
+	expect(calls).toBe(2);
 });
 test("the refreshed session scope replaces stale choices in the open hub", async () => {
 	const refreshed = Promise.withResolvers<void>();
 	const r = registry();
 	r.refresh = () => refreshed.promise;
-	const hub = open({ registry: r, scoped: [], callbacks: { onCatalogRefreshed: () => [{ model: b }] } });
+	const hub = open({ registry: r, scoped: [], callbacks: { onModelsReloaded: () => [{ model: b }] } });
 	expect(props(hub).items?.map(item => item.id)).toContain("one/first");
+	act(hub, "refresh");
 	refreshed.resolve();
 	await settle();
 	expect(props(hub).order?.filter(item => typeof item === "string")).toEqual(["two/second"]);

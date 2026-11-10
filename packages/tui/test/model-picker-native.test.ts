@@ -62,12 +62,9 @@ function registry(models: Model[]): ModelHubRegistry {
 		getAvailable: () => models,
 		getAll: () => models,
 		authStorage: { keys: { source: () => "env" } },
-		getDiscoverableProviders: () => [],
-		getProviderDiscoveryState: () => undefined,
 		find: (provider: string, id: string) =>
 			models.find(candidate => candidate.provider === provider && candidate.id === id),
 		refresh: async () => {},
-		refreshProvider: async () => {},
 	} as unknown as ModelHubRegistry;
 }
 
