@@ -26,7 +26,6 @@ interface AgentFrontmatter {
 	model?: string | string[];
 	thinkingLevel?: string;
 	blocking?: boolean;
-	prewalk?: boolean | string;
 	advisor?: boolean | string;
 }
 

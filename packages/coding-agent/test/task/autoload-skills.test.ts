@@ -1,3 +1,4 @@
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { afterEach, describe, expect, it, type Mock, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -88,6 +89,7 @@ describe("autoloadSkills in executor", () => {
 	};
 
 	const baseOptions = {
+		parentModel: createMockModel({ id: "executor-parent" }),
 		cwd: "/tmp",
 		agent: baseAgent,
 		task: "do work",
@@ -282,6 +284,7 @@ describe("autoloadSkills through task spawn", () => {
 				cwd: root,
 				hasUI: false,
 				settings: Settings.isolated({ "task.isolation.enabled": false }),
+				getActiveModel: () => createMockModel(),
 				getSessionFile: () => null,
 				getSessionSpawns: () => "*",
 				getSessionAgents: () => [],

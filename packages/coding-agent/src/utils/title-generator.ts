@@ -181,7 +181,7 @@ export async function generateSessionTitle(
 	credentialSourceSessionId?: string,
 ): Promise<string | null> {
 	// Defer titling for greetings / acknowledgements / empty input. The default
-	// tiny title model can't reliably decline trivial input, so this happens
+	// Avoid sending trivial input to the model; this happens
 	// deterministically before any model is invoked; the caller retries on the
 	// next user message while the session stays unnamed.
 	if (isLowSignalTitleInput(firstMessage)) {

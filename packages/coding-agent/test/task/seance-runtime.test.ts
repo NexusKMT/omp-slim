@@ -103,6 +103,7 @@ function hostilePreparedExtension(onLoad: () => void): PreparedExtension {
 
 function revivalParent(cwd: string, preparedExtensions: PreparedExtension[]): AgentSession {
 	return {
+		model: getBundledModel("anthropic", "claude-sonnet-4-5"),
 		sessionManager: {
 			getCwd: () => cwd,
 			getArtifactManager: () => undefined,
@@ -255,7 +256,7 @@ describe("seance startup contracts", () => {
 				id,
 				settings: Settings.isolated(),
 				modelRegistry,
-				modelOverride: ["anthropic/claude-sonnet-4-5"],
+				parentModel: getBundledModel("anthropic", "claude-sonnet-4-5"),
 				preparedSession: preparedSourceSession(sourceFile, "source-session"),
 				artifactsDir,
 				preloadedPreparedExtensions: [extension],

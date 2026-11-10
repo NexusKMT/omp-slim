@@ -320,9 +320,7 @@ export interface AgentDefinition {
 	autoloadSkills?: string[];
 	/** When `false`, the agent's `read` tool returns verbatim file content instead of structural summaries. */
 	readSummarize?: boolean;
-	/** Prewalk hand-off for the spawned session: `true` = switch to the default prewalk target at the first edit/write, string = custom target model pattern. */
-	prewalk?: boolean | string;
-	/** Advisor for spawned sessions of this agent: `true` = advise with the default advisor-role model, string = advise with that model pattern (optional `:level` suffix). Absent/`false` = no advisor. */
+	/** Enable the advisor on the current model. Legacy model strings preserve enablement only. */
 	advisor?: boolean | string;
 	source: AgentSource;
 	filePath?: string;

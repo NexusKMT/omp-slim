@@ -181,15 +181,9 @@ describe("createTools", () => {
 		expect(properties).toHaveProperty("key");
 		expect(properties).not.toHaveProperty("type");
 	});
-	it("excludes todo from yield sessions unless prewalk is armed", async () => {
-		// Subagents (requireYieldTool) never get todo — except when the spawn is
-		// prewalk-armed: the prewalk plan nudge + todo gate need the child to
-		// commit its own todo list before the model hand-off.
+	it("excludes todo from yield sessions", async () => {
 		const subagent = await createTools(createTestSession({ requireYieldTool: true }));
 		expect(subagent.map(t => t.name)).not.toContain("todo");
-
-		const prewalkSubagent = await createTools(createTestSession({ requireYieldTool: true, prewalkArmed: true }));
-		expect(prewalkSubagent.map(t => t.name)).toContain("todo");
 	});
 
 	it("excludes ask tool when hasUI is false", async () => {

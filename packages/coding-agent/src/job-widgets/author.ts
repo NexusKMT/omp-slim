@@ -1,6 +1,6 @@
 /**
  * The cheap-model side of job widgets: one toolless request to the `widget`
- * role (aliasing `smol`) with a forced `respond` call carrying the spec
+ * current session model with a forced `respond` call carrying the spec
  * schema, fed the job's brief and redacted output samples.
  */
 import { type AgentTelemetryConfig, instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";

@@ -13,7 +13,7 @@ function getModelOrThrow(id: string): Model<Api> {
 
 function createSettings(model: Model<Api>) {
 	return Settings.isolated({
-		modelRoles: { tiny: `${model.provider}/${model.id}` },
+		model: `${model.provider}/${model.id}`,
 	});
 }
 
@@ -53,6 +53,7 @@ describe("task label generation", () => {
 			createSettings(model),
 			undefined,
 			controller.signal,
+			model,
 		);
 		await started.promise;
 		controller.abort();
@@ -73,6 +74,8 @@ describe("task label generation", () => {
 			createRegistry(model),
 			createSettings(model),
 			"AuthLoader",
+			undefined,
+			model,
 		);
 		expect(echoed).toBeNull();
 
@@ -85,6 +88,8 @@ describe("task label generation", () => {
 			createRegistry(model),
 			createSettings(model),
 			"AuthLoader",
+			undefined,
+			model,
 		);
 		expect(labeled).toBe("Sleep then reply done");
 	});

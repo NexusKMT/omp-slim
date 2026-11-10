@@ -311,9 +311,7 @@ export interface ToolSession {
 	outputSchemaMode?: StructuredSubagentSchemaMode;
 	/** Whether to include the yield tool by default */
 	requireYieldTool?: boolean;
-	/** Session starts with a prewalk hand-off armed. Keeps `todo` in yield-gated
-	 *  (subagent) registries: the prewalk plan nudge + todo gate need it. */
-	prewalkArmed?: boolean;
+
 	/**
 	 * Constrain the active set to the caller's explicit built-in names (plus a
 	 * required yield tool). Suppresses automatic tool-set expansion.
@@ -727,8 +725,7 @@ export async function resolveBuiltinToolPlan(session: ToolSession, toolNames?: s
 		if (name === "eval") return allowEval;
 		if (name === "debug") return cfgDebugEnabled.get(session.settings);
 		if (name === "ida") return cfgIdaAvailable.get(session.settings);
-		if (name === "todo")
-			return (!includeYield || session.prewalkArmed === true) && cfgTodoEnabled.get(session.settings);
+		if (name === "todo") return !includeYield && cfgTodoEnabled.get(session.settings);
 		if (name === "glob") return cfgGlobEnabled.get(session.settings);
 		if (name === "grep") return cfgGrepEnabled.get(session.settings);
 		if (name === "find") return isFindEnabled(session);

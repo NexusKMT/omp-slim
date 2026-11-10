@@ -1,3 +1,4 @@
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -114,6 +115,7 @@ function createSession(
 			"isolation.backend": "rcopy",
 			...(options.taskEnableLsp !== undefined ? { "task.enableLsp": options.taskEnableLsp } : {}),
 		}),
+		getActiveModel: () => createMockModel(),
 		getSessionFile: () => options.sessionFile ?? null,
 		getSessionSpawns: () => "*",
 		modelRegistry,

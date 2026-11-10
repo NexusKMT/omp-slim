@@ -1,5 +1,5 @@
 /**
- * Tiny-model UI labels for spawned subagents.
+ * Current-model UI labels for spawned subagents.
  */
 import type { Model } from "@oh-my-pi/pi-ai";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
@@ -21,7 +21,7 @@ export function labelEchoesHandle(handle: string | undefined, label: string): bo
 	return /^\d+$/.test(suffix) && prefix.localeCompare(label, undefined, { sensitivity: "accent" }) === 0;
 }
 
-/** Compresses a delegated assignment into a one-sentence UI label via the tiny title model — fired by the executor spawn path because the task wire schema no longer carries a `description`; null on empty input or failure. */
+/** Compresses a delegated assignment into a one-sentence UI label via the current session model — fired by the executor spawn path because the task wire schema no longer carries a `description`; null on empty input or failure. */
 export async function generateTaskLabel(
 	assignment: string,
 	registry: ModelRegistry,

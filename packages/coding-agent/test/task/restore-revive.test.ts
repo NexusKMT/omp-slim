@@ -173,6 +173,7 @@ async function restoreInterruptedChild(options: { transcript?: "handoff" | "fall
 		defaultThinkingLevel: Effort.Medium,
 	});
 	const session = {
+		model: mocks[0],
 		sessionManager: {
 			getSessionFile: () => mainFile,
 			getCwd: () => cwd,
@@ -210,16 +211,16 @@ it("revives a subagent a crash cut off mid tool call, runs the call again, and d
 	expect(readResults[SPAWN_MODEL]![0]).toContain("the answer is 42");
 }, 20_000);
 
-it("revives a subagent on the model and effort a prewalk handoff switched it to, not its spawn model", async () => {
+it("revives old handoff history on the current parent model while preserving its saved effort", async () => {
 	const { delivered, readResults, readEfforts } = await restoreInterruptedChild({ transcript: "handoff" });
 
-	expect(delivered).toContain(`restored: 42 (${HANDOFF_MODEL})`);
-	expect(readResults[HANDOFF_MODEL]).toHaveLength(1);
-	expect(readResults[SPAWN_MODEL]).toEqual([]);
-	expect(readEfforts[HANDOFF_MODEL]).toEqual([Effort.High]);
+	expect(delivered).toContain(`restored: 42 (${SPAWN_MODEL})`);
+	expect(readResults[SPAWN_MODEL]).toHaveLength(1);
+	expect(readResults[HANDOFF_MODEL]).toEqual([]);
+	expect(readEfforts[SPAWN_MODEL]).toEqual([Effort.High]);
 }, 20_000);
 
-it("revives a subagent whose handoff target failed over on the spawn model, not the failed target", async () => {
+it("revives old fallback history on the current parent model without contacting the historical target", async () => {
 	const { delivered, readResults } = await restoreInterruptedChild({ transcript: "fallback" });
 
 	expect(delivered).toContain(`restored: 42 (${SPAWN_MODEL})`);

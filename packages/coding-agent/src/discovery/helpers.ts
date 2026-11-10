@@ -304,9 +304,7 @@ export interface ParsedAgentFields {
 	blocking?: boolean;
 	/** `true` = keep `yield` and the output schema when `task.structured` is off. */
 	structured?: boolean;
-	/** `true` = prewalk into the default target; string = prewalk into that model pattern. */
-	prewalk?: boolean | string;
-	/** `true` = advise with the default advisor-role model; string = advise with that model pattern. */
+	/** Enable the advisor on the current model; legacy model strings enable it without selecting a model. */
 	advisor?: boolean | string;
 }
 
@@ -377,13 +375,7 @@ export function parseAgentFields(frontmatter: Record<string, unknown>): ParsedAg
 	const blocking = parseBoolean(frontmatter.blocking);
 	const structured = parseBoolean(frontmatter.structured);
 	const readSummarize = parseBoolean(frontmatter.readSummarize);
-	// prewalk: true → hand off to the default prewalk target; "<pattern>" → custom target.
-	let prewalk: boolean | string | undefined = parseBoolean(frontmatter.prewalk);
-	if (prewalk === undefined && typeof frontmatter.prewalk === "string") {
-		const trimmed = frontmatter.prewalk.trim();
-		if (trimmed) prewalk = trimmed;
-	}
-	// advisor: true → advise with the default advisor-role model; "<pattern>" → custom advisor model.
+	// Legacy advisor model strings preserve only enablement.
 	let advisor: boolean | string | undefined = parseBoolean(frontmatter.advisor);
 	if (advisor === undefined && typeof frontmatter.advisor === "string") {
 		const trimmed = frontmatter.advisor.trim();
@@ -404,7 +396,6 @@ export function parseAgentFields(frontmatter: Record<string, unknown>): ParsedAg
 		structured,
 		autoloadSkills,
 		readSummarize,
-		prewalk,
 		advisor,
 	};
 }

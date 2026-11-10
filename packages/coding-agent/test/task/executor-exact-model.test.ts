@@ -9,6 +9,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import * as sdk from "@oh-my-pi/pi-coding-agent/sdk";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { parseAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
 import * as discovery from "@oh-my-pi/pi-coding-agent/task/discovery";
 import {
 	runStructuredSubagent,
@@ -41,15 +42,18 @@ async function fixture() {
 	vi.spyOn(modelRegistry, "getAll").mockReturnValue([other]);
 	vi.spyOn(discovery, "discoverAgents").mockResolvedValue({
 		agents: [
-			{
-				name: "worker",
-				description: "Read-only worker",
-				systemPrompt: "Keep the worker persona.",
-				source: "bundled",
-				tools: ["read"],
-				model: [`mock/${other.id}`],
-				prewalk: `mock/${other.id}`,
-			},
+			parseAgent(
+				"legacy-worker.md",
+				`---
+name: worker
+description: Read-only worker
+tools: [read]
+model: mock/${other.id}
+prewalk: mock/${other.id}
+---
+Keep the worker persona.`,
+				"bundled",
+			),
 		],
 		projectAgentsDir: null,
 	});
