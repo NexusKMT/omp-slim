@@ -90,7 +90,6 @@ export interface SecurityPreflightInput {
 	knowledgeBasePaths?: string[];
 	outputRoot?: string;
 	archiveExisting?: boolean;
-	credentialId?: number;
 	model?: Model;
 	thinkingLevel?: string;
 	signal?: AbortSignal;

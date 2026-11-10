@@ -88,7 +88,7 @@ async function createOmpInference(
 	config: ConventionalGenerationConfig,
 ): Promise<OmpCommitInference> {
 	options.signal?.throwIfAborted();
-	const authStorage = await discoverAuthStorage(undefined, { settings });
+	const authStorage = await discoverAuthStorage(undefined);
 	try {
 		const registry = new ModelRegistry(authStorage);
 		await registry.refresh();

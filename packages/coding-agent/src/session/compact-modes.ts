@@ -13,7 +13,7 @@
 import type { CompactionMethod } from "./compaction-methods";
 
 /** Subcommand selecting a one-off compaction mode for manual `/compact`. */
-export type CompactMode = "soft" | "remote" | "snapcompact";
+export type CompactMode = "soft" | "snapcompact";
 
 /**
  * Per-invocation ordered methods merged over the configured
@@ -40,13 +40,8 @@ export interface CompactModeDef {
 export const COMPACT_MODES: readonly CompactModeDef[] = [
 	{
 		name: "soft",
-		description: "Summarize locally with the active model (skip server compaction)",
+		description: "Summarize with the active Chat model",
 		overrides: { methodOrder: ["soft"] },
-	},
-	{
-		name: "remote",
-		description: "Summarize via OpenAI-compatible server compaction, then fall back to a local summary",
-		overrides: { methodOrder: ["remote", "soft"] },
 	},
 	{
 		name: "snapcompact",

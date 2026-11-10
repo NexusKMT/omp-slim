@@ -32,8 +32,7 @@ import type {
 } from "./types";
 
 function formatFreshSessionResult(result: FreshSessionResult): string {
-	const stateLabel = result.closedProviderSessions === 1 ? "provider state" : "provider states";
-	return `Fresh provider session started (${result.closedProviderSessions} ${stateLabel} pruned).`;
+	return "Fresh session started.";
 }
 
 export const shutdownHandlerTui = (

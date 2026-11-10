@@ -1,11 +1,4 @@
-import type {
-	Agent,
-	AgentMessage,
-	AgentTool,
-	AgentToolContext,
-	StreamFn,
-	ThinkingLevel,
-} from "@oh-my-pi/pi-agent-core";
+import type { Agent, AgentMessage, AgentTool, StreamFn, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type {
 	AssistantMessage,
 	Context,
@@ -14,7 +7,6 @@ import type {
 	Message,
 	MessageAttribution,
 	Model,
-	OAuthAccountSummary,
 	ServiceTierByFamily,
 	SimpleStreamOptions,
 	ToolChoice,
@@ -25,18 +17,15 @@ import type { AsyncJob, AsyncJobDeliveryState, AsyncJobManager, AsyncJobManagerA
 import type { EffectiveExtensionRoots } from "../capability/types";
 import type { AgentDefinition } from "../task/types";
 import type { AgentRegistryApi } from "../registry/agent-registry";
-import type { SessionAccountPoolScope } from "../config/account-pools";
 import type { ModelRegistry } from "../config/model-registry";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";
 import type { SkillsSettings } from "../extensibility/settings";
-import type { CursorMcpResourceAdapter } from "../cursor";
 import type { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
 import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { TtsrManager } from "../export/ttsr";
 import type { LoadedCustomCommand } from "../extensibility/custom-commands";
 import type { ExtensionRunner, PreparedExtension } from "../extensibility/extensions";
-import type { CacheWarmer } from "./cache-warmer";
 import type { ContextUsage } from "../extensibility/extensions/types";
 import type { SkillDescriptionCatalog } from "../extensibility/skill-descriptions";
 import type { Skill, SkillWarning } from "../extensibility/skills";
@@ -46,7 +35,6 @@ import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { JobWidgetView } from "@oh-my-pi/pi-tui/tools/job-widget";
 import type { ToolSession } from "../tools";
 import type { XdevState } from "../tools/xdev";
-import type { CodexAutoRedeemCoordinator } from "./codex-auto-reset";
 import type { SettingsGatedToolDelta, SystemPromptRebuilder } from "./session-tools";
 import type { CostGateApi } from "./cost-gate";
 import type { SessionManager } from "./session-manager";
@@ -120,33 +108,6 @@ export interface AsyncJobTree {
 
 export type { ShakeMode, ShakeResult } from "./shake-types";
 
-/** Details shown when confirming a usage-reserve-triggered model fallback. */
-export interface UsageFallbackConfirmation {
-	from: string;
-	to: string;
-	remainingPercent: number | undefined;
-}
-
-/**
- * Confirms whether a reserve-triggered model fallback may proceed.
- *
- * Interactive callers use the confirmation details to present the pending
- * route change; aborting `signal` cancels that pending confirmation.
- */
-export type UsageFallbackConfirmer = (confirmation: UsageFallbackConfirmation, signal: AbortSignal) => Promise<boolean>;
-
-/** Identifies a retry fallback chain already entered during startup model resolution. */
-export interface InitialRetryFallbackState {
-	/** Role whose configured primary was unavailable. */
-	role: string;
-	/** Configured primary selector retained for restoration when it becomes available. */
-	originalSelector: string;
-	/** Thinking selector configured for the unavailable primary. */
-	originalThinkingLevel: ConfiguredThinkingLevel | undefined;
-	/** Prevent cooldown restoration when startup selected this fallback from live usage health. */
-	pinned?: boolean;
-}
-
 /** Dependencies and initial state used to construct an AgentSession. */
 export interface AgentSessionConfig {
 	agent: Agent;
@@ -190,16 +151,7 @@ export interface AgentSessionConfig {
 	thinkingLevel?: ConfiguredThinkingLevel;
 	/** Hard ceiling on the session's thinking effort (e.g. a task spawn's `task.maxEffort`-capped hint); every later change, including retry-fallback recovery, is re-clamped to it. */
 	thinkingLevelCeiling?: Effort;
-	/**
-	 * Disable retry fallback, context promotion and usage-aware fallback: the turn retries on, or fails
-	 * with, its own model instead. Startup model selection, and the return to the primary after a
-	 * startup fallback, are not affected.
-	 */
-	disableModelFallback?: boolean;
-	/** Retry chain ownership when startup selected one of its fallback entries. */
-	initialRetryFallback?: InitialRetryFallbackState;
-	/** Skip retry.fallbackChains validation at construction; the host calls `validateRetryFallbackChains()` later. */
-	deferRetryFallbackValidation?: boolean;
+
 	/**
 	 * Created to run an assignment its owner prompts once setup finishes (task executor spawns).
 	 * Until the first prompt, IRC messages never wake a turn the assignment would miss; see
@@ -216,12 +168,7 @@ export interface AgentSessionConfig {
 	slashCommands?: FileSlashCommand[];
 	/** Extension runner created with wrapped tools. */
 	extensionRunner?: ExtensionRunner;
-	/**
-	 * Prompt-cache warmer owned by the main agent loop. The session arms it per
-	 * main-loop request, settles it when the agent run finishes, and invalidates
-	 * it when the context changes; side-channel requests never arm it.
-	 */
-	cacheWarmer?: CacheWarmer;
+
 	/** Returns the current enabled eval prelude definitions. */
 	getEvalPreludes?: () => readonly EvalPreludeDefinition[];
 	/** Tool bridge context used by user-initiated Python cells to project enabled eval preludes. */
@@ -256,8 +203,7 @@ export interface AgentSessionConfig {
 	 * passes its `interactivePrompts` option. Default: true.
 	 */
 	interactivePrompts?: boolean;
-	/** Whether the startup model may be replaced by refreshed same-selector registry metadata. */
-	rebindModelAfterDiscovery?: boolean;
+
 	/** Tool registry for LSP and settings. */
 	toolRegistry?: Map<string, AgentTool>;
 	/** Creates tools registered only while vibe mode is active. */
@@ -294,8 +240,7 @@ export interface AgentSessionConfig {
 	sideStreamFn?: StreamFn;
 	/** Stream wrapper for advisor requests. */
 	advisorStreamFn?: StreamFn;
-	/** Shared saved-reset coordinator; defaults process-wide so concurrent Codex/Claude sessions cannot double-spend. Inject a fresh one in tests. */
-	codexResetCoordinator?: CodexAutoRedeemCoordinator;
+
 	/** Provider payload hook used by the active session request path. */
 	onPayload?: SimpleStreamOptions["onPayload"];
 	/** Provider response hook used by the active session request path. */
@@ -336,41 +281,12 @@ export interface AgentSessionConfig {
 	agentRegistry?: AgentRegistryApi;
 	/** Provider-facing session ID override. */
 	providerSessionId?: string;
-	/** OAuth account pools enforced on the session's key lookups; the session lifts them on dispose. */
-	accountPoolScope?: SessionAccountPoolScope;
+
 	/** Whether the provider prompt-cache key was explicit or fork-inherited. */
 	providerPromptCacheKeySource?: "explicit" | "fork";
 	/** Full advisor toolset built against an advisor-scoped tool session. */
 	advisorTools?: AgentTool[];
-	/**
-	 * Build a `grep` honoring a Cursor `pi_grep` frame's own context width and
-	 * match cap, against the advisor-scoped tool session. Without it an advisor
-	 * running on Cursor silently drops both fields.
-	 */
-	advisorCreateGrepTool?(options: { context?: number; totalMatchLimit?: number }): AgentTool | undefined;
-	/**
-	 * Build the `replace`-mode `edit` a Cursor `pi_edit` frame needs, against the
-	 * advisor-scoped tool session. The advisor's ordinary instance follows the
-	 * configured `edit.mode` and rejects the frame's `old_string`/`new_string` args.
-	 */
-	advisorCreateEditTool?(): AgentTool | undefined;
-	/**
-	 * The execute-time context the advisor's bridge tools resolve approval from.
-	 *
-	 * `ExtensionToolWrapper` reads `tools.approvalMode`, per-tool
-	 * `tools.approval.<tool>` policies and `autoApprove` only from this context;
-	 * with none it fails closed to `always-ask` with empty policies (no user
-	 * grant), so a bridge tool that needs a prompt cannot run unattended.
-	 */
-	advisorGetToolContext?: () => AgentToolContext | undefined;
-	/**
-	 * The live MCP connections the advisor's Cursor resource frames answer from.
-	 *
-	 * Advisors share the session's connections and may be granted tools from
-	 * those same servers; without this their `list_mcp_resources` reports an
-	 * empty catalog and every `read_mcp_resource` a `not_found`.
-	 */
-	advisorMcpResources?: CursorMcpResourceAdapter;
+
 	/** Preloaded watchdog prompt content for the advisor. */
 	advisorWatchdogPrompt?: string;
 	/** Shared advisor instructions loaded from WATCHDOG.yml. */
@@ -552,17 +468,10 @@ export interface SessionStats {
 	contextUsage?: ContextUsage;
 }
 
-/** Stored OAuth accounts available to the current model provider. */
-export interface SessionOAuthAccountList {
-	provider: string;
-	accounts: OAuthAccountSummary[];
-}
-
 /** IDs for a newly created session and the session it replaced. */
 export interface FreshSessionResult {
 	previousSessionId: string;
 	sessionId: string;
-	closedProviderSessions: number;
 }
 
 /** Outcome of an in-place `/clear` conversation-context reset. */
@@ -583,12 +492,11 @@ export interface EphemeralTurnOptions {
 	history?: readonly Message[];
 	/** Opaque provider-lineage key for a series of related side turns. Rotate it after cancellation or failure before retrying. */
 	conversationKey?: string;
-	/** Omit tool definitions and request no tool calls. Rejects before inference on transports with mandatory native tools (Cursor). Tool calls are never executed, even when this option is omitted. */
+	/** Omit tool definitions and request no tool calls. Tool calls are never executed in side turns. */
 	tools?: false;
-	/** Optional positive safe-integer output-token cap. Transports that omit or overwrite caller output limits reject this option before inference. On budget-thinking models a cap disables optional thinking (models that require it reject the cap). */
+	/** Optional positive safe-integer output-token cap. */
 	maxTokens?: number;
-	/** Run at the model's lowest effort where the provider carries the change as a per-message control that keeps the prompt cache (Anthropic per-message effort, OpenAI `configuration_update`) and the session thinks. Elsewhere the session's reasoning applies, since changing request-level reasoning forfeits the cache. */
-	minimizeEffort?: boolean;
+
 	/** Positive safe-integer UTF-8 byte cap. Reject before inference when the serialized post-transform, secret-obfuscated provider context exceeds it. Measured before `before_provider_request` hooks; payload replacements are not re-measured. */
 	maxContextBytes?: number;
 	/** Awaited in order; a delivery failure rejects the side turn and aborts the request. */

@@ -87,7 +87,6 @@ export function createSkillDescriptionCompressor(
 						sessionId: options.sessionId,
 						maxTokens: 1024,
 						disableReasoning: true,
-						disableServerSideFallback: true,
 						temperature: 0,
 						signal: AbortSignal.any([AbortSignal.timeout(30_000), refused.signal]),
 						beforeDispatch: gate ? refuseAttempt : undefined,

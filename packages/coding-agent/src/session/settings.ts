@@ -513,24 +513,6 @@ export const cfgSampling = combine(
 	}),
 );
 
-export const cfgTextVerbosity = register({
-	id: "textVerbosity",
-	type: "enum",
-	values: ["low", "medium", "high"] as const,
-	default: "low",
-	ui: {
-		tab: "model",
-		group: "Sampling",
-		label: "Text Verbosity",
-		description: "OpenAI Responses and Codex response verbosity (low, medium, or high)",
-		options: [
-			{ value: "low", label: "Low", description: "Prefer concise responses (default)" },
-			{ value: "medium", label: "Medium", description: "Balance brevity and detail" },
-			{ value: "high", label: "High", description: "Prefer detailed responses" },
-		],
-	},
-});
-
 export const cfgTierOpenai = register({
 	id: "tier.openai",
 	type: "enum",
@@ -558,23 +540,6 @@ export const cfgTierSubagent = register({
 		description:
 			"Service Tier for spawned task/eval subagents. Inherit = match the main agent's live per-family tiers (tracks /fast); pick a value to apply it to whichever family the subagent's model belongs to.",
 		options: SERVICE_TIER_INHERIT_OPTIONS,
-	},
-});
-
-export const cfgTierAdvisor = register({
-	id: "tier.advisor",
-	protocolDefault: ["rpc", "acp"],
-	type: "enum",
-	values: SERVICE_TIER_INHERIT_SETTING_VALUES,
-	default: "none",
-	ui: {
-		tab: "model",
-		group: "Sampling",
-		label: "Service Tier — Advisor",
-		description:
-			"Service Tier for the advisor model. None = standard processing; Inherit = match the main agent's live per-family tiers; pick a value to apply it to the advisor model's family.",
-		options: SERVICE_TIER_INHERIT_OPTIONS,
-		condition: "advisorEnabled",
 	},
 });
 

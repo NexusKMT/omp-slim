@@ -317,7 +317,6 @@ export interface ExecutorOptions {
 	/** Parent session's manager; the child and its revived turns use this exact delivery scope. */
 	asyncJobManager?: AsyncJobManagerApi;
 	/** Parent session whose stored credential affinities seed the child session. */
-	credentialSourceSessionId?: string;
 	worktree?: string;
 	agent: AgentDefinition;
 	task: string;
@@ -4675,13 +4674,10 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 					authStorage,
 					modelRegistry,
 					getApiKey: options.getApiKey,
-					credentialSourceSessionId: options.credentialSourceSessionId,
 
 					inheritedSessionAgents: options.inheritedSessionAgents,
 					model,
 					thinkingLevel: effectiveThinkingLevel,
-					disableModelFallback: true,
-					disableServerSideFallback: true,
 					assertDispatchModel: inheritedModelGuard(model, spawnEffortCeiling),
 					thinkingLevelCeiling: spawnEffortCeiling,
 					// Subagents are short-lived; never schedule background warm requests.

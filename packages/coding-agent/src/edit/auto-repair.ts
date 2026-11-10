@@ -381,7 +381,6 @@ export async function attemptEditAutoRepair(options: {
 						sessionId,
 						maxTokens: COMPLETION_MAX_TOKENS,
 						disableReasoning: true,
-						disableServerSideFallback: true,
 						signal,
 					},
 				);
