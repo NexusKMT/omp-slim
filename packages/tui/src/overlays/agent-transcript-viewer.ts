@@ -5,13 +5,12 @@
  * (`ui.showOverlay(..., { fullscreen: true })`), so it borrows the terminal's
  * alternate screen buffer (the vim/less idiom) and paints the whole screen — no
  * compositing into the live transcript's scrollback. It renders a parked
- * subagent / advisor / collab-guest transcript that has no live in-view session.
+ * subagent / advisor transcript that has no live in-view session.
  *
  * Local transcripts tail append-only growth: unchanged file identity plus stable
  * sentinels means only newly appended JSONL is parsed and rendered. Rewrites,
  * truncation, rotation, or sentinel drift fall back to a full rebuild so changed
- * historical entries cannot leave stale components behind. Collab guests use the
- * same append path over the host's byte-capped transcript reads.
+ * historical entries cannot leave stale components behind.
  */
 import type * as fs from "node:fs";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
@@ -30,7 +29,6 @@ import type { SessionMessageEntryLike } from "../chat/transcript-entry";
 import type { ObservableSession, SessionObserverRegistry } from "./session-observer-registry";
 import { getEditorTheme, theme } from "../theme/theme";
 import { matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
-import type { AgentHubRemote } from "./agent-hub";
 import { ChatTranscriptBuilder } from "../chat/chat-transcript-builder";
 import {
 	TranscriptBrowser,
@@ -66,8 +64,6 @@ export interface AgentTranscriptViewerDeps {
 	/** Persisted entry to reveal on first paint when opened from an activity row. */
 	initialEntryId?: string;
 	registry: AgentHubRegistry;
-	/** Collab guest: read transcript from the host instead of a local file. */
-	remote?: AgentHubRemote;
 	/** Progress/cost snapshot source for the stats line. */
 	observers?: SessionObserverRegistry;
 	/** Revive+prompt path for messageable local agents. Lazy to avoid touching the global. */
@@ -181,13 +177,6 @@ export class AgentTranscriptViewer implements Component {
 
 	#localState: LocalTranscriptState | undefined;
 	#localUnavailable = "";
-	// Remote transcript state (incremental; the host caps each read).
-	#remoteBytes = 0;
-	#remoteFetchInFlight = false;
-	#remoteToken = 0;
-	#remoteUnavailable = false;
-	#remoteError = "";
-	#hasRemoteData = false;
 
 	#model: string | undefined;
 	#pollTimer: NodeJS.Timeout | undefined;
@@ -214,7 +203,7 @@ export class AgentTranscriptViewer implements Component {
 			hideThinkingBlock: deps.hideThinkingBlock,
 			proseOnlyThinking: deps.proseOnlyThinking,
 			expandThinkingBlocks: deps.expandThinkingBlocks,
-			// Charts are for the main session's answers, not parked subagent, advisor, or guest transcripts.
+			// Charts are for the main session's answers, not parked subagent or advisor transcripts.
 			tableCharts: false,
 			requestRender: deps.requestRender,
 		});
@@ -239,13 +228,12 @@ export class AgentTranscriptViewer implements Component {
 	get #sendable(): boolean {
 		const ref = this.#deps.registry.get(this.#deps.agentId);
 		if (!ref || ref.kind === "advisor") return false;
-		return Boolean(this.#deps.remote || this.#deps.lifecycle);
+		return Boolean(this.#deps.lifecycle);
 	}
 
 	dispose(): void {
 		this.#disposed = true;
 		this.#stopPolling();
-		this.#remoteToken++;
 		this.#builder.dispose();
 	}
 
@@ -259,13 +247,9 @@ export class AgentTranscriptViewer implements Component {
 	// Transcript loading
 	// ========================================================================
 
-	/** Refresh the transcript from a local file or remote host. */
+	/** Refresh the transcript from its local file. */
 	#refresh(allowAsync: boolean): void {
 		if (this.#disposed) return;
-		if (this.#deps.remote) {
-			this.#fetchRemote();
-			return;
-		}
 		if (this.#localLoadInFlight) return;
 		const sessionFile = this.#deps.registry.get(this.#deps.agentId)?.sessionFile;
 		if (!sessionFile) {
@@ -442,73 +426,6 @@ export class AgentTranscriptViewer implements Component {
 		}
 	}
 
-	#fetchRemote(): void {
-		const remote = this.#deps.remote;
-		if (!remote || this.#remoteFetchInFlight) return;
-		const id = this.#deps.agentId;
-		const fromByte = this.#remoteBytes;
-		this.#remoteFetchInFlight = true;
-		const token = ++this.#remoteToken;
-		void remote
-			.readTranscript(id, fromByte)
-			.then(result => {
-				if (token !== this.#remoteToken || this.#disposed) return;
-				this.#remoteFetchInFlight = false;
-				if (!result) {
-					if (!this.#hasRemoteData && !this.#remoteUnavailable) {
-						this.#remoteUnavailable = true;
-						this.#deps.requestRender();
-					}
-					return;
-				}
-				if (result.error) {
-					this.#remoteError = result.error;
-					this.#hasRemoteData = true;
-					this.#remoteUnavailable = false;
-					this.#stopPolling();
-					this.#deps.requestRender();
-					return;
-				}
-				if (result.newSize < fromByte) {
-					// Host transcript rotated/truncated — drop the stale rendered rows
-					// before restarting; otherwise the post-rotation fetch would stack
-					// new content under the pre-rotation history.
-					this.#remoteBytes = 0;
-					this.#remoteError = "";
-					this.#hasRemoteData = false;
-					this.#model = undefined;
-					this.#rebuild([]);
-					this.#fetchRemote();
-					return;
-				}
-				this.#remoteUnavailable = false;
-				this.#remoteError = "";
-				const firstData = !this.#hasRemoteData;
-				this.#hasRemoteData = true;
-				const lastNewline = result.text.lastIndexOf("\n");
-				if (lastNewline >= 0) {
-					const completeChunk = result.text.slice(0, lastNewline + 1);
-					this.#remoteBytes = fromByte + Buffer.byteLength(completeChunk, "utf-8");
-					const previousModel = this.#model;
-					const parsed = this.#extractMessages(this.#deps.transcript.parseEntries(completeChunk));
-					if (parsed.length > 0) {
-						this.#append(parsed);
-						return;
-					}
-					if (this.#model !== previousModel) {
-						this.#deps.requestRender();
-						return;
-					}
-				}
-				// First completed fetch (even empty) clears the "Loading…" placeholder.
-				if (firstData) this.#deps.requestRender();
-			})
-			.catch((error: unknown) => {
-				if (token === this.#remoteToken) this.#remoteFetchInFlight = false;
-				logger.warn("transcript viewer: remote fetch failed", { id, error: String(error) });
-			});
-	}
-
 	/** Filter to message entries, tracking the model from the first assistant / a model_change. */
 	#extractMessages(entries: AgentTranscriptEntry[]): SessionMessageEntryLike[] {
 		const messages: SessionMessageEntryLike[] = [];
@@ -609,11 +526,6 @@ export class AgentTranscriptViewer implements Component {
 		if (!trimmed) return;
 		this.#notice = undefined;
 		const id = this.#deps.agentId;
-		if (this.#deps.remote) {
-			this.#deps.remote.chat(id, trimmed);
-			this.#deps.requestRender();
-			return;
-		}
 		const lifecycle = this.#deps.lifecycle;
 		if (!lifecycle) return;
 		void (async () => {
@@ -664,8 +576,8 @@ export class AgentTranscriptViewer implements Component {
 	 */
 	describe(_cx: DescribeContext): NativeNode {
 		const ref = this.#deps.registry.get(this.#deps.agentId);
-		const notice = this.#notice ?? (this.#remoteError && !this.#builder.isEmpty ? this.#remoteError : undefined);
-		const placeholder = this.#builder.isEmpty ? this.#placeholder(NATIVE_LINE_WIDTH) : undefined;
+		const notice = this.#notice;
+		const placeholder = this.#builder.isEmpty ? this.#placeholder() : undefined;
 		const progress = this.#deps.observers?.getSession(this.#deps.agentId)?.progress;
 		const stats = progress
 			? [progress.contextTokens, progress.contextWindow, progress.durationMs, progress.toolCount, progress.cost]
@@ -781,17 +693,13 @@ export class AgentTranscriptViewer implements Component {
 
 		const headerLines = this.#headerLines(ref?.status, ref?.kind, ref?.parentId);
 		const footerLines = this.#footerLines();
-		const noticeLine = this.#notice
-			? theme.fg("error", sanitizeErrorLine(this.#notice, chromeWidth))
-			: this.#remoteError && !this.#builder.isEmpty
-				? theme.fg("error", sanitizeErrorLine(this.#remoteError, chromeWidth))
-				: undefined;
+		const noticeLine = this.#notice ? theme.fg("error", sanitizeErrorLine(this.#notice, chromeWidth)) : undefined;
 		// The editor carries no outer gutter; it renders at chrome width and the
 		// browser insets each row.
 		const editorLines = this.#editor ? this.#editor.render(chromeWidth) : [];
 
 		const contentLines = this.#builder.isEmpty
-			? [` ${theme.fg("dim", this.#placeholder(Math.max(10, contentWidth - 1)))}`]
+			? [` ${theme.fg("dim", this.#placeholder())}`]
 			: this.#builder.container.render(contentWidth);
 		let anchor: ScrollRangeAnchor | undefined;
 		if (this.#initialEntryId) {
@@ -858,12 +766,7 @@ export class AgentTranscriptViewer implements Component {
 		return parts.join(theme.sep.dot);
 	}
 
-	#placeholder(maxWidth: number): string {
-		if (this.#deps.remote) {
-			if (this.#remoteError) return sanitizeErrorLine(this.#remoteError, maxWidth);
-			if (this.#remoteUnavailable) return "Transcript lives on the host — not available.";
-			return this.#hasRemoteData ? "No messages yet." : "Loading transcript from host…";
-		}
+	#placeholder(): string {
 		if (!this.#deps.registry.get(this.#deps.agentId)?.sessionFile) return "No session file available yet.";
 		return "No messages yet.";
 	}

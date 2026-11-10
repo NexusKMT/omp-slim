@@ -13,7 +13,7 @@ import { createAgentHubRuntime } from "@oh-my-pi/pi-coding-agent/modes/agent-hub
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { copySessionArtifacts } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { type AgentHubRemote, AgentHubOverlayComponent } from "@oh-my-pi/pi-tui/overlays/agent-hub";
+import { AgentHubOverlayComponent } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
@@ -40,7 +40,7 @@ describe("Agent Hub session scope", () => {
 	 * `copied`: idle/aborted refs' transcripts were forked into the new root. `collision`: the new
 	 * root holds separately created transcripts under the same agent ids.
 	 */
-	async function renderHub(options: { remote?: AgentHubRemote; old?: "copied" | "collision" } = {}): Promise<string> {
+	async function renderHub(options: { old?: "copied" | "collision" } = {}): Promise<string> {
 		dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-hub-scope-"));
 		const oldRoot = path.join(dir, "old.jsonl");
 		const newRoot = path.join(dir, "new.jsonl");
@@ -99,7 +99,6 @@ describe("Agent Hub session scope", () => {
 			...createAgentHubRuntime({
 				settings: Settings.isolated(),
 				registry,
-				remote: options.remote,
 				sessionFile: newRoot,
 			}),
 			observers: new SessionObserverRegistry(),
@@ -107,7 +106,6 @@ describe("Agent Hub session scope", () => {
 			onDone: () => {},
 			requestRender: () => {},
 			irc: new IrcBus(registry),
-			remote: options.remote,
 			sessionFile: newRoot,
 		});
 		hubs.push(hub);
@@ -121,17 +119,6 @@ describe("Agent Hub session scope", () => {
 		expect(text).toContain("Memory");
 		expect(text).not.toContain("OldParked");
 		expect(text).not.toContain("OldNested");
-	});
-
-	it("keeps the host's full roster for a collab guest", async () => {
-		const remote: AgentHubRemote = {
-			chat: () => {},
-			kill: () => {},
-			revive: () => {},
-			readTranscript: async () => null,
-		};
-		const text = await renderHub({ remote });
-		for (const id of ["NewLive", "Memory", "OldParked", "OldNested"]) expect(text).toContain(id);
 	});
 
 	it("keeps idle and aborted refs when a fork copied their nested and direct transcripts", async () => {
