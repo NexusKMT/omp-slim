@@ -129,7 +129,7 @@ jobs:
             dist/validation/macos-intel/*.log
 
       - name: Preserve unverified compiled files after a failure
-        if: failure()
+        if: ${{ failure() && steps.native-build.outcome == 'failure' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: omp-slim-darwin-x64-unverified-${{ github.sha }}
@@ -143,6 +143,16 @@ jobs:
             packages/natives/native/index.d.ts
             dist/builds/**/source-*
             dist/builds/**/exit-code
+
+      - name: Upload native addon for local platform verification
+        if: ${{ always() && steps.native-build.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: omp-slim-native-addon-${{ github.sha }}
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+          path: packages/natives/native/*.node
 
       - name: Upload generated native bindings for source comparison
         if: ${{ always() && (steps.native-build.outcome == 'success' || steps.native-build.outcome == 'failure') }}
