@@ -12,17 +12,20 @@ control, speech/live audio, and automatic long-term memory. Session storage,
 resume/history, context compaction, file editing, shell execution, subagents,
 ordinary HTTP search, MCP and manually maintained instructions remain core.
 
-Implementation order: build baseline, memory, voice, desktop, browser, then
-dependency and packaging cleanup. A disabled setting alone is not evidence that
-a component has been removed from the product. Track the actual state below.
+The baseline was built before removal. Browser, desktop, speech and memory were
+then removed in four isolated worktrees and integrated on `main`. At most five
+agents may run concurrently, including the coordinator; workers must not spawn
+child agents. A disabled setting alone is not evidence that a component has
+been removed from the product. Track the actual state below.
 
 | Stage | State |
 | --- | --- |
 | Public repository and pinned upstream baseline | Established; made public at the user's request on 2026-11-10 |
 | Repeatable Codespace bootstrap/build/artifact procedure | Baseline built; binary and archive recovered and SHA-256 verified |
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
-| Other memory backends, browser, desktop and speech removal | Pending |
-| Intel macOS Actions build | Run `42763829793` passed; archive recovered and verified on the local Intel Mac |
+| Other memory backends, browser, desktop and speech removal | Source, registration, workers, UI, dedicated tests/docs and native backends removed; integrated TypeScript and Rust formatting checks passed; final compiled validation pending |
+| Dependency cleanup | Cargo packages 979 → 799, Bun packages 462 → 396; no new package versions; two dedicated workspaces removed |
+| Intel macOS Actions build | Baseline run `42763829793` passed and was verified locally; the fully trimmed source requires a new run |
 
 As of 2026-11-10 (Asia/Shanghai), Codespace
 `omp-slim-build-vrxqgpxrj7gfp579` was verified **Shutdown** after both Linux builds
@@ -37,6 +40,21 @@ remove browser-dependent fallbacks explicitly. Standard OAuth callbacks and API
 keys remain supported. Long-term memory removal must not erase stored sessions.
 `ttsr` means Time-Traveling Stream Rules, and Rust `memory.rs` manages the native
 heap; neither belongs to the memory/speech removal scope.
+
+The integrated removal includes the Chromium/Puppeteer runtime and installer,
+browser relay/extension, browser-backed search/PDF/cookie-login paths, native
+desktop control on all three operating systems, STT/TTS/live audio and
+`pi-voice`, all automatic memory backends and learning jobs, `packages/mnemopi`,
+and its dedicated native vector kernels. Generic provider protocol/catalog
+types remain for SDK consumers and history compatibility. Codex attestation
+was moved intact into `config/` because ordinary Codex requests also use it.
+Manual skill management remains explicit through `manage_skill`.
+
+Old browser/desktop/memory settings are retired on load/save without removing
+stored user files. Old speech configuration remains inert data and cannot
+reactivate removed tools. Existing sessions, manually managed skills and
+instructions remain readable. See [the full removal report](docs/slim-removal-2026-11-10.md)
+for scope, verification and dependency measurements.
 
 ## Codespace procedure
 
@@ -134,7 +152,13 @@ This does not replace feature regression tests. Follow upstream `AGENTS.md`:
 baseline failures separately from regressions. Never treat a passing build as
 proof of real provider authentication or of completed feature removal.
 
-The first removal was verified with:
+The fully trimmed tree uses two manual public workflows: `slim-macos-intel.yml`
+rebuilds and tests the macOS artifact and retained TypeScript workspace;
+`slim-rust-checks.yml` runs Rust formatting/lint plus nextest and doctests on
+Ubuntu 24.04. Both are gated on public visibility. The Rust job uses the
+repository's `check:rs` / `test:rs` wrappers and does not need a Codespace.
+
+The historical Sharpshooter-only removal was verified with:
 
 ```sh
 bun check
@@ -147,7 +171,7 @@ bun test \
   packages/coding-agent/test/session-manager/signature-persistence.test.ts
 ```
 
-These cover old nested/dotted settings, preservation of stored decisions,
+At that stage these covered old nested/dotted settings, preservation of stored decisions,
 absence of automatic decision injection in primary/advisor prompts, surviving
 memory lifecycle boundaries, session replay and compaction. There were 238
 passing tests, zero failures and 910 assertions. No Rust sources changed in this
@@ -187,14 +211,14 @@ Rust uses `rust-toolchain.toml`, with four parallel Cargo jobs on the four-core
 runner. It builds the native addon and CLI, checks the
 Mach-O architecture and ad-hoc signature, rejects Homebrew/runner-specific
 dynamic library paths, runs the worker smoke test, checks TypeScript, and runs
-the six focused regression files listed above. Rust intermediates and dependency
+the complete retained TypeScript CI suite in bounded subprocess groups. Rust intermediates and dependency
 downloads are cached; cache saving also runs after validation failures. Runs
 time out at 120 minutes; verified archives are retained for 7 days. A failed
 run also uploads any unverified binary/addon separately for 2 days. No provider
 credentials are required.
 
 [Run 42763829793](https://github.com/NexusKMT/omp-slim/actions/runs/42763829793)
-passed from source `4cf083db60ff87624b79d960fdedfd6713fea329`. It completed in
+passed from the earlier source `4cf083db60ff87624b79d960fdedfd6713fea329`. It completed in
 32m11s including cache restoration, 22m27s of Cargo compilation, CLI packaging,
 worker smoke, TypeScript checks and 238 regression tests (0 failures).
 The archive and binary SHA-256 checks passed after download. The extracted CLI

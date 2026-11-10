@@ -41,7 +41,7 @@ ENV BUN_INSTALL=/opt/bun \
     CARGO_TERM_COLOR=never \
     OMP_NATIVE_CARGO_PROFILE=ci
 
-# clang/libclang-dev: bindgen for pipewire-sys/libspa-sys (Linux desktop capture);
+# clang/libclang-dev: retained native C/C++ build and bindgen tooling;
 # cmake: wasmtime installs the C API headers used by tree-sitter.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

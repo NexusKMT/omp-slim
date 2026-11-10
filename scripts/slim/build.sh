@@ -50,6 +50,7 @@ df -h "$omp_repo_root" "${TMPDIR:-/tmp}"
 omp_native_started=$SECONDS
 bun run build:native
 printf '%s\n' "$((SECONDS - omp_native_started))" > "$omp_build_dir/native-build-seconds"
+bun scripts/slim/verify-native.ts | tee "$omp_build_dir/native-exports.txt"
 omp_cli_started=$SECONDS
 bun --cwd=packages/coding-agent run build
 printf '%s\n' "$((SECONDS - omp_cli_started))" > "$omp_build_dir/cli-build-seconds"
@@ -100,7 +101,7 @@ cp "$omp_binary" "$omp_build_dir/omp"
   if command -v sha256sum >/dev/null; then omp_sha256=(sha256sum); fi
   "${omp_sha256[@]}" omp > SHA256SUMS
   omp_archive="omp-$omp_platform-$omp_arch.tar.gz"
-  omp_metadata=(SHA256SUMS source-commit source-status source-status-after bun-version rust-version native-build-seconds cli-build-seconds help.txt build-host.txt version.txt)
+  omp_metadata=(SHA256SUMS source-commit source-status source-status-after bun-version rust-version native-build-seconds cli-build-seconds native-exports.txt help.txt build-host.txt version.txt)
   if [[ "$omp_platform" == darwin ]]; then omp_metadata+=(macos-linkage.txt macos-dependencies.txt); fi
   tar -czf "$omp_archive" omp "${omp_metadata[@]}"
   "${omp_sha256[@]}" "$omp_archive" > ARCHIVE-SHA256SUMS
