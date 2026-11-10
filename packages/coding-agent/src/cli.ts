@@ -34,7 +34,6 @@ import { extractProfileFlags } from "./cli/profile-bootstrap";
 import {
 	AUTO_UPDATE_WORKER_ARG,
 	BLOB_BROKER_WORKER_ARG,
-	COMPUTER_WORKER_ARG,
 	DAEMON_BROKER_WORKER_ARG,
 	IDA_HOST_WORKER_ARG,
 	LSP_MUX_WORKER_ARG,
@@ -178,8 +177,6 @@ async function runSmokeTest(): Promise<void> {
 	await smokeTestTinyTitleWorker();
 	await smokeTestSttWorker();
 	await smokeTestJsEvalWorker();
-	const { smokeTestComputerWorker } = await import("./tools/computer/supervisor");
-	await smokeTestComputerWorker();
 	await smokeTestTtsWorker();
 	await smokeTestMnemopiEmbedWorker();
 	await smokeTestDaemonBroker();
@@ -213,7 +210,7 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 		// spawning (the smoke ping, the first parse request) would be dropped.
 		// Park early events and replay them once the module's handler is live.
 		// Worker-thread entries using `parentPort` need the same sync-prefix
-		// buffering; the computer/eval cases install that inbox below.
+		// buffering; the eval cases install that inbox below.
 		const scope = globalThis as unknown as { onmessage: ((event: MessageEvent) => void) | null };
 		const pending: MessageEvent[] = [];
 		const buffer = (event: MessageEvent): void => {
@@ -230,15 +227,8 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	// Bun flushes messages the parent posted before spawn once this entry's
 	// top-level evaluation completes. Install a buffering inbox synchronously
 	// before binding the selected worker's real handler so the parent's
-	// synchronous `init` survives. The dynamically imported computer/eval modules
-	// consume the same inbox after their module evaluation begins.
-	if (arg === COMPUTER_WORKER_ARG) {
-		const parentPort = getWorkerParentPort();
-		if (parentPort) installWorkerInbox(parentPort);
-		const { startComputerWorker } = await import("./tools/computer/worker-entry");
-		startComputerWorker();
-		return true;
-	}
+	// synchronous `init` survives. Dynamically imported workers consume the
+	// same inbox after their module evaluation begins.
 	if (arg === JS_EVAL_WORKER_ARG) {
 		const parentPort = getWorkerParentPort();
 		if (parentPort) installWorkerInbox(parentPort);

@@ -35,7 +35,6 @@ describe("sdk edit-store session reset", () => {
 		tempDir = TempDir.createSync("@omp-edit-store-reset-");
 		const settings = Settings.isolated({
 			"async.enabled": false,
-			"computer.enabled": false,
 			"compaction.enabled": false,
 			"todo.enabled": false,
 		});

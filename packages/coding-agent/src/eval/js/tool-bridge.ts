@@ -227,7 +227,7 @@ export async function callSessionTool(name: string, args: unknown, options: Tool
 		const request = parsePreludeRequest(args);
 		const toolCallId = `prelude-${request.name}-${crypto.randomUUID()}`;
 		try {
-			// Host operations own their deadlines. Caller abort still flows
+			// Prelude operations own their deadlines. Caller abort still flows
 			// through; only the runtime-work watchdog is paused.
 			const result = await withBridgeTimeoutPause(options.emitStatus, () =>
 				invokeEvalPrelude(request.name, request.parameters, {

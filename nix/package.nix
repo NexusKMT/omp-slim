@@ -12,7 +12,6 @@
   lib,
   libpulseaudio,
   makeBinaryWrapper,
-  pipewire,
   removeReferencesTo,
   source,
   stdenv,
@@ -24,10 +23,6 @@
   # btop). Note the closure cost — libcublas ~745 MB, libcurand ~136 MB,
   # cuda_cudart ~74 MB — so this stays opt-in and off by default.
   cudaSupport ? config.cudaSupport,
-  # Wayland screencast support links libpipewire, whose runtime closure adds
-  # ~750 MB (gstreamer, ffmpeg, systemd, ...). Official npm/Bazel addons ship
-  # without it, so default to the lean build; opt in via `.override`.
-  withWaylandScreencast ? false,
   # Release builds use fat LTO with one codegen unit, which is slow. Set this
   # to false for faster local builds with thin LTO and 16 codegen units.
   withFatLto ? true,
@@ -39,7 +34,6 @@ let
     inherit
       source
       craneLib
-      withWaylandScreencast
       withFatLto
       ;
   };
@@ -104,9 +98,7 @@ stdenv.mkDerivation {
   ++ lib.optionals stdenv.hostPlatform.isDarwin [ darwin.autoSignDarwinBinariesHook ];
 
   # libgcc_s is resolved from the compiler's lib output during autoPatchelf.
-  buildInputs =
-    lib.optionals stdenv.hostPlatform.isLinux [ stdenv.cc.cc.lib ]
-    ++ lib.optionals withWaylandScreencast [ pipewire ];
+  buildInputs = lib.optionals stdenv.hostPlatform.isLinux [ stdenv.cc.cc.lib ];
 
   strictDeps = true;
   # Nix builders cannot reliably hardlink cache files into node_modules

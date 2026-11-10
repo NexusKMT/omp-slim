@@ -124,8 +124,6 @@ export type {
 	ShellRendererConfig,
 } from "@oh-my-pi/pi-tui/tools/bash";
 export * from "./checkpoint";
-export * from "./computer";
-export * from "./computer/supervisor";
 export * from "./context-notes";
 export * from "./debug";
 export * from "./ida";

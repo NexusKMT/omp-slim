@@ -554,13 +554,10 @@ describe("system prompt tool inventory", () => {
 			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
 			nativeTools: true,
 			inlineToolDescriptors: false,
-			evalPreludes: [{ name: "browser" }, { name: "computer", guidance: "COMPUTER-GUIDANCE" }],
+			evalPreludes: [{ name: "browser" }, { name: "custom", guidance: "CUSTOM-GUIDANCE" }],
 		});
-		expect(systemPrompt[1]).toBe("COMPUTER-GUIDANCE");
-		expect(systemPrompt.filter(block => block.includes("COMPUTER-GUIDANCE"))).toHaveLength(1);
-		// Prelude names still drive the verification bullets.
-		expect(systemPrompt[0]).toContain("Native desktop: JS/Python eval `computer` helpers");
-		expect(systemPrompt[0]).not.toContain("No runtime for changed surface");
+		expect(systemPrompt[1]).toBe("CUSTOM-GUIDANCE");
+		expect(systemPrompt.filter(block => block.includes("CUSTOM-GUIDANCE"))).toHaveLength(1);
 	});
 
 	it("renders the functions namespace (not a name list) when tools are not native", async () => {
@@ -617,16 +614,16 @@ describe("system prompt tool inventory", () => {
 			rules: [],
 			toolNames: ["eval"],
 			tools,
-			evalPreludes: [{ name: "computer", guidance: "COMPUTER-GUIDANCE" }],
+			evalPreludes: [{ name: "custom", guidance: "CUSTOM-GUIDANCE" }],
 			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
 			nativeTools: true,
 			inlineToolDescriptors: true,
 		});
 		const text = systemPrompt.join("\n\n");
 		expect(text).toContain("type eval = (");
-		expect(text).not.toContain("type computer = (");
+		expect(text).not.toContain("type custom = (");
 		// Guidance still ships for enabled Eval preludes.
-		expect(text).toContain("COMPUTER-GUIDANCE");
+		expect(text).toContain("CUSTOM-GUIDANCE");
 	});
 
 	it("uses a conservative fallback inventory when no tools map is provided", async () => {

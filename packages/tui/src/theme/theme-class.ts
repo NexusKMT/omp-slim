@@ -721,7 +721,6 @@ export class Theme {
 			inbox: this.#symbols["cmd.inbox"],
 			swap: this.#symbols["cmd.swap"],
 			expand: this.#symbols["cmd.expand"],
-			computer: this.#symbols["cmd.computer"],
 			eye: this.#symbols["cmd.eye"],
 			todo: this.#symbols["cmd.todo"],
 			stats: this.#symbols["cmd.stats"],

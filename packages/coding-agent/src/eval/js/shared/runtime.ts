@@ -7,7 +7,7 @@ import { Writable } from "node:stream";
 import * as util from "node:util";
 import * as vm from "node:vm";
 
-// Subpath imports only: the computer worker's readiness graph includes this runtime and must not
+// Subpath imports only: a worker's readiness graph includes this runtime and must not
 // load pi_natives (verified under `--no-addons`); the `@oh-my-pi/pi-utils` barrel loads it eagerly.
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import { isRecord } from "@oh-my-pi/pi-utils/type-guards";

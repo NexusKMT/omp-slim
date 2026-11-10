@@ -98,7 +98,7 @@ describe("native exports missing from a stale addon", () => {
 	});
 
 	it("keeps a class absence a plain undefined on a current addon", () => {
-		expect(missingNativeClass("MacOSFrontApp", status({ version: "18.2.6", stale: false }))).toBeUndefined();
+		expect(missingNativeClass("PtySession", status({ version: "18.2.6", stale: false }))).toBeUndefined();
 	});
 });
 

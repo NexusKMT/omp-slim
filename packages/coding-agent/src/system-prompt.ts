@@ -583,7 +583,7 @@ export interface BuildSystemPromptOptions {
 	/**
 	 * Eval preludes advertised by this prompt. Each prelude's `guidance` is
 	 * appended as its own block after the rendered template, so custom templates
-	 * keep it; names also set the `computerEnabled` template flags.
+	 * keep it.
 	 */
 	evalPreludes?: readonly Pick<EvalPreludeDefinition, "name" | "guidance">[];
 	/** Active model identifier (e.g. "anthropic/claude-opus-4") surfaced in the workstation block. */
@@ -1031,7 +1031,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		scoutAvailable,
 		taskIrcEnabled,
 		secretsEnabled,
-		computerEnabled: evalPreludes.some(prelude => prelude.name === "computer"),
 		includeWorkspaceTree,
 		renderMermaid,
 		renderSvg,

@@ -622,18 +622,6 @@ export const cfgGenerateImageEnabled = register({
 	},
 });
 
-export const cfgComputerEnabled = register({
-	id: "computer.enabled",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "tools",
-		group: "Available Tools",
-		label: "Computer",
-		description: "Enable the scriptable host-desktop eval prelude (screenshots, input, accessibility)",
-	},
-});
-
 export const cfgRatchetEnabled = register({
 	id: "ratchet.enabled",
 	type: "boolean",
@@ -656,70 +644,6 @@ export const cfgArchiveEnabled = register({
 		label: "Archive",
 		description:
 			"Enable the read-only archive eval prelude: prompt history, recent projects, past sessions and recaps",
-	},
-});
-
-export const cfgComputerDisplay = register({
-	id: "computer.display",
-	type: "string",
-	default: "active",
-	ui: {
-		tab: "tools",
-		group: "Computer",
-		label: "Computer Display",
-		description: "Active window's display (active), all displays (all), or a native display id",
-	},
-});
-
-export const cfgComputerMaxWidth = register({
-	id: "computer.maxWidth",
-	type: "number",
-	default: 3840,
-	ui: {
-		tab: "tools",
-		group: "Computer",
-		label: "Computer Screenshot Width",
-		description: "Maximum screenshot width in pixels",
-	},
-});
-
-export const cfgComputerMaxHeight = register({
-	id: "computer.maxHeight",
-	type: "number",
-	default: 2400,
-	ui: {
-		tab: "tools",
-		group: "Computer",
-		label: "Computer Screenshot Height",
-		description: "Maximum screenshot height in pixels",
-	},
-});
-
-export const cfgComputerBackgroundFallback = register({
-	id: "computer.backgroundFallback",
-	type: "enum",
-	values: ["takeover", "refuse"] as const,
-	default: "takeover",
-	ui: {
-		tab: "tools",
-		group: "Computer",
-		label: "Computer Background Fallback",
-		description:
-			"What window input does when its background route is unavailable: rerun it in takeover and return focus to your app (macOS; elsewhere plain takeover), or refuse, which also keeps the agent from taking the foreground or opening macOS menus itself",
-		options: [
-			{
-				value: "takeover",
-				label: "Takeover",
-				description:
-					"Briefly bring the target forward for that one call, then return focus to your app (on macOS even if you kept typing)",
-			},
-			{
-				value: "refuse",
-				label: "Refuse",
-				description:
-					"Fail the call; nothing takes over, and the agent's own takeover, raise, activating open, desktop input and macOS menus (context menus, popup and menu buttons; they take your keyboard while open) are refused too",
-			},
-		],
 	},
 });
 

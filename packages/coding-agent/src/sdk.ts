@@ -301,7 +301,6 @@ import {
 	listXdevTools,
 	planXdevPromptDocs,
 	ReadTool,
-	releaseComputerSessionsForOwner,
 	renderXdevPromptDocs,
 	resolveBuiltinToolPlan,
 	resolveMountedXdevExecutable,
@@ -325,7 +324,6 @@ import {
 	resolveToolCallIntent,
 } from "./job-widgets";
 import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
-import { createComputerPrelude } from "./tools/computer";
 import { createRatchetPrelude } from "./ratchet/prelude-definition";
 import { createArchivePrelude } from "./archive/prelude-definition";
 import { ToolContextStore } from "./tools/context";
@@ -351,7 +349,6 @@ import {
 	cfgArchiveEnabled,
 	cfgAsyncMaxJobs,
 	cfgAsyncWidgets,
-	cfgComputerEnabled,
 	cfgRatchetEnabled,
 	cfgGenerateImageEnabled,
 	cfgSecurityEnabled,
@@ -2751,16 +2748,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const spotlightExperiment =
 			options.bindProcessState === false ? undefined : startSpotlightExperiment(settings, sessionManager);
 		if (spotlightExperiment) toolSession.spotlight = spotlightExperiment;
-		let computerPrelude: EvalPreludeDefinition | undefined;
 		let ratchetPrelude: EvalPreludeDefinition | undefined;
 		let archivePrelude: EvalPreludeDefinition | undefined;
 		const getEvalPreludes = (): readonly EvalPreludeDefinition[] => {
 			if (restrictToolNames || !toolRegistry.has("eval") || !activeToolNames.has("eval")) return [];
 			const builtins: EvalPreludeDefinition[] = [];
-			if (cfgComputerEnabled.get(settings)) {
-				computerPrelude ??= createComputerPrelude(toolSession);
-				builtins.push(computerPrelude);
-			}
 			if (cfgRatchetEnabled.get(settings)) {
 				ratchetPrelude ??= createRatchetPrelude(toolSession);
 				builtins.push(ratchetPrelude);
@@ -5930,7 +5922,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 					await asyncJobManager.dispose({ timeoutMs: 3_000 });
 				}
-				await releaseComputerSessionsForOwner(evalKernelOwnerId);
 				await disposeKernelSessionsByOwner(evalKernelOwnerId);
 				await disposeVmContextsByOwner(evalKernelOwnerId);
 				if (ownsAuthStorage) authStorage.close();

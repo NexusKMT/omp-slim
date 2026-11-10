@@ -256,10 +256,6 @@ _[观看录屏 ↗](https://omp.sh/clips/conflict.mp4)_
 
 _[观看录屏 ↗](https://omp.sh/clips/codemod.mp4)_
 
-### 21 · 直接操作桌面
-
-Eval 的 `computer` 辅助方法——`computer.window(...)`、`win.screenshot()`、`win.ax()`、`el.press()`，以及用于多步脚本的 `computer.run(fnOrCode, options)`——控制真实的宿主机：枚举窗口和显示器、截图、发送原生输入、遍历操作系统无障碍树、使用剪贴板。它不暴露浏览器 DOM。
-
 ## 任务需要什么，_早已内置_。
 
 核心工具与 `read` 和 `bash` 位于同一命名空间。用 `--tools read,edit,bash,…` 固定启用的工具集；不常用的工具则通过 `xd://` 设备按需发现。`read xd://` 会列出它们，启用 `tools.xdev` 后可用 `write xd://<tool>` 运行。
@@ -292,9 +288,8 @@ Eval 的 `computer` 辅助方法——`computer.window(...)`、`win.screenshot()
 - `todo` — 对会话待办列表进行有序修改，支持阶段跟踪。
 - `ask` — 交互式运行中的结构化追问。
 
-**桌面与网络**
+**网络**
 
-- `computer` — 针对宿主桌面的持久化 JS：窗口、截图、原生输入、AX 树、剪贴板。
 - `web_search` — 一次查询覆盖所有已配置的提供商，返回答案和引用。
 - `github` — GitHub CLI 操作——仓库、PR、issue、代码搜索、Actions 运行监视。
 - `generate_image` — 通过 Gemini、GPT 或 xAI Grok 图像模型生成或编辑位图。
@@ -454,7 +449,7 @@ Exa 也可以通过 `/login exa` 存储 API 密钥；显式选择无密钥模式
 
 ## 约 **80,000** 行 Rust，干的是其他智能体框架要调用外部程序才能做的活。
 
-六个 crate，一个按平台打包的 N-API 插件。搜索、shell、AST、语法高亮、PTY、桌面控制、图像解码、BPE 计数——全部在 libuv 线程池中进程内完成。热路径上没有 fork/exec。shell 是我们自己的 bash 5.3 引擎，58 个命令行工具——coreutils、findutils、sed、jq、基于 ripgrep 的 grep、fd、diff、moreutils——被移植进 builtins crate，直接编译进 shell。
+六个 crate，一个按平台打包的 N-API 插件。搜索、shell、AST、语法高亮、PTY、图像解码、BPE 计数——全部在 libuv 线程池中进程内完成。热路径上没有 fork/exec。shell 是我们自己的 bash 5.3 引擎，58 个命令行工具——coreutils、findutils、sed、jq、基于 ripgrep 的 grep、fd、diff、moreutils——被移植进 builtins crate，直接编译进 shell。
 
 - Crate：`pi-natives`、`pi-shell`、`pi-ast`、`pi-iso`、`pi-voice`、`pi-walker`
 - 平台：`linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`win32-x64`、`win32-arm64`——x64 同时提供 AVX2 和基线两种二进制
@@ -474,7 +469,6 @@ Exa 也可以通过 `/login exa` 存储 API 密钥；显式选择无密钥模式
 
 | 模块          | 功能                                                                  | 基于                                      | ~代码行 |
 | ------------- | --------------------------------------------------------------------- | ----------------------------------------- | ------: |
-| desktop       | 为 `computer` 提供窗口/显示器枚举 · 截图 · 原生输入 · AX 树           | xcap · enigo · OS AX FFI                  |  10,600 |
 | grep          | 正则搜索 · 并行/串行 · glob 与类型过滤 · 模糊查找                     | grep-regex · grep-searcher                |   3,280 |
 | text          | ANSI 感知的宽度计算 · 截断 · 按列切片 · 保留 SGR 的换行               | unicode-width · segmentation              |   2,070 |
 | snapcompact   | 用于上下文压缩的位图帧光栅化 + PNG 编码                               | image · png                               |   1,760 |
@@ -622,7 +616,7 @@ bun setup
 bun dev
 ```
 
-使用 `nix build .#omp` 构建并冒烟测试可分发的 Nix 包。Wayland 屏幕录制支持默认关闭（链接 libpipewire 会增加约 750 MB 的运行时闭包）；可通过 `omp.override { withWaylandScreencast = true; }` 开启。发布构建使用 fat LTO 链接 `pi-natives`；`omp.override { withFatLto = false; }` 改用 thin LTO，本地重新构建会快得多。Rust 依赖和原生插件在不同的 derivation 中构建，因此修改 Rust 代码会复用已编译的依赖，修改 TypeScript 会复用已构建的插件。`nix/bun.nix` 只在 `bun.lock` 变化时生成；发布时会自动重新生成。依赖变更后，请运行：
+使用 `nix build .#omp` 构建并冒烟测试可分发的 Nix 包。发布构建使用 fat LTO 链接 `pi-natives`；`omp.override { withFatLto = false; }` 改用 thin LTO，本地重新构建会快得多。Rust 依赖和原生插件在不同的 derivation 中构建，因此修改 Rust 代码会复用已编译的依赖，修改 TypeScript 会复用已构建的插件。`nix/bun.nix` 只在 `bun.lock` 变化时生成；发布时会自动重新生成。依赖变更后，请运行：
 
 ```sh
 bun run gen:nix

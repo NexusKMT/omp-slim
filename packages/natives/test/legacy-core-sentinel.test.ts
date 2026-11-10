@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { validateLoadedBindings } from "../native/loader-state.js";
 
 async function withCandidate(contents: string, test: (candidate: string) => void) {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-natives-legacy-desktop-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-natives-legacy-core-"));
 	const candidate = path.join(dir, "pi_natives.node");
 	try {
 		await fs.writeFile(candidate, contents);
@@ -24,12 +24,6 @@ function stamped(version: string): string {
 	return `${slot}${"\0".repeat(64 - slot.length)}`;
 }
 
-class LegacyDesktopSession {
-	capture() {}
-	execute() {}
-	close() {}
-}
-
 const legacyCoreBindings = {
 	countTokens() {},
 	executeShell() {},
@@ -39,7 +33,7 @@ const legacyCoreBindings = {
 describe("legacy native addon loading", () => {
 	it("accepts a compatible pre-sentinel addon from disk", async () => {
 		const ctx = ctxFor("17.2.8");
-		const bindings = { ...legacyCoreBindings, DesktopSession: LegacyDesktopSession };
+		const bindings = legacyCoreBindings;
 		await withCandidate("legacy native addon", candidate => {
 			expect(() => validateLoadedBindings(ctx, bindings, candidate)).not.toThrow();
 		});
@@ -48,21 +42,12 @@ describe("legacy native addon loading", () => {
 	it("rejects a pre-sentinel addon without the compatible core ABI", async () => {
 		const ctx = ctxFor("17.2.8");
 		await withCandidate("legacy native addon", candidate => {
-			expect(() => validateLoadedBindings(ctx, { DesktopSession: LegacyDesktopSession }, candidate)).toThrow(
-				"reinstall to re-sync",
-			);
+			expect(() => validateLoadedBindings(ctx, {}, candidate)).toThrow("reinstall to re-sync");
 		});
 	});
-	it("rejects a pre-sentinel core without the legacy desktop ABI", async () => {
-		const ctx = ctxFor("17.2.8");
-		await withCandidate("legacy native addon", candidate => {
-			expect(() => validateLoadedBindings(ctx, legacyCoreBindings, candidate)).toThrow("reinstall to re-sync");
-		});
-	});
-
 	it("keeps resident old addons restart-only", async () => {
 		const ctx = ctxFor("17.2.8");
-		const bindings = { __piNativesV17_2_7: () => {}, ...legacyCoreBindings, DesktopSession: LegacyDesktopSession };
+		const bindings = { __piNativesV17_2_7: () => {}, ...legacyCoreBindings };
 		await withCandidate(stamped("17.2.8"), candidate => {
 			expect(() => validateLoadedBindings(ctx, bindings, candidate)).toThrow("restart omp");
 		});
@@ -73,7 +58,6 @@ describe("legacy native addon loading", () => {
 		const bindings = {
 			__piNativesBuildVersion: () => null,
 			...legacyCoreBindings,
-			DesktopSession: LegacyDesktopSession,
 		};
 		await withCandidate("unstamped", candidate => {
 			expect(() => validateLoadedBindings(ctx, bindings, candidate)).toThrow("reinstall to re-sync");

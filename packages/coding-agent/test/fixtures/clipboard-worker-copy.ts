@@ -1,5 +1,5 @@
 // Worker body for clipboard-osc52.test.ts: runs copyToClipboard off the main
-// thread, as the computer tool's `clipboard.write` does, and reports what
+// thread and reports what
 // reached this worker's stdout and the native backend. The worker has its own
 // `process`, so the fakes below do not touch the test runner.
 import { spyOn } from "bun:test";

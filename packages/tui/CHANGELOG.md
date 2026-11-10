@@ -5,6 +5,7 @@
 ### Removed
 
 - OMP Slim removes the setup wizard browser cookie-login hook while preserving normal authorization URL flows.
+- OMP Slim removes the desktop control settings group and computer command symbols.
 
 ## [18.18.3] - 2026-11-09
 

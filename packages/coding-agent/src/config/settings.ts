@@ -3902,16 +3902,11 @@ export class Settings {
 			delete raw["exa.enableWebsets"];
 		}
 
-		// computer.backend and model-specific controller routing were removed
-		// when the computer tool moved to one native desktop implementation.
-		const computerObj = isRecord(raw.computer) ? raw.computer : undefined;
-		if (computerObj && "backend" in computerObj) {
-			delete computerObj.backend;
-			if (Object.keys(computerObj).length === 0) {
-				delete raw.computer;
-			}
+		// OMP Slim no longer ships native desktop control.
+		delete raw.computer;
+		for (const key of Object.keys(raw)) {
+			if (key.startsWith("computer.")) delete raw[key];
 		}
-		delete raw["computer.backend"];
 
 		delete raw["hindsight.mentalModelRefreshIntervalMs"];
 

@@ -50,7 +50,7 @@ describe("copyToClipboard OSC 52 routing", () => {
 		expect(harness.routed).toEqual([]);
 	});
 
-	// The computer tool copies from a Bun Worker, which has no route to the
+	// Code can copy from a Bun Worker, which has no route to the
 	// main thread's terminal; its OSC 52 would hit fd 1 around the pump.
 	it("skips OSC 52 in a worker thread and still makes the native copy", async () => {
 		const worker = new Worker(new URL("../fixtures/clipboard-worker-copy.ts", import.meta.url).href, {

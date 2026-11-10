@@ -241,14 +241,6 @@ import { type ApprovalGrantStore, getApprovalGrants } from "../tools/approval-ca
 import { type AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
 import { recoverAskHtml } from "../tools/ask";
 import type { CheckpointState, CompletedRewindState } from "../tools/checkpoint";
-import {
-	beginComputerTurnForOwner,
-	endComputerTurnForOwner,
-	releaseComputerSessionsForOwner,
-	resumeComputerTurnForOwner,
-	resumeComputerUseForOwner,
-	revokeComputerControlForOwner,
-} from "../tools/computer/supervisor";
 import { isAutoQaEnabled } from "../tools/report-tool-issue";
 import {
 	buildResolveReminderMessage,
@@ -580,7 +572,6 @@ import {
 } from "../utils/title-settings";
 import {
 	cfgArchiveEnabled,
-	cfgComputerEnabled,
 	cfgRatchetEnabled,
 	cfgDevAutoqa,
 	cfgDevAutoqaConsent,
@@ -1372,10 +1363,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * dropped by the ACP host).
 	 */
 	#clientPromptInFlightCount = 0;
-	/** Dialogs open and waiting for the user's answer; while any is, the computer turn is ended. */
-	#userWaitCount = 0;
-	/** Whether the open dialogs ended a prompt's computer turn, which goes on once they settle. */
-	#userWaitEndedTurn = false;
 	#inFlightEpoch = 0;
 	#abortInProgress = false;
 	/** Forced sends still unwinding, including while their pending agent_end is flushed. */
@@ -1512,10 +1499,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	#onAgentPauseChange(paused: boolean): void {
 		if (paused) {
 			this.#releasePowerAssertion();
-			this.#endComputerTurn();
 		} else if (this.#promptInFlightCount > 0) {
 			this.#acquirePowerAssertion();
-			this.#resumeComputerTurn();
 		}
 	}
 
@@ -1523,7 +1508,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#promptInFlightCount++;
 		if (this.#promptInFlightCount === 1) {
 			this.#acquirePowerAssertion();
-			this.#beginComputerTurn();
 		}
 		return this.#inFlightEpoch;
 	}
@@ -1537,7 +1521,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		if (this.#promptInFlightCount !== 0) return;
 		this.yieldQueue.requestIdleFlush();
 		this.#releasePowerAssertion();
-		this.#endComputerTurn();
 		this.#flushPendingAgentEnd();
 		// The in-flight bracket drained: wake steers parked on a dispatch that
 		// settled without ever going live (setup failure, abort, disposal) —
@@ -1550,18 +1533,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		void this.#flushInFlightSettledCallbacks().finally(() => this.#drainStrandedQueuedMessages());
 	}
 
-	/**
-	 * Runs `dialog`, which waits for the user's answer (`ask`, a tool approval, an extension prompt), with the
-	 * computer turn ended, so an unattended Mac sleeps and locks on its own timer rather than showing the pending
-	 * question. Once the last open dialog settles, if a prompt is still in flight, the turn goes on: the run still active
-	 * in it (a dialog can be that run's control confirmation) and later runs hold the display again. While it is open,
-	 * the agent counts as blocked on the user ({@link USER_AWAIT_ID}), so a peer's wait for its reply ends.
-	 */
+	/** Keep peer waits aware while a dialog waits for the user's answer. */
 	async waitForUser<T>(dialog: () => Promise<T>): Promise<T> {
-		if (this.#userWaitCount++ === 0) {
-			this.#userWaitEndedTurn = this.#promptInFlightCount > 0;
-			this.#endComputerTurn();
-		}
 		const releaseUserHold = this.#agentId
 			? this.#agentRegistry?.awaits.hold(this.#agentId, [USER_AWAIT_ID], { interruptible: false })
 			: undefined;
@@ -1569,31 +1542,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			return await dialog();
 		} finally {
 			releaseUserHold?.();
-			if (--this.#userWaitCount === 0 && this.#promptInFlightCount > 0) {
-				if (!this.#userWaitEndedTurn) this.#beginComputerTurn();
-				else this.#resumeComputerTurn();
-			}
 		}
-	}
-
-	/**
-	 * Computer runs keep the display awake until {@link #endComputerTurn}. Only a top-level session marks turns: a
-	 * subagent's turn can end mid-way through its parent's, so its runs keep the native grace period instead.
-	 */
-	#beginComputerTurn(): void {
-		if (this.#agentKind !== "main" || this.#userWaitCount > 0) return;
-		beginComputerTurnForOwner(this.#eval.getKernelOwnerId());
-	}
-
-	/** Continues a turn whose display hold a dialog or pause released, re-holding the display for its active run. */
-	#resumeComputerTurn(): void {
-		if (this.#agentKind !== "main" || this.#userWaitCount > 0) return;
-		resumeComputerTurnForOwner(this.#eval.getKernelOwnerId());
-	}
-
-	#endComputerTurn(): void {
-		if (this.#agentKind !== "main") return;
-		endComputerTurnForOwner(this.#eval.getKernelOwnerId());
 	}
 
 	async #flushInFlightSettledCallbacks(): Promise<void> {
@@ -2045,7 +1994,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#clientPromptInFlightCount = 0;
 		this.yieldQueue.requestIdleFlush();
 		this.#releasePowerAssertion();
-		this.#endComputerTurn();
 		this.#flushPendingAgentEnd();
 		// The abort/disposal cleared every in-flight bracket: wake steers
 		// parked on a dispatch that will never go live — they re-check
@@ -3083,7 +3031,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		cfgExtendedContext.listen(this, () => this.#reapplyContextWindowPolicy());
 		cfgCompactionModelThresholds.listen(this, () => this.#reapplyContextWindowPolicy());
 		cfgCompactionModelThresholdsEnabled.listen(this, () => this.#reapplyContextWindowPolicy());
-		cfgComputerEnabled.listen(this, () => this.#reconcileEvalPreludeSetting("computer.enabled"));
 		cfgRatchetEnabled.listen(this, () => this.#reconcileEvalPreludeSetting("ratchet.enabled"));
 		cfgArchiveEnabled.listen(this, () => this.#reconcileEvalPreludeSetting("archive.enabled"));
 
@@ -3139,7 +3086,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * Mid-session the next user prompt carries a hidden prelude notice instead
 	 * (see {@link SessionTools.takeEvalPreludeNotice}).
 	 */
-	async #reconcileEvalPreludeSetting(path: "computer.enabled" | "ratchet.enabled" | "archive.enabled"): Promise<void> {
+	async #reconcileEvalPreludeSetting(path: "ratchet.enabled" | "archive.enabled"): Promise<void> {
 		try {
 			if (this.agent.state.messages.length === 0) await this.refreshBaseSystemPrompt();
 		} catch (error) {
@@ -4114,19 +4061,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * the recovery wait always sees the in-flight handler and blocks until it — and
 	 * everything it schedules — settles. */
 	#dispatchAgentEvent = async (event: AgentEvent): Promise<void> => {
-		// Revoke before the first await: delayed end-of-turn maintenance must
-		// never revoke a foreground-control grant acquired by a later prompt.
-		const computerControlRevocation =
-			event.type === "agent_end" ? revokeComputerControlForOwner(this.#eval.getKernelOwnerId()) : undefined;
-		// Only the user's own prompt, steer or follow-up lifts the computer-use stop their Escape set;
-		// synthetic continues and agent-sent messages (subagent budget steers) never do.
-		if (
-			event.type === "message_start" &&
-			isUserAuthoredMessage(event.message) &&
-			!(event.message.role === "user" && (event.message.synthetic || event.message.attribution === "agent"))
-		) {
-			resumeComputerUseForOwner(this.#eval.getKernelOwnerId());
-		}
 		if (event.type === "tool_execution_end" && this.#isTerminalYieldToolResult(event)) {
 			const alreadyTerminated = this.#synchronouslyTerminatedYieldToolCallIds.delete(event.toolCallId);
 			if (!alreadyTerminated) {
@@ -4146,10 +4080,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#trackPostPromptTask(promise);
 		this.#inFlightAgentEndMaintenance.add(promise);
 		try {
-			// Maintenance starts now, not behind the revocation ack: it classifies this run's end
-			// against live abort state, and a deferred start lets `abort()` settle first, so a
-			// deliberate empty abort reads as a reasonless one and is auto-retried.
-			await Promise.all([this.#processAgentEvent(event), computerControlRevocation]);
+			await this.#processAgentEvent(event);
 		} catch (error) {
 			// Post-turn maintenance (compaction, pruning rewrites, hooks) threw before
 			// publishing the settle. Without it the run never reports idle and every
@@ -6633,19 +6564,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		}
 	}
 
-	async #releaseOwnedComputerSessions(ownerId: string | undefined): Promise<void> {
-		if (!ownerId) return;
-		try {
-			await withTimeout(
-				releaseComputerSessionsForOwner(ownerId),
-				3_000,
-				"Timed out releasing native computer session during dispose",
-			);
-		} catch (error) {
-			logger.warn("Failed to release native computer session during dispose", { error: String(error) });
-		}
-	}
-
 	async #disconnectOwnedMcp(): Promise<void> {
 		if (!this.#disconnectOwnedMcpManager) return;
 		try {
@@ -6721,7 +6639,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		const results = await Promise.allSettled([
 			this.#disposeOwnedAsyncJobs(),
 			this.#eval.disposeKernels(),
-			this.#releaseOwnedComputerSessions(this.#eval.getKernelOwnerId()),
 			this.#disconnectOwnedMcp(),
 			advisorRecorderClosed,
 			hindsightState?.flushRetainQueue() ?? Promise.resolve(),
@@ -11883,10 +11800,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			}
 			this.abortBash();
 			this.abortEval();
-			const computerControlRevocation = revokeComputerControlForOwner(this.#eval.getKernelOwnerId());
 			const postPromptDrain = this.#cancelPostPromptTasks(options?.reason);
 			this.agent.abort(options?.reason);
-			await Promise.all([postPromptDrain, computerControlRevocation]);
+			await postPromptDrain;
 			await this.agent.waitForIdle();
 			this.#persistToolResultsEndedWhileDisconnected();
 			// agent_end maintenance can enqueue a retry after the first cancellation.

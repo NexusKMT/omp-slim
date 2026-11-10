@@ -45,7 +45,7 @@ export class ToolContextStore {
 
 	constructor(
 		private readonly getBaseContext: () => ToolBaseContext,
-		/** Runs each dialog a tool opens (`ask`, eval prelude approvals, computer control) as a wait for the user. */
+		/** Runs each dialog a tool opens (`ask`, eval prelude approvals) as a wait for the user. */
 		private readonly trackUserWait?: UserWaitTracker,
 	) {}
 

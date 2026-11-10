@@ -944,7 +944,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 				const backend = cell.resolved.backend;
 				// The per-cell `timeout` is a budget on the cell runtime's *own*
 				// work. Host-side waits on `agent()`/`completion()` handles,
-				// `tool.task()`/`tool.wait()`, and host preludes suspend
+				// `tool.task()`/`tool.wait()`, and eval preludes suspend
 				// that budget entirely and restart a fresh timeout window when control
 				// returns to the active backend runtime. Compute, stdout, `log()`/`phase()`, and
 				// ordinary tool calls all count against the budget. The watchdog drives
@@ -1029,8 +1029,8 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 						if (text) cellViews.push({ text, view: output.view });
 					}
 					if (output.type === "image") {
-						// Computer frames have a matching native input coordinate space. Generic
-						// display resizing must not change it; provider-boundary safety still applies.
+						// Honor explicit original-detail images without display resizing;
+						// provider-boundary safety still applies.
 						if (output.detail === "original") {
 							images.push(output);
 							continue;

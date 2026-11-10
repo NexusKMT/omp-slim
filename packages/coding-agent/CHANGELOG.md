@@ -5,6 +5,7 @@
 ### Removed
 
 - OMP Slim removes bundled browser automation, relay, Chromium PDF page screenshots and browser cookie login; HTTP search, PDF text extraction, normal OAuth and external MCP remain available.
+- OMP Slim removes the built-in computer eval prelude, desktop control workers, `/computer`, desktop settings, and native window, screenshot, input, accessibility, and application-control APIs. Clipboard paste/copy and provider session replay remain available.
 - OMP Slim removes Sharpshooter automatic decision extraction and consolidation; old Sharpshooter settings select memory off and existing stored files are preserved.
 
 ## [18.18.3] - 2026-11-09

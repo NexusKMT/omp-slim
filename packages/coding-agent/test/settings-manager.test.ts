@@ -58,7 +58,6 @@ import {
 	cfgGrepContextAfter,
 	cfgGrepContextBefore,
 	cfgTodoEager,
-	cfgComputerEnabled,
 	cfgImagesQuestionTimeoutMs,
 } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import {
@@ -2249,15 +2248,21 @@ describe("Settings", () => {
 			expect((await readSettings()).exa).toBeUndefined();
 		});
 
-		it("removes the retired computer backend setting", async () => {
-			await writeSettings({ computer: { backend: "auto", enabled: true }, "computer.backend": "native" });
+		it("removes retired desktop settings while retaining other preferences", async () => {
+			await writeSettings({
+				computer: { backend: "auto", enabled: true, display: "active" },
+				"computer.backend": "native",
+				"computer.maxWidth": 1280,
+			});
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(cfgComputerEnabled.get(settings)).toBe(true);
 			cfgDisplayShowTokenUsage.set(settings, true);
 			await settings.flush();
-			expect((await readSettings()).computer).toEqual({ enabled: true });
+			const saved = await readSettings();
+			expect(saved.computer).toBeUndefined();
+			expect(saved["computer.backend"]).toBeUndefined();
+			expect(saved["computer.maxWidth"]).toBeUndefined();
+			expect(cfgDisplayShowTokenUsage.get(settings)).toBe(true);
 		});
 
 		it("normalizes retired local tiny title models before role migration", async () => {

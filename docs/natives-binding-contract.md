@@ -7,7 +7,7 @@ This page defines the public JS/TS boundary between `@oh-my-pi/pi-natives` calle
 1. `crates/pi-natives/src/**/*.rs` defines `#[napi]` functions, classes, objects, and enums.
 2. `bun --cwd=packages/natives run build:bindings` runs napi-rs, installs the host addon and generated `native/index.d.ts`, then runs `gen-enums.ts`.
 3. `gen-enums.ts` reads the declarations, rewrites napi-rs `const enum` declarations to runtime-usable declarations, and replaces the marked block in `native/index.js` with explicit class/function exports and literal enum objects.
-4. `native/index.js` loads the addon and binds that generated root surface. `DesktopSession` is routed through `desktop-adapter.js` for compatibility with older desktop ABIs; current classes pass through unchanged.
+4. `native/index.js` loads the addon and binds that generated root surface.
 
 There is no `NativeBindings` declaration-merging lifecycle or `packages/natives/src/<module>` wrapper convention. The loader checks release identity for install/compiled loads (with a narrow pre-sentinel compatibility exception), not every public symbol; a function export the loaded addon omits is `missingNativeExport(name)` — `undefined` on a current addon, and on a stale workspace addon a throwing stub that names the addon and the rebuild command (`bun run build:native`).
 
@@ -18,7 +18,6 @@ There is no `NativeBindings` declaration-merging lifecycle or `packages/natives/
 | Entry                            | Public values                                                                                                                   |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `@oh-my-pi/pi-natives`           | Generated root classes, functions, and enum objects from `native/index.js` / `index.d.ts`. Importing is eager.                  |
-| `@oh-my-pi/pi-natives/desktop`   | `createDesktopSession(options): DesktopSession`; addon load is deferred until invocation.                                       |
 | `@oh-my-pi/pi-natives/clipboard` | `copyToClipboard(text)` and `readImageFromClipboard()` plus the `ClipboardImage` type; addon load is deferred until invocation. |
 
 Two additional public subpaths are lazy:
@@ -41,7 +40,7 @@ Do not import unexported `native/*` implementation paths from package consumers.
 | Diff and vectors         | `diffLines`, `diffWords`, `diffLineRuns`, `structuredPatchHunks`, `DiffStream`, `cosineSimilarityPairs`, `mmrRerankIndices`, `vectorIndexTopK`                                       | `diff.rs` (core in `pi-diff`), `vectors.rs`                           | sync transforms; mixed `DiffStream` |
 | Shell and PTY            | `executeShell`, `Shell`, `PtySession`                                                                                                                                                | `shell.rs`, `pty.rs`                                                  | classes/promises                    |
 | Process and files        | `Process`, `FileLock`, `execReplace`                                                                                                                                                 | `ps.rs`, `file_lock/mod.rs`                                           | classes/mixed                       |
-| Desktop and clipboard    | `DesktopSession`, `copyToClipboard`, `readImageFromClipboard`                                                                                                                        | `desktop/mod.rs`, `clipboard.rs`                                      | class, sync, promise                |
+| Clipboard    | `copyToClipboard`, `readImageFromClipboard`                                                                                                                        | `clipboard.rs`                                      | class, sync, promise                |
 | Audio and live media     | `AudioCapture`, `AudioPlayback`, `LiveWebRtcPeer`                                                                                                                                    | `audio.rs`, `live.rs`                                                 | classes/mixed                       |
 | Text and highlighting    | `wrapTextWithAnsi`, `truncateToWidth`, `sliceWithWidth`, `extractSegments`, `visibleWidth`, `setHangulCompatJamoWidthOverride`, `highlightCode`, `HighlightStream`, language queries | `text.rs`, `highlight.rs`                                             | sync                                |
 | Conversion and rendering | `htmlToMarkdown`, `pdfToMarkdown`, `rasterizeSvg`, `encodeSixel`, `renderSnapcompactPng`, `snapcompactSupportedChars`                                                                | `html.rs`, `pdf.rs`, `svg.rs`, `sixel.rs`, `snapcompact.rs`           | mixed sync/promise                  |
@@ -68,7 +67,7 @@ Newer surface members on existing exports (all present in `native/index.d.ts`):
 The call style is part of the public contract:
 
 - CPU-heavy/blocking APIs generally return promises through napi-rs tasks, including `grep`, `glob`, `fuzzyFind`, AST search/edit, `summarizeCodeAsync`, snapcompact rendering, and HTML conversion.
-- Tokio-backed operations such as shell, PTY, isolation lifecycle, device check, desktop operations, and live media use promises where declared.
+- Tokio-backed operations such as shell, PTY, isolation lifecycle, device check, and live media use promises where declared.
 - In-memory transforms and direct probes generally remain synchronous: `search`, `hasMatch`, block boundaries, text/layout helpers, diffs, vector ranking, highlighting, key parsing, and isolation probe/resolve helpers.
 - Stateful resources are classes. Their constructors and individual methods can have different sync/async behavior; use the declarations rather than assuming the whole class is asynchronous.
 
@@ -78,7 +77,7 @@ Callback parameters generated from napi-rs `ThreadsafeFunction` use an error-fir
 
 ## Objects, enums, and binary data
 
-`#[napi(object)]` structs become TS interfaces such as search results, AST payloads, shell/PTY results, desktop options/results, audio/live events, and isolation records. napi-rs owns runtime conversion; TypeScript optionality does not provide semantic validation to untyped callers.
+`#[napi(object)]` structs become TS interfaces such as search results, AST payloads, shell/PTY results, audio/live events, and isolation records. napi-rs owns runtime conversion; TypeScript optionality does not provide semantic validation to untyped callers.
 
 The generated runtime enum objects currently are:
 
@@ -103,7 +102,7 @@ Numeric and string enum declarations constrain TypeScript callers but do not by 
 ## Import and error behavior
 
 - Importing the root throws if no compatible addon candidate loads. Lazy subpaths defer that failure until a native-backed operation is called.
-- Install and compiled candidates normally must report the package version through their stamp or legacy sentinel. A pre-sentinel addon with no release identity can pass a narrow core/desktop compatibility check if its disk file lacks the expected current stamp. Workspace-development candidates skip this validation.
+- Install and compiled candidates normally must report the package version through their stamp or legacy sentinel. A pre-sentinel addon with no release identity can pass a narrow core compatibility check if its disk file lacks the expected current stamp. Workspace-development candidates skip this validation.
 - A resident prior-version addon can produce a restart-specific mismatch; a stale file on disk produces a reinstall diagnosis.
 - The loader does not check the full export set. A same-version incomplete build can therefore load and later expose `undefined` members.
 - N-API conversion errors throw or reject before Rust business logic runs. Native task and async failures generally reject their promises; `EditSession.apply` returns engine failures as `isError` outcomes instead.

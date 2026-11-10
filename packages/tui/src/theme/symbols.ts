@@ -150,7 +150,6 @@ export type SymbolKey =
 	| "cmd.inbox"
 	| "cmd.swap"
 	| "cmd.expand"
-	| "cmd.computer"
 	| "cmd.eye"
 	| "cmd.todo"
 	| "cmd.stats"
@@ -336,7 +335,6 @@ export type SlashCommandIconName =
 	| "inbox"
 	| "swap"
 	| "expand"
-	| "computer"
 	| "eye"
 	| "todo"
 	| "stats"
@@ -541,7 +539,6 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"cmd.inbox": "📥",
 	"cmd.swap": "⇄",
 	"cmd.expand": "⤢",
-	"cmd.computer": "🖥",
 	"cmd.eye": "👁",
 	"cmd.todo": "☑",
 	"cmd.stats": "📊",
@@ -976,7 +973,6 @@ const NERD_SYMBOLS: SymbolMap = {
 	// pick: 󰁌 (nf-md-arrow_expand_all) | alt: 󰘖 (nf-md-arrow_expand)
 	"cmd.expand": "\u{f004c}",
 	// pick:  (nf-fa-desktop) | alt:  (nf-oct-device_desktop)
-	"cmd.computer": "\uf108",
 	// pick:  (nf-fa-eye) | alt:  (nf-cod-eye, matches icon.advisor)
 	"cmd.eye": "\uf06e",
 	// pick:  (nf-fa-tasks) | alt:  (nf-cod-checklist)
@@ -1342,7 +1338,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"cmd.inbox": "",
 	"cmd.swap": "",
 	"cmd.expand": "",
-	"cmd.computer": "",
 	"cmd.eye": "",
 	"cmd.todo": "",
 	"cmd.stats": "",

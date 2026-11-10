@@ -13,7 +13,6 @@ Start with a behavior-compatible JS baseline and representative inputs. A native
 The package has no `packages/natives/src/<module>` wrapper layer. Its entrypoints are:
 
 - eager root: `native/index.js` with generated `native/index.d.ts`;
-- lazy desktop wrapper: `native/desktop.js` / `desktop.d.ts`;
 - lazy clipboard wrapper: `native/clipboard.js` / `clipboard.d.ts`;
 - lazy Windows-path wrapper: `native/path.js` / `path.d.ts` (`@oh-my-pi/pi-natives/path`); other platforms return the input unchanged without loading;
 - lazy vcs wrapper: `native/vcs.js` / `vcs.d.ts` (`@oh-my-pi/pi-natives/vcs`).

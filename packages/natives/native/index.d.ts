@@ -28,128 +28,6 @@ export declare class AudioPlayback {
   stop(): void
 }
 
-/** Persistent, serialized native desktop capture/input/accessibility session. */
-export declare class DesktopSession {
-  constructor(options?: DesktopSessionOptions | undefined | null)
-  /**
-   * Asks the worker when it is idle, so permissions are read live. While
-   * another operation holds the worker, answers from the snapshot of the
-   * latest capabilities read or capture instead of blocking the JS thread
-   * behind it.
-   */
-  get capabilities(): DesktopCapabilities
-  /**
-   * Lock and display-sleep state read on the calling thread, never queued
-   * behind the worker, so it answers at once even while a request is stuck.
-   */
-  get screenState(): DesktopScreenState
-  /**
-   * Keeps the display awake from the next activity request until
-   * `releaseDisplayAwake()`, however long the session sits idle in between,
-   * instead of for the grace period after the last request. An agent calls
-   * this when it acts inside a turn.
-   */
-  holdDisplayUntilReleased(): void
-  /**
-   * Lets the display sleep now if a turn holds it, without waiting behind
-   * queued requests, and returns later activity to the grace period. Activity
-   * outside a turn keeps its grace. An agent calls this when its turn ends.
-   */
-  releaseDisplayAwake(): void
-  /**
-   * How many times the user's physical Escape has stopped takeover input in
-   * this session, or under its `escapeStopKey`. Host cancels, retirement and
-   * release never count, so a rise tells the host the user stopped the work.
-   */
-  get escapeStops(): number
-  listDisplays(): Promise<Array<DesktopDisplay>>
-  listWindows(): Promise<Array<DesktopWindow>>
-  listApplications(options?: ApplicationQuery | undefined | null): Promise<Array<Application>>
-  openApplication(id: string, options?: ApplicationOpenOptions | undefined | null): Promise<OpenedApplication>
-  /**
-   * Capture and accessibility share one serialized request. Neither a failed
-   * snapshot nor an abandoned reply replaces the last delivered input frame.
-   */
-  observe(target: string, caps?: CaptureCaps | undefined | null, axOptions?: AxSnapshotOptions | undefined | null): Promise<DesktopObservation>
-  menuItems(target: string, path?: Array<string> | undefined | null): Promise<Array<DesktopMenuItem>>
-  menuSelect(target: string, path: Array<string>): Promise<undefined>
-  bringToCurrentSpace(windowId: string): Promise<undefined>
-  holdKeys(target: string, keys: Array<string>, options: HoldOptions): Promise<DesktopFocusReturn | undefined | null>
-  holdMouse(target: string, x: number, y: number, options: HoldOptions): Promise<DesktopFocusReturn | undefined | null>
-  /**
-   * Native ownership only. Human approval is required by the host before
-   * calling this method.
-   */
-  acquireControl(): Promise<DesktopControlState>
-  releaseControl(): void
-  controlState(): DesktopControlState
-  /** Retire queued work from a completed helper without revoking task control. */
-  retire(): void
-  /**
-   * Sets when the current run ends, `remaining_ms` from now; each run sets
-   * it before its first call. Input waiting for the user to pause in its app
-   * (macOS) or for a Wayland permission prompt gives up shortly before it.
-   */
-  setRunDeadline(remainingMs: number): void
-  capture(target: string, caps?: CaptureCaps | undefined | null): Promise<DesktopCapture>
-  /**
-   * Capture a fresh native-detail region without replacing the full input
-   * coordinate frame.
-   */
-  captureRegion(target: string, region: CaptureRegion, caps?: CaptureCaps | undefined | null): Promise<DesktopCapture>
-  click(target: string, x: number, y: number, opts?: PointerOptions | undefined | null): Promise<DesktopFocusReturn | undefined | null>
-  moveMouse(target: string, x: number, y: number, opts?: PointerOptions | undefined | null): Promise<DesktopFocusReturn | undefined | null>
-  /**
-   * Drags along `path`. A macOS background left drag across the text of one
-   * native text element is made as that element's selection through
-   * accessibility, with no mouse event, and resolves to the selection read
-   * back; a drag posted as input resolves to where a takeover left focus.
-   */
-  drag(target: string, path: Array<DesktopPoint>, opts?: PointerOptions | undefined | null): Promise<DesktopDragResult>
-  scroll(target: string, x: number, y: number, dx: number, dy: number, opts?: PointerOptions | undefined | null): Promise<DesktopFocusReturn | undefined | null>
-  typeText(target: string, text: string, opts?: PointerOptions | undefined | null): Promise<DesktopFocusReturn | undefined | null>
-  keyChord(target: string, keys: Array<string>, opts?: PointerOptions | undefined | null): Promise<DesktopFocusReturn | undefined | null>
-  raiseWindow(windowId: string): Promise<undefined>
-  axSnapshot(target: string, opts?: AxSnapshotOptions | undefined | null): Promise<AxSnapshot>
-  axQuery(target: string, query: AxQuery): Promise<Array<AxNode>>
-  /**
-   * Accessibility hit-test at global logical desktop coordinates; needs no
-   * prior capture.
-   */
-  axElementAt(target: string, x: number, y: number): Promise<AxNode | undefined | null>
-  axFocused(): Promise<AxNode | undefined | null>
-  axNode(reference: string): Promise<AxNode>
-  axAttributes(reference: string): Promise<Array<[string, string]>>
-  axChildren(reference: string): Promise<Array<AxNode>>
-  axParent(reference: string): Promise<AxNode | undefined | null>
-  /**
-   * Performs `action` on the element; with `menu`, chooses that item path
-   * in the menu the action opens, which closes it.
-   */
-  axPerform(reference: string, action: string, menu?: Array<string> | undefined | null): Promise<undefined>
-  axSetValue(reference: string, value: string): Promise<undefined>
-  /**
-   * Selects `text` in the element's value by accessibility, or places a
-   * caret at its start or end, without focus change or keystrokes.
-   */
-  axSelectText(reference: string, text: string, opts?: AxSelectTextOptions | undefined | null): Promise<AxTextSelection>
-  axFocus(reference: string): Promise<undefined>
-  axClick(reference: string, opts?: PointerOptions | undefined | null): Promise<DesktopFocusReturn | undefined | null>
-  /**
-   * Types `text` into the element: native text fields take it by AX
-   * insertion, other elements as keystrokes once they hold keyboard focus.
-   */
-  axType(reference: string, text: string, opts?: PointerOptions | undefined | null): Promise<DesktopFocusReturn | undefined | null>
-  /** Presses a key chord in the element once it holds keyboard focus. */
-  axKeyChord(reference: string, keys: Array<string>, opts?: PointerOptions | undefined | null): Promise<DesktopFocusReturn | undefined | null>
-  /**
-   * Immediately cancel operations submitted before this call. Later
-   * operations may proceed.
-   */
-  cancel(): void
-  close(): Promise<undefined>
-}
-
 /**
  * Incrementally ingests old/new text and computes an exact line diff on a
  * worker thread once both sides finish.
@@ -433,24 +311,6 @@ export declare class MacAppearanceObserver {
   static start(callback: (err: null | Error, appearance: MacOSAppearance) => void): MacAppearanceObserver
   stop(): void
 }
-
-/** The app the user had in front when `macOSFrontApp()` read it. */
-export declare class MacOSFrontApp {
-  /**
-   * Puts this app back in front, without raising its windows, each time the
-   * app that took the front from it takes it again during the next
-   * `durationMs`. Ends early once a hardware mouse button or ⌘/⌃ is used
-   * after the app was read, the app came from a launcher or Spotlight panel,
-   * or a different app comes forward: that is the user picking an app.
-   * Typing does not end it, and a hand-back macOS refuses for a key typed
-   * meanwhile is asked again. Holds nothing when called over a second after
-   * the latest read, as picks made since then went unwatched. Owns desktop
-   * input/focus control only for each hand-back, and rejects if another
-   * operation owns it then. Resolves how many times it put the app back.
-   */
-  keepInFront(durationMs: number): Promise<number>
-}
-export type MacosFrontApp = MacOSFrontApp
 
 /** A transactional, process-owned native OAuth callback receiver. */
 export declare class NativeOAuthCallback {
@@ -1028,38 +888,6 @@ export declare function appleFmCancel(handle: number): void
 export declare function appleFmGenerate(request: string, onEvent: (err: null | Error, event: string) => void): number
 
 /**
- * Installed application identity with currently observable process
- * information.
- */
-export interface Application {
-  id: string
-  name: string
-  path: string
-  running: boolean
-  pid?: number
-}
-
-/**
- * How `apps.open` opens its target.
- *
- * `activate` deliberately brings the application forward. On macOS a file,
- * folder or URL target opens in its default application, or in `app` (an
- * application ID, name or path); `reveal` instead shows the file or folder
- * selected in Finder, which comes to the front.
- */
-export interface ApplicationOpenOptions {
-  activate?: boolean
-  reveal?: boolean
-  app?: string
-}
-
-/** Filters the native application inventory without requiring screen access. */
-export interface ApplicationQuery {
-  query?: string
-  runningOnly?: boolean
-}
-
-/**
  * Applies an `HDiffPatch` single-stream patch to `oldPath`, writing `outPath`.
  *
  * Accepts HDIFFSF20 patches, zstd-compressed or uncompressed; `outPath` is
@@ -1333,65 +1161,6 @@ export interface AstReplaceResult {
   missingGrammars?: Array<string>
 }
 
-export interface AxNode {
-  ref: string
-  role: string
-  nativeRole: string
-  title?: string
-  value?: string
-  description?: string
-  enabled: boolean
-  focused: boolean
-  x?: number
-  y?: number
-  width?: number
-  height?: number
-  actions?: Array<string>
-  childCount: number
-}
-
-export interface AxQuery {
-  role?: string
-  title?: string
-  value?: string
-  limit?: number
-}
-
-/** Where `axSelectText` looks for its text and what it selects there. */
-export interface AxSelectTextOptions {
-  /** Text that must directly precede the match. */
-  prefix?: string
-  /** Text that must directly follow the match. */
-  suffix?: string
-  /** `text` (default) selects the match; `start` and `end` place a caret. */
-  select?: string
-}
-
-export interface AxSnapshot {
-  text: string
-  nodeCount: number
-  truncated: boolean
-}
-
-export interface AxSnapshotOptions {
-  maxDepth?: number
-  maxNodes?: number
-  all?: boolean
-}
-
-/** The selection read back after `axSelectText`, in UTF-16 code units. */
-export interface AxTextSelection {
-  start: number
-  length: number
-  /** The selected text, empty for a caret. */
-  text: string
-  /**
-   * Whether the element is focused in its app: typing and AX insertion
-   * act on the focused element.
-   */
-  focused: boolean
-}
-
 export interface BlockParseOptions {
   /** Source code to parse. */
   code: string
@@ -1428,19 +1197,6 @@ export interface BlockRangeOptions {
   line: number
 }
 
-export interface CaptureCaps {
-  maxWidth?: number
-  maxHeight?: number
-}
-
-/** Rectangle in pixels of the most recent full screenshot of the same target. */
-export interface CaptureRegion {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
 /** Clipboard image payload encoded as PNG bytes. */
 export interface ClipboardImage {
   /** PNG-encoded image bytes. */
@@ -1448,16 +1204,6 @@ export interface ClipboardImage {
   /** MIME type for the encoded image payload. */
   mimeType: string
 }
-
-/**
- * Invalidates this process's event taps before it exits.
- *
- * No desktop session here sees the user's input again afterwards. A macOS tap
- * that dies with its process while the user types makes `WindowServer`
- * deliver their key again; Bun's `process.exit` runs no native exit hook, so
- * the host calls this from its exit handler.
- */
-export declare function closeDesktopEventTaps(): void
 
 /** A context line (before or after a match). */
 export interface ContextLine {
@@ -1518,198 +1264,6 @@ export declare function decodeSixelToPng(bytes: Uint8Array): Uint8Array
  * blocking pool instead of the JS thread.
  */
 export declare function decodeSixelToPngAsync(bytes: Uint8Array): Promise<Uint8Array>
-
-export interface DesktopCapabilities {
-  backend: string
-  displayServer?: string
-  capture: boolean
-  input: boolean
-  ax: boolean
-  backgroundWindowInput: boolean
-  /**
-   * Whether window input accepts `takeover: true` (briefly activate the
-   * target and post real input).
-   */
-  takeover: boolean
-  applications: boolean
-  menus: boolean
-  heldInput: boolean
-  spaces: boolean
-  /**
-   * Native global Escape cancellation of takeover input (`takeover: true`,
-   * held control, desktop/display-level input, raises, activating launches).
-   * Without held control, background window input never watches the user's
-   * keys; it and Wayland stop only through the host interrupt.
-   */
-  globalEscape: boolean
-  capturePermission: string
-  inputPermission: string
-  axPermission: string
-  displayCount: number
-  /**
-   * The user session is locked (lock screen up). Only macOS detects this;
-   * other backends report `false`.
-   */
-  screenLocked: boolean
-  /**
-   * The display is asleep, so nothing can be captured until it wakes. Only
-   * macOS detects this; other backends report `false`.
-   */
-  displayAsleep: boolean
-}
-
-export interface DesktopCapture {
-  data: Uint8Array
-  width: number
-  height: number
-  /** Pre-scaling capture width in native pixels; equals `width` when unscaled. */
-  sourceWidth: number
-  /**
-   * Pre-scaling capture height in native pixels; equals `height` when
-   * unscaled.
-   */
-  sourceHeight: number
-  /** Dimensions of the full screenshot coordinate frame used by pointer input. */
-  coordinateWidth: number
-  coordinateHeight: number
-  /**
-   * Region in the full screenshot's coordinates; zoom pixels are not input
-   * coordinates.
-   */
-  region?: CaptureRegion
-  target: string
-  displays: Array<DesktopDisplay>
-  backend: string
-  displayServer?: string
-  /**
-   * The user session was locked when this frame was taken: a display
-   * capture shows the lock screen, and a window capture shows the window's
-   * last frame behind it. Only macOS detects this; others report `false`.
-   */
-  screenLocked: boolean
-}
-
-export interface DesktopControlState {
-  active: boolean
-}
-
-/**
- * Monitor geometry in both global logical desktop coordinates and composite
- * screenshot pixels.
- */
-export interface DesktopDisplay {
-  id: string
-  name: string
-  x: number
-  y: number
-  width: number
-  height: number
-  scale: number
-  pixelX: number
-  pixelY: number
-  pixelWidth: number
-  pixelHeight: number
-  isPrimary: boolean
-}
-
-/** What a drag call did: made a text selection, or posted input. */
-export interface DesktopDragResult {
-  /**
-   * The selection a macOS background left drag across the text of one
-   * native text element made through accessibility, read back; absent when
-   * the drag was posted as input.
-   */
-  selection?: AxTextSelection
-  /**
-   * Where focus ended when the drag ran in takeover; see
-   * [`DesktopFocusReturn`].
-   */
-  focusReturn?: DesktopFocusReturn
-}
-
-/**
- * Physical-Escape stops counted under `key` by every desktop session created
- * with it, including closed ones, until the key is forgotten.
- */
-export declare function desktopEscapeStops(key: string): number
-
-/**
- * Where focus ended after a takeover input call, as `WindowServer` reports
- * it. Input calls resolve to it on macOS when they took over; other
- * backends and background delivery resolve to `null`.
- */
-export interface DesktopFocusReturn {
-  /** Whether the takeover handed focus back to the app front before it. */
-  handedBack: boolean
-  /** The process front before the takeover. */
-  previousPid?: number
-  /** The process front once the takeover ended; absent when unreadable. */
-  frontPid?: number
-}
-
-/**
- * One immediate child of a native application menu. Paths contain the actual
- * native labels, including ellipses; selection accepts normalized labels.
- */
-export interface DesktopMenuItem {
-  title: string
-  path: Array<string>
-  enabled: boolean
-  checked: boolean
-  hasSubmenu: boolean
-  shortcut?: string
-}
-
-export interface DesktopObservation {
-  capture: DesktopCapture
-  accessibility: AxSnapshot
-}
-
-export interface DesktopPoint {
-  x: number
-  y: number
-}
-
-/**
- * Lock and display-sleep state of the user session, read live per call.
- * Only macOS detects either; other platforms report both as `false`.
- */
-export interface DesktopScreenState {
-  screenLocked: boolean
-  displayAsleep: boolean
-}
-
-export interface DesktopSessionOptions {
-  display?: string
-  /**
-   * Sessions created with the same key share one physical-Escape stop
-   * count, which `desktopEscapeStops` reads after they close.
-   */
-  escapeStopKey?: string
-}
-
-/** One capturable top-level window in global logical desktop coordinates. */
-export interface DesktopWindow {
-  /**
-   * Backend-defined opaque window id, valid as a capture target while the
-   * window lives. Numeric on X11/Win32/macOS; a composite AT-SPI string on
-   * Wayland (e.g. `atspi::1.31:/org/a11y/atspi/accessible/1`). Never parse
-   * it.
-   */
-  id: string
-  /** Window title; may be empty for untitled windows. */
-  title: string
-  /** Owning application name. */
-  app: string
-  /** Owning process id when the platform exposes it. */
-  pid?: number
-  x: number
-  y: number
-  width: number
-  height: number
-  /** Whether the window currently holds input focus. */
-  focused: boolean
-}
 
 /**
  * Detect macOS system appearance via CoreFoundation.
@@ -2158,9 +1712,6 @@ export declare enum FileType {
   Symlink = 3
 }
 
-/** Drops the stop count kept under `key` once no session will use it again. */
-export declare function forgetDesktopEscapeStops(key: string): void
-
 /** Fuzzy file path search for autocomplete. */
 export declare function fuzzyFind(options: FuzzyFindOptions): Promise<FuzzyFindResult>
 
@@ -2536,24 +2087,6 @@ export interface HighlightColors {
   deleted?: string
 }
 
-export interface HoldOptions {
-  /** Duration in seconds, from zero through 100. */
-  duration: number
-  button?: string
-  keys?: Array<string>
-  takeover?: boolean
-  /**
-   * With `takeover`, hand focus back to the user's app even after their
-   * input during the hold; see `PointerOptions.returnFocus`.
-   */
-  returnFocus?: boolean
-  /**
-   * Refuse a background left hold that starts on a control that opens a
-   * menu; see `PointerOptions.refuseMenu`.
-   */
-  refuseMenu?: boolean
-}
-
 /**
  * Convert HTML source to Markdown with optional preprocessing.
  *
@@ -2864,12 +2397,6 @@ export declare function macOSAutocorrectWord(text: string, start: number, length
  */
 export declare function macOSCheckSpelling(text: string): Promise<Array<SpellingRange>>
 
-/**
- * The app macOS `WindowServer` has in front. `null` off macOS and when the
- * front-process SPI is unavailable.
- */
-export declare function macOSFrontApp(): MacOSFrontApp | null
-
 /** Whether the host can use Apple's native spelling service. */
 export declare function macOSSpellCheckerAvailable(): boolean
 
@@ -3079,20 +2606,6 @@ export declare function normalizePtyDimensions(cols: number, rows: number): PtyD
 /** Decode notebook JSON into the editable cell-marker text. */
 export declare function notebookToEditableText(json: string, displayPath: string): string
 
-/**
- * An opened application: its [`Application`] fields and the window it
- * shows. On macOS `window` is its frontmost window once one is on screen;
- * other platforms report none.
- */
-export interface OpenedApplication {
-  id: string
-  name: string
-  path: string
-  running: boolean
-  pid?: number
-  window?: DesktopWindow
-}
-
 /** Check syntax through the shared parse cache without constructing a summary. */
 export declare function parseCodeStatus(options: ParseStatusOptions): ParseStatus
 
@@ -3211,39 +2724,6 @@ export interface PipeStreamInfo {
   total: number
   /** Whether bytes may still arrive. */
   open: boolean
-}
-
-export interface PointerOptions {
-  button?: string
-  count?: number
-  modifiers?: Array<string>
-  /** Arbitrary keys held for the duration of a drag. */
-  keys?: Array<string>
-  /**
-   * Briefly activate the target window and post real input instead of the
-   * default background delivery.
-   */
-  takeover?: boolean
-  /**
-   * With `takeover`, hand focus back to the user's app even if they typed
-   * or clicked during the action; only a third app they switched to keeps
-   * it. The host sets this when it reruns a refused background action.
-   */
-  returnFocus?: boolean
-  /**
-   * Item path to choose in the menu a click opens, matched like a menu-bar
-   * path, e.g. a context menu's `["Add to", "Fonts"]`; the call opens the
-   * menu, presses the item and returns with the menu closed.
-   */
-  menu?: Array<string>
-  /**
-   * Refuse a background left click that lands on a control that opens a
-   * menu (on macOS a menu button or popup button), or a drag that starts on
-   * one, with `BackgroundUnavailable` before anything is sent. The host sets
-   * this when the user refuses foreground takeover: an open menu takes their
-   * keyboard.
-   */
-  refuseMenu?: boolean
 }
 
 /**

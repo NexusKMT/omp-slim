@@ -32,14 +32,7 @@ import { commandConsumed, errorMessage, usage } from "./helpers/parse";
 import { handleSecurityCommand } from "./helpers/security";
 import type { SlashCommandSpec } from "./types";
 
-import {
-	cfgComputerBackgroundFallback,
-	cfgComputerDisplay,
-	cfgComputerEnabled,
-	cfgComputerMaxHeight,
-	cfgComputerMaxWidth,
-	cfgRatchetEnabled,
-} from "../tools/settings";
+import { cfgRatchetEnabled } from "../tools/settings";
 import { cfgPrewalkFrom, cfgPrewalkInto, cfgSkillful } from "../session/settings";
 import { formatSlowModeResetClock } from "../session/anthropic-slow-mode";
 import { cfgExtendedContext } from "../session/context-settings";
@@ -164,40 +157,6 @@ function applyExtendedContextCommand(settings: Settings, args: string): string |
 	}
 	if (arg === "status") return `Extended context is ${formatExtendedContextStatus(settings)}.`;
 	return undefined;
-}
-
-/** Detailed, session-effective `/computer status` diagnostics. */
-function formatComputerUseStatus(session: AgentSession): string {
-	const enabled = cfgComputerEnabled.get(session.settings);
-	const active = session.getEvalPreludes().some(definition => definition.name === "computer");
-	const configured = {
-		display: cfgComputerDisplay.get(session.settings),
-		maxWidth: cfgComputerMaxWidth.get(session.settings),
-		maxHeight: cfgComputerMaxHeight.get(session.settings),
-		backgroundFallback: cfgComputerBackgroundFallback.get(session.settings),
-	};
-	return [
-		`Computer use: ${enabled ? "enabled" : "disabled"}`,
-		`prelude: ${active ? "active" : "inactive"}`,
-		`configured: display=${configured.display}, maxWidth=${configured.maxWidth}, maxHeight=${configured.maxHeight}, backgroundFallback=${configured.backgroundFallback}`,
-	].join(" · ");
-}
-
-/**
- * Apply a session-scoped computer-use toggle; the session's setting listener
- * reconciles the prompt without a mid-session cache-busting rebuild.
- * The override is never persisted to settings.json.
- */
-function applyComputerUseToggle(session: AgentSession, enable: boolean): string {
-	const previous = cfgComputerEnabled.get(session.settings);
-	cfgComputerEnabled.override(session.settings, enable);
-	if (enable && !session.getEvalPreludes().some(definition => definition.name === "computer")) {
-		cfgComputerEnabled.override(session.settings, previous);
-		return "Computer use is unavailable in this session.";
-	}
-	return enable
-		? `Computer use enabled for this session. ${formatComputerUseStatus(session)}`
-		: "Computer use disabled for this session.";
 }
 
 /** Tools the ratchet loop needs: the eval kernel hosts `ratchet()`, `task` runs its analyzer. */
@@ -640,51 +599,6 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			const output = applyExtendedContextCommand(runtime.ctx.settings, command.args);
 			refreshStatusLine(runtime.ctx);
 			runtime.ctx.showStatus(output ?? "Usage: /extended-context [on|off|status]");
-			clearSubmittedText(runtime);
-		},
-	},
-	{
-		name: "computer",
-		icon: "computer",
-		description: "Toggle the native computer-use eval prelude for this session",
-		acpDescription: "Toggle computer use",
-		acpInputHint: "[on|off|status]",
-		subcommands: [
-			{ name: "on", description: "Enable computer use for this session" },
-			{ name: "off", description: "Disable computer use for this session" },
-			{ name: "status", description: "Show computer use status" },
-		],
-		allowArgs: true,
-		getTuiAutocompleteDescription: runtime =>
-			`Computer: ${cfgComputerEnabled.get(runtime.ctx.session.settings) ? "on" : "off"}`,
-		handle: async (command, runtime) => {
-			const arg = command.args.trim().toLowerCase();
-			if (arg === "status") {
-				await runtime.output(formatComputerUseStatus(runtime.session));
-				return commandConsumed();
-			}
-			if (!arg || arg === "toggle" || arg === "on" || arg === "off") {
-				const enable = arg === "off" ? false : arg === "on" || !cfgComputerEnabled.get(runtime.session.settings);
-				await runtime.output(applyComputerUseToggle(runtime.session, enable));
-				return commandConsumed();
-			}
-			return usage("Usage: /computer [on|off|status]", runtime);
-		},
-		handleTui: async (command, runtime) => {
-			const arg = command.args.trim().toLowerCase();
-			if (arg === "status") {
-				runtime.ctx.showStatus(formatComputerUseStatus(runtime.ctx.session));
-				clearSubmittedText(runtime);
-				return;
-			}
-			if (!arg || arg === "toggle" || arg === "on" || arg === "off") {
-				const enable =
-					arg === "off" ? false : arg === "on" || !cfgComputerEnabled.get(runtime.ctx.session.settings);
-				runtime.ctx.showStatus(applyComputerUseToggle(runtime.ctx.session, enable));
-				clearSubmittedText(runtime);
-				return;
-			}
-			runtime.ctx.showStatus("Usage: /computer [on|off|status]");
 			clearSubmittedText(runtime);
 		},
 	},

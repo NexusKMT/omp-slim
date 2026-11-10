@@ -228,9 +228,6 @@ Main agent verifies once after all subagents land; parallel runs storm the CPU a
 Verify proportionally: run the narrowest check that exercises the change (the failing test, a one-off script), once.
 - Investigation: run it; output proves it; no tests.
 - UI: verify actual surface.
-{{#if computerEnabled}}
-  - Native desktop: JS/Python eval `computer` helpers; fresh screenshot/accessibility proof.
-{{/if}}
   - TUI/CLI: launch actual program; observe interaction/output/state.
   - No runtime for changed surface: throwaway script/smoke test; report visual limit.
 - Bug: a failing test or a clear user report is the reproduction; fix, then rerun the narrowest check. Add a regression test only when no existing test covers the path.

@@ -1,5 +1,4 @@
 import { loadNative, missingNativeClass, missingNativeExport } from "./loader-state.js";
-import { adaptDesktopSession } from "./desktop-adapter.js";
 
 /**
  * Native addon entrypoint.
@@ -25,7 +24,6 @@ const nativeBindings = loadNative();
 // classes
 export const AudioCapture = nativeBindings.AudioCapture ?? missingNativeClass("AudioCapture");
 export const AudioPlayback = nativeBindings.AudioPlayback ?? missingNativeClass("AudioPlayback");
-export const DesktopSession = adaptDesktopSession(nativeBindings.DesktopSession);
 export const DiffStream = nativeBindings.DiffStream ?? missingNativeClass("DiffStream");
 export const EditSession = nativeBindings.EditSession ?? missingNativeClass("EditSession");
 export const EditStore = nativeBindings.EditStore ?? missingNativeClass("EditStore");
@@ -36,7 +34,6 @@ export const IpcServer = nativeBindings.IpcServer ?? missingNativeClass("IpcServ
 export const LineMatcher = nativeBindings.LineMatcher ?? missingNativeClass("LineMatcher");
 export const LiveWebRtcPeer = nativeBindings.LiveWebRtcPeer ?? missingNativeClass("LiveWebRtcPeer");
 export const MacAppearanceObserver = nativeBindings.MacAppearanceObserver ?? missingNativeClass("MacAppearanceObserver");
-export const MacOSFrontApp = nativeBindings.MacOSFrontApp ?? missingNativeClass("MacOSFrontApp");
 export const NativeOAuthCallback = nativeBindings.NativeOAuthCallback ?? missingNativeClass("NativeOAuthCallback");
 export const PipeStreams = nativeBindings.PipeStreams ?? missingNativeClass("PipeStreams");
 export const PowerAssertion = nativeBindings.PowerAssertion ?? missingNativeClass("PowerAssertion");
@@ -63,13 +60,11 @@ export const astEdit = nativeBindings.astEdit ?? missingNativeExport("astEdit");
 export const astGrep = nativeBindings.astGrep ?? missingNativeExport("astGrep");
 export const astMatch = nativeBindings.astMatch ?? missingNativeExport("astMatch");
 export const blockRangeAt = nativeBindings.blockRangeAt ?? missingNativeExport("blockRangeAt");
-export const closeDesktopEventTaps = nativeBindings.closeDesktopEventTaps ?? missingNativeExport("closeDesktopEventTaps");
 export const copyToClipboard = nativeBindings.copyToClipboard ?? missingNativeExport("copyToClipboard");
 export const cosineSimilarityPairs = nativeBindings.cosineSimilarityPairs ?? missingNativeExport("cosineSimilarityPairs");
 export const countTokens = nativeBindings.countTokens ?? missingNativeExport("countTokens");
 export const decodeSixelToPng = nativeBindings.decodeSixelToPng ?? missingNativeExport("decodeSixelToPng");
 export const decodeSixelToPngAsync = nativeBindings.decodeSixelToPngAsync ?? missingNativeExport("decodeSixelToPngAsync");
-export const desktopEscapeStops = nativeBindings.desktopEscapeStops ?? missingNativeExport("desktopEscapeStops");
 export const detectMacOSAppearance = nativeBindings.detectMacOSAppearance ?? missingNativeExport("detectMacOSAppearance");
 export const deviceCheckGenerateToken = nativeBindings.deviceCheckGenerateToken ?? missingNativeExport("deviceCheckGenerateToken");
 export const diffLineRuns = nativeBindings.diffLineRuns ?? missingNativeExport("diffLineRuns");
@@ -89,7 +84,6 @@ export const executeShell = nativeBindings.executeShell ?? missingNativeExport("
 export const expandWindowsLongPath = nativeBindings.expandWindowsLongPath ?? missingNativeExport("expandWindowsLongPath");
 export const extractInlineSloppyRegions = nativeBindings.extractInlineSloppyRegions ?? missingNativeExport("extractInlineSloppyRegions");
 export const extractSegments = nativeBindings.extractSegments ?? missingNativeExport("extractSegments");
-export const forgetDesktopEscapeStops = nativeBindings.forgetDesktopEscapeStops ?? missingNativeExport("forgetDesktopEscapeStops");
 export const fuzzyFind = nativeBindings.fuzzyFind ?? missingNativeExport("fuzzyFind");
 export const getSupportedLanguages = nativeBindings.getSupportedLanguages ?? missingNativeExport("getSupportedLanguages");
 export const getWindowsShortPath = nativeBindings.getWindowsShortPath ?? missingNativeExport("getWindowsShortPath");
@@ -118,7 +112,6 @@ export const isoStop = nativeBindings.isoStop ?? missingNativeExport("isoStop");
 export const listWorkspace = nativeBindings.listWorkspace ?? missingNativeExport("listWorkspace");
 export const macOSAutocorrectWord = nativeBindings.macOSAutocorrectWord ?? missingNativeExport("macOSAutocorrectWord");
 export const macOSCheckSpelling = nativeBindings.macOSCheckSpelling ?? missingNativeExport("macOSCheckSpelling");
-export const macOSFrontApp = nativeBindings.macOSFrontApp ?? missingNativeExport("macOSFrontApp");
 export const macOSSpellCheckerAvailable = nativeBindings.macOSSpellCheckerAvailable ?? missingNativeExport("macOSSpellCheckerAvailable");
 export const macOSSpellingGuesses = nativeBindings.macOSSpellingGuesses ?? missingNativeExport("macOSSpellingGuesses");
 export const matchesKey = nativeBindings.matchesKey ?? missingNativeExport("matchesKey");

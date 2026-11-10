@@ -29,27 +29,6 @@ fn main() {
 	build_syntax_set();
 	build_oauth_callback_helper();
 	if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-		build_darwin_native_helper(
-			"src/desktop/macos/capture/helper.m",
-			"omp-capture-helper",
-			"OMP_CAPTURE_DARWIN_HELPER",
-			&["AppKit", "ScreenCaptureKit", "CoreGraphics"],
-			"14.0",
-		);
-		build_darwin_native_helper(
-			"src/desktop/macos/keymap-helper.m",
-			"omp-keymap-helper",
-			"OMP_KEYMAP_DARWIN_HELPER",
-			&["Carbon"],
-			"12.0",
-		);
-		build_rust_helper(
-			"src/desktop/macos/release_helper.rs",
-			&["src/desktop/macos/release.rs", "src/desktop/macos/route.rs"],
-			"omp_input_release",
-			"omp-input-release",
-			"OMP_INPUT_RELEASE_HELPER",
-		);
 		build_applefm_bridge();
 	}
 }
