@@ -1149,7 +1149,13 @@ export class SessionAdvisors {
 		const descriptors = this.#resolveAdvisorRuntimeDescriptors(false);
 		if (descriptors.length !== this.#advisors.length) return false;
 		for (let i = 0; i < descriptors.length; i++) {
-			if (descriptors[i].signature !== this.#advisors[i].signature) return false;
+			// The same provider/id can carry a different endpoint, headers or header
+			// resolver. A primary object replacement must reach advisor requests too.
+			if (
+				descriptors[i].model !== this.#advisors[i].model ||
+				descriptors[i].signature !== this.#advisors[i].signature
+			)
+				return false;
 		}
 		return true;
 	}

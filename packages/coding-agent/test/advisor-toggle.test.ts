@@ -211,6 +211,41 @@ describe("AgentSession advisor toggle", () => {
 		expect(session.getAdvisorAgent()?.state.model.id).toBe(replacementModel.id);
 	});
 
+	it("uses the replacement primary transport when provider and model id stay the same", async () => {
+		const initial: Model = {
+			...model,
+			baseUrl: "https://first-gateway.example.invalid/v1",
+			headers: { "x-model-route": "first" },
+		};
+		const replacement: Model = {
+			...initial,
+			baseUrl: "https://second-gateway.example.invalid/v1",
+			headers: { "x-model-route": "second" },
+			resolveHeaders: async () => ({ "x-dynamic-route": "second" }),
+		};
+		await session.setModel(initial);
+		expect(session.setAdvisorEnabled(true)).toBe(true);
+
+		await session.setModelTemporary(replacement);
+		const currentModel = session.model;
+		if (!currentModel) throw new Error("Expected primary model after model switch");
+		const advisor = session.getAdvisorAgent();
+		if (!advisor) throw new Error("Expected advisor agent after model switch");
+		const requestedModels: Model[] = [];
+		const mock = createMockModel({ responses: [{ content: ["review complete"] }] });
+		advisor.streamFn = (requestModel, context, options) => {
+			requestedModels.push(requestModel);
+			return mock.stream(requestModel, context, options);
+		};
+		await advisor.prompt("Review the current change.");
+
+		expect(requestedModels).toHaveLength(1);
+		expect(requestedModels[0]).toBe(currentModel);
+		expect(requestedModels[0]?.baseUrl).toBe(replacement.baseUrl);
+		expect(requestedModels[0]?.headers).toEqual(replacement.headers);
+		expect(requestedModels[0]?.resolveHeaders).toBe(replacement.resolveHeaders);
+	});
+
 	it("refreshes the live advisor when only the advisor route changes", async () => {
 		const initial = resolveModelOverride(["openrouter/z-ai/glm-4.7@cerebras"], modelRegistry).model;
 		if (!initial) throw new Error("Missing routed fixture model");
