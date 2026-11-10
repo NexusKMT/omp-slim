@@ -7143,25 +7143,6 @@ func (v *GetSessionLeaseResult) decodeFrom(raw map[string]json.RawMessage) error
 	return nil
 }
 
-type ExportHtmlResult struct {
-	Path string `json:"path"`
-}
-
-func (v *ExportHtmlResult) UnmarshalJSON(data []byte) error {
-	return decodeWith(data, "ExportHtmlResult", v.decodeFrom)
-}
-
-func (v *ExportHtmlResult) decodeFrom(raw map[string]json.RawMessage) error {
-	var out ExportHtmlResult
-	d := fieldDecoder{raw: raw, owner: "ExportHtmlResult"}
-	d.required("path", &out.Path)
-	if d.err != nil {
-		return d.err
-	}
-	*v = out
-	return nil
-}
-
 type GetBranchMessagesResult struct {
 	Messages []BranchMessage `json:"messages"`
 }
@@ -7832,18 +7813,6 @@ func (c Commands) GetSessionLease(ctx context.Context, p GetSessionLeaseCommand)
 	var out GetSessionLeaseResult
 	err := c.call(ctx, "get_session_lease", p, 0, &out)
 	return out, err
-}
-
-// ExportHTMLCommand holds the parameters of "export_html".
-type ExportHTMLCommand struct {
-	OutputPath *string `json:"outputPath,omitempty"`
-}
-
-// ExportHTML sends "export_html": Export the session as HTML; returns the written path.
-func (c Commands) ExportHTML(ctx context.Context, p ExportHTMLCommand) (string, error) {
-	var out ExportHtmlResult
-	err := c.call(ctx, "export_html", p, 0, &out)
-	return out.Path, err
 }
 
 // SwitchSessionCommand holds the parameters of "switch_session".

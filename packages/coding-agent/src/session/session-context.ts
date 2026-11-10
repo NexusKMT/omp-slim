@@ -1,16 +1,7 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { customMessageEntryMessage, isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
-import {
-	canReplayRemoteCompaction,
-	getAnthropicCompactionPayload,
-	isTurnStartEntry,
-} from "@oh-my-pi/pi-agent-core/compaction";
-import {
-	coerceServiceTierByFamily,
-	type Model,
-	type OpenAIResponsesHistoryPayload,
-	type ServiceTierByFamily,
-} from "@oh-my-pi/pi-ai";
+import { hasOpaqueCompaction, isTurnStartEntry } from "@oh-my-pi/pi-agent-core/compaction";
+import { coerceServiceTierByFamily, type Model, type ServiceTierByFamily } from "@oh-my-pi/pi-ai";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import {
@@ -228,21 +219,6 @@ function snapcompactHistoryBlocksForContext(
 	return snapcompact.historyBlocks(archive, snapcompactHistoryBlockOptions(archive, options));
 }
 
-/** Reads validated OpenAI Responses replacement history from a compaction entry. */
-export function getOpenAiRemoteCompactionPayload(
-	compaction: Pick<CompactionEntry, "preserveData"> | null | undefined,
-): OpenAIResponsesHistoryPayload | undefined {
-	const candidate = compaction?.preserveData?.openaiRemoteCompaction;
-	if (!isRecord(candidate)) return undefined;
-	if (typeof candidate.provider !== "string" || candidate.provider.length === 0) return undefined;
-	if (!Array.isArray(candidate.replacementHistory) || !candidate.replacementHistory.every(isRecord)) return undefined;
-	return {
-		type: "openaiResponsesHistory",
-		provider: candidate.provider,
-		items: candidate.replacementHistory,
-	};
-}
-
 /** Session entries that replay as transcript messages: persisted messages and custom messages. */
 export type TranscriptEntry = SessionMessageEntry | CustomMessageEntry;
 
@@ -251,18 +227,14 @@ export function isTranscriptEntry(entry: SessionEntry): entry is TranscriptEntry
 }
 
 /**
- * The newest compaction on `path` that `model` can read (see
- * {@link BuildSessionContextOptions.model}), or null when there is none.
- * Without a model the newest compaction is the boundary.
+ * The newest readable text summary on `path`, or null when there is none.
+ * Opaque legacy payloads require replaying their original journal messages.
  */
-export function getReadableCompactionEntry(
-	path: readonly SessionEntry[],
-	model: Model | undefined,
-): CompactionEntry | null {
+export function getReadableCompactionEntry(path: readonly SessionEntry[]): CompactionEntry | null {
 	for (let i = path.length - 1; i >= 0; i--) {
 		const entry = path[i];
 		if (entry.type !== "compaction") continue;
-		if (!model || canReplayRemoteCompaction(entry.preserveData, model)) return entry;
+		if (!hasOpaqueCompaction(entry.preserveData)) return entry;
 	}
 	return null;
 }
@@ -378,8 +350,8 @@ export function buildSessionContext(
 		}
 	}
 
-	if (options?.model && !options.transcript) {
-		compaction = getReadableCompactionEntry(path, options.model);
+	if (!options?.transcript) {
+		compaction = getReadableCompactionEntry(path);
 	}
 	const injectedTtsrRules = Array.from(injectedTtsrRulesSet);
 
@@ -536,45 +508,8 @@ export function buildSessionContext(
 			appendMessage(path[i]);
 		}
 	} else if (compaction) {
-		const remotePayload = getOpenAiRemoteCompactionPayload(compaction);
-		const remoteReplacementHistory = remotePayload?.items;
-		// Anthropic server compaction persists a plain-text summary plus its
-		// native replay; the kept tail still comes from entries below.
-		const anthropicPayload = getAnthropicCompactionPayload(compaction.preserveData);
-		const providerPayload = remotePayload ?? anthropicPayload;
-
 		// Find compaction index in path
 		const compactionIdx = path.findIndex(e => e.type === "compaction" && e.id === compaction.id);
-
-		// A natively replayed summary must not invalidate the retained tail's
-		// bound thinking: the commit timestamp as historyRewriteAt would be newer
-		// than the tail and strip its signatures on the next request. Predate the
-		// marker before the first retained entry instead (other lanes use the
-		// commit timestamp). The summary itself keeps the commit timestamp, which
-		// still retires the tail's pre-compaction usage reports.
-		let historyRewriteAt: number | undefined;
-		if (anthropicPayload !== undefined) {
-			const firstKeptIdx = path.findIndex(entry => entry.id === compaction.firstKeptEntryId);
-			const snapshotIdx =
-				compaction.firstKeptEntryId === "" && compaction.providerReplayThroughEntryId
-					? path.findIndex(entry => entry.id === compaction.providerReplayThroughEntryId)
-					: -1;
-			const firstRetained =
-				(firstKeptIdx >= 0 && firstKeptIdx < compactionIdx ? path[firstKeptIdx] : undefined) ??
-				(snapshotIdx >= 0 && snapshotIdx < compactionIdx - 1 ? path[snapshotIdx + 1] : undefined) ??
-				path[compactionIdx + 1];
-			// The message's own time, not the entry's: an assistant message is
-			// stamped when its stream starts and saved after it ends, so a marker
-			// derived from the entry would postdate that turn and strip its thinking.
-			// Summaries without `exactTail` keep the entry time: thinking created
-			// after them was signed against requests that stripped that turn's.
-			if (firstRetained?.type === "message" && anthropicPayload.exactTail) {
-				historyRewriteAt = firstRetained.message.timestamp - 1;
-			} else if (firstRetained) {
-				const retainedAt = new Date(firstRetained.timestamp).getTime();
-				if (Number.isFinite(retainedAt)) historyRewriteAt = retainedAt - 1;
-			}
-		}
 
 		// Re-attach any archived snapcompact frames so the model can keep
 		// reading the archived history after every context rebuild.
@@ -585,12 +520,10 @@ export function buildSessionContext(
 			compaction.timestamp,
 			{
 				shortSummary: compaction.shortSummary,
-				providerPayload,
 				blocks: snapcompactHistoryBlocksForContext(snapcompactArchive, options),
 				warning: compaction.warning,
 				method: compaction.method,
 				tokensAfter: compaction.tokensAfter,
-				historyRewriteAt,
 			},
 		);
 		// Agent context (non-transcript): summary first so the LLM sees the
@@ -623,18 +556,13 @@ export function buildSessionContext(
 			}
 		}
 
-		// The remote replacement payload (OpenAI remote compaction) carries the
-		// kept turns for the LLM context only; it is not rendered as visible
-		// messages. The collapsed display transcript must still emit the kept
-		// SessionEntry rows so a remotely-compacted session keeps its recent
-		// turns visible instead of showing only the summary and post-compaction.
-		if (!remoteReplacementHistory || options?.transcript) {
+		{
 			// Emit kept messages (before compaction, starting from firstKeptEntryId).
 			const firstKeptIdx = path.findIndex(
 				(entry, index) => index < compactionIdx && entry.id === compaction.firstKeptEntryId,
 			);
 			const snapshotIdx =
-				anthropicPayload && compaction.firstKeptEntryId === "" && compaction.providerReplayThroughEntryId
+				compaction.firstKeptEntryId === "" && compaction.providerReplayThroughEntryId
 					? path.findIndex(entry => entry.id === compaction.providerReplayThroughEntryId)
 					: -1;
 			const retainedStart = firstKeptIdx >= 0 ? firstKeptIdx : snapshotIdx >= 0 ? snapshotIdx + 1 : -1;
@@ -667,13 +595,6 @@ export function buildSessionContext(
 					appendMessage(entry);
 				}
 			}
-		} else if (compaction.providerReplayThroughEntryId) {
-			const replayThroughIdx = path.findIndex(entry => entry.id === compaction.providerReplayThroughEntryId);
-			if (replayThroughIdx >= 0 && replayThroughIdx < compactionIdx) {
-				for (let i = replayThroughIdx + 1; i < compactionIdx; i++) {
-					appendMessage(path[i]);
-				}
-			}
 		}
 
 		// Display transcript: emit the summary at the chronological compaction
@@ -704,20 +625,8 @@ export function buildSessionContext(
 		if (notes && renderedNotes.length > 0) {
 			const sourceEntry = path.find(entry => entry.id === notes.entryId);
 			if (sourceEntry) {
-				// A native Anthropic compaction block must open the request, and the
-				// provider folds it into a directly following retained assistant turn
-				// (whose signed thinking is bound to that prefix). Nothing may precede
-				// the block or split that fold, so the notes follow the summary and any
-				// retained assistant turn with its tool results.
-				const head = messages[0];
-				let insertAt = 0;
-				if (head?.role === "compactionSummary" && head.providerPayload?.type === "anthropicCompaction") {
-					insertAt = 1;
-					if (messages[insertAt]?.role === "assistant") insertAt++;
-					while (messages[insertAt]?.role === "toolResult") insertAt++;
-				}
 				messages.splice(
-					insertAt,
+					0,
 					0,
 					createCustomMessage(CONTEXT_NOTES_ENTRY_TYPE, renderedNotes, false, undefined, sourceEntry.timestamp),
 				);

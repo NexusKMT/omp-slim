@@ -66,8 +66,8 @@ const PYTHON_BINDING: PythonBinding = {
 		"set_host_uri_schemes",
 		"get_messages",
 	],
-	pathParams: ["open_session.sessionDir", "switch_session.sessionPath", "export_html.outputPath"],
-	pathResults: ["export_html"],
+	pathParams: ["open_session.sessionDir", "switch_session.sessionPath"],
+	pathResults: [],
 	listenerNames: { extension_ui_request: "on_ui_request" },
 	extraDefs: ["AskAnswer"],
 };

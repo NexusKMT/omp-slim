@@ -245,13 +245,6 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		result: { held: "string[]", unknown: "string[]" },
 	},
 	{
-		name: "export_html",
-		doc: "Export the session as HTML; returns the written path.",
-		params: { "outputPath?": "string" },
-		result: { path: "string" },
-		unwrap: "path",
-	},
-	{
 		name: "switch_session",
 		doc: "Switch to another session file. Give provider and modelId together to override the saved model; otherwise an unavailable saved model fails the request and keeps the current session.",
 		params: { sessionPath: "string", "provider?": "string", "modelId?": "string" },
