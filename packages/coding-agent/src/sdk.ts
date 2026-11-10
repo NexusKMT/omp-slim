@@ -178,13 +178,7 @@ import {
 	obfuscateProviderContext,
 	type SecretObfuscator,
 } from "./secrets";
-import {
-	AgentSession,
-	type InitialRetryFallbackState,
-	MCP_DISCOVERY_TURN_WAIT_MS,
-	type PlanYolo,
-	type Prewalk,
-} from "./session/agent-session";
+import { AgentSession, type InitialRetryFallbackState, MCP_DISCOVERY_TURN_WAIT_MS } from "./session/agent-session";
 import type { AgentSessionDisposeOptions } from "./session/agent-session-types";
 import {
 	createAuthStorageSettingsSync,
@@ -319,7 +313,6 @@ import { createRatchetPrelude } from "./ratchet/prelude-definition";
 import { createArchivePrelude } from "./archive/prelude-definition";
 import { ToolContextStore } from "./tools/context";
 import { isIrcEnabled } from "./irc/messaging";
-import { imageGenTool } from "./tools/image-gen";
 import { wrapToolWithMetaNotice } from "./tools/output-meta";
 import { isFilesystemSourcePath } from "./tools/path-utils";
 import { isAutoQaEnabled } from "./tools/report-tool-issue";
@@ -331,8 +324,6 @@ import { formatLocalCalendarDate } from "@oh-my-pi/pi-tui/chrome/local-date";
 import { normalizePromptPath } from "./utils/prompt-path";
 import { buildNamedToolChoice } from "./utils/tool-choice";
 import { VibeSessionRegistry } from "./vibe/runtime";
-import { registerLocalInferenceApi } from "./tiny/local-inference-api";
-import { shutdownTinyTitleClient } from "./tiny/title-client";
 import { buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 
 import {
@@ -340,7 +331,6 @@ import {
 	cfgAsyncMaxJobs,
 	cfgAsyncWidgets,
 	cfgRatchetEnabled,
-	cfgGenerateImageEnabled,
 	cfgSecurityEnabled,
 	cfgToolsAbortOnFabricatedResult,
 	cfgToolsIntentTracing,
@@ -387,7 +377,7 @@ import {
 	type SkillsSettings,
 } from "./extensibility/settings";
 import { cfgTtsr } from "./export/ttsr-settings";
-import { cfgDisabledProviders, cfgEnabledModels, cfgEnabledProviders, cfgModelRoles } from "./config/model-settings";
+import { cfgDisabledProviders, cfgEnabledModels, cfgEnabledProviders, cfgModel } from "./config/model-settings";
 import { cfgEditRecoverInlineEdits } from "./edit/settings";
 import { cfgGoalEnabled } from "./goals/settings";
 import {
@@ -664,21 +654,13 @@ export interface CreateAgentSessionOptions {
 	resolveServiceTierByFamily?: (model: Model | undefined) => ServiceTierByFamily;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>;
-	/** Prewalk from the starting model to a fast/cheap target at the first edit/write once the todo list exists. */
-	prewalk?: Prewalk;
-	/** CLI prewalk selector awaiting extension provider registration; patterns retain role fallback order. */
-	deferredPrewalk?: { target: string; patterns: string[] };
-	/** Host-owned display sink for non-fatal startup prewalk warnings. */
-	onPrewalkWarning?: (warning: string) => void;
-	/** Keep `prewalk.auto` away from the startup session (`--no-prewalk`); `/new` lifts it. */
-	suppressAutoPrewalk?: boolean;
 	/**
 	 * Session is IRC-routable before its owner sends the first prompt (task executor spawns): until
 	 * then, incoming IRC messages queue for that prompt's turn instead of waking one without it.
 	 */
 	awaitingAssignment?: boolean;
 	/** Force read-only plan mode at start, auto-approve on the model's first resolve call, then switch to execute. */
-	planYolo?: PlanYolo;
+	planYolo?: boolean;
 
 	/** Provider-facing system prompt override. Replaces the fully rendered default blocks. */
 	systemPrompt?: string | string[] | ((defaultPrompt: string[]) => string | string[]);
@@ -1227,96 +1209,6 @@ export async function loadCliExtensionProviders(
 	if (options.discoverModels !== false) await modelRegistry.refreshRuntimeProviders();
 }
 
-/** Resolve prewalk with the same ordering before and after extension registration. */
-export async function resolvePrewalkTarget(
-	patterns: readonly string[],
-	target: string,
-	modelRegistry: ModelRegistry,
-	preferences: ModelMatchPreferences,
-	disabledProviders: ReadonlySet<string>,
-	{
-		deferUnregistered = false,
-		beforeRefresh,
-	}: { deferUnregistered?: boolean; beforeRefresh?: () => Promise<void> } = {},
-): Promise<{ prewalk?: Prewalk; warnings: string[]; deferred: boolean }> {
-	let refreshedProviders: Set<string> | undefined;
-	const resolveCandidate = (pattern: string) => resolveCliModel({ cliModel: pattern, modelRegistry, preferences });
-	let authenticated: ResolveCliModelResult | undefined;
-	let firstUnauthenticated: ResolveCliModelResult | undefined;
-	let lastResolution: ResolveCliModelResult | undefined;
-	let deferred = false;
-	let disabledProvider: string | undefined;
-
-	// Each provider-qualified candidate gets its scoped discovery opportunity
-	// before advancing to the next candidate in the configured role chain.
-	for (const pattern of patterns) {
-		disabledProvider = undefined;
-		let candidate = resolveCandidate(pattern);
-		lastResolution = candidate;
-		if (candidate.model && disabledProviders.has(candidate.model.provider)) {
-			disabledProvider = candidate.model.provider;
-			continue;
-		}
-		if (candidate.model && modelRegistry.hasConfiguredAuth(candidate.model)) {
-			authenticated = candidate;
-			break;
-		}
-		if (candidate.model) {
-			firstUnauthenticated ??= candidate;
-			continue;
-		}
-
-		const requestedProvider = parseModelString(pattern)?.provider.toLowerCase();
-		if (requestedProvider && disabledProviders.has(requestedProvider)) {
-			disabledProvider = requestedProvider;
-			continue;
-		}
-		if (!requestedProvider) {
-			if (deferUnregistered) deferred = true;
-			continue;
-		}
-		if (refreshedProviders?.has(requestedProvider)) continue;
-		const provider = modelRegistry.getDiscoveryProviderId(requestedProvider);
-		if (!provider) {
-			if (deferUnregistered) deferred = true;
-			continue;
-		}
-
-		(refreshedProviders ??= new Set()).add(requestedProvider);
-		await beforeRefresh?.();
-		await modelRegistry.refreshDiscoverableProviders([provider], "online-if-uncached");
-		candidate = resolveCandidate(pattern);
-		lastResolution = candidate;
-		if (candidate.model && disabledProviders.has(candidate.model.provider)) {
-			disabledProvider = candidate.model.provider;
-			continue;
-		}
-		if (candidate.model && modelRegistry.hasConfiguredAuth(candidate.model)) {
-			authenticated = candidate;
-			break;
-		}
-		if (candidate.model) firstUnauthenticated ??= candidate;
-	}
-
-	if (deferred) return { warnings: [], deferred: true };
-	const resolved = authenticated ?? firstUnauthenticated ?? lastResolution ?? resolveCandidate(patterns[0] ?? target);
-	const warnings = resolved.warning ? [resolved.warning] : [];
-	if (resolved.error || !resolved.model) {
-		warnings.push(
-			disabledProvider
-				? `prewalk disabled — provider "${disabledProvider}" is disabled`
-				: `prewalk disabled — ${resolved.error ?? `model "${target}" not found`}`,
-		);
-	} else if (disabledProviders.has(resolved.model.provider)) {
-		warnings.push(`prewalk disabled — provider "${resolved.model.provider}" is disabled`);
-	} else if (!modelRegistry.hasConfiguredAuth(resolved.model)) {
-		warnings.push(`prewalk disabled — no API key for ${resolved.model.provider}/${resolved.model.id}`);
-	} else {
-		return { prewalk: { target: resolved.model, thinkingLevel: resolved.thinkingLevel }, warnings, deferred: false };
-	}
-	return { warnings, deferred: false };
-}
-
 /**
  * Discover skills from cwd and agentDir.
  */
@@ -1706,7 +1598,6 @@ function buildMCPPromptCommands(manager: MCPManager): LoadedCustomCommand[] {
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
-	registerLocalInferenceApi();
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
@@ -1764,8 +1655,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				cacheDbPath: getModelDbPath(agentDir),
 			},
 		);
-	let prewalk = options.prewalk;
-	let deferredPrewalk = options.deferredPrewalk;
 	// Track whether we internally created the authStorage so we can close it
 	// if construction fails before the session takes ownership.
 	const ownsAuthStorage = !options.authStorage && !options.modelRegistry;
@@ -2272,6 +2161,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				);
 			};
 		const cheapModelOptions: Omit<ModelJobWidgetAuthorOptions, "onUsage"> = {
+			getModel: () => agent?.state.model,
 			settings,
 			modelRegistry,
 			sessionId: () => sessionManager.getSessionId(),
@@ -2399,9 +2289,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			outputSchema: options.outputSchema,
 			outputSchemaMode: options.outputSchemaMode,
 			requireYieldTool: options.requireYieldTool,
-			get prewalkArmed() {
-				return prewalk !== undefined || deferredPrewalk !== undefined;
-			},
 			taskDepth: options.taskDepth ?? 0,
 			getSessionFile: () => sessionManager.getSessionFile() ?? null,
 			sessionManager,
@@ -3421,25 +3308,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 		}
 
-		if (deferredPrewalk) {
-			const { target, patterns } = deferredPrewalk;
-			const discoveryInFlight = runtimeDiscoveryPromise;
-			const selection = await resolvePrewalkTarget(
-				patterns,
-				target,
-				modelRegistry,
-				modelMatchPreferences,
-				disabledProviderIds(settings),
-				{ beforeRefresh: discoveryInFlight ? () => discoveryInFlight : undefined },
-			);
-			prewalk = selection.prewalk;
-			deferredPrewalk = undefined;
-			for (const warning of selection.warnings) {
-				logger.warn("Prewalk startup warning", { warning });
-				options.onPrewalkWarning?.(warning);
-			}
-		}
-
 		if (model) {
 			const selectedModel = model;
 			const refreshedModel = await logger.time("refreshInitialModelMetadata", () =>
@@ -3634,48 +3502,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		for (const tool of toolRegistry.values()) {
 			toolRegistry.set(tool.name, new ExtensionToolWrapper(tool, extensionRunner));
 		}
-		// Image and speech generation are optional custom tools gated by live settings.
-		// They install here, not through the custom-tools extension, so the settings
-		// reconcile can add and remove exactly the entries it owns and never a
-		// same-named extension tool, which keeps precedence over them.
-		const settingsGatedCustomEntries = new Map<string, Tool>();
-		const reconcileSettingsGatedCustomTools = async (): Promise<{ added: Tool[]; removed: string[] }> => {
-			const added: Tool[] = [];
-			const removed: string[] = [];
-			if (restrictToolNames) return { added, removed };
-			const wanted: CustomTool[] = [];
-			// Image generation also honors an explicit tool whitelist: custom tools are
-			// force-activated, so `--no-tools` or a list without `generate_image` must
-			// keep it out (issue #5305).
-			const imageGenRequested = !options.toolNames || options.toolNames.includes("generate_image");
-			if (cfgGenerateImageEnabled.get(settings) && imageGenRequested) {
-				wanted.push(imageGenTool as unknown as CustomTool);
-			}
-			const wantedNames = new Set(wanted.map(tool => tool.name));
-			for (const [name, entry] of settingsGatedCustomEntries) {
-				if (wantedNames.has(name)) continue;
-				settingsGatedCustomEntries.delete(name);
-				// A later same-named registration superseded this entry; it stays.
-				if (toolRegistry.get(name) !== entry) continue;
-				toolRegistry.delete(name);
-				removed.push(name);
-			}
-			for (const tool of wanted) {
-				if (toolRegistry.has(tool.name)) continue;
-				const definition = customToolToDefinition(tool);
-				const [adapted] = wrapRegisteredTools(
-					[{ definition, extensionPath: "<sdk>", sourceInfo: extensionToolSourceInfo(definition, "<sdk>") }],
-					extensionRunner,
-				);
-				if (!adapted) continue;
-				const entry = new ExtensionToolWrapper(wrapToolWithMetaNotice(adapted), extensionRunner) as Tool;
-				toolRegistry.set(tool.name, entry);
-				settingsGatedCustomEntries.set(tool.name, entry);
-				added.push(entry);
-			}
-			return { added, removed };
-		};
-		await reconcileSettingsGatedCustomTools();
 		// Hashline `edit` stays in the registry so Cursor can call it as MCP.
 		// Native StrReplace arrives as `editToolCall` and materializes through
 		// exec `readArgs`/`writeArgs`; `pi_edit` still needs a `replace`-mode
@@ -3802,11 +3628,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						name === "rewind"
 					: native.hidden !== true;
 				added.push({ name, builtIn: true, activate });
-			}
-			const custom = await reconcileSettingsGatedCustomTools();
-			removed.push(...custom.removed);
-			for (const entry of custom.added) {
-				added.push({ name: entry.name, builtIn: false, activate: entry.hidden !== true });
 			}
 			syncXdevState();
 			return { added, removed, xdev: toolSession.xdev };
@@ -4233,11 +4054,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// unless the effective registry winner is hidden / defaultInactive. Restricted callers own the list.
 		const alwaysInclude: string[] = restrictToolNames
 			? []
-			: [
-					...sdkCustomTools.map(t => t.name),
-					...registeredTools.map(t => t.definition.name),
-					...settingsGatedCustomEntries.keys(),
-				].filter(name => !defaultInactiveToolNames.has(name));
+			: [...sdkCustomTools.map(t => t.name), ...registeredTools.map(t => t.definition.name)].filter(
+					name => !defaultInactiveToolNames.has(name),
+				);
 		for (const name of alwaysInclude) {
 			if (toolRegistry.has(name) && !initialToolNames.includes(name)) {
 				initialToolNames.push(name);
@@ -4814,8 +4633,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			disableModelFallback: options.disableModelFallback,
 			initialRetryFallback,
 			deferRetryFallbackValidation: options.deferRetryFallbackValidation,
-			prewalk,
-			suppressAutoPrewalk: options.suppressAutoPrewalk,
 			awaitingAssignment: options.awaitingAssignment,
 			planYolo: options.planYolo,
 			serviceTierByFamily: initialServiceTierByFamily,
@@ -4988,7 +4805,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			cfgSessionToolGates.listen(session, () => reconcileGatedTools());
 			// `find.enabled: auto` follows the judge role; a role change only touches
 			// the prompt when it actually adds or removes `find`.
-			cfgModelRoles.listen(session, () => reconcileGatedTools({ refreshPrompt: false }));
+			cfgModel.listen(session, () => reconcileGatedTools({ refreshPrompt: false }));
 		}
 		// Backfill the resumed advisor spend without blocking startup: the scan
 		// runs after the session is live, so `--resume` no longer scales with the
@@ -5227,7 +5044,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		{
 			const originalDispose = session.dispose.bind(session);
-			let tinyClientReleased = false;
 			session.dispose = async (disposeOptions?: AgentSessionDisposeOptions) => {
 				try {
 					// Reject new session work (eval starts) the moment disposal
@@ -5254,18 +5070,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 					await originalDispose(disposeOptions);
 				} finally {
-					// The tiny-model client is a process singleton shared by every session.
-					// Only the session that owns process state drops its connections, once:
-					// that fails every request still in flight, and a repeat dispose must not
-					// cancel requests other sessions made since.
-					if (bindsProcessState && !tinyClientReleased) {
-						tinyClientReleased = true;
-						try {
-							await shutdownTinyTitleClient();
-						} catch (error) {
-							logger.warn("Session dispose: tiny-model client shutdown failed", { error: String(error) });
-						}
-					}
 					unregisterUnlessParked();
 					unsubscribeCredentialDisabled();
 					unbindSessionEffects?.();

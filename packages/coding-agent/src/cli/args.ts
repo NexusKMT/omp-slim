@@ -34,16 +34,9 @@ export interface Args {
 	provider?: string;
 	model?: string;
 	config?: string[];
-	smol?: string;
-	slow?: string;
-	plan?: string;
 	/** Objective for a fresh interactive goal session. */
 	goal?: string;
-	prewalk?: boolean;
-	noPrewalk?: boolean;
-	prewalkInto?: string;
 	planYolo?: boolean;
-	planYoloInto?: string;
 	maxTime?: number;
 	warnCost?: number;
 	maxCost?: number;
@@ -376,10 +369,6 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.waitAsync = true;
 		} else if (arg === "--external-thinking") {
 			result.externalThinking = true;
-		} else if (arg === "--prewalk") {
-			result.prewalk = true;
-		} else if (arg === "--no-prewalk") {
-			result.noPrewalk = true;
 		} else if (arg === "--plan-yolo") {
 			result.planYolo = true;
 		} else if (arg === "--print" || arg === "-p") {

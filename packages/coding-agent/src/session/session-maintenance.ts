@@ -3646,28 +3646,8 @@ export class SessionMaintenance {
 		contextWindow: number,
 		signal?: AbortSignal,
 	): Promise<Model | undefined> {
-		const availableModels = this.#host.modelRegistry.getAvailable();
-		if (availableModels.length === 0) return undefined;
-
-		const configured = resolveContextPromotionConfiguredTarget(currentModel, availableModels);
-		// Judge the window this session would actually run the target with.
-		const candidate = configured && this.#host.modelRegistry.fitContextWindow(configured, this.#host.settings);
-		if (!candidate) return undefined;
-		if (modelsAreEqual(candidate, currentModel)) return undefined;
-		if (candidate.contextWindow == null || candidate.contextWindow <= contextWindow) return undefined;
-		// A larger window only helps when the target reads this same context. One
-		// that cannot replay the compaction it stands on reads the history behind
-		// it instead, so promote only when that history fits too.
-		const branch = this.#host.sessionManager.getBranch();
-		if (
-			getReadableCompactionEntry(branch, candidate) !== getReadableCompactionEntry(branch, currentModel) &&
-			!this.contextFitsModel(candidate)
-		) {
-			return undefined;
-		}
-		const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId(), { signal });
-		if (!apiKey) return undefined;
-		return candidate;
+		// A single-model session compacts its current context instead of changing models.
+		return undefined;
 	}
 
 	#getCompactionModelCandidates(availableModels: Model[], filter?: (model: Model) => boolean): Model[] {
@@ -3679,45 +3659,10 @@ export class SessionMaintenance {
 		availableModels: Model[],
 		filter?: (model: Model) => boolean,
 	): Model[] {
-		// Shared catalog rows carry the registry's extended-window opt-ins; judge
-		// and compact with the window this session's settings select.
-		const registry = this.#host.modelRegistry;
-		const settings = this.#host.settings;
-		availableModels = availableModels.map(model => registry.fitContextWindow(model, settings));
-		const candidates: Model[] = [];
-		const seen = new Set<string>();
-
-		const addCandidate = (model: Model | undefined): void => {
-			if (!model) return;
-			const key = `${model.provider}/${model.id}`;
-			if (seen.has(key)) return;
-			seen.add(key);
-			// `seen` still tracks rejected models so the largest-context fallback
-			// scan below doesn't reintroduce them; the filter just suppresses
-			// inclusion in this caller's candidate chain.
-			if (filter && !filter(model)) return;
-			candidates.push(model);
-		};
-
-		if (preferredModel) {
-			addCandidate(resolveCompactionConfiguredTarget(preferredModel, availableModels));
-		}
-		addCandidate(preferredModel ?? undefined);
-		for (const role of CHAT_MODEL_ROLE_IDS) {
-			addCandidate(
-				resolveRoleModelFull(this.#host.settings, role, availableModels, preferredModel ?? undefined).model,
-			);
-		}
-
-		const sortedByContext = [...availableModels].sort((a, b) => (b.contextWindow ?? 0) - (a.contextWindow ?? 0));
-		for (const model of sortedByContext) {
-			if (!seen.has(`${model.provider}/${model.id}`)) {
-				addCandidate(model);
-				break;
-			}
-		}
-
-		return candidates;
+		const current = this.#model ?? preferredModel;
+		if (!current) return [];
+		const candidate = this.#host.modelRegistry.fitContextWindow(current, this.#host.settings);
+		return filter && !filter(candidate) ? [] : [candidate];
 	}
 
 	#buildCompactionAuthError(): Error {
@@ -3729,7 +3674,7 @@ export class SessionMaintenance {
 		}
 		return new Error(
 			`Compaction requires usable credentials for ${currentModel.provider}/${currentModel.id}. ` +
-				`Configure ${currentModel.provider} credentials or assign an authenticated fallback role such as modelRoles.smol.`,
+				`Configure credentials for ${currentModel.provider} or explicitly select a different main model.`,
 		);
 	}
 

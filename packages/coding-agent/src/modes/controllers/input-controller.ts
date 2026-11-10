@@ -55,8 +55,6 @@ import { pickRecentFocusableAgentId } from "./session-focus-controller";
 import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { restoreDetachedDraft } from "../../slash-commands/helpers/draft";
 import { parseSlashCommand, parseSubcommand } from "../../slash-commands/helpers/parse";
-import { isTinyLocalModelKey } from "../../tiny/models";
-import { tinyTitleClient } from "../../tiny/title-client";
 import { resolveReadPath } from "../../tools/path-utils";
 import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
 import {
@@ -80,7 +78,6 @@ import { VideoError, buildVideoContactSheetPng, probeVideo } from "../../utils/v
 import { isVideoPath } from "@oh-my-pi/pi-tui/prompt/video";
 import { resizeImage } from "../../utils/image-resize";
 
-import { cfgCycleOrder } from "../../config/model-settings";
 import {
 	cfgBareExitOnEmptySession,
 	cfgBareSlashCommands,
@@ -292,20 +289,8 @@ export class InputController {
 	) {}
 
 	/** Resolve the current tiny role at use time so project/session reloads cannot leave a stale model. */
-	#resolveTinyTitleLocalModelKey(): string | undefined {
-		const model = resolveModelRoleValue(
-			formatModelRoleAlias("tiny"),
-			roleCandidatePool("tiny", this.ctx.settings, this.ctx.session.modelRegistry),
-			{ settings: this.ctx.settings },
-		).model;
-		return model?.api === "local-inference" && isTinyLocalModelKey(model.id) ? model.id : undefined;
-	}
 
 	/** Prewarm only the local worker selected by the current tiny role. */
-	prewarmTinyTitleModel(): void {
-		const modelKey = this.#resolveTinyTitleLocalModelKey();
-		if (modelKey) tinyTitleClient.prewarm(modelKey);
-	}
 
 	#enhancedPaste?: EnhancedPasteController;
 	#draftText: string | undefined;
@@ -695,9 +680,7 @@ export class InputController {
 			this.cycleThinkingLevel();
 		};
 		this.ctx.editor.setActionKeys("app.model.cycleForward", this.ctx.keybindings.getKeys("app.model.cycleForward"));
-		this.ctx.editor.onCycleModelForward = () => this.cycleRoleModel("forward");
 		this.ctx.editor.setActionKeys("app.model.cycleBackward", this.ctx.keybindings.getKeys("app.model.cycleBackward"));
-		this.ctx.editor.onCycleModelBackward = () => this.cycleRoleModel("backward");
 		this.ctx.editor.setActionKeys(
 			"app.model.selectTemporary",
 			this.ctx.keybindings.getKeys("app.model.selectTemporary"),
@@ -3035,31 +3018,6 @@ export class InputController {
 		} else {
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorBorderColor();
-		}
-	}
-
-	async cycleRoleModel(direction: "forward" | "backward" = "forward"): Promise<void> {
-		try {
-			const cycleOrder = cfgCycleOrder.get(settings);
-			const result = await this.ctx.viewSession.cycleRoleModels(cycleOrder, direction);
-			if (!result) {
-				this.ctx.showStatus("Only one role model available");
-				return;
-			}
-
-			this.ctx.statusLine.invalidate();
-			this.ctx.updateEditorBorderColor();
-			// The status line already reports the resolved model + thinking level, so
-			// the cycle status is just a status-line-style chip track (active role
-			// filled), matching the plan-approval model slider. It renders into its
-			// own anchored container above the editor (cleared+rebuilt each cycle),
-			// so it updates in place instead of stacking duplicates in the scrollback.
-			this.ctx.showModelCycleTrack(
-				cycleOrder.map(role => ({ label: role })),
-				cycleOrder.indexOf(result.role),
-			);
-		} catch (error) {
-			this.ctx.showError(error instanceof Error ? error.message : String(error));
 		}
 	}
 

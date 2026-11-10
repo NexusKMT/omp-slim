@@ -105,7 +105,6 @@ import {
 	createAgentSession,
 	discoverAuthStorage,
 	loadSessionExtensions,
-	resolvePrewalkTarget,
 	SessionModelRestoreError,
 } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
@@ -141,7 +140,6 @@ import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
 import { type RestoreOutcome, restoreSession } from "./task/restore";
 import { createTelemetryExportConfig, initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
 import { cfgTelemetryOtlpExportEnabled } from "./telemetry-settings";
-import { registerLocalInferenceApi } from "./tiny/local-inference-api";
 import { automaticThinkingLevel, concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { LspStartupServerInfo } from "./tools";
 import { sanitizeDisplayWarnings } from "@oh-my-pi/pi-tui/render/render-utils";
@@ -191,8 +189,6 @@ import {
 	cfgExternalThinking,
 	cfgHideThinkingBlock,
 	cfgOmitThinking,
-	cfgPrewalkEnabled,
-	cfgPrewalkInto,
 	cfgSessionMaxCost,
 	cfgSessionWarnCost,
 	cfgSessionWorktreeScope,
@@ -1513,7 +1509,6 @@ export async function buildSessionOptions(
 	// `--model` rewrites the session's `default` role below. Preserve the
 	// configured assignment so explicit prewalk role targets still resolve
 	// against the value that existed when the CLI was invoked.
-	const preModelOverrideDefaultRole = activeSettings.getModelRole("default");
 	// True when a configured `default` role was deliberately left unresolved for
 	// createAgentSession's post-extension re-resolution (issue #6694); the
 	// scoped thinking-level seed below must be deferred along with the model.
@@ -1637,74 +1632,7 @@ export async function buildSessionOptions(
 		options.modelPattern = parsed.models;
 	}
 
-	if (parsed.noPrewalk && (parsed.prewalk || parsed.prewalkInto !== undefined)) {
-		throw new Error("--no-prewalk cannot be combined with --prewalk or --prewalk-into");
-	}
-	options.suppressAutoPrewalk = parsed.noPrewalk;
-	const explicitPrewalk = parsed.prewalk === true || parsed.prewalkInto !== undefined;
-	const prewalkEnabled = parsed.noPrewalk
-		? false
-		: explicitPrewalk
-			? true
-			: !restoringSession && cfgPrewalkEnabled.get(activeSettings);
-	if (prewalkEnabled) {
-		const target = parsed.prewalkInto ?? cfgPrewalkInto.get(activeSettings);
-		// `--model` mutates only the session default role. Resolve an explicit
-		// `--prewalk-into` against the pre-mutation default while leaving all
-		// other role lookups live; the configured `prewalk.into` keeps resolving
-		// against the live settings.
-		const roleLookup =
-			parsed.prewalkInto === undefined
-				? activeSettings
-				: {
-						getModelRole: (role: string) =>
-							role === "default" ? preModelOverrideDefaultRole : activeSettings.getModelRole(role),
-					};
-
-		// Bare `default` is a backwards-compatible special selector handled
-		// by expandRoleAlias rather than the prefixed role-alias grammar.
-		const targetSelector = target.trim() === "default" ? expandRoleAlias(target, roleLookup) : target;
-		// Keep every role candidate so a later authenticated fallback can still arm prewalk.
-		const configuredPatterns = resolveConfiguredModelPatterns(targetSelector, roleLookup);
-		const targetPatterns = configuredPatterns.length > 0 ? configuredPatterns : [targetSelector];
-
-		const selection = await resolvePrewalkTarget(
-			targetPatterns,
-			target,
-			modelRegistry,
-			modelMatchPreferences,
-			disabledProviders,
-			{ deferUnregistered: true },
-		);
-		if (selection.deferred) {
-			// Preserve role fallback order until extensions have registered their providers.
-			options.deferredPrewalk = { target, patterns: targetPatterns };
-		} else {
-			options.prewalk = selection.prewalk;
-			for (const warning of selection.warnings) warn(warning);
-		}
-	}
-
-	if (parsed.planYoloInto !== undefined && !parsed.planYolo) {
-		throw new Error("--plan-yolo-into requires --plan-yolo");
-	}
-	if (parsed.planYolo) {
-		const rolePattern = expandRoleAlias(parsed.planYoloInto ?? "@smol", activeSettings);
-		const resolved = resolveCliModel({ cliModel: rolePattern, modelRegistry, preferences: modelMatchPreferences });
-		if (resolved.warning) warn(resolved.warning);
-		if (resolved.error || !resolved.model) {
-			throw new Error(resolved.error ?? `Model "${parsed.planYoloInto ?? "@smol"}" not found`);
-		}
-		if (disabledProviders.has(resolved.model.provider)) {
-			throw new Error(
-				`Provider "${resolved.model.provider}" is disabled. Remove it from disabledProviders to hand off to "${rolePattern}".`,
-			);
-		}
-		if (!modelRegistry.hasConfiguredAuth(resolved.model)) {
-			throw new Error(`No API key for ${resolved.model.provider}/${resolved.model.id}`);
-		}
-		options.planYolo = { target: resolved.model, thinkingLevel: resolved.thinkingLevel };
-	}
+	if (parsed.planYolo) options.planYolo = true;
 
 	// Thinking level
 	if (parsed.thinking) {
@@ -2025,18 +1953,6 @@ export async function runRootCommand(
 
 		// Initialize discovery system with settings for provider persistence
 		logger.time("initializeWithSettings", initializeWithSettings, settingsInstance);
-
-		// Apply model role overrides from CLI args or env vars (ephemeral, not persisted)
-		const smolModel = parsedArgs.smol ?? $env.PI_SMOL_MODEL;
-		const slowModel = parsedArgs.slow ?? $env.PI_SLOW_MODEL;
-		const planModel = parsedArgs.plan ?? $env.PI_PLAN_MODEL;
-		if (smolModel || slowModel || planModel) {
-			settingsInstance.overrideModelRoles({
-				smol: smolModel,
-				slow: slowModel,
-				plan: planModel,
-			});
-		}
 
 		// --print-thoughts (single-shot print mode) must surface reasoning, so un-hide
 		// thinking before the session is built — otherwise a passive omitThinking
@@ -2392,7 +2308,6 @@ export async function runRootCommand(
 			options.settings = settingsInstance;
 			options.telemetry = startupTelemetry;
 			options.extensions = startupExtensions;
-			options.onPrewalkWarning = startupWarning;
 			return options;
 		};
 		let sessionOptions = await buildStartupSessionOptions(sessionManager);
@@ -2925,7 +2840,6 @@ export async function runRootCommand(
 }
 
 export async function main(args: string[]): Promise<void> {
-	registerLocalInferenceApi();
 	const { runCli } = await import("./cli");
 	await runCli(args.length === 0 ? ["launch"] : args);
 }

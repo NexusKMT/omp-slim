@@ -120,24 +120,6 @@ export interface AsyncJobTree {
 
 export type { ShakeMode, ShakeResult } from "./shake-types";
 
-/**
- * Prewalk switches an active session one-way from its starting model to a
- * fast/cheap target after implementation begins.
- */
-export interface Prewalk {
-	target: Model;
-	thinkingLevel?: ConfiguredThinkingLevel;
-}
-
-/**
- * PlanYolo starts in read-only plan mode, auto-approves the proposal, then
- * switches to a target model for implementation.
- */
-export interface PlanYolo {
-	target: Model;
-	thinkingLevel?: ConfiguredThinkingLevel;
-}
-
 /** Details shown when confirming a usage-reserve-triggered model fallback. */
 export interface UsageFallbackConfirmation {
 	from: string;
@@ -223,10 +205,6 @@ export interface AgentSessionConfig {
 	 * slow-verdict boundary runs in milliseconds; production never sets it.
 	 */
 	unexpectedStopJudgeTimeoutMs?: number;
-	/** Prewalk from the starting model to a fast/cheap target after implementation begins. */
-	prewalk?: Prewalk;
-	/** Keep `prewalk.auto` away from this session until `/new` (`--no-prewalk`). */
-	suppressAutoPrewalk?: boolean;
 	/**
 	 * Created to run an assignment its owner prompts once setup finishes (task executor spawns).
 	 * Until the first prompt, IRC messages never wake a turn the assignment would miss; see
@@ -234,7 +212,7 @@ export interface AgentSessionConfig {
 	 */
 	awaitingAssignment?: boolean;
 	/** Force read-only plan mode at start, auto-approve, then switch to the target. */
-	planYolo?: PlanYolo;
+	planYolo?: boolean;
 	/** Initial per-family service tiers for the live session. */
 	serviceTierByFamily?: ServiceTierByFamily;
 	/** Prompt templates for expansion. */

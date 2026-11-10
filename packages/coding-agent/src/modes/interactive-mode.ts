@@ -111,7 +111,6 @@ import type { FileSlashCommand } from "../extensibility/slash-commands";
 import { loadSlashCommands } from "../extensibility/slash-commands";
 import type { GoalModeState } from "../goals/state";
 import { copyLocalArtifacts, resolveLocalRoot } from "../internal-urls";
-import { hasNativeJudge } from "../judgment";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "../lsp/startup-events";
 import type { MCPManager } from "../mcp";
 import {
@@ -150,8 +149,6 @@ import type { AgentViewSession } from "../session/agent-session-handle";
 import type { CompactMode } from "../session/compact-modes";
 import type { ForeignSessionSource } from "../session/foreign-session-store";
 import { HistoryStorage } from "../session/history-storage";
-import { syncTextPrediction, textPredictionBackend } from "../predict/client";
-import { setWordPredictionHost } from "@oh-my-pi/pi-tui/prompt/word-completion";
 import { USER_INTERRUPT_LABEL } from "../session/messages";
 import { resolveMarkdownLinkHrefs } from "../internal-urls/hyperlink-targets";
 import type { ResolveContext } from "../internal-urls/index";
@@ -393,8 +390,6 @@ import { materializeImageChipLinks, UiHelpers } from "./utils/ui-helpers";
 import {
 	askTimeoutMs,
 	cfgAutocompleteMaxVisible,
-	cfgComposerPredictionAlternatives,
-	cfgComposerPredictions,
 	cfgComposerShape,
 	cfgComposerTokenRate,
 	cfgDisplayAdvisorCollapsedLines,
@@ -495,8 +490,6 @@ const cfgLiveUiSettings = combine({
 	"compaction.idleTimeoutSeconds": cfgCompactionIdleTimeoutSeconds,
 	"recap.enabled": cfgRecapEnabled,
 	"recap.idleSeconds": cfgRecapIdleSeconds,
-	"composer.predictions": cfgComposerPredictions,
-	"composer.predictionAlternatives": cfgComposerPredictionAlternatives,
 	"compaction.enabled": cfgCompactionEnabled,
 	"compaction.methodOrder": cfgCompactionMethodOrder,
 	"display.hideToolActivity": cfgDisplayHideToolActivity,
@@ -2110,9 +2103,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editor = this.composer.editor;
 		this.editor.magicKeywordsEnabled = () => cfgMagicKeywordsEnabled.get(this.settings);
 		this.editor.placeholder = () => this.#composerHint();
-		this.editor.predictions = () => this.#eventController.composerPrediction.choices;
-		this.editor.onPredictionAccepted = index => this.#eventController.composerPrediction.accepted(index);
-		this.editor.onPredictionShown = () => this.#eventController.composerPrediction.shown();
 		this.editor.composerState = () => this.#composerNativeState();
 		this.editor.imageReferenceHyperlink = imageReferenceHyperlink;
 		this.editor.skillFilePath = name => this.skillCommands.get(`skill:${name}`)?.filePath;
@@ -2236,13 +2226,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#syncEditorMaxHeight();
 		};
 		process.stdout.on("resize", this.#resizeHandler);
-		setWordPredictionHost(textPredictionBackend);
 		try {
 			this.historyStorage = HistoryStorage.open();
 			this.editor.setHistoryStorage(this.historyStorage);
 			this.historyStorage.setSessionResolver(() => this.sessionManager.getSessionId());
-			// The prediction daemon learns from history.db; nudge it once each prompt is durable.
-			this.historyStorage.setAddListener(syncTextPrediction);
 			this.historyStorage.setErrorListener(() => {
 				this.showWarning("Prompt history could not be saved; this prompt may be unavailable after restart.");
 			});
@@ -2760,13 +2747,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			);
 		}
 
-		// Prewarm the local tiny-title worker off the submit hot path: spawn it
-		// now, idle and unref'd, so the first submit reuses a live subprocess
-		// instead of paying spawn latency ahead of the first frame (issue #6462).
-		// No-ops for the online default and for already-named sessions that will
-		// not be titled. Deferred via setImmediate so it runs AFTER the render
-		// callback requestRender(true) queued above (immediates are FIFO) — the
-		// spawn syscall never lands in the same loop turn ahead of the first paint.
+		// Warm rendering and the current model connection after the first frame.
 		setImmediate(() => {
 			// Resumed sessions paint their restored transcript (code blocks, diffs)
 			// right after init; warm the native syntax set (~60ms, ~24 MiB) off-thread
@@ -2775,9 +2756,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			if (this.session.messages.length > 0) void warmHighlighter();
 			// Open the model API connection while the user reads the first frame.
 			this.session.prewarmModelConnection();
-			if (!$env.PI_NO_TITLE && !this.sessionManager.getSessionName()) {
-				this.#inputController.prewarmTinyTitleModel();
-			}
 		});
 
 		// Host the session before extension hooks run: a dialog raised from a
@@ -4194,16 +4172,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * role change mid-session applies), else the local guess.
 	 */
 	#applyAutoGraphSetting(): void {
-		const mode = cfgTuiAutoGraph.get(this.settings);
-		if (mode === "off" || mode === "always") {
-			setTableCharts(mode);
-			return;
-		}
-		setTableCharts("smart", request =>
-			mode === "auto" && !hasNativeJudge(this.settings, this.session.modelRegistry)
-				? undefined
-				: pickTableChart(request, this.session.tableChartJudge()),
-		);
+		setTableCharts(cfgTuiAutoGraph.get(this.settings) === "off" ? "off" : "always");
 	}
 
 	/**
@@ -4239,16 +4208,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (any("display.subagentLivePreview")) {
 			this.#renderSubagentList();
 			this.ui.requestRender();
-		}
-		const composerPrediction = this.#eventController.composerPrediction;
-		if (
-			(any("composer.predictions") && !next["composer.predictions"]) ||
-			// Alternatives already offered would keep their list until the next turn.
-			(any("composer.predictionAlternatives") &&
-				!next["composer.predictionAlternatives"] &&
-				(composerPrediction.choices?.length ?? 0) > 1)
-		) {
-			composerPrediction.cancel();
 		}
 		if (any("compaction.enabled", "compaction.methodOrder")) {
 			this.statusLine.setAutoCompactEnabled(this.session.autoCompactionEnabled);
@@ -8184,7 +8143,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// InteractiveMode instance (e.g. test harnesses, headless re-init).
 		setAutoQaConsentHandler(null, null);
 		setCfgApprovalHost(null);
-		setWordPredictionHost(undefined);
 		this.#disposeImageBlobWriter?.();
 		this.#disposeImageBlobWriter = undefined;
 		this.#hideSessionInfo();
@@ -8492,9 +8450,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		nextEditor.viewportRowsProvider = () => this.ui.terminal.rows;
 		nextEditor.magicKeywordsEnabled = () => cfgMagicKeywordsEnabled.get(this.settings);
 		nextEditor.placeholder = () => this.#composerHint();
-		nextEditor.predictions = () => this.#eventController.composerPrediction.choices;
-		nextEditor.onPredictionAccepted = index => this.#eventController.composerPrediction.accepted(index);
-		nextEditor.onPredictionShown = () => this.#eventController.composerPrediction.shown();
 		nextEditor.composerState = () => this.#composerNativeState();
 		nextEditor.attachmentChips = previousEditor.attachmentChips;
 		nextEditor.imageReferenceHyperlink = imageReferenceHyperlink;
@@ -9663,10 +9618,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	cycleThinkingLevel(): void {
 		this.#inputController.cycleThinkingLevel();
-	}
-
-	cycleRoleModel(direction?: "forward" | "backward"): Promise<void> {
-		return this.#inputController.cycleRoleModel(direction);
 	}
 
 	toggleToolOutputExpansion(): void {

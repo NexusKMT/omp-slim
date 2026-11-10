@@ -41,7 +41,6 @@ import {
 	STATS_ACTIVITY_WORKER_ARG,
 	SUBAGENT_WORKER_ARG,
 	TERMINAL_OUTPUT_WORKER_ARG,
-	TEXT_PREDICT_WORKER_ARG,
 } from "./cli/worker-selectors";
 import type * as JsProcessEntry from "./eval/js/process-entry";
 import type { WorkerInbound as JsWorkerInbound, WorkerOutbound as JsWorkerOutbound } from "./eval/js/worker-protocol";
@@ -144,7 +143,6 @@ async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
  */
 async function runSmokeTest(): Promise<void> {
 	const { smokeTestSyncWorker, startServer } = await import("@oh-my-pi/omp-stats");
-	const { smokeTestTinyTitleWorker } = await import("./tiny/title-client");
 	const { smokeTestStatsActivityWorker } = await import("./stats/activity-client");
 	const { smokeTestJsEvalWorker } = await import("./eval/js/context-manager");
 	// Other smoke dependencies stay lazy so normal CLI startup does not load their worker clients.
@@ -153,7 +151,6 @@ async function runSmokeTest(): Promise<void> {
 	const { smokeTestIdaHost } = await import("./ida/client");
 	const { smokeTestBlobBroker } = await import("./blob-broker/daemon");
 	const { smokeTestTerminalOutputWorker } = await import("./launch/terminal-output-worker-client");
-	const { smokeTestTextPredictDaemon } = await import("./predict/client");
 	const { smokeTestSubagentWorker } = await import("./thread/subagent-worker");
 	await smokeTestSyncWorker();
 	await smokeTestStatsActivityWorker();
@@ -170,28 +167,21 @@ async function runSmokeTest(): Promise<void> {
 		statsServer.stop();
 	}
 
-	await smokeTestTinyTitleWorker();
 	await smokeTestJsEvalWorker();
 	await smokeTestDaemonBroker();
 	await smokeTestLspMux();
 	await smokeTestIdaHost();
 	await smokeTestBlobBroker();
 	await smokeTestTerminalOutputWorker();
-	await smokeTestTextPredictDaemon();
 	await smokeTestSubagentWorker();
 	process.stdout.write("smoke-test: ok\n");
 }
 
-const TINY_WORKER_ARG = "__omp_worker_tiny_inference";
 const STATS_SYNC_WORKER_ARG = "__omp_worker_stats_sync";
 const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 const JS_EVAL_PROCESS_ARG = "__omp_worker_js_eval_process";
 
 async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
-	if (arg === TINY_WORKER_ARG) {
-		await runTinyWorker();
-		return true;
-	}
 	if (arg === STATS_SYNC_WORKER_ARG) {
 		// The sync worker handles messages via `self.onmessage`, assigned during
 		// this *async* dynamic import. Bun flushes the worker's initial message
@@ -286,11 +276,6 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 		await startBlobBrokerFromEnvironment();
 		return true;
 	}
-	if (arg === TEXT_PREDICT_WORKER_ARG) {
-		const { startTextPredictDaemonFromEnvironment } = await import("./predict/daemon");
-		await startTextPredictDaemonFromEnvironment();
-		return true;
-	}
 	if (arg === AUTO_UPDATE_WORKER_ARG) {
 		// Selector boundary keeps the updater graph out of ordinary startup. The worker
 		// downloads releases, so it needs the PI_PROXY handling ordinary commands get.
@@ -302,16 +287,7 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	return false;
 }
 
-/**
- * Boot a subprocess-isolated transformers.js worker over the parent's IPC
- * channel and block until the parent disconnects. Tiny-model workers run `onnxruntime-node` (loaded transitively by
- * `@huggingface/transformers`) in a child address space because its NAPI
- * finalizer segfaults Bun on shutdown (issue #1606); the parent `SIGKILL`s the
- * child so that finalizer never runs in either process. This wires `process`
- * IPC to the worker's typed transport, keeps the event loop alive while the
- * worker is idle, and hard-kills the process on parent `disconnect` or — via
- * the off-main-thread {@link startParentWatchdog} — parent exit.
- */
+/** Run a subprocess worker over the parent IPC channel and clean up when its parent exits. */
 async function runIpcSubprocessWorker<In, Out>(
 	start: (transport: {
 		send(message: Out): void;
@@ -398,19 +374,6 @@ async function runIpcSubprocessWorker<In, Out>(
 		clearInterval(keepalive);
 	}
 	process.kill(process.pid, "SIGKILL");
-}
-
-/**
- * Hidden subcommand that boots the ONNX tiny-model worker for one model: a
- * detached process owning that model's socket (`OMP_TINY_WORKER_SOCKET`),
- * shared by every omp process on the machine and exiting on its own when
- * idle. It exists so `onnxruntime-node` (loaded transitively by
- * `@huggingface/transformers`) never runs in an omp address space — its NAPI
- * finalizer segfaults Bun on Windows (issue #1606).
- */
-async function runTinyWorker(): Promise<void> {
-	const { startTinyWorkerFromEnvironment } = await import("./tiny/worker");
-	await startTinyWorkerFromEnvironment();
 }
 
 /** Resolved top-level command name (never its arguments), for the unsettled-entry report. */

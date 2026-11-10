@@ -10,16 +10,6 @@ import {
 	SERVICE_TIER_OPENAI_OPTIONS,
 	SERVICE_TIER_OPENAI_VALUES,
 } from "../config/service-tier";
-import {
-	TINY_MODEL_DEVICE_DEFAULT,
-	TINY_MODEL_DEVICE_SETTING_OPTIONS,
-	TINY_MODEL_DEVICE_SETTING_VALUES,
-} from "../tiny/device";
-import {
-	TINY_MODEL_DTYPE_DEFAULT,
-	TINY_MODEL_DTYPE_SETTING_OPTIONS,
-	TINY_MODEL_DTYPE_SETTING_VALUES,
-} from "../tiny/dtype";
 import { DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS, MAX_WEB_SEARCH_TIMEOUT_SECONDS } from "../web/search/types";
 import { DEFAULT_USAGE_RESERVE_PCT } from "@oh-my-pi/pi-ai/auth-storage";
 import { configureProviderStoreResponses } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
@@ -87,84 +77,6 @@ export const cfgPowerSleepPrevention = register({
 					"Also block all system sleep on AC and declare the user active (macOS `caffeinate -i -d -s -u`)",
 			},
 		],
-	},
-});
-
-export const cfgPrewalkEnabled = register({
-	id: "prewalk.enabled",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "model",
-		group: "Prewalk",
-		label: "Enable Prewalk",
-		description:
-			"Start on the active model, then switch to a fast/cheap model (default the 'smol' role) at the first edit/write after the plan nudge's todo list exists — the strong model plans, commits the todos, and starts the implementation before handing off. Overridable per session with --prewalk / --no-prewalk.",
-	},
-});
-
-export const cfgPrewalkFrom = register({
-	id: "prewalk.from",
-	type: "string",
-	default: "@default",
-	ui: {
-		tab: "model",
-		group: "Prewalk",
-		label: "Prewalk planning model",
-		description: "Model or role (default '@default') that /prewalk restart returns to for planning.",
-	},
-});
-
-export const cfgPrewalkInto = register({
-	id: "prewalk.into",
-	type: "string",
-	default: "@smol",
-	ui: {
-		tab: "model",
-		group: "Prewalk",
-		label: "Prewalk target",
-		description:
-			"Model or role (default '@smol') that prewalk hands off to at the first edit/write: /prewalk, /prewalk restart, Enable Prewalk, and --prewalk. Auto-prewalk uses its own target.",
-	},
-});
-
-export const cfgPrewalkAuto = register({
-	id: "prewalk.auto",
-	type: "enum",
-	values: ["off", "suggest", "on"] as const,
-	default: "off",
-	ui: {
-		tab: "model",
-		group: "Prewalk",
-		label: "Auto Prewalk",
-		description:
-			"Ask the native judge resolved through the 'judge' role whether each new top-level user task front-loads its hard reasoning. Needs a native judge; without one nothing is classified. Independent of Enable Prewalk.",
-		options: [
-			{ value: "off", label: "Off", description: "Never classify prompts for prewalk" },
-			{
-				value: "suggest",
-				label: "Suggest",
-				description: "Classify each task and report the decision without arming prewalk",
-			},
-			{
-				value: "on",
-				label: "On",
-				description:
-					"For confidently front-loaded tasks, arm a handoff from the active model to the auto target; the next task starts back on the planning model",
-			},
-		],
-	},
-});
-
-export const cfgPrewalkAutoTarget = register({
-	id: "prewalk.autoTarget",
-	type: "string",
-	default: "@smol",
-	ui: {
-		tab: "model",
-		group: "Prewalk",
-		label: "Auto-prewalk target",
-		description: "Model or role (default '@smol') auto-prewalk hands off to at the first edit/write.",
 	},
 });
 
@@ -1045,44 +957,6 @@ export const cfgProvidersFireworksTier = register({
 				description: "Priority serving path: higher reliability, premium per-token pricing",
 			},
 		],
-	},
-});
-
-export const cfgProvidersTinyModelDevice = register({
-	id: "providers.tinyModelDevice",
-	type: "enum",
-	values: TINY_MODEL_DEVICE_SETTING_VALUES,
-	default: TINY_MODEL_DEVICE_DEFAULT,
-	env: {
-		name: "PI_TINY_DEVICE",
-		parse: raw => TINY_MODEL_DEVICE_SETTING_VALUES.find(value => value === raw.trim().toLowerCase()),
-	},
-	ui: {
-		tab: "providers",
-		group: "Tiny Model",
-		label: "Tiny Model Device",
-		description:
-			"Inference backend for local tiny models (titles + memory): an ONNX execution provider, or `mlx` to download MLX weights and run them through mlx-lm on Apple silicon. Default uses CPU-only ONNX. The PI_TINY_DEVICE env var overrides this.",
-		options: TINY_MODEL_DEVICE_SETTING_OPTIONS,
-	},
-});
-
-export const cfgProvidersTinyModelDtype = register({
-	id: "providers.tinyModelDtype",
-	type: "enum",
-	values: TINY_MODEL_DTYPE_SETTING_VALUES,
-	default: TINY_MODEL_DTYPE_DEFAULT,
-	env: {
-		name: "PI_TINY_DTYPE",
-		parse: raw => TINY_MODEL_DTYPE_SETTING_VALUES.find(value => value === raw.trim().toLowerCase()),
-	},
-	ui: {
-		tab: "providers",
-		group: "Tiny Model",
-		label: "Tiny Model Precision",
-		description:
-			"ONNX quantization/precision for local tiny models. Default uses each model's shipped dtype (q4); lower precision is faster, higher is more faithful. Ignored by the MLX backend (its repos are pre-quantized 4-bit). The PI_TINY_DTYPE env var overrides this.",
-		options: TINY_MODEL_DTYPE_SETTING_OPTIONS,
 	},
 });
 

@@ -177,11 +177,6 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.pluginHelp,
 	},
 	{
-		name: "predict",
-		load: () => import("./commands/predict").then(m => m.default),
-		help: commandHelp.predictHelp,
-	},
-	{
 		name: "ps",
 		load: () => import("./commands/ps").then(m => m.default),
 		help: commandHelp.psHelp,
@@ -273,11 +268,6 @@ export const commands: CommandEntry[] = [
 		name: "usage",
 		load: () => import("./commands/usage").then(m => m.default),
 		help: commandHelp.usageHelp,
-	},
-	{
-		name: "tiny-models",
-		load: () => import("./commands/tiny-models").then(m => m.default),
-		help: commandHelp.tinyModelsHelp,
 	},
 	{
 		name: "token",

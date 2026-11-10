@@ -77,7 +77,6 @@ import {
 	splitAssistantMessageToolTimeline,
 } from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
 import { isWarpCliAgentProtocolActive } from "../warp-events";
-import { ComposerPredictionController } from "./composer-prediction-controller";
 import { StreamingRevealController } from "./streaming-reveal";
 import { streamingStringKeysForTool, ToolArgsRevealController } from "./tool-args-reveal";
 import { createToolCallBlock } from "./tool-call-block";
@@ -296,7 +295,6 @@ export class EventController {
 	// (never deferred) can tell them apart.
 	#retryPending = false;
 	/** Next-message prediction offered as composer ghost text after a completed turn. */
-	readonly composerPrediction: ComposerPredictionController;
 	#ircExpiryTimers = new Map<string, NodeJS.Timeout>();
 	// Insertion-ordered IRC cards not yet retired; values are the transcript
 	// components each card contributed (see #retireIrcCard for the guard).
@@ -378,7 +376,6 @@ export class EventController {
 			getSmoothStreaming: () => cfgDisplaySmoothStreaming.get(this.ctx.settings),
 			requestRender: component => this.ctx.ui.requestComponentRender(component),
 		});
-		this.composerPrediction = new ComposerPredictionController(ctx);
 		this.#handlers = {
 			agent_start: e => this.#handleAgentStart(e),
 			agent_end: e => this.#handleAgentEnd(e),
@@ -492,7 +489,6 @@ export class EventController {
 		this.#pendingMessageRestart = false;
 		this.#streamingReveal.stop();
 		this.#toolArgsReveal.stop();
-		this.composerPrediction.cancel();
 		this.#setTerminalProgress(false);
 		for (const timer of this.#ircExpiryTimers.values()) {
 			clearTimeout(timer);
@@ -1050,7 +1046,6 @@ export class EventController {
 		this.#pinnedErrorMessage = undefined;
 		this.#restorePinnedErrorInline = true;
 		this.#retryPending = this.ctx.viewSession.isRetrying;
-		this.composerPrediction.cancel();
 		for (const timer of this.#ircExpiryTimers.values()) {
 			clearTimeout(timer);
 		}
@@ -1212,7 +1207,6 @@ export class EventController {
 			this.ctx.retryLoader = undefined;
 			this.ctx.statusContainer.disposeChildren();
 		}
-		this.composerPrediction.cancel();
 		this.ctx.statusLine.markActivityStart();
 		// The turn owns progress from here; a compaction that started it hands it over.
 		this.#compactionOwnsProgress = false;
@@ -2595,7 +2589,6 @@ export class EventController {
 		}
 		// The user stopped the run themselves: no prediction or toast for it.
 		if (options?.interrupted) return;
-		if (this.#settledRunStatus(event).state === "done") this.composerPrediction.request();
 		this.sendErrorNotification(event);
 		this.sendCompletionNotification(event);
 	}
@@ -2641,7 +2634,6 @@ export class EventController {
 	async #handleAutoCompactionStart(
 		event: Extract<AgentSessionEvent, { type: "auto_compaction_start" }>,
 	): Promise<void> {
-		this.composerPrediction.cancel();
 		if (!this.#terminalProgressActive) {
 			this.#setTerminalProgress(true);
 			this.#compactionOwnsProgress = this.#terminalProgressActive;

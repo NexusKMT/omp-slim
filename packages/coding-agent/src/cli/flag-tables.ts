@@ -154,24 +154,9 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	"--model": (result, value) => {
 		result.model = value;
 	},
-	"--smol": (result, value) => {
-		result.smol = value;
-	},
-	"--slow": (result, value) => {
-		result.slow = value;
-	},
 	"--goal": (result, value) => {
 		if (!value.trim()) throw new CliUsageError("--goal requires a non-empty objective.");
 		result.goal = value.trim();
-	},
-	"--plan": (result, value) => {
-		result.plan = value;
-	},
-	"--prewalk-into": (result, value) => {
-		result.prewalkInto = value;
-	},
-	"--plan-yolo-into": (result, value) => {
-		result.planYoloInto = value;
 	},
 	"--max-time": (result, value) => {
 		result.maxTime = parseMaxTimeSeconds(value);
@@ -317,7 +302,7 @@ export const STRING_VALUE_FLAGS: ReadonlySet<string> = new Set(Object.keys(STRIN
  * value-like successor for the built-in form (`--plan opus`), but a
  * flag-looking successor remains a fresh flag (`--plan --profile work`).
  */
-export const EXTENSION_SHADOWABLE_STRING_FLAGS: ReadonlySet<string> = new Set(["--plan"]);
+export const EXTENSION_SHADOWABLE_STRING_FLAGS: ReadonlySet<string> = new Set();
 
 /**
  * Derived from {@link OPTIONAL_FLAGS}. Same single-source contract as
@@ -360,8 +345,6 @@ export const VALUELESS_FLAGS: ReadonlySet<string> = new Set([
 	"--advisor",
 	"--wait-async",
 	"--external-thinking",
-	"--prewalk",
-	"--no-prewalk",
 	"--plan-yolo",
 	"--print",
 	"--print-thoughts",
