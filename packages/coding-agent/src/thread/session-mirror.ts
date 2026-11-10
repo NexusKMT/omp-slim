@@ -12,12 +12,12 @@
  * and the session's entry list, which back the `AgentViewSession` surface of
  * the mirror; unwatched sessions never pay for them.
  *
- * Everything here is data: models, messages, and events pass through
- * {@link toWireData}, which strips functions and flattens foreign class
- * instances so a session's state never drags live objects across a link. The
- * exceptions are main-owned objects a worker session was built over (its
- * model registry, async job manager, settings), which travel back to main as
- * references to the originals.
+ * Messages, events, and ordinary state pass through {@link toWireData}, which
+ * strips functions and flattens foreign class instances. The runtime model
+ * retains its header resolver as an RPC callable so child sessions inherit
+ * the parent's live transport when they revive. Main-owned objects a worker
+ * session was built over (its model registry, async job manager, settings)
+ * travel back to main as references to the originals.
  */
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Effort, ImageContent, Model, ServiceTierByFamily, ToolResultMessage, UsageReport } from "@oh-my-pi/pi-ai";
@@ -56,7 +56,7 @@ import type { AgentDefinition } from "../task/types";
 import type { WorkPoolYieldItem } from "../task/workpool-yield";
 import type { RemoteObject, RpcMethod } from "./rpc";
 
-/** Data a session homed on another thread exposes synchronously. */
+/** State a session homed on another thread exposes synchronously through RPC. */
 export interface SessionMirrorState {
 	isStreaming: boolean;
 	runStartedAt: number | undefined;
@@ -66,6 +66,7 @@ export interface SessionMirrorState {
 	isPaused: boolean;
 	streamMessage: AgentMessage | null;
 	pendingToolCalls: string[];
+	/** Runtime model, including its asynchronous header resolver capability. */
 	model: Model | undefined;
 	servingModel: ServingModel | undefined;
 	thinkingLevel: ThinkingLevel | undefined;
@@ -326,7 +327,7 @@ export class SessionBridgeClient {
 	constructor(readonly remote: RemoteObject<SessionBridgeProtocol>) {}
 }
 
-/** Readers of every {@link PeerStateField} on any handle, returning wire-safe data. */
+/** Readers of every {@link PeerStateField} on any handle, returning RPC-safe values. */
 export const SESSION_STATE_READERS: {
 	readonly [K in PeerStateField]: (session: AgentSessionHandle) => SessionMirrorState[K];
 } = {
@@ -336,7 +337,12 @@ export const SESSION_STATE_READERS: {
 	isPaused: session => session.agent.isPaused,
 	streamMessage: session => toWireData(session.agent.state.streamMessage),
 	pendingToolCalls: session => [...session.agent.state.pendingToolCalls],
-	model: session => toWireData(session.model),
+	model: session => {
+		const model = session.model;
+		// Only this runtime hook survives state sanitization; RpcLink carries it
+		// as a callable, including when a sibling worker reads main's mirror.
+		return model?.resolveHeaders ? { ...toWireData(model), resolveHeaders: model.resolveHeaders } : toWireData(model);
+	},
 	servingModel: session => toWireData(session.servingModel),
 	thinkingLevel: session => session.thinkingLevel,
 	sessionFile: session => session.sessionFile,

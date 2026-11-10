@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- Reviving a worker-hosted subagent preserves its parent's dynamic authentication headers and resolves them for every request.
 - Subagents preserve their parent's custom model endpoint and headers during startup, revival, and local runtime metadata updates.
 - Cancelling a background wake during setup prevents a new agent turn and correctly reports that no turn started.
 - Branching a session keeps late advisor completions out of the new conversation's transcript and cost total.

@@ -9,6 +9,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
+import type { Model } from "@oh-my-pi/pi-ai";
 import { closeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { __resetDirsFromEnvForTests, logger, removeWithRetries } from "@oh-my-pi/pi-utils";
 import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
@@ -99,6 +100,12 @@ function chunks(reply: Reply): string {
  * (the job's completion notice, side requests) → `pong`.
  */
 class FakeModelServer {
+	readonly turns: Array<{
+		model: unknown;
+		pathname: string;
+		dynamicHeader: string | null;
+		staticHeader: string | null;
+	}> = [];
 	readonly #server: Bun.Server<undefined>;
 	readonly #hangs: Array<() => void> = [];
 	#hungRequest = Promise.withResolvers<void>();
@@ -164,6 +171,14 @@ class FakeModelServer {
 			.map(message => messageText(message.content))
 			.join("\n");
 		const runTurn = systemText.includes(AGENT_MARKER);
+		if (runTurn) {
+			this.turns.push({
+				model: typeof body === "object" && body !== null ? Reflect.get(body, "model") : undefined,
+				pathname: url.pathname,
+				dynamicHeader: request.headers.get("x-dynamic-token"),
+				staticHeader: request.headers.get("x-static-token"),
+			});
+		}
 		let reply: Reply = { text: "pong" };
 		if (runTurn && last?.role === "tool") {
 			reply = { text: `tool said: ${messageText(last.content)}` };
@@ -327,8 +342,7 @@ function runOptions(id: string, task: string, extra: Partial<ExecutorOptions> = 
 }
 
 /** A real main-thread root session, as main.ts hands the persisted reviver factory. */
-function rootSession(): AgentSession {
-	const model = modelRegistry.find("fake", "fake-model");
+function rootSession(model: Model | undefined = modelRegistry.find("fake", "fake-model")): AgentSession {
 	if (!model) throw new Error("fake model missing from the main registry");
 	const agent = new Agent({ initialState: { model, systemPrompt: ["root"], tools: [] }, convertToLlm });
 	const session = new AgentSession({
@@ -343,6 +357,94 @@ function rootSession(): AgentSession {
 }
 
 describe("subagent runs routed into pooled workers", () => {
+	for (const revival of ["warm", "cold"] as const) {
+		it(
+			`keeps the parent's runtime endpoint and dynamic headers through ${revival} worker revival`,
+			async () => {
+				const transport = new FakeModelServer();
+				cleanups.push(() => transport.stop());
+				const catalogModel = modelRegistry.find("fake", "fake-model");
+				if (!catalogModel) throw new Error("fake model missing from the main registry");
+				let token = "fresh";
+				const headers = { "x-static-token": "inherited-static" };
+				const resolveHeaders = async () => ({ ...headers, "x-dynamic-token": token });
+				const model: Model = {
+					...catalogModel,
+					baseUrl: `http://127.0.0.1:${transport.port}/inherited/v1`,
+					headers,
+					resolveHeaders,
+				};
+				const parent = rootSession(model);
+				AgentRegistry.global().register({
+					id: MAIN_AGENT_ID,
+					displayName: MAIN_AGENT_ID,
+					kind: "main",
+					session: parent,
+					status: "idle",
+				});
+				const first = await runSubprocess(
+					runOptions("Headers", "ping", { parentModel: model, parentAgentId: MAIN_AGENT_ID }),
+				);
+				expect(first.error).toBeUndefined();
+				expect(first.output).toBe("pong");
+				const home = mirrorOf(AgentRegistry.global().get("Headers")?.session).home;
+				const lifecycle = AgentLifecycleManager.global();
+				await lifecycle.park("Headers");
+				expect(AgentRegistry.global().get("Headers")?.session).toBeNull();
+				if (revival === "cold") {
+					const worker = pool.forThread(home);
+					if (!worker) throw new Error("home worker missing");
+					// Discard the worker-owned warm reviver; reopen the persisted session in a new worker.
+					worker.terminate("test cold revival");
+					lifecycle.setPersistedSubagentReviverFactory(
+						createPersistedSubagentReviverFactory({
+							session: parent,
+							authStorage,
+							modelRegistry,
+							settings,
+							enableLsp: false,
+							eventBus,
+						}),
+						() => 0,
+					);
+				}
+				for (const nextToken of ["revived", "rotated"]) {
+					token = nextToken;
+					const followUp = await runSubagentFollowUpTurn({
+						id: "Headers",
+						agent: AGENT,
+						message: nextToken,
+						structured: false,
+					});
+					expect(followUp.error).toBeUndefined();
+					expect(followUp.output).toBe("pong");
+				}
+				const revived = mirrorOf(AgentRegistry.global().get("Headers")?.session);
+				if (revival === "cold") expect(revived.home).not.toBe(home);
+				else expect(revived.home).toBe(home);
+				// The registry's endpoint has no runtime header hook and must never replace the parent's model.
+				expect(server.turns).toEqual([]);
+				expect(transport.turns).toEqual(
+					["fresh", "revived", "rotated"].map(dynamicHeader => ({
+						model: model.id,
+						pathname: "/inherited/v1/chat/completions",
+						dynamicHeader,
+						staticHeader: headers["x-static-token"],
+					})),
+				);
+				expect(revived.model).toMatchObject({
+					provider: model.provider,
+					id: model.id,
+					baseUrl: model.baseUrl,
+					headers,
+				});
+				// The worker's published mirror returns the callable to its original owner on main.
+				expect(revived.model?.resolveHeaders).toBe(resolveHeaders);
+			},
+			TEST_TIMEOUT_MS,
+		);
+	}
+
 	it(
 		"warms a worker with a throwaway session sealed off from main, then runs subagents there",
 		async () => {
