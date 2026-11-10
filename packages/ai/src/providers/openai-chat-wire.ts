@@ -13,14 +13,20 @@ export interface ChatCompletionMessageFunctionToolCall {
 	type: "function";
 	function: { name: string; arguments: string };
 }
-export interface ChatCompletionMessageParam {
-	role: "system" | "developer" | "user" | "assistant" | "tool";
-	content: string | ChatCompletionContentPart[] | null;
+export interface ChatCompletionAssistantMessageParam {
+	role: "assistant";
+	content: string | null;
 	tool_calls?: ChatCompletionMessageFunctionToolCall[];
-	tool_call_id?: string;
 }
-export type ChatCompletionAssistantMessageParam = ChatCompletionMessageParam;
-export type ChatCompletionToolMessageParam = ChatCompletionMessageParam;
+export interface ChatCompletionToolMessageParam {
+	role: "tool";
+	content: string;
+	tool_call_id: string;
+}
+export type ChatCompletionMessageParam =
+	| ChatCompletionAssistantMessageParam
+	| ChatCompletionToolMessageParam
+	| { role: "system" | "developer" | "user"; content: string | ChatCompletionContentPart[] };
 export interface ChatCompletionTool {
 	type: "function";
 	function: { name: string; description?: string; parameters?: Record<string, unknown>; strict?: boolean };

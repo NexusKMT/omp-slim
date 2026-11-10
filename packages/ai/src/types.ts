@@ -103,7 +103,7 @@ export interface StreamOptions {
 	parentSessionId?: string;
 	taskBudget?: TokenTaskBudget;
 	promptCacheKey?: string;
-	loopGuard?: { enabled?: boolean; checkAssistantContent?: boolean };
+	loopGuard?: { enabled?: boolean; level?: "exact" | "semantic"; checkAssistantContent?: boolean };
 	maxInFlightRequests?: Record<string, number>;
 	beforeDispatch?: () => void;
 	waitForTerminalDrain?: boolean;
