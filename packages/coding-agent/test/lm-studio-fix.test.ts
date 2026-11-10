@@ -199,76 +199,95 @@ describe("ModelRegistry LM Studio Fixes", () => {
 		expect(registry.find("lm-studio", "big-model")?.contextWindow).toBe(262144);
 	});
 
-	test("first successful inference refreshes the live session context window", async () => {
-		let loaded = false;
-		const fetchMock: FetchImpl = input => {
-			const url = String(input);
-			if (url === "http://127.0.0.1:1234/api/v0/models") {
-				return Promise.resolve(
-					new Response(
-						JSON.stringify({
-							data: [
-								{
-									id: "big-model",
-									type: "llm",
-									state: loaded ? "loaded" : "not-loaded",
-									max_context_length: 262144,
-									loaded_context_length: loaded ? 81920 : null,
-								},
-							],
+	test.each(["main", "sub"] as const)(
+		"preserves the %s session model policy after the first successful inference",
+		async agentKind => {
+			let loaded = false;
+			const fetchMock: FetchImpl = input => {
+				const url = String(input);
+				if (url === "http://127.0.0.1:1234/api/v0/models") {
+					return Promise.resolve(
+						new Response(
+							JSON.stringify({
+								data: [
+									{
+										id: "big-model",
+										type: "llm",
+										state: loaded ? "loaded" : "not-loaded",
+										max_context_length: 262144,
+										loaded_context_length: loaded ? 81920 : null,
+									},
+								],
+							}),
+							{ status: 200, headers: { "Content-Type": "application/json" } },
+						),
+					);
+				}
+				if (url === "http://127.0.0.1:1234/v1/models") {
+					return Promise.resolve(
+						new Response(JSON.stringify({ data: [{ id: "big-model", object: "model" }] }), {
+							status: 200,
+							headers: { "Content-Type": "application/json" },
 						}),
-						{ status: 200, headers: { "Content-Type": "application/json" } },
-					),
-				);
+					);
+				}
+				return Promise.resolve(new Response(null, { status: 404 }));
+			};
+
+			const modelRegistry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+			await modelRegistry.refresh();
+			expect(modelRegistry.find("lm-studio", "big-model")?.contextWindow).toBe(262144);
+
+			// Model registered while unloaded, then JIT-loaded on the first request.
+			loaded = true;
+
+			// A MockModel carrying the LM Studio provider/id/baseUrl drives the agent
+			// loop and fires onResponse (via responseHeaders) with a 200, exactly like
+			// a real provider returning after the JIT load completes.
+			const parentContextWindow = agentKind === "main" ? 262144 : 131072;
+			const parentEndpoint = agentKind === "main" ? "http://127.0.0.1:1234/v1" : "http://127.0.0.1:1234/parent/v1";
+			const resolveHeaders = async () => ({ "x-parent-route": "inherited" });
+			const mockModel = Object.assign(
+				createMockModel({
+					provider: "lm-studio",
+					id: "big-model",
+					baseUrl: parentEndpoint,
+					contextWindow: parentContextWindow,
+					responses: [{ content: ["ok"], responseHeaders: {} }],
+				}),
+				{ headers: { "x-parent-route": "inherited" }, resolveHeaders },
+			);
+			const agent = new Agent({
+				getApiKey: () => "test-key",
+				initialState: { model: mockModel, systemPrompt: ["Test"], tools: [] },
+				streamFn: mockModel.stream,
+			});
+			const session = new AgentSession({
+				agent,
+				agentKind,
+				sessionManager: SessionManager.inMemory(),
+				settings: Settings.isolated({ "compaction.enabled": false }),
+				modelRegistry,
+			});
+			try {
+				expect(session.model?.contextWindow).toBe(parentContextWindow);
+				await session.prompt("hi");
+				await session.waitForIdle();
+				if (agentKind === "main") {
+					// The main session learns the loaded context window after inference.
+					expect(session.model?.contextWindow).toBe(81920);
+				} else {
+					// A child keeps the parent's transport and metadata, even when the
+					// catalog has a different endpoint and context window for the same id.
+					expect(session.model).toBe(mockModel);
+					expect(session.model?.contextWindow).toBe(parentContextWindow);
+					expect(session.model?.baseUrl).toBe(parentEndpoint);
+					expect(session.model?.headers).toEqual({ "x-parent-route": "inherited" });
+					expect(session.model?.resolveHeaders).toBe(resolveHeaders);
+				}
+			} finally {
+				await session.dispose();
 			}
-			if (url === "http://127.0.0.1:1234/v1/models") {
-				return Promise.resolve(
-					new Response(JSON.stringify({ data: [{ id: "big-model", object: "model" }] }), {
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-					}),
-				);
-			}
-			return Promise.resolve(new Response(null, { status: 404 }));
-		};
-
-		const modelRegistry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
-		await modelRegistry.refresh();
-		expect(modelRegistry.find("lm-studio", "big-model")?.contextWindow).toBe(262144);
-
-		// Model registered while unloaded, then JIT-loaded on the first request.
-		loaded = true;
-
-		// A MockModel carrying the LM Studio provider/id/baseUrl drives the agent
-		// loop and fires onResponse (via responseHeaders) with a 200, exactly like
-		// a real provider returning after the JIT load completes.
-		const mockModel = createMockModel({
-			provider: "lm-studio",
-			id: "big-model",
-			baseUrl: "http://127.0.0.1:1234/v1",
-			contextWindow: 262144,
-			responses: [{ content: ["ok"], responseHeaders: {} }],
-		});
-		const agent = new Agent({
-			getApiKey: () => "test-key",
-			initialState: { model: mockModel, systemPrompt: ["Test"], tools: [] },
-			streamFn: mockModel.stream,
-		});
-		const session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "compaction.enabled": false }),
-			modelRegistry,
-		});
-		try {
-			expect(session.model?.contextWindow).toBe(262144);
-			await session.prompt("hi");
-			await session.waitForIdle();
-			// The first successful inference re-probed the runtime window and folded
-			// it into the live session model without a manual refresh.
-			expect(session.model?.contextWindow).toBe(81920);
-		} finally {
-			await session.dispose();
-		}
-	});
+		},
+	);
 });

@@ -2939,7 +2939,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 		}
 
-		if (model) {
+		// A child inherits its parent's resolved runtime metadata and transport.
+		// Lazy-provider refresh may replace it with a same-selector catalog object.
+		if (model && !(isSubagentSession && options.model !== undefined)) {
 			const selectedModel = model;
 			const refreshedModel = await logger.time("refreshInitialModelMetadata", () =>
 				modelRegistry.refreshSelectedModelMetadata(selectedModel),

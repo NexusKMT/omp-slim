@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- Subagents preserve their parent's custom model endpoint and headers during startup, revival, and local runtime metadata updates.
 - Cancelling a background wake during setup prevents a new agent turn and correctly reports that no turn started.
 - Branching a session keeps late advisor completions out of the new conversation's transcript and cost total.
 - ACP ignores delayed end-of-turn handlers after their prompt finishes, so late background results stay in context until the next user prompt and a later prompt cannot be ended by an earlier turn.

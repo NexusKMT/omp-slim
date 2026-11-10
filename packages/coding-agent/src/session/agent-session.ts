@@ -6521,7 +6521,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * no-callback `#onResponse` fast path stays allocation-free.
 	 */
 	#maybeRefreshLazyLocalContext(response: ProviderResponseMetadata, model: Model | undefined): void | Promise<void> {
-		if (!model || response.status < 200 || response.status >= 300) return;
+		// Subagents use the parent's resolved metadata and transport without rebinding to the catalog.
+		if (this.#agentKind === "sub" || !model || response.status < 200 || response.status >= 300) return;
 		const key = `${model.provider}/${model.id}`;
 		if (this.#lazyContextRefreshed.has(key)) return;
 		if (!this.#modelRegistry.hasLazyRuntimeMetadata(model.provider)) return;

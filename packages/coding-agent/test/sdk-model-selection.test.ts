@@ -338,6 +338,62 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		}
 	});
 
+	test("preserves inherited child transport while main sessions refresh local runtime metadata", async () => {
+		const resolveHeaders = async () => ({ "x-parent-route": "inherited" });
+		const inheritedModel = buildModel({
+			id: "local-model",
+			name: "Parent local model",
+			api: "openai-completions",
+			provider: "lm-studio",
+			baseUrl: "http://127.0.0.1:9/parent/v1",
+			headers: { "x-parent-route": "inherited" },
+			resolveHeaders,
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 32_000,
+			maxTokens: 4_000,
+		});
+		const catalogModel = {
+			...inheritedModel,
+			baseUrl: "http://127.0.0.1:9/catalog/v1",
+			headers: { "x-parent-route": "catalog" },
+			resolveHeaders: undefined,
+			contextWindow: 64_000,
+		};
+		// Lazy local-provider refresh can return the same selector's catalog
+		// object, whose transport differs from the parent's explicit override.
+		vi.spyOn(fixtureModelRegistry, "refreshSelectedModelMetadata").mockResolvedValue(catalogModel);
+		const options = {
+			...buildSessionOptions([]),
+			extensions: [],
+			settings: Settings.isolated({ "compaction.enabled": false, "todo.enabled": false }),
+			model: inheritedModel,
+			hasUI: true,
+		};
+		const { session: main } = await createAgentSession(options);
+		try {
+			expect(main.model).toBe(catalogModel);
+			expect(main.model?.contextWindow).toBe(64_000);
+			const { session: child } = await createAgentSession({
+				...options,
+				sessionManager: SessionManager.inMemory(),
+				taskDepth: 1,
+			});
+			try {
+				expect(child.model).toBe(inheritedModel);
+				expect(child.model?.baseUrl).toBe("http://127.0.0.1:9/parent/v1");
+				expect(child.model?.headers).toEqual({ "x-parent-route": "inherited" });
+				expect(child.model?.resolveHeaders).toBe(resolveHeaders);
+				expect(child.model?.contextWindow).toBe(32_000);
+			} finally {
+				await child.dispose();
+			}
+		} finally {
+			await main.dispose();
+		}
+	});
+
 	test("hydrates credential-scoped model caches before selecting the configured primary", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		authStoragesToClose.push(authStorage);
