@@ -16,23 +16,30 @@ function fakeModel(provider: string, id: string): Model<Api> {
 	} as unknown as Model<Api>;
 }
 
-test("dry-balance resolves configured bare role names", async () => {
+test("dry-balance samples the primary model and rejects retired role selectors before sampling", async () => {
 	const model = fakeModel("acme", "balance-model");
+	let samples = 0;
 	const registry: DryBalanceModelRegistry = {
 		authStorage: {
 			oauth: {
-				access: async () => ({ accessToken: "test-token", email: "test@example.com" }) as unknown as OAuthAccess,
+				access: async () => {
+					samples++;
+					return { accessToken: "test-token", email: "test@example.com" } as unknown as OAuthAccess;
+				},
 			},
 		},
 		getAll: () => [model],
 		getAvailable: () => [model],
 		getApiKey: async () => "test-token",
 	};
-	const settings = Settings.isolated({ modelRoles: { task: "acme/balance-model" } });
+	const settings = Settings.isolated({
+		model: "acme/balance-model",
+		modelRoles: { task: "acme/balance-model", smol: "acme/balance-model" },
+	});
 
 	const summary = await runDryBalanceCommand(
 		{
-			flags: { model: "task", count: 1, concurrency: 1, json: true },
+			flags: { model: "default", count: 1, concurrency: 1, json: true },
 		},
 		{
 			createRuntime: async () => ({ modelRegistry: registry, settings }),
@@ -45,6 +52,20 @@ test("dry-balance resolves configured bare role names", async () => {
 
 	expect(summary.model).toBe("acme/balance-model");
 	expect(summary.success.total).toBe(1);
+	for (const selector of ["task", "@smol"]) {
+		await expect(
+			runDryBalanceCommand(
+				{ flags: { model: selector, count: 1, concurrency: 1, json: true } },
+				{
+					createRuntime: async () => ({ modelRegistry: registry, settings }),
+					writeStdout: () => {},
+					writeStderr: () => {},
+					setExitCode: () => {},
+				},
+			),
+		).rejects.toThrow(`Model "${selector}" not found`);
+	}
+	expect(samples).toBe(1);
 });
 
 test("dry-balance samples leave no session pins in the credential store", async () => {

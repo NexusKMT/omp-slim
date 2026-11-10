@@ -47,7 +47,7 @@ beforeEach(async () => {
 		path.join(getProjectAgentDir(tmp.path()), "settings.json"),
 		JSON.stringify({
 			extensions: [extensionPath],
-			modelRoles: { commit: SELECTOR },
+			model: SELECTOR,
 		}),
 	);
 
@@ -82,7 +82,7 @@ describe.serial("commit extension provider resolution", () => {
 		).resolves.toEqual({ usedFallback: false });
 	});
 
-	test("legacy pipeline resolves the project commit role from an extension provider", async () => {
+	test("legacy pipeline accepts a clean project configured with an extension-provided primary model", async () => {
 		await expect(
 			runCommitCommand({
 				push: false,

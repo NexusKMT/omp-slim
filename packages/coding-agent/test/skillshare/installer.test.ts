@@ -23,7 +23,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/skillshare/manifest";
 import { writeTar } from "@oh-my-pi/pi-coding-agent/skillshare/tar";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
-import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils/dirs";
+import * as dirs from "@oh-my-pi/pi-utils/dirs";
 import type { SkillPackument, SkillVersionManifest, SkillVersionSummary } from "@oh-my-pi/pi-wire/skillshare";
 
 const SCOPE = "alice";
@@ -176,12 +176,14 @@ describe("installer", () => {
 	};
 
 	beforeEach(async () => {
-		originalAgentDir = getAgentDir();
+		originalAgentDir = dirs.getAgentDir();
 		tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-skillshare-install-"));
 		project = path.join(tempHome, "work", "proj");
 		await fs.mkdir(path.join(project, ".git"), { recursive: true });
 		vi.spyOn(os, "homedir").mockReturnValue(tempHome);
-		setAgentDir(path.join(tempHome, ".omp", "agent"));
+		// This fixture asserts the default project layout independently of the host config override.
+		vi.spyOn(dirs, "getConfigDirName").mockReturnValue(".omp");
+		dirs.setAgentDir(path.join(tempHome, ".omp", "agent"));
 		client = await SkillshareClient.create({ registryUrl: "https://skills.test" });
 		registry = { pk: packument([], {}), tarballs: {}, files: [] };
 		vi.spyOn(client, "packument").mockImplementation(async () => registry.pk);
@@ -208,7 +210,7 @@ describe("installer", () => {
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
-		setAgentDir(originalAgentDir);
+		dirs.setAgentDir(originalAgentDir);
 		await removeWithRetries(tempHome);
 	});
 
@@ -277,7 +279,7 @@ describe("installer", () => {
 		).rejects.toThrow(/declined/);
 		expect(confirmations).toEqual([`${ID}@1.0.0:scripts/run.sh`]);
 		expect(client.tarball).not.toHaveBeenCalled();
-		expect(await Bun.file(path.join(getAgentDir(), "skills.lock.json")).exists()).toBe(false);
+		expect(await Bun.file(path.join(dirs.getAgentDir(), "skills.lock.json")).exists()).toBe(false);
 	});
 
 	it("update moves to the newest in-range version, prunes the old one, and restores a missing store dir", async () => {
@@ -310,8 +312,8 @@ describe("installer", () => {
 		await installSkillPackages(client, { specs: [ID], global: true, yes: false, cwd: project }, hooks);
 
 		expect(await uninstallSkillPackages({ names: [ID], global: true, cwd: project })).toEqual([ID]);
-		expect((await readSkillsManifest(path.join(getAgentDir(), "skills.json"))).skills).toEqual({});
-		expect((await readSkillsLock(path.join(getAgentDir(), "skills.lock.json"))).skills).toEqual({});
+		expect((await readSkillsManifest(path.join(dirs.getAgentDir(), "skills.json"))).skills).toEqual({});
+		expect((await readSkillsLock(path.join(dirs.getAgentDir(), "skills.lock.json"))).skills).toEqual({});
 		expect(await Bun.file(path.join(getSkillStorePath(SCOPE, NAME, "1.0.0"), "SKILL.md")).exists()).toBe(false);
 		await expect(uninstallSkillPackages({ names: [ID], global: true, cwd: project })).rejects.toThrow(
 			/not installed/,

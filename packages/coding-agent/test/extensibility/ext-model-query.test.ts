@@ -49,10 +49,15 @@ describe("createExtensionModelQuery", () => {
 		expect(q.resolve("definitely-not-a-model")).toBeUndefined();
 	});
 
-	test("resolve() honors configured role aliases via the same settings-backed path as core", () => {
-		const settings = Settings.isolated({ modelRoles: { slow: "anthropic/claude-opus-4-8" } });
+	test("resolve() keeps the primary model alias and rejects retired roles", () => {
+		const settings = Settings.isolated({
+			model: "anthropic/claude-opus-4-8",
+			modelRoles: { slow: "openai/gpt-5.4", smol: "openai/gpt-5.4" },
+		});
 		const q = createExtensionModelQuery(registry(), settings, () => undefined);
-		expect(q.resolve("@slow")).toBe(claude);
+		expect(q.resolve("@default")).toBe(claude);
+		expect(q.resolve("@slow")).toBeUndefined();
+		expect(q.resolve("@smol")).toBeUndefined();
 	});
 
 	test("family() groups a vendor's point releases and separates vendors", () => {

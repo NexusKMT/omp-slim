@@ -22,11 +22,9 @@ describe("dropSettingsGroupShadows", () => {
 		expect(result).toEqual({ auth: {}, autoResume: true });
 	});
 
-	it("drops Claude Code's top-level model string, which would shadow omp's model.* group", () => {
-		// Claude Code writes `"model": "opus"` at the top level; omp has no bare
-		// `model` leaf, only `model.*` settings, so the string is a shadow too.
-		const result = dropSettingsGroupShadows({ model: "opus" }, "/proj/.claude/settings.json");
-		expect(result).toEqual({});
+	it("preserves the scalar primary model setting", () => {
+		const result = dropSettingsGroupShadows({ model: "anthropic/claude-sonnet-4-5" }, "/proj/.omp/settings.json");
+		expect(result).toEqual({ model: "anthropic/claude-sonnet-4-5" });
 	});
 	it("passes unknown keys through untouched", () => {
 		const result = dropSettingsGroupShadows(
@@ -40,7 +38,10 @@ describe("dropSettingsGroupShadows", () => {
 	});
 
 	it("preserves arrays at non-group paths", () => {
-		const result = dropSettingsGroupShadows({ cycleOrder: ["a", "b"] }, "/proj/.claude/settings.json");
-		expect(result).toEqual({ cycleOrder: ["a", "b"] });
+		const result = dropSettingsGroupShadows(
+			{ disabledProviders: ["provider-a", "provider-b"] },
+			"/proj/.claude/settings.json",
+		);
+		expect(result).toEqual({ disabledProviders: ["provider-a", "provider-b"] });
 	});
 });
