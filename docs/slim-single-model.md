@@ -31,7 +31,7 @@ image attachments and reports its capability limit instead of calling another
 vision model.
 
 The independent tiny/MLX/ONNX inference installers and workers, predictive
-composer runtime, automatic judge routing and image-generation product tool
+composer runtime, automatic judge routing, Spotlight ranking/output rewriting and image-generation product tool
 are removed. Generic provider protocols, catalog metadata and historical data
 formats are retained for compatibility. Native prediction crate removal is
 outside this application-level pass; no native addon input has changed.
@@ -49,7 +49,24 @@ cover configuration migration, startup and strict restoration, same-model
 recovery, compaction, plan approval, exact child model inheritance, rejected
 overrides, child session release, cache isolation, image capability handling,
 focused UI controls and title lifecycle races. Whole-workspace TypeScript
-checking and formatting passed before the final Spotlight removal. Build
+checking and formatting passed after integrating the Spotlight removal. Build
 results, final source revision and artifact hashes will be recorded here after
 the integrated run finishes. Earlier macOS artifacts in `SLIM.md` describe the
 previous browser/desktop/voice/memory removal and do not contain this change.
+
+## Size measurement
+
+At application source `e69f3fc969`, this pass changed 519 tracked text files:
+6,919 lines added, 73,495 deleted, and 66,576 removed net. This includes tests,
+documentation, configuration and generated text, so it is not a count of removed
+production code. Against the original upstream baseline, tracked text is down
+308,537 lines net.
+
+Source-extension physical lines across the repository were 3,257,477 at the
+original upstream, 3,033,850 before this pass, and 2,968,554 after it. This count
+includes tests, fixtures, vendored/generated source, comments and blank lines.
+Markdown, JSON/YAML/TOML/KDL configuration, locks and binary resources are
+excluded. The source reduction in this pass is 65,296 lines (2.15%); cumulative
+source reduction is 288,923 lines (8.87%). A large monorepo remains; the practical
+maintenance gain is removal of complete runtimes and routing branches, not a
+claim that the entire codebase is small.
