@@ -1,34 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, Message, Model, ModelSpec, Usage } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
+import type { AssistantMessage, Message, Usage } from "@oh-my-pi/pi-ai";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import * as snapcompact from "../src";
 
 // Small frames keep render time negligible. Legacy 5x8 shape: 320px → 64 cols
-// x 40 rows = 2560 chars. Default (anthropic 8x8r-bw): 40 cols x 20 rows = 800.
+// x 40 rows = 2560 chars. Explicit 8x8r-bw: 40 cols x 20 rows = 800.
 const TEST_FRAME_SIZE = 320;
 
 function createUserMessage(content: string): Message {
 	return { role: "user", content, timestamp: 0 };
-}
-
-/** Runs `fn` with `overrides` applied to `Bun.env` (`undefined` deletes), then restores the previous values. */
-function withEnv(overrides: Readonly<Record<string, string | undefined>>, fn: () => void): void {
-	const previous = Object.keys(overrides).map(key => [key, Bun.env[key]] as const);
-	const apply = (entries: Iterable<readonly [string, string | undefined]>) => {
-		for (const [key, value] of entries) {
-			if (value === undefined) delete Bun.env[key];
-			else Bun.env[key] = value;
-		}
-	};
-	try {
-		apply(Object.entries(overrides));
-		fn();
-	} finally {
-		apply(previous);
-	}
 }
 
 const ZERO_USAGE: Usage = {
@@ -322,290 +302,58 @@ describe("normalize", () => {
 });
 
 describe("shape resolution", () => {
-	it("maps provider APIs to their eval-winning shapes", () => {
-		expect(snapcompact.resolveShape({ api: "anthropic-messages" })).toEqual(snapcompact.SHAPES.anthropic);
-		expect(snapcompact.resolveShape({ api: "openai-responses" })).toEqual(snapcompact.SHAPES.openai);
-		expect(snapcompact.resolveShape({ api: "azure-openai-responses" })).toEqual(snapcompact.SHAPES.openai);
-		expect(snapcompact.resolveShape({ api: "google-generative-ai" })).toEqual(snapcompact.SHAPES.google);
-		// Unknown and absent APIs fall back to the unknown family default (8on22-bw, billed at the ceiling).
-		const unknownFallback = snapcompact.resolveShape({ api: "some-future-api" });
-		expect(unknownFallback.cellHeight).toBe(22);
-		expect(unknownFallback.variant).toBe("bw");
-		expect(snapcompact.resolveShape(undefined)).toEqual(unknownFallback);
-	});
-
-	it("detects the ideal shape from the model id across gateways", () => {
-		// A high-res Claude served through an OpenAI-compatible gateway keeps
-		// its own geometry (tracked 8x13), its 1932px frame, and Anthropic's
-		// billing (69² 28px patches); the gateway only adds its detail hint.
-		const claudeViaOpenRouter = snapcompact.resolveShape({
-			api: "openai-completions",
-			id: "anthropic/claude-fable-5",
-		});
-		expect(claudeViaOpenRouter.font).toBe("8x13");
-		expect(claudeViaOpenRouter.cellWidth).toBe(11); // extra tracking
-		expect(claudeViaOpenRouter.frameSize).toBe(1932);
-		expect(claudeViaOpenRouter.frameTokenEstimate).toBe(4761);
-		expect(claudeViaOpenRouter.imageDetail).toBe("original");
-
-		// Claude on Vertex must not inherit the Gemini shape or Gemini's fixed
-		// per-image price.
-		const claudeOnVertex = snapcompact.resolveShape({ api: "google-vertex", id: "claude-fable-5@20250929" });
-		expect(claudeOnVertex.font).toBe("8x13");
-		expect(claudeOnVertex.cellWidth).toBe(11);
-		expect(claudeOnVertex.frameSize).toBe(1932);
-		expect(claudeOnVertex.frameTokenEstimate).toBe(4761);
-
-		// High-res frames are reserved for the lines that read them natively;
-		// older Claude lines keep the safe 1568px family default.
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-8" }).frameSize).toBe(1932);
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "anthropic--claude-4.8-opus" }).frameSize).toBe(
-			1932,
-		);
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-10" }).frameSize).toBe(1932);
-		// Versionless Fable/Mythos aliases (bundled `claude-fable-latest`) never
-		// parse a numeric version but still read the high-res tier by name (#8257).
-		expect(
-			snapcompact.resolveShape({ api: "openai-completions", id: "anthropic/claude-fable-latest" }).frameSize,
-		).toBe(1932);
-		expect(
-			snapcompact.resolveShape({ api: "openai-completions", id: "~anthropic/claude-fable-latest" }).frameSize,
-		).toBe(1932);
-		// Opus 5+ shares the Anthropic visual-token cap, so it stays on the
-		// high-res tier rather than falling back to the 1568px default (#8256).
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-5" }).frameSize).toBe(1932);
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-6" }).frameSize).toBe(1932);
-		// Mixed-case gateway ids matched the pre-catalog-parser /i regex; the
-		// parser input is normalized so they stay on the high-res tier.
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "CLAUDE-OPUS-5" }).frameSize).toBe(1932);
-		// Minor versions past the old 9.10 semver-table bound must not fall
-		// back to the 1568px default (same staleness class as #8256).
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-5-11" }).frameSize).toBe(1932);
-		// Opus lines below 4.7 downscale, so they keep the 1568px family
-		// geometry, billed under the standard tier's 1,568-token cap (39²).
-		const opus46 = snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-6" });
-		expect(opus46).toEqual({ ...snapcompact.SHAPES.anthropic, frameTokenEstimate: 1521 });
-		// Older Sonnet lines share that tier but only Sonnet 4.6 was billing-verified.
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-3-5-sonnet" })).toEqual({
-			...snapcompact.SHAPES.anthropic,
-			frameTokenEstimate: 1521,
-		});
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-sonnet-4-6" })).toEqual({
-			...snapcompact.SHAPES.anthropic,
-			frameTokenEstimate: 1521,
-			frameTokensVerified: true,
-		});
-
-		// Gemini reads 2048px frames at the same fixed bill, single-column with
-		// extra leading (22px pitch).
-		const gemini = snapcompact.resolveShape({ api: "google-generative-ai", id: "gemini-3.5-flash" });
-		expect(gemini.frameSize).toBe(2048);
-		expect(gemini.columns).toBeUndefined();
-		expect(gemini.cellHeight).toBe(22); // extra leading
-		expect(gemini.frameTokenEstimate).toBe(1120);
-
-		// Kimi models resolve to 8on22-bw; GLM keeps 8on16-bw.
-		const kimiShape = snapcompact.resolveShape({ api: "openai-completions" }, "8on22-bw");
-		const glmShape = snapcompact.resolveShape({ api: "openai-completions" }, "8on16-bw");
-		expect(snapcompact.resolveShape({ api: "openai-completions", id: "moonshotai/kimi-k2.6" })).toEqual(kimiShape);
-		expect(snapcompact.resolveShape({ api: "openai-completions", id: "z-ai/glm-4.6v" })).toEqual(glmShape);
-
-		// Unmeasured model ids fall back to the API family default shape and,
-		// without a catalog image rule, to the wire family's billing.
-		expect(snapcompact.resolveShape({ api: "openai-completions", id: "qwen/qwen3-vl" })).toEqual(
-			snapcompact.SHAPES.openai,
-		);
-		expect(snapcompact.idealShapeVariant("qwen/qwen3-vl")).toBeUndefined();
-
-		// An explicit variant wins over identity detection, at the variant's
-		// own research frame size.
-		const forced = snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-fable-5" }, "8x8r-bw");
-		expect(forced.lineRepeat).toBe(2);
-		expect(forced.frameSize).toBe(1568);
-	});
-
-	it("forces a named variant and re-prices it for the provider's billing", () => {
-		// "auto" behaves exactly like no override.
-		expect(snapcompact.resolveShape({ api: "anthropic-messages" }, "auto")).toEqual(snapcompact.SHAPES.anthropic);
-
-		// Forced geometry survives; billing follows the provider, not the variant.
-		const denseOnAnthropic = snapcompact.resolveShape({ api: "anthropic-messages" }, "6x6u-sent");
-		expect(denseOnAnthropic.cellWidth).toBe(6);
-		expect(denseOnAnthropic.variant).toBe("sent");
-		expect(denseOnAnthropic.frameTokenEstimate).toBe(snapcompact.SHAPES.anthropic.frameTokenEstimate);
-		expect(denseOnAnthropic.imageDetail).toBeUndefined();
-
-		const repeatedOnOpenai = snapcompact.resolveShape({ api: "openai-responses" }, "8x8r-bw");
-		expect(repeatedOnOpenai.lineRepeat).toBe(2);
-		expect(repeatedOnOpenai.frameTokenEstimate).toBe(snapcompact.SHAPES.openai.frameTokenEstimate);
-		expect(repeatedOnOpenai.imageDetail).toBe("original");
-
-		// Billing is computed for the variant's own frame size: the legacy
-		// 2576px frame caps out Anthropic's visual-token budget but stays at
-		// Gemini's fixed per-image price.
-		const legacyOnGoogle = snapcompact.resolveShape({ api: "google-generative-ai" }, "5x8-bw");
-		expect(legacyOnGoogle.frameSize).toBe(2576);
-		expect(legacyOnGoogle.frameTokenEstimate).toBe(snapcompact.SHAPES.google.frameTokenEstimate);
-		const legacyOnAnthropic = snapcompact.resolveShape({ api: "anthropic-messages" }, "5x8-bw");
-		expect(legacyOnAnthropic.frameTokenEstimate).toBe(69 * 69);
-	});
-
-	it("renders frames no wider than the host's image edge, priced at that size", async () => {
-		// Cursor fits Claude and GPT images into 1024×1024 before the model reads them.
-		const claude = snapcompact.resolveShape({ provider: "cursor", api: "cursor-agent", id: "claude-opus-5-high" });
-		expect(claude).toMatchObject({ cellWidth: 11, frameSize: 1024, frameTokenEstimate: 37 * 37 });
-		const gpt = snapcompact.resolveShape({ provider: "cursor", api: "cursor-agent", id: "gpt-5.4-nano" });
-		expect(gpt).toMatchObject({ cellHeight: 22, frameSize: 1024, frameTokenEstimate: Math.ceil(32 * 32 * 1.2) });
-		expect(
-			snapcompact.resolveShape({ provider: "cursor", api: "cursor-agent", id: "claude-opus-5-high" }, "5x8-bw")
-				.frameSize,
-		).toBe(1024);
-		const [frame] = await snapcompact.renderMany("cursor ".repeat(2000), { shape: claude, maxFrames: 1 });
+	it("uses a generic readable grid and permits explicit geometry", async () => {
+		expect(snapcompact.resolveShape()).toEqual(snapcompact.SHAPES.default);
+		expect(snapcompact.resolveShape("auto")).toEqual(snapcompact.SHAPES.default);
+		const shape = { ...snapcompact.resolveShape("11on16-bw"), frameSize: 1024 };
+		const [frame] = await snapcompact.renderMany("readable text ".repeat(1000), { shape, maxFrames: 1 });
 		expect(decodePng(Buffer.from(frame.data, "base64")).width).toBe(1024);
-		// Targets naming only the host or only Cursor's wire reach the same backend.
-		expect(snapcompact.resolveShape({ provider: "cursor", id: "claude-opus-5-high" }).frameSize).toBe(1024);
-		const [apiOnly] = await snapcompact.renderMany("cursor ".repeat(2000), {
-			model: { api: "cursor-agent", id: "claude-opus-5-high" },
-			maxFrames: 1,
-		});
-		expect(decodePng(Buffer.from(apiOnly.data, "base64")).width).toBe(1024);
-
-		// Readers whose host passes images through keep their own frame size.
-		expect(
-			snapcompact.resolveShape({ provider: "cursor", api: "cursor-agent", id: "gemini-3.7-flash" }).frameSize,
-		).toBe(2048);
-		expect(
-			snapcompact.resolveShape({ provider: "anthropic", api: "anthropic-messages", id: "claude-opus-5" }),
-		).toMatchObject({ frameSize: 1932, frameTokenEstimate: 69 * 69 });
+		expect(frame.detail).toBeUndefined();
 	});
 
-	it("prices frames by the reading model's lineage, not the wire API", () => {
-		const codex = snapcompact.resolveShape({ api: "openai-codex-responses", id: "gpt-6-astra" });
-		expect(codex.frameSize).toBe(1568);
-		expect(codex.frameTokenEstimate).toBe(2882);
-		expect(codex.imageDetail).toBe("original");
-		expect(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-5-5" }).frameTokenEstimate).toBe(
-			4761,
-		);
-		// The standard tier bills under its 1,568-token cap on every host.
-		for (const target of [
-			{ api: "anthropic-messages", id: "claude-opus-4-6" },
-			{ api: "openai-completions", id: "anthropic/claude-sonnet-4.6" },
-			{ api: "bedrock-converse-stream", provider: "amazon-bedrock", id: "us.anthropic.claude-haiku-4-5-v1:0" },
-		] as const) {
-			expect(snapcompact.resolveShape(target).frameTokenEstimate).toBe(1521);
-		}
-		// A forced 2576px variant is priced at its own size: 81² patches × 1.2
-		// on GPT, while the standard Claude tier still fits its cap.
-		const forcedOnCodex = snapcompact.resolveShape({ api: "openai-codex-responses", id: "gpt-6-astra" }, "5x8-bw");
-		expect(forcedOnCodex.frameTokenEstimate).toBe(Math.ceil(81 * 81 * 1.2));
-		expect(
-			snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-6" }, "5x8-bw").frameTokenEstimate,
-		).toBe(1521);
-		// Gemini 3 keeps its fixed budget behind an OpenAI-compatible gateway.
-		expect(
-			snapcompact.resolveShape({ api: "openai-completions", id: "google/gemini-3.5-flash" }).frameTokenEstimate,
-		).toBe(1120);
-		// A built model's identity wins over re-parsing its id.
-		expect(
-			snapcompact.resolveShape({
-				api: "openai-completions",
-				id: "house-vision-model",
-				identity: { class: "anthropic", family: "opus", revision: "4.6.0" },
-			}).frameTokenEstimate,
-		).toBe(1521);
-		// Unversioned Claude aliases price at the high-res tier: 56² for a 1568px frame.
-		expect(
-			snapcompact.resolveShape({ api: "openrouter", provider: "openrouter", id: "~anthropic/claude-opus-latest" })
-				.frameTokenEstimate,
-		).toBe(56 * 56);
-		// An unclassified model bills at its wire API's rule; with no rule at all it costs the ceiling.
-		expect(snapcompact.resolveShape({ api: "openai-completions", id: "qwen/qwen3-vl" }).frameTokenEstimate).toBe(
-			2882,
-		);
-		expect(snapcompact.resolveShape({ api: "some-future-api", id: "qwen/qwen3-vl" }).frameTokenEstimate).toBe(
-			snapcompact.FRAME_TOKEN_ESTIMATE,
-		);
+	it("plans with a verified explicit token estimate or the conservative default", () => {
+		const shape = { ...snapcompact.resolveShape(), frameTokenEstimate: 1200, frameTokensVerified: true };
+		const explicit = snapcompact.frameBilling(shape);
+		expect(snapcompact.frameTokens(explicit)).toBe(1200);
+		expect(snapcompact.plannedFrameTokens(shape)).toBe(1200);
+		const unverified = { ...shape, frameTokensVerified: false };
+		expect(snapcompact.frameTokens(snapcompact.frameBilling(unverified))).toBe(snapcompact.FRAME_TOKEN_ESTIMATE);
+		expect(snapcompact.frameBillingKey(explicit)).not.toBe(snapcompact.frameBillingKey(snapcompact.frameBilling()));
+		expect(snapcompact.plannedFrameTokens({ ...unverified, frameTokenEstimate: 8000 })).toBe(8000);
 	});
 
-	it("plans archives at a billing-verified frame price and at least the ceiling otherwise", () => {
-		const codex = snapcompact.resolveShape({ api: "openai-codex-responses", id: "gpt-6.1-sol" });
-		expect(codex.frameTokensVerified).toBe(true);
-		expect(snapcompact.plannedFrameTokens(codex)).toBe(2882);
-		expect(snapcompact.plannedFrameTokens({ ...codex, frameTokensVerified: false })).toBe(
-			snapcompact.FRAME_TOKEN_ESTIMATE,
-		);
-		expect(
-			snapcompact.plannedFrameTokens(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-5-5" })),
-		).toBe(4761);
-		// Same 2,882 price, but Grok 4.5 is priced by the OpenAI-wire fallback and Opus 4.6 by the standard tier.
-		const grok = snapcompact.resolveShape({ api: "openai-responses", provider: "xai", id: "grok-4.5" });
-		expect(grok.frameTokenEstimate).toBe(2882);
-		expect(grok.frameTokensVerified).toBeUndefined();
-		expect(snapcompact.plannedFrameTokens(grok)).toBe(snapcompact.FRAME_TOKEN_ESTIMATE);
-		// Grok 4.7's own rule is verified at its frame price.
-		expect(
-			snapcompact.plannedFrameTokens(
-				snapcompact.resolveShape({ api: "openai-responses", provider: "xai", id: "grok-4.7" }),
-			),
-		).toBe(2442);
-		// DeepSeek V4.1 Flash via OpenRouter: its own verified rule, not the Anthropic-wire fallback's 3,136.
-		expect(
-			snapcompact.plannedFrameTokens(
-				snapcompact.resolveShape(getBundledModel("openrouter", "deepseek/deepseek-v4.1-flash-1017")),
-			),
-		).toBe(994);
-		expect(
-			snapcompact.plannedFrameTokens(snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-6" })),
-		).toBe(snapcompact.FRAME_TOKEN_ESTIMATE);
-		// A forced 2576px shape bills above the ceiling, verified or not.
-		const forced = Math.ceil(81 * 81 * 1.2);
-		expect(
-			snapcompact.plannedFrameTokens(
-				snapcompact.resolveShape({ api: "openai-codex-responses", id: "gpt-6.1-sol" }, "5x8-bw"),
-			),
-		).toBe(forced);
-		expect(
-			snapcompact.plannedFrameTokens(
-				snapcompact.resolveShape({ api: "openai-responses", provider: "xai", id: "grok-4.5" }, "5x8-bw"),
-			),
-		).toBe(forced);
-	});
-
-	it("every catalog variant resolves to a complete, renderable shape", () => {
+	it("every named variant resolves to a complete, renderable shape", () => {
 		for (const name of snapcompact.SHAPE_VARIANT_NAMES) {
 			expect(snapcompact.isShapeVariantName(name)).toBe(true);
-			expect(snapcompact.isShape(snapcompact.resolveShape({ api: "openai-responses" }, name))).toBe(true);
-			expect(snapcompact.isShape(snapcompact.resolveShape(undefined, name))).toBe(true);
+			expect(snapcompact.isShape(snapcompact.resolveShape(name))).toBe(true);
+			expect(snapcompact.isShape(snapcompact.resolveShape(name))).toBe(true);
 		}
 		expect(snapcompact.isShapeVariantName("auto")).toBe(false);
 		expect(snapcompact.isShapeVariantName("6x10-sent")).toBe(false);
 	});
 
 	it("recognizes complete shape overrides and rejects malformed ones", () => {
-		expect(snapcompact.isShape(snapcompact.SHAPES.openai)).toBe(true);
-		expect(snapcompact.isShape({ ...snapcompact.SHAPES.openai, cellWidth: 0 })).toBe(false);
-		expect(snapcompact.isShape({ ...snapcompact.SHAPES.openai, variant: "color" })).toBe(false);
-		expect(snapcompact.isShape({ ...snapcompact.SHAPES.openai, imageDetail: "original" })).toBe(true);
+		expect(snapcompact.isShape(snapcompact.SHAPES.default)).toBe(true);
+		expect(snapcompact.isShape({ ...snapcompact.SHAPES.default, cellWidth: 0 })).toBe(false);
+		expect(snapcompact.isShape({ ...snapcompact.SHAPES.default, variant: "color" })).toBe(false);
+		expect(snapcompact.isShape({ ...snapcompact.SHAPES.default, imageDetail: "original" })).toBe(true);
 	});
 
 	it("keeps bitmap shapes render-safe via Silver fallback while CJK-heavy auto archives use Silver", () => {
 		const cjkHeavyText = "こんにちは 你好 안녕 世界 한국어";
-		const silver = snapcompact.resolveShape({ api: "anthropic-messages" }, "silver16-bw");
+		const silver = snapcompact.resolveShape("silver16-bw");
 
 		expect(snapcompact.scanRenderability(cjkHeavyText).isSafe).toBe(true);
 		expect(snapcompact.scanRenderability(cjkHeavyText, { shape: silver }).isSafe).toBe(true);
 		expect(snapcompact.normalize(cjkHeavyText)).toBe(cjkHeavyText);
 		expect(snapcompact.normalize(cjkHeavyText, { shape: silver })).toBe(cjkHeavyText);
-		expect(snapcompact.resolveShapeForText(cjkHeavyText, { api: "anthropic-messages" }, "auto")).toEqual(silver);
+		expect(snapcompact.resolveShapeForText(cjkHeavyText, "auto")).toEqual(silver);
 	});
 
-	it("keeps ASCII-heavy auto archives on the provider/model shape", () => {
-		const model = { api: "openai-responses" as const, id: "gpt-5.5" };
-		const expected = snapcompact.resolveShape(model, "auto");
+	it("keeps ASCII-heavy auto archives on the generic readable shape", () => {
+		const expected = snapcompact.resolveShape("auto");
 		const actual = snapcompact.resolveShapeForText(
 			"function render(value: string) { return value.trim().toLowerCase(); }",
-			model,
 			"auto",
 		);
 
@@ -614,16 +362,15 @@ describe("shape resolution", () => {
 	});
 
 	it("respects explicit non-auto variants even for CJK-heavy text", () => {
-		const model = { api: "anthropic-messages" as const };
-		const expected = snapcompact.resolveShape(model, "8on16-bw");
-		const actual = snapcompact.resolveShapeForText("こんにちは 你好 안녕 世界 한국어", model, "8on16-bw");
+		const expected = snapcompact.resolveShape("8on16-bw");
+		const actual = snapcompact.resolveShapeForText("こんにちは 你好 안녕 世界 한국어", "8on16-bw");
 
 		expect(actual).toEqual(expected);
 		expect(actual.font).not.toBe("silver");
 	});
 
 	it("reports unsupported CJK ideographs unsafe even with the Silver shape selected", () => {
-		const silver = snapcompact.resolveShape(undefined, "silver16-bw");
+		const silver = snapcompact.resolveShape("silver16-bw");
 		const res = snapcompact.scanRenderability("\u{31350}".repeat(12), { shape: silver });
 
 		expect(res.isSafe).toBe(false);
@@ -673,7 +420,7 @@ describe("render", () => {
 	});
 
 	it("pads a short final page without altering the printed rows", async () => {
-		const shape = snapcompact.resolveShape(undefined, "8on22-bw");
+		const shape = snapcompact.resolveShape("8on22-bw");
 		const [last] = await snapcompact.renderMany("x".repeat(83), { shape });
 		const short = decodePng(Buffer.from(last.data, "base64"));
 		const full = await snapcompact.render("x".repeat(83) + " ".repeat(113) + "y".repeat(400), shape);
@@ -686,7 +433,7 @@ describe("render", () => {
 	});
 
 	it("leaves the repeated-row highlight out of padding", async () => {
-		const shape = snapcompact.resolveShape(undefined, "8x8r-bw");
+		const shape = snapcompact.resolveShape("8x8r-bw");
 		const frame = await snapcompact.render("x", shape);
 		const decoded = decodePng(Buffer.from(frame.data, "base64"));
 		expect(decoded.height).toBe(64);
@@ -695,7 +442,7 @@ describe("render", () => {
 	});
 
 	it("renders the repeated grid with doubled lines, black ink, and highlight bands", async () => {
-		const repeated = snapcompact.resolveShape({ api: "anthropic-messages" }, "8x8r-bw");
+		const repeated = snapcompact.resolveShape("8x8r-bw");
 		const geometry = snapcompact.geometry(repeated, TEST_FRAME_SIZE);
 		expect(geometry).toEqual({ cols: 40, rows: 20, capacity: 800 });
 
@@ -708,12 +455,12 @@ describe("render", () => {
 		expect(used.has(1)).toBe(false); // no sentence hues in bw
 	});
 
-	it("renders the anthropic default (tracked 8x13) in plain black, no dim or bands", async () => {
-		const geometry = snapcompact.geometry(snapcompact.SHAPES.anthropic, TEST_FRAME_SIZE);
+	it("renders explicit tracked 8x13 in plain black, no dim or bands", async () => {
+		const geometry = snapcompact.geometry(snapcompact.resolveShape("11on16-bw"), TEST_FRAME_SIZE);
 		expect(geometry).toEqual({ cols: 29, rows: 20, capacity: 580 });
 
 		const frames = await snapcompact.renderMany("Reading the films of the archive. Again.", {
-			shape: snapcompact.SHAPES.anthropic,
+			shape: snapcompact.resolveShape("11on16-bw"),
 			frameSize: TEST_FRAME_SIZE,
 		});
 		const decoded = decodePng(Buffer.from(frames[0].data, "base64"));
@@ -726,7 +473,7 @@ describe("render", () => {
 	});
 
 	it("still dims stopwords on the selectable 6x12-dim variant", async () => {
-		const dim = snapcompact.resolveShape({ api: "anthropic-messages" }, "6x12-dim");
+		const dim = snapcompact.resolveShape("6x12-dim");
 		const frames = await snapcompact.renderMany("Reading the films of the archive. Again.", {
 			shape: dim,
 			frameSize: TEST_FRAME_SIZE,
@@ -737,7 +484,7 @@ describe("render", () => {
 	});
 
 	it("renders a stretched shape as truecolor RGB", async () => {
-		const stretched = snapcompact.resolveShape({ api: "openai-responses" }, "6x6u-sent");
+		const stretched = snapcompact.resolveShape("6x6u-sent");
 		const frame = await snapcompact.render("Hello world.", stretched, TEST_FRAME_SIZE);
 		// IHDR color type byte: 2 = truecolor RGB (anti-aliased stretch output).
 		expect(Buffer.from(frame.data, "base64")[25]).toBe(2);
@@ -745,7 +492,7 @@ describe("render", () => {
 	});
 
 	it("pads stretched RGB frames as well as indexed frames", async () => {
-		const shape = snapcompact.resolveShape(undefined, "6x6u-bw");
+		const shape = snapcompact.resolveShape("6x6u-bw");
 		const frame = await snapcompact.render("x", shape);
 		const png = Buffer.from(frame.data, "base64");
 		expect(png[25]).toBe(2);
@@ -753,7 +500,7 @@ describe("render", () => {
 	});
 
 	it("renders Silver TrueType Unicode text as truecolor RGB", async () => {
-		const silver = snapcompact.resolveShape(undefined, "silver16-bw");
+		const silver = snapcompact.resolveShape("silver16-bw");
 		const frame = await snapcompact.render("你好안녕", silver, 64);
 		const png = Buffer.from(frame.data, "base64");
 		expect(png[25]).toBe(2);
@@ -764,7 +511,7 @@ describe("render", () => {
 	});
 
 	it("renders a Silver fallback glyph across two cells in a bitmap frame", async () => {
-		const bitmap = snapcompact.resolveShape(undefined, "8on16-bw"); // 8px-wide cells at 64px → cols 8
+		const bitmap = snapcompact.resolveShape("8on16-bw"); // 8px-wide cells at 64px → cols 8
 		const frame = await snapcompact.render("你", bitmap, 64);
 		const decoded = decodePng(Buffer.from(frame.data, "base64"));
 		expect(decoded.colorType).toBe(3);
@@ -806,16 +553,21 @@ describe("render", () => {
 describe("renderMany", () => {
 	it("returns no frames for empty or whitespace-only input", async () => {
 		expect(
-			await snapcompact.renderMany("", { shape: snapcompact.SHAPES.anthropic, frameSize: TEST_FRAME_SIZE }),
+			await snapcompact.renderMany("", { shape: snapcompact.resolveShape("11on16-bw"), frameSize: TEST_FRAME_SIZE }),
 		).toEqual([]);
 		expect(
-			await snapcompact.renderMany("  \n\t  ", { shape: snapcompact.SHAPES.anthropic, frameSize: TEST_FRAME_SIZE }),
+			await snapcompact.renderMany("  \n\t  ", {
+				shape: snapcompact.resolveShape("11on16-bw"),
+				frameSize: TEST_FRAME_SIZE,
+			}),
 		).toEqual([]);
-		expect(snapcompact.frames("", { shape: snapcompact.SHAPES.anthropic, frameSize: TEST_FRAME_SIZE })).toBe(0);
+		expect(snapcompact.frames("", { shape: snapcompact.resolveShape("11on16-bw"), frameSize: TEST_FRAME_SIZE })).toBe(
+			0,
+		);
 	});
 
 	it("pages text into image blocks matching the predicted frame count", async () => {
-		const shape = snapcompact.SHAPES.anthropic;
+		const shape = snapcompact.resolveShape("11on16-bw");
 		const { capacity } = snapcompact.geometry(shape, TEST_FRAME_SIZE);
 
 		const short = await snapcompact.renderMany("hello world", { shape, frameSize: TEST_FRAME_SIZE });
@@ -830,7 +582,7 @@ describe("renderMany", () => {
 	});
 
 	it("counts wide CJK as two grid cells in bitmap shapes and one in Silver", () => {
-		const bitmap = snapcompact.resolveShape(undefined, "8on16-bw"); // cols 8 (even) at 64px
+		const bitmap = snapcompact.resolveShape("8on16-bw"); // cols 8 (even) at 64px
 		const cap = snapcompact.geometry(bitmap, 64).capacity;
 		// Wide glyphs take two cells, so half a frame's worth of cells fits as chars.
 		expect(snapcompact.frames("你".repeat(cap / 2), { shape: bitmap, frameSize: 64 })).toBe(1);
@@ -838,13 +590,13 @@ describe("renderMany", () => {
 		// ASCII stays one cell per char on the same shape.
 		expect(snapcompact.frames("a".repeat(cap), { shape: bitmap, frameSize: 64 })).toBe(1);
 		// The square-celled Silver shape draws CJK one cell each (no doubling).
-		const silver = snapcompact.resolveShape(undefined, "silver16-bw");
+		const silver = snapcompact.resolveShape("silver16-bw");
 		const silverCap = snapcompact.geometry(silver, 64).capacity;
 		expect(snapcompact.frames("你".repeat(silverCap), { shape: silver, frameSize: 64 })).toBe(1);
 	});
 
 	it("honors maxFrames and propagates the shape's detail hint", async () => {
-		const shape = snapcompact.SHAPES.openai;
+		const shape: snapcompact.Shape = { ...snapcompact.SHAPES.default, imageDetail: "original" };
 		const { capacity } = snapcompact.geometry(shape, TEST_FRAME_SIZE);
 		const frames = await snapcompact.renderMany("x".repeat(capacity * 3), {
 			shape,
@@ -852,10 +604,10 @@ describe("renderMany", () => {
 			maxFrames: 2,
 		});
 		expect(frames).toHaveLength(2);
-		// The openai shape carries imageDetail: "original"; anthropic carries none.
+		// Explicit image detail survives pagination; ordinary shapes carry no hint.
 		expect(frames[0].detail).toBe("original");
 		const bw = await snapcompact.renderMany("hi", {
-			shape: snapcompact.SHAPES.anthropic,
+			shape: snapcompact.resolveShape("11on16-bw"),
 			frameSize: TEST_FRAME_SIZE,
 		});
 		expect(bw[0].detail).toBeUndefined();
@@ -1176,11 +928,11 @@ describe("compact", () => {
 		const hugeText = `HEAD sentinel. ${"Important fact number one. ".repeat(1000)}TAIL sentinel.`;
 		const result = await snapcompact.compact(
 			makePreparation({ messagesToSummarize: [createUserMessage(hugeText)] }),
-			{ model: { api: "anthropic-messages" }, frameSize: TEST_FRAME_SIZE, maxFrames: 7 },
+			{ shape: snapcompact.resolveShape("11on16-bw"), frameSize: TEST_FRAME_SIZE, maxFrames: 7 },
 		);
 		const archive = snapcompact.getPreservedArchive(result.preserveData);
 		expect(archive?.frames).toHaveLength(7);
-		const hiCols = snapcompact.geometry(snapcompact.SHAPES.anthropic, TEST_FRAME_SIZE).cols;
+		const hiCols = snapcompact.geometry(snapcompact.resolveShape("11on16-bw"), TEST_FRAME_SIZE).cols;
 		const cols = archive?.frames.map(frame => frame.cols) ?? [];
 		expect(cols.slice(0, 3)).toEqual([hiCols, hiCols, hiCols]);
 		expect(cols.slice(-3)).toEqual([hiCols, hiCols, hiCols]);
@@ -1189,7 +941,7 @@ describe("compact", () => {
 	});
 
 	it("keeps foveated Silver archives on the Silver font", async () => {
-		const silver = snapcompact.resolveShape(undefined, "silver16-bw");
+		const silver = snapcompact.resolveShape("silver16-bw");
 		const result = await snapcompact.compact(
 			makePreparation({ messagesToSummarize: [createUserMessage("你好世界".repeat(200))] }),
 			{ shape: silver, frameSize: 64, maxFrames: 1 },
@@ -1419,91 +1171,17 @@ describe("compact", () => {
 });
 
 describe("frame data budget", () => {
-	const codex = { api: "openai-codex-responses", id: "gpt-6-astra" } as const;
-	const budget = snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET;
-	const highResFrames = Math.floor(budget / snapcompact.FRAME_DATA_BYTES_ESTIMATE);
-
-	it("gives the default 1568px shapes more of the same byte budget", () => {
-		const opus = snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-4-8" });
-		const sonnet = snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-sonnet-4-5" });
-		expect(snapcompact.maxFramesForDataBudget(opus, budget)).toBe(highResFrames);
-		expect(snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(codex), budget)).toBe(26);
-		expect(snapcompact.maxFramesForDataBudget(sonnet, budget)).toBe(26);
-		// Frames larger than 1932px keep the 1932px charge rather than losing frames.
-		const gemini = snapcompact.resolveShape({ api: "google-generative-ai", id: "gemini-3.5-flash" });
-		expect(snapcompact.maxFramesForDataBudget(gemini, budget)).toBe(highResFrames);
-		// Inkier 1568px variants keep the 1932px charge.
+	it("scales known sparse grids by area and keeps dense variants at the conservative byte estimate", () => {
+		const budget = snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET;
+		const fullFrames = Math.floor(budget / snapcompact.FRAME_DATA_BYTES_ESTIMATE);
+		const shape = snapcompact.resolveShape();
+		expect(snapcompact.maxFramesForDataBudget(shape, budget)).toBe(26);
+		expect(snapcompact.maxFramesForDataBudget({ ...shape, frameSize: 1932 }, budget)).toBe(fullFrames);
+		expect(snapcompact.maxFramesForDataBudget({ ...shape, frameSize: 2048 }, budget)).toBe(fullFrames);
 		for (const variant of ["8x13-bw", "6x12-dim", "doc-8on16-sent-dim", "8on16-bw", "silver16-bw"] as const) {
-			expect(snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(codex, variant), budget)).toBe(
-				highResFrames,
-			);
+			expect(snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(variant), budget)).toBe(fullFrames);
 		}
 	});
-
-	it("gives frames half the deployment's inline-image budget, and the default elsewhere", () => {
-		const opus = getBundledModel("anthropic", "claude-opus-5-5");
-		const sol = getBundledModel("openai-codex", "gpt-6.1-sol");
-		const throughProxy = (model: Model) => buildModel({ ...toModelSpec(model), baseUrl: "https://proxy.example/v1" });
-		expect(snapcompact.frameDataBytesBudget(opus)).toBe(60_000_000);
-		expect(snapcompact.frameDataBytesBudget(sol)).toBe(12_000_000);
-		// A rerouted baseUrl has its own body limit; so does a host without a budget rule.
-		expect(snapcompact.frameDataBytesBudget(throughProxy(opus))).toBe(budget);
-		expect(snapcompact.frameDataBytesBudget(throughProxy(sol))).toBe(budget);
-		expect(snapcompact.frameDataBytesBudget(getBundledModel("openrouter", "anthropic/claude-opus-5.5"))).toBe(budget);
-		expect(snapcompact.frameDataBytesBudget(undefined)).toBe(budget);
-		// Factory Droid's own hosts carry a smaller budget; a custom gateway in front of Factory keeps the default.
-		const factory = (baseUrl: string) => {
-			const spec: ModelSpec<"factory-droid-agent"> = {
-				id: "claude-haiku-4-5-20251001",
-				name: "Haiku 4.5",
-				api: "factory-droid-agent",
-				provider: "factory-droid",
-				baseUrl,
-				reasoning: true,
-				input: ["text", "image"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 200_000,
-				maxTokens: 64_000,
-			};
-			return buildModel(spec);
-		};
-		expect(snapcompact.frameDataBytesBudget(factory("https://api.factory.ai/api/llm/a"))).toBeLessThan(budget);
-		expect(snapcompact.frameDataBytesBudget(factory("https://factory-gateway.example/api/llm/a"))).toBe(budget);
-		// Opus's 1932px frames: 17 under the default, 352 under Anthropic's share.
-		const opusShape = snapcompact.resolveShape(opus);
-		expect(snapcompact.maxFramesForDataBudget(opusShape, budget)).toBe(17);
-		expect(snapcompact.maxFramesForDataBudget(opusShape, snapcompact.frameDataBytesBudget(opus))).toBe(352);
-	});
-
-	it.each([
-		["ANTHROPIC_BASE_URL", { ANTHROPIC_BASE_URL: "https://anthropic-proxy.example/v1" }],
-		[
-			"Foundry's FOUNDRY_BASE_URL",
-			{ CLAUDE_CODE_USE_FOUNDRY: "1", FOUNDRY_BASE_URL: "https://foundry-proxy.example" },
-		],
-	] as const)(
-		"an official Anthropic model rerouted by %s gets the proxy's 3 MB frame budget and 90 images",
-		(_, reroute) => {
-			const opus = getBundledModel("anthropic", "claude-opus-5-5");
-			const sol = getBundledModel("openai-codex", "gpt-6.1-sol");
-			const official = {
-				ANTHROPIC_BASE_URL: undefined,
-				CLAUDE_CODE_USE_FOUNDRY: undefined,
-				FOUNDRY_BASE_URL: undefined,
-			};
-			withEnv(official, () => {
-				expect(snapcompact.frameDataBytesBudget(opus)).toBe(60_000_000);
-				expect(snapcompact.providerImageBudget(opus)).toBe(600);
-			});
-			withEnv({ ...official, ...reroute }, () => {
-				expect(snapcompact.frameDataBytesBudget(opus)).toBe(budget);
-				expect(snapcompact.providerImageBudget(opus)).toBe(90);
-				// Anthropic's env reroute leaves the Codex backend official.
-				expect(snapcompact.frameDataBytesBudget(sol)).toBe(12_000_000);
-				expect(snapcompact.providerImageBudget(sol)).toBe(2000);
-			});
-		},
-	);
 });
 
 describe("archive helpers", () => {
@@ -1662,7 +1340,7 @@ describe("archive helpers", () => {
 					],
 					fileOps,
 				}),
-				{ model: { api: "anthropic-messages" }, frameSize: TEST_FRAME_SIZE, maxFrames: 5 },
+				{ shape: snapcompact.resolveShape("11on16-bw"), frameSize: TEST_FRAME_SIZE, maxFrames: 5 },
 			);
 			const archive = snapcompact.getPreservedArchive(result.preserveData)!;
 			expect(archive.frames.length).toBeGreaterThan(0);
@@ -1824,21 +1502,6 @@ describe("archive helpers", () => {
 		expect((blocks[1] as { data: string }).data).toBe(btoa("middle"));
 		expect((blocks[2] as { text: string }).text).toContain("tail text");
 	});
-
-	it("caps images at the deployment's budget and unknown hosts at the safe floor", () => {
-		const ramp = buildModel({ ...toModelSpec(getBundledModel("anthropic", "claude-opus-5-5")), provider: "ramp" });
-		expect(snapcompact.providerImageBudget(ramp)).toBe(snapcompact.DEFAULT_PROVIDER_IMAGE_BUDGET);
-		expect(snapcompact.providerImageBudget(undefined)).toBe(snapcompact.DEFAULT_PROVIDER_IMAGE_BUDGET);
-		expect(snapcompact.providerFrameBudget(ramp)).toBe(snapcompact.DEFAULT_PROVIDER_IMAGE_BUDGET);
-		// The frame cap never exceeds the default frame count, even under a 600-image budget.
-		const opus = getBundledModel("anthropic", "claude-opus-5-5");
-		expect(snapcompact.providerImageBudget(opus)).toBe(600);
-		expect(snapcompact.providerFrameBudget(opus)).toBe(snapcompact.MAX_FRAMES_DEFAULT);
-		// The strictest Anthropic budget (200k-window models) still holds a full default archive.
-		expect(snapcompact.MAX_FRAMES_DEFAULT).toBeLessThanOrEqual(
-			snapcompact.providerImageBudget(getBundledModel("anthropic", "claude-haiku-4-5")),
-		);
-	});
 });
 
 describe("dimStopwords", () => {
@@ -1887,7 +1550,7 @@ describe("wrap", () => {
 });
 
 describe("doc layout", () => {
-	const docShape = snapcompact.resolveShape(undefined, "doc-8on16-bw");
+	const docShape = snapcompact.resolveShape("doc-8on16-bw");
 
 	it("computes two-column geometry with the 3-cell gutter", () => {
 		// 1568px: 196 grid cells → (196-3)/2 = 96 per column; 1568/16 = 98 rows.
@@ -1919,14 +1582,14 @@ describe("new shape variants", () => {
 		for (const name of newNames) {
 			expect(snapcompact.isShapeVariantName(name)).toBe(true);
 			expect(snapcompact.SHAPE_VARIANT_NAMES).toContain(name);
-			const shape = snapcompact.resolveShape(undefined, name);
+			const shape = snapcompact.resolveShape(name);
 			expect(snapcompact.isShape(shape)).toBe(true);
 			expect(shape.frameSize).toBe(1568);
 		}
 	});
 
 	it("isShape validates the new optional fields", () => {
-		const base = snapcompact.resolveShape(undefined, "doc-8on16-sent-dim");
+		const base = snapcompact.resolveShape("doc-8on16-sent-dim");
 		expect(snapcompact.isShape({ ...base, columns: 3 })).toBe(false);
 		expect(snapcompact.isShape({ ...base, columns: 1 })).toBe(true);
 		expect(snapcompact.isShape({ ...base, stretch: "no" })).toBe(false);

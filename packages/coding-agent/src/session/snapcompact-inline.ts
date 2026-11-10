@@ -41,7 +41,7 @@ export type SnapcompactSystemPromptMode = "none" | "agents-md" | "all";
 export interface SnapcompactInlineOptions {
 	renderSystemPrompt: SnapcompactSystemPromptMode;
 	renderToolResults: boolean;
-	/** Frame variant override; `"auto"`/omitted picks the provider's eval winner. */
+	/** Frame variant override; `"auto"`/omitted uses the generic readable grid. */
 	shape?: snapcompact.ShapeVariantName | "auto";
 }
 
@@ -56,11 +56,8 @@ export type SnapcompactSavingsSink = (
 	model: Model,
 ) => void;
 
-// Per-deployment image-count budgets come from the catalog via @oh-my-pi/snapcompact
-// (`providerImageBudget`): snapcompact frames are 1568px (<2000px) so
-// dimension/size limits never bind; only COUNT does. Once the budget is
-// spent by already-attached archive/system-prompt images, tool results ship
-// verbatim as text.
+// Archive, system-prompt and tool-result images share a conservative request
+// budget. Once it is spent, tool results stay verbatim text.
 const MAX_SYSTEM_PROMPT_FRAMES = 6;
 /** Tool results under this many tokens are never rasterized — the swap can't
  *  save enough to justify trading crisp text for an image. */
@@ -261,7 +258,7 @@ export interface InlineSystemPromptCandidate {
 export interface InlinePlanInput {
 	options: SnapcompactInlineOptions;
 	shape: snapcompact.Shape;
-	/** Provider per-request image cap (`providerImageBudget`). */
+	/** Total per-request image cap. */
 	imageLimit: number;
 	/** Images already in the context, across all messages. */
 	existingImages: number;
@@ -271,7 +268,7 @@ export interface InlinePlanInput {
 	systemPrompt: InlineSystemPromptCandidate | undefined;
 	/** Whether a user message exists to carry the prompt frames. */
 	hasUserMessage: boolean;
-	/** The reader opted in to `read` results as frames (`snapcompact.readerImagesReadResults`). */
+	/** The user explicitly enabled tool-result imaging, including read results. */
 	imageReadResults: boolean;
 }
 
@@ -625,10 +622,10 @@ export function estimateInlineSavings(input: {
 		return { visionCapable: false, savedTokens: 0 };
 	}
 
-	const shape = snapcompact.resolveShape(model, options.shape);
+	const shape = snapcompact.resolveShape(options.shape);
 	const tokenizer = new Tokenizer(model);
-	const imageLimit = snapcompact.providerImageBudget(model);
-	const imageReadResults = snapcompact.readerImagesReadResults(model);
+	const imageLimit = snapcompact.DEFAULT_IMAGE_BUDGET;
+	const imageReadResults = options.renderToolResults;
 	const scan = scanInlineContext(input.messages, options.renderToolResults, tokenizer, shape, imageReadResults);
 	const candidates = scan.toolResults.map(built => built.candidate);
 
@@ -759,15 +756,15 @@ export class SnapcompactInlineTransformer {
 		// them, never reach the model — rendering would lose the content.
 		if (!sendsImageInputOnWire(model)) return context;
 
-		const shape = snapcompact.resolveShape(model, options.shape);
+		const shape = snapcompact.resolveShape(options.shape);
 		const shapeKey = JSON.stringify(shape);
 		const tokenizer = new Tokenizer(model);
-		const imageLimit = snapcompact.providerImageBudget(model);
+		const imageLimit = snapcompact.DEFAULT_IMAGE_BUDGET;
 		const messages = [...context.messages];
 
 		// Tool-result candidates (in order) for the planner, plus the text/index
 		// needed to apply swaps and the live ids for cache eviction.
-		const imageReadResults = snapcompact.readerImagesReadResults(model);
+		const imageReadResults = options.renderToolResults;
 		const scan = scanInlineContext(messages, options.renderToolResults, tokenizer, shape, imageReadResults);
 		const targets = new Map(scan.toolResults.map(built => [built.candidate.id, built]));
 

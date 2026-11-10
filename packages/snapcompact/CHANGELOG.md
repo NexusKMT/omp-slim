@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Frame geometry and budgets now use generic defaults or explicit caller settings; provider identities and catalog rules no longer alter images, token estimates or request limits.
+
 ## [18.17.0] - 2026-11-06
 
 ### Fixed
