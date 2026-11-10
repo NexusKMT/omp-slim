@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { handleRpcCancelSubagent } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
 import { RpcSubagentRegistry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents";
@@ -211,13 +212,14 @@ describe("handleRpcCancelSubagent", () => {
 	test("settles a foreground nested task run as aborted and emits the aborted lifecycle frame", async () => {
 		const id = "Worker.Child";
 		const artifactsDir = sessionDir;
+		const parentModel = createMockModel().model;
 		const promptEntered = Promise.withResolvers<void>();
 		const listeners: Array<(event: AgentSessionEvent) => void> = [];
 		// Minimal session whose turn never finishes on its own: only a cancel can end the run.
 		const session = {
 			state: { messages: [] },
-			agent: { state: { systemPrompt: ["test"] } },
-			model: undefined,
+			agent: { state: { systemPrompt: ["test"], model: parentModel } },
+			model: parentModel,
 			extensionRunner: undefined,
 			sessionManager: { appendSessionInit: () => {} },
 			getActiveToolNames: () => ["read", "yield"],
@@ -268,8 +270,22 @@ describe("handleRpcCancelSubagent", () => {
 		const agent: AgentDefinition = { name: "task", description: "test", systemPrompt: "test", source: "bundled" };
 
 		// Foreground: awaited directly, with no async job behind it.
-		const run = runSubprocess({ cwd: artifactsDir, agent, task: "work", index: 0, id, eventBus, artifactsDir });
-		await promptEntered.promise;
+		const run = runSubprocess({
+			cwd: artifactsDir,
+			agent,
+			task: "work",
+			index: 0,
+			id,
+			eventBus,
+			artifactsDir,
+			parentModel,
+		});
+		await Promise.race([
+			promptEntered.promise,
+			run.then(result => {
+				throw new Error(`Subagent exited before its prompt started: ${JSON.stringify(result)}`);
+			}),
+		]);
 
 		await expect(handleRpcCancelSubagent(registry, id)).resolves.toBe(true);
 

@@ -264,9 +264,30 @@ describe("AgentSession queued steer delivery", () => {
 	});
 
 	it("defaults direct user steers and idle prompts to user attribution", async () => {
-		const { session } = await createSession([{ content: ["ack user"] }]);
+		const started = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const { session } = await createSession([
+			async () => {
+				started.resolve();
+				await release.promise;
+				return { content: ["ack user"] };
+			},
+		]);
 
-		await session.sendUserMessage("typed normally");
+		const run = session.sendUserMessage("typed normally");
+		try {
+			await started.promise;
+
+			// Keep the turn live so the idle drain cannot consume the queued steer.
+			await session.steer("user steer");
+			const steer = session.agent.popLastSteer();
+			if (steer?.role !== "user") throw new Error("Expected queued user steer");
+			expect(steer.attribution).toBe("user");
+			expect(steer.steering).toBe(true);
+		} finally {
+			release.resolve();
+			await run;
+		}
 		const promptMessage = session.state.messages.find(candidate => {
 			if (candidate.role !== "user") return false;
 			const content = candidate.content;
@@ -279,32 +300,41 @@ describe("AgentSession queued steer delivery", () => {
 			throw new Error("Expected user prompt in session state");
 		}
 		expect(promptMessage.attribution).toBe("user");
-
-		await session.steer("user steer");
-		const steer = session.agent.popLastSteer();
-		if (steer?.role !== "user") throw new Error("Expected queued user steer");
-		expect(steer.attribution).toBe("user");
-		expect(steer.steering).toBe(true);
 	});
 
 	it("preserves explicit agent attribution across queued text-message APIs", async () => {
-		const { session } = await createSession([]);
+		const started = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const { session } = await createSession([
+			async () => {
+				started.resolve();
+				await release.promise;
+				return { content: ["ack host"] };
+			},
+		]);
 
-		await session.steer("parent steer", undefined, { attribution: "agent" });
-		const steer = session.agent.popLastSteer();
-		if (steer?.role !== "user") throw new Error("Expected queued agent-attributed steer");
-		expect(steer.attribution).toBe("agent");
-		expect(steer.steering).toBe(true);
+		const run = session.prompt("host request");
+		try {
+			await started.promise;
+			await session.steer("parent steer", undefined, { attribution: "agent" });
+			const steer = session.agent.popLastSteer();
+			if (steer?.role !== "user") throw new Error("Expected queued agent-attributed steer");
+			expect(steer.attribution).toBe("agent");
+			expect(steer.steering).toBe(true);
 
-		await session.followUp("parent follow-up", undefined, { attribution: "agent" });
-		const followUp = session.agent.popLastFollowUp();
-		if (followUp?.role !== "user") throw new Error("Expected queued agent-attributed follow-up");
-		expect(followUp.attribution).toBe("agent");
+			await session.followUp("parent follow-up", undefined, { attribution: "agent" });
+			const followUp = session.agent.popLastFollowUp();
+			if (followUp?.role !== "user") throw new Error("Expected queued agent-attributed follow-up");
+			expect(followUp.attribution).toBe("agent");
 
-		await session.sendUserMessage("host steer", { deliverAs: "steer", attribution: "agent" });
-		const hostSteer = session.agent.popLastSteer();
-		if (hostSteer?.role !== "user") throw new Error("Expected queued host steer");
-		expect(hostSteer.attribution).toBe("agent");
+			await session.sendUserMessage("host steer", { deliverAs: "steer", attribution: "agent" });
+			const hostSteer = session.agent.popLastSteer();
+			if (hostSteer?.role !== "user") throw new Error("Expected queued host steer");
+			expect(hostSteer.attribution).toBe("agent");
+		} finally {
+			release.resolve();
+			await run;
+		}
 	});
 
 	it("drains a steer stranded in the agent queue when the session settles", async () => {

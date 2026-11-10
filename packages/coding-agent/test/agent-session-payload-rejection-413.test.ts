@@ -32,7 +32,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
 		authStorage.keys.setRuntime("anthropic", "test-key");
-		authStorage.keys.setRuntime("openai", "openai-test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -119,7 +118,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			sessionManager,
 			settings: Settings.isolated({
 				"compaction.autoContinue": true,
-				"contextPromotion.enabled": false,
 				...options?.extraSettings,
 			}),
 			modelRegistry,
@@ -1104,144 +1102,39 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		});
 	}
 
-	it("consults a configured fallback chain in goal mode before any maintenance outcome stands", async () => {
-		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
-		if (!fallbackModel) {
-			throw new Error("Expected bundled openai fallback model to exist");
-		}
-
+	it("retries a transient goal-mode failure on the current model", async () => {
 		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
-		const fallbackMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
-		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		const provider = createMockModel({
+			id: "claude-sonnet-4-5",
+			provider: "anthropic",
+			responses: [{ throw: TRANSIENT_ERROR_MESSAGE }, { content: ["recovered on the current model"] }],
+		});
 		await createSession(200_000, undefined, {
 			streamFn: (model, context, options) => {
 				requestedModels.push(`${model.provider}/${model.id}`);
-				if (model.provider === "anthropic") {
-					primaryMock.push({ throw: PAYLOAD_ERROR_MESSAGE });
-					return primaryMock.stream(model, context, options);
-				}
-				fallbackMock.push({ content: ["recovered on configured fallback"] });
-				return fallbackMock.stream(model, context, options);
+				return provider.stream(model, context, options);
 			},
 			extraSettings: {
 				"retry.baseDelayMs": 5,
-				"retry.modelFallback": true,
-				"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+				"retry.maxRetries": 1,
 			},
 		});
-		activateOngoingGoal("goal-fallback");
-		session.subscribe(event => {
-			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
-		});
-
-		const notices = collectNotices();
-		const endCount = countCompactionEvents("auto_compaction_end");
+		const currentModel = session.model;
+		activateOngoingGoal("goal-transient-retry");
 
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		expect(endCount()).toBe(0);
-		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
-		expect(payloadNotices.length).toBe(0);
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", `${fallbackModel.provider}/${fallbackModel.id}`]);
-		expect(fallbackEvents).toHaveLength(1);
-		expect(fallbackEvents[0].to).toBe(`${fallbackModel.provider}/${fallbackModel.id}`);
-		expect(session.model?.provider).toBe(fallbackModel.provider);
-	});
-
-	it("consults a configured fallback chain for dual-flag bare-413 rejections", async () => {
-		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
-		if (!fallbackModel) {
-			throw new Error("Expected bundled openai fallback model to exist");
-		}
-
-		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
-		const fallbackMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
-		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
-		await createSession(200_000, undefined, {
-			streamFn: (model, context, options) => {
-				requestedModels.push(`${model.provider}/${model.id}`);
-				if (model.provider === "anthropic") {
-					primaryMock.push({ throw: "413 status code (no body)" });
-					return primaryMock.stream(model, context, options);
-				}
-				fallbackMock.push({ content: ["recovered on configured fallback"] });
-				return fallbackMock.stream(model, context, options);
-			},
-			extraSettings: {
-				"retry.baseDelayMs": 5,
-				"retry.modelFallback": true,
-				"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
-			},
-		});
-		activateOngoingGoal("goal-dual-flag-fallback");
-		session.subscribe(event => {
-			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
-		});
-
-		const notices = collectNotices();
-		const endCount = countCompactionEvents("auto_compaction_end");
-
-		await session.prompt("work on the goal");
-		await session.waitForIdle();
-
-		expect(endCount()).toBe(0);
-		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
-		expect(payloadNotices.length).toBe(0);
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", `${fallbackModel.provider}/${fallbackModel.id}`]);
-		expect(fallbackEvents).toHaveLength(1);
-		expect(fallbackEvents[0].to).toBe(`${fallbackModel.provider}/${fallbackModel.id}`);
-		expect(session.model?.provider).toBe(fallbackModel.provider);
-	});
-
-	it("routes goal-mode transient failures exactly like the non-goal ladder", async () => {
-		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
-		if (!fallbackModel) {
-			throw new Error("Expected bundled openai fallback model to exist");
-		}
-
-		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
-		const chainMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
-		await createSession(200_000, undefined, {
-			streamFn: (model, context, options) => {
-				requestedModels.push(`${model.provider}/${model.id}`);
-				if (model.provider === "anthropic") {
-					primaryMock.push({ throw: TRANSIENT_ERROR_MESSAGE });
-					return primaryMock.stream(model, context, options);
-				}
-				chainMock.push({ content: ["recovered on configured fallback"] });
-				return chainMock.stream(model, context, options);
-			},
-			extraSettings: {
-				"retry.baseDelayMs": 5,
-				"retry.modelFallback": true,
-				"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
-			},
-		});
-		activateOngoingGoal("goal-transient-ladder");
-
-		await session.prompt("work on the goal");
-		await session.waitForIdle();
-
-		expect(requestedModels.slice(0, 2)).toEqual([
-			"anthropic/claude-sonnet-4-5",
-			`${fallbackModel.provider}/${fallbackModel.id}`,
+		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"]);
+		expect(session.model).toBe(currentModel);
+		expect(session.getLastAssistantMessage()?.content).toEqual([
+			{ type: "text", text: "recovered on the current model" },
 		]);
-		expect(session.model?.provider).toBe(fallbackModel.provider);
 	});
 
-	it("keeps usage-backed payload overflows off the configured chain", async () => {
-		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
-		if (!fallbackModel) {
-			throw new Error("Expected bundled openai fallback model to exist");
-		}
-
+	it("compacts usage-backed payload overflows on the current model", async () => {
 		const requestedModels: string[] = [];
 		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
-		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
 		let failedOnce = false;
 		await createSession(200_000, undefined, {
 			streamFn: (model, context, options) => {
@@ -1261,21 +1154,17 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			},
 			extraSettings: {
 				"retry.baseDelayMs": 5,
-				"retry.modelFallback": true,
-				"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
 			},
 		});
 		activateOngoingGoal("goal-usage-backed");
-		session.subscribe(event => {
-			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
-		});
+		const currentModel = session.model;
 		const startCount = countCompactionEvents("auto_compaction_start");
 
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		expect(fallbackEvents).toHaveLength(0);
-		expect(requestedModels.every(m => m.startsWith("anthropic/"))).toBe(true);
+		expect(session.model).toBe(currentModel);
+		expect(requestedModels.every(m => m === "anthropic/claude-sonnet-4-5")).toBe(true);
 		expect(startCount()).toBeGreaterThanOrEqual(1);
 	});
 
@@ -1395,55 +1284,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		expect(payloadNotices[0].level).toBe("warning");
 		expect(startCount()).toBe(0);
 	});
-	it("consults the chain before overflow maintenance absorbs a high-occupancy payload rejection", async () => {
-		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
-		if (!fallbackModel) {
-			throw new Error("Expected bundled openai fallback model to exist");
-		}
-
-		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
-		const fallbackMock = createMockModel({ id: fallbackModel.id, provider: fallbackModel.provider });
-		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
-		await createSession(
-			2_000,
-			{ toolText: "x".repeat(40_000) },
-			{
-				streamFn: (model, context, options) => {
-					requestedModels.push(`${model.provider}/${model.id}`);
-					if (model.provider === "anthropic") {
-						primaryMock.push({ throw: PAYLOAD_ERROR_MESSAGE });
-						return primaryMock.stream(model, context, options);
-					}
-					fallbackMock.push({ content: ["recovered on configured fallback"] });
-					return fallbackMock.stream(model, context, options);
-				},
-				extraSettings: {
-					"retry.baseDelayMs": 5,
-					"retry.modelFallback": true,
-					"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
-					"contextPromotion.enabled": true,
-					"compaction.enabled": false,
-				},
-			},
-		);
-		activateOngoingGoal("goal-high-occupancy");
-		session.subscribe(event => {
-			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
-		});
-		const notices = collectNotices();
-		const startCount = countCompactionEvents("auto_compaction_start");
-		const endCount = countCompactionEvents("auto_compaction_end");
-		await session.prompt("work on the goal");
-		await session.waitForIdle();
-
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5", `${fallbackModel.provider}/${fallbackModel.id}`]);
-		expect(fallbackEvents).toHaveLength(1);
-		expect(session.model?.provider).toBe(fallbackModel.provider);
-		expect(startCount()).toBe(0);
-		expect(endCount()).toBe(0);
-		expect(notices.filter(n => n.source === NOTICE_SOURCE)).toHaveLength(0);
-	});
 	it("believes provider-reported usage when it contradicts a payload-only body", async () => {
 		const requestedModels: string[] = [];
 		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
@@ -1489,7 +1329,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 				},
 				extraSettings: {
 					"compaction.enabled": false,
-					"contextPromotion.enabled": false,
 				},
 			},
 		);
@@ -1519,7 +1358,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 				},
 				extraSettings: {
 					"compaction.enabled": false,
-					"contextPromotion.enabled": false,
 				},
 			},
 		);
@@ -1554,7 +1392,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 				},
 				extraSettings: {
 					"compaction.enabled": false,
-					"contextPromotion.enabled": false,
 				},
 			},
 		);
@@ -1594,7 +1431,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 				},
 				extraSettings: {
 					"compaction.enabled": false,
-					"contextPromotion.enabled": false,
 				},
 			},
 		);
