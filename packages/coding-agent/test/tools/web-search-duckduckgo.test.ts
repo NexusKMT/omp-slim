@@ -1,18 +1,11 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import type { SearchParams } from "@oh-my-pi/pi-coding-agent/web/search/providers/base";
 import { searchDuckDuckGo } from "@oh-my-pi/pi-coding-agent/web/search/providers/duckduckgo";
 import { applyQueryConstraints, parseSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search/query";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 
 const sharedAuthStorage = createInMemoryAuthStorage();
-const { modelRegistry, model: duckDuckGoModel } = (() => {
-	const modelRegistry = new ModelRegistry(sharedAuthStorage);
-	const model = modelRegistry.find("web", "duckduckgo");
-	if (!model) throw new Error("Expected bundled web/duckduckgo model");
-	return { modelRegistry, model };
-})();
 
 afterAll(() => sharedAuthStorage.close());
 
@@ -57,10 +50,9 @@ describe("DuckDuckGo web search pagination", () => {
 		const response = await searchDuckDuckGo({
 			query: "open source software",
 			limit: 20,
-			systemPrompt: "Test DuckDuckGo search",
+
 			authStorage: sharedAuthStorage,
-			model: duckDuckGoModel,
-			modelRegistry,
+
 			fetch: fetchMock,
 		});
 
@@ -88,9 +80,7 @@ function makeParams(query: string, fetch: FetchImpl): SearchParams {
 	return {
 		query,
 		authStorage: sharedAuthStorage,
-		model: duckDuckGoModel,
-		modelRegistry,
-		systemPrompt: "DuckDuckGo search test prompt",
+
 		fetch,
 	};
 }

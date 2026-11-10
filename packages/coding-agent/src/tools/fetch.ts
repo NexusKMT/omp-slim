@@ -5,12 +5,11 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { type FetchImpl, getEnvApiKey, type ImageContent, type Model, type TextContent } from "@oh-my-pi/pi-ai";
+import { type FetchImpl, getEnvApiKey, type ImageContent, type TextContent } from "@oh-my-pi/pi-ai";
 import { htmlToMarkdown, notebookToEditableText } from "@oh-my-pi/pi-natives";
 import { $which, ptree } from "@oh-my-pi/pi-utils";
 import { type ArchiveFormat, listArchiveRoot, sniffArchiveFormat } from "@oh-my-pi/pi-utils/ar";
 import type { Element } from "@oh-my-pi/pi-utils/dom";
-import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
 import type { ToolSession } from "../sdk";
 import type { AgentStorageApi } from "../session/agent-storage";
@@ -1132,15 +1131,13 @@ async function handleSpecialUrls(
 	timeout: number,
 	signal: AbortSignal | undefined,
 	storage: AgentStorageApi | null,
-	modelRegistry: ModelRegistry | undefined,
-	sessionModel: Model | undefined,
 ): Promise<FetchRenderResult | null> {
 	const specialHandlers = await loadSpecialHandlers();
 	for (const handler of specialHandlers) {
 		if (signal?.aborted) {
 			throw new ToolAbortError();
 		}
-		const result = await handler(url, timeout, signal, storage, modelRegistry, sessionModel);
+		const result = await handler(url, timeout, signal, storage);
 		if (result) return result;
 	}
 	return null;
@@ -1160,8 +1157,6 @@ async function renderUrl(
 	settings: Settings,
 	signal: AbortSignal | undefined,
 	storage: AgentStorageApi | null,
-	modelRegistry: ModelRegistry | undefined,
-	sessionModel: Model | undefined,
 	fetchOverride?: FetchImpl,
 	excludeWebP?: true,
 ): Promise<FetchRenderResult> {
@@ -1190,7 +1185,7 @@ async function renderUrl(
 
 	// Step 1: Try special handlers for known sites (unless raw mode)
 	if (!raw) {
-		const specialResult = await handleSpecialUrls(url, timeout, signal, storage, modelRegistry, sessionModel);
+		const specialResult = await handleSpecialUrls(url, timeout, signal, storage);
 		if (specialResult) return specialResult;
 	}
 
@@ -1806,8 +1801,6 @@ export async function fetchReadUrl(
 		session.settings,
 		signal,
 		storage,
-		session.modelRegistry,
-		session.getActiveModel?.(),
 		session.fetch,
 		webpExclusionForModel(session.getActiveModel?.()),
 	);
