@@ -7,8 +7,8 @@ This document describes how the coding-agent currently loads models, applies ove
 Primary implementation files:
 
 - `packages/coding-agent/src/config/model-registry.ts` — loads built-in + custom models, provider overrides, runtime discovery, auth integration
-- `packages/coding-agent/src/config/model-resolver.ts` — parses model patterns and selects initial/smol/slow models
-- `packages/coding-agent/src/config/model-settings.ts` — model selection settings (`modelRoles`, `enabledModels`, `enabledProviders`/`disabledProviders`, `modelProviderOrder`, `cycleOrder`)
+- `packages/coding-agent/src/config/model-resolver.ts` — parses selectors and resolves the primary model
+- `packages/coding-agent/src/config/model-settings.ts` — model selection settings (`model`, `modelStorage`, `enabledModels`, `enabledProviders`/`disabledProviders`, `modelProviderOrder`)
 - `packages/coding-agent/src/session/settings.ts` — provider transport preferences (`providers.*`)
 - `packages/coding-agent/src/config/models-config.ts` and `models-config-schema-bundle.ts` — custom provider/model validation
 - `packages/coding-agent/src/session/auth-storage.ts` — re-exports `AuthStorage` from `@oh-my-pi/pi-ai`; credential precedence is implemented in `packages/ai/src/auth/cascade.ts`
@@ -213,7 +213,8 @@ override matching model tags. These fields do not configure the Anthropic Messag
 
 ### Compaction options
 
-- `compactionModel` (per model, including `modelOverrides`) — preferred compaction model, tried before the active model, chat-role candidates, and a largest-context fallback. It does not switch the active conversation model.
+Summary compaction uses the current session model. Legacy `compactionModel` metadata does not select a separate model.
+
 - `remoteCompaction` (provider level or per model) — opts eligible models into provider-native compaction. Supported keys: `enabled`, `api`, `endpoint`, `model`, `v2StreamingEnabled`, `v2Endpoint`, `streamingEndpoint`. Provider-level settings are the baseline; per-model keys override them.
 
 ### Allowed provider/model `api` values
@@ -232,61 +233,11 @@ override matching model tags. These fields do not configure the Anthropic Messag
 - `openai-decisions`
 - `workers-ai-systemone`
 
-`typesafe`, `openrouter-decisions`, `openai-decisions`, and `workers-ai-systemone` are judgment APIs, not chat transports: a model declared with one answers judgment requests and is selected by the `judge` model role. `typesafe` posts TypeSafe's System One body to `{baseUrl}/v1/systemone` (any System One server: TypeSafe, OpenJEV, Kev, self-hosted Clef); `openrouter-decisions` posts the same body to `{baseUrl}/decisions`; `openai-decisions` translates questions and answers to OpenAI's Decisions API at `{baseUrl}/decisions` (the bundled `openai/gpt-6-luna-decisions` row sends the wire model `gpt-6-luna`); `workers-ai-systemone` posts the System One body to Cloudflare Workers AI at `{baseUrl}/{model id}`, where `<account>` in the base URL is filled from the stored credential's account id or `CLOUDFLARE_ACCOUNT_ID`. Its `headers` carry gateway routing or custom authentication headers for that traffic.
-Judgment requests can share image attachments with vision-chat requests. Native OpenAI Decisions, TypeSafe Jev, OpenRouter Jev, and Workers AI judges, plus prompted vision-chat models, support images; text-only candidates are skipped for image requests. `Judge.supportsImages` identifies compatible candidates, and a judge chain with no image-capable model fails explicitly rather than dropping images. Prompted judgments normalize images for the selected candidate, including upscaling undersized rasters and converting WebP for models with STB-backed decoders; native judges continue to receive the original image bytes. When constructing a `NativeJudge` directly for System One, set `supportsImages: true`; `createNativeJudge` derives this flag from the catalog.
+`typesafe`, `openrouter-decisions`, `openai-decisions`, and `workers-ai-systemone` are judgment APIs, not chat transports: a model declared with one describes a native judgment endpoint for lower-level API clients. `typesafe` posts TypeSafe's System One body to `{baseUrl}/v1/systemone` (any System One server: TypeSafe, OpenJEV, Kev, self-hosted Clef); `openrouter-decisions` posts the same body to `{baseUrl}/decisions`; `openai-decisions` translates questions and answers to OpenAI's Decisions API at `{baseUrl}/decisions` (the bundled `openai/gpt-6-luna-decisions` row sends the wire model `gpt-6-luna`); `workers-ai-systemone` posts the System One body to Cloudflare Workers AI at `{baseUrl}/{model id}`, where `<account>` in the base URL is filled from the stored credential's account id or `CLOUDFLARE_ACCOUNT_ID`. Its `headers` carry gateway routing or custom authentication headers for that traffic.
 
-Catalog-backed native judges apply the selected model's image bounds. Direct `NativeJudge` constructors can supply `imageInput` bounds explicitly; opting into images does not inherit Jev's size limits for unrelated System One models.
+These APIs remain in the provider catalog and `pi-ai` SDK. OMP Slim’s `judge()` helper sends its request to the current chat model; it has no separate judge model or fallback chain. Image judgments require image support on that same model.
 
-`openrouter-decisions` judges honor the model's `compat.openRouterRouting` and `compat.extraBody` as OpenRouter chat models do, under any base URL: routing (including an `@provider` selector pin) becomes the request's `provider` field, then `extraBody` is merged over the body. `openRouterRouting` accepts only `only` and `order`; for other [provider preferences](https://openrouter.ai/docs/provider-routing) such as `allow_fallbacks` or `data_collection`, set the whole `provider` object in `extraBody`, which replaces the routing block. Other judgment APIs ignore both keys.
-
-```yaml
-providers:
-   openrouter:
-      modelOverrides:
-         typesafe/jev-1.14:
-            compat:
-               extraBody:
-                  provider: { only: [typesafe], allow_fallbacks: false, data_collection: deny }
-```
-
-OpenAI Decisions forwards embedded `ImageContent.detail`, and different explicit fidelity settings retain separate native image-judgment cache entries. TypeSafe Jev has no image-detail equivalent: detail is ignored on the wire and in cache identity, so requests that differ only by detail can reuse an answer. Omitted detail and explicit `auto` share the default setting.
-
-Image inputs are validated before any candidate runs; malformed images fail as caller errors rather than exhausting the chain. Providers may enforce additional limits. Workers AI Clef accepts at most 4 PNG, JPEG, or WebP images of up to 4 MiB and 16 MP each, 8 MiB in total. Valid padded and unpadded base64, and MIME case variants, share one cache identity.
-
-After image filtering, the same native-only tail policy used for text judgments applies: a failed native judge may fall through to another compatible native, never to a prompted chat model. Filtering removes natives without image support and natives whose image-count cap the request exceeds, so when no compatible native remains, eligible prompted candidates and a vision-capable session-model fallback can still answer. Size bounds never filter a native: each image is fitted into them first (see below).
-
-#### Jev images (experimental)
-
-Native image judgments for Jev are experimental. Direct TypeSafe Jev supports `jev-latest`, `jev-preview`, `jev-1.13.0`, and `jev-1.14.0` (the default `judge` role uses `typesafe/jev-1.14.0`; `jev-latest` is TypeSafe's stable alias, currently `jev-1.13.0`). OpenRouter supports `typesafe/jev-1.13`, `typesafe/jev-1.14`, and `~typesafe/jev-latest`.
-
-Images join `state` without replacing it: an object root keeps its fields and gains them under a collision-safe `__omp_judgment_images` key (with a numeric suffix if the key is taken), an array root gains them at the end, and a string root becomes `[original, ...images]`. Direct TypeSafe requests add each image as a referenced `assets` entry and put its reference in `state`, setting `TypeSafe-Danger-Zone-Images: true` only when images are attached; caller-supplied assets (auth gateway) must each be referenced in `state`, `instructions`, or `criteria`, and each split request carries only the assets it references. OpenRouter encodes each image as an `image_url` data URL part and uses neither the TypeSafe header nor a top-level `images` field.
-
-Text-only requests retain their original request shape and bytes. Image support is limited to the listed TypeSafe Jev and OpenRouter Jev models; it does not imply support for other System One-compatible servers or OpenRouter Decisions models.
-
-Both paths accept PNG and JPEG of 280–1568 pixels per side and 78,400–2,458,624 pixels in total, and reject anything else rather than resizing it. The judge chain therefore fits every image into a native judge's bounds before sending: an image already inside them keeps its original bytes; any other is scaled down past a maximum, or up toward a minimum as far as the maximums allow, without distortion, then padded with its top-left pixel when an extreme aspect ratio still leaves a side short (a 401×41 toolbar crop becomes 1568×160 centered on 1568×280), and re-encoded as PNG, or JPEG when the PNG exceeds the byte cap. TypeSafe Jev has no image-detail equivalent, so `ImageContent.detail` is ignored on direct TypeSafe requests.
-
-[Box questions](https://docs.typesafe.ai/primitives/box) (`{ type: "box", instructions, image }`) need Jev 1.14 and go only to TypeSafe and OpenRouter Decisions judges; the chain skips every other candidate for a request that has one, with no prompted or session-model fallback. `image` indexes the request's `images` and never reaches the wire, so `instructions` must still name the image to search among several. Jev answers with edges as fractions of the image it was sent; when fitting padded that image, the chain maps the edges back onto the image you passed and clamps any edge that lands in the padding.
-
-See TypeSafe's [image documentation](https://docs.typesafe.ai/images) and OpenRouter's [multimodal Decisions guide](https://openrouter.ai/docs/guides/community/multimodal-decisions) for their image constraints.
-
-OpenRouter's guide lists a 256 px minimum side, but a [report of a live Jev 1.14 request](https://github.com/can1357/oh-my-pi/pull/15887#issuecomment-6218295982) says a 270×300 PNG received HTTP 400; the 280 px minimum side is intentional and remains in effect.
-
-For example, configure TypeSafe Jev as the judge and attach an image in JavaScript or Python:
-
-```yaml
-modelRoles:
-   judge: typesafe/jev-1.14.0
-```
-
-```js
-await judge(state, question, { images: ["./chart.png"] });
-```
-
-```python
-await judge(state, question, images=["./chart.png"])
-```
-
-A model or `modelOverrides` entry may also use a runner API, which serves one model `kind`; `RUNNER_API_KINDS` in `packages/catalog/src/types.ts` lists them (for example `openai-images` serves `image`, `openai-embeddings` serves `embedding`, `openai-speech` serves `tts`). `web-search` is built in and cannot be named here, so neither can `kind: search`. `kind` defaults to the api's kind (`chat` for chat transports), and an explicit `kind` must be one its api serves. Chat transports serve `chat` and `tiny` (small models for the `tiny`, `memory`, and `judge` roles); those that `generate_image` runs (`openai-responses`, `openai-codex-responses`, `google-generative-ai`, `google-gemini-cli`) also serve `image`: on `openai-responses`, the image is generated through the Responses `image_generation` tool, carried by a GPT-5+ chat model on the same provider, instead of `/images/generations`. This moves discovered gateway models to the image role:
+A model or `modelOverrides` entry may also use a runner API, which serves one model `kind`; `RUNNER_API_KINDS` in `packages/catalog/src/types.ts` lists them (for example `openai-images` serves `image`, `openai-embeddings` serves `embedding`, `openai-speech` serves `tts`). `web-search` is built in and cannot be named here, so neither can `kind: search`. `kind` defaults to the api's kind (`chat` for chat transports), and an explicit `kind` must be one its api serves. Chat transports serve the catalog kinds `chat` and `tiny`; the latter is metadata, not a local model downloader or a separate OMP model setting. Transports that support image generation (`openai-responses`, `openai-codex-responses`, `google-generative-ai`, `google-gemini-cli`) also serve `image`: on `openai-responses`, the image is generated through the Responses `image_generation` tool, carried by a GPT-5+ chat model on the same provider, instead of `/images/generations`. This classifies discovered gateway models as image models in the catalog:
 
 ```yaml
 providers:
@@ -565,7 +516,7 @@ response JIT-loads a model, OMP refreshes that runtime metadata. Explicit custom
 Decision models (`type: "decision"` in LM Studio's native `GET /api/v1/models`) are discovered as
 `judge` models on the `openai-decisions` API: judgments post to `{baseUrl}/decisions`, LM Studio's
 OpenAI-compatible Decisions endpoint, instead of chat completions. They accept images when LM Studio
-reports `has_vision_adapter: true`. Select one with `modelRoles.judge: lm-studio/<model>`.
+reports `has_vision_adapter: true`. This metadata is available to lower-level API clients; OMP Slim’s judgment helper uses the current chat model.
 
 This path also works for local OpenAI-compatible servers that are not LM Studio. For example, if oMLX is bound to Ollama's usual port, set `LM_STUDIO_BASE_URL=http://127.0.0.1:11434/v1` to discover it through the existing `/v1/models` flow. Running oMLX and Ollama side by side requires assigning a different port to one of them. Do not configure oMLX as `ollama`: Ollama discovery uses native `/api/tags` and `/api/show` endpoints, not OpenAI `/v1/models`.
 
@@ -763,7 +714,7 @@ Resolution precedence for exact selectors:
 3. retired effort-tier variant alias (collapsed catalog entries, e.g. `X`/`X-thinking` twins)
 4. substring matching with an alias-vs-dated pick (bare ids only)
 
-A `provider/modelId` selector whose provider is known stops after the exact phases: it never runs a similarly named sibling. A miss fails with `Model "…" not found`, which suggests up to three close ids from that provider. A configured default model that misses produces a warning naming it and the model that runs instead, unless a configured `retry.fallbackChains` entry takes over; a configured dictation model that misses warns the same way.
+A `provider/modelId` selector whose provider is known stops after the exact phases: it never runs a similarly named sibling. A miss fails with `Model "…" not found`, which suggests up to three close ids from that provider. An explicit primary-model selection must resolve successfully; configure a usable model before sending a turn. There is no task-role or retry chain that can replace it.
 
 Glob scope patterns (used by `enabledModels` and CLI `--models`) run separately over concrete models after exact matching.
 
@@ -776,89 +727,43 @@ When a bare id matches models from multiple providers, preference order is:
 
 ### Initial model selection priority
 
-`findInitialModel(...)` uses this order:
+An explicit `--model` selection takes priority. For a fresh session, the first model from an explicit `--models` scope is next, followed by the saved `model` setting. When no model is selected, startup can choose an available provider default. This initial choice becomes the session’s model.
 
-1. explicit CLI provider+model
-2. first scoped model (if not resuming)
-3. saved default provider/model
-4. known provider defaults (e.g. OpenAI/Anthropic/etc.) among available models; a provider whose discovery marks the account's default model (`isProviderDefault`, e.g. Devin) uses it in place of its bundled `default-model`
-5. first available model
+Startup discovery prefers providers with concrete credentials, including keyless local providers. Ambient AWS/Vertex credentials remain usable. Session restoration separately checks the saved model and its credential; an unavailable explicit or restored selection is reported instead of starting a turn on another model.
 
-The automatic fallback first restricts the pool to providers with concrete credentials (including
-keyless locals) when any exist. Ambient AWS/Vertex credential sentinels remain usable, but do not
-displace providers with explicit credentials. Session restoration is handled separately and checks
-that the saved model still exists and resolves a usable credential.
+### One selected model
 
-### Role aliases and settings
-
-Model roles assign model selectors to workloads. Configure them under `modelRoles` in `config.yml`, not in `models.yml`; `models.yml` defines providers and model metadata.
-
-Built-in roles are grouped in the model picker:
-
-- **Chat roles:** `default`, `smol`, `slow`, `vision`, `plan`, `commit`, `tiny`, `memory`, `task`, and `advisor`. The `tiny` and `memory` roles accept both ordinary chat models and `tiny` catalog models.
-- **Model-kind roles:** `image`, `web`, and `judge`. These select image generation, search/grounded chat, and judgment runners respectively. The `judge` role also accepts tiny and chat models.
-
-`vision` and `image` are different workloads: `vision` selects a chat model for image analysis, such as `read screenshot.png?q=...`; `image` selects a model with catalog kind `image` for `generate_image`. Assigning a model to `vision` does not give it image-input support: image questions additionally check that the model can send image input to its provider.
-
-The `tiny` role selects lightweight models for background work such as session titles; when unset, it resolves through `@smol`. The `memory` role resolves through `@tiny` when unset. See [model settings](./settings.md#models) for configuration and fallback-chain examples.
-
-Assigning a non-default role in `/models` normally saves its selector without switching the active conversation model. A workload uses the role when invoked; assigning `plan` does not itself enter plan mode, and calling `todo` does not itself select the plan model. While plan mode is active, changing the `plan` role reapplies its model. Assigning `default` normally also switches the active model, unless a higher-priority settings layer overrides the edited assignment. The session-only model picker changes the active model without rewriting role assignments.
-
-Role aliases like `@smol` expand through `settings.modelRoles`; `*` selects `@default`. Quote `@` aliases in YAML values (`plan: "@slow"`). Chat-role values can append a thinking selector such as `:minimal`, `:low`, `:medium`, or `:high`; model-kind roles do not use chat thinking suffixes.
-
-Role values can contain comma-separated selectors; selection uses the first available match,
-not a per-request retry chain. Request-failure fallbacks are configured separately under
-`retry.fallbackChains` (role, exact model, or provider-wildcard keys; see [Settings](./settings.md)).
-Custom role names
-can be introduced through `modelRoles`, `modelTags`, or `cycleOrder`; they use chat models.
-Unset `smol` and `slow` inherit an explicitly configured `default` before their built-in priority
-lists. The advisor uses an explicitly configured `slow`, otherwise its own strong-model priority
-chain rather than inheriting the active conversation model.
-
-If a role points at another role, the target model still inherits normally and any explicit suffix on the referring role wins for that role-specific use.
-
-### Model presets
-
-A model preset is a named snapshot of every role assignment plus `defaultThinkingLevel`, so you can swap a whole setup at once:
-
-```text
-/modelpreset save cheap      # save the current roles and thinking level
-/modelpreset switch deep     # apply a saved preset
-/modelpreset                 # pick one from a list (interactive)
-/modelpreset list | delete <name>
-```
-
-In `/models`, press `s` in the Roles view to save the current setup under a name. Presets live under `modelPresets` in `config.yml`:
+Store the primary selector in `config.yml`. Provider definitions and metadata belong in `models.yml`.
 
 ```yaml
-modelPresets:
-   deep:
-      modelRoles:
-         default: anthropic/claude-opus-4-5:high
-         smol: anthropic/claude-sonnet-4-5
-      defaultThinkingLevel: high
+model: anthropic/claude-sonnet-4-5:high
+modelStorage: global
+
+enabledModels:
+   - anthropic/claude-sonnet-4-5
+   - openai/gpt-5.2
 ```
 
-Switching writes roles the way the model picker does: into the scope chosen by `modelRoleStorage`, clearing roles the preset leaves out and replacing `--model`/`--smol` session overrides. The preset's `defaultThinkingLevel` is written to the global config. It then switches the active model to the resulting `default` (an automatic provider-default selection when the preset has none) and sets the session's thinking level from the `:level` suffix on that selector, or else the preset's `defaultThinkingLevel`; a `:inherit` suffix leaves the level the model switch set. When a preset's `default` model is unavailable, nothing is changed. Roles that another layer still decides — a `--config` file, a project config in `global` storage, or the global config in `project` storage — are listed in the switch message with the layer that wins, instead of being reported as switched. The same goes for a `defaultThinkingLevel` set by a project config or `--config` file: the session still switches to the preset's level, but the message names that layer, whose level returns on the next start.
+The current session model is also used for planning, task subagents, advisors, session titles, commit helpers, judgments, and summary compaction. Enabling one of these workflows does not choose another model. Image analysis and image generation check the current model’s capabilities and report unsupported requests.
 
-When several config layers define a preset of the same name, the highest layer (command line, then `--config` file, then project config, then global config) wins whole: entries are never merged across layers, so a project `deep` that only sets `default` applies without the global `deep`'s other roles. A `null` entry in a `--config` file (or a command-line override) hides the preset from lists and switches; a `null` entry in a project config is ignored, so the global preset of that name still applies. Saving always writes the named entry to the global config and reports when a higher layer still takes precedence for that name.
+Use `/model` or `/models` to select a different primary model manually. `modelStorage: global` saves it in the active profile; `modelStorage: project` saves it in the current directory’s `.omp/config.yml`. A project without a selected model uses the profile model. A session-only selection changes the running session without saving the selector.
 
-Saving captures the effective assignments — including any `--model` session override — and the configured `defaultThinkingLevel`, not the session's live thinking level.
+Selectors accept the same optional thinking suffixes as `--model`, including `:off`, `:high`, `:auto`, and `:inherit`. `auto` uses a local default effort for the selected model; it does not call another model to classify the prompt. Explicit thinking controls and the `ultrathink` keyword remain available.
+
+When loading an older config, `modelRoles.default` migrates to `model` only if that same layer does not already own `model`. Other roles, custom tags, role cycles, presets, and model fallback chains are retired. Legacy role names do not select independent models. Profile, project, overlay, and runtime precedence still applies; see [Settings](./settings.md#precedence).
 
 Related settings:
 
-- `modelRoles` (record)
-- `enabledModels` (scoped pattern list)
-- `modelProviderOrder` (provider precedence when equivalent concrete choices share an id)
-- `providers.kimiApiFormat` (`auto|openai|anthropic`; `auto` follows server-declared model metadata)
-- `providers.openaiWebsockets` (`auto|off|on` websocket preference for OpenAI Codex transport)
-- `providers.openaiResponsesWebsockets` (opt-in standard Responses transport; see [Standard Responses WebSockets](#standard-responses-websockets))
-- `providers.openaiLiveSteering` (deliver mid-response user messages into GPT-6 responses over the Codex WebSocket)
+- `model` — primary selector, optionally with a thinking suffix.
+- `modelStorage` — `global` or `project` for persistent model-picker writes.
+- `enabledModels` — scope for startup selection and explicit model cycling.
+- `modelProviderOrder` — provider preference when a bare id is ambiguous.
+- `providers.kimiApiFormat` — transport format for Kimi (`auto`, `openai`, or `anthropic`).
+- `providers.openaiWebsockets` — OpenAI Codex WebSocket preference.
+- `providers.openaiResponsesWebsockets` — opt-in [standard Responses transport](#standard-responses-websockets).
+- `providers.openaiLiveSteering` — in-flight steering over the Codex WebSocket.
 
-`modelRoles` stores model selectors such as `provider/modelId`; `enabledModels` and CLI `--models`
-accept exact selectors, globs, and fuzzy matches. The resulting scope restricts chat models only
-(Ctrl+P cycling, the startup model, chat roles in `/model`); judge, search, image, and speech
-models stay available for their roles, so entries naming them are accepted but have no effect.
+`enabledModels` and CLI `--models` accept exact selectors, globs, and fuzzy matches. They restrict chat-model startup choices and user-triggered cycling; they do not create a background routing policy.
 
 `enabledModels`, `enabledProviders`, and `disabledProviders` entries may also be scoped to a path prefix:
 
@@ -881,7 +786,7 @@ String entries apply everywhere. Scoped entries apply when the current working d
 
 Both surfaces keep provider-prefixed concrete models visible and selectable.
 
-- `/model` / `/models` opens the model hub with role assignments and provider catalogs; the session-only picker changes the active model without saving a role assignment.
+- `/model` / `/models` opens the provider catalog and primary-model picker; the session-only picker changes the active model without saving it.
 - `omp models` (default `ls` action) prints provider-grouped tables of available **chat** models; `--kind <kind>` selects another catalog kind and `--kind all` includes every kind.
 - `omp models find <substring>` filters by provider, id, or name; `omp models refresh` forces an online catalog re-fetch ignoring the model cache TTL; a provider name doubles as an `ls` filter (e.g. `omp models openai-codex`).
 - Other flags: `--json`, `-e <path>` / `--extension <path>` (repeatable), `--no-extensions` (skip ambient discovery; explicit `-e` still loads), and `--config <overlay>` (repeatable).
@@ -895,66 +800,11 @@ The table's `images` column reports what the transport will actually send, so a 
 stripped (`compat.stripImageInput`, see [Image handling](#compatibility-and-routing-fields)) shows `no`
 even when its spec declares `input: [text, image]`; `--json` keeps the declared `input`.
 
-## Context promotion
+## Context limits and recovery
 
-Context promotion switches to an explicitly configured larger-context model before compaction.
-It is attempted on context overflow errors and at pre-prompt or post-turn compaction thresholds.
+When the active model runs out of context, OMP applies the configured compaction methods to that session. Summary compaction uses the same model; provider-native compaction stays on its provider transport. It does not promote the conversation to a different model, and legacy `contextPromotionTarget` metadata is ignored.
 
-Context promotion and [retry model fallback](./non-compaction-retry-policy.md) are independent.
-Turning off **Auto-Promote Context** (`contextPromotion.enabled`) does not disable
-`retry.fallbackChains`: provider errors still switch the active model while `retry.modelFallback`
-is on, even when the fallback model happens to have a larger context window. To stop those
-switches, set `retry.modelFallback: false`; same-model retries (`retry.enabled`) and automatic
-compaction (`compaction.enabled`) are unaffected.
-
-### Trigger and order
-
-When a turn fails with a context overflow error (e.g. `context_length_exceeded`), `AgentSession` attempts promotion **before** falling back to compaction:
-
-1. If `contextPromotion.enabled` is true, resolve a promotion target (see below).
-2. If a target is found, switch to it and retry the request — no compaction needed.
-3. If no target is available, fall through to auto-compaction on the current model.
-
-### Target selection
-
-Selection is explicit and model-driven:
-
-1. `currentModel.contextPromotionTarget` (if configured)
-
-Only the configured target is considered; context promotion does not automatically choose a larger same-provider/API sibling. The target must be available, differ from the current model, have a strictly larger known context window, and resolve a usable credential (`ModelRegistry.getApiKey(...)`).
-
-### OpenAI Codex websocket handoff
-
-If switching from/to `openai-codex-responses`, session provider state key `openai-codex-responses` is closed before model switch. This drops websocket transport state so the next turn starts clean on the promoted model.
-
-### Persistence behavior
-
-Promotion uses temporary switching (`setModelTemporary`):
-
-- recorded as a `model_change` with the ephemeral role `"fallback"` (not a durable user model selection)
-- does not rewrite saved role mapping
-
-### Configuring promotion targets
-
-Configure the target directly in model metadata via `contextPromotionTarget`.
-
-`contextPromotionTarget` accepts either:
-
-- `provider/model-id` (explicit)
-- `model-id` (resolved within current provider)
-
-Example (`models.yml`) for an explicit OpenAI promotion target:
-
-```yaml
-providers:
-   openai-codex:
-      modelOverrides:
-         gpt-5.5:
-            contextPromotionTarget: openai-codex/gpt-5.4
-```
-
-Do not rely on a model-name-derived chain: configure the target explicitly or use a target supplied
-by the provider's discovered metadata.
+Request recovery can retry the selected model, rotate credentials that serve that model, or wait for an admitted provider reset. A failed request does not change the model. Use `/model` for a deliberate change, and see [Compaction](./compaction.md) for context controls.
 
 ## Compatibility and routing fields
 
