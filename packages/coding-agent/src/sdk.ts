@@ -3734,7 +3734,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}),
 			createAnnotationsAPI,
 		);
-		// A dialog waits for the user, not the agent: the session lets the display sleep while one is open.
+		// Register user input waits so peer agents can observe the session's waiting state.
 		const trackUserWait: UserWaitTracker = dialog => (hasSession ? session.waitForUser(dialog) : dialog());
 		extensionRunner.setUserWaitTracker(trackUserWait);
 

@@ -10,7 +10,7 @@
  * `sha256sum -c SHA256SUMS.txt` (or `shasum -a 256 -c` on macOS).
  *
  * Intended for the `release_github` CI job, run after the release binaries
- * and browser-relay archive are assembled and before the GitHub Release is
+ * are assembled and before the GitHub Release is
  * created, so the checksums file itself ships as one of the release assets.
  */
 
