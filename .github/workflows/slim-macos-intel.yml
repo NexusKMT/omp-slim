@@ -48,7 +48,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ${{ runner.temp }}/omp-slim-cargo
-          key: slim-macos15-intel-xcode16.4-ci-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', '.cargo/**', 'rust-toolchain.toml', 'bun.lock', 'scripts/slim/**', 'packages/natives/scripts/**', '.github/workflows/slim-macos-intel.yml') }}
+          key: slim-macos15-intel-xcode16.4-ci-v1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', '.cargo/**', 'rust-toolchain.toml', 'bun.lock', 'scripts/slim/**', 'scripts/run-rs-task.ts', '.config/nextest.toml', 'packages/natives/scripts/**', '.github/workflows/slim-macos-intel.yml') }}
           restore-keys: |
             slim-macos15-intel-xcode16.4-ci-v1-
 
@@ -63,6 +63,22 @@ jobs:
         id: native-build
         shell: bash
         run: bash scripts/slim/build.sh macos-intel
+
+      - name: Install nextest for macOS PTY regressions
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-nextest@0.9.151
+
+      - name: Test native PTY lifecycle on macOS
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/omp-slim-cargo
+          CARGO_BUILD_JOBS: "4"
+          RUSTFLAGS: "-C target-cpu=x86-64-v3"
+          OMP_FORCE_RUST_TASKS: "1"
+          NEXTEST_PROFILE: ci
+          NEXTEST_TEST_THREADS: "4"
+        run: bun run test:rs:pty 2>&1 | tee dist/validation/macos-intel/pty-rust-tests.log
 
       - name: Preserve build cache even if validation fails
         if: ${{ !cancelled() && steps.toolchains.outcome == 'success' && steps.build-cache.outputs.cache-hit != 'true' && steps.build-cache.outputs.cache-primary-key != '' }}

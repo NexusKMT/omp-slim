@@ -81,6 +81,23 @@ const TASK_COMMANDS = {
 		// (napi-rs's) has to be in VENDORED_FORK_EXCLUDES.
 		["cargo", "test", "--doc", "--workspace", ...VENDORED_FORK_EXCLUDES],
 	],
+	// macOS PTY regressions need the host's kernel and reuse the native build's
+	// ci profile. pi-natives is a cdylib and has no runnable doctests.
+	"test:rs:pty": [
+		[
+			"cargo",
+			"nextest",
+			"run",
+			"-p",
+			"pi-natives",
+			"--cargo-profile",
+			"ci",
+			"-E",
+			"test(pty::reader_queue_tests)",
+			"--status-level=fail",
+			"--final-status-level=fail",
+		],
+	],
 } as const satisfies Record<string, readonly (readonly string[])[]>;
 
 type RustTaskName = keyof typeof TASK_COMMANDS;
