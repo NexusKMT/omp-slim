@@ -72,10 +72,13 @@ TUI editing, RPC schemas and the affected Python SDK. Their focused runs used
 the baseline native addon for retained functionality; those runs cannot prove
 that the rebuilt addon has removed all retired symbols.
 
-Some combined local test invocations exposed shared authentication/fixture
-state failures that disappeared in isolation. They must be checked with the
-complete retained suite in a clean CI environment; isolated passes are not
-reported as a full-suite pass.
+One combined SDK suite exposed shared settings contamination: a shell test
+initialized global settings, and a shared ModelRegistry without explicit
+settings then adopted the user's disabled-provider list. The fixture now uses
+isolated settings, in-memory authentication and a temporary model path.
+Reproduction with a synthetic globally disabled OpenAI provider passed all
+57 tests / 253 assertions after the fix, with two loopback requests and zero
+external network attempts. This does not replace the full retained CI suite.
 
 Two manual workflows validate the final source on public runners:
 
@@ -92,3 +95,12 @@ validates recovered artifacts. The Codespace remains stopped.
 
 Final workflow runs, rebuilt artifact sizes/hashes and local verification are
 pending. They will be recorded here after completion.
+
+The first integrated runs, Mac `42783413828` and Rust `42783420636`, stopped
+during dependency installation because the export viewer manifest had not
+been regenerated after removing feature-specific renderers. Neither reached
+native compilation. The viewer manifest was regenerated, and a frozen install
+including the prepare script then passed locally. Cache saving now requires
+successful toolchain/dependency setup, preventing failed bootstraps from
+occupying the final build-cache key. Rust was restarted as `42784508716` from
+`a3130cafd71f769037e8f2915dd1bd077a7f8b53`.
