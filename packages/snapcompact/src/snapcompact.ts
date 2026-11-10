@@ -8,43 +8,13 @@
  * actually printed, with a 64px floor for vision processors that reject
  * smaller images.
  *
- * The frame shape is provider-aware. Original choices came from the SQuAD
- * prose evals (`packages/snapcompact`, 200k-token monolithic runs); the
- * spacing choices below come from the tool-result legibility bench
- * (`research/toolbench.py`, real search/read/find output with structure QA),
- * which exposed that the prose-tuned dense cells erase the line numbers and
- * indentation that code/search output depends on:
+ * Frames use a generic readable grid unless the caller supplies a shape.
+ * The automatic choice depends only on the text: CJK-heavy archives use
+ * the embedded Silver font. Model names, providers and endpoint URLs do not
+ * select geometry, image detail hints or billing rules.
  *
- * - **Anthropic** (`11on16-bw`): 8x13 glyphs on an 11px advance (extra
- *   letter-spacing), black ink. On the tool-result bench, tracking the
- *   readable cell beat plain `8on16-bw` (opus-4.8 f1 .806 vs .755) and far
- *   beat the prior dense `6x12-dim` (.351, which fell below the OCR ~16px/char
- *   floor and abstained). Opus 4.7+/Fable/Mythos ingest high-res natively
- *   (2576px edge, 4,784 visual-token cap), so those lines get 1932px frames:
- *   same bill, fewer frames. Older Claude lines downscale past 1568px.
- * - **Google** (`8on22-bw` @2048): 8x13 glyphs on a 22px pitch (extra line
- *   spacing), black ink. Leading lifted gemini-3.5-flash to f1 .934 vs .807
- *   for `8on16-bw` and .287 for the prior `doc-8on16-sent-dim`. Gemini 3.x
- *   bills a fixed `media_resolution` budget per image (default 1,120 tokens)
- *   regardless of pixels, so the 2048px frame carries more chars at the same
- *   bill.
- * - **OpenAI** (`8on22-bw`): same leading win (gpt-5.5/gpt-5.4-mini). Patch
- *   billing (32px × 1.2, 10k-patch budget at `detail: "original"`) is
- *   area-proportional, so resolution cannot improve chars/$ — 1568 stays.
- *   `detail: "high"` would downgrade (2,500-patch cap); `original` is sent.
- * - **Unknown providers** default to `8on22-bw`. `providerImageBudget` caps
- *   per-request images at the deployment's catalog `image-count-budget`, so
- *   inline imaging cannot flood a request with attachments.
- *
- * The per-frame token estimate follows the reading model's catalog
- * `image-tokenization` rule (its lineage, not the gateway), so Claude behind
- * OpenRouter is billed as Claude and Opus 4.6 under its 1,568-token cap.
- * Models without a lineage rule fall back to the catalog rule for their wire
- * API; a reader with neither costs {@link FRAME_TOKEN_ESTIMATE} per frame.
- *
- * A host that downscales every image before the model reads it (catalog
- * `image-max-edge`, e.g. Cursor) gets frames rendered at that edge instead,
- * so glyphs reach the model at the size they were drawn.
+ * Token and image budgets use explicit shape estimates and conservative
+ * defaults. Callers may pass their own shape, frame count and byte limits.
  *
  * The whole pass is local and deterministic — no LLM call, no API key, no
  * latency beyond rendering. Rasterization and PNG encoding happen in native
@@ -54,19 +24,7 @@
  */
 
 import { type } from "@oh-my-pi/omptype";
-import type { Api, ImageContent, Message, Model, TextContent } from "@oh-my-pi/pi-ai";
-import { reachesBudgetedHost } from "@oh-my-pi/pi-ai/providers/anthropic-state";
-import { resolveCatalogPolicy } from "@oh-my-pi/pi-catalog/compat/catalog-policy";
-import {
-	type ImageSize,
-	type ImageTokenization,
-	type ImageTokenizationTarget,
-	imageTokens,
-	resolveImageMaxEdge,
-	resolveImageTokenization,
-} from "@oh-my-pi/pi-catalog/compat/image-tokenization";
-import { resolveImageCountBudget, resolveInlineImageByteBudget } from "@oh-my-pi/pi-catalog/compat/request-size";
-import { classifyModel, compareRevision, parseRevision } from "@oh-my-pi/pi-catalog/identity";
+import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
 import { renderSnapcompactPng, snapcompactSupportedChars } from "@oh-my-pi/pi-natives";
 import { formatGroupedPaths, isRecord, prompt } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
@@ -101,15 +59,15 @@ export interface Shape {
 	lineRepeat: number;
 	/** Frame edge in pixels. */
 	frameSize: number;
-	/** Per-frame billed-token estimate for the shape's target provider. */
+	/** Per-frame token estimate supplied with the shape. */
 	frameTokenEstimate: number;
-	/** `frameTokenEstimate` comes from a catalog rule measured against provider billing. */
+	/** The caller has verified `frameTokenEstimate` against its endpoint billing. */
 	frameTokensVerified?: boolean;
-	/** Resolution hint attached to frame images (OpenAI-only). */
+	/** Explicit resolution hint attached to frame images. */
 	imageDetail?: ImageContent["detail"];
 }
 
-/** Geometry half of a {@link Shape}: everything except provider billing. */
+/** Geometry half of a {@link Shape}: everything except token estimates and image hints. */
 export type ShapeGeometry = Omit<Shape, "frameTokenEstimate" | "frameTokensVerified" | "imageDetail">;
 
 /**
@@ -224,101 +182,48 @@ export function isShapeVariantName(value: unknown): value is ShapeVariantName {
 	return typeof value === "string" && value in SHAPE_VARIANTS;
 }
 
-/** Wire API families with distinct default shapes and request hints. */
-type ApiFamily = "anthropic" | "google" | "openai" | "unknown";
+/** Conservative default token estimate for each rendered archive frame. */
+export const FRAME_TOKEN_ESTIMATE = 5024;
 
-function apiFamily(api?: Api): ApiFamily {
-	switch (api) {
-		case "anthropic-messages":
-		case "bedrock-converse-stream":
-			return "anthropic";
-		case "openai-completions":
-		case "openai-responses":
-		case "openai-codex-responses":
-		case "azure-openai-responses":
-			return "openai";
-		case "google-generative-ai":
-		case "google-gemini-cli":
-		case "google-vertex":
-			return "google";
-		default:
-			return "unknown";
-	}
-}
-
-/**
- * How a reader is billed per frame: its catalog `image-tokenization` rule
- * (the model's lineage, else its wire API's fallback) and the `detail` hint
- * snapcompact sends. OpenAI-family wires send `detail: "original"` (`high`
- * caps the frame at 2,500 patches). Without a rule, every frame costs
- * {@link FRAME_TOKEN_ESTIMATE}.
- */
+/** Explicit token estimate and image hint used to budget rendered frames. */
 export interface FrameBilling {
-	rule?: ImageTokenization;
+	tokensPerFrame: number;
 	imageDetail?: ImageContent["detail"];
 }
 
-/** Resolve the frame billing of `target`. */
-export function frameBilling(target: ShapeTarget | undefined): FrameBilling {
-	const rule = target ? resolveImageTokenization(target) : undefined;
-	const imageDetail = apiFamily(target?.api) === "openai" ? "original" : undefined;
-	return { ...(rule && { rule }), ...(imageDetail && { imageDetail }) };
-}
-
-/** Identity of a frame price list: equal keys price every frame alike. */
-export function frameBillingKey(billing: FrameBilling): string {
-	return `${billing.imageDetail ?? "auto"}:${billing.rule ? JSON.stringify(billing.rule) : "ceiling"}`;
-}
-
-/** Billed-token estimate for one rendered frame of `size` under `billing`. */
-export function frameTokens(billing: FrameBilling, size: ImageSize): number {
-	return billing.rule ? imageTokens(billing.rule, size, billing.imageDetail) : FRAME_TOKEN_ESTIMATE;
-}
-
-/**
- * Attach the reader's billing to a variant geometry. The square price is a
- * planning bound: shorter frames can bill differently.
- */
-function priceShape(base: ShapeGeometry, target: ShapeTarget | undefined): Shape {
-	const billing = frameBilling(target);
-	const frameTokenEstimate = frameTokens(billing, { width: base.frameSize, height: base.frameSize });
+/** Use a caller-supplied shape estimate, or the generic frame budget. */
+export function frameBilling(shape?: Shape): FrameBilling {
 	return {
-		...base,
-		frameTokenEstimate,
-		...(billing.rule?.verified && { frameTokensVerified: true }),
-		...(billing.imageDetail && { imageDetail: billing.imageDetail }),
+		tokensPerFrame: shape ? plannedFrameTokens(shape) : FRAME_TOKEN_ESTIMATE,
+		...(shape?.imageDetail && { imageDetail: shape.imageDetail }),
 	};
 }
 
-/**
- * Per-frame tokens archive sizing charges `shape`: its own price when provider
- * billing verified it, else at least {@link FRAME_TOKEN_ESTIMATE}.
- */
+/** Equal keys budget every frame alike. */
+export function frameBillingKey(billing: FrameBilling): string {
+	return `${billing.imageDetail ?? "auto"}:${billing.tokensPerFrame}`;
+}
+
+/** Token estimate for a frame under an explicit budget. */
+export function frameTokens(billing: FrameBilling): number {
+	return billing.tokensPerFrame;
+}
+
+function priceShape(base: ShapeGeometry): Shape {
+	return { ...base, frameTokenEstimate: FRAME_TOKEN_ESTIMATE };
+}
+
+/** Use a verified explicit estimate, otherwise reserve at least the default. */
 export function plannedFrameTokens(shape: Shape): number {
 	return shape.frameTokensVerified
 		? shape.frameTokenEstimate
 		: Math.max(FRAME_TOKEN_ESTIMATE, shape.frameTokenEstimate);
 }
 
-/** Eval-validated shapes, keyed by the provider family they won on. */
+/** Generic current geometry and the original format used by saved archives. */
 export const SHAPES = {
-	/** `11on16-bw`: 8x13 glyphs on an 11px advance (extra tracking), black ink.
-	 *  Tool-result legibility bench (real search/read/find output, structure QA)
-	 *  on opus-4.8: f1 .806 vs .755 for plain `8on16-bw` and .351 for the prior
-	 *  `6x12-dim` default — letter-spacing the readable cell wins; the dense
-	 *  6x12 was below the OCR ~16px/char floor and abstained. */
-	anthropic: priceShape(SHAPE_VARIANTS["11on16-bw"], { api: "anthropic-messages" }),
-	/** `8on22-bw`: 8x13 glyphs on a 22px pitch (extra leading), black ink.
-	 *  Tool-result legibility bench on gemini-3.5-flash: f1 .934 vs .807 for
-	 *  plain `8on16-bw` and .287 for the prior `doc-8on16-sent-dim`; the
-	 *  line-spacing reduces row crowding so line numbers stay legible. */
-	google: priceShape(SHAPE_VARIANTS["8on22-bw"], { api: "google-generative-ai" }),
-	/** `8on22-bw`: 8x13 glyphs on a 22px pitch (extra leading), black ink.
-	 *  Same line-spacing win for OpenAI; bench on gpt-5.5/gpt-5.4-mini showed
-	 *  leading lifts recall on the readable cell over plain `8on16-bw`. */
-	openai: priceShape(SHAPE_VARIANTS["8on22-bw"], { api: "openai-responses" }),
-	/** Original 5x8 X.org shape (pre-shape-table sessions rendered this). */
-	legacy: priceShape(SHAPE_VARIANTS["5x8-sent"], { api: "anthropic-messages" }),
+	default: priceShape(SHAPE_VARIANTS["8on22-bw"]),
+	legacy: priceShape(SHAPE_VARIANTS["5x8-sent"]),
 } satisfies Record<string, Shape>;
 
 /** In-memory shapes may carry optional keys as `undefined`. */
@@ -342,113 +247,9 @@ export function isShape(value: unknown): value is Shape {
 	return ShapeSchema.allows(value);
 }
 
-/** Eval-winning variant per wire family (fallback when the model id matches
- *  no known reader line). */
-const FAMILY_VARIANT: Record<ApiFamily, ShapeVariantName> = {
-	anthropic: "11on16-bw",
-	google: "8on22-bw",
-	openai: "8on22-bw",
-	unknown: "8on22-bw",
-};
-
-/** Denser companion variant per family for the foveated archive middle: same
- *  pixels (identical per-frame bill) but a tighter 8px cell, trading some
- *  legibility for ~40% more chars per frame so the least-important middle of a
- *  long archive compresses into fewer frames. */
-const FAMILY_VARIANT_LOW: Record<ApiFamily, ShapeVariantName> = {
-	anthropic: "8on16-bw",
-	google: "8on16-bw",
-	openai: "8on16-bw",
-	unknown: "8on16-bw",
-};
-
-/** One model line's ideal format: variant plus an optional frame-size
- *  override when the line reads larger frames at no extra cost. */
-export interface IdealShape {
-	variant: ShapeVariantName;
-	frameSize?: number;
-}
-
-/** Eval-winning format per model line. The wire API only identifies the
- *  gateway — a Claude served through Vertex or OpenRouter still reads best
- *  with its own shape. Classified Anthropic models use the shared catalog
- *  identity parser; remaining model lines use first-match regex rules and fall
- *  back to the API family's winner at the standard 1568px frame. */
-const HIGH_RES_ANTHROPIC_VARIANT = { variant: "11on16-bw", frameSize: 1932 } as const satisfies IdealShape;
-const MODEL_VARIANTS: readonly (readonly [RegExp, IdealShape])[] = [
-	// Versionless Fable/Mythos aliases (e.g. `claude-fable-latest`) never parse
-	// a numeric version, so keep them on the high-res tier by name — every
-	// Fable/Mythos line reads it natively.
-	[/claude.*(fable|mythos)/i, HIGH_RES_ANTHROPIC_VARIANT],
-	// Older Claude lines downscale past 1568px — keep the safe size.
-	[/claude/i, { variant: "11on16-bw" }],
-	// Gemini 3.x bills a fixed 1,120-token budget per image regardless of
-	// pixels: 2048px packs more chars per frame at the same bill.
-	[/gemini/i, { variant: "8on22-bw", frameSize: 2048 }],
-	// gpt-5.5 patch billing is area-proportional; 1568 is already optimal.
-	[/gpt|codex/i, { variant: "8on22-bw" }],
-	// kimi-k3 chunked bench: `8on22-bw` scored f1 .915 @ $0.66 vs .813 on `8on16-bw` ($0.70);
-	// 1568 wins on chars/$ (image processor downscales past 1792px).
-	[/kimi/i, { variant: "8on22-bw" }],
-	// glm-4.6v .780 mono via direct vendor routing.
-	[/glm/i, { variant: "8on16-bw" }],
-];
-
-/** Eval-ideal format for a model id, or undefined when unmeasured. */
-export function idealShapeVariant(modelId: string): IdealShape | undefined {
-	const identity = classifyModel("", modelId, { lenient: true });
-	const revision = identity.revision === undefined ? undefined : parseRevision(identity.revision);
-	const opusFloor = parseRevision("4.7");
-	if (
-		identity.class === "anthropic" &&
-		(identity.family === "fable" ||
-			identity.family === "mythos" ||
-			(identity.family === "opus" &&
-				revision !== undefined &&
-				opusFloor !== undefined &&
-				compareRevision(revision, opusFloor) >= 0))
-	) {
-		// Opus 4.7+ and Fable/Mythos read high-res natively: same recall and
-		// cost as 1568, a third fewer frames. 1932 is the largest *square* not
-		// downscaled under Anthropic's 4,784 visual-token cap ((1932/28)² =
-		// 69² = 4,761 ≤ 4,784 28px patches), and staying below 2000px clears
-		// the stricter ≤2000px limit for requests with more than 20 images.
-		return HIGH_RES_ANTHROPIC_VARIANT;
-	}
-	return MODEL_VARIANTS.find(([pattern]) => pattern.test(modelId))?.[1];
-}
-
-/** What will read the frames: the model id (shape and billing), the wire API
- *  (request hints, fallback billing), and optionally the host and parsed
- *  identity of a built model. */
-export interface ShapeTarget {
-	api?: Api;
-	id?: string;
-	provider?: string;
-	identity?: ImageTokenizationTarget["identity"];
-}
-
-/**
- * Pick the frame shape for a reader. An explicit `variant` (anything but
- * `"auto"`) forces that geometry; otherwise the model id selects the
- * eval-winning shape — and frame size — for its model line, falling back to
- * the API family's winner when the model is unmeasured. Either way the frame
- * is no wider than the host's catalog `image-max-edge`. Billing (token
- * estimate, detail hint) is computed for the resolved frame size from the
- * model's catalog image rule. Accepts a full pi-ai `Model` or any
- * `{ api, id }` subset.
- */
-export function resolveShape(model?: ShapeTarget, variant?: ShapeVariantName | "auto"): Shape {
-	if (variant && variant !== "auto") return priceShape(fitHostImageEdge(SHAPE_VARIANTS[variant], model), model);
-	const ideal = model?.id ? idealShapeVariant(model.id) : undefined;
-	const base = SHAPE_VARIANTS[ideal?.variant ?? FAMILY_VARIANT[apiFamily(model?.api)]];
-	return priceShape(fitHostImageEdge(ideal?.frameSize ? { ...base, frameSize: ideal.frameSize } : base, model), model);
-}
-
-/** Shrink `base` to the longest image edge `target`'s host passes to the model. */
-function fitHostImageEdge(base: ShapeGeometry, target: ShapeTarget | undefined): ShapeGeometry {
-	const maxEdge = target ? resolveImageMaxEdge(target) : undefined;
-	return maxEdge !== undefined && base.frameSize > maxEdge ? { ...base, frameSize: maxEdge } : base;
+/** Resolve a named geometry, with the generic readable grid as the default. */
+export function resolveShape(variant?: ShapeVariantName | "auto"): Shape {
+	return priceShape(SHAPE_VARIANTS[variant && variant !== "auto" ? variant : "8on22-bw"]);
 }
 
 const CJK_HEAVY_MIN_WIDE_CHARS = 8;
@@ -470,14 +271,14 @@ function isCjkHeavyText(text: string): boolean {
 
 /**
  * Pick the frame shape for `text`. Explicit variants remain forced. Auto first
- * resolves the model/provider default, then selects the Silver CJK grid when
+ * resolves the generic default, then selects the Silver CJK grid when
  * the default font cannot safely render the text or wide CJK glyphs dominate
  * the transcript and Silver can render it safely.
  */
-export function resolveShapeForText(text: string, model?: ShapeTarget, variant?: ShapeVariantName | "auto"): Shape {
-	const shape = resolveShape(model, variant);
+export function resolveShapeForText(text: string, variant?: ShapeVariantName | "auto"): Shape {
+	const shape = resolveShape(variant);
 	if (variant && variant !== "auto") return shape;
-	const silver = resolveShape(model, "silver16-bw");
+	const silver = resolveShape("silver16-bw");
 	if (!scanRenderability(text, { shape }).isSafe) {
 		return scanRenderability(text, { shape: silver }).isSafe ? silver : shape;
 	}
@@ -494,13 +295,8 @@ export function resolveShapeForText(text: string, model?: ShapeTarget, variant?:
  *  shapes carry their own `frameSize`. */
 export const FRAME_SIZE = 2576;
 
-/** Default upper bound on archive frames carried per compaction. Sized to hold
- *  ~400k tokens of the high-res Anthropic frame Opus reads (1932px ≈ 5,000
- *  billed tokens each → 80 frames) while staying under the ~100-image
- *  per-request wire cap. Oldest frames are dropped first once the budget is
- *  exceeded (mirrors how iterative text summaries fade the oldest detail); a
- *  caller may pass a lower `maxFrames` upper limit, and per-model context
- *  fitting is handled by the caller's overflow guard. */
+/** Engine ceiling for archive growth. Request-level image and byte budgets
+ *  can lower this; explicit `maxFrames` never raises it. */
 export const MAX_FRAMES_DEFAULT = 80;
 
 /** High-quality (legible) frames rendered at each chronological edge of a
@@ -508,35 +304,14 @@ export const MAX_FRAMES_DEFAULT = 80;
  *  text region (newest) — with the denser low-quality tier filling the middle. */
 export const HQ_EDGE_FRAMES = 3;
 
-/** Conservative per-frame token estimate for sizing archives whose frame price
- *  is not billing-verified, and for frames of unknown size — the upper bound
- *  across shapes: high-res Claude frames hit the 4,784 visual-token cap, billed
- *  at +5% margin (ceil(4784 * 1.05)). Keeps the overflow guard from
- *  undercounting a high-res archive at the raised {@link MAX_FRAMES_DEFAULT}. */
-export const FRAME_TOKEN_ESTIMATE = 5024;
-
-/** Conservative upper bound for one persisted frame's base64 payload. The
- *  measured high-res Anthropic `8x13`/`11on16` PNG frames sit around 159 KB;
- *  170 KB leaves margin for denser glyph pages without permitting multi-MB
- *  standing request bodies at large context windows. */
+/** Base64 payload estimate for a dense reference frame. */
 export const FRAME_DATA_BYTES_ESTIMATE = 170_000;
 
-/** Frame payload cap for a deployment without a catalog `inline-image-byte-budget`:
- *  an unmeasured backend can accept the HTTP body and still fail mid-stream
- *  with opaque 5xx errors. Keep this independent from visual-token budgeting:
- *  a 1M-token model can afford 70 images on paper, but not the resulting
- *  ~11 MB JSON payload on every turn. */
+/** Default total base64 payload budget for archive frames in one request. */
 export const DEFAULT_FRAME_DATA_BYTES_BUDGET = 3_000_000;
 
-/** Base64 image bytes the archive frames riding every request to `model` may
- *  carry: half the deployment's inline-image byte budget, else
- *  {@link DEFAULT_FRAME_DATA_BYTES_BUDGET}. Frames are the oldest images in the
- *  request, so the send-time byte clamp evicts them first; the other half stays
- *  free for live screenshots. */
-export function frameDataBytesBudget(model: Model | undefined): number {
-	const inlineBudget = model ? resolveInlineImageByteBudget(model, reachesBudgetedHost(model)) : undefined;
-	return inlineBudget === undefined ? DEFAULT_FRAME_DATA_BYTES_BUDGET : Math.floor(inlineBudget / 2);
-}
+/** Reference frame edge used by the measured byte estimate. */
+const FRAME_DATA_REFERENCE_SIZE = 1932;
 
 /** Default edge variants whose frames shrink with pixel area. Inkier variants
  *  keep the full {@link FRAME_DATA_BYTES_ESTIMATE} at any frame size. */
@@ -558,7 +333,7 @@ export function maxFramesForDataBudget(shape: ShapeGeometry, budget: number): nu
 			variant.columns === shape.columns &&
 			variant.lineRepeat === shape.lineRepeat,
 	);
-	const areaRatio = areaPriced ? (shape.frameSize / HIGH_RES_ANTHROPIC_VARIANT.frameSize) ** 2 : 1;
+	const areaRatio = areaPriced ? (shape.frameSize / FRAME_DATA_REFERENCE_SIZE) ** 2 : 1;
 	const frameBytes = Math.min(FRAME_DATA_BYTES_ESTIMATE, Math.ceil(FRAME_DATA_BYTES_ESTIMATE * areaRatio));
 	return Math.max(1, Math.floor(budget / frameBytes));
 }
@@ -568,27 +343,8 @@ export function frameDataBytes(frames: readonly Pick<Frame, "data">[]): number {
 	return frames.reduce((sum, frame) => sum + frame.data.length, 0);
 }
 
-/** Safe floor for a deployment whose catalog rules set no `image-count-budget`
- *  (strictest mainstream measured: Groq ~5). */
-export const DEFAULT_PROVIDER_IMAGE_BUDGET = 5;
-
-/** Most images one request to `model`'s deployment may carry, archive,
- *  system-prompt and tool-result imaging combined. */
-export function providerImageBudget(model: Model | undefined): number {
-	return (
-		(model ? resolveImageCountBudget(model, reachesBudgetedHost(model)) : undefined) ?? DEFAULT_PROVIDER_IMAGE_BUDGET
-	);
-}
-
-/** Archive frame cap for `model`: its image budget, never above {@link MAX_FRAMES_DEFAULT}. */
-export function providerFrameBudget(model: Model | undefined): number {
-	return Math.min(providerImageBudget(model), MAX_FRAMES_DEFAULT);
-}
-
-/** Whether `model` may get a fresh `read` result as frames (catalog `snapcompact-image-reads`, opt-in). */
-export function readerImagesReadResults(model: Model): boolean {
-	return resolveCatalogPolicy(model).snapcompactImageReads === true;
-}
+/** Conservative total image budget for a request to an unmeasured endpoint. */
+export const DEFAULT_IMAGE_BUDGET = 5;
 
 /** Key under `CompactionEntry.preserveData` holding the frame archive. */
 export const PRESERVE_KEY = "snapcompact";
@@ -661,8 +417,6 @@ export interface Geometry {
 export interface Options<TMessage = Message> extends SerializeOptions {
 	/** App-level message transformer (same contract as agent-core's `SummaryOptions.convertToLlm`). */
 	convertToLlm?: ConvertToLlm<TMessage>;
-	/** Model whose provider API and id select the frame shape. */
-	model?: ShapeTarget;
 	/** Explicit shape override; wins over `model`. */
 	shape?: Shape;
 	/** Frame edge in pixels. Defaults to the shape's `frameSize`. */
@@ -839,7 +593,7 @@ export interface SerializeOptions {
 	dimToolResults?: boolean;
 	/** Serialize assistant reasoning as `¶think:` sections. Defaults to `true`.
 	 *  Callers archiving for a reader whose classifier refuses quoted reasoning
-	 *  ({@link readerIncludesThinking} `false`) set this `false`:
+	 *  set this `false`:
 	 *  the archive frames are replayed as text into every later request, and
 	 *  reasoning rendered back to Claude trips its `reasoning_extraction`
 	 *  classifier (issue #6093). */
@@ -1712,8 +1466,6 @@ function pageFinisher(shape: Shape): (page: string) => string {
 export interface RenderManyOptions {
 	/** Explicit shape; wins over `model`. */
 	shape?: Shape;
-	/** Model whose provider API and id select the frame shape. */
-	model?: ShapeTarget;
 	/** Frame edge in px; defaults to the shape's `frameSize`. */
 	frameSize?: number;
 	/** Hard cap on frames produced; omit for unbounded (caller decides usage). */
@@ -1725,7 +1477,7 @@ export interface RenderManyOptions {
  * (first page first). Empty/whitespace-only input yields no frames.
  */
 export async function renderMany(text: string, options?: RenderManyOptions): Promise<ImageContent[]> {
-	const shape = options?.shape ?? resolveShapeForText(text, options?.model);
+	const shape = options?.shape ?? resolveShapeForText(text);
 	const frameSize = options?.frameSize ?? shape.frameSize;
 	const geo = geometry(shape, frameSize);
 	const normalized = normalize(text, { shape });
@@ -1759,8 +1511,8 @@ export async function renderMany(text: string, options?: RenderManyOptions): Pro
 /** Frames needed to hold `text` at the given shape/size, without rendering.
  *  For doc shapes this wraps the text once and counts pages of `2 * rows`
  *  lines; for grid shapes it divides by the frame capacity. */
-export function frames(text: string, options?: Pick<RenderManyOptions, "shape" | "model" | "frameSize">): number {
-	const shape = options?.shape ?? resolveShapeForText(text, options?.model);
+export function frames(text: string, options?: Pick<RenderManyOptions, "shape" | "frameSize">): number {
+	const shape = options?.shape ?? resolveShapeForText(text);
 	const geo = geometry(shape, options?.frameSize ?? shape.frameSize);
 	const normalized = normalize(text, { shape });
 	const wideCells = usesWideCells(shape);
@@ -2069,14 +1821,14 @@ export function capFrameDataBytes(
 // Compaction entry point
 // ============================================================================
 
-/** Denser companion of `high` for the foveated archive middle: same family and
+/** Denser companion of `high` for the foveated archive middle: same
  *  frame size (identical per-frame bill) but a tighter cell. Returns `high`
  *  unchanged for doc layouts, TrueType Unicode shapes, or when no denser
  *  variant exists (foveation off). */
-function denseCompanion(high: Shape, api: Api | undefined): Shape {
+function denseCompanion(high: Shape): Shape {
 	if (high.columns === 2 || high.font === "silver") return high;
 	const low: Shape = {
-		...SHAPE_VARIANTS[FAMILY_VARIANT_LOW[apiFamily(api)]],
+		...SHAPE_VARIANTS["8on16-bw"],
 		frameSize: high.frameSize,
 		frameTokenEstimate: high.frameTokenEstimate,
 		...(high.imageDetail && { imageDetail: high.imageDetail }),
@@ -2235,17 +1987,6 @@ function stripThinkingSections(text: string): string {
 	return sections.at(-1)?.startsWith(THINK_LABEL) ? stripped.replace(TRAILING_LINE_BREAKS, "") : stripped;
 }
 
-/**
- * Whether an archive read by `model` may carry assistant reasoning. The archive
- * replays as text into every later request, and a reader whose classifier
- * refuses reasoning quoted back into its input (the `classifier-cot-extraction`
- * catalog axis, set for Claude: `reasoning_extraction`, issue #6093) gets
- * `¶think:` sections and their legend left out.
- */
-export function readerIncludesThinking(model: Model): boolean {
-	return resolveCatalogPolicy(model).classifierCotExtraction !== true;
-}
-
 /** Whether a snapcompact summary declares `¶think:` reasoning scopes: true for
  *  archives rendered with {@link SerializeOptions.includeThinking}, and for
  *  summaries written before that legend was gated on it. */
@@ -2376,7 +2117,7 @@ function summaryFileSection(summary: string): string | undefined {
 
 /** Options for {@link viewWithoutFrames}. */
 export interface ViewWithoutFramesOptions {
-	/** `false` for a reader that excludes assistant reasoning ({@link readerIncludesThinking}). */
+	/** `false` for a reader that excludes assistant reasoning . */
 	includeThinking?: boolean;
 	/** Most archive characters the reader takes; the middle past it is dropped, both ends kept. */
 	maxChars?: number;
@@ -2523,10 +2264,10 @@ export async function compact<TMessage = Message>(
 	const hasPreviousText = previousText.length > 0;
 	const includedPreviousSummary = !hasPreviousText && !!previousSummary;
 	const shapeProbeText = renderabilityProbeText(serialized, previousPreserveData, previousSummary);
-	const baseShape = options?.shape ?? resolveShapeForText(shapeProbeText, options?.model);
+	const baseShape = options?.shape ?? resolveShapeForText(shapeProbeText);
 	const frameSize = options?.frameSize ?? baseShape.frameSize;
 	const high = frameSize === baseShape.frameSize ? baseShape : { ...baseShape, frameSize };
-	const low = denseCompanion(high, options?.model?.api);
+	const low = denseCompanion(high);
 	const geo = geometry(high);
 	// The engine default caps archive growth; a caller-supplied maxFrames only
 	// lowers it further (an upper limit), never raising it past the default.
