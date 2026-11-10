@@ -107,8 +107,6 @@ export type SymbolKey =
 	| "icon.job"
 	| "icon.cache"
 	| "icon.cacheMiss"
-	| "icon.cacheWarm"
-	| "icon.cacheCold"
 	| "icon.input"
 	| "icon.output"
 	| "icon.throughput"
@@ -489,8 +487,6 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"icon.job": "⚙",
 	"icon.cache": "💾",
 	"icon.cacheMiss": "⊘",
-	"icon.cacheWarm": "●",
-	"icon.cacheCold": "⊘",
 	"icon.input": "⤵",
 	"icon.output": "⤴",
 	"icon.throughput": "⚡",
@@ -881,9 +877,7 @@ const NERD_SYMBOLS: SymbolMap = {
 	// pick:  (fa-ban) | alt: ⊘
 	"icon.cacheMiss": "\uf05e",
 	// pick: 󱘲 (nf-md-database_outline) | alt: 
-	"icon.cacheWarm": "\u{f1632}",
 	// pick: 󱘱 (nf-md-database_off_outline): the warm glyph struck through | alt: 
-	"icon.cacheCold": "\u{f1631}",
 	// pick:  | alt:  →
 	"icon.input": "\uf090",
 	// pick:  | alt:  →
@@ -1285,8 +1279,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"icon.intelligence": "IQ",
 	"icon.cache": "cache",
 	"icon.cacheMiss": "!",
-	"icon.cacheWarm": "cache",
-	"icon.cacheCold": "!cache",
 	"icon.input": "in:",
 	"icon.host": "host",
 	"icon.session": "id",
