@@ -136,7 +136,9 @@ export async function postOpenAIStream<TEvent>(init: OpenAIStreamRequestInit): P
 		});
 	}
 	return {
-		events: decodeStream<TEvent>(response.body, init.signal, init.onSseEvent, init.onDoneSentinel),
+		events: response.headers.get("content-type")?.includes("application/json")
+			? decodeJson<TEvent>(response)
+			: decodeStream<TEvent>(response.body, init.signal, init.onSseEvent, init.onDoneSentinel),
 		response,
 		requestId: response.headers.get("x-request-id"),
 	};
@@ -202,4 +204,8 @@ export async function captureOpenAIHttpError(response: Response): Promise<AIErro
 		? `${response.status} ${detail.length > MAX_DETAIL_CHARS ? detail.slice(0, MAX_DETAIL_CHARS) : detail}`
 		: `${response.status} status code (no body)`;
 	return new AIError.OpenAIHttpError(message, captured, code);
+}
+
+async function* decodeJson<TEvent>(response: Response): AsyncGenerator<TEvent> {
+	yield (await response.json()) as TEvent;
 }

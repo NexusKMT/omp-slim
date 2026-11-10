@@ -1,4 +1,3 @@
-import { getOpenAICodexTransportDetails, type OpenAICodexTransportDetails } from "./providers/openai-codex-state";
 import type { Api, Model, Provider, ProviderSessionState } from "./types";
 
 export interface ProviderDetailField {
@@ -38,18 +37,6 @@ export function getProviderDetails(context: ProviderDetailsContext): ProviderDet
 		fields.push({ label: "Source", value: context.credentialSource });
 	}
 
-	if (context.model.api === "openai-codex-responses") {
-		const codexDetails = getOpenAICodexTransportDetails(context.model as Model<"openai-codex-responses">, {
-			sessionId: context.sessionId,
-			baseUrl: context.model.baseUrl,
-			preferWebsockets: context.preferWebsockets,
-			providerSessionState: context.providerSessionState,
-		});
-		fields.push({ label: "Transport", value: formatCodexTransport(codexDetails) });
-		fields.push({ label: "WebSocket", value: formatCodexWebSocket(codexDetails) });
-		fields.push({ label: "Reuse", value: formatCodexReuse(codexDetails, context.sessionId) });
-	}
-
 	return {
 		provider: context.model.provider,
 		api: context.model.api,
@@ -65,26 +52,4 @@ function formatEndpoint(baseUrl: string): string {
 	} catch {
 		return baseUrl;
 	}
-}
-
-function formatCodexTransport(details: OpenAICodexTransportDetails): string {
-	if (details.lastTransport === "websocket") return "websocket";
-	if (details.lastTransport === "sse" && (details.websocketDisabled || details.fallbackCount > 0)) {
-		return "sse (fallback)";
-	}
-	if (details.lastTransport === "sse") return "sse";
-	return details.websocketPreferred ? "websocket preferred" : "sse";
-}
-
-function formatCodexWebSocket(details: OpenAICodexTransportDetails): string {
-	if (!details.websocketPreferred) return "off";
-	if (details.websocketDisabled) return "disabled after fallback";
-	if (details.websocketConnected) return "connected";
-	if (details.prewarmed) return "prewarmed";
-	return details.hasSessionState ? "enabled" : "waiting for first request";
-}
-
-function formatCodexReuse(details: OpenAICodexTransportDetails, sessionId: string | undefined): string {
-	if (!sessionId) return "no session key";
-	return details.canAppend ? "append enabled" : "full request";
 }
