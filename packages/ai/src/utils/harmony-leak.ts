@@ -54,7 +54,7 @@ export function escapeHarmonyControlTokensInJson(text: string): string {
  * `gpt-5.4` — are detected even when the local id is opaque.
  */
 export function isHarmonyDialectModel(model: Model): boolean {
-	return model.identity.class === "gpt-oss";
+	return model.identity?.class === "gpt-oss";
 }
 
 // Channel-word adjacency (`C`): channel/role name appearing immediately before the marker.

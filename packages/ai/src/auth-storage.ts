@@ -4,7 +4,6 @@ import { getEnvApiKey, getEnvApiKeyName } from "./env-api-key";
 import { SqliteAuthCredentialStore } from "./auth/sqlite-credential-store";
 import type { AuthCredentialStore } from "./auth/store";
 import type {
-	AuthCredential,
 	AuthSource,
 	AuthStorageData,
 	AuthStorageOptions,

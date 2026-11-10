@@ -53,7 +53,6 @@
  * three guarded attempts and then fail closed. Disable detection with
  * `PI_NO_THINKING_LOOP_GUARD=1`.
  */
-import { resolveCatalogPolicy } from "@oh-my-pi/pi-catalog/compat/catalog-policy";
 import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type { Api, AssistantMessage, Model, StreamOptions } from "../types";
@@ -143,10 +142,9 @@ export type LoopGuardLevel = "off" | "exact" | "semantic";
  * `loopGuard.enabled: false` turn it off; otherwise the model line's
  * `thinking-loop-guard` catalog axis decides, and unassigned lines get `exact`.
  */
-export function loopGuardLevel(model: Model<Api>, options?: StreamOptions): LoopGuardLevel {
+export function loopGuardLevel(_model: Model<Api>, options?: StreamOptions): LoopGuardLevel {
 	if (process.env.PI_NO_THINKING_LOOP_GUARD === "1" || options?.loopGuard?.enabled === false) return "off";
-	const level = resolveCatalogPolicy(model).thinkingLoopGuard;
-	return level === "off" || level === "semantic" ? level : "exact";
+	return "exact";
 }
 
 /**
