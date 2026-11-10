@@ -746,7 +746,10 @@ export class Settings {
 		const raw: RawSettings = {};
 		for (const key in overrides) {
 			const value = overrides[key];
-			if (value !== undefined) setByPath(raw, key.split("."), value);
+			if (value === undefined) continue;
+			// Legacy dotted loop guards must not overwrite the scalar primary model.
+			if (key.startsWith("model.")) raw[key] = value;
+			else setByPath(raw, key.split("."), value);
 		}
 		const layer = this.#migrateRawSettings(raw);
 		assertKnownSettingPaths(layer);
@@ -2891,9 +2894,8 @@ export class Settings {
 			todoObj.eager = todoObj.eager ? "always" : "default";
 		}
 
-		// features.unexpectedStopDetection (boolean) -> enum none|mechanical|smart.
-		// `true` reproduced the previous small-model-classified behavior, which is
-		// now "smart"; `false` maps to "none" so explicitly disabled configs remain
+		// features.unexpectedStopDetection -> enum none|mechanical.
+		// `true` and retired "smart" retain local mechanical detection; `false` maps to "none" so explicitly disabled configs remain
 		// off rather than inheriting the new "mechanical" default.
 		// Handles nested and quoted-dotted sources, like the legacy image settings above.
 		const featuresObj = isRecord(raw.features) ? (raw.features as Record<string, unknown>) : undefined;
@@ -2911,10 +2913,15 @@ export class Settings {
 			const current = target.unexpectedStopDetection;
 			const currentIsMode = typeof current === "string" && ["none", "mechanical", "smart"].includes(current);
 			if (!currentIsMode) {
-				target.unexpectedStopDetection = legacyUnexpectedStop ? "smart" : "none";
+				target.unexpectedStopDetection = legacyUnexpectedStop ? "mechanical" : "none";
 			}
 			delete raw["features.unexpectedStopDetection"];
 		}
+		if (isRecord(raw.features) && raw.features.unexpectedStopDetection === "smart")
+			raw.features.unexpectedStopDetection = "mechanical";
+		if (raw["features.unexpectedStopDetection"] === "smart") raw["features.unexpectedStopDetection"] = "mechanical";
+		deleteByPath(raw, ["providers", "anthropic", "serverSideFallback"]);
+		delete raw["providers.anthropic.serverSideFallback"];
 		// Split the legacy combined isolation setting into enablement and backend.
 		// Handle both nested YAML and quoted dotted keys. Explicit enabled and
 		// backend values win; legacy backend names are normalized everywhere.
@@ -3401,6 +3408,9 @@ export class Settings {
 		delete raw["mcp.discoveryMode"];
 		delete raw["mcp.discoveryDefaultServers"];
 
+		deleteByPath(raw, ["images", "describeForTextModels"]);
+		delete raw["images.describeForTextModels"];
+
 		// Retired task-specific selectors must not recreate independent model roles.
 		const providerSettings = isRecord(raw.providers) ? raw.providers : undefined;
 		for (const key of [
@@ -3421,6 +3431,24 @@ export class Settings {
 		}
 		if (providerSettings && Object.keys(providerSettings).length === 0) delete raw.providers;
 
+		// The old model namespace held stream/tool loop guards. Keep those controls
+		// under their own roots before reserving model for the primary selector.
+		for (const key of [
+			"loopGuard.enabled",
+			"loopGuard.checkAssistantContent",
+			"loopGuard.toolCallReminder",
+			"toolCallLoopGuard.enabled",
+			"toolCallLoopGuard.threshold",
+			"toolCallLoopGuard.exemptTools",
+		]) {
+			const path = key.split(".");
+			const legacy = raw[`model.${key}`] ?? getByPath(raw, ["model", ...path]);
+			if (legacy !== undefined && raw[key] === undefined && getByPath(raw, path) === undefined)
+				setByPath(raw, path, legacy);
+			delete raw[`model.${key}`];
+		}
+		if (isRecord(raw.model)) delete raw.model;
+
 		// Migrate each layer independently so project/profile/CLI precedence is unchanged.
 		// An owned canonical key, including null, always wins over the legacy default.
 		const roles = isRecord(raw.modelRoles) ? raw.modelRoles : undefined;
@@ -3436,9 +3464,13 @@ export class Settings {
 		if (retrySettings) {
 			delete retrySettings.fallbackChains;
 			delete retrySettings.modelFallback;
+			for (const key of ["fallbackOn", "fallbackRevert", "usageAwareFallback", "modelCooldownMs", "minCooldownMs"])
+				delete retrySettings[key];
 		}
 		delete raw["retry.fallbackChains"];
 		delete raw["retry.modelFallback"];
+		for (const key of ["fallbackOn", "fallbackRevert", "usageAwareFallback", "modelCooldownMs", "minCooldownMs"])
+			delete raw[`retry.${key}`];
 		const taskSettings = isRecord(raw.task) ? raw.task : undefined;
 		for (const key of ["agentModelOverrides", "perCallModel", "perCallModelAllow", "agentPrewalk", "prewalk"]) {
 			if (taskSettings) delete taskSettings[key];

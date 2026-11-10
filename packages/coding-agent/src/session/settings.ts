@@ -211,7 +211,7 @@ export const cfgExternalThinking = register({
 });
 
 export const cfgModelLoopGuardEnabled = register({
-	id: "model.loopGuard.enabled",
+	id: "loopGuard.enabled",
 	type: "boolean",
 	default: true,
 	// Kill switch shared with pi-ai's stream-level guard (`utils/thinking-loop.ts`); only `1` disables.
@@ -225,7 +225,7 @@ export const cfgModelLoopGuardEnabled = register({
 });
 
 export const cfgModelLoopGuardCheckAssistantContent = register({
-	id: "model.loopGuard.checkAssistantContent",
+	id: "loopGuard.checkAssistantContent",
 	type: "boolean",
 	default: true,
 	ui: {
@@ -237,7 +237,7 @@ export const cfgModelLoopGuardCheckAssistantContent = register({
 });
 
 export const cfgModelLoopGuardToolCallReminder = register({
-	id: "model.loopGuard.toolCallReminder",
+	id: "loopGuard.toolCallReminder",
 	type: "boolean",
 	default: true,
 	ui: {
@@ -250,7 +250,7 @@ export const cfgModelLoopGuardToolCallReminder = register({
 });
 
 export const cfgModelToolCallLoopGuardEnabled = register({
-	id: "model.toolCallLoopGuard.enabled",
+	id: "toolCallLoopGuard.enabled",
 	type: "boolean",
 	default: true,
 	ui: {
@@ -262,7 +262,7 @@ export const cfgModelToolCallLoopGuardEnabled = register({
 });
 
 export const cfgModelToolCallLoopGuardThreshold = register({
-	id: "model.toolCallLoopGuard.threshold",
+	id: "toolCallLoopGuard.threshold",
 	type: "number",
 	default: 5,
 	ui: {
@@ -274,7 +274,7 @@ export const cfgModelToolCallLoopGuardThreshold = register({
 });
 
 export const cfgModelToolCallLoopGuardExemptTools = register({
-	id: "model.toolCallLoopGuard.exemptTools",
+	id: "toolCallLoopGuard.exemptTools",
 	type: "array",
 	default: DEFAULT_TOOL_CALL_LOOP_EXEMPT_TOOLS,
 	ui: {

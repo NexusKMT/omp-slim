@@ -31,7 +31,7 @@ export interface AdvisorLoopGuardHost {
  * `LoopGuards`, so a model reissuing one failing call had no bound at all:
  * `AdvisorRuntime` counts whole-turn provider failures, which a turn that
  * *succeeds* while burning dozens of identical failing tool calls never trips.
- * Reuses the primary's `model.toolCallLoopGuard.*` settings and corrective so
+ * Reuses the primary's `toolCallLoopGuard.*` settings and corrective so
  * one knob governs both loops (issue #9491).
  */
 export class AdvisorLoopGuard {

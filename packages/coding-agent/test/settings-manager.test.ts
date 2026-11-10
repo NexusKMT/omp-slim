@@ -1830,13 +1830,13 @@ describe("Settings", () => {
 			expect(cfgTodoEager.get(settings)).toBe("default");
 		});
 
-		it("migrates legacy features.unexpectedStopDetection=true to smart", async () => {
+		it("migrates legacy features.unexpectedStopDetection=true to mechanical", async () => {
 			await writeSettings({ features: { unexpectedStopDetection: true } });
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
 			// `true` reproduced the previous small-model-classified guard, now "smart".
-			expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("smart");
+			expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("mechanical");
 		});
 
 		it("maps legacy features.unexpectedStopDetection=false to none", async () => {
@@ -1852,7 +1852,7 @@ describe("Settings", () => {
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("smart");
+			expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("mechanical");
 		});
 
 		it("keeps an explicit unexpected-stop mode over a legacy dotted boolean", async () => {
@@ -1863,7 +1863,7 @@ describe("Settings", () => {
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("smart");
+			expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("mechanical");
 		});
 
 		it("moves legacy lastChangelogVersion out of config.yml into the marker file", async () => {

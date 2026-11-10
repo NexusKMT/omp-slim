@@ -6,6 +6,12 @@ import { cfgModel, cfgModelStorage } from "@oh-my-pi/pi-coding-agent/config/mode
 import { lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgThemeDark } from "@oh-my-pi/pi-coding-agent/modes/settings";
+import {
+	cfgModelLoopGuardEnabled,
+	cfgModelLoopGuardCheckAssistantContent,
+	cfgModelToolCallLoopGuardThreshold,
+	cfgModelToolCallLoopGuardExemptTools,
+} from "@oh-my-pi/pi-coding-agent/session/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
@@ -68,6 +74,42 @@ describe("single model settings", () => {
 		}
 		expect(saved.retry).toEqual({});
 		expect(saved.task).toEqual({});
+	});
+
+	it("migrates legacy loop guards without losing the primary model or persisted controls", async () => {
+		const file = path.join(agentDir, "config.yml");
+		await Bun.write(
+			file,
+			YAML.stringify({
+				model: {
+					loopGuard: { enabled: false, checkAssistantContent: false },
+					toolCallLoopGuard: { threshold: 8, exemptTools: ["read"] },
+				},
+				modelRoles: { default: "anthropic/primary:high", plan: "other/retired" },
+			}),
+		);
+		const settings = await Settings.loadIsolated({ agentDir, cwd });
+		expect(settings.getModel()).toBe("anthropic/primary:high");
+		expect(cfgModelLoopGuardEnabled.get(settings)).toBe(false);
+		expect(cfgModelLoopGuardCheckAssistantContent.get(settings)).toBe(false);
+		expect(cfgModelToolCallLoopGuardThreshold.get(settings)).toBe(8);
+		expect(cfgModelToolCallLoopGuardExemptTools.get(settings)).toEqual(["read"]);
+		settings.setModel("openai/new:medium");
+		await settings.flush();
+		expect(YAML.parse(await Bun.file(file).text())).toEqual({
+			model: "openai/new:medium",
+			loopGuard: { enabled: false, checkAssistantContent: false },
+			toolCallLoopGuard: { threshold: 8, exemptTools: ["read"] },
+		});
+		const dotted = Settings.isolated({
+			model: "openai/current",
+			"model.loopGuard.enabled": false,
+			"model.toolCallLoopGuard.threshold": 7,
+			loopGuard: { enabled: true },
+		});
+		expect(dotted.getModel()).toBe("openai/current");
+		expect(cfgModelLoopGuardEnabled.get(dotted)).toBe(true);
+		expect(cfgModelToolCallLoopGuardThreshold.get(dotted)).toBe(7);
 	});
 
 	it("keeps canonical model ownership including tombstones ahead of legacy values", () => {
