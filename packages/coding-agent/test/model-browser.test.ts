@@ -1,6 +1,7 @@
+import { cfgModelProviderOrder } from "../src/config/model-settings";
 import { createModelBrowserSource } from "../src/modes/model-browser-source";
 import { beforeAll, describe, expect, setSystemTime, test } from "bun:test";
-import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
@@ -14,8 +15,6 @@ import {
 	buildSearchAffinity,
 	rankModelItems,
 	ModelBrowser,
-	type RoleAssignments,
-	resolveRoleAssignments,
 	sortModelItems,
 } from "@oh-my-pi/pi-tui/overlays/model-browser";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
@@ -45,88 +44,23 @@ function makeModel(provider: string, id: string, metadata?: NativeMetadata): Mod
 }
 
 /** Browser preloaded with `models`, MRU-sorted like the hub does on sync. */
-function makeBrowser(
-	models: Model[],
-	mruOrder: string[],
-	options: { roles?: RoleAssignments; providerOrder?: string[] } = {},
-): ModelBrowser {
+function makeBrowser(models: Model[], mruOrder: string[], options: { providerOrder?: string[] } = {}): ModelBrowser {
 	const browser = new ModelBrowser(
 		createModelBrowserSource(Settings.isolated({ modelProviderOrder: options.providerOrder ?? [] })),
 	);
 	const items = buildBrowserItems(models);
 	sortModelItems(items, { mruOrder });
-	browser.setRoles(options.roles ?? {});
 	browser.setMruOrder(mruOrder);
 	browser.setItems(items);
 	return browser;
 }
 
-describe("resolveRoleAssignments", () => {
-	test("rejects configured models that do not match the role's accepted kind", () => {
-		const chat = makeModel("demo", "chat");
-		const image = makeModel("demo", "image", { kind: "image" });
-		const settings = Settings.isolated({
-			modelRoles: {
-				default: "demo/image",
-				image: "demo/image",
-			},
-		});
-
-		const roles = resolveRoleAssignments(createModelBrowserSource(settings), [chat, image], [chat, image]);
-
-		expect(roles.default).toBeUndefined();
-		expect(roles.image?.model).toBe(image);
-	});
-
-	test("shows configured smol for an unconfigured tiny role", () => {
-		const smol = makeModel("demo", "custom-smol");
-		const priorityHead = makeModel("demo", "gemini-3.8-flash");
-		const settings = Settings.isolated({
-			modelRoles: {
-				default: "demo/default",
-				smol: "demo/custom-smol",
-			},
-		});
-
-		const roles = resolveRoleAssignments(
-			createModelBrowserSource(settings),
-			[smol, priorityHead],
-			[smol, priorityHead],
-		);
-
-		expect(roles.smol?.model).toBe(smol);
-		expect(roles.tiny?.model).toBe(smol);
-		expect(roles.tiny?.autoSelected).toBe(true);
-	});
-
-	test("shows configured slow for an unconfigured advisor role", () => {
-		const slow = makeModel("demo", "custom-slow");
-		const priorityHead = makeModel("demo", "gpt-5.6-sol");
-		const settings = Settings.isolated({
-			modelRoles: {
-				default: "demo/default",
-				slow: "demo/custom-slow",
-			},
-		});
-
-		const roles = resolveRoleAssignments(
-			createModelBrowserSource(settings),
-			[slow, priorityHead],
-			[slow, priorityHead],
-		);
-
-		expect(roles.slow?.model).toBe(slow);
-		expect(roles.advisor?.model).toBe(slow);
-		expect(roles.advisor?.autoSelected).toBe(true);
-	});
-});
-
 describe("createModelMentionSource", () => {
-	test("refreshes candidates when role settings or availability change between queries", () => {
+	test("refreshes candidates when provider order or availability change between queries", () => {
 		const a = makeModel("a", "example-2");
 		const b = makeModel("b", "example-2");
 		const available = [a, b];
-		const settings = Settings.isolated({ modelRoles: { default: "b/example-2" } });
+		const settings = Settings.isolated({ modelProviderOrder: ["b"] });
 		const candidates = createModelMentionSource({
 			source: createModelBrowserSource(settings),
 			registry: { getError: () => undefined, getAvailable: () => [...available], getAll: () => [...available] },
@@ -136,7 +70,7 @@ describe("createModelMentionSource", () => {
 
 		expect(selectors("example")).toEqual(["b/example-2", "a/example-2"]);
 
-		settings.setModelRole("default", "a/example-2");
+		cfgModelProviderOrder.set(settings, ["a"]);
 		expect(selectors("example")).toEqual(["a/example-2", "b/example-2"]);
 
 		available.push(makeModel("c", "example-3"));
@@ -176,17 +110,15 @@ describe("createModelMentionSource", () => {
 describe("ModelBrowser search ranking", () => {
 	test("headless candidates preserve picker relevance and affinity ordering", () => {
 		const models = [makeModel("a", "example-2"), makeModel("b", "example-2"), makeModel("a", "other")];
-		const roles: RoleAssignments = {};
 		const mruOrder = ["b/example-2", "a/example-2"];
 		const providerOrder = ["a"];
-		const browser = makeBrowser(models, mruOrder, { roles, providerOrder });
+		const browser = makeBrowser(models, mruOrder, { providerOrder });
 		const query = "example";
 		browser.setQuery(query);
 		const items = buildBrowserItems(models);
 		const ranked = rankModelItems(query, items, {
-			roles,
 			mruOrder,
-			affinity: buildSearchAffinity(providerOrder, roles, mruOrder),
+			affinity: buildSearchAffinity(providerOrder, mruOrder),
 		});
 		expect(ranked.map(item => item.selector)).toEqual(["b/example-2", "a/example-2"]);
 		expect(browser.getSelected()?.selector).toBe(ranked[0].selector);
@@ -198,8 +130,7 @@ describe("ModelBrowser search ranking", () => {
 		// order followed whatever order the catalog or fuzzy pass handed in.
 		const alpha = makeModel("demo", "alpha-latest");
 		const beta = makeModel("demo", "beta-latest");
-		const roles: RoleAssignments = {};
-		const options = { roles, mruOrder: [], affinity: buildSearchAffinity([], roles, []) };
+		const options = { mruOrder: [], affinity: buildSearchAffinity([], []) };
 		for (const models of [
 			[alpha, beta],
 			[beta, alpha],
@@ -240,24 +171,6 @@ describe("ModelBrowser search ranking", () => {
 		expect(browser.getSelected()?.selector).toBe("zenmux/gpt-5.5");
 	});
 
-	test("a configured role provider outranks punctuation-biased fuzzy scores", () => {
-		const kilo = makeModel("kilo", "liquid/lfm-2.5-2.6b:free");
-		const ollama = makeModel("ollama", "lfm2:2.6b");
-		const browser = makeBrowser([kilo, ollama], [], {
-			roles: {
-				slow: {
-					model: ollama,
-					thinkingLevel: ThinkingLevel.Inherit,
-					autoSelected: false,
-				},
-			},
-		});
-
-		browser.setQuery("lfm");
-
-		expect(browser.getSelected()?.selector).toBe("ollama/lfm2:2.6b");
-	});
-
 	test("recent use establishes provider affinity across models", () => {
 		const browser = makeBrowser(
 			[makeModel("kilo", "liquid/lfm-2.5-2.6b:free"), makeModel("ollama", "lfm2:2.6b")],
@@ -279,34 +192,6 @@ describe("ModelBrowser search ranking", () => {
 		browser.setQuery("lfm");
 
 		expect(browser.getSelected()?.selector).toBe("ollama/lfm2:2.6b");
-	});
-
-	test("a recently used model outranks a peer from a role-assigned provider", () => {
-		// Regression: with a `glm` role on fireworks, typing "muse" selected
-		// fireworks/muse-glimmer-30b over the muse-spark model actually used.
-		const glm = makeModel("fireworks", "glm-5.2");
-		const browser = makeBrowser(
-			[glm, makeModel("fireworks", "muse-glimmer-30b"), makeModel("meta", "muse-spark-1.3-contributor")],
-			["meta/muse-spark-1.3-contributor"],
-			{ roles: { glm: { model: glm, thinkingLevel: ThinkingLevel.Inherit, autoSelected: false } } },
-		);
-
-		browser.setQuery("muse");
-
-		expect(browser.getSelected()?.selector).toBe("meta/muse-spark-1.3-contributor");
-	});
-
-	test("a role-assigned model outranks a recently used model", () => {
-		const assigned = makeModel("fireworks", "muse-glimmer-30b");
-		const browser = makeBrowser(
-			[assigned, makeModel("meta", "muse-spark-1.3-contributor")],
-			["meta/muse-spark-1.3-contributor"],
-			{ roles: { fast: { model: assigned, thinkingLevel: ThinkingLevel.Inherit, autoSelected: false } } },
-		);
-
-		browser.setQuery("muse");
-
-		expect(browser.getSelected()?.selector).toBe("fireworks/muse-glimmer-30b");
 	});
 
 	test("typing free finds a zero-cost model whose id never says free", () => {

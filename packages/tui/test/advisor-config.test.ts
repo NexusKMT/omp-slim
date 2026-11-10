@@ -11,21 +11,7 @@ import {
 import { getThemeByName, setThemeInstance } from "../src/theme";
 
 const deps: AdvisorConfigDeps = {
-	getAvailableModels: () => [],
-	browserSource: {
-		revision: 0,
-		defaultThinkingLevel: "high",
-		modelProviderOrder: [],
-		knownRoleIds: [],
-		mruOrder: [],
-		modelPerf: new Map(),
-		getModelRole: () => undefined,
-		getRoleInfo: role => ({ name: role, section: "chat", accepts: () => true }),
-		defaultRoleChain: () => [],
-		resolveRoleValue: () => ({ model: undefined, explicitThinkingLevel: false }),
-	},
 	defaultToolNames: new Set(["read", "grep", "glob"]),
-	scopedModels: [],
 	availableToolNames: [],
 };
 
@@ -90,7 +76,7 @@ describe("advisor sync backlog picker", () => {
 		});
 
 		overlay.handleInput("\r"); // Advisor detail.
-		for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[B");
+		for (let i = 0; i < 4; i++) overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r"); // Sync backlog picker (inherit selected).
 		for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r"); // Pick strict.
@@ -109,7 +95,7 @@ describe("advisor sync backlog picker", () => {
 		});
 
 		overlay.handleInput("\r"); // Advisor detail.
-		for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[B");
+		for (let i = 0; i < 4; i++) overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r"); // Sync backlog picker (off selected).
 		overlay.handleInput("\x1b[A"); // Up to inherit.
 		overlay.handleInput("\r"); // Pick inherit.
@@ -128,7 +114,7 @@ describe("advisor sync backlog picker", () => {
 		});
 
 		overlay.handleInput("\r"); // Seeded "default" advisor detail.
-		for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[B");
+		for (let i = 0; i < 4; i++) overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r"); // Sync backlog picker (inherit selected).
 		for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r"); // Pick strict.

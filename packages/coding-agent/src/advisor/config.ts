@@ -70,7 +70,6 @@ function normalizeSyncBacklog(
 
 const advisorEntrySchema = type({
 	name: "string",
-	"model?": "string",
 	"tools?": "string[]",
 	"reviewMode?": "'turn' | 'agent-end'",
 	"reviewInterval?": reviewIntervalSchema,
@@ -242,7 +241,6 @@ export async function discoverAdvisorConfigs(cwd: string, agentDir?: string): Pr
 				: undefined;
 			advisors.set(slug, {
 				name: entry.name,
-				model: entry.model?.trim() || undefined,
 				tools: filterAdvisorTools(entry.tools, item.path),
 				reviewMode: entry.reviewMode,
 				reviewInterval: entry.reviewInterval,
@@ -334,7 +332,6 @@ export async function loadWatchdogConfigFile(filePath: string): Promise<Watchdog
 	for (const message of warnings) logger.warn("Advisor config", { path: filePath, error: message });
 	const advisors = entries.map(a => {
 		const advisor: AdvisorConfig = { name: a.name };
-		if (a.model?.trim()) advisor.model = a.model;
 		if (a.tools !== undefined) advisor.tools = [...a.tools];
 		if (a.reviewMode !== undefined) advisor.reviewMode = a.reviewMode;
 		if (a.reviewInterval !== undefined) advisor.reviewInterval = a.reviewInterval;
@@ -398,7 +395,6 @@ export function serializeWatchdogConfig(doc: WatchdogConfigDoc): string {
 		lines.push("advisors:");
 		for (const advisor of doc.advisors) {
 			lines.push(`  - name: ${YAML.stringify(advisor.name)}`);
-			if (advisor.model?.trim()) lines.push(`    model: ${YAML.stringify(advisor.model)}`);
 			if (advisor.tools !== undefined) {
 				if (advisor.tools.length === 0) {
 					lines.push("    tools: []");

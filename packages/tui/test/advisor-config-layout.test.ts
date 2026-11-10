@@ -9,21 +9,7 @@ import { getThemeByName, setThemeInstance } from "../src/theme";
 
 describe("AdvisorConfigOverlayComponent", () => {
 	const deps: AdvisorConfigDeps = {
-		getAvailableModels: () => [],
-		browserSource: {
-			revision: 0,
-			defaultThinkingLevel: "high",
-			modelProviderOrder: [],
-			knownRoleIds: [],
-			mruOrder: [],
-			modelPerf: new Map(),
-			getModelRole: () => undefined,
-			getRoleInfo: role => ({ name: role, section: "chat", accepts: () => true }),
-			defaultRoleChain: () => [],
-			resolveRoleValue: () => ({ model: undefined, explicitThinkingLevel: false }),
-		},
 		defaultToolNames: new Set(["read", "grep", "glob"]),
-		scopedModels: [],
 		availableToolNames: ["read", "grep", "glob", "lsp", "web_search"],
 	};
 	const callbacks = {
@@ -44,10 +30,7 @@ describe("AdvisorConfigOverlayComponent", () => {
 		setThemeInstance(uiTheme);
 		const overlay = make({
 			instructions: "shared baseline",
-			advisors: [
-				{ name: "Architecture", model: "x-ai/grok-code-fast:high" },
-				{ name: "Security", tools: ["read", "web_search"] },
-			],
+			advisors: [{ name: "Architecture" }, { name: "Security", tools: ["read", "web_search"] }],
 		});
 		const frame = overlay.render(200);
 		// Fills the screen top-to-bottom (the fix for the bottom-anchored frame
@@ -61,7 +44,7 @@ describe("AdvisorConfigOverlayComponent", () => {
 		expect(text).toContain("+ Add advisor");
 		expect(text).toContain("Save & apply");
 		// Right preview reflects the highlighted (first) advisor.
-		expect(text).toContain("x-ai/grok-code-fast:high");
+		expect(text).toContain("current session model");
 		expect(text).toContain("read, grep, glob (default)");
 	});
 
@@ -109,10 +92,7 @@ describe("AdvisorConfigOverlayComponent", () => {
 		if (!uiTheme) throw new Error("theme unavailable");
 		setThemeInstance(uiTheme);
 		const overlay = make({
-			advisors: [
-				{ name: "Active", model: "x-ai/grok-code-fast:high" },
-				{ name: "Disabled", model: "openai/gpt-4", enabled: false },
-			],
+			advisors: [{ name: "Active" }, { name: "Disabled", enabled: false }],
 		});
 		const text = strip(overlay.render(200));
 		// The list shows ● for enabled and ○ for disabled.

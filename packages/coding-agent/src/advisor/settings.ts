@@ -18,8 +18,7 @@ export const cfgAdvisorEnabled = register({
 		tab: "model",
 		group: "Advisor",
 		label: "Enable Advisor",
-		description:
-			"Pair a second model (assigned to the 'advisor' role) that passively reviews each turn and injects notes.",
+		description: "Use the current model to passively review each turn and inject notes.",
 	},
 });
 

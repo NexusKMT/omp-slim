@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { Model, ServiceTier } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentsHubDeps } from "@oh-my-pi/pi-tui/overlays/agents-hub";
 import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 import { isEnoent, prompt } from "@oh-my-pi/pi-utils";
@@ -9,29 +9,15 @@ import { YAML } from "bun";
 import type { EffectiveExtensionRoots } from "../capability/types";
 import { getConfigDirs } from "../config";
 import type { ModelRegistry } from "../config/model-registry";
-import {
-	resolveAgentAdvisorSelection,
-	resolveAgentModelPatterns,
-	resolveAgentPrewalkPattern,
-	resolveConfiguredModelPatterns,
-	resolveModelOverride,
-} from "../config/model-resolver";
 import type { Settings } from "../config/settings";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import agentCreationArchitectPrompt from "../prompts/system/agent-creation-architect.md" with { type: "text" };
 import agentCreationUserPrompt from "../prompts/system/agent-creation-user.md" with { type: "text" };
 import { createAgentSession } from "../sdk";
 import { refreshAgentDiscovery } from "../task";
 import { discoverAgents } from "../task/discovery";
-import { resolveAgentPrewalkDefault } from "../task/prewalk";
-import { createModelBrowserSource } from "./model-browser-source";
 
-import {
-	cfgTaskAgentAdvisor,
-	cfgTaskAgentModelOverrides,
-	cfgTaskAgentPrewalk,
-	cfgTaskDisabledAgents,
-	cfgTaskPrewalk,
-} from "../task/settings";
+import { cfgTaskAgentAdvisor, cfgTaskDisabledAgents } from "../task/settings";
 
 function extractAssistantText(messages: AgentMessage[]): string | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -58,102 +44,34 @@ export function createAgentsHubDeps(
 	settings: Settings,
 	modelRegistry: ModelRegistry,
 	extensionRoots: () => EffectiveExtensionRoots,
-	activeModelPattern?: string,
-	defaultModelPattern?: string,
-	sessionServiceTier?: (model: Model) => ServiceTier | undefined,
+	activeModel?: Model,
+	thinkingLevel?: ConfiguredThinkingLevel,
 ): AgentsHubDeps {
 	return {
-		browserSource: createModelBrowserSource(settings, sessionServiceTier),
 		loadAgents: async () => {
 			const { agents } = await discoverAgents(cwd, undefined, extensionRoots());
 			const disabled = new Set(cfgTaskDisabledAgents.get(settings));
-			const overrides = cfgTaskAgentModelOverrides.get(settings);
-			const prewalkOverrides = cfgTaskAgentPrewalk.get(settings);
 			const advisorOverrides = cfgTaskAgentAdvisor.get(settings);
-			return agents.map(agent => {
-				const override = overrides[agent.name];
-				const overrideModel = (Array.isArray(override) ? override.join(",") : (override ?? "")).trim();
-				return {
-					...agent,
-					disabled: disabled.has(agent.name),
-					overrideModel: overrideModel || undefined,
-					prewalkOverride: prewalkOverrides[agent.name]?.trim() || undefined,
-					advisorOverride: advisorOverrides[agent.name]?.trim() || undefined,
-				};
-			});
-		},
-		getAvailableModels: () => modelRegistry.getAvailable(),
-		effectiveModelPatterns: agent =>
-			resolveAgentModelPatterns({
-				settingsOverride: agent.overrideModel,
-				agentModel: agent.model,
-				settings,
-				activeModelPattern,
-				fallbackModelPattern: defaultModelPattern,
-			}),
-		resolvePatterns: patterns => {
-			if (patterns.length === 0) return undefined;
-			const { model, thinkingLevel, explicitThinkingLevel } = resolveModelOverride(
-				patterns,
-				modelRegistry,
-				settings,
-			);
-			if (!model) return undefined;
-			const level = explicitThinkingLevel && thinkingLevel ? `:${thinkingLevel}` : "";
-			return `${model.provider}/${model.id}${level}`;
-		},
-		effectivePrewalkPattern: agent =>
-			resolveAgentPrewalkPattern({
-				settingsOverride: agent.prewalkOverride,
-				agentPrewalk: resolveAgentPrewalkDefault(agent, cfgTaskPrewalk.get(settings)),
-			}),
-		effectiveAdvisorPattern: agent => {
-			const selection = resolveAgentAdvisorSelection({
-				settingsOverride: agent.advisorOverride,
-				agentAdvisor: agent.advisor,
-			});
-			return selection ? (selection.model ?? "@advisor") : undefined;
+			return agents.map(agent => ({
+				...agent,
+				disabled: disabled.has(agent.name),
+				advisor:
+					advisorOverrides[agent.name] === "on" ||
+					(advisorOverrides[agent.name] !== "off" && agent.advisor === true),
+			}));
 		},
 		setAgentDisabled: (name, { disabled }) => cfgTaskDisabledAgents.setMember(settings, name, { member: disabled }),
-		setAgentOverride: (property, name, value) => {
-			const setting =
-				property === "model"
-					? cfgTaskAgentModelOverrides
-					: property === "prewalk"
-						? cfgTaskAgentPrewalk
-						: cfgTaskAgentAdvisor;
-			if (property !== "model") {
-				setting.setEntry(settings, name, value);
-				return;
-			}
-			// A session-only pick (Alt+P) is a runtime override of the whole map and would mask this
-			// saved entry. Drop the override for `name` only; other agents keep their session picks.
-			const active = cfgTaskAgentModelOverrides.get(settings);
-			cfgTaskAgentModelOverrides.setEntry(settings, name, value);
-			cfgTaskAgentModelOverrides.clearOverride(settings);
-			const persisted = cfgTaskAgentModelOverrides.get(settings);
-			const sessionPicks = Object.entries(active).filter(
-				([agent, pick]) => agent !== name && JSON.stringify(pick) !== JSON.stringify(persisted[agent]),
-			);
-			if (sessionPicks.length > 0) {
-				cfgTaskAgentModelOverrides.override(settings, { ...persisted, ...Object.fromEntries(sessionPicks) });
-			}
-		},
+		setAgentAdvisor: (name, enabled) => cfgTaskAgentAdvisor.setEntry(settings, name, enabled ? "on" : "off"),
 		generateAgent: async (description, onText) => {
-			await modelRegistry.refresh();
-			const patterns = resolveConfiguredModelPatterns(
-				activeModelPattern ?? defaultModelPattern ?? settings.getModelRole("default"),
-				settings,
-			);
-			const { model } = resolveModelOverride(patterns, modelRegistry, settings);
-			const selectedModel = model ?? modelRegistry.getAvailable()[0];
-			if (!selectedModel) throw new Error("No available model to generate agent specification.");
+			const selectedModel = activeModel;
+			if (!selectedModel) throw new Error("Select a current model before creating an agent.");
 			const { session } = await createAgentSession({
 				cwd,
 				authStorage: modelRegistry.authStorage,
 				modelRegistry,
 				settings,
 				model: selectedModel,
+				thinkingLevel,
 				systemPrompt: [prompt.render(agentCreationArchitectPrompt, {})],
 				hasUI: false,
 				enableLsp: false,

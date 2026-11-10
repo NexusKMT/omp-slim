@@ -4,13 +4,7 @@ import type { TspPickerProps } from "@oh-my-pi/pi-wire";
 import type { SgrMouseEvent } from "../../mouse";
 import { Text } from "../../components/text";
 import { WizardStep } from "../../components/wizard-step";
-import {
-	buildBrowserItems,
-	ModelBrowser,
-	type ModelBrowserItem,
-	resolveRoleAssignments,
-	sortModelItems,
-} from "../../overlays/model-browser";
+import { buildBrowserItems, ModelBrowser, type ModelBrowserItem, sortModelItems } from "../../overlays/model-browser";
 import { BROWSER_FRAME_ROWS } from "../../overlays/model-picker";
 import { formatKeyHint } from "../../app-keybindings";
 import { matchesKey } from "../../keys";
@@ -268,13 +262,11 @@ class ModelSceneController implements SetupSceneController {
 	}
 
 	#syncModels(): void {
-		const { available, all, current } = this.#host.ctx.getModels();
+		const { available, current } = this.#host.ctx.getModels();
 		const source = this.#host.ctx.modelSource;
-		const roles = resolveRoleAssignments(source, all, available);
 		const items = buildBrowserItems(available.filter(model => modelKind(model) === "chat"));
-		sortModelItems(items, { roles, mruOrder: source.mruOrder });
+		sortModelItems(items, { mruOrder: source.mruOrder });
 		this.#items = items;
-		this.#browser.setRoles(roles);
 		this.#browser.setMruOrder(source.mruOrder);
 		this.#browser.setPerfStats(source.modelPerf);
 		this.#browser.setItems(items);

@@ -44,7 +44,6 @@ import type { TspEditorDecoration, TspText } from "@oh-my-pi/pi-wire";
 import { motionEffectsEnabled } from "../motion-effects";
 import { isNativeRendering } from "../native/state";
 import { isQueuedMessageList, parseQueueShorthand, QUEUE_LIST_MARKER_RE } from "./queue-input";
-import { type WordCompletionMethod, WordCompletionProvider } from "./word-completion";
 import { fgOrPlain, theme } from "../theme/theme";
 
 /** A shell-mode draft's sigil (`!`, `!!`, `$`, `$$`) with its surrounding blanks; the mode chip stands in for it natively. */
@@ -102,7 +101,6 @@ const EFFORT_STEPS: Partial<Record<string, number>> = {
 /** Independently switchable prose-assistance features of the composer. */
 export interface SpellingFeatures extends MacOSSpellingFeatures {
 	/** Word-completion engine; `off` disables ghost text. */
-	autocomplete: WordCompletionMethod;
 }
 
 type ConfigurableEditorAction = Extract<
@@ -113,8 +111,6 @@ type ConfigurableEditorAction = Extract<
 	| "app.suspend"
 	| "app.display.reset"
 	| "app.thinking.cycle"
-	| "app.model.cycleForward"
-	| "app.model.cycleBackward"
 	| "app.model.select"
 	| "app.model.selectTemporary"
 	| "app.message.dequeue"
@@ -131,8 +127,6 @@ const DEFAULT_ACTION_KEYS: Record<ConfigurableEditorAction, KeyId[]> = {
 	"app.suspend": ["ctrl+z"],
 	"app.display.reset": ["alt+l"],
 	"app.thinking.cycle": ["shift+tab"],
-	"app.model.cycleForward": ["ctrl+p"],
-	"app.model.cycleBackward": ["shift+ctrl+p"],
 	"app.model.select": ["alt+m"],
 	"app.model.selectTemporary": ["alt+p"],
 	"app.message.dequeue": ["alt+up", "shift+up"],
@@ -456,7 +450,6 @@ export class CustomEditor extends Editor {
 	#spelling = new MacOSSpellingProvider();
 	/** The word being typed: its typo mark waits until the caret leaves it. */
 	#typing = new TypingWordTracker();
-	#wordCompletion = new WordCompletionProvider();
 	imageLinks?: readonly (string | undefined)[];
 
 	/** Draft images pasted into the composer, consumed on submit. Co-located with
@@ -515,13 +508,8 @@ export class CustomEditor extends Editor {
 			this.#requestShimmerRepaint?.();
 		};
 		this.#spelling.onUpdate = requestTextAssistRepaint;
-		this.#wordCompletion.onUpdate = requestTextAssistRepaint;
 		this.onTextAssistApplied = requestTextAssistRepaint;
 		this.setTextAssistProvider({
-			getWordCompletion: (lines, cursorLine, cursorCol) =>
-				this.#wordCompletion.getWordCompletion(lines, cursorLine, cursorCol),
-			wordCompletionFeedback: (lines, cursorLine, cursorCol, suggestion, accepted) =>
-				this.#wordCompletion.wordCompletionFeedback(lines, cursorLine, cursorCol, suggestion, accepted),
 			tryAutocorrect: (lines, cursorLine, cursorCol) => this.#spelling.tryAutocorrect(lines, cursorLine, cursorCol),
 			getWordReplacements: (lines, cursorLine, cursorCol) =>
 				this.#spelling.getWordReplacements(lines, cursorLine, cursorCol),
@@ -529,10 +517,9 @@ export class CustomEditor extends Editor {
 		if (args[0] instanceof TUI) this.tui = args[0];
 	}
 
-	/** Independently configure typo detection, the word-completion engine, and autocorrect. */
+	/** Configure typo detection and autocorrect. */
 	setSpellingFeatures(features: SpellingFeatures): void {
 		this.#spelling.setFeatures({ typoDetection: features.typoDetection, autocorrect: features.autocorrect });
-		this.#wordCompletion.setMethod(features.autocomplete);
 	}
 
 	/** Clear the composer draft: optionally commit `historyText` to history, then
@@ -1405,8 +1392,6 @@ export class CustomEditor extends Editor {
 	onExit?: () => void;
 	onDisplayReset?: () => void;
 	onCycleThinkingLevel?: () => void;
-	onCycleModelForward?: () => void;
-	onCycleModelBackward?: () => void;
 	onSelectModel?: () => void;
 	onSuspend?: () => void;
 	onSelectModelTemporary?: () => void;
@@ -1613,18 +1598,6 @@ export class CustomEditor extends Editor {
 			// Intercept configured model selector shortcut
 			if (this.#matchesAction(canonical, "app.model.select") && this.onSelectModel) {
 				this.onSelectModel();
-				return;
-			}
-
-			// Intercept configured backward model cycling (check before forward cycling)
-			if (this.#matchesAction(canonical, "app.model.cycleBackward") && this.onCycleModelBackward) {
-				this.onCycleModelBackward();
-				return;
-			}
-
-			// Intercept configured forward model cycling
-			if (this.#matchesAction(canonical, "app.model.cycleForward") && this.onCycleModelForward) {
-				this.onCycleModelForward();
 				return;
 			}
 

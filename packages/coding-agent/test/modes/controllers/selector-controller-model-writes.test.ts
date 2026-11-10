@@ -78,37 +78,33 @@ describe("SelectorController model hub writes", () => {
 		return callbacks;
 	}
 
-	it("saves only the edited fallback chain, never the chains a --config overlay supplies", async () => {
+	it("persists the chosen current model and changes the live session", async () => {
 		const agentDir = tempDir.join("agent");
-		const overlayPath = tempDir.join("overlay.yml");
-		await Bun.write(overlayPath, YAML.stringify({ retry: { fallbackChains: { smol: ["overlay/cheap"] } } }));
-		// The global instance, as in the app: the hub's status text reads the global settings.
-		const settings = await Settings.init({ agentDir, cwd: tempDir.path(), configFiles: [overlayPath] });
-		const { controller, showError } = start(settings, model("claude-sonnet-4-5"));
-
-		openModelHub(controller).onFallbackChainChange?.("slow", ["user/slow-fallback"]);
-		await settings.flush();
-
-		expect(showError).not.toHaveBeenCalled();
-		const saved = YAML.parse(await Bun.file(path.join(agentDir, "config.yml")).text()) as RawSettings;
-		expect(saved).toEqual({ retry: { fallbackChains: { slow: ["user/slow-fallback"] } } });
-	});
-
-	it("switches the session to the project default when its already-assigned chip is picked", async () => {
-		const agentDir = tempDir.join("agent");
-		await Bun.write(
-			tempDir.join(".omp", "config.yml"),
-			YAML.stringify({ modelRoles: { default: "anthropic/claude-opus-4-5" } }),
-		);
 		const settings = await Settings.init({ agentDir, cwd: tempDir.path() });
-		// The session moved off the configured default earlier (an in-session pick).
 		const { controller, showError } = start(settings, model("claude-sonnet-4-5"));
-
-		// The hub shows the project default as assigned, so picking it sends unassign.
-		await openModelHub(controller).onUnassign("default");
-
+		await openModelHub(controller).onSelect(model("claude-opus-4-5"), undefined, "anthropic/claude-opus-4-5");
+		await settings.flush();
 		expect(showError).not.toHaveBeenCalled();
 		expect(session?.model?.id).toBe("claude-opus-4-5");
+		const saved = YAML.parse(await Bun.file(path.join(agentDir, "config.yml")).text()) as RawSettings;
+		expect(saved.model).toBe("anthropic/claude-opus-4-5");
+		expect(Object.hasOwn(saved, "modelRoles")).toBe(false);
+	});
+	it("saves project model selections to project scope without promoting them to the global file", async () => {
+		const agentDir = tempDir.join("agent");
+		await Bun.write(tempDir.join(".omp", "config.yml"), YAML.stringify({ modelStorage: "project" }));
+		const settings = await Settings.init({ agentDir, cwd: tempDir.path() });
+		const { controller, showError } = start(settings, model("claude-sonnet-4-5"));
+		await openModelHub(controller).onSelect(model("claude-opus-4-5"), undefined, "anthropic/claude-opus-4-5");
+		await settings.flush();
+		expect(showError).not.toHaveBeenCalled();
+		expect(session?.model?.id).toBe("claude-opus-4-5");
+		const project = YAML.parse(await Bun.file(tempDir.join(".omp", "config.yml")).text()) as RawSettings;
+		expect(project.model).toBe("anthropic/claude-opus-4-5");
+		const global = Bun.file(path.join(agentDir, "config.yml"));
+		expect(
+			(await global.exists()) ? (YAML.parse(await global.text()) as RawSettings).model : undefined,
+		).toBeUndefined();
 	});
 
 	it("refreshes the open hub once a confirmed compaction point has moved the model to its extended window", async () => {

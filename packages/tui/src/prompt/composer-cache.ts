@@ -28,7 +28,6 @@ import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
 import type { ComposerPreferences, ComposerStatusCache } from "./composer";
 import { readStatusLineStartupData } from "../status-line/startup";
 import type { SymbolPreset } from "../theme/theme";
-import { isWordCompletionMethod } from "./word-completion";
 
 /** Bump whenever any payload format changes; older stores are cleared on open. */
 const FORMAT_VERSION = 1;
@@ -99,7 +98,6 @@ function parseUiState(
 		imeSafeCursor,
 		autocompleteMaxVisible,
 		spellingTypoDetection,
-		spellingAutocomplete,
 		spellingAutocorrect,
 	} = value.preferences;
 	if (
@@ -115,7 +113,6 @@ function parseUiState(
 		typeof imeSafeCursor !== "boolean" ||
 		typeof autocompleteMaxVisible !== "number" ||
 		typeof spellingTypoDetection !== "boolean" ||
-		!isWordCompletionMethod(spellingAutocomplete) ||
 		typeof spellingAutocorrect !== "boolean"
 	) {
 		return undefined;
@@ -143,7 +140,6 @@ function parseUiState(
 			imeSafeCursor,
 			autocompleteMaxVisible,
 			spellingTypoDetection,
-			spellingAutocomplete,
 			spellingAutocorrect,
 		},
 		theme: { symbolPreset, colorBlindMode, darkTheme, lightTheme },

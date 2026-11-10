@@ -138,9 +138,8 @@ export function createModelMentionSource(host: {
 		const providerOrder = host.source.modelProviderOrder;
 		if (ranker?.items !== scope.items || rankerProviderOrder !== providerOrder) {
 			ranker = new ModelItemRanker(scope.items, {
-				roles: scope.roles,
 				mruOrder: scope.mruOrder,
-				affinity: buildSearchAffinity(providerOrder, scope.roles, scope.mruOrder),
+				affinity: buildSearchAffinity(providerOrder, scope.mruOrder),
 			});
 			rankerProviderOrder = providerOrder;
 		}

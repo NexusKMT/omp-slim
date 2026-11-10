@@ -19,6 +19,7 @@ export class ThinkingSelectorComponent extends OverlayPanel {
 		availableLevels: ConfiguredThinkingLevel[],
 		onSelect: (level: ConfiguredThinkingLevel) => void,
 		onCancel: () => void,
+		options: { docked?: boolean } = {},
 	) {
 		super("Thinking Level", "omp.overlay.thinking");
 
@@ -42,19 +43,23 @@ export class ThinkingSelectorComponent extends OverlayPanel {
 		};
 
 		this.addChild(this.#selectList);
-		this.#sheet = new SelectListSheet(this.#selectList, {
-			title: "Thinking level",
-			icon: "brain",
-			noun: "levels",
-			current: currentLevel ? [currentLevel] : [],
-			// How hard each level thinks, as a meter from off (empty) to the deepest effort (full); auto has none.
-			columns: [{ id: "depth", format: "bar" }],
-			decorate: item => {
-				if (item.value === AUTO_THINKING) return undefined;
-				const effort = THINKING_EFFORTS.indexOf(item.value as (typeof THINKING_EFFORTS)[number]);
-				return { facts: { depth: (effort + 1) / THINKING_EFFORTS.length } };
+		this.#sheet = new SelectListSheet(
+			this.#selectList,
+			{
+				title: "Thinking level",
+				icon: "brain",
+				noun: "levels",
+				current: currentLevel ? [currentLevel] : [],
+				// How hard each level thinks, as a meter from off (empty) to the deepest effort (full); auto has none.
+				columns: [{ id: "depth", format: "bar" }],
+				decorate: item => {
+					if (item.value === AUTO_THINKING) return undefined;
+					const effort = THINKING_EFFORTS.indexOf(item.value as (typeof THINKING_EFFORTS)[number]);
+					return { facts: { depth: (effort + 1) / THINKING_EFFORTS.length } };
+				},
 			},
-		});
+			options,
+		);
 	}
 
 	override describe(cx: DescribeContext): NativeNode | null {

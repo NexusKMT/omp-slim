@@ -41,15 +41,14 @@ async function createHub(state: ProviderDiscoveryState): Promise<ModelHubCompone
 	} as unknown as ModelRegistry;
 	const ui = { requestRender: vi.fn(), terminal: { rows: 40 } } as unknown as TUI;
 	const hub = new ModelHubComponent(ui, createModelBrowserSource(Settings.isolated({})), modelRegistry, [], {
-		onAssign: () => {},
-		onUnassign: () => {},
+		onSelect: () => {},
 		onCancel: () => {},
 	});
 	await Bun.sleep(0);
 	installTestTheme();
 	// Scope-hop is the default arrow mode: one Down moves All models → the
 	// sole provider entry (separators are skipped).
-	hub.handleInput("\x1b[B");
+	hub.handleNativeEvent({ type: "action", key: "", act: "scope", value: `provider:${state.provider}`, mods: [] });
 	await Bun.sleep(0);
 	return hub;
 }

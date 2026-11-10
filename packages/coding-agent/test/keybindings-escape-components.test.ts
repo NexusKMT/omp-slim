@@ -98,8 +98,7 @@ describe("component escape bindings", () => {
 			modelRegistry,
 			[{ model, thinkingLevel: "off" }],
 			{
-				onAssign: () => {},
-				onUnassign: () => {},
+				onSelect: () => {},
 				onCancel,
 			},
 		);

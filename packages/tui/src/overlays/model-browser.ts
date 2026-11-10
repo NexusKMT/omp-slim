@@ -1,21 +1,15 @@
 /**
  * Frameless, reusable model browser: a fuzzy search row, a windowed model
- * list with role chips and metadata columns, and a selection detail block.
+ * list with metadata columns, and a selection detail block.
  *
  * Hosts own the surrounding chrome and the data scope — the fullscreen
- * /models hub ({@link ./model-hub}) feeds it scope-filtered items plus role
- * state, while the advisor config overlay embeds it as a plain "pick one
+ * /models hub ({@link ./model-hub}) feeds it scope-filtered items, while the advisor config overlay embeds it as a plain "pick one
  * model" list.
  */
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import {
-	getEffectiveTokenCost,
-	getFactoryDroidCreditRate,
-	getModelPricingStatus,
-	modelsAreEqual,
-} from "@oh-my-pi/pi-catalog/models";
+import { getEffectiveTokenCost, getFactoryDroidCreditRate, getModelPricingStatus } from "@oh-my-pi/pi-catalog/models";
 import { modelKind, type ModelKind, type ModelPricingStatus } from "@oh-my-pi/pi-catalog/types";
 import type { Component } from "../tui";
 import { FuzzyCorpus, fuzzyRank } from "../fuzzy";
@@ -25,13 +19,7 @@ import { matchesKey } from "../keys";
 import type { SgrMouseEvent } from "../mouse";
 import { replaceTabs, truncateToWidth, visibleWidth } from "../utils";
 import { formatNumber, sanitizeText } from "@oh-my-pi/pi-utils";
-import {
-	AUTO_THINKING,
-	type ConfiguredThinkingLevel,
-	getConfiguredThinkingLevelMetadata,
-	parseConfiguredThinkingLevel,
-} from "../thinking";
-import { thinkingLevelGlyph } from "../render/render-utils";
+import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../thinking";
 import { type Theme, type ThemeColor, theme } from "../theme/theme";
 import {
 	matchesSelectCancel,
@@ -57,50 +45,6 @@ import type { NativeChild, NativeNode, NativeUiEvent } from "../native/node";
 import { sameItems } from "../native/memo";
 import { plainText } from "../native/spans";
 
-/** Canonical display ordering of built-in model roles. */
-export type ModelRole =
-	| "default"
-	| "smol"
-	| "slow"
-	| "vision"
-	| "plan"
-	| "commit"
-	| "tiny"
-	| "task"
-	| "advisor"
-	| "widget"
-	| "image"
-	| "web"
-	| "judge";
-export const MODEL_ROLE_IDS: ModelRole[] = [
-	"default",
-	"smol",
-	"slow",
-	"vision",
-	"plan",
-	"commit",
-	"tiny",
-	"task",
-	"advisor",
-	"widget",
-	"image",
-	"web",
-	"judge",
-];
-export const CHAT_MODEL_ROLE_IDS: ModelRole[] = [
-	"default",
-	"smol",
-	"slow",
-	"vision",
-	"plan",
-	"commit",
-	"tiny",
-	"task",
-	"advisor",
-	"widget",
-];
-export const KIND_ROLE_IDS: ModelRole[] = ["image", "web", "judge"];
-
 /** Measured model performance shown in browser rows. */
 export interface ModelBrowserPerf {
 	samples: number;
@@ -108,30 +52,7 @@ export interface ModelBrowserPerf {
 	ttftMs: number | null;
 }
 
-/** Role metadata shown in model selectors. */
-export interface ModelBrowserRoleInfo {
-	tag?: string;
-	name: string;
-	color?: ThemeColor;
-	hidden?: boolean;
-	section: "chat" | "kind";
-	accepts(model: Model): boolean;
-}
-
-/** Role lookup used for scoped model resolution. */
-export interface ModelRoleLookup {
-	getModelRole(role: string): string | undefined;
-}
-
-/** Resolved selector metadata required by model overlays. */
-export interface ResolvedModelRoleValue {
-	model: Model | undefined;
-	thinkingLevel?: ConfiguredThinkingLevel;
-	explicitThinkingLevel: boolean;
-	warning?: string;
-}
-
-/** Where auto-compaction triggers for one model, as the model hub's preview shows it (edited from the Roles view). */
+/** Where auto-compaction triggers for one model, as the model hub's preview shows it . */
 export interface ModelCompactionPoint {
 	/** Context tokens that trigger auto-compaction; undefined when auto-compaction is off or the window is unknown. */
 	tokens: number | undefined;
@@ -143,8 +64,8 @@ export interface ModelCompactionPoint {
 	draft?: string;
 }
 
-/** Host-provided preferences and model-role resolution for the browser. */
-export interface ModelBrowserSource extends ModelRoleLookup {
+/** Host-provided preferences for the browser. */
+export interface ModelBrowserSource {
 	/**
 	 * Changes whenever any preference this source reads or resolves against changes,
 	 * except the storage-backed `mruOrder` and `modelPerf`. Keys derived-scope caches.
@@ -152,7 +73,6 @@ export interface ModelBrowserSource extends ModelRoleLookup {
 	readonly revision: number;
 	readonly defaultThinkingLevel: string;
 	readonly modelProviderOrder: readonly string[];
-	readonly knownRoleIds: readonly string[];
 	readonly mruOrder: readonly string[];
 	readonly modelPerf: ReadonlyMap<string, ModelBrowserPerf>;
 	/**
@@ -161,9 +81,6 @@ export interface ModelBrowserSource extends ModelRoleLookup {
 	 * instead of the standard aggregate.
 	 */
 	serviceTierFor?(model: Model): string | undefined;
-	getRoleInfo(role: string): ModelBrowserRoleInfo;
-	defaultRoleChain(role: string): string[];
-	resolveRoleValue(value: string | undefined, models: Model[], roleLookup?: ModelRoleLookup): ResolvedModelRoleValue;
 	/** Auto-compaction point for `model`; absent hosts show no compaction row in the preview. */
 	compactionPointFor?(model: Model): ModelCompactionPoint | undefined;
 }
@@ -183,109 +100,6 @@ export interface ModelBrowserItem {
 	selector: string;
 	/** Optional foreground color for the row label. */
 	labelColor?: ThemeColor;
-}
-
-/** Resolved role assignment as displayed by the browser and the hub. */
-export interface RoleAssignment {
-	model: Model;
-	thinkingLevel: ConfiguredThinkingLevel;
-	/** True when the role has no configured value and fell back to auto-selection. */
-	autoSelected: boolean;
-}
-
-/** Map of role id to its resolved assignment (absent roles are unresolved). */
-export type RoleAssignments = Record<string, RoleAssignment | undefined>;
-
-/**
- * Resolve every known role to its display assignment: configured role values
- * resolve against `allModels`; unconfigured roles fall back to auto-selection
- * over `autoCandidates` (skipped when empty). Shared by the /models hub and
- * the alt+p session picker.
- */
-export function resolveRoleAssignments(
-	settings: ModelBrowserSource,
-	allModels: ReadonlyArray<Model>,
-	autoCandidates: ReadonlyArray<Model>,
-): RoleAssignments {
-	const resolvedThinkingLevel = (
-		role: string,
-		resolved: { explicitThinkingLevel: boolean; thinkingLevel?: ConfiguredThinkingLevel },
-	): ConfiguredThinkingLevel => {
-		if (resolved.explicitThinkingLevel && resolved.thinkingLevel !== undefined) {
-			return resolved.thinkingLevel;
-		}
-		if (role === "default") {
-			return parseConfiguredThinkingLevel(settings.defaultThinkingLevel) ?? ThinkingLevel.Inherit;
-		}
-		return ThinkingLevel.Inherit;
-	};
-
-	// Roles sharing an `accepts` predicate share one filtered array, so the
-	// resolver's array-keyed indexes are built once per pool, not once per role.
-	const eligible = (
-		pool: ReadonlyArray<Model>,
-		byAccepts: Map<ModelBrowserRoleInfo["accepts"], Model[]>,
-		role: string,
-	): Model[] => {
-		const accepts = settings.getRoleInfo(role).accepts;
-		let models = byAccepts.get(accepts);
-		if (!models) {
-			models = pool.filter(accepts);
-			byAccepts.set(accepts, models);
-		}
-		return models;
-	};
-
-	const roles: RoleAssignments = {};
-	const knownRoles = settings.knownRoleIds;
-	const configuredRoles = new Set<string>();
-	const catalogByAccepts = new Map<ModelBrowserRoleInfo["accepts"], Model[]>();
-
-	for (const role of knownRoles) {
-		const roleValue = settings.getModelRole(role);
-		if (!roleValue) continue;
-		configuredRoles.add(role);
-		const resolved = settings.resolveRoleValue(roleValue, eligible(allModels, catalogByAccepts, role));
-		if (resolved.model) {
-			roles[role] = {
-				model: resolved.model,
-				thinkingLevel: resolvedThinkingLevel(role, resolved),
-				autoSelected: false,
-			};
-		}
-	}
-
-	if (autoCandidates.length > 0) {
-		const candidatesByAccepts = new Map<ModelBrowserRoleInfo["accepts"], Model[]>();
-		for (const role of knownRoles) {
-			if (configuredRoles.has(role)) continue;
-			const resolved = settings.resolveRoleValue(`pi/${role}`, eligible(autoCandidates, candidatesByAccepts, role));
-			if (!resolved.model) continue;
-			roles[role] = {
-				model: resolved.model,
-				thinkingLevel: resolvedThinkingLevel(role, resolved),
-				autoSelected: true,
-			};
-		}
-	}
-
-	return roles;
-}
-
-/**
- * Role-resolution pool for a `--models`/`enabledModels` scope: the scoped
- * models plus every available non-chat runner (judge, search, image, …). The
- * scope only filters chat models (it feeds Ctrl+P cycling) and runtime role
- * resolution ignores it for other kinds, so displayed role assignments must too.
- * Shared by the /models hub and the session picker.
- */
-export function scopedRolePool(scoped: ReadonlyArray<Model>, registry: ModelBrowserRegistry): Model[] {
-	const pool = [...scoped];
-	for (const model of registry.getAvailable("all")) {
-		if (modelKind(model) === "chat" || scoped.some(entry => modelsAreEqual(entry, model))) continue;
-		pool.push(model);
-	}
-	return pool;
 }
 
 /** Wrap raw models into browser items. */
@@ -312,33 +126,13 @@ function extractVersionNumber(id: string): number {
 	return 0;
 }
 
-/** Rank a model by the first built-in role it is assigned to (lower = earlier role). */
-function computeModelRank(model: Model, roles: RoleAssignments): number {
-	let i = 0;
-	while (i < MODEL_ROLE_IDS.length) {
-		const assigned = roles[MODEL_ROLE_IDS[i]];
-		if (assigned && modelsAreEqual(assigned.model, model)) {
-			break;
-		}
-		i++;
-	}
-	return i;
-}
-
 /** Options for {@link sortModelItems}. */
 export interface SortModelItemsOptions {
-	roles?: RoleAssignments;
 	mruOrder?: ReadonlyArray<string>;
-	/**
-	 * When a search query is narrowing the list, role assignments should NOT
-	 * promote a weakly-matching default model above a perfect text match —
-	 * defer to MRU/version instead so user affinity drives the order.
-	 */
-	skipRoleRank?: boolean;
 }
 
 /**
- * Order models for display: role-assigned first, then most-recently-used,
+ * Order models for display: most-recently-used,
  * then per provider by priority, version, and recency.
  */
 export function sortModelItems(items: ModelBrowserItem[], options: SortModelItemsOptions = {}): void {
@@ -346,19 +140,13 @@ export function sortModelItems(items: ModelBrowserItem[], options: SortModelItem
 }
 
 function modelItemComparator(options: SortModelItemsOptions): (a: ModelBrowserItem, b: ModelBrowserItem) => number {
-	const { roles = {}, mruOrder = [], skipRoleRank = false } = options;
+	const { mruOrder = [] } = options;
 	const mruIndex = new Map(mruOrder.map((key, i) => [key, i]));
 
 	const dateRe = /-(\d{8})$/;
 	const latestRe = /-latest$/;
 
 	return (a, b) => {
-		if (!skipRoleRank) {
-			const aRank = computeModelRank(a.model, roles);
-			const bRank = computeModelRank(b.model, roles);
-			if (aRank !== bRank) return aRank - bRank;
-		}
-
 		// Then MRU order (models in mruIndex come before those not in it)
 		const aMru = mruIndex.get(a.selector) ?? Number.MAX_SAFE_INTEGER;
 		const bMru = mruIndex.get(b.selector) ?? Number.MAX_SAFE_INTEGER;
@@ -405,23 +193,13 @@ function modelItemComparator(options: SortModelItemsOptions): (a: ModelBrowserIt
 /** Picker candidates and ordering inputs shared with composer model mentions. */
 export interface SessionModelScope {
 	items: ModelBrowserItem[];
-	roles: RoleAssignments;
 	mruOrder: ReadonlyArray<string>;
 	error: string | undefined;
 }
 
 /** Catalog inputs a {@link SessionModelScope} is derived from. */
 interface SessionModelScopeInputs {
-	/** Chat models listed as picker rows. */
 	models: ReadonlyArray<Model>;
-	/** Catalog that configured role values resolve against. */
-	allModels: ReadonlyArray<Model>;
-	/**
-	 * Available models of every kind that unconfigured roles auto-select from,
-	 * as at runtime; a chat-only pool would pin `judge` on a chat model while
-	 * the session judges with an available native judge.
-	 */
-	roleModels: ReadonlyArray<Model>;
 	error: string | undefined;
 }
 
@@ -429,36 +207,21 @@ function readSessionModelScopeInputs(
 	registry: ModelBrowserRegistry,
 	scopedModels: ReadonlyArray<Model>,
 ): SessionModelScopeInputs {
-	if (scopedModels.length > 0) {
-		let roleModels: ReadonlyArray<Model>;
-		let error: string | undefined;
-		try {
-			roleModels = scopedRolePool(scopedModels, registry);
-		} catch (cause) {
-			error = cause instanceof Error ? cause.message : String(cause);
-			roleModels = scopedModels;
-		}
-		return { models: scopedModels, allModels: roleModels, roleModels, error };
-	}
+	if (scopedModels.length > 0)
+		return { models: scopedModels.filter(model => modelKind(model) === "chat"), error: undefined };
 	const loadError = registry.getError();
-	let error = loadError ? String(loadError) : undefined;
-	let roleModels: ReadonlyArray<Model>;
 	try {
-		roleModels = registry.getAvailable("all");
+		return { models: registry.getAvailable("chat"), error: loadError ? String(loadError) : undefined };
 	} catch (cause) {
-		error = cause instanceof Error ? cause.message : String(cause);
-		roleModels = [];
+		return { models: [], error: cause instanceof Error ? cause.message : String(cause) };
 	}
-	const models = roleModels.filter(model => modelKind(model) === "chat");
-	return { models, allModels: registry.getAll("all"), roleModels, error };
 }
 
 function scopeFromInputs(settings: ModelBrowserSource, inputs: SessionModelScopeInputs): SessionModelScope {
-	const roles = resolveRoleAssignments(settings, inputs.allModels, inputs.roleModels);
 	const mruOrder = settings.mruOrder;
 	const items = buildBrowserItems(inputs.models);
-	sortModelItems(items, { roles, mruOrder });
-	return { items, roles, mruOrder, error: inputs.error };
+	sortModelItems(items, { mruOrder });
+	return { items, mruOrder, error: inputs.error };
 }
 
 /** Build the session picker's current scope without creating an interactive browser. */
@@ -498,8 +261,6 @@ export class SessionModelScopeCache {
 			revision === this.#revision &&
 			inputs.error === cachedInputs.error &&
 			sameItems(inputs.models, cachedInputs.models) &&
-			sameItems(inputs.allModels, cachedInputs.allModels) &&
-			sameItems(inputs.roleModels, cachedInputs.roleModels) &&
 			sameItems(this.#settings.mruOrder, cached.mruOrder)
 		) {
 			return cached;
@@ -512,27 +273,20 @@ export class SessionModelScopeCache {
 	}
 }
 
-interface RoleProviderStats {
-	count: number;
-	firstRole: number;
-}
-
 /** User affinity used to order search matches within one relevance tier. */
 export interface SearchAffinity {
-	/** `provider/id` (lowercased) → rank; configured-role models first, then MRU. */
+	/** `provider/id` (lowercased) → rank; recent model use. */
 	models: Map<string, number>;
-	/** provider (lowercased) → rank; explicit order, then role providers, then MRU providers. */
+	/** provider (lowercased) → rank; explicit order, then MRU providers. */
 	providers: Map<string, number>;
 }
 
 /**
  * Build model and provider affinity from explicit configuration, configured
- * role assignments, and recent model use. Auto-selected roles are catalog
- * policy, not evidence of user preference.
+ * and recent model use.
  */
 export function buildSearchAffinity(
 	providerOrder: ReadonlyArray<string>,
-	roles: RoleAssignments,
 	mruOrder: ReadonlyArray<string>,
 ): SearchAffinity {
 	const models: string[] = [];
@@ -555,33 +309,7 @@ export function buildSearchAffinity(
 
 	for (const provider of providerOrder) addProvider(provider);
 
-	const roleStats = new Map<string, RoleProviderStats>();
-	const seenRoles = new Set<string>();
-	let roleIndex = 0;
-	const recordRole = (role: string) => {
-		if (seenRoles.has(role)) return;
-		seenRoles.add(role);
-		const assignment = roles[role];
-		if (assignment && !assignment.autoSelected) {
-			addModel(`${assignment.model.provider}/${assignment.model.id}`);
-			const provider = assignment.model.provider.toLowerCase();
-			const current = roleStats.get(provider);
-			if (current) {
-				current.count++;
-			} else {
-				roleStats.set(provider, { count: 1, firstRole: roleIndex });
-			}
-		}
-		roleIndex++;
-	};
-	for (const role of MODEL_ROLE_IDS) recordRole(role);
-	for (const role in roles) recordRole(role);
 	for (const selector of mruOrder) addModel(selector);
-
-	const preferredByRole = [...roleStats.entries()].sort(
-		([, a], [, b]) => b.count - a.count || a.firstRole - b.firstRole,
-	);
-	for (const [provider] of preferredByRole) addProvider(provider);
 
 	for (const selector of mruOrder) {
 		const slash = selector.indexOf("/");
@@ -609,7 +337,6 @@ function modelSearchTier(query: string, id: string, selector: string): number {
 
 /** Inputs to {@link rankModelItems} / {@link ModelItemRanker}. */
 export interface ModelRankOptions {
-	roles: RoleAssignments;
 	mruOrder: ReadonlyArray<string>;
 	affinity: SearchAffinity;
 }
@@ -640,7 +367,7 @@ export class ModelItemRanker {
 		this.items = items;
 		this.options = options;
 		this.#corpus = new FuzzyCorpus(items, modelSearchText);
-		const compare = modelItemComparator({ roles: options.roles, mruOrder: options.mruOrder, skipRoleRank: true });
+		const compare = modelItemComparator({ mruOrder: options.mruOrder });
 		const ordered = [...items].sort(compare);
 		let group = 0;
 		for (let i = 0; i < ordered.length; i++) {
@@ -693,41 +420,6 @@ export function rankModelItems(
 	options: ModelRankOptions,
 ): ModelBrowserItem[] {
 	return new ModelItemRanker(items, options).rank(query);
-}
-
-/**
- * A slim role chip: `● default ◉` — solid dot for configured assignments,
- * hollow for auto-selected fallbacks, thinking glyph attached when set.
- *
- * The space after the status glyph is load-bearing. Under the `nerd` preset
- * these are Nerd Font private-use icons (U+F111 / U+F10C) whose glyphs are
- * drawn two cells wide, while `visibleWidth` counts them as one
- * (`ambiguousIsNarrow: true` in tui/utils.ts — the PUA block is
- * East_Asian_Width=Ambiguous). Without a separator the icon overhangs and
- * eats the label's first character (`● default` renders as `●efault`).
- * Mirrors the spacing already used for `status.success` in model-hub.
- */
-export function formatRoleChip(role: string, assignment: RoleAssignment, settings: ModelBrowserSource): string {
-	const info = settings.getRoleInfo(role);
-	const label = (info.tag ?? info.name ?? role).toLowerCase();
-	const glyph = thinkingLevelGlyph(assignment.thinkingLevel, theme);
-	const suffix = glyph ? ` ${theme.fg("dim", glyph)}` : "";
-	if (assignment.autoSelected) {
-		return theme.fg("dim", `${theme.status.shadowed} ${label}`) + suffix;
-	}
-	return theme.fg(info.color ?? "muted", `${theme.status.enabled} ${label}`) + suffix;
-}
-
-/** {@link formatRoleChip} as styled spans for a described node. */
-function roleChipSpans(role: string, assignment: RoleAssignment, settings: ModelBrowserSource): TspSpan[] {
-	const info = settings.getRoleInfo(role);
-	const label = (info.tag ?? info.name ?? role).toLowerCase();
-	const glyph = thinkingLevelGlyph(assignment.thinkingLevel, theme);
-	const spans = assignment.autoSelected
-		? [span(`${theme.status.shadowed} ${label}`, "dim")]
-		: [span(`${theme.status.enabled} ${label}`, info.color ?? "muted")];
-	if (glyph) spans.push(span(` ${glyph}`, "dim"));
-	return spans;
 }
 
 /**
@@ -1020,7 +712,6 @@ export class ModelBrowser implements Component {
 		isDisabled: item => item.id === "separator",
 		filter: (items, query) => this.#filterItems(items, query),
 	});
-	#roles: RoleAssignments = {};
 	#mruOrder: ReadonlyArray<string> = [];
 	#affinity: SearchAffinity = { models: new Map(), providers: new Map() };
 	/** Ranker for the menu's current item array; rebuilt when items or affinity change. */
@@ -1042,7 +733,7 @@ export class ModelBrowser implements Component {
 	#currentContextTokens: number;
 	#markOverContext: boolean;
 	#emptyText?: () => string | undefined;
-	/** Keep role-like virtual rows in their host-defined order during search. */
+	/** Keep virtual rows in their host-defined order during search. */
 	#preserveQueryOrder = false;
 	/** First visible list row; panned by the wheel, snapped to the selection on keyboard navigation. */
 	#windowStart = 0;
@@ -1063,22 +754,16 @@ export class ModelBrowser implements Component {
 	#nativeListNode:
 		| { children: NativeChild[]; selected: string | null; filter: string; empty: string; node: NativeNode }
 		| undefined;
-	#nativeDetail:
-		| { item: ModelBrowserItem | undefined; epoch: number; roles: RoleAssignments; node: NativeNode }
-		| undefined;
+	#nativeDetail: { item: ModelBrowserItem | undefined; epoch: number; node: NativeNode } | undefined;
 	#nativeRoot: { list: NativeNode; detail: NativeNode; node: NativeNode } | undefined;
-	/** Bumped when a picker row input other than roles changes (perf, over-context flagging). */
+	/** Bumped when a picker row input changes (perf, over-context flagging). */
 	#pickerEpoch = 0;
-	/** Picker rows by selector, reused while the model and the roles it holds are unchanged. */
-	#pickerItemCache = new Map<
-		string,
-		{ model: Model; label: string; held: string; epoch: number; value: TspPickerItem }
-	>();
+	/** Picker rows by selector, reused while the model is unchanged. */
+	#pickerItemCache = new Map<string, { model: Model; label: string; epoch: number; value: TspPickerItem }>();
 	#pickerItems:
 		| {
 				catalogue: readonly ModelBrowserItem[];
 				epoch: number;
-				roles: RoleAssignments;
 				value: ModelPickerCatalogue;
 		  }
 		| undefined;
@@ -1094,7 +779,6 @@ export class ModelBrowser implements Component {
 		| {
 				item: ModelBrowserItem | undefined;
 				epoch: number;
-				roles: RoleAssignments;
 				key: string;
 				children: readonly NativeChild[];
 		  }
@@ -1134,18 +818,13 @@ export class ModelBrowser implements Component {
 		}
 	}
 
-	setRoles(roles: RoleAssignments): void {
-		this.#roles = roles;
-		this.#syncAffinity();
-	}
-
 	setMruOrder(order: ReadonlyArray<string>): void {
 		this.#mruOrder = order;
 		this.#syncAffinity();
 	}
 
 	#syncAffinity(): void {
-		this.#affinity = buildSearchAffinity(this.#settings.modelProviderOrder, this.#roles, this.#mruOrder);
+		this.#affinity = buildSearchAffinity(this.#settings.modelProviderOrder, this.#mruOrder);
 	}
 
 	/** Measured TPS/TTFT averages keyed by `provider/id` selector (see AgentStorage.getModelPerf). */
@@ -1245,7 +924,7 @@ export class ModelBrowser implements Component {
 				query.trim() ? fuzzyRank(base, query, modelSearchText).map(result => result.item) : base,
 			);
 		}
-		// The menu hands back the same array until `setItems`, and roles/MRU replace the
+		// The menu hands back the same array until `setItems`, and MRU replace the
 		// affinity object, so one ranker serves every keystroke of a search.
 		let cached = this.#ranker;
 		if (cached?.source !== items || cached.ranker.options.affinity !== this.#affinity) {
@@ -1253,7 +932,7 @@ export class ModelBrowser implements Component {
 				source: items,
 				ranker: new ModelItemRanker(
 					items.filter(item => !this.#isDisabled(item)),
-					{ roles: this.#roles, mruOrder: this.#mruOrder, affinity: this.#affinity },
+					{ mruOrder: this.#mruOrder, affinity: this.#affinity },
 				),
 			};
 			this.#ranker = cached;
@@ -1296,17 +975,12 @@ export class ModelBrowser implements Component {
 		}
 	}
 
-	#isRecentOrRole(item: ModelBrowserItem): boolean {
-		if (this.#mruOrder.includes(item.selector)) return true;
-		for (const role in this.#roles) {
-			const r = this.#roles[role];
-			if (r && modelsAreEqual(r.model, item.model)) return true;
-		}
-		return false;
+	#isRecent(item: ModelBrowserItem): boolean {
+		return this.#mruOrder.includes(item.selector);
 	}
 	#insertSeparator(items: ModelBrowserItem[]): ModelBrowserItem[] {
 		const filtered = items.filter(item => item.id !== "separator");
-		const firstNonRecentIndex = filtered.findIndex(item => !this.#isRecentOrRole(item));
+		const firstNonRecentIndex = filtered.findIndex(item => !this.#isRecent(item));
 		if (firstNonRecentIndex > 0 && firstNonRecentIndex < filtered.length) {
 			const separatorItem: ModelBrowserItem = {
 				id: "separator",
@@ -1656,17 +1330,6 @@ export class ModelBrowser implements Component {
 		if (selected.selector === this.#currentSelector) {
 			chips.push(theme.fg("success", `${theme.status.enabled} current`));
 		}
-		const seen = new Set<string>();
-		const pushRole = (role: string) => {
-			if (seen.has(role)) return;
-			seen.add(role);
-			const assignment = this.#roles[role];
-			if (!assignment || !modelsAreEqual(assignment.model, model)) return;
-			if (this.#settings.getRoleInfo(role).hidden) return;
-			chips.push(formatRoleChip(role, assignment, this.#settings));
-		};
-		for (const role of MODEL_ROLE_IDS) pushRole(role);
-		for (const role in this.#roles) pushRole(role);
 		const line2 = chips.length > 0 ? truncateToWidth(`  ${chips.join(theme.fg("dim", " · "))}`, width) : "";
 		return [line1, line2];
 	}
@@ -1803,7 +1466,7 @@ export class ModelBrowser implements Component {
 	/**
 	 * `col[search row, list, detail]`: the query field (the embedded `Input`),
 	 * every visible model as a keyed `item` (the terminal virtualizes and
-	 * scrolls), and the selection's facts and role chips.
+	 * scrolls), and the selection's facts and current-model marker.
 	 */
 	describe(): NativeNode {
 		this.#syncCreditClock();
@@ -1912,11 +1575,11 @@ export class ModelBrowser implements Component {
 		return itemNode;
 	}
 
-	/** Facts, upstream badges, and the over-context warning or role chips for the selection. */
+	/** Facts, upstream badges, and the over-context warning or current-model marker for the selection. */
 	#describeDetail(): NativeNode {
 		const selected = this.getSelected();
 		const prev = this.#nativeDetail;
-		if (prev && prev.item === selected && prev.epoch === this.#nativeEpoch && prev.roles === this.#roles) {
+		if (prev && prev.item === selected && prev.epoch === this.#nativeEpoch) {
 			return prev.node;
 		}
 
@@ -1959,23 +1622,11 @@ export class ModelBrowser implements Component {
 				if (selected.selector === this.#currentSelector) {
 					chips.push(span(`${theme.status.enabled} current`, "success"));
 				}
-				const seen = new Set<string>();
-				const pushRole = (role: string) => {
-					if (seen.has(role)) return;
-					seen.add(role);
-					const assignment = this.#roles[role];
-					if (!assignment || !modelsAreEqual(assignment.model, model)) return;
-					if (this.#settings.getRoleInfo(role).hidden) return;
-					if (chips.length > 0) chips.push(span(" · ", "dim"));
-					chips.push(...roleChipSpans(role, assignment, this.#settings));
-				};
-				for (const role of MODEL_ROLE_IDS) pushRole(role);
-				for (const role in this.#roles) pushRole(role);
 				if (chips.length > 0) children.push(text(chips, { wrap: "word" }));
 			}
 		}
 		const detailNode = node("col", { role: "omp.model-browser.detail", gap: "none" }, children, "detail");
-		this.#nativeDetail = { item: selected, epoch: this.#nativeEpoch, roles: this.#roles, node: detailNode };
+		this.#nativeDetail = { item: selected, epoch: this.#nativeEpoch, node: detailNode };
 		return detailNode;
 	}
 
@@ -2015,20 +1666,20 @@ export class ModelBrowser implements Component {
 	}
 
 	/**
-	 * Picker rows for `catalogue`: the same object while the catalogue, roles
+	 * Picker rows for `catalogue`: the same object while the catalogue
 	 * and row inputs are unchanged, so typing and scope hops never resend it.
 	 * A rebuilt catalogue that differs in a few rows (a provider refresh, a
-	 * role moving) keeps the last whole `items` and patches it.
+	 * model changing) keeps the last whole `items` and patches it.
 	 */
 	pickerItems(catalogue: readonly ModelBrowserItem[]): ModelPickerCatalogue {
 		this.#syncCreditClock();
 		const memo = this.#pickerItems;
-		if (memo?.catalogue === catalogue && memo.epoch === this.#pickerEpoch && memo.roles === this.#roles) {
+		if (memo?.catalogue === catalogue && memo.epoch === this.#pickerEpoch) {
 			return memo.value;
 		}
 		const rows = catalogue.map(item => this.#pickerItem(item));
 		const value = this.#patchCatalogue(rows);
-		this.#pickerItems = { catalogue, epoch: this.#pickerEpoch, roles: this.#roles, value };
+		this.#pickerItems = { catalogue, epoch: this.#pickerEpoch, value };
 		return value;
 	}
 
@@ -2060,17 +1711,8 @@ export class ModelBrowser implements Component {
 
 	#pickerItem(item: ModelBrowserItem): TspPickerItem {
 		const model = item.model;
-		const heldRoles = this.#heldRoles(model);
-		const held = heldRoles
-			.map(({ role, assignment }) => `${role}:${assignment.autoSelected}:${assignment.thinkingLevel}`)
-			.join(",");
 		const cached = this.#pickerItemCache.get(item.selector);
-		if (
-			cached?.model === model &&
-			cached.label === item.id &&
-			cached.held === held &&
-			cached.epoch === this.#pickerEpoch
-		) {
+		if (cached?.model === model && cached.label === item.id && cached.epoch === this.#pickerEpoch) {
 			return cached.value;
 		}
 		this.#noteCreditChange(model);
@@ -2094,55 +1736,24 @@ export class ModelBrowser implements Component {
 		if (model.isNew) badges.push({ text: "new", tone: "accent" });
 		if (model.isBeta) badges.push({ text: "beta", tone: "warning" });
 		if (isFreeModel(model)) badges.push({ text: "free", tone: "success" });
-		const chips = heldRoles.map(({ role, assignment }) => {
-			const info = this.#settings.getRoleInfo(role);
-			const dot = thinkingDotToken(assignment.thinkingLevel);
-			return {
-				text: (info.tag ?? info.name ?? role).toLowerCase(),
-				on: !assignment.autoSelected,
-				...(assignment.autoSelected ? { auto: true } : {}),
-				...(dot ? { dot } : {}),
-			};
-		});
-		// Quick-role rows (`@role`) name the role and trail the model they apply.
-		const quickRole = item.provider === "" && item.id.startsWith("@");
 		const value: TspPickerItem = {
 			id: item.selector,
-			label: quickRole ? item.id : item.selector,
+			label: item.selector,
 			mark: providerMark(item.model.provider),
 			mono: true,
-			...(quickRole ? { detail: `${item.model.provider}/${item.model.id}` } : {}),
 			facts,
 			...(badges.length > 0 ? { badges: badges.slice(0, 3) } : {}),
-			...(chips.length > 0 ? { chips } : {}),
 			...(int !== undefined ? { title: `Intelligence ${Math.round(int)}` } : {}),
 		};
 		// Discovery re-mints Model objects for unchanged models; an equal row keeps its identity.
 		const kept = cached && Bun.deepEquals(cached.value, value) ? cached.value : value;
-		this.#pickerItemCache.set(item.selector, { model, label: item.id, held, epoch: this.#pickerEpoch, value: kept });
+		this.#pickerItemCache.set(item.selector, { model, label: item.id, epoch: this.#pickerEpoch, value: kept });
 		return kept;
-	}
-
-	/** Visible roles `model` holds, built-in order first (the detail line's chips). */
-	#heldRoles(model: Model): { role: string; assignment: RoleAssignment }[] {
-		const held: { role: string; assignment: RoleAssignment }[] = [];
-		const seen = new Set<string>();
-		const push = (role: string) => {
-			if (seen.has(role)) return;
-			seen.add(role);
-			const assignment = this.#roles[role];
-			if (!assignment || !modelsAreEqual(assignment.model, model)) return;
-			if (this.#settings.getRoleInfo(role).hidden) return;
-			held.push({ role, assignment });
-		};
-		for (const role of MODEL_ROLE_IDS) push(role);
-		for (const role in this.#roles) push(role);
-		return held;
 	}
 
 	/**
 	 * The visible rows as picker `order`: the Recent block (recent and
-	 * role-assigned models, the ANSI separator's upper side) under "Recent",
+	 * models, the ANSI separator's upper side) under "Recent",
 	 * then the rest per provider or under `grouping.rest`. Memoized per
 	 * result list and query, so selection moves reuse it.
 	 */
@@ -2217,7 +1828,7 @@ export class ModelBrowser implements Component {
 	 * Preview children for the selection. `full` (the model hub's side pane):
 	 * title, copyable id, badges, a fact grid, every role the model can fill
 	 * (held ones on) and the description. `compact` (the quick picker's strip
-	 * below the list): one inline fact line and the held-role chips.
+	 * below the list): one inline fact line and the held-current-model marker.
 	 */
 	pickerPreview(mode: "full" | "compact", current?: string): readonly NativeChild[] {
 		this.#syncCreditClock();
@@ -2225,22 +1836,16 @@ export class ModelBrowser implements Component {
 		const item = selected && !this.#isDisabled(selected) ? selected : undefined;
 		const key = `${mode}\0${current ?? ""}\0${this.#settings.revision}`;
 		const memo = this.#pickerPreview;
-		if (
-			memo !== undefined &&
-			memo.item === item &&
-			memo.epoch === this.#pickerEpoch &&
-			memo.roles === this.#roles &&
-			memo.key === key
-		) {
+		if (memo !== undefined && memo.item === item && memo.epoch === this.#pickerEpoch && memo.key === key) {
 			return memo.children;
 		}
 		if (item) this.#noteCreditChange(item.model);
 		const children = item ? this.modelPreview(item, mode, current) : [];
-		this.#pickerPreview = { item, epoch: this.#pickerEpoch, roles: this.#roles, key, children };
+		this.#pickerPreview = { item, epoch: this.#pickerEpoch, key, children };
 		return children;
 	}
 
-	/** Preview children for any model row (the hub's Roles view previews assigned models with it); unmemoized. */
+	/** Preview children for any model row; unmemoized. */
 	modelPreview(item: ModelBrowserItem, mode: "full" | "compact", current: string | undefined): NativeChild[] {
 		const model = item.model;
 		const selector = `${model.provider}/${model.id}`;
@@ -2259,21 +1864,6 @@ export class ModelBrowser implements Component {
 					{ wrap: "word" },
 				)
 			: undefined;
-		const held = this.#heldRoles(model);
-		const roleBadge = (role: string, assignment: RoleAssignment | undefined): NativeNode => {
-			const info = this.#settings.getRoleInfo(role);
-			const level =
-				assignment && assignment.thinkingLevel !== ThinkingLevel.Inherit
-					? getConfiguredThinkingLevelMetadata(assignment.thinkingLevel).label
-					: undefined;
-			return node("badge", {
-				text: (info.tag ?? info.name ?? role).toLowerCase(),
-				...(assignment ? { tone: assignment.autoSelected ? "muted" : "accent" } : {}),
-				title: assignment
-					? `${info.name}${assignment.autoSelected ? " (auto-selected)" : ""}${level ? ` · thinking ${level}` : ""}`
-					: `${info.name}: not assigned`,
-			});
-		};
 
 		if (mode === "compact") {
 			const facts: { k: TspText; v: TspText }[] = [];
@@ -2286,7 +1876,6 @@ export class ModelBrowser implements Component {
 			const children: NativeChild[] = [node("kv", { items: facts, layout: "inline" })];
 			const chips: NativeChild[] = [];
 			if (item.selector === current) chips.push(node("badge", { text: "current", tone: "success" }));
-			for (const { role, assignment } of held) chips.push(roleBadge(role, assignment));
 			if (chips.length > 0) children.push(row(chips, { gap: "xs", wrap: true }));
 			if (warning) children.push(warning);
 			return children;
@@ -2340,16 +1929,6 @@ export class ModelBrowser implements Component {
 		children.push(node("kv", { items: facts }));
 		if (warning) children.push(warning);
 
-		const heldBy = new Map(held.map(entry => [entry.role, entry.assignment]));
-		const roleBadges: NativeChild[] = [];
-		for (const role of this.#settings.knownRoleIds) {
-			const info = this.#settings.getRoleInfo(role);
-			if (info.hidden || !info.accepts(model)) continue;
-			roleBadges.push(roleBadge(role, heldBy.get(role)));
-		}
-		if (roleBadges.length > 0) {
-			children.push(node("section", { head: "Roles" }, [row(roleBadges, { gap: "xs", wrap: true })]));
-		}
 		const description = model.description ? sanitizeText(model.description).trim() : "";
 		if (description) children.push(md(description));
 		return children;

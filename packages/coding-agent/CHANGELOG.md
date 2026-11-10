@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed model roles, model presets, per-agent model selection and predictive composer text; model menus now select one current chat model and its thinking level.
+
 ### Fixed
 
 - Branching a session keeps late advisor completions out of the new conversation's transcript and cost total.

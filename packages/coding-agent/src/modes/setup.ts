@@ -24,7 +24,7 @@ import {
 	cfgThemeLight,
 	cfgUpdateAuto,
 } from "./settings";
-import { cfgDisabledProviders, cfgModelRoleStorage } from "../config/model-settings";
+import { cfgDisabledProviders, cfgModelStorage } from "../config/model-settings";
 
 export { ALL_SCENES, CURRENT_SETUP_VERSION, setupWizardAllowed };
 export type { SetupScene, SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
@@ -58,15 +58,16 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 		},
 		modelSource,
 		getModels: () => ({
-			available: ctx.session.modelRegistry.getAvailable("all"),
-			all: ctx.session.modelRegistry.getAll("all"),
+			available: ctx.session.modelRegistry.getAvailable("chat"),
+			all: ctx.session.modelRegistry.getAll("chat"),
 			current: ctx.session.model,
 		}),
 		refreshModels: () => ctx.session.modelRegistry.refresh("online-if-uncached"),
 		selectModel: async (model, selector) => {
-			const projectScope = cfgModelRoleStorage.get(ctx.settings) === "project";
-			await ctx.session.setModel(model, "default", { selector, persist: !projectScope });
-			if (projectScope) ctx.settings.setProjectModelRole("default", selector);
+			const projectScope = cfgModelStorage.get(ctx.settings) === "project";
+			const { switched } = await ctx.session.setModel(model, "default", { selector, persist: !projectScope });
+			if (!switched) return;
+			if (projectScope) ctx.settings.setProjectModel(selector);
 			await ctx.settings.flush();
 		},
 		refreshProvider: async provider => {

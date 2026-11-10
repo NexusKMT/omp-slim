@@ -22,8 +22,6 @@ describe("buildHotkeysMarkdown", () => {
 			"app.exit": "Ctrl+D",
 			"app.suspend": "Ctrl+Z",
 			"app.thinking.cycle": "Shift+Tab",
-			"app.model.cycleForward": "Ctrl+P",
-			"app.model.cycleBackward": "Shift+Ctrl+P",
 			"app.model.selectTemporary": "Ctrl+Shift+L",
 			"app.model.select": "Alt+M",
 			"app.history.search": "Ctrl+R",

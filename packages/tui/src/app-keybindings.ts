@@ -31,8 +31,6 @@ interface AppKeybindings {
 	"app.display.reset": true;
 	"app.thinking.cycle": true;
 	"app.thinking.toggle": true;
-	"app.model.cycleForward": true;
-	"app.model.cycleBackward": true;
 	"app.model.select": true;
 	"app.model.selectTemporary": true;
 	"app.tools.expand": true;
@@ -117,14 +115,6 @@ export const KEYBINDINGS = {
 	"app.thinking.toggle": {
 		defaultKeys: "ctrl+t",
 		description: "Toggle thinking mode",
-	},
-	"app.model.cycleForward": {
-		defaultKeys: "ctrl+p",
-		description: "Cycle to next model",
-	},
-	"app.model.cycleBackward": {
-		defaultKeys: "shift+ctrl+p",
-		description: "Cycle to previous model",
 	},
 	"app.model.select": {
 		defaultKeys: "alt+m",
@@ -285,8 +275,6 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	suspend: "app.suspend",
 	displayReset: "app.display.reset",
 	cycleThinkingLevel: "app.thinking.cycle",
-	cycleModelForward: "app.model.cycleForward",
-	cycleModelBackward: "app.model.cycleBackward",
 	selectModel: "app.model.select",
 	selectModelTemporary: "app.model.selectTemporary",
 	togglePlanMode: "app.plan.toggle",

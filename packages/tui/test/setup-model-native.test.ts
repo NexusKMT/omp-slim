@@ -35,16 +35,8 @@ const source: ModelBrowserSource = {
 	revision: 0,
 	defaultThinkingLevel: "off",
 	modelProviderOrder: [],
-	knownRoleIds: ["default"],
 	mruOrder: [],
 	modelPerf: new Map(),
-	getRoleInfo: role => ({ tag: role, name: `${role} role`, section: "chat", accepts: () => true }),
-	defaultRoleChain: () => [],
-	resolveRoleValue: (value, models) => ({
-		model: models.find(candidate => `${candidate.provider}/${candidate.id}` === value),
-		explicitThinkingLevel: false,
-	}),
-	getModelRole: () => undefined,
 };
 
 interface Mounted {

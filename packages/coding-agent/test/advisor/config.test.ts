@@ -31,7 +31,7 @@ describe("discoverAdvisorConfigs", () => {
 		await fsp.rm(agentDir, { recursive: true, force: true });
 	});
 
-	it("parses advisors, the model thinking suffix, cadence, tool filtering, and shared instructions", async () => {
+	it("parses advisor cadence, tool filtering and instructions while discarding legacy model overrides", async () => {
 		const yaml = [
 			"instructions: Shared baseline for all advisors.",
 			"advisors:",
@@ -49,14 +49,12 @@ describe("discoverAdvisorConfigs", () => {
 		expect(advisors).toHaveLength(2);
 		const [arch, sec] = advisors;
 		expect(arch.name).toBe("Architecture");
-		// The model selector (incl. the `:high` thinking suffix) is stored verbatim;
-		// resolution happens later in the session, not here.
-		expect(arch.model).toBe("x-ai/grok-code-fast:high");
+		expect(Object.hasOwn(arch, "model")).toBe(false);
 		expect(arch.reviewMode).toBe("agent-end");
 		expect(arch.reviewInterval).toBe(3);
 		expect(arch.instructions).toBe("Watch module boundaries.");
 		expect(sec.name).toBe("Security Reviewer");
-		expect(sec.model).toBeUndefined();
+		expect(Object.hasOwn(sec, "model")).toBe(false);
 		expect(sec.reviewMode).toBeUndefined();
 		expect(sec.reviewInterval).toBeUndefined();
 		// The unknown/non-read-only tool is dropped; only `read` survives.
@@ -268,7 +266,6 @@ describe("WATCHDOG.yml file round-trip", () => {
 		advisors: [
 			{
 				name: "Architecture",
-				model: "x-ai/grok-code-fast:high",
 				reviewMode: "agent-end",
 				reviewInterval: 3,
 				instructions: "Watch module boundaries.\nReport coupling.",
@@ -408,9 +405,9 @@ describe("per-advisor enabled field", () => {
 		try {
 			const doc: WatchdogConfigDoc = {
 				advisors: [
-					{ name: "Explicit On", model: "test/model-a", enabled: true },
-					{ name: "Explicit Off", model: "test/model-b", enabled: false },
-					{ name: "Default", model: "test/model-c" },
+					{ name: "Explicit On", enabled: true },
+					{ name: "Explicit Off", enabled: false },
+					{ name: "Default" },
 				],
 			};
 			const file = path.join(tmp, "WATCHDOG.yml");

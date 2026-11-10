@@ -120,7 +120,6 @@ export function applyStartupComposerPreferences(update: PrepaintComposerPreferen
 		imeSafeCursor: update.imeSafeCursor,
 		autocompleteMaxVisible: update.autocompleteMaxVisible,
 		spellingTypoDetection: update.spellingTypoDetection,
-		spellingAutocomplete: update.spellingAutocomplete,
 		spellingAutocorrect: update.spellingAutocorrect,
 	};
 	pending.composer.setPreferences(preferences);

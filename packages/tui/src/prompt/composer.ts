@@ -23,7 +23,6 @@ import type { DescribeContext, NativeChild, NativeSurface, NativeSurfaceProvider
 import { sameItems } from "../native/memo";
 import { postmortem } from "@oh-my-pi/pi-utils";
 import { CustomEditor } from "./custom-editor";
-import type { WordCompletionMethod } from "./word-completion";
 import { type AnimationFrame, TranscriptContainer } from "../chrome/transcript-container";
 import { type VersionUpdate, WelcomeComponent } from "./welcome";
 import { ensureThemeSync, getEditorTheme, theme } from "../theme/theme";
@@ -44,7 +43,6 @@ export interface ComposerPreferences {
 	readonly imeSafeCursor: boolean;
 	readonly autocompleteMaxVisible: number;
 	readonly spellingTypoDetection: boolean;
-	readonly spellingAutocomplete: WordCompletionMethod;
 	readonly spellingAutocorrect: boolean;
 }
 
@@ -59,7 +57,6 @@ export const COMPOSER_DEFAULTS: ComposerPreferences = {
 	imeSafeCursor: false,
 	autocompleteMaxVisible: 10,
 	spellingTypoDetection: true,
-	spellingAutocomplete: "auto",
 	spellingAutocorrect: false,
 };
 
@@ -358,7 +355,6 @@ export class Composer implements TerminalFrameProvider, NativeSurfaceProvider {
 		this.editor.setAutocompleteMaxVisible(this.#preferences.autocompleteMaxVisible);
 		this.editor.setSpellingFeatures({
 			typoDetection: this.#preferences.spellingTypoDetection,
-			autocomplete: this.#preferences.spellingAutocomplete,
 			autocorrect: this.#preferences.spellingAutocorrect,
 		});
 		try {
@@ -1080,7 +1076,6 @@ export class Composer implements TerminalFrameProvider, NativeSurfaceProvider {
 		this.editor.setAutocompleteMaxVisible(this.#preferences.autocompleteMaxVisible);
 		this.editor.setSpellingFeatures({
 			typoDetection: this.#preferences.spellingTypoDetection,
-			autocomplete: this.#preferences.spellingAutocomplete,
 			autocorrect: this.#preferences.spellingAutocorrect,
 		});
 		this.#startupStatus?.attachToEditor(this.editor, getComposerStyle(this.#preferences.composerShape));

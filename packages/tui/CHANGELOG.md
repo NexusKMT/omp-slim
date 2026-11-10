@@ -4,6 +4,10 @@
 
 ### Removed
 
+- Removed model roles, model presets, per-agent model selection and predictive composer text; model menus now select one current chat model and its thinking level.
+
+### Removed
+
 - OMP Slim removes the setup wizard browser cookie-login hook while preserving normal authorization URL flows.
 - OMP Slim removes the desktop control settings group and computer command symbols.
 - OMP Slim removes the live voice visualizer, microphone composer control, speech hotkeys and speech model roles.
