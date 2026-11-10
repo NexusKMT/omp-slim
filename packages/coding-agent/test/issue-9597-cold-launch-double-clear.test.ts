@@ -15,7 +15,6 @@ import {
 	cfgAutocompleteMaxVisible,
 	cfgComposerShape,
 	cfgShowHardwareCursor,
-	cfgSpellingAutocomplete,
 	cfgSpellingAutocorrect,
 	cfgSpellingTypoDetection,
 	cfgStartupQuiet,
@@ -67,7 +66,6 @@ describe("issue #9597 — cold-launch welcome duplication", () => {
 			imeSafeCursor: cfgTuiImeSafeCursor.get(settings),
 			autocompleteMaxVisible: cfgAutocompleteMaxVisible.get(settings),
 			spellingTypoDetection: cfgSpellingTypoDetection.get(settings),
-			spellingAutocomplete: cfgSpellingAutocomplete.get(settings),
 			spellingAutocorrect: cfgSpellingAutocorrect.get(settings),
 		};
 	});

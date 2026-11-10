@@ -108,6 +108,7 @@ export function createSessionStub(
 		retryAttempt: 0,
 		messages: [],
 		model: undefined,
+		configuredThinkingLevel: () => undefined,
 		sessionFile: undefined,
 		skills: [],
 		ttsrManager: undefined,
@@ -308,7 +309,6 @@ export function createInteractiveModeContext(overrides: ContextOverrides = {}): 
 		replaceOptimisticUserMessage: vi.fn(),
 		reconcileOptimisticSkillMessage: vi.fn(),
 		flushCompactionQueue: vi.fn(async () => {}),
-		flushPendingModelSwitch: vi.fn(async () => {}),
 		reloadTodos: vi.fn(async () => {}),
 		setTodos: vi.fn(),
 	} satisfies ContextOverrides;

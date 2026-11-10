@@ -514,22 +514,6 @@ export interface ModelCycleResult {
 	isScoped: boolean;
 }
 
-/** Result from cycleRoleModels(). */
-export interface RoleModelCycleResult {
-	model: Model;
-	thinkingLevel: ThinkingLevel | undefined;
-	role: string;
-}
-
-import type { ResolvedRoleModel } from "@oh-my-pi/pi-tui/overlays/model-picker";
-export type { ResolvedRoleModel } from "@oh-my-pi/pi-tui/overlays/model-picker";
-
-/** Resolvable role models and the currently active index. */
-export interface RoleModelCycle {
-	models: ResolvedRoleModel[];
-	currentIndex: number;
-}
-
 /** Token breakdown for the current provider context. */
 export interface ContextUsageBreakdown {
 	contextWindow: number;

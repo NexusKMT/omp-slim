@@ -377,7 +377,6 @@ describe("EventController — terminal title across a non-terminal agent_end", (
 		const markActivityEnd = vi.spyOn(ctx.statusLine, "markActivityEnd");
 		const tornDown = Promise.withResolvers<void>();
 		markActivityEnd.mockImplementation(() => tornDown.resolve());
-		const flushPendingModelSwitch = vi.spyOn(ctx, "flushPendingModelSwitch");
 		const controller = new EventController(ctx);
 		await controller.handleEvent({
 			...makeAgentEndEvent([makeAssistantMessage("stop")]),
@@ -387,8 +386,6 @@ describe("EventController — terminal title across a non-terminal agent_end", (
 		// The agent's own continuation follows: never drop to `idle`, never run #finishAgentEnd teardown.
 		expect(stateSpy).not.toHaveBeenCalledWith("idle");
 		expect(markActivityEnd).not.toHaveBeenCalled();
-		// The automatic continuation must still pick up a queued plan-mode model switch.
-		expect(flushPendingModelSwitch).toHaveBeenCalledTimes(1);
 
 		// An abort cancels the continuation before its agent_start, so no terminal
 		// agent_end ever arrives: the settle itself must end the run.

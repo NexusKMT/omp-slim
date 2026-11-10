@@ -954,7 +954,7 @@ describe("Agent hub row ordering", () => {
 			hub.dispose();
 		}
 	});
-	it("shows configured role text beside a resolved model but not for an explicit selector", () => {
+	it("renders the resolved model for historical tasks without configuring model roles", () => {
 		geometry = stubStdoutGeometry(160);
 		const agents = new AgentRegistry();
 		agents.register({ id: "RoleAgent", displayName: "Role Agent", kind: "sub", session: null });
@@ -1009,21 +1009,12 @@ describe("Agent hub row ordering", () => {
 				} as never,
 			},
 		]);
-		const hub = makeHub(agents, {
-			observers,
-			getRoleInfo: createAgentHubRuntime({
-				settings: Settings.isolated({
-					modelRoles: { rapid: "openai/gpt-4o" },
-					modelTags: { rapid: { name: "Quick", color: "warning" } },
-				}),
-			}).getRoleInfo,
-		});
+		const hub = makeHub(agents, { observers });
 
 		try {
 			const roleBlock = renderedRosterEntry(hub, "RoleAgent", 160);
-			expect(roleBlock).toContain("Quick");
+			expect(roleBlock).not.toContain("Quick");
 			expect(roleBlock).toContain("gpt-4o");
-			expect(roleBlock.indexOf("Quick")).toBeLessThan(roleBlock.indexOf("gpt-4o"));
 
 			const explicitBlock = renderedRosterEntry(hub, "ExplicitAgent", 160);
 			expect(explicitBlock).toContain("gpt-4o");

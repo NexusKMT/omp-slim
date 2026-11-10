@@ -2,7 +2,7 @@
  * Fullscreen plan-review overlay. The overlay owns its entire content: the plan
  * is split into sections (preamble + one per heading), each rendered through its
  * own {@link Markdown} and windowed by a {@link ScrollView}, while the approval
- * options (plus the optional model-tier slider) sit beneath inside the same
+ * options sit beneath inside the same
  * outlined box — one self-contained surface in the spirit of the `/copy` picker.
  *
  * When the terminal is wide enough and the plan has ≥2 headings, a Contents
@@ -13,9 +13,9 @@
  * Focus regions (`toc`/`body`/`actions`) cycle with Tab/Shift+Tab; arrows move
  * within the focused region and step left into the sidebar. The default focus is
  * `actions`, so the muscle memory of the old single-target overlay carries over:
- * ↑/↓ select options, Enter confirms, ←/→ drives the slider, g/G + PgUp/PgDn
+ * ↑/↓ select options, Enter confirms, g/G + PgUp/PgDn
  * scroll, and the external-editor key opens the plan. Under Tern the options
- * are a horizontal bar, so ←/→ select options and Shift+←/→ drive the slider.
+ * are a horizontal bar, so ←/→ select options.
  */
 import {
 	type Component,
@@ -40,7 +40,6 @@ import {
 	matchesSelectDown,
 	matchesSelectUp,
 } from "../keybinding-matchers";
-import type { HookSelectorSlider } from "./hook-selector";
 import {
 	bottomBorder,
 	divider,
@@ -53,7 +52,6 @@ import {
 } from "../chrome/overlay-box";
 import { joinPlanSections, parsePlanSections, sectionDeletionSpan } from "./plan-toc";
 import { padToWidth } from "../render/utils";
-import { renderSegmentTrack } from "../chrome/segment-track";
 import { formatKeyHint, formatKeyHints } from "../app-keybindings";
 import { editorKey, editorKeys } from "../chrome/keybinding-hints";
 import type { KeyName } from "../key-hint-format";
@@ -252,8 +250,6 @@ export interface PlanReviewOverlayOptions {
 	helpText?: string;
 	/** Initially highlighted option index. */
 	initialIndex?: number;
-	/** Optional model-tier slider rendered between the plan body and options. */
-	slider?: HookSelectorSlider;
 	/** Display label for the external-editor key, surfaced in the footer help. */
 	externalEditorLabel?: string;
 	/** The external editor's name ("Notepad", "nvim") for the native Edit button; `$EDITOR` when unset. */
@@ -291,8 +287,6 @@ export class PlanReviewOverlay implements Component {
 	#externalEditorName: string | undefined;
 	#promptTitle: string | undefined;
 	#selectedIndex: number;
-	#slider: HookSelectorSlider | undefined;
-	#sliderIndex: number;
 
 	#focus: Focus = "actions";
 	#tocCursor = 0;
@@ -360,12 +354,6 @@ export class PlanReviewOverlay implements Component {
 		this.#externalEditorName = options.externalEditorName;
 		this.#promptTitle = options.promptTitle;
 		this.#selectedIndex = this.#coerceIndex(options.initialIndex ?? 0);
-		if (options.slider && options.slider.segments.length > 0) {
-			this.#slider = options.slider;
-			this.#sliderIndex = Math.max(0, Math.min(options.slider.index, options.slider.segments.length - 1));
-		} else {
-			this.#sliderIndex = 0;
-		}
 		this.#editor = new Editor(getEditorTheme());
 		this.#editor.setBorderVisible(false);
 		this.#editor.setPromptGutter("> ");
@@ -600,22 +588,6 @@ export class PlanReviewOverlay implements Component {
 		}
 	}
 
-	/** Step the slider by `delta`, clamped to its edges (narrow-terminal mode). */
-	#moveSlider(delta: number): void {
-		const slider = this.#slider;
-		if (!slider) return;
-		const next = Math.max(0, Math.min(slider.segments.length - 1, this.#sliderIndex + delta));
-		if (next === this.#sliderIndex) return;
-		this.#sliderIndex = next;
-		slider.onChange?.(next);
-	}
-
-	/** Synchronize an external tier pick with the displayed slider before committing. */
-	setSliderIndex(index: number): void {
-		if (this.#committed || !this.#slider) return;
-		this.#moveSlider(index - this.#sliderIndex);
-	}
-
 	/** Commit an external answer through the same input-locking path as Enter; false when nothing was committed. */
 	selectOption(label: string): boolean {
 		if (this.#committed) return false;
@@ -771,19 +743,6 @@ export class PlanReviewOverlay implements Component {
 			this.#handleNativeActions(data);
 			return;
 		}
-		// Left/right always drive the slider. The sidebar sits beside the body
-		// (above this row), not the slider, so stealing left for it would strand
-		// the operator unable to step the model tier back — reach the ToC via Tab.
-		const isLeft = matchesKey(data, "left") || (this.#slider !== undefined && matchesKey(data, "h"));
-		const isRight = matchesKey(data, "right") || (this.#slider !== undefined && matchesKey(data, "l"));
-		if (isLeft) {
-			this.#moveSlider(-1);
-			return;
-		}
-		if (isRight) {
-			this.#moveSlider(1);
-			return;
-		}
 		if (matchesSelectUp(data) || matchesKey(data, "k")) {
 			if (this.#selectedIndex === this.#firstEnabledIndex()) this.#setFocus("body");
 			else this.#moveSelection(-1);
@@ -800,17 +759,8 @@ export class PlanReviewOverlay implements Component {
 		this.#handleBodyScroll(data);
 	}
 
-	/** Tern lays the options out as a horizontal decision bar: ←/→ step through
-	 *  it, ↑ returns to the body above, and the model slider moves to Shift+←/→. */
+	/** Tern lays the options out as a horizontal decision bar: ←/→ step through it, ↑ returns to the body above. */
 	#handleNativeActions(data: string): void {
-		if (matchesKey(data, "shift+left")) {
-			this.#moveSlider(-1);
-			return;
-		}
-		if (matchesKey(data, "shift+right")) {
-			this.#moveSlider(1);
-			return;
-		}
 		if (matchesKey(data, "left") || matchesKey(data, "h")) {
 			this.#moveSelection(-1);
 			return;
@@ -1201,20 +1151,6 @@ export class PlanReviewOverlay implements Component {
 		return fence;
 	}
 
-	#renderSliderLines(): string[] {
-		const slider = this.#slider;
-		if (!slider) return [];
-		const active = this.#sliderIndex;
-		const track = renderSegmentTrack(slider.segments, active);
-		const leftArrow = theme.fg(active > 0 ? "accent" : "dim", "◂");
-		const rightArrow = theme.fg(active < slider.segments.length - 1 ? "accent" : "dim", "▸");
-		const caption = slider.caption ? `${theme.fg("dim", slider.caption)}  ` : "";
-		const trackLine = `${caption}${leftArrow}  ${track}  ${rightArrow}`;
-		const detail = slider.segments[active]?.detail;
-		if (!detail) return [trackLine];
-		return [trackLine, `  ${theme.fg("dim", "↳")} ${theme.fg("muted", detail)}`];
-	}
-
 	#renderOptionLines(): string[] {
 		const active = this.#focus === "actions";
 		return this.#options.map((label, i) => {
@@ -1245,7 +1181,6 @@ export class PlanReviewOverlay implements Component {
 		switch (this.#focus) {
 			case "actions":
 				parts.push(`${upDown} select`, `${enter} confirm`);
-				if (this.#slider) parts.push(`${formatKeyHints(["left", "right"])} model`);
 				break;
 			case "toc":
 				parts.push(
@@ -1547,7 +1482,6 @@ export class PlanReviewOverlay implements Component {
 			this.#tocCursor,
 			this.#jump?.n ?? 0,
 			this.#selectedIndex,
-			this.#sliderIndex,
 			this.#committed ? `committed:${this.#committedLabel ?? ""}` : "",
 			this.#annotating
 				? `annotating:${target?.sectionIndex}:${target?.row}:${target?.context}:${this.#editingAnnotation !== undefined}`
@@ -1601,7 +1535,6 @@ export class PlanReviewOverlay implements Component {
 				),
 			);
 		} else {
-			children.push(...this.#describeSlider());
 			// The decision bar: Tern lays the list out as buttons, the first one the hero.
 			const optionItems = this.#options.map((label, i) =>
 				item(`o${i}`, {
@@ -1689,11 +1622,6 @@ export class PlanReviewOverlay implements Component {
 				if (activate) this.#confirmSelection();
 				return;
 			}
-			case "tabs": {
-				const index = itemIndex(event.item, "t");
-				if (index >= 0) this.#moveSlider(index - this.#sliderIndex);
-				return;
-			}
 			case "chooser": {
 				const chooser = this.#annotationChooser;
 				const index = itemIndex(event.item, "c");
@@ -1747,28 +1675,6 @@ export class PlanReviewOverlay implements Component {
 		});
 		this.#nativeContent = { sections: this.#sections, rev: this.#annotationRev, body, toc };
 		return this.#nativeContent;
-	}
-
-	#describeSlider(): NativeNode[] {
-		const slider = this.#slider;
-		if (!slider) return [];
-		const tabs = node(
-			"tabs",
-			{
-				items: slider.segments.map((segment, i) => ({ id: `t${i}`, label: segment.label })),
-				active: `t${this.#sliderIndex}`,
-				actions: { click: "select" },
-				role: "omp.plan.strategy",
-			},
-			undefined,
-			"tabs",
-		);
-		const track: NativeChild[] = slider.caption ? [text([span(slider.caption, "dim")]), tabs] : [tabs];
-		// A role of its own: Tern's sheet lets only the role-less split row (Contents + body) shrink and scroll.
-		const out = [keyed(rowNode(track, { role: "omp.plan.slider", gap: "sm", align: "center" }), "slider")];
-		const detail = slider.segments[this.#sliderIndex]?.detail;
-		if (detail) out.push(keyed(text([span("↳ ", "dim"), span(detail, "muted")], { wrap: "word" }), "sliderDetail"));
-		return out;
 	}
 
 	#describeFooter(): NativeChild[] {
@@ -1838,7 +1744,6 @@ export class PlanReviewOverlay implements Component {
 		switch (this.#focus) {
 			case "actions":
 				hints.push(key(["left", "right"], "select"), key("enter", "confirm"));
-				if (this.#slider) hints.push(key(["shift+left", "shift+right"], "model"));
 				break;
 			case "toc":
 				hints.push(
@@ -1877,11 +1782,10 @@ export class PlanReviewOverlay implements Component {
 		const bodyContentWidth = sidebarShown ? splitBodyWidth(width, sidebarWidth) : innerWidth;
 
 		const committed = this.#committed;
-		const sliderLines = committed ? [] : this.#renderSliderLines();
 		const submittingLabel = this.#committedLabel ? `${this.#committedLabel} — submitting…` : "Submitting…";
 		const optionLines = committed ? [theme.bold(theme.fg("accent", submittingLabel))] : this.#renderOptionLines();
 		const promptLines = this.#promptTitle ? [theme.bold(theme.fg("accent", this.#promptTitle))] : [];
-		const baseChrome = 4 + promptLines.length + sliderLines.length + optionLines.length;
+		const baseChrome = 4 + promptLines.length + optionLines.length;
 		const chooserFooterRows = this.#annotationChooser
 			? Math.max(0, termHeight - baseChrome - MIN_BODY_ROWS)
 			: Number.POSITIVE_INFINITY;
@@ -1890,7 +1794,7 @@ export class PlanReviewOverlay implements Component {
 			: this.#renderFooterLines(innerWidth, chooserFooterRows);
 
 		// Chrome rows: top border, two dividers, bottom border, plus the
-		// prompt/slider/option/footer rows between them.
+		// prompt/option/footer rows between them.
 		const chrome = baseChrome + footerLines.length;
 		const regionRows = this.#annotationChooser
 			? Math.max(0, termHeight - chrome)
@@ -1930,7 +1834,6 @@ export class PlanReviewOverlay implements Component {
 			out.push(divider(width));
 		}
 		for (const line of promptLines) out.push(row(line, width));
-		for (const line of sliderLines) out.push(row(line, width));
 		for (let i = 0; i < optionLines.length; i++) {
 			if (!committed) this.#optionClickRows.set(out.length, i);
 			out.push(row(optionLines[i]!, width));

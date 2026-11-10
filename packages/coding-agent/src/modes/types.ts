@@ -8,7 +8,6 @@ import type { CollabController } from "../collab/controller";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
 import type { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
-import type { TrackSegment } from "@oh-my-pi/pi-tui/chrome/segment-track";
 import type { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import type { Settings } from "../config/settings";
 import type {
@@ -174,7 +173,6 @@ export interface InteractiveModeContext {
 	omfgContainer: Container;
 	cleanseContainer: Container;
 	errorBannerContainer: Container;
-	modelCycleContainer: Container;
 	deferredCommandContainer: Container;
 	/** The docked `/changelog`-style command report, just above the editor; Esc clears it. */
 	reportContainer: Container;
@@ -437,7 +435,6 @@ export interface InteractiveModeContext {
 	resetTranscript(): void;
 	showStatus(message: string, options?: ShowStatusOptions): void;
 	/** Show the ctrl+p role chip track above the editor, `activeIndex` filled. */
-	showModelCycleTrack(segments: readonly TrackSegment[], activeIndex: number): void;
 	showError(message: string): void;
 	showPinnedError(message: string): void;
 	clearPinnedError(): void;
@@ -461,7 +458,6 @@ export interface InteractiveModeContext {
 	/** True while a foreground submission is accepted but not yet handed to the session. */
 	hasPendingSubmission(): boolean;
 	flushPendingBashComponents(): void;
-	flushPendingModelSwitch(): Promise<void>;
 	/** No argument restores the default; a function label is re-read on every spinner tick. */
 	setWorkingMessage(message?: string | (() => string)): void;
 	applyPendingWorkingMessage(): void;
@@ -719,7 +715,7 @@ export interface InteractiveModeContext {
 	disableGoalMode(message?: string): void;
 	pauseLoop(): void;
 	handlePlanApproval(details: PlanApprovalDetails): Promise<void>;
-	resolvePlanReview(reviewId: string, choice: PlanReviewChoice, input?: { feedback?: string; role?: string }): boolean;
+	resolvePlanReview(reviewId: string, choice: PlanReviewChoice, input?: { feedback?: string }): boolean;
 	getPendingPlanReview(): PlanReviewRequestedEvent | undefined;
 	openPlanReview(options?: { fromExtension?: boolean }): Promise<boolean>;
 	readonly sessionModes: ExtensionSessionModes;

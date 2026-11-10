@@ -74,7 +74,12 @@ import {
 	selectReportableAccounts,
 } from "../../slash-commands/helpers/usage-accounts";
 import { loadDailyActivity } from "../../stats/activity-client";
-import { AUTO_THINKING, type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import {
+	AUTO_THINKING,
+	concreteThinkingLevel,
+	type ConfiguredThinkingLevel,
+	parseConfiguredThinkingLevel,
+} from "@oh-my-pi/pi-tui/thinking";
 import type { ToolSession } from "../../tools";
 import { AskTool } from "../../tools/ask";
 import { type AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
@@ -312,7 +317,7 @@ export class SelectorController {
 				const selector = new SettingsSelectorComponent(
 					{
 						availableThinkingLevels: [...this.ctx.session.getAvailableThinkingLevels()],
-						thinkingLevel: this.ctx.session.configuredThinkingLevel(),
+						thinkingLevel: concreteThinkingLevel(this.ctx.session.configuredThinkingLevel()),
 						availableThemes,
 						providers: [...new Set(this.ctx.session.getAvailableModels().map(model => model.provider))].sort(
 							(a, b) => a.localeCompare(b),

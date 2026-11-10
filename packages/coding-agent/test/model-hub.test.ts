@@ -42,7 +42,7 @@ function registry(models: Model[] = [a, b]): ModelHubRegistry {
 		getAvailable: () => models,
 		getAll: () => models,
 		getError: () => undefined,
-		authStorage: { keys: { source: () => "env" } },
+		authStorage: { keys: { source: () => ({ kind: "env", concrete: true }) } },
 		getDiscoverableProviders: () => [],
 		getProviderDiscoveryState: () => undefined,
 		find: (provider, id) => models.find(m => m.provider === provider && m.id === id),
@@ -142,7 +142,7 @@ test("a locked catalogue provider forwards to login while configured discovery e
 	const locked = model("locked", "remote");
 	const r = registry([a]);
 	r.getAll = () => [a, locked];
-	r.authStorage.keys.source = provider => (provider === "locked" ? undefined : "env");
+	r.authStorage.keys.source = provider => (provider === "one" ? { kind: "env", concrete: true } : undefined);
 	r.getDiscoverableProviders = () => ["implicit", "custom"];
 	r.getProviderDiscoveryState = provider =>
 		provider === "implicit"

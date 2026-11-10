@@ -2376,10 +2376,6 @@ export class EventController {
 		// Skip the idle title/loader teardown; the continuation's terminal
 		// `agent_end` performs it, or the settle watch does when that continuation
 		// never starts (an abort cancels it, background work ends without a wake).
-		// Still flush a deferred model switch — the plan-mode reconciler queues it
-		// to apply once the current stream ends, and `#finishAgentEnd` is otherwise
-		// its only flush site, so the automatic continuation would otherwise run
-		// on the old model/thinking level until the terminal settle.
 		if (event.isTerminal === false) {
 			// `awaitingAsyncWork`: the model handed control back and only a
 			// background-job result can resume it. The title tracks the model, so it
@@ -2391,7 +2387,6 @@ export class EventController {
 				this.#showAsyncWait(event);
 			}
 			void this.#finishWhenRunSettles(event);
-			await this.ctx.flushPendingModelSwitch();
 			// Reaching here means the first guard passed, so `isStreaming` is already
 			// false: a command issued from now on mounts immediately. Leaving earlier
 			// panels queued would render them out of order, minutes later, after the
@@ -2552,7 +2547,6 @@ export class EventController {
 		// not mark that live turn idle.
 		this.#runActive = this.ctx.viewSession.isStreaming;
 		this.#syncComposerActivity();
-		await this.ctx.flushPendingModelSwitch();
 		this.#sealAbandonedForegroundTools();
 		this.#blockingPrompts.clear();
 		this.#readToolCallArgs.clear();

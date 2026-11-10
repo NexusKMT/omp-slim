@@ -7,7 +7,6 @@ import * as path from "node:path";
 import { type Agent, AgentBusyError, type AgentMessage, agentPauseGate, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
-import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { execReplace } from "@oh-my-pi/pi-natives";
 import type {
 	AutocompleteProvider,
@@ -53,14 +52,12 @@ import {
 import type { AsyncJobManagerApi } from "../async/job-manager";
 import type { JobWidgetRegistry } from "../job-widgets/types";
 import { sameItems } from "@oh-my-pi/pi-tui/native/memo";
-import { describeSegmentTrack, renderSegmentTrack, type TrackSegment } from "@oh-my-pi/pi-tui/chrome/segment-track";
 import type { WorkingRowSpec } from "@oh-my-pi/pi-tui/components/loader";
 import { formatDoubleTap } from "@oh-my-pi/pi-tui/key-hint-format";
 import { thinkingLevelWord } from "@oh-my-pi/pi-tui/status-line/segments";
 import type { TspChecklistItem, TspChecklistPhase, TspSpan, TspText, TspTreeNode } from "@oh-my-pi/pi-wire";
 import { isInsideTerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import {
-	$env,
 	adjustHsv,
 	formatDuration,
 	formatNumber,
@@ -74,14 +71,13 @@ import {
 	setProjectDir,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import { pickTableChart } from "../auto-graph/planner";
 import { restartArgv } from "../cli/flag-tables";
 import type { CollabGuestLink } from "../collab/guest";
 import { CollabController } from "../collab/controller";
 import type { CollabHost } from "../collab/host";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { appKey, editorKey, rawKeyHint } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
-import { formatModelString, type ResolvedModelRoleValue, resolveModelRoleValue } from "../config/model-resolver";
+import { formatModelString, resolveModelRoleValue } from "../config/model-resolver";
 import { isSettingsInitialized, Settings, settings } from "../config/settings";
 import { clearClaudePluginRootsCache } from "../discovery/helpers";
 import type {
@@ -129,7 +125,6 @@ import {
 import { onDownloadActivity } from "../downloads/activity";
 import { DownloadActivityHud, JudgmentBatchProgressHud } from "./progress-hud";
 import { autosaveApprovedPlan, planSaveFileName } from "../plan-mode/plan-autosave";
-import { resolvePlanModelTransition } from "../plan-mode/model-transition";
 import guidedGoalInterviewPrompt from "../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planFilenamePrompt from "../prompts/system/plan-filename.md" with { type: "text" };
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
@@ -139,12 +134,7 @@ import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { registerPersistedSubagents } from "../registry/persisted-agents";
 import type { AgentCostSnapshot } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
 import { sumSubagentTreeCost } from "./agent-hub-runtime";
-import {
-	type AgentSession,
-	type AgentSessionEvent,
-	type DroppedPrompt,
-	type ResolvedRoleModel,
-} from "../session/agent-session";
+import { type AgentSession, type AgentSessionEvent, type DroppedPrompt } from "../session/agent-session";
 import type { AgentViewSession } from "../session/agent-session-handle";
 import type { CompactMode } from "../session/compact-modes";
 import type { ForeignSessionSource } from "../session/foreign-session-store";
@@ -171,7 +161,6 @@ import { resolveCliEntryCmd } from "../subprocess/worker-client";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
 import { labelEchoesHandle } from "../task/label";
 import { agentTypeBadge, formatTaskId } from "@oh-my-pi/pi-tui/tools/task";
-import type { ModelRoleLookup } from "@oh-my-pi/pi-tui/overlays/model-browser";
 import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
@@ -408,7 +397,6 @@ import {
 	cfgRecapEnabled,
 	cfgRecapIdleSeconds,
 	cfgShowHardwareCursor,
-	cfgSpellingAutocomplete,
 	cfgSpellingAutocorrect,
 	cfgSpellingTypoDetection,
 	cfgStartupChangelogMode,
@@ -448,7 +436,6 @@ import { cfgTasksTodoClearDelay } from "../tools/settings";
 import { cfgWorktreeOnExit, cfgWorktreeOnStart } from "../task/settings";
 import { cfgExpandThinkingBlocks, cfgProseOnlyThinking } from "../session/settings";
 import { cfgDefaultThinkingLevel, cfgHideThinkingBlock } from "../session/settings";
-import { cfgCycleOrder, cfgModelRoles } from "../config/model-settings";
 import { cfgExtensionHandlersModeControl } from "../extensibility/settings";
 import { cfgGoalContinuationModes, cfgGoalEnabled } from "../goals/settings";
 import { goalContinuationActivity, goalFromModeData } from "../goals/state";
@@ -478,7 +465,6 @@ const cfgLiveUiSettings = combine({
 	"tui.imeSafeCursor": cfgTuiImeSafeCursor,
 	autocompleteMaxVisible: cfgAutocompleteMaxVisible,
 	"spelling.typoDetection": cfgSpellingTypoDetection,
-	"spelling.autocomplete": cfgSpellingAutocomplete,
 	"spelling.autocorrect": cfgSpellingAutocorrect,
 	"composer.shape": cfgComposerShape,
 	"tui.vimMode": cfgTuiVimMode,
@@ -1019,7 +1005,6 @@ const DEFERRED_PREVIEW_VIEWPORT_FRACTION = 0.4;
 
 /** How long the ctrl+p model-role cycle chip track lingers above the editor
  *  before it auto-clears, mirroring the todo HUD's auto-clear timer. */
-const MODEL_CYCLE_TRACK_CLEAR_MS = 4000;
 
 /** Active subagent sessions the anchored HUD jump-lists, sync or detached. Slots follow registry order. */
 function isHudSubagent(session: ObservableSession): boolean {
@@ -1384,7 +1369,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	omfgContainer: Container;
 	cleanseContainer: Container;
 	errorBannerContainer: Container;
-	modelCycleContainer: Container;
 	deferredCommandContainer: Container;
 	/** The docked `/changelog`-style command report, just above the editor; Esc clears it. */
 	reportContainer: Container;
@@ -1444,7 +1428,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	#pendingLoopIterations = 0;
 	#todoAutoClearTimer: NodeJS.Timeout | undefined;
 	#todoAutoClearGeneration = 0;
-	#modelCycleClearTimer: NodeJS.Timeout | undefined;
 	#editorComponentFactory:
 		| ((tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => CustomEditor)
 		| undefined;
@@ -1808,10 +1791,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	#pendingGoalContinuationTurns = 0;
 	#previousGoalContinuationActivity: string | undefined;
 	#goalSuppressNextContinuation = false;
-	#planModePreviousModelState: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
-	#pendingModelSwitch: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
-	/** Whether #pendingModelSwitch was queued by the live plan-role reconciler. */
-	#pendingPlanModelSwitch = false;
 	#planModeHasEntered = false;
 	#planReviewOverlay: PlanReviewOverlay | undefined;
 	#planReviewOverlayHandle: OverlayHandle | undefined;
@@ -1830,8 +1809,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		| {
 				request: PlanReviewRequestedEvent;
 				remote?: { choice: PlanReviewChoice; feedback?: string };
-				/** Applies a remote tier pick to the review's slider selection; undefined when the slider is hidden. */
-				selectTier?: (role: string) => boolean;
 		  }
 		| undefined;
 	/** Serializable review annotations keyed by the resolved plan file path. */
@@ -1990,8 +1967,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.pendingShellContainer.disposeChildren();
 		this.pendingMessagesContainer.disposeChildren();
 		this.#clearJudgmentBatchProgress();
-		this.#cancelModelCycleClearTimer();
-		this.modelCycleContainer.disposeChildren();
 		this.deferredCommandContainer.disposeChildren();
 		this.#pendingCommandOutput = [];
 		this.#pendingCommandOutputSessionId = undefined;
@@ -2196,7 +2171,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.omfgContainer = new AnchoredLiveContainer();
 		this.cleanseContainer = new AnchoredLiveContainer();
 		this.errorBannerContainer = new AnchoredLiveContainer();
-		this.modelCycleContainer = new AnchoredLiveContainer();
 		this.deferredCommandContainer = new AnchoredLiveContainer();
 		this.reportContainer = new AnchoredLiveContainer();
 		if (eventBus) {
@@ -2514,7 +2488,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.omfgContainer,
 				this.cleanseContainer,
 				this.errorBannerContainer,
-				this.modelCycleContainer,
 				this.deferredCommandContainer,
 				// Judge batches and automatic downloads stay editor-anchored and update
 				// independently of transcript output, directly above the working/throughput/title row.
@@ -2549,14 +2522,9 @@ export class InteractiveMode implements InteractiveModeContext {
 					this.errorBannerContainer,
 				],
 				// HUDs that clear themselves on a timer or registry change (todos,
-				// background subagents, model cycle, progress). Their first paint can be
+				// background subagents, progress). Their first paint can be
 				// their tallest (a restored todo list on resume), so it is never a baseline.
-				selfClearingChrome: [
-					this.todoContainer,
-					this.subagentContainer,
-					this.modelCycleContainer,
-					this.progressHudContainer,
-				],
+				selfClearingChrome: [this.todoContainer, this.subagentContainer, this.progressHudContainer],
 				// Natively the HUD pills lead the dock, queued messages sit between
 				// the working row and the composer, and the attachment chips live
 				// inside the composer.
@@ -2566,7 +2534,6 @@ export class InteractiveMode implements InteractiveModeContext {
 					this.omfgContainer,
 					this.cleanseContainer,
 					this.errorBannerContainer,
-					this.modelCycleContainer,
 					this.deferredCommandContainer,
 					this.progressHudContainer,
 					this.statusContainer,
@@ -2875,9 +2842,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Config warnings can change during the same pre-subscription window; the
 		// event is not replayed, so rebuild from the live array once here too.
 		this.#syncHeaderExtras();
-		this.#eventBusUnsubscribers.push(
-			cfgModelRoles.listen(this.settings, () => this.#reapplyPlanModeModelOnRoleChange()),
-		);
+		this.#eventBusUnsubscribers.push();
 		this.#eventBusUnsubscribers.push(
 			this.session.subscribeCommandMetadataChanged(() => {
 				// Skills/commands rediscovery (live `skills.*`/`commands.*`/extension edits,
@@ -4152,7 +4117,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			imeSafeCursor: cfgTuiImeSafeCursor.get(this.settings),
 			autocompleteMaxVisible: cfgAutocompleteMaxVisible.get(this.settings),
 			spellingTypoDetection: cfgSpellingTypoDetection.get(this.settings),
-			spellingAutocomplete: cfgSpellingAutocomplete.get(this.settings),
 			spellingAutocorrect: cfgSpellingAutocorrect.get(this.settings),
 		};
 	}
@@ -4194,7 +4158,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				"tui.imeSafeCursor",
 				"autocompleteMaxVisible",
 				"spelling.typoDetection",
-				"spelling.autocomplete",
 				"spelling.autocorrect",
 			)
 		) {
@@ -4649,27 +4612,24 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/**
 	 * Cache the inputs of a fresh session's status bar (settings, the configured
-	 * default model and the thinking level a new session starts it at) so the
+	 * selected model and the thinking level a new session starts it at) so the
 	 * next launch renders it at first paint; see `createStartupStatusLine`.
 	 */
 	#persistComposerStatus(): void {
 		if (!this.sessionManager.getSessionFile()) return;
 		// Prepaint runs only for launches without model flags, which read the persisted
-		// roles alone: `--model`/`--smol` overrides and session-only switches stay out.
-		const roles: ModelRoleLookup = {
-			getModelRole: role => this.settings.getProjectModelRole(role) ?? this.settings.getGlobalModelRole(role),
-		};
-		const defaultRole = resolveModelRoleValue(
-			roles.getModelRole("default"),
+		// selected model: `--model` overrides and session-only switches stay out.
+		const selected = resolveModelRoleValue(
+			this.settings.getProjectModel() ?? this.settings.getGlobalModel(),
 			this.session.modelRegistry.getAvailable(),
-			{ settings: this.settings, roleLookup: roles },
+			{ settings: this.settings },
 		);
-		const model = defaultRole.model;
-		// Without a resolvable default the next launch picks a fallback; keep the previous speculation.
+		const model = selected.model;
+		// Without a resolvable configured model, keep the previous startup cache.
 		if (!model) return;
 		const thinking = newSessionThinkingLevel(
 			model,
-			defaultRole.explicitThinkingLevel ? defaultRole.thinkingLevel : undefined,
+			selected.explicitThinkingLevel ? selected.thinkingLevel : undefined,
 			parseConfiguredThinkingLevel(cfgDefaultThinkingLevel.get(this.settings)),
 		);
 		// Recover the border's ANSI wrapper by coloring a sentinel and splitting around it.
@@ -5131,46 +5091,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			});
 		}, delaySeconds * 1000);
 		this.#todoAutoClearTimer.unref?.();
-	}
-
-	/**
-	 * Render the ctrl+p model-role cycle chip track into its own anchored
-	 * container (just above the editor), mirroring the todo HUD: the container is
-	 * cleared and rebuilt in place on every cycle, so rapid presses or concurrent
-	 * chat activity can never stack duplicate tracks into the scrollback.
-	 */
-	showModelCycleTrack(segments: readonly TrackSegment[], activeIndex: number): void {
-		this.#renderModelCycleTrack({ segments, activeIndex });
-		this.#syncModelCycleClearTimer();
-		this.ui.requestRender();
-	}
-
-	#renderModelCycleTrack(track: { segments: readonly TrackSegment[]; activeIndex: number } | null): void {
-		this.modelCycleContainer.clear();
-		if (!track) return;
-		this.modelCycleContainer.addChild(new Spacer(1));
-		this.modelCycleContainer.addChild(
-			new DescribedComponent(
-				new Text(renderSegmentTrack([...track.segments], track.activeIndex), 1, 0),
-				describeSegmentTrack(track.segments, track.activeIndex),
-			),
-		);
-	}
-
-	#cancelModelCycleClearTimer(): void {
-		if (!this.#modelCycleClearTimer) return;
-		clearTimeout(this.#modelCycleClearTimer);
-		this.#modelCycleClearTimer = undefined;
-	}
-
-	#syncModelCycleClearTimer(): void {
-		this.#cancelModelCycleClearTimer();
-		this.#modelCycleClearTimer = setTimeout(() => {
-			this.#modelCycleClearTimer = undefined;
-			this.#renderModelCycleTrack(null);
-			this.ui.requestRender();
-		}, MODEL_CYCLE_TRACK_CLEAR_MS);
-		this.#modelCycleClearTimer.unref?.();
 	}
 
 	#getActivePhase(phases: TodoPhase[]): TodoPhase | undefined {
@@ -5705,108 +5625,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.syncIdleMaintenanceView();
 	}
 
-	async #applyPlanModeModel(): Promise<void> {
-		const resolved = this.session.resolveRoleModelWithThinking("plan");
-		if (!resolved.model) return;
-
-		const currentModel = this.session.model;
-		// Capture the pre-plan model so #exitPlanMode can restore it. Only the
-		// entry path records this — a mid-planning role change (below) leaves the
-		// active model on the plan role, so overwriting here would restore the old
-		// plan model instead of the user's real pre-plan model.
-		this.#planModePreviousModelState = currentModel
-			? {
-					model: currentModel,
-					thinkingLevel: this.session.configuredThinkingLevel(),
-				}
-			: undefined;
-
-		await this.#applyPlanModelTransition(currentModel, resolved);
-	}
-
-	/**
-	 * Re-resolve the `plan` role and move the active model onto it. Fires when
-	 * the plan role is reassigned while plan mode is active: the active model IS
-	 * the plan model there, so a settings-only change would otherwise leave the
-	 * current turn on the model plan mode was entered with (issue #5657). No-op
-	 * outside plan mode — role reassignment for an inactive role only touches
-	 * settings.
-	 */
-	async #reapplyPlanModeModelOnRoleChange(): Promise<void> {
-		if (!this.planModeEnabled) return;
-		const resolved = this.session.resolveRoleModelWithThinking("plan");
-		if (!resolved.model) {
-			this.#clearPendingPlanModelSwitch();
-			return;
-		}
-		await this.#applyPlanModelTransition(this.session.model, resolved);
-	}
-
-	/**
-	 * Drop a stale deferred switch that was queued for a previous plan-role
-	 * assignment. Other deferred switches (such as restoring the pre-plan
-	 * model) remain intact.
-	 */
-	#clearPendingPlanModelSwitch(): void {
-		if (!this.#pendingPlanModelSwitch) return;
-		this.#pendingModelSwitch = undefined;
-		this.#pendingPlanModelSwitch = false;
-	}
-
-	/** Apply (or defer) the model/thinking change implied by the resolved plan role. */
-	async #applyPlanModelTransition(currentModel: Model | undefined, resolved: ResolvedModelRoleValue): Promise<void> {
-		const transition = resolvePlanModelTransition(currentModel, resolved, this.session.isStreaming);
-		if (transition.kind !== "apply" || !transition.deferred) {
-			this.#clearPendingPlanModelSwitch();
-		}
-		switch (transition.kind) {
-			case "none":
-				return;
-			case "thinking":
-				this.session.setThinkingLevel(transition.thinkingLevel);
-				return;
-			case "apply":
-				if (transition.deferred) {
-					this.#pendingModelSwitch = {
-						model: transition.model,
-						thinkingLevel: transition.thinkingLevel,
-					};
-					this.#pendingPlanModelSwitch = true;
-					return;
-				}
-				try {
-					await this.session.setModelTemporary(transition.model, transition.thinkingLevel);
-				} catch (error) {
-					this.showWarning(
-						`Failed to switch to plan model for plan mode: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
-				return;
-		}
-	}
-
-	/** Apply any deferred model switch after the current stream ends. */
-	async flushPendingModelSwitch(): Promise<void> {
-		const pending = this.#pendingModelSwitch;
-		this.#pendingModelSwitch = undefined;
-		this.#pendingPlanModelSwitch = false;
-		if (!pending) return;
-		try {
-			await this.session.setModelTemporary(pending.model, pending.thinkingLevel);
-		} catch (error) {
-			this.showWarning(
-				`Failed to switch model after streaming: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-	}
-
 	async #clearTransientModeState(options?: {
 		preserveVibe?: boolean;
 		vibeScopeAlreadySuspended?: boolean;
-		restorePlanModel?: boolean;
 	}): Promise<void> {
 		if (this.planModeEnabled || this.planModePaused) {
-			const previousModel = this.#planModePreviousModelState;
 			this.session.setPlanModeState(undefined);
 			try {
 				const previousPresentation = this.#planModePreviousToolPresentation;
@@ -5823,14 +5646,8 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.planModePaused = false;
 				this.planModePlanFilePath = undefined;
 				this.#planModePreviousToolPresentation = undefined;
-				this.#planModePreviousModelState = undefined;
-				this.#pendingModelSwitch = undefined;
-				this.#pendingPlanModelSwitch = false;
 				this.#planModeHasEntered = false;
 				this.#updatePlanModeStatus();
-			}
-			if (options?.restorePlanModel && previousModel) {
-				await this.#restorePlanPreviousModel(previousModel);
 			}
 		}
 
@@ -5893,13 +5710,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		// flags and settings, and that set — not a historical one — is what exiting
 		// vibe must restore.
 		const vibeToolsetLostToTeardown = this.vibeModeEnabled && !preserveVibe;
-		// A session that records no model (a `/new` boundary) keeps the live model,
-		// which during plan mode is the transient plan-role model; hand it the
-		// pre-plan model instead. A recorded model was already restored by switchSession.
 		await this.#clearTransientModeState({
 			preserveVibe,
 			vibeScopeAlreadySuspended,
-			restorePlanModel: Object.keys(sessionContext.models).length === 0,
 		});
 		await VibeSessionRegistry.global().rehydrate(vibeSession);
 		const goalEnabled = cfgGoalEnabled.get(this.session.settings);
@@ -5956,7 +5769,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		if (sessionContext.mode === "plan") {
 			const planFilePath = sessionContext.modeData?.planFilePath as string | undefined;
-			await this.#enterPlanMode({ planFilePath, preserveRestoredModel: true });
+			await this.#enterPlanMode({ planFilePath });
 		} else if (sessionContext.mode === "plan_paused") {
 			this.planModePaused = true;
 			this.#planModeHasEntered = true;
@@ -5976,11 +5789,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async #enterPlanMode(options?: {
-		planFilePath?: string;
-		workflow?: "parallel" | "iterative";
-		preserveRestoredModel?: boolean;
-	}): Promise<void> {
+	async #enterPlanMode(options?: { planFilePath?: string; workflow?: "parallel" | "iterative" }): Promise<void> {
 		if (this.planModeEnabled) {
 			return;
 		}
@@ -6055,60 +5864,12 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.session.sendPlanModeContext({ deliverAs: "steer" });
 		}
 		this.#planModeHasEntered = true;
-		// Session loading already restored the model recorded in the journal.
-		// Reapplying today's plan role here would replace a CLI/session-specific
-		// selection with current config during --resume or an in-process switch.
-		if (!options?.preserveRestoredModel) {
-			await this.#applyPlanModeModel();
-		}
 		this.#updatePlanModeStatus();
 		this.sessionManager.appendModeChange("plan", { planFilePath });
 		this.showStatus(`Plan mode enabled. Plan file: ${planFilePath}`);
 	}
 
-	async #restorePlanPreviousModel(prev: { model: Model; thinkingLevel?: ConfiguredThinkingLevel }): Promise<void> {
-		if (modelsAreEqual(this.session.model, prev.model)) {
-			// Same model — only thinking level may differ. Avoid setModelTemporary()
-			// which would reset provider-side sessions and break continuity.
-			this.session.setThinkingLevel(prev.thinkingLevel);
-		} else if (this.session.isStreaming) {
-			this.#pendingModelSwitch = {
-				model: prev.model,
-				thinkingLevel: prev.thinkingLevel,
-			};
-			this.#pendingPlanModelSwitch = false;
-		} else {
-			await this.session.setModelTemporary(prev.model, prev.thinkingLevel);
-		}
-	}
-
-	/**
-	 * Idempotent post-compaction model transition for the plan-approval compact
-	 * path. The deferred pre-plan state is consumed on first application, so a
-	 * second call (the before-flush hook vs. the short-circuit fallback) is a
-	 * no-op. "failed" intentionally stays on the plan model — the context is
-	 * intact and we dispatch best-effort.
-	 */
-	async #applyDeferredPlanModelTransition(
-		outcome: CompactionOutcome | undefined,
-		executionModel: ResolvedRoleModel | undefined,
-	): Promise<void> {
-		const deferredPrev = this.#planModePreviousModelState;
-		if (deferredPrev === undefined || outcome === "failed") return;
-		this.#planModePreviousModelState = undefined;
-		if (executionModel) {
-			await this.#applyPlanExecutionModel(executionModel);
-		} else {
-			await this.#restorePlanPreviousModel(deferredPrev);
-		}
-	}
-
-	async #exitPlanMode(options?: {
-		silent?: boolean;
-		paused?: boolean;
-		deferModelRestore?: boolean;
-		interruptActiveTurn?: boolean;
-	}): Promise<void> {
+	async #exitPlanMode(options?: { silent?: boolean; paused?: boolean; interruptActiveTurn?: boolean }): Promise<void> {
 		if (!this.planModeEnabled) {
 			return;
 		}
@@ -6126,20 +5887,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#tearDownPlanMode(options);
 	}
 
-	async #tearDownPlanMode(options?: {
-		silent?: boolean;
-		paused?: boolean;
-		deferModelRestore?: boolean;
-	}): Promise<void> {
+	async #tearDownPlanMode(options?: { silent?: boolean; paused?: boolean }): Promise<void> {
 		const planModeState = this.session.getPlanModeState();
 		const planModeTools = this.session.getEnabledToolNames();
 		const planModeMountedTools = this.session.getMountedXdevToolNames();
-		const planModeModelState = this.session.model
-			? {
-					model: this.session.model,
-					thinkingLevel: this.session.configuredThinkingLevel(),
-				}
-			: undefined;
 		this.session.setPlanModeState(undefined);
 		try {
 			const previousPresentation = this.#planModePreviousToolPresentation;
@@ -6150,32 +5901,8 @@ export class InteractiveMode implements InteractiveModeContext {
 					previousPresentation.registered,
 				);
 			}
-			if (this.#planModePreviousModelState && !options?.deferModelRestore) {
-				await this.#restorePlanPreviousModel(this.#planModePreviousModelState);
-			}
-			// If #applyPlanModeModel queued a deferred switch to the plan-role model
-			// (because the session was streaming on entry), drop it now: we are
-			// leaving plan mode, so flushing it on the next agent_end would land the
-			// session on the plan-role model after the user has exited plan mode
-			// (issue #816). This runs even when deferModelRestore is set
-			// (compact-approval path): otherwise the stale plan switch survives and
-			// flushPendingModelSwitch() later clobbers the restored/execution model.
-			if (this.#planModePreviousModelState) this.#clearPendingPlanModelSwitch();
 		} catch (error) {
 			this.session.setPlanModeState(planModeState);
-			if (
-				planModeModelState &&
-				(!modelsAreEqual(this.session.model, planModeModelState.model) ||
-					this.session.configuredThinkingLevel() !== planModeModelState.thinkingLevel)
-			) {
-				try {
-					await this.#restorePlanPreviousModel(planModeModelState);
-				} catch (rollbackError) {
-					logger.warn("Failed to restore plan model after plan exit failure", {
-						error: String(rollbackError),
-					});
-				}
-			}
 			const enabledTools = this.session.getEnabledToolNames();
 			const mountedTools = this.session.getMountedXdevToolNames();
 			if (
@@ -6202,7 +5929,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.planModePaused = options?.paused ?? false;
 		this.planModePlanFilePath = undefined;
 		this.#planModePreviousToolPresentation = undefined;
-		if (!options?.deferModelRestore) this.#planModePreviousModelState = undefined;
 		this.#updatePlanModeStatus();
 		const paused = options?.paused ?? false;
 		this.sessionManager.appendModeChange(paused ? "plan_paused" : "none");
@@ -6382,7 +6108,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			/** Called once, with the settled choice, when the review overlay is hidden. */
 			onClose?: (choice: string | undefined) => void;
 		},
-		extra?: { slider?: HookSelectorSlider },
 	): Promise<string | undefined> {
 		this.#hidePlanReview();
 		const pending = this.#pendingPlanReview;
@@ -6414,7 +6139,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				disabledIndices: dialogOptions?.disabledIndices,
 				helpText: dialogOptions?.helpText,
 				initialIndex: dialogOptions?.initialIndex,
-				slider: extra?.slider,
 				externalEditorLabel: appKey(this.keybindings, "app.editor.external") || undefined,
 				externalEditorName: getEditorName(),
 				annotationState: dialogOptions?.annotationState,
@@ -6465,15 +6189,9 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/**
 	 * Answers the open plan review as if the operator picked `choice`: backs `ctx.resolvePlanReview`.
-	 * Refine feedback is sent verbatim; it only has to be non-blank. `input.role` moves an
-	 * approval's execution-tier selection before the pick; it is refused when it names no tier
-	 * or accompanies a non-approval choice.
+	 * Refine feedback is sent verbatim; it only has to be non-blank.
 	 */
-	resolvePlanReview(
-		reviewId: string,
-		choice: PlanReviewChoice,
-		input?: { feedback?: string; role?: string },
-	): boolean {
+	resolvePlanReview(reviewId: string, choice: PlanReviewChoice, input?: { feedback?: string }): boolean {
 		const pending = this.#pendingPlanReview;
 		const pick = this.#planReviewPick;
 		if (!pending || pending.request.reviewId !== reviewId || !pick) return false;
@@ -6481,10 +6199,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!option || option.disabled) return false;
 		const feedback = input?.feedback;
 		if (choice === "refine" && !feedback?.trim()) return false;
-		if (input?.role !== undefined) {
-			const approves = choice === "execute" || choice === "compact" || choice === "keep";
-			if (!approves || !pending.selectTier?.(input.role)) return false;
-		}
 		pending.remote = { choice, feedback };
 		if (pick(option.label)) return true;
 		pending.remote = undefined;
@@ -6492,8 +6206,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	#getPlanApprovalContextUsage(): ContextUsage | undefined {
-		const executionModel = this.#planModePreviousModelState?.model ?? this.session.model;
-		const contextWindow = executionModel?.contextWindow;
+		const contextWindow = this.session.model?.contextWindow;
 		if (typeof contextWindow === "number") {
 			return this.session.getContextUsage({ contextWindow });
 		}
@@ -6744,20 +6457,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async #applyPlanExecutionModel(entry: ResolvedRoleModel | undefined): Promise<void> {
-		if (!entry) return;
-		try {
-			await this.session.applyRoleModel(entry);
-			this.statusLine.invalidate();
-			this.updateEditorBorderColor();
-			this.showStatus(`Continuing with ${entry.role}: ${entry.model.name || entry.model.id}`);
-		} catch (error) {
-			this.showWarning(
-				`Could not switch to the ${entry.role} model: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-	}
-
 	#resolveLocalRoot(): string {
 		return path.resolve(
 			resolveLocalRoot({
@@ -6774,7 +6473,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			title: string;
 			preserveContext?: boolean;
 			compactBeforeExecute?: boolean;
-			executionModel?: ResolvedRoleModel;
 			reviewOwner: object;
 		},
 	): Promise<boolean> {
@@ -6798,7 +6496,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			await this.#exitPlanMode({
 				silent: true,
 				paused: false,
-				deferModelRestore: options.compactBeforeExecute === true,
 			});
 
 			if (!options.preserveContext) {
@@ -6831,16 +6528,12 @@ export class InteractiveMode implements InteractiveModeContext {
 				// so it reaches native summarization without leaking into the public
 				// `customInstructions` channel on `session_before_compact` — extensions
 				// there treat that field as user focus and would query-bias the
-				// summary toward the plan boilerplate (issue #4359). The model the
-				// transition below restores reads the summary.
-				const readerModel =
-					options.executionModel?.model ?? this.#planModePreviousModelState?.model ?? this.session.model;
-				compactOutcome = await this.handleCompactCommand(
-					undefined,
-					undefined,
-					outcome => this.#applyDeferredPlanModelTransition(outcome, options.executionModel),
-					{ internalGuidance: compactionPrompt, readerModel },
-				);
+				// summary toward the plan boilerplate (issue #4359).
+				const readerModel = this.session.model;
+				compactOutcome = await this.handleCompactCommand(undefined, undefined, undefined, {
+					internalGuidance: compactionPrompt,
+					readerModel,
+				});
 			}
 		} finally {
 			// Unconditional clear. Idempotent: a no-op when the flag was never set
@@ -6882,20 +6575,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				TRUNCATE_LENGTHS.CONTENT,
 			);
 			this.showWarning(`Failed to autosave plan: ${detail}`);
-		}
-
-		// Resolve the deferred plan-approval model transition. On the compact path
-		// the before-flush hook passed to handleCompactCommand already ran this (so
-		// any input queued during compaction executed on the post-compaction
-		// model); the re-run here is idempotent and covers the short-circuit where
-		// compaction never executed. It runs for "cancelled" too — the operator
-		// aborted only the compaction, not the approval — so the next turn no longer
-		// lands on the plan model. "failed" stays on the plan model (context
-		// intact) and dispatches best-effort.
-		if (options.compactBeforeExecute) {
-			await this.#applyDeferredPlanModelTransition(compactOutcome, options.executionModel);
-		} else {
-			await this.#applyPlanExecutionModel(options.executionModel);
 		}
 
 		if (compactOutcome === "cancelled") {
@@ -7753,30 +7432,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			{ id: "save", label: PLAN_SAVE_AND_QUIT_OPTION, disabled: false },
 		];
 
-		// Model-tier slider: let the operator pick which configured role model
-		// (smol/default/slow/…) executes the approved plan. The slider always starts
-		// on the `default` tier so execution defaults to the default model no matter
-		// which model drove the planning conversation. Left/right move it from there;
-		// hidden when fewer than two role models resolve — a lone tier is no choice.
-		// `selectedTierIndex` tracks the live slider position.
-		const cycle = this.session.getRoleModelCycle(cfgCycleOrder.get(this.session.settings));
-		const defaultTierIndex = cycle ? cycle.models.findIndex(entry => entry.role === "default") : -1;
-		const startTierIndex = defaultTierIndex >= 0 ? defaultTierIndex : (cycle?.currentIndex ?? 0);
-		let selectedTierIndex = startTierIndex;
-		const slider: HookSelectorSlider | undefined =
-			cycle && cycle.models.length > 1
-				? {
-						caption: "continue with",
-						index: startTierIndex,
-						segments: cycle.models.map(entry => ({
-							label: entry.role,
-							detail: entry.model.name || entry.model.id,
-						})),
-						onChange: index => {
-							selectedTierIndex = index;
-						},
-					}
-				: undefined;
 		// The overlay now owns the dynamic, focus-aware help line; the caller only
 		// supplies the trailing cancel hint.
 		const helpText = `${editorKey("tui.select.cancel")} cancel`;
@@ -7796,30 +7451,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			planFilePath,
 			planContent,
 			options: reviewOptions,
-			tiers: slider
-				? cycle!.models.map(entry => ({
-						role: entry.role,
-						provider: entry.model.provider,
-						model: entry.model.id,
-						...(entry.explicitThinkingLevel && entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
-					}))
-				: undefined,
 		};
 		const reviewId = request.reviewId;
 		this.#pendingPlanReview = {
 			request,
-			// Mirrors the slider's onChange for remote answers: a pick in `resolvePlanReview`
-			// moves the same `selectedTierIndex` the approval branch reads after the choice.
-			// Undefined when the slider is hidden — a lone tier is no selection, and pinning
-			// it would switch the session back to the plan model.
-			selectTier: slider
-				? role => {
-						const index = cycle!.models.findIndex(entry => entry.role === role);
-						if (index < 0) return false;
-						this.#planReviewOverlay?.setSliderIndex(index);
-						return true;
-					}
-				: undefined,
 		};
 		const pending = this.#pendingPlanReview;
 		const extensionRunner = this.session.extensionRunner;
@@ -7859,7 +7494,6 @@ export class InteractiveMode implements InteractiveModeContext {
 					void requestDelivered.promise.then(() => extensionRunner.emit(resolved));
 				},
 			},
-			{ slider },
 		);
 		options?.onOpened?.();
 		// Handlers get their own copy so mutating the event cannot re-enable a refused choice.
@@ -7910,40 +7544,11 @@ export class InteractiveMode implements InteractiveModeContext {
 					closePlanReview();
 					return;
 				}
-				// Capture the operator's tier choice and hand it to #approvePlan, which
-				// applies it AFTER #exitPlanMode. #exitPlanMode normally restores
-				// #planModePreviousModelState (the model from before plan mode), so
-				// applying the slider choice any earlier would be silently reverted.
-				// Pass executionModel only when the slider was actually shown — a
-				// singleton cycle (e.g. only modelRoles.plan is configured, so
-				// getRoleModelCycle synthesizes a lone `default` entry from the
-				// currently active plan model) hides the slider, the operator made
-				// no selection, and the pre-plan model is not in the cycle. Pinning
-				// that singleton would silently switch the session back to the plan
-				// model after #exitPlanMode restored the pre-plan model.
-				// Treat the choice as implicit only when applying the selected role
-				// would land on the same end state as the restore — same model AND
-				// the same effective thinking level. A role with an explicit thinking
-				// suffix that differs from the restored thinking level must still go
-				// through applyRoleModel, otherwise approving on the same model with a
-				// different configured thinking level silently keeps the pre-plan level.
-				const restoredState = this.#planModePreviousModelState;
-				const restoredIndex =
-					cycle && restoredState
-						? cycle.models.findIndex(entry => {
-								if (!modelsAreEqual(entry.model, restoredState.model)) return false;
-								if (!entry.explicitThinkingLevel) return true;
-								return entry.thinkingLevel === restoredState.thinkingLevel;
-							})
-						: -1;
-				const executionModel =
-					slider && cycle && selectedTierIndex !== restoredIndex ? cycle.models[selectedTierIndex] : undefined;
 				const executionDispatched = await this.#approvePlan(latestPlanContent, {
 					planFilePath,
 					title: details.title,
 					preserveContext: choice !== "Approve and execute",
 					compactBeforeExecute: choice === "Approve and compact context",
-					executionModel,
 					reviewOwner: pending,
 				});
 				if (executionDispatched) this.#planReviewAnnotationState.delete(annotationStateKey);
@@ -8444,7 +8049,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		nextEditor.setAutocompleteMaxVisible(cfgAutocompleteMaxVisible.get(this.settings));
 		nextEditor.setSpellingFeatures({
 			typoDetection: cfgSpellingTypoDetection.get(this.settings),
-			autocomplete: cfgSpellingAutocomplete.get(this.settings),
 			autocorrect: cfgSpellingAutocorrect.get(this.settings),
 		});
 		nextEditor.viewportRowsProvider = () => this.ui.terminal.rows;
@@ -8519,7 +8123,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * transcript: a mid-turn mount changes the active frame while streaming,
 	 * which is why the earlier `showStatus` acknowledgment was reverted. An
 	 * anchored container is cleared and rebuilt in place without adding history
-	 * rows — the same reason the ctrl+p role-cycle track lives there.
+	 * rows.
 	 *
 	 * A Tern Surface Protocol surface has no append-only scrollback to
 	 * duplicate into, so there the panel mounts in the transcript at once.

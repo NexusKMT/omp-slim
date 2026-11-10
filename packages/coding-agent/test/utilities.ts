@@ -81,8 +81,7 @@ export function assistantMsg(text: string) {
  */
 export async function createTestSession(options: TestSessionOptions = {}): Promise<TestSessionContext> {
 	const tempDir = path.join(os.tmpdir(), `omp-test-${Snowflake.next()}`);
-	// Interactive editor input must not contact the developer's global text-predict daemon.
-	const settingsOverrides = { "spelling.autocomplete": "off", ...options.settingsOverrides };
+	const settingsOverrides = options.settingsOverrides ?? {};
 	fs.mkdirSync(tempDir, { recursive: true });
 
 	const toolSession: ToolSession = {

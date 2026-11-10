@@ -167,7 +167,6 @@ describe("EventController superseded agent_end", () => {
 			isTerminal: false,
 		} as unknown as AgentSessionEvent);
 
-		expect(ctx.flushPendingModelSwitch).toHaveBeenCalled();
 		expect(ctx.flushPendingCommandOutput).toHaveBeenCalled();
 	});
 });

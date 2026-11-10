@@ -36,7 +36,6 @@ import {
 	cfgComposerShape,
 	cfgMarketplaceAutoUpdate,
 	cfgShowHardwareCursor,
-	cfgSpellingAutocomplete,
 	cfgSpellingAutocorrect,
 	cfgSpellingTypoDetection,
 	cfgStartupChangelogMode,
@@ -312,7 +311,6 @@ describe("Composer prepaint", () => {
 			imeSafeCursor: cfgTuiImeSafeCursor.get(settings),
 			autocompleteMaxVisible: cfgAutocompleteMaxVisible.get(settings),
 			spellingTypoDetection: cfgSpellingTypoDetection.get(settings),
-			spellingAutocomplete: cfgSpellingAutocomplete.get(settings),
 			spellingAutocorrect: cfgSpellingAutocorrect.get(settings),
 		};
 	});
@@ -839,7 +837,6 @@ describe("Composer prepaint", () => {
 			imeSafeCursor: config.imeSafeCursor,
 			autocompleteMaxVisible: config.autocompleteMaxVisible,
 			spellingTypoDetection: cfgSpellingTypoDetection.get(settings),
-			spellingAutocomplete: cfgSpellingAutocomplete.get(settings),
 			spellingAutocorrect: cfgSpellingAutocorrect.get(settings),
 			theme: {},
 		});

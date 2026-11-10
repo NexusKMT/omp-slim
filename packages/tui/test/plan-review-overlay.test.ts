@@ -1,15 +1,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
-import type { HookSelectorSlider } from "@oh-my-pi/pi-tui/overlays/hook-selector";
 import { PlanReviewOverlay } from "@oh-my-pi/pi-tui/overlays/plan-review-overlay";
 import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
 import { setKeybindings } from "@oh-my-pi/pi-tui";
 
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
-const LEFT = "\x1b[D";
-const RIGHT = "\x1b[C";
 const ENTER = "\r";
 const TAB = "\t";
 const SHIFT_DOWN = "\x1b[1;2B";
@@ -148,33 +145,6 @@ describe("PlanReviewOverlay", () => {
 		);
 		overlay.handleInput(CANCEL);
 		expect(onCancel).toHaveBeenCalledTimes(1);
-	});
-
-	it("drives the model-tier slider with left/right without changing the option cursor", () => {
-		const changes: number[] = [];
-		const slider: HookSelectorSlider = {
-			caption: "continue with",
-			index: 0,
-			segments: [{ label: "default" }, { label: "slow", detail: "opus" }],
-			onChange: index => changes.push(index),
-		};
-		const onPick = vi.fn();
-		const overlay = new PlanReviewOverlay(
-			"plan",
-			{ promptTitle: "next", options: APPROVAL_OPTIONS, slider },
-			{ onPick, onCancel: vi.fn() },
-		);
-		overlay.handleInput(RIGHT);
-		expect(changes).toEqual([1]);
-		// Clamped at the right edge.
-		overlay.handleInput(RIGHT);
-		expect(changes).toEqual([1]);
-		overlay.handleInput(LEFT);
-		expect(changes).toEqual([1, 0]);
-
-		// The slider must not have moved the option cursor.
-		overlay.handleInput(ENTER);
-		expect(onPick).toHaveBeenCalledWith("Approve and execute");
 	});
 
 	it("invokes the external-editor callback on its key", () => {
@@ -1001,29 +971,6 @@ describe("PlanReviewOverlay", () => {
 		const feedback = onFeedbackChange.mock.calls.at(-1)?.[0] as string;
 		expect(feedback).toContain("Remove these sections:");
 		expect(feedback).toContain("Goal");
-	});
-
-	it("drives the slider with both arrows even when a sidebar is present", () => {
-		const changes: number[] = [];
-		const slider: HookSelectorSlider = {
-			caption: "continue with",
-			index: 0,
-			segments: [{ label: "default" }, { label: "slow", detail: "opus" }],
-			onChange: index => changes.push(index),
-		};
-		const overlay = new PlanReviewOverlay(
-			SECTION_PLAN,
-			{ promptTitle: "next", options: APPROVAL_OPTIONS, slider },
-			{ onPick: vi.fn(), onCancel: vi.fn() },
-		);
-		render(overlay); // establish the sidebar
-		// The sidebar sits beside the body, not the slider, so left must still step
-		// the tier back instead of being stolen to focus the ToC.
-		overlay.handleInput(RIGHT); // 0 -> 1
-		overlay.handleInput(LEFT); // 1 -> 0
-		expect(changes).toEqual([1, 0]);
-		// Focus stayed on the actions region (left did not jump to the ToC).
-		expect(render(overlay)).not.toContain("a annotate");
 	});
 
 	it("fast-scrolls the body with Shift+Arrow", () => {

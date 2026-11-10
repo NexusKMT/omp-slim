@@ -17,8 +17,6 @@ const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const RIGHT = "\x1b[C";
 const LEFT = "\x1b[D";
-const SHIFT_RIGHT = "\x1b[1;2C";
-const SHIFT_LEFT = "\x1b[1;2D";
 
 /** A terminal that draws every kind (`meter` included). */
 const CX: DescribeContext = { cols: 100, reduceMotion: false, dark: true, supports: () => true, feature: () => true };
@@ -593,25 +591,21 @@ describe("dialogs under a native surface", () => {
 		expect(viaKey).toHaveBeenCalledTimes(1);
 	});
 
-	it("plan review: ←/→ walk the horizontal decision bar, Shift+←/→ step the model slider, ↑ leaves it", () => {
+	it("plan review: ←/→ walk the horizontal decision bar and ↑ returns to the body", () => {
 		const onPick = vi.fn();
-		const onChange = vi.fn();
 		const overlay = new PlanReviewOverlay(
 			"# Plan\n\nbody\n",
 			{
 				options: ["Approve", "Refine", "Stay"],
-				slider: { segments: [{ label: "Fast" }, { label: "Smart" }], index: 0, onChange },
 			},
 			{ onPick, onCancel: vi.fn() },
 		);
 		setNativeRendering(true);
 		try {
-			// → → ← lands on the middle option; Shift+→ then Shift+← round-trips the slider.
+			// → → ← lands on the middle option.
 			overlay.handleInput(RIGHT);
 			overlay.handleInput(RIGHT);
 			overlay.handleInput(LEFT);
-			overlay.handleInput(SHIFT_RIGHT);
-			overlay.handleInput(SHIFT_LEFT);
 			// ↓ has nothing below the bar: the selection stays put.
 			overlay.handleInput(DOWN);
 			// ↑ hands focus to the body, where Enter returns to the bar instead of confirming.
@@ -622,7 +616,6 @@ describe("dialogs under a native surface", () => {
 		} finally {
 			setNativeRendering(false);
 		}
-		expect(onChange.mock.calls).toEqual([[1], [0]]);
 		expect(onPick).toHaveBeenCalledWith("Refine");
 	});
 

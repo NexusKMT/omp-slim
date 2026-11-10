@@ -36,9 +36,7 @@ export interface ModelHubSource extends ModelBrowserSource {
 export interface ModelHubRegistry extends ModelBrowserRegistry {
 	readonly authStorage: { readonly keys: Pick<KeysApi, "source"> };
 	getDiscoverableProviders(): string[];
-	getProviderDiscoveryState(
-		provider: string,
-	):
+	getProviderDiscoveryState(provider: string):
 		| {
 				optional: boolean;
 				status: "idle" | "ok" | "empty" | "cached" | "unavailable" | "unauthenticated";
@@ -226,6 +224,7 @@ export class ModelHubComponent implements Component {
 				if (
 					state?.optional &&
 					(state.status === "idle" || state.status === "unavailable") &&
+					!this.registry.authStorage.keys.source(provider) &&
 					!available.some(model => model.provider === provider)
 				)
 					continue;

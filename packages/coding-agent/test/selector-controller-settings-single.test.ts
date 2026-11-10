@@ -9,7 +9,6 @@ import { SessionSelectorComponent } from "@oh-my-pi/pi-tui/overlays/session-sele
 import { AgentsHubComponent } from "@oh-my-pi/pi-tui/overlays/agents-hub";
 import * as activityClient from "@oh-my-pi/pi-coding-agent/stats/activity-client";
 import * as sessionPins from "@oh-my-pi/pi-coding-agent/session/session-pins";
-import { cfgTaskAgentModelOverrides } from "@oh-my-pi/pi-coding-agent/task/settings";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import * as themeModule from "@oh-my-pi/pi-tui/theme";
 import { createInteractiveModeContext } from "./helpers/interactive-mode-context";
@@ -58,10 +57,8 @@ function pickerContext(ui: OverlayUi, models: Model[] = [], current?: Model, set
 			scopedModels: [],
 			getContextUsage: () => undefined,
 			effectiveServiceTier: () => undefined,
-			getRoleModelCycle: () => undefined,
 			resolveTemporaryModelThinkingLevel: () => undefined,
 			setModelTemporary: vi.fn(async () => {}),
-			applyRoleModel: vi.fn(async () => {}),
 			modelRegistry: {
 				getError: () => undefined,
 				getAvailable: () => models,
@@ -139,8 +136,6 @@ describe("single-instance menus", () => {
 		const model = createMockModel({ provider: "openai", id: "selection-target" }).model;
 		const hostModel = createMockModel({ provider: "anthropic", id: "host-model" }).model;
 		const ctx = pickerContext(ui, [model], hostModel, Settings.isolated());
-		cfgTaskAgentModelOverrides.override(ctx.settings, { task: "kept/task-model" });
-		const taskDefaults = structuredClone(cfgTaskAgentModelOverrides.get(ctx.settings));
 		const selected = vi.fn();
 		const controller = new SelectorController(ctx);
 
@@ -162,8 +157,6 @@ describe("single-instance menus", () => {
 
 		expect(selected).toHaveBeenCalledWith(`${model.provider}/${model.id}`);
 		expect(ctx.session.setModelTemporary).not.toHaveBeenCalled();
-		expect(ctx.session.applyRoleModel).not.toHaveBeenCalled();
-		expect(cfgTaskAgentModelOverrides.get(ctx.settings)).toEqual(taskDefaults);
 
 		controller.showModelSelector({
 			selectOnly: { currentSelector: `${model.provider}/${model.id}`, onSelect: selected },

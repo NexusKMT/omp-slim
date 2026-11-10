@@ -384,69 +384,6 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		expect(session?.getActiveToolNames()).toEqual(["read"]);
 	});
 
-	it("restores plan tool presentation when prior-model restoration fails", async () => {
-		const settings = Settings.isolated({ "plan.defaultOnStartup": true, "compaction.enabled": false });
-		settings.setModelRole("plan", "anthropic/claude-haiku-4-5:high");
-		const writeTool = makeTool("write");
-		const planSelectedTool = makeTool("plan_selected");
-		const mountedTool = makeMcpTool();
-		const xdev: XdevState = {
-			tools: new Map(),
-			mountedNames: new Set(),
-			builtInNames: new Set(["read", "write"]),
-			isActive: name => session?.getActiveToolNames().includes(name) === true,
-		};
-		const created = createHarness(settings, {
-			extraRegistryTools: [writeTool, planSelectedTool],
-			builtInToolNames: ["read", "write"],
-			xdev,
-		});
-		const previousModel = session?.model;
-		await created.init({ suppressWelcomeIntro: true });
-		const planModel = session?.model;
-		await session!.refreshMCPTools([mountedTool]);
-		await session!.setActiveToolsByName([...session!.getEnabledToolNames(), planSelectedTool.name]);
-		const planTools = session!.getEnabledToolNames();
-		const planActiveTools = session!.getActiveToolNames();
-		const planMountedTools = session!.getMountedXdevToolNames();
-		expect(planModel?.id).toBe("claude-haiku-4-5");
-		expect(session?.configuredThinkingLevel()).toBe(Effort.High);
-		expect(planActiveTools).toEqual(["read", "write", planSelectedTool.name]);
-		expect(planMountedTools).toEqual([mountedTool.name]);
-		expect(xdev.mountedNames.has(mountedTool.name)).toBe(true);
-
-		const setModelTemporary = session!.setModelTemporary.bind(session);
-		const restoreModel = vi.spyOn(session!, "setModelTemporary").mockImplementationOnce(async (...args) => {
-			await setModelTemporary(...args);
-			throw new Error("model restore failed after switch");
-		});
-		await expect(created.handlePlanModeCommand()).rejects.toThrow("model restore failed after switch");
-
-		expect(created.planModeEnabled).toBe(true);
-		expect(created.planModePaused).toBe(false);
-		expect(session?.getPlanModeState()?.enabled).toBe(true);
-		expect(session?.peekPlanProposalHandler()).toBeDefined();
-		expect(session?.model?.id).toBe(planModel?.id);
-		expect(session?.configuredThinkingLevel()).toBe(Effort.High);
-		expect(session?.getEnabledToolNames()).toEqual(planTools);
-		expect(session?.getActiveToolNames()).toEqual(planActiveTools);
-		expect(session?.getMountedXdevToolNames()).toEqual(planMountedTools);
-		expect(xdev.mountedNames.has(mountedTool.name)).toBe(true);
-
-		restoreModel.mockRestore();
-		await created.handlePlanModeCommand();
-		expect(created.planModeEnabled).toBe(false);
-		expect(session?.getPlanModeState()).toBeUndefined();
-		expect(session?.model?.id).toBe(previousModel?.id);
-		// The plan-only selections are removed while the live MCP tool survives
-		// top-level because restoring the read-only snapshot removes its device transport.
-		expect(session?.getActiveToolNames()).toContain(mountedTool.name);
-		expect(session?.getActiveToolNames()).not.toContain(planSelectedTool.name);
-		expect(session?.getMountedXdevToolNames()).toEqual([]);
-		expect(xdev.tools.has(mountedTool.name)).toBe(true);
-		expect(resolveXdevTool(xdev, mountedTool.name)).toBeDefined();
-	});
-
 	it("clears old plan UI state when target-session reconciliation restore fails", async () => {
 		const writeTool = makeTool("write");
 		const rebuildGate = { fail: false, calls: 0 };
@@ -482,13 +419,12 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 			Settings.isolated({
 				"plan.defaultOnStartup": true,
 				"compaction.enabled": false,
-				modelRoles: { plan: "anthropic/claude-sonnet-4-6" },
 			}),
 			{ extraRegistryTools: [writeTool], builtInToolNames: ["read", "write"] },
 		);
 		await created.init({ suppressWelcomeIntro: true });
 		expect(created.planModeEnabled).toBe(true);
-		expect(session?.model?.id).toBe("claude-sonnet-4-6");
+		expect(session?.model?.id).toBe("claude-sonnet-4-5");
 		const previousSessionFile = session?.sessionFile;
 
 		await created.handleClearCommand();
@@ -508,7 +444,6 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 			Settings.isolated({
 				"plan.defaultOnStartup": true,
 				"compaction.enabled": false,
-				modelRoles: { plan: "anthropic/claude-sonnet-4-6" },
 			}),
 		);
 		await created.init({ suppressWelcomeIntro: true });
@@ -521,7 +456,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		expect(session?.sessionManager.buildSessionContext().mode).toBe("plan");
 		expect(session?.getPlanModeState()?.enabled).toBe(true);
 		expect(session?.peekPlanProposalHandler()).toBeDefined();
-		expect(session?.model?.id).toBe("claude-sonnet-4-6");
+		expect(session?.model?.id).toBe("claude-sonnet-4-5");
 	});
 
 	it("enters only when enabled and the session has no conversation or explicit mode", () => {
@@ -567,7 +502,6 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		const created = createHarness(
 			Settings.isolated({
 				"compaction.enabled": false,
-				modelRoles: { plan: "anthropic/claude-sonnet-4-6" },
 			}),
 		);
 		created.sessionManager.appendModelChange("anthropic/claude-sonnet-4-5");

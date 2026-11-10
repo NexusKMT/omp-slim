@@ -70,7 +70,7 @@ describe("createModelMentionSource", () => {
 
 		expect(selectors("example")).toEqual(["b/example-2", "a/example-2"]);
 
-		cfgModelProviderOrder.set(settings, ["a"]);
+		cfgModelProviderOrder.override(settings, ["a"]);
 		expect(selectors("example")).toEqual(["a/example-2", "b/example-2"]);
 
 		available.push(makeModel("c", "example-3"));

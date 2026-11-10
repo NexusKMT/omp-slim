@@ -202,36 +202,29 @@ describe("focused subagent view slash commands", () => {
 		expect(focused.editor.getText()).toBe("");
 	});
 
-	it("cycles the focused agent's thinking level and role model, not the main session's", async () => {
+	it("cycles the focused agent's thinking level", async () => {
 		const focused = createFocusedContext();
 		const focusedCycleThinking = vi.fn(() => "high");
-		const focusedCycleRoles = vi.fn(async () => ({ role: "slow" }));
 		const mainCycleThinking = vi.fn(() => "low");
-		const mainCycleRoles = vi.fn(async () => ({ role: "default" }));
+		Object.assign(focused.raw.session, { cycleThinkingLevel: mainCycleThinking });
 		Object.assign(focused.raw.viewSession, {
 			cycleThinkingLevel: focusedCycleThinking,
-			cycleRoleModels: focusedCycleRoles,
 		});
-		Object.assign(focused.raw.session, { cycleThinkingLevel: mainCycleThinking, cycleRoleModels: mainCycleRoles });
 		Object.assign(focused.raw, {
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),
-			showModelCycleTrack: vi.fn(),
 		});
 		const controller = new InputController(focused.ctx);
 		const settingsState = beginSettingsTest();
 		try {
 			await Settings.init({ inMemory: true });
 			controller.cycleThinkingLevel();
-			await controller.cycleRoleModel("forward");
 		} finally {
 			restoreSettingsTestState(settingsState);
 		}
 
 		expect(focusedCycleThinking).toHaveBeenCalledTimes(1);
-		expect(focusedCycleRoles).toHaveBeenCalledTimes(1);
 		expect(mainCycleThinking).not.toHaveBeenCalled();
-		expect(mainCycleRoles).not.toHaveBeenCalled();
 	});
 
 	it("keeps other commands gated to the main session, draft intact", async () => {
