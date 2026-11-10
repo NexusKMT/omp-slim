@@ -33,7 +33,7 @@ export async function resolvePrimaryModel(
 ): Promise<ResolvedCommitModel> {
 	const available = modelRegistry.getAvailable();
 	const matchPreferences = getModelMatchPreferences(settings);
-	const selector = override ?? settings.getModelRole("default");
+	const selector = override ?? settings.getModel();
 	const resolved = selector ? resolveModelRoleValue(selector, available, { settings, matchPreferences }) : undefined;
 	const model = resolved?.model;
 	if (!model) {

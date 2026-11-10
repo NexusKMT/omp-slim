@@ -41,7 +41,6 @@ import {
 import { createSecurityPublicationTool } from "./publication";
 import { SecurityStore, writeSecurityBundleToDirectory } from "./store";
 
-import { cfgRetryFallbackChains, cfgRetryModelFallback, cfgRetryUsageAwareFallback } from "../session/settings";
 import { cfgSecurityEnabled } from "../tools/settings";
 
 const SECURITY_SESSION_TOOLS = ["read", "grep", "glob", "lsp", "ast_grep", "task", "security_publish"];
@@ -233,9 +232,6 @@ function initialBundle(
 
 async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInput): Promise<AgentSession> {
 	const scanSettings = await input.host.settings.cloneForCwd(input.executionRoot);
-	cfgRetryModelFallback.override(scanSettings, false);
-	cfgRetryUsageAwareFallback.override(scanSettings, false);
-	cfgRetryFallbackChains.override(scanSettings, {});
 	const providerSessionId = `security:${input.scanId}`;
 	const { session } = await createAgentSession({
 		cwd: input.executionRoot,

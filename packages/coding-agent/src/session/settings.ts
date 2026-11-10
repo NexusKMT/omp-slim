@@ -638,7 +638,7 @@ export const cfgRetryMaxRetries = register({
 	default: 10,
 	ui: {
 		tab: "model",
-		group: "Retry & Fallback",
+		group: "Retry",
 		label: "Retry Attempts",
 		description: "Maximum retry attempts on API errors",
 		options: [
@@ -659,10 +659,10 @@ export const cfgRetryMaxDelayMs = register({
 	default: 5 * 60 * 1000,
 	ui: {
 		tab: "model",
-		group: "Retry & Fallback",
+		group: "Retry",
 		label: "Max Retry Delay",
 		description:
-			"Maximum wait between retries, in ms. When the provider asks us to wait longer than this and no credential or model fallback succeeds, the request fails fast instead of sleeping (e.g. 3-hour Anthropic rate-limit windows). 0 disables the ceiling — to let the session auto-resume through provider-stated quota resets.",
+			"Maximum wait between retries, in ms. When the provider asks us to wait longer than this and no other credential can serve the same model, the request fails fast instead of sleeping (e.g. 3-hour Anthropic rate-limit windows). 0 disables the ceiling — to let the session auto-resume through provider-stated quota resets.",
 	},
 });
 
@@ -672,76 +672,11 @@ export const cfgRetryWaitForUsageReset = register({
 	default: false,
 	ui: {
 		tab: "model",
-		group: "Retry & Fallback",
+		group: "Retry",
 		label: "Wait For Usage Reset",
 		get description() {
 			return `When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable (${formatKeyHint("escape")}) but also hold subagents, so leave off for unattended runs.`;
 		},
-	},
-});
-
-export const cfgRetryModelFallback = register({
-	id: "retry.modelFallback",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "model",
-		group: "Retry & Fallback",
-		label: "Retry Model Fallback",
-		description:
-			"Allow retry recovery to switch to models in retry.fallbackChains after provider errors. Independent of Auto-Promote Context",
-	},
-});
-
-export const cfgRetryFallbackOn = register({
-	id: "retry.fallbackOn",
-	type: "enum",
-	values: ["any", "usage-limit", "except-usage-limit"] as const,
-	default: "any",
-	ui: {
-		tab: "model",
-		group: "Retry & Fallback",
-		label: "Fallback Trigger",
-		description: "Which failed requests may switch to a configured fallback model",
-		options: [
-			{ value: "any", label: "Any error", description: "Every provider error may switch models" },
-			{
-				value: "usage-limit",
-				label: "Usage limits only",
-				description: "Switch only on a usage limit; retry other errors on the same model, then surface them",
-			},
-			{
-				value: "except-usage-limit",
-				label: "All but usage limits",
-				description: "Wait out or surface a usage limit; switch on other errors",
-			},
-		],
-	},
-});
-
-export const cfgRetryRateLimitWalksChain = register({
-	id: "retry.rateLimitWalksChain",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "model",
-		group: "Retry & Fallback",
-		label: "Rate Limit Walks Chain",
-		description:
-			"On a rate limit, do not hold the retry.fallbackChains walk for a turn whose thinking is signed by the failing model. Off (the default), such a turn keeps retrying the rate-limited model until retry.maxRetries is spent before the chain is reached.",
-	},
-});
-
-export const cfgRetryUsageAwareFallback = register({
-	id: "retry.usageAwareFallback",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "model",
-		group: "Retry & Fallback",
-		label: "Usage-Aware Fallback",
-		description:
-			"Use reliable coding-plan quota reports to prefer same-provider accounts, then configured fallback models, before a hard usage limit. Ordinary configured API keys are excluded.",
 	},
 });
 
@@ -751,11 +686,10 @@ export const cfgRetryUsageReservePct = register({
 	default: DEFAULT_USAGE_RESERVE_PCT,
 	ui: {
 		tab: "model",
-		group: "Retry & Fallback",
+		group: "Retry",
 		label: "Reserve Margin",
 		description:
-			"Treat a coding-plan model as near its limit below this remaining percentage. Unknown or unmapped usage keeps the primary model.",
-		condition: "usageAwareFallbackEnabled",
+			"Prefer another account for the current model below this remaining percentage. Unknown or unmapped usage does not change the model.",
 		options: [
 			{ value: "5", label: "5%", description: "Act only when nearly exhausted" },
 			{ value: "10", label: "10%", description: "Balanced safety margin" },
@@ -766,101 +700,18 @@ export const cfgRetryUsageReservePct = register({
 	},
 });
 
-export const cfgRetryUsageReservePolicy = register({
-	id: "retry.usageReservePolicy",
-	type: "enum",
-	values: ["confirm", "auto", "fail-closed"] as const,
-	default: "confirm",
-	ui: {
-		tab: "model",
-		group: "Retry & Fallback",
-		label: "Reserve Policy",
-		description: "What to do when every same-provider coding-plan account is inside the reserve margin.",
-		condition: "usageAwareFallbackEnabled",
-		options: [
-			{
-				value: "confirm",
-				label: "Confirm interactively",
-				description: "Keep interactive sessions on the primary until confirmed; background agents auto-fallback",
-			},
-			{
-				value: "auto",
-				label: "Auto-fallback",
-				description: "Always select the next eligible configured fallback",
-			},
-			{
-				value: "fail-closed",
-				label: "Fail closed",
-				description: "Do not spend reserve quota or select a fallback",
-			},
-		],
-	},
-});
-
-export const cfgRetryFallbackChains = register({
-	id: "retry.fallbackChains",
-	type: "record",
-	default: EMPTY_STRING_ARRAYS_RECORD,
-	ui: {
-		tab: "model",
-		group: "Retry & Fallback",
-		label: "Retry Fallback Chains",
-		description:
-			'JSON object mapping model roles, model selectors ("provider/model-id"), or provider wildcards ("provider/*") to ordered fallback selectors, e.g. {"default":["openai/gpt-4o-mini"],"google-antigravity/*":["google/*","google-vertex/*"]}. Model-oriented keys apply whenever that model/provider is active, regardless of role; a "provider/*" entry keeps the failing model\'s id and swaps the provider. An id-prefixed wildcard ("openrouter/google/*") re-prefixes the failing model\'s bare id (google-antigravity/gemini-x -> openrouter/google/gemini-x) and, used as a key, matches only that provider\'s ids under the prefix. A fallback entry may carry an explicit thinking suffix ("provider/model:low", ":high", ":max", ":off"); a bare entry inherits the failing turn\'s effort, and "provider/*" entries always inherit.',
-	},
-});
-
-export const cfgRetryFallbackRevertPolicy = register({
-	id: "retry.fallbackRevertPolicy",
-	type: "enum",
-	values: ["cooldown-expiry", "never"] as const,
-	default: "cooldown-expiry",
-	ui: {
-		tab: "model",
-		group: "Retry & Fallback",
-		label: "Fallback Revert Policy",
-		description: "When to return to the primary model after a fallback",
-		options: [
-			{
-				value: "cooldown-expiry",
-				label: "Cooldown expiry",
-				description: "Return to the primary model after its suppression window ends",
-			},
-			{ value: "never", label: "Never", description: "Stay on the fallback model until manually changed" },
-		],
-	},
-});
-
-/** Retry/backoff and usage-aware fallback policy (`retry.*` except fallback chains/revert policy). */
+/** Retry/backoff and same-model account reserve policy. */
 export const cfgRetry = combine({
 	enabled: cfgRetryEnabled,
 	maxRetries: cfgRetryMaxRetries,
 	baseDelayMs: cfgRetryBaseDelayMs,
 	maxDelayMs: cfgRetryMaxDelayMs,
 	waitForUsageReset: cfgRetryWaitForUsageReset,
-	modelFallback: cfgRetryModelFallback,
-	fallbackOn: cfgRetryFallbackOn,
-	rateLimitWalksChain: cfgRetryRateLimitWalksChain,
-	usageAwareFallback: cfgRetryUsageAwareFallback,
 	usageReservePct: cfgRetryUsageReservePct,
-	usageReservePolicy: cfgRetryUsageReservePolicy,
 });
 
 /** Retry/backoff policy ({@link cfgRetry}). */
 export type RetrySettings = SettingValueOf<typeof cfgRetry>;
-
-export const cfgProvidersAnthropicServerSideFallback = register({
-	id: "providers.anthropic.serverSideFallback",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "model",
-		group: "Retry & Fallback",
-		label: "Anthropic Server-Side Fallback (Fable 5)",
-		description:
-			"When a Claude Fable 5 / Mythos 5 request is blocked by Anthropic's safety classifier, retry it on Claude Opus 5 server-side (Anthropic `server-side-fallback-2026-06-01` beta). Opt-in — leaving this off preserves the pre-fallback behavior for every request.",
-	},
-});
 
 /**
  * Anthropic subscription slow mode (`off` | `auto`). Deliberately has no
@@ -982,25 +833,19 @@ export const cfgProvidersAutoThinkingMaxEffort = register({
 export const cfgFeaturesUnexpectedStopDetection = register({
 	id: "features.unexpectedStopDetection",
 	type: "enum",
-	values: ["none", "mechanical", "smart"] as const,
+	values: ["none", "mechanical"] as const,
 	default: "mechanical",
 	ui: {
 		tab: "interaction",
 		group: "Agent",
 		label: "Unexpected Stops",
-		description:
-			"Automatically recover when the assistant stops without a visible message. Smart also classifies text-only stops with a small model.",
+		description: "Automatically retry the current model when the assistant stops without a visible message.",
 		options: [
 			{ value: "none", label: "None", description: "Disabled" },
 			{
 				value: "mechanical",
 				label: "Mechanical",
 				description: "Retry stops with no visible assistant message; tool calls are excluded (default)",
-			},
-			{
-				value: "smart",
-				label: "Smart",
-				description: "Mechanical + small-model classification of text-only stops",
 			},
 		],
 	},

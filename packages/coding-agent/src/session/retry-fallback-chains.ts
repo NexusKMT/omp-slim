@@ -90,9 +90,7 @@ export function formatRetryFallbackBaseSelector(selector: RetryFallbackSelector)
 }
 
 /**
- * A dynamic role pinned to one model selector with its own fallback chain.
- * Subagents own one under `subagent:<id>`; `session_init` persists it so cold
- * revival restores the same routing the spawn installed.
+ * Legacy session metadata. New runs never install or follow these fallback chains.
  */
 export interface RetryFallbackRole {
 	/** Selector the role is assigned (the chain's primary). */

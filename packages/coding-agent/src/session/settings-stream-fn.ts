@@ -13,7 +13,6 @@
 import { fitOutputTokensToContextWindow, type StreamFn, Tokenizer } from "@oh-my-pi/pi-agent-core";
 import { type Model, type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi-ai";
 import { openAIResponsesReplaysNativeHistory } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
-import { serverSideFallbackModels } from "@oh-my-pi/pi-catalog/compat/server-side-fallback";
 import type { Settings } from "../config/settings";
 import { type AnthropicSlowModeLanes, anthropicSlowModeLanes } from "./anthropic-slow-mode";
 
@@ -21,7 +20,6 @@ import {
 	cfgModelLoopGuardCheckAssistantContent,
 	cfgModelLoopGuardEnabled,
 	cfgOmitThinking,
-	cfgProvidersAnthropicServerSideFallback,
 	cfgProvidersAnthropicSlowMode,
 	cfgProvidersAntigravityEndpoint,
 	cfgProvidersCacheRetention,
@@ -63,7 +61,7 @@ function timeoutSecondsToMs(value: number): number | undefined {
 	return Math.max(1, Math.trunc(value * 1000));
 }
 
-/** Session wiring for Anthropic subscription wrap-up and slow mode (`providers.anthropic.slowMode`), and server-side fallback opt-out. */
+/** Session wiring for Anthropic subscription wrap-up and slow mode (`providers.anthropic.slowMode`). */
 export interface SettingsStreamSlowModeContext {
 	/** Defaults to the process-wide lane registry. */
 	lanes?: AnthropicSlowModeLanes;
@@ -73,8 +71,6 @@ export interface SettingsStreamSlowModeContext {
 	notify?: (level: "info" | "warning" | "error", message: string) => void;
 	/** Record which account lane served the session's latest Anthropic request. */
 	onLane?: (lane: string) => void;
-	/** Never inject the opt-in server-side fallback chain (per-call `model` workers never switch models). */
-	disableServerSideFallback?: boolean;
 }
 
 /**
@@ -113,18 +109,6 @@ export function createSettingsAwareStreamFn(
 		const cacheRetention = cacheRetentionSetting === "auto" ? undefined : cacheRetentionSetting;
 		const streamFirstEventTimeoutMs = timeoutSecondsToMs(cfgProvidersStreamFirstEventTimeoutSeconds.get(settings));
 		const streamIdleTimeoutMs = timeoutSecondsToMs(cfgProvidersStreamIdleTimeoutSeconds.get(settings));
-		// Server-side fallback (opt-in): when the user enables it, inject the
-		// catalog-owned `fallbacks` chain (`server-side-fallback-models` axis,
-		// authored for Fable/Mythos on first-party Anthropic). The provider
-		// layer picks it up, sends the beta header, and honors the response
-		// signals. Models without a rule-assigned chain are untouched.
-		const serverSideFallbackChain =
-			streamOptions?.fallbacks === undefined && cfgProvidersAnthropicServerSideFallback.get(settings)
-				? serverSideFallbackModels(model)
-				: [];
-		const fallbacks =
-			streamOptions?.fallbacks ??
-			(serverSideFallbackChain.length > 0 ? serverSideFallbackChain.map(id => ({ model: id })) : undefined);
 		// Anthropic usage-limit stages: the provider consults these hooks only for
 		// first-party OAuth requests, so attaching them per anthropic call is safe.
 		// Wrap-up tracking runs for everyone; the setting (`/slow`) gates only the
@@ -187,13 +171,10 @@ export function createSettingsAwareStreamFn(
 			hideThinkingSummary: streamOptions?.hideThinkingSummary ?? cfgOmitThinking.get(settings),
 			// An off switch, not a default: the agent loop always offers its queue.
 			liveSteering: cfgProvidersOpenaiLiveSteering.get(settings) ? streamOptions?.liveSteering : undefined,
-			...(fallbacks !== undefined ? { fallbacks } : {}),
 			...(storeResponses !== undefined ? { storeResponses } : {}),
-			// A per-call worker never switches models: no fallback chain, including a
-			// caller-supplied one, and Factory drops its own refusal chain.
-			...(slowModeContext?.disableServerSideFallback
-				? { fallbacks: undefined, disableServerSideFallback: true }
-				: {}),
+			// Every session keeps its selected model, including provider-side retries.
+			fallbacks: undefined,
+			disableServerSideFallback: true,
 			...(codexAccessPrograms !== undefined ? { codexAccessPrograms } : {}),
 			...(slowModeHooks !== undefined ? { anthropicSlowMode: slowModeHooks } : {}),
 		};
