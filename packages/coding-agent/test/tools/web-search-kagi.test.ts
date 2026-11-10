@@ -3,7 +3,7 @@ import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
 import { type KagiSearchRequest, searchWithKagi } from "@oh-my-pi/pi-coding-agent/web/kagi";
 import { KagiProvider, searchKagi } from "@oh-my-pi/pi-coding-agent/web/search/providers/kagi";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../helpers/auth-storage";
 
 const providerAuthStorage = createInMemoryAuthStorage();
 providerAuthStorage.keys.setRuntime("kagi", "test-kagi-key");

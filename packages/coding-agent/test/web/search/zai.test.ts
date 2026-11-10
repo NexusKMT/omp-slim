@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
 import { searchZai, ZaiProvider } from "@oh-my-pi/pi-coding-agent/web/search/providers/zai";
-import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../../helpers/auth-storage";
 
 const authStorage = createInMemoryAuthStorage();
 authStorage.keys.setRuntime("zai", "zai-test-key");
