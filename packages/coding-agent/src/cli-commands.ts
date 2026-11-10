@@ -37,21 +37,7 @@ export const commands: CommandEntry[] = [
 		load: () => import("./commands/acp").then(m => m.default),
 		help: commandHelp.acpHelp,
 	},
-	{
-		name: "auth",
-		load: () => import("./commands/auth").then(m => m.default),
-		help: commandHelp.authHelp,
-	},
-	{
-		name: "auth-broker",
-		load: () => import("./commands/auth-broker").then(m => m.default),
-		help: commandHelp.authBrokerHelp,
-	},
-	{
-		name: "auth-gateway",
-		load: () => import("./commands/auth-gateway").then(m => m.default),
-		help: commandHelp.authGatewayHelp,
-	},
+
 	{
 		name: "agents",
 		load: () => import("./commands/agents").then(m => m.default),
@@ -97,11 +83,7 @@ export const commands: CommandEntry[] = [
 		load: () => import("./commands/config").then(m => m.default),
 		help: commandHelp.configHelp,
 	},
-	{
-		name: "dry-balance",
-		load: () => import("./commands/dry-balance").then(m => m.default),
-		help: commandHelp.dryBalanceHelp,
-	},
+
 	{
 		name: "find",
 		load: () => import("./commands/find").then(m => m.default),
@@ -148,11 +130,7 @@ export const commands: CommandEntry[] = [
 		load: () => import("./commands/install").then(m => m.default),
 		help: commandHelp.installHelp,
 	},
-	{
-		name: "login",
-		load: () => import("./commands/login").then(m => m.default),
-		help: commandHelp.loginHelp,
-	},
+
 	{
 		name: "models",
 		load: () => import("./commands/models").then(m => m.default),
@@ -232,11 +210,7 @@ export const commands: CommandEntry[] = [
 		load: () => import("./commands/update").then(m => m.default),
 		help: commandHelp.updateHelp,
 	},
-	{
-		name: "usage",
-		load: () => import("./commands/usage").then(m => m.default),
-		help: commandHelp.usageHelp,
-	},
+
 	{
 		name: "token",
 		load: () => import("./commands/token").then(m => m.default),

@@ -6,7 +6,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type Agent, AgentBusyError, type AgentMessage, agentPauseGate, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Model, Usage } from "@oh-my-pi/pi-ai";
 import { execReplace } from "@oh-my-pi/pi-natives";
 import type {
 	AutocompleteProvider,
@@ -262,7 +262,7 @@ import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { AttachmentChipsBand } from "@oh-my-pi/pi-tui/prompt/attachment-chips";
 import type { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-execution";
 import { ChatBlock, type ChatBlockHost } from "@oh-my-pi/pi-tui/chrome/chat-block";
-import { CodexResetFireworksController } from "@oh-my-pi/pi-tui/overlays/codex-reset-fireworks";
+
 import { type ComposerNativeState, CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
 import { DynamicBorder } from "@oh-my-pi/pi-tui/chrome/dynamic-border";
 import { EditorTopGap } from "@oh-my-pi/pi-tui/prompt/editor-top-gap";
@@ -1778,7 +1778,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	mcpManager?: MCPManager;
 	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
 
-	readonly #codexResetFireworksController: CodexResetFireworksController;
 	readonly #btwController: BtwController;
 	readonly #tanCommandController: TanCommandController;
 	readonly #omfgController: OmfgController;
@@ -2198,13 +2197,9 @@ export class InteractiveMode implements InteractiveModeContext {
 					this.showGitUi();
 					return;
 				case "status.cost":
-					void this.handleUsageCommand();
-					return;
-				// Only the main session has a cache warmer, so a focused subagent's bar shows no
-				// cache marker: this click always comes from the main session's marker.
-				case "status.cache":
 					void this.handleSessionCommand();
 					return;
+
 				case "status.path":
 					openPath(this.sessionManager.getCwd());
 					return;
@@ -2213,11 +2208,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// A TSP terminal has no status strip: the tab title carries the PR.
 		this.statusLine.onNativePullRequest = pr => setTerminalTitlePullRequest(pr?.number);
 		this.statusLine.setAutoCompactEnabled(session.autoCompactionEnabled);
-		this.#codexResetFireworksController = new CodexResetFireworksController(this);
-		this.statusLine.setCodexResetFireworksHandler(event => {
-			this.#codexResetFireworksController.show(event);
-		});
-		this.statusLine.setResetExpiryNoticeHandler(notice => this.showWarning(notice));
+
 		// Vibe worker tok/s aggregator — keeps the status-line render layer off
 		// the heavy vibe/task dependency graph. The director is often idle while
 		// workers stream, so without this the tok/s badge would show a stale
@@ -2634,15 +2625,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		// TUI's multiplexer, output-backlog, and image safety gates.
 		this.ui.renderNow();
 
-		// Warm rendering and the current model connection after the first frame.
+		// Warm transcript rendering after the first frame.
 		setImmediate(() => {
 			// Resumed sessions paint their restored transcript (code blocks, diffs)
 			// right after init; warm the native syntax set (~60ms, ~24 MiB) off-thread
 			// so that paint does not build it on the JS thread. Fresh sessions skip it
 			// and pay the cost lazily on the first highlight, if any.
 			if (this.session.messages.length > 0) void warmHighlighter();
-			// Open the model API connection while the user reads the first frame.
-			this.session.prewarmModelConnection();
 		});
 
 		// Initialize hooks with TUI-based UI context
@@ -2737,7 +2726,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.session.subscribe(event => {
 				if (event.type === "model_changed") {
 					this.#scheduleComposerStatusPersist();
-					this.session.prewarmModelConnection();
 				}
 				if (event.type === "config_warnings_changed") {
 					this.#syncHeaderExtras();
@@ -4565,7 +4553,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				autoThinking: thinking === AUTO_THINKING,
 				// A fresh session derives tiers from settings, not this session's `/fast` toggles.
 				fastMode: this.session.isFastModeConfiguredFor(model),
-				usingSubscription: this.session.modelRegistry.isUsingSubscription(model),
+
 				autoCompactEnabled: this.session.autoCompactionEnabled,
 				compactionBoundaries: model.contextWindow
 					? statusLineHost.computeCompactionBoundaries(this.session, model.contextWindow, model)
@@ -7632,7 +7620,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#agentRegistryUnsubscribe = undefined;
 		this.#agentRegistrySubscriptionTarget = undefined;
 		this.#eventController.dispose();
-		this.#codexResetFireworksController.dispose();
+
 		this.statusLine.dispose();
 		if (this.#resizeHandler) {
 			process.stdout.removeListener("resize", this.#resizeHandler);
@@ -8574,10 +8562,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#commandController.handleJobsCommand(options);
 	}
 
-	handleUsageCommand(reports?: UsageReport[] | null): Promise<void> {
-		return this.#commandController.handleUsageCommand(reports);
-	}
-
 	async handleChangelogCommand(args = ""): Promise<void> {
 		await this.#commandController.handleChangelogCommand(args);
 	}
@@ -8771,10 +8755,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#selectorController.showSettingsSelector();
 	}
 
-	showUsageDashboard(reports: UsageReport[]): void {
-		this.#selectorController.showUsageDashboard(reports);
-	}
-
 	showAdvisorConfigure(): void {
 		this.#selectorController.showAdvisorConfigure();
 	}
@@ -8832,23 +8812,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleSessionDeleteCommand(): Promise<void> {
 		return this.#selectorController.handleSessionDeleteCommand();
-	}
-
-	showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
-		return this.#selectorController.showOAuthSelector(mode, providerId);
-	}
-
-	showSessionPinSelector(): Promise<void> {
-		return this.#selectorController.showSessionPinSelector();
-	}
-
-	showResetUsageSelector(): Promise<void> {
-		return this.#selectorController.showResetUsageSelector();
-	}
-
-	async showProviderSetup(): Promise<void> {
-		const { runProviderSetupWizard } = await import("./setup");
-		await runProviderSetupWizard(this);
 	}
 
 	showHookConfirm(title: string, message: string, dialogOptions?: InteractiveSelectorDialogOptions): Promise<boolean> {

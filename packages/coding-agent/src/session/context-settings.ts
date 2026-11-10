@@ -411,53 +411,6 @@ export const cfgSnapcompactToolResults = register({
 	},
 });
 
-export const cfgToolsFormat = register({
-	id: "tools.format",
-	type: "enum",
-	values: [
-		"auto",
-		"native",
-		"glm",
-		"hermes",
-		"kimi",
-		"xml",
-		"anthropic",
-		"deepseek",
-		"harmony",
-		"qwen3",
-		"gemini",
-		"gemma",
-		"minimax",
-	] as const,
-	default: "auto",
-	ui: {
-		tab: "context",
-		group: "Experimental",
-		label: "Tool Calling Mode",
-		description:
-			"Controls how tools are exposed to the model. Auto uses provider-native tool calls unless the selected model is marked as not supporting them, then falls back to the GLM owned dialect. Native forces provider-native tools; the other values force the named owned dialect.",
-		options: [
-			{
-				value: "auto",
-				label: "Auto",
-				description: "Use native tool calls unless the model is known not to support them.",
-			},
-			{ value: "native", label: "Native", description: "Use provider-native tool calls." },
-			{ value: "glm", label: "GLM", description: "Use GLM-style in-band tool calls." },
-			{ value: "hermes", label: "Hermes", description: "Use Hermes-style in-band tool calls." },
-			{ value: "kimi", label: "Kimi", description: "Use Kimi-style in-band tool calls." },
-			{ value: "xml", label: "XML", description: "Use generic XML in-band tool calls." },
-			{ value: "anthropic", label: "Anthropic", description: "Use Anthropic-style in-band tool calls." },
-			{ value: "deepseek", label: "DeepSeek", description: "Use DeepSeek-style in-band tool calls." },
-			{ value: "harmony", label: "Harmony", description: "Use Harmony-style in-band tool calls." },
-			{ value: "qwen3", label: "Qwen3", description: "Use the Qwen3 owned dialect." },
-			{ value: "gemini", label: "Gemini", description: "Use the Gemini owned dialect." },
-			{ value: "gemma", label: "Gemma", description: "Use the Gemma owned dialect." },
-			{ value: "minimax", label: "MiniMax", description: "Use the MiniMax owned dialect." },
-		],
-	},
-});
-
 export const cfgSnapcompactShape = register({
 	id: "snapcompact.shape",
 	type: "enum",

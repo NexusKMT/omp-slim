@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
+
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
@@ -47,13 +47,13 @@ import type { AgentSessionHandle } from "../../session/agent-session-handle";
 import type { MCPManager } from "../../mcp/manager";
 import { reconnectMcpManagerServer } from "../../mcp/oauth-reauth";
 import type { RestoredQueuedMessage } from "../../session/agent-session-types";
-import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
+
 import { findMostRecentNonEmptySession, findRecentSessionContinuation } from "../../session/session-listing";
 import { probeSessionLeases } from "../../session/session-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
-import { listLogoutAccounts, logoutCredential } from "../../slash-commands/helpers/logout";
+
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
 import { selectRpcEntries } from "./rpc-compat";
@@ -879,7 +879,7 @@ async function findRpcModel(session: RpcModelLookupSession, provider: string, mo
 	const find = () => session.getAvailableModels().find(m => m.provider === provider && m.id === modelId);
 	const model = find();
 	if (model) return model;
-	await session.modelRegistry.awaitBackgroundRefresh();
+
 	return find();
 }
 
@@ -2124,10 +2124,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					fastModeEnabled: session.isFastModeEnabled(),
 					tokensPerSecond: calculateTokensPerSecond(session.messages, session.isStreaming),
 					fastModeActive: session.isFastModeActive(),
-					slowModeSupported: session.isSlowModeSupported(),
-					slowModeEnabled: session.isSlowModeEnabled(),
-					slowModeScope: session.getSlowModeScope(),
-					usageLimit: session.getUsageLimitState(),
+
 					messageCount: session.messages.length,
 					systemPrompt: session.systemPrompt,
 					dumpTools: session.agent.state.tools.map(tool => ({
@@ -2151,18 +2148,6 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					enabled: session.isFastModeEnabled(),
 					active: session.isFastModeActive(),
 				});
-			}
-
-			case "set_slow_mode": {
-				// A truthy non-boolean must not flip a persisted global setting.
-				if (typeof command.enabled !== "boolean") {
-					return error(id, "set_slow_mode", "set_slow_mode requires boolean enabled");
-				}
-				const supported = session.setSlowMode(command.enabled);
-				if (command.enabled && !supported) {
-					return error(id, "set_slow_mode", "Slow mode is unavailable for the current model.");
-				}
-				return success(id, "set_slow_mode", { enabled: session.isSlowModeEnabled() });
 			}
 
 			case "goal": {
@@ -2332,7 +2317,6 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			}
 
 			case "get_available_models": {
-				await session.modelRegistry.awaitBackgroundRefresh();
 				const models = session.getAvailableModels();
 				return success(id, "get_available_models", { models });
 			}
@@ -2395,18 +2379,6 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			case "set_auto_compaction": {
 				session.setAutoCompactionEnabled(command.enabled);
 				return success(id, "set_auto_compaction");
-			}
-
-			// =================================================================
-			// Cache warming
-			// =================================================================
-
-			case "set_cache_warming": {
-				if (!CACHE_WARMING_MODES.includes(command.mode)) {
-					return error(id, "set_cache_warming", `Invalid cache warming mode: ${String(command.mode)}`);
-				}
-				const mode = session.setCacheWarmingMode(command.mode);
-				return success(id, "set_cache_warming", { mode });
 			}
 
 			// =================================================================
@@ -2527,110 +2499,6 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 						pageError instanceof RpcMessagesPageError ? pageError.code : undefined,
 					);
 				}
-			}
-
-			// =================================================================
-			// Login
-			// =================================================================
-
-			case "get_login_providers": {
-				const providers = getOAuthProviders().map(provider => ({
-					id: provider.id,
-					name: provider.name,
-					available: provider.available,
-					authenticated:
-						session.modelRegistry.authStorage.keys.source(provider.storeCredentialsAs ?? provider.id) !==
-						undefined,
-				}));
-				return success(id, "get_login_providers", { providers });
-			}
-
-			case "login": {
-				const knownProvider = getOAuthProviders().find(p => p.id === command.providerId);
-				if (!knownProvider) {
-					return error(id, "login", `Unknown OAuth provider: ${command.providerId}`);
-				}
-				const uiCtx = new RpcExtensionUIContext(pendingExtensionRequests, output);
-				// Track whether onAuth has fired. Providers that require interactive
-				// input before a browser URL cannot be satisfied headlessly; after
-				// onAuth, prompt input is the pasted OAuth code/redirect URL path.
-				let authEmitted = false;
-				try {
-					await session.modelRegistry.authStorage.oauth.login(command.providerId, {
-						onAuth: info => {
-							authEmitted = true;
-							output({
-								type: "extension_ui_request",
-								id: Snowflake.next() as string,
-								method: "open_url",
-								url: info.url,
-								launchUrl: info.launchUrl,
-								instructions: info.instructions,
-							} as RpcExtensionUIRequest);
-						},
-						onProgress: message => {
-							uiCtx.notify(message, "info");
-						},
-						onPrompt: async prompt => {
-							if (prompt.secret) {
-								throw new Error(
-									`Provider '${command.providerId}' requires secret input, ` +
-										"which is not supported in RPC mode. Use the terminal UI to log in.",
-								);
-							}
-							if (!authEmitted) {
-								// onPrompt called before any auth URL — provider requires
-								// interactive input that cannot be satisfied headlessly.
-								return Promise.reject(
-									new Error(
-										`Provider '${command.providerId}' requires interactive prompts ` +
-											"which are not supported in RPC mode. Use the terminal UI to log in.",
-									),
-								);
-							}
-							return (await uiCtx.input(prompt.message, prompt.placeholder, { timeout: 600_000 })) ?? "";
-						},
-					});
-					// Provider-scoped online refresh so the just-persisted credential
-					// re-runs discovery instead of reusing a fresh authoritative cache
-					// row (#5780).
-					await session.modelRegistry.refreshProvider(
-						knownProvider.storeCredentialsAs ?? knownProvider.id,
-						"online",
-					);
-					await session.refreshScopedModels();
-					return success(id, "login", { providerId: command.providerId });
-				} catch (err: unknown) {
-					return error(id, "login", err instanceof Error ? err.message : String(err));
-				}
-			}
-
-			case "get_logout_accounts": {
-				// An absent provider would list every provider's credentials.
-				if (typeof command.providerId !== "string") {
-					return error(id, "get_logout_accounts", "providerId must be a string");
-				}
-				const accounts = await listLogoutAccounts(
-					session.modelRegistry.authStorage,
-					command.providerId,
-					session.sessionId,
-				);
-				return success(id, "get_logout_accounts", { accounts });
-			}
-
-			case "logout": {
-				if (typeof command.providerId !== "string" || !Number.isInteger(command.credentialId)) {
-					return error(id, "logout", "providerId must be a string and credentialId an integer");
-				}
-				const { removed, remainingSource } = await logoutCredential(
-					session,
-					command.providerId,
-					command.credentialId,
-				);
-				if (!removed) {
-					return error(id, "logout", `Credential ${command.credentialId} is not stored for ${command.providerId}`);
-				}
-				return success(id, "logout", { remainingSource });
 			}
 
 			// =================================================================

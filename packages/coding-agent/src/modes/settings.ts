@@ -526,20 +526,6 @@ export const cfgTuiReactions = register({
 	},
 });
 
-export const cfgTuiCodexResetFireworks = register({
-	id: "tui.codexResetFireworks",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "appearance",
-		group: "Display",
-		label: "Codex Reset Fireworks",
-		get description() {
-			return `Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until ${formatKeyHint("escape")}`;
-		},
-	},
-});
-
 export const cfgTuiTitleState = register({
 	id: "tui.titleState",
 	type: "boolean",

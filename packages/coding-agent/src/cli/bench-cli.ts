@@ -7,7 +7,6 @@ import type {
 	Context,
 	Effort,
 	Model,
-	ProviderSessionState,
 	ServiceTier,
 	ServiceTierByFamily,
 } from "@oh-my-pi/pi-ai";
@@ -25,8 +24,7 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { formatModelStringWithRouting } from "../config/model-resolver";
 import { buildServiceTierByFamily, serviceTierForAllFamilies, serviceTierSettingToTier } from "../config/service-tier";
-import { Settings } from "../config/settings";
-import { resolveWebsocketPreference } from "../session/settings-stream-fn";
+
 import cachePrefixTemplate from "../prompts/bench/cache-prefix.md" with { type: "text" };
 import cachePrefixChunk from "../prompts/bench/cache-prefix-chunk.md" with { type: "text" };
 import cacheSuffixTemplate from "../prompts/bench/cache-suffix.md" with { type: "text" };
@@ -36,7 +34,6 @@ import prefillInstruction from "../prompts/bench/prefill-instruction.md" with { 
 import { shouldDisableReasoning, toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";
 import {
 	type BenchRuntime,
-	type BenchTarget,
 	createDefaultBenchRuntime,
 	resolveBenchTargets,
 	type StreamSimpleFn,
@@ -44,7 +41,7 @@ import {
 import { createLiveBoard, type LiveBoardOutput } from "@oh-my-pi/pi-tui/chrome/live-board";
 import { formatCost } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
 
-import { cfgTierAnthropic, cfgTierGoogle, cfgTierOpenai } from "../session/settings";
+import { cfgTierOpenai } from "../session/settings";
 
 const DEFAULT_PAR = 4;
 const DEFAULT_CACHE_MAX_TOKENS = 64;
@@ -223,7 +220,7 @@ export interface BenchCachePairReport {
 	stablePrefix: true;
 	suffixChanged: true;
 	promptCacheKeyStable: true;
-	statefulResponsesDisabled: true;
+
 	freshProviderSessionState: true;
 	/** "unavailable" when a transport does not expose the provider payload locally. */
 	payloadStructureStable: boolean | "unavailable";
@@ -334,13 +331,6 @@ function normalizePositiveInteger(name: string, value: number | undefined, fallb
 		throw new Error(`Expected --${name} to be a positive integer, got ${value}`);
 	}
 	return value;
-}
-
-function closeProviderSessionStates(providerSessionState: Map<string, ProviderSessionState>): void {
-	for (const state of providerSessionState.values()) {
-		state.close();
-	}
-	providerSessionState.clear();
 }
 
 function isFirstTokenEvent(event: AssistantMessageEvent): boolean {
@@ -661,7 +651,7 @@ interface BenchRequestOptions {
 	/** Requested service tier passed to `streamSimple`; absent omits the option. The provider layer applies scope/support gating before it reaches the wire. */
 	serviceTier?: ServiceTier;
 	promptCacheKey?: string;
-	statefulResponses?: false;
+
 	cacheCapture?: CacheRequestCapture;
 }
 
@@ -674,7 +664,6 @@ async function runBenchRequest(
 	const startedAt = now();
 	let firstTokenAt: number | undefined;
 	let transport: "http" | "websocket" | undefined;
-	const providerSessionState = new Map<string, ProviderSessionState>();
 	try {
 		const context: Context = {
 			// Codex's Responses endpoint 400s with "Instructions are required" when no
@@ -691,7 +680,7 @@ async function runBenchRequest(
 					: options.maxTokens,
 			reasoning: options.reasoning,
 			promptCacheKey: options.promptCacheKey,
-			statefulResponses: options.statefulResponses,
+
 			onPayload: options.cacheCapture
 				? payload => {
 						options.cacheCapture!.payloadStructure = payloadStructure(payload);
@@ -710,16 +699,6 @@ async function runBenchRequest(
 			},
 			disableReasoning: options.disableReasoning,
 			serviceTier: options.serviceTier,
-			providerSessionState,
-			// Keep Codex bench runs on WS as before; the settings wrapper still
-			// gates standard Responses on `providers.openaiResponsesWebsockets`.
-			preferWebsockets: true,
-			// pi-ai opts every OpenRouter request into response caching (1h TTL).
-			// Bench sends a byte-identical request each run, so within the TTL
-			// OpenRouter replays the cached generation with zeroed usage — the run
-			// shows "tokens 0, TPS 0.0" at line speed. Opt back out so every run
-			// measures a fresh generation.
-			headers: model.provider === "openrouter" ? { "X-OpenRouter-Cache": "false" } : undefined,
 		});
 		let message: AssistantMessage | undefined;
 		for await (const event of stream) {
@@ -783,8 +762,6 @@ async function runBenchRequest(
 		};
 	} catch (error) {
 		return { ok: false, error: getErrorMessage(error) };
-	} finally {
-		closeProviderSessionStates(providerSessionState);
 	}
 }
 
@@ -1026,14 +1003,6 @@ function formatBenchTable(rows: readonly BenchTableRow[], spec: BenchTableSpec, 
 	return table.map(cells => renderTableRow(cells, layout, undefined, { gap: "  " }).trimEnd());
 }
 
-function assertCacheModeSupported(targets: BenchTarget[]): void {
-	if (targets.some(({ model }) => model.api === "openai-codex-responses")) {
-		throw new Error(
-			"--cache is not supported for openai-codex-responses because Codex WebSocket chaining cannot produce independent prompt-cache pairs",
-		);
-	}
-}
-
 export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDependencies = {}): Promise<BenchSummary> {
 	const cacheMode = command.flags.cache === true;
 	const cacheFlagsUsed =
@@ -1160,26 +1129,19 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 	};
 
 	const runtime = await (deps.createRuntime ?? createDefaultBenchRuntime)();
-	const settings = runtime.settings ?? Settings.isolated({});
 	const streamFn: StreamSimpleFn = (model, context, options) =>
 		baseStreamFn(model, context, {
 			...options,
-			preferWebsockets: resolveWebsocketPreference(settings, model, options?.preferWebsockets),
 		});
 	try {
 		const targets = await resolveBenchTargets(command.models, runtime.modelRegistry, runtime.settings, writeStderr);
-		if (cacheMode) assertCacheModeSupported(targets);
 		// Explicit `--service-tier` (a single value broadcast across families) wins;
 		// otherwise fall back to the configured per-family `tier.*` settings. Each
 		// model resolves its own family's tier below before reaching the wire.
 		const flagTier = command.flags.serviceTier ? serviceTierSettingToTier(command.flags.serviceTier) : undefined;
 		const serviceTierByFamily = command.flags.serviceTier
 			? serviceTierForAllFamilies(flagTier)
-			: buildServiceTierByFamily(
-					(runtime.settings ? cfgTierOpenai.get(runtime.settings) : undefined) ?? "none",
-					(runtime.settings ? cfgTierAnthropic.get(runtime.settings) : undefined) ?? "none",
-					(runtime.settings ? cfgTierGoogle.get(runtime.settings) : undefined) ?? "none",
-				);
+			: buildServiceTierByFamily((runtime.settings ? cfgTierOpenai.get(runtime.settings) : undefined) ?? "none");
 		if (!json && flagTier) print(chalk.dim(`service tier: ${flagTier}`));
 		const total = cacheMode ? cachePairs! : runs;
 		rows = targets.map(({ selector, model, thinking }): BenchTableRow => ({
@@ -1249,7 +1211,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 								disableReasoning: shouldDisableReasoning(thinking) ? true : undefined,
 								serviceTier,
 								promptCacheKey,
-								statefulResponses: false,
+
 								cacheCapture: coldCapture,
 							},
 							streamFn,
@@ -1270,7 +1232,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 								disableReasoning: shouldDisableReasoning(thinking) ? true : undefined,
 								serviceTier,
 								promptCacheKey,
-								statefulResponses: false,
+
 								cacheCapture: warmCapture,
 							},
 							streamFn,
@@ -1288,7 +1250,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 							stablePrefix: true,
 							suffixChanged: true,
 							promptCacheKeyStable: true,
-							statefulResponsesDisabled: true,
+
 							freshProviderSessionState: true,
 							payloadStructureStable:
 								coldCapture.payloadStructure === undefined || warmCapture.payloadStructure === undefined

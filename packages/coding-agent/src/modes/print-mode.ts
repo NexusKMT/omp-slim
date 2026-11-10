@@ -13,7 +13,7 @@ import type { MCPManager } from "../mcp/manager";
 import { resolveMCPTimeoutMs } from "../mcp/timeout";
 import { type AgentSession, type AgentSessionEvent } from "../session/agent-session";
 import { COST_GATE_NOTICE_SOURCE } from "../session/cost-gate";
-import { CREDENTIAL_DISABLED_NOTICE_SOURCE } from "../session/credential-disabled-notice";
+
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
 import { parseSlashCommand, parseSubcommand } from "../slash-commands/helpers/parse";
@@ -383,14 +383,8 @@ async function runPrintModeCore(
 		// In JSON mode, output all events
 		if (mode === "json") {
 			stdout.writeLine(`${JSON.stringify(printableEvent(event))}\n`);
-		} else if (
-			event.type === "notice" &&
-			(event.source === CREDENTIAL_DISABLED_NOTICE_SOURCE || event.source === COST_GATE_NOTICE_SOURCE)
-		) {
-			// Text mode renders no session notices, but an automatic sign-out must not stay
-			// hidden behind a sibling account that quietly answers the prompt, a run must
-			// say when it crossed its cost thresholds.
-			writeStderrLine(event.source === COST_GATE_NOTICE_SOURCE ? event.message : `Warning: ${event.message}`);
+		} else if (event.type === "notice" && event.source === COST_GATE_NOTICE_SOURCE) {
+			writeStderrLine(event.message);
 		} else if (event.type === "auto_retry_start") {
 			// Text mode shows only `Working...` while a turn runs; a turn stuck retrying
 			// (offline, an outage) must say why instead of looking like a slow answer.

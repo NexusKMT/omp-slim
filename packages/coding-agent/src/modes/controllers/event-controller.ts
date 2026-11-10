@@ -402,15 +402,7 @@ export class EventController {
 			manual_compaction_end: async () => {},
 			auto_retry_start: e => this.#handleAutoRetryStart(e),
 			auto_retry_end: e => this.#handleAutoRetryEnd(e),
-			// The cache details show a refresh in flight; its hit moves the entry's expiry, a miss turns it cold.
-			cache_warming_start: async () => {
-				this.ctx.statusLine.invalidate();
-				this.ctx.ui.requestRender();
-			},
-			cache_warming_end: async () => {
-				this.ctx.statusLine.invalidate();
-				this.ctx.ui.requestRender();
-			},
+
 			retry_fallback_applied: e => this.#handleRetryFallbackApplied(e),
 			retry_fallback_succeeded: e => this.#handleRetryFallbackSucceeded(e),
 			ttsr_triggered: e => this.#handleTtsrTriggered(e),
@@ -1056,26 +1048,10 @@ export class EventController {
 		this.#lastTtsrNotification = undefined;
 		this.#streamingReveal.stop();
 		this.#toolArgsReveal.stop();
-		this.#seedHeldCompletionsFromPendingResults();
-	}
-
-	/** Restore display state without replaying completion notifications or persistence. */
-	#seedHeldCompletionsFromPendingResults(): void {
-		const pending = this.ctx.viewSession.agent.getPendingToolResults();
-		for (const result of pending) {
-			this.#orphanedToolCompletions.set(result.toolCallId, {
-				type: "tool_execution_end",
-				toolCallId: result.toolCallId,
-				toolName: result.toolName,
-				result: { content: result.content, details: result.details },
-				isError: result.isError,
-			});
-		}
 	}
 
 	/** Settle replay-created cards without waiting for another streaming update. */
 	restorePendingToolResults(): void {
-		this.#seedHeldCompletionsFromPendingResults();
 		for (const [toolCallId, component] of this.ctx.pendingTools) {
 			this.#toolTimelineComponents.set(toolCallId, component);
 			this.#settleHeldCompletionIfPresent(toolCallId, component);
@@ -1191,7 +1167,7 @@ export class EventController {
 		this.#readToolCallArgs.clear();
 		this.#readToolCallAssistantComponents.clear();
 		this.#resetReadGroup();
-		this.#seedHeldCompletionsFromPendingResults();
+
 		this.#resolveDisplaceableTodo();
 		this.#lastAssistantComponent = undefined;
 		// Restore terminal errors in transcript history when their banner clears.
