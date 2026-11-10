@@ -80,7 +80,7 @@ async function runScenario(scenario: Scenario): Promise<Observation> {
 		];
 		await Bun.write(file, rows.map(row => JSON.stringify(row)).join("\\n") + "\\n");
 		const args = ["--no-title", "--no-tools", "--no-skills", "--no-rules", "--no-lsp",
-			"--no-prewalk", "--trusted-extension", ${JSON.stringify(extension)}];
+			"--trusted-extension", ${JSON.stringify(extension)}];
 		if (scenario === "continue") args.push("-c");
 		if (scenario === "resume") args.push("--resume", file);
 		if (scenario === "headless") args.push("-p", "Continue.");
@@ -347,7 +347,6 @@ describe("implicit auto-resume model restoration", () => {
 					"--no-rules",
 					"--no-tools",
 					"--no-lsp",
-					"--no-prewalk",
 				],
 				{ cwd: temp.path(), env, terminal, signal: AbortSignal.timeout(20_000) },
 			);

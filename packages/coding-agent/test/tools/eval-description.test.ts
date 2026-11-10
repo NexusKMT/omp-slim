@@ -107,37 +107,6 @@ describe("eval tool description", () => {
 		expect(disabled.agents).not.toContain("tools?=None");
 	});
 
-	// Advertisement content is covered through the task tool (task-schema.test.ts); this pins the eval gate.
-	it("advertises approved agent()/workpool() selectors only while task.perCallModel is not off", () => {
-		for (const mode of ["off", "on", "eval"] as const) {
-			const tool = new EvalTool(
-				makeSession({
-					readActive: false,
-					settings: {
-						"task.perCallModel": mode,
-						modelRoles: { smol: "anthropic/claude-haiku-4-5", slow: "openai/gpt-5.5" },
-						"task.perCallModelAllow": ["openai/gpt-5.5"],
-					},
-				}),
-			);
-			const texts = [tool.docTopics().agents ?? "", tool.description];
-			if (mode === "off") {
-				for (const text of texts) {
-					for (const guidance of ["model?=None", "anthropic/claude-haiku-4-5", "openai/gpt-5.5"]) {
-						expect(text).not.toContain(guidance);
-					}
-				}
-				continue;
-			}
-			expect(texts[0].match(/model\?=None/g)).toHaveLength(2);
-			for (const text of texts) {
-				// The allowlist admits only slow's model; smol's would be refused at dispatch.
-				expect(text).toContain("`openai/gpt-5.5` (slow)");
-				expect(text).not.toContain("anthropic/claude-haiku-4-5");
-			}
-		}
-	});
-
 	it("renders helper syntax only for available runtimes", () => {
 		const jsOnly = getEvalDocTopics({ py: false, js: true });
 		expect(jsOnly.helpers).toContain("%bun add");

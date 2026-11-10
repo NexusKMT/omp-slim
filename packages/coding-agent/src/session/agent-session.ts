@@ -7890,7 +7890,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				py: cfgEvalPy.get(this.settings),
 				js: cfgEvalJs.get(this.settings),
 				freshAgents: cfgEvalWorkpoolFreshAgents.get(this.settings),
-				perCallModel: false,
 			};
 			// A notice whose contract needs an inactive tool would demand an
 			// unavailable capability; skip it rather than mislead the model.

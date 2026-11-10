@@ -17,7 +17,7 @@ import { asGlobalFetch } from "./helpers/fetch-mock";
 describe("createAgentSession Factory server-side fallback", () => {
 	afterEach(() => vi.restoreAllMocks());
 
-	it.each([false, true])("preserves the Factory wire opt-out: %p", async disabled => {
+	it("omits alternate models even when a legacy host explicitly enables Factory fallback", async () => {
 		using tempDir = TempDir.createSync("@pi-factory-server-side-fallback-");
 		const model = factoryModel("claude-fable-5", ["anthropic"]);
 		const chunks = anthropicChunks("OK").map(chunk => {
@@ -37,7 +37,7 @@ describe("createAgentSession Factory server-side fallback", () => {
 			modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
 			settings: Settings.isolated({ "compaction.enabled": false }),
 			model,
-			disableServerSideFallback: disabled,
+			disableServerSideFallback: false,
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],
@@ -57,9 +57,9 @@ describe("createAgentSession Factory server-side fallback", () => {
 		const requests = captured.filter(request => new URL(request.url).pathname === "/api/llm/a/v1/messages");
 		expect(requests).toHaveLength(1);
 		const request = requests[0]!;
-		expect(request.body.fallbacks).toEqual(disabled ? undefined : [{ model: "claude-opus-5" }]);
+		expect(request.body.fallbacks).toBeUndefined();
 		const betas = request.headers["anthropic-beta"] ?? "";
-		expect(betas.includes("server-side-fallback-2026-06-01")).toBe(!disabled);
-		expect(betas.includes("fallback-credit-2026-06-01")).toBe(!disabled);
+		expect(betas.includes("server-side-fallback-2026-06-01")).toBe(false);
+		expect(betas.includes("fallback-credit-2026-06-01")).toBe(false);
 	});
 });
