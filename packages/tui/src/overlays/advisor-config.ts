@@ -14,8 +14,6 @@
  * {@link WatchdogConfigDoc} and only touches disk + the live advisors via the host
  * `save` callback.
  */
-import { resolveUsedFraction, type UsageLimit, type UsageReport } from "@oh-my-pi/pi-ai";
-import { formatDuration } from "@oh-my-pi/pi-utils";
 import {
 	type Component,
 	Input,
@@ -113,13 +111,6 @@ export interface AdvisorConfigCallbacks {
 	warn?: (message: string) => void;
 	/** Live advisor usage stats; lets the preview show tokens/cost per advisor. */
 	getAdvisorStats?: () => AdvisorConfigStat[];
-	/** Reports normalized by the host to collapse shared credential pools. */
-	getUsageReports?: () => Promise<UsageReport[] | null>;
-	/** Filter to the advisor's active credential; absent identity includes every limit. */
-	getQuotaLimitFilter?: (
-		provider: string,
-		sessionId: string | undefined,
-	) => ((report: UsageReport, limit: UsageLimit) => boolean) | undefined;
 }
 
 export interface AdvisorConfigDeps {
@@ -132,46 +123,6 @@ export interface AdvisorConfigDeps {
 }
 
 const PREVIEW_WIDTH = 60;
-
-/**
- * One-line provider quota display. The host supplies normalized usage reports
- * and an optional credential filter; the overlay owns only presentation.
- */
-export function formatCompactQuota(
-	provider: string,
-	reports: UsageReport[],
-	nowMs: number,
-	includeLimit?: (report: UsageReport, limit: UsageLimit) => boolean,
-): string | null {
-	const byWindow = new Map<string, { limit: UsageLimit; fraction: number }>();
-	for (const report of reports) {
-		if (report.provider !== provider) continue;
-		for (const limit of report.limits) {
-			if (includeLimit && !includeLimit(report, limit)) continue;
-			const fraction = resolveUsedFraction(limit);
-			if (fraction === undefined) continue;
-			const key = limit.window?.id ?? limit.scope.windowId ?? "—";
-			const existing = byWindow.get(key);
-			if (!existing || fraction > existing.fraction) byWindow.set(key, { limit, fraction });
-		}
-	}
-	if (byWindow.size === 0) return null;
-	const entries = [...byWindow.values()].sort((a, b) => b.fraction - a.fraction);
-	const lines: string[] = [];
-	for (const { limit, fraction } of entries) {
-		const pct = Math.round(fraction * 100);
-		const windowLabel = limit.window?.label ?? limit.scope.windowId ?? "—";
-		const identity = limit.label.trim();
-		const header = identity && identity !== windowLabel ? `${windowLabel} (${identity})` : windowLabel;
-		const parts = [`${header}: ${pct}% used`];
-		const window = limit.window;
-		if (window?.resetsAt !== undefined && Number.isFinite(window.resetsAt) && window.resetsAt > nowMs) {
-			parts.push(`${window.resetLabel ?? "resets"} in ${formatDuration(window.resetsAt - nowMs)}`);
-		}
-		lines.push(parts.join(" · "));
-	}
-	return `Quota: ${lines.join(" │ ")}`;
-}
 
 function previewLineOrNone(text: string | undefined): string {
 	if (!text?.trim()) return "(none)";
@@ -317,8 +268,6 @@ export class AdvisorConfigOverlayComponent implements Component {
 	#cb: AdvisorConfigCallbacks;
 	#scope: AdvisorConfigScope;
 	#doc: WatchdogConfigDoc;
-	/** Cached usage reports (quota/window/reset) prefetched on overlay open. */
-	#cachedReports: UsageReport[] | null = null;
 	#dirty = false;
 
 	/** The advisor the detail screen (and its editors) edits; -1 on the roster or the shared instructions. */
@@ -402,16 +351,6 @@ export class AdvisorConfigOverlayComponent implements Component {
 		this.#doc = doc;
 		this.#ensureRosterVisible();
 		this.#showList();
-		// Prefetch usage reports for quota display; non-fatal if unavailable.
-		if (callbacks.getUsageReports) {
-			void callbacks
-				.getUsageReports()
-				.then(r => {
-					this.#cachedReports = r;
-					this.#cb.requestRender();
-				})
-				.catch(() => {});
-		}
 	}
 
 	// ───────────────────────────── render ─────────────────────────────
@@ -833,7 +772,7 @@ export class AdvisorConfigOverlayComponent implements Component {
 		return card;
 	}
 
-	/** The highlighted roster entry's preview; rebuilt only when its content changes (live stats, quota). */
+	/** The highlighted roster entry's preview; rebuilt only when its content changes (live stats). */
 	#describePreview(): NativeNode {
 		const children: NativeNode[] = [];
 		if (this.#doc.warnings?.length) {
@@ -917,16 +856,6 @@ export class AdvisorConfigOverlayComponent implements Component {
 				});
 			}
 			out.push(text([span("Usage:", "dim")]), node("kv", { items: usage }));
-		}
-		const quotaProvider = liveStat?.model?.provider;
-		if (this.#cachedReports && quotaProvider) {
-			const quota = formatCompactQuota(
-				quotaProvider,
-				this.#cachedReports,
-				Date.now(),
-				this.#cb.getQuotaLimitFilter?.(quotaProvider, liveStat?.sessionId),
-			);
-			if (quota) out.push(text([span(quota, "dim")], { wrap: "word" }));
 		}
 		return out;
 	}
@@ -1061,16 +990,6 @@ export class AdvisorConfigOverlayComponent implements Component {
 					),
 				);
 			}
-		}
-		const quotaProvider = liveStat?.model?.provider;
-		if (this.#cachedReports && quotaProvider) {
-			const quota = formatCompactQuota(
-				quotaProvider,
-				this.#cachedReports,
-				Date.now(),
-				this.#cb.getQuotaLimitFilter?.(quotaProvider, liveStat?.sessionId),
-			);
-			if (quota) lines.push(theme.fg("dim", `  ${quota}`));
 		}
 		return lines.map(line => truncateToWidth(line, bodyWidth));
 	}

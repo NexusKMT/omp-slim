@@ -66,7 +66,6 @@ import {
 	ImageInputTooLargeError,
 	InvalidImageDataError,
 	MAX_IMAGE_INPUT_BYTES,
-	webpExclusionForModel,
 } from "@oh-my-pi/pi-tui/chat/image-loading";
 import { askImageQuestion, resolveImageQuestionModel } from "../utils/image-question";
 import { CONVERTIBLE_EXTENSIONS, convertFileWithMarkit } from "../utils/markit";
@@ -1444,9 +1443,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		let dimensionNote: string | undefined;
 		if (cfgImagesAutoResize.get(this.session.settings)) {
 			try {
-				const resized = await resizeImage(image, {
-					excludeWebP: webpExclusionForModel(this.session.getActiveModel?.()),
-				});
+				const resized = await resizeImage(image, {});
 				dimensionNote = formatDimensionNote(resized);
 				image = { type: "image", data: resized.data, mimeType: resized.mimeType };
 			} catch {
@@ -1524,7 +1521,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				autoResize: cfgImagesAutoResize.get(this.session.settings),
 				maxBytes: MAX_IMAGE_SIZE,
 				resolvedPath: absolutePath,
-				excludeWebP: webpExclusionForModel(resolved?.model ?? this.session.getActiveModel?.()),
 			};
 			const imageInput =
 				imageKind === "svg"

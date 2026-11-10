@@ -15,7 +15,6 @@ import type { Settings } from "../config/settings";
 import type { ToolSession } from "../sdk";
 import type { AgentStorageApi } from "../session/agent-storage";
 import { DEFAULT_MAX_BYTES, truncateHead, truncateHeadBytes } from "@oh-my-pi/pi-tui/tools/streaming-output";
-import { webpExclusionForModel } from "@oh-my-pi/pi-tui/chat/image-loading";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize";
 import { CONVERTIBLE_EXTENSIONS } from "../utils/markit";
 import { ensureTool } from "../utils/tools-manager";
@@ -1809,7 +1808,6 @@ export async function fetchReadUrl(
 		session.modelRegistry,
 		session.getActiveModel?.(),
 		session.fetch,
-		webpExclusionForModel(session.getActiveModel?.()),
 	);
 	if (result.truncated) {
 		// Covers special handlers and every renderUrl branch, whichever response supplied the content.

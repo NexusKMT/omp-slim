@@ -2,18 +2,17 @@ import * as fs from "node:fs/promises";
 import {
 	MAX_IMAGE_INPUT_BYTES,
 	SUPPORTED_INPUT_IMAGE_MIME_TYPES,
-	modelLacksWebpSupport,
 	ImageInputTooLargeError,
 	InvalidImageDataError,
 	imageDecodeFailureReason,
 } from "@oh-my-pi/pi-tui/chat/image-loading";
 import * as path from "node:path";
-import type { Context, ImageContent, Message, Model, ProviderPayload, TextContent } from "@oh-my-pi/pi-ai";
+import type { Context, ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
 import { rasterizeSvg } from "@oh-my-pi/pi-natives";
-import { $which, isRecord, logger, readImageMetadata } from "@oh-my-pi/pi-utils";
+import { $which, logger, readImageMetadata } from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { resolveReadPath } from "../tools/path-utils";
-import { formatDimensionNote, type ImageResizeOptions, resizeImage } from "./image-resize";
+import { formatDimensionNote, type ImageResizeOptions, isWebPExcluded, resizeImage } from "./image-resize";
 import { decodeStillImageJpeg, VideoError } from "./video";
 
 /** Largest edge rasterized from SVG before it enters the image pipeline. */
@@ -33,10 +32,6 @@ function createUndecodableStbImageOmission(): TextContent {
 	return { type: "text", text: UNDECODABLE_STB_IMAGE_OMISSION_TEXT };
 }
 
-function createNativeUndecodableStbImageOmission(): Record<string, unknown> {
-	return { type: "input_text", text: UNDECODABLE_STB_IMAGE_OMISSION_TEXT };
-}
-
 function hasWebPMagic(data: string): boolean {
 	const header = Buffer.from(data.slice(0, 16), "base64");
 	return (
@@ -48,16 +43,6 @@ function isWebPImage(image: ImageContent): boolean {
 	if (typeof image.data !== "string") return false;
 	const mimeType = typeof image.mimeType === "string" ? image.mimeType.toLowerCase() : undefined;
 	return mimeType === "image/webp" || hasWebPMagic(image.data);
-}
-
-function imageFromBase64DataUrl(imageUrl: unknown): ImageContent | undefined {
-	if (typeof imageUrl !== "string" || !imageUrl.toLowerCase().startsWith("data:")) return undefined;
-	const separator = ";base64,";
-	const separatorIndex = imageUrl.toLowerCase().indexOf(separator);
-	if (separatorIndex < 5) return undefined;
-	const mimeType = imageUrl.slice(5, separatorIndex);
-	if (!mimeType.toLowerCase().startsWith("image/")) return undefined;
-	return { type: "image", mimeType, data: imageUrl.slice(separatorIndex + separator.length) };
 }
 
 function modelBoundaryImageCacheKey(image: ImageContent, resize: ImageResizeOptions | undefined): string {
@@ -84,12 +69,14 @@ async function memoizedStbImageNormalization(
 		pending = resizeImage(image, { ...resize, excludeWebP: true })
 			.then(resized => {
 				if (resized.mimeType === "image/webp" || hasWebPMagic(resized.data)) {
-					throw new Error("Image normalization retained WebP for an STB-backed model");
+					throw new Error("Image normalization retained WebP for the configured image format restriction");
 				}
 				return { data: resized.data, mimeType: resized.mimeType };
 			})
 			.catch(error => {
-				logger.warn("Dropping undecodable WebP for an STB-backed model", { error: String(error) });
+				logger.warn("Dropping undecodable WebP for the configured image format restriction", {
+					error: String(error),
+				});
 				return null;
 			})
 			.then(payload => {
@@ -103,44 +90,6 @@ async function memoizedStbImageNormalization(
 	return normalized ? { ...image, ...normalized } : null;
 }
 
-async function normalizeNativeResponsesImagePart(part: unknown): Promise<unknown> {
-	if (!isRecord(part) || part.type !== "input_image") return part;
-	const image = imageFromBase64DataUrl(part.image_url);
-	if (!image || !isWebPImage(image)) return part;
-	const normalized = await memoizedStbImageNormalization(image, undefined);
-	if (!normalized) return createNativeUndecodableStbImageOmission();
-	return { ...part, image_url: `data:${normalized.mimeType};base64,${normalized.data}` };
-}
-
-async function normalizeNativeResponsesItem(item: Record<string, unknown>): Promise<Record<string, unknown>> {
-	const normalizedItem = await normalizeNativeResponsesImagePart(item);
-	if (normalizedItem !== item) return normalizedItem as Record<string, unknown>;
-	if (!Array.isArray(item.content)) return item;
-
-	let content: unknown[] | undefined;
-	for (let index = 0; index < item.content.length; index++) {
-		const part = item.content[index];
-		const normalizedPart = await normalizeNativeResponsesImagePart(part);
-		if (normalizedPart !== part) content ??= item.content.slice(0, index);
-		content?.push(normalizedPart);
-	}
-	return content ? { ...item, content } : item;
-}
-
-async function normalizeNativeResponsesHistoryPayload(
-	payload: ProviderPayload | undefined,
-): Promise<ProviderPayload | undefined> {
-	if (payload?.type !== "openaiResponsesHistory" || !Array.isArray(payload.items)) return payload;
-	let items: Array<Record<string, unknown>> | undefined;
-	for (let index = 0; index < payload.items.length; index++) {
-		const item = payload.items[index]!;
-		const normalizedItem = await normalizeNativeResponsesItem(item);
-		if (normalizedItem !== item) items ??= payload.items.slice(0, index);
-		items?.push(normalizedItem);
-	}
-	return items ? { ...payload, items } : payload;
-}
-
 export interface LoadImageInputOptions {
 	path: string;
 	cwd: string;
@@ -148,7 +97,7 @@ export interface LoadImageInputOptions {
 	maxBytes?: number;
 	resolvedPath?: string;
 	detectedMimeType?: string;
-	/** Force non-WebP output (e.g. for Ollama). Leave unset to honor `OMP_NO_WEBP`. */
+	/** Force non-WebP output. Leave unset to honor `OMP_NO_WEBP`. */
 	excludeWebP?: boolean;
 }
 
@@ -159,7 +108,7 @@ export interface LoadImageAttachmentInputOptions {
 	uri: string;
 	autoResize: boolean;
 	maxBytes?: number;
-	/** Force non-WebP output (e.g. for Ollama). Leave unset to honor `OMP_NO_WEBP`. */
+	/** Force non-WebP output. Leave unset to honor `OMP_NO_WEBP`. */
 	excludeWebP?: boolean;
 }
 
@@ -242,8 +191,8 @@ async function loadInMemoryImageInput(options: LoadInMemoryImageInputOptions): P
 }
 
 export interface NormalizeModelContextImagesOptions {
-	/** Model the images are bound for; used to derive encoder constraints (WebP exclusion for Ollama). */
-	model?: Model;
+	/** Explicitly force WebP conversion; otherwise honor `OMP_NO_WEBP`. */
+	excludeWebP?: boolean;
 	resize?: ImageResizeOptions;
 }
 
@@ -259,7 +208,7 @@ export async function normalizeModelContextImages(
 	options?: NormalizeModelContextImagesOptions,
 ): Promise<ImageContent[] | undefined> {
 	if (!images || images.length === 0) return undefined;
-	const excludesWebP = modelLacksWebpSupport(options?.model);
+	const excludesWebP = options?.excludeWebP ?? isWebPExcluded();
 	const resize: ImageResizeOptions | undefined = excludesWebP
 		? { ...options?.resize, excludeWebP: true }
 		: options?.resize;
@@ -287,19 +236,16 @@ export async function normalizeModelContextImages(
 
 /**
  * Rewrites historical/resumed WebP blocks in the ephemeral provider request.
- * Persisted session messages remain untouched, while STB-backed local servers
- * never receive a format they cannot decode.
+ * Persisted session messages remain untouched, while explicitly configured format restrictions apply to resumed images too.
  */
-export async function normalizeModelContextMessages(messages: Message[], model: Model | undefined): Promise<Message[]> {
-	if (!modelLacksWebpSupport(model)) return messages;
+export async function normalizeModelContextMessages(
+	messages: Message[],
+	options?: Pick<NormalizeModelContextImagesOptions, "excludeWebP">,
+): Promise<Message[]> {
+	if (!(options?.excludeWebP ?? isWebPExcluded())) return messages;
 	let output: Message[] | undefined;
 	for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
 		const message = messages[messageIndex]!;
-		const hasNativePayload = message.role === "user" || message.role === "developer";
-		const normalizedProviderPayload = hasNativePayload
-			? await normalizeNativeResponsesHistoryPayload(message.providerPayload)
-			: undefined;
-		const providerPayloadChanged = hasNativePayload && normalizedProviderPayload !== message.providerPayload;
 		let content: Array<(typeof message.content)[number]> | undefined;
 		if (typeof message.content !== "string") {
 			for (let partIndex = 0; partIndex < message.content.length; partIndex++) {
@@ -313,18 +259,12 @@ export async function normalizeModelContextMessages(messages: Message[], model: 
 				content.push(normalized ?? createUndecodableStbImageOmission());
 			}
 		}
-		if (!content && !providerPayloadChanged) continue;
+		if (!content) continue;
 		output ??= messages.slice();
 		const normalizedMessage = { ...message, ...(content ? { content } : {}) } as Message;
 		if (normalizedMessage.role === "user" || normalizedMessage.role === "developer") {
-			if (providerPayloadChanged) {
-				normalizedMessage.providerPayload = normalizedProviderPayload;
-			} else if (content) {
-				// Native Responses history takes precedence over message content. If an
-				// image changed but no matching native image was found, discard the opaque
-				// replay payload rather than risk resending stale bytes.
-				delete normalizedMessage.providerPayload;
-			}
+			// A converted block supersedes opaque history bytes on this ephemeral request.
+			delete normalizedMessage.providerPayload;
 		}
 		output[messageIndex] = normalizedMessage;
 	}
@@ -332,8 +272,11 @@ export async function normalizeModelContextMessages(messages: Message[], model: 
 }
 
 /** Normalizes historical image blocks in an ephemeral provider request. */
-export async function normalizeProviderContextImagesForModel(context: Context, model: Model): Promise<Context> {
-	const messages = await normalizeModelContextMessages(context.messages, model);
+export async function normalizeProviderContextImages(
+	context: Context,
+	options?: Pick<NormalizeModelContextImagesOptions, "excludeWebP">,
+): Promise<Context> {
+	const messages = await normalizeModelContextMessages(context.messages, options);
 	return messages === context.messages ? context : { ...context, messages };
 }
 
