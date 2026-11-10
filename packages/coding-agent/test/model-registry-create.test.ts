@@ -7,7 +7,7 @@ import { ModelsConfigSchema } from "@oh-my-pi/pi-coding-agent/config/models-conf
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
-describe("ModelRegistry.create() factory (F6)", () => {
+describe("manual model config legacy JSON migration", () => {
 	let tempDir: TempDir;
 
 	beforeEach(() => {
@@ -15,18 +15,14 @@ describe("ModelRegistry.create() factory (F6)", () => {
 	});
 
 	afterEach(async () => {
-		// On Windows the cache SQLite handle inside the registry may briefly hold
-		// the dir; treat cleanup errors as best-effort like TempDir's Symbol.dispose.
-		await tempDir.remove().catch(() => {});
+		await tempDir.remove();
 	});
 
 	test("migrates legacy models.json → models.yml ahead of the sync constructor", async () => {
 		const yml = path.join(tempDir.path(), "models.yml");
 		const json = path.join(tempDir.path(), "models.json");
 
-		// Seed a legacy JSON config; factory should migrate it asynchronously
-		// before the sync constructor reads from the yml path.
-		await Bun.write(json, JSON.stringify({ models: [] }));
+		await Bun.write(json, JSON.stringify({ providers: {} }));
 		expect(fs.existsSync(yml)).toBe(false);
 
 		const authStorage = await AuthStorage.create(":memory:");
@@ -41,7 +37,7 @@ describe("ModelRegistry.create() factory (F6)", () => {
 	test("ConfigFile migration is idempotent — second load is a no-op", async () => {
 		const yml = path.join(tempDir.path(), "models.yml");
 		const json = path.join(tempDir.path(), "models.json");
-		await Bun.write(json, JSON.stringify({ models: [] }));
+		await Bun.write(json, JSON.stringify({ providers: {} }));
 
 		const cf = new ConfigFile("models", ModelsConfigSchema, yml);
 		cf.tryLoad();
