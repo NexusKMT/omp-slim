@@ -22,7 +22,6 @@ import {
 	type CreateAgentSessionOptions,
 	type CustomTool,
 	createAgentSession,
-	discoverAuthStorage,
 	type ExtensionFactory,
 } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -30,6 +29,8 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { VIBE_TOOL_NAMES } from "@oh-my-pi/pi-coding-agent/tools/vibe";
 import { resetYieldTurnState } from "@oh-my-pi/pi-coding-agent/tools/yield";
 import { logger, removeSyncWithRetries, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
+
+import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 import { cfgExternalThinking } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { cfgPlanEnabled } from "@oh-my-pi/pi-coding-agent/plan-mode/settings";
@@ -71,8 +72,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 	const tempDirs: string[] = [];
 
 	// Built once and shared by every session. `ModelRegistry` eagerly loads all
-	// bundled + cached models and `discoverAuthStorage` opens the auth DB — the
-	// dominant (~50ms) slice of a cold boot, and identical for every test here.
+	// bundled + cached models — the dominant (~50ms) slice of a cold boot,
+	// identical for every test here.
 	// Injecting it drops each per-test boot to the ~4ms of activation-specific work
 	// these tests vary, and skips the background model refresh the SDK would
 	// otherwise start when it builds its own registry.
@@ -86,10 +87,14 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		return tempDir;
 	};
 
-	beforeAll(async () => {
+	beforeAll(() => {
 		registryAuthDir = path.join(os.tmpdir(), `pi-sdk-tool-activation-auth-${Snowflake.next()}`);
 		fs.mkdirSync(registryAuthDir, { recursive: true });
-		modelRegistry = new ModelRegistry(await discoverAuthStorage(registryAuthDir));
+		// Shell tests may initialize process-global settings mid-suite. Keep model
+		// availability and credentials bound to this fixture when that happens.
+		modelRegistry = new ModelRegistry(createInMemoryAuthStorage(), path.join(registryAuthDir, "models.yml"), {
+			settings: Settings.isolated(),
+		});
 	});
 
 	// Shared options for every session. `rules: []` and `workspaceTree` short-circuit
@@ -132,7 +137,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 	});
 
 	afterAll(() => {
-		// The discovered auth DB lives in registryAuthDir; Windows cannot delete it while open.
+		// Close the isolated auth store and remove this suite's model cache.
 		modelRegistry.authStorage.close();
 		removeSyncWithRetries(registryAuthDir);
 	});
