@@ -535,6 +535,7 @@ describe("native composer first frame", () => {
 						api: "openai-completions",
 						baseUrl: "http://localhost:8000/v1",
 						reasoning: true,
+						thinking: { mode: "effort", efforts: ["low", "medium", "high"] },
 						input: ["text"],
 						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 						contextWindow: 32000,
