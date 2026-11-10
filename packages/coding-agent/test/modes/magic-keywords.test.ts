@@ -56,7 +56,6 @@ describe("workflow notice", () => {
 		py: true,
 		js: true,
 		freshAgents: false,
-		perCallModel: false,
 	};
 
 	it("defaults to workpools and hides eval-defined tools when disabled", () => {
@@ -100,19 +99,5 @@ describe("workflow notice", () => {
 		expect(both).toContain("JS: `await workpool(");
 		expect(both).toContain("raise_errors");
 		expect(both).toContain("raiseErrors");
-	});
-
-	it("lists the per-call model option only when task.perCallModel admits it for eval", () => {
-		const off = renderWorkflowNotice(base);
-		const on = renderWorkflowNotice({ ...base, perCallModel: true });
-
-		// agent() and workpool(), in both the Python and JS spellings.
-		for (const [text, count] of [
-			[off, 0],
-			[on, 2],
-		] as const) {
-			expect(text.match(/model=None\)/g) ?? []).toHaveLength(count);
-			expect(text.match(/, model \}\)/g) ?? []).toHaveLength(count);
-		}
 	});
 });
