@@ -7,14 +7,13 @@ import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Effort } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import * as autoThinkingClassifier from "@oh-my-pi/pi-coding-agent/auto-thinking/classifier";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { AUTO_THINKING } from "@oh-my-pi/pi-tui/thinking";
+import { resolveProvisionalAutoLevel, AUTO_THINKING } from "@oh-my-pi/pi-tui/thinking";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 import { cfgMagicKeyword, cfgMagicKeywordsEnabled } from "@oh-my-pi/pi-coding-agent/modes/settings";
@@ -201,14 +200,12 @@ describe("AgentSession magic keyword settings", () => {
 		session = created.session;
 		cfgMagicKeyword.ultrathink.set(created.settings, false);
 		vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
-		const classifierSpy = vi.spyOn(autoThinkingClassifier, "classifyDifficulty").mockResolvedValue(Effort.Low);
 		session.setThinkingLevel(AUTO_THINKING);
 
 		await session.prompt("ultrathink through the unsafe refactor");
 
-		expect(classifierSpy).toHaveBeenCalledTimes(1);
-		expect(session.thinkingLevel).toBe(Effort.Low);
-		expect(session.autoResolvedThinkingLevel()).toBe(Effort.Low);
+		expect(session.thinkingLevel).toBe(resolveProvisionalAutoLevel(session.model));
+		expect(session.autoResolvedThinkingLevel()).toBe(resolveProvisionalAutoLevel(session.model));
 	});
 
 	it.each([
@@ -250,12 +247,10 @@ describe("AgentSession magic keyword settings", () => {
 		const created = await createMagicKeywordSession(modelRegistry, [], "claude-sonnet-5-5");
 		session = created.session;
 		vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
-		const classifierSpy = vi.spyOn(autoThinkingClassifier, "classifyDifficulty").mockResolvedValue(Effort.High);
 		session.setThinkingLevel(AUTO_THINKING);
 
 		await session.prompt("chillax and rename the flag");
 
-		expect(classifierSpy).not.toHaveBeenCalled();
 		expect(session.thinkingLevel).toBe(Effort.Low);
 		expect(session.configuredThinkingLevel()).toBe(AUTO_THINKING);
 	});

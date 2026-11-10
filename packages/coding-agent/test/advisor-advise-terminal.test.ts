@@ -75,7 +75,6 @@ describe("advisor advise-only turn terminates the review", () => {
 			advisorTools: [readTool],
 			advisorStreamFn: advisorMock.stream,
 		});
-		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		const advisor = session.getAdvisorAgent();
 		if (!advisor) throw new Error("Expected advisor agent to be active");

@@ -8,6 +8,7 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { loadAdvisorTranscriptCosts } from "@oh-my-pi/pi-coding-agent/advisor/transcript-recorder";
+import { resolveModelOverride } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -130,7 +131,6 @@ describe("AgentSession advisor toggle", () => {
 	}
 
 	function enableAdvisor(target: AgentSession = session): Agent {
-		target.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		target.toggleAdvisorEnabled();
 		const advisor = target.getAdvisorAgent();
 		if (!advisor) throw new Error("Expected advisor agent to exist");
@@ -179,7 +179,6 @@ describe("AgentSession advisor toggle", () => {
 	}
 
 	it("toggle enables the advisor and runtime", () => {
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		const active = session.toggleAdvisorEnabled();
 		expect(active).toBe(true);
 		expect(session.isAdvisorActive()).toBe(true);
@@ -187,26 +186,24 @@ describe("AgentSession advisor toggle", () => {
 		expect(session.formatAdvisorStatus()).toContain("Advisor is enabled (anthropic/claude-sonnet-4-5)");
 	});
 
-	it("explicit enable rebuilds the runtime when the advisor role changes", () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
+	it("explicit enable rebuilds the runtime after the primary model changes", () => {
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		expect(session.getAdvisorAgent()?.state.model.provider).toBe(model.provider);
 		expect(session.getAdvisorAgent()?.state.model.id).toBe(model.id);
 
-		session.settings.setModelRole("advisor", `${replacementModel.provider}/${replacementModel.id}`);
+		session.agent.setModel(replacementModel);
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		expect(session.getAdvisorAgent()?.state.model.provider).toBe(replacementModel.provider);
 		expect(session.getAdvisorAgent()?.state.model.id).toBe(replacementModel.id);
 	});
 
-	it("refreshes the live advisor when the advisor role setting changes", async () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
+	it("refreshes the live advisor when the primary model changes", async () => {
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		expect(session.getAdvisorAgent()?.state.model.provider).toBe(model.provider);
 		expect(session.getAdvisorAgent()?.state.model.id).toBe(model.id);
 
-		session.settings.setModelRole("advisor", `${replacementModel.provider}/${replacementModel.id}`);
+		await session.setModel(replacementModel);
 		// Role listeners run on the next microtask.
 		await Promise.resolve();
 
@@ -215,7 +212,9 @@ describe("AgentSession advisor toggle", () => {
 	});
 
 	it("refreshes the live advisor when only the advisor route changes", async () => {
-		session.settings.setModelRole("advisor", "openrouter/z-ai/glm-4.7@cerebras");
+		const initial = resolveModelOverride(["openrouter/z-ai/glm-4.7@cerebras"], modelRegistry).model;
+		if (!initial) throw new Error("Missing routed fixture model");
+		await session.setModel(initial);
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		expect(session.getAdvisorAgent()?.state.model.provider).toBe("openrouter");
 		expect(session.getAdvisorAgent()?.state.model.id).toBe("z-ai/glm-4.7");
@@ -224,7 +223,9 @@ describe("AgentSession advisor toggle", () => {
 				?.openRouterRouting?.only,
 		).toEqual(["cerebras"]);
 
-		session.settings.setModelRole("advisor", "openrouter/z-ai/glm-4.7@fireworks");
+		const replacement = resolveModelOverride(["openrouter/z-ai/glm-4.7@fireworks"], modelRegistry).model;
+		if (!replacement) throw new Error("Missing replacement routed fixture model");
+		await session.setModel(replacement);
 		await Promise.resolve();
 
 		expect(session.getAdvisorAgent()?.state.model.provider).toBe("openrouter");
@@ -236,7 +237,6 @@ describe("AgentSession advisor toggle", () => {
 	});
 
 	it("rebuilds a running advisor on budget edits without overriding a session-only disable", async () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		cfgAdvisorEnabled.set(session.settings, true);
 		await Promise.resolve();
 		expect(session.isAdvisorActive()).toBe(true);
@@ -253,7 +253,7 @@ describe("AgentSession advisor toggle", () => {
 		expect(session.isAdvisorActive()).toBe(false);
 	});
 
-	it("refreshes the live advisor after project model-role reloads", async () => {
+	it("keeps the live advisor on the active model after project settings reload", async () => {
 		const projectA = path.join(tempDir.path(), "project-a");
 		const projectB = path.join(tempDir.path(), "project-b");
 		const agentDir = path.join(tempDir.path(), "agent");
@@ -294,8 +294,8 @@ describe("AgentSession advisor toggle", () => {
 
 			await settings.reloadForCwd(projectB);
 
-			expect(customSession.getAdvisorAgent()?.state.model.provider).toBe(replacementModel.provider);
-			expect(customSession.getAdvisorAgent()?.state.model.id).toBe(replacementModel.id);
+			expect(customSession.getAdvisorAgent()?.state.model.provider).toBe(model.provider);
+			expect(customSession.getAdvisorAgent()?.state.model.id).toBe(model.id);
 		} finally {
 			await customSession.dispose();
 			AgentStorage.close();
@@ -303,7 +303,6 @@ describe("AgentSession advisor toggle", () => {
 	});
 
 	it("keeps explicit enable idempotent when the advisor config is unchanged", () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		const advisor = session.getAdvisorAgent();
 		if (!advisor) throw new Error("Expected advisor agent to be live");
@@ -317,7 +316,6 @@ describe("AgentSession advisor toggle", () => {
 	});
 
 	it("explicit enable overrides default-off setting for the session only", () => {
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		cfgAdvisorEnabled.override(session.settings, false);
 		const customSession = new AgentSession({
 			agent: session.agent,
@@ -337,7 +335,6 @@ describe("AgentSession advisor toggle", () => {
 	});
 
 	it("toggle disables the advisor and runtime", () => {
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		session.toggleAdvisorEnabled();
 		const active = session.toggleAdvisorEnabled();
 		expect(active).toBe(false);
@@ -345,78 +342,47 @@ describe("AgentSession advisor toggle", () => {
 		expect(session.isAdvisorEnabled()).toBe(false);
 	});
 
-	it("setAdvisorEnabled reports inactive when the advisor role resolves to no model", () => {
-		// The advisor role falls back to the `slow` priority chain when unset, so an
-		// unset role still resolves a model. The inactive-but-enabled path is only
-		// reached when the configured advisor model cannot be resolved at all.
-		session.settings.setModelRole("advisor", "nonexistent/advisor-model");
-		const active = session.setAdvisorEnabled(true);
-		expect(active).toBe(false);
-		expect(session.isAdvisorActive()).toBe(false);
-		expect(session.isAdvisorEnabled()).toBe(true);
-		expect(session.formatAdvisorStatus()).toBe(
-			"Advisor setting is enabled, but no model is assigned to the 'advisor' role.",
-		);
-	});
-	it("keeps advisors without a live runtime yielded during a primary turn", () => {
-		// A configured advisor with no resolvable model has no runtime and can
-		// never review — the streaming mask must not reopen its eye mid-turn.
-		session.settings.setModelRole("advisor", "nonexistent/advisor-model");
-		expect(session.setAdvisorEnabled(true)).toBe(false);
-
-		const yielded = () => session.getAdvisorStatusOverview().advisors[0]?.yielded;
-		expect(yielded()).toBe(true);
-		session.agent.state.isStreaming = true;
-		expect(yielded()).toBe(true);
-		session.agent.state.isStreaming = false;
-	});
-
-	it("activates the default advisor when discovery starts after session construction", async () => {
-		const advisorSelector = `${replacementModel.provider}/${replacementModel.id}`;
-		const settings = Settings.isolated({ "compaction.enabled": false, "advisor.enabled": true });
-		settings.setModelRole("advisor", advisorSelector);
-		const registry = new ModelRegistry(authStorage);
-		const fullCatalog = registry.getAvailable();
-		const withoutAdvisorModel = fullCatalog.filter(
-			m => !(m.provider === replacementModel.provider && m.id === replacementModel.id),
-		);
-		let discovered = false;
-		vi.spyOn(registry, "getAvailable").mockImplementation(() => (discovered ? fullCatalog : withoutAdvisorModel));
-		const { promise: refreshSettled, resolve: settleRefresh } = Promise.withResolvers<void>();
-		vi.spyOn(registry, "refresh").mockImplementation(() => refreshSettled);
-
-		const raceSession = new AgentSession({
+	it("inherits the active model even when the saved advisor selector is invalid", async () => {
+		const settings = Settings.isolated({
+			modelRoles: { advisor: "nonexistent/advisor-model" },
+			"advisor.enabled": true,
+		});
+		const inherited = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),
 			sessionManager,
 			settings,
+			modelRegistry,
+			advisorTools: [],
+		});
+		try {
+			expect(inherited.isAdvisorActive()).toBe(true);
+			expect(inherited.getAdvisorAgent()?.state.model).toBe(model);
+		} finally {
+			await inherited.dispose();
+		}
+	});
+
+	it("uses the active model before background discovery settles", async () => {
+		const registry = new ModelRegistry(authStorage);
+		vi.spyOn(registry, "getAvailable").mockReturnValue([]);
+		const inherited = new AgentSession({
+			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),
+			sessionManager,
+			settings: Settings.isolated({ "advisor.enabled": true }),
 			modelRegistry: registry,
 			advisorTools: [],
 		});
 		try {
-			expect(raceSession.isAdvisorEnabled()).toBe(true);
-			expect(raceSession.isAdvisorActive()).toBe(false);
-			await registry.awaitBackgroundRefresh();
-			await Promise.resolve();
-			expect(raceSession.isAdvisorActive()).toBe(false);
-
-			registry.refreshInBackground();
-			await Promise.resolve();
-			expect(raceSession.isAdvisorActive()).toBe(false);
-			discovered = true;
-			settleRefresh();
-			await registry.awaitBackgroundRefresh();
-			expect(raceSession.getAdvisorAgent()?.state.model.id).toBe(replacementModel.id);
-			expect(raceSession.isAdvisorActive()).toBe(true);
+			expect(inherited.isAdvisorActive()).toBe(true);
+			expect(inherited.getAdvisorAgent()?.state.model).toBe(model);
 		} finally {
-			settleRefresh();
 			vi.restoreAllMocks();
-			await raceSession.dispose();
+			await inherited.dispose();
 		}
 	});
 
 	it("keeps sessions isolated when sharing a Settings instance", async () => {
 		const sharedSettings = Settings.isolated({ "compaction.enabled": false });
-		sharedSettings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(cfgAdvisorEnabled.get(sharedSettings)).toBe(false);
 
 		const sessionA = new AgentSession({
@@ -459,7 +425,6 @@ describe("AgentSession advisor toggle", () => {
 	});
 
 	it("exposes provider sessionId on live advisor stats", () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		session.toggleAdvisorEnabled();
 
 		const stats = session.getAdvisorStats();
@@ -486,7 +451,6 @@ describe("AgentSession advisor toggle", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false });
-		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		const reviewSession = new AgentSession({
 			agent: primaryAgent,
 			sessionManager: SessionManager.inMemory(),
@@ -594,7 +558,6 @@ describe("AgentSession advisor toggle", () => {
 		expect(advisorPrompt).toContain("Review module boundaries.");
 	});
 	it("uses a roster saved while the advisor is disabled once it is enabled", () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		expect(session.isAdvisorEnabled()).toBe(false);
 
 		expect(
@@ -691,7 +654,6 @@ describe("AgentSession advisor toggle", () => {
 			"advisor.enabled": true,
 			"compaction.enabled": false,
 		});
-		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		const result = await createAgentSession({
 			cwd: tempDir.path(),
 			agentDir: tempDir.path(),
@@ -1099,7 +1061,6 @@ describe("AgentSession advisor toggle", () => {
 			"retry.maxRetries": 1,
 			"retry.modelFallback": false,
 		});
-		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		const quotaSession = new AgentSession({
 			agent: primaryAgent,
 			sessionManager: SessionManager.inMemory(),
@@ -1171,7 +1132,6 @@ describe("AgentSession advisor toggle", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false });
-		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		const quotaSession = new AgentSession({
 			agent: primaryAgent,
 			sessionManager: SessionManager.inMemory(),
@@ -1314,7 +1274,6 @@ describe("AgentSession advisor toggle", () => {
 	});
 
 	it("filters WATCHDOG.yml advisors by scope (main vs subagent vs all)", () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		const roster = [
 			{ name: "Main Guard", scope: "main" as const },
@@ -1336,7 +1295,6 @@ describe("AgentSession advisor toggle", () => {
 			},
 		});
 		const subSettings = Settings.isolated({ "compaction.enabled": false, "advisor.enabled": true });
-		subSettings.setModelRole("advisor", `${model.provider}/${model.id}`);
 		const subSession = new AgentSession({
 			agent: subAgent,
 			sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),

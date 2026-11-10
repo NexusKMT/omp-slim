@@ -42,7 +42,7 @@ import type { EditModeSetting } from "../edit/settings";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ModelCycleResult } from "./agent-session-types";
 import { formatRoleModelValue, resolveRoleModelFull } from "./role-models";
-import { EPHEMERAL_MODEL_CHANGE_ROLE, PREWALK_MODEL_CHANGE_ROLE } from "./session-entries";
+import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 
 import {
@@ -261,7 +261,7 @@ export class ModelControls {
 		role: string = "default",
 		options?: {
 			selector?: string;
-			thinkingLevel?: ThinkingLevel;
+			thinkingLevel?: ConfiguredThinkingLevel;
 			persist?: boolean;
 		},
 	): Promise<{ switched: boolean }> {
@@ -308,7 +308,7 @@ export class ModelControls {
 	async setModelTemporary(
 		model: Model,
 		thinkingLevel?: ConfiguredThinkingLevel,
-		options?: { ephemeral?: boolean; prewalk?: boolean },
+		options?: { ephemeral?: boolean },
 		selection: "explicit" | "automatic" = "explicit",
 	): Promise<void> {
 		const previousEditMode = this.#host.resolveActiveEditMode();
@@ -322,7 +322,7 @@ export class ModelControls {
 		await this.#host.setModelWithProviderSessionReset(targetModel, selection);
 		this.#host.sessionManager.appendModelChange(
 			`${targetModel.provider}/${targetModel.id}`,
-			options?.prewalk ? PREWALK_MODEL_CHANGE_ROLE : options?.ephemeral ? EPHEMERAL_MODEL_CHANGE_ROLE : "temporary",
+			options?.ephemeral ? EPHEMERAL_MODEL_CHANGE_ROLE : "temporary",
 		);
 		this.#host.settings.getStorage()?.recordModelUsage(`${targetModel.provider}/${targetModel.id}`);
 
@@ -590,7 +590,10 @@ export class ModelControls {
 
 	/** Publish `effort` as the turn's auto resolution; the transcript records only a changed level. */
 	#resolveAutoThinkingLevel(effort: Effort): void {
-		const shouldPersistResolution = this.#thinkingLevel !== effort;
+		const shouldPersistResolution =
+			this.#thinkingLevel !== effort ||
+			(this.#autoResolvedLevel === undefined &&
+				this.#host.sessionManager.buildSessionContext().configuredThinkingLevel !== AUTO_THINKING);
 		this.#autoResolvedLevel = effort;
 		this.#thinkingLevel = effort;
 		this.#applyThinkingLevelToAgent(effort);

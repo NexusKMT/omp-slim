@@ -125,7 +125,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			onSseEvent,
 			transformProviderContext,
 		});
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		const advisor = session.getAdvisorAgent();
@@ -191,7 +190,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			transformProviderContext,
 			createAdvisorTransformProviderContext,
 		});
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		expect(advisorRequests).toHaveLength(2);
 
@@ -230,7 +228,9 @@ describe("AgentSession advisor provider-options parity", () => {
 				advisorTools: [],
 			});
 			cfgProvidersOpenaiResponsesWebsockets.set(session.settings, true);
-			session.settings.setModelRole("advisor", `openai/${advisorModel.id}`);
+			const selected = modelRegistry.find("openai", advisorModel.id);
+			if (!selected) throw new Error("Missing local Responses model");
+			session.agent.setModel(selected);
 			expect(session.setAdvisorEnabled(true)).toBe(true);
 			const advisor = session.getAdvisorAgent();
 			if (!advisor) throw new Error("Expected standard Responses advisor");
@@ -268,7 +268,9 @@ describe("AgentSession advisor provider-options parity", () => {
 			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 		});
-		session.settings.setModelRole("advisor", "openai-codex/gpt-5.6-sol");
+		const selected = modelRegistry.find("openai-codex", "gpt-5.6-sol");
+		if (!selected) throw new Error("Missing Codex fixture model");
+		session.agent.setModel(selected);
 		cfgProvidersOpenaiWebsockets.set(session.settings, "on");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
@@ -301,7 +303,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			modelRegistry,
 			advisorTools: [],
 		});
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		const advisor = session.getAdvisorAgent();
@@ -339,7 +340,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 		});
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		const advisor = session.getAdvisorAgent();
@@ -378,7 +378,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 		});
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		const advisor = session.getAdvisorAgent();
@@ -420,7 +419,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 		});
-		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		const advisor = session.getAdvisorAgent();
@@ -478,7 +476,6 @@ describe("AgentSession advisor provider-options parity", () => {
 				advisorTools: [],
 				accountPoolScope,
 			});
-			session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 			expect(session.setAdvisorEnabled(true)).toBe(true);
 
 			const advisor = session.getAdvisorAgent();

@@ -18,8 +18,6 @@ import { modelKind } from "@oh-my-pi/pi-catalog/types";
 import { finalizeCustomModel } from "@oh-my-pi/pi-coding-agent/config/custom-models";
 import { applyModelPatch, mergeDiscoveredModel } from "@oh-my-pi/pi-coding-agent/config/model-patch";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { resolveRoleChain } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
-import { roleCandidatePool } from "@oh-my-pi/pi-coding-agent/config/model-roles";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
@@ -307,61 +305,6 @@ describe("ModelRegistry", () => {
 					expect.objectContaining({ provider: "typesafe", id: "jev-latest" }),
 				]),
 			);
-		});
-
-		test("keeps image fallback runners across authoritative chat cache and refresh", async () => {
-			authStorage.keys.setRuntime("deepinfra", "deepinfra-test-key");
-			const settings = Settings.isolated({
-				modelRoles: { image: "deepinfra/missing-image" },
-				"retry.fallbackChains": {
-					image: ["deepinfra/black-forest-labs/FLUX-2-pro"],
-				},
-			});
-			const cachedChat = buildModel({
-				id: "cached-chat",
-				name: "Cached Chat",
-				provider: "deepinfra",
-				api: "openai-completions",
-				baseUrl: "https://api.deepinfra.com/v1/openai",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32_000,
-				maxTokens: 4096,
-			});
-			writeModelCache(
-				"deepinfra",
-				Date.now(),
-				[cachedChat],
-				true,
-				fingerprintStaticModels(getBundledModels("deepinfra"), { authoritative: true }),
-				path.join(tempDir, "models.db"),
-			);
-			const registry = new ModelRegistry(authStorage, modelsJsonPath, {
-				settings,
-				fetch: async () => Response.json({ data: [] }),
-			});
-			const runnerRoutes = () =>
-				["image"].flatMap(role =>
-					resolveRoleChain(role, settings, roleCandidatePool(role, settings, registry)).map(
-						({ model }) => `${model.provider}/${model.id}`,
-					),
-				);
-			const expectedRoutes = ["deepinfra/black-forest-labs/FLUX-2-pro"];
-
-			expect(runnerRoutes()).toEqual(expectedRoutes);
-			expect(
-				registry
-					.getAll()
-					.filter(model => model.provider === "deepinfra")
-					.map(model => model.id),
-			).toEqual([cachedChat.id]);
-			expect(runnerRoutes()).toEqual(expectedRoutes);
-
-			await registry.refreshProvider("deepinfra", "online");
-
-			expect(runnerRoutes()).toEqual(expectedRoutes);
-			expect(registry.getAll().filter(model => model.provider === "deepinfra")).toEqual([]);
 		});
 
 		test("disabled runner providers remain excluded from available kind and all pools", () => {

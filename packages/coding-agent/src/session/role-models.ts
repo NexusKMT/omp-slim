@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelSelectorValue, parseModelString } from "@oh-my-pi/pi-tui/overlays/model-selector";
@@ -17,7 +17,7 @@ export function formatRoleModelValue(
 	_role: string,
 	model: Model,
 	selectorOverride?: string,
-	thinkingLevelOverride?: ThinkingLevel,
+	thinkingLevelOverride?: ConfiguredThinkingLevel,
 ): string {
 	const modelKey = selectorOverride ?? `${model.provider}/${model.id}`;
 	if (thinkingLevelOverride !== undefined) return formatModelSelectorValue(modelKey, thinkingLevelOverride);

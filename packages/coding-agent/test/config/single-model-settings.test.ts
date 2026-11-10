@@ -12,6 +12,10 @@ import {
 	cfgModelToolCallLoopGuardThreshold,
 	cfgModelToolCallLoopGuardExemptTools,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
+import {
+	cfgRetryUsageReservePct,
+	cfgFeaturesUnexpectedStopDetection,
+} from "@oh-my-pi/pi-coding-agent/session/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
@@ -110,6 +114,30 @@ describe("single model settings", () => {
 		expect(dotted.getModel()).toBe("openai/current");
 		expect(cfgModelLoopGuardEnabled.get(dotted)).toBe(true);
 		expect(cfgModelToolCallLoopGuardThreshold.get(dotted)).toBe(7);
+	});
+
+	it("retires automatic selectors while preserving local guards and credential reserve settings", () => {
+		const settings = Settings.isolated({
+			retry: {
+				modelFallback: true,
+				fallbackOn: "any",
+				rateLimitWalksChain: true,
+				usageAwareFallback: true,
+				usageReservePolicy: "free",
+				fallbackRevertPolicy: "cooldown-expiry",
+				fallbackChains: { default: ["other/model"] },
+				usageReservePct: 12,
+			},
+			providers: { anthropic: { serverSideFallback: true }, autoThinkingMaxEffort: "max" },
+			features: { unexpectedStopDetection: "smart" },
+			images: { describeForTextModels: true },
+			contextPromotion: { enabled: true },
+			spelling: { autocomplete: "auto" },
+			composer: { predictions: "on" },
+		});
+		expect(cfgRetryUsageReservePct.get(settings)).toBe(12);
+		expect(cfgFeaturesUnexpectedStopDetection.get(settings)).toBe("mechanical");
+		expect(settings.getModel()).toBeUndefined();
 	});
 
 	it("keeps canonical model ownership including tombstones ahead of legacy values", () => {

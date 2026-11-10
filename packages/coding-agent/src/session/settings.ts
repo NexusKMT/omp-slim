@@ -20,7 +20,6 @@ import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
 import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 
 const EMPTY_NUMBER_RECORD: Record<string, number> = {};
-const EMPTY_STRING_ARRAYS_RECORD: Record<string, string[]> = {};
 const DEFAULT_TOOL_CALL_LOOP_EXEMPT_TOOLS: string[] = ["wait"];
 
 /** Scope of the resume picker's current-folder list. */
@@ -794,25 +793,6 @@ export const cfgProvidersFireworksTier = register({
 				label: "Priority",
 				description: "Priority serving path: higher reliability, premium per-token pricing",
 			},
-		],
-	},
-});
-
-export const cfgProvidersAutoThinkingMaxEffort = register({
-	id: "providers.autoThinkingMaxEffort",
-	type: "enum",
-	values: ["xhigh", "max"] as const,
-	default: "xhigh",
-	ui: {
-		tab: "model",
-		group: "Thinking",
-		label: "Auto Thinking Ceiling",
-		description:
-			"Highest effort the `auto` classifier may resolve. `xhigh` keeps the classifier one tier below the top, so only an explicit `ultrathink` reaches `max`; `max` lets a turn the classifier judges exceptional bill the top tier on models that expose it.",
-		condition: "autoThinkingActive",
-		options: [
-			{ value: "xhigh", label: "xhigh", description: "Classifier stops at xhigh (default)" },
-			{ value: "max", label: "max", description: "Classifier may resolve max where the model supports it" },
 		],
 	},
 });

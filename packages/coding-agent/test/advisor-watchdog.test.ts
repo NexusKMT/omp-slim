@@ -50,7 +50,6 @@ describe("advisor watchdog prompt discovery", () => {
 						"async.enabled": false,
 						"advisor.enabled": true,
 					});
-					s.setModelRole("advisor", "openai/gpt-4o-mini");
 					return s;
 				})(),
 				model: getBundledModel("openai", "gpt-4o-mini"),

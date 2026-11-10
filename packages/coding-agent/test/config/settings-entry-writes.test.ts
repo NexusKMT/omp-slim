@@ -3,13 +3,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type RawSettings, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
+import { cfgTaskAgentSoftRequestBudget } from "@oh-my-pi/pi-coding-agent/task/settings";
 import { cfgTaskDisabledAgents } from "@oh-my-pi/pi-coding-agent/task/settings";
 import { acquireFileLock, TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
 
-// Editing one fallback chain or one agent must persist only that entry: every entry another layer
+// Editing one request budget or one agent must persist only that entry: every entry another layer
 // (a `--config` overlay) supplies stays out of config.yml.
 describe("Settings entry-level writes", () => {
 	let state: SettingsTestState | undefined;
@@ -45,50 +45,50 @@ describe("Settings entry-level writes", () => {
 		return Settings.loadIsolated({ agentDir, cwd, configFiles: [overlayPath] });
 	}
 
-	it("persists one fallback chain without the chains a --config overlay supplies", async () => {
-		const settings = await load({}, { retry: { fallbackChains: { smol: ["overlay/cheap"] } } });
+	it("persists one request budget without the budgets a --config overlay supplies", async () => {
+		const settings = await load({}, { task: { agentSoftRequestBudget: { smol: 1 } } });
 
-		cfgRetryFallbackChains.setEntry(settings, "slow", ["user/slow-fallback"]);
+		cfgTaskAgentSoftRequestBudget.setEntry(settings, "slow", 2);
 		await settings.flush();
 
-		expect(await readConfig()).toEqual({ retry: { fallbackChains: { slow: ["user/slow-fallback"] } } });
-		expect(cfgRetryFallbackChains.get(settings)).toEqual({
-			smol: ["overlay/cheap"],
-			slow: ["user/slow-fallback"],
+		expect(await readConfig()).toEqual({ task: { agentSoftRequestBudget: { slow: 2 } } });
+		expect(cfgTaskAgentSoftRequestBudget.get(settings)).toEqual({
+			smol: 1,
+			slow: 2,
 		});
 	});
 
 	it("addresses a dotted record key exactly, across an external edit, and deletes it on undefined", async () => {
-		const settings = await load({ retry: { fallbackChains: { slow: ["user/slow"] } } }, {});
+		const settings = await load({ task: { agentSoftRequestBudget: { slow: 3 } } }, {});
 
-		cfgRetryFallbackChains.setEntry(settings, "openai/gpt-5.4", ["openai/gpt-5.4-mini"]);
+		cfgTaskAgentSoftRequestBudget.setEntry(settings, "openai/gpt-5.4", 4);
 		// Another process edits config.yml before the save merges this write into it.
 		await Bun.write(
 			configPath(),
-			YAML.stringify({ temperature: 0.3, retry: { fallbackChains: { slow: ["user/slow"] } } }),
+			YAML.stringify({ temperature: 0.3, task: { agentSoftRequestBudget: { slow: 3 } } }),
 		);
 		await settings.flush();
 		expect(await readConfig()).toEqual({
 			temperature: 0.3,
-			retry: { fallbackChains: { slow: ["user/slow"], "openai/gpt-5.4": ["openai/gpt-5.4-mini"] } },
+			task: { agentSoftRequestBudget: { slow: 3, "openai/gpt-5.4": 4 } },
 		});
 
-		cfgRetryFallbackChains.setEntry(settings, "openai/gpt-5.4", undefined);
+		cfgTaskAgentSoftRequestBudget.setEntry(settings, "openai/gpt-5.4", undefined);
 		await settings.flush();
-		expect(await readConfig()).toEqual({ temperature: 0.3, retry: { fallbackChains: { slow: ["user/slow"] } } });
-		expect(cfgRetryFallbackChains.get(settings)).toEqual({ slow: ["user/slow"] });
+		expect(await readConfig()).toEqual({ temperature: 0.3, task: { agentSoftRequestBudget: { slow: 3 } } });
+		expect(cfgTaskAgentSoftRequestBudget.get(settings)).toEqual({ slow: 3 });
 	});
 
 	it("saves a whole-record write made while a save of one of its entries waits for the config lock", async () => {
-		const settings = await load({ retry: { fallbackChains: { slow: ["old/slow"], smol: ["old/smol"] } } }, {});
-		cfgRetryFallbackChains.setEntry(settings, "slow", ["intermediate/slow"]);
+		const settings = await load({ task: { agentSoftRequestBudget: { slow: 5, smol: 6 } } }, {});
+		cfgTaskAgentSoftRequestBudget.setEntry(settings, "slow", 7);
 
 		const lock = await acquireFileLock(configPath());
 		let entrySave: Promise<void> | undefined;
 		try {
 			// This save captures the entry write, then cannot read config.yml before the whole record is set.
 			entrySave = settings.flush();
-			cfgRetryFallbackChains.set(settings, { slow: ["final/slow"], smol: ["final/smol"] });
+			cfgTaskAgentSoftRequestBudget.set(settings, { slow: 8, smol: 9 });
 		} finally {
 			lock.release();
 		}
@@ -96,28 +96,28 @@ describe("Settings entry-level writes", () => {
 		await settings.flush();
 
 		expect(await readConfig()).toEqual({
-			retry: { fallbackChains: { slow: ["final/slow"], smol: ["final/smol"] } },
+			task: { agentSoftRequestBudget: { slow: 8, smol: 9 } },
 		});
 	});
 
 	it.each([
 		{
 			edited: "another setting",
-			external: { temperature: 0.3, retry: { fallbackChains: { slow: ["old/slow"], smol: ["old/smol"] } } },
-			saved: { temperature: 0.3, retry: { fallbackChains: { slow: ["final/slow"], smol: ["final/smol"] } } },
+			external: { temperature: 0.3, task: { agentSoftRequestBudget: { slow: 5, smol: 6 } } },
+			saved: { temperature: 0.3, task: { agentSoftRequestBudget: { slow: 8, smol: 9 } } },
 		},
 		{
 			edited: "an entry only the whole-record write sets",
-			external: { retry: { fallbackChains: { slow: ["old/slow"], smol: ["external/smol"] } } },
-			saved: { retry: { fallbackChains: { slow: ["final/slow"], smol: ["external/smol"] } } },
+			external: { task: { agentSoftRequestBudget: { slow: 5, smol: 10 } } },
+			saved: { task: { agentSoftRequestBudget: { slow: 8, smol: 10 } } },
 		},
 	])(
 		"merges an entry write and a later whole-record write with an external edit of $edited",
 		async ({ external, saved }) => {
-			const settings = await load({ retry: { fallbackChains: { slow: ["old/slow"], smol: ["old/smol"] } } }, {});
+			const settings = await load({ task: { agentSoftRequestBudget: { slow: 5, smol: 6 } } }, {});
 
-			cfgRetryFallbackChains.setEntry(settings, "slow", ["intermediate/slow"]);
-			cfgRetryFallbackChains.set(settings, { slow: ["final/slow"], smol: ["final/smol"] });
+			cfgTaskAgentSoftRequestBudget.setEntry(settings, "slow", 7);
+			cfgTaskAgentSoftRequestBudget.set(settings, { slow: 8, smol: 9 });
 			await Bun.write(configPath(), YAML.stringify(external));
 			await settings.flush();
 
@@ -127,15 +127,15 @@ describe("Settings entry-level writes", () => {
 
 	it("writes an entry into a record malformed as a list, keeping the entries an overlay supplies", async () => {
 		const settings = await load(
-			{ retry: { fallbackChains: [] } },
-			{ retry: { fallbackChains: { smol: ["overlay/cheap"] } } },
+			{ task: { agentSoftRequestBudget: [] } },
+			{ task: { agentSoftRequestBudget: { smol: 1 } } },
 		);
 
-		cfgRetryFallbackChains.setEntry(settings, "slow", ["user/slow"]);
+		cfgTaskAgentSoftRequestBudget.setEntry(settings, "slow", 3);
 		await settings.flush();
 
-		expect(cfgRetryFallbackChains.get(settings)).toEqual({ smol: ["overlay/cheap"], slow: ["user/slow"] });
-		expect(await readConfig()).toEqual({ retry: { fallbackChains: { slow: ["user/slow"] } } });
+		expect(cfgTaskAgentSoftRequestBudget.get(settings)).toEqual({ smol: 1, slow: 3 });
+		expect(await readConfig()).toEqual({ task: { agentSoftRequestBudget: { slow: 3 } } });
 	});
 
 	it("changes the persisted agent list by the toggled item only while an overlay supplies the list", async () => {

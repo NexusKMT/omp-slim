@@ -11,12 +11,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { AUTO_THINKING, toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
-// `auto` is a session-level selector: the per-turn difficulty classifier runs
-// for the primary turn only, and `concreteThinkingLevel` erases `auto` when the
-// advisor descriptor is built. An advisor configured with `:auto` therefore used
-// to collapse to the hardcoded `medium` fallback and stay there for the whole
-// session. It now tracks the effort the primary turn is running at, whether the
-// primary is on `auto` or pinned.
+// Advisors inherit the primary's effort and follow changes at review boundaries.
 describe("advisor auto thinking level", () => {
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
@@ -50,7 +45,6 @@ describe("advisor auto thinking level", () => {
 			...(streamFn ? { streamFn } : {}),
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, ...settingsOverrides });
-		settings.setModelRole("advisor", `${model.provider}/${model.id}:${AUTO_THINKING}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),
@@ -77,7 +71,7 @@ describe("advisor auto thinking level", () => {
 		expect(advisor.state.thinkingLevel).toBe(toReasoningEffort(primaryLevel));
 	});
 
-	it("drops to the build-time default at the next review boundary when the primary turns thinking off", async () => {
+	it("turns advisor reasoning off at the next review boundary when the primary turns it off", async () => {
 		const mock = createMockModel({ handler: { content: ["primary complete"] } });
 		const s = newSession(mock.stream);
 		s.setThinkingLevel(Effort.High);
@@ -90,12 +84,14 @@ describe("advisor auto thinking level", () => {
 		await s.agent.prompt("do work");
 		await s.waitForAdvisorCatchup(2000);
 		expect(s.getAdvisorAgent()).toBe(advisor);
-		expect(advisor.state.thinkingLevel).toBe(Effort.Medium);
+		expect(advisor.state.thinkingLevel).toBeUndefined();
+		expect(advisor.state.disableReasoning).toBe(true);
 
 		// The live retune and a fresh build agree on the level.
 		s.setAdvisorEnabled(false);
 		expect(s.setAdvisorEnabled(true)).toBe(true);
-		expect(s.getAdvisorAgent()?.state.thinkingLevel).toBe(Effort.Medium);
+		expect(s.getAdvisorAgent()?.state.thinkingLevel).toBeUndefined();
+		expect(s.getAdvisorAgent()?.state.disableReasoning).toBe(true);
 	});
 
 	it("retunes the live advisor at the turn boundary without rebuilding or resetting it", async () => {
@@ -159,140 +155,4 @@ describe("advisor auto thinking level", () => {
 		expect(s.getAdvisorAgent()).toBe(advisorBefore);
 		expect(advisorBefore.state.thinkingLevel).toBe(Effort.Low);
 	});
-
-	it("an auto advisor on a retry-fallback model is not retuned when the primary's level changes; it follows again once back on its main model", async () => {
-		const primary = createMockModel({ handler: { content: ["primary complete"] } });
-		const advisorMock = createMockModel();
-		const wire: string[] = [];
-		let quotaFailed = false;
-		const s = newSession(
-			primary.stream,
-			{
-				"advisor.syncBacklog": "1",
-				"retry.baseDelayMs": 5,
-				"retry.fallbackChains": { advisor: ["google/gemini-2.5-flash:minimal"] },
-			},
-			(m, context, options) => {
-				wire.push(`${m.id}:${options?.reasoning}`);
-				if (m.id === model.id && !quotaFailed) {
-					quotaFailed = true;
-					advisorMock.push({
-						throw: "Devin stream error failed_precondition: Your daily usage quota has been exhausted. Your quota will reset after 60s.",
-					});
-				} else {
-					advisorMock.push({ content: ["advisor ok"] });
-				}
-				return advisorMock.stream(m, context, options);
-			},
-		);
-		vi.spyOn(modelRegistry.authStorage.limits, "markReached").mockResolvedValue({ switched: false });
-		s.setThinkingLevel(Effort.Low);
-		expect(s.setAdvisorEnabled(true)).toBe(true);
-		const advisor = s.getAdvisorAgent();
-		if (!advisor) throw new Error("Expected advisor Agent to be live");
-		// The failed review falls back asynchronously, after catch-up reports.
-		const fellBack = Promise.withResolvers<void>();
-		s.subscribe(event => {
-			if (event.type === "retry_fallback_succeeded") fellBack.resolve();
-		});
-		const review = async (prompt: string) => {
-			await s.agent.prompt(prompt);
-			expect(await s.waitForAdvisorCatchup(5000)).toBe(true);
-			return wire.at(-1);
-		};
-
-		await s.agent.prompt("quota fails over to the fallback");
-		await fellBack.promise;
-		expect(wire).toEqual([`${model.id}:${Effort.Low}`, "gemini-2.5-flash:minimal"]);
-		s.setThinkingLevel(Effort.High);
-		expect(await review("primary now high")).toBe("gemini-2.5-flash:minimal");
-
-		// Cooldown over: the very review that restores the main model already
-		// runs at the primary's current level, not the pre-fallback `low`.
-		vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000);
-		expect(await review("cooldown expired")).toBe(`${model.id}:${Effort.High}`);
-		expect(s.getAdvisorAgent()).toBe(advisor);
-	});
-
-	for (const { name, unverified, revertPolicy } of [
-		{ name: "keeps following the primary with no revert", unverified: false, revertPolicy: "never" },
-		{ name: "retunes during cooldown and restores fixed effort", unverified: false, revertPolicy: "cooldown-expiry" },
-		{ name: "leaves unverified thinking unset", unverified: true, revertPolicy: "never" },
-	] as const) {
-		it(`a fixed-effort advisor on an :auto fallback ${name}`, async () => {
-			const provider = "meta";
-			modelRegistry.registerProvider(provider, {
-				api: "openai-completions",
-				apiKey: "test-key",
-				baseUrl: "https://test.example.com",
-				models: [
-					{
-						id: "fallback",
-						name: "Auto fallback",
-						reasoning: !unverified,
-						input: ["text"],
-						supportsTools: true,
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-						contextWindow: 200_000,
-						maxTokens: 64_000,
-					},
-				],
-			});
-			const primary = createMockModel({ handler: { content: ["primary complete"] } });
-			const advisorMock = createMockModel();
-			const wire: Array<{ id: string; reasoning: Effort | undefined }> = [];
-			let failed = false;
-			const s = newSession(
-				primary.stream,
-				{
-					"advisor.syncBacklog": "1",
-					"retry.baseDelayMs": 5,
-					"retry.fallbackRevertPolicy": revertPolicy,
-					"retry.fallbackChains": { advisor: [`${provider}/fallback:auto`] },
-				},
-				(m, context, options) => {
-					wire.push({ id: m.id, reasoning: options?.reasoning });
-					if (m.id === model.id && !failed) {
-						failed = true;
-						advisorMock.push({
-							throw: "Devin stream error failed_precondition: Your daily usage quota has been exhausted. Your quota will reset after 60s.",
-						});
-					} else {
-						advisorMock.push({ content: ["advisor ok"] });
-					}
-					return advisorMock.stream(m, context, options);
-				},
-			);
-			vi.spyOn(modelRegistry.authStorage.limits, "markReached").mockResolvedValue({ switched: false });
-			s.settings.setModelRole("advisor", `${model.provider}/${model.id}:low`);
-			s.setThinkingLevel(Effort.High);
-			expect(s.setAdvisorEnabled(true)).toBe(true);
-			const advisor = s.getAdvisorAgent();
-			if (!advisor) throw new Error("Expected advisor Agent to be live");
-			const fellBack = Promise.withResolvers<void>();
-			s.subscribe(event => {
-				if (event.type === "retry_fallback_succeeded") fellBack.resolve();
-			});
-
-			await s.agent.prompt("fall back from fixed effort to auto");
-			await fellBack.promise;
-			expect(wire).toEqual([
-				{ id: model.id, reasoning: Effort.Low },
-				{ id: "fallback", reasoning: unverified ? undefined : Effort.High },
-			]);
-
-			s.setThinkingLevel(Effort.Medium);
-			await s.agent.prompt("follow the next primary turn");
-			expect(await s.waitForAdvisorCatchup(5000)).toBe(true);
-			expect(wire.at(-1)).toEqual({ id: "fallback", reasoning: unverified ? undefined : Effort.Medium });
-			expect(s.getAdvisorAgent()).toBe(advisor);
-
-			if (revertPolicy === "cooldown-expiry") {
-				vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000);
-				await s.agent.prompt("restore the fixed-effort advisor");
-				expect(await s.waitForAdvisorCatchup(5000)).toBe(true);
-				expect(wire.at(-1)).toEqual({ id: model.id, reasoning: Effort.Low });
-			}
-		});
-	}
 });

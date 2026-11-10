@@ -11,7 +11,6 @@ import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
 
-import { cfgTaskPerCallModelAllow } from "@oh-my-pi/pi-coding-agent/task/settings";
 import { cfgSearxngEndpoint } from "@oh-my-pi/pi-coding-agent/web/settings";
 
 let state: SettingsTestState | undefined;
@@ -70,18 +69,10 @@ it("clearing a settings-panel text field removes the key from config.yml so its 
 	expect(YAML.parse(await Bun.file(configPath).text())).toEqual({ temperature: 0.4 });
 });
 
-it("hides the per-call allowlist editor for a project-supplied list so it cannot be promoted to global", async () => {
+it("omits the retired per-call model allowlist from the settings panel", async () => {
 	const projectConfig = path.join(projectDir, ".omp", "settings.json");
 	fs.mkdirSync(path.dirname(projectConfig), { recursive: true });
-	await Bun.write(projectConfig, JSON.stringify({ task: { perCallModelAllow: ["mock/target"] } }));
-	const settings = await Settings.init({ cwd: projectDir, agentDir });
-	expect(cfgTaskPerCallModelAllow.provenance(settings)).toBe("project");
-	const entry = createSettingsHost().entries.find(candidate => candidate.path === "task.perCallModelAllow");
-	expect(entry?.condition?.()).toBe(false);
-});
-
-it("keeps the per-call allowlist editor when only the global layer supplies it", async () => {
+	await Bun.write(projectConfig, JSON.stringify({ task: { perCallModelAllow: ["mock/retired"] } }));
 	await Settings.init({ cwd: projectDir, agentDir });
-	const entry = createSettingsHost().entries.find(candidate => candidate.path === "task.perCallModelAllow");
-	expect(entry?.condition?.()).toBe(true);
+	expect(createSettingsHost().entries.some(entry => entry.path === "task.perCallModelAllow")).toBe(false);
 });

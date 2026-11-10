@@ -177,7 +177,6 @@ describe("advisor tool-call loop guard", () => {
 			advisorConfigs:
 				advisorConfig === undefined ? undefined : Array.isArray(advisorConfig) ? advisorConfig : [advisorConfig],
 		});
-		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		const advisor = session.getAdvisorAgent();
 		if (!advisor) throw new Error("Expected advisor agent to be active");
@@ -701,7 +700,6 @@ describe("advisor tool-call loop guard", () => {
 				},
 			],
 		});
-		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		await session.prompt("only update");
@@ -755,7 +753,6 @@ describe("advisor tool-call loop guard", () => {
 			advisorConfigs: [{ name: "Final reviewer", reviewMode: "agent-end", reviewInterval: 2 }],
 		});
 		session = live;
-		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(live.setAdvisorEnabled(true)).toBe(true);
 		await live.prompt("ship the retry change");
 		expect(reviews).toHaveLength(0);

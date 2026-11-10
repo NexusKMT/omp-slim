@@ -3071,16 +3071,6 @@ export class Settings {
 			raw["find.enabled"] = raw["find.enabled"] ? "on" : "off";
 		}
 
-		// spelling.autocomplete: boolean -> engine enum. `true` was the macOS
-		// dictionary completion, which the cross-platform `auto` engine replaces.
-		const spellingObj = isRecord(raw.spelling) ? raw.spelling : undefined;
-		if (spellingObj && typeof spellingObj.autocomplete === "boolean") {
-			spellingObj.autocomplete = spellingObj.autocomplete ? "auto" : "off";
-		}
-		if (typeof raw["spelling.autocomplete"] === "boolean") {
-			raw["spelling.autocomplete"] = raw["spelling.autocomplete"] ? "auto" : "off";
-		}
-
 		// statusLine: rename "plan_mode" segment to "mode"
 		const statusLineObj = raw.statusLine as Record<string, unknown> | undefined;
 		if (statusLineObj) {
@@ -3411,6 +3401,14 @@ export class Settings {
 		deleteByPath(raw, ["images", "describeForTextModels"]);
 		delete raw["images.describeForTextModels"];
 
+		for (const path of [
+			["spelling", "autocomplete"],
+			["composer", "predictions"],
+			["contextPromotion", "enabled"],
+		]) {
+			deleteByPath(raw, path);
+			delete raw[path.join(".")];
+		}
 		// Retired task-specific selectors must not recreate independent model roles.
 		const providerSettings = isRecord(raw.providers) ? raw.providers : undefined;
 		for (const key of [
@@ -3422,6 +3420,7 @@ export class Settings {
 			"imageOrder",
 			"judgmentProvider",
 			"autoThinkingModel",
+			"autoThinkingMaxEffort",
 			"unexpectedStopModel",
 			"tinyModel",
 			"memoryModel",
@@ -3464,12 +3463,28 @@ export class Settings {
 		if (retrySettings) {
 			delete retrySettings.fallbackChains;
 			delete retrySettings.modelFallback;
-			for (const key of ["fallbackOn", "fallbackRevert", "usageAwareFallback", "modelCooldownMs", "minCooldownMs"])
+			for (const key of [
+				"fallbackOn",
+				"fallbackRevertPolicy",
+				"rateLimitWalksChain",
+				"usageReservePolicy",
+				"usageAwareFallback",
+				"modelCooldownMs",
+				"minCooldownMs",
+			])
 				delete retrySettings[key];
 		}
 		delete raw["retry.fallbackChains"];
 		delete raw["retry.modelFallback"];
-		for (const key of ["fallbackOn", "fallbackRevert", "usageAwareFallback", "modelCooldownMs", "minCooldownMs"])
+		for (const key of [
+			"fallbackOn",
+			"fallbackRevertPolicy",
+			"rateLimitWalksChain",
+			"usageReservePolicy",
+			"usageAwareFallback",
+			"modelCooldownMs",
+			"minCooldownMs",
+		])
 			delete raw[`retry.${key}`];
 		const taskSettings = isRecord(raw.task) ? raw.task : undefined;
 		for (const key of ["agentModelOverrides", "perCallModel", "perCallModelAllow", "agentPrewalk", "prewalk"]) {

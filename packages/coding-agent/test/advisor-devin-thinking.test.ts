@@ -19,9 +19,6 @@ import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 // and disable the advisor session-wide with an empty
 // `Supported efforts:` warning list.
 //
-// This mirrors the `auto`-path fix already covered by
-// `auto-thinking-classifier.test.ts:145` for `clampAutoThinkingEffort`, at the
-// advisor descriptor boundary.
 describe("AgentSession advisor descriptor thinking level", () => {
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
@@ -103,7 +100,7 @@ describe("AgentSession advisor descriptor thinking level", () => {
 		expect(devinModel.reasoning).toBe(true);
 		expect(devinModel.thinking).toBeUndefined();
 
-		session.settings.setModelRole("advisor", `${devinModel.provider}/${devinModel.id}`);
+		session.agent.setModel(devinModel);
 
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		expect(session.isAdvisorActive()).toBe(true);
@@ -124,10 +121,10 @@ describe("AgentSession advisor descriptor thinking level", () => {
 		expect(advisor.state.disableReasoning).toBe(false);
 	});
 
-	it("Anthropic advisor with no configured thinking suffix still gets the medium default", () => {
+	it("Anthropic advisor inherits the primary medium selection", () => {
 		// Guard against over-clamping: models that support `medium` MUST keep
 		// receiving it so the historical advisor thinking budget is preserved.
-		session.settings.setModelRole("advisor", `${anthropicModel.provider}/${anthropicModel.id}`);
+		session.setThinkingLevel(Effort.Medium);
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		const advisor = session.getAdvisorAgent();
@@ -136,13 +133,14 @@ describe("AgentSession advisor descriptor thinking level", () => {
 		expect(advisor.state.thinkingLevel).toBe(Effort.Medium);
 	});
 
-	it("Devin advisor with an explicit :off suffix disables reasoning without clamping to inherit", () => {
+	it("Devin advisor with primary thinking off disables reasoning without clamping to inherit", () => {
 		// `off` is an explicit user opt-out and MUST reach the Agent as
 		// `disableReasoning: true` regardless of the model's effort surface. The
 		// clamp helper preserves `off`; verifying that here so a future change
 		// to the descriptor doesn't route `off` through the Devin
 		// no-controllable-effort fallback and silently re-enable reasoning.
-		session.settings.setModelRole("advisor", `${devinModel.provider}/${devinModel.id}:off`);
+		session.agent.setModel(devinModel);
+		session.setThinkingLevel("off");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
 		const advisor = session.getAdvisorAgent();

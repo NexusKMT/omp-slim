@@ -3,7 +3,6 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
-import * as autoThinking from "@oh-my-pi/pi-coding-agent/auto-thinking/classifier";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
@@ -29,7 +28,6 @@ it("shares Vibe sibling cache routing by worker type while keeping conversations
 	// Task workers classify each turn's difficulty through the judge role, whose native backends
 	// retry a failed request with backoff; fail the classification outright, as offline, so each
 	// worker falls back to its provisional level at once.
-	vi.spyOn(autoThinking, "classifyDifficulty").mockRejectedValue(new Error("Network is disabled in this test"));
 	const authStorage = await AuthStorage.create(directory.join("auth.db"));
 	authStorage.keys.setRuntime("muse-code", JSON.stringify({ oauthAccessToken: "test-oauth", apiKey: "test-key" }));
 	const modelId = "muse-spark-1.3-contributor";
