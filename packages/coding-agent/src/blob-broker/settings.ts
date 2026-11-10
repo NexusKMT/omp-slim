@@ -5,7 +5,7 @@
 import { combine, register } from "../config/registry";
 import { BUILTIN_BLOB_DESTINATIONS, type BlobDestinationId, type BlobDestinationMetadata } from "./destinations";
 
-const DEFAULT_IMAGES_URLS_BACKENDS: BlobDestinationId[] = ["provider-files", "tailscale", "cloudflared", "litterbox"];
+const DEFAULT_IMAGES_URLS_BACKENDS: BlobDestinationId[] = ["tailscale", "cloudflared", "litterbox"];
 const EMPTY_IMAGES_URLS_OPTIONS: Partial<Record<BlobDestinationId, Record<string, unknown>>> = {};
 const EMPTY_IMAGES_URLS_CREDENTIALS: Partial<Record<BlobDestinationId, Record<string, string>>> = {};
 
@@ -13,9 +13,7 @@ const BUILTIN_BLOB_DESTINATION_METADATA: readonly BlobDestinationMetadata<BlobDe
 	Object.values(BUILTIN_BLOB_DESTINATIONS);
 
 const BLOB_BACKEND_CHOICES = BUILTIN_BLOB_DESTINATION_METADATA.filter(
-	destination =>
-		destination.id === "provider-files" ||
-		(destination.directImage && destination.status !== "incompatible" && destination.status !== "defunct"),
+	destination => destination.directImage && destination.status !== "incompatible" && destination.status !== "defunct",
 ).map(destination => ({
 	value: destination.id,
 	label: destination.label,

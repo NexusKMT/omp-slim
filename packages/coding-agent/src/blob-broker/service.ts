@@ -17,7 +17,6 @@ import { type BlobBackend, LocalBlobBackend } from "./broker";
 import {
 	contextHasImages,
 	contextHasImageUrls,
-	contextHasProviderFiles,
 	decorateContextImages,
 	inlineContextImages,
 	supportsRemoteImageUrls,
@@ -25,8 +24,6 @@ import {
 import { connectDaemonBlobBackend, type RenderCallbackHost } from "./daemon";
 import type { BlobBrokerWorkerConfig } from "./protocol";
 import { RENDER_CALLBACK_PATH, RENDER_CALLBACK_TOKEN_HEADER } from "./protocol";
-import { ProviderFileCache } from "./provider-file-types";
-import { type ProviderFileCredentialResolver, ProviderFileManager } from "./provider-files";
 import type { BlobPublication } from "./publication";
 import { BlobBrokerSavingsJournal, type BlobBrokerSavingsRecord, blobBrokerSavingsJournalPath } from "./savings";
 import type { LazyBlobFetcher } from "./store";
@@ -155,8 +152,6 @@ export class ImageUrlService {
 	#publicationSourceByUrl = new Map<string, { rangeStart: number; rangeEnd: number; hash: string }>();
 	#callback: { port: number; token: string; server: Bun.Server<undefined> } | null | undefined;
 	#daemonEnabled: boolean;
-	#providerFiles: ProviderFileManager | undefined;
-	#providerFilePosition: number;
 	#savingsJournal: BlobBrokerSavingsJournal | undefined;
 
 	constructor(
@@ -164,25 +159,18 @@ export class ImageUrlService {
 		configs: readonly BlobBrokerWorkerConfig[],
 		options?: {
 			daemon?: boolean;
-			providerFiles?: ProviderFileManager;
-			providerFilePosition?: number;
 			savingsJournal?: BlobBrokerSavingsJournal;
 		},
 	) {
 		this.#projectDir = projectDir;
 		this.#configs = configs;
 		this.#daemonEnabled = options?.daemon ?? true;
-		this.#providerFiles = options?.providerFiles;
-		this.#providerFilePosition = options?.providerFilePosition ?? configs.length;
 		this.#savingsJournal = options?.savingsJournal;
 	}
 
 	/** Kick off daemon/exposure startup in the background to hide latency. */
 	prewarm(): void {
-		const position = Math.min(this.#providerFilePosition, this.#configs.length);
-		const configs = position > 0 ? this.#configs.slice(0, position) : this.#configs.slice(position);
-		const key = position > 0 ? `range:0:${position}` : `range:${position}:${this.#configs.length}`;
-		if (configs.length > 0) void this.#ensureBackend(configs, key);
+		if (this.#configs.length > 0) void this.#ensureBackend();
 	}
 
 	#ensureBackend(
@@ -269,32 +257,10 @@ export class ImageUrlService {
 		return this.#callback;
 	}
 
-	/**
-	 * Decorate images in configured backend order. The first source that can
-	 * represent an image wins; provider-native upload failures continue into
-	 * the following URL destinations without changing the session context.
-	 */
+	/** Publish images in configured URL-backend order without changing saved context. */
 	async decorateContext(context: Context, model: Model): Promise<Context> {
 		if (!contextHasImages(context)) return context;
-		const position = Math.min(this.#providerFilePosition, this.#configs.length);
-		let decorated = context;
-		if (position > 0) {
-			decorated = await this.#decorateUrls(
-				decorated,
-				model,
-				this.#configs.slice(0, position),
-				`range:0:${position}`,
-			);
-		}
-		if (this.#providerFiles) decorated = await this.#providerFiles.decorateContext(decorated, model);
-		if (position < this.#configs.length) {
-			decorated = await this.#decorateUrls(
-				decorated,
-				model,
-				this.#configs.slice(position),
-				`range:${position}:${this.#configs.length}`,
-			);
-		}
+		const decorated = await this.#decorateUrls(context, model, this.#configs, "all");
 		await this.#recordSavings(context, decorated, model);
 		return decorated;
 	}
@@ -329,25 +295,11 @@ export class ImageUrlService {
 		for (let index = 0; index < count; index++) {
 			const inline = sourceImages[index];
 			const reference = decoratedImages[index];
-			if (
-				inline.data.length === 0 ||
-				inline.url ||
-				inline.providerFile ||
-				(!reference.url && !reference.providerFile)
-			) {
-				continue;
-			}
-			const destination = reference.providerFile
-				? "provider-files"
-				: reference.url
-					? this.#publicationByUrl.get(reference.url)?.destination
-					: undefined;
+			if (inline.data.length === 0 || inline.url || !reference.url) continue;
+			const destination = this.#publicationByUrl.get(reference.url)?.destination;
 			if (!destination) continue;
 			const inlineBytes = Buffer.byteLength(inline.data, "utf8");
-			const referenceBytes = Buffer.byteLength(
-				reference.providerFile ? JSON.stringify(reference.providerFile) : (reference.url ?? ""),
-				"utf8",
-			);
+			const referenceBytes = Buffer.byteLength(reference.url, "utf8");
 			const current = counters.get(destination) ?? { imageCount: 0, inlineBytes: 0, referenceBytes: 0 };
 			current.imageCount++;
 			current.inlineBytes += inlineBytes;
@@ -387,7 +339,7 @@ export class ImageUrlService {
 			if (message.role !== "user" && message.role !== "developer" && message.role !== "toolResult") continue;
 			if (!Array.isArray(message.content)) continue;
 			for (const block of message.content) {
-				if (block.type !== "image" || block.url || block.providerFile || block.data.length === 0) continue;
+				if (block.type !== "image" || block.url || block.data.length === 0) continue;
 				const hash = blockContentHash(block);
 				const group = byHash.get(hash);
 				if (group) group.push(block);
@@ -436,9 +388,6 @@ export class ImageUrlService {
 	get frameSink(): SnapcompactFrameSink {
 		return {
 			framesFor: async (text, shape, maxFrames) => {
-				// A leading provider-file source needs eager bytes so the later
-				// model-aware decoration phase can upload them natively.
-				if (this.#providerFiles && this.#providerFilePosition === 0) return null;
 				const backend = await this.#ensureBackend();
 				if (!backend?.supportsLazy) return null;
 				const total = snapcompact.frames(text, { shape });
@@ -534,21 +483,11 @@ export class ImageUrlService {
 	}
 
 	/**
-	 * Advance one rejected image source. Provider-file rejection starts the
-	 * URL chain from its beginning. URL rejection resumes strictly after the
+	 * Advance one rejected URL source. URL rejection resumes strictly after the
 	 * destination that produced the failed publication, then falls back inline.
 	 */
 	async fallbackContext(context: Context, model: Model): Promise<Context> {
 		const urls = this.#imageUrls(context);
-		if (contextHasProviderFiles(context)) {
-			await this.#providerFiles?.invalidateContext(context, model);
-			const inline = await this.inlineContext(context);
-			this.#forgetUrls(urls);
-			const withUrls = await this.#decorateUrls(inline, model, this.#configs, "all");
-			const fallback = contextHasImageUrls(withUrls) ? withUrls : inline;
-			await this.#recordSavings(inline, fallback, model);
-			return fallback;
-		}
 
 		const failedIndex = this.#failedConfigIndex(urls);
 		const inline = await this.inlineContext(context);
@@ -603,12 +542,6 @@ function destinationOptions(
 	return options;
 }
 
-/** Deterministic durable provider-file cache path for one project. */
-export function providerFileCachePath(settings: Settings, projectDir: string): string {
-	const projectHash = Bun.hash.wyhash(path.resolve(projectDir)).toString(16);
-	return path.join(getBlobsDir(settings.getAgentDir()), `provider-files-index-${projectHash}.json`);
-}
-
 /** Resolve configured URL destinations without constructing their runtimes. */
 export function resolveBlobBrokerConfigs(settings: Settings, projectDir: string): BlobBrokerWorkerConfig[] {
 	const blobsDir = getBlobsDir(settings.getAgentDir());
@@ -618,7 +551,6 @@ export function resolveBlobBrokerConfigs(settings: Settings, projectDir: string)
 	const credentialsByDestination = cfgImagesUrlsCredentials.get(settings);
 	const configs: BlobBrokerWorkerConfig[] = [];
 	for (const destination of cfgImagesUrlsBackends.get(settings)) {
-		if (destination === "provider-files") continue;
 		const options = destinationOptions(optionsByDestination[destination]);
 		if (destination === "command" && typeof options.command !== "string") {
 			const command = cfgImagesUrlsCommand.get(settings);
@@ -667,15 +599,13 @@ export function resolveBlobBrokerConfigs(settings: Settings, projectDir: string)
 export class LiveImageUrlService implements SnapcompactFrameSink {
 	#settings: Settings;
 	#projectDir: () => string;
-	#resolveCredential: ProviderFileCredentialResolver;
 	#current: ImageUrlService | undefined;
 	#generation = 0;
 	#unwatch: () => void;
 
-	constructor(settings: Settings, projectDir: () => string, resolveCredential: ProviderFileCredentialResolver) {
+	constructor(settings: Settings, projectDir: () => string) {
 		this.#settings = settings;
 		this.#projectDir = projectDir;
-		this.#resolveCredential = resolveCredential;
 		this.#current = this.#build();
 		this.#unwatch = cfgImagesUrls.listen(settings, () => this.#rebuild());
 	}
@@ -710,7 +640,7 @@ export class LiveImageUrlService implements SnapcompactFrameSink {
 	}
 
 	#build(): ImageUrlService | undefined {
-		const service = createImageUrlServiceFromSettings(this.#settings, this.#projectDir(), this.#resolveCredential);
+		const service = createImageUrlServiceFromSettings(this.#settings, this.#projectDir());
 		service?.prewarm();
 		return service;
 	}
@@ -725,34 +655,13 @@ export class LiveImageUrlService implements SnapcompactFrameSink {
 }
 
 /** Resolve the settings group into a service; `undefined` when disabled. */
-export function createImageUrlServiceFromSettings(
-	settings: Settings,
-	projectDir: string,
-	resolveCredential: ProviderFileCredentialResolver,
-): ImageUrlService | undefined {
+export function createImageUrlServiceFromSettings(settings: Settings, projectDir: string): ImageUrlService | undefined {
 	if (!cfgImagesUrlsEnabled.get(settings)) return undefined;
 	const configs = resolveBlobBrokerConfigs(settings, projectDir);
-	let providerFilePosition: number | undefined;
-	let urlPosition = 0;
-	for (const destination of cfgImagesUrlsBackends.get(settings)) {
-		if (destination === "provider-files") providerFilePosition ??= urlPosition;
-		else urlPosition++;
-	}
-	if (configs.length === 0 && providerFilePosition === undefined) {
+	if (configs.length === 0) {
 		logger.warn("blob-broker: no configured image backend is available; images stay inline");
 		return undefined;
 	}
 	const savingsJournal = new BlobBrokerSavingsJournal(blobBrokerSavingsJournalPath(settings, projectDir));
-	const providerFiles =
-		providerFilePosition === undefined
-			? undefined
-			: new ProviderFileManager(
-					new ProviderFileCache(providerFileCachePath(settings, projectDir)),
-					resolveCredential,
-				);
-	return new ImageUrlService(projectDir, configs, {
-		providerFiles,
-		providerFilePosition: providerFilePosition ?? configs.length,
-		savingsJournal,
-	});
+	return new ImageUrlService(projectDir, configs, { savingsJournal });
 }

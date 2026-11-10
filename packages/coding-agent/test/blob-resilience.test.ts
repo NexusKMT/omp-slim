@@ -26,8 +26,8 @@ function publication(destination: "direct" | "chevereto", url: string): BlobPubl
 const model: Model = buildModel({
 	id: "resilience-model",
 	name: "Resilience Model",
-	api: "anthropic-messages",
-	provider: "anthropic",
+	api: "openai-completions",
+	provider: "custom",
 	baseUrl: "https://example.invalid",
 	reasoning: false,
 	input: ["text", "image"],

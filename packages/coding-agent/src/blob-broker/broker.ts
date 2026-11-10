@@ -10,12 +10,11 @@
  * Design invariants:
  * - **Stable, multi-use URLs.** A blob's URL is keyed by content hash for the
  *   backend's lifetime. Anthropic silently forgets images unless a resent turn
- *   is byte-identical, OpenAI's fetcher issues two GETs per image, and any
+ *   is byte-identical, clients may issue multiple GETs per image, and any
  *   provider may refetch on a cache miss — single-use tokens would break all
  *   three.
  * - **Unguessable URL is the only authorization.** 128-bit random token per
- *   blob. `User-Agent` attribution (pi-catalog fetcher registry) is telemetry,
- *   never a gate.
+ *   blob. GET/HEAD telemetry is diagnostic, never an access gate.
  * - **Fail toward inline.** Missing binary, tunnel crash, failed upload, or a
  *   provider rejection all degrade to inline base64.
  */

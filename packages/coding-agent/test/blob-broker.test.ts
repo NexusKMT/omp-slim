@@ -34,7 +34,7 @@ function makeModel(api: string, provider: string): Model {
 	});
 }
 
-const anthropicModel = makeModel("anthropic-messages", "anthropic");
+const chatModel = makeModel("openai-completions", "custom");
 
 function makeContext(): Context {
 	return {
@@ -269,7 +269,7 @@ describe("ImageUrlService", () => {
 		const service = makeService();
 		const context = makeContext();
 
-		const decorated = await service.decorateContext(context, anthropicModel);
+		const decorated = await service.decorateContext(context, chatModel);
 		expect(decorated).not.toBe(context);
 		const [user, toolResult] = decorated.messages;
 		if (user.role !== "user" || typeof user.content === "string") throw new Error("unexpected shape");
@@ -283,7 +283,7 @@ describe("ImageUrlService", () => {
 		expect(toolImage.url).toMatch(/\.jpg$/);
 
 		// Same bytes on the next turn resolve to the same url.
-		const again = await service.decorateContext(makeContext(), anthropicModel);
+		const again = await service.decorateContext(makeContext(), chatModel);
 		const againUser = again.messages[0];
 		if (againUser.role !== "user" || typeof againUser.content === "string") throw new Error("unexpected shape");
 		const againImage = againUser.content[1];
@@ -291,10 +291,10 @@ describe("ImageUrlService", () => {
 		expect(againImage.url).toBe(image.url);
 
 		// Non-fetching API: untouched context, by reference.
-		expect(await service.decorateContext(context, makeModel("ollama-chat", "ollama"))).toBe(context);
+		expect(await service.decorateContext(context, { ...chatModel, input: ["text"] })).toBe(context);
 
-		service.quarantine("anthropic", "test");
-		expect(await service.decorateContext(context, anthropicModel)).toBe(context);
+		service.quarantine("custom", "test");
+		expect(await service.decorateContext(context, chatModel)).toBe(context);
 	});
 
 	it("serves lazy snapcompact frames on fetch and materializes them for inline retries", async () => {
@@ -332,20 +332,11 @@ describe("ImageUrlService", () => {
 });
 
 describe("supportsRemoteImageUrls", () => {
-	it("admits verified url-fetching surfaces and refuses shared-API lookalikes", () => {
-		expect(supportsRemoteImageUrls(anthropicModel)).toBe(true);
-		expect(supportsRemoteImageUrls(makeModel("openai-codex-responses", "openai-codex"))).toBe(true);
-		expect(supportsRemoteImageUrls(makeModel("openai-responses", "xai"))).toBe(true);
-		expect(supportsRemoteImageUrls(makeModel("google-gemini-cli", "google-antigravity"))).toBe(true);
-		// Same API shape, backend that cannot fetch arbitrary URLs.
-		expect(supportsRemoteImageUrls(makeModel("anthropic-messages", "opencode"))).toBe(false);
-		// Moonshot-native hosts reject remote image URLs on both transports
-		// ("unsupported image url" 400) despite the openai-completions catalog api.
-		expect(supportsRemoteImageUrls(makeModel("openai-completions", "kimi-code"))).toBe(false);
-		expect(supportsRemoteImageUrls(makeModel("anthropic-messages", "kimi-code"))).toBe(false);
-		expect(supportsRemoteImageUrls(makeModel("openai-completions", "moonshot"))).toBe(false);
-		expect(supportsRemoteImageUrls(makeModel("google-gemini-cli", "google-gemini-cli"))).toBe(false);
-		expect(supportsRemoteImageUrls(makeModel("bedrock-converse-stream", "amazon-bedrock"))).toBe(false);
+	it("uses the explicit image capability and Chat protocol without provider-name guesses", () => {
+		expect(supportsRemoteImageUrls(chatModel)).toBe(true);
+		expect(supportsRemoteImageUrls(makeModel("openai-completions", "arbitrary-endpoint"))).toBe(true);
+		expect(supportsRemoteImageUrls({ ...chatModel, input: ["text"] })).toBe(false);
+		expect(supportsRemoteImageUrls({ ...chatModel, api: "retired-protocol" })).toBe(false);
 	});
 });
 
@@ -433,8 +424,8 @@ function errorMessage(message: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: "anthropic",
+		api: "openai-completions",
+		provider: "custom",
 		model: "test-model",
 		usage: {
 			input: 0,
@@ -480,8 +471,8 @@ describe("wrapStreamFnWithBlobUrlFallback", () => {
 		};
 		const wrapped = wrapStreamFnWithBlobUrlFallback(base as never, () => service);
 
-		const decorated = await service.decorateContext(makeContext(), anthropicModel);
-		const stream = await wrapped(anthropicModel, decorated, undefined);
+		const decorated = await service.decorateContext(makeContext(), chatModel);
+		const stream = await wrapped(chatModel, decorated, undefined);
 		const events: AssistantMessageEvent[] = [];
 		for await (const event of stream) events.push(event);
 
@@ -490,7 +481,7 @@ describe("wrapStreamFnWithBlobUrlFallback", () => {
 		expect(contextHasImageUrls(calls[1])).toBe(false);
 		expect(events.map(event => event.type)).toEqual(["start", "done"]);
 		expect((await stream.result()).stopReason).toBe("stop");
-		expect(service.isQuarantined("anthropic")).toBe(true);
+		expect(service.isQuarantined("custom")).toBe(true);
 	});
 
 	it("does not retry once content streamed, and passes undecorated contexts through", async () => {
@@ -507,16 +498,16 @@ describe("wrapStreamFnWithBlobUrlFallback", () => {
 		};
 		const wrapped = wrapStreamFnWithBlobUrlFallback(base as never, () => service);
 
-		const decorated = await service.decorateContext(makeContext(), anthropicModel);
-		const stream = await wrapped(anthropicModel, decorated, undefined);
+		const decorated = await service.decorateContext(makeContext(), chatModel);
+		const stream = await wrapped(chatModel, decorated, undefined);
 		const result = await stream.result();
 		expect(result.stopReason).toBe("error");
 		expect(calls).toHaveLength(1);
-		expect(service.isQuarantined("anthropic")).toBe(false);
+		expect(service.isQuarantined("custom")).toBe(false);
 
 		// No urls in the context → wrapper is a pass-through, single call.
 		const plain = makeContext();
-		const passStream = await wrapped(anthropicModel, plain, undefined);
+		const passStream = await wrapped(chatModel, plain, undefined);
 		expect((await passStream.result()).stopReason).toBe("error");
 		expect(calls).toHaveLength(2);
 		expect(calls[1]).toBe(plain);

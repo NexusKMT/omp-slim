@@ -1,9 +1,7 @@
 import { constants as fsConstants } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { getBundledModels } from "@oh-my-pi/pi-catalog";
-import { $which, type FetchImpl, formatBytes, getAgentDbPath, isEnoent } from "@oh-my-pi/pi-utils";
+import { $which, formatBytes } from "@oh-my-pi/pi-utils";
 import {
 	queryBlobBrokerDoctor,
 	queryBlobBrokerProbe,
@@ -26,23 +24,11 @@ import type {
 	BlobBrokerWorkerConfig,
 } from "../blob-broker/protocol";
 import {
-	hashProviderFileCredential,
-	parsePersistedProviderFileEntry,
-	ProviderFileCache,
-	type ProviderFileCacheEntry,
-	type ProviderFileCacheStatus,
-	type ProviderFileClient,
-	type ProviderFileProvider,
-} from "../blob-broker/provider-file-types";
-import { createAnthropicFileClient } from "../blob-broker/provider-files-anthropic";
-import { createGeminiProviderFileClient } from "../blob-broker/provider-files-gemini";
-import { createOpenAIFileClient } from "../blob-broker/provider-files-openai";
-import {
 	type BlobBrokerSavingsStatus,
 	blobBrokerSavingsJournalPath,
 	readBlobBrokerSavingsStatus,
 } from "../blob-broker/savings";
-import { providerFileCachePath, resolveBlobBrokerConfigs } from "../blob-broker/service";
+import { resolveBlobBrokerConfigs } from "../blob-broker/service";
 import { createConfiguredUploader } from "../blob-broker/uploaders";
 import { Settings } from "../config/settings";
 
@@ -67,13 +53,7 @@ export interface ImagesResolvedConfig {
 	readonly enabled: boolean;
 	readonly orderedBackends: readonly BlobDestinationId[];
 	readonly configs: readonly BlobBrokerWorkerConfig[];
-	readonly providerFileCachePath: string;
 	readonly savingsJournalPath: string;
-}
-
-export interface ImagesProviderFileSnapshot {
-	readonly entries: readonly ProviderFileCacheEntry[];
-	readonly lastError?: string;
 }
 
 export type ImagesDoctorSeverity = "ok" | "warn" | "error";
@@ -88,14 +68,6 @@ export interface ImagesCliDependencies {
 	readonly loadSettings: (projectDir: string) => Promise<Settings>;
 	readonly resolveConfig: (settings: Settings, projectDir: string) => ImagesResolvedConfig;
 	readonly readSavings: (journalPath: string) => Promise<BlobBrokerSavingsStatus>;
-	readonly readProviderFileSnapshot: (indexPath: string) => Promise<ImagesProviderFileSnapshot>;
-	readonly loadProviderFileCache: (indexPath: string) => ProviderFileCache;
-	readonly openAuthStorage: () => Promise<AuthStorage>;
-	readonly createProviderFileClient: (
-		provider: ProviderFileProvider,
-		credential: string,
-		fetchImpl: FetchImpl,
-	) => ProviderFileClient | null;
 	readonly queryStatus: (projectDir: string) => Promise<BlobBrokerStatus | null>;
 	readonly queryDoctor: (
 		projectDir: string,
@@ -111,7 +83,6 @@ export interface ImagesCliDependencies {
 		request: BlobBrokerPurgeRequest,
 	) => Promise<BlobBrokerPurgeResponse | null>;
 	readonly which: (binary: string) => string | null;
-	readonly fetch: FetchImpl;
 	readonly writeStdout: (text: string) => void;
 	readonly writeStderr: (text: string) => void;
 }
@@ -131,7 +102,6 @@ export interface ImagesStatusResult {
 	readonly enabled: boolean;
 	readonly backends: readonly BlobDestinationId[];
 	readonly daemon: SafeDaemonStatus;
-	readonly providerFiles: ProviderFileCacheStatus;
 	readonly savings: BlobBrokerSavingsStatus;
 }
 
@@ -163,14 +133,6 @@ export interface ImagesDaemonPurgeResult {
 	readonly errors: readonly string[];
 }
 
-export interface ImagesProviderPurgeResult {
-	readonly selected: number;
-	readonly bytes: number;
-	readonly deleted: number;
-	readonly skippedAuth: number;
-	readonly errors: readonly string[];
-}
-
 export interface ImagesPurgeResult {
 	readonly action: "purge";
 	readonly exitCode: 0 | 1;
@@ -178,7 +140,6 @@ export interface ImagesPurgeResult {
 	readonly applied: boolean;
 	readonly all: boolean;
 	readonly daemon: ImagesDaemonPurgeResult | null;
-	readonly providerFiles: ImagesProviderPurgeResult;
 }
 
 export interface ImagesErrorResult {
@@ -212,72 +173,19 @@ function defaultResolveConfig(settings: Settings, projectDir: string): ImagesRes
 		enabled: cfgImagesUrlsEnabled.get(settings),
 		orderedBackends: cfgImagesUrlsBackends.get(settings),
 		configs: resolveBlobBrokerConfigs(settings, projectDir),
-		providerFileCachePath: providerFileCachePath(settings, projectDir),
 		savingsJournalPath: blobBrokerSavingsJournalPath(settings, projectDir),
 	};
-}
-
-function defaultCreateProviderFileClient(
-	provider: ProviderFileProvider,
-	credential: string,
-	fetchImpl: FetchImpl,
-): ProviderFileClient | null {
-	for (const model of getBundledModels(provider)) {
-		const client =
-			provider === "openai"
-				? createOpenAIFileClient(model, credential, fetchImpl)
-				: provider === "anthropic"
-					? createAnthropicFileClient(model, credential, fetchImpl)
-					: createGeminiProviderFileClient(model, credential, fetchImpl);
-		if (client) return client;
-	}
-	return null;
-}
-
-async function defaultOpenAuthStorage(): Promise<AuthStorage> {
-	const store = await SqliteAuthCredentialStore.open(getAgentDbPath());
-	const storage = new AuthStorage(store);
-	await storage.credentials.reload();
-	return storage;
-}
-
-async function defaultReadProviderFileSnapshot(indexPath: string): Promise<ImagesProviderFileSnapshot> {
-	let source: string;
-	try {
-		source = await fs.readFile(indexPath, "utf8");
-	} catch (error) {
-		if (isEnoent(error)) return { entries: [] };
-		return { entries: [], lastError: safeDetail(error) };
-	}
-	try {
-		const parsed = JSON.parse(source) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			return { entries: [], lastError: "Malformed provider file cache index" };
-		}
-		const candidate = parsed as { version?: unknown; entries?: unknown };
-		if (candidate.version !== 1 || !Array.isArray(candidate.entries)) {
-			return { entries: [], lastError: "Unsupported provider file cache index" };
-		}
-		return { entries: candidate.entries.flatMap(value => parsePersistedProviderFileEntry(value) ?? []) };
-	} catch {
-		return { entries: [], lastError: "Malformed provider file cache index" };
-	}
 }
 
 const DEFAULT_DEPENDENCIES: ImagesCliDependencies = {
 	loadSettings: projectDir => Settings.loadReadOnly({ cwd: projectDir }),
 	resolveConfig: defaultResolveConfig,
 	readSavings: readBlobBrokerSavingsStatus,
-	readProviderFileSnapshot: defaultReadProviderFileSnapshot,
-	loadProviderFileCache: indexPath => new ProviderFileCache(indexPath),
-	openAuthStorage: defaultOpenAuthStorage,
-	createProviderFileClient: defaultCreateProviderFileClient,
 	queryStatus: queryBlobBrokerStatus,
 	queryDoctor: queryBlobBrokerDoctor,
 	queryProbe: queryBlobBrokerProbe,
 	queryPurge: queryBlobBrokerPurge,
 	which: binary => $which(binary) ?? null,
-	fetch: globalThis.fetch,
 	writeStdout: text => {
 		process.stdout.write(text);
 	},
@@ -322,8 +230,6 @@ function publicStatus(status: BlobBrokerStatus | null): SafeDaemonStatus {
 		lazy: status.lazy,
 		metrics: status.metrics,
 		recentFetches: status.recentFetches.map(event => ({
-			fetcherId: event.fetcherId,
-			corroborated: event.corroborated,
 			timestamp: event.timestamp,
 			method: event.method,
 			found: event.found,
@@ -332,38 +238,15 @@ function publicStatus(status: BlobBrokerStatus | null): SafeDaemonStatus {
 	};
 }
 
-function providerFileStatus(indexPath: string, snapshot: ImagesProviderFileSnapshot): ProviderFileCacheStatus {
-	const providers: Record<ProviderFileProvider, number> = { openai: 0, anthropic: 0, google: 0 };
-	let bytes = 0;
-	let entries = 0;
-	const now = Date.now();
-	for (const entry of snapshot.entries) {
-		if (entry.handle.expiresAt !== undefined && entry.handle.expiresAt <= now) continue;
-		entries++;
-		bytes += entry.handle.bytes;
-		providers[entry.provider]++;
-	}
-	return {
-		indexPath,
-		entries,
-		bytes,
-		providers,
-		dirty: false,
-		...(snapshot.lastError === undefined ? {} : { lastError: snapshot.lastError }),
-	};
-}
-
 async function collectStatus(
 	projectDir: string,
 	config: ImagesResolvedConfig,
 	deps: ImagesCliDependencies,
 ): Promise<ImagesStatusResult> {
-	const [daemon, journalSavings, providerFileSnapshot] = await Promise.all([
+	const [daemon, journalSavings] = await Promise.all([
 		deps.queryStatus(projectDir),
 		deps.readSavings(config.savingsJournalPath),
-		deps.readProviderFileSnapshot(config.providerFileCachePath),
 	]);
-	const providerFiles = providerFileStatus(config.providerFileCachePath, providerFileSnapshot);
 	const savings = daemon?.savings ?? journalSavings;
 	return {
 		action: "status",
@@ -372,7 +255,6 @@ async function collectStatus(
 		enabled: config.enabled,
 		backends: config.orderedBackends,
 		daemon: publicStatus(daemon),
-		providerFiles,
 		savings,
 	};
 }
@@ -403,7 +285,7 @@ function configChecks(config: ImagesResolvedConfig, deps: ImagesCliDependencies)
 				: `${metadata.label}: ${metadata.status}`,
 		});
 		const runtime = configByKind.get(backend);
-		if (backend !== "provider-files" && runtime) {
+		if (runtime) {
 			// Serving kinds carry their exposure settings as top-level worker-config fields, while
 			// the registry describes them as option keys; a value in either place is configured.
 			const serveFields: Record<string, string | number | undefined> = {
@@ -451,7 +333,6 @@ function configChecks(config: ImagesResolvedConfig, deps: ImagesCliDependencies)
 
 async function diskChecks(config: ImagesResolvedConfig): Promise<ImagesDoctorCheck[]> {
 	const directories = new Set<string>([
-		path.dirname(config.providerFileCachePath),
 		path.dirname(config.savingsJournalPath),
 		...config.configs.flatMap(item =>
 			item.persist ? [item.persist.blobsDir, path.dirname(item.persist.indexPath)] : [],
@@ -483,31 +364,6 @@ async function collectDoctor(
 	deps: ImagesCliDependencies,
 ): Promise<ImagesDoctorResult> {
 	const checks = [...configChecks(config, deps), ...(await diskChecks(config))];
-	if (config.orderedBackends.includes("provider-files")) {
-		let storage: AuthStorage | undefined;
-		try {
-			storage = await deps.openAuthStorage();
-			const authenticated = (["openai", "anthropic", "google"] as const).filter(
-				provider => storage?.keys.source(provider) !== undefined,
-			);
-			checks.push({
-				name: "config:provider-files",
-				severity: authenticated.length > 0 ? "ok" : "error",
-				detail:
-					authenticated.length > 0
-						? `Authentication is available for: ${authenticated.join(", ")}`
-						: "No OpenAI, Anthropic, or Google authentication is available",
-			});
-		} catch {
-			checks.push({
-				name: "config:provider-files",
-				severity: "warn",
-				detail: "Provider authentication storage could not be inspected",
-			});
-		} finally {
-			storage?.close();
-		}
-	}
 	const daemon = await deps.queryDoctor(projectDir, { probe: true });
 	if (!daemon) {
 		checks.push({ name: "daemon", severity: "warn", detail: "Image daemon is stopped or unreachable" });
@@ -565,73 +421,6 @@ async function collectProbe(
 	};
 }
 
-function credentialValues(storage: AuthStorage, provider: ProviderFileProvider): string[] {
-	const values: string[] = [];
-	for (const row of storage.credentials.list(provider)) {
-		const credential = row.credential;
-		if (credential.type === "api_key") values.push(credential.key);
-		else if (credential.access) values.push(credential.access);
-	}
-	return values;
-}
-
-async function credentialForEntry(storage: AuthStorage, entry: ProviderFileCacheEntry): Promise<string | undefined> {
-	const values = credentialValues(storage, entry.provider);
-	try {
-		const resolved = await storage.keys.get(entry.provider);
-		if (resolved) values.push(resolved);
-	} catch {
-		// A failed refresh is reported as skipped authentication, never with credential detail.
-	}
-	return values.find(value => hashProviderFileCredential(value) === entry.credentialHash);
-}
-
-async function purgeProviderFiles(
-	entries: readonly ProviderFileCacheEntry[],
-	cache: ProviderFileCache | undefined,
-	apply: boolean,
-	deps: ImagesCliDependencies,
-): Promise<ImagesProviderPurgeResult> {
-	const bytes = entries.reduce((total, entry) => total + entry.handle.bytes, 0);
-	if (!apply || entries.length === 0 || !cache) {
-		return { selected: entries.length, bytes, deleted: 0, skippedAuth: 0, errors: [] };
-	}
-	let storage: AuthStorage;
-	try {
-		storage = await deps.openAuthStorage();
-	} catch {
-		return { selected: entries.length, bytes, deleted: 0, skippedAuth: entries.length, errors: [] };
-	}
-	let deleted = 0;
-	let skippedAuth = 0;
-	const errors: string[] = [];
-	try {
-		for (const entry of entries) {
-			const credential = await credentialForEntry(storage, entry);
-			if (!credential) {
-				skippedAuth++;
-				continue;
-			}
-			const client = deps.createProviderFileClient(entry.provider, credential, deps.fetch);
-			if (!client) {
-				skippedAuth++;
-				continue;
-			}
-			try {
-				await client.delete(entry.handle);
-				cache.delete(entry.provider, credential, entry.contentHash);
-				deleted++;
-			} catch (error) {
-				errors.push(`${entry.provider}: ${safeDetail(error)}`);
-			}
-		}
-		if (deleted > 0) cache.save();
-	} finally {
-		storage.close();
-	}
-	return { selected: entries.length, bytes, deleted, skippedAuth, errors };
-}
-
 function publicPurgeResponse(response: BlobBrokerPurgeResponse | null): ImagesDaemonPurgeResult | null {
 	if (!response) return null;
 	return {
@@ -646,29 +435,12 @@ function publicPurgeResponse(response: BlobBrokerPurgeResponse | null): ImagesDa
 
 async function collectPurge(
 	projectDir: string,
-	config: ImagesResolvedConfig,
 	apply: boolean,
 	all: boolean,
 	deps: ImagesCliDependencies,
 ): Promise<ImagesPurgeResult> {
-	const snapshot = await deps.readProviderFileSnapshot(config.providerFileCachePath);
-	const now = Date.now();
-	const selectedEntries = snapshot.entries.filter(
-		entry => all || (entry.handle.expiresAt !== undefined && entry.handle.expiresAt <= now),
-	);
-	const cache =
-		apply && selectedEntries.length > 0 ? deps.loadProviderFileCache(config.providerFileCachePath) : undefined;
-	const [daemonRaw, providerFilesRaw] = await Promise.all([
-		deps.queryPurge(projectDir, { apply, all, expiredOnly: !all }),
-		purgeProviderFiles(selectedEntries, cache, apply, deps),
-	]);
-	const daemon = publicPurgeResponse(daemonRaw);
-	const providerFiles: ImagesProviderPurgeResult =
-		snapshot.lastError === undefined
-			? providerFilesRaw
-			: { ...providerFilesRaw, errors: [...providerFilesRaw.errors, snapshot.lastError] };
-	const failed =
-		(daemon?.errors.length ?? 0) > 0 || providerFiles.errors.length > 0 || (apply && providerFiles.skippedAuth > 0);
+	const daemon = publicPurgeResponse(await deps.queryPurge(projectDir, { apply, all, expiredOnly: !all }));
+	const failed = (daemon?.errors.length ?? 0) > 0;
 	return {
 		action: "purge",
 		exitCode: failed ? 1 : 0,
@@ -676,7 +448,6 @@ async function collectPurge(
 		applied: apply,
 		all,
 		daemon,
-		providerFiles,
 	};
 }
 
@@ -697,12 +468,9 @@ function renderStatus(result: ImagesStatusResult): string {
 	}
 	lines.push(
 		`Bytes saved: ${formatBytes(result.savings.savedBytes)} (${formatBytes(result.savings.inlineBytes)} inline → ${formatBytes(result.savings.referenceBytes)} references)`,
-		`Provider files: ${result.providerFiles.entries} active, ${formatBytes(result.providerFiles.bytes)}`,
 	);
 	for (const event of result.daemon.recentFetches ?? []) {
-		lines.push(
-			`Recent fetch: ${event.fetcherId ?? "unknown"}; corroborated=${event.corroborated ? "yes" : "no"}; ${event.method} ${event.found ? "hit" : "miss"}`,
-		);
+		lines.push(`Recent fetch: ${event.method} ${event.found ? "hit" : "miss"}`);
 	}
 	return `${lines.join("\n")}\n`;
 }
@@ -724,15 +492,8 @@ function renderPurge(result: ImagesPurgeResult): string {
 	const lines = [
 		result.applied ? "Image purge applied." : "Image purge dry-run; pass --apply to delete.",
 		`Daemon blobs: ${daemonSelected}, ${formatBytes(daemonBytes)}`,
-		`Provider files: ${result.providerFiles.selected} selected, ${result.providerFiles.deleted} deleted, ${formatBytes(result.providerFiles.bytes)}`,
 	];
-	if (result.providerFiles.skippedAuth > 0) {
-		lines.push(
-			`Skipped ${result.providerFiles.skippedAuth} provider file(s): matching authentication was unavailable.`,
-		);
-	}
 	for (const error of result.daemon?.errors ?? []) lines.push(`Daemon error: ${error}`);
-	for (const error of result.providerFiles.errors) lines.push(`Provider error: ${error}`);
 	return `${lines.join("\n")}\n`;
 }
 
@@ -781,13 +542,7 @@ export async function runImagesCommand(
 					);
 					break;
 				case "purge":
-					result = await collectPurge(
-						projectDir,
-						config,
-						args.flags.apply === true,
-						args.flags.all === true,
-						deps,
-					);
+					result = await collectPurge(projectDir, args.flags.apply === true, args.flags.all === true, deps);
 					break;
 			}
 		} catch (error) {

@@ -1,5 +1,5 @@
 /**
- * Transparent provider-file to URL to inline recovery for image requests.
+ * Transparent URL to inline recovery for image requests.
  * Retries are allowed only before the provider emits content, keeping the
  * consumer-facing stream single and ordered.
  */
@@ -9,18 +9,17 @@ import type { Context } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { logger } from "@oh-my-pi/pi-utils";
 import { clampProviderContextImageBytes } from "../session/provider-image-budget";
-import { contextHasImageUrls, contextHasProviderFiles } from "./context-images";
+import { contextHasImageUrls } from "./context-images";
 import type { ImageUrlService } from "./service";
 
-type ImageSource = "provider-file" | "url" | "inline";
+type ImageSource = "url" | "inline";
 
 function imageSource(context: Context): ImageSource {
-	if (contextHasProviderFiles(context)) return "provider-file";
 	return contextHasImageUrls(context) ? "url" : "inline";
 }
 
 /**
- * Wrap `base` with provider-file then URL then inline recovery. `resolveBroker`
+ * Wrap `base` with URL then inline recovery. `resolveBroker`
  * is consulted per request so live settings changes swap the service.
  */
 export function wrapStreamFnWithBlobUrlFallback(
@@ -28,7 +27,7 @@ export function wrapStreamFnWithBlobUrlFallback(
 	resolveBroker: () => ImageUrlService | undefined,
 ): StreamFn {
 	return (model, context, options) => {
-		if (!contextHasProviderFiles(context) && !contextHasImageUrls(context)) return base(model, context, options);
+		if (!contextHasImageUrls(context)) return base(model, context, options);
 		const broker = resolveBroker();
 		if (!broker) return base(model, context, options);
 
@@ -58,7 +57,7 @@ export function wrapStreamFnWithBlobUrlFallback(
 							model,
 						);
 						const fallbackSource = imageSource(fallback);
-						if (source !== "inline" && fallbackSource !== source) {
+						if (source !== "inline" && fallback !== attemptContext) {
 							logger.warn("blob-broker: provider rejected image source; retrying with fallback", {
 								provider: model.provider,
 								model: model.id,
@@ -77,7 +76,7 @@ export function wrapStreamFnWithBlobUrlFallback(
 					outer.push(event);
 				}
 				if (retry) continue;
-				if (succeeded && failedSourceAwaitingProof === "url") {
+				if (succeeded && source === "inline" && failedSourceAwaitingProof === "url") {
 					broker.quarantine(model.provider, "request failed with image URLs but succeeded with inline data");
 				}
 				return;

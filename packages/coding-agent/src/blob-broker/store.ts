@@ -21,7 +21,6 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { identifyImageFetcher } from "@oh-my-pi/pi-catalog/wire/image-fetchers";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { BlobStore as SessionBlobStore } from "../session/blob-store";
 import {
@@ -480,7 +479,7 @@ export class BlobRegistry {
 		}
 	}
 
-	/** Return current store counters and the bounded fetch-attribution history. */
+	/** Return current store counters and the bounded fetch history. */
 	status(): BlobStoreStatus {
 		this.#sweep(true);
 		let eagerBlobs = 0;
@@ -596,7 +595,7 @@ export class BlobRegistry {
 	/**
 	 * Serve one public request against the registry. Unknown tokens 404;
 	 * expired or source-less entries 410; only GET/HEAD are read operations.
-	 * Fetcher attribution is logged, never gated.
+	 * Request methods and hit counts are recorded without identifying the endpoint vendor.
 	 */
 	async serve(request: Request): Promise<Response> {
 		if (request.method !== "GET" && request.method !== "HEAD") {
@@ -605,19 +604,14 @@ export class BlobRegistry {
 		this.#sweep();
 		const token = BLOB_PATH_PATTERN.exec(new URL(request.url).pathname)?.[1];
 		const entry = token ? this.#entries.get(token) : undefined;
-		const fetcher = identifyImageFetcher(request.headers);
 		const method: "GET" | "HEAD" = request.method === "GET" ? "GET" : "HEAD";
 		this.#recordFetch({
-			fetcherId: fetcher?.id ?? null,
-			corroborated: fetcher?.corroborated ?? false,
 			timestamp: this.#now(),
 			method,
 			found: entry !== undefined,
 			tokenSuffix: token?.slice(-6) ?? null,
 		});
 		logger.debug("blob-broker: inbound fetch", {
-			fetcher: fetcher?.id ?? null,
-			corroborated: fetcher?.corroborated ?? false,
 			found: entry !== undefined,
 			method,
 		});
