@@ -13,7 +13,6 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import * as unexpectedStopClassifier from "@oh-my-pi/pi-coding-agent/session/unexpected-stop-classifier";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import * as imageLoading from "@oh-my-pi/pi-coding-agent/utils/image-loading";
 import { TempDir, withTimeout } from "@oh-my-pi/pi-utils";
@@ -2050,14 +2049,19 @@ describe("AgentSession auto-compaction queue resume", () => {
 		cfgCompactionAutoContinue.set(session.settings, true);
 		cfgFeaturesUnexpectedStopDetection.set(session.settings, "mechanical");
 
-		vi.spyOn(unexpectedStopClassifier, "classifyUnexpectedStop").mockResolvedValue(true);
 		vi.spyOn(session.agent, "continue").mockImplementation(async () => {
 			session.agent.clearAllQueues();
 		});
 
 		const assistantMsg = {
 			role: "assistant" as const,
-			content: [{ type: "text" as const, text: "I should continue investigating another module." }],
+			content: [
+				{
+					type: "thinking" as const,
+					thinking: "I should continue investigating another module.",
+					thinkingSignature: "reasoning_content",
+				},
+			],
 			api: "anthropic-messages" as const,
 			provider: "anthropic" as const,
 			model: "claude-sonnet-4-5",

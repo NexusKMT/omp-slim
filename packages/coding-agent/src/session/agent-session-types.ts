@@ -201,11 +201,6 @@ export interface AgentSessionConfig {
 	/** Skip retry.fallbackChains validation at construction; the host calls `validateRetryFallbackChains()` later. */
 	deferRetryFallbackValidation?: boolean;
 	/**
-	 * Override for the unexpected-stop judge verdict budget. Test seam so the
-	 * slow-verdict boundary runs in milliseconds; production never sets it.
-	 */
-	unexpectedStopJudgeTimeoutMs?: number;
-	/**
 	 * Created to run an assignment its owner prompts once setup finishes (task executor spawns).
 	 * Until the first prompt, IRC messages never wake a turn the assignment would miss; see
 	 * `AgentSession.#wakeForIrc`.

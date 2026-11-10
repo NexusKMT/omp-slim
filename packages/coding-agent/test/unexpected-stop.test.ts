@@ -1,0 +1,98 @@
+import { describe, expect, it } from "bun:test";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { isUnexpectedStopCandidate } from "@oh-my-pi/pi-coding-agent/session/unexpected-stop";
+
+function makeAssistantMessage(options: {
+	stopReason: AssistantMessage["stopReason"];
+	content: AssistantMessage["content"];
+}): AssistantMessage {
+	return {
+		role: "assistant",
+		provider: "mock",
+		model: "mock/mock",
+		api: "mock" as unknown as AssistantMessage["api"],
+		content: options.content,
+		stopReason: options.stopReason,
+		timestamp: Date.now(),
+	} as unknown as AssistantMessage;
+}
+
+describe("isUnexpectedStopCandidate", () => {
+	it("returns true for a text-only stop", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [{ type: "text", text: "I should do the same for the JS eval worker." }],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(true);
+	});
+
+	it("returns false when stopReason is not stop", () => {
+		const length = makeAssistantMessage({
+			stopReason: "length",
+			content: [{ type: "text", text: "I should continue." }],
+		});
+		expect(isUnexpectedStopCandidate(length)).toBe(false);
+
+		const aborted = makeAssistantMessage({
+			stopReason: "aborted",
+			content: [{ type: "text", text: "I should continue." }],
+		});
+		expect(isUnexpectedStopCandidate(aborted)).toBe(false);
+	});
+
+	it("returns false when the message contains a toolCall", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [
+				{ type: "text", text: "I will run the tests now." },
+				{ type: "toolCall", id: "call-1", name: "bash", arguments: {} },
+			],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(false);
+	});
+
+	it("returns false when the text is only whitespace", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [{ type: "text", text: "   \n\t  " }],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(false);
+	});
+
+	it("returns false for an empty stop", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(false);
+	});
+
+	it("returns true for a signed thinking-only stop", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [{ type: "thinking", thinking: " 响应", thinkingSignature: "reasoning_content" }],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(true);
+	});
+
+	it("returns false for an unsigned thinking-only stop (empty-stop path owns it)", () => {
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [{ type: "thinking", thinking: "responseAll four reviewers complete." }],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(false);
+	});
+
+	it("returns false for a signed empty-thinking stop that delivered an image", () => {
+		// OpenAI Responses image generation: a signed reasoning item with empty
+		// text plus the generated image. Retrying would regenerate the image.
+		const message = makeAssistantMessage({
+			stopReason: "stop",
+			content: [
+				{ type: "thinking", thinking: "", thinkingSignature: "rs_123" },
+				{ type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+			],
+		});
+		expect(isUnexpectedStopCandidate(message)).toBe(false);
+	});
+});

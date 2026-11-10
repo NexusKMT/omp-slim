@@ -42,7 +42,7 @@ import { type SessionEntry } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 import { isUserQueuedMessage } from "./queued-messages";
 import { sameMessageContent, sessionMessagePersistenceKey } from "./turn-persistence";
-import { isUnexpectedStopCandidate } from "./unexpected-stop-classifier";
+import { isUnexpectedStopCandidate } from "./unexpected-stop";
 
 import { cfgFeaturesUnexpectedStopDetection, cfgModelLoopGuardEnabled, cfgRetry, cfgRetryEnabled } from "./settings";
 
@@ -228,14 +228,6 @@ export interface TurnRecoveryHost {
 	streamingEditAbortTriggered(): boolean;
 	promptGeneration(): number;
 	promptSequence(): number;
-	/**
-	 * Live post-prompt abort signal; aborted when the user interrupts (Esc),
-	 * the turn is superseded, or the session is torn down. The unexpected-stop
-	 * judge wait links its timeout to this signal so a slow verdict never
-	 * blocks the abort drain. Optional so partial test stubs that never reach
-	 * the judge path need not provide it.
-	 */
-	unexpectedStopAbortSignal?(): AbortSignal;
 	sessionId(): string;
 	emitSessionEvent(event: AgentSessionEvent): Promise<void>;
 	scheduleAgentContinue(options: {
