@@ -14,6 +14,10 @@ Actions build jobs gated on a public repository; do not run them privately.
 The user limits concurrent agents to five total, including the coordinating
 agent. Use at most four worker agents. Workers must not spawn or resume child
 agents; reuse idle workers for reviews instead.
+Use `gh` to monitor Actions and retrieve logs: `gh run watch` or `gh run view
+--json` for running jobs, and `gh run view --log` / `--log-failed` for available
+logs. Save logs locally and search them with `rg`. Do not use CDP/browser
+automation to monitor Actions.
 
 # Development Rules
 
