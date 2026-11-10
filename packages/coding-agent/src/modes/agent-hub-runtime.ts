@@ -5,7 +5,6 @@ import { type AgentCostSnapshot, aggregateCost } from "@oh-my-pi/pi-tui/overlays
 import type { AgentTranscriptSource } from "@oh-my-pi/pi-tui/overlays/agent-transcript-viewer";
 import type { ObservableSession, SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
 import { AgentActivityIndex } from "../activity";
-import { getRoleInfo } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import { IrcBus, type IrcBusApi } from "../irc/bus";
 import { type AgentLifecycleApi, AgentLifecycleManager } from "../registry/agent-lifecycle";
@@ -40,15 +39,7 @@ export function createAgentHubRuntime(
 	} = {},
 ): Pick<
 	AgentHubDeps<AgentRef>,
-	| "registry"
-	| "inSession"
-	| "lifecycle"
-	| "irc"
-	| "activity"
-	| "manageActivityLive"
-	| "transcript"
-	| "loadPersisted"
-	| "getRoleInfo"
+	"registry" | "inSession" | "lifecycle" | "irc" | "activity" | "manageActivityLive" | "transcript" | "loadPersisted"
 > {
 	const registry = options.registry ?? AgentRegistry.global();
 	const rootSessionFile = options.sessionFile?.endsWith(".jsonl") ? options.sessionFile : undefined;
@@ -71,7 +62,6 @@ export function createAgentHubRuntime(
 				shouldContinue,
 				onCopiedRef: ref => copied.add(ref),
 			}),
-		getRoleInfo: options.settings ? role => getRoleInfo(role, options.settings!) : undefined,
 	};
 }
 

@@ -18,7 +18,6 @@ import type {
 	Effort,
 	Message,
 	Model,
-	ModelUsageHealth,
 	ServiceTier,
 	ServiceTierByFamily,
 	SimpleStreamOptions,
@@ -61,25 +60,20 @@ import type { EffectiveExtensionRoots } from "./capability/types";
 import { type OAuthAccountPools, SessionAccountPoolScope } from "./config/account-pools";
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
 import { shouldInlineToolDescriptors } from "./config/inline-tool-descriptors-mode";
-import { isAuthenticated, kNoAuth, ModelRegistry } from "./config/model-registry";
+import { ModelRegistry } from "./config/model-registry";
 import {
 	disabledProviderIds,
 	formatModelString,
-	formatModelStringWithRouting,
 	getModelMatchPreferences,
-	type ModelMatchPreferences,
-	parseModelPattern,
 	pickDefaultAvailableModel,
 	providerModelHint,
 	resolveAllowedModels,
 	resolveCliModel,
-	type ResolveCliModelResult,
 	resolveConfiguredModelPatterns,
 	resolveModelRoleValue,
 	resolveSessionModelSelector,
 	sessionModelDiscoveryProviders,
 } from "./config/model-resolver";
-import { formatModelSelectorValue, parseModelString } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./config/prompt-templates";
 import { buildServiceTierByFamily } from "./config/service-tier";
 import { bindEffects, combine } from "./config/registry";
@@ -178,7 +172,7 @@ import {
 	obfuscateProviderContext,
 	type SecretObfuscator,
 } from "./secrets";
-import { AgentSession, type InitialRetryFallbackState, MCP_DISCOVERY_TURN_WAIT_MS } from "./session/agent-session";
+import { AgentSession, MCP_DISCOVERY_TURN_WAIT_MS } from "./session/agent-session";
 import type { AgentSessionDisposeOptions } from "./session/agent-session-types";
 import {
 	createAuthStorageSettingsSync,
@@ -213,14 +207,6 @@ import {
 	clampProviderContextImages,
 	dropUnreadableContextImages,
 } from "./session/provider-image-budget";
-import {
-	expandDefaultRetryFallbackChains,
-	findRetryFallbackCandidates,
-	installRetryFallbackRole,
-	type RetryFallbackResolutionContext,
-	resolveRetryFallbackChainKey,
-} from "./session/retry-fallback-chains";
-import { describeUsageFallback } from "./session/retry-fallback-reason";
 import { getReadableCompactionEntry, getRestorableSessionModels } from "./session/session-context";
 import { SessionManager } from "./session/session-manager";
 import { SHAPE_RULE } from "./spotlight/shape";
@@ -351,11 +337,6 @@ import {
 	cfgProviderAppendOnlyContext,
 	cfgProvidersCacheWarming,
 	cfgProvidersKimiApiFormat,
-	cfgRetryFallbackChains,
-	cfgRetryModelFallback,
-	cfgRetryUsageAwareFallback,
-	cfgRetryUsageReservePct,
-	cfgRetryUsageReservePolicy,
 	cfgSampling,
 	cfgSkillful,
 	cfgThinkingBudgets,
@@ -1913,8 +1894,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	);
 	let model = options.model;
 	let modelFallbackMessage: string | undefined;
-	let initialRetryFallback: InitialRetryFallbackState | undefined;
-	let modelPatternRetryFallbackRole: string | undefined;
 	// Identify session model strings to restore in fallback order. We do an
 	// initial pass here so model-dependent setup (thinking-level resolution,
 	// host preconnect) can use the restored model; extension-registered
@@ -1922,7 +1901,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// extensions register below.
 	const sessionModelStrings =
 		!hasExplicitModel && hasExistingSession
-			? getRestorableSessionModels(existingSession.models, sessionManager.getLastModelChangeRole())
+			? getRestorableSessionModels(existingSession.models, sessionManager.getLastModelChangeRole()).slice(0, 1)
 			: [];
 	let restoredSessionModelIndex = -1;
 	let restoredSessionThinkingLevel: ConfiguredThinkingLevel | undefined;
@@ -1948,7 +1927,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 	// If still no model, try settings default.
 	// Skip settings fallback when an explicit model was requested.
-	if (!hasExplicitModel && !model && defaultRoleSpec.model) {
+	if (!hasExplicitModel && !model && sessionModelStrings.length === 0 && defaultRoleSpec.model) {
 		const settingsDefaultModel = defaultRoleSpec.model;
 		logger.time("resolveSettingsDefaultModel", () => {
 			// defaultRoleSpec.model already comes from modelRegistry.getAvailable(),
@@ -2809,11 +2788,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		}
 		// Exhaust persisted candidates (including configured and extension discovery)
 		// before permitting a settings-default or first-available substitution.
-		if (
-			sessionModelStrings.length > 0 &&
-			restoredSessionModelIndex < 0 &&
-			(!options.hasUI || options.allowSessionModelFallback === false || !cfgRetryModelFallback.get(settings))
-		) {
+		if (sessionModelStrings.length > 0 && restoredSessionModelIndex < 0) {
 			throw new SessionModelRestoreError(sessionModelStrings[0]);
 		}
 		// Resolve deferred --model/subagent patterns now that extension models are
@@ -2867,252 +2842,25 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				disabledProviders.size === 0
 					? modelRegistry.getAll()
 					: modelRegistry.getAll().filter(candidate => !disabledProviders.has(candidate.provider));
-			const availableModels =
-				disabledProviders.size === 0
-					? modelRegistry.getAvailable()
-					: modelRegistry.getAvailable().filter(candidate => !disabledProviders.has(candidate.provider));
 			const expandedModelPatterns = deferredModelPatterns.flatMap(pattern =>
-				pattern.split(",").flatMap(selector => {
-					const trimmedSelector = selector.trim();
-					if (!trimmedSelector) return [];
-					const resolved = resolveCliModel({
-						cliModel: trimmedSelector,
-						modelRegistry,
-						settings,
-						preferences: matchPreferences,
-					});
-					if (resolved.configuredPatterns && resolved.configuredPatterns.length > 0) {
-						const primaryPatterns: Array<{
-							pattern: string;
-							retryFallback: InitialRetryFallbackState | undefined;
-						}> = resolved.configuredPatterns.map(pattern => ({
-							pattern,
-							retryFallback: undefined,
-						}));
-						if (!resolved.configuredRole || !cfgRetryModelFallback.get(settings)) {
-							return primaryPatterns;
-						}
-						const fallbackContext: RetryFallbackResolutionContext = {
-							chains: expandDefaultRetryFallbackChains(cfgRetryFallbackChains.get(settings), [
-								...Object.keys(settings.getModelRoles()),
-								resolved.configuredRole,
-							]),
-							getModelRole: role => settings.getModelRole(role),
-							modelLookup: modelRegistry,
-						};
-						const originalSelector = resolved.configuredPatterns[0];
-						const availableOriginal = parseModelPattern(originalSelector, availableModels, matchPreferences);
-						const originalModel =
-							availableOriginal.model ??
-							parseModelPattern(originalSelector, allEnabledModels, matchPreferences).model;
-						const chainKey = resolveRetryFallbackChainKey(
-							fallbackContext,
-							originalSelector,
-							originalModel,
-							resolved.configuredRole,
-						);
-						if (!chainKey) return primaryPatterns;
-						const parsedOriginal = parseModelString(originalSelector, {
-							allowMaxSuffix: true,
-							allowAutoAlias: true,
-							isLiteralModelId: (provider, id) => modelRegistry.find(provider, id) !== undefined,
-						});
-						const retryFallback: InitialRetryFallbackState = {
-							role: chainKey,
-							originalSelector,
-							originalThinkingLevel: parsedOriginal?.thinkingLevel,
-						};
-						return [
-							...primaryPatterns,
-							...findRetryFallbackCandidates(fallbackContext, chainKey, originalSelector, originalModel, {
-								allowMissingPrimary: true,
-							}).map(candidate => ({ pattern: candidate.raw, retryFallback })),
-						];
-					}
-					if (resolved.model) {
-						return [
-							{
-								pattern: formatModelSelectorValue(
-									resolved.selector ?? formatModelStringWithRouting(resolved.model),
-									resolved.thinkingLevel,
-								),
-								retryFallback: undefined,
-							},
-						];
-					}
-					return resolveConfiguredModelPatterns([trimmedSelector], settings).map(pattern => ({
-						pattern,
-						retryFallback: undefined,
-					}));
-				}),
+				pattern
+					.split(",")
+					.map(selector => selector.trim())
+					.filter(Boolean),
 			);
-			const resolutionModels = expandedModelPatterns.some(
-				({ pattern }) => parseModelPattern(pattern, availableModels, matchPreferences).model,
-			)
-				? availableModels
-				: allEnabledModels;
-			let usageFallbackTriggered = false;
-			let usageFallbackReason: { from: string; reason: string } | undefined;
-			for (let patternIndex = 0; patternIndex < expandedModelPatterns.length; patternIndex += 1) {
-				const { pattern, retryFallback } = expandedModelPatterns[patternIndex];
-				const primary = parseModelPattern(pattern, resolutionModels, matchPreferences);
-				if (!primary.model || (retryFallback && !hasModelAuth(primary.model))) continue;
-				let hasUsageFallbackCandidate = false;
-				for (
-					let candidateIndex = patternIndex + 1;
-					candidateIndex < expandedModelPatterns.length;
-					candidateIndex += 1
-				) {
-					const candidate = parseModelPattern(
-						expandedModelPatterns[candidateIndex].pattern,
-						resolutionModels,
-						matchPreferences,
-					);
-					if (candidate.model && hasModelAuth(candidate.model)) {
-						hasUsageFallbackCandidate = true;
-						break;
-					}
-				}
-				const usageReservePolicy = cfgRetryUsageReservePolicy.get(settings);
-				const modelFallbackEnabled = cfgRetryModelFallback.get(settings);
-				if (
-					((modelFallbackEnabled && (hasUsageFallbackCandidate || usageFallbackTriggered)) ||
-						usageReservePolicy === "fail-closed") &&
-					cfgRetryUsageAwareFallback.get(settings)
-				) {
-					let usageHealth: ModelUsageHealth | undefined;
-					try {
-						usageHealth = await modelRegistry.authStorage.health.model(primary.model.provider, {
-							modelId: primary.model.id,
-							baseUrl: primary.model.baseUrl,
-							reserveFraction: cfgRetryUsageReservePct.get(settings) / 100,
-						});
-					} catch (error) {
-						logger.debug("Usage-aware model preflight failed open", {
-							provider: primary.model.provider,
-							model: primary.model.id,
-							error: String(error),
-						});
-					}
-					if (usageHealth?.state === "depleted") {
-						if (usageReservePolicy === "fail-closed") {
-							throw new Error(
-								`Usage depleted for ${primary.model.provider}/${primary.model.id}; reserve policy is fail-closed.`,
-							);
-						}
-						if (modelFallbackEnabled) {
-							usageFallbackTriggered = true;
-							usageFallbackReason ??= {
-								from: formatModelSelectorValue(
-									formatModelStringWithRouting(primary.model),
-									primary.thinkingLevel,
-								),
-								reason: describeUsageFallback(usageHealth, cfgRetryUsageReservePct.get(settings)),
-							};
-							continue;
-						}
-					}
-					if (usageHealth?.state === "reserve") {
-						if (usageReservePolicy === "fail-closed") {
-							throw new Error(
-								`Usage reserve reached for ${primary.model.provider}/${primary.model.id}; reserve policy is fail-closed.`,
-							);
-						}
-						if (
-							modelFallbackEnabled &&
-							(usageReservePolicy === "auto" || (!options.hasUI && !options.deferUsageReserveConfirmation))
-						) {
-							usageFallbackTriggered = true;
-							usageFallbackReason ??= {
-								from: formatModelSelectorValue(
-									formatModelStringWithRouting(primary.model),
-									primary.thinkingLevel,
-								),
-								reason: describeUsageFallback(usageHealth, cfgRetryUsageReservePct.get(settings)),
-							};
-							continue;
-						}
-					}
-				}
-				let selectedModel = primary.model;
-				let selectedThinkingLevel = primary.thinkingLevel;
-				let selectedExplicitThinkingLevel = primary.explicitThinkingLevel;
-				// A chain entry without its own `:level` suffix inherits the
-				// unavailable primary's configured thinking level, matching
-				// runtime fallback-chain semantics.
-				if (retryFallback && !selectedExplicitThinkingLevel && retryFallback.originalThinkingLevel !== undefined) {
-					selectedThinkingLevel = retryFallback.originalThinkingLevel;
-					selectedExplicitThinkingLevel = true;
-				}
-				let authFallbackUsed = false;
-				if (options.modelPatternAuthFallback) {
-					const primaryKey = await modelRegistry.getApiKey(primary.model);
-					if (primaryKey !== kNoAuth && !isAuthenticated(primaryKey)) {
-						const fallback = parseModelPattern(
-							options.modelPatternAuthFallback,
-							resolutionModels,
-							matchPreferences,
-						);
-						if (fallback.model) {
-							const fallbackKey = await modelRegistry.getApiKey(fallback.model);
-							if (isAuthenticated(fallbackKey)) {
-								selectedModel = fallback.model;
-								selectedThinkingLevel = fallback.thinkingLevel;
-								selectedExplicitThinkingLevel = fallback.explicitThinkingLevel;
-								authFallbackUsed = true;
-							}
-						}
-					}
-				}
-				if (!authFallbackUsed && options.modelPatternFallbackRole) {
-					const primarySelector = formatModelSelectorValue(
-						formatModelStringWithRouting(primary.model),
-						primary.thinkingLevel,
-					);
-					const seenSelectors = new Set<string>([primarySelector]);
-					const fallbackSelectors: string[] = [];
-					for (const fallbackEntry of expandedModelPatterns.slice(patternIndex + 1)) {
-						const fallback = parseModelPattern(fallbackEntry.pattern, resolutionModels, matchPreferences);
-						if (!fallback.model) continue;
-						const fallbackSelector = formatModelSelectorValue(
-							formatModelStringWithRouting(fallback.model),
-							fallback.thinkingLevel,
-						);
-						if (seenSelectors.has(fallbackSelector)) continue;
-						seenSelectors.add(fallbackSelector);
-						fallbackSelectors.push(fallbackSelector);
-					}
-					if (fallbackSelectors.length === 0) {
-						for (const selector of options.modelPatternDefaultFallbackChain ?? []) {
-							if (typeof selector !== "string" || seenSelectors.has(selector)) continue;
-							seenSelectors.add(selector);
-							fallbackSelectors.push(selector);
-						}
-					}
-					if (fallbackSelectors.length > 0 || options.modelPatternDefaultFallbackChain?.length === 0) {
-						installRetryFallbackRole(settings, options.modelPatternFallbackRole, {
-							primary: primarySelector,
-							chain: fallbackSelectors,
-						});
-						modelPatternRetryFallbackRole = options.modelPatternFallbackRole;
-					}
-				}
-				model = selectedModel;
-				initialRetryFallback =
-					retryFallback && usageFallbackTriggered ? { ...retryFallback, pinned: true } : retryFallback;
+			for (const selector of expandedModelPatterns) {
+				const resolved = resolveCliModel({
+					cliModel: selector,
+					modelRegistry,
+					settings,
+					preferences: matchPreferences,
+				});
+				if (!resolved.model || disabledProviders.has(resolved.model.provider)) continue;
+				model = resolved.model;
 				modelFallbackMessage = undefined;
-				if (selectedExplicitThinkingLevel) {
-					restoredSessionThinkingLevel = selectedThinkingLevel;
-				}
-				adoptThinkingForModel(selectedModel);
-				if (usageFallbackReason) {
-					const target = formatModelSelectorValue(
-						formatModelStringWithRouting(selectedModel),
-						effectiveThinkingLevel,
-					);
-					modelFallbackMessage = `Fallback: ${usageFallbackReason.from} -> ${target}\n${usageFallbackReason.reason}`;
-				}
-				void prewarmModelConnection(selectedModel);
+				if (resolved.thinkingLevel !== undefined) restoredSessionThinkingLevel = resolved.thinkingLevel;
+				adoptThinkingForModel(model);
+				void prewarmModelConnection(model);
 				break;
 			}
 			if (!model) {
@@ -3165,82 +2913,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				return true;
 			};
 
-			const tryResolveDefaultRoleFallback = (fallbackCandidates: Model[]): boolean => {
-				const originalSelector = settings.getModelRole("default");
-				if (hasExplicitModel || !originalSelector || !cfgRetryModelFallback.get(settings)) return false;
-				const chains = expandDefaultRetryFallbackChains(cfgRetryFallbackChains.get(settings), [
-					...Object.keys(settings.getModelRoles()),
-					"default",
-				]);
-				// Candidates come only from configured chain entries. Without one,
-				// bail before any catalog lookup so the first-paint path never
-				// composes the full catalog.
-				if (!Object.values(chains).some(chain => Array.isArray(chain) && chain.length > 0)) return false;
-				const fallbackContext: RetryFallbackResolutionContext = {
-					chains,
-					getModelRole: role => settings.getModelRole(role),
-					modelLookup: modelRegistry,
-				};
-				const parsedOriginal = parseModelString(originalSelector, {
-					allowMaxSuffix: true,
-					allowAutoAlias: true,
-					isLiteralModelId: (provider, id) => modelRegistry.find(provider, id) !== undefined,
-				});
-				// A provider-qualified selector resolves within its provider's
-				// catalog; only bare/alias selectors need the full catalog.
-				const originalModel = parsedOriginal
-					? (modelRegistry.find(parsedOriginal.provider, parsedOriginal.id) ??
-						parseModelPattern(
-							originalSelector,
-							modelRegistry.getProviderModels(parsedOriginal.provider),
-							modelMatchPreferences,
-						).model)
-					: parseModelPattern(originalSelector, modelRegistry.getAll(), modelMatchPreferences).model;
-				const chainKey = resolveRetryFallbackChainKey(fallbackContext, originalSelector, originalModel, "default");
-				if (!chainKey) return false;
-				const retryFallback: InitialRetryFallbackState = {
-					role: chainKey,
-					originalSelector,
-					originalThinkingLevel: parsedOriginal?.thinkingLevel,
-				};
-				// `fallbackCandidates` is the default-availability pool, which ignores
-				// cross-provider env aliases (`xai-oauth` borrowing `XAI_API_KEY`).
-				// An explicit chain entry is bound only by the `enabledModels` scope,
-				// so outside one it resolves from its provider's catalog and
-				// `hasModelAuth` decides whether requests can authenticate.
-				const scopedByEnabledModels = (cfgEnabledModels.get(settings)?.length ?? 0) > 0;
-				const disabledProviders = cfgDisabledProviders.get(settings);
-				for (const candidate of findRetryFallbackCandidates(
-					fallbackContext,
-					chainKey,
-					originalSelector,
-					originalModel,
-					{ allowMissingPrimary: true },
-				)) {
-					let resolved = parseModelPattern(candidate.raw, fallbackCandidates, modelMatchPreferences);
-					if (!resolved.model && !scopedByEnabledModels && !disabledProviders?.includes(candidate.provider)) {
-						resolved = parseModelPattern(
-							candidate.raw,
-							modelRegistry.getProviderModels(candidate.provider),
-							modelMatchPreferences,
-						);
-					}
-					if (!resolved.model || !hasModelAuth(resolved.model)) continue;
-					model = resolved.model;
-					initialRetryFallback = retryFallback;
-					modelFallbackMessage = undefined;
-					if (resolved.explicitThinkingLevel) {
-						restoredSessionThinkingLevel = resolved.thinkingLevel;
-					} else if (retryFallback.originalThinkingLevel !== undefined) {
-						restoredSessionThinkingLevel = retryFallback.originalThinkingLevel;
-					}
-					adoptThinkingForModel(resolved.model);
-					void prewarmModelConnection(resolved.model);
-					return true;
-				}
-				return false;
-			};
-
 			await tryResolveDefaultRole();
 
 			if (!model) {
@@ -3272,27 +2944,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 				}
 
-				if (!model && !tryResolveDefaultRoleFallback(fallbackCandidates) && pick) {
+				if (!model && !settings.getModel() && pick) {
 					model = pick;
 					adoptThinkingForModel(pick);
-					// A configured default that no longer resolves (a renamed or retired
-					// id) must not be replaced silently; the suffix below names `pick`.
-					// The checks above ran against usable models only, so tell a model
-					// the catalog lacks apart from one without credentials or scope.
-					const configuredDefault = settings.getModelRole("default");
-					if (configuredDefault && !hasExplicitModel) {
-						const inCatalog = resolveModelRoleValue(configuredDefault, modelRegistry.getAll(), {
-							settings,
-							matchPreferences: modelMatchPreferences,
-						}).model;
-						const defaultReason = inCatalog
-							? `Default model ${configuredDefault} is unavailable (no credentials, or not in enabledModels)`
-							: `Default model ${configuredDefault} not found`;
-						// Keep an earlier diagnostic (a saved session model that could not be restored).
-						modelFallbackMessage = modelFallbackMessage
-							? `${modelFallbackMessage}. ${defaultReason}`
-							: defaultReason;
-					}
 				}
 			}
 			if (model) {
@@ -3301,8 +2955,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				}
 			} else {
 				const patterns = cfgEnabledModels.get(settings);
-				modelFallbackMessage =
-					patterns && patterns.length > 0
+				modelFallbackMessage = settings.getModel()
+					? `Configured model ${settings.getModel()} is unavailable. Configure its credentials or explicitly select a model with /model.`
+					: patterns && patterns.length > 0
 						? `No model available matching enabledModels (${patterns.join(", ")}) with usable credentials. Configure auth for an allowed provider or adjust enabledModels.`
 						: "No default model selected. Use /login, set an API key environment variable, or select a local model with /model or --model.";
 			}
@@ -4411,7 +4066,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					cfgExternalThinking.get(settings) &&
 					agent.state.tools.some(tool => tool.name === "think") &&
 					supportsExternalThinking(streamModel);
-				const fallbackCreditRedemption = session?.consumeActiveFallbackCreditRedemption(streamModel);
 				if (streamOptions?.promptCacheKey === undefined) session?.promoteTaskSiblingCandidate(streamModel);
 				const merged: SimpleStreamOptions = {
 					...streamOptions,
@@ -4423,7 +4077,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				const onPayload = merged.onPayload;
 				const stream = primaryStreamFn(streamModel, context, {
 					...merged,
-					...(fallbackCreditRedemption !== undefined ? { fallbackCreditRedemption } : {}),
 					onPayload: (payload, payloadModel, signal) => {
 						session.markPromptCacheDispatched(context);
 						return onPayload?.(payload, payloadModel, signal);
@@ -4518,12 +4171,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (model) {
 				const initialModel = `${model.provider}/${model.id}`;
 				sessionManager.appendModelChange(initialModel);
-				// A deferred pattern's own retry role follows the explicit default entry, as
-				// the task executor records it, so chain lookup prefers the pattern's chain
-				// while resume still restores this model as the default.
-				if (modelPatternRetryFallbackRole) {
-					sessionManager.appendModelChange(initialModel, modelPatternRetryFallbackRole);
-				}
 			}
 			if (!autoThinking) {
 				// Do not write the `auto` selector before the first turn resolves; auto
@@ -4630,9 +4277,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			agent,
 			thinkingLevel: autoThinking ? AUTO_THINKING : effectiveThinkingLevel,
 			thinkingLevelCeiling: options.thinkingLevelCeiling,
-			disableModelFallback: options.disableModelFallback,
-			initialRetryFallback,
-			deferRetryFallbackValidation: options.deferRetryFallbackValidation,
 			awaitingAssignment: options.awaitingAssignment,
 			planYolo: options.planYolo,
 			serviceTierByFamily: initialServiceTierByFamily,
@@ -4663,7 +4307,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			skillsReloadable: options.skills === undefined,
 			skillsSettings: cfgSkills.get(settings),
 			modelRegistry,
-			allowSessionModelFallback: options.hasUI === true && options.allowSessionModelFallback !== false,
+			allowSessionModelFallback: false,
 			interactivePrompts: options.interactivePrompts,
 			rebindModelAfterDiscovery: options.model === undefined || options.rebindModelAfterDiscovery === true,
 			toolRegistry,

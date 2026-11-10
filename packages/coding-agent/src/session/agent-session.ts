@@ -56,7 +56,6 @@ import {
 	type ShakeConfig,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import type {
-	AnthropicFallbackCreditHandle,
 	AssistantMessage,
 	CodexCompactionContext,
 	Context,
@@ -126,9 +125,7 @@ import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mod
 import type { ModelRegistry } from "../config/model-registry";
 import {
 	disabledProviderIds,
-	getModelMatchPreferences,
 	type ResolvedModelRoleValue,
-	resolveCliModel,
 	resolveSessionModelSelector,
 	sessionModelDiscoveryProviders,
 } from "../config/model-resolver";
@@ -181,7 +178,7 @@ import { normalizeToolEventInput, resolveToolEventInput } from "../extensibility
 import { GoalRuntime } from "../goals/runtime";
 import type { GoalModeState, GoalTokenUsage } from "../goals/state";
 import { InternalUrlRouter, type LocalProtocolOptions } from "../internal-urls";
-import { type ChainJudge, hasNativeJudge, journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "../judgment";
+import { type ChainJudge, journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "../judgment";
 import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import type { JobWidgetEntry } from "@oh-my-pi/pi-tui/tools/job-widget";
 import type { DaemonCompletionNotification } from "../launch/protocol";
@@ -301,16 +298,12 @@ import type {
 	ModelCycleResult,
 	PromptOptions,
 	ResetSessionContextResult,
-	ResolvedRoleModel,
 	RestoredQueuedMessage,
-	RoleModelCycle,
-	RoleModelCycleResult,
 	SendUserMessageOptions,
 	SessionHandoffOptions,
 	SessionOAuthAccountList,
 	SessionStats,
 	SteerOptions,
-	UsageFallbackConfirmer,
 } from "./agent-session-types";
 import { writeArtifact } from "./artifacts";
 import { type PowerAssertionHandle, startPowerAssertion } from "./power-assertion-backend";
@@ -385,7 +378,6 @@ import {
 import {
 	type BashExecutionMessage,
 	buildReplanTitleContext,
-	buildTitleDriftTurns,
 	CHECKPOINT_ACTIVE_REMINDER_TYPE,
 	type CustomMessage,
 	type CustomMessagePayload,
@@ -466,7 +458,6 @@ import {
 	SessionMaintenance,
 	type SessionMaintenanceHost,
 } from "./session-maintenance";
-import { classifyTitleDrift } from "./title-drift-classifier";
 import {
 	cleanupEmptyMoveSession,
 	copySessionArtifacts,
@@ -495,10 +486,9 @@ const DEFERRED_TITLE_MIN_WORDS = 40;
 /** Cap on the forked title request itself (measured p90 2.3s). */
 const TITLE_FORK_TIMEOUT_MS = 15_000;
 /** Cap on the judgment that decides whether a `title.refreshAfterPrompts` check regenerates the title. */
-const TITLE_DRIFT_JUDGE_TIMEOUT_MS = 15_000;
 
 import { LoopGuards, type StreamGuardsHost, StreamingEditGuard } from "./stream-guards";
-import { EAGER_TODO_PRELUDE_MESSAGE_TYPE, TodoTracker, type TodoTrackerHost } from "./todo-tracker";
+import { TodoTracker, type TodoTrackerHost } from "./todo-tracker";
 import { TtsrCoordinator, type TtsrCoordinatorHost } from "./ttsr-coordinator";
 
 import { cfgAdvisorEnabled, cfgAdvisorMaxNotesPerUpdate } from "../advisor/settings";
@@ -515,7 +505,6 @@ import {
 	cfgProvidersCacheRetention,
 	cfgProvidersAntigravityEndpoint,
 	cfgRetryModelFallback,
-	cfgRetryUsageAwareFallback,
 	cfgSampling,
 	cfgSkillful,
 	cfgTierAdvisor,
@@ -540,7 +529,7 @@ import {
 	cfgThemeDark,
 	cfgThemeLight,
 } from "../modes/settings";
-import { cfgTaskBatch, cfgTaskDisabledAgents, perCallModelEnabled } from "../task/settings";
+import { cfgTaskBatch, cfgTaskDisabledAgents } from "../task/settings";
 import {
 	cfgBranchSummaryReserveTokens,
 	cfgCompactionModelThresholds,
@@ -563,7 +552,6 @@ import {
 	cfgTodoEnabled,
 	cfgToolsApproval,
 } from "../tools/settings";
-import { cfgTtsrJudge } from "../export/ttsr-settings";
 
 /** Advisor settings whose edit toggles or rebuilds a running advisor. */
 const cfgAdvisorRuntimeInputs = combine({
@@ -1035,7 +1023,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 	readonly configWarnings: string[] = [];
 	/** Construction skipped fallback-chain validation; {@link validateRetryFallbackChains} still owes it. */
-	#fallbackChainValidationDeferred = false;
 
 	readonly #models: ModelControls;
 	readonly #tools: SessionTools;
@@ -1259,16 +1246,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	readonly #interactivePrompts: boolean;
 	/** Newest usage reports, cached by fetchUsageReports. */
 	#usageReports: UsageReport[] | undefined;
-	#usageFallbackConfirmer: UsageFallbackConfirmer | undefined;
-	#usagePreflightAbortControllers = new Set<AbortController>();
 	/** In-flight vision descriptions that gate prompt admission; abort() cancels them. */
 	#imageDescriptionAbortControllers = new Set<AbortController>();
 	#queuedMessageDrainBlocked = false;
 	#modeExitDrainSuppressionDepth = 0;
-	#usagePreflightReadyForNextModelCall = false;
-	#usagePreflightReadyModel: Model | undefined;
-	#detachUsageBeforeQueueDequeue: (() => void) | undefined;
-	#detachUsageBeforeModelCall: (() => void) | undefined;
 	/** Claude account lane (`cred:<id>`/`key:<hash>`) that served the latest Anthropic request. */
 	#anthropicSlowModeLane: string | undefined;
 	/** `<lane>#<window>` of the wrap-up window this session already told the model about. */
@@ -2068,8 +2049,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#costGate = config.costGate ?? this.#createCostGate();
 		this.#skillDescriptions = config.skillDescriptions ?? new SkillDescriptionCatalog();
 		this.#modelRegistry = config.modelRegistry;
-		this.#allowSessionModelFallback = config.allowSessionModelFallback === true;
-		this.#disableModelFallback = config.disableModelFallback === true;
+		this.#allowSessionModelFallback = false;
+		this.#disableModelFallback = true;
 		this.#interactivePrompts = config.interactivePrompts !== false;
 		this.#extensionRoots =
 			config.extensionRoots ??
@@ -2185,7 +2166,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				await this.#setModelWithProviderSessionReset(model);
 				// Only a completed explicit selection, including same-model reselection, takes ownership.
 			},
-			clearActiveRetryFallback: () => this.#recovery.clearActiveRetryFallback(),
 			clearInheritedProviderPromptCacheKey: () => this.#clearInheritedProviderPromptCacheKey(),
 			magicKeywordEnabled: keyword => this.#magicKeywordEnabled(keyword),
 			emit: event => this.#emit(event),
@@ -2257,38 +2237,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			shakeForRequestBodyReadTimeout: generation => this.#maintenance.shakeForRequestBodyReadTimeout(generation),
 			withBashBranchTransition: operation => this.#bash.withBranchTransition(operation),
 		};
-		this.#fallbackChainValidationDeferred = config.deferRetryFallbackValidation === true;
-		this.#recovery = new TurnRecovery(recoveryHost, {
-			initialRetryFallback: config.initialRetryFallback,
-			deferFallbackChainValidation: this.#fallbackChainValidationDeferred,
-			unexpectedStopJudgeTimeoutMs: config.unexpectedStopJudgeTimeoutMs,
-		});
-		this.#detachUsageBeforeQueueDequeue = this.agent.addBeforeQueuedMessageDequeueHook(async signal => {
-			if (
-				!cfgRetryUsageAwareFallback.get(this.settings) ||
-				(this.#usagePreflightReadyForNextModelCall && this.#usagePreflightReadyModel === this.model)
-			) {
-				return;
-			}
-			if (!(await this.#runQueuedUsageAwarePreflight(signal))) {
-				signal?.throwIfAborted();
-				throw new DOMException("Usage preflight cancelled", "AbortError");
-			}
-		});
+		this.#recovery = new TurnRecovery(recoveryHost);
 		this.agent.prepareQueuedMessages = this.#prepareQueuedUserMessages;
-		this.#detachUsageBeforeModelCall = this.agent.addBeforeModelCallHook(async signal => {
-			if (!cfgRetryUsageAwareFallback.get(this.settings)) return;
-			if (this.#usagePreflightReadyForNextModelCall) {
-				const checkedModel = this.#usagePreflightReadyModel;
-				this.#usagePreflightReadyForNextModelCall = false;
-				this.#usagePreflightReadyModel = undefined;
-				if (checkedModel === this.model) return;
-			}
-			if (!(await this.#runUsageAwarePreflight(signal))) {
-				signal?.throwIfAborted();
-				throw new DOMException("Usage preflight cancelled", "AbortError");
-			}
-		});
 		const statsHost: SessionStatsTrackerHost = {
 			session: this,
 			agent: this.agent,
@@ -2667,6 +2617,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		});
 
 		const advisorsHost: SessionAdvisorsHost = {
+			model: () => this.model,
 			agent: this.agent,
 			sessionManager: this.sessionManager,
 			settings: this.settings,
@@ -2694,19 +2645,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			hasPendingNextTurnMessages: () => this.#pendingNextTurnMessages.length > 0,
 			convertToLlmForSideRequest: messages => this.#convertToLlmForSideRequest(messages),
 			effectiveServiceTier: model => this.#models.effectiveServiceTier(model),
-			resolveContextPromotionTarget: (model, contextWindow, signal) =>
-				this.#maintenance.resolveContextPromotionTarget(model, contextWindow, signal),
-			resolveCompactionModelCandidates: (model, availableModels) =>
-				this.#maintenance.resolveCompactionModelCandidates(model, availableModels),
-			resolveRetryFallbackRole: (selector, model, roleHint) =>
-				this.#recovery.resolveRetryFallbackRole(selector, model, roleHint),
-			retryFallbackChainKeys: (selector, model, options) =>
-				this.#recovery.retryFallbackChainKeys(selector, model, options),
-			findRetryFallbackCandidates: (role, selector, model) =>
-				this.#recovery.findRetryFallbackCandidates(role, selector, model),
-			isRetryFallbackSelectorSuppressed: selector => this.#recovery.isRetryFallbackSelectorSuppressed(selector),
-			noteRetryFallbackCooldown: (selector, retryAfterMs, errorMessage) =>
-				this.#recovery.noteRetryFallbackCooldown(selector, retryAfterMs, errorMessage),
 			createCodexCompactionContext: createMaintenanceCodexCompactionContext,
 			sessionId: () => this.sessionId,
 			restrictOAuthAccounts: providerSessionId => this.#accountPoolScope?.restrict(providerSessionId),
@@ -2938,7 +2876,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// warnings discovery produced (e.g. an unreachable OLLAMA_BASE_URL)
 		// once discovery settles.
 		void this.#retryInactiveAdvisorAfterModelDiscovery();
-		void this.#revalidateFallbackChainsAfterModelDiscovery();
 		if (config.rebindModelAfterDiscovery) void this.#rebindActiveModelAfterModelDiscovery();
 		void this.#surfaceModelRegistryWarningsAfterDiscovery();
 		this.#watchWorkspaceAndPowerSettings();
@@ -4897,14 +4834,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			let compactionResult = COMPACTION_CHECK_NONE;
 			let checkedCompaction = false;
 			if (activeGoal) {
-				// Payload rejections get a pre-compaction chain consult; checkCompaction()'s overflow path commits a remedy before returning (#9235).
-				if (AIError.isPayloadRejection(msg) && this.#recovery.isHardErrorFallbackEligible(msg)) {
-					const didRetry = await this.#recovery.handleRetryableError(msg, { hardErrorFallback: true });
-					if (didRetry) {
-						await emitAgentEndNotification({ willContinue: true });
-						return;
-					}
-				}
 				maintenanceRoute("active-goal-pre-empt-checkCompaction");
 				const compactionTask = this.#maintenance.checkCompaction(msg);
 				this.#trackPostPromptTask(compactionTask);
@@ -4940,9 +4869,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			if (this.#recovery.isRetryableReasonlessAbort(msg) || resolvedInterruptedToolTurn === "reasonless-abort") {
 				const didRetry = await this.#recovery.handleRetryableError(
 					msg,
-					resolvedInterruptedToolTurn === "reasonless-abort"
-						? { allowModelFallback: false, preserveFailedTurn: true }
-						: { allowModelFallback: false },
+					resolvedInterruptedToolTurn === "reasonless-abort" ? { preserveFailedTurn: true } : undefined,
 				);
 				if (didRetry) {
 					await emitAgentEndNotification({ willContinue: true });
@@ -4966,16 +4893,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				return;
 			}
 			const requestBodyTimeoutTerminal = requestBodyTimeoutRecovery === "handled-terminal";
-			// Fireworks Fast variants degrade to their base model on a failed turn —
-			// including hard router errors the generic retry classifier rejects — so
-			// run this gate before the standard retryability check.
-			if (!requestBodyTimeoutTerminal && this.#recovery.isFireworksFastFallbackEligible(msg)) {
-				const didRetry = await this.#recovery.handleRetryableError(msg, { fireworksFastFallback: true });
-				if (didRetry) {
-					await emitAgentEndNotification({ willContinue: true });
-					return;
-				}
-			}
 			const resumeResolvedStreamStall = resolvedInterruptedToolTurn === "stream-stall";
 			if (!requestBodyTimeoutTerminal && (resumeResolvedStreamStall || this.#recovery.isRetryableError(msg))) {
 				const didRetry = await this.#recovery.handleRetryableError(
@@ -5000,18 +4917,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				maintenanceRoute("committed-text-stream-stall-continued");
 				await emitAgentEndNotification({ willContinue: true });
 				return;
-			} else if (!requestBodyTimeoutTerminal && this.#recovery.isHardErrorFallbackEligible(msg)) {
-				// A non-retryable hard error on a model covered by a configured
-				// fallback chain: retrying the SAME model is pointless, but a
-				// DIFFERENT model is a fresh chance — consult the chain before
-				// surfacing the failure. #handleRetryableError bails out (no
-				// backoff-retry of the failing model) when no switch happens.
-				const didRetry = await this.#recovery.handleRetryableError(msg, { hardErrorFallback: true });
-				if (didRetry) {
-					await emitAgentEndNotification({ willContinue: true });
-					return;
-				}
 			}
+
 			// Classifier refusals are persisted-skipped above; also prune the trailing
 			// stub from active context so the next turn's prompt does not replay it.
 			// Keep a reference for post-settle readers (print mode, task executor via
@@ -5175,33 +5082,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		onStart?: () => void,
 	): Promise<AgentContinueOutcome> {
 		try {
-			// During an automatic-retry saga the primary model's selector cooldown
-			// can expire while a chain-tail fallback is still mid-backoff. Restoring
-			// the primary then would reset the retry budget and re-enter a model
-			// that just failed — an unbounded loop. Skip the cooldown-expiry revert
-			// for retries; the primary can still be restored on the next user
-			// prompt or after the saga terminates.
-			const isAutomaticRetry = request.options.source === "automatic-retry";
-			const reverted = isAutomaticRetry ? false : await this.#recovery.maybeRestoreRetryFallbackPrimary();
-			if (signal.aborted || this.#isDisposed || this.#abortInProgress) {
-				return { status: "skipped", reason: "post-restore-unavailable" };
-			}
-			// A cooldown-expiry revert can drop the active window below the
-			// accumulated context. The user-prompt path re-checks context after
-			// the revert via runPrePromptCompactionIfNeeded; the auto-continue
-			// path must do the same so agent.continue() never sends a
-			// predictably oversized request to the reverted (smaller) model.
-			if (reverted) {
-				await this.#maintenance.runPrePromptCompactionIfNeeded([]);
-				if (signal.aborted || this.#isDisposed || this.#abortInProgress) {
-					return { status: "skipped", reason: "post-restore-unavailable" };
-				}
-			}
-			if (cfgRetryUsageAwareFallback.get(this.settings)) {
-				if (!(await this.#runQueuedUsageAwarePreflight(signal))) {
-					return { status: "skipped", reason: "session-unavailable" };
-				}
-			}
 			if (signal.aborted || this.#isDisposed || this.#abortInProgress) {
 				return { status: "skipped", reason: "session-unavailable" };
 			}
@@ -5343,7 +5223,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 					if (this.#activeAgentContinue === attempt) {
 						this.#activeAgentContinue = undefined;
 					}
-					this.#usagePreflightReadyForNextModelCall = false;
 					this.#endInFlight(inFlightEpoch);
 					void this.#finishTurnObservation(observation, outcome?.status === "failed" ? outcome.error : undefined);
 				}
@@ -6283,11 +6162,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		for (const dispose of this.#disposers.splice(0)) dispose();
 		this.#modelDiscoveryAbortController.abort();
 		this.#queuedMessageDrainBlocked = false;
-		this.#usagePreflightReadyForNextModelCall = false;
-		this.#detachUsageBeforeQueueDequeue?.();
-		this.#detachUsageBeforeQueueDequeue = undefined;
-		this.#detachUsageBeforeModelCall?.();
-		this.#detachUsageBeforeModelCall = undefined;
 		if (this.agent.prepareQueuedMessages === this.#prepareQueuedUserMessages) {
 			this.agent.prepareQueuedMessages = undefined;
 		}
@@ -6731,11 +6605,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	}
 
 	/** Install the interactive decision surface for reserve-triggered model changes; it waits for the user mid-turn. */
-	setUsageFallbackConfirmer(confirmer: UsageFallbackConfirmer | undefined): void {
-		this.#usageFallbackConfirmer = confirmer
-			? (confirmation, signal) => this.waitForUser(() => confirmer(confirmation, signal))
-			: undefined;
-	}
 
 	#allowQueuedMessageDrainRetry(): void {
 		this.#queuedMessageDrainBlocked = false;
@@ -6744,63 +6613,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	#reconcileQueuedMessageDrain(): void {
 		if (!this.agent.hasQueuedMessages()) {
 			this.#queuedMessageDrainBlocked = false;
-		}
-	}
-
-	async #runQueuedUsageAwarePreflight(signal?: AbortSignal): Promise<boolean> {
-		const generation = this.#promptGeneration;
-		try {
-			const allowed = await this.#runUsageAwarePreflight(signal);
-			// An interrupted preflight is not a usage denial. Its queue is still
-			// owned by the next turn, so it must not block the post-abort drain.
-			if (signal?.aborted || this.#promptGeneration !== generation) return false;
-			this.#usagePreflightReadyForNextModelCall = allowed;
-			this.#usagePreflightReadyModel = allowed ? this.model : undefined;
-			this.#queuedMessageDrainBlocked = !allowed && this.agent.hasQueuedMessages();
-			return allowed;
-		} catch (error) {
-			if (!signal?.aborted && this.#promptGeneration === generation) {
-				this.#queuedMessageDrainBlocked = this.agent.hasQueuedMessages();
-			}
-			throw error;
-		}
-	}
-
-	async #runUsageAwarePreflightForNextModelCall(signal?: AbortSignal): Promise<boolean> {
-		const allowed = await this.#runUsageAwarePreflight(signal);
-		this.#usagePreflightReadyForNextModelCall = allowed;
-		this.#usagePreflightReadyModel = allowed ? this.model : undefined;
-		return allowed;
-	}
-
-	async #runUsageAwarePreflight(signal?: AbortSignal): Promise<boolean> {
-		if (signal?.aborted) return false;
-		const generation = this.#promptGeneration;
-
-		const controller = new AbortController();
-		const onAbort = () => controller.abort(signal?.reason);
-		signal?.addEventListener("abort", onAbort, { once: true });
-		this.#usagePreflightAbortControllers.add(controller);
-		try {
-			while (true) {
-				const model = this.model;
-				try {
-					const fallbackCommitted = await this.#recovery.maybeApplyUsageAwareFallback(
-						controller.signal,
-						this.#usageFallbackConfirmer,
-					);
-					if (fallbackCommitted) return true;
-					if (controller.signal.aborted || this.#promptGeneration !== generation) return false;
-					if (this.model === model || modelsAreEqual(this.model, model)) return true;
-				} catch (error) {
-					if (controller.signal.aborted || this.#promptGeneration !== generation) return false;
-					if (this.model !== model && !modelsAreEqual(this.model, model)) continue;
-					throw error;
-				}
-			}
-		} finally {
-			signal?.removeEventListener("abort", onAbort);
-			this.#usagePreflightAbortControllers.delete(controller);
 		}
 	}
 
@@ -8116,7 +7928,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				py: cfgEvalPy.get(this.settings),
 				js: cfgEvalJs.get(this.settings),
 				freshAgents: cfgEvalWorkpoolFreshAgents.get(this.settings),
-				perCallModel: perCallModelEnabled(this.settings, "eval"),
+				perCallModel: false,
 			};
 			// A notice whose contract needs an inactive tool would demand an
 			// unavailable capability; skip it rather than mislead the model.
@@ -8884,9 +8696,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#promptSetupAbortController = setupAbort;
 		try {
 			options?.onPromptAdmitted?.();
-			await this.#recovery.maybeRestoreRetryFallbackPrimary();
-			if (!(await logger.time("prompt:usagePreflight", () => this.#runUsageAwarePreflightForNextModelCall())))
-				return false;
 			// A capped session hands the prompt back rather than start a run whose first request it refuses.
 			if (this.#refuseOverCostCap()) return false;
 			// Flush any pending bash messages before the new prompt
@@ -8912,7 +8721,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 
 			// Validate API key; a provider without one walks the retry fallback chain first.
 			const apiKey = await logger.time("prompt:apiKey", () => this.#modelRegistry.getApiKey(model, this.sessionId));
-			if (!apiKey && !(await this.#recovery.applyMissingCredentialFallback(setupAbort.signal))) {
+			if (!apiKey) {
 				if (setupAbort.signal.aborted) return false;
 				throw new PromptPreflightError(
 					`No API key found for ${model.provider}.\n\n` +
@@ -9118,7 +8927,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		} finally {
 			// The per-turn before_agent_start override lives only for this turn.
 			this.#tools.clearTurnSystemPromptOverride();
-			this.#usagePreflightReadyForNextModelCall = false;
 			// Client ownership is released by #prompt's bracket, which settles
 			// after this frame returns; its wake re-checks parked steers
 			// against zero.
@@ -10001,7 +9809,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		const setupAbort = new AbortController();
 		this.#promptSetupAbortController = setupAbort;
 		try {
-			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
 			const acceptTerminalEmptyStop = options?.acceptTerminalEmptyStop === true;
 			if (acceptTerminalEmptyStop) {
 				this.#resetPromptMaintenanceState();
@@ -10020,7 +9827,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		} finally {
 			// The per-turn before_agent_start override lives only for this turn.
 			this.#tools.clearTurnSystemPromptOverride();
-			this.#usagePreflightReadyForNextModelCall = false;
 			this.#recovery.setAcceptTerminalEmptyStop(false);
 			this.#endInFlight(inFlightEpoch);
 			if (this.#promptSetupAbortController === setupAbort) this.#promptSetupAbortController = undefined;
@@ -11427,7 +11233,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		try {
 			this.#titleGenerationAbortController.abort();
 			if (!this.#isDisposed) this.#titleGenerationAbortController = new AbortController();
-			for (const controller of this.#usagePreflightAbortControllers) controller.abort();
 			for (const controller of this.#imageDescriptionAbortControllers) controller.abort(options?.reason);
 			this.abortRetry();
 			this.#promptGeneration++;
@@ -11606,7 +11411,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#sessionGeneration++;
 			this.#scheduledHiddenNextTurnGeneration = undefined;
 			this.#queuedMessageDrainBlocked = false;
-			this.#usagePreflightReadyForNextModelCall = false;
 
 			this.sessionManager.appendThinkingLevelChange(this.thinkingLevel, this.configuredThinkingLevel());
 			this.sessionManager.appendServiceTierChange(this.#models.serviceTierEntry());
@@ -11857,22 +11661,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	}
 
 	/** Resolves configured role models and the currently active role index. */
-	getRoleModelCycle(roleOrder: readonly string[]): RoleModelCycle | undefined {
-		return this.#models.getRoleModelCycle(roleOrder);
-	}
 
 	/** Applies a resolved role model without changing global settings. */
-	applyRoleModel(entry: ResolvedRoleModel): Promise<void> {
-		return this.#models.applyRoleModel(entry);
-	}
 
 	/** Cycles the configured role models in the supplied order. */
-	cycleRoleModels(
-		roleOrder: readonly string[],
-		direction: "forward" | "backward" = "forward",
-	): Promise<RoleModelCycleResult | undefined> {
-		return this.#models.cycleRoleModels(roleOrder, direction);
-	}
 
 	/** Lists available models after applying the configured enabled-model filter. */
 	getAvailableModels(): Model[] {
@@ -13311,8 +13103,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		const previousPendingNextTurnMessages = [...this.#pendingNextTurnMessages];
 		const previousScheduledHiddenNextTurnGeneration = this.#scheduledHiddenNextTurnGeneration;
 		const previousQueuedMessageDrainBlocked = this.#queuedMessageDrainBlocked;
-		const previousUsagePreflightReadyForNextModelCall = this.#usagePreflightReadyForNextModelCall;
-		const previousUsagePreflightReadyModel = this.#usagePreflightReadyModel;
 		const previousModel = this.model;
 		const previousThinkingLevel = this.thinkingLevel;
 		const previousAutoThinking = this.isAutoThinking;
@@ -13350,8 +13140,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#queuedMessageDrainBlocked = false;
-		this.#usagePreflightReadyForNextModelCall = false;
-		this.#usagePreflightReadyModel = undefined;
 
 		let cwdChangeTarget: string | undefined;
 		try {
@@ -13400,7 +13188,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			const targetModelStrings = getRestorableSessionModels(
 				sessionContext.models,
 				this.sessionManager.getLastModelChangeRole(),
-			);
+			).slice(0, 1);
 			let targetModel = explicitModel;
 			let modelFallbackWarning: string | undefined;
 			if (!targetModel && !options?.keepModel && targetModelStrings.length > 0) {
@@ -13598,8 +13386,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#pendingNextTurnMessages = previousPendingNextTurnMessages;
 			this.#scheduledHiddenNextTurnGeneration = previousScheduledHiddenNextTurnGeneration;
 			this.#queuedMessageDrainBlocked = previousQueuedMessageDrainBlocked;
-			this.#usagePreflightReadyForNextModelCall = previousUsagePreflightReadyForNextModelCall;
-			this.#usagePreflightReadyModel = previousUsagePreflightReadyModel;
 			this.#inheritedProviderPromptCacheKey = previousInheritedProviderPromptCacheKey;
 			if (previousTaskSiblingCandidate !== undefined) {
 				this.sessionManager.setTaskSiblingCandidate(previousTaskSiblingCandidate);
@@ -13769,7 +13555,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#queuedMessageDrainBlocked = false;
-		this.#usagePreflightReadyForNextModelCall = false;
 
 		const bashTransition = this.#bash.beginSessionTransition();
 		this.#cancelOwnAsyncJobs();
@@ -13896,7 +13681,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#releaseQueuedTtsrReservations();
 		this.agent.replaceQueues([], []);
 		this.#queuedMessageDrainBlocked = false;
-		this.#usagePreflightReadyForNextModelCall = false;
 		await this.#bash.flushPending();
 		await this.sessionManager.flush();
 		const bashTransition = this.#bash.beginSessionTransition();
@@ -15346,14 +15130,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * every provider a chain names, so interactive startup runs it after the
 	 * first frame; the header picks the warnings up via `config_warnings_changed`.
 	 */
-	validateRetryFallbackChains(): void {
-		if (this.#isDisposed || !this.#fallbackChainValidationDeferred) return;
-		this.#fallbackChainValidationDeferred = false;
-		const warningCount = this.configWarnings.length;
-		this.#recovery.validateRetryFallbackChains();
-		if (this.configWarnings.length !== warningCount) this.#emit({ type: "config_warnings_changed" });
-		void this.#revalidateFallbackChainsAfterModelDiscovery();
-	}
 
 	/**
 	 * Re-run retry.fallbackChains validation once the initial background discovery
@@ -15364,14 +15140,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * because the CLI starts that refresh right after the session is built, so an
 	 * in-flight snapshot taken in the constructor would always miss it.
 	 */
-	async #revalidateFallbackChainsAfterModelDiscovery(): Promise<void> {
-		if (this.#isDisposed || !this.#recovery.hasPendingDiscoveryDeferredFallbackValidation()) return;
-		await this.#modelRegistry.awaitInitialBackgroundRefresh(this.#modelDiscoveryAbortController.signal);
-		if (this.#isDisposed) return;
-		if (this.#recovery.revalidateRetryFallbackChainsAfterDiscovery()) {
-			this.#emit({ type: "config_warnings_changed" });
-		}
-	}
 
 	/**
 	 * Move registry warnings produced by the initial background discovery into
@@ -15627,7 +15395,4 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/**
 	 * Consume any pending Anthropic fallback credit handle for the next retry turn.
 	 */
-	consumeActiveFallbackCreditRedemption(targetModel?: Model): AnthropicFallbackCreditHandle | undefined {
-		return this.#recovery.consumeActiveFallbackCreditRedemption(targetModel);
-	}
 }

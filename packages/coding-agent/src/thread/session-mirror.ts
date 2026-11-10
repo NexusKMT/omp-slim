@@ -43,11 +43,8 @@ import type {
 	AgentSessionDisposeOptions,
 	EphemeralTurnOptions,
 	EphemeralTurnResult,
-	Prewalk,
 	PromptOptions,
-	ResolvedRoleModel,
 	RestoredQueuedMessage,
-	RoleModelCycleResult,
 	SessionStats,
 	SteerOptions,
 } from "../session/agent-session-types";
@@ -185,7 +182,7 @@ export interface SessionViewState {
 	serviceTierByFamily: ServiceTierByFamily;
 	fastModeActive: boolean;
 	anthropicSlowModeLabel: string | undefined;
-	prewalk: Prewalk | undefined;
+	prewalk: undefined;
 	goalMode: GoalModeState | undefined;
 	advisorCost: number;
 	advisorUsingSubscription: boolean;
@@ -277,11 +274,6 @@ export type SessionHostProtocol = {
 		[model: Model, thinkingLevel?: ConfiguredThinkingLevel, options?: { ephemeral?: boolean }],
 		void
 	>;
-	cycleRoleModels: RpcMethod<
-		[roleOrder: readonly string[], direction?: "forward" | "backward"],
-		RoleModelCycleResult | undefined
-	>;
-	applyRoleModel: RpcMethod<[entry: ResolvedRoleModel], void>;
 	fetchUsageReports: RpcMethod<[signal?: AbortSignal], UsageReport[] | null>;
 	runEphemeralTurn: RpcMethod<[args: EphemeralTurnOptions], EphemeralTurnResult>;
 	exportToHtml: RpcMethod<[outputPath?: string, useUserThemes?: boolean], string>;

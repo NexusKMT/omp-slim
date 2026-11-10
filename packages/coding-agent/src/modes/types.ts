@@ -696,7 +696,6 @@ export interface InteractiveModeContext {
 	/** Screen rows a report above the editor may take (all of them but the editor and the chrome under it). */
 	commandReportRows(): number | undefined;
 	cycleThinkingLevel(): void;
-	cycleRoleModel(direction?: "forward" | "backward"): Promise<void>;
 	toggleToolOutputExpansion(): void;
 	setToolsExpanded(expanded: boolean): void;
 	toggleThinkingBlockVisibility(): void;

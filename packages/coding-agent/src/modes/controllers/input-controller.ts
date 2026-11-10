@@ -18,8 +18,6 @@ import {
 import { isEnoent, logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
 import { formatDoubleTap } from "@oh-my-pi/pi-tui/app-keybindings";
 import { appKey, editorKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
-import { formatModelRoleAlias, roleCandidatePool } from "../../config/model-roles";
-import { resolveModelRoleValue } from "../../config/model-resolver";
 import { isSettingsInitialized, settings } from "../../config/settings";
 import { InternalUrlRouter, resolveLocalRoot } from "../../internal-urls";
 import { ApprovalDialogComponent } from "@oh-my-pi/pi-tui/overlays/approval-dialog";
@@ -679,8 +677,6 @@ export class InputController {
 			hintUsage.record("effort");
 			this.cycleThinkingLevel();
 		};
-		this.ctx.editor.setActionKeys("app.model.cycleForward", this.ctx.keybindings.getKeys("app.model.cycleForward"));
-		this.ctx.editor.setActionKeys("app.model.cycleBackward", this.ctx.keybindings.getKeys("app.model.cycleBackward"));
 		this.ctx.editor.setActionKeys(
 			"app.model.selectTemporary",
 			this.ctx.keybindings.getKeys("app.model.selectTemporary"),

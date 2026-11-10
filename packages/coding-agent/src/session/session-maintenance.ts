@@ -74,7 +74,6 @@ import { isRecord, logger, prompt, Snowflake, toError } from "@oh-my-pi/pi-utils
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { writeArtifact } from "./artifacts";
 import type { ModelRegistry } from "../config/model-registry";
-import { CHAT_MODEL_ROLE_IDS } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import type { ExtensionRunner, SessionBeforeCompactResult } from "../extensibility/extensions";
 import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
@@ -103,11 +102,7 @@ import {
 	stripImagesFromMessage,
 } from "./messages";
 import { isTerminalTextAssistantAnswer } from "./queued-messages";
-import {
-	resolveCompactionConfiguredTarget,
-	resolveContextPromotionConfiguredTarget,
-	resolveRoleModelFull,
-} from "./role-models";
+import { resolveContextPromotionConfiguredTarget } from "./role-models";
 import type { BuildSessionContextOptions, SessionContext } from "./session-context";
 import {
 	buildSessionContext,

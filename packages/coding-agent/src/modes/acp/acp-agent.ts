@@ -3169,17 +3169,6 @@ export class AcpAgent implements Agent {
 		);
 		if (this.#clientCapabilities?.elicitation?.form != null) {
 			record.setToolUIContext?.(uiContext, true);
-			record.session.setUsageFallbackConfirmer((confirmation, signal) => {
-				const reserve =
-					confirmation.remainingPercent === undefined
-						? "inside the configured reserve margin"
-						: `${confirmation.remainingPercent.toFixed(1)}% remaining`;
-				return uiContext.confirm(
-					"Coding-plan reserve reached",
-					`${confirmation.from} has ${reserve}. Switch to ${confirmation.to}? Choose No to keep using the current plan.`,
-					{ signal },
-				);
-			});
 		}
 
 		const extensionRunner = record.session.extensionRunner;

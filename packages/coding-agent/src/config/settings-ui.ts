@@ -7,15 +7,13 @@ import { type AnySetting, lookup } from "./registry";
 
 import { cfgPlanAutosave, cfgPlanEnabled } from "../plan-mode/settings";
 import {
-	cfgRetryUsageAwareFallback,
 	cfgDefaultThinkingLevel,
 	normalizeProviderMaxInFlightRequests,
 	validateProviderMaxInFlightRequests,
 } from "../session/settings";
-import { cfgComposerPredictions, cfgTuiVimMode } from "../modes/settings";
+import { cfgTuiVimMode } from "../modes/settings";
 import { cfgAdvisorEnabled } from "../advisor/settings";
 import { cfgContextFilesExtra } from "../session/context-settings";
-import { cfgTaskPerCallModelAllow } from "../task/settings";
 import { cfgToolsRestrictedFolders } from "../tools/settings";
 
 /** Condition over the global settings; hidden (false) until they are initialized. */
@@ -29,15 +27,12 @@ const CONDITIONS: Record<string, () => boolean> = {
 	nativeRendering: () => isNativeRendering(),
 	advisorEnabled: whenSettings(s => cfgAdvisorEnabled.get(s) === true),
 	vimModeEnabled: whenSettings(s => cfgTuiVimMode.get(s) === true),
-	composerPredictionsEnabled: whenSettings(s => cfgComposerPredictions.get(s) === true),
 	autoThinkingActive: whenSettings(s => cfgDefaultThinkingLevel.get(s) === "auto"),
-	usageAwareFallbackEnabled: whenSettings(s => cfgRetryUsageAwareFallback.get(s) === true),
 	planModeEnabled: whenSettings(s => cfgPlanEnabled.get(s)),
 	planAutosaveEnabled: whenSettings(s => cfgPlanEnabled.get(s) && cfgPlanAutosave.get(s)),
 	// These editors write the global layer; hide them so a project-supplied list is never promoted to global.
 	contextFilesExtraNotProject: whenSettings(s => cfgContextFilesExtra.provenance(s) !== "project"),
 	restrictedFoldersNotProject: whenSettings(s => cfgToolsRestrictedFolders.provenance(s) !== "project"),
-	perCallModelAllowNotProject: whenSettings(s => cfgTaskPerCallModelAllow.provenance(s) !== "project"),
 };
 
 /** Description suffix telling the panel user that an environment variable is in play. */

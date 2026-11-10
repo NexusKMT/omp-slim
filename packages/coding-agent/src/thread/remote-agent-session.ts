@@ -67,12 +67,8 @@ import type {
 	AsyncJobTree,
 	EphemeralTurnOptions,
 	EphemeralTurnResult,
-	Prewalk,
 	PromptOptions,
-	ResolvedRoleModel,
 	RestoredQueuedMessage,
-	RoleModelCycle,
-	RoleModelCycleResult,
 	SessionStats,
 	SteerOptions,
 } from "../session/agent-session-types";
@@ -87,7 +83,7 @@ import {
 import { BlobStore, type BlobPutOptions, type BlobPutResult, lazyImageDataSync } from "../session/blob-store";
 import type { IdleMaintenanceOptions } from "../session/idle-maintenance";
 import type { CustomMessage } from "../session/messages";
-import { resolveRoleModelCycle, roleThinkingLevelForModel, serviceTierForModel } from "../session/model-controls";
+import { roleThinkingLevelForModel, serviceTierForModel } from "../session/model-controls";
 import type { ServingModel } from "../session/retry-fallback-chains";
 import {
 	buildSessionContext,
@@ -95,7 +91,7 @@ import {
 	type TranscriptSessionContextOptions,
 } from "../session/session-context";
 import type { CustomEntry, SessionEntry } from "../session/session-entries";
-import { conversationTip, lastModelChangeRole, SessionEntryIndex } from "../session/session-manager";
+import { conversationTip, SessionEntryIndex } from "../session/session-manager";
 import type { AgentDefinition } from "../task/types";
 import type { WorkPoolYieldItem } from "../task/workpool-yield";
 import { type ApprovalGrantStore, getApprovalGrants } from "../tools/approval-cache";
@@ -592,27 +588,6 @@ export class RemoteAgentSession implements AgentViewSession {
 		return this.#command("setModelTemporary", toWireData(model), thinkingLevel, options);
 	}
 
-	getRoleModelCycle(roleOrder: readonly string[]): RoleModelCycle | undefined {
-		return resolveRoleModelCycle(
-			this.settings,
-			this.modelRegistry.getAvailable(),
-			this.#state.model,
-			lastModelChangeRole(this.#entryIndex.branchView()),
-			roleOrder,
-		);
-	}
-
-	cycleRoleModels(
-		roleOrder: readonly string[],
-		direction?: "forward" | "backward",
-	): Promise<RoleModelCycleResult | undefined> {
-		return this.#command("cycleRoleModels", roleOrder, direction);
-	}
-
-	applyRoleModel(entry: ResolvedRoleModel): Promise<void> {
-		return this.#command("applyRoleModel", toWireData(entry));
-	}
-
 	effectiveServiceTier(model: Model): ServiceTier | undefined {
 		return serviceTierForModel(this.settings, model, this.#view.serviceTierByFamily);
 	}
@@ -625,8 +600,8 @@ export class RemoteAgentSession implements AgentViewSession {
 		return this.#view.anthropicSlowModeLabel;
 	}
 
-	getPrewalkState(): Prewalk | undefined {
-		return this.#view.prewalk;
+	getPrewalkState(): undefined {
+		return undefined;
 	}
 
 	getGoalModeState(): GoalModeState | undefined {

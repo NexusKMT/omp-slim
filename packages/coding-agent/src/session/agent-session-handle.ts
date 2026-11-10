@@ -36,12 +36,8 @@ import type {
 	AsyncJobTree,
 	EphemeralTurnOptions,
 	EphemeralTurnResult,
-	Prewalk,
 	PromptOptions,
-	ResolvedRoleModel,
 	RestoredQueuedMessage,
-	RoleModelCycle,
-	RoleModelCycleResult,
 	SessionStats,
 	SteerOptions,
 } from "./agent-session-types";
@@ -322,15 +318,6 @@ export interface AgentViewSession extends AgentSessionHandle {
 		thinkingLevel?: ConfiguredThinkingLevel,
 		options?: { ephemeral?: boolean },
 	): Promise<void>;
-	/** Model-role cycle for the given role order. */
-	getRoleModelCycle(roleOrder: readonly string[]): RoleModelCycle | undefined;
-	/** Cycle through role models. */
-	cycleRoleModels(
-		roleOrder: readonly string[],
-		direction?: "forward" | "backward",
-	): Promise<RoleModelCycleResult | undefined>;
-	/** Apply a resolved role model. */
-	applyRoleModel(entry: ResolvedRoleModel): Promise<void>;
 	/** Service tier in effect for `model`. */
 	effectiveServiceTier(model: Model): ServiceTier | undefined;
 	/** Whether fast mode is active. */
@@ -338,7 +325,7 @@ export interface AgentViewSession extends AgentSessionHandle {
 	/** Anthropic usage-limit label, when one applies. */
 	getAnthropicSlowModeLabel(): string | undefined;
 	/** Active prewalk state. */
-	getPrewalkState(): Prewalk | undefined;
+	getPrewalkState(): undefined;
 	/** Goal-mode state. */
 	getGoalModeState(): GoalModeState | undefined;
 	/** Total advisor cost. */

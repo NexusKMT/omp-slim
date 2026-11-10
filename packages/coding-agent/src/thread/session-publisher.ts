@@ -612,13 +612,6 @@ export const SESSION_HOST_SERVE: RpcServe<SessionPublisher, SessionHostProtocol>
 			publisher,
 			publisher.session.setModelTemporary(localModel(publisher.session, model), thinkingLevel, options),
 		),
-	cycleRoleModels: async (publisher, roleOrder, direction) =>
-		toWireData(await settle(publisher, publisher.session.cycleRoleModels(roleOrder, direction))),
-	applyRoleModel: async (publisher, entry) =>
-		settle(
-			publisher,
-			publisher.session.applyRoleModel({ ...entry, model: localModel(publisher.session, entry.model) }),
-		),
 	fetchUsageReports: async (publisher, signal) => toWireData(await publisher.session.fetchUsageReports(signal)),
 	runEphemeralTurn: async (publisher, args) => toWireData(await publisher.session.runEphemeralTurn(args)),
 	exportToHtml: async (publisher, outputPath, useUserThemes) =>

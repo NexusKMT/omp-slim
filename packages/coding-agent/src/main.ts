@@ -50,10 +50,8 @@ import { ModelRegistry } from "./config/model-registry";
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import {
 	disabledProviderIds,
-	expandRoleAlias,
 	getModelMatchPreferences,
 	resolveCliModel,
-	resolveConfiguredModelPatterns,
 	resolveModelRoleValue,
 	resolveModelScope,
 	type ScopedModel,
@@ -2008,7 +2006,6 @@ export async function runRootCommand(
 			imeSafeCursor: cfgTuiImeSafeCursor.get(settingsInstance),
 			autocompleteMaxVisible: cfgAutocompleteMaxVisible.get(settingsInstance),
 			spellingTypoDetection: cfgSpellingTypoDetection.get(settingsInstance),
-			spellingAutocomplete: cfgSpellingAutocomplete.get(settingsInstance),
 			spellingAutocorrect: cfgSpellingAutocorrect.get(settingsInstance),
 			theme: {
 				symbolPreset: cfgSymbolPreset.get(settingsInstance),
@@ -2539,7 +2536,6 @@ export async function runRootCommand(
 				preloadedExtensions: extensionsResult,
 				deferredExtensionPaths: extensionsResult.deferredPaths,
 				// Validation waits for background refresh and the first interactive frame.
-				deferRetryFallbackValidation: true,
 			};
 			let createdSession: CreateAgentSessionResult;
 			try {
@@ -2571,7 +2567,6 @@ export async function runRootCommand(
 				mcpManager,
 				startBackgroundModelDiscovery,
 			} = createdSession;
-			if (!isInteractive) session.validateRetryFallbackChains();
 
 			const sessionToolNames = session.getAllToolNames();
 			try {
@@ -2651,7 +2646,6 @@ export async function runRootCommand(
 				void session.loadDeferredExtensions();
 				session.startSkillDescriptionCompression();
 				modelRegistry.refreshInBackground();
-				session.validateRetryFallbackChains();
 				if (configuredScope.length > 0) {
 					// Must follow refreshInBackground: it waits on the in-flight refresh.
 					void rebuildScopedModelsAfterDiscovery(session, parsedArgs, modelRegistry, settingsInstance).catch(
