@@ -240,13 +240,12 @@ describe("executeSearch abort propagation", () => {
 		expect(timeoutMs).toBe(60_000);
 	});
 
-	it("surfaces caller cancellation instead of falling through to the next HTTP engine", async () => {
+	it("does not start any provider when the caller has already cancelled", async () => {
+		const firstSearch = vi.fn();
 		const fallbackSearch = vi.fn();
 		const context = await configureProviderChain([
-			fakeProvider("firecrawl", async () => {
-				throw new DOMException("aborted", "AbortError");
-			}),
-			fakeProvider("exa", fallbackSearch),
+			fakeProvider("exa", firstSearch),
+			fakeProvider("firecrawl", fallbackSearch),
 		]);
 		const ac = new AbortController();
 		ac.abort();
@@ -254,6 +253,26 @@ describe("executeSearch abort propagation", () => {
 		await expect(runSearchQuery({ query: "anything" }, { ...context, signal: ac.signal })).rejects.toBeInstanceOf(
 			ToolAbortError,
 		);
+		expect(firstSearch).not.toHaveBeenCalled();
+		expect(fallbackSearch).not.toHaveBeenCalled();
+	});
+
+	it("surfaces cancellation during search without starting the next HTTP engine", async () => {
+		const ac = new AbortController();
+		const fallbackSearch = vi.fn();
+		const firstSearch = vi.fn(async () => {
+			ac.abort();
+			throw new DOMException("aborted", "AbortError");
+		});
+		const context = await configureProviderChain([
+			fakeProvider("exa", firstSearch),
+			fakeProvider("firecrawl", fallbackSearch),
+		]);
+
+		await expect(runSearchQuery({ query: "anything" }, { ...context, signal: ac.signal })).rejects.toBeInstanceOf(
+			ToolAbortError,
+		);
+		expect(firstSearch).toHaveBeenCalledTimes(1);
 		expect(fallbackSearch).not.toHaveBeenCalled();
 	});
 

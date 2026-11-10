@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, setSystemTime, vi } from "
 import { AuthStorage, type FetchImpl, type Model, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { searchXAI, XAIProvider } from "@oh-my-pi/pi-coding-agent/web/search/providers/xai";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
 
@@ -66,7 +67,7 @@ describe("xAI web search provider", () => {
 	beforeEach(() => {
 		authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
 		authStorage.keys.setRuntime("xai", "test-xai-key");
-		modelRegistry = new ModelRegistry(authStorage);
+		modelRegistry = new ModelRegistry(authStorage, undefined, { settings: Settings.isolated({}) });
 	});
 
 	function makeParams(

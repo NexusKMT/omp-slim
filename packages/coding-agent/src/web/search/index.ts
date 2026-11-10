@@ -197,7 +197,7 @@ async function executeSearch(
 	const candidates = searchCandidates(params, modelRegistry, options.sessionModel);
 	const parsedQuery = parseSearchQuery(params.query);
 
-	// Invariant across candidates; resolve once before walking the role chain.
+	// Invariant across candidates; resolve once before trying the search transports.
 	let antigravityEndpointMode: "auto" | "production" | "sandbox" | undefined;
 	try {
 		antigravityEndpointMode = cfgProvidersAntigravityEndpoint.get(settings);
@@ -220,6 +220,7 @@ async function executeSearch(
 	let lastProvider: { id: string; label: string } | undefined;
 	let failedResponseProvider: SearchResponse["provider"] = "none";
 	for (const candidate of candidates) {
+		throwIfAborted(signal);
 		let provider: SearchProvider | undefined;
 		const candidateMeta = { id: candidate.model.id, label: candidate.model.name };
 		lastProvider = candidateMeta;

@@ -34,7 +34,10 @@ const SUBMIT_JUDGMENT: Tool = {
 	strict: true,
 };
 
-export type ChatTextBackendOptions = Pick<SimpleStreamOptions, "apiKey" | "sessionId" | "metadata"> & {
+export type ChatTextBackendOptions = Pick<
+	SimpleStreamOptions,
+	"apiKey" | "sessionId" | "metadata" | "disableServerSideFallback"
+> & {
 	/** Receives every completed attempt (including transient failures) for usage accounting. */
 	onAttempt?: (message: AssistantMessage) => void;
 };
@@ -75,6 +78,7 @@ export function chatTextBackend(model: Model<Api>, options: ChatTextBackendOptio
 							apiKey: options.apiKey,
 							sessionId: options.sessionId,
 							metadata: options.metadata,
+							disableServerSideFallback: options.disableServerSideFallback,
 							maxTokens: JUDGMENT_CHAT_MAX_TOKENS,
 							temperature: 0,
 							disableReasoning: true,

@@ -33,8 +33,8 @@ describe("single-model web search", () => {
 	let modelRegistry: ModelRegistry;
 	let attempted: string[];
 
-	beforeEach(async () => {
-		const settings = await Settings.init({ inMemory: true });
+	beforeEach(() => {
+		const settings = Settings.isolated({});
 		authStorage = createInMemoryAuthStorage();
 		// Paid credentials the chain must never spend unless the session already runs on them.
 		for (const paid of [
@@ -113,6 +113,8 @@ describe("single-model web search", () => {
 			{ query: "anything" },
 			{ authStorage, modelRegistry, sessionModel: sessionModel("anthropic", "claude-sonnet-4-5") },
 		);
-		expect(result.details.failures?.[0]?.reason).toContain("returned no sources");
+		expect(result.details.failures).toContainEqual(
+			expect.objectContaining({ reason: expect.stringContaining("returned no sources") }),
+		);
 	});
 });

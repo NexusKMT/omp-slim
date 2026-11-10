@@ -223,6 +223,7 @@ describe("runEvalCompletion", () => {
 		const spy = vi.spyOn(ai, "completeSimple").mockResolvedValue(assistant({ text: "ok" }));
 		await runEvalCompletionAndWait({ prompt: "q" }, { session });
 		expect(spy.mock.calls[0]?.[0]).toBe(current);
+		expect(spy.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
 		expect(available).not.toHaveBeenCalled();
 	});
 

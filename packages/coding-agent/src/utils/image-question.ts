@@ -97,6 +97,7 @@ export async function askImageQuestion(
 			},
 			{
 				apiKey: modelRegistry.resolver(model, session.getSessionId?.() ?? undefined),
+				disableServerSideFallback: true,
 				signal: effectiveSignal,
 			},
 			{ telemetry, oneshotKind: "image_question", completeImpl },

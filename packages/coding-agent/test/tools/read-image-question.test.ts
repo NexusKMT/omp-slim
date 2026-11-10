@@ -231,6 +231,7 @@ describe("read image questions", () => {
 		});
 		await new ReadTool(session, stub.fn).execute("call", { path: `${imagePath}?q=What color?` });
 		expect(stub.calls[0]?.[0]).toBe(current);
+		expect(stub.calls[0]?.[2]).toMatchObject({ disableServerSideFallback: true });
 	});
 
 	it("does not use another available vision model when the current model is text-only", async () => {

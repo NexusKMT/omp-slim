@@ -154,6 +154,7 @@ async function executeCompletion(
 			},
 			{
 				apiKey: registry.resolver(model, sessionId),
+				disableServerSideFallback: true,
 				signal,
 				toolChoice: schema ? { type: "tool", name: STRUCTURED_TOOL_NAME } : undefined,
 			},
