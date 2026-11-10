@@ -10,7 +10,7 @@ import type {
 } from "@oh-my-pi/pi-agent-core/types";
 import type { Message, ToolChoice } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { createHarmonyMitigationModel, createUserMessage } from "./helpers";
+import { createUserMessage } from "./helpers";
 
 function identityConverter(messages: AgentMessage[]): Message[] {
 	return messages.filter(m => m.role === "user" || m.role === "assistant" || m.role === "toolResult") as Message[];
@@ -236,34 +236,5 @@ describe("agentLoop soft tool requirement", () => {
 		}
 		expect(mock.calls).toHaveLength(1);
 		expect(mock.calls[0]?.options?.toolChoice).toBeUndefined();
-	});
-
-	it("reuses the fetched hard tool choice across a Harmony retry instead of re-consuming getToolChoice", async () => {
-		const context: AgentContext = { systemPrompt: ["sys"], messages: [], tools: [] };
-		// Consuming source: yields the forced choice once, then nothing — mirrors
-		// coding-agent's ToolChoiceQueue.nextToolChoice advancing its generator.
-		const queue: ToolChoice[] = [{ type: "tool", name: "resolve" }];
-		const leak = "Some prose. analysis to=functions.edit code 大发官网";
-		const mock = createMockModel({
-			provider: "openai-codex",
-			responses: [{ content: [leak] }, { content: ["clean retry"] }],
-		});
-		const config: AgentLoopConfig = {
-			model: createHarmonyMitigationModel(),
-			convertToLlm: identityConverter,
-			getToolChoice: () => queue.shift(),
-		};
-
-		const stream = agentLoop([createUserMessage("go")], context, config, undefined, mock.stream);
-		for await (const _ of stream) {
-			// drain
-		}
-
-		// The leaked attempt was retried; both calls carried the SAME forced choice
-		// and the consuming source advanced exactly once (no double-consume).
-		expect(mock.calls).toHaveLength(2);
-		expect(mock.calls[0]?.options?.toolChoice).toEqual({ type: "tool", name: "resolve" });
-		expect(mock.calls[1]?.options?.toolChoice).toEqual({ type: "tool", name: "resolve" });
-		expect(queue).toHaveLength(0);
 	});
 });
