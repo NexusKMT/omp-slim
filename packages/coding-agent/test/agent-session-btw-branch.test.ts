@@ -186,7 +186,6 @@ describe("AgentSession.branchFromBtw", () => {
 	});
 	it("does not record a late advisor turn into a /btw branch", async () => {
 		const activeSession = await createSession();
-		activeSession.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		activeSession.toggleAdvisorEnabled();
 		const advisor = activeSession.getAdvisorAgent();
 		if (!advisor) throw new Error("Expected advisor agent to exist");

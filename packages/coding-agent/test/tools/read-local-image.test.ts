@@ -81,7 +81,6 @@ function makeSession(testDir: string, textOnlyModel = false): ToolSession {
 	const model = createMockModel({ id: textOnlyModel ? "text-only" : "vision" });
 	if (!textOnlyModel) model.input.push("image");
 	const settings = Settings.isolated({ "images.autoResize": false });
-	settings.setModelRole("vision", `${model.provider}/${model.id}`);
 	return {
 		cwd: testDir,
 		hasUI: false,

@@ -179,6 +179,6 @@ export const cfgEditAutoRepairEnabled = register({
 		group: "Editing",
 		label: "Auto-Repair Parse Regressions",
 		description:
-			"When an edit breaks a file's AST parse, ask the smol model to fix the broken region (validated by re-parse; falls back to a warning)",
+			"When an edit breaks a file's AST parse, ask the current session model to fix the broken region (validated by re-parse; falls back to a warning)",
 	},
 });

@@ -294,7 +294,6 @@ describe("AgentSession per-turn prune persistence", () => {
 		}
 
 		function enableAdvisor(): void {
-			session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 			expect(session.setAdvisorEnabled(true)).toBe(true);
 		}
 

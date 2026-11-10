@@ -28,7 +28,6 @@ async function createContextSession(
 	if (options.advisor) {
 		authStorage.keys.setRuntime("openai", "test-key");
 		cfgAdvisorEnabled.set(settings, true);
-		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
 	}
 	const modelRegistry = new ModelRegistry(authStorage, `${cwd}/models.json`);
 	const sessionManager = SessionManager.inMemory(cwd);

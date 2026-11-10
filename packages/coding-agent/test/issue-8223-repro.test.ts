@@ -51,7 +51,6 @@ test("keeps Gemini 3.6 advisor context and accepts a silent review", async () =>
 		advisorStreamFn,
 	});
 	try {
-		session.settings.setModelRole("advisor", "google/gemini-3.6-flash");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 		const advisor = session.getAdvisorAgent();
 		if (!advisor) throw new Error("advisor did not start");

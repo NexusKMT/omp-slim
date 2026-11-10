@@ -196,7 +196,6 @@ it.each([
 			...(immuneTurns === 0 ? { "advisor.immuneTurns": 0 } : {}),
 			...(continueSeverity ? { "advisor.continueSeverity": continueSeverity } : {}),
 		});
-		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		const session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),
@@ -356,7 +355,6 @@ it("continues once on a late nit at advisor.continueSeverity=nit without re-revi
 		"advisor.syncBacklog": "off",
 		"advisor.continueSeverity": "nit",
 	});
-	settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 	const session = new AgentSession({
 		agent,
 		sessionManager: SessionManager.inMemory(),

@@ -790,7 +790,7 @@ describe("ACP builtin slash commands", () => {
 		expect(configNotified).toBe(0);
 	});
 
-	// /switch resolves like `omp bench`: fuzzy ids, @role aliases, :level suffixes
+	// /switch supports fuzzy ids and :level suffixes for explicit model changes.
 	it("switch opus:low: fuzzy-resolves a session-only model with the thinking suffix", async () => {
 		const { output, runtime, session } = createRuntime();
 		const available = [
@@ -809,19 +809,19 @@ describe("ACP builtin slash commands", () => {
 		expect(output[0]).toContain("Session-only model: anthropic/claude-opus-4-5");
 	});
 
-	it("switch @smol: resolves the configured role alias", async () => {
-		const { runtime, session } = createRuntime();
-		const available = [
+	it("switch rejects retired role aliases without changing the active model", async () => {
+		const { output, runtime, session } = createRuntime();
+		session.getAvailableModels = () => [
 			{ provider: "anthropic", id: "claude-opus-4-5", contextWindow: 200_000 },
 			{ provider: "anthropic", id: "claude-haiku-4-5", contextWindow: 200_000 },
 		];
-		session.getAvailableModels = () => available;
-		runtime.settings.setModelRole("smol", "anthropic/claude-haiku-4-5");
+		runtime.settings.setModel("anthropic/claude-opus-4-5");
 		const temporarySpy = spyOn(session, "setModelTemporary").mockResolvedValue(undefined);
 
 		await executeAcpBuiltinSlashCommand("/switch @smol", runtime);
 
-		expect(temporarySpy).toHaveBeenCalledWith(available[1], undefined);
+		expect(temporarySpy).not.toHaveBeenCalled();
+		expect(output[0]).toContain("@smol");
 	});
 
 	it("switch unknown: reports the selector and leaves the model alone", async () => {

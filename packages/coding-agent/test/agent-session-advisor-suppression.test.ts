@@ -226,7 +226,6 @@ describe("AgentSession advisor auto-resume suppression", () => {
 			"retry.enabled": false,
 			...(continueSeverity ? { "advisor.continueSeverity": continueSeverity } : {}),
 		});
-		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorages.push(authStorage);
 		authStorage.keys.setRuntime("anthropic", "test-key");
@@ -314,7 +313,6 @@ describe("AgentSession advisor auto-resume suppression", () => {
 			"compaction.enabled": false,
 			"retry.enabled": false,
 		});
-		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorages.push(authStorage);
 		authStorage.keys.setRuntime("anthropic", "test-key");
@@ -726,7 +724,6 @@ describe("AgentSession advisor auto-resume suppression", () => {
 			"compaction.enabled": false,
 			"retry.enabled": false,
 		});
-		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorages.push(authStorage);
 		authStorage.keys.setRuntime("anthropic", "test-key");
