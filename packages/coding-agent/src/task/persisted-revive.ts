@@ -35,7 +35,6 @@ import {
 	softRequestBudgetFor,
 } from "./executor";
 import { isCompletionProbeEnabled } from "./completion-probe";
-import { cfgTaskAgentAccountPools } from "./settings";
 import { type RestoredSeanceSession, restoreSeanceSession } from "./seance";
 import { seanceIsolationOptions } from "./seance-policy";
 import type { AgentDefinition } from "./types";

@@ -424,7 +424,7 @@ export class SecurityCoordinator {
 		}
 		const model = input.model ?? this.#host.activeModel;
 		if (!model) throw new Error("Security scan preflight requires an active model");
-		const account = selectSecurityAuth(this.#host.authStorage, model, input.credentialId, this.#host.sessionId);
+		const account = selectSecurityAuth(model);
 		const store = await this.#openStore(this.#host.cwd);
 		const workRoot = path.join(store.projectDirectory, "work");
 		await fs.mkdir(workRoot, { recursive: true, mode: 0o700 });

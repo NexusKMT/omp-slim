@@ -1,6 +1,3 @@
-import { classifyModel } from "@oh-my-pi/pi-catalog/identity";
-import { $flag } from "@oh-my-pi/pi-utils";
-
 import type { EditMode } from "@oh-my-pi/pi-tui/tools/edit";
 import type { Settings } from "../config/settings";
 import { cfgEditMode, type EditModeSetting, editModelVariants } from "../edit/settings";
@@ -28,22 +25,5 @@ export function resolveEditMode(session: EditModeSessionLike): EditModeSetting {
 	const activeModel = session.getActiveModelString?.();
 	const modelVariant = editVariantForModel(session.settings, activeModel);
 	if (modelVariant) return modelVariant;
-	// `PI_EDIT_VARIANT` pins the mode exactly; only settings-derived hashline adapts to the model.
-	if (cfgEditMode.provenance(session.settings) === "env") return mode;
-	if (mode === "hashline" && !$flag("PI_STRICT_EDIT_MODE") && activeModel) {
-		const identity = classifyModel("", activeModel, { lenient: true });
-		if (
-			identity.class === "kimi" ||
-			identity.class === "mimo" ||
-			identity.class === "minimax" ||
-			identity.class === "deepseek" ||
-			identity.class === "stepfun" ||
-			identity.family === "codex-spark" ||
-			(identity.class === "glm" && identity.family === "flash" && identity.revision === "5.3.0") ||
-			(identity.class === "qwen" && identity.revision === "3.8.0")
-		) {
-			return "replace";
-		}
-	}
 	return mode;
 }

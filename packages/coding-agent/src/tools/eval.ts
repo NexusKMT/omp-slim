@@ -45,7 +45,6 @@ import {
 	type OutputSummary,
 	TailBuffer,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
-import { sessionDelegationBias } from "../task/prompt-policy";
 import { resolveSpawnPolicy } from "../task/spawn-policy";
 import { canSpawnAtDepth } from "../task/types";
 import { formatDimensionNote, isWebPExcluded, resizeImage } from "../utils/image-resize";
@@ -389,7 +388,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 			spawns: depthAllowsSpawning ? (session.getSessionSpawns?.() ?? "*") : false,
 			autoBackgroundEnabled: cfgEvalAutoBackgroundEnabled.get(session.settings),
 			evalTools: cfgEvalToolsEnabled.get(session.settings),
-			eagerDelegation: sessionDelegationBias(session) === "eager",
+			eagerDelegation: false,
 			waitTool: hasWaitTool(session),
 			preludes: this.#advertisedPreludes(session),
 			inlineTopics: session.isToolActive?.("read") === false,

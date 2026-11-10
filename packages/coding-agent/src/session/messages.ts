@@ -54,7 +54,8 @@ import { convertMessageToLlm } from "@oh-my-pi/pi-agent-core/compaction/messages
 import type { AssistantMessage, ImageContent, Message, TextContent, UserMessage } from "@oh-my-pi/pi-ai";
 import { copyPerCallContextMessage } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { isRecord, logger, prompt } from "@oh-my-pi/pi-utils";
-import { COLLAB_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-wire";
+// Read-only recognition of historical collaboration messages.
+const COLLAB_PROMPT_MESSAGE_TYPE = "collab-prompt";
 import userInterjectionTemplate from "../prompts/steering/user-interjection.md" with { type: "text" };
 import { formatTitleConversationContext, type TitleConversationTurn } from "../tiny/message-preproc";
 import { stripXdUrlPrefix } from "@oh-my-pi/pi-tui/tools/xd-url";

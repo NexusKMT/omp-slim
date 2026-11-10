@@ -62,9 +62,7 @@ import type {
 	Static,
 	TextContent,
 	TSchema,
-	UsageProvider,
 } from "@oh-my-pi/pi-ai";
-import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -1244,23 +1242,6 @@ export type {
 	TtsrTriggeredEvent,
 } from "../shared-events";
 
-/** Fired when AuthStorage automatically soft-disables a credential (e.g. OAuth `invalid_grant`). Not fired for user-initiated `remove()` or duplicate-credential dedup. */
-export interface CredentialDisabledEvent {
-	type: "credential_disabled";
-	/** Provider id whose credential was disabled (e.g. "anthropic"). */
-	provider: string;
-	/** Verbatim error captured for forensics (truncated upstream). */
-	disabledCause: string;
-	/** Database row id of the disabled credential. */
-	credentialId?: number;
-	/** Account identity recorded on the disabled OAuth credential, when the provider supplied one. */
-	email?: string;
-	accountId?: string;
-	/** Organization/workspace the credential was scoped to. */
-	orgId?: string;
-	orgName?: string;
-}
-
 // ============================================================================
 // MCP Events
 // ============================================================================
@@ -1620,7 +1601,6 @@ export type ExtensionEvent =
 	| TtsrTriggeredEvent
 	| TodoReminderEvent
 	| GoalUpdatedEvent
-	| CredentialDisabledEvent
 	| McpNotificationEvent
 	| LinkActivateEvent
 	| UserBashEvent
@@ -1841,7 +1821,6 @@ export interface ExtensionAPI {
 	on(event: "ttsr_triggered", handler: ExtensionHandler<TtsrTriggeredEvent>): void;
 	on(event: "todo_reminder", handler: ExtensionHandler<TodoReminderEvent>): void;
 	on(event: "goal_updated", handler: ExtensionHandler<GoalUpdatedEvent>): void;
-	on(event: "credential_disabled", handler: ExtensionHandler<CredentialDisabledEvent>): void;
 	on(event: "input", handler: ExtensionHandler<InputEvent, InputEventResult>): void;
 	on(event: "tool_approval_requested", handler: ExtensionHandler<ToolApprovalRequestedEvent>): void;
 	on(event: "tool_approval_resolved", handler: ExtensionHandler<ToolApprovalResolvedEvent>): void;
@@ -2160,49 +2139,13 @@ export interface ExtensionAPI {
 
 /** Configuration for registering a provider via pi.registerProvider(). */
 export interface ProviderConfig {
-	/** Base URL for the API endpoint. Required when defining models. */
 	baseUrl?: string;
-	/**
-	 * API key or environment variable name. Required when defining models unless oauth is provided.
-	 *
-	 * Without `oauth`, this overrides stored OAuth and `/login` credentials for the provider. With
-	 * `oauth`, it is a fallback: a key saved by `/login` wins, and this value is used only when no
-	 * stored login credential exists.
-	 */
 	apiKey?: string;
-	/** API type identifier. Required when registering streamSimple or when models don't specify one. */
-	api?: Api;
-	/** Custom streaming function for non-built-in APIs. */
-	streamSimple?: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream;
-	/** Custom headers to include in requests. */
+	api?: "openai-completions";
 	headers?: Record<string, string>;
-	/** If true, adds Authorization: Bearer header with the resolved API key. */
+	auth?: "apiKey" | "none";
 	authHeader?: boolean;
-	/** Models to register. If provided, replaces all existing models for this provider. */
 	models?: ProviderModelConfig[];
-	/** Optional normalized usage fetcher used by AuthStorage for this provider. */
-	usage?: UsageProvider;
-	/** OAuth provider for /login support. */
-	oauth?: {
-		/** Display name in login UI. */
-		name: string;
-		/** Run the provider login flow and return credentials (or a plain API key) to persist. */
-		login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials | string>;
-		/** Refresh expired credentials. */
-		refreshToken?(credentials: OAuthCredentials): Promise<OAuthCredentials>;
-		/** Convert credentials to an API key string for requests. */
-		getApiKey?(credentials: OAuthCredentials): string;
-		/** Optional model rewrite hook for credential-aware routing (e.g., enterprise URLs). */
-		modifyModels?(models: Model<Api>[], credentials: OAuthCredentials): Model<Api>[];
-	};
-	/**
-	 * Async factory that fetches the live model list from the provider endpoint.
-	 * Runs through the same SQLite model-cache as built-in providers (keyed by
-	 * provider name, default 24 h TTL). Receives the resolved API key (undefined
-	 * when unauthenticated). When combined with `models`, the static models remain as fallbacks
-	 * alongside the live catalog.
-	 */
-	fetchDynamicModels?: (apiKey: string | undefined) => Promise<readonly ProviderModelConfig[]>;
 }
 
 /** Configuration for a model within a provider. */

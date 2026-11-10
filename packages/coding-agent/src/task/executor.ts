@@ -156,13 +156,7 @@ import {
 	cfgTaskMaxRecursionDepth,
 	cfgTaskAgentAdvisor,
 } from "./settings";
-import {
-	cfgTierSubagent,
-	cfgTierGoogle,
-	cfgTierAnthropic,
-	cfgTierOpenai,
-	cfgDefaultThinkingLevel,
-} from "../session/settings";
+import { cfgTierSubagent, cfgTierOpenai, cfgDefaultThinkingLevel } from "../session/settings";
 import {
 	cfgCompactionModelThresholdsEnabled,
 	cfgCompactionThresholdPercent,
@@ -1042,14 +1036,10 @@ function inheritedSubagentServiceTiers(
 	inheritedServiceTier?: ServiceTierByFamily | null,
 ): ServiceTierByFamily {
 	if (inheritedServiceTier === undefined) {
-		return buildServiceTierByFamily(
-			cfgTierOpenai.get(baseSettings),
-			cfgTierAnthropic.get(baseSettings),
-			cfgTierGoogle.get(baseSettings),
-		);
+		return buildServiceTierByFamily(cfgTierOpenai.get(baseSettings));
 	}
 	const tiers: ServiceTierByFamily = {};
-	for (const family of ["openai", "anthropic", "google"] as const) {
+	for (const family of ["openai"] as const) {
 		const tier = inheritedServiceTier?.[family];
 		if (isServiceTierForFamily(family, tier)) tiers[family] = tier;
 	}
@@ -1123,8 +1113,6 @@ export function createSubagentSettings(
 			// snapshot of the parent default); a later parent default edit must not re-steer it.
 			defaultThinkingLevel: cfgDefaultThinkingLevel.get(baseSettings),
 			"tier.openai": subagentTiers.openai ?? "none",
-			"tier.anthropic": subagentTiers.anthropic ?? "none",
-			"tier.google": subagentTiers.google ?? "none",
 			// Async jobs and bash/eval auto-backgrounding are inherited from the parent:
 			// background jobs are owner-routed to the subagent's own session, and
 			// the run driver's quiescence barrier + teardown reap guarantee no
@@ -4559,7 +4547,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			}
 			checkAbort();
 			if (!registryFromParent) {
-				modelRegistry.refreshInBackground();
 			} else {
 				logger.debug("runSubagent: reusing parent modelRegistry; skipping refresh");
 			}
