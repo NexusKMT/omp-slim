@@ -59,18 +59,32 @@ if [[ "$omp_platform" == darwin ]]; then
   [[ "$omp_arch" != x64 ]] || omp_macho_arch=x86_64
   lipo "$omp_binary" -verify_arch "$omp_macho_arch"
   codesign --verify --strict "$omp_binary"
+  omp_macos_files=("$omp_binary")
   {
     file "$omp_binary"
     otool -L "$omp_binary"
     xcrun vtool -show-build "$omp_binary"
     for omp_addon in packages/natives/native/pi_natives."$omp_platform-$omp_arch"*.node; do
+      omp_macos_files+=("$omp_addon")
       lipo "$omp_addon" -verify_arch "$omp_macho_arch"
       file "$omp_addon"
       otool -L "$omp_addon"
       xcrun vtool -show-build "$omp_addon"
     done
   } > "$omp_build_dir/macos-linkage.txt"
-  if grep -Eq '^[[:space:]]+/(opt/homebrew|usr/local|Users/runner)/' "$omp_build_dir/macos-linkage.txt"; then
+  {
+    for omp_macos_file in "${omp_macos_files[@]}"; do
+      printf 'File: %s\n' "$omp_macos_file"
+      # otool -L also prints a dylib's own LC_ID_DYLIB install name. Only
+      # load commands describe dependencies the loader must resolve.
+      otool -l "$omp_macos_file" | awk '
+        $1 == "cmd" && $2 ~ /^LC_(LOAD_DYLIB|LOAD_WEAK_DYLIB|REEXPORT_DYLIB|LOAD_UPWARD_DYLIB|LAZY_LOAD_DYLIB)$/ { dependency=1; next }
+        dependency && $1 == "name" { print "  " $2; dependency=0 }
+      '
+    done
+  } > "$omp_build_dir/macos-dependencies.txt"
+  if grep -Eq '^[[:space:]]+/(opt/homebrew|usr/local|Users/runner)/' "$omp_build_dir/macos-dependencies.txt"; then
+    cat "$omp_build_dir/macos-dependencies.txt"
     printf 'Artifact contains a dependency on a build-machine path.\n' >&2
     exit 1
   fi
@@ -87,7 +101,7 @@ cp "$omp_binary" "$omp_build_dir/omp"
   "${omp_sha256[@]}" omp > SHA256SUMS
   omp_archive="omp-$omp_platform-$omp_arch.tar.gz"
   omp_metadata=(SHA256SUMS source-commit source-status source-status-after bun-version rust-version native-build-seconds cli-build-seconds help.txt build-host.txt version.txt)
-  if [[ "$omp_platform" == darwin ]]; then omp_metadata+=(macos-linkage.txt); fi
+  if [[ "$omp_platform" == darwin ]]; then omp_metadata+=(macos-linkage.txt macos-dependencies.txt); fi
   tar -czf "$omp_archive" omp "${omp_metadata[@]}"
   "${omp_sha256[@]}" "$omp_archive" > ARCHIVE-SHA256SUMS
 )
