@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgThemeDark } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { cfgTaskAgentAccountPools } from "@oh-my-pi/pi-coding-agent/task/settings";
+import { cfgProvidersMaxInFlightRequests } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
@@ -48,7 +48,7 @@ describe("Settings no-op saves", () => {
 			configPath(),
 			YAML.stringify({
 				theme: { dark: "titanium" },
-				task: { agentAccountPools: { scout: { openai: ["pool"] } } },
+				providers: { maxInFlightRequests: { endpoint: 2 } },
 				model: "openai/gpt-5",
 			}),
 		);
@@ -56,7 +56,7 @@ describe("Settings no-op saves", () => {
 		const before = snapshotConfig();
 
 		cfgThemeDark.set(settings, "titanium");
-		cfgTaskAgentAccountPools.setEntry(settings, "scout", { openai: ["pool"] });
+		cfgProvidersMaxInFlightRequests.setEntry(settings, "endpoint", 2);
 		settings.setModelRole("default", "openai/gpt-5");
 		await settings.flush();
 
