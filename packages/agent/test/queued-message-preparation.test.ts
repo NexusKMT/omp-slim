@@ -16,7 +16,6 @@ function userTexts(messages: readonly AgentMessage[]): string[] {
 interface QueueView {
 	steering: AgentMessage[];
 	followUp: AgentMessage[];
-	liveSteered: AgentMessage[];
 }
 
 /** The queue display's source of truth: pending queue contents plus live steering
@@ -25,7 +24,6 @@ function queueView(agent: Agent): QueueView {
 	return {
 		steering: [...agent.peekSteeringQueue()],
 		followUp: [...agent.peekFollowUpQueue()],
-		liveSteered: [...agent.peekLiveSteeredMessages()],
 	};
 }
 
@@ -219,7 +217,7 @@ describe("queued message preparation", () => {
 				expect(agent.state.messages.filter(message => message === second)).toHaveLength(1);
 				expect(agent.state.messages.filter(message => message === later)).toHaveLength(1);
 				expect(userTexts(agent.state.messages)).toEqual(["first", "second", "prepared 1", "later", "prepared 2"]);
-				expect(queueView(agent)).toEqual({ steering: [], followUp: [], liveSteered: [] });
+				expect(queueView(agent)).toEqual({ steering: [], followUp: [] });
 				expect(tracked.latest()).toEqual(queueView(agent));
 				expect(agent.peekUndeliveredQueuedMessages()).toEqual([]);
 				expect(agent.hasQueuedMessages()).toBe(false);
@@ -259,7 +257,7 @@ describe("queued message preparation", () => {
 		expect(userTexts(agent.state.messages)).toEqual(["fast steering", "fast follow-up"]);
 		expect(agent.state.messages.filter(message => message === steering)).toHaveLength(1);
 		expect(agent.state.messages.filter(message => message === followUp)).toHaveLength(1);
-		expect(queueView(agent)).toEqual({ steering: [], followUp: [], liveSteered: [] });
+		expect(queueView(agent)).toEqual({ steering: [], followUp: [] });
 		expect(tracked.latest()).toEqual(queueView(agent));
 		expect(agent.peekUndeliveredQueuedMessages()).toEqual([]);
 		expect(agent.hasQueuedMessages()).toBe(false);
@@ -267,14 +265,10 @@ describe("queued message preparation", () => {
 		// Once the fast path has drained both queues, a normal run must not
 		// restore anything it already recorded (no message reappears in a later
 		// notification).
-		const firstEmpty = tracked.views.findIndex(
-			view => view.steering.length === 0 && view.followUp.length === 0 && view.liveSteered.length === 0,
-		);
+		const firstEmpty = tracked.views.findIndex(view => view.steering.length === 0 && view.followUp.length === 0);
 		expect(firstEmpty).toBeGreaterThanOrEqual(0);
 		expect(
-			tracked.views
-				.slice(firstEmpty)
-				.every(view => view.steering.length === 0 && view.followUp.length === 0 && view.liveSteered.length === 0),
+			tracked.views.slice(firstEmpty).every(view => view.steering.length === 0 && view.followUp.length === 0),
 		).toBe(true);
 	});
 
@@ -342,7 +336,7 @@ describe("queued message preparation", () => {
 			expect(agent.state.messages.filter(message => message === laterSteering)).toHaveLength(1);
 			expect(agent.state.messages.filter(message => message === laterFollowUp)).toHaveLength(1);
 			expect(agent.hasQueuedMessages()).toBe(false);
-			expect(queueView(agent)).toEqual({ steering: [], followUp: [], liveSteered: [] });
+			expect(queueView(agent)).toEqual({ steering: [], followUp: [] });
 			expect(tracked.latest()).toEqual(queueView(agent));
 		},
 	);
@@ -701,7 +695,7 @@ describe("queued message preparation", () => {
 		await agent.continue();
 		expect(userTexts(mock.calls[1].context.messages)).toEqual(["ordinary", "follow-up"]);
 		expect(agent.state.messages.filter(message => message === original)).toHaveLength(1);
-		expect(queueView(agent)).toEqual({ steering: [], followUp: [], liveSteered: [] });
+		expect(queueView(agent)).toEqual({ steering: [], followUp: [] });
 		expect(tracked.latest()).toEqual(queueView(agent));
 	});
 
