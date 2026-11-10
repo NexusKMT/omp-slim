@@ -1,21 +1,11 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import type { SearchParams } from "@oh-my-pi/pi-coding-agent/web/search/providers/base";
 import { searchPublicWeb } from "@oh-my-pi/pi-coding-agent/web/search/providers/public";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 
 const authStorage = createInMemoryAuthStorage();
-const modelRegistry = new ModelRegistry(authStorage);
-
-function requirePublicModel() {
-	const model = modelRegistry.find("web", "public");
-	if (!model) throw new Error("Expected bundled web/public model");
-	return model;
-}
-
-const publicModel = requirePublicModel();
 
 afterAll(() => {
 	authStorage.close();
@@ -25,9 +15,7 @@ function makeParams(query: string, fetch: FetchImpl): SearchParams {
 	return {
 		query,
 		authStorage,
-		model: publicModel,
-		modelRegistry,
-		systemPrompt: "Public web search test prompt",
+
 		fetch,
 	};
 }

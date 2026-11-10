@@ -1,28 +1,11 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import {
 	buildRequestBody,
 	searchTavily,
 	type TavilySearchParams,
 } from "@oh-my-pi/pi-coding-agent/web/search/providers/tavily";
-import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
-
-const catalogAuthStorage = createInMemoryAuthStorage();
-const modelRegistry = new ModelRegistry(catalogAuthStorage);
-
-function requireTavilyModel() {
-	const model = modelRegistry.find("web", "tavily");
-	if (!model) throw new Error("Expected bundled web/tavily model");
-	return model;
-}
-
-const tavilyModel = requireTavilyModel();
-
-afterAll(() => {
-	catalogAuthStorage.close();
-});
 
 describe("Tavily buildRequestBody", () => {
 	afterEach(() => {
@@ -74,10 +57,8 @@ describe("Tavily searchTavily request shape (integration)", () => {
 		return {
 			query,
 			authStorage: fakeAuthStorage,
-			systemPrompt: "Tavily integration test prompt",
+
 			...extras,
-			model: tavilyModel,
-			modelRegistry,
 		};
 	}
 

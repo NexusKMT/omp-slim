@@ -229,6 +229,9 @@ export class AgentStorage implements AgentStorageApi {
 
 		// Create AuthCredentialStore with our open database
 		this.#authStore = new SqliteAuthCredentialStore(this.#db);
+		this.#db.run(
+			"CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+		);
 
 		this.#listSettingsStmt = this.#db.prepare("SELECT key, value FROM settings");
 		this.#upsertModelUsageStmt = this.#db.prepare(
@@ -877,8 +880,6 @@ ON CONFLICT(model_key) DO UPDATE SET
 				let credential: AuthCredential;
 				if (row.credential_type === "api_key" && typeof (parsed as { key?: unknown }).key === "string") {
 					credential = { type: "api_key", key: (parsed as { key: string }).key };
-				} else if (row.credential_type === "oauth") {
-					credential = { type: "oauth", ...(parsed as Record<string, unknown>) } as AuthCredential;
 				} else {
 					continue;
 				}
@@ -898,15 +899,6 @@ ON CONFLICT(model_key) DO UPDATE SET
 	 */
 	replaceAuthCredentials(provider: string, credentials: AuthCredential[]): Promise<StoredAuthCredential[]> {
 		return this.#authStore.replaceAuthCredentials(provider, credentials);
-	}
-
-	/**
-	 * Updates an existing auth credential by ID.
-	 * @param id - Database row ID of the credential to update
-	 * @param credential - New credential data
-	 */
-	updateAuthCredential(id: number, credential: AuthCredential): void {
-		this.#authStore.updateAuthCredential(id, credential);
 	}
 
 	/**
@@ -931,21 +923,28 @@ ON CONFLICT(model_key) DO UPDATE SET
 	 * Gets a cached value by key. Returns null if not found or expired.
 	 */
 	getCache(key: string): string | null {
-		return this.#authStore.getCache(key);
+		const row = this.#db
+			.query<{ value: string }, [string]>("SELECT value FROM cache WHERE key = ? AND expires_at > unixepoch()")
+			.get(key);
+		return row?.value ?? null;
 	}
 
 	/**
 	 * Sets a cached value with expiry time (unix seconds).
 	 */
 	setCache(key: string, value: string, expiresAtSec: number): void {
-		this.#authStore.setCache(key, value, expiresAtSec);
+		this.#db
+			.query(
+				"INSERT INTO cache (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at",
+			)
+			.run(key, value, expiresAtSec);
 	}
 
 	/**
 	 * Deletes expired cache entries. Call periodically for cleanup.
 	 */
 	cleanExpiredCache(): void {
-		this.#authStore.cleanExpiredCache();
+		this.#db.run("DELETE FROM cache WHERE expires_at <= unixepoch()");
 	}
 
 	/**

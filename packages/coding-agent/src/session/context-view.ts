@@ -133,7 +133,7 @@ function appendToolDefinitionEntries(session: AgentSession, state: SnapshotBuild
 			displayIndent: 2,
 			pruneDescriptions: session.agent.prunesToolDescriptions(session.model),
 		});
-		const tokens = session.model?.toolSchemasInContext === false ? 0 : session.agent.tokenizer.countTokens(fragments);
+		const tokens = session.agent.tokenizer.countTokens(fragments);
 		const shown = display ?? fragments;
 		if (schemaError !== undefined) shown.push(`Schema unavailable: ${schemaError}`);
 		const source = toolSourcesByName.get(tool.name);
@@ -310,7 +310,7 @@ function appendMessageEntries(session: AgentSession, state: SnapshotBuildState):
 	const sourceMessages = session.agent.state.messages;
 	const convertedMessages = convertMessagesForContextView(sourceMessages);
 	const latestSurvivingAssistantIndex = convertedMessages.findLastIndex(
-		({ message }) => message.role === "assistant" && isSurvivingAssistant(message, session.model ?? undefined),
+		({ message }) => message.role === "assistant" && isSurvivingAssistant(message),
 	);
 	for (const convertedMessage of convertedMessages) {
 		const { message, sourceIndex, convertedIndex } = convertedMessage;

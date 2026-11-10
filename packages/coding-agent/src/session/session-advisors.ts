@@ -60,7 +60,7 @@ import { evictStaleToolResults } from "../advisor/tool-result-eviction";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelString, formatModelStringWithRouting } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
-import { estimateContextToolSchemaTokens } from "@oh-my-pi/pi-tui/status-line/context-usage";
+import { estimateToolSchemaTokens } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import type { PlanModeState } from "../plan-mode/state";
 import advisorBoundaryGuidance from "../prompts/advisor/boundary-guidance.md" with { type: "text" };
 import advisorSystemPrompt from "../prompts/advisor/system.md" with { type: "text" };
@@ -754,11 +754,7 @@ export class SessionAdvisors {
 		advisor.agent.sessionId = providerSessionId;
 		advisor.agent.promptCacheKey = this.#host.agent.promptCacheKey ?? providerSessionId;
 		advisor.agent.getApiKey = requestModel => this.#host.modelRegistry.resolver(requestModel, providerSessionId);
-		advisor.agent.setMetadataResolver(
-			providerSessionId
-				? provider => buildSessionMetadata(providerSessionId, provider, this.#host.modelRegistry.authStorage)
-				: undefined,
-		);
+		advisor.agent.setMetadataResolver(providerSessionId ? () => buildSessionMetadata(providerSessionId) : undefined);
 
 		const telemetry = advisor.agent.telemetry;
 		if (telemetry?.agent) {
@@ -1690,15 +1686,13 @@ export class SessionAdvisors {
 		// delta to that arm. Floor it by a full local estimate — fixed advisor system
 		// prompt, tool schemas, stored messages, and incoming delta — so provider
 		// under-reporting or payload transforms cannot suppress maintenance.
-		// Schema overhead depends on the model, so promotion re-evaluates the
-		// local arm against the promoted model's schema policy.
 		const providerContextTokens = this.#estimateAdvisorContextTokens(advisor) + incomingTokens;
 		const fixedPromptTokens = agent.tokenizer.countTokens(agent.state.systemPrompt);
 		const contextTokensFor = (model: Model): number =>
 			compactionContextTokens(
 				providerContextTokens,
 				fixedPromptTokens +
-					estimateContextToolSchemaTokens(agent.state.tools, agent.tokenizer, model, {
+					estimateToolSchemaTokens(agent.state.tools, agent.tokenizer, {
 						sourceRevision: this.#host.settings.revision,
 						pruneDescriptions: agent.prunesToolDescriptions(model),
 					}) +
@@ -1762,13 +1756,7 @@ export class SessionAdvisors {
 					telemetry: resolveTelemetry(agent.telemetry, advisorProviderSessionId),
 					sessionId: advisorProviderSessionId,
 					promptCacheKey: this.#host.agent.promptCacheKey,
-					metadata: advisorProviderSessionId
-						? buildSessionMetadata(
-								advisorProviderSessionId,
-								advisorModel.provider,
-								this.#host.modelRegistry.authStorage,
-							)
-						: undefined,
+					metadata: advisorProviderSessionId ? buildSessionMetadata(advisorProviderSessionId) : undefined,
 					completeImpl: async (model, context, options) => {
 						const stream = await (this.#advisorStreamFn ?? streamSimple)(model, context, options);
 						return stream.result();

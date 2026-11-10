@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { scheduler } from "node:timers/promises";
-import { clearCustomApis, registerCustomApi } from "@oh-my-pi/pi-ai/api-registry";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createMockModel, type MockContent, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { complete, completeSimple, stream, streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { wrapLeakedThinkingStream } from "@oh-my-pi/pi-ai/utils/leaked-thinking-stream";
 import {
 	GEMINI_HEADER_RUNAWAY_THRESHOLD,
 	GeminiHeaderRunDetector,
@@ -17,7 +15,6 @@ import {
 	withThinkingLoopGuard,
 } from "@oh-my-pi/pi-ai/utils/thinking-loop";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import { isRetryableError } from "@oh-my-pi/pi-utils";
 
 function context(): Context {
@@ -413,17 +410,14 @@ describe("thinking-loop guard (stream wrapper)", () => {
 		return { content: [{ type: "thinking", thinking: nearDuplicateLoop(12) }] };
 	}
 
-	for (const { label, provider, id } of [
-		{ label: "Gemini", provider: "openrouter", id: "google/gemini-3.5-flash" },
-		{ label: "Grok 4.6", provider: "xai", id: "grok-4-6" },
-	]) {
+	for (const { label, provider, id } of [{ label: "configured semantic", provider: "gateway", id: "main" }]) {
 		test(`terminates a ${label} loop with a retryable empty-content error`, async () => {
 			registerMockApi();
 			try {
 				const mock = createMockModel({ provider, id });
 				mock.push(loopingThinkingResponse());
 
-				const result = await stream(mock.model, context()).result();
+				const result = await stream(mock.model, context(), { loopGuard: { level: "semantic" } }).result();
 
 				expect(result.stopReason).toBe("error");
 				expect(result.content).toEqual([]);
@@ -433,7 +427,7 @@ describe("thinking-loop guard (stream wrapper)", () => {
 				expect(result.errorMessage).toContain("stream stall");
 				expect(isRetryableError(new Error(result.errorMessage))).toBe(true);
 			} finally {
-				clearCustomApis();
+				mock.restore();
 			}
 		});
 	}
@@ -444,7 +438,7 @@ describe("thinking-loop guard (stream wrapper)", () => {
 			const mock = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" });
 			mock.push(loopingThinkingResponse());
 
-			const events = await collect(stream(mock.model, context()));
+			const events = await collect(stream(mock.model, context(), { loopGuard: { level: "semantic" } }));
 			const terminal = events.at(-1);
 			expect(terminal?.type).toBe("error");
 			// A prefix can stream before detection, but the failed terminal must not
@@ -453,39 +447,7 @@ describe("thinking-loop guard (stream wrapper)", () => {
 			expect(events.some(e => e.type === "done")).toBe(false);
 			if (terminal?.type === "error") expect(terminal.error.content).toEqual([]);
 		} finally {
-			clearCustomApis();
-		}
-	});
-
-	test("passes a Claude stream through untouched even with an exact cycle", async () => {
-		registerMockApi();
-		try {
-			const mock = createMockModel({ provider: "anthropic", id: "claude-opus-5-5" });
-			// Trips the exact-cycle check at the default level (see the verbatim
-			// back-to-back detector test).
-			mock.push({ content: [{ type: "thinking", thinking: "🌊 ".repeat(120) }] });
-
-			const result = await stream(mock.model, context()).result();
-
-			expect(result.stopReason).toBe("stop");
-			expect(result.content.some(b => b.type === "thinking")).toBe(true);
-		} finally {
-			clearCustomApis();
-		}
-	});
-
-	test("passes a non-gemini model through untouched even when it loops", async () => {
-		registerMockApi();
-		try {
-			const mock = createMockModel({ provider: "openai", id: "gpt-5.5" });
-			mock.push(loopingThinkingResponse());
-
-			const result = await stream(mock.model, context()).result();
-
-			expect(result.stopReason).toBe("stop");
-			expect(result.content.some(b => b.type === "thinking")).toBe(true);
-		} finally {
-			clearCustomApis();
+			mock.restore();
 		}
 	});
 
@@ -495,14 +457,14 @@ describe("thinking-loop guard (stream wrapper)", () => {
 			const mock = createMockModel({ provider: "kiro", id: "gpt-5-6-sol" });
 			mock.push({ content: [`Healthy lead sentence. ${OBSERVED_KIRO_CYCLE.repeat(6)}`] });
 
-			const result = await stream(mock.model, context()).result();
+			const result = await stream(mock.model, context(), { loopGuard: { level: "semantic" } }).result();
 
 			expect(result.stopReason).toBe("error");
 			expect(result.content).toEqual([]);
 			expect(result.errorMessage).toContain(THINKING_LOOP_ERROR_MARKER);
 			expect(AIError.is(result.errorId, AIError.Flag.ThinkingLoop)).toBe(true);
 		} finally {
-			clearCustomApis();
+			mock.restore();
 		}
 	});
 
@@ -564,12 +526,12 @@ describe("thinking-loop guard (stream wrapper)", () => {
 			const mock = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" });
 			mock.push({ content: [{ type: "thinking", thinking: distinctReasoning() }, "Here is the final answer."] });
 
-			const result = await stream(mock.model, context()).result();
+			const result = await stream(mock.model, context(), { loopGuard: { level: "semantic" } }).result();
 
 			expect(result.stopReason).toBe("stop");
 			expect(result.content.some(b => b.type === "text")).toBe(true);
 		} finally {
-			clearCustomApis();
+			mock.restore();
 		}
 	});
 
@@ -587,23 +549,23 @@ describe("thinking-loop guard (stream wrapper)", () => {
 				],
 			});
 
-			const result = await stream(mock.model, context()).result();
+			const result = await stream(mock.model, context(), { loopGuard: { level: "semantic" } }).result();
 
 			// Visible text already streamed, so the loop must NOT hijack the turn.
 			expect(result.stopReason).toBe("stop");
 			expect(result.content.some(b => b.type === "text")).toBe(true);
 		} finally {
-			clearCustomApis();
+			mock.restore();
 		}
 	});
 
-	test("guards the streamSimple custom-api path (agent default entrypoint)", async () => {
+	test("guards the streamSimple transport path (agent default entrypoint)", async () => {
 		registerMockApi();
 		try {
 			const mock = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" });
 			mock.push(loopingThinkingResponse());
 
-			const result = await streamSimple(mock.model, context()).result();
+			const result = await streamSimple(mock.model, context(), { loopGuard: { level: "semantic" } }).result();
 
 			expect(result.stopReason).toBe("error");
 			expect(result.content).toEqual([]);
@@ -611,40 +573,8 @@ describe("thinking-loop guard (stream wrapper)", () => {
 			expect(AIError.is(result.errorId, AIError.Flag.ThinkingLoop)).toBe(true);
 			expect(isRetryableError(new Error(result.errorMessage))).toBe(true);
 		} finally {
-			clearCustomApis();
+			mock.restore();
 		}
-	});
-});
-
-describe("withThinkingLoopGuard (Vertex transport)", () => {
-	test("emits a retryable empty-content error for a looping Vertex Gemini stream", async () => {
-		const model = {
-			api: "google-vertex",
-			provider: "google-vertex",
-			id: "gemini-2.5-pro",
-			identity: classifyModel("google-vertex", "gemini-2.5-pro"),
-		} as unknown as Model<Api>;
-		const partial = { role: "assistant", content: [] } as unknown as AssistantMessage;
-
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
-			const inner = new AssistantMessageEventStream();
-			const events: AssistantMessageEvent[] = [
-				{ type: "start", partial },
-				{ type: "thinking_start", contentIndex: 0, partial },
-				{ type: "thinking_delta", contentIndex: 0, delta: nearDuplicateLoop(12), partial },
-				{ type: "thinking_end", contentIndex: 0, content: "", partial },
-				{ type: "done", reason: "stop", message: partial },
-			];
-			for (const event of events) inner.push(event);
-			return inner;
-		});
-
-		const result = await guarded.result();
-		expect(result.stopReason).toBe("error");
-		expect(result.content.length).toBe(0);
-		expect(result.errorMessage).toContain(THINKING_LOOP_ERROR_MARKER);
-		expect(AIError.is(result.errorId, AIError.Flag.ThinkingLoop)).toBe(true);
-		expect(isRetryableError(new Error(result.errorMessage))).toBe(true);
 	});
 });
 
@@ -675,7 +605,7 @@ describe("thinking-loop error accounting", () => {
 	const attempt = (responseId: string): AssistantMessage => ({
 		role: "assistant",
 		content: [],
-		api: "google-vertex",
+		api: "openai-completions",
 		provider: "google-vertex",
 		model: "gemini-2.5-pro",
 		responseId,
@@ -687,7 +617,7 @@ describe("thinking-loop error accounting", () => {
 	test("keeps the aborted attempt's usage, start time, response id and timing", async () => {
 		// Usage reported mid-stream (Gemini, Anthropic) is on the partial when the guard trips.
 		const partial = { ...attempt("resp-looping"), usage: usage(116_000, 2_400, 0.169) };
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			void (async () => {
 				inner.push({ type: "start", partial });
@@ -716,7 +646,7 @@ describe("thinking-loop error accounting", () => {
 	test("reports the attempt that tripped, not the time spent on an earlier retried attempt", async () => {
 		const first = attempt("attempt-1");
 		let second: AssistantMessage | undefined;
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			void (async () => {
 				inner.push({ type: "start", partial: first });
@@ -740,7 +670,7 @@ describe("thinking-loop error accounting", () => {
 	test("restarts attempt timing when a provider resets its output in place for a retry", async () => {
 		// Google's empty-response retry rewrites the same output object (timestamp included).
 		const output = attempt("attempt-1");
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			void (async () => {
 				inner.push({ type: "start", partial: output });
@@ -772,7 +702,7 @@ describe("thinking-loop error accounting", () => {
 		};
 		// Seven separated duplicates leave the cluster-completing eighth unterminated.
 		const block = `${nearDuplicateLoop(7)}\n\n\nI am now verifying the test module to guarantee there are no compile errors and the code is completely safe.`;
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			inner.push({ type: "start", partial });
 			inner.push({ type: "thinking_start", contentIndex: 0, partial });
@@ -792,7 +722,7 @@ describe("thinking-loop error accounting", () => {
 	test("sees usage a provider replaces mid-stream through leaked-thinking healing", async () => {
 		// Gemini assigns a fresh `usage` object per chunk; the healing wrapper sits between it and the guard.
 		const output = attempt("resp-gemini");
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			void (async () => {
 				inner.push({ type: "start", partial: output });
@@ -801,7 +731,7 @@ describe("thinking-loop error accounting", () => {
 				output.usage = usage(116_000, 2_500, 0.17);
 				inner.push({ type: "thinking_delta", contentIndex: 0, delta: nearDuplicateLoop(12), partial: output });
 			})();
-			return wrapLeakedThinkingStream(inner);
+			return inner;
 		});
 
 		const result = await guarded.result();
@@ -813,14 +743,14 @@ describe("thinking-loop error accounting", () => {
 describe("withThinkingLoopGuard (thinking after toolcall)", () => {
 	test("trips on a thinking loop that continues after toolcall_start", async () => {
 		const model = {
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "xai-oauth",
 			id: "grok-4.6",
-			identity: classifyModel("xai-oauth", "grok-4.6"),
+			identity: { class: "test" },
 		} as unknown as Model<Api>;
 		const partial = { role: "assistant", content: [] } as unknown as AssistantMessage;
 
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			const events: AssistantMessageEvent[] = [
 				{ type: "start", partial },
@@ -845,14 +775,14 @@ describe("withThinkingLoopGuard (thinking after toolcall)", () => {
 
 	test("re-arms thinking after thinking_end when more reasoning arrives after a tool call", async () => {
 		const model = {
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "xai-oauth",
 			id: "grok-4.6",
-			identity: classifyModel("xai-oauth", "grok-4.6"),
+			identity: { class: "test" },
 		} as unknown as Model<Api>;
 		const partial = { role: "assistant", content: [] } as unknown as AssistantMessage;
 
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			const events: AssistantMessageEvent[] = [
 				{ type: "start", partial },
@@ -878,14 +808,14 @@ describe("withThinkingLoopGuard (thinking after toolcall)", () => {
 
 	test("does not re-arm thinking after visible answer text even if a tool call already started", async () => {
 		const model = {
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "xai-oauth",
 			id: "grok-4.6",
-			identity: classifyModel("xai-oauth", "grok-4.6"),
+			identity: { class: "test" },
 		} as unknown as Model<Api>;
 		const partial = { role: "assistant", content: [] } as unknown as AssistantMessage;
 
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			const events: AssistantMessageEvent[] = [
 				{ type: "start", partial },
@@ -908,14 +838,14 @@ describe("withThinkingLoopGuard (thinking after toolcall)", () => {
 
 	test("does not latch thinking off on text_start before any visible answer text", async () => {
 		const model = {
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "xai-oauth",
 			id: "grok-4.6",
-			identity: classifyModel("xai-oauth", "grok-4.6"),
+			identity: { class: "test" },
 		} as unknown as Model<Api>;
 		const partial = { role: "assistant", content: [] } as unknown as AssistantMessage;
 
-		const guarded = withThinkingLoopGuard(model, undefined, () => {
+		const guarded = withThinkingLoopGuard(model, { loopGuard: { level: "semantic" } }, () => {
 			const inner = new AssistantMessageEventStream();
 			const events: AssistantMessageEvent[] = [
 				{ type: "start", partial },
@@ -939,70 +869,16 @@ describe("withThinkingLoopGuard (thinking after toolcall)", () => {
 	});
 });
 
-describe("loopGuardLevel", () => {
-	test("runs semantic heuristics for Gemini, DeepSeek, and xAI structured identity", () => {
-		const gemini = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" }).model;
-		const deepseek = createMockModel({ provider: "deepseek", id: "deepseek-reasoner" }).model;
-		const grok46 = createMockModel({ provider: "venice", id: "grok-4-6" }).model;
-		const cursorGrok46 = createMockModel({ provider: "cursor", id: "cursor-grok-4.6-high" }).model;
-		const grok460 = createMockModel({ provider: "venice", id: "grok-4.60" }).model;
-		const grok45 = createMockModel({ provider: "cursor", id: "cursor-grok-4.5-high" }).model;
-		const opaqueDeepseek = createMockModel({ provider: "deepseek", id: "opaque-model" }).model;
-		const other = createMockModel({ provider: "openai", id: "gpt-4o" }).model;
-		const openaiNamespacedGemini = createMockModel({ provider: "custom", id: "openai/gemini-pro" }).model;
-		const openaiNamespacedDeepseek = createMockModel({ provider: "custom", id: "openai/deepseek-r1" }).model;
-		const openaiNamespacedGrok = createMockModel({ provider: "custom", id: "openai/grok-4.6" }).model;
-
-		expect(loopGuardLevel(gemini)).toBe("semantic");
-		expect(loopGuardLevel(deepseek)).toBe("semantic");
-		expect(loopGuardLevel(grok46)).toBe("semantic");
-		// Cursor's wrapped per-tier Grok ids carry structured xai identity
-		// (`taxonomy/xai.kdl` cursor-grok- prefix), so the guard applies.
-		expect(loopGuardLevel(cursorGrok46)).toBe("semantic");
-		expect(loopGuardLevel(grok460)).toBe("semantic");
-		expect(loopGuardLevel(grok45)).toBe("semantic");
-		expect(loopGuardLevel(opaqueDeepseek)).toBe("exact");
-		expect(loopGuardLevel(other)).toBe("exact");
-
-		expect(loopGuardLevel(openaiNamespacedGemini)).toBe("semantic");
-		expect(loopGuardLevel(openaiNamespacedDeepseek)).toBe("semantic");
-		expect(loopGuardLevel(openaiNamespacedGrok)).toBe("semantic");
-		// enabled: false disables every guarded family.
-		expect(loopGuardLevel(gemini, { loopGuard: { enabled: false } })).toBe("off");
-		expect(loopGuardLevel(deepseek, { loopGuard: { enabled: false } })).toBe("off");
-		expect(loopGuardLevel(grok45, { loopGuard: { enabled: false } })).toBe("off");
-
-		// enabled: true does not opt unrelated models into the semantic heuristics.
-		expect(loopGuardLevel(other, { loopGuard: { enabled: true } })).toBe("exact");
-	});
-
-	test("turns the guard off for Claude on every host", () => {
-		// Claude's summarized thinking repeats one status line verbatim, which the
-		// exact-cycle check misread as a runaway and discarded whole turns.
-		for (const [provider, id] of [
-			["anthropic", "claude-opus-5-5"],
-			["anthropic", "claude-fable-5-1"],
-			["amazon-bedrock", "us.anthropic.claude-opus-5-5"],
-			["openrouter", "anthropic/claude-opus-5-5"],
-		]) {
-			expect(loopGuardLevel(createMockModel({ provider, id }).model)).toBe("off");
-		}
-		// enabled: true is the default, not an opt-in that overrides the lineage rule.
-		const claude = createMockModel({ provider: "anthropic", id: "claude-opus-5-5" }).model;
-		expect(loopGuardLevel(claude, { loopGuard: { enabled: true } })).toBe("off");
-	});
-});
-
 describe("loop guard assistant prose/text loops", () => {
 	test("trips on assistant text/prose loop when checkAssistantContent is enabled", async () => {
 		const model = {
 			api: "openai-completions",
 			provider: "deepseek",
 			id: "deepseek-reasoner",
-			identity: classifyModel("deepseek", "deepseek-reasoner"),
+			identity: { class: "test" },
 		} as unknown as Model<Api>;
 		const partial = { role: "assistant", content: [], stopReason: "stop" } as unknown as AssistantMessage;
-		const options = { loopGuard: { checkAssistantContent: true } };
+		const options = { loopGuard: { level: "semantic" as const, checkAssistantContent: true } };
 
 		const guarded = withThinkingLoopGuard(model, options, () => {
 			const inner = new AssistantMessageEventStream();
@@ -1034,10 +910,10 @@ describe("loop guard assistant prose/text loops", () => {
 			api: "openai-completions",
 			provider: "deepseek",
 			id: "deepseek-reasoner",
-			identity: classifyModel("deepseek", "deepseek-reasoner"),
+			identity: { class: "test" },
 		} as unknown as Model<Api>;
 		const partial = { role: "assistant", content: [], stopReason: "stop" } as unknown as AssistantMessage;
-		const options = { loopGuard: { checkAssistantContent: false } };
+		const options = { loopGuard: { level: "semantic" as const, checkAssistantContent: false } };
 
 		const guarded = withThinkingLoopGuard(model, options, () => {
 			const inner = new AssistantMessageEventStream();
@@ -1141,224 +1017,5 @@ describe("GeminiHeaderRunDetector", () => {
 		detector.reset();
 		expect(detector.count).toBe(0);
 		expect(detector.push(runaway)).toBe(true);
-	});
-});
-
-describe("thinking-loop retry budget (result path)", () => {
-	function loopResponse(): { content: MockContent[] } {
-		return { content: [{ type: "thinking", thinking: nearDuplicateLoop(12) }] };
-	}
-
-	test("completeSimple fails closed after three guarded attempts", async () => {
-		registerMockApi();
-		const waitSpy = spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		try {
-			const mock = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" });
-			for (let i = 0; i < 4; i++) mock.push(loopResponse());
-			const attempts: AssistantMessage[] = [];
-
-			const result = await completeSimple(mock.model, context(), { onAttempt: message => attempts.push(message) });
-
-			expect(mock.calls).toHaveLength(3);
-			expect(attempts).toHaveLength(3);
-			expect(result.stopReason).toBe("error");
-			expect(result.content).toEqual([]);
-			expect(result.errorMessage).toContain(THINKING_LOOP_ERROR_MARKER);
-			expect(mock.calls.every(call => call.options?.loopGuard?.enabled !== false)).toBe(true);
-		} finally {
-			waitSpy.mockRestore();
-			clearCustomApis();
-		}
-	});
-
-	test("complete (non-simple) also fails closed after three guarded attempts", async () => {
-		registerMockApi();
-		const waitSpy = spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		try {
-			const mock = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" });
-			for (let i = 0; i < 4; i++) mock.push(loopResponse());
-
-			const result = await complete(mock.model, context());
-
-			expect(mock.calls).toHaveLength(3);
-			expect(result.stopReason).toBe("error");
-			expect(result.content).toEqual([]);
-			expect(result.errorMessage).toContain(THINKING_LOOP_ERROR_MARKER);
-			expect(mock.calls.every(call => call.options?.loopGuard?.enabled !== false)).toBe(true);
-		} finally {
-			waitSpy.mockRestore();
-			clearCustomApis();
-		}
-	});
-
-	test("a caller abort during backoff rejects instead of returning the stall", async () => {
-		registerMockApi();
-		const controller = new AbortController();
-		const waitSpy = spyOn(scheduler, "wait").mockImplementation(async (_delay, opts) => {
-			controller.abort(new Error("user cancelled"));
-			opts?.signal?.throwIfAborted();
-		});
-		try {
-			const mock = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" });
-			mock.push(loopResponse());
-
-			await expect(completeSimple(mock.model, context(), { signal: controller.signal })).rejects.toThrow(
-				"user cancelled",
-			);
-			// Only the first guarded attempt ran; the abort pre-empted re-sampling.
-			expect(mock.calls).toHaveLength(1);
-		} finally {
-			waitSpy.mockRestore();
-			clearCustomApis();
-		}
-	});
-
-	test("a caller abort after the third guarded result supersedes the loop error", async () => {
-		registerMockApi();
-		const controller = new AbortController();
-		const waitSpy = spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		try {
-			let attempts = 0;
-			const mock = createMockModel({
-				provider: "openrouter",
-				id: "google/gemini-3.5-flash",
-				handler: () => {
-					if (++attempts === 3) controller.abort(new Error("cancelled after final result"));
-					return loopResponse();
-				},
-			});
-
-			await expect(completeSimple(mock.model, context(), { signal: controller.signal })).rejects.toThrow(
-				"cancelled after final result",
-			);
-			expect(mock.calls).toHaveLength(3);
-		} finally {
-			waitSpy.mockRestore();
-			clearCustomApis();
-		}
-	});
-
-	test("does not retry a contentful ThinkingLoop error (replay-unsafe output)", async () => {
-		const api = "contentful-loop-test";
-		let calls = 0;
-		const model = {
-			api,
-			provider: "test",
-			id: "test-model",
-			name: "Test model",
-			baseUrl: "test://",
-			reasoning: false,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 1_000,
-			maxTokens: 100,
-		} as unknown as Model<Api>;
-		registerCustomApi(api, () => {
-			calls++;
-			const inner = new AssistantMessageEventStream();
-			const error: AssistantMessage = {
-				role: "assistant",
-				content: [{ type: "text", text: "Looping visible reasoning garbage." }],
-				api,
-				provider: model.provider,
-				model: model.id,
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
-				stopReason: "error",
-				errorMessage: `${THINKING_LOOP_ERROR_MARKER}: already streamed, non-retryable`,
-				errorId: AIError.create(AIError.Flag.ThinkingLoop),
-				timestamp: Date.now(),
-			};
-			inner.push({ type: "error", reason: "error", error });
-			return inner;
-		});
-		const waitSpy = spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		try {
-			const result = await completeSimple(model, context());
-
-			expect(calls).toBe(1);
-			expect(result.stopReason).toBe("error");
-			expect(result.content).toHaveLength(1);
-			expect(AIError.is(result.errorId, AIError.Flag.ThinkingLoop)).toBe(true);
-		} finally {
-			waitSpy.mockRestore();
-			clearCustomApis();
-		}
-	});
-});
-
-describe("loopGuard on mapped provider options", () => {
-	// A built-in API, so the request goes through mapOptionsForApi before stream() guards it.
-	const model = buildModel({
-		api: "openai-responses",
-		provider: "loop-guard-test",
-		id: "loop-guard-test-model",
-		name: "Loop guard test model",
-		baseUrl: "https://unused.example.com/v1",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 200_000,
-		maxTokens: 32_768,
-	} satisfies ModelSpec<"openai-responses">);
-	const text = `Healthy lead sentence. ${OBSERVED_KIRO_CYCLE.repeat(6)}`;
-	const fetch = async (): Promise<Response> => {
-		const events: unknown[] = [
-			{
-				type: "response.output_item.added",
-				output_index: 0,
-				item: { type: "message", id: "msg_1", role: "assistant", content: [] },
-			},
-			{ type: "response.content_part.added", part: { type: "output_text", text: "" } },
-		];
-		for (let i = 0; i < text.length; i += 23) {
-			events.push({ type: "response.output_text.delta", delta: text.slice(i, i + 23) });
-		}
-		events.push(
-			{
-				type: "response.output_item.done",
-				output_index: 0,
-				item: { type: "message", id: "msg_1", role: "assistant", content: [{ type: "output_text", text }] },
-			},
-			{
-				type: "response.completed",
-				response: {
-					status: "completed",
-					usage: {
-						input_tokens: 1,
-						output_tokens: 1,
-						total_tokens: 2,
-						input_tokens_details: { cached_tokens: 0 },
-					},
-				},
-			},
-		);
-		return new Response(`${events.map(event => `data: ${JSON.stringify(event)}`).join("\n\n")}\n\n`, {
-			headers: { "content-type": "text/event-stream" },
-		});
-	};
-
-	test("trips on an exact answer-text cycle when loopGuard is unset", async () => {
-		const result = await streamSimple(model, context(), { apiKey: "test", fetch }).result();
-
-		expect(result.stopReason).toBe("error");
-		expect(result.errorMessage).toContain(THINKING_LOOP_ERROR_MARKER);
-	});
-
-	test.each([
-		["enabled: false", { enabled: false }],
-		["checkAssistantContent: false", { checkAssistantContent: false }],
-	] as const)("returns the full answer when %s", async (_label, loopGuard) => {
-		const result = await streamSimple(model, context(), { apiKey: "test", fetch, loopGuard }).result();
-
-		expect(result.errorMessage).toBeUndefined();
-		expect(result.stopReason).toBe("stop");
-		expect(result.content).toEqual([expect.objectContaining({ type: "text", text })]);
 	});
 });

@@ -2,7 +2,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { MAIN_AGENT_RULE_NAME, SUB_AGENT_RULE_NAME } from "../capability/rule";
-import { validateAgentAccountPools } from "../config/account-pools";
 import type { ModelRegistry } from "../config/model-registry";
 import { inheritedModelGuard } from "./model-inheritance";
 import type { Settings } from "../config/settings";
@@ -36,7 +35,6 @@ import {
 	softRequestBudgetFor,
 } from "./executor";
 import { isCompletionProbeEnabled } from "./completion-probe";
-import { cfgTaskAgentAccountPools } from "./settings";
 import { type RestoredSeanceSession, restoreSeanceSession } from "./seance";
 import { seanceIsolationOptions } from "./seance-policy";
 import type { AgentDefinition } from "./types";
@@ -270,9 +268,6 @@ export async function revivePersistedSubagent(spec: PersistedReviveSpec, expecte
 	});
 	// Account pools are owner policy, like the extension roots below: take the
 	// live exact-name `task.agentAccountPools` entry, never a transcript copy.
-	const agentAccountPools = validateAgentAccountPools(cfgTaskAgentAccountPools.get(spec.settings));
-	const oauthAccountPools =
-		init.agent && Object.hasOwn(agentAccountPools, init.agent) ? agentAccountPools[init.agent] : undefined;
 	// Historical model/role fields remain readable but cannot select a new model.
 	// Keep the original tool grants, including the read-only boundary.
 	const revivedToolNames = restoredSeance
@@ -313,7 +308,7 @@ export async function revivePersistedSubagent(spec: PersistedReviveSpec, expecte
 			parentTaskPrefix: ref.id,
 			asyncJobManager: spec.asyncJobManager,
 			parentAgentId: ref.parentId,
-			oauthAccountPools,
+
 			disableModelFallback: true,
 			disableServerSideFallback: true,
 			assertDispatchModel: inheritedModelGuard(model),

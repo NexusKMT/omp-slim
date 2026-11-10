@@ -9,7 +9,6 @@ import { InternalUrlFilesystem, type UrlFileStat } from "../internal-urls/url-fi
 import { glob as ovnfsGlob } from "../ovnfs/search";
 import globDescription from "../prompts/tools/glob.md" with { type: "text" };
 import { truncateHead } from "@oh-my-pi/pi-tui/tools/streaming-output";
-import { sessionDelegationBias } from "../task/prompt-policy";
 import { isScoutSpawnable } from "../task/spawn-policy";
 import type { ToolSession } from ".";
 import { resolveToolTier } from "./approval";
@@ -148,7 +147,7 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 	readonly label = "Glob";
 	get description(): string {
 		const hasFind = this.session.isToolActive?.("find") ?? isFindEnabled(this.session);
-		const eagerDelegation = sessionDelegationBias(this.session) === "eager";
+		const eagerDelegation = false;
 		const scoutAvailable = isScoutSpawnable(
 			cfgTaskDisabledAgents.get(this.session.settings),
 			this.session.getSessionSpawns?.() ?? "*",

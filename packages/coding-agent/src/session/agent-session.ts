@@ -310,7 +310,6 @@ import {
 } from "./checkpoint-entries";
 import type { ClientBridge } from "./client-bridge";
 import { COST_GATE_NOTICE_SOURCE, type CostCapRefusal, CostGate, type CostGateApi } from "./cost-gate";
-import { recordCredentialPin, seedCredentialPins } from "./credential-pin";
 import { isDateCwdReminderControl } from "./date-cwd-reminder";
 import { EvalRunner, type EvalRunnerHost, type PythonExecuteOptions } from "./eval-runner";
 import {
@@ -385,7 +384,6 @@ import {
 } from "./session-advisors";
 import type { SessionContext, TranscriptSessionContextOptions } from "./session-context";
 import { buildSessionContext, getRestorableSessionModels, isTranscriptEntry } from "./session-context";
-import type { PromptCacheStatus } from "@oh-my-pi/pi-tui/status-line/host";
 import { isUserRequestEntry, transcriptEntryMessage, userTurnDraft } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { anonymizeSessionTranscripts } from "./session-anonymizer";
 import {
@@ -397,12 +395,7 @@ import {
 import { collectSubSessions, type SubSession } from "./sub-sessions";
 import type { BranchSummaryEntry, NewSessionOptions, SessionEntry } from "./session-entries";
 import { SessionHandoff, type SessionHandoffHost } from "./session-handoff";
-import {
-	COMPACTION_CHECK_NONE,
-	createCodexCompactionContext as createMaintenanceCodexCompactionContext,
-	SessionMaintenance,
-	type SessionMaintenanceHost,
-} from "./session-maintenance";
+import { COMPACTION_CHECK_NONE, SessionMaintenance, type SessionMaintenanceHost } from "./session-maintenance";
 import {
 	cleanupEmptyMoveSession,
 	copySessionArtifacts,
@@ -414,7 +407,6 @@ import { buildSessionMetadata } from "./session-metadata";
 import { SessionProviderBoundary, type SessionProviderBoundaryHost } from "./session-provider-boundary";
 import { SessionStatsTracker, type SessionStatsTrackerHost } from "./session-stats";
 import { promptDigestOfEntry, SessionTools, type SessionToolsHost } from "./session-tools";
-import { resolveWebsocketPreference } from "./settings-stream-fn";
 import type { ShakeMode, ShakeResult } from "./shake-types";
 import { ToolChoiceQueue } from "./tool-choice-queue";
 import { planTurnPersistence, sameMessageContent, sessionMessagePersistenceKey } from "./turn-persistence";
@@ -2392,7 +2384,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			preserveAdvisorCard: card => this.#preserveAdvisorCard(card),
 			hasPendingNextTurnMessages: () => this.#pendingNextTurnMessages.length > 0,
 			convertToLlmForSideRequest: messages => this.#convertToLlmForSideRequest(messages),
-			effectiveServiceTier: model => this.#models.effectiveServiceTier(model),
 
 			sessionId: () => this.sessionId,
 
@@ -2402,10 +2393,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		this.#advisors = new SessionAdvisors(advisorsHost, {
 			enabled: cfgAdvisorEnabled.get(this.settings),
 			tools: config.advisorTools,
-			createGrepTool: config.advisorCreateGrepTool,
-			createEditTool: config.advisorCreateEditTool,
-			getToolContext: config.advisorGetToolContext,
-			mcpResources: config.advisorMcpResources,
+
 			watchdogPrompt: config.advisorWatchdogPrompt,
 			sharedInstructions: config.advisorSharedInstructions,
 			sharedMaxNotesPerUpdate: config.advisorSharedMaxNotesPerUpdate,
@@ -2429,7 +2417,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			model: () => this.model,
 			thinkingLevel: () => this.thinkingLevel,
 			isDisposed: () => this.#isDisposed,
-			modelFallbackDisabled: () => this.#disableModelFallback,
+
 			isStreaming: () => this.isStreaming,
 			isGeneratingHandoff: () => this.isGeneratingHandoff,
 			promptGeneration: () => this.#promptGeneration,
@@ -2481,34 +2469,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				if (message) this.sessionManager.appendMessage(message);
 			},
 			convertToLlmForSideRequest: messages => this.#convertToLlmForSideRequest(messages),
-			buildLiveProviderContext: async (summarized, retained, signal, model) => {
-				// compact() rebuilds the previous summary message; send the live
-				// agent's own one. Conversion caches key on message identity, so a
-				// copy would re-render the bytes the live turns already sent.
-				const liveSummary = this.agent.state.messages[0];
-				const first = summarized[0];
-				const history =
-					first?.role === "compactionSummary" &&
-					liveSummary?.role === "compactionSummary" &&
-					liveSummary.timestamp === first.timestamp
-						? [liveSummary, ...summarized.slice(1)]
-						: summarized;
-				// Transform the whole history as the live turn does, then cut it:
-				// provider transforms (inline imaging, image budgets) decide per
-				// request, so a separately transformed prefix can differ.
-				const prefixLength = (await this.convertMessagesToLlm(history, signal, model)).length;
-				const live = await this.agent.buildSideRequestContext(
-					await this.convertMessagesToLlm([...history, ...retained], signal, model),
-				);
-				// Date/cwd reminder controls are the only messages the transforms
-				// insert: count past them, and leave out any at the cut, so the kept
-				// turns follow the summarized range directly.
-				let cut = 0;
-				for (let counted = 0; cut < live.messages.length && counted < prefixLength; cut++) {
-					if (!isDateCwdReminderControl(live.messages[cut]!)) counted++;
-				}
-				return { ...live, messages: live.messages.slice(0, cut) };
-			},
+
 			obfuscateTextForProvider: text => this.#obfuscateTextForProvider(text),
 			obfuscatePreparationForProvider: preparation => this.#obfuscatePreparationForProvider(preparation),
 			getPromptCacheKeyForModel: model => this.getPromptCacheKeyForModel(model),
@@ -2585,7 +2546,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			deobfuscateFromProvider: text => this.#deobfuscateFromProvider(text),
 			convertMessagesToLlm: (messages, signal, model) => this.convertMessagesToLlm(messages, signal, model),
 			prepareSimpleStreamOptions: (options, provider) => this.prepareSimpleStreamOptions(options, provider),
-			effectiveServiceTier: model => this.#models.effectiveServiceTier(model),
 		};
 		this.#handoff = new SessionHandoff(handoffHost);
 
@@ -4274,12 +4234,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				// Persist which account served this turn so a resumed process can
 				// re-pin it and keep the provider's account-scoped prompt cache
 				// warm (broker-mode sticky routing is process-local).
-				recordCredentialPin(
-					this.#modelRegistry.authStorage,
-					this.sessionManager,
-					this.sessionId,
-					assistantMsg.provider,
-				);
 			}
 			if (event.message.role === "toolResult") {
 				const { toolName, toolCallId, isError, content } = event.message;
@@ -5539,9 +5493,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		}
 		const sid = this.#activeProviderSessionId(sessionId);
 		this.agent.sessionId = sid;
-		this.agent.setMetadataResolver((provider: string) =>
-			buildSessionMetadata(sid, provider, this.#modelRegistry.authStorage),
-		);
+		this.agent.setMetadataResolver((provider: string) => buildSessionMetadata(sid));
 		// A fresh or reset id becomes the pool scope's primary id, restricted
 		// before restored pins are seeded so they cannot leave the pool.
 
@@ -5551,7 +5503,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// the account-scoped prompt cache. Skipped for fresh provider sessions —
 		// those explicitly want new routing identity.
 		if (!this.#freshProviderSessionId) {
-			seedCredentialPins(this.#modelRegistry.authStorage, this.sessionManager, sid);
 		}
 		// Keep every live advisor's provider identity in lockstep with the primary's
 		// across every session-boundary transition — including branch paths that
@@ -7182,7 +7133,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	}
 
 	#normalizeImagesForModel(images: ImageContent[] | undefined): Promise<ImageContent[] | undefined> {
-		return normalizeModelContextImages(images, { model: this.model });
+		return normalizeModelContextImages(images);
 	}
 
 	/**
@@ -10373,7 +10324,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				this.settings,
 				sessionId,
 				this.model,
-				provider => buildSessionMetadata(sessionId, provider, this.#modelRegistry.authStorage),
+				() => buildSessionMetadata(sessionId),
 				customSystemPrompt ?? this.#titleSystemPrompt,
 				titleSignal,
 				parentSessionId,
@@ -11438,9 +11389,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// A model that cannot replay the latest provider-native compaction reads
 		// the history behind it instead (see `BuildSessionContextOptions.model`):
 		// rebuild the context whenever the two models stand on different boundaries.
-		if (isChanging && this.#providerBoundary.readsOtherCompaction(currentModel, model)) {
-			this.agent.replaceMessages(this.buildDisplaySessionContext(model).messages);
-		}
 
 		await this.#reconcileModelDependentState(model);
 	}
@@ -11468,7 +11416,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 */
 	#syncAppendOnlyContext(model: Model | null | undefined): void {
 		const setting = cfgProviderAppendOnlyContext.get(this.settings);
-		const enable = shouldEnableAppendOnlyContext(setting, model);
+		const enable = shouldEnableAppendOnlyContext(setting);
 		const providerId = model?.provider;
 		const prev = this.#lastAppendOnlyResolution;
 		if (prev && prev.enable === enable && prev.providerId === providerId) return;
@@ -12219,13 +12167,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			// The first build was read by the departing model; rebuild it for the
 			// model this session is about to adopt when that one sizes the archive
 			// differently or stands on another compaction boundary.
-			if (
-				targetModel &&
-				(DEFAULT_FRAME_DATA_BYTES_BUDGET !== DEFAULT_FRAME_DATA_BYTES_BUDGET ||
-					this.#providerBoundary.readsOtherCompaction(targetModel, this.model))
-			) {
-				sessionContext = this.buildDisplaySessionContext(targetModel);
-			}
+
 			const didReloadConversationChange =
 				previousSessionContext !== undefined &&
 				didSessionMessagesChange(previousSessionContext.messages, sessionContext.messages);
@@ -12353,7 +12295,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			if (switchingToDifferentSession) {
 				const providersBySlug = new Map<string, Set<string>>();
 				const costs = await loadAdvisorTranscriptCosts(this.sessionFile, { providersBySlug });
-				this.#advisors.restoreCost(costs, providersBySlug);
+				this.#advisors.restoreCost(costs);
 			}
 			this.#bash.finishSessionTransition(bashTransition, true);
 			// Keep the old reservations during rollback; the target is committed now,
@@ -13632,7 +13574,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		costsAtSnapshot: ReadonlyMap<string, number> = new Map(),
 		providersBySlug?: ReadonlyMap<string, ReadonlySet<string>>,
 	): void {
-		this.#advisors.restoreInitialCost(costs, costsAtSnapshot, providersBySlug);
+		this.#advisors.restoreInitialCost(costs, costsAtSnapshot);
 	}
 
 	/**

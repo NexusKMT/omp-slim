@@ -1,5 +1,4 @@
 import type { Context, Model, Tool } from "@oh-my-pi/pi-ai";
-import { stopsOutputAtContextWindow } from "@oh-my-pi/pi-catalog/compat/output-limits";
 import { stringifyJson } from "@oh-my-pi/pi-utils";
 import { findRequestUsageAnchor } from "./compaction/transcript-tokens";
 import type { Tokenizer } from "./tokenizer";
@@ -84,22 +83,13 @@ export function fitOutputTokensToContextWindow(
 	maxTokens: number | undefined,
 	tokenizer: Tokenizer,
 ): number | undefined {
-	if (maxTokens === undefined && omitsDefaultOutputCap(model.compat)) return undefined;
 	const requested = maxTokens ?? model.maxTokens;
 	const contextWindow = model.contextWindow;
 	if (!requested || !contextWindow || contextWindow <= 0) return maxTokens;
-	if (stopsOutputAtContextWindow(model)) return maxTokens;
 
 	const room = contextWindow - countPromptTokens(context, tokenizer) - OUTPUT_FIT_HEADWAY_TOKENS;
 	if (room >= requested) return maxTokens;
 	return Math.max(MIN_FITTED_OUTPUT_TOKENS, room);
-}
-
-/** OpenRouter hosts drop the catalog default cap unless the endpoint always needs one. */
-function omitsDefaultOutputCap(compat: Model["compat"] | undefined): boolean {
-	return (
-		compat !== undefined && "isOpenRouterHost" in compat && compat.isOpenRouterHost && !compat.alwaysSendMaxTokens
-	);
 }
 
 /**

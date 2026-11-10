@@ -24,6 +24,7 @@ import {
 	getOpenAIStreamFirstEventTimeoutMs,
 	getOpenAIStreamIdleTimeoutMs,
 	iterateWithIdleTimeout,
+	iterateWithTerminalGrace,
 } from "../utils/idle-iterator";
 import { OpenAIHttpError, postOpenAIStream } from "../utils/openai-http";
 import { notifyProviderResponse } from "../utils/provider-response";
@@ -78,7 +79,13 @@ export function convertMessages(model: Model<"openai-completions">, context: Con
 	for (const prompt of normalizeSystemPrompts(context.systemPrompt))
 		messages.push({ role: "system", content: prompt });
 	const supportsImages = model.input.includes("image");
+	const pendingImages: ImageContent[] = [];
+	const flushImages = () => {
+		if (pendingImages.length)
+			messages.push({ role: "user", content: inputParts(pendingImages.splice(0), supportsImages) });
+	};
 	for (const message of transformMessages(context.messages, model)) {
+		if (message.role !== "toolResult") flushImages();
 		if (message.role === "assistant") {
 			const text = message.content
 				.filter((block): block is TextContent => block.type === "text")
@@ -103,7 +110,7 @@ export function convertMessages(model: Model<"openai-completions">, context: Con
 				tool_call_id: message.toolCallId,
 				content: text || (images.length ? "Image output attached below." : ""),
 			});
-			if (images.length) messages.push({ role: "user", content: inputParts(images, supportsImages) });
+			pendingImages.push(...images);
 		} else {
 			messages.push({
 				role:
@@ -112,6 +119,7 @@ export function convertMessages(model: Model<"openai-completions">, context: Con
 			});
 		}
 	}
+	flushImages();
 	return messages;
 }
 
@@ -313,8 +321,11 @@ export function streamOpenAICompletions(
 			output.credentialId = options.credentialId;
 			stream.push({ type: "start", partial: output });
 			let finished = false;
+			let finishedAtMs: number | undefined;
+			let sawUsage = false;
+			let cachePlaceholder = false;
 			const idleTimeout = options.streamIdleTimeoutMs ?? getOpenAIStreamIdleTimeoutMs();
-			for await (const chunk of iterateWithIdleTimeout(handle.events, {
+			const timedEvents = iterateWithIdleTimeout(handle.events, {
 				firstItemTimeoutMs: firstTimeout,
 				idleTimeoutMs: idleTimeout,
 				errorMessage: "Chat Completions stream stalled",
@@ -325,7 +336,16 @@ export function streamOpenAICompletions(
 					abortTracker.abortLocally(
 						new AIError.StreamTimeoutError("Chat Completions timed out before the first event"),
 					),
-			})) {
+			});
+			const events = iterateWithTerminalGrace(timedEvents, {
+				finishedAtMs: () => finishedAtMs,
+				graceMs: 2_500,
+				onGraceEnd: () => abortTracker.requestAbortController.abort(),
+				awaitDrainOnReturn: options.waitForTerminalDrain,
+			});
+			for await (const chunk of events) {
+				const inBandError = AIError.createInBandProviderError(chunk);
+				if (inBandError) throw inBandError;
 				if (chunk.error)
 					throw new AIError.ProviderResponseError(chunk.error.message ?? "Chat Completions returned an error", {
 						provider: model.provider,
@@ -334,7 +354,12 @@ export function streamOpenAICompletions(
 				if (chunk.model && chunk.model !== model.id) output.upstreamModel = chunk.model;
 				const serviceTier = parseServiceTier(chunk.service_tier);
 				if (serviceTier) output.serviceTier = serviceTier;
-				if (chunk.usage) assignUsage(output, chunk.usage, model);
+				if (chunk.usage) {
+					assignUsage(output, chunk.usage, model);
+					sawUsage = true;
+					cachePlaceholder = chunk.usage.prompt_tokens_details?.cached_tokens === 0;
+				}
+				if (finished && sawUsage && !cachePlaceholder) break;
 				const choice = chunk.choices?.find(value => value.index === 0 || value.index === undefined);
 				if (!choice) continue;
 				const delta = choice.delta ?? choice.message;
@@ -378,6 +403,7 @@ export function streamOpenAICompletions(
 				}
 				if (choice.finish_reason) {
 					finished = true;
+					finishedAtMs ??= Date.now();
 					if (choice.finish_reason === "content_filter")
 						throw new AIError.ProviderResponseError("Chat Completions response blocked by content filter", {
 							provider: model.provider,
@@ -389,8 +415,9 @@ export function streamOpenAICompletions(
 								? "toolUse"
 								: "stop";
 				}
+				if (finished && sawUsage && !cachePlaceholder) break;
 			}
-			signal.throwIfAborted();
+			options.signal?.throwIfAborted();
 			if (!finished && !sawDone)
 				throw new AIError.ProviderResponseError("Chat Completions stream ended before a terminal event", {
 					provider: model.provider,

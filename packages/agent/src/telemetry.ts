@@ -764,7 +764,7 @@ export interface ChatRequestSnapshot {
 	readonly messages?: readonly Message[];
 }
 
-function buildChatRequestAttributes(stepNumber: number, request: ChatRequestSnapshot, model: Model): Attributes {
+function buildChatRequestAttributes(stepNumber: number, request: ChatRequestSnapshot, _model: Model): Attributes {
 	const attrs: Attributes = {
 		[OmpGenAIAttr.AgentStepNumber]: stepNumber,
 		[GenAIAttr.OutputType]: "text",
@@ -781,7 +781,7 @@ function buildChatRequestAttributes(stepNumber: number, request: ChatRequestSnap
 		attrs[GenAIAttr.RequestStopSequences] = [...request.stopSequences];
 	}
 	// Record the tier only when it reaches the wire for this model (Codex drops unadvertised tiers).
-	if (request.serviceTier && shouldSendServiceTier(request.serviceTier, model)) {
+	if (request.serviceTier && shouldSendServiceTier(request.serviceTier)) {
 		attrs[OpenAIAttr.RequestServiceTier] = request.serviceTier;
 	}
 	if (request.reasoningEffort) attrs[OmpGenAIAttr.RequestReasoningEffort] = request.reasoningEffort;

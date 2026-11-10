@@ -17,11 +17,7 @@ import { describeAttachedImagesForTextModel, shouldDescribeImagesForTextModel } 
 import { blobExtensionForImageMimeType } from "@oh-my-pi/pi-tui/prompt/image-format";
 import { type CustomMessage, convertToLlm } from "./messages";
 import { IMAGE_ATTACHMENT_DESCRIPTION_TYPE } from "./queued-messages";
-import {
-	getReadableCompactionEntry,
-	type SessionContext,
-	type TranscriptSessionContextOptions,
-} from "./session-context";
+import { type SessionContext, type TranscriptSessionContextOptions } from "./session-context";
 import type { CostGateApi } from "./cost-gate";
 import type { SessionManager } from "./session-manager";
 
@@ -123,15 +119,6 @@ export class SessionProviderBoundary {
 			}),
 			this.#host.obfuscator(),
 		);
-	}
-
-	/**
-	 * Whether `a` and `b` read the stored context from different compaction boundaries (one cannot replay a
-	 * provider-native compaction the other can), so the context built for one does not serve the other.
-	 */
-	readsOtherCompaction(a: Model | undefined, b: Model | undefined): boolean {
-		const branch = this.#host.sessionManager.getBranch();
-		return false;
 	}
 
 	/**
@@ -291,7 +278,7 @@ export class SessionProviderBoundary {
 
 	/** Normalizes image payloads for the active model. */
 	normalizeImagesForModel(images: ImageContent[] | undefined): Promise<ImageContent[] | undefined> {
-		return normalizeModelContextImages(images, { model: this.#host.model() });
+		return normalizeModelContextImages(images);
 	}
 
 	/** Saves attachments for text-only models and records how to read them after a model change. */

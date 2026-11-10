@@ -6,7 +6,6 @@
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search";
 import type { SearchParams } from "@oh-my-pi/pi-coding-agent/web/search/provider";
@@ -22,10 +21,9 @@ const SOURCES: SearchSource[] = [
 const openAuthStorages: AuthStorage[] = [];
 
 async function stubProvider(id: SearchProviderId, behaviour: (params: SearchParams) => Promise<SearchResponse>) {
-	const settings = await Settings.init({ inMemory: true });
+	await Settings.init({ inMemory: true });
 	const authStorage = createInMemoryAuthStorage();
 	openAuthStorages.push(authStorage);
-	const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
 	const stub: provider.SearchProvider = {
 		id,
 		label: id,
@@ -37,7 +35,7 @@ async function stubProvider(id: SearchProviderId, behaviour: (params: SearchPara
 		if (requested !== id) throw new Error(`Unexpected provider: ${requested}`);
 		return stub;
 	});
-	return { authStorage, modelRegistry, getProvider };
+	return { authStorage, getProvider };
 }
 
 describe("web search directive pipeline", () => {
@@ -56,8 +54,8 @@ describe("web search directive pipeline", () => {
 
 		const result = await runSearchQuery({ query: "guide site:docs.example.com", engine: "brave" }, context);
 
-		expect(seen?.model.provider).toBe("web");
-		expect(seen?.model.id).toBe("brave");
+		expect(seen).not.toHaveProperty("model");
+		expect(seen).not.toHaveProperty("modelRegistry");
 		expect(seen?.parsedQuery?.sites).toEqual(["docs.example.com"]);
 		expect(seen?.parsedQuery?.text).toBe("guide");
 		expect(result.details.response.sources.map(source => source.url)).toEqual(["https://docs.example.com/guide"]);
@@ -80,14 +78,6 @@ describe("web search directive pipeline", () => {
 		["keeps the HTTP engine for queries that are not X-only", "tern site:x.com site:github.com", "brave"],
 	])("%s", async (_caseName, query, expectedProvider) => {
 		const context = await stubProvider("brave", async () => ({ provider: "brave", sources: SOURCES }));
-		context.authStorage.keys.setRuntime("xai", "test-xai-key");
-		vi.spyOn(provider, "getGroundedSearchProvider").mockImplementation(async grounding => ({
-			id: "xai",
-			label: grounding,
-			isAvailable: () => true,
-			isExplicitlyAvailable: () => true,
-			search: async () => ({ provider: "xai", sources: [{ title: "Post", url: "https://x.com/jack/status/20" }] }),
-		}));
 
 		const result = await runSearchQuery({ query, engine: "brave" }, context);
 
@@ -97,7 +87,7 @@ describe("web search directive pipeline", () => {
 	it("allows explicit selection of an HTTP engine", async () => {
 		const context = await stubProvider("jina", async params => ({
 			provider: "jina",
-			sources: [{ title: params.model.id, url: "https://jina.example" }],
+			sources: [{ title: params.query, url: "https://jina.example" }],
 		}));
 		const exaProvider: provider.SearchProvider = {
 			id: "exa",
@@ -106,7 +96,7 @@ describe("web search directive pipeline", () => {
 			isExplicitlyAvailable: () => true,
 			search: async params => ({
 				provider: "exa",
-				sources: [{ title: params.model.id, url: "https://exa.example" }],
+				sources: [{ title: params.query, url: "https://exa.example" }],
 			}),
 		};
 		context.getProvider.mockImplementation(async requested => {
@@ -117,6 +107,6 @@ describe("web search directive pipeline", () => {
 		const result = await runSearchQuery({ query: "override", engine: "exa" }, context);
 
 		expect(result.details.response.provider).toBe("exa");
-		expect(result.details.response.sources[0]?.title).toBe("exa");
+		expect(result.details.response.sources[0]?.title).toBe("override");
 	});
 });

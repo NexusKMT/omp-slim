@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resolveFirecrawlUrl } from "@oh-my-pi/pi-coding-agent/web/firecrawl";
 import { FirecrawlProvider, searchFirecrawl } from "@oh-my-pi/pi-coding-agent/web/search/providers/firecrawl";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
@@ -8,19 +7,10 @@ import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 
 const TEST_KEY = "test-firecrawl-key";
 
-function createFirecrawlFixture(authStorage: AuthStorage) {
-	const modelRegistry = new ModelRegistry(authStorage);
-	const model = modelRegistry.find("web", "firecrawl");
-	if (!model) throw new Error("Expected bundled web/firecrawl model");
-	return { model, modelRegistry };
-}
-
 const providerAuthStorage = createInMemoryAuthStorage();
 providerAuthStorage.keys.setRuntime("firecrawl", TEST_KEY);
-const providerFixture = createFirecrawlFixture(providerAuthStorage);
 
 const keylessAuthStorage = createInMemoryAuthStorage();
-const keylessFixture = createFirecrawlFixture(keylessAuthStorage);
 const keylessResolverSpy = vi.spyOn(keylessAuthStorage.keys, "resolver").mockImplementation((provider, options) => {
 	expect(provider).toBe("firecrawl");
 	expect(options?.sessionId).toBe("session-firecrawl-test");
@@ -39,17 +29,10 @@ afterAll(() => {
 });
 
 function makeParams(query: string, authStorage: AuthStorage = providerAuthStorage) {
-	const fixture =
-		authStorage === providerAuthStorage
-			? providerFixture
-			: authStorage === keylessAuthStorage
-				? keylessFixture
-				: createFirecrawlFixture(authStorage);
 	return {
 		query,
 		authStorage,
-		...fixture,
-		systemPrompt: "Firecrawl test prompt",
+
 		sessionId: "session-firecrawl-test",
 	} as const;
 }

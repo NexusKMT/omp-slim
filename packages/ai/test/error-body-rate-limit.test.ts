@@ -19,7 +19,6 @@
  * Envelopes that are not a recognised throttle must fall through untouched.
  */
 import { describe, expect, it } from "bun:test";
-import { processResponsesStream } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import type { AssistantMessage, Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -28,7 +27,6 @@ import { classify, Flag, is, retriable } from "@oh-my-pi/pi-ai/error/flags";
 import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error/rate-limit";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error/classes";
 import { createInBandProviderError, createInBandProviderErrorFromText } from "@oh-my-pi/pi-ai/error/body-error";
-import { minimaxTokenPlanOpenAIModel } from "./helpers";
 
 function createSseResponse(events: unknown[]): Response {
 	const payload = `${events
@@ -56,7 +54,7 @@ function baseContext(): Context {
 
 /** Stream one in-band frame through the real provider and return the finalized message. */
 async function streamFrame(frame: unknown) {
-	const model = minimaxTokenPlanOpenAIModel("minimax-code-cn", "MiniMax-M3");
+	const model = buildModel({ id: "fixture", provider: "fixture", baseUrl: "https://fixture.invalid/v1" });
 	return streamOpenAICompletions(model, baseContext(), {
 		apiKey: "test-key",
 		fetch: createMockFetch([frame, "[DONE]"]),
@@ -202,120 +200,5 @@ describe("createInBandProviderError", () => {
 	it("rejects prose statuses that are not a standalone token", () => {
 		// A 4290 prefix must not be read as 429.
 		expect(createInBandProviderErrorFromText("4290 requests in flight")).toBeUndefined();
-	});
-});
-
-function makeResponsesModel(): Model<"openai-responses"> {
-	return buildModel({
-		api: "openai-responses",
-		name: "GPT Test",
-		id: "gpt-test",
-		provider: "openai",
-		baseUrl: "https://api.openai.com/v1",
-		contextWindow: 8192,
-		maxTokens: 2048,
-		input: ["text"],
-		reasoning: false,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-	});
-}
-
-function makeResponsesOutput(): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [],
-		timestamp: Date.now(),
-		provider: "openai",
-		model: "gpt-test",
-		api: "openai-responses",
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-	};
-}
-
-async function* asEvents(events: unknown[]): AsyncIterable<never> {
-	for (const event of events) yield event as never;
-}
-
-/** Run the Responses terminal/error probes and return what they threw. */
-async function processEvents(events: unknown[]): Promise<Error | undefined> {
-	const noopStream = { push: () => {}, end: () => {} } as never;
-	try {
-		await processResponsesStream(asEvents(events), makeResponsesOutput(), noopStream, makeResponsesModel());
-		return undefined;
-	} catch (error) {
-		return error as Error;
-	}
-}
-
-describe("in-band 429/5xx bodies (responses probes)", () => {
-	it("reads a status reported beside the error member on a failed response", async () => {
-		// The probe receives the whole envelope, so `status` next to `error` counts
-		// even when the inner object carries no code of its own.
-		const error = await processEvents([
-			{
-				type: "response.failed",
-				response: { status: 429, error: { message: "slow down" } },
-			},
-		]);
-
-		expect(error).toBeInstanceOf(ProviderHttpError);
-		expect((error as ProviderHttpError).status).toBe(429);
-		expect(is(classify(error), Flag.Transient)).toBe(true);
-		expect(retriable(classify(error))).toBe(true);
-		expect(error?.message).toBe("429 slow down");
-	});
-
-	it("classifies a flat typed error event", async () => {
-		const error = await processEvents([{ type: "error", code: "rate_limit_exceeded", message: "back off" }]);
-
-		expect((error as ProviderHttpError).status).toBe(429);
-		expect(error?.message).toBe("429 back off (rate_limit_exceeded)");
-	});
-
-	it("leaves a generic terminal server_error to the existing envelope format", async () => {
-		// Azure reports terminal backend failures as `server_error` inside a 200
-		// stream. The shared text rules already retry that wording, and tests pin
-		// the `"<code>: <message>"` shape, so the probe must not reformat it.
-		const error = await processEvents([
-			{ type: "response.failed", response: { error: { code: "server_error", message: "backend exploded" } } },
-		]);
-
-		expect(error).toBeDefined();
-		expect(error).not.toBeInstanceOf(ProviderHttpError);
-		expect(error?.message).toBe("server_error: backend exploded");
-	});
-
-	it("leaves an unrelated error event untouched", async () => {
-		const error = await processEvents([
-			{ type: "error", error: { code: "context_length_exceeded", message: "Your input exceeds the limit" } },
-		]);
-
-		expect(error?.message).toBe("Error Code context_length_exceeded: Your input exceeds the limit");
-		expect(error).not.toBeInstanceOf(ProviderHttpError);
-	});
-
-	it("classifies a throttle carried in a completed terminal envelope", async () => {
-		// `response.completed` with `status: "failed"` reaches the third probe, which
-		// also receives the whole envelope so a top-level `code` counts.
-		const error = await processEvents([
-			{
-				type: "response.completed",
-				response: { status: "failed", code: 429, error: { message: "Too many requests, retry later" } },
-			},
-		]);
-
-		expect((error as ProviderHttpError).status).toBe(429);
-		expect(retriable(classify(error))).toBe(true);
-		expect(error?.message).toBe("429 Too many requests, retry later");
-		expect(isAuthRetryableError(error)).toBe(false);
-		expect(isUsageLimitOutcome(429, error?.message ?? "")).toBe(false);
 	});
 });

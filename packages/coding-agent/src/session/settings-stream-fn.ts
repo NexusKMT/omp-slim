@@ -1,182 +1,50 @@
-/**
- * Settings-aware stream wrapper shared by the main agent (sdk.ts) and the
- * advisor agent (AgentSession.#buildAdvisorRuntime).
- *
- * verbosity, stream watchdog budgets, per-provider in-flight caps, and the loop
- * guard out of `Settings`
- * per request, layering them onto whatever options the caller passed. Before
- * this helper existed, advisor turns called bare `streamSimple` while the main
- * turn went through an inline closure that read these settings — so an advisor on
- * OpenRouter never saw `providers.openrouterVariant`, breaking sticky routing
- * and OpenRouter response-cache hits across advisor calls.
- */
+/** Apply session request limits, cancellation watchdogs and output budgets to Chat Completions. */
 import { fitOutputTokensToContextWindow, type StreamFn, Tokenizer } from "@oh-my-pi/pi-agent-core";
-import { type Model, type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi-ai";
-import { openAIResponsesReplaysNativeHistory } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
+import { type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi-ai";
 import type { Settings } from "../config/settings";
-import { type AnthropicSlowModeLanes, anthropicSlowModeLanes } from "./anthropic-slow-mode";
-
 import {
 	cfgModelLoopGuardCheckAssistantContent,
 	cfgModelLoopGuardEnabled,
 	cfgOmitThinking,
-	cfgProvidersAnthropicSlowMode,
-	cfgProvidersAntigravityEndpoint,
-	cfgProvidersCacheRetention,
 	cfgProvidersMaxInFlightRequests,
-	cfgProvidersMuseCodeStoreResponses,
-	cfgProvidersOpenaiCodexDaybreak,
-	cfgProvidersOpenaiLiveSteering,
-	cfgProvidersOpenaiResponsesWebsockets,
-	cfgProvidersOpenaiWebsockets,
-	cfgProvidersOpenrouterVariant,
 	cfgProvidersStreamFirstEventTimeoutSeconds,
 	cfgProvidersStreamIdleTimeoutSeconds,
 	cfgRetryMaxDelayMs,
-	cfgTextVerbosity,
 	validateProviderMaxInFlightRequests,
 } from "./settings";
 
-/** Apply each API's setting once; standard Responses preferences can only narrow it. */
-export function resolveWebsocketPreference(
-	settings: Settings,
-	model: Model | undefined,
-	requestPreference?: boolean,
-): boolean | undefined {
-	if (model?.api === "openai-responses") {
-		return (
-			cfgProvidersOpenaiResponsesWebsockets.get(settings) &&
-			model.preferWebsockets !== false &&
-			requestPreference !== false
-		);
-	}
-	if (model?.api !== "openai-codex-responses") return requestPreference;
-	const setting = cfgProvidersOpenaiWebsockets.get(settings);
-	return requestPreference ?? (setting === "on" ? true : setting === "off" ? false : undefined);
-}
-
 function timeoutSecondsToMs(value: number): number | undefined {
 	if (!Number.isFinite(value) || value < 0) return undefined;
-	if (value === 0) return 0;
-	return Math.max(1, Math.trunc(value * 1000));
+	return value === 0 ? 0 : Math.max(1, Math.trunc(value * 1000));
 }
 
-/** Session wiring for Anthropic subscription wrap-up and slow mode (`providers.anthropic.slowMode`). */
-export interface SettingsStreamSlowModeContext {
-	/** Defaults to the process-wide lane registry. */
-	lanes?: AnthropicSlowModeLanes;
-	/** Final gate before auto-accepting the lane for `model` (e.g. prefer sibling accounts). */
-	canAutoAccept?: (model: Model) => boolean | Promise<boolean>;
-	/** Route slow-mode notices to the requesting session. */
-	notify?: (level: "info" | "warning" | "error", message: string) => void;
-	/** Record which account lane served the session's latest Anthropic request. */
-	onLane?: (lane: string) => void;
-}
-
-/**
- * Build a {@link StreamFn} that reads provider routing/guard settings from
- * `settings` per call and forwards to `base` (defaults to `streamSimple`).
- *
- * Caller-supplied `streamOptions` normally win. Standard Responses WS requires
- * its opt-in setting and honors either explicit false; the output cap is lowered
- * when prompt plus cap would exceed the model's context window (see
- * {@link fitOutputTokensToContextWindow}); every request this session drives,
- * including side turns like `/btw`, goes through here.
- */
-export function createSettingsAwareStreamFn(
-	settings: Settings,
-	base: StreamFn = streamSimple,
-	slowModeContext?: SettingsStreamSlowModeContext,
-): StreamFn {
-	// One tokenizer per reading model and native-history replay state, so
-	// per-message counts are reused across requests: its prices (images,
-	// replayed thinking and reasoning) belong to that model and request state.
+export function createSettingsAwareStreamFn(settings: Settings, base: StreamFn = streamSimple): StreamFn {
 	const tokenizers = new Map<string, Tokenizer>();
-	return (model, context, streamOptions) => {
-		const openrouterRoutingPreset = cfgProvidersOpenrouterVariant.get(settings);
-		const openrouterVariant =
-			openrouterRoutingPreset && openrouterRoutingPreset !== "default" ? openrouterRoutingPreset : undefined;
-		const antigravityEndpointMode = cfgProvidersAntigravityEndpoint.get(settings);
-		const textVerbosity =
-			model.api === "openai-codex-responses" || model.api === "openai-responses"
-				? cfgTextVerbosity.get(settings)
-				: undefined;
-		// "auto" leaves the option unset so provider defaults and the
-		// PI_CACHE_RETENTION env override keep working; anything else is an
-		// explicit per-request retention (long restores 1h Anthropic TTLs and
-		// implicitly disables the short-entry keep-alive refresh loop).
-		const cacheRetentionSetting = cfgProvidersCacheRetention.get(settings);
-		const cacheRetention = cacheRetentionSetting === "auto" ? undefined : cacheRetentionSetting;
-		const streamFirstEventTimeoutMs = timeoutSecondsToMs(cfgProvidersStreamFirstEventTimeoutSeconds.get(settings));
-		const streamIdleTimeoutMs = timeoutSecondsToMs(cfgProvidersStreamIdleTimeoutSeconds.get(settings));
-		// Anthropic usage-limit stages: the provider consults these hooks only for
-		// first-party OAuth requests, so attaching them per anthropic call is safe.
-		// Wrap-up tracking runs for everyone; the setting (`/slow`) gates only the
-		// low-priority lane, read per call so a mid-request toggle takes effect.
-		const slowModeLanes = slowModeContext?.lanes ?? anthropicSlowModeLanes;
-		const canAutoAccept = slowModeContext?.canAutoAccept;
-		const slowModeHooks =
-			streamOptions?.anthropicSlowMode === undefined && model.provider === "anthropic"
-				? slowModeLanes.hooks({
-						lowPriority: () => cfgProvidersAnthropicSlowMode.get(settings) === "auto",
-						canAutoAccept: canAutoAccept ? () => canAutoAccept(model) : undefined,
-						notify: slowModeContext?.notify,
-						onLane: slowModeContext?.onLane,
-					})
-				: undefined;
-		// Opt-in: storage keeps prompts and outputs on Meta's side. The setting
-		// also reads PI_MUSE_STORE_RESPONSES, which overrides it while set.
-		const storeResponses =
-			streamOptions?.storeResponses ??
-			(model.provider === "muse-code" ? cfgProvidersMuseCodeStoreResponses.get(settings) : undefined);
-		// Per request from this session's settings: the process-wide default in
-		// pi-ai follows whichever session bound effects last.
-		const codexAccessPrograms =
-			streamOptions?.codexAccessPrograms ??
-			(model.api === "openai-codex-responses" ? cfgProvidersOpenaiCodexDaybreak.get(settings) : undefined);
-		const maxInFlightRequests = validateProviderMaxInFlightRequests(
-			streamOptions?.maxInFlightRequests ?? cfgProvidersMaxInFlightRequests.get(settings),
-		);
-		// A cold Responses session rebuilds turns without their encrypted reasoning.
-		// A request that may wait for a provider slot is built when it gets one,
-		// after a concurrent response may have warmed the session, so it is
-		// fitted as replaying.
-		const nativeHistoryReplay =
-			Object.hasOwn(maxInFlightRequests, model.provider) ||
-			openAIResponsesReplaysNativeHistory(model, streamOptions?.providerSessionState);
-		const tokenizerKey = `${model.provider}\0${model.api}\0${model.id}\0${nativeHistoryReplay}`;
-		let tokenizer = tokenizers.get(tokenizerKey);
+	return (model, context, options) => {
+		const key = `${model.provider}\0${model.id}`;
+		let tokenizer = tokenizers.get(key);
 		if (!tokenizer) {
-			tokenizer = new Tokenizer(model, { nativeHistoryReplay });
-			tokenizers.set(tokenizerKey, tokenizer);
+			tokenizer = new Tokenizer(model);
+			tokenizers.set(key, tokenizer);
 		}
-		const maxTokens = fitOutputTokensToContextWindow(model, context, streamOptions?.maxTokens, tokenizer);
 		const merged: SimpleStreamOptions = {
-			...streamOptions,
-			maxTokens,
-			preferWebsockets: resolveWebsocketPreference(settings, model, streamOptions?.preferWebsockets),
-			openrouterVariant: streamOptions?.openrouterVariant ?? openrouterVariant,
-			antigravityEndpointMode: streamOptions?.antigravityEndpointMode ?? antigravityEndpointMode,
-			textVerbosity: streamOptions?.textVerbosity ?? textVerbosity,
-			cacheRetention: streamOptions?.cacheRetention ?? cacheRetention,
-			streamFirstEventTimeoutMs: streamOptions?.streamFirstEventTimeoutMs ?? streamFirstEventTimeoutMs,
-			streamIdleTimeoutMs: streamOptions?.streamIdleTimeoutMs ?? streamIdleTimeoutMs,
-			maxRetryDelayMs: streamOptions?.maxRetryDelayMs ?? cfgRetryMaxDelayMs.get(settings),
-			maxInFlightRequests,
+			...options,
+			maxTokens: fitOutputTokensToContextWindow(model, context, options?.maxTokens, tokenizer),
+			streamFirstEventTimeoutMs:
+				options?.streamFirstEventTimeoutMs ??
+				timeoutSecondsToMs(cfgProvidersStreamFirstEventTimeoutSeconds.get(settings)),
+			streamIdleTimeoutMs:
+				options?.streamIdleTimeoutMs ?? timeoutSecondsToMs(cfgProvidersStreamIdleTimeoutSeconds.get(settings)),
+			maxRetryDelayMs: options?.maxRetryDelayMs ?? cfgRetryMaxDelayMs.get(settings),
+			maxInFlightRequests: validateProviderMaxInFlightRequests(
+				options?.maxInFlightRequests ?? cfgProvidersMaxInFlightRequests.get(settings),
+			),
 			loopGuard: {
 				enabled: cfgModelLoopGuardEnabled.get(settings),
 				checkAssistantContent: cfgModelLoopGuardCheckAssistantContent.get(settings),
-				...streamOptions?.loopGuard,
+				...options?.loopGuard,
 			},
-			hideThinkingSummary: streamOptions?.hideThinkingSummary ?? cfgOmitThinking.get(settings),
-			// An off switch, not a default: the agent loop always offers its queue.
-			liveSteering: cfgProvidersOpenaiLiveSteering.get(settings) ? streamOptions?.liveSteering : undefined,
-			...(storeResponses !== undefined ? { storeResponses } : {}),
-			// Every session keeps its selected model, including provider-side retries.
-			fallbacks: undefined,
-			disableServerSideFallback: true,
-			...(codexAccessPrograms !== undefined ? { codexAccessPrograms } : {}),
-			...(slowModeHooks !== undefined ? { anthropicSlowMode: slowModeHooks } : {}),
+			hideThinkingSummary: options?.hideThinkingSummary ?? cfgOmitThinking.get(settings),
 		};
 		return base(model, context, merged);
 	};

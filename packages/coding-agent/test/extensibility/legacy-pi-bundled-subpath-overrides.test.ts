@@ -221,7 +221,7 @@ export const observed = buildModel({
 	it("expands web search provider wildcard exports for compiled plugin imports", () => {
 		const overrides = __buildLegacyPiPackageRootOverrides(true, bundledModuleKeys);
 		const providerKeys = [
-			"@oh-my-pi/pi-coding-agent/web/search/providers/xai",
+			"@oh-my-pi/pi-coding-agent/web/search/providers/brave",
 			"@oh-my-pi/pi-coding-agent/web/search/providers/tinyfish",
 			"@oh-my-pi/pi-coding-agent/web/search/providers/firecrawl",
 			"@oh-my-pi/pi-coding-agent/web/search/providers/duckduckgo",
