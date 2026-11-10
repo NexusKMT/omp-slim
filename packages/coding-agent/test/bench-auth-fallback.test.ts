@@ -357,28 +357,28 @@ describe("bench credential-aware provider selection", () => {
 	});
 });
 
-describe("bench configured role selection", () => {
-	it("resolves configured bare role names", async () => {
+describe("bench configured primary model selection", () => {
+	it("resolves the legacy default alias to the primary model", async () => {
 		const model = fakeModel("acme", "bench-model");
 		const registry = fakeRegistry({ models: [model], authedProviders: ["acme"] });
-		const settings = Settings.isolated({ modelRoles: { task: "acme/bench-model" } });
+		const settings = Settings.isolated({ model: "acme/bench-model" });
 
-		const { summary } = await runBench("task", registry, fakeStream, settings);
+		const { summary } = await runBench("default", registry, fakeStream, settings);
 
 		expect(summary.models[0].model).toBe("acme/bench-model");
 		expect(summary.failures).toBe(0);
 	});
 
-	it("honors provider-pinned configured role targets", async () => {
+	it("honors the primary model provider pin even without credentials", async () => {
 		const registry = fakeRegistry({
 			models: [fakeModel("groq", "openai/gpt-oss-20b"), fakeModel("openrouter", "openai/gpt-oss-20b")],
 			authedProviders: ["openrouter"],
 		});
 		const settings = Settings.isolated({
-			modelRoles: { task: "groq/openai/gpt-oss-20b" },
+			model: "groq/openai/gpt-oss-20b",
 		});
 
-		const { summary, stderr } = await runBench("task", registry, fakeStream, settings);
+		const { summary, stderr } = await runBench("@default", registry, fakeStream, settings);
 
 		expect(summary.models[0].model).toBe("groq/openai/gpt-oss-20b");
 		expect(summary.failures).toBe(1);

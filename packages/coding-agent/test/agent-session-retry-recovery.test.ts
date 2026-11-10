@@ -201,7 +201,7 @@ describe("AgentSession retry recovery", () => {
 			"retry.maxDelayMs": 100,
 			"retry.maxRetries": 1,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
 		const session = new AgentSession({
@@ -387,9 +387,8 @@ describe("AgentSession retry recovery", () => {
 			"retry.baseDelayMs": 5,
 			"retry.maxDelayMs": 100,
 			"retry.maxRetries": 1,
-			"retry.modelFallback": false,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 
 		const sessionManager = SessionManager.inMemory();
 		const session = new AgentSession({
@@ -437,9 +436,8 @@ describe("AgentSession retry recovery", () => {
 			"retry.baseDelayMs": 5,
 			"retry.maxDelayMs": 100,
 			"retry.maxRetries": 4,
-			"retry.modelFallback": false,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		const session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),
@@ -494,9 +492,8 @@ describe("AgentSession retry recovery", () => {
 			"retry.baseDelayMs": 5,
 			"retry.maxDelayMs": 100,
 			"retry.maxRetries": 1,
-			"retry.modelFallback": false,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
 		const session = new AgentSession({
@@ -551,32 +548,26 @@ describe("AgentSession retry recovery", () => {
 		expect(sessionManager.buildSessionContext().messages.map(message => message.role)).toEqual(["user"]);
 	});
 	/**
-	 * Runs one prompt against a primary model with a single-entry fallback chain,
-	 * scripting each provider attempt in order. Returns the model each request
-	 * went to and the fallback switches the session announced.
+	 * Script retry attempts while loading a legacy fallback configuration. Every
+	 * request must remain on the selected model, including after a second failure.
 	 */
-	async function runFallbackChainRecovery(
+	async function runModelRetryRecovery(
 		responses: MockResponse[],
 		maxRetries = 2,
-		models: { primary: Model; fallback: Model } = {
-			primary: getBundledModel("anthropic", "claude-sonnet-4-5"),
-			fallback: getBundledModel("openai", "gpt-5.5"),
-		},
+		model: Model = getBundledModel("anthropic", "claude-sonnet-4-5"),
 	): Promise<{
 		primary: string;
-		fallback: string;
 		requestedModels: string[];
-		fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>>;
 		sessionManager: SessionManager;
 	}> {
-		const { primary: model, fallback: fallbackModel } = models;
-		if (!model || !fallbackModel) {
-			throw new Error("Expected bundled primary and fallback test models to exist");
+		const legacyFallbackModel = getBundledModel("openai", "gpt-5.5");
+		if (!model || !legacyFallbackModel) {
+			throw new Error("Expected bundled retry test models to exist");
 		}
 		authStorage.keys.setRuntime(model.provider, `${model.provider}-test-key`);
-		authStorage.keys.setRuntime(fallbackModel.provider, `${fallbackModel.provider}-test-key`);
+		authStorage.keys.setRuntime(legacyFallbackModel.provider, `${legacyFallbackModel.provider}-test-key`);
 		const primary = `${model.provider}/${model.id}`;
-		const fallback = `${fallbackModel.provider}/${fallbackModel.id}`;
+		const legacyFallback = `${legacyFallbackModel.provider}/${legacyFallbackModel.id}`;
 
 		const requestedModels: string[] = [];
 		const mock = createMockModel({ responses });
@@ -589,29 +580,25 @@ describe("AgentSession retry recovery", () => {
 			},
 		});
 		const settings = Settings.isolated({
+			model: primary,
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
 			"retry.maxDelayMs": 100,
 			"retry.maxRetries": maxRetries,
 			"retry.modelFallback": true,
-			"retry.fallbackChains": { default: [fallback] },
+			"retry.fallbackChains": { default: [legacyFallback] },
 		});
-		settings.setModelRole("default", primary);
 
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
 		managers.push(sessionManager);
 		const session = new AgentSession({ agent, sessionManager, settings, modelRegistry });
 		sessions.push(session);
 		mockSchedulerWaitWithClock();
-		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
-		session.subscribe(event => {
-			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
-		});
 
 		await session.prompt("Trigger a socket drop");
 		await session.waitForIdle();
 		await sessionManager.flush();
-		return { primary, fallback, requestedModels, fallbackEvents, sessionManager };
+		return { primary, requestedModels, sessionManager };
 	}
 
 	const droppedAfterThinking: MockResponse = {
@@ -620,102 +607,86 @@ describe("AgentSession retry recovery", () => {
 		errorMessage: SOCKET_CLOSE_MID_STREAM,
 	};
 
-	it("retries a mid-stream socket drop on the same model before consulting the fallback chain", async () => {
-		// The transport died after the model had already emitted reasoning, so the
-		// failure says nothing about model health: the first attempt stays on the
-		// primary instead of switching to the fallback chain.
-		const { primary, requestedModels, fallbackEvents, sessionManager } = await runFallbackChainRecovery([
+	it("retries a mid-stream socket drop on the selected model", async () => {
+		const { primary, requestedModels, sessionManager } = await runModelRetryRecovery([
 			droppedAfterThinking,
 			{ content: ["recovered on the same model"], stopReason: "stop" },
 		]);
 
 		expect(requestedModels).toEqual([primary, primary]);
-		expect(fallbackEvents).toEqual([]);
 		successfulAssistantEntry(sessionManager, "recovered on the same model");
 		const errors = assistantEntries(sessionManager).filter(candidate => candidate.message.stopReason === "error");
 		expect(errors).toHaveLength(1);
 		expect(errors[0].message.retryRecovery).toMatchObject({ recovery: "plain", note: "error; retried" });
 	});
 
-	it("retries the same model only once, then consults the fallback chain", async () => {
-		// The same-model retry is bounded to the first attempt: a second drop must
-		// fall through to the chain rather than keep retrying the primary.
-		const { primary, fallback, requestedModels, fallbackEvents } = await runFallbackChainRecovery([
+	it("keeps repeated socket recovery on the selected model throughout the retry budget", async () => {
+		const { primary, requestedModels, sessionManager } = await runModelRetryRecovery([
 			droppedAfterThinking,
 			droppedAfterThinking,
-			{ content: ["recovered on fallback"], stopReason: "stop" },
+			{ content: ["recovered after two retries"], stopReason: "stop" },
 		]);
 
-		expect(requestedModels).toEqual([primary, primary, fallback]);
-		expect(fallbackEvents).toHaveLength(1);
+		expect(requestedModels).toEqual([primary, primary, primary]);
+		successfulAssistantEntry(sessionManager, "recovered after two retries");
 	});
 
-	it("still consults the fallback chain when no same-model retry is left", async () => {
-		// With `retry.maxRetries: 0` the first attempt is already over budget, so the
-		// chain is the only recovery: the socket-drop gate must not suppress it.
-		const { primary, fallback, requestedModels, fallbackEvents } = await runFallbackChainRecovery(
-			[droppedAfterThinking, { content: ["recovered on fallback"], stopReason: "stop" }],
-			0,
-		);
+	it("stops without changing models when the socket retry budget is zero", async () => {
+		const { primary, requestedModels, sessionManager } = await runModelRetryRecovery([droppedAfterThinking], 0);
 
-		expect(requestedModels).toEqual([primary, fallback]);
-		expect(fallbackEvents).toHaveLength(1);
-	});
-
-	it("keeps the immediate fallback for a socket drop with no streamed content", async () => {
-		// No progress streamed before the drop, so a different route may genuinely
-		// help: the first attempt still switches to the fallback chain.
-		const { primary, fallback, requestedModels, fallbackEvents, sessionManager } = await runFallbackChainRecovery([
-			{ stopReason: "error", errorMessage: SOCKET_CLOSE_MID_STREAM },
-			{ content: ["recovered on fallback"], stopReason: "stop" },
-		]);
-
-		expect(requestedModels).toEqual([primary, fallback]);
-		expect(fallbackEvents).toHaveLength(1);
-		successfulAssistantEntry(sessionManager, "recovered on fallback");
+		expect(requestedModels).toEqual([primary]);
 		const errors = assistantEntries(sessionManager).filter(candidate => candidate.message.stopReason === "error");
 		expect(errors).toHaveLength(1);
-		expect(errors[0].message.retryRecovery).toMatchObject({ recovery: "model" });
+		expect(errors[0].message.errorMessage).toContain(SOCKET_CLOSE_MID_STREAM);
+		expect(errors[0].message.retryRecovery).toBeUndefined();
 	});
 
-	const codexModels = {
-		primary: getBundledModel("openai-codex", "gpt-6-astra"),
-		fallback: getBundledModel("openai-codex", "gpt-6.1-sol"),
-	};
-	const steerRejectedAfterThinking: MockResponse = {
-		content: [{ type: "thinking", thinking: "planning the next tool call" }],
-		stopReason: "error",
-		errorMessage: CODEX_STEER_REJECTION,
-	};
-
-	it("retries a Codex steering rejection on the same model instead of consulting the fallback chain", async () => {
-		// Codex dropped the response because omp steered it mid-stream, after
-		// reasoning had streamed. The provider already stopped steering the
-		// session, so the primary replays cleanly; switching models fixes nothing.
-		const { primary, requestedModels, fallbackEvents, sessionManager } = await runFallbackChainRecovery(
-			[steerRejectedAfterThinking, { content: ["recovered on the same model"], stopReason: "stop" }],
-			2,
-			codexModels,
-		);
+	it("retries a socket drop before streamed content on the selected model", async () => {
+		const { primary, requestedModels, sessionManager } = await runModelRetryRecovery([
+			{ stopReason: "error", errorMessage: SOCKET_CLOSE_MID_STREAM },
+			{ content: ["recovered on the same model"], stopReason: "stop" },
+		]);
 
 		expect(requestedModels).toEqual([primary, primary]);
-		expect(fallbackEvents).toEqual([]);
 		successfulAssistantEntry(sessionManager, "recovered on the same model");
 		const errors = assistantEntries(sessionManager).filter(candidate => candidate.message.stopReason === "error");
 		expect(errors).toHaveLength(1);
 		expect(errors[0].message.retryRecovery).toMatchObject({ recovery: "plain" });
 	});
 
-	it("still consults the fallback chain for a Codex steering rejection when no same-model retry is left", async () => {
-		// With `retry.maxRetries: 0` the chain is the only recovery left.
-		const { primary, fallback, requestedModels, fallbackEvents } = await runFallbackChainRecovery(
-			[steerRejectedAfterThinking, { content: ["recovered on fallback"], stopReason: "stop" }],
-			0,
-			codexModels,
+	const codexModel = getBundledModel("openai-codex", "gpt-6-astra");
+	const steerRejectedAfterThinking: MockResponse = {
+		content: [{ type: "thinking", thinking: "planning the next tool call" }],
+		stopReason: "error",
+		errorMessage: CODEX_STEER_REJECTION,
+	};
+
+	it("retries a Codex steering rejection on the selected model", async () => {
+		const { primary, requestedModels, sessionManager } = await runModelRetryRecovery(
+			[steerRejectedAfterThinking, { content: ["recovered on the same model"], stopReason: "stop" }],
+			2,
+			codexModel,
 		);
 
-		expect(requestedModels).toEqual([primary, fallback]);
-		expect(fallbackEvents).toHaveLength(1);
+		expect(requestedModels).toEqual([primary, primary]);
+		successfulAssistantEntry(sessionManager, "recovered on the same model");
+		const errors = assistantEntries(sessionManager).filter(candidate => candidate.message.stopReason === "error");
+		expect(errors).toHaveLength(1);
+		expect(errors[0].message.retryRecovery).toMatchObject({ recovery: "plain" });
+	});
+
+	it("stops without changing models when the Codex steering retry budget is zero", async () => {
+		const { primary, requestedModels, sessionManager } = await runModelRetryRecovery(
+			[steerRejectedAfterThinking],
+			0,
+			codexModel,
+		);
+
+		expect(requestedModels).toEqual([primary]);
+		const errors = assistantEntries(sessionManager).filter(candidate => candidate.message.stopReason === "error");
+		expect(errors).toHaveLength(1);
+		expect(errors[0].message.errorMessage).toContain(CODEX_STEER_REJECTION);
+		expect(errors[0].message.retryRecovery).toBeUndefined();
 	});
 
 	it("maps assistant error presentation for recovered, unrecovered, and silent abort turns", () => {
