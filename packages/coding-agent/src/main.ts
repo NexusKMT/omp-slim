@@ -245,11 +245,6 @@ async function loadSessionPicker(init?: { foreign?: boolean }): Promise<SessionP
 	};
 }
 
-/** Join-only graph boundary; the full built-in slash-command registry is otherwise unnecessary at startup. */
-async function loadBuiltinSlashCommandExecutor() {
-	return (await import("./slash-commands/builtin-registry")).executeBuiltinSlashCommand;
-}
-
 /** Missing-session-directory prompt boundary; ordinary launches do not need node:readline. */
 async function loadReadlineInterface() {
 	return (await import("node:readline/promises")).createInterface;
@@ -645,7 +640,6 @@ async function runInteractiveMode(
 	subagentEventBus?: EventBus,
 	initialMessage?: string,
 	initialImages?: ImageContent[],
-	joinLink?: string,
 	startDeferredStartupWork?: (mode: InteractiveMode) => void,
 	startupLease?: ComposerLease,
 	startupGoal?: string,
@@ -670,139 +664,109 @@ async function runInteractiveMode(
 		throw error;
 	}
 
-	let setupWizard: typeof SetupWizardModule | undefined;
-	let setupScenes: SetupScene[] = [];
-	let playStartupSplash = false;
-	try {
-		// Cold-launch gate: the full setup wizard (every scene + the overlay and
-		// their TUI/OAuth/search/theme deps) is heavy, yet the common case only needs
-		// to know whether the stored setup version is current. Lazy-load the wizard
-		// barrel only when setup is stale, forced, or the explicit startup splash
-		// setting needs the shared setup splash renderer.
-		const storedSetupVersion = cfgSetupVersion.get(settings);
-		setupWizard =
-			forceSetupWizard || storedSetupVersion < CURRENT_SETUP_VERSION || showStartupSplash
-				? await import("./modes/setup")
-				: undefined;
-		const setupOptions = {
-			resuming,
-			isTTY: process.stdin.isTTY && process.stdout.isTTY,
-			setupWizardEnabled: cfgStartupSetupWizard.get(settings),
-			force: forceSetupWizard,
-		};
-		setupScenes = setupWizard
-			? await setupWizard.selectSetupScenes(storedSetupVersion, setupWizard.ALL_SCENES, mode, setupOptions)
-			: [];
-		// Every newer scene declined to run here (the auto-update question in a
-		// source checkout or under Tern): record the version as seen, or every
-		// launch would load the wizard only to skip it again.
-		if (
-			setupWizard &&
-			setupScenes.length === 0 &&
-			storedSetupVersion < CURRENT_SETUP_VERSION &&
-			setupWizard.setupWizardAllowed(setupOptions)
-		) {
-			await setupWizard.markSetupWizardComplete(settings);
-		}
-		playStartupSplash = showStartupSplash && setupScenes.length === 0;
-		const offersStartupWorktree = !resuming && joinLink === undefined;
+	// Cold-launch gate: the full setup wizard (every scene + the overlay and
+	// their TUI/OAuth/search/theme deps) is heavy, yet the common case only needs
+	// to know whether the stored setup version is current. Lazy-load the wizard
+	// barrel only when setup is stale, forced, or the explicit startup splash
+	// setting needs the shared setup splash renderer.
+	const storedSetupVersion = cfgSetupVersion.get(settings);
+	const setupWizard: typeof SetupWizardModule | undefined =
+		forceSetupWizard || storedSetupVersion < CURRENT_SETUP_VERSION || showStartupSplash
+			? await import("./modes/setup")
+			: undefined;
+	const setupOptions = {
+		resuming,
+		isTTY: process.stdin.isTTY && process.stdout.isTTY,
+		setupWizardEnabled: cfgStartupSetupWizard.get(settings),
+		force: forceSetupWizard,
+	};
+	const setupScenes: SetupScene[] = setupWizard
+		? await setupWizard.selectSetupScenes(storedSetupVersion, setupWizard.ALL_SCENES, mode, setupOptions)
+		: [];
+	// Every newer scene declined to run here (the auto-update question in a
+	// source checkout or under Tern): record the version as seen, or every
+	// launch would load the wizard only to skip it again.
+	if (
+		setupWizard &&
+		setupScenes.length === 0 &&
+		storedSetupVersion < CURRENT_SETUP_VERSION &&
+		setupWizard.setupWizardAllowed(setupOptions)
+	) {
+		await setupWizard.markSetupWizardComplete(settings);
+	}
+	const playStartupSplash = showStartupSplash && setupScenes.length === 0;
+	const offersStartupWorktree = !resuming;
 
-		await logger.time("InteractiveMode.init", () =>
-			mode.init({
-				suppressWelcomeIntro: resuming || setupScenes.length > 0 || playStartupSplash,
-				clearInitialTerminalHistory: true,
-				autoStartCollab: joinLink === undefined,
-				// Setup scenes and the startup worktree question wait on the user before any
-				// prompt runs, so they keep the boot `idle`. The worktree check runs before its
-				// async git check, so a folder where the question never shows also keeps `idle`.
-				startupRun:
-					setupScenes.length === 0 &&
-					!(offersStartupWorktree && mode.mayAskForStartupWorktree()) &&
-					(startupGoal !== undefined || initialMessage !== undefined || initialMessages.length > 0),
-			}),
-		);
-		startDeferredStartupWork?.(mode);
+	await logger.time("InteractiveMode.init", () =>
+		mode.init({
+			suppressWelcomeIntro: resuming || setupScenes.length > 0 || playStartupSplash,
+			clearInitialTerminalHistory: true,
+			// Setup scenes and the startup worktree question wait on the user before any
+			// prompt runs, so they keep the boot `idle`. The worktree check runs before its
+			// async git check, so a folder where the question never shows also keeps `idle`.
+			startupRun:
+				setupScenes.length === 0 &&
+				!(offersStartupWorktree && mode.mayAskForStartupWorktree()) &&
+				(startupGoal !== undefined || initialMessage !== undefined || initialMessages.length > 0),
+		}),
+	);
+	startDeferredStartupWork?.(mode);
 
-		if (setupWizard && playStartupSplash) {
-			await setupWizard.runStartupSplash(mode);
-		}
+	if (setupWizard && playStartupSplash) {
+		await setupWizard.runStartupSplash(mode);
+	}
 
-		if (setupWizard && setupScenes.length > 0) {
-			await setupWizard.runSetupWizard(mode, setupScenes);
-		}
+	if (setupWizard && setupScenes.length > 0) {
+		await setupWizard.runSetupWizard(mode, setupScenes);
+	}
 
-		// Consume failures immediately, but defer any banner until the transcript is stable.
-		const checkedVersionPromise = versionCheckPromise.catch(() => undefined);
+	// Consume failures immediately, but defer any banner until the transcript is stable.
+	const checkedVersionPromise = versionCheckPromise.catch(() => undefined);
 
-		// `init` already cleared native history before painting the startup frame.
-		// Replaying resumed transcript rows and repainting the viewport is enough;
-		// another clear would only archive the startup frame. In-process session
-		// replacements still request `clearTerminalHistory` at their own callsites.
-		await logger.time("InteractiveMode.renderInitialMessages", () =>
-			mode.renderInitialMessages({ preserveExistingChat: true }),
-		);
-		// A resolved version check must not insert its banner into a partial transcript.
-		const notifyNewVersion = (newVersion: string): void => {
-			if (cfgStartupCheckUpdate.get(settings)) mode.showNewVersionNotification(newVersion);
-		};
-		if (cfgUpdateAuto.get(settings)) {
-			void runAutoUpdate(checkedVersionPromise, {
-				show: update => mode.showVersionUpdate(update),
-				notify: notifyNewVersion,
-			});
-		} else {
-			checkedVersionPromise.then(newVersion => {
-				if (newVersion) notifyNewVersion(newVersion);
-			});
-		}
+	// `init` already cleared native history before painting the startup frame.
+	// Replaying resumed transcript rows and repainting the viewport is enough;
+	// another clear would only archive the startup frame. In-process session
+	// replacements still request `clearTerminalHistory` at their own callsites.
+	await logger.time("InteractiveMode.renderInitialMessages", () =>
+		mode.renderInitialMessages({ preserveExistingChat: true }),
+	);
+	// A resolved version check must not insert its banner into a partial transcript.
+	const notifyNewVersion = (newVersion: string): void => {
+		if (cfgStartupCheckUpdate.get(settings)) mode.showNewVersionNotification(newVersion);
+	};
+	if (cfgUpdateAuto.get(settings)) {
+		void runAutoUpdate(checkedVersionPromise, {
+			show: update => mode.showVersionUpdate(update),
+			notify: notifyNewVersion,
+		});
+	} else {
+		checkedVersionPromise.then(newVersion => {
+			if (newVersion) notifyNewVersion(newVersion);
+		});
+	}
 
-		const advisorConfigWarnings = session.getAdvisorConfigWarnings();
-		if (advisorConfigWarnings.length > 0) {
-			// Pulled here, not pushed from SessionAdvisors: the constructor-time
-			// `emitNotice` fired before the UI subscribed and was silently lost.
-			mode.showWarning(`WATCHDOG.yml: ${sanitizeDisplayWarnings(advisorConfigWarnings).join("; ")}`);
-		}
+	const advisorConfigWarnings = session.getAdvisorConfigWarnings();
+	if (advisorConfigWarnings.length > 0) {
+		// Pulled here, not pushed from SessionAdvisors: the constructor-time
+		// `emitNotice` fired before the UI subscribed and was silently lost.
+		mode.showWarning(`WATCHDOG.yml: ${sanitizeDisplayWarnings(advisorConfigWarnings).join("; ")}`);
+	}
 
-		for (const notify of notifs) {
-			if (!notify) {
-				continue;
-			}
-			if (notify.kind === "warn") {
-				mode.showWarning(notify.message);
-			} else if (notify.kind === "error") {
-				mode.showError(notify.message);
-			} else if (notify.kind === "info") {
-				mode.showStatus(notify.message);
-			}
+	for (const notify of notifs) {
+		if (!notify) {
+			continue;
 		}
+		if (notify.kind === "warn") {
+			mode.showWarning(notify.message);
+		} else if (notify.kind === "error") {
+			mode.showError(notify.message);
+		} else if (notify.kind === "info") {
+			mode.showStatus(notify.message);
+		}
+	}
 
-		if (offersStartupWorktree) {
-			await mode.maybeAutoCreateWorktree();
-		}
-
-		// `omp join <link>`: dispatch through the same builtin path as a typed
-		// `/join` so collab guards and error rendering stay in one place.
-		if (joinLink !== undefined) {
-			const executeBuiltinSlashCommand = await loadBuiltinSlashCommandExecutor();
-			await executeBuiltinSlashCommand(`/join ${joinLink}`, { ctx: mode });
-			// Join failure returns to the local session; success still needs the
-			// controller observing its eventual restoration without hosting replicas.
-			mode.collabController.autoStart();
-		}
-		// Keep guest mutations gated through setup dialogs and transcript replay,
-		// not just init. Only a successful outer startup opens the room for input.
-		mode.collabController.startupComplete();
-	} catch (error) {
-		// Init publishes before startup dialogs, so any later startup failure
-		// must withdraw the room before restoring the terminal.
-		try {
-			await mode.collabController.shutdown("startup failed");
-		} catch (cleanupError) {
-			logger.warn("Failed to stop collaboration after startup failure", { error: String(cleanupError) });
-		} finally {
-			mode.stop();
-		}
-		throw error;
+	if (offersStartupWorktree) {
+		await mode.maybeAutoCreateWorktree();
 	}
 
 	if (startupGoal !== undefined) {
@@ -1770,26 +1734,6 @@ export async function runRootCommand(
 
 		if (parsedArgs.version) {
 			writeStartupNotice(parsedArgs, `${VERSION}\n`);
-			process.exit(0);
-		}
-
-		if (parsedArgs.export) {
-			// Export loads no extensions, so none can own a value the bootstrap parse
-			// rejected: report it as the usage error it is instead of exporting.
-			if (reportInvalidFlagValues(parsedArgs)) {
-				process.exit(2);
-			}
-			let result: string;
-			try {
-				const outputPath = parsedArgs.messages.length > 0 ? parsedArgs.messages[0] : undefined;
-				const { exportFromFile } = await import("./export/html");
-				result = await exportFromFile(parsedArgs.export, outputPath);
-			} catch (error: unknown) {
-				const message = error instanceof Error ? error.message : "Failed to export session";
-				process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
-				process.exit(1);
-			}
-			writeStartupNotice(parsedArgs, `Exported to: ${result}\n`);
 			process.exit(0);
 		}
 
@@ -2786,7 +2730,6 @@ export async function runRootCommand(
 						subagentEventBus,
 						initialMessage,
 						initialImages,
-						parsedArgs.join,
 						startDeferredStartupWork,
 						startupLease,
 						initialArgs.goal,

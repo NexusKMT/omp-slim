@@ -73,13 +73,6 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.cleanseHelp,
 	},
 	{
-		name: "collab",
-		// Keep implementation imports behind the command boundary: this table is
-		// also imported before profile bootstrap and by native-free worker entries.
-		load: () => import("./commands/collab").then(m => m.default),
-		help: commandHelp.collabHelp,
-	},
-	{
 		name: "commit",
 		load: () => import("./commands/commit").then(m => m.default),
 		help: commandHelp.commitHelp,
@@ -156,11 +149,6 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.installHelp,
 	},
 	{
-		name: "join",
-		load: () => import("./commands/join").then(m => m.default),
-		help: commandHelp.joinHelp,
-	},
-	{
 		name: "login",
 		load: () => import("./commands/login").then(m => m.default),
 		help: commandHelp.loginHelp,
@@ -180,21 +168,6 @@ export const commands: CommandEntry[] = [
 		name: "ps",
 		load: () => import("./commands/ps").then(m => m.default),
 		help: commandHelp.psHelp,
-	},
-	{
-		name: "clip",
-		load: () => import("./commands/clip").then(m => m.default),
-		help: commandHelp.clipHelp,
-	},
-	{
-		name: "play",
-		load: () => import("./commands/play").then(m => m.default),
-		help: commandHelp.playHelp,
-	},
-	{
-		name: "share",
-		load: () => import("./commands/share").then(m => m.default),
-		help: commandHelp.shareHelp,
 	},
 	{
 		name: "session",
@@ -253,11 +226,6 @@ export const commands: CommandEntry[] = [
 		name: "stats",
 		load: () => import("./commands/stats").then(m => m.default),
 		help: commandHelp.statsHelp,
-	},
-	{
-		name: "stream",
-		load: () => import("./commands/stream").then(m => m.default),
-		help: commandHelp.streamHelp,
 	},
 	{
 		name: "update",

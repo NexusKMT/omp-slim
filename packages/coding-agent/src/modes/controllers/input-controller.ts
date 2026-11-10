@@ -177,7 +177,6 @@ const OMP_STATUS_LINE_RE = /^\s*in:\s+\d+\s+out:\s+\d+(?:\s+cache\s+\S+)?\s+t:\s
 const FOCUSED_VIEW_COMMANDS: Record<string, (args: string) => boolean> = {
 	btw: () => true,
 	effort: () => true,
-	export: () => true,
 	jobs: args => {
 		const { verb, rest } = parseSubcommand(args);
 		return !verb || (verb === "full" && !rest);
@@ -586,15 +585,6 @@ export class InputController {
 					void this.ctx.unfocusSession();
 				}
 				return; // double-escape backtrack (/tree, /branch) stays main-only
-			}
-			if (this.ctx.collabGuest) {
-				// Guest Esc: ask the host to interrupt its agent; the local replica
-				// session is never streaming, so the native abort path below would
-				// no-op.
-				if (this.ctx.collabGuest.state?.isStreaming || this.ctx.loadingAnimation) {
-					this.ctx.collabGuest.sendAbort();
-				}
-				return;
 			}
 			if (this.ctx.loadingAnimation && this.ctx.cancelPendingSubmission()) {
 				this.#restoreYieldCompactionOnStop();
@@ -1195,33 +1185,6 @@ export class InputController {
 				}
 			}
 
-			// Collab guest: prompts execute on the host; local slash/skill/bash/
-			// python execution is host-only (builtins are gated inside
-			// executeBuiltinSlashCommand, which already consumed allowed ones).
-			if (this.ctx.collabGuest) {
-				if (text.startsWith("/")) {
-					this.ctx.showStatus(`${text.split(/\s+/, 1)[0]} is host-only during a collab session`);
-					this.ctx.editor.setText("");
-					return;
-				}
-				if (text.startsWith("!") || parsePythonCommandInput(text)) {
-					this.ctx.showStatus("Local execution is host-only during a collab session");
-					this.ctx.editor.setText("");
-					return;
-				}
-				if (this.ctx.collabGuest.readOnly) {
-					// Keep the typed text: the prompt was not consumed.
-					this.ctx.showStatus("This collab link is read-only — prompting is disabled");
-					return;
-				}
-				const images = inputImages && inputImages.length > 0 ? [...inputImages] : undefined;
-				this.ctx.editor.clearDraft(text);
-				// No local render: the prompt comes back from the host as a
-				// collab-prompt event/entry and renders with the author badge.
-				this.ctx.collabGuest.sendPrompt(text, images);
-				return;
-			}
-
 			// `side: true` file commands answer as a /btw side question: off the
 			// transcript and runnable mid-turn, so they never steer the running work.
 			// The side question carries text only, so the submitted attachments drop.
@@ -1484,7 +1447,6 @@ export class InputController {
 	 *   conversation exists the word may be a genuine reply, so the first Enter
 	 *   returns `confirm` and only a repeat of the same word (`armed`) runs it.
 	 *
-	 * Collab-guest gating applies unchanged in the slash dispatch that follows.
 	 */
 	#resolveBareSlashCommand(
 		text: string,
@@ -1615,8 +1577,8 @@ export class InputController {
 				return;
 			}
 			if (parsed && name && FOCUSED_VIEW_COMMANDS[name]?.(parsed.args)) {
-				// Viewer-scoped commands: /btw asks about the focused transcript, /export
-				// writes it (with its own subagents), /jobs lists the focused agent's jobs
+				// Viewer-scoped commands: /btw asks about the focused transcript,
+				// /jobs lists the focused agent's jobs
 				// without a way to cancel them, /usage reports account-wide limits, and
 				// /effort changes the focused agent's thinking level.
 				this.#recordSlashCommandUsage(text);
@@ -1903,10 +1865,6 @@ export class InputController {
 	}
 
 	async handleRetry(): Promise<void> {
-		if (this.ctx.collabGuest) {
-			this.ctx.showStatus("/retry is host-only during a collab session");
-			return;
-		}
 		const didRetry = await this.ctx.viewSession.retry();
 		// Composer text is an unsent draft, not the request retry() resends.
 		if (!didRetry) {
@@ -1945,11 +1903,6 @@ export class InputController {
 	): Promise<void> {
 		// Queue shorthand reaches this helper before the normal guest input gate.
 		// Like /queue, it must not submit to the guest's local session.
-		if (this.ctx.collabGuest) {
-			this.ctx.showStatus("/queue is host-only during a collab session");
-			this.ctx.editor.setText(options.detachedText ?? options.historyText ?? text);
-			return;
-		}
 
 		const splitMessages = splitQueuedMessages(text);
 		if (splitMessages.length === 0 && !options.images?.length) {
@@ -3125,7 +3078,7 @@ export class InputController {
 		}
 	}
 
-	/** Alt+G: the `/local` picker. `openLocalFileInEditor` refuses collab guests itself. */
+	/** Alt+G: the `/local` picker. Open the selected local file in the editor. */
 	openLocalFilePicker(): Promise<void> {
 		return openLocalFileInEditor(this.ctx);
 	}

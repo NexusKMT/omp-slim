@@ -156,17 +156,6 @@ describe("resolveLocalEditorTarget", () => {
 
 		await expect(revalidateLocalEditorEntry(entry, options)).rejects.toThrow(/escapes/);
 	});
-
-	it("rejects openLocalFileInEditor when collabGuest is active", async () => {
-		const showStatus = vi.fn();
-		const ctx = {
-			collabGuest: {} as unknown as InteractiveModeContext["collabGuest"],
-			showStatus,
-		} as unknown as InteractiveModeContext;
-
-		await openLocalFileInEditor(ctx);
-		expect(showStatus).toHaveBeenCalledWith("/local is host-only during a collab session");
-	});
 });
 
 describe("buildLocalFileArgumentCompletions", () => {

@@ -170,6 +170,7 @@ describe("Agent hub Enter activation", () => {
 
 	afterEach(() => {
 		resetSettingsForTest();
+		AgentRegistry.resetGlobalForTests();
 	});
 
 	it("Enter focuses the selected agent and closes the hub", async () => {
@@ -621,7 +622,6 @@ describe("Agent hub Enter activation", () => {
 			},
 			editor,
 			editorContainer,
-			collabGuest: { agentRegistry: agents, hubRemote: undefined },
 			focusAgentSession: async (id: string) => {
 				focusedIds.push(id);
 				focusResolved.resolve();
@@ -630,6 +630,7 @@ describe("Agent hub Enter activation", () => {
 			sessionManager: { getCwd: () => TEST_CWD, getSessionFile: () => null },
 			hideThinkingBlock: false,
 		};
+		AgentRegistry.installGlobal(agents);
 		const controller = new SelectorController(ctx as unknown as InteractiveModeContext);
 
 		controller.showAgentHub(new SessionObserverRegistry());
@@ -653,6 +654,7 @@ describe("Agent hub double-← gating", () => {
 
 	afterEach(() => {
 		resetSettingsForTest();
+		AgentRegistry.resetGlobalForTests();
 	});
 
 	function setup(agents: AgentRegistry, sessionFile: string | null = null) {
@@ -681,12 +683,12 @@ describe("Agent hub double-← gating", () => {
 				clear: () => {},
 				addChild: () => {},
 			},
-			collabGuest: { agentRegistry: agents, hubRemote: undefined },
 			focusAgentSession: async () => {},
 			session: { getToolByName: () => undefined, extensionRunner: undefined },
 			sessionManager: { getCwd: () => TEST_CWD, getSessionFile: () => sessionFile },
 			hideThinkingBlock: false,
 		};
+		AgentRegistry.installGlobal(agents);
 		const controller = new SelectorController(ctx as unknown as InteractiveModeContext);
 		return {
 			controller,

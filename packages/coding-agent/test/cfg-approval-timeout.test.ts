@@ -91,7 +91,7 @@ describe("cfg:// approval prompt wiring", () => {
 		spyOn(mode.statusLine, "watchBranch").mockImplementation(() => {});
 		spyOn(mode, "showHookConfirm").mockResolvedValue(true);
 		const seen: Array<number | undefined> = [];
-		spyOn(ExtensionUiController.prototype, "showCollabAwareSelector").mockImplementation(
+		spyOn(ExtensionUiController.prototype, "showHookSelector").mockImplementation(
 			async (_title: string, _options: unknown, dialogOptions?: { timeout?: number; signal?: AbortSignal }) => {
 				seen.push(dialogOptions?.timeout);
 				// Mirror the real dialog: a pre-aborted signal settles dismissed

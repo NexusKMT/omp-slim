@@ -2460,7 +2460,7 @@ describe("runGcCommand stale state", () => {
 		}
 	});
 
-	test("--apply expires reports and collab replicas beyond both the newest-count and age limits", async () => {
+	test("--apply expires reports beyond both retention limits while leaving legacy sessions alone", async () => {
 		// A custom agent dir named `agent` owns its parent as config root.
 		const agentDir = path.join(root, "agent");
 		const reportsDir = path.join(root, "reports");
@@ -2481,47 +2481,21 @@ describe("runGcCommand stale state", () => {
 			flags: { agentDir, stale: true, staleRetainNewest: 1, staleRetainDays: 30, apply: true },
 		});
 
-		expect(result.stale).toMatchObject({ expiredReports: 2, expiredReplicas: 1, deleted: 3, errors: [] });
-		for (const removed of [...oldReports, oldReplica, oldReplicaArtifact, oldReplicaMarker]) {
+		expect(result.stale).toMatchObject({ expiredReports: 2, deleted: 2, errors: [] });
+		for (const removed of oldReports) {
 			expect(await Bun.file(removed).exists()).toBe(false);
 		}
-		for (const kept of [newestReport, youngReport, unrelated, liveReplica]) {
+		for (const kept of [
+			newestReport,
+			youngReport,
+			unrelated,
+			liveReplica,
+			oldReplica,
+			oldReplicaArtifact,
+			oldReplicaMarker,
+		]) {
 			expect(await Bun.file(kept).exists()).toBe(true);
 		}
-	});
-
-	test("--apply keeps old collab replicas a terminal resumes or a running guest holds open", async () => {
-		const agentDir = path.join(root, "agent");
-		const collabDir = path.join(root, "collab");
-		const resumed = await writeAged(collabDir, "room-resumed.jsonl", "{}\n", 60);
-		// Unique per run: the lease is machine-wide, so a fixed id would contend
-		// with the same test running concurrently elsewhere.
-		const heldId = Bun.randomUUIDv7();
-		const held = await writeAged(
-			collabDir,
-			"room-held.jsonl",
-			`${JSON.stringify({ type: "session", id: heldId, timestamp: new Date().toISOString(), cwd: root })}\n`,
-			60,
-		);
-		const idle = await writeAged(collabDir, "room-idle.jsonl", "{}\n", 60);
-		// `--continue` in this terminal reopens the replica it last switched to.
-		await writeAged(getTerminalSessionsDir(agentDir), "tty-guest", `${root}\n${resumed}\n`);
-		// A live guest writing its replica holds the session's ownership lease.
-		const release = new FileSessionStorage().claimSession(heldId, held);
-		if (!release) throw new Error("Expected to claim the replica lease");
-		let result: GcResult;
-		try {
-			result = await runGcCommand({
-				flags: { agentDir, stale: true, staleRetainNewest: 0, staleRetainDays: 30, apply: true },
-			});
-		} finally {
-			release();
-		}
-
-		expect(result.stale).toMatchObject({ expiredReplicas: 1, deleted: 1, errors: [] });
-		expect(await Bun.file(idle).exists()).toBe(false);
-		expect(await Bun.file(resumed).exists()).toBe(true);
-		expect(await Bun.file(held).exists()).toBe(true);
 	});
 
 	test("an unqualified run leaves stale state alone unless gc.stale is enabled", async () => {

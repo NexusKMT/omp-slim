@@ -19,7 +19,6 @@ describe("/branch slash command", () => {
 		const setText = vi.fn();
 		const runtime = {
 			ctx: {
-				collabGuest: false,
 				showTreeSelector,
 				showUserMessageSelector,
 				editor: { setText },

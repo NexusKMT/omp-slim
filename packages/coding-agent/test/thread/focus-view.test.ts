@@ -191,7 +191,6 @@ function focusHarness(): FocusHarness {
 		syncIdleMaintenanceView() {},
 		ui: { requestRender() {}, requestComponentRender() {} },
 		showStatus() {},
-		collabGuest: undefined,
 	} as unknown as InteractiveModeContext;
 	const controller = new SessionFocusController(ctx, AgentRegistry.global(), () => AgentLifecycleManager.global());
 	focus.controller = controller;

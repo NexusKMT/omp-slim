@@ -589,23 +589,6 @@ describe("interactive native input ingress", () => {
 		expect(h.editor.pendingImageLinks).toEqual(["local://original.png"]);
 	});
 
-	it("Enter /tan as a collab guest gives the draft and its image back", async () => {
-		const h = await createHarness(() => {});
-		Object.assign(h.session, { customCommands: [], promptTemplates: [] });
-		Object.assign(h.ctx, { collabGuest: {} });
-		const run = vi.fn(async () => true);
-		h.ctx.handleTanCommand = run;
-		h.draftWithImage("/tan fix this block [Image #1]");
-
-		await h.pressSubmit(ENTER);
-
-		expect(run).not.toHaveBeenCalled();
-		expect(h.ctx.showStatus).toHaveBeenCalledWith("/tan is host-only during a collab session");
-		expect(h.editor.getExpandedText()).toBe("/tan fix this block [Image #1]");
-		expect(h.editor.pendingImages).toEqual([originalImage]);
-		expect(h.editor.pendingImageLinks).toEqual(["local://original.png"]);
-	});
-
 	it("Enter /tan renumbers an image pasted while its input hook runs", async () => {
 		const entered = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();
@@ -635,7 +618,7 @@ describe("interactive native input ingress", () => {
 		expect(h.prompt).toHaveBeenCalledWith("newer [Image #1]", { streamingBehavior: "steer", images: [newerImage] });
 	});
 
-	it.each(["/clear", "/export"])(
+	it.each(["/clear", "/trace"])(
 		"Ctrl+Enter preserves newer drafts across delayed %s builtin dispatch",
 		async command => {
 			const hookEntered = Promise.withResolvers<void>();
@@ -653,7 +636,7 @@ describe("interactive native input ingress", () => {
 				await releaseCommand.promise;
 			};
 			h.ctx.handleResetContextCommand = runCommand;
-			h.ctx.handleExportCommand = runCommand;
+			h.ctx.handleTraceCommand = runCommand;
 			h.editor.setText(command);
 			const submitting = h.pressSubmit(FOLLOW_UP);
 			await hookEntered.promise;

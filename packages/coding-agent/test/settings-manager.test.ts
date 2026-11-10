@@ -1680,26 +1680,34 @@ describe("Settings", () => {
 		});
 	});
 	describe("migrations", () => {
-		it.each(["memory", "memories", "hindsight", "mnemopi", "mnemosyne", "sharpshooter", "autolearn"])(
-			"retires nested and dotted %s settings while preserving user files",
-			async namespace => {
-				const storedPath = path.join(agentDir, namespace, "saved-data.txt");
-				await Bun.write(storedPath, "existing user data");
-				await writeSettings({
-					[namespace]: { enabled: true, backend: "mnemopi" },
-					[`${namespace}.model`]: "legacy-model",
-				});
-				const settings = await Settings.init({ cwd: projectDir, agentDir });
-				expect(lookup(`${namespace}.enabled`)).toBeUndefined();
-				expect(lookup(`${namespace}.model`)).toBeUndefined();
-				cfgDisplayShowTokenUsage.set(settings, true);
-				await settings.flush();
-				const saved = await readSettings();
-				expect(saved[namespace]).toBeUndefined();
-				expect(saved[`${namespace}.model`]).toBeUndefined();
-				expect(await Bun.file(storedPath).text()).toBe("existing user data");
-			},
-		);
+		it.each([
+			"memory",
+			"memories",
+			"hindsight",
+			"mnemopi",
+			"mnemosyne",
+			"sharpshooter",
+			"autolearn",
+			"collab",
+			"stream",
+			"share",
+		])("retires nested and dotted %s settings while preserving user files", async namespace => {
+			const storedPath = path.join(agentDir, namespace, "saved-data.txt");
+			await Bun.write(storedPath, "existing user data");
+			await writeSettings({
+				[namespace]: { enabled: true, backend: "mnemopi" },
+				[`${namespace}.model`]: "legacy-model",
+			});
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(lookup(`${namespace}.enabled`)).toBeUndefined();
+			expect(lookup(`${namespace}.model`)).toBeUndefined();
+			cfgDisplayShowTokenUsage.set(settings, true);
+			await settings.flush();
+			const saved = await readSettings();
+			expect(saved[namespace]).toBeUndefined();
+			expect(saved[`${namespace}.model`]).toBeUndefined();
+			expect(await Bun.file(storedPath).text()).toBe("existing user data");
+		});
 
 		it("preserves current ask timeout seconds in overrides and persisted config", async () => {
 			expect(cfgAskTimeout.get(Settings.isolated({ "ask.timeout": 2000 }))).toBe(2000);

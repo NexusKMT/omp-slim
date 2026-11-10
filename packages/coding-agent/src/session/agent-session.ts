@@ -519,13 +519,7 @@ import { cfgSteeringMode } from "../modes/settings";
 import { cfgDisabledProviders, cfgModel } from "../config/model-settings";
 import { cfgEvalJs, cfgEvalPy, cfgEvalToolsEnabled, cfgEvalWorkpoolFreshAgents } from "../eval/settings";
 import { cfgExtensions, type SkillsSettings } from "../extensibility/settings";
-import {
-	cfgImagesAutoResize,
-	cfgMagicKeyword,
-	cfgMagicKeywordsEnabled,
-	cfgThemeDark,
-	cfgThemeLight,
-} from "../modes/settings";
+import { cfgImagesAutoResize, cfgMagicKeyword, cfgMagicKeywordsEnabled } from "../modes/settings";
 import { cfgTaskBatch, cfgTaskDisabledAgents } from "../task/settings";
 import {
 	cfgBranchSummaryReserveTokens,
@@ -3145,7 +3139,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		return this.#ttsr.manager;
 	}
 
-	/** Secret obfuscator, when secrets are configured; /share redaction reuses it. */
+	/** Secret obfuscator, when secrets are configured. */
 	get obfuscator(): SecretObfuscator | undefined {
 		return this.#obfuscator;
 	}
@@ -12932,15 +12926,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		sessionPath: string,
 		options?: {
 			onCwdChange?: (newCwd: string, previousCwd: string) => Promise<boolean>;
-			/** Collab snapshot adoption keeps the guest's process cwd and marks the replica runtime-only. */
-			preserveLocalCwd?: boolean;
 			/**
 			 * Use this model instead of the target's saved one, like an explicit
 			 * `--model` at startup, and record it in the session when it differs.
 			 */
 			model?: Model;
-			/** Keep the current model without restoring the target's (collab replicas mirror the host's model). */
-			keepModel?: boolean;
 			/**
 			 * Receives the model fallback warning after the switch commits, instead of a
 			 * `notice` event; for hosts that re-render the transcript after switching.
@@ -13051,21 +13041,17 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			this.#bash.markSessionTransition(bashTransition);
 			const newCwd = this.sessionManager.getCwd();
 			const recordedCwd = this.sessionManager.getRecordedCwd() ?? previousSessionState.cwd;
-			if (options?.preserveLocalCwd) {
-				this.sessionManager.setCwdWithoutRelocation(previousSessionState.cwd);
-			} else {
-				if (!options?.onCwdChange && path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
-					throw SESSION_CWD_CHANGE_REJECTED;
-				}
-				if (options?.onCwdChange) {
-					if (path.resolve(newCwd) !== path.resolve(previousSessionState.cwd)) {
-						cwdChangeTarget = newCwd;
-						if (!(await options.onCwdChange(newCwd, previousSessionState.cwd))) {
-							throw SESSION_CWD_CHANGE_REJECTED;
-						}
-					} else if (path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
+			if (!options?.onCwdChange && path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
+				throw SESSION_CWD_CHANGE_REJECTED;
+			}
+			if (options?.onCwdChange) {
+				if (path.resolve(newCwd) !== path.resolve(previousSessionState.cwd)) {
+					cwdChangeTarget = newCwd;
+					if (!(await options.onCwdChange(newCwd, previousSessionState.cwd))) {
 						throw SESSION_CWD_CHANGE_REJECTED;
 					}
+				} else if (path.resolve(recordedCwd) !== path.resolve(previousSessionState.cwd)) {
+					throw SESSION_CWD_CHANGE_REJECTED;
 				}
 			}
 			if (switchingToDifferentSession) {
@@ -13086,7 +13072,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				this.sessionManager.getLastModelChangeRole(),
 			).slice(0, 1);
 			let targetModel = explicitModel;
-			if (!targetModel && !options?.keepModel && targetModelStrings.length > 0) {
+			if (!targetModel && targetModelStrings.length > 0) {
 				targetModel = await this.#resolveSessionModel(targetModelStrings);
 				if (!targetModel && switchingToDifferentSession) {
 					throw new Error(`Could not restore model ${targetModelStrings[0]}`);
@@ -14741,22 +14727,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * @param outputPath Optional output path
 	 * @param useUserThemes Bundle the dark and light TUI themes selected in settings
 	 */
-	async exportToHtml(outputPath?: string, useUserThemes = false): Promise<string> {
-		// Lazy import: the export module embeds the HTML template and pre-built
-		// tool renderers as text; only `/export` should pay that load.
-		const { exportSessionToHtml } = await import("../export/html");
-		return exportSessionToHtml(this.sessionManager, this.state, {
-			outputPath,
-			palette: useUserThemes ? "theme" : "web",
-			themeNames: useUserThemes
-				? {
-						dark: cfgThemeDark.get(this.settings),
-						light: cfgThemeLight.get(this.settings),
-					}
-				: undefined,
-		});
-	}
-
 	// =========================================================================
 	// Utilities
 	// =========================================================================
