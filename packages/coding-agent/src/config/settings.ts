@@ -3458,6 +3458,8 @@ export class Settings {
 			"retry.waitForUsageReset",
 			"retry.usageReservePct",
 			"tier.anthropic",
+			"tier.advisor",
+			"textVerbosity",
 			"tier.google",
 			"tools.format",
 			"tools.abortOnFabricatedResult",

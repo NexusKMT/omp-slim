@@ -742,7 +742,7 @@ export class SelectorController {
 					}
 				},
 
-				onCatalogRefreshed: async () => {
+				onModelsReloaded: async () => {
 					await this.ctx.session.refreshScopedModels();
 					return this.ctx.session.scopedModels;
 				},

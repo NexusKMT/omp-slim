@@ -11,7 +11,6 @@ import path from "node:path";
 import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
 import { AgentBusyError, recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
 import type { Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
-import { isCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import {
 	isRecord,
 	logger,
@@ -2031,7 +2030,6 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 					if (messageContent && Array.isArray(messageContent)) {
 						const turnText: string[] = [];
 						let startedMoreWork = false;
-						let completedServerWork = false;
 						for (const block of messageContent) {
 							if (!isRecord(block)) continue;
 							if (block.type === "text" && typeof block.text === "string") {
@@ -2047,18 +2045,14 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 								}
 								continue;
 							}
-							if (isCursorExecResolved(block)) completedServerWork = true;
-							else startedMoreWork = true;
+							startedMoreWork = true;
 							turnText.length = 0;
 						}
 						// Locally runnable calls make all prose in or before this turn
-						// mid-work narration. Cursor exec-resolved calls already ran, so
-						// text after the last one is a report; without such text, prior
-						// prose predates that work and is invalidated.
+						// mid-work narration; the following completed text turn supplies the report.
 						const text = turnText.join("\n");
 						if (startedMoreWork) lastReportTurnText = undefined;
 						else if (text.trim()) lastReportTurnText = text;
-						else if (completedServerWork) lastReportTurnText = undefined;
 					}
 					// A yield awaiting validation suppresses the budget check for
 					// its own turn (#5006). Defer it rather than drop it: every

@@ -5,12 +5,10 @@ import {
 	type AgentTurnEndContext,
 	createToolScopedAbortReason,
 } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, AssistantMessageEvent, Model } from "@oh-my-pi/pi-ai";
-import { GeminiHeaderRunDetector } from "@oh-my-pi/pi-ai/utils/thinking-loop";
+import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { type RepeatedToolCallDetection, ToolCallLoopGuard } from "@oh-my-pi/pi-ai/utils/tool-call-loop-guard";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
-import geminiToolReminderTemplate from "../prompts/system/gemini-tool-call-reminder.md" with { type: "text" };
 import streamingEditRecoveryTemplate from "../prompts/system/streaming-edit-recovery.md" with { type: "text" };
 import type { CustomMessage } from "./messages";
 import type { SessionManager } from "./session-manager";
@@ -22,15 +20,11 @@ import {
 
 import { cfgEditStreamingAbort } from "../edit/settings";
 import {
-	cfgModelLoopGuardEnabled,
-	cfgModelLoopGuardToolCallReminder,
 	cfgModelToolCallLoopGuardEnabled,
 	cfgModelToolCallLoopGuardExemptTools,
 	cfgModelToolCallLoopGuardThreshold,
 } from "./settings";
 
-const GEMINI_HEADER_INTERRUPT_REASON = "Interrupted: emit a tool call instead of more planning";
-const GEMINI_TOOL_REMINDER_TYPE = "gemini-tool-call-reminder";
 /** Abort reason (and aborted-message `errorMessage`) for a failed streamed edit preview. */
 const STREAMING_EDIT_ABORT_REASON = "Streaming edit preview failed";
 const STREAMING_EDIT_RECOVERY_TYPE = "streaming-edit-recovery";
@@ -196,10 +190,10 @@ export class StreamingEditGuard {
 	}
 }
 
-/** Detects cross-turn tool loops and Gemini reasoning-header runaways. */
+/** Detects cross-turn tool loops. */
 export class LoopGuards {
 	readonly #host: StreamGuardsHost;
-	#geminiHeaderDetector: GeminiHeaderRunDetector | undefined;
+
 	#toolCallLoopGuard: ToolCallLoopGuard | undefined;
 	#toolCallLoopGuardSettingsKey: string | undefined;
 
@@ -216,21 +210,6 @@ export class LoopGuards {
 			injectedContext: (context.additionalMessages?.length ?? 0) > 0,
 		});
 		if (detection) this.#injectToolCallLoopRedirect(messages, detection);
-	}
-
-	/** Feeds a streamed assistant event to the Gemini header-runaway detector. */
-	onAssistantEvent(message: AssistantMessage, event: AssistantMessageEvent): void {
-		if (event.type === "thinking_start") {
-			this.#geminiHeaderDetector = this.#geminiHeaderGuardActive() ? new GeminiHeaderRunDetector() : undefined;
-			return;
-		}
-		const detector = this.#geminiHeaderDetector;
-		if (!detector) return;
-		if (event.type === "thinking_delta") {
-			if (detector.push(event.delta)) this.#interruptGeminiHeaderRunaway(detector.count, message.timestamp);
-			return;
-		}
-		if (event.type === "text_start" || event.type === "toolcall_start") detector.reset();
 	}
 
 	#activeToolCallLoopGuard(): ToolCallLoopGuard | undefined {
@@ -273,64 +252,5 @@ export class LoopGuards {
 			details,
 			"agent",
 		);
-	}
-
-	#geminiHeaderGuardActive(): boolean {
-		const model = this.#host.model();
-		return (
-			cfgModelLoopGuardEnabled.get(this.#host.settings) === true &&
-			cfgModelLoopGuardToolCallReminder.get(this.#host.settings) === true &&
-			model !== undefined &&
-			model.identity.class === "gemini"
-		);
-	}
-
-	#interruptGeminiHeaderRunaway(headerCount: number, targetTimestamp: number): void {
-		const model = this.#host.model();
-		logger.warn("Gemini reasoning-header runaway; interrupting to require a tool call", {
-			model: model?.id,
-			provider: model?.provider,
-			headers: headerCount,
-		});
-		this.#host.emitNotice(
-			"warning",
-			`Interrupted ${headerCount} planning headers with no tool call; reminded the model to issue one.`,
-			"loop-guard",
-		);
-		this.#host.agent.abort(GEMINI_HEADER_INTERRUPT_REASON);
-		const generation = this.#host.promptGeneration();
-		this.#host.schedulePostPromptTask(async signal => {
-			if (signal.aborted || this.#host.isDisposed() || this.#host.promptGeneration() !== generation) return;
-			await this.#host.agent.waitForIdle();
-			if (signal.aborted || this.#host.isDisposed() || this.#host.promptGeneration() !== generation) return;
-			const aborted = this.#host.agent.state.messages.findLast(
-				(message): message is AssistantMessage =>
-					message.role === "assistant" && message.timestamp === targetTimestamp,
-			);
-			if (aborted) this.#host.discardAssistantTurn(aborted);
-			const content = prompt.render(geminiToolReminderTemplate, { count: headerCount });
-			const details = { headers: headerCount };
-			this.#host.agent.appendMessage({
-				role: "custom",
-				customType: GEMINI_TOOL_REMINDER_TYPE,
-				content,
-				display: false,
-				details,
-				attribution: "agent",
-				timestamp: Date.now(),
-			});
-			this.#host.sessionManager.appendCustomMessageEntry(
-				GEMINI_TOOL_REMINDER_TYPE,
-				content,
-				false,
-				details,
-				"agent",
-			);
-			try {
-				await this.#host.agent.continue();
-			} catch (error) {
-				logger.warn("gemini tool-call reminder continue failed", { error: String(error) });
-			}
-		});
 	}
 }

@@ -176,7 +176,6 @@ import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
 import type { PlanModeState } from "../plan-mode/state";
 import goalModeContextPrompt from "../prompts/goals/goal-mode-context.md" with { type: "text" };
 import goalTodoContextPrompt from "../prompts/goals/goal-todo-context.md" with { type: "text" };
-import anthropicUsageWrapUpPrompt from "../prompts/system/anthropic-usage-wrap-up.md" with { type: "text" };
 import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type: "text" };
 import checkpointActiveNoticeTemplate from "../prompts/system/checkpoint-active-notice.md" with { type: "text" };
 import interruptedThinkingTemplate from "../prompts/system/interrupted-thinking.md" with { type: "text" };
@@ -2289,7 +2288,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			});
 		}
 		this.agent.setAssistantMessageEventInterceptor((message, assistantMessageEvent) => {
-			this.#loopGuards.onAssistantEvent(message, assistantMessageEvent);
 		});
 		// Tool-result hook owns synchronous post-tool actions that must affect the current loop.
 		this.agent.afterToolCall = ctx => this.#afterToolCall(ctx);
@@ -6600,7 +6598,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	}
 
 	/** Apply session-level stream hooks to a direct side request. */
-	prepareSimpleStreamOptions(options: SimpleStreamOptions, provider = "anthropic"): SimpleStreamOptions {
+	prepareSimpleStreamOptions(options: SimpleStreamOptions, provider = this.model?.provider ?? ""): SimpleStreamOptions {
 		return this.#providerBoundary.prepareSimpleStreamOptions(options, provider);
 	}
 
