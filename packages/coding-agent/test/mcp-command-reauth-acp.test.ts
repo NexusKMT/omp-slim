@@ -12,7 +12,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
+import { MCPOAuthStorage } from "../src/mcp/oauth-storage";
+import * as oauthStorageModule from "../src/mcp/oauth-storage";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as mcpClient from "@oh-my-pi/pi-coding-agent/mcp/client";
 import * as oauthDiscovery from "@oh-my-pi/pi-coding-agent/mcp/oauth-discovery";
@@ -68,10 +69,11 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 	let originalMcpHost: string | undefined;
 	// Track every in-memory auth store so afterEach can close the underlying
 	// bun:sqlite Database (leaked handles can crash a later parallel GC sweep).
-	const openAuthStores: AuthStorage[] = [];
-	function freshAuthStorage(): AuthStorage {
-		const storage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
+	const openAuthStores: MCPOAuthStorage[] = [];
+	function freshMCPOAuthStorage(): MCPOAuthStorage {
+		const storage = new MCPOAuthStorage(new Database(":memory:"));
 		openAuthStores.push(storage);
+		vi.spyOn(oauthStorageModule, "discoverMcpOAuthStorage").mockResolvedValue(storage);
 		return storage;
 	}
 
@@ -87,7 +89,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 	}
 
 	function makeRuntime(
-		authStorage: AuthStorage,
+		authStorage: MCPOAuthStorage,
 		signal?: AbortSignal,
 		mcpManager?: SlashCommandRuntime["mcpManager"],
 	): SlashCommandRuntime {
@@ -143,7 +145,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 
 	async function runReauth(
 		name: string,
-		authStorage: AuthStorage,
+		authStorage: MCPOAuthStorage,
 		signal?: AbortSignal,
 		mcpManager?: SlashCommandRuntime["mcpManager"],
 	): Promise<void> {
@@ -193,8 +195,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			refresh: "fresh-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authStorage = freshAuthStorage();
-		await authStorage.credentials.reload();
+		const authStorage = freshMCPOAuthStorage();
 
 		await runReauth("envserver", authStorage);
 
@@ -202,14 +203,14 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 		expect(joined).toContain("Reauthorizing");
 		expect(joined).toContain("Reauthorized");
 		// Same url-keyed credential row the TUI path persists.
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toMatchObject({
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toMatchObject({
 			type: "oauth",
 			access: "fresh-access",
 			tokenUrl: "https://auth.example.com/token",
 			resource: EXPANDED_SERVER_URL,
 		});
 		// The legacy pointer row was collected after the fresh row landed.
-		expect(authStorage.credentials.get("mcp_oauth_legacy_123")).toBeUndefined();
+		expect(authStorage.get("mcp_oauth_legacy_123")).toBeUndefined();
 		const saved = await readSavedServer();
 		// Raw `${...}` placeholder stays in the file; the auth block points at
 		// the credential row.
@@ -228,7 +229,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			refresh: "fresh-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 
 		await runReauth("envserver", authStorage);
 
@@ -237,7 +238,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 		const saved = await readSavedServer();
 		expect(saved.auth).toBeUndefined();
 		expect(saved.url).toBe(RAW_SERVER_URL);
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toMatchObject({
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toMatchObject({
 			access: "fresh-access",
 		});
 	});
@@ -251,11 +252,11 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 				2,
 			)}\n`,
 		);
-		await runReauth("envserver", freshAuthStorage());
+		await runReauth("envserver", freshMCPOAuthStorage());
 		expect(outputs.join("\n")).toContain("stdio servers manage their own credentials");
 
 		outputs.length = 0;
-		await runReauth("no-such-server", freshAuthStorage());
+		await runReauth("no-such-server", freshMCPOAuthStorage());
 		expect(outputs.join("\n")).toContain("not found");
 	});
 
@@ -265,14 +266,14 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 		);
 		vi.spyOn(mcpClient, "disconnectServer").mockResolvedValue(undefined);
 		// Anonymous connect succeeds: the discovery probe must stay offline.
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 		vi.spyOn(oauthDiscovery, "discoverOAuthEndpoints").mockResolvedValue(null);
 
 		await runReauth("envserver", authStorage);
 
 		const joined = outputs.join("\n");
 		expect(joined).toContain("reauthorization is not required");
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toBeUndefined();
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toBeUndefined();
 	});
 
 	test("sends a DCR-issued client secret on the token exchange, never an empty one", async () => {
@@ -310,7 +311,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 		);
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock);
 
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 		const reauth = runReauth("envserver", authStorage);
 		// The flow has started its callback server once the authorization URL
 		// is emitted; drive the browser redirect against it like a real client.
@@ -331,7 +332,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 		expect(tokenBodies[0]).toContain("client_secret=dcr-secret");
 		expect(tokenBodies[0]).toContain("client_id=dcr-client");
 		// …and is embedded in the stored credential row…
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toMatchObject({
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toMatchObject({
 			clientId: "dcr-client",
 			clientSecret: "dcr-secret",
 			access: "fresh-access",
@@ -344,7 +345,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			clientId: "dcr-client",
 		});
 		expect(saved.auth?.clientSecret).toBeUndefined();
-		expect(authStorage.credentials.get("mcp_oauth_legacy_456")).toBeUndefined();
+		expect(authStorage.get("mcp_oauth_legacy_456")).toBeUndefined();
 	});
 
 	test("aborts cleanly when the host cancels mid-flow, writing no credential", async () => {
@@ -352,7 +353,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 		vi.spyOn(mcpClient, "connectToServer").mockRejectedValue(AUTH_ERROR);
 		vi.spyOn(openUtil, "openPath").mockImplementation(() => {});
 		const hostAbort = new AbortController();
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 
 		const reauth = runReauth("envserver", authStorage, hostAbort.signal);
 		// Abort once the flow is inside its callback wait (the authorization
@@ -362,7 +363,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 		await reauth;
 
 		expect(outputs.join("\n")).toContain("Reauthorization cancelled");
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toBeUndefined();
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toBeUndefined();
 		const saved = await readSavedServer();
 		expect(saved.auth).toBeUndefined();
 	});
@@ -382,7 +383,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			refresh: "fresh-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 		const acpManager = {
 			getServerConfig: (name: string) =>
 				name === "client-server" ? { type: "http", url: "https://acp.example.com/mcp" } : undefined,
@@ -394,7 +395,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 
 		const joined = outputs.join("\n");
 		expect(joined).toContain('Reauthorized "client-server"');
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId("https://acp.example.com/mcp"))).toMatchObject({
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId("https://acp.example.com/mcp"))).toMatchObject({
 			access: "fresh-access",
 			tokenUrl: "https://auth.example.com/token",
 		});
@@ -431,7 +432,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			refresh: "fresh-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 
 		await runReauth("envserver", authStorage);
 
@@ -461,7 +462,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			refresh: "fresh-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 		const acpManager = {
 			getServerConfig: (name: string) =>
 				name === "envserver" ? { type: "http", url: "https://acp.example.com/mcp" } : undefined,
@@ -472,12 +473,12 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 		await runReauth("envserver", authStorage, undefined, acpManager);
 
 		// The fresh credential is keyed by the manager entry's URL…
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId("https://acp.example.com/mcp"))).toMatchObject({
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId("https://acp.example.com/mcp"))).toMatchObject({
 			access: "fresh-access",
 			tokenUrl: "https://auth.example.com/token",
 		});
 		// …and nothing was keyed for the inert file entry's URL.
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toBeUndefined();
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toBeUndefined();
 		// The colliding file entry stays untouched.
 		const saved = await readSavedServer();
 		expect(saved.url).toBe(RAW_SERVER_URL);
@@ -497,7 +498,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			refresh: "fresh-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 		const fileManager = {
 			getServerConfig: (name: string) =>
 				name === "envserver" ? { type: "http", url: "https://expanded.example.com/mcp" } : undefined,
@@ -511,12 +512,10 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 
 		// The credential is keyed by the project file's URL, not the
 		// manager's expanded copy.
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toMatchObject({
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toMatchObject({
 			access: "fresh-access",
 		});
-		expect(
-			authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId("https://expanded.example.com/mcp")),
-		).toBeUndefined();
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId("https://expanded.example.com/mcp"))).toBeUndefined();
 	});
 
 	test("resolves a multi-word server name without truncation", async () => {
@@ -531,7 +530,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			)}\n`,
 		);
 
-		await runReauth("MaaS Slack", freshAuthStorage());
+		await runReauth("MaaS Slack", freshMCPOAuthStorage());
 
 		// The named server was found (its stdio refusal), not reported
 		// missing the way a truncated "MaaS" lookup would be.
@@ -551,7 +550,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			refresh: "fresh-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 		const acpManager = {
 			getServerConfig: (name: string) =>
 				name === "client-server"
@@ -569,7 +568,7 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 
 		expect(outputs.join("\n")).toContain('Reauthorized "client-server"');
 		// The fresh binding lives only in authStorage…
-		expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId("https://acp.example.com/mcp"))).toMatchObject({
+		expect(authStorage.get(oauthFlow.mcpOAuthCredentialId("https://acp.example.com/mcp"))).toMatchObject({
 			access: "fresh-access",
 		});
 		// …and neither config file gained the session-owned definition.
@@ -604,17 +603,17 @@ describe("/mcp reauth (ACP dispatcher)", () => {
 			refresh: "fresh-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authStorage = freshAuthStorage();
+		const authStorage = freshMCPOAuthStorage();
 		const runtime = makeRuntime(authStorage);
 		cfgMcpEnableProjectConfig.set(runtime.settings, false);
 		try {
 			await handleMcpAcp({ args: "reauth envserver" } as ParsedSlashCommand, runtime);
 			// The credential is keyed by the user entry's URL…
-			expect(
-				authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId("https://user.example.com/mcp")),
-			).toMatchObject({ access: "fresh-access" });
+			expect(authStorage.get(oauthFlow.mcpOAuthCredentialId("https://user.example.com/mcp"))).toMatchObject({
+				access: "fresh-access",
+			});
 			// …and nothing was keyed for the opted-out project shadow.
-			expect(authStorage.credentials.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toBeUndefined();
+			expect(authStorage.get(oauthFlow.mcpOAuthCredentialId(EXPANDED_SERVER_URL))).toBeUndefined();
 		} finally {
 			cfgMcpEnableProjectConfig.unset(runtime.settings);
 		}

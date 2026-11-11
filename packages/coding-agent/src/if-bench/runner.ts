@@ -190,7 +190,6 @@ async function runTarget(target: BenchTarget, options: IfBenchRunOptions): Promi
 	const context: Context = { systemPrompt: [buildSystemPrompt(options.nyaMax)], messages };
 	// Owned per thread so transport-native chaining survives every turn and is
 	// torn down deterministically when the thread ends.
-	const providerSessionState = new Map<string, ProviderSessionState>();
 	let state = initialArray(options.arrayLength);
 	let cumulativeActions = 0;
 
@@ -212,7 +211,7 @@ async function runTarget(target: BenchTarget, options: IfBenchRunOptions): Promi
 			options.observer?.turnStarted?.(label, turn, actions.length);
 
 			const expected = applyActions(state, actions);
-			const outcome = await requestTurnWithRefusalRetry(model, context, providerSessionState, target, options);
+			const outcome = await requestTurnWithRefusalRetry(model, context, target, options);
 			cumulativeActions += actions.length;
 			const assessment = outcome.error
 				? { passed: false, failure: "provider" as IfBenchFailure }
@@ -252,8 +251,6 @@ async function runTarget(target: BenchTarget, options: IfBenchRunOptions): Promi
 			if (outcome.message) messages.push(outcome.message);
 		}
 	} finally {
-		for (const state of providerSessionState.values()) state.close();
-		providerSessionState.clear();
 	}
 
 	options.observer?.modelFinished?.(report);
@@ -272,7 +269,6 @@ async function runTarget(target: BenchTarget, options: IfBenchRunOptions): Promi
 async function requestTurnWithRefusalRetry(
 	model: Model<Api>,
 	context: Context,
-	providerSessionState: Map<string, ProviderSessionState>,
 	target: BenchTarget,
 	options: IfBenchRunOptions,
 ): Promise<TurnOutcome> {
@@ -281,7 +277,7 @@ async function requestTurnWithRefusalRetry(
 		if (attempt > 1) await (options.sleep ?? Bun.sleep)(REFUSAL_BACKOFF_MS[attempt - 1] ?? 180_000);
 		const sessionId = options.randomSessionId();
 		const apiKey = options.runtime.modelRegistry.resolver(model, sessionId);
-		outcome = await requestTurn(model, context, sessionId, apiKey, providerSessionState, target, options);
+		outcome = await requestTurn(model, context, sessionId, apiKey, target, options);
 		if (!isCyberRefusal(outcome.error) || attempt === REFUSAL_MAX_ATTEMPTS) return outcome;
 		logger.debug("if-bench: cyber refusal, retrying", { attempt, error: outcome.error });
 	}
@@ -293,7 +289,6 @@ async function requestTurn(
 	context: Context,
 	sessionId: string,
 	apiKey: ApiKeyResolver,
-	providerSessionState: Map<string, ProviderSessionState>,
 	target: BenchTarget,
 	options: IfBenchRunOptions,
 ): Promise<TurnOutcome> {
@@ -315,7 +310,6 @@ async function requestTurn(
 			temperature: 0,
 			reasoning: toReasoningEffort(target.thinking),
 			disableReasoning: shouldDisableReasoning(target.thinking) ? true : undefined,
-			providerSessionState,
 		});
 		let message: AssistantMessage | undefined;
 		for await (const event of stream) {

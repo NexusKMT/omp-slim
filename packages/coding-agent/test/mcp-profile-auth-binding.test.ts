@@ -10,7 +10,7 @@
  */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
+import { MCPOAuthStorage } from "../src/mcp/oauth-storage";
 import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import { removeManagedMcpOAuthCredential } from "@oh-my-pi/pi-coding-agent/mcp/oauth-credentials";
 import * as oauthFlow from "@oh-my-pi/pi-coding-agent/mcp/oauth-flow";
@@ -28,16 +28,15 @@ function authorizationHeader(config: MCPServerConfig): string | undefined {
 
 describe("per-profile MCP OAuth binding", () => {
 	let manager: MCPManager;
-	let authStorage: AuthStorage;
+	let authStorage: MCPOAuthStorage;
 	let originalProfile: string | undefined;
 
 	beforeEach(async () => {
 		originalProfile = getActiveProfile();
-		const store = new SqliteAuthCredentialStore(new Database(":memory:"));
-		authStorage = new AuthStorage(store);
-		await authStorage.credentials.reload();
+		authStorage = new MCPOAuthStorage(new Database(":memory:"));
+
 		manager = new MCPManager(process.cwd());
-		manager.setAuthStorage(authStorage);
+		manager.setOAuthStorage(authStorage);
 	});
 
 	afterEach(() => {
@@ -50,13 +49,13 @@ describe("per-profile MCP OAuth binding", () => {
 		const workKey = mcpOAuthCredentialId(SERVER_URL, "work");
 		const personalKey = mcpOAuthCredentialId(SERVER_URL, "personal");
 		expect(workKey).not.toBe(personalKey);
-		await authStorage.credentials.set(workKey, {
+		await authStorage.set(workKey, {
 			type: "oauth",
 			access: "work-token",
 			refresh: "r",
 			expires: Date.now() + 3_600_000,
 		});
-		await authStorage.credentials.set(personalKey, {
+		await authStorage.set(personalKey, {
 			type: "oauth",
 			access: "personal-token",
 			refresh: "r",
@@ -77,7 +76,7 @@ describe("per-profile MCP OAuth binding", () => {
 	test("ignores another profile's explicit profile-scoped credentialId in shared storage", async () => {
 		const workKey = mcpOAuthCredentialId(SERVER_URL, "work");
 		const personalKey = mcpOAuthCredentialId(SERVER_URL, "personal");
-		await authStorage.credentials.set(workKey, {
+		await authStorage.set(workKey, {
 			type: "oauth",
 			access: "work-token",
 			refresh: "r",
@@ -95,7 +94,7 @@ describe("per-profile MCP OAuth binding", () => {
 			),
 		).toBeUndefined();
 
-		await authStorage.credentials.set(personalKey, {
+		await authStorage.set(personalKey, {
 			type: "oauth",
 			access: "personal-token",
 			refresh: "r",
@@ -116,7 +115,7 @@ describe("per-profile MCP OAuth binding", () => {
 	test("resolves the url-keyed credential when the file's credentialId belongs to another profile", async () => {
 		// This profile authed the server (url-keyed row exists), but the shared
 		// project file still carries a credentialId minted by a different profile.
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "this-profile-token",
 			refresh: "r",
@@ -133,7 +132,7 @@ describe("per-profile MCP OAuth binding", () => {
 	});
 
 	test("resolves the url-keyed credential for a definition-only config (no auth block)", async () => {
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "bound-token",
 			refresh: "r",
@@ -146,7 +145,7 @@ describe("per-profile MCP OAuth binding", () => {
 	});
 
 	test("prepareConfig({ oauth: false }) skips injection so the reauth probe sees the bare server", async () => {
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "bound-token",
 			refresh: "r",
@@ -159,7 +158,7 @@ describe("per-profile MCP OAuth binding", () => {
 	});
 
 	test("never clobbers an explicitly configured Authorization header", async () => {
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "bound-token",
 			refresh: "r",
@@ -177,7 +176,7 @@ describe("per-profile MCP OAuth binding", () => {
 	});
 
 	test("refreshes with embedded material and preserves it across rotation", async () => {
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "expired-token",
 			refresh: "old-refresh",
@@ -209,7 +208,7 @@ describe("per-profile MCP OAuth binding", () => {
 		// of this definition-only binding would be impossible. The fallback
 		// resource (synthesized from config.url) is intentionally not persisted —
 		// it is re-derived from the definition on the next refresh.
-		const stored = authStorage.credentials.get(URL_KEY_ID);
+		const stored = authStorage.get(URL_KEY_ID);
 		expect(stored).toMatchObject({
 			type: "oauth",
 			access: "fresh-token",
@@ -221,7 +220,7 @@ describe("per-profile MCP OAuth binding", () => {
 	});
 
 	test("does not inject oauth for configs with explicit apikey auth", async () => {
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "bound-token",
 			refresh: "r",
@@ -238,13 +237,13 @@ describe("per-profile MCP OAuth binding", () => {
 	});
 
 	test("an explicit credentialId that resolves wins over the url-keyed row", async () => {
-		await authStorage.credentials.set("mcp_oauth_1234_pinned", {
+		await authStorage.set("mcp_oauth_1234_pinned", {
 			type: "oauth",
 			access: "pinned-token",
 			refresh: "r",
 			expires: Date.now() + 3_600_000,
 		});
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "url-token",
 			refresh: "r",
@@ -261,7 +260,7 @@ describe("per-profile MCP OAuth binding", () => {
 	});
 
 	test("url-keyed fallback never overrides a pinned Authorization header, even past a stale auth block", async () => {
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "bound-token",
 			refresh: "r",
@@ -283,7 +282,7 @@ describe("per-profile MCP OAuth binding", () => {
 		// url-keyed row embeds its own DCR client. Refresh tokens are bound to
 		// the client that minted them, so the embedded material must win or the
 		// refresh dies with invalid_grant and the row gets purged.
-		await authStorage.credentials.set(URL_KEY_ID, {
+		await authStorage.set(URL_KEY_ID, {
 			type: "oauth",
 			access: "expired-token",
 			refresh: "my-refresh",
@@ -331,25 +330,25 @@ describe("per-profile MCP OAuth binding", () => {
 		const personalKey = mcpOAuthCredentialId(SERVER, "personal");
 		const legacyKey = `mcp_oauth:${SERVER}`;
 		const oauth = { type: "oauth", access: "t", refresh: "r", expires: Date.now() + 3_600_000 } as const;
-		await authStorage.credentials.set(workKey, oauth);
-		await authStorage.credentials.set(personalKey, oauth);
-		await authStorage.credentials.set(legacyKey, oauth);
+		await authStorage.set(workKey, oauth);
+		await authStorage.set(personalKey, oauth);
+		await authStorage.set(legacyKey, oauth);
 
 		setProfile("work");
-		const removeSpy = vi.spyOn(authStorage.credentials, "remove");
+		const removeSpy = vi.spyOn(authStorage, "remove");
 
 		// Foreign profile's row is protected: returns false, never calls remove, row survives.
 		expect(await removeManagedMcpOAuthCredential(authStorage, personalKey)).toBe(false);
 		expect(removeSpy).not.toHaveBeenCalled();
-		expect(authStorage.credentials.get(personalKey)?.type).toBe("oauth");
+		expect(authStorage.get(personalKey)?.type).toBe("oauth");
 
 		// Active-profile and legacy url-keyed rows remain removable.
 		expect(await removeManagedMcpOAuthCredential(authStorage, workKey)).toBe(true);
 		expect(await removeManagedMcpOAuthCredential(authStorage, legacyKey)).toBe(true);
 		expect(removeSpy).toHaveBeenCalledWith(workKey);
 		expect(removeSpy).toHaveBeenCalledWith(legacyKey);
-		expect(authStorage.credentials.get(workKey)).toBeUndefined();
-		expect(authStorage.credentials.get(legacyKey)).toBeUndefined();
-		expect(authStorage.credentials.get(personalKey)?.type).toBe("oauth");
+		expect(authStorage.get(workKey)).toBeUndefined();
+		expect(authStorage.get(legacyKey)).toBeUndefined();
+		expect(authStorage.get(personalKey)?.type).toBe("oauth");
 	});
 });

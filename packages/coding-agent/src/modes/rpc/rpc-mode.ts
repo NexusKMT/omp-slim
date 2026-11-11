@@ -2118,7 +2118,6 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					queuedMessages: {
 						steering: [...queuedMessages.steering],
 						followUp: [...queuedMessages.followUp],
-						liveSteered: queuedMessages.liveSteered,
 					},
 					todoPhases: session.getTodoPhases(),
 					fastModeEnabled: session.isFastModeEnabled(),
