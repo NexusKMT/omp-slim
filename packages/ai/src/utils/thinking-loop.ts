@@ -1,57 +1,8 @@
 /**
- * Thinking-loop guard.
- *
- * Gemini models (notably `gemini-3.5-flash` via OpenRouter) occasionally fall
- * into a degenerate reasoning loop: they re-emit the same paragraph intent over
- * and over with cosmetic wording drift ("Confirming Safety", "Verifying
- * Completion", …), burning the entire output budget without ever calling a tool
- * or answering. The runaway is *not* byte-identical, so a cheap verbatim
- * tail-repeat check alone misses it.
- *
- * This guard watches streamed deltas and, on a match, terminates the stream with
- * a synthetic `error` {@link AssistantMessage} whose terminal content is empty.
- * Deltas emitted before enough evidence accumulates may already be observable to
- * a live streaming consumer; the empty terminal prevents the failed attempt from
- * being committed or replayed. Tagged with `AIError.Flag.ThinkingLoop`, the
- * result lets `AgentSession` discard the runaway and re-sample.
- *
- * Four failure shapes are detected:
- * 1. **Exact suffix cycles** — a byte-identical unit repeated back-to-back,
- *    including long cycles such as the observed 311-character Kiro runaway.
- *    This bounded detector applies to every model the guard covers. A cycle
- *    spanning a line break repeats whole lines — reasoning summarizers restate
- *    one status line ("Still writing the parser...") while hidden work runs —
- *    so it needs the long-cycle floor, not the short-stutter one.
- * 2. **Near-duplicate segments** — paragraphs that normalize to the same
- *    word-trigram fingerprint. Caught with a Jaccard window over recent
- *    paragraphs. Thresholds were calibrated on a real loop transcript plus
- *    13.5k non-loop thinking blocks (zero false positives; hardest negative
- *    scored 3 against the trigger of 4).
- * 3. **Progress-lexicon stall** — paragraphs that keep reshuffling the same
- *    motivational filler ("just doing it, pushing ahead, maintaining momentum")
- *    into fresh word order, so trigrams never match, yet introduce no new
- *    vocabulary and name nothing concrete. Caught by a run of low-novelty,
- *    anchor-free segments; a segment naming a path/identifier resets the run, so
- *    genuine but vocabulary-repetitive work (per-file templates) is spared.
- * 4. **Gemini summary-header runaway** — handled separately by
- *    {@link GeminiHeaderRunDetector}.
- *
- * The semantic heuristics (2, 3) judge prose only: code-shaped lines are dropped
- * before analysis because legitimate code repeats one keyword skeleton with
- * different literals, and numeric tokens are stripped during normalization.
- *
- * Scope: the `thinking-loop-guard` catalog axis picks the level per model line
- * ({@link loopGuardLevel}): exact cycles by default, plus semantic heuristics
- * for Gemini, DeepSeek, and Grok, and no guard for Claude. Thinking stays armed
- * after a tool call starts — xAI/Grok can keep emitting `thinking_delta` after
- * `toolcall_start`, and those deltas count as stream progress so the idle
- * watchdog never fires. Visible assistant text still latches the thinking
- * detector off. Native thinking is checked first; assistant text can also be
- * checked for providers that surface reasoning as visible prose. On a hit the
- * failed turn is emitted as an empty retryable stream-stall error;
- * result-awaiting callers (`complete`, `completeSimple`) re-sample at most
- * three guarded attempts and then fail closed. Disable detection with
- * `PI_NO_THINKING_LOOP_GUARD=1`.
+ * Detect exact repetition and optional semantic loops in streamed text.
+ * Detection levels come from explicit stream options. A loop aborts the
+ * request and emits an empty retryable failure so partial reasoning is not
+ * committed to history. Abort and retry limits remain owned by the caller.
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
@@ -312,81 +263,6 @@ export class ThinkingLoopDetector {
 			}
 		}
 		return null;
-	}
-}
-
-/**
- * Consecutive Gemini thought-summary headers in one uninterrupted reasoning
- * stream that trips the tool-call reminder. Gemini occasionally narrates a long
- * chain of titled summaries ("Examining Result Handling", "Refining Result
- * Rendering", …) without ever calling a tool, burning the whole budget on
- * planning. This is the over-planning shape {@link ThinkingLoopDetector} misses —
- * those titles are stripped before its similarity analysis precisely because their
- * wording keeps changing, so a genuinely-distinct planning runaway never trips it.
- *
- * Set well above legitimate hard-problem depth: a capable model can emit ~10
- * distinct, progressing hypotheses in a single reasoning block before acting (and
- * a false trip is costly — the interrupt discards the whole reasoning turn). A
- * real narration runaway burns dozens-to-hundreds of titles, so this still trips
- * fast on the actual pathology.
- */
-export const GEMINI_HEADER_RUNAWAY_THRESHOLD = 36;
-
-/**
- * True when a single trimmed line is a Gemini reasoning-summary title: a markdown
- * ATX heading (`## …`) or a whole-line bold / bold-italic run (`**Title**`,
- * `***Title***`). Inline emphasis inside prose never matches — the bold run must
- * span the entire line. Mirrors the title shapes {@link ThinkingLoopDetector}
- * strips before similarity analysis.
- */
-export function isReasoningSummaryHeader(line: string): boolean {
-	return /^#{1,6}[ \t]+\S/.test(line) || /^\*{2,3}.+\*{2,3}$/.test(line);
-}
-
-/**
- * Counts consecutive Gemini reasoning-summary headers across a streamed thinking
- * block. {@link push} returns true exactly once — when the running header count
- * first reaches {@link GEMINI_HEADER_RUNAWAY_THRESHOLD} — and the caller then
- * interrupts the stream and reminds the model to issue a tool call. Paragraph
- * lines between titles do NOT reset the run (Gemini emits header + paragraph per
- * thought, so the run IS the number of summaries); leaving the reasoning channel
- * does, via {@link reset} on a new thinking block / prose / tool call.
- */
-export class GeminiHeaderRunDetector {
-	/** Thinking text not yet split into completed lines. */
-	#pending = "";
-	/** Summary-title lines seen in the current run. */
-	#count = 0;
-	/** Latches after the first threshold hit so each run fires at most once. */
-	#fired = false;
-
-	/** Feed a thinking delta. Returns true the first time the run hits the threshold. */
-	push(delta: string): boolean {
-		if (this.#fired || !delta) return false;
-		this.#pending += delta;
-		let nl = this.#pending.indexOf("\n");
-		while (nl !== -1) {
-			const line = this.#pending.slice(0, nl).trim();
-			this.#pending = this.#pending.slice(nl + 1);
-			if (line !== "" && isReasoningSummaryHeader(line) && ++this.#count >= GEMINI_HEADER_RUNAWAY_THRESHOLD) {
-				this.#fired = true;
-				return true;
-			}
-			nl = this.#pending.indexOf("\n");
-		}
-		return false;
-	}
-
-	/** Number of summary titles counted in the current run (for the reminder/log). */
-	get count(): number {
-		return this.#count;
-	}
-
-	/** Re-arm for a fresh reasoning block: clears the buffer, count, and latch. */
-	reset(): void {
-		this.#pending = "";
-		this.#count = 0;
-		this.#fired = false;
 	}
 }
 
