@@ -1,4 +1,5 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { getDbBusyTimeoutMs, openSqliteDatabase } from "@oh-my-pi/pi-utils";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AuthCredentialStore } from "./store";
@@ -16,16 +17,32 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 	#dataVersion: number;
 	constructor(db: Database) {
 		this.#db = db;
-		db.run("PRAGMA busy_timeout = 5000");
+		db.run(`PRAGMA busy_timeout = ${getDbBusyTimeoutMs()}`);
+		db.run("PRAGMA journal_mode = WAL");
+		db.run("PRAGMA synchronous = NORMAL");
 		db.run(
 			`CREATE TABLE IF NOT EXISTS auth_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, credential_type TEXT NOT NULL, data TEXT NOT NULL, disabled_cause TEXT DEFAULT NULL, identity_key TEXT DEFAULT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()))`,
 		);
 		this.#dataVersion = this.#version();
 	}
 	static async open(dbPath: string): Promise<SqliteAuthCredentialStore> {
-		if (dbPath !== ":memory:") await fs.mkdir(path.dirname(dbPath), { recursive: true });
-		return new SqliteAuthCredentialStore(new Database(dbPath, { create: true }));
+		if (dbPath !== ":memory:") await fs.mkdir(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+		return openSqliteDatabase(
+			dbPath,
+			async db => {
+				if (dbPath !== ":memory:") {
+					try {
+						await fs.chmod(dbPath, 0o600);
+					} catch {
+						// Permissions are unavailable on some platforms (e.g. Windows).
+					}
+				}
+				return new SqliteAuthCredentialStore(db);
+			},
+			{ recoverCorruption: true },
+		);
 	}
+
 	#version(): number {
 		return this.#db.query<{ data_version: number }, []>("PRAGMA data_version").get()?.data_version ?? 0;
 	}
