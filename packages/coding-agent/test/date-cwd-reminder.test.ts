@@ -26,8 +26,7 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
 
 describe("date-cwd-reminder", () => {
-	afterEach(() => {
-	});
+	afterEach(() => {});
 
 	describe("DateCwdReminderInjector", () => {
 		it("injects the first reminder without mutating the context", () => {
@@ -1149,7 +1148,7 @@ describe("date-cwd reminder on the provider wire", () => {
 		using tempDir = TempDir.createSync("@pi-date-cwd-reminder-");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -1244,7 +1243,7 @@ describe("date-cwd reminder on the provider wire", () => {
 			stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: message });
 			stream.push({ type: "done", reason: "toolUse", message });
 		};
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			const request = contexts.length;
@@ -1344,7 +1343,7 @@ describe("date-cwd reminder on the provider wire", () => {
 			);
 			const api = "openai-completions";
 			const contexts: Context[] = [];
-			mockChatStream( (_model, context) => {
+			mockChatStream((_model, context) => {
 				contexts.push(context);
 				const stream = new AssistantMessageEventStream();
 				queueMicrotask(() => {
@@ -1433,7 +1432,7 @@ describe("date-cwd reminder on the provider wire", () => {
 		await Bun.write(tempDir.join("notes.txt"), "notes");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			const request = contexts.length;
@@ -1541,7 +1540,7 @@ describe("date-cwd reminder on the provider wire", () => {
 		await Bun.write(tempDir.join("notes.txt"), "notes");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			const request = contexts.length;
@@ -1711,7 +1710,7 @@ describe("date-cwd reminder on the provider wire", () => {
 		using tempDir = TempDir.createSync("@pi-date-cwd-reminder-");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {

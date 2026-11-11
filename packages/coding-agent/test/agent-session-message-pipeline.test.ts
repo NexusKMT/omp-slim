@@ -772,7 +772,7 @@ describe("AgentSession message pipeline", () => {
 		using tempDir = TempDir.createSync("@pi-stb-main-path-");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -863,7 +863,7 @@ describe("AgentSession message pipeline", () => {
 		using tempDir = TempDir.createSync("@pi-stb-corrupt-attachment-");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -1014,7 +1014,7 @@ describe("AgentSession message pipeline", () => {
 		const api = "openai-completions";
 		let capturedOptions: SimpleStreamOptions | undefined;
 		let capturedContext: Context | undefined;
-		mockChatStream( (_model, _context, options) => {
+		mockChatStream((_model, _context, options) => {
 			capturedOptions = options;
 			capturedContext = _context;
 			const stream = new AssistantMessageEventStream();
@@ -1783,7 +1783,7 @@ describe("AgentSession message pipeline", () => {
 		const googleErrorMessage = "Google API error (429): Resource exhausted. Please try again later.";
 		const keys: unknown[] = [];
 		let capturedOptions: SimpleStreamOptions | undefined;
-		mockChatStream( (_model, _context, options) => {
+		mockChatStream((_model, _context, options) => {
 			capturedOptions = options;
 			keys.push(options?.apiKey);
 			const stream = new AssistantMessageEventStream();
@@ -1852,7 +1852,7 @@ describe("AgentSession message pipeline", () => {
 	it("applies configured OpenRouter routing variant to ephemeral side-channel options", async () => {
 		const api = "openai-completions";
 		let capturedOptions: SimpleStreamOptions | undefined;
-		mockChatStream( (_model, _context, options) => {
+		mockChatStream((_model, _context, options) => {
 			capturedOptions = options;
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -1906,7 +1906,7 @@ describe("AgentSession message pipeline", () => {
 		const continueConversion = Promise.withResolvers<void>();
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: secret }]);
 		let capturedContext: Context | undefined;
-		mockChatStream( (_model, context, _options) => {
+		mockChatStream((_model, context, _options) => {
 			capturedContext = context;
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -1986,7 +1986,7 @@ describe("AgentSession message pipeline", () => {
 			let callCount = 0;
 			let mainContext: Context | undefined;
 			let sideContext: Context | undefined;
-			mockChatStream( (_model, context, _options) => {
+			mockChatStream((_model, context, _options) => {
 				if (callCount === 0) {
 					mainContext = context;
 				} else {
@@ -2152,7 +2152,7 @@ describe("AgentSession message pipeline", () => {
 		using tempDir = TempDir.createSync("@pi-subagent-append-only-");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2238,7 +2238,7 @@ describe("AgentSession message pipeline", () => {
 	it("rewrites finalized assistant text before it reaches history and session persistence", async () => {
 		using tempDir = TempDir.createSync("@pi-assistant-message-rewrite-");
 		const api = "openai-completions";
-		mockChatStream( () => {
+		mockChatStream(() => {
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() =>
 				stream.push({ type: "done", reason: "stop", message: createAssistantMessage("original") }),
@@ -2305,7 +2305,7 @@ describe("AgentSession message pipeline", () => {
 	it("retains completed assistant text in history when aborted during a pending rewrite", async () => {
 		using tempDir = TempDir.createSync("@pi-assistant-message-abort-");
 		const api = "openai-completions";
-		mockChatStream( () => {
+		mockChatStream(() => {
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() =>
 				stream.push({ type: "done", reason: "stop", message: createAssistantMessage("original") }),
@@ -2394,7 +2394,7 @@ describe("AgentSession message pipeline", () => {
 		using tempDir = TempDir.createSync("@pi-tool-call-revision-");
 		const api = "openai-completions";
 		let requests = 0;
-		mockChatStream( () => {
+		mockChatStream(() => {
 			requests++;
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2494,7 +2494,7 @@ describe("AgentSession message pipeline", () => {
 		using tempDir = TempDir.createSync("@pi-tool-call-context-");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2594,7 +2594,7 @@ describe("AgentSession message pipeline", () => {
 		using tempDir = TempDir.createSync("@pi-invoke-tool-");
 		const api = "openai-completions";
 		const contexts: Context[] = [];
-		mockChatStream( (_model, context) => {
+		mockChatStream((_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2707,7 +2707,7 @@ describe("AgentSession message pipeline", () => {
 		using tempDir = TempDir.createSync("@pi-web-search-override-");
 		const api = "openai-completions";
 		let requests = 0;
-		mockChatStream( () => {
+		mockChatStream(() => {
 			requests++;
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2842,7 +2842,7 @@ describe("AgentSession message pipeline", () => {
 			const api = "openai-completions";
 			let capturedContext: Context | undefined;
 			let capturedOptions: SimpleStreamOptions | undefined;
-			mockChatStream( (_model, context, options) => {
+			mockChatStream((_model, context, options) => {
 				capturedContext = context;
 				capturedOptions = options;
 				const stream = new AssistantMessageEventStream();
@@ -2923,7 +2923,7 @@ describe("AgentSession message pipeline", () => {
 
 	it.each([undefined, false] as const)("ephemeral discards tool calls with tools=%s", async tools => {
 		const api = "openai-completions";
-		mockChatStream( (_model, _context, _options) => {
+		mockChatStream((_model, _context, _options) => {
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
 				const message = createAssistantMessage("Here is text");

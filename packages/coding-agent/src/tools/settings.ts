@@ -793,8 +793,6 @@ export const cfgToolsIntentTracing = register({
 	},
 });
 
-
-
 export const cfgToolsSpeculativeExecutionEnabled = register({
 	id: "tools.speculativeExecution.enabled",
 	type: "boolean",

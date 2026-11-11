@@ -43,7 +43,6 @@ export const stateDefs = {
 		{
 			steering: "string[]",
 			followUp: "string[]",
-			
 		},
 		"Displayable queue-chip text for pending user-authored messages; accepted verbatim by `remove_queued_message`.",
 	),
@@ -96,7 +95,7 @@ export const stateDefs = {
 			doc("boolean", "Idle with nothing queued or pending; same predicate as `session_settled`."),
 			false,
 		),
-		queuedMessages: absentAs("QueuedMessagesState", { steering: [], followUp: [], }),
+		queuedMessages: absentAs("QueuedMessagesState", { steering: [], followUp: [] }),
 		todoPhases: absentAs("TodoPhase[]", []),
 		systemPrompt: absentAs(doc("string[]", "System prompt sections, for session dumps."), []),
 		dumpTools: absentAs("ToolDescriptor[]", []),

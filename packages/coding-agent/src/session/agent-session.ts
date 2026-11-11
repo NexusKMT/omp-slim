@@ -2287,8 +2287,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				build: buildAsyncResultBatchMessage,
 			});
 		}
-		this.agent.setAssistantMessageEventInterceptor((message, assistantMessageEvent) => {
-		});
+		this.agent.setAssistantMessageEventInterceptor((message, assistantMessageEvent) => {});
 		// Tool-result hook owns synchronous post-tool actions that must affect the current loop.
 		this.agent.afterToolCall = ctx => this.#afterToolCall(ctx);
 		// Pre-scheduling tool_call wiring: extension handlers run at arg-prep
@@ -6598,7 +6597,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	}
 
 	/** Apply session-level stream hooks to a direct side request. */
-	prepareSimpleStreamOptions(options: SimpleStreamOptions, provider = this.model?.provider ?? ""): SimpleStreamOptions {
+	prepareSimpleStreamOptions(
+		options: SimpleStreamOptions,
+		provider = this.model?.provider ?? "",
+	): SimpleStreamOptions {
 		return this.#providerBoundary.prepareSimpleStreamOptions(options, provider);
 	}
 

@@ -1793,15 +1793,7 @@ export async function fetchReadUrl(
 	}
 
 	const storage = session.settings.getStorage();
-	let result = await renderUrl(
-		url,
-		effectiveTimeout,
-		raw,
-		session.settings,
-		signal,
-		storage,
-		session.fetch,
-	);
+	let result = await renderUrl(url, effectiveTimeout, raw, session.settings, signal, storage, session.fetch);
 	if (result.truncated) {
 		// Covers special handlers and every renderUrl branch, whichever response supplied the content.
 		const cutNote = `Response body exceeded ${formatBytes(MAX_BYTES)} and was cut mid-stream; content is incomplete`;

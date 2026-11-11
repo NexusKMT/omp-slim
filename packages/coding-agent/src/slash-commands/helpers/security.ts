@@ -51,8 +51,6 @@ function requireToken(tokens: readonly string[], index: number, flag: string): s
 	return value;
 }
 
-
-
 function parsePlanOptions(rest: string): SecurityPlanCliOptions {
 	const tokens = parseCommandArgs(rest);
 	const includePaths: string[] = [];

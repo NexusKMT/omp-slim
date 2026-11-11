@@ -9,7 +9,11 @@ import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from 
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { calculateCost, modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { getTestModel as getBundledModel, getTestModels as getBundledModels, getTestProviders as getBundledProviders } from "../../../catalog/test/fixtures/models";
+import {
+	getTestModel as getBundledModel,
+	getTestModels as getBundledModels,
+	getTestProviders as getBundledProviders,
+} from "../../../catalog/test/fixtures/models";
 import { Type as TypeBoxShimType } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { isRetryableAssistantError } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-ai-shim";
 import {

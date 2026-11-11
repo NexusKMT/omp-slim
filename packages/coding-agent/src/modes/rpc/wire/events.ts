@@ -167,7 +167,6 @@ export const eventDefs = {
 			type: "'queue_update'",
 			steering: "string[]",
 			followUp: "string[]",
-			
 		},
 		"Coalesced snapshot of the displayable steering/follow-up queue, sent whenever it changes.",
 	),

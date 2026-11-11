@@ -4,12 +4,7 @@ import * as path from "node:path";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import * as ai from "@oh-my-pi/pi-ai";
 import { createModelJobWidgetAuthor } from "@oh-my-pi/pi-coding-agent/job-widgets/author";
-import {
-	type Api,
-	type AssistantMessage,
-	type Model,
-	type ModelSpec,
-} from "@oh-my-pi/pi-ai";
+import { type Api, type AssistantMessage, type Model, type ModelSpec } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { runCli } from "@oh-my-pi/pi-coding-agent/cli";
@@ -298,7 +293,7 @@ describe("cost gate in a running session", () => {
 	/** Registers a provider that answers with `responses` in order and counts the requests it got. */
 	function scriptedProvider(api: string, responses: AssistantMessage[]): { calls: () => number } {
 		let calls = 0;
-		mockChatStream( () => streamOf(responses[Math.min(calls++, responses.length - 1)]));
+		mockChatStream(() => streamOf(responses[Math.min(calls++, responses.length - 1)]));
 		return { calls: () => calls };
 	}
 
