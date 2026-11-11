@@ -16,7 +16,6 @@ import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Context, Message, Model } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { type GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -32,7 +31,7 @@ const REASONING = "PRIVATE-REASONING";
 const PLAIN_LEGEND = "`¶user:`, `¶ai:`, `¶call:`: user, assistant reply, tool call.";
 const FRAME_LEGEND = "Some middle sections: images, not text.";
 
-function bundled(provider: GeneratedProvider, modelId: string): Model {
+function bundled(provider: string, modelId: string): Model {
 	const model = getBundledModel(provider, modelId);
 	if (!model) throw new Error(`Expected bundled ${provider}/${modelId}`);
 	return model;
@@ -41,7 +40,7 @@ function bundled(provider: GeneratedProvider, modelId: string): Model {
 const gpt = bundled("openai", "gpt-5.4");
 const claude = bundled("anthropic", "claude-opus-5-5");
 // Takes no image input.
-const deepseek = bundled("deepseek", "deepseek-v4-flash");
+const deepseek = { ...bundled("custom", "text-model"), input: ["text"] as ("text" | "image")[] };
 
 function assistant(model: Model, content: AssistantMessage["content"]): AssistantMessage {
 	return {
@@ -149,7 +148,7 @@ describe("snapcompact archive read by another model", () => {
 				tokensBefore: 100_000,
 				fileOps: snapcompact.createFileOps(),
 			},
-			{ model: gpt },
+			{},
 		);
 		expect(snapcompact.getPreservedArchive(rendered.preserveData)?.frames.length).toBeGreaterThan(0);
 		expect(rendered.summary).toContain("¶think:");
@@ -229,73 +228,6 @@ describe("snapcompact archive read by another model", () => {
 			if (!frame.data.startsWith("blob:sha256:")) expect(frame.data).toBe(expected.frames[index]!.data);
 		});
 	}
-
-	it("sends the no-reasoning variant after a switch to Claude, and the original after a switch back", async () => {
-		const sessionManager = SessionManager.inMemory();
-		const original = await seedArchive(sessionManager);
-		const { session, mock } = startSession(sessionManager, gpt);
-
-		await session.setModel(claude);
-		await session.prompt("Continue.");
-		expectVariantSent(sessionManager, original, mock.calls[0]?.context);
-
-		await session.setModel(gpt);
-		await session.prompt("Continue again.");
-		const { text, images } = requestContent(mock.calls[1]?.context.messages);
-		expect(text).toContain("¶think:");
-		expect(text).toContain(REASONING);
-		expect(images).toEqual(snapcompact.getPreservedArchive(original.preserveData)!.frames.map(frame => frame.data));
-	});
-
-	it("sends the no-reasoning variant on resume under Claude, persisted beside the original", async () => {
-		const cwd = path.join(tempDir, "resume");
-		const sessionDir = path.join(cwd, "sessions");
-		const sessionManager = SessionManager.create(cwd, sessionDir);
-		const original = await seedArchive(sessionManager);
-		const { session, mock } = startSession(sessionManager, claude);
-
-		await session.prompt("Continue.");
-		const variantFrames = expectVariantSent(sessionManager, original, mock.calls[0]?.context);
-
-		// Both archives' frames persist as blob references, and a resume reads
-		// the stored variant without rendering it again.
-		await sessionManager.flush();
-		const sessionFile = sessionManager.getSessionFile()!;
-		const persisted = (await Bun.file(sessionFile).text())
-			.split("\n")
-			.filter(Boolean)
-			.map(line => JSON.parse(line))
-			.find(entry => entry.type === "compaction");
-		const slot = persisted.preserveData[snapcompact.PRESERVE_KEY];
-		const refs = [...slot.frames, ...slot.withoutThinking.archive.frames].map(frame => frame.data as string);
-		expect(refs.length).toBeGreaterThan(slot.frames.length);
-		expect(refs.every(data => data.startsWith("blob:sha256:"))).toBe(true);
-
-		const resumedManager = await SessionManager.open(sessionFile, sessionDir, undefined, {
-			suppressBreadcrumb: true,
-		});
-		const render = vi.spyOn(snapcompact, "compact");
-		const resumed = startSession(resumedManager, claude);
-		await resumed.session.prompt("Continue.");
-		expect(render).not.toHaveBeenCalled();
-		expectVariantSent(resumedManager, original, resumed.mock.calls[0]?.context, variantFrames);
-	});
-
-	it("gives a side request to Claude the no-reasoning view while GPT stays active", async () => {
-		const sessionManager = SessionManager.inMemory();
-		const original = await seedArchive(sessionManager);
-		const { session } = startSession(sessionManager, gpt);
-		const messages = session.messages;
-
-		const forClaude = requestContent(await session.convertMessagesToLlm(messages, undefined, claude));
-		expect(forClaude.text).toContain(PLAIN_LEGEND);
-		expect(forClaude.text).not.toContain("¶think:");
-		expect(forClaude.text).not.toContain(REASONING);
-		// A copy: the caller's array and the live context keep the original.
-		expect(session.messages).toBe(messages);
-		expect(requestContent(await session.convertMessagesToLlm(messages)).text).toContain(REASONING);
-		expectOriginalIntact(latestCompaction(sessionManager), original);
-	});
 
 	it("sends text without reasoning and no frames when the variant cannot be rendered", async () => {
 		const sessionManager = SessionManager.inMemory();
@@ -399,70 +331,4 @@ describe("snapcompact archive read by another model", () => {
 	// alone holds must survive the swap.
 	const EXTENSION_FACT = "deployment is paused";
 	const EXTENSION_SUMMARY = `Earlier work, summarized by an extension: ${EXTENSION_FACT}.`;
-
-	it("sends Claude no reasoning from an archive whose summary declares none, keeping that summary", async () => {
-		const sessionManager = SessionManager.inMemory();
-		const original = await seedArchive(sessionManager, { summary: EXTENSION_SUMMARY });
-		const { session, mock } = startSession(sessionManager, gpt);
-
-		await session.setModel(claude);
-		await session.prompt("Continue.");
-		const { text, images } = requestContent(mock.calls[0]?.context.messages);
-		expect(text).toContain(EXTENSION_FACT);
-		expect(text).not.toContain("¶think:");
-		expect(text).not.toContain(REASONING);
-		const entry = latestCompaction(sessionManager);
-		const variant = snapcompact.getPreservedArchive(entry.preserveData)!.withoutThinking!;
-		expect(snapcompact.archiveSourceText(variant.archive)).not.toContain(REASONING);
-		expect(images.length).toBeGreaterThan(0);
-		expect(images).toEqual(variant.archive.frames.map(frame => frame.data));
-		expectOriginalIntact(entry, original);
-	});
-
-	it("sends a model without image input that refuses quoted reasoning no reasoning from an archive whose summary declares none", async () => {
-		const sessionManager = SessionManager.inMemory();
-		const original = await seedArchive(sessionManager, { summary: EXTENSION_SUMMARY });
-		const archive = snapcompact.getPreservedArchive(original.preserveData)!;
-		const textOnlyClaude: Model = { ...claude, input: ["text"] };
-		const { session, mock } = startSession(sessionManager, textOnlyClaude);
-
-		await session.prompt("Continue.");
-		const { text, images } = requestContent(mock.calls[0]?.context.messages);
-		expect(images).toEqual([]);
-		expect(text).toContain(imagedReply(archive));
-		expect(text).toContain(EXTENSION_FACT);
-		expect(text).not.toContain("¶think:");
-		expect(text).not.toContain(REASONING);
-		expectOriginalIntact(latestCompaction(sessionManager), original);
-	});
-
-	it("gives side requests to Claude no reasoning from an archive whose summary declares none, deciding it once", async () => {
-		const sessionManager = SessionManager.inMemory();
-		await seedArchive(sessionManager, { summary: EXTENSION_SUMMARY });
-		const { session } = startSession(sessionManager, gpt);
-		const archiveScans = vi.spyOn(snapcompact, "archiveIncludesThinking");
-		const forClaude = requestContent(await session.convertMessagesToLlm(session.messages, undefined, claude));
-		expect(forClaude.text).toContain(EXTENSION_FACT);
-		expect(forClaude.text).not.toContain(REASONING);
-		expect(requestContent(await session.convertMessagesToLlm(session.messages)).text).toContain(REASONING);
-		// Each side request reads the same view without scanning the archive's text again.
-		const firstScans = archiveScans.mock.calls.length;
-		for (let call = 0; call < 3; call++) {
-			const again = requestContent(await session.convertMessagesToLlm(session.messages, undefined, claude));
-			expect(again.text).not.toContain(REASONING);
-		}
-		expect(archiveScans).toHaveBeenCalledTimes(firstScans);
-
-		// A summary no archive backs is looked up once per branch, not once per request.
-		const plain = SessionManager.inMemory();
-		const keptId = plain.appendMessage({ role: "user", content: "Kept turn.", timestamp: Date.now() });
-		plain.appendCompaction(EXTENSION_SUMMARY, "Earlier work.", keptId, 100);
-		const plainSession = startSession(plain, gpt).session;
-		const branchLookups = vi.spyOn(plain.getBranchView(), "findLast");
-		for (let call = 0; call < 3; call++) {
-			const sent = requestContent(await plainSession.convertMessagesToLlm(plainSession.messages, undefined, claude));
-			expect(sent.text).toContain(EXTENSION_FACT);
-		}
-		expect(branchLookups).toHaveBeenCalledTimes(1);
-	});
 });

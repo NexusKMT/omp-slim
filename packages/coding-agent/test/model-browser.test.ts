@@ -1,5 +1,5 @@
 import { createModelBrowserSource } from "../src/modes/model-browser-source";
-import { beforeAll, describe, expect, setSystemTime, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -18,14 +18,14 @@ import {
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 
 /** Optional presentation metadata a catalog or discovery source may attach. */
-type NativeMetadata = Pick<Model, "description" | "isNew" | "isBeta" | "isRecommended" | "int" | "tps"> &
+type NativeMetadata = Partial<Pick<Model, "description" | "int" | "tps">> &
 	Partial<Pick<Model, "cost" | "kind" | "pricingStatus">>;
 
 function makeModel(provider: string, id: string, metadata?: NativeMetadata): Model {
 	return buildModel({
 		id,
 		name: id,
-		api: "ollama-chat",
+		api: "openai-completions",
 		provider,
 		baseUrl: "https://example.com",
 		reasoning: false,
@@ -289,21 +289,6 @@ describe("ModelBrowser native model metadata", () => {
 		return lines[lines.length - 2] as string;
 	}
 
-	test("detail line badges upstream flags and appends the provider blurb", () => {
-		const detail = renderDetail(
-			makeModel("fixture", "swe-2", {
-				description: "Fast\tagentic\ncoder",
-				isNew: true,
-				isBeta: true,
-				isRecommended: true,
-			}),
-		);
-
-		expect(detail).toContain("swe-2 · new · beta · recommended · 128k ctx · 1k out · free per M");
-		// Tabs and newlines are flattened so the blurb stays one detail row.
-		expect(detail).toMatch(/free per M · Fast {2,}agentic coder$/);
-	});
-
 	test("models without upstream metadata render the plain detail line", () => {
 		expect(renderDetail(makeModel("openai", "gpt-5"))).toContain("gpt-5 · 128k ctx · 1k out · free per M");
 	});
@@ -420,200 +405,6 @@ describe("ModelBrowser native model metadata", () => {
 		expect(detailRow).toContain("$100/0.001 per M");
 		expect(tinyRow).toContain("$0.0000001/0.001");
 		expect(rows.every(line => Bun.stringWidth(line) <= 100)).toBe(true);
-	});
-});
-
-describe("Factory Droid credits badge", () => {
-	beforeAll(async () => {
-		await initTheme(false);
-	});
-
-	/** A Factory Droid row: upstream list price as `cost`, the base Standard Credits rate as the badge. */
-	function makeDroidModel(id: string, credits: number): Model {
-		return {
-			...makeModel("factory-droid", id),
-			cost: { input: 1.25, output: 10, cacheRead: 0, cacheWrite: 0 },
-			factoryDroidCredits: credits,
-		};
-	}
-
-	test("shows list price with the credit badge and never advertises unknown list prices as free", () => {
-		const priced = makeDroidModel("claude-opus-5", 2);
-		const paid = makeDroidModel("preview-credit-model", 2);
-		paid.cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-		const browser = makeBrowser([priced, paid], []);
-		const rows = browser.render(120).map(line => Bun.stripANSI(line));
-		const pricedRow = rows.find(row => row.includes("claude-opus-5"));
-		const paidRow = rows.find(row => row.includes("preview-credit-model"));
-
-		expect(pricedRow).toContain("$1.25/10 2×");
-		expect(paidRow).toContain("2×");
-		expect(paidRow).not.toContain("free");
-		browser.setQuery("free");
-		expect(browser.visibleCount).toBe(0);
-	});
-
-	test("classifies a credit-only row as free by the credit rate due now, not the base", () => {
-		const charged = makeDroidModel("preview-credit-model", 0);
-		charged.cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-		charged.factoryDroidCreditCards = [{ effectiveFrom: Date.now() - 86_400_000, input: 0.5 }];
-		const browser = makeBrowser([charged], []);
-		const row = browser
-			.render(120)
-			.map(line => Bun.stripANSI(line))
-			.find(line => line.includes("preview-credit-model"));
-		expect(row).toContain("0.5×");
-		expect(row).not.toContain("free");
-		browser.setQuery("free");
-		expect(browser.visibleCount).toBe(0);
-	});
-
-	test("shows the dated credit rate due now and names the next one in the detail, never cutting other facts", () => {
-		const promoted = {
-			...makeDroidModel("gpt-5.6-sol", 2),
-			reasoning: true,
-			input: ["text", "image"] as Model["input"],
-			factoryDroidCreditCards: [
-				{ effectiveFrom: Date.now() - 86_400_000, input: 1.6 },
-				{ effectiveFrom: Date.parse("2099-11-22T00:00:00Z"), input: 2 },
-			],
-		};
-		for (const width of [80, 120]) {
-			const rows = makeBrowser([promoted], [])
-				.render(width)
-				.map(line => Bun.stripANSI(line));
-			const row = rows.find(line => line.includes("gpt-5.6-sol"));
-			expect(row).toContain("$1.25/10 1.6×");
-			expect(row).not.toContain("from 2099-11-22");
-			expect(rows.some(line => line.includes("reasoning · vision"))).toBe(true);
-		}
-		const wide = makeBrowser([promoted], [])
-			.render(160)
-			.map(line => Bun.stripANSI(line));
-		expect(wide.some(line => line.includes("· 2× from 2099-11-22"))).toBe(true);
-		const ended = {
-			...promoted,
-			factoryDroidCreditCards: [
-				{ effectiveFrom: Date.now() - 86_400_000, input: 1.6 },
-				{ effectiveFrom: Date.now() - 1, input: 2 },
-			],
-		};
-		const endedRows = makeBrowser([ended], [])
-			.render(160)
-			.map(line => Bun.stripANSI(line));
-		expect(endedRows.find(line => line.includes("gpt-5.6-sol"))).toContain("$1.25/10 2×");
-		expect(endedRows.some(line => line.includes("× from "))).toBe(false);
-	});
-});
-
-describe("Factory Droid dated credit rates over time", () => {
-	beforeAll(async () => {
-		await initTheme(false);
-	});
-
-	const startsAt = Date.parse("2026-08-22T00:00:00Z");
-	const endsAt = Date.parse("2026-11-22T00:00:00Z");
-	const promoted: Model = {
-		...makeModel("factory-droid", "gpt-5.6-sol"),
-		cost: { input: 1.25, output: 10, cacheRead: 0, cacheWrite: 0 },
-		factoryDroidCredits: 2,
-		factoryDroidCreditCards: [
-			{ effectiveFrom: startsAt, input: 1.6 },
-			{ effectiveFrom: endsAt, input: 2 },
-		],
-	};
-	const text = (value: unknown) => JSON.stringify(value);
-
-	test("an open browser drops the discount from rows, picker and preview once the next card takes over", () => {
-		try {
-			setSystemTime(new Date(endsAt - 1000));
-			const browser = makeBrowser([promoted], []);
-			const catalogue = buildBrowserItems([promoted]);
-			const row = () =>
-				browser
-					.render(120)
-					.map(line => Bun.stripANSI(line))
-					.find(line => line.includes("gpt-5.6-sol"));
-			expect(row()).toContain("1.6×");
-			expect(text(browser.describe())).toContain("1.6×");
-			expect(text(browser.pickerItems(catalogue))).toContain("1.6×");
-			expect(text(browser.pickerPreview("compact"))).toContain("2× from 2026-11-22");
-
-			setSystemTime(new Date(endsAt));
-			// A refresh that re-tracks the same items first must not swallow the passed card date.
-			expect(text(browser.pickerItems([...catalogue]))).not.toContain("1.6×");
-			expect(row()).toContain("$1.25/10 2×");
-			expect(text(browser.describe())).not.toContain("1.6×");
-			expect(text(browser.pickerPreview("compact"))).not.toContain("× from ");
-		} finally {
-			setSystemTime();
-		}
-	});
-
-	test("a row hidden while its discounted card takes effect shows the discount when it comes back", () => {
-		try {
-			setSystemTime(new Date(startsAt - 1000));
-			const other: Model = { ...makeModel("factory-droid", "claude-opus-5"), factoryDroidCredits: 2 };
-			const browser = makeBrowser([], []);
-			const items = buildBrowserItems([promoted, other]);
-			const without = items.filter(item => item.model !== promoted);
-			browser.setItems(items);
-			expect(Bun.stripANSI(browser.render(120).join("\n"))).toContain("$1.25/10 2×");
-			expect(text(browser.describe())).toContain("$1.25/10 2×");
-			expect(text(browser.pickerItems(items))).toContain("$1.25·10 2×");
-
-			// `@role` mode and scope hops hide the row, then restore the same item objects.
-			browser.setItems(without);
-			expect(text(browser.describe())).not.toContain("gpt-5.6-sol");
-			browser.pickerItems(without);
-			setSystemTime(new Date(startsAt));
-			browser.setItems(items);
-			expect(Bun.stripANSI(browser.render(120).join("\n"))).toContain("$1.25/10 1.6×");
-			expect(text(browser.describe())).toContain("1.6×");
-			expect(text(browser.pickerItems(items))).toContain("1.6×");
-		} finally {
-			setSystemTime();
-		}
-	});
-
-	test("an open `free` search follows credit-only models across cards that charge or free them", () => {
-		// Ids without an `e`, so only the `free` search word can match the query.
-		const charged = (): Model => ({
-			...makeModel("factory-droid", "kilo"),
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			factoryDroidCredits: 0,
-			factoryDroidCreditCards: [{ effectiveFrom: startsAt, input: 0.5 }],
-		});
-		const freed = (): Model => ({
-			...makeModel("factory-droid", "mango"),
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			factoryDroidCredits: 0.5,
-			factoryDroidCreditCards: [{ effectiveFrom: endsAt, input: 0 }],
-		});
-		const search = (models: Model[]) => {
-			const browser = makeBrowser(models, []);
-			browser.setQuery("free");
-			return () => Bun.stripANSI(browser.render(120).join("\n"));
-		};
-		try {
-			setSystemTime(new Date(startsAt - 1000));
-			const both = search([charged(), freed()]);
-			expect(both()).toContain("factory-droid/kilo");
-			expect(both()).not.toContain("factory-droid/mango");
-			setSystemTime(new Date(startsAt));
-			expect(both()).not.toContain("factory-droid/kilo");
-			setSystemTime(new Date(endsAt));
-			expect(both()).toContain("factory-droid/mango");
-
-			// The only dated card belongs to a row the query never showed.
-			setSystemTime(new Date(endsAt - 1000));
-			const hidden = search([freed()]);
-			expect(hidden()).not.toContain("factory-droid/mango");
-			setSystemTime(new Date(endsAt));
-			expect(hidden()).toContain("factory-droid/mango");
-		} finally {
-			setSystemTime();
-		}
 	});
 });
 

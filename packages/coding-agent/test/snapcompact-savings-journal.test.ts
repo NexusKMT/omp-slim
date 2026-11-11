@@ -13,7 +13,7 @@ function model(provider = "anthropic", id = "claude-test"): Model {
 	return buildModel({
 		id,
 		name: id,
-		api: "anthropic-messages",
+		api: "openai-completions",
 		provider,
 		baseUrl: "https://example.invalid",
 		reasoning: false,

@@ -89,7 +89,6 @@ function createCtx(overrides?: {
 			status: null,
 			pr: null,
 		},
-		usage: null,
 	};
 }
 

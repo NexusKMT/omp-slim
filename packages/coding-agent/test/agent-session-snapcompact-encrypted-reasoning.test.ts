@@ -53,7 +53,7 @@ describe("AgentSession snapcompact no-reduction guard: opaque reasoning", () => 
 					{ type: "thinking", thinking: "short", thinkingSignature: bigSignature },
 					{ type: "text", text: "first answer" },
 				],
-				api: "anthropic-messages",
+				api: "openai-completions",
 				provider: "anthropic",
 				model: "claude-sonnet-4-5",
 				stopReason: "stop",

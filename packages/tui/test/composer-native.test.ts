@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { TspKind } from "@oh-my-pi/pi-wire";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Container, Text } from "@oh-my-pi/pi-tui";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
@@ -535,7 +536,7 @@ describe("native composer first frame", () => {
 						api: "openai-completions",
 						baseUrl: "http://localhost:8000/v1",
 						reasoning: true,
-						thinking: { mode: "effort", efforts: ["low", "medium", "high"] },
+						thinking: { mode: "effort", efforts: [Effort.Low, Effort.Medium, Effort.High] },
 						input: ["text"],
 						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 						contextWindow: 32000,

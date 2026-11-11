@@ -22,7 +22,6 @@ import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { CompactionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { Message } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { closeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -60,7 +59,7 @@ describe("AgentSession snapcompact no-reduction guard", () => {
 			{
 				role: "assistant",
 				content: [{ type: "text", text: "first answer" }],
-				api: "anthropic-messages",
+				api: "openai-completions",
 				provider: "anthropic",
 				model: "claude-sonnet-4-5",
 				stopReason: "stop",
@@ -78,7 +77,7 @@ describe("AgentSession snapcompact no-reduction guard", () => {
 			{
 				role: "assistant",
 				content: [{ type: "text", text: "second answer" }],
-				api: "anthropic-messages",
+				api: "openai-completions",
 				provider: "anthropic",
 				model: "claude-sonnet-4-5",
 				stopReason: "stop",
@@ -184,7 +183,7 @@ describe("AgentSession snapcompact no-reduction guard", () => {
 
 	it("rejects non-shrinking remote/soft auto-compactions instead of committing tokensAfter >= tokensBefore", async () => {
 		const customSessionManager = SessionManager.inMemory();
-		const model = modelRegistry.find("anthropic", "claude-haiku-5-5");
+		const model = getBundledModel("anthropic", "claude-haiku-5-5", { contextWindow: 100_000 });
 		if (!model) throw new Error("Expected anthropic/claude-haiku-5-5 model in registry");
 		expect(model.contextWindow).toBe(100_000);
 
@@ -295,7 +294,7 @@ describe("AgentSession snapcompact no-reduction guard", () => {
 
 	it("compacts a 100k-window session at its configured 40% trigger and lands the result in the recovery band", async () => {
 		const customSessionManager = SessionManager.inMemory();
-		const model = modelRegistry.find("anthropic", "claude-haiku-5-5");
+		const model = getBundledModel("anthropic", "claude-haiku-5-5", { contextWindow: 100_000 });
 		if (!model) throw new Error("Expected anthropic/claude-haiku-5-5 model in registry");
 		expect(model.contextWindow).toBe(100_000);
 
@@ -397,7 +396,6 @@ describe("AgentSession snapcompact no-reduction guard on a resumed session that 
 		vi.restoreAllMocks();
 		setAgentDir(originalAgentDir);
 		// The model registry opened `<agentDir>/models.db`; Windows cannot delete an open database.
-		closeModelCache();
 		await tempDir?.remove();
 	});
 
@@ -406,7 +404,7 @@ describe("AgentSession snapcompact no-reduction guard on a resumed session that 
 		return {
 			role,
 			content: [{ type: "text", text: value }],
-			api: "anthropic-messages",
+			api: "openai-completions",
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 			stopReason: "stop",
