@@ -1,3 +1,4 @@
+import { discoverMcpOAuthStorage } from "../../mcp/oauth-storage";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { AgentBusyError, type AgentToolResult } from "@oh-my-pi/pi-agent-core";
@@ -3274,7 +3275,7 @@ export class AcpAgent implements Agent {
 		// `/mcp reauth` writes url-keyed credential rows; without the session's
 		// auth storage the manager cannot resolve them on reconnect and a
 		// successful reauthorization would leave the live server disconnected.
-		manager.setAuthStorage(record.session.modelRegistry.authStorage);
+		manager.setOAuthStorage(await discoverMcpOAuthStorage(record.session.settings.getAgentDir()));
 		// MCP servers connect and reconnect independently, so `onToolsChanged` can fire
 		// several times back to back. Each firing is chained onto `record.mcpRefreshChain`
 		// so refreshes apply in order, and each one re-reads `manager.getTools()` at the

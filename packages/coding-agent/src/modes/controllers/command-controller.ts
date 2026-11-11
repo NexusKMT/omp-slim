@@ -839,13 +839,12 @@ export class CommandController {
 	async handleFreshCommand(): Promise<void> {
 		const result = this.ctx.session.freshSession();
 		if (!result) {
-			this.ctx.showWarning("Wait for the current response to finish or abort it before refreshing provider state.");
+			this.ctx.showWarning("Wait for the current response to finish or abort it before starting a fresh session.");
 			return;
 		}
-		const stateLabel = result.closedProviderSessions === 1 ? "provider state" : "provider states";
 		this.ctx.statusLine.invalidate();
 		this.ctx.ui.requestRender();
-		this.ctx.showStatus(`Fresh provider session started (${result.closedProviderSessions} ${stateLabel} pruned).`);
+		this.ctx.showStatus("Fresh session started.");
 	}
 
 	async handleResetContextCommand(): Promise<void> {

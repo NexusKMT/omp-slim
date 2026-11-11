@@ -1,3 +1,4 @@
+import { discoverMcpOAuthStorage } from "../../mcp/oauth-storage";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getMCPConfigPath, logger } from "@oh-my-pi/pi-utils";
 import { connectToServer, disconnectServer, listPrompts, listResources, listTools } from "../../mcp/client";
@@ -217,7 +218,7 @@ async function withPreparedMcpConnection<T>(
 		// servers can refresh credentials and inject Authorization headers.
 		// Without this, `/mcp test|resources|prompts` silently fails for any
 		// server saved by the TUI/reauth path.
-		manager.setAuthStorage(runtime.session.modelRegistry.authStorage);
+		manager.setOAuthStorage(await discoverMcpOAuthStorage(runtime.settings.getAgentDir()));
 		const resolvedConfig = await manager.prepareConfig(config);
 		connection = await connectToServer(name, resolvedConfig);
 		return await fn(connection);
@@ -509,7 +510,7 @@ async function handleReauthCommand(rest: string, runtime: SlashCommandRuntime): 
 	const run = async (): Promise<SlashCommandResult> => {
 		try {
 			await reauthorizeMcpServer(name, found, {
-				authStorage: runtime.session.modelRegistry.authStorage,
+				oauthStorage: await discoverMcpOAuthStorage(runtime.settings.getAgentDir()),
 				signal: runtime.signal,
 				cwd: runtime.cwd,
 				onReauthorizing: () => emit(`Reauthorizing "${name}"… opening your browser (5 minute timeout).`),

@@ -16,6 +16,7 @@ import { loadSkills } from "../extensibility/skills";
 import { closeDaemonClients } from "../launch/client";
 import { discoverAndLoadMCPTools } from "../mcp/loader";
 import { MCPManager } from "../mcp/manager";
+import { discoverMcpOAuthStorage } from "../mcp/oauth-storage";
 import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
 import type { AuthStorage } from "../session/auth-storage";
 import type { ToolSession } from "../tools";
@@ -80,12 +81,11 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 		// MCP servers start only when a read reaches an MCP resource — `mcp://`, a scheme with no
 		// registered handler, or a skill:// URL no loaded skill owns — in any list entry.
 		MCPManager.setDeferredInstance(async () => {
-			authStorage ??= await discoverAuthStorage(undefined);
 			const result = await discoverAndLoadMCPTools(cwd, {
 				enableProjectConfig: cfgMcpEnableProjectConfig.get(settings),
 				filterExa: true,
 				cacheStorage: settings.getStorage(),
-				authStorage,
+				oauthStorage: await discoverMcpOAuthStorage(),
 			});
 			mcpManager = result.manager;
 			session.mcpManager = mcpManager;

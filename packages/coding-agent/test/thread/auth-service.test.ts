@@ -34,7 +34,7 @@ describe("auth thread service", () => {
 				providers: {
 					"unit-mirror": {
 						baseUrl: "https://unit-mirror.example.invalid/v1",
-						api: "chat",
+						api: "openai-completions",
 						apiKey: "mirror-config-key",
 						models: [{ id: "mirror-model", name: "Mirror Model" }],
 					},
@@ -42,6 +42,7 @@ describe("auth thread service", () => {
 			}),
 		);
 		registry = new ModelRegistry(storage, modelsPath);
+		if (registry.getError()) throw registry.getError();
 
 		const spawned = new Worker(new URL("../fixtures/auth-service-worker.ts", import.meta.url).href, {
 			type: "module",

@@ -11,7 +11,7 @@ import { logger, untilAborted } from "@oh-my-pi/pi-utils";
 import type { EffectiveExtensionRoots, SourceMeta } from "../capability/types";
 import { resolveConfigValue } from "../config/resolve-config-value";
 import type { CustomTool } from "../extensibility/custom-tools/types";
-import type { AuthStorage } from "../session/auth-storage";
+import type { MCPOAuthStorage } from "./oauth-storage";
 import {
 	MCPConnectionTimeoutError,
 	connectToServer,
@@ -375,7 +375,7 @@ export class MCPManager implements MCPManagerApi {
 	#startupServers = new Set<string>();
 	#startupFailures = new Map<string, string>();
 	#sources = new Map<string, SourceMeta>();
-	#authStorage: AuthStorage | null = null;
+	#oauthStorage: MCPOAuthStorage | null = null;
 	#authHandler?: MCPAuthHandler;
 	#notificationListeners = new Set<(serverName: string, method: string, params: unknown) => void>();
 	#connectionStatusListeners = new Set<(event: McpConnectionStatusEvent) => void>();
@@ -729,8 +729,8 @@ export class MCPManager implements MCPManagerApi {
 	/**
 	 * Set the auth storage for resolving OAuth credentials.
 	 */
-	setAuthStorage(authStorage: AuthStorage): void {
-		this.#authStorage = authStorage;
+	setOAuthStorage(oauthStorage: MCPOAuthStorage): void {
+		this.#oauthStorage = oauthStorage;
 	}
 
 	/** Set the callback used to complete OAuth after a tool-level auth challenge. */
@@ -936,7 +936,7 @@ export class MCPManager implements MCPManagerApi {
 					// too and need the same mid-session refresh hook.
 					if (
 						isAuthRefreshableMCPTransport(connection.transport) &&
-						lookupMcpOAuthCredential(this.#authStorage, config)
+						lookupMcpOAuthCredential(this.#oauthStorage, config)
 					) {
 						connection.transport.onAuthError = async () => {
 							const refreshed = await this.#resolveAuthConfig(config, { forceRefresh: true });
@@ -1867,7 +1867,7 @@ export class MCPManager implements MCPManagerApi {
 
 		// Wire auth refresh for HTTP-like transports, and reconnect for any transport.
 		// Same gate as connectServers: any resolvable managed credential.
-		if (isAuthRefreshableMCPTransport(connection.transport) && lookupMcpOAuthCredential(this.#authStorage, config)) {
+		if (isAuthRefreshableMCPTransport(connection.transport) && lookupMcpOAuthCredential(this.#oauthStorage, config)) {
 			connection.transport.onAuthError = async () => {
 				const refreshed = await this.#resolveAuthConfig(config, { forceRefresh: true });
 				if (refreshed.type === "http" || refreshed.type === "sse") {
@@ -2215,15 +2215,15 @@ export class MCPManager implements MCPManagerApi {
 
 		const auth = config.auth;
 		const lookup: MCPOAuthCredentialLookup | undefined =
-			opts?.oauth !== false ? lookupMcpOAuthCredential(this.#authStorage, config) : undefined;
-		const authStorage = this.#authStorage;
-		if (lookup && authStorage) {
+			opts?.oauth !== false ? lookupMcpOAuthCredential(this.#oauthStorage, config) : undefined;
+		const oauthStorage = this.#oauthStorage;
+		if (lookup && oauthStorage) {
 			const { credentialId } = lookup;
 			try {
 				let credential: MCPStoredOAuthCredential | undefined = lookup.credential;
 				// Stop waiting on abort; a refresh already running finishes so a rotated token is stored, not lost.
 				const refreshResult = await untilAborted(signal, () =>
-					refreshStoredManagedMcpOAuthCredential(authStorage, credentialId, {
+					refreshStoredManagedMcpOAuthCredential(oauthStorage, credentialId, {
 						serverUrl: config.type === "http" || config.type === "sse" ? config.url : undefined,
 						auth,
 						forceRefresh: opts?.forceRefresh,

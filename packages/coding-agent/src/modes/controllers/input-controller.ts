@@ -1782,7 +1782,7 @@ export class InputController {
 		// Steering pops first, as in `AgentSession.popLastQueuedMessage`. Behind a yield compaction,
 		// the session's follow-ups are older than it: the follow-ups it holds go next, then the request.
 		const queued = yieldCompaction ? this.ctx.viewSession.getQueuedMessages() : undefined;
-		if (!queued || queued.steering.length > queued.liveSteered) {
+		if (!queued || queued.steering.length > 0) {
 			const fromQueue = this.ctx.viewSession.popLastQueuedMessage();
 			if (fromQueue) return fromQueue;
 			if (this.ctx.focusedAgentId) return undefined;

@@ -5,12 +5,11 @@
  * by providing authorization URL, token URL, and client credentials.
  */
 
-import type { OAuthCallbackFlowOptions } from "@oh-my-pi/pi-ai/oauth/callback-server";
-import { OAuthCallbackFlow } from "@oh-my-pi/pi-ai/oauth/callback-server";
-import type { OAuthController, OAuthCredentials } from "@oh-my-pi/pi-ai/oauth/types";
+import type { OAuthCallbackFlowOptions } from "./oauth-callback";
+import { OAuthCallbackFlow } from "./oauth-callback";
+import type { OAuthController, OAuthCredentials } from "./oauth-types";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 import { getActiveProfile } from "@oh-my-pi/pi-utils/dirs";
-import type { OAuthCredential } from "../session/auth-storage";
 import { buildWellKnownUrls } from "./oauth-discovery";
 
 /** Credential-id prefix for OMP-managed MCP OAuth credentials keyed by profile and server URL. */
@@ -79,7 +78,8 @@ export function mcpOAuthServerUrlFromCredentialId(credentialId: string): string 
  * Stored MCP OAuth credential. Refresh material is embedded so token refresh
  * works without any `auth` block persisted in (possibly shared) config files.
  */
-export interface MCPStoredOAuthCredential extends OAuthCredential {
+export interface MCPStoredOAuthCredential extends OAuthCredentials {
+	type: "oauth";
 	tokenUrl?: string;
 	clientId?: string;
 	clientSecret?: string;
