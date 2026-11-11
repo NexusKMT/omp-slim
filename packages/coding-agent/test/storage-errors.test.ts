@@ -98,22 +98,22 @@ test("auth startup quarantines corruption and persists new credentials", async (
 	const dbPath = tempDir.join("auth.db");
 
 	const original = await SqliteAuthCredentialStore.open(dbPath);
-	await original.saveApiKey("damaged-provider", "damaged-secret");
+	await original.replaceAuthCredentials("damaged-provider", [{ type: "api_key", key: "damaged-secret" }]);
 	original.close();
 	const damaged = await corruptDatabase(dbPath);
 
 	const storage = await SqliteAuthCredentialStore.open(dbPath);
 	try {
-		expect(storage.listProviders()).toEqual([]);
-		expect(storage.getApiKey("damaged-provider")).toBeNull();
-		await storage.saveApiKey("recovered-provider", "recovered-secret");
+		expect(storage.listAuthCredentials()).toEqual([]);
+		expect(storage.listAuthCredentials("damaged-provider")[0]?.credential.key).toBeUndefined();
+		await storage.replaceAuthCredentials("recovered-provider", [{ type: "api_key", key: "recovered-secret" }]);
 	} finally {
 		storage.close();
 	}
 
 	const reopened = await SqliteAuthCredentialStore.open(dbPath);
 	try {
-		expect(reopened.getApiKey("recovered-provider")).toBe("recovered-secret");
+		expect(reopened.listAuthCredentials("recovered-provider")[0]?.credential.key).toBe("recovered-secret");
 	} finally {
 		reopened.close();
 	}
@@ -134,7 +134,7 @@ test("concurrent agent and auth startup share one private recovered database", a
 		]);
 		auth = openedAuth;
 		agent.recordModelUsage("openai/concurrent-recovery");
-		await auth.saveApiKey("concurrent-provider", "concurrent-secret");
+		await auth.replaceAuthCredentials("concurrent-provider", [{ type: "api_key", key: "concurrent-secret" }]);
 		expect(agent.getModelUsageOrder()).toEqual(["openai/concurrent-recovery"]);
 		expect(agent.listAuthCredentials("concurrent-provider")).toMatchObject([
 			{ credential: { type: "api_key", key: "concurrent-secret" } },

@@ -13,23 +13,9 @@ import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
 
-import {
-	cfgTierAdvisor,
-	cfgTierAnthropic,
-	cfgTierGoogle,
-	cfgTierOpenai,
-	cfgTierSubagent,
-} from "@oh-my-pi/pi-coding-agent/session/settings";
+import { cfgTierOpenai, cfgTierSubagent } from "@oh-my-pi/pi-coding-agent/session/settings";
 
-function requiredBundledModel(provider: "openai-codex" | "anthropic" | "google", id: string) {
-	const model = getBundledModel(provider, id);
-	if (!model) throw new Error(`Expected bundled model ${provider}/${id}`);
-	return model;
-}
-
-const openAIModel = requiredBundledModel("openai-codex", "gpt-5.6-sol");
-const anthropicModel = requiredBundledModel("anthropic", "claude-sonnet-4-5");
-const googleModel = requiredBundledModel("google", "gemini-2.5-flash");
+const openAIModel = getBundledModel("endpoint", "chat-model");
 
 // Locks the back-compat migration of the legacy single `serviceTier` enum (with
 // scoped `openai-only`/`claude-only` sentinels) plus `serviceTierSubagent`/
@@ -64,43 +50,36 @@ describe("serviceTier → tier.* settings migration", () => {
 		return Settings.init({ cwd: projectDir, agentDir });
 	}
 
-	it("expands unscoped priority to every family", async () => {
+	it("migrates unscoped priority to the Chat service tier", async () => {
 		const settings = await loadWith({ serviceTier: "priority" });
 		expect(cfgTierOpenai.get(settings)).toBe("priority");
-		expect(cfgTierAnthropic.get(settings)).toBe("priority");
-		expect(cfgTierGoogle.get(settings)).toBe("priority");
 	});
 
-	it("scopes openai-only/claude-only to a single family", async () => {
+	it("migrates the Chat legacy tier and retires the other protocol tier", async () => {
 		const openai = await loadWith({ serviceTier: "openai-only" });
 		expect(cfgTierOpenai.get(openai)).toBe("priority");
-		expect(cfgTierAnthropic.get(openai)).toBe("none");
-		expect(cfgTierGoogle.get(openai)).toBe("none");
 
 		const claude = await loadWith({ serviceTier: "claude-only" });
-		expect(cfgTierAnthropic.get(claude)).toBe("priority");
 		expect(cfgTierOpenai.get(claude)).toBe("none");
 	});
 
 	it("maps plain OpenAI tiers onto the OpenAI family", async () => {
 		const settings = await loadWith({ serviceTier: "flex" });
 		expect(cfgTierOpenai.get(settings)).toBe("flex");
-		expect(cfgTierAnthropic.get(settings)).toBe("none");
 	});
 
-	it("carries subagent/advisor over and drops scoped sentinels", async () => {
+	it("carries the subagent tier over and drops retired advisor settings", async () => {
 		const settings = await loadWith({
 			serviceTierSubagent: "claude-only",
 			serviceTierAdvisor: "flex",
 		});
 		expect(cfgTierSubagent.get(settings)).toBe("priority"); // claude-only → priority
-		expect(cfgTierAdvisor.get(settings)).toBe("flex");
 	});
 });
 
 describe("task.agentServiceTierOverrides", () => {
 	it("resolves every documented setting for the OpenAI family", () => {
-		const parentTiers: ServiceTierByFamily = { openai: "priority", anthropic: "priority", google: "flex" };
+		const parentTiers: ServiceTierByFamily = { openai: "priority" };
 
 		expect(resolveAgentServiceTierOverride("inherit", openAIModel, parentTiers)).toEqual(parentTiers);
 		expect(resolveAgentServiceTierOverride("none", openAIModel, parentTiers)).toEqual({});
@@ -136,16 +115,6 @@ describe("task.agentServiceTierOverrides", () => {
 		);
 		// An empty YAML mapping (`agentServiceTierOverrides:`) is `null`, not a typo.
 		expect(validateAgentServiceTierOverrides(null)).toEqual({});
-	});
-
-	it("applies concrete values only when the effective model family supports them", () => {
-		const inherited: ServiceTierByFamily = { openai: "priority", anthropic: "priority", google: "flex" };
-		expect(resolveAgentServiceTierOverride("priority", anthropicModel, inherited)).toEqual({
-			anthropic: "priority",
-		});
-		expect(resolveAgentServiceTierOverride("flex", googleModel, inherited)).toEqual({ google: "flex" });
-		expect(resolveAgentServiceTierOverride("scale", anthropicModel, inherited)).toEqual({});
-		expect(resolveAgentServiceTierOverride("default", googleModel, inherited)).toEqual({});
 	});
 
 	it("never broadcasts a concrete value across families when no model resolved", () => {

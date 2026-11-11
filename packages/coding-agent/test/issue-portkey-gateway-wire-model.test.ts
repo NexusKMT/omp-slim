@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
-import { resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -48,21 +46,11 @@ describe("Portkey gateway custom models", () => {
         input: [text]
         contextWindow: 1048576
         maxTokens: 131072
-        compat:
-          thinkingFormat: openai
-          supportsReasoningEffort: true
-          reasoningEffortMap:
-            minimal: none
-            low: low
-            medium: medium
-            high: high
-            xhigh: max
 `,
 		);
 		const registry = new ModelRegistry(authStorage, modelsPath);
 		const model = registry.find("gateway", "@modal/GLM-5-2-FP8");
 		expect(model).toBeDefined();
-		expect(resolveWireModelId(model!, Effort.High)).toBe("@modal/GLM-5-2-FP8");
-		expect(resolveWireModelId(model!, undefined)).toBe("@modal/GLM-5-2-FP8");
+		expect(model?.id).toBe("@modal/GLM-5-2-FP8");
 	});
 });

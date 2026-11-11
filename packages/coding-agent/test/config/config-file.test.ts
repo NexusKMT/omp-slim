@@ -23,6 +23,7 @@ const LEGACY_MODELS_JSON = JSON.stringify({
 		acme: {
 			baseUrl: "https://api.acme.test/v1",
 			apiKey: API_KEY,
+			models: [{ id: "chat-model" }],
 		},
 	},
 });

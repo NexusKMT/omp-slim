@@ -11,7 +11,6 @@ import { createSettingsHost } from "../src/config/settings-ui";
 describe("credential settings", () => {
 	it("marks every known credential, including those with no settings panel entry", () => {
 		for (const path of [
-			"auth.broker.token",
 			"searxng.token",
 			"searxng.basicPassword",
 			"dev.autoqaPush.token",
