@@ -369,7 +369,6 @@ async function createHeadlessSession(cwd: string, config: Config, agentId: strin
 		enableIrc: false,
 		disableExtensionDiscovery: true,
 		skipPythonPreflight: true,
-		cacheWarming: false,
 		agentId,
 	});
 	await session.modelRegistry.refresh();
