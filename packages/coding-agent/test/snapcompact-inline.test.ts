@@ -1,17 +1,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { Tokenizer } from "@oh-my-pi/pi-agent-core";
-import type {
-	AssistantMessage,
-	Context,
-	ImageContent,
-	Message,
-	Model,
-	TextContent,
-	ToolResultMessage,
-} from "@oh-my-pi/pi-ai";
-import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
+import type { AssistantMessage, Context, ImageContent, Message, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import toolResultNote from "../src/prompts/system/snapcompact-toolresult-note.md" with { type: "text" };
 import {
 	estimateInlineSavings,
@@ -21,7 +11,26 @@ import {
 } from "@oh-my-pi/pi-coding-agent/session/snapcompact-inline";
 import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import * as snapcompact from "@oh-my-pi/snapcompact";
-import { createAssistantMessage } from "./helpers/agent-session-setup";
+
+function createAssistantMessage(text: string): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text }],
+		api: "openai-completions",
+		provider: "custom",
+		model: "test-model",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp: 0,
+	};
+}
 
 /**
  * Token-dense deterministic word salad: each word is `w` + ≤5 digits, ~7
@@ -33,7 +42,7 @@ function denseText(words: number): string {
 
 /** Frame capacity of the high-capacity test shape. */
 const TEST_SHAPE = "6x12-dim";
-const DEFAULT_CAPACITY = snapcompact.geometry(snapcompact.resolveShape(undefined, TEST_SHAPE)).capacity;
+const DEFAULT_CAPACITY = snapcompact.geometry(snapcompact.resolveShape(TEST_SHAPE)).capacity;
 
 /**
  * Sized to span exactly 2 default-shape frames (~1.7x one frame's capacity):
@@ -68,15 +77,15 @@ function makeModel(
 		id?: string;
 		provider?: string;
 		input?: ("text" | "image")[];
-		api?: "anthropic-messages" | "google-generative-ai";
+		api?: "openai-completions";
 		baseUrl?: string;
 	} = {},
 ) {
 	return buildModel({
 		id: overrides.id ?? "test-model",
 		name: "Test Model",
-		api: overrides.api ?? "anthropic-messages",
-		provider: overrides.provider ?? "anthropic",
+		api: overrides.api ?? "openai-completions",
+		provider: overrides.provider ?? "custom",
 		baseUrl: overrides.baseUrl ?? "https://example.invalid",
 		reasoning: false,
 		input: overrides.input ?? ["text", "image"],
@@ -116,27 +125,14 @@ describe("SnapcompactInlineTransformer", () => {
 		expect(await transformer.transform(context, makeModel({ input: ["text"] }))).toBe(context);
 	});
 
-	it("is a no-op for models whose wire strips image input", async () => {
-		// Declares image input, but the Chat Completions guard replaces every
-		// image with a placeholder, so imaged tool results would reach it empty.
-		const model = getBundledModel("deepseek", "deepseek-v4-flash");
-		const options = withTestShape({ renderSystemPrompt: "all", renderToolResults: true });
-		const context = makeContext();
-		expect(await new SnapcompactInlineTransformer(options).transform(context, model)).toBe(context);
-		expect(
-			estimateInlineSavings({ options, model, systemPrompt: context.systemPrompt ?? [], messages: context.messages })
-				.visionCapable,
-		).toBe(false);
-	});
-
-	it("treats Copilot business/enterprise endpoints as vision-capable when the model input includes image", async () => {
+	it("uses explicit image capability for configured endpoints regardless of hostname", async () => {
 		const transformer = new SnapcompactInlineTransformer(
 			withTestShape({ renderSystemPrompt: "all", renderToolResults: true }),
 		);
-		for (const baseUrl of ["https://api.business.githubcopilot.com", "https://copilot-api.ghe.example.com"]) {
+		for (const baseUrl of ["https://custom.example/v1", "http://localhost:8080/v1"]) {
 			const context = makeContext();
 			const model = makeModel({
-				provider: "github-copilot",
+				provider: "custom",
 				baseUrl,
 				input: ["text", "image"],
 			});
@@ -184,29 +180,24 @@ describe("SnapcompactInlineTransformer", () => {
 		expect(result.systemPrompt).toBe(context.systemPrompt);
 	});
 
-	it("images a large `read` result only for a reader whose catalog rule opts in", async () => {
+	it("images read results only when the user enables tool-result imaging, with no model-name rule", async () => {
 		const context: Context = {
 			systemPrompt: ["system"],
 			messages: [userMessage("go"), toolResult("read-1", LARGE, "read"), toolResult("grep-1", LARGE, "grep")],
 		};
 		const imaged = (message: Message) =>
 			message.role === "toolResult" && message.content.slice(1).some(block => block.type === "image");
-		const options = withTestShape({ renderSystemPrompt: "none", renderToolResults: true });
-
-		// Opus 5.5 opts in: both results go out as frames.
-		const opus = await new SnapcompactInlineTransformer(options).transform(
-			context,
-			makeModel({ id: "claude-opus-5-5" }),
-		);
-		expect(opus.messages.map(imaged)).toEqual([false, true, true]);
-
-		// Haiku 5.5 does not: `read` keeps its text, other tools are still imaged.
-		const haiku = await new SnapcompactInlineTransformer(options).transform(
-			context,
-			makeModel({ id: "claude-haiku-5-5" }),
-		);
-		expect(haiku.messages[1]).toBe(context.messages[1]);
-		expect(haiku.messages.map(imaged)).toEqual([false, false, true]);
+		for (const id of ["model-one", "model-two"]) {
+			const model = makeModel({ id });
+			const enabled = await new SnapcompactInlineTransformer(
+				withTestShape({ renderSystemPrompt: "none", renderToolResults: true }),
+			).transform(context, model);
+			expect(enabled.messages.map(imaged)).toEqual([false, true, true]);
+			const disabled = await new SnapcompactInlineTransformer(
+				withTestShape({ renderSystemPrompt: "none", renderToolResults: false }),
+			).transform(context, model);
+			expect(disabled).toBe(context);
+		}
 	});
 
 	it("renders a `read` result with indentation as count brackets and its snapshot header as text", async () => {
@@ -258,7 +249,7 @@ describe("SnapcompactInlineTransformer", () => {
 
 			// The brackets cost cells: planning counts frames on the encoded body,
 			// so /context and the image cap see what the request carries.
-			const shape = snapcompact.resolveShape(model, TEST_SHAPE);
+			const shape = snapcompact.resolveShape(TEST_SHAPE);
 			expect(snapcompact.frames(raw, { shape })).toBeLessThan(frames.length);
 			const estimate = estimateInlineSavings({
 				options,
@@ -470,7 +461,6 @@ describe("SnapcompactInlineTransformer", () => {
 			data: "dG9vbC1pbWFnZS1ieXRlcw==",
 			mimeType: "image/webp",
 			detail: "original",
-			providerFile: { provider: "anthropic", id: "file_tool_source" },
 			url: "https://images.example.invalid/tool-source.webp",
 		};
 		const secondToolImage: ImageContent = {
@@ -645,20 +635,16 @@ describe("SnapcompactInlineTransformer", () => {
 
 	it("never rasterizes tool results under the 3k-token floor, even when frames are cheaper", async () => {
 		const transformer = new SnapcompactInlineTransformer({ renderSystemPrompt: "none", renderToolResults: true });
-		// ~1.7k soft tokens: the google shape estimates 1 frame ≈ 1120 tokens, so the
-		// savings gate alone would rasterize this — the floor must keep it text.
+		// Short tool results remain text under the generic floor and frame estimate.
 		const midsize = denseText(900);
 		const context: Context = {
 			messages: [userMessage("go"), toolResult("call_1", midsize)],
 		};
-		const result = await transformer.transform(
-			context,
-			makeModel({ api: "google-generative-ai", provider: "google" }),
-		);
+		const result = await transformer.transform(context, makeModel());
 		expect(result).toBe(context);
 	});
 
-	it("respects the per-provider image budget for unknown providers", async () => {
+	it("respects the generic image budget on every configured endpoint", async () => {
 		const transformer = new SnapcompactInlineTransformer(
 			withTestShape({ renderSystemPrompt: "none", renderToolResults: true }),
 		);
@@ -671,7 +657,7 @@ describe("SnapcompactInlineTransformer", () => {
 				toolResult("call_4", LARGE),
 			],
 		};
-		// Unknown provider → default budget 5. Each LARGE needs 2 frames:
+		// The generic request budget is 5 images. Each LARGE needs 2 frames:
 		// call_1 (2) + call_2 (2) fit, call_3 needs 2 > 1 remaining → text.
 		const result = await transformer.transform(context, makeModel({ provider: "groq" }));
 		expect(imageCount(result)).toBeLessThanOrEqual(5);
@@ -679,7 +665,7 @@ describe("SnapcompactInlineTransformer", () => {
 		expect(result.messages[4]).toBe(context.messages[4]);
 	});
 
-	it("truthfully skips swaps when source images consume the provider budget", async () => {
+	it("truthfully skips swaps when source images consume the request budget", async () => {
 		const options = withTestShape({ renderSystemPrompt: "all", renderToolResults: true });
 		const sourceImages: ImageContent[] = Array.from({ length: 5 }, (_, index) => ({
 			type: "image",
@@ -748,7 +734,7 @@ describe("SnapcompactInlineTransformer", () => {
 		}
 	});
 
-	it("stamps a cap retraction of an already-sent result so thinking bound to its frames is dropped", async () => {
+	it("stamps a cap retraction of an already-sent result without changing retained history", async () => {
 		const transformer = new SnapcompactInlineTransformer(
 			withTestShape({ renderSystemPrompt: "none", renderToolResults: true }),
 		);
@@ -783,27 +769,10 @@ describe("SnapcompactInlineTransformer", () => {
 		const retracted = after.messages[3] as ToolResultMessage;
 		expect(retracted.content).toEqual(history[3].content as ToolResultMessage["content"]);
 		expect(retracted.prunedAt).toBe(6);
-
-		// A prefix-binding provider drops only the thinking minted against the frames.
-		const anthropic = makeModel();
-		const bindingModel = {
-			...anthropic,
-			thinking: { ...anthropic.thinking, prefixBinding: true },
-		} as Model<"anthropic-messages">;
-		const replayed = transformMessages(after.messages, bindingModel);
-		const thinkingByTurn = replayed
-			.filter(message => message.role === "assistant")
-			.map(message => message.content.some(block => block.type === "thinking"));
-		expect(thinkingByTurn).toEqual([true, false, true]);
 	});
 
 	describe("successive cap crossings", () => {
 		const model = makeModel({ provider: "groq" });
-		const anthropic = makeModel();
-		const bindingModel = {
-			...anthropic,
-			thinking: { ...anthropic.thinking, prefixBinding: true },
-		} as Model<"anthropic-messages">;
 		const screenshot: ImageContent = { type: "image", data: "c2NyZWVuc2hvdA==", mimeType: "image/png" };
 		const paste = (timestamp: number): Message => ({ role: "user", content: [screenshot, screenshot], timestamp });
 		const thinkingTurn = (timestamp: number): AssistantMessage => ({
@@ -815,12 +784,6 @@ describe("SnapcompactInlineTransformer", () => {
 			model: "test-model",
 			timestamp,
 		});
-		const thinkingKept = (messages: Message[]) =>
-			Object.fromEntries(
-				transformMessages(messages, bindingModel)
-					.filter(message => message.role === "assistant")
-					.map(message => [message.timestamp, message.content.some(block => block.type === "thinking")]),
-			);
 
 		it("stamps a result at the later crossing that retracted it, not the first", async () => {
 			const transformer = new SnapcompactInlineTransformer(
@@ -848,7 +811,6 @@ describe("SnapcompactInlineTransformer", () => {
 			expect(imageCount(afterSecond)).toBe(4);
 			expect((afterSecond.messages[1] as ToolResultMessage).prunedAt).toBe(8);
 			expect((afterSecond.messages[3] as ToolResultMessage).prunedAt).toBe(6);
-			expect(thinkingKept(afterSecond.messages)).toEqual({ 3: false, 5: false, 7: false, 9: true });
 		});
 
 		it("stamps a system-prompt retraction at its own crossing after a tool result's", async () => {
@@ -877,7 +839,6 @@ describe("SnapcompactInlineTransformer", () => {
 			const carrier = afterSecond.messages[0] as Extract<Message, { role: "user" }>;
 			expect(carrier.historyRewriteAt).toBe(6);
 			expect((afterSecond.messages[1] as ToolResultMessage).prunedAt).toBe(4);
-			expect(thinkingKept(afterSecond.messages)).toEqual({ 3: false, 5: false, 7: true });
 		});
 	});
 
@@ -916,7 +877,7 @@ describe("SnapcompactInlineTransformer", () => {
 					// The newest result is imaged on its first send.
 					expect(imageCount({ messages: [sent.messages[2]] })).toBe(2);
 				}
-				expect(imageCount(sent)).toBeLessThanOrEqual(snapcompact.providerImageBudget(model));
+				expect(imageCount(sent)).toBeLessThanOrEqual(snapcompact.DEFAULT_IMAGE_BUDGET);
 				previous = sent;
 			}
 		}
@@ -924,7 +885,7 @@ describe("SnapcompactInlineTransformer", () => {
 });
 
 describe("planInlineSwaps", () => {
-	const shape = snapcompact.resolveShape({ api: "anthropic-messages" });
+	const shape = snapcompact.resolveShape();
 	const toolOnly = { renderSystemPrompt: "none" as const, renderToolResults: true };
 	const promptOnly = { renderSystemPrompt: "all" as const, renderToolResults: false };
 
@@ -937,11 +898,11 @@ describe("planInlineSwaps", () => {
 			toolResults: [
 				{ id: "empty", textTokens: 0, frames: 0, imagesThrough: 0 },
 				{ id: "small", textTokens: 2999, frames: 1, imagesThrough: 0 },
-				// 2 frames ≈ 6272 image tokens > 6900 * 0.9 — margin gate rejects.
+				// 2 frames ≈ 10048 image tokens > 6900 * 0.9 — margin gate rejects.
 				{ id: "margin", textTokens: 6900, frames: 2, imagesThrough: 0 },
-				{ id: "err", textTokens: 10000, frames: 2, isError: true, imagesThrough: 0 },
-				{ id: "ok", textTokens: 10000, frames: 2, imagesThrough: 0 },
-				{ id: "newest", textTokens: 10000, frames: 2, imagesThrough: 0 },
+				{ id: "err", textTokens: 15000, frames: 2, isError: true, imagesThrough: 0 },
+				{ id: "ok", textTokens: 15000, frames: 2, imagesThrough: 0 },
+				{ id: "newest", textTokens: 15000, frames: 2, imagesThrough: 0 },
 			],
 			systemPrompt: undefined,
 			hasUserMessage: true,
@@ -957,10 +918,10 @@ describe("planInlineSwaps", () => {
 			imageLimit: 3,
 			existingImages: 0,
 			toolResults: [
-				{ id: "a", textTokens: 10000, frames: 2, imagesThrough: 0 },
-				{ id: "b", textTokens: 10000, frames: 2, imagesThrough: 0 },
-				{ id: "c", textTokens: 5000, frames: 1, imagesThrough: 0 },
-				{ id: "d", textTokens: 10000, frames: 2, imagesThrough: 0 },
+				{ id: "a", textTokens: 15000, frames: 2, imagesThrough: 0 },
+				{ id: "b", textTokens: 15000, frames: 2, imagesThrough: 0 },
+				{ id: "c", textTokens: 7500, frames: 1, imagesThrough: 0 },
+				{ id: "d", textTokens: 15000, frames: 2, imagesThrough: 0 },
 			],
 			systemPrompt: undefined,
 			hasUserMessage: true,
@@ -976,10 +937,10 @@ describe("planInlineSwaps", () => {
 			imageLimit: 6,
 			existingImages: 0,
 			toolResults: [
-				{ id: "a", textTokens: 10000, frames: 2, imagesThrough: 0 },
-				{ id: "b", textTokens: 10000, frames: 2, imagesThrough: 0 },
+				{ id: "a", textTokens: 15000, frames: 2, imagesThrough: 0 },
+				{ id: "b", textTokens: 15000, frames: 2, imagesThrough: 0 },
 			],
-			systemPrompt: { textTokens: 10000, frames: 2, imagesThrough: 0 },
+			systemPrompt: { textTokens: 15000, frames: 2, imagesThrough: 0 },
 			hasUserMessage: true,
 			imageReadResults: false,
 		};
@@ -990,7 +951,7 @@ describe("planInlineSwaps", () => {
 		// A newer result that no longer fits stays text; the prompt keeps its frames.
 		const grown = planInlineSwaps({
 			...input,
-			toolResults: [...input.toolResults, { id: "c", textTokens: 10000, frames: 2, imagesThrough: 0 }],
+			toolResults: [...input.toolResults, { id: "c", textTokens: 15000, frames: 2, imagesThrough: 0 }],
 		});
 		expect(grown.systemPrompt).toEqual(first.systemPrompt);
 		expect(grown.toolResults.map(swap => swap.id)).toEqual(["a", "b"]);
@@ -1014,13 +975,13 @@ describe("planInlineSwaps", () => {
 		};
 		// 7 frames exceeds the 6-frame system prompt cap.
 		expect(
-			planInlineSwaps({ ...base, systemPrompt: { textTokens: 100000, frames: 7, imagesThrough: 0 } }).systemPrompt,
+			planInlineSwaps({ ...base, systemPrompt: { textTokens: 150000, frames: 7, imagesThrough: 0 } }).systemPrompt,
 		).toBeUndefined();
-		// 6 frames ≈ 18816 ≤ 30000 * 0.9 — fits.
+		// 6 frames ≈ 30144 ≤ 45000 * 0.9 — fits.
 		expect(
-			planInlineSwaps({ ...base, systemPrompt: { textTokens: 30000, frames: 6, imagesThrough: 0 } }).systemPrompt,
+			planInlineSwaps({ ...base, systemPrompt: { textTokens: 45000, frames: 6, imagesThrough: 0 } }).systemPrompt,
 		).toBeDefined();
-		// 2 frames ≈ 6272 > 6900 * 0.9 — margin gate rejects.
+		// 2 frames ≈ 10048 > 6900 * 0.9 — margin gate rejects.
 		expect(
 			planInlineSwaps({ ...base, systemPrompt: { textTokens: 6900, frames: 2, imagesThrough: 0 } }).systemPrompt,
 		).toBeUndefined();
@@ -1030,7 +991,7 @@ describe("planInlineSwaps", () => {
 				...base,
 				hasUserMessage: false,
 				imageReadResults: false,
-				systemPrompt: { textTokens: 30000, frames: 6, imagesThrough: 0 },
+				systemPrompt: { textTokens: 45000, frames: 6, imagesThrough: 0 },
 			}).systemPrompt,
 		).toBeUndefined();
 	});
@@ -1061,10 +1022,10 @@ describe("estimateInlineSavings", () => {
 		expect(estimate.visionCapable).toBe(true);
 		expect(estimate.systemPrompt?.applied).toBe(true);
 		expect(estimate.systemPrompt?.frames).toBe(2);
-		// Anthropic wire, unclassified model: the high-res tier's 56² per 1568px frame.
-		expect(snapcompact.resolveShape(model, TEST_SHAPE).frameTokenEstimate).toBe(56 * 56);
+		// Every endpoint uses the same conservative frame estimate.
+		expect(snapcompact.resolveShape(TEST_SHAPE).frameTokenEstimate).toBe(snapcompact.FRAME_TOKEN_ESTIMATE);
 		expect(estimate.systemPrompt?.imageTokens).toBe(
-			estimate.systemPrompt!.frames * snapcompact.resolveShape(model, TEST_SHAPE).frameTokenEstimate,
+			estimate.systemPrompt!.frames * snapcompact.resolveShape(TEST_SHAPE).frameTokenEstimate,
 		);
 		expect(estimate.systemPrompt?.savedTokens).toBe(
 			estimate.systemPrompt!.textTokens - estimate.systemPrompt!.imageTokens,
