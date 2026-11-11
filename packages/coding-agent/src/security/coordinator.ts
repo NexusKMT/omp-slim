@@ -239,7 +239,6 @@ async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInp
 		settings: scanSettings,
 		model: input.model,
 		getApiKey: createSecurityAuthResolver({
-			authStorage: input.host.authStorage,
 			auth: input.plan.account,
 			providerResolver: model => input.host.modelRegistry.resolver(model, providerSessionId),
 		}),
