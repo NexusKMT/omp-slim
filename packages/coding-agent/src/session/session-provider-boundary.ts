@@ -210,7 +210,7 @@ export class SessionProviderBoundary {
 	}
 
 	/** Applies session-level stream hooks and provider defaults to a side request. */
-	prepareSimpleStreamOptions(options: SimpleStreamOptions, provider = "anthropic"): SimpleStreamOptions {
+	prepareSimpleStreamOptions(options: SimpleStreamOptions, provider = this.#host.agent.state.model?.provider ?? ""): SimpleStreamOptions {
 		const sessionOnPayload = this.#host.onPayload;
 		const sessionOnResponse = this.#host.onResponse;
 		const sessionMetadata = this.#host.agent.metadataForProvider(provider);

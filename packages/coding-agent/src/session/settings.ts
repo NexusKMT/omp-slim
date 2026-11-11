@@ -228,19 +228,6 @@ export const cfgModelLoopGuardCheckAssistantContent = register({
 	},
 });
 
-export const cfgModelLoopGuardToolCallReminder = register({
-	id: "loopGuard.toolCallReminder",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "model",
-		group: "Thinking",
-		label: "Loop Guard Tool-Call Reminder",
-		description:
-			"When a Gemini reasoning stream emits many consecutive planning headers without calling a tool, interrupt it and inject a reminder to issue a tool call (requires Loop Guard)",
-	},
-});
-
 export const cfgModelToolCallLoopGuardEnabled = register({
 	id: "toolCallLoopGuard.enabled",
 	type: "boolean",
