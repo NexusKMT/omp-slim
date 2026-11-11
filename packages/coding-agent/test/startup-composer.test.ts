@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { clearOmpExtensionCliRoots } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
 import { Composer, type ComposerPreferences } from "@oh-my-pi/pi-tui/prompt/composer";

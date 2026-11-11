@@ -419,8 +419,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 
 	/**
 	 * Asked after the complete provider context has been built, including
-	 * message conversion, provider transforms, normalized tools, and owned
-	 * dialect prompt injection. Returning {@link AgentPreModelCallStop} ends
+	 * message conversion, provider transforms, and normalized tools. Returning {@link AgentPreModelCallStop} ends
 	 * the stream without emitting `turn_start`, so no turn is left open and no
 	 * request is billed. Return nothing to proceed. The signal aborts when
 	 * the run is canceled or its deadline expires.

@@ -8,7 +8,6 @@
  */
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getEffectiveTokenCost, getModelPricingStatus } from "@oh-my-pi/pi-catalog/models";
 import { modelKind, type ModelKind, type ModelPricingStatus } from "@oh-my-pi/pi-catalog/types";
 import type { Component } from "../tui";
@@ -960,18 +959,8 @@ export class ModelBrowser implements Component {
 				id: "separator",
 				provider: "",
 				selector: "separator",
-				model: buildModel({
-					id: "separator",
-					name: "separator",
-					api: "ollama-chat",
-					provider: "",
-					baseUrl: "",
-					reasoning: false,
-					input: ["text"],
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-					contextWindow: 0,
-					maxTokens: 0,
-				}),
+				// The disabled divider carries an existing row's metadata; it never represents an executable model.
+				model: filtered[firstNonRecentIndex]!.model,
 			};
 			return [...filtered.slice(0, firstNonRecentIndex), separatorItem, ...filtered.slice(firstNonRecentIndex)];
 		}

@@ -11,7 +11,6 @@ export * from "./output-budget";
 // Process-global pause gate
 export * from "./pause";
 // Proxy utilities
-export * from "./proxy";
 // Replay policy
 export * from "./replay-policy";
 // Run-level telemetry collector + aggregators

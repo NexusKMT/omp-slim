@@ -515,7 +515,6 @@ class ModelInfo:
     """Null when the provider does not report a limit."""
     headers: dict[str, str] | None = None
     premium_multiplier: float | None = None
-    prefer_websockets: bool | None = None
     context_promotion_target: str | None = None
     priority: int | None = None
     thinking: ThinkingConfig | None = None
@@ -550,8 +549,6 @@ class QueuedMessagesState:
     """Displayable queue-chip text for pending user-authored messages; accepted verbatim by `remove_queued_message`."""
     steering: tuple[str, ...]
     follow_up: tuple[str, ...]
-    live_steered: int = 0
-    """Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them."""
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -613,7 +610,7 @@ class SessionState:
     """Background jobs or deliveries can still inject a follow-up and wake the session."""
     is_settled: bool = False
     """Idle with nothing queued or pending; same predicate as `session_settled`."""
-    queued_messages: QueuedMessagesState = field(default_factory=lambda: parse_queued_messages_state({"steering": [], "followUp": [], "liveSteered": 0}, "queuedMessages"))
+    queued_messages: QueuedMessagesState = field(default_factory=lambda: parse_queued_messages_state({"steering": [], "followUp": []}, "queuedMessages"))
     todo_phases: tuple[TodoPhase, ...] = ()
     system_prompt: tuple[str, ...] = ()
     """System prompt sections, for session dumps."""
@@ -1178,8 +1175,6 @@ class QueueUpdateEvent:
     type: Literal["queue_update"] = "queue_update"
     steering: tuple[str, ...]
     follow_up: tuple[str, ...]
-    live_steered: int = 0
-    """Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them."""
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1776,7 +1771,6 @@ def parse_model_info(value: object, path: str = "ModelInfo") -> ModelInfo:
         max_tokens=required(payload, "maxTokens", nullable(decode_int), path),
         headers=optional(payload, "headers", record(decode_str), path),
         premium_multiplier=optional(payload, "premiumMultiplier", decode_float, path),
-        prefer_websockets=optional(payload, "preferWebsockets", decode_bool, path),
         context_promotion_target=optional(payload, "contextPromotionTarget", decode_str, path),
         priority=optional(payload, "priority", decode_int, path),
         thinking=optional(payload, "thinking", parse_thinking_config, path),
@@ -1817,7 +1811,6 @@ def parse_queued_messages_state(value: object, path: str = "QueuedMessagesState"
     return QueuedMessagesState(
         steering=required(payload, "steering", array(decode_str), path),
         follow_up=required(payload, "followUp", array(decode_str), path),
-        live_steered=defaulted(payload, "liveSteered", decode_int, path, 0),
     )
 
 
@@ -1884,7 +1877,7 @@ def parse_session_state(value: object, path: str = "SessionState") -> SessionSta
         queued_message_count=defaulted(payload, "queuedMessageCount", decode_int, path, 0),
         has_pending_async_work=defaulted(payload, "hasPendingAsyncWork", decode_bool, path, False),
         is_settled=defaulted(payload, "isSettled", decode_bool, path, False),
-        queued_messages=defaulted(payload, "queuedMessages", parse_queued_messages_state, path, parse_queued_messages_state({"steering": [], "followUp": [], "liveSteered": 0}, path)),
+        queued_messages=defaulted(payload, "queuedMessages", parse_queued_messages_state, path, parse_queued_messages_state({"steering": [], "followUp": []}, path)),
         todo_phases=defaulted(payload, "todoPhases", array(parse_todo_phase), path, ()),
         system_prompt=defaulted(payload, "systemPrompt", scalar_or_array(decode_str), path, ()),
         dump_tools=defaulted(payload, "dumpTools", array(parse_tool_descriptor), path, ()),
@@ -2520,7 +2513,6 @@ def parse_queue_update_event(value: object, path: str = "QueueUpdateEvent") -> Q
     return QueueUpdateEvent(
         steering=required(payload, "steering", array(decode_str), path),
         follow_up=required(payload, "followUp", array(decode_str), path),
-        live_steered=defaulted(payload, "liveSteered", decode_int, path, 0),
     )
 
 

@@ -358,20 +358,6 @@ interface PromptSurface {
 	evalToolNames: readonly string[];
 }
 
-/**
- * Tool roster a committed base prompt rendered, captured for prefix-bound
- * models. While a roster change is held out of that prompt, a forced rebuild
- * re-renders this roster first (see `SessionTools.#prepareHeldRosterPrompt`).
- */
-interface PromptRoster {
-	/** Active tool names the render listed. */
-	readonly toolNames: string[];
-	/** Registry entries the render could read. */
-	readonly tools: Map<string, AgentTool>;
-	/** `xd://` state over {@link tools} with the mounts the render listed. */
-	readonly xdev: XdevState | undefined;
-}
-
 interface PendingNoticePreview<T> {
 	notice: CustomMessage<T> | undefined;
 	/**
@@ -413,13 +399,7 @@ export class SessionTools {
 	 * override hides it, the complete pending delta still does.
 	 */
 	#basePromptReflectsRosterDelta = false;
-	/**
-	 * Newest assistant reply restored with the transcript this session was
-	 * created with, and the recorded digest of the prompt that transcript was
-	 * sent with, until this session's first primary model call; see
-	 * {@link #implicitRebuildBinding}.
-	 */
-	#restoredTranscript: { reply: AgentMessage; promptDigest: string } | undefined;
+
 	/** Base-prompt digest of the last primary model call, until its reply ends. */
 	#capturedPromptDigest: string | undefined;
 	/** Base-prompt digest each primary reply with provider output was produced under. */
@@ -454,10 +434,7 @@ export class SessionTools {
 	/** The latest per-turn override and the base its hook was given; kept after the turn ends. */
 	#lastTurnSystemPromptOverride: { prompt: string[]; base: string[] } | undefined;
 	#lastAppliedToolSignature: string | undefined;
-	/** Roster {@link #baseSystemPrompt} rendered; captured only for prefix-bound models. */
-	#basePromptRoster: PromptRoster | undefined;
-	/** A frozen roster change is held out of {@link #baseSystemPrompt}, riding notices instead. */
-	#promptRosterHeld = false;
+
 	/** Full enabled set, including tools demoted from the model-visible surface. */
 	#enabledToolNames = new Set<string>();
 	/**
@@ -574,12 +551,6 @@ export class SessionTools {
 		if (this.#xdev) this.#xdev.decorateExecution = tool => this.#wrapToolForAcpPermission(tool);
 		this.#setActiveToolNames = options.setActiveToolNames;
 		this.#baseSystemPrompt = options.baseSystemPrompt;
-		const restoredReply = this.#latestReply();
-		const restoredPromptDigest = restoredReply && this.recordedPromptDigest();
-		this.#restoredTranscript =
-			restoredReply && restoredPromptDigest
-				? { reply: restoredReply, promptDigest: restoredPromptDigest }
-				: undefined;
 		this.#skills = options.skills ?? [];
 		this.#promptSkills = this.#skills;
 		this.#skillWarnings = options.skillWarnings ?? [];
@@ -1514,9 +1485,6 @@ export class SessionTools {
 
 		let rebuiltSystemPrompt: string[] | undefined;
 		let rebuiltSignature: string | undefined;
-		let frozenSignature: string | undefined;
-		// Trigger of an implicit (non-forced) rebuild, rechecked at commit.
-		let implicitRebuildSignature: string | undefined;
 		let rebuiltXdevCatalogNames: readonly string[] | undefined;
 		let candidateSurface: PromptSurface | undefined;
 		try {
@@ -1549,13 +1517,7 @@ export class SessionTools {
 					sessionAgents: this.#promptSurface.sessionAgents,
 					evalToolNames: this.#promptSurface.evalToolNames,
 				});
-				const freezeImplicitPromptRefresh =
-					!forcePromptRefresh &&
-					triggerSignature !== this.#lastAppliedToolSignature &&
-					this.#implicitRebuildBinding() === "frozen";
-				if (freezeImplicitPromptRefresh) {
-					frozenSignature = triggerSignature;
-				} else if (forcePromptRefresh || triggerSignature !== this.#lastAppliedToolSignature) {
+				if (forcePromptRefresh || triggerSignature !== this.#lastAppliedToolSignature) {
 					const signature = computeSignature(candidate);
 					const built = await untilAborted(
 						signal,
@@ -1564,7 +1526,6 @@ export class SessionTools {
 						),
 					);
 					rebuiltSystemPrompt = built.systemPrompt;
-					if (!forcePromptRefresh) implicitRebuildSignature = triggerSignature;
 					rebuiltSignature = signature;
 					rebuiltXdevCatalogNames = built.xdevCatalogNames;
 					candidateSurface = candidate;
@@ -1595,31 +1556,15 @@ export class SessionTools {
 			if (currentTools.length !== tools.length || currentTools.some((tool, index) => tool !== tools[index])) {
 				this.#host.agent.setTools(tools);
 			}
-			// The first primary model call can capture the prompt while the rebuild
-			// awaits; that prompt is bound from then on, so an implicit rebuild ends
-			// exactly as if it had frozen up front. Before that call, a resumed
-			// transcript binds the prompt it was sent with: only a rebuild that
-			// reproduces it commits.
-			let restoresTranscriptPrompt = false;
-			if (rebuiltSystemPrompt && implicitRebuildSignature !== undefined) {
-				const binding = this.#implicitRebuildBinding();
-				restoresTranscriptPrompt =
-					typeof binding === "object" && systemPromptDigest(rebuiltSystemPrompt) === binding.promptDigest;
-				if (binding !== "free" && !restoresTranscriptPrompt) {
-					rebuiltSystemPrompt = undefined;
-					frozenSignature = implicitRebuildSignature;
-				}
-			}
 			if (rebuiltSystemPrompt && rebuiltSignature) {
 				// The restored transcript was sent with this prompt under the inherited cache key.
-				if (this.#lastAppliedToolSignature !== undefined && !restoresTranscriptPrompt) {
+				if (this.#lastAppliedToolSignature !== undefined) {
 					this.#host.clearInheritedProviderPromptCacheKey();
 				}
 				this.#baseSystemPrompt = rebuiltSystemPrompt;
 				this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
 				invalidateToolSchemaMetadata(this.#host.agent.state.tools);
 				this.#lastAppliedToolSignature = rebuiltSignature;
-				this.#recordPromptRoster(validToolNames);
 				this.#promptModelKey = this.#currentPromptModelKey();
 				this.#promptInlineDescriptors = this.#currentInlineDescriptors();
 				this.#setBasePromptXdevNames(rebuiltXdevCatalogNames);
@@ -1631,10 +1576,6 @@ export class SessionTools {
 				// Publish the exact surface the prompt rendered with — never
 				// re-derive from live settings, which could diverge mid-flight.
 				this.#promptSurface = candidateSurface ?? this.#promptSurface;
-			} else if (frozenSignature) {
-				this.#notifyToolRosterDelta(previousActiveToolNames, validToolNames);
-				this.#lastAppliedToolSignature = frozenSignature;
-				this.#promptRosterHeld = true;
 			}
 			if (restoreDormantDeviceOnlyWrite) {
 				this.#setDeviceOnlyWrite?.(true);
@@ -1671,10 +1612,6 @@ export class SessionTools {
 				.mappings.filter(mapping => docsPlan.catalog.has(mapping.name))
 				.map(mapping => mapping.name),
 		);
-	}
-
-	#latestReply(): AgentMessage | undefined {
-		return this.#host.agent.state.messages.findLast(message => message.role === "assistant");
 	}
 
 	/** Digest of the base prompt the current branch's newest reply with provider output was produced under. */
@@ -1721,7 +1658,6 @@ export class SessionTools {
 	 * not count.
 	 */
 	recordPrimaryModelCall(prompt: string[]): void {
-		this.#restoredTranscript = undefined;
 		this.#capturedPromptDigest = systemPromptDigest(this.baseOfSystemPrompt(prompt));
 	}
 
@@ -1758,52 +1694,7 @@ export class SessionTools {
 
 	/** Drops retained transcript references when the session is disposed. */
 	releaseRestoredTranscript(): void {
-		this.#restoredTranscript = undefined;
 		this.#recordedDigestScan = undefined;
-	}
-
-	/**
-	 * What an implicit prompt rebuild must keep when the model binds signed
-	 * thinking to its prompt prefix. `"free"`: no prompt is committed yet, the
-	 * model does not bind, or the transcript holds no reply. `"frozen"`: the
-	 * transcript may be bound to the current prompt. Otherwise the newest reply is
-	 * the restored one and no primary model call has run: a resumed process builds
-	 * its base prompt before tools that register late (extension tools, MCP
-	 * servers), so a rebuild may commit only when it reproduces the prompt the
-	 * transcript was sent with. A transcript restored without a recorded digest,
-	 * or switched in later, stays frozen.
-	 */
-	#implicitRebuildBinding(): "free" | "frozen" | { promptDigest: string } {
-		if (this.#lastAppliedToolSignature === undefined || this.#host.model()?.thinking?.prefixBinding !== true) {
-			return "free";
-		}
-		const latest = this.#latestReply();
-		if (latest === undefined) return "free";
-		return latest === this.#restoredTranscript?.reply ? this.#restoredTranscript : "frozen";
-	}
-
-	/**
-	 * Records the roster a just-committed base prompt rendered and ends any hold.
-	 * Only prefix-bound models hold roster changes, so others skip the copy.
-	 */
-	#recordPromptRoster(toolNames: readonly string[]): void {
-		this.#promptRosterHeld = false;
-		if (this.#host.model()?.thinking?.prefixBinding !== true) {
-			this.#basePromptRoster = undefined;
-			return;
-		}
-		const tools = new Map(this.#toolRegistry);
-		const xdev = this.#xdev;
-		this.#basePromptRoster = {
-			toolNames: [...toolNames],
-			tools,
-			xdev: xdev && {
-				tools,
-				mountedNames: new Set(xdev.mountedNames),
-				builtInNames: xdev.builtInNames,
-				isActive: xdev.isActive,
-			},
-		};
 	}
 
 	#notifyToolRosterDelta(previousActiveToolNames: readonly string[], appliedNames: readonly string[]): void {
@@ -2478,12 +2369,6 @@ export class SessionTools {
 		const activeToolNames = this.getActiveToolNames();
 		this.#setActiveToolNames?.(activeToolNames);
 		const previousBaseSystemPrompt = this.#baseSystemPrompt;
-		const heldRoster =
-			this.#promptRosterHeld && this.#implicitRebuildBinding() !== "free" ? this.#basePromptRoster : undefined;
-		if (heldRoster) {
-			const kept = await this.#prepareHeldRosterPrompt(heldRoster, rebuildSystemPrompt, isCurrent);
-			if (kept) return kept;
-		}
 		// Derive the candidate and run the awaited render inside its scope: the
 		// tool getters read the candidate while the prompt renders, so the built
 		// prompt and the captured signature describe the same state. Nothing is
@@ -2531,44 +2416,6 @@ export class SessionTools {
 				this.#promptModelKey = this.#currentPromptModelKey();
 				this.#promptInlineDescriptors = this.#currentInlineDescriptors();
 				this.#lastAppliedToolSignature = signature;
-				this.#recordPromptRoster(activeToolNames);
-				return true;
-			},
-		};
-	}
-
-	/**
-	 * Re-renders a frozen prefix's base prompt against the roster it was
-	 * committed with, so a forced rebuild that changes nothing else (a body-only
-	 * skill update, an unchanged prompt refresh) keeps the held roster change
-	 * out of the bound prefix — eval description included — and leaves it to its
-	 * notices. Returns `undefined` when the rebuild changes the prompt anyway:
-	 * the prefix breaks regardless, so the caller absorbs the live roster.
-	 */
-	async #prepareHeldRosterPrompt(
-		roster: PromptRoster,
-		rebuildSystemPrompt: SystemPromptRebuilder,
-		isCurrent: (() => boolean) | undefined,
-	): Promise<SystemPromptPreparation | undefined> {
-		const previousBaseSystemPrompt = this.#baseSystemPrompt;
-		const candidate: PromptSurface = {
-			...this.#derivePromptSurface(),
-			evalToolNames: this.#promptSurface.evalToolNames,
-		};
-		const built = await this.#promptSurfaceScope.run(candidate, () =>
-			rebuildSystemPrompt(roster.toolNames, roster.tools, roster.xdev),
-		);
-		if (!samePromptBlocks(built.systemPrompt, previousBaseSystemPrompt)) return undefined;
-		return {
-			systemPrompt: previousBaseSystemPrompt,
-			commit: () => {
-				if (this.#host.isDisposed() || isCurrent?.() === false) return false;
-				if (this.#baseSystemPrompt !== previousBaseSystemPrompt) return true;
-				this.#promptSurface = candidate;
-				this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
-				invalidateToolSchemaMetadata(this.#host.agent.state.tools);
-				this.#promptModelKey = this.#currentPromptModelKey();
-				this.#promptInlineDescriptors = this.#currentInlineDescriptors();
 				return true;
 			},
 		};

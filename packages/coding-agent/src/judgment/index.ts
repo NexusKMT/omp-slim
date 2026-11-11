@@ -150,7 +150,6 @@ export class ChainJudge implements Judge {
 			}
 			const backend = chatTextBackend(model, {
 				apiKey: registry.resolver(model, sessionId),
-				disableServerSideFallback: true,
 				sessionId,
 				metadata: this.#deps.metadataResolver?.(model.provider),
 				onAttempt: attempt =>

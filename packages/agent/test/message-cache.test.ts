@@ -9,6 +9,8 @@ import {
 	isEstimateCacheable,
 	pruneToolOutputs,
 } from "@oh-my-pi/pi-agent-core/compaction";
+import { convertMessages } from "@oh-my-pi/pi-ai/providers/openai-completions";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
 
 const tokenizer = new Tokenizer();
@@ -92,53 +94,25 @@ describe("estimate cache settle gate", () => {
 	});
 });
 
-describe("estimate cache option split", () => {
-	test("default and floored estimates do not collide in one map", () => {
-		const blob = "blob ".repeat(4000);
-		const msg: AssistantMessage = {
-			...settledAssistant("thinking heavy"),
-			content: [
-				{ type: "text", text: "answer" },
-				{ type: "thinking", thinking: "reasoning", thinkingSignature: blob },
-			],
-		};
-		// Prime the default map first, then the floored one; the floored estimate
-		// (which drops the encrypted-reasoning blob) must not read the default entry.
-		const withBlob = tokenizer.countMessage(msg as AgentMessage);
-		const floored = tokenizer.countMessage(msg as AgentMessage, { excludeEncryptedReasoning: true });
-		expect(withBlob).toBeGreaterThan(floored + 500);
-		// Cached reads return the same split values.
-		expect(tokenizer.countMessage(msg as AgentMessage)).toBe(withBlob);
-		expect(tokenizer.countMessage(msg as AgentMessage, { excludeEncryptedReasoning: true })).toBe(floored);
-	});
-
-	test("counts native server-tool blocks by default and drops them from the compaction floor", () => {
-		const encrypted = "cipher".repeat(4000);
-		const msg: AssistantMessage = {
-			...settledAssistant("with search"),
-			content: [
-				{ type: "text", text: "answer" },
-				{
-					type: "anthropicServerTool",
-					block: {
-						type: "web_search_tool_result",
-						tool_use_id: "srvtoolu_1",
-						content: [{ type: "web_search_result", encrypted_content: encrypted }],
-					},
-				},
-			],
-		};
-		const textOnly = tokenizer.countMessage({
-			...settledAssistant("x"),
-			content: [{ type: "text", text: "answer" }],
-		} as AgentMessage);
-		const withServerTool = tokenizer.countMessage(msg as AgentMessage);
-		const floored = tokenizer.countMessage(msg as AgentMessage, { excludeEncryptedReasoning: true });
-		// Default estimate charges for the serialized server-tool payload…
-		expect(withServerTool).toBeGreaterThan(floored + 500);
-		// …while the compaction floor ignores the opaque encrypted blob entirely.
-		expect(floored).toBe(textOnly);
-	});
+test("legacy native payloads do not inflate the Chat Completions context estimate", () => {
+	const textOnly = settledAssistant("answer");
+	const legacy: AssistantMessage = {
+		...textOnly,
+		content: [
+			{ type: "thinking", thinking: "secret plan".repeat(4000), thinkingSignature: "cipher".repeat(4000) },
+			{
+				type: "anthropicServerTool",
+				block: { type: "web_search_tool_result", tool_use_id: "legacy-call", content: "opaque".repeat(4000) },
+			},
+			...textOnly.content,
+		],
+	};
+	const model = buildModel({ id: "configured-model", provider: "gateway", baseUrl: "http://localhost:0/v1" });
+	const wire = convertMessages(model, { messages: [legacy] });
+	expect(wire).toEqual([{ role: "assistant", content: "answer" }]);
+	const expected = tokenizer.countMessage(textOnly);
+	expect(tokenizer.countMessage(legacy)).toBe(expected);
+	expect(tokenizer.countMessage(legacy, { excludeEncryptedReasoning: true })).toBe(expected);
 });
 
 describe("estimate cache invalidation seams", () => {

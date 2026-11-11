@@ -14,7 +14,6 @@ import {
 	type Model,
 	retryTransientCompletion,
 } from "@oh-my-pi/pi-ai";
-import { StreamMarkupHealing } from "@oh-my-pi/pi-ai/utils/stream-markup-healing";
 import { writeTerminalSequence } from "@oh-my-pi/pi-tui";
 import { isNativeRendering, onNativeRenderingChange } from "@oh-my-pi/pi-tui/native/state";
 import { theme } from "@oh-my-pi/pi-tui/theme";
@@ -178,7 +177,6 @@ export async function generateSessionTitle(
 	metadataResolver?: (provider: string) => Record<string, unknown> | undefined,
 	customSystemPrompt?: string,
 	signal?: AbortSignal,
-	credentialSourceSessionId?: string,
 ): Promise<string | null> {
 	// Defer titling for greetings / acknowledgements / empty input. The default
 	// Avoid sending trivial input to the model; this happens
@@ -204,7 +202,6 @@ export async function generateSessionTitle(
 		metadataResolver,
 		signal,
 		customSystemPrompt?.trim() || undefined,
-		credentialSourceSessionId,
 	);
 }
 
@@ -217,7 +214,6 @@ export async function generateTitleOnline(
 	metadataResolver?: (provider: string) => Record<string, unknown> | undefined,
 	signal?: AbortSignal,
 	customSystemPrompt?: string,
-	credentialSourceSessionId?: string,
 ): Promise<string | null> {
 	const models = getTitleModels(registry, settings, currentModel);
 	if (models.length === 0) {
@@ -232,7 +228,6 @@ export async function generateTitleOnline(
 		metadataResolver,
 		signal,
 		customSystemPrompt,
-		credentialSourceSessionId,
 	);
 }
 
@@ -244,7 +239,6 @@ async function generateTitleOnlineWithModels(
 	metadataResolver?: (provider: string) => Record<string, unknown> | undefined,
 	signal?: AbortSignal,
 	customSystemPrompt?: string,
-	credentialSourceSessionId?: string,
 ): Promise<string | null> {
 	const titleSystemPrompt = customSystemPrompt?.trim() || undefined;
 	// The model is always asked to wrap the title in `<title>...</title>` and
@@ -274,14 +268,6 @@ async function generateTitleOnlineWithModels(
 		}
 
 		try {
-			if (credentialSourceSessionId && sessionId && credentialSourceSessionId !== sessionId) {
-				const foregroundCredential = registry.authStorage.oauth
-					.accounts(model.provider, credentialSourceSessionId)
-					.find(account => account.active);
-				if (foregroundCredential) {
-					registry.authStorage.sessions.pin(model.provider, sessionId, foregroundCredential.credentialId);
-				}
-			}
 			const apiKey = await registry.getApiKey(model, sessionId);
 			if (!apiKey) {
 				logger.warn("title-generator: no API key", { ...modelContext, reason: "missing-api-key" });
@@ -305,7 +291,6 @@ async function generateTitleOnlineWithModels(
 			logger.debug("title-generator: request", { ...modelContext, maxTokens });
 
 			const messages: Message[] = [{ role: "user", content: userMessage, timestamp: Date.now() }];
-			if (model.supportsAssistantPrefill) messages.push(titlePrefill(model));
 
 			const response = await retryTransientCompletion(
 				() =>
@@ -317,7 +302,6 @@ async function generateTitleOnlineWithModels(
 						},
 						{
 							apiKey: registry.resolver(model, sessionId),
-							disableServerSideFallback: true,
 							sessionId,
 							maxTokens,
 							disableReasoning: true,
@@ -391,33 +375,6 @@ async function generateTitleOnlineWithModels(
 	return null;
 }
 
-/**
- * Open the `<title>` marker as a trailing assistant turn on hosts that continue
- * it verbatim (`Model.supportsAssistantPrefill`). Some Ollama chat templates
- * (LFM2.5) open a reasoning channel regardless of the disable flag, burning the
- * whole output budget on thinking and never emitting a title. Committing the
- * marker first skips the reasoning channel entirely.
- */
-function titlePrefill(model: Model<Api>): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text: "<title>" }],
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
-}
-
 function extractGeneratedTitle(contentBlocks: AssistantMessage["content"]): string {
 	let textTitle = "";
 	for (const content of contentBlocks) {
@@ -488,8 +445,7 @@ function stripLeadingLeakedThinkingMarkup(text: string): string {
 }
 
 function stripLeakedThinkingMarkup(text: string): string {
-	const healer = new StreamMarkupHealing({ pattern: "thinking" });
-	return healer.feed(text) + healer.flushPending();
+	return text.replace(/<(?:think|thinking|reasoning)>[\s\S]*?(?:<\/(?:think|thinking|reasoning)>|$)/gi, "");
 }
 
 /**

@@ -1,4 +1,5 @@
-import { type GeneratedProvider, getBundledModels } from "@oh-my-pi/pi-catalog/models";
+import { type GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
+import { getTestModels as getBundledModels } from "../../../catalog/test/fixtures/models";
 import { type Model, modelKind } from "@oh-my-pi/pi-catalog/types";
 
 /** Select a bundled chat model by behavior so tests survive catalog roster changes. */

@@ -6,7 +6,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { runAgenticCommit } from "@oh-my-pi/pi-coding-agent/commit/agentic";
 import * as agentModule from "@oh-my-pi/pi-coding-agent/commit/agentic/agent";
 import * as modelSelection from "@oh-my-pi/pi-coding-agent/commit/model-selection";

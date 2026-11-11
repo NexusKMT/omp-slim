@@ -625,7 +625,6 @@ function buildExecutorOptions(
 		costGate: session.costGate,
 		additionalDirectories: session.additionalDirectories,
 		getApiKey: session.getApiKey,
-		credentialSourceSessionId: session.getCredentialSourceSessionId?.(),
 		agent: policy.effectiveAgent,
 		task: renderSubagentUserPrompt(request.assignment),
 		assignment: request.assignment.trim(),

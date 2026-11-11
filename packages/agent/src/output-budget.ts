@@ -19,8 +19,7 @@ const PROMPT_ESTIMATE_MARGIN_DIVISOR = 10;
 /**
  * Chat-template framing charged per locally counted message. `Tokenizer.countMessage`
  * counts content only, but every template wraps each message in role markers and
- * separators, and tool results in response wrappers: about 5 tokens per merged
- * Qwen3 `<tool_response>` or Llama 3 turn, 10–15 for harmony or Mistral tool results.
+ * separators, and tool results in response wrappers.
  * The proportional margin scales with content, so many short messages (a turn's
  * parallel tool results) leave this uncovered. Provider-anchored messages need no
  * charge: the host's own report already includes their framing.
@@ -40,13 +39,9 @@ export const OUTPUT_FIT_HEADWAY_TOKENS = 64;
  * Output cap for a request, so prompt plus output stays inside the model's
  * context window.
  *
- * Chat Completions-style providers (DeepSeek, OpenAI, vLLM, ...) reject a
- * request whose prompt tokens plus `max_tokens` exceed the window. Every
- * request asks for `model.maxTokens` of output by default, so without this a
- * large model output cap (DeepSeek V4: ~384k of a ~1M window) makes every
- * request fail once the prompt passes window minus output cap, long before
- * compaction triggers, and side turns (`/btw`, recaps) have no overflow
- * recovery at all.
+ * Chat Completions endpoints may reject requests whose prompt and requested
+ * output exceed the context window. Fitting the output cap protects normal
+ * turns and side requests before compaction becomes necessary.
  *
  * The prompt size is the provider's own report from the newest trustworthy
  * assistant turn (see {@link findRequestUsageAnchor}) plus a local count of
@@ -55,27 +50,11 @@ export const OUTPUT_FIT_HEADWAY_TOKENS = 64;
  * counts carry a proportional tokenizer margin plus
  * {@link MESSAGE_FRAMING_TOKENS} per message.
  *
- * Returns `maxTokens` unchanged when the requested cap already fits, the
- * model declares no window, the host ends generation at the window itself
- * instead of rejecting the request (`stops-output-at-context-window`, e.g.
- * Claude 4.5+ on the Claude API), or nothing would be requested (including an
- * OpenRouter-hosted model with no caller cap: the transport omits the catalog
- * default there so each upstream self-caps, and a fitted value would turn into
- * an explicit cap that filters upstreams). Otherwise returns
- * the remaining room minus {@link OUTPUT_FIT_HEADWAY_TOKENS} (never below
- * {@link MIN_FITTED_OUTPUT_TOKENS}); a
- * prompt that fills the whole window still overflows and is left to the
- * caller's compaction. Near a full window the floor means a turn can stop on
- * `length` instead of failing with a 400.
- *
- * Lives here, not next to the default in pi-ai's `mapOptionsForApi`, because
- * pi-ai has no tokenizer; callers apply it in their `streamFn` (coding-agent
- * does so in its shared settings-aware wrapper).
- *
- * Not fixed: Anthropic budget-thinking transports raise `max_tokens` back to
- * at least the thinking budget plus a fallback buffer downstream
- * (`ensureMaxTokensForThinking`), so a fitted cap below that is overridden
- * and the request can still exceed the window as before.
+ * Returns `maxTokens` unchanged when it fits, the model declares no window,
+ * or no output is requested. Otherwise the cap is the remaining room minus
+ * {@link OUTPUT_FIT_HEADWAY_TOKENS}, never below {@link MIN_FITTED_OUTPUT_TOKENS}.
+ * A prompt that fills the whole window is left to the caller's compaction.
+ * Callers apply this in their stream function because pi-ai has no tokenizer.
  */
 export function fitOutputTokensToContextWindow(
 	model: Model,

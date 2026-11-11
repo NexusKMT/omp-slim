@@ -1,18 +1,4 @@
-import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
 import type { AgentMessage } from "./types";
-
-/**
- * Symbol-keyed carrier for passive context reported by a tool executed outside
- * the agent loop (Cursor exec-channel dispatch). The executor attaches the
- * joined context to the {@link ToolResultMessage} it returns; `Agent` reads it
- * when the provider hands the result back and injects it after the buffered
- * results. Symbol keys never serialize, so the context cannot leak into the
- * persisted tool result.
- */
-export const TOOL_RESULT_ADDITIONAL_CONTEXT = Symbol("tool-result-additional-context");
-
-/** A tool result optionally carrying {@link TOOL_RESULT_ADDITIONAL_CONTEXT}. */
-export type ToolResultWithAdditionalContext = ToolResultMessage & { [TOOL_RESULT_ADDITIONAL_CONTEXT]?: string };
 
 /**
  * True for a passive-context value worth delivering: a string with at least

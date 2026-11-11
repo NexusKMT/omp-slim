@@ -29,7 +29,7 @@ import { getPreset } from "./presets";
 import { describeSegment, renderSegment, type SegmentContext } from "./segments";
 import type { TspMeterMark, TspProps } from "@oh-my-pi/pi-wire";
 import type { NativeNode, NativeUiEvent } from "../native/node";
-import { col, node, span, text } from "../native/describe";
+import { col, node, span } from "../native/describe";
 import { getContextMeterThresholds } from "../chrome/context-thresholds";
 import { isNativeRendering, onNativeRenderingChange } from "../native/state";
 import { getSeparator } from "./separators";

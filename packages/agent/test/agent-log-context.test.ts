@@ -20,7 +20,7 @@ it("runs continue()'s queued-message hooks and its loop under the agent's log co
 		logger.info("log-context probe", { probe: "request" });
 		return mock.stream(...args);
 	};
-	const agent = new Agent({ streamFn });
+	const agent = new Agent({ initialState: { model: mock.model }, streamFn });
 	agent.logContext = { sessionId: "recipient" };
 	agent.addBeforeQueuedMessageDequeueHook(() => logger.info("log-context probe", { probe: "dequeue hook" }));
 	agent.followUp({ role: "user", content: [{ type: "text", text: "queued" }], timestamp: Date.now() });

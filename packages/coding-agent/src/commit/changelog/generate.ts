@@ -69,7 +69,6 @@ export async function generateChangelogEntries({
 				{
 					apiKey,
 					sessionId,
-					disableServerSideFallback: true,
 					maxTokens: 1200,
 					reasoning: toReasoningEffort(thinkingLevel),
 				},

@@ -1868,9 +1868,6 @@
 				"premiumMultiplier": {
 					"type": "number"
 				},
-				"preferWebsockets": {
-					"type": "boolean"
-				},
 				"contextPromotionTarget": {
 					"type": "string"
 				},
@@ -2019,11 +2016,6 @@
 					"items": {
 						"type": "string"
 					}
-				},
-				"liveSteered": {
-					"type": "integer",
-					"description": "Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them.",
-					"default": 0
 				}
 			},
 			"required": ["steering", "followUp"],
@@ -2207,8 +2199,7 @@
 					"$ref": "#/$defs/QueuedMessagesState",
 					"default": {
 						"steering": [],
-						"followUp": [],
-						"liveSteered": 0
+						"followUp": []
 					}
 				},
 				"todoPhases": {
@@ -3578,11 +3569,6 @@
 					"items": {
 						"type": "string"
 					}
-				},
-				"liveSteered": {
-					"type": "integer",
-					"description": "Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them.",
-					"default": 0
 				}
 			},
 			"required": ["type", "steering", "followUp"],

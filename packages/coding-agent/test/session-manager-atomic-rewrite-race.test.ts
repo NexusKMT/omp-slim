@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import {
 	IndexedSessionStorage,
 	type SessionStorageBackend,

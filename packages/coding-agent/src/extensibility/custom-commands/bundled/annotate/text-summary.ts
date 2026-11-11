@@ -26,7 +26,6 @@ export async function generateTextReviewContextSummary(
 		{
 			apiKey: ctx.modelRegistry.resolver(model, ctx.sessionManager.getSessionId()),
 			disableReasoning: true,
-			disableServerSideFallback: true,
 			maxTokens: 512,
 			signal: requestSignal,
 		},

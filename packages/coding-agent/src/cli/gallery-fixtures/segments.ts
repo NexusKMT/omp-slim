@@ -4,7 +4,7 @@ import { ALL_SEGMENT_IDS, renderSegment } from "@oh-my-pi/pi-tui/status-line/seg
 import type { SegmentContext } from "@oh-my-pi/pi-tui/status-line/types";
 import { theme } from "@oh-my-pi/pi-tui/theme";
 import type { GallerySessionOptions } from "./preview-session";
-import { createGallerySession, GALLERY_CONTEXT_WINDOW, GALLERY_PROMPT_CACHE } from "./preview-session";
+import { createGallerySession, GALLERY_CONTEXT_WINDOW } from "./preview-session";
 import type { GalleryPreviewEntry } from "./types";
 
 const FIXED_NOW = new Date(2026, 7, 29, 14, 7, 9);
@@ -56,7 +56,6 @@ export function createGallerySegmentContext(sessionOptions?: GallerySessionOptio
 			orchestrationInput: 900,
 			orchestrationOutput: 240,
 			orchestrationCacheRead: 3_000,
-			premiumRequests: sessionOptions?.premiumRequests ?? 2,
 			cost: sessionOptions?.cost ?? 0.42,
 			tokensPerSecond: 87.3,
 		},
@@ -75,8 +74,6 @@ export function createGallerySegmentContext(sessionOptions?: GallerySessionOptio
 			pr: { number: 1842, url: "https://github.com/can1357/oh-my-pi/pull/1842" },
 		},
 		worktree: null,
-
-		promptCache: sessionOptions?.promptCache,
 	};
 }
 
@@ -168,20 +165,9 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 			];
 		case "cost":
 			return [
-				{ label: "metered + premium + advisor" },
-				{
-					label: "subscription",
-					session: { usingSubscription: true, cost: 0, premiumRequests: 0, advisorCost: 0 },
-				},
-				{
-					label: "subscription + subagents",
-					session: { usingSubscription: true, cost: 0.38, premiumRequests: 0, advisorCost: 0 },
-					context: { subagentTreeCost: 1.27 },
-				},
-				{
-					label: "premium requests",
-					session: { cost: 0, premiumRequests: 2, advisorCost: 0 },
-				},
+				{ label: "session and advisor" },
+				{ label: "zero cost", session: { cost: 0, advisorCost: 0 } },
+				{ label: "with subagents", session: { cost: 0.38, advisorCost: 0 }, context: { subagentTreeCost: 1.27 } },
 			];
 		case "context_pct":
 			return [
@@ -207,7 +193,6 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 				{ label: "24-hour with seconds" },
 				{ label: "12-hour", context: { options: { time: { format: "12h", showSeconds: false } } } },
 			];
-
 		case "vim":
 			return [
 				{
@@ -226,14 +211,6 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 					label: "icon mode",
 					context: { vim: { mode: "normal", pending: "", selectedLines: 0, display: "icon" } },
 				},
-			];
-		case "cache":
-			return [
-				{ label: "cached", session: { promptCache: GALLERY_PROMPT_CACHE.warm } },
-				{ label: "likely cached (inferred)", session: { promptCache: GALLERY_PROMPT_CACHE.likelyWarm } },
-				{ label: "not cached — expired", session: { promptCache: GALLERY_PROMPT_CACHE.coldExpired } },
-				{ label: "not cached — model changed", session: { promptCache: GALLERY_PROMPT_CACHE.coldModel } },
-				{ label: "hidden (nothing to report)" },
 			];
 		default:
 			return [{ label: "canonical" }];

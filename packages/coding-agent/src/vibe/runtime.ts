@@ -1,3 +1,4 @@
+import { cfgTaskEnableLsp } from "../task/settings";
 import {
 	type VibeSessionState,
 	type VibeScreenSnapshot,
@@ -55,7 +56,6 @@ import {
 } from "./lifecycle";
 import { type VibeCli } from "@oh-my-pi/pi-tui/tools/vibe";
 
-import { cfgTaskAgentAccountPools, cfgTaskEnableLsp } from "../task/settings";
 /**
  * CLI flavor → bundled agent type. This IS the model-tier mapping: `sonic`
  * carries `model: "@smol"` (the configured fast/low-latency role) and `task`

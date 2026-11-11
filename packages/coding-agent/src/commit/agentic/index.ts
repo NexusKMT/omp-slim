@@ -32,7 +32,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<{ usedF
 	const cwd = getProjectDir();
 	const repo = vcs.requireGit(cwd);
 	const settings = await Settings.init({ cwd });
-	const authStorage = await discoverAuthStorage(undefined, { settings });
+	const authStorage = await discoverAuthStorage(undefined);
 	// Release the credential store once the command settles: the local store holds
 	// `agent.db` open and a broker-backed one runs a sync loop that pins the event loop.
 	try {
