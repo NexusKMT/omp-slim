@@ -2,11 +2,9 @@ import { describe, expect, it } from "bun:test";
 import {
 	adaptSchemaForStrict,
 	areJsonValuesEqual,
-	copySchemaWithout,
 	isJsonObject,
 	mergeCompatibleEnumSchemas,
 	mergePropertySchemas,
-	stripResidualCombiners,
 } from "@oh-my-pi/pi-ai/utils/schema";
 
 describe("isJsonObject", () => {
@@ -144,63 +142,6 @@ describe("mergePropertySchemas", () => {
 		const b = { type: "string" };
 		const result = mergePropertySchemas(a, b) as { anyOf: unknown[] };
 		expect(result.anyOf).toHaveLength(2);
-	});
-});
-
-describe("copySchemaWithout", () => {
-	it("copies all keys except the specified one", () => {
-		const schema = { type: "object", anyOf: [1, 2], description: "test" };
-		const result = copySchemaWithout(schema, "anyOf");
-		expect(result).toEqual({ type: "object", description: "test" });
-	});
-
-	it("returns a copy when key is not present", () => {
-		const schema = { type: "string" };
-		const result = copySchemaWithout(schema, "anyOf");
-		expect(result).toEqual({ type: "string" });
-		expect(result).not.toBe(schema);
-	});
-});
-
-describe("stripResidualCombiners", () => {
-	it("collapses same-type anyOf into single schema", () => {
-		const input = {
-			anyOf: [
-				{ type: "string", description: "A" },
-				{ type: "string", description: "B" },
-			],
-		};
-		const result = stripResidualCombiners(input) as Record<string, unknown>;
-		expect(result.type).toBe("string");
-		expect(result.anyOf).toBeUndefined();
-	});
-
-	it("collapses nested residual combiners", () => {
-		const input = {
-			type: "object",
-			properties: {
-				field: {
-					anyOf: [
-						{ type: "string", description: "A" },
-						{ type: "string", description: "B" },
-					],
-				},
-			},
-		};
-		const result = stripResidualCombiners(input) as Record<string, unknown>;
-		const props = result.properties as Record<string, Record<string, unknown>>;
-		expect(props.field.type).toBe("string");
-		expect(props.field.anyOf).toBeUndefined();
-	});
-
-	it("preserves non-collapsible combiners", () => {
-		const input = {
-			anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }],
-		};
-		// This has 3 variants of different types but all are distinct non-null.
-		// collapseMixedTypeCombinerVariants should collapse this to first non-null type.
-		const result = stripResidualCombiners(input) as Record<string, unknown>;
-		expect(result.type).toBe("string");
 	});
 });
 

@@ -1,24 +1,8 @@
-import {
-	CCA_UNSUPPORTED_SCHEMA_FIELDS,
-	COMBINATOR_KEYS,
-	NON_STRUCTURAL_SCHEMA_KEYS,
-	UNSUPPORTED_SCHEMA_FIELDS,
-} from "./fields";
-import { isValidJsonSchema } from "./meta-validator";
+import { COMBINATOR_KEYS, NON_STRUCTURAL_SCHEMA_KEYS } from "./fields";
 import { isJsonObject, type JsonObject } from "./types";
 
-/**
- * Schema compatibility audits.
- *
- * Each provider has a different idea of what JSON Schema features it accepts
- * for tool definitions. The normalizers in `normalize.ts`, `strict-mode`,
- * and `adapt.ts` rewrite incoming schemas to fit. This module is the
- * *audit* counterpart: it walks a (presumably already-sanitized) schema and
- * reports any feature the target provider would reject. Tests use it to lock
- * down the contract; the runtime uses it to fail-open with diagnostic logs
- * rather than silently shipping a broken tool definition.
- */
-export type SchemaCompatibilityProvider = "openai-strict" | "google" | "cloud-code-assist-claude";
+/** Audits the strict function-tool schema accepted by Chat Completions. */
+export type SchemaCompatibilityProvider = "openai-strict";
 
 export interface SchemaCompatibilityViolation {
 	path: string;
@@ -43,8 +27,6 @@ export interface StrictSchemaEnforcementResult {
 // plus a few provider-specific extras (`const`, `nullable`) folded in here so
 // each rule is defined in exactly one place.
 const STRICT_FORBIDDEN_KEYS: Record<string, true> = { ...NON_STRUCTURAL_SCHEMA_KEYS, const: true, nullable: true };
-const GOOGLE_FORBIDDEN_KEYS: Record<string, true> = { ...UNSUPPORTED_SCHEMA_FIELDS, const: true };
-const CCA_FORBIDDEN_KEYS: Record<string, true> = { ...CCA_UNSUPPORTED_SCHEMA_FIELDS, const: true };
 
 // Keys whose values are JSON-Schema *containers* (arrays of values, scalars,
 // etc.) rather than nested schemas. The traversal must skip these — recursing
@@ -138,7 +120,7 @@ function walkSchema(
 }
 
 /**
- * Strict-mode audit (OpenAI Responses / Codex `strict: true`):
+ * Strict-mode audit (Chat function tools with `strict: true`):
  *  1. Forbid keywords that strict mode disallows (`format`, `pattern`, `const`,
  *     `nullable`, etc. — see `STRICT_FORBIDDEN_KEYS`).
  *  2. Every node must declare *something* concrete: a `type`, a combinator,
@@ -255,151 +237,15 @@ function validateStrictNode(node: JsonObject, state: TraversalState): SchemaComp
 	return violations;
 }
 
-function validateGoogleNode(node: JsonObject, state: TraversalState): SchemaCompatibilityViolation[] {
-	const violations: SchemaCompatibilityViolation[] = [];
-
-	for (const key in node) {
-		const value = node[key];
-		if (!(key in GOOGLE_FORBIDDEN_KEYS)) {
-			continue;
-		}
-		violations.push(
-			createViolation(
-				`${state.path}.${key}`,
-				"google-forbidden-key",
-				`Google schema contains unsupported key "${key}"`,
-				key,
-				value,
-			),
-		);
-	}
-
-	if (Array.isArray(node.type)) {
-		violations.push(
-			createViolation(
-				`${state.path}.type`,
-				"google-type-array",
-				"Google schema type must be a scalar string, not an array",
-				"type",
-				node.type,
-			),
-		);
-	}
-
-	return violations;
-}
-
-function validateCloudCodeAssistNode(node: JsonObject, state: TraversalState): SchemaCompatibilityViolation[] {
-	const violations: SchemaCompatibilityViolation[] = [];
-
-	for (const key in node) {
-		const value = node[key];
-		if (key in CCA_FORBIDDEN_KEYS) {
-			violations.push(
-				createViolation(
-					`${state.path}.${key}`,
-					"cca-forbidden-key",
-					`Cloud Code Assist schema contains unsupported key "${key}"`,
-					key,
-					value,
-				),
-			);
-		}
-	}
-
-	if (Array.isArray(node.type)) {
-		violations.push(
-			createViolation(
-				`${state.path}.type`,
-				"cca-type-array",
-				"Cloud Code Assist schema forbids array-valued type",
-				"type",
-				node.type,
-			),
-		);
-	}
-
-	if (node.type === "null") {
-		violations.push(
-			createViolation(
-				`${state.path}.type`,
-				"cca-null-type",
-				'Cloud Code Assist schema forbids type: "null"',
-				"type",
-				node.type,
-			),
-		);
-	}
-
-	if (Object.hasOwn(node, "nullable")) {
-		violations.push(
-			createViolation(
-				`${state.path}.nullable`,
-				"cca-nullable-key",
-				"Cloud Code Assist schema forbids nullable keyword",
-				"nullable",
-				node.nullable,
-			),
-		);
-	}
-
-	for (const key of COMBINATOR_KEYS) {
-		if (Array.isArray(node[key])) {
-			violations.push(
-				createViolation(
-					`${state.path}.${key}`,
-					"cca-combiner",
-					`Cloud Code Assist schema forbids ${key}`,
-					key,
-					node[key],
-				),
-			);
-		}
-	}
-
-	return violations;
-}
-
-function validateCloudCodeAssistSchema(schema: unknown): SchemaCompatibilityViolation[] {
-	if (isValidJsonSchema(schema)) {
-		return [];
-	}
-	return [
-		createViolation(
-			"root",
-			"cca-meta-schema-validation",
-			"Cloud Code Assist schema is not a structurally valid JSON Schema",
-		),
-	];
-}
-
 export function validateSchemaCompatibility(
 	schema: unknown,
 	provider: SchemaCompatibilityProvider,
 ): SchemaCompatibilityResult {
 	const violations: SchemaCompatibilityViolation[] = [];
 
-	switch (provider) {
-		case "openai-strict": {
-			walkSchema(schema, { path: "root" }, (node, state) => {
-				violations.push(...validateStrictNode(node, state));
-			});
-			break;
-		}
-		case "google": {
-			walkSchema(schema, { path: "root" }, (node, state) => {
-				violations.push(...validateGoogleNode(node, state));
-			});
-			break;
-		}
-		case "cloud-code-assist-claude": {
-			walkSchema(schema, { path: "root" }, (node, state) => {
-				violations.push(...validateCloudCodeAssistNode(node, state));
-			});
-			violations.push(...validateCloudCodeAssistSchema(schema));
-			break;
-		}
-	}
+	walkSchema(schema, { path: "root" }, (node, state) => {
+		violations.push(...validateStrictNode(node, state));
+	});
 
 	return {
 		provider,

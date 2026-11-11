@@ -1,8 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
 	adaptSchemaForStrict,
-	normalizeSchemaForCCA,
-	normalizeSchemaForGoogle,
 	type SchemaCompatibilityResult,
 	validateSchemaCompatibility,
 	validateStrictSchemaEnforcement,
@@ -67,70 +65,5 @@ describe("schema compatibility validation", () => {
 
 		expect(compatibility.compatible).toBe(false);
 		expect(hasRule(compatibility, "strict-object-required")).toBe(true);
-	});
-
-	it("validates Google-compatible schemas after sanitization", () => {
-		const sanitized = normalizeSchemaForGoogle({
-			type: "object",
-			additionalProperties: false,
-			properties: {
-				pattern: { type: "string", description: "property name that matches schema keyword" },
-				status: { type: ["string", "null"], const: "active" },
-			},
-			required: ["status"],
-		});
-
-		const compatibility = validateSchemaCompatibility(sanitized, "google");
-		expect(compatibility.compatible).toBe(true);
-		expect(compatibility.violations).toEqual([]);
-	});
-
-	it("reports Google violations for unsupported schema features", () => {
-		const compatibility = validateSchemaCompatibility(
-			{
-				type: ["string", "null"],
-				additionalProperties: false,
-			},
-			"google",
-		);
-
-		expect(compatibility.compatible).toBe(false);
-		expect(hasRule(compatibility, "google-type-array")).toBe(true);
-		expect(hasRule(compatibility, "google-forbidden-key")).toBe(true);
-	});
-
-	it("validates Cloud Code Assist Claude schemas after normalization", () => {
-		const prepared = normalizeSchemaForCCA({
-			type: "object",
-			properties: {
-				mode: { anyOf: [{ const: "fast" }, { const: "safe" }, { type: "null" }] },
-			},
-			required: ["mode"],
-		});
-
-		const compatibility = validateSchemaCompatibility(prepared, "cloud-code-assist-claude");
-		expect(compatibility.compatible).toBe(true);
-		expect(compatibility.violations).toEqual([]);
-	});
-
-	it("reports Cloud Code Assist residual incompatibilities", () => {
-		const compatibility = validateSchemaCompatibility(
-			{
-				type: "object",
-				properties: {
-					value: {
-						nullable: true,
-						anyOf: [{ type: "string" }, { type: "null" }],
-					},
-				},
-				required: ["value"],
-			},
-			"cloud-code-assist-claude",
-		);
-
-		expect(compatibility.compatible).toBe(false);
-		expect(hasRule(compatibility, "cca-nullable-key")).toBe(true);
-		expect(hasRule(compatibility, "cca-combiner")).toBe(true);
-		expect(hasRule(compatibility, "cca-null-type")).toBe(true);
 	});
 });

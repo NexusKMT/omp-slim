@@ -7,9 +7,7 @@ import { tryEnforceStrictSchema } from "./normalize";
  * (e.g. for debugging a provider that misreports strict support, or when
  * comparing strict vs non-strict outputs).
  *
- * Honored by every provider that emits `strict: true` on its function tools —
- * see `openai-completions`, `openai-responses`, `openai-codex-responses`, and
- * the strict candidate selection in `anthropic`.
+ * Honored by the Chat Completions function-tool serializer.
  */
 export const NO_STRICT = $flag("PI_NO_STRICT");
 
