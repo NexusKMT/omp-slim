@@ -1,3 +1,4 @@
+import { mockChatStream } from "./helpers/chat-stream";
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
@@ -6,10 +7,8 @@ import { createModelJobWidgetAuthor } from "@oh-my-pi/pi-coding-agent/job-widget
 import {
 	type Api,
 	type AssistantMessage,
-	clearCustomApis,
 	type Model,
 	type ModelSpec,
-	registerCustomApi,
 } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -291,7 +290,6 @@ describe("cost gate in a running session", () => {
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
-		clearCustomApis();
 		for (const session of sessions.splice(0)) await session.dispose();
 		for (const storage of authStorages.splice(0)) storage.close();
 		for (const dir of tempDirs.splice(0)) dir.removeSync();
@@ -300,7 +298,7 @@ describe("cost gate in a running session", () => {
 	/** Registers a provider that answers with `responses` in order and counts the requests it got. */
 	function scriptedProvider(api: string, responses: AssistantMessage[]): { calls: () => number } {
 		let calls = 0;
-		registerCustomApi(api, () => streamOf(responses[Math.min(calls++, responses.length - 1)]));
+		mockChatStream( () => streamOf(responses[Math.min(calls++, responses.length - 1)]));
 		return { calls: () => calls };
 	}
 
@@ -344,7 +342,7 @@ describe("cost gate in a running session", () => {
 	}
 
 	it("refuses the next request of a turn once a response reaches the cap", async () => {
-		const api = "test-cost-gate-midturn";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(1.5, true), response(0.1)]);
 		const session = await createSession(api, { "session.maxCost": 1 });
 		const notices = costNotices(session);
@@ -359,7 +357,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("warns once at session.warnCost and keeps sending requests", async () => {
-		const api = "test-cost-gate-warn";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(0.6, true), response(0.6, true), response(0.6)]);
 		const session = await createSession(api, { "session.warnCost": 1 });
 		const notices = costNotices(session);
@@ -373,7 +371,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("counts a subagent's spend against the shared cap", async () => {
-		const api = "test-cost-gate-child";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(1.2)]);
 		const parent = await createSession(api, { "session.maxCost": 1 });
 		const child = await createSession(api, {}, { costGate: parent.costGate });
@@ -388,7 +386,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("hands a prompt back, unsent and unrecorded, when a resumed session is already past its cap", async () => {
-		const api = "test-cost-gate-resume";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(0.1)]);
 		const tempDir = TempDir.createSync("@omp-cost-gate-resume-");
 		tempDirs.push(tempDir);
@@ -409,7 +407,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("rejects an extension-style idle user message with the cost-cap reason", async () => {
-		const api = "test-cost-gate-extension-send";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(0.1)]);
 		const session = await createSession(api, { "session.maxCost": 1 });
 		session.costGate.record(1.2);
@@ -427,7 +425,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("applies a cap set while the session is open", async () => {
-		const api = "test-cost-gate-enable";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(1.2)]);
 		const session = await createSession(api, {});
 
@@ -442,7 +440,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("sends no title request once the session is at its cap", async () => {
-		const api = "test-cost-gate-title";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(1.2)]);
 		const session = await createSession(api, {
 			"session.maxCost": 1,
@@ -464,7 +462,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("keeps the spent budget when the session is forked from an earlier message", async () => {
-		const api = "test-cost-gate-fork";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(1.2), response(0.1)]);
 		const tempDir = TempDir.createSync("@omp-cost-gate-fork-");
 		tempDirs.push(tempDir);
@@ -487,7 +485,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("gives a new session a fresh budget", async () => {
-		const api = "test-cost-gate-new-session";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(1.2), response(0.1)]);
 		const session = await createSession(api, { "session.maxCost": 1 });
 
@@ -502,7 +500,7 @@ describe("cost gate in a running session", () => {
 	});
 
 	it("starts a resumed session from its recorded spend when switching to it", async () => {
-		const api = "test-cost-gate-switch";
+		const api = "openai-completions";
 		const provider = scriptedProvider(api, [response(0.1)]);
 		const tempDir = TempDir.createSync("@omp-cost-gate-switch-");
 		tempDirs.push(tempDir);
@@ -550,7 +548,7 @@ describe("cost gate in a running session", () => {
 		}
 
 		it("exits with the cost-cap status and reports the refusal on stderr", async () => {
-			const api = "test-cost-gate-print";
+			const api = "openai-completions";
 			scriptedProvider(api, [response(1.5, true), response(0.1)]);
 			const session = await createSession(api, { "session.maxCost": 1 });
 			const output = captureOutput();
@@ -563,7 +561,7 @@ describe("cost gate in a running session", () => {
 		});
 
 		it("emits the refusal as a cost-gate notice in JSON mode", async () => {
-			const api = "test-cost-gate-print-json";
+			const api = "openai-completions";
 			scriptedProvider(api, [response(1.5, true), response(0.1)]);
 			const session = await createSession(api, { "session.maxCost": 1 });
 			const output = captureOutput();
@@ -580,7 +578,7 @@ describe("cost gate in a running session", () => {
 		});
 
 		it("exits 0 when the run stays under the cap", async () => {
-			const api = "test-cost-gate-print-ok";
+			const api = "openai-completions";
 			scriptedProvider(api, [response(0.1)]);
 			const session = await createSession(api, { "session.maxCost": 1 });
 			const output = captureOutput();
@@ -592,7 +590,7 @@ describe("cost gate in a running session", () => {
 		});
 
 		it("exits 0 for a run after the cap was raised, though an earlier run was capped", async () => {
-			const api = "test-cost-gate-print-recover";
+			const api = "openai-completions";
 			scriptedProvider(api, [response(1.2, true), response(0.1)]);
 			const session = await createSession(api, { "session.maxCost": 1 });
 			const output = captureOutput();
@@ -606,7 +604,7 @@ describe("cost gate in a running session", () => {
 		});
 
 		it("reports a refusal that lands between the loop's check and the dispatch as the cost cap", async () => {
-			const api = "test-cost-gate-print-race";
+			const api = "openai-completions";
 			const provider = scriptedProvider(api, [response(1.2)]);
 			let dispatches = 0;
 			const session = await createSession(

@@ -7,10 +7,8 @@ import { afterEach, beforeEach, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { Effort } from "@oh-my-pi/pi-ai";
-import { closeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -63,12 +61,10 @@ afterEach(async () => {
 	AgentRegistry.resetGlobalForTests();
 	AsyncJobManager.setInstance(undefined);
 	await manager.dispose({ timeoutMs: 1_000 });
-	unregisterCustomApis(MOCK_API_SOURCE);
 	vi.restoreAllMocks();
 	for (const key of ENV_KEYS) restoreEnvValue(key, savedEnv[key]);
 	__resetDirsFromEnvForTests();
 	AgentStorage.close();
-	closeModelCache();
 	await removeWithRetries(root);
 });
 

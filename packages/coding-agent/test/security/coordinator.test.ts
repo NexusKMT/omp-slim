@@ -2,7 +2,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi 
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { type AuthCredentialStore, AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
 import {
 	createMockModel,
@@ -33,7 +32,6 @@ let credentialStore: AuthCredentialStore | null = null;
 let authStorage: AuthStorage;
 let settings: Settings;
 let modelRegistry: ModelRegistry;
-let credentialId = 0;
 
 const gitAdapter: SecurityGitAdapter = {
 	root: async () => repositoryRoot,
@@ -51,19 +49,7 @@ beforeAll(async () => {
 	registryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "omp-security-coordinator-auth-"));
 	credentialStore = await SqliteAuthCredentialStore.open(path.join(registryRoot, "agent.db"));
 	authStorage = new AuthStorage(credentialStore);
-	await authStorage.credentials.set("openai-codex", {
-		type: "oauth",
-		access: "fixture-access-token",
-		refresh: "fixture-refresh-token",
-		expires: Date.now() + 60 * 60_000,
-		accountId: "workspace-fixture",
-		email: "security@example.invalid",
-		orgId: "workspace-fixture",
-		orgName: "pro",
-	});
-	const account = authStorage.oauth.accounts("openai-codex")[0];
-	if (!account) throw new Error("expected fixture OAuth account");
-	credentialId = account.credentialId;
+	authStorage.keys.setRuntime("openai-codex", "fixture-api-key");
 	modelRegistry = new ModelRegistry(authStorage, path.join(registryRoot, "models.yml"));
 });
 
@@ -79,7 +65,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	vi.restoreAllMocks();
-	unregisterCustomApis(MOCK_SOURCE_ID);
 	settings.cancelPendingSaves();
 	await fs.rm(temporaryRoot, { recursive: true, force: true });
 });
@@ -150,7 +135,7 @@ describe("native security coordinator", () => {
 			{ openStore: storeFactory, gitAdapter },
 		);
 		const plan = await coordinator.preflight();
-		expect(plan.account).toEqual({ provider: "amazon-bedrock", api: "bedrock-converse-stream" });
+		expect(plan.account).toEqual({ provider: "amazon-bedrock", api: "openai-completions" });
 	});
 
 	test("scripted mock model publishes a canonical completed scan and restartable session", async () => {
@@ -158,7 +143,7 @@ describe("native security coordinator", () => {
 			{ content: [{ type: "toolCall", name: "security_publish", arguments: FIXTURE_PUBLICATION }] },
 			{ content: ["Security publication completed."] },
 		]);
-		const createdPlan = await coordinator.preflight({ credentialId, model: mock.model });
+		const createdPlan = await coordinator.preflight({ model: mock.model });
 		const started = await coordinator.start({ planId: createdPlan.id });
 		const terminal = await coordinator.wait(started.operationId);
 		expect(terminal.phase).toBe("completed");
@@ -213,7 +198,7 @@ describe("native security coordinator", () => {
 			}
 			return { content: [{ type: "toolCall", name: "security_publish", arguments: FIXTURE_PUBLICATION }] };
 		});
-		const plan = await coordinator.preflight({ credentialId, model: mock.model });
+		const plan = await coordinator.preflight({ model: mock.model });
 		const started = await coordinator.start({ planId: plan.id });
 		const terminal = await coordinator.wait(started.operationId);
 		expect(terminal).toMatchObject({ phase: "completed", findingCount: 1 });
@@ -238,7 +223,7 @@ describe("native security coordinator", () => {
 				},
 			},
 		);
-		const plan = await coordinator.preflight({ credentialId, model: mock.model });
+		const plan = await coordinator.preflight({ model: mock.model });
 		vi.spyOn(store, "putBundle").mockRejectedValue(new Error("security store unavailable"));
 		const started = await coordinator.start({ planId: plan.id });
 		await expect(coordinator.wait(started.operationId)).rejects.toThrow("security store unavailable");
@@ -269,7 +254,7 @@ describe("native security coordinator", () => {
 				},
 			},
 		);
-		const createdPlan = await coordinator.preflight({ credentialId, model: mock.model });
+		const createdPlan = await coordinator.preflight({ model: mock.model });
 		const started = await coordinator.start({ planId: createdPlan.id });
 		expect(await coordinator.cancel(started.operationId)).toBeTrue();
 		const terminal = await coordinator.wait(started.operationId);
@@ -314,7 +299,7 @@ describe("native security coordinator", () => {
 				}),
 			},
 		);
-		const createdPlan = await coordinator.preflight({ credentialId, model: mock.model });
+		const createdPlan = await coordinator.preflight({ model: mock.model });
 		const started = await coordinator.start({ planId: createdPlan.id });
 		await promptStarted.promise;
 		expect(await coordinator.cancel(started.operationId)).toBeTrue();
@@ -372,7 +357,6 @@ describe("native security coordinator", () => {
 			},
 		);
 		const plan = await coordinator.preflight({
-			credentialId,
 			model: mock.model,
 			target: { kind: "ref_diff", baseRevision, headRevision },
 		});
@@ -388,7 +372,7 @@ describe("native security coordinator", () => {
 
 	test("restart recovery reconciles an interrupted persisted operation", async () => {
 		const { coordinator, mock } = coordinatorWithMockSession([]);
-		const plan = await coordinator.preflight({ credentialId, model: mock.model });
+		const plan = await coordinator.preflight({ model: mock.model });
 		const store = await storeFactory();
 		const operationId = "secop_restart_fixture";
 		const scanId = "secscan_restartfixture";

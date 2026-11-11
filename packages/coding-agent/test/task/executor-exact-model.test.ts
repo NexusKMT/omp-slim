@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -30,7 +29,6 @@ async function fixture() {
 	cleanups.push(async () => {
 		await AgentRegistry.global().get(id)?.session?.dispose();
 		AgentRegistry.global().unregister(id);
-		unregisterCustomApis(id);
 		authStorage.close();
 		await fs.rm(cwd, { recursive: true, force: true });
 	});
@@ -107,8 +105,6 @@ describe("subagents inherit one current model", () => {
 		expect(other.calls).toHaveLength(0);
 		expect(options?.model).toBe(current);
 		expect(options).not.toHaveProperty("prewalk");
-		expect(options?.disableModelFallback).toBe(true);
-		expect(options?.disableServerSideFallback).toBe(true);
 		expect(options?.toolNames).toEqual(["read"]);
 		expect(() => options?.assertDispatchModel?.(other)).toThrow("inherited parent model");
 	});

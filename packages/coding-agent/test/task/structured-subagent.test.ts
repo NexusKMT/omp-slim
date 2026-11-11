@@ -2,11 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
-import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
-import { closeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import {
 	disableProvider,
 	enableProvider,
@@ -646,7 +644,6 @@ describe("structured subagent primitive", () => {
 					AgentRegistry.global().unregister(agentId);
 					if (artifactsDir) await fs.rm(artifactsDir, { recursive: true, force: true });
 				} finally {
-					unregisterCustomApis(sourceId);
 					authStorage.close();
 					await fs.rm(root, { recursive: true, force: true });
 				}
@@ -731,7 +728,6 @@ describe("structured subagent primitive", () => {
 					AgentRegistry.global().unregister(agentId);
 					if (artifactDir) await fs.rm(artifactDir, { recursive: true, force: true });
 				} finally {
-					unregisterCustomApis(sourceId);
 					authStorage.close();
 					await fs.rm(root, { recursive: true, force: true });
 				}
@@ -1231,12 +1227,10 @@ describe("agent frontmatter structured opt-in", () => {
 		await AgentLifecycleManager.global().dispose();
 		AgentLifecycleManager.resetGlobalForTests();
 		AgentRegistry.resetGlobalForTests();
-		unregisterCustomApis(MOCK_API_SOURCE);
 		for (const key of ENV_KEYS) restoreEnvValue(key, savedEnv[key]);
 		__resetDirsFromEnvForTests();
 		// The child sessions opened agent.db and models.db under root; Windows cannot delete open files.
 		AgentStorage.close();
-		closeModelCache();
 		await removeWithRetries(root);
 	});
 

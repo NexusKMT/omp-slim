@@ -1,14 +1,13 @@
+import { mockChatStream } from "./helpers/chat-stream";
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import {
 	type Api,
 	type Context,
-	clearCustomApis,
 	type ImageContent,
 	type Message,
 	type Model,
 	type ModelSpec,
-	registerCustomApi,
 	type SimpleStreamOptions,
 	type TextContent,
 	type ToolCall,
@@ -94,7 +93,6 @@ describe("AgentSession message pipeline", () => {
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
-		clearCustomApis();
 		for (const session of sessions.splice(0)) {
 			await session.dispose();
 		}
@@ -772,9 +770,9 @@ describe("AgentSession message pipeline", () => {
 
 	it("normalizes historical WebP on the main provider request path", async () => {
 		using tempDir = TempDir.createSync("@pi-stb-main-path-");
-		const api = "test-stb-main-path";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -863,9 +861,9 @@ describe("AgentSession message pipeline", () => {
 
 	it("continues a user turn when an attached WebP is undecodable by an STB model", async () => {
 		using tempDir = TempDir.createSync("@pi-stb-corrupt-attachment-");
-		const api = "test-stb-corrupt-attachment";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -1013,10 +1011,10 @@ describe("AgentSession message pipeline", () => {
 		expect(requestOnPayload).not.toHaveBeenCalled();
 	});
 	it("lets an extension stream a context-aware side turn without persisting its exchange", async () => {
-		const api = "test-ephemeral-side-channel";
+		const api = "openai-completions";
 		let capturedOptions: SimpleStreamOptions | undefined;
 		let capturedContext: Context | undefined;
-		registerCustomApi(api, (_model, _context, options) => {
+		mockChatStream( (_model, _context, options) => {
 			capturedOptions = options;
 			capturedContext = _context;
 			const stream = new AssistantMessageEventStream();
@@ -1781,11 +1779,11 @@ describe("AgentSession message pipeline", () => {
 	});
 
 	it("rotates ephemeral side-channel credentials on Google Resource exhausted", async () => {
-		const api = "test-ephemeral-google-resource-exhausted";
+		const api = "openai-completions";
 		const googleErrorMessage = "Google API error (429): Resource exhausted. Please try again later.";
 		const keys: unknown[] = [];
 		let capturedOptions: SimpleStreamOptions | undefined;
-		registerCustomApi(api, (_model, _context, options) => {
+		mockChatStream( (_model, _context, options) => {
 			capturedOptions = options;
 			keys.push(options?.apiKey);
 			const stream = new AssistantMessageEventStream();
@@ -1852,9 +1850,9 @@ describe("AgentSession message pipeline", () => {
 	});
 
 	it("applies configured OpenRouter routing variant to ephemeral side-channel options", async () => {
-		const api = "test-ephemeral-openrouter-variant";
+		const api = "openai-completions";
 		let capturedOptions: SimpleStreamOptions | undefined;
-		registerCustomApi(api, (_model, _context, options) => {
+		mockChatStream( (_model, _context, options) => {
 			capturedOptions = options;
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -1902,13 +1900,13 @@ describe("AgentSession message pipeline", () => {
 	});
 
 	it("snapshots and obfuscates ephemeral history before asynchronous context conversion", async () => {
-		const api = "test-ephemeral-secret-redaction";
+		const api = "openai-completions";
 		const secret = "EPHEMERAL_SECRET_TOKEN_12345";
 		const conversionStarted = Promise.withResolvers<void>();
 		const continueConversion = Promise.withResolvers<void>();
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: secret }]);
 		let capturedContext: Context | undefined;
-		registerCustomApi(api, (_model, context, _options) => {
+		mockChatStream( (_model, context, _options) => {
 			capturedContext = context;
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -1983,12 +1981,12 @@ describe("AgentSession message pipeline", () => {
 
 	it("keeps obfuscated side-channel stable prefix byte-identical to the main turn", async () => {
 		await withNativeDialectEnv(async () => {
-			const api = "test-ephemeral-obfuscated-prefix-parity";
+			const api = "openai-completions";
 			const secret = "PREFIX_SECRET_TOKEN_12345";
 			let callCount = 0;
 			let mainContext: Context | undefined;
 			let sideContext: Context | undefined;
-			registerCustomApi(api, (_model, context, _options) => {
+			mockChatStream( (_model, context, _options) => {
 				if (callCount === 0) {
 					mainContext = context;
 				} else {
@@ -2152,9 +2150,9 @@ describe("AgentSession message pipeline", () => {
 
 	it("preserves append-only prefixes in subagent sessions when context handlers rewrite prior turns", async () => {
 		using tempDir = TempDir.createSync("@pi-subagent-append-only-");
-		const api = "test-subagent-append-only-cache";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2239,8 +2237,8 @@ describe("AgentSession message pipeline", () => {
 	});
 	it("rewrites finalized assistant text before it reaches history and session persistence", async () => {
 		using tempDir = TempDir.createSync("@pi-assistant-message-rewrite-");
-		const api = "test-assistant-message-rewrite";
-		registerCustomApi(api, () => {
+		const api = "openai-completions";
+		mockChatStream( () => {
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() =>
 				stream.push({ type: "done", reason: "stop", message: createAssistantMessage("original") }),
@@ -2306,8 +2304,8 @@ describe("AgentSession message pipeline", () => {
 	});
 	it("retains completed assistant text in history when aborted during a pending rewrite", async () => {
 		using tempDir = TempDir.createSync("@pi-assistant-message-abort-");
-		const api = "test-assistant-message-abort";
-		registerCustomApi(api, () => {
+		const api = "openai-completions";
+		mockChatStream( () => {
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() =>
 				stream.push({ type: "done", reason: "stop", message: createAssistantMessage("original") }),
@@ -2394,9 +2392,9 @@ describe("AgentSession message pipeline", () => {
 		// tool_execution_start reports, what bash executes, and what the
 		// assistant message persists.
 		using tempDir = TempDir.createSync("@pi-tool-call-revision-");
-		const api = "test-tool-call-revision";
+		const api = "openai-completions";
 		let requests = 0;
-		registerCustomApi(api, () => {
+		mockChatStream( () => {
 			requests++;
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2494,9 +2492,9 @@ describe("AgentSession message pipeline", () => {
 	});
 	it("delivers tool_call and tool_result additionalContext on the next provider request", async () => {
 		using tempDir = TempDir.createSync("@pi-tool-call-context-");
-		const api = "test-tool-call-context";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2594,9 +2592,9 @@ describe("AgentSession message pipeline", () => {
 		// End-to-end for the registered-tool path: the execute context forwards passive context to
 		// the agent loop and binds invokeTool to the native built-in of the same name.
 		using tempDir = TempDir.createSync("@pi-invoke-tool-");
-		const api = "test-invoke-tool";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2707,9 +2705,9 @@ describe("AgentSession message pipeline", () => {
 
 	it("uses an extension web_search implementation when the built-in is enabled", async () => {
 		using tempDir = TempDir.createSync("@pi-web-search-override-");
-		const api: Api = "test-web-search-override";
+		const api = "openai-completions";
 		let requests = 0;
-		registerCustomApi(api, () => {
+		mockChatStream( () => {
 			requests++;
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -2841,10 +2839,10 @@ describe("AgentSession message pipeline", () => {
 
 	it.each([undefined, false] as const)("ephemeral tool catalog with tools=%s", async tools => {
 		await withNativeDialectEnv(async () => {
-			const api = "test-ephemeral-tools-warm-cache";
+			const api = "openai-completions";
 			let capturedContext: Context | undefined;
 			let capturedOptions: SimpleStreamOptions | undefined;
-			registerCustomApi(api, (_model, context, options) => {
+			mockChatStream( (_model, context, options) => {
 				capturedContext = context;
 				capturedOptions = options;
 				const stream = new AssistantMessageEventStream();
@@ -2924,8 +2922,8 @@ describe("AgentSession message pipeline", () => {
 	});
 
 	it.each([undefined, false] as const)("ephemeral discards tool calls with tools=%s", async tools => {
-		const api = "test-ephemeral-tools-discard";
-		registerCustomApi(api, (_model, _context, _options) => {
+		const api = "openai-completions";
+		mockChatStream( (_model, _context, _options) => {
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
 				const message = createAssistantMessage("Here is text");

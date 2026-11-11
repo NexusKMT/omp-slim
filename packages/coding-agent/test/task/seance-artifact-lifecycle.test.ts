@@ -3,7 +3,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import type { MockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { sessionResolveContext } from "@oh-my-pi/pi-coding-agent/internal-urls/context";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
@@ -101,7 +100,6 @@ afterEach(() => {
 	AgentLifecycleManager.resetGlobalForTests();
 	AgentRegistry.resetGlobalForTests();
 	IrcBus.resetGlobalForTests();
-	unregisterCustomApis(MOCK_API_SOURCE);
 	vi.restoreAllMocks();
 });
 

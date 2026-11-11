@@ -15,9 +15,9 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { createTools, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { Snowflake } from "@oh-my-pi/pi-utils";
-import { e2eApiKey } from "../../ai/test/oauth";
 
-export { e2eApiKey };
+/** Live model tests are opt-in through an explicitly named environment variable. */
+export function e2eApiKey(name: string): string | undefined { return process.env[name]; }
 
 /**
  * Options for creating a test session.

@@ -1,6 +1,6 @@
+import { mockChatStream } from "./helpers/chat-stream";
 import { afterEach, describe, expect, it, setSystemTime } from "bun:test";
 import type { Api, AssistantMessage, Context, Message, Model, ModelSpec } from "@oh-my-pi/pi-ai";
-import { clearCustomApis, registerCustomApi } from "@oh-my-pi/pi-ai";
 import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import type { MessageCreateParams } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import { isPerCallContextMessage, markPerCallContextMessage } from "@oh-my-pi/pi-ai/utils/block-symbols";
@@ -27,7 +27,6 @@ import { createAssistantMessage } from "./helpers/agent-session-setup";
 
 describe("date-cwd-reminder", () => {
 	afterEach(() => {
-		clearCustomApis();
 	});
 
 	describe("DateCwdReminderInjector", () => {
@@ -1141,7 +1140,6 @@ describe("date-cwd reminder on the provider wire", () => {
 		// Restore the clock here, not only in each test's `finally`: an aborted test would
 		// otherwise leave every later test file running at the faked date.
 		setSystemTime();
-		clearCustomApis();
 		for (const session of sessions.splice(0)) {
 			await session.dispose();
 		}
@@ -1149,9 +1147,9 @@ describe("date-cwd reminder on the provider wire", () => {
 
 	it("keeps the date/cwd out of the system prompt and pins the reminder to the first user turn across requests", async () => {
 		using tempDir = TempDir.createSync("@pi-date-cwd-reminder-");
-		const api = "test-date-cwd-reminder";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {
@@ -1233,7 +1231,7 @@ describe("date-cwd reminder on the provider wire", () => {
 	it("keeps an earlier steering message byte-identical when the date rolls over mid-turn", async () => {
 		using tempDir = TempDir.createSync("@pi-date-cwd-reminder-");
 		await Bun.write(tempDir.join("notes.txt"), "notes");
-		const api = "test-date-cwd-reminder-steer";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
 		const pushReadCall = (stream: AssistantMessageEventStream, id: string) => {
 			const toolCall = { type: "toolCall" as const, id, name: "read", arguments: { path: "notes.txt" } };
@@ -1246,7 +1244,7 @@ describe("date-cwd reminder on the provider wire", () => {
 			stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: message });
 			stream.push({ type: "done", reason: "toolUse", message });
 		};
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			const request = contexts.length;
@@ -1344,9 +1342,9 @@ describe("date-cwd reminder on the provider wire", () => {
 				tempDir.join("secrets.yml"),
 				`- type: plain\n  content: ${secret}\n  mode: replace\n  replacement: "[redacted]"\n`,
 			);
-			const api = "test-date-cwd-reminder-copies";
+			const api = "openai-completions";
 			const contexts: Context[] = [];
-			registerCustomApi(api, (_model, context) => {
+			mockChatStream( (_model, context) => {
 				contexts.push(context);
 				const stream = new AssistantMessageEventStream();
 				queueMicrotask(() => {
@@ -1433,9 +1431,9 @@ describe("date-cwd reminder on the provider wire", () => {
 	it("keeps a first message a context hook re-creates on every request byte-identical when the date rolls over mid-run", async () => {
 		using tempDir = TempDir.createSync("@pi-date-cwd-reminder-");
 		await Bun.write(tempDir.join("notes.txt"), "notes");
-		const api = "test-date-cwd-reminder-recreated";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			const request = contexts.length;
@@ -1541,9 +1539,9 @@ describe("date-cwd reminder on the provider wire", () => {
 	it("keeps the Anthropic cache on the history when the date rolls over under per-call messages a context hook adds", async () => {
 		using tempDir = TempDir.createSync("@pi-date-cwd-reminder-");
 		await Bun.write(tempDir.join("notes.txt"), "notes");
-		const api = "test-date-cwd-reminder-per-call";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			const request = contexts.length;
@@ -1711,9 +1709,9 @@ describe("date-cwd reminder on the provider wire", () => {
 
 	it("resends the first user turn with its own date when the session is reopened on a later day", async () => {
 		using tempDir = TempDir.createSync("@pi-date-cwd-reminder-");
-		const api = "test-date-cwd-reminder-reopen";
+		const api = "openai-completions";
 		const contexts: Context[] = [];
-		registerCustomApi(api, (_model, context) => {
+		mockChatStream( (_model, context) => {
 			contexts.push(context);
 			const stream = new AssistantMessageEventStream();
 			queueMicrotask(() => {

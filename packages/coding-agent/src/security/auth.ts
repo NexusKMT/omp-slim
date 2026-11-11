@@ -1,5 +1,4 @@
 import type { AgentOptions } from "@oh-my-pi/pi-agent-core";
-import type { AuthStorage } from "../session/auth-storage";
 import type { SecurityAuthRef } from "./contracts";
 
 export interface SecurityAuthModel {
@@ -7,7 +6,6 @@ export interface SecurityAuthModel {
 	api: string;
 }
 export interface SecurityAuthResolverOptions {
-	authStorage: AuthStorage;
 	auth: SecurityAuthRef;
 	providerResolver: NonNullable<AgentOptions["getApiKey"]>;
 }
