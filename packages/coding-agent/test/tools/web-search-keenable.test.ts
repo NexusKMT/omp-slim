@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:t
 import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
 import { getSearchProvider } from "@oh-my-pi/pi-coding-agent/web/search/provider";
 import { searchKeenable } from "@oh-my-pi/pi-coding-agent/web/search/providers/keenable";
-import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../helpers/auth-storage";
 
 const TEST_KEY = "keen_test_key";
 const savedEnvKey = process.env.KEENABLE_API_KEY;

@@ -1,7 +1,5 @@
-import { Database } from "bun:sqlite";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { TodoTool } from "@oh-my-pi/pi-coding-agent/tools";
 
 /**
@@ -12,7 +10,7 @@ export function createAssistantMessage(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
+		api: "openai-completions",
 		provider: "anthropic",
 		model: "mock",
 		usage: {
@@ -28,14 +26,7 @@ export function createAssistantMessage(text: string): AssistantMessage {
 	};
 }
 
-/**
- * Build isolated auth state without opening a filesystem-backed SQLite database.
- * AgentSession unit tests that only need a runtime API key should not pay for
- * database creation, journaling, and deletion on every case.
- */
-export function createInMemoryAuthStorage(): AuthStorage {
-	return new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
-}
+export { createInMemoryAuthStorage } from "./auth-storage";
 
 /**
  * Make `todo` the session's active tool. Todo stop reminders only fire while

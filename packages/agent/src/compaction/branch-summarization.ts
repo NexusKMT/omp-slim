@@ -327,15 +327,7 @@ export async function generateBranchSummary(
 		return { summary: "No content to summarize" };
 	}
 
-	// A snapcompact summary rendered for another model may carry reasoning
-	// sections and their legend, which Claude refuses (issue #6093).
-	const messages = snapcompact.readerIncludesThinking(model)
-		? branchMessages
-		: branchMessages.map(message =>
-				message.role === "compactionSummary"
-					? { ...message, summary: snapcompact.textWithoutThinking(message.summary) }
-					: message,
-			);
+	const messages = branchMessages;
 
 	// Transform to LLM-compatible messages, then serialize to text
 	// Serialization prevents the model from treating it as a conversation to continue

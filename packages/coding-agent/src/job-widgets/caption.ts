@@ -100,7 +100,6 @@ export function createModelJobCaptionWriter(options: ModelJobWidgetAuthorOptions
 			{ systemPrompt: [systemPrompt], messages: [message] },
 			{
 				apiKey: options.modelRegistry.resolver(model, sessionId),
-				disableServerSideFallback: true,
 				signal,
 				disableReasoning: true,
 				maxTokens: MAX_CAPTION_TOKENS,

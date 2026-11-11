@@ -5175,13 +5175,7 @@ export class SessionMaintenance {
 						if (!shouldRetry) throw error;
 						const baseDelayMs = retrySettings.baseDelayMs * 2 ** attempt;
 						const delayMs = Math.max(baseDelayMs, retryAfterMs ?? 0);
-						const waitForUsageReset =
-							retrySettings.waitForUsageReset === true &&
-							AIError.is(id, AIError.Flag.UsageLimit) &&
-							retryAfterMs !== undefined &&
-							delayMs <= retryAfterMs;
-						if (retrySettings.maxDelayMs > 0 && !waitForUsageReset && delayMs > retrySettings.maxDelayMs)
-							throw error;
+						if (retrySettings.maxDelayMs > 0 && delayMs > retrySettings.maxDelayMs) throw error;
 						attempt++;
 						logger.warn("Auto-compaction failed, retrying current model", { attempt, delayMs, error: message });
 						await scheduler.wait(delayMs, { signal: autoCompactionSignal });

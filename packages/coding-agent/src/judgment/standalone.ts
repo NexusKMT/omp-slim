@@ -24,7 +24,7 @@ export interface StandaloneJudge {
  */
 export async function openStandaloneJudge(cwd: string, purpose: string): Promise<StandaloneJudge> {
 	const settings = await Settings.init({ cwd });
-	const authStorage = await discoverAuthStorage(undefined, { settings });
+	const authStorage = await discoverAuthStorage(undefined);
 	try {
 		const registry = new ModelRegistry(authStorage);
 		await registry.refresh();

@@ -308,9 +308,6 @@ export async function revivePersistedSubagent(spec: PersistedReviveSpec, expecte
 			parentTaskPrefix: ref.id,
 			asyncJobManager: spec.asyncJobManager,
 			parentAgentId: ref.parentId,
-
-			disableModelFallback: true,
-			disableServerSideFallback: true,
 			assertDispatchModel: inheritedModelGuard(model),
 			expectedAgentRef: expectedRef,
 			taskDepth,

@@ -33,7 +33,7 @@
  * with an error naming the worker, and treats `dispose` as already done.
  */
 import { type AgentMessage, type AgentTool, ThinkingLevel, Tokenizer } from "@oh-my-pi/pi-agent-core";
-import type { Effort, ImageContent, Model, ServiceTier, ToolResultMessage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { Effort, ImageContent, Model, ServiceTier } from "@oh-my-pi/pi-ai";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import type { JobWidgetEntry } from "@oh-my-pi/pi-tui/tools/job-widget";
@@ -176,7 +176,7 @@ function emptyViewState(): SessionViewState {
 		tools: [],
 		toolNames: [],
 		builtInTools: [],
-		pendingToolResults: [],
+
 		runToolCallIds: [],
 		systemPrompt: [],
 		skills: [],
@@ -197,10 +197,10 @@ function emptyViewState(): SessionViewState {
 		availableEffortSelectors: [],
 		serviceTierByFamily: {},
 		fastModeActive: false,
-		anthropicSlowModeLabel: undefined,
+
 		goalMode: undefined,
 		advisorCost: 0,
-		advisorUsingSubscription: false,
+
 		todoPhases: [],
 		queuedMessages: { steering: [], followUp: [], liveSteered: 0 },
 		restorableQueue: { steering: [], followUp: [] },
@@ -312,7 +312,6 @@ export class RemoteAgentSession implements AgentViewSession {
 				return mirror.#state.isPaused;
 			},
 			state: loopState,
-			getPendingToolResults: (): readonly ToolResultMessage[] => this.#view.pendingToolResults,
 		};
 		this.state = {
 			get model(): Model | undefined {
@@ -595,24 +594,12 @@ export class RemoteAgentSession implements AgentViewSession {
 		return this.#view.fastModeActive;
 	}
 
-	getAnthropicSlowModeLabel(): string | undefined {
-		return this.#view.anthropicSlowModeLabel;
-	}
-
 	getGoalModeState(): GoalModeState | undefined {
 		return this.#view.goalMode;
 	}
 
 	getAdvisorCost(): number {
 		return this.#view.advisorCost;
-	}
-
-	isAdvisorUsingSubscription(): boolean {
-		return this.#view.advisorUsingSubscription;
-	}
-
-	fetchUsageReports(signal?: AbortSignal): Promise<UsageReport[] | null> {
-		return this.#command("fetchUsageReports", signal);
 	}
 
 	getAsyncJobSnapshot(options?: { recentLimit?: number }): AsyncJobSnapshot | null {

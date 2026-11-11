@@ -22,7 +22,7 @@ import { searchBrave } from "@oh-my-pi/pi-coding-agent/web/search/providers/brav
 import { withHardTimeout } from "@oh-my-pi/pi-coding-agent/web/search/providers/utils";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { type SearchProviderId, type SearchResponse } from "@oh-my-pi/pi-coding-agent/web/search/types";
-import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../../helpers/auth-storage";
 
 import { cfgProvidersWebSearchTimeoutSeconds } from "@oh-my-pi/pi-coding-agent/session/settings";
 

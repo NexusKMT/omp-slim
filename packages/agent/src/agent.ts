@@ -570,7 +570,7 @@ export class Agent {
 	 * Resolve request metadata for the given provider at call time. When a
 	 * resolver is installed via {@link setMetadataResolver}, it is invoked with
 	 * the provider string so the result can be scoped (e.g. `account_uuid` is
-	 * only included for `"anthropic"` requests). Falls back to the static
+	 * only included for the configured endpoint). Falls back to the static
 	 * {@link metadata} value when no resolver is set.
 	 */
 	metadataForProvider(provider: string): Record<string, unknown> | undefined {
@@ -581,7 +581,7 @@ export class Agent {
 	/**
 	 * Install a function that resolves request metadata at call time. The
 	 * resolver receives the target provider string and can gate provider-specific
-	 * fields (e.g. `account_uuid` only for `"anthropic"`). Invoked per LLM
+	 * fields required by the configured endpoint. Invoked per LLM
 	 * request by `agent-loop` after `getApiKey` selects the session-sticky
 	 * credential. Pass `undefined` to clear and revert to the static
 	 * {@link metadata} value.
@@ -767,9 +767,8 @@ export class Agent {
 	/**
 	 * Assemble the provider Context for a side-channel (no-loop) request, mirroring
 	 * the main loop's prefix (system + normalized tools) so it shares the prompt
-	 * cache. Never touches the append-only log or the tool-choice queue. Owned/
-	 * in-band dialect sessions stay tools-less (matching their no-native-tools wire
-	 * shape and avoiding tool-markup leakage). `llmMessages` is already converted
+	 * cache. Never touches the append-only log or the tool-choice queue.
+	 * `llmMessages` is already converted
 	 * (and, in production, obfuscated) by the caller.
 	 *
 	 * `systemPrompt` defaults to the live agent prompt so the side request hits the

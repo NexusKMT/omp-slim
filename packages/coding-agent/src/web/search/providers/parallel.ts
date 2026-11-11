@@ -76,7 +76,6 @@ async function searchWithPublicMcp(
 		signal?: AbortSignal;
 		timeoutMs?: number;
 		fetch?: FetchImpl;
-		modelName?: string;
 	},
 	sessionId?: string,
 ): Promise<ParallelSearchResult> {
@@ -89,7 +88,6 @@ async function searchWithPublicMcp(
 				objective,
 				search_queries: queries,
 				...(sessionId && sessionId.length <= 100 && { session_id: sessionId }),
-				...(params.modelName && params.modelName.length <= 100 && { model_name: params.modelName }),
 			},
 		},
 		{
@@ -153,7 +151,6 @@ async function searchWithAuthStorage(
 		timeoutMs?: number;
 		fetch?: FetchImpl;
 		mcpQuery: string;
-		modelName?: string;
 	},
 	authStorage: AuthStorage,
 	sessionId?: string,
@@ -219,7 +216,6 @@ export async function searchParallel(
 		timeoutMs?: number;
 		fetch?: FetchImpl;
 		parsedQuery?: StructuredQuery;
-		modelName?: string;
 	},
 	authStorage: AuthStorage,
 	sessionId?: string,
@@ -242,7 +238,6 @@ export async function searchParallel(
 				timeoutMs: params.timeoutMs,
 				fetch: params.fetch,
 				mcpQuery,
-				modelName: params.modelName,
 			},
 			authStorage,
 			sessionId,

@@ -1182,7 +1182,10 @@ export class SessionAdvisors {
 				maintainContext: (incoming, signal) => this.#maintainAdvisorContext(advisorRef, incoming, signal),
 				obfuscator: this.#host.obfuscator(),
 				includeReasoning: descriptor.config.includeReasoning,
-				getModelIdentity: () => formatModelString(advisorRef.agent.state.model),
+				getModelIdentity: () => {
+					const model = advisorRef.agent.state.model;
+					return model ? formatModelString(model) : "unconfigured";
+				},
 				beginAdvisorUpdate: inProgress => {
 					advisorRef.recorder.beginTurn();
 					// Flushes the deferred backlog on the in-progress→completed
@@ -1216,7 +1219,7 @@ export class SessionAdvisors {
 					const message = error instanceof Error ? error.message : String(error);
 					this.#host.emitNotice(
 						"warning",
-						`Advisor${slug ? ` "${advisorName}"` : ""} unavailable for ${formatModelString(advisorAgent.state.model)}: ${message}`,
+						`Advisor${slug ? ` "${advisorName}"` : ""} unavailable for ${advisorAgent.state.model ? formatModelString(advisorAgent.state.model) : "unconfigured"}: ${message}`,
 						"advisor",
 					);
 				},
@@ -1560,6 +1563,7 @@ export class SessionAdvisors {
 		if (assistantFailure?.content.some(block => block.type === "toolCall")) return false;
 
 		const currentModel = advisor.agent.state.model;
+		if (!currentModel) return false;
 		const message = assistantFailure?.errorMessage ?? (error instanceof Error ? error.message : String(error));
 		const errorId = assistantFailure
 			? AIError.classifyMessage({
@@ -1672,6 +1676,7 @@ export class SessionAdvisors {
 		}
 		const compactionMethod = "soft";
 		const advisorModel = agent.state.model;
+		if (!advisorModel) return false;
 		const compactionSettings = resolveMethodSettings(
 			resolveModelCompactionSettings(this.#host.settings, advisorModel),
 			compactionMethod,
@@ -2137,7 +2142,7 @@ export class SessionAdvisors {
 					? "error"
 					: "running",
 			model,
-			contextWindow: model.contextWindow ?? 0,
+			contextWindow: model?.contextWindow ?? 0,
 			contextTokens,
 			tokens: { input, output, reasoning, cacheRead, cacheWrite, total: totalTokens },
 			cost: this.#advisorCosts.get(advisor.slug) ?? 0,
@@ -2229,7 +2234,10 @@ export class SessionAdvisors {
 					});
 		if (this.#advisors.length === 1) return dump(this.#advisors[0]);
 		return this.#advisors
-			.map(a => `### Advisor: ${a.name} (${a.agent.state.model.provider}/${a.agent.state.model.id})\n\n${dump(a)}`)
+			.map(
+				a =>
+					`### Advisor: ${a.name} (${a.agent.state.model ? formatModelString(a.agent.state.model) : "unconfigured"})\n\n${dump(a)}`,
+			)
 			.join("\n\n");
 	}
 }

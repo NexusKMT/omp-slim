@@ -6,7 +6,7 @@ import { AuthBrokerClient, RemoteAuthCredentialStore, startAuthBroker } from "@o
 import type { ApiKeyResolver } from "@oh-my-pi/pi-ai/auth-retry";
 import * as oauthRegistry from "@oh-my-pi/pi-ai/registry/oauth";
 import { registerOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel as getBundledModel } from "../../../catalog/test/fixtures/models";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 import { createBrokerAuthStorage } from "../../src/cli/auth-broker-cli";
 import { createExactSecurityOAuthResolver, createSecurityAuthResolver, selectSecurityAuth } from "../../src/security";

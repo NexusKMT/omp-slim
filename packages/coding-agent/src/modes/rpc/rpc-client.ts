@@ -9,12 +9,12 @@ import type { AgentEvent, AgentMessage, AgentToolResult, ThinkingLevel } from "@
 import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import { isRecord, ptree, readJsonl, toError } from "@oh-my-pi/pi-utils";
-import type { LogoutAccount } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
+
 import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import type { FileSink } from "bun";
 import type { BashResult } from "../../exec/bash-executor";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
-import type { CacheWarmingMode } from "../../session/cache-warmer";
+
 import type { SessionEntry, SessionTreeNode } from "../../session/session-entries";
 import type { SessionLeaseReport } from "../../session/session-storage";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameDecoder, type RpcProtocolVersion } from "./rpc-frame";
@@ -165,8 +165,7 @@ const sessionEventTypes = new Set<AgentSessionEvent["type"]>([
 	"manual_compaction_end",
 	"auto_retry_start",
 	"auto_retry_end",
-	"cache_warming_start",
-	"cache_warming_end",
+
 	"retry_fallback_applied",
 	"retry_fallback_succeeded",
 	"ttsr_triggered",
@@ -795,8 +794,7 @@ export class RpcClient {
 			...state,
 			fastModeEnabled: state.fastModeEnabled === true,
 			fastModeActive: state.fastModeActive === true,
-			slowModeSupported: state.slowModeSupported === true,
-			slowModeEnabled: state.slowModeEnabled === true,
+
 			goal: state.goal ?? null,
 			tokensPerSecond:
 				typeof state.tokensPerSecond === "number" && Number.isFinite(state.tokensPerSecond)
@@ -811,16 +809,6 @@ export class RpcClient {
 	async setFastMode(enabled: boolean): Promise<{ enabled: boolean; active: boolean }> {
 		const response = await this.#send({ type: "set_fast_mode", enabled });
 		return this.#getData(response);
-	}
-
-	/**
-	 * Enable or disable `/slow` for the active model: the flex tier for this
-	 * session on OpenAI/Google, or the persisted Claude low-priority setting
-	 * (`providers.anthropic.slowMode`) on Anthropic.
-	 */
-	async setSlowMode(enabled: boolean): Promise<boolean> {
-		const response = await this.#send({ type: "set_slow_mode", enabled });
-		return this.#getData<{ enabled: boolean }>(response).enabled;
 	}
 
 	/**
@@ -997,12 +985,6 @@ export class RpcClient {
 	 */
 	async setAutoCompaction(enabled: boolean): Promise<void> {
 		await this.#send({ type: "set_auto_compaction", enabled });
-	}
-
-	/** Set the session-scoped cache warming mode and return the effective mode. */
-	async setCacheWarming(mode: CacheWarmingMode): Promise<CacheWarmingMode> {
-		const response = await this.#send({ type: "set_cache_warming", mode });
-		return this.#getData<{ mode: CacheWarmingMode }>(response).mode;
 	}
 
 	/**
@@ -1198,87 +1180,6 @@ export class RpcClient {
 		}
 		const response = await this.#send({ type: "get_messages" });
 		return this.#getData<{ messages: AgentMessage[] }>(response).messages;
-	}
-
-	/**
-	 * Get list of OAuth providers available for login, with their current authentication status.
-	 */
-	async getLoginProviders(): Promise<Array<{ id: string; name: string; available: boolean; authenticated: boolean }>> {
-		const response = await this.#send({ type: "get_login_providers" });
-		return this.#getData<{
-			providers: Array<{ id: string; name: string; available: boolean; authenticated: boolean }>;
-		}>(response).providers;
-	}
-
-	/**
-	 * Trigger OAuth login for the given provider.
-	 * The server will emit an `open_url` extension_ui_request for the auth URL.
-	 * Providers that require pasted-code completion may then emit an `input`
-	 * extension_ui_request; pass `onManualCodeInput` to satisfy it.
-	 * Resolves when login completes or rejects on failure.
-	 *
-	 * @param onOpenUrl Called when the server emits the auth URL. The host must
-	 *   open `url` in a browser. When the flow's callback server hosts a
-	 *   `/launch` redirect, `launchUrl` is a short loopback URL that 302s to
-	 *   `url` — hosts SHOULD surface it as the truncation-safe copy target so
-	 *   terminal viewport clipping cannot corrupt trailing OAuth query
-	 *   parameters (e.g. `code_challenge_method=S256`).
-	 */
-	async login(
-		providerId: string,
-		options?: {
-			onOpenUrl?: (url: string, instructions?: string, launchUrl?: string) => void;
-			onManualCodeInput?: (prompt: { title: string; placeholder?: string }) => string | Promise<string>;
-		},
-	): Promise<{ providerId: string }> {
-		const { onManualCodeInput, onOpenUrl } = options ?? {};
-		const listener =
-			onOpenUrl || onManualCodeInput
-				? (req: RpcExtensionUIRequest) => {
-						if (req.method === "open_url") {
-							onOpenUrl?.(req.url, req.instructions, req.launchUrl);
-							return;
-						}
-						// Provider login rejects secret prompts on the server, so any `secret: true`
-						// input frame is an unrelated concurrent extension dialog and must not be
-						// intercepted as unmasked OAuth code input.
-						if (req.method !== "input" || req.secret || !onManualCodeInput) return;
-						// The prompt can outlive the agent (e.g. a broken stdin pipe stops the client); drop the reply
-						// instead of throwing "Client not started" out of a detached promise chain.
-						void Promise.resolve(onManualCodeInput({ title: req.title, placeholder: req.placeholder })).then(
-							value => {
-								if (this.#process) this.#writeFrame({ type: "extension_ui_response", id: req.id, value });
-							},
-							() => {
-								if (this.#process) {
-									this.#writeFrame({ type: "extension_ui_response", id: req.id, cancelled: true });
-								}
-							},
-						);
-					}
-				: undefined;
-		if (listener) this.#extensionUiListeners.add(listener);
-		try {
-			const response = await this.#send({ type: "login", providerId }, 600_000);
-			return this.#getData<{ providerId: string }>(response);
-		} finally {
-			if (listener) this.#extensionUiListeners.delete(listener);
-		}
-	}
-
-	/** List the stored credentials `logout()` can remove for a provider, active first. */
-	async getLogoutAccounts(providerId: string): Promise<LogoutAccount[]> {
-		const response = await this.#send({ type: "get_logout_accounts", providerId });
-		return this.#getData<{ accounts: LogoutAccount[] }>(response).accounts;
-	}
-
-	/**
-	 * Remove one stored credential. Rejects when it is no longer stored.
-	 * `remainingSource` names what still authenticates the provider (another stored credential, env var, config).
-	 */
-	async logout(providerId: string, credentialId: number): Promise<{ remainingSource?: string }> {
-		const response = await this.#send({ type: "logout", providerId, credentialId });
-		return this.#getData<{ remainingSource?: string }>(response);
 	}
 
 	/**

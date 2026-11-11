@@ -5,7 +5,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search";
 import * as provider from "@oh-my-pi/pi-coding-agent/web/search/provider";
 import type { SearchProviderId } from "@oh-my-pi/pi-coding-agent/web/search/types";
-import { createInMemoryAuthStorage } from "../../helpers/agent-session-setup";
+import { createInMemoryAuthStorage } from "../../helpers/auth-storage";
 
 describe("HTTP web search selection", () => {
 	let authStorage: AuthStorage;

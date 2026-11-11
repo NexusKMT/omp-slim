@@ -5,7 +5,7 @@ import type { Settings } from "../config/settings";
 import { describeModelCompactionPoint } from "../session/model-compaction-threshold";
 
 import { cfgDisabledProviders, cfgModelProviderOrder } from "../config/model-settings";
-import { cfgDefaultThinkingLevel, cfgTierAnthropic, cfgTierGoogle, cfgTierOpenai } from "../session/settings";
+import { cfgDefaultThinkingLevel, cfgTierOpenai } from "../session/settings";
 
 /**
  * Supply live model-overlay preferences and runtime resolution from the host.
@@ -37,17 +37,10 @@ export function createModelBrowserSource(
 		serviceTierFor: model => {
 			const tier = sessionServiceTier
 				? sessionServiceTier(model)
-				: resolveModelServiceTier(
-						buildServiceTierByFamily(
-							cfgTierOpenai.get(settings),
-							cfgTierAnthropic.get(settings),
-							cfgTierGoogle.get(settings),
-						),
-						model,
-					);
+				: resolveModelServiceTier(buildServiceTierByFamily(cfgTierOpenai.get(settings)), model);
 			// Label only a tier the request carries as `service_tier`: that is what the
 			// provider echoes back as the served tier, which keys the perf row.
-			return shouldSendServiceTier(tier, model) ? tier : undefined;
+			return shouldSendServiceTier(tier) ? tier : undefined;
 		},
 		get disabledProviders() {
 			return cfgDisabledProviders.get(settings);

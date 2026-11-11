@@ -481,7 +481,7 @@ export class SessionPublisher {
 				previous && reuse("toolNames")
 					? previous.builtInTools
 					: sources.toolNames.filter(name => session.hasBuiltInTool(name)),
-			pendingToolResults: toWireData([...session.agent.getPendingToolResults()]),
+
 			runToolCallIds: [...session.runToolCallIds],
 			systemPrompt: previous && reuse("systemPrompt") ? previous.systemPrompt : [...sources.systemPrompt],
 			skills: previous && reuse("skills") ? previous.skills : toWireData([...session.skills]),
@@ -503,10 +503,10 @@ export class SessionPublisher {
 			availableEffortSelectors: session.getAvailableEffortSelectors(),
 			serviceTierByFamily: toWireData(session.serviceTierByFamily),
 			fastModeActive: session.isFastModeActive(),
-			anthropicSlowModeLabel: session.getAnthropicSlowModeLabel(),
+
 			goalMode: toWireData(session.getGoalModeState()),
 			advisorCost: session.getAdvisorCost(),
-			advisorUsingSubscription: session.isAdvisorUsingSubscription(),
+
 			todoPhases: toWireData(session.getTodoPhases()),
 			queuedMessages: toWireData(session.getQueuedMessages()),
 			restorableQueue: toWireData({ steering: steering.map(queuedEntry), followUp: followUp.map(queuedEntry) }),
@@ -611,7 +611,7 @@ export const SESSION_HOST_SERVE: RpcServe<SessionPublisher, SessionHostProtocol>
 			publisher,
 			publisher.session.setModelTemporary(localModel(publisher.session, model), thinkingLevel, options),
 		),
-	fetchUsageReports: async (publisher, signal) => toWireData(await publisher.session.fetchUsageReports(signal)),
+
 	runEphemeralTurn: async (publisher, args) => toWireData(await publisher.session.runEphemeralTurn(args)),
 	enableIdleMaintenance: (publisher, options) => publisher.session.enableIdleMaintenance(options),
 	refreshIdleMaintenance: publisher => publisher.session.refreshIdleMaintenance(),

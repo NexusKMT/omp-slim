@@ -1,5 +1,3 @@
-import { getOAuthCredentialProvider } from "@oh-my-pi/pi-ai/oauth";
-import { runProviderSetupWizard as runProviderWizard } from "@oh-my-pi/pi-tui/setup/lazy";
 import type { SetupHost, SetupScene } from "@oh-my-pi/pi-tui/setup/scenes/types";
 import {
 	ALL_SCENES,
@@ -24,7 +22,7 @@ import {
 	cfgThemeLight,
 	cfgUpdateAuto,
 } from "./settings";
-import { cfgDisabledProviders, cfgModelStorage } from "../config/model-settings";
+import { cfgModelStorage } from "../config/model-settings";
 
 export { ALL_SCENES, CURRENT_SETUP_VERSION, setupWizardAllowed };
 export type { SetupScene, SetupSceneHost } from "@oh-my-pi/pi-tui/setup/scenes/types";
@@ -47,22 +45,18 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 		get colorBlindMode() {
 			return cfgColorBlindMode.get(ctx.settings);
 		},
-		get disabledProviders() {
-			return cfgDisabledProviders.get(ctx.settings);
-		},
+
 		get autoUpdate() {
 			return cfgUpdateAuto.get(ctx.settings);
 		},
-		get authStorage() {
-			return ctx.session.modelRegistry.authStorage;
-		},
+
 		modelSource,
 		getModels: () => ({
 			available: ctx.session.modelRegistry.getAvailable("chat"),
 			all: ctx.session.modelRegistry.getAll("chat"),
 			current: ctx.session.model,
 		}),
-		refreshModels: () => ctx.session.modelRegistry.refresh("online-if-uncached"),
+		refreshModels: () => ctx.session.modelRegistry.refresh("offline"),
 		selectModel: async (model, selector) => {
 			const projectScope = cfgModelStorage.get(ctx.settings) === "project";
 			const { switched } = await ctx.session.setModel(model, "default", { selector, persist: !projectScope });
@@ -70,11 +64,7 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 			if (projectScope) ctx.settings.setProjectModel(selector);
 			await ctx.settings.flush();
 		},
-		refreshProvider: async provider => {
-			// An OAuth alias (`openai-codex-device`) stores its credential under the base provider.
-			await ctx.session.modelRegistry.refreshProvider(getOAuthCredentialProvider(provider), "online");
-			await ctx.session.refreshScopedModels();
-		},
+
 		saveComposerShape: async shape => {
 			cfgComposerShape.set(ctx.settings, shape);
 			await ctx.settings.flush();
@@ -93,7 +83,7 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 			cfgUpdateAuto.set(ctx.settings, enabled);
 			await ctx.settings.flush();
 		},
-		openInBrowser: url => ctx.openInBrowser(url),
+
 		markComplete: version => markSetupWizardComplete(ctx.settings, version),
 		playWelcomeIntro: () => ctx.playWelcomeIntro(),
 		showError: message => ctx.showError(message),
@@ -116,16 +106,11 @@ export function selectSetupScenes(
 	return selectScenes(storedVersion, scenes, ctx ? createSetupHost(ctx) : undefined, options);
 }
 
-/** Run setup with application-owned persistence and provider effects. */
+/** Run setup with application-owned persistence. */
 export function runSetupWizard(
 	ctx: InteractiveModeContext,
 	scenes: readonly SetupScene[] = ALL_SCENES,
 	options: RunSetupWizardOptions = {},
 ): Promise<void> {
 	return runWizard(createSetupHost(ctx), scenes, options);
-}
-
-/** Open provider setup without advancing onboarding or replaying the welcome intro. */
-export function runProviderSetupWizard(ctx: InteractiveModeContext): Promise<void> {
-	return runProviderWizard(createSetupHost(ctx));
 }

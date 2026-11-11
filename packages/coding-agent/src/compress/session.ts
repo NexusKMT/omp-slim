@@ -30,7 +30,7 @@ export async function createCompressSession(options: {
 }): Promise<CompressSession> {
 	const cwd = options.cwd ?? getProjectDir();
 	const settings = await Settings.init({ cwd });
-	const authStorage = await discoverAuthStorage(undefined, { settings });
+	const authStorage = await discoverAuthStorage(undefined);
 	const modelRegistry = new ModelRegistry(authStorage);
 	await modelRegistry.refresh();
 	// An absent selector means "whatever the session is configured to use", which
@@ -44,7 +44,6 @@ export async function createCompressSession(options: {
 		settings,
 		authStorage,
 		modelRegistry,
-		cacheWarming: false,
 		...(resolved?.model ? { model: resolved.model } : {}),
 		customTools: [options.protocol.rewriteTool(), options.protocol.approveTool()],
 		toolNames: ["rewrite", "approve"],

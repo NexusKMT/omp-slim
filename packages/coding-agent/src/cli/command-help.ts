@@ -11,19 +11,6 @@ export const anonymizeHelp = {
 		"Write a shareable copy of a session and its subagents: turn contents redacted, metadata kept, paths and literals replaced by consistent mock tokens",
 } satisfies CommandMetadata;
 
-export const authHelp = {
-	description: "Export or import stored provider credentials (API keys and OAuth logins) as JSON",
-} satisfies CommandMetadata;
-
-export const authBrokerHelp = {
-	description: "Manage the omp auth-broker (credential vault)",
-} satisfies CommandMetadata;
-
-export const authGatewayHelp = {
-	description:
-		"Run an auth-gateway: an HTTP forward proxy backed by the configured broker, or JSON lines on stdio with your own credentials",
-} satisfies CommandMetadata;
-
 export const benchHelp = {
 	description:
 		"Benchmark models: TTFT/prefill vs decode throughput with p50/p95, across chat, prefill, generation, and prompt-cache workloads, or single-user vs parallel load (--detailed)",
@@ -47,10 +34,6 @@ export const compressHelp = {
 
 export const configHelp = { description: "Manage configuration settings" } satisfies CommandMetadata;
 
-export const dryBalanceHelp = {
-	description: "Dry-run OAuth account balancing across random session ids",
-} satisfies CommandMetadata;
-
 export const galleryHelp = {
 	description: "Preview tool, composer, and status-line renderers in a deterministic visual gallery",
 } satisfies CommandMetadata;
@@ -72,10 +55,6 @@ export const grepHelp = { description: "Test grep tool" } satisfies CommandMetad
 
 export const grievancesHelp = {
 	description: "View, clean, or push reported tool issues (auto-QA grievances)",
-} satisfies CommandMetadata;
-
-export const loginHelp = {
-	description: "Log in to a model provider (terminal counterpart of /login)",
 } satisfies CommandMetadata;
 
 export const imagesHelp = {
@@ -142,7 +121,7 @@ export const sshHelp = { description: "Manage SSH host configurations" } satisfi
 
 export const statsHelp = { description: "View usage statistics" } satisfies CommandMetadata;
 
-export const tokenHelp = { description: "Get the API key or OAuth token for a provider" } satisfies CommandMetadata;
+export const tokenHelp = { description: "Get the configured API key for a provider" } satisfies CommandMetadata;
 
 export const toksHelp = {
 	description: "Count a file or text with every embedded offline tokenizer (OpenAI, Claude, Qwen, …)",
@@ -153,10 +132,6 @@ export const ttsrHelp = {
 } satisfies CommandMetadata;
 
 export const updateHelp = { description: "Check for and install updates" } satisfies CommandMetadata;
-
-export const usageHelp = {
-	description: "Show provider usage limits for every authenticated account",
-} satisfies CommandMetadata;
 
 export const worktreeHelp = {
 	description: "Add, list, or clear git worktrees (clone-first when enabled)",

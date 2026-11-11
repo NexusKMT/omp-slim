@@ -6,7 +6,7 @@ import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model, TextContent } from "@oh-my-pi/pi-ai";
 import * as codexResponses from "@oh-my-pi/pi-ai/providers/openai-codex-state";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";

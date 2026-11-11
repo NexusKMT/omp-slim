@@ -221,7 +221,6 @@ export function createModelJobWidgetAuthor(options: ModelJobWidgetAuthorOptions)
 			},
 			{
 				apiKey: options.modelRegistry.resolver(model, sessionId),
-				disableServerSideFallback: true,
 				signal,
 				// Spec writing is formatting work; a forced tool call also rules out thinking on some providers.
 				disableReasoning: true,
