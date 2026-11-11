@@ -415,7 +415,7 @@ const FAILURE_COLUMNS: readonly Column<MessageStats>[] = [
 	{
 		key: "cost",
 		header: "Cost",
-		title: "API-equivalent estimate",
+		title: "recorded cost",
 		align: "right",
 		sort: row => row.usage.cost.total,
 		render: row => <span className="num">{formatMessageCost(row, 4)}</span>,

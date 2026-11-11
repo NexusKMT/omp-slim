@@ -71,7 +71,7 @@ export function buildAgentTokenShare(stats: AgentTypeStats[]): AgentTokenShareVi
 	return { totalTokens, totalCost, segments };
 }
 
-/** API-equivalent cost split by billing component. */
+/** Recorded cost split by billing component. */
 export interface CostComponents {
 	costInput: number;
 	costOutput: number;
@@ -118,7 +118,7 @@ export interface FolderRowView extends FolderStats {
 	conversationTokens: number;
 	/** Share of every folder's requests in range (0-1). */
 	requestShare: number;
-	/** Share of every folder's API-equivalent cost in range (0-1). */
+	/** Share of every folder's Recorded cost in range (0-1). */
 	costShare: number;
 	/** Session directory under a system temp location (`/tmp`, `/var/folders`, …). */
 	temporary: boolean;

@@ -116,8 +116,8 @@ export function ModelsRoute({ active, range }: ModelsRouteProps) {
 									spark={view.requestTotals}
 								/>
 								<Stat
-									label="API-equivalent cost"
-									title="What this usage would cost at public API rates"
+									label="Recorded cost"
+									title="Costs recorded with each request"
 									value={formatEstimatedCost(view.totalCost, view.unpricedRequests)}
 									hint={
 										view.unpricedRequests > 0 ? `${formatInteger(view.unpricedRequests)} unpriced` : undefined
@@ -357,7 +357,7 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
 		{
 			key: "cost",
 			header: "Cost",
-			title: "API-equivalent estimate at public rates",
+			title: "Recorded cost",
 			align: "right",
 			sort: row => row.totalCost,
 			render: row => <span className="num">{formatEstimatedCost(row.totalCost, row.unpricedRequests)}</span>,

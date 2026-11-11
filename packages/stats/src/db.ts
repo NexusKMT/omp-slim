@@ -1,16 +1,7 @@
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
 import type { ServiceTier, Usage } from "@oh-my-pi/pi-ai";
-import { pricingPeerFor } from "@oh-my-pi/pi-catalog/compat/behavior";
-import {
-	calculateUncachedInputCost,
-	calculateUsageCost,
-	type GeneratedProvider,
-	getBundledModel,
-	hasRecurringTariff,
-} from "@oh-my-pi/pi-catalog/models";
-import type { ModelCost } from "@oh-my-pi/pi-catalog/types";
-import { getConfigRootDir, getStatsDbPath, VERSION } from "@oh-my-pi/pi-utils";
+import { getConfigRootDir, getStatsDbPath } from "@oh-my-pi/pi-utils";
 import { ChunkedInsert } from "./chunked-insert";
 import { classifyAgentType, type ParseSessionResult, type SessionParserState } from "./parser";
 import { ensureRollupSchema, getDailyActivityFromRollup } from "./rollup";
@@ -36,7 +27,6 @@ import type {
 } from "./types";
 
 type UsageCost = Usage["cost"];
-type CostTokens = Pick<Usage, "input" | "output" | "cacheRead" | "cacheWrite" | "orchestration" | "cttl">;
 
 const ZERO_USAGE_COST: UsageCost = {
 	input: 0,
@@ -46,47 +36,9 @@ const ZERO_USAGE_COST: UsageCost = {
 	total: 0,
 };
 
-/**
- * Predicate counting one stored request as "unpriced" — the public rate card
- * has no charge for it, so its zero is unknown spend rather than free usage.
- * Two shapes store that zero:
- *   - `xai-oauth` bills through the SuperGrok subscription, so ingestion
- *     deliberately records no per-request price;
- *   - `cost_unpriced = 1`, set by `insertMessageStats` when `resolveStoredCost`
- *     refuses to price a scheduled (time-based) card whose entry carried no
- *     recoverable request timestamp — the epoch would silently become the
- *     tariff. Such a row keeps its real tokens and its zero until a re-parse
- *     recovers the time.
- *
- * Nothing else sets the marker: an explicit recorded zero, a free flat card,
- * and a model with no catalog card at all keep `cost_unpriced = 0` even at the
- * parser's timestamp sentinel, because their zero is a real price.
- * `prefix` qualifies the columns for queries that alias `messages`.
- */
+/** A request with tokens but no recorded price is unknown spend, not a free request. */
 export function unpricedRequestSql(prefix = ""): string {
-	return `CASE WHEN ${prefix}total_tokens > 0 AND ${prefix}cost_total = 0
-		AND (${prefix}provider = 'xai-oauth' OR ${prefix}cost_unpriced = 1) THEN 1 ELSE 0 END`;
-}
-
-interface CostBackfillRow {
-	id: number;
-	provider: string;
-	model: string;
-	timestamp: number;
-	input_tokens: number;
-	output_tokens: number;
-	cache_read_tokens: number;
-	cache_write_tokens: number;
-}
-
-interface NoCacheInputCostBackfillRow {
-	id: number;
-	provider: string;
-	model: string;
-	timestamp: number;
-	input_tokens: number;
-	cache_read_tokens: number;
-	cache_write_tokens: number;
+	return `CASE WHEN ${prefix}total_tokens > 0 AND ${prefix}cost_unpriced = 1 THEN 1 ELSE 0 END`;
 }
 
 let db: Database | null = null;
@@ -100,10 +52,6 @@ const BACKFILL_COMPLETE = "complete";
 const BACKFILL_PENDING = "pending";
 const USER_MESSAGES_BACKFILL_KEY = "user_messages_v10";
 const USER_MESSAGE_LINKS_REPAIR_KEY = "user_message_links_v1";
-// v2: the parser also records the served service tier per message, so a full
-// re-parse fills `service_tier` and re-derives ultrafast premium counts that the
-// v1 pass (priority only) left at zero.
-const PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY = "premium_requests_priority_v2";
 const AGENT_TYPE_BACKFILL_KEY = "agent_type_v1";
 const FORK_DEDUPE_KEY = "fork_dedupe_v1";
 // v2: tool-name sanitization at ingest (see `sanitizeToolName` in parser.ts)
@@ -111,24 +59,14 @@ const FORK_DEDUPE_KEY = "fork_dedupe_v1";
 // rows already stored in existing databases.
 // v3: reclassify synthetic non-executions so historical tool error rates are corrected.
 const TOOL_CALLS_BACKFILL_KEY = "tool_calls_v3";
-// Older ingests dropped `Usage.orchestration` (never a stored column) when
-// pricing, so subscription models billed on orchestration tokens — multi-agent
-// Grok most notably — were priced from conversation buckets alone and could not
-// reach the inclusive 200K tier. A one-time full re-parse repairs them through
-// the cost-refreshing UPSERT in `insertMessageStats`.
+// Retain the one-time history refresh marker used by older databases.
+// Re-ingestion now copies recorded costs without consulting a price catalog.
 const COST_REINGEST_BACKFILL_KEY = "messages_cost_reingest_v1";
 // The absence-aware `resolveStoredCost` and the `cost_unpriced` marker only
 // reach already-ingested rows through a re-parse, and the reingest sentinel
 // above is already spent for them — without this one, every historical row
-// keeps `cost_unpriced = 0` and unknown scheduled spend reports as free.
+// keeps `cost_unpriced = 0` and unknown spend reports as free.
 const COST_UNPRICED_BACKFILL_KEY = "messages_cost_unpriced_v1";
-// Rows predating the `cost_no_cache_input` column are NULL; ingest always
-// writes a value, so one pass settles the column for good.
-const NO_CACHE_INPUT_BACKFILL_KEY = "cost_no_cache_input_v1";
-// Zero-cost rows are repriced from the bundled catalog once per release (the
-// value stored is the version that ran it), since only a catalog update can
-// price a model it could not price before.
-const CATALOG_COST_BACKFILL_KEY = "catalog_cost_backfill";
 // The Spotlight tables are filled by the parser; transcripts ingested before
 // they existed are re-parsed once. Only files modified since the experiment
 // shipped can hold its entries, so older cursors stay put.
@@ -530,10 +468,7 @@ export async function initDb(): Promise<Database> {
 	backfillReingestCosts(db);
 	backfillUnpricedCosts(db);
 	repairUserMessageLinks(db);
-	backfillPriorityPremiumRequests(db);
 	backfillAgentType(db);
-	backfillMissingCatalogCosts(db);
-	backfillNoCacheInputCosts(db);
 	backfillForkDuplicates(db);
 	backfillSpotlight(db, SPOTLIGHT_BACKFILL_KEY);
 	reparseSpotlightSessions(db, SPOTLIGHT_EDITS_BACKFILL_KEY);
@@ -544,236 +479,30 @@ export async function initDb(): Promise<Database> {
 	return db;
 }
 
-function hasBillableCost(cost: ModelCost): boolean {
-	return cost.input !== 0 || cost.output !== 0 || cost.cacheRead !== 0 || cost.cacheWrite !== 0;
-}
-
-function getBundledModelCost(provider: string, modelId: string): ModelCost | null {
-	const model = getBundledModel(provider as GeneratedProvider, modelId);
-	return model?.cost ?? null;
-}
-
-function getCatalogCost(provider: string, modelId: string): ModelCost | null {
-	const primaryCost = getBundledModelCost(provider, modelId);
-	if (primaryCost && hasBillableCost(primaryCost)) {
-		return primaryCost;
-	}
-
-	// openai-codex has no catalog pricing-peer row (its bundled rows carry
-	// their own prices); keep its first-party fallback here.
-	const peer = pricingPeerFor(provider, modelId);
-	const fallbacks = peer
-		? peer.peers.map(peerProvider => [peerProvider, peer.peerId] as const)
-		: provider === "openai-codex"
-			? [["openai", modelId] as const]
-			: [];
-	for (const [fallbackProvider, fallbackId] of fallbacks) {
-		const fallbackCost = getBundledModelCost(fallbackProvider, fallbackId);
-		if (fallbackCost && hasBillableCost(fallbackCost)) {
-			return fallbackCost;
-		}
-	}
-
-	return null;
-}
-
-/** Whether the catalog prices this model on a time-based (scheduled) card. */
-export function isScheduledCatalogModel(provider: string, modelId: string): boolean {
-	return getCatalogCost(provider, modelId)?.timeBased != null;
-}
-
-function calculateCatalogCost(
-	provider: string,
-	modelId: string,
-	tokens: CostTokens,
-	timestamp: number,
-): UsageCost | null {
-	const cost = getCatalogCost(provider, modelId);
-	if (!cost) return null;
-
-	const orchestration = tokens.orchestration;
-	const usage: Usage = {
-		...tokens,
-		totalTokens:
-			tokens.input +
-			tokens.output +
-			tokens.cacheRead +
-			tokens.cacheWrite +
-			(orchestration?.input ?? 0) +
-			(orchestration?.output ?? 0) +
-			(orchestration?.cacheRead ?? 0),
-		cost: { ...ZERO_USAGE_COST },
-	};
-	return calculateUsageCost(cost, usage, timestamp);
-}
-
-function normalizeUsageCost(cost: Partial<UsageCost>): UsageCost {
-	const input = cost.input ?? 0;
-	const output = cost.output ?? 0;
-	const cacheRead = cost.cacheRead ?? 0;
-	const cacheWrite = cost.cacheWrite ?? 0;
-	const total = cost.total ?? input + output + cacheRead + cacheWrite;
-	return { input, output, cacheRead, cacheWrite, total };
-}
-
-/**
- * The parser records no timestamp for an entry that carries neither a numeric
- * message timestamp nor a parseable entry timestamp, leaving this sentinel.
- * Pricing such a request from the clock would bill it as a 1970 request.
- */
-function hasRequestTimestamp(timestamp: number): boolean {
-	return Number.isFinite(timestamp) && timestamp > 0;
+/** Normalize a recorded price; absence and malformed prices remain unpriced. */
+export function recordedUsageCost(raw: Partial<Record<keyof UsageCost, unknown>> | undefined): UsageCost | undefined {
+	if (!raw || typeof raw !== "object") return undefined;
+	const values = [raw.input, raw.output, raw.cacheRead, raw.cacheWrite, raw.total];
+	if (!values.some(value => typeof value === "number" && Number.isFinite(value))) return undefined;
+	if (values.some(value => value !== undefined && (typeof value !== "number" || !Number.isFinite(value))))
+		return undefined;
+	const input = typeof raw.input === "number" ? raw.input : 0;
+	const output = typeof raw.output === "number" ? raw.output : 0;
+	const cacheRead = typeof raw.cacheRead === "number" ? raw.cacheRead : 0;
+	const cacheWrite = typeof raw.cacheWrite === "number" ? raw.cacheWrite : 0;
+	const total = typeof raw.total === "number" ? raw.total : input + output + cacheRead + cacheWrite;
+	return Number.isFinite(total) ? { input, output, cacheRead, cacheWrite, total } : undefined;
 }
 
 interface ResolvedCost {
 	cost: UsageCost;
-	/**
-	 * The stored zero is unknown spend rather than a price: a scheduled card
-	 * with no recoverable request timestamp to select a tariff from. Persisted
-	 * as `cost_unpriced` so the aggregates do not have to infer it.
-	 */
 	unpriced: boolean;
 }
 
+/** Preserve the request's recorded price, including explicit zero, without catalog inference. */
 function resolveStoredCost(stats: MessageStatsInput): ResolvedCost {
-	// `usage.cost` is absent when the session entry recorded no price at all, and
-	// legacy payloads can carry a partially-populated cost object (e.g. only
-	// `total`). The messages table declares every cost_* column as REAL NOT NULL,
-	// so any missing field must be normalised here before binding into SQLite.
-	const raw: Partial<UsageCost> | undefined = stats.usage.cost;
-	const storedCost = raw ? normalizeUsageCost(raw) : undefined;
-	const catalogCost = getCatalogCost(stats.provider, stats.model);
-
-	// Recurring-tariff prices are frozen per request, including explicitly free
-	// usage. Preserve legacy zero-cost subscription correction for other models;
-	// dated rate cards reprice it at the card for the request's timestamp.
-	const recurring = catalogCost?.timeBased !== undefined && hasRecurringTariff(catalogCost.timeBased);
-	if (storedCost && Number.isFinite(storedCost.total) && (storedCost.total !== 0 || recurring)) {
-		return { cost: storedCost, unpriced: false };
-	}
-
-	// Without a request timestamp a scheduled card has no tariff to select, and
-	// the epoch would silently become one. Leave the request unpriced; a re-parse
-	// of the session file repairs it once the timestamp is recoverable.
-	if (!hasRequestTimestamp(stats.timestamp) && catalogCost?.timeBased) {
-		return { cost: storedCost ?? ZERO_USAGE_COST, unpriced: true };
-	}
-
-	return {
-		cost:
-			calculateCatalogCost(stats.provider, stats.model, stats.usage, stats.timestamp) ??
-			storedCost ??
-			ZERO_USAGE_COST,
-		unpriced: false,
-	};
-}
-
-function calculateNoCacheInputCost(
-	provider: string,
-	modelId: string,
-	tokens: CostTokens,
-	timestamp: number,
-): number | null {
-	const cost = getCatalogCost(provider, modelId);
-	if (!cost) return null;
-	// Mirrors `resolveStoredCost`: an unpriced scheduled request must not report
-	// its whole prompt as cache savings just because the clock could be read.
-	if (!hasRequestTimestamp(timestamp) && cost.timeBased) return null;
-	const promptInputTokens =
-		tokens.input +
-		tokens.cacheRead +
-		tokens.cacheWrite +
-		(tokens.orchestration?.input ?? 0) +
-		(tokens.orchestration?.cacheRead ?? 0);
-	return calculateUncachedInputCost(cost, promptInputTokens, timestamp);
-}
-
-function backfillMissingCatalogCosts(database: Database): void {
-	const ran = database.query("SELECT value FROM meta WHERE key = ?").get(CATALOG_COST_BACKFILL_KEY) as
-		| { value: string }
-		| undefined;
-	if (ran?.value === VERSION) return;
-	const markRan = database.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
-	const rows = database
-		.query(`
-			SELECT id, provider, model, timestamp, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
-			FROM messages
-			WHERE cost_total = 0 AND total_tokens > 0
-		`)
-		.all() as CostBackfillRow[];
-
-	const update = database.query(`
-		UPDATE messages
-		SET cost_input = ?, cost_output = ?, cost_cache_read = ?, cost_cache_write = ?, cost_total = ?
-		WHERE id = ?
-	`);
-
-	const applyBackfill = database.transaction(() => {
-		for (const row of rows) {
-			// A stored zero cannot distinguish missing historical prices from an
-			// explicitly free request. Never reprice recorded recurring-tariff
-			// usage: a zero ingested for such a card is permanent, because this
-			// backfill skips those rows. Re-parsing the session file is the only
-			// repair, and it works only once the entry's absent `cost` reaches
-			// `resolveStoredCost` as absence rather than as a synthesized zero.
-			// Dated rate cards need the row's timestamp to pick their card.
-			const schedule = getCatalogCost(row.provider, row.model)?.timeBased;
-			if (schedule && (hasRecurringTariff(schedule) || !hasRequestTimestamp(row.timestamp))) continue;
-			const cost = calculateCatalogCost(
-				row.provider,
-				row.model,
-				{
-					input: row.input_tokens,
-					output: row.output_tokens,
-					cacheRead: row.cache_read_tokens,
-					cacheWrite: row.cache_write_tokens,
-				},
-				row.timestamp,
-			);
-
-			if (!cost || cost.total === 0) continue;
-
-			update.run(cost.input, cost.output, cost.cacheRead, cost.cacheWrite, cost.total, row.id);
-		}
-		markRan.run(CATALOG_COST_BACKFILL_KEY, VERSION);
-	});
-
-	applyBackfill();
-}
-
-function backfillNoCacheInputCosts(database: Database): void {
-	const row = database.query("SELECT value FROM meta WHERE key = ?").get(NO_CACHE_INPUT_BACKFILL_KEY) as
-		| { value: string }
-		| undefined;
-	if (row?.value === BACKFILL_COMPLETE) return;
-	const markComplete = database.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
-	const rows = database
-		.query(`
-			SELECT id, provider, model, timestamp, input_tokens, cache_read_tokens, cache_write_tokens
-			FROM messages
-			WHERE cost_no_cache_input IS NULL
-		`)
-		.all() as NoCacheInputCostBackfillRow[];
-
-	const update = database.query("UPDATE messages SET cost_no_cache_input = ? WHERE id = ?");
-	const applyBackfill = database.transaction(() => {
-		for (const row of rows) {
-			const cost = calculateNoCacheInputCost(
-				row.provider,
-				row.model,
-				{
-					input: row.input_tokens,
-					output: 0,
-					cacheRead: row.cache_read_tokens,
-					cacheWrite: row.cache_write_tokens,
-				},
-				row.timestamp,
-			);
-			update.run(cost ?? 0, row.id);
-		}
-		markComplete.run(NO_CACHE_INPUT_BACKFILL_KEY, BACKFILL_COMPLETE);
-	});
-	applyBackfill();
+	const cost = recordedUsageCost(stats.usage.cost);
+	return { cost: cost ?? ZERO_USAGE_COST, unpriced: cost === undefined };
 }
 
 /**
@@ -1130,9 +859,8 @@ export function completeSessionSync(reconcile: boolean): void {
  * aggregate. The {@link ChunkedInsert} fork guard skips inserts whose
  * `(entry_id, timestamp)` already exists under a different `session_file` —
  * first-write-wins across the lineage. Same-file re-syncs still hit the
- * `ON CONFLICT(session_file, entry_id)` upsert below, which re-derives the
- * stored cost (orchestration-aware) and keeps `premium_requests` monotonic, so
- * a forced re-parse repairs historical `premium_requests` and cost fix-ups.
+ * `ON CONFLICT(session_file, entry_id)` upsert below, which refreshes the
+ * recorded cost and preserves recorded historical premium counts.
  */
 export function insertMessageStats(stats: Iterable<MessageStatsInput>): number {
 	if (!db) return 0;
@@ -1175,14 +903,13 @@ export function insertMessageStats(stats: Iterable<MessageStatsInput>): number {
 			cost_cache_read = excluded.cost_cache_read,
 			cost_cache_write = excluded.cost_cache_write,
 			cost_total = excluded.cost_total,
-			cost_no_cache_input = excluded.cost_no_cache_input,
+			cost_no_cache_input = COALESCE(excluded.cost_no_cache_input, messages.cost_no_cache_input),
 			cost_unpriced = excluded.cost_unpriced,
 			service_tier = excluded.service_tier`,
 	});
 	return atomically(db, () => {
 		for (const s of stats) {
 			const { cost, unpriced } = resolveStoredCost(s);
-			const noCacheInputCost = calculateNoCacheInputCost(s.provider, s.model, s.usage, s.timestamp) ?? 0;
 			writer.add(
 				s.sessionFile,
 				[s.entryId, s.timestamp],
@@ -1209,7 +936,7 @@ export function insertMessageStats(stats: Iterable<MessageStatsInput>): number {
 					cost.cacheRead,
 					cost.cacheWrite,
 					cost.total,
-					noCacheInputCost,
+					null,
 					unpriced ? 1 : 0,
 					s.agentType,
 					s.serviceTier ?? null,
@@ -1422,15 +1149,9 @@ function backfillToolCalls(database: Database): void {
 }
 
 /**
- * One-shot `file_offsets` wipe so the next sync re-parses every session and
- * re-prices `messages` from source. Pre-fix ingests priced subscription rows
- * from the four stored token buckets only, dropping `Usage.orchestration`
- * (never a stored column), so multi-agent Grok and any other orchestration-
- * billed model were understated and could not reach the inclusive 200K tier.
- * The re-parse reruns the orchestration-aware pricing in `resolveStoredCost`
- * and the cost-refreshing UPSERT in {@link insertMessageStats} writes it back.
- * `messages`/`user_messages`/`tool_calls` re-inserts are idempotent, so the
- * offset reset is safe. Same sentinel protocol as {@link backfillToolCalls}.
+ * Preserve the prior one-shot history refresh migration. Re-ingestion copies
+ * the source request's recorded price and does not consult a price catalog.
+ * Rows remain idempotent across a sync interrupted after clearing its offsets.
  */
 function backfillReingestCosts(database: Database): void {
 	const row = database.query("SELECT value FROM meta WHERE key = ?").get(COST_REINGEST_BACKFILL_KEY) as
@@ -1449,9 +1170,8 @@ function backfillReingestCosts(database: Database): void {
  * re-derives `cost_unpriced` from `resolveStoredCost`. Rows ingested before the
  * marker existed defaulted to 0, and `INSERT ... ON CONFLICT DO UPDATE` only
  * refreshes them when the session is re-parsed — which the spent reingest
- * sentinel above will never do again. The re-parse also re-prices the
- * previously absent legacy `cost` charges, since `resolveStoredCost` now reads
- * absence as absence. Same sentinel protocol as {@link backfillReingestCosts}.
+ * sentinel above will never do again. The re-parse preserves the distinction
+ * between an absent price and an explicitly recorded zero charge. Same sentinel protocol as {@link backfillReingestCosts}.
  */
 function backfillUnpricedCosts(database: Database): void {
 	const row = database.query("SELECT value FROM meta WHERE key = ?").get(COST_UNPRICED_BACKFILL_KEY) as
@@ -1557,28 +1277,6 @@ function repairUserMessageLinks(database: Database): void {
 }
 
 /**
- * One-shot wipe of `file_offsets` so the next sync re-parses every session
- * and re-derives `premium_requests` from recorded `service_tier_change`
- * entries. Earlier ingestions captured priority OpenAI traffic with
- * `premium_requests = 0` because the AI layer only set the field for GitHub
- * Copilot traffic. The parser now folds priority requests into the same
- * counter; combined with the UPSERT in `insertMessageStats`, a single sync
- * pass brings the messages table up to date without touching any other
- * column. Idempotent: gated by a sentinel row in `meta`.
- */
-function backfillPriorityPremiumRequests(database: Database): void {
-	const row = database.query("SELECT value FROM meta WHERE key = ?").get(PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY) as
-		| { value: string }
-		| undefined;
-	if (!shouldResetBackfill(row?.value)) return;
-
-	database.run("DELETE FROM file_offsets");
-	database
-		.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)")
-		.run(PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY, BACKFILL_PENDING);
-}
-
-/**
  * Settle every full-session backfill after a successful sync pass.
  */
 export function markSessionBackfillsComplete(): void {
@@ -1589,7 +1287,6 @@ export function markSessionBackfillsComplete(): void {
 			USER_MESSAGES_BACKFILL_KEY,
 			TOOL_CALLS_BACKFILL_KEY,
 			USER_MESSAGE_LINKS_REPAIR_KEY,
-			PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY,
 			COST_REINGEST_BACKFILL_KEY,
 			COST_UNPRICED_BACKFILL_KEY,
 		]) {

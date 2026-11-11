@@ -208,7 +208,7 @@ function deepseekEntry(id: string, usage: Record<string, unknown>, timestamp?: n
 // `backfillMissingCatalogCosts` never revisits scheduled rows to repair it.
 // Absence must stay absent until the request timestamp prices it.
 describe("legacy entries without a recorded price", () => {
-	it("estimates the stored cost at the request timestamp instead of freezing zero", async () => {
+	it("marks absent prices as unpriced while preserving recorded zero charges", async () => {
 		const file = await writeSession([
 			deepseekEntry("unpriced", { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 }, DEEPSEEK_PEAK),
 			deepseekEntry(
@@ -232,25 +232,24 @@ describe("legacy entries without a recorded price", () => {
 		expect(insertMessageStats(result.stats)).toBe(2);
 
 		const stored = getRecentRequests(2);
-		// 1M uncached input tokens at the peak card's $0.30/M.
-		expect(stored.find(request => request.entryId === "unpriced")?.usage.cost.total).toBeCloseTo(0.3, 8);
+		// Timestamps and model names do not supply an absent price.
+		expect(stored.find(request => request.entryId === "unpriced")?.usage.cost.total).toBe(0);
 		// A recorded zero is a real charge and stays zero.
 		expect(stored.find(request => request.entryId === "explicit-zero")?.usage.cost.total).toBe(0);
-		expect(getOverallStats().totalCost).toBeCloseTo(0.3, 8);
-		// Uncached-equivalent prompt cost 2 x $0.30 against $0.30 of recorded
-		// prompt charges (the frozen zero row contributes none).
-		expect(getOverallStats().cacheSavings).toBeCloseTo(0.5, 8);
+		expect(getOverallStats().totalCost).toBe(0);
+		expect(getOverallStats().unpricedRequests).toBe(1);
+		expect(getOverallStats().cacheSavings).toBe(0);
 
 		closeDb();
 		await initDb();
 
 		const reopened = getRecentRequests(2);
-		expect(reopened.find(request => request.entryId === "unpriced")?.usage.cost.total).toBeCloseTo(0.3, 8);
+		expect(reopened.find(request => request.entryId === "unpriced")?.usage.cost.total).toBe(0);
 		expect(reopened.find(request => request.entryId === "explicit-zero")?.usage.cost.total).toBe(0);
-		expect(getOverallStats().totalCost).toBeCloseTo(0.3, 8);
+		expect(getOverallStats().totalCost).toBe(0);
 	});
 
-	it("leaves scheduled usage unpriced when the entry has no recoverable timestamp", async () => {
+	it("leaves usage unpriced when the entry has no recoverable timestamp", async () => {
 		const file = await writeSession([
 			JSON.stringify({
 				type: "message",
@@ -273,8 +272,7 @@ describe("legacy entries without a recorded price", () => {
 		await initDb();
 		expect(insertMessageStats(result.stats)).toBe(1);
 
-		// The parser's `0` sentinel is not a 1970 request: never bill a peak or
-		// off-peak card from it, and never let the missing charge report savings.
+		// Missing timestamps and absent prices remain distinct from recorded zero charges.
 		expect(getRecentRequests(1)[0]?.usage.cost.total).toBe(0);
 		expect(getOverallStats().totalCost).toBe(0);
 		expect(getOverallStats().cacheSavings).toBe(0);
@@ -305,11 +303,11 @@ describe("legacy entries without a recorded price", () => {
 		await initDb();
 		expect(insertMessageStats(result.stats)).toBe(1);
 
-		// Recovered peak time prices at the peak card instead of unpriced.
-		expect(getRecentRequests(1)[0]?.usage.cost.total).toBeCloseTo(0.3, 8);
-		expect(getRecentRequests(1)[0]?.costUnpriced).toBe(false);
-		expect(getOverallStats()).toMatchObject({ unpricedRequests: 0 });
-		expect(getOverallStats().totalCost).toBeCloseTo(0.3, 8);
+		// Recovering the time does not invent a price.
+		expect(getRecentRequests(1)[0]?.usage.cost.total).toBe(0);
+		expect(getRecentRequests(1)[0]?.costUnpriced).toBe(true);
+		expect(getOverallStats()).toMatchObject({ unpricedRequests: 1 });
+		expect(getOverallStats().totalCost).toBe(0);
 	});
 
 	// Regression: the derived total is summed with `+` over runtime values a
@@ -371,7 +369,7 @@ describe("legacy entries without a recorded price", () => {
 	// Regression: the marker only reaches history through a re-parse, and every
 	// earlier sentinel is already spent for an existing database. Without the
 	// unpriced sentinel, a row ingested before the column existed keeps
-	// `cost_unpriced = 0` forever and its unknown scheduled spend reports as free.
+	// `cost_unpriced = 0` forever and its unknown spend reports as free.
 	it("re-parses history to mark pre-existing unpriced rows once, then leaves offsets alone", async () => {
 		const file = await writeSession([
 			JSON.stringify({

@@ -25,23 +25,14 @@ export function formatCost(value: number, digits?: number): string {
 	})}`;
 }
 
-/** Format an API-equivalent estimate, using N/A when all usage is unpriced. */
+/** Format recorded cost, using N/A when all usage is unpriced. */
 export function formatEstimatedCost(value: number, unpricedRequests: number, digits?: number): string {
 	return value === 0 && unpricedRequests > 0 ? "N/A" : formatCost(value, digits);
 }
 
-/**
- * Whether one request's zero cost means unknown spend rather than free usage.
- * Mirrors the server's `unpricedRequestSql`: `xai-oauth` is billed through a
- * subscription, and `costUnpriced` marks a row the ingest path could not price
- * (a scheduled card with no recoverable request timestamp).
- */
+/** Whether the request has tokens but no recorded price. */
 export function isUnpricedMessage(message: Pick<MessageStats, "provider" | "usage" | "costUnpriced">): boolean {
-	return (
-		message.usage.totalTokens > 0 &&
-		message.usage.cost.total === 0 &&
-		(message.provider === "xai-oauth" || message.costUnpriced === true)
-	);
+	return message.usage.totalTokens > 0 && message.usage.cost.total === 0 && message.costUnpriced === true;
 }
 
 /** Format one request's cost, distinguishing unpriced usage from free usage. */

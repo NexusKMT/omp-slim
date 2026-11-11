@@ -34,7 +34,7 @@ export interface AggregatedStats {
 	cacheSavings: number;
 	/** Total cost */
 	totalCost: number;
-	/** Requests with token usage but no public-equivalent subscription price. */
+	/** Requests with token usage but no recorded price. */
 	unpricedRequests: number;
 	/** Total premium requests */
 	totalPremiumRequests: number;
@@ -124,7 +124,7 @@ export interface CostTimeSeriesPoint {
 	provider: string;
 	/** Total cost for this bucket */
 	cost: number;
-	/** Requests excluded because no public-equivalent subscription price exists. */
+	/** Requests excluded because no recorded price exists. */
 	unpricedRequests: number;
 	/** Cost breakdown */
 	costInput: number;
@@ -142,7 +142,7 @@ export interface CostTimeSeriesPoint {
 export interface DailyActivityPoint {
 	/** Local calendar date, `YYYY-MM-DD`. */
 	day: string;
-	/** Summed API-equivalent cost for the day. */
+	/** Summed Recorded cost for the day. */
 	cost: number;
 	/** Request count for the day. */
 	requests: number;
@@ -211,24 +211,12 @@ export interface FrustrationCounts {
 	angry: number;
 }
 
-/**
- * Frustration tallies for one model version. Provider/spelling variants of the
- * same model (`claude-opus-4.6`, `anthropic/claude-opus-4-6`) merge under one
- * catalog identity.
- */
+/** Frustration tallies for an exact provider and model id pair. */
 export interface FrustrationModelStats extends FrustrationCounts {
-	/** Stable key: `class/family/revision` when classified, else the raw model id. */
 	key: string;
-	/** Display label, e.g. `opus 4.5`; the raw model id when unclassified. */
 	label: string;
-	/** Catalog identity class, e.g. `anthropic`; `unknown` when unclassified. */
-	modelClass: string;
-	/** Catalog family within the class, e.g. `opus`. */
-	family: string | null;
-	/** Canonical `major.minor.patch`, e.g. `4.5.0`. */
-	revision: string | null;
-	/** Raw model ids merged into this row. */
-	models: string[];
+	provider: string;
+	model: string;
 	/** Earliest message timestamp (ms) in range. */
 	firstSeen: number;
 }
@@ -260,7 +248,7 @@ export interface FrustrationJobStatus {
 /** Payload of `GET /api/stats/frustration`. */
 export interface FrustrationDashboardStats {
 	overall: FrustrationCounts;
-	/** Every model with messages in range, ordered by class, then revision, then family. */
+	/** Every model with messages in range, ordered by exact provider and model id. */
 	byModel: FrustrationModelStats[];
 	/** Whether this dashboard host can run the judge (standalone `omp-stats` cannot). */
 	judgeAvailable: boolean;
@@ -801,7 +789,7 @@ export interface ToolUsageStats {
 	outputTokensShare: number;
 	/** Cost (USD) of invoking turns, attributed per call share. */
 	costShare: number;
-	/** Share of unpriced subscription requests attributed to this tool. */
+	/** Share of requests with no recorded price attributed to this tool. */
 	unpricedRequestsShare: number;
 	/** Unix ms of the most recent call in range. */
 	lastUsed: number;
@@ -844,7 +832,7 @@ export interface ProviderAggregate {
 	/** Uncached input + cache reads + cache writes + output. */
 	totalTokens: number;
 	totalCost: number;
-	/** Requests excluded because no public-equivalent subscription price exists. */
+	/** Requests excluded because no recorded price exists. */
 	unpricedRequests: number;
 	totalPremiumRequests: number;
 	avgTokensPerSecond: number | null;
@@ -869,70 +857,9 @@ export interface ProviderTimeSeriesPoint {
 	provider: string;
 	totalTokens: number;
 	cost: number;
-	/** Requests excluded because no public-equivalent subscription price exists. */
+	/** Requests excluded because no recorded price exists. */
 	unpricedRequests: number;
 	requests: number;
-}
-
-/** One recorded usage-limit snapshot for an (account, window) series. */
-export interface UsageWindowPoint {
-	timestamp: number;
-	/** Used fraction 0..1 (>1 = overage) when the provider reported one. */
-	usedFraction: number | null;
-	exhausted: boolean;
-}
-
-/**
- * Utilization history for one (account, limit window) pair of a provider,
- * sourced from the auth store's recorded usage-limit snapshots.
- */
-export interface UsageWindowSeries {
-	provider: string;
-	accountKey: string;
-	/** Email/account id when known, else the stable account key. */
-	accountLabel: string;
-	/** Groups the same limit window across accounts: the limit id, or quota family + window for positional Codex slots. */
-	windowKey: string;
-	/** Human label of the limit (distinguishes same-duration windows). */
-	windowLabel: string;
-	points: UsageWindowPoint[];
-}
-
-/**
- * Derived subscription insight for one provider limit window across all
- * accounts: how much of the window was consumed, what one window is worth in
- * tokens, and how many accounts peak demand would have needed.
- */
-export interface ProviderWindowInsight {
-	provider: string;
-	/** Groups the same limit window across accounts: the limit id, or quota family + window for positional Codex slots. */
-	windowKey: string;
-	/** Human label of the limit (distinguishes same-duration windows). */
-	windowLabel: string;
-	/** Accounts with at least one snapshot for this window in range. */
-	accounts: number;
-	/** Window resets observed (drops in used fraction). */
-	cycles: number;
-	/**
-	 * Subscription-window equivalents consumed in range: sum of positive
-	 * used-fraction deltas across accounts (1.0 = one full window burned).
-	 */
-	fractionConsumed: number;
-	/**
-	 * Estimated tokens one full window buys: provider tokens burned in range
-	 * divided by {@link fractionConsumed}. Null when too little of the window
-	 * was consumed to extrapolate.
-	 */
-	estTokensPerWindow: number | null;
-	/** Peak of sum-across-accounts used fraction at any sampled instant. */
-	peakConcurrentFraction: number;
-	/**
-	 * Accounts needed to keep peak demand under 90% of fleet capacity:
-	 * max(1, ceil(peakConcurrentFraction / 0.9)).
-	 */
-	idealAccounts: number;
-	/** Transitions into an exhausted state observed in range. */
-	exhaustedEvents: number;
 }
 
 /** Ingest state of the dashboard host's background session sync. */
@@ -969,17 +896,6 @@ export interface ProviderDashboardStats {
 	series: ProviderTimeSeriesPoint[];
 }
 
-/**
- * Subscription-window payload (`GET /api/stats/provider-windows`). Snapshots
- * may come from the auth broker over the network, so it is fetched separately
- * from {@link ProviderDashboardStats}. `usageSeries` only carries the
- * requested provider's series (empty without a provider) — all of them can be
- * thousands of series.
- */
-export interface ProviderWindowStats {
-	windowInsights: ProviderWindowInsight[];
-	usageSeries: UsageWindowSeries[];
-}
 /**
  * One row of the Traces session list: a root session with every child
  * transcript (task subagents, advisors) folded in.

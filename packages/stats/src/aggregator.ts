@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDbPath, getStatsDbPath, workerHostEntry } from "@oh-my-pi/pi-utils";
+import { getStatsDbPath, workerHostEntry } from "@oh-my-pi/pi-utils";
 import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import {
 	applySessionParseResults,
@@ -52,11 +52,9 @@ import type {
 	FolderStats,
 	MessageStats,
 	ProviderDashboardStats,
-	ProviderWindowStats,
 	RequestDetails,
 	ToolDashboardStats,
 } from "./types";
-import { computeUsageWindowStats, fetchUsageData, type UsageDataSnapshot } from "./usage-windows";
 
 const STATS_SYNC_LOCK_RETRY_MS = 25;
 const STATS_SYNC_LOCK_WAIT_MS = 60 * 60 * 1000;
@@ -620,8 +618,7 @@ export async function getToolDashboardStats(range?: string | null): Promise<Tool
 
 /**
  * Get the providers dashboard payload: per-provider totals, peak-burn-hours
- * histogram and provider token time series. Subscription windows are served
- * separately by {@link getProviderWindowStats}.
+ * histogram and provider token time series.
  */
 export async function getProviderDashboardStats(range?: string | null): Promise<ProviderDashboardStats> {
 	await initDb();
@@ -630,53 +627,5 @@ export async function getProviderDashboardStats(range?: string | null): Promise<
 		providers: getStatsByProvider(window.cutoff),
 		hourly: getProviderHourlyBurn(window.cutoff),
 		series: getProviderTimeSeries(window),
-	};
-}
-
-const USAGE_CACHE_TTL_MS = 60_000;
-let usageCache: { key: string; at: number; data: Promise<UsageDataSnapshot> } | null = null;
-
-/**
- * Usage snapshots since `sinceMs`, memoized for a minute per hour-aligned
- * cutoff and source database: the broker fetch takes seconds and the
- * dashboard asks on every range switch and live refresh.
- */
-function cachedUsageData(sinceMs: number): Promise<UsageDataSnapshot> {
-	const sinceHour = Math.floor(sinceMs / HOUR_MS) * HOUR_MS;
-	const key = `${getAgentDbPath()}:${sinceHour}`;
-	const now = Date.now();
-	if (usageCache?.key === key && now - usageCache.at < USAGE_CACHE_TTL_MS) {
-		return usageCache.data;
-	}
-	const data = fetchUsageData(sinceHour);
-	usageCache = { key, at: now, data };
-	data.catch(() => {
-		if (usageCache?.data === data) usageCache = null;
-	});
-	return data;
-}
-
-/**
- * Subscription-window analytics derived from recorded usage-limit snapshots:
- * insights for every provider window, plus utilization series for `provider`
- * only (all series can number in the thousands).
- *
- * Window token estimates use broker-held fleet token burn when a broker is
- * configured — the window fractions cover every install sharing the broker's
- * credentials, so dividing them into local-only tokens would undercount.
- */
-export async function getProviderWindowStats(
-	range?: string | null,
-	provider?: string | null,
-): Promise<ProviderWindowStats> {
-	await initDb();
-	const { cutoff } = getTimeRangeConfig(range);
-	const usage = await cachedUsageData(cutoff ?? 0);
-	const tokensByProvider =
-		usage.fleetTokensByProvider ?? new Map(getStatsByProvider(cutoff).map(p => [p.provider, p.totalTokens]));
-	const { usageSeries, windowInsights } = computeUsageWindowStats(usage.rows, tokensByProvider);
-	return {
-		windowInsights,
-		usageSeries: provider ? usageSeries.filter(series => series.provider === provider) : [],
 	};
 }

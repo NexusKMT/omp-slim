@@ -51,8 +51,7 @@ const METRIC_OPTIONS = [
 /** Tools stacked individually in the calls chart; the rest fold into "Other". */
 const TOP_TOOLS = 6;
 
-const ATTRIBUTION_NOTE =
-	"Tokens and API-equivalent cost of each invoking turn, split evenly across that turn's tool calls";
+const ATTRIBUTION_NOTE = "Tokens and recorded cost of each invoking turn, split evenly across that turn's tool calls";
 
 const NO_CALLS = <EmptyState title="No tool calls in this range" />;
 
@@ -110,7 +109,7 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
 								/>
 								<Stat
 									label="Attributed cost"
-									title={`${ATTRIBUTION_NOTE}; API-equivalent estimate`}
+									title={`${ATTRIBUTION_NOTE}; recorded cost`}
 									value={formatEstimatedCost(t.cost, t.unpriced)}
 									hint={
 										t.unpriced > 0
@@ -435,7 +434,7 @@ function buildToolColumns(
 		{
 			key: "cost",
 			header: "Attr. cost",
-			title: `${ATTRIBUTION_NOTE}; API-equivalent estimate`,
+			title: `${ATTRIBUTION_NOTE}; recorded cost`,
 			align: "right",
 			sort: row => row.costShare,
 			render: row => (
@@ -544,7 +543,7 @@ function ToolModelTable({
 			{
 				key: "cost",
 				header: "Attr. cost",
-				title: `${ATTRIBUTION_NOTE}; API-equivalent estimate`,
+				title: `${ATTRIBUTION_NOTE}; recorded cost`,
 				align: "right",
 				sort: row => row.costShare,
 				render: row => <span className="num">{formatEstimatedCost(row.costShare, row.unpricedRequestsShare)}</span>,

@@ -144,7 +144,7 @@ function RequestDetailsBody({ details, aborted }: { details: RequestDetails; abo
 			</section>
 
 			<section>
-				<div className="section-label">API-equivalent cost</div>
+				<div className="section-label">Recorded cost</div>
 				<KeyValues
 					items={[
 						{ key: "total", label: "Total", value: formatMessageCost(details, 4) },

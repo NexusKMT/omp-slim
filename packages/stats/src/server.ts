@@ -10,7 +10,6 @@ import {
 	getModelDashboardStats,
 	getOverviewStats,
 	getProviderDashboardStats,
-	getProviderWindowStats,
 	getRecentErrors,
 	getRecentRequests,
 	getRequestDetails,
@@ -263,10 +262,6 @@ export async function handleApi(req: Request): Promise<Response> {
 	if (path === "/api/stats/tools") {
 		const stats = await getToolDashboardStats(range);
 		return Response.json(stats);
-	}
-
-	if (path === "/api/stats/provider-windows") {
-		return Response.json(await getProviderWindowStats(range, url.searchParams.get("provider")));
 	}
 
 	if (path === "/api/stats/providers") {

@@ -76,7 +76,7 @@ export function CostsRoute({ active, range }: CostsRouteProps) {
 		<div className="page">
 			<PageHeader
 				title="Costs"
-				description={`What ${meta.windowLabel} of usage would cost at public API rates. Subscription usage without a public price is counted as unpriced, not free.`}
+				description={`Costs recorded during ${meta.windowLabel}. Requests without a recorded price are counted as unpriced.`}
 			/>
 
 			<QueryView
@@ -247,8 +247,8 @@ function CostStats({ view, stale }: { view: CostsView; stale: boolean }) {
 		<div data-stale={stale}>
 			<StatGrid min={180}>
 				<Stat
-					label="API-equivalent estimate"
-					title="What this usage would cost at public API rates"
+					label="Recorded cost"
+					title="Costs recorded with each request"
 					value={formatEstimatedCost(summary.totalCost, summary.unpricedRequests)}
 					hint={`${formatInteger(summary.requests)} requests`}
 					spark={view.dailyTotals}
@@ -311,7 +311,7 @@ function ComponentBreakdown({ summary }: { summary: CostSummaryView }) {
 			</div>
 			{summary.unpricedRequests > 0 && (
 				<p className="micro dim">
-					{formatInteger(summary.unpricedRequests)} unpriced subscription request
+					{formatInteger(summary.unpricedRequests)} unpriced request
 					{summary.unpricedRequests === 1 ? " is" : "s are"} not included.
 				</p>
 			)}
@@ -350,7 +350,7 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
 		{
 			key: "cost",
 			header: "Estimate",
-			title: "API-equivalent estimate at public rates",
+			title: "Recorded cost",
 			align: "right",
 			sort: row => row.cost,
 			render: row => (

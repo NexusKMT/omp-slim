@@ -1,4 +1,4 @@
-import type { AssistantMessage, ServiceTier, ServiceTierByFamily, StopReason, Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ServiceTier, StopReason, Usage } from "@oh-my-pi/pi-ai";
 import type { AgentType } from "./shared-types";
 
 export * from "./shared-types";
@@ -44,8 +44,7 @@ export interface MessageStats {
 	 */
 	serviceTier?: ServiceTier | null;
 	/**
-	 * Ingest refused to price this request: a scheduled (time-based) card with no
-	 * recoverable request timestamp, so `usage.cost.total` of 0 is unknown spend
+	 * This request recorded no valid price, so `usage.cost.total` of 0 is unknown spend
 	 * rather than a free request. Always written by `rowToMessageStats`; optional
 	 * only because session fixtures that stand in for ingest input are typed as
 	 * `MessageStats` too.
@@ -57,8 +56,8 @@ export interface MessageStats {
  * Session-recorded token usage before pricing: counters are coerced to numbers
  * because their columns are NOT NULL, but `cost` is only present when the
  * session entry actually recorded one. Absence is meaningful — `resolveStoredCost`
- * estimates a request with no recorded price, whereas a recorded zero is a real
- * charge that scheduled cards freeze. `costUnpriced` is omitted because it is a
+ * marks a request with no recorded price as unpriced; an explicit zero is a real
+ * recorded charge. `costUnpriced` is omitted because it is a
  * decision of the ingest path, not something the parser or a caller supplies.
  */
 export interface MessageStatsInput extends Omit<MessageStats, "usage" | "costUnpriced"> {
@@ -93,14 +92,6 @@ export interface SessionMessageEntry {
 	parentId: string | null;
 	timestamp: string;
 	message: AssistantMessage | { role: "user" | "toolResult" };
-}
-
-export interface SessionServiceTierChangeEntry {
-	type: "service_tier_change";
-	id: string;
-	parentId?: string | null;
-	timestamp: string;
-	serviceTier: ServiceTierByFamily | ServiceTier | null;
 }
 
 export interface SessionModelUsageEntry {
@@ -143,7 +134,6 @@ export interface SessionTypedEntry {
 export type SessionEntry =
 	| SessionHeader
 	| SessionMessageEntry
-	| SessionServiceTierChangeEntry
 	| SessionModelUsageEntry
 	| SessionCustomEntry
 	| SessionTypedEntry
