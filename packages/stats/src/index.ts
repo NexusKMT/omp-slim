@@ -48,7 +48,7 @@ export type {
 	ToolUsageStats,
 } from "./types";
 
-/** Format an API-equivalent estimate in dollars, or N/A for unpriced usage. */
+/** Format recorded cost in dollars, or N/A for unpriced usage. */
 function formatCost(n: number, unpricedRequests = 0): string {
 	if (n === 0 && unpricedRequests > 0) return "N/A";
 	if (n < 0.01) return `$${n.toFixed(4)}`;
@@ -74,7 +74,7 @@ export async function printStatsSummary(): Promise<void> {
 	console.log(`  Output Tokens: ${formatNumber(overall.totalOutputTokens)}`);
 	console.log(`  Cache Rate: ${formatPercent(overall.cacheRate)}`);
 	console.log(`  Cache Savings: ${formatPercent(overall.cacheSavings)}`);
-	console.log(`  API-equivalent estimate: ${formatCost(overall.totalCost, overall.unpricedRequests)}`);
+	console.log(`  Recorded Cost: ${formatCost(overall.totalCost, overall.unpricedRequests)}`);
 	console.log(`  Premium Requests: ${formatNumber(normalizePremiumRequests(overall.totalPremiumRequests ?? 0))}`);
 	console.log(`  Avg Duration: ${overall.avgDuration !== null ? formatDuration(overall.avgDuration) : "-"}`);
 	console.log(`  Avg TTFT: ${overall.avgTtft !== null ? formatDuration(overall.avgTtft) : "-"}`);
@@ -83,7 +83,7 @@ export async function printStatsSummary(): Promise<void> {
 	}
 
 	if (byModel.length > 0) {
-		console.log(chalk.bold("\nBy Model (API-equivalent estimates):"));
+		console.log(chalk.bold("\nBy Model (recorded costs):"));
 		for (const m of byModel.slice(0, 10)) {
 			console.log(
 				`  ${m.model}: ${formatNumber(m.totalRequests)} reqs, ${formatCost(m.totalCost, m.unpricedRequests)}, ${formatPercent(m.cacheRate)} cache rate, ${formatPercent(m.cacheSavings)} cache savings`,
@@ -92,7 +92,7 @@ export async function printStatsSummary(): Promise<void> {
 	}
 
 	if (byFolder.length > 0) {
-		console.log(chalk.bold("\nBy Folder (API-equivalent estimates):"));
+		console.log(chalk.bold("\nBy Folder (recorded costs):"));
 		for (const f of byFolder.slice(0, 10)) {
 			console.log(
 				`  ${f.folder}: ${formatNumber(f.totalRequests)} reqs, ${formatCost(f.totalCost, f.unpricedRequests)}`,

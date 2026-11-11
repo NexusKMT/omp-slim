@@ -93,8 +93,8 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
 								hint={`${formatInteger(view.failedRequests)} failed`}
 							/>
 							<Stat
-								label="API-equivalent cost"
-								title="What this usage would cost at public API rates"
+								label="Recorded cost"
+								title="Costs recorded with each request"
 								value={formatEstimatedCost(view.totalCost, view.unpricedRequests)}
 								hint={
 									view.unpricedRequests > 0 ? `${formatInteger(view.unpricedRequests)} unpriced` : undefined
@@ -116,7 +116,7 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
 			</QueryView>
 
 			<div className="grid grid-2">
-				<Card index={1} title="Top by cost" description="Share of API-equivalent cost" stale={folders.stale}>
+				<Card index={1} title="Top by cost" description="Share of Recorded cost" stale={folders.stale}>
 					<QueryView
 						query={folders}
 						skeleton={<ChartSkeleton height={236} />}
@@ -243,7 +243,7 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
 		{
 			key: "cost",
 			header: "Cost",
-			title: "API-equivalent cost at public API rates",
+			title: "Recorded cost",
 			align: "right",
 			sort: row => row.totalCost,
 			render: row => (

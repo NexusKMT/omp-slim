@@ -3,17 +3,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
 	type AssistantMessage,
-	coerceServiceTierByFamily,
-	getPremiumServiceTierRequests,
 	type MessageAttribution,
 	parseServiceTier,
-	resolveModelServiceTier,
-	type ServiceTierByFamily,
 	type ToolCall,
 	type ToolResultMessage,
 	type Usage,
 } from "@oh-my-pi/pi-ai";
-import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import { getSessionsDir, isEnoent, readLines } from "@oh-my-pi/pi-utils";
 import type {
 	AgentType,
@@ -21,7 +16,6 @@ import type {
 	SessionEntry,
 	SessionMessageEntry,
 	SessionModelUsageEntry,
-	SessionServiceTierChangeEntry,
 	ToolCallStats,
 	ToolResultLink,
 	UserMessageLink,
@@ -102,13 +96,6 @@ function isUserMessage(entry: SessionEntry): entry is SessionMessageEntry {
 	const msgEntry = entry as SessionMessageEntry;
 	if (typeof msgEntry.id !== "string" || msgEntry.id.length === 0) return false;
 	return msgEntry.message?.role === "user";
-}
-
-/**
- * Check if an entry is a service-tier change.
- */
-function isServiceTierChange(entry: SessionEntry): entry is SessionServiceTierChangeEntry {
-	return entry.type === "service_tier_change";
 }
 
 /**
@@ -241,7 +228,6 @@ function extractStats(
 	sessionFile: string,
 	folder: string,
 	entry: SessionMessageEntry,
-	currentServiceTier: ServiceTierByFamily | undefined,
 	agentType: AgentType,
 ): MessageStatsInput | null {
 	const msg = entry.message as AssistantMessage;
@@ -250,50 +236,29 @@ function extractStats(
 	const rawUsage = msg.usage as Partial<Usage> | undefined;
 	if (!rawUsage || typeof rawUsage !== "object") return null;
 
-	// Backfill: when the session recorded a premium tier (`priority`/`ultrafast`)
-	// as the active service tier at this point but the AI usage payload was
-	// captured before premium requests were folded into `premiumRequests`, derive
-	// the count here so the "Premium Reqs" stat aggregates premium traffic on
-	// re-sync. The tier the provider reported serving the turn (`msg.serviceTier`)
-	// is authoritative — it is proof the tier reached the wire, so the
-	// discovery-metadata gate is skipped; the session's live setting is only a
-	// fallback for turns recorded before that field existed. Trust any non-zero
-	// value already in `usage.premiumRequests` (Copilot multipliers or the new AI
-	// code path) and only synthesise when the field is missing/zero.
-	const recorded = rawUsage.premiumRequests ?? 0;
-	const model = {
-		provider: msg.provider,
-		api: msg.api,
-		identity: classifyModel(msg.provider, msg.model, { lenient: true }),
-	};
 	const servedTier = parseServiceTier(msg.serviceTier);
-	const tier = servedTier ?? resolveModelServiceTier(currentServiceTier, model);
-	const derived =
-		recorded > 0 ? recorded : getPremiumServiceTierRequests(tier, model, { served: servedTier !== undefined });
 	const wellFormed =
 		isFiniteCount(rawUsage.input) &&
 		isFiniteCount(rawUsage.output) &&
 		isFiniteCount(rawUsage.cacheRead) &&
 		isFiniteCount(rawUsage.cacheWrite) &&
 		isFiniteCount(rawUsage.totalTokens);
-	const usage: MessageStatsInput["usage"] =
-		wellFormed && derived === recorded
-			? (rawUsage as Usage)
-			: {
-					...rawUsage,
-					input: finiteTokenCount(rawUsage.input),
-					output: finiteTokenCount(rawUsage.output),
-					cacheRead: finiteTokenCount(rawUsage.cacheRead),
-					cacheWrite: finiteTokenCount(rawUsage.cacheWrite),
-					// A present finite provider total stays authoritative; a missing
-					// or malformed one (absent, string, NaN) is derived from the buckets.
-					totalTokens: resolveUsageTotal(rawUsage),
-					// An omitted `cost` must stay omitted: `resolveStoredCost` reads
-					// absence as "no recorded price" and estimates the request, while
-					// a zero would read as an explicitly free request.
-					cost: rawUsage.cost,
-					premiumRequests: derived,
-				};
+	const usage: MessageStatsInput["usage"] = wellFormed
+		? (rawUsage as Usage)
+		: {
+				...rawUsage,
+				input: finiteTokenCount(rawUsage.input),
+				output: finiteTokenCount(rawUsage.output),
+				cacheRead: finiteTokenCount(rawUsage.cacheRead),
+				cacheWrite: finiteTokenCount(rawUsage.cacheWrite),
+				// A present finite provider total stays authoritative; a missing
+				// or malformed one (absent, string, NaN) is derived from the buckets.
+				totalTokens: resolveUsageTotal(rawUsage),
+				// An omitted `cost` must stay omitted: `resolveStoredCost` reads
+				// absence as "no recorded price", while
+				// a zero would read as an explicitly free request.
+				cost: rawUsage.cost,
+			};
 
 	return {
 		sessionFile,
@@ -342,7 +307,6 @@ function extractModelUsageStats(
 				timestamp: Number.isFinite(timestamp) ? timestamp : 0,
 			},
 		},
-		undefined,
 		agentType,
 	);
 }
@@ -350,7 +314,7 @@ function extractModelUsageStats(
 /** Message timestamp, falling back to the entry's ISO timestamp, then 0. */
 function coerceEntryTimestamp(timestamp: number | undefined, entry: SessionMessageEntry): number {
 	// A stored zero is the "no timestamp" sentinel, not 1970: fall through to
-	// the entry envelope so a recoverable ISO time still selects its tariff.
+	// the entry envelope so the request keeps its recoverable time.
 	if (typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp > 0) return timestamp;
 	const ts = Date.parse(entry.timestamp);
 	return Number.isFinite(ts) ? ts : 0;
@@ -503,15 +467,6 @@ export function parseAllSessionEntries(bytes: Uint8Array): SessionEntry[] {
 	return entries;
 }
 
-/** Rebuild the cursor state of `bytes` (a transcript prefix): the last service tier and the Spotlight state. */
-function scanPrefixState(bytes: Uint8Array, spotlight: SpotlightCollector): ServiceTierByFamily | undefined {
-	let currentServiceTier: ServiceTierByFamily | undefined;
-	visitSessionEntriesLenient(bytes, entry => {
-		if (isServiceTierChange(entry)) currentServiceTier = coerceServiceTierByFamily(entry.serviceTier);
-		else spotlight.visit(entry);
-	});
-	return currentServiceTier;
-}
 export interface SessionParserState {
 	version: 1;
 	offset: number;
@@ -521,7 +476,6 @@ export interface SessionParserState {
 	size: number;
 	mtimeMs: number;
 	checkpoint: string;
-	serviceTier: ServiceTierByFamily | null;
 	/** Absent in cursors persisted before the Spotlight tables; such a tail parse starts from an empty state. */
 	spotlight?: SpotlightParserState;
 }
@@ -557,7 +511,7 @@ export function matchesSessionFile(state: SessionParserState, info: nodeFs.Stats
 	return state.dev === info.dev && state.ino === info.ino && state.birthtimeMs === info.birthtimeMs;
 }
 
-/** Offset-only callers reconstruct service-tier state once; persisted cursors read only the appended tail. */
+/** Offset-only callers reconstruct parser state once; persisted cursors read only the appended tail. */
 export async function parseSessionFile(
 	sessionPath: string,
 	fromOffset = 0,
@@ -567,7 +521,6 @@ export async function parseSessionFile(
 	let bytes: Uint8Array;
 	let start = fromOffset;
 	let reset = false;
-	let currentServiceTier: ServiceTierByFamily | undefined;
 	let info: nodeFs.Stats;
 	let checkpoint: string;
 	let read: number;
@@ -585,10 +538,6 @@ export async function parseSessionFile(
 	// Reduce each entry immediately so full replays do not retain tool-output/message bodies.
 	const visit = (entry: SessionEntry): void => {
 		spotlight.visit(entry);
-		if (isServiceTierChange(entry)) {
-			currentServiceTier = coerceServiceTierByFamily(entry.serviceTier);
-			return;
-		}
 		if (isUserMessage(entry)) {
 			const userMsg = extractUserStats(sessionPath, folder, entry);
 			if (userMsg) userStats.push(userMsg);
@@ -611,7 +560,7 @@ export async function parseSessionFile(
 			return;
 		}
 		if (isAssistantMessage(entry)) {
-			const msgStats = extractStats(sessionPath, folder, entry, currentServiceTier, agentType);
+			const msgStats = extractStats(sessionPath, folder, entry, agentType);
 			if (msgStats) stats.push(msgStats);
 			for (const call of extractToolCalls(sessionPath, folder, entry, agentType)) {
 				toolCalls.push(call);
@@ -654,11 +603,10 @@ export async function parseSessionFile(
 			const readStart = resume ? start : 0;
 			bytes = await file.slice(readStart, info.size).bytes();
 			if (resume) {
-				currentServiceTier = state?.serviceTier ?? undefined;
 				spotlight = new SpotlightCollector(sessionPath, folder, state?.spotlight ?? emptySpotlightState());
 			} else {
 				const prefix = new SpotlightCollector(sessionPath, folder, emptySpotlightState(), false);
-				currentServiceTier = scanPrefixState(bytes.subarray(0, start), prefix);
+				visitSessionEntriesLenient(bytes.subarray(0, start), entry => prefix.visit(entry));
 				spotlight = new SpotlightCollector(sessionPath, folder, prefix.state);
 			}
 			read = visitSessionEntriesLenient(bytes.subarray(start - readStart), visit);
@@ -706,7 +654,6 @@ export async function parseSessionFile(
 			size: info.size,
 			mtimeMs: info.mtimeMs,
 			checkpoint,
-			serviceTier: currentServiceTier ?? null,
 			spotlight: spotlight.state,
 		},
 	};

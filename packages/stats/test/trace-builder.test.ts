@@ -494,7 +494,7 @@ describe("buildSessionTrace", () => {
 		expect(summary.idleMs).toBe(10_000);
 	});
 
-	it("marks dateless scheduled usage as unpriced instead of free", async () => {
+	it("marks dateless usage as unpriced instead of free", async () => {
 		const projectDir = path.join(getSessionsDir(), PROJECT);
 		await fs.mkdir(projectDir, { recursive: true });
 		const file = path.join(projectDir, "1700000000001_unpriced.jsonl");

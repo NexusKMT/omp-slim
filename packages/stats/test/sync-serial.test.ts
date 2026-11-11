@@ -82,7 +82,8 @@ describe("stats sync serial mode", () => {
 
 		expect(synced).toEqual({ processed: 1, files: 1 });
 		expect(overall.totalRequests).toBe(1);
-		expect(overall.totalCost).toBeGreaterThan(0);
+		expect(overall.totalCost).toBe(0);
+		expect(overall.unpricedRequests).toBe(1);
 	});
 
 	it("uses the serial parser by default on macOS", async () => {

@@ -11,10 +11,8 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { pricingPeerFor } from "@oh-my-pi/pi-catalog/compat/behavior";
-import { getBundledModel, type GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
 import { getSessionsDir, isEnoent } from "@oh-my-pi/pi-utils";
-import { initDb, isScheduledCatalogModel } from "./db";
+import { initDb, recordedUsageCost } from "./db";
 import { extractFolderFromPath, parseAllSessionEntries, resolveUsageTotal } from "./parser";
 import { getSessionRollups } from "./rollup";
 import type {
@@ -35,7 +33,7 @@ export class TracePathError extends Error {}
  * span assembly changes so browsers don't revalidate stale cached bodies
  * against an unchanged transcript mtime.
  */
-export const TRACE_ETAG_VERSION = 5;
+export const TRACE_ETAG_VERSION = 6;
 
 const MAX_TRACK_DEPTH = 6;
 const LABEL_MAX = 80;
@@ -389,26 +387,8 @@ function scanTranscript(
 			// helper, so a legacy entry with tokens but no total still
 			// classifies as unpriced.
 			const totalTokens = resolveUsageTotal(msg.usage);
-			const costObj = msg.usage?.cost;
-			const costTotal =
-				typeof costObj?.total === "number" && Number.isFinite(costObj.total) ? costObj.total : undefined;
-			if (totalTokens > 0 && (costTotal === undefined || costTotal === 0)) {
-				const provider = typeof msg.provider === "string" ? msg.provider : "";
-				const model = typeof msg.model === "string" ? msg.model : "";
-				const peer = provider && model ? pricingPeerFor(provider, model) : undefined;
-				if (peer) {
-					const priced = peer.peers.some(peerProvider => {
-						const ref = getBundledModel(peerProvider as GeneratedProvider, peer.peerId)?.cost;
-						return ref && (ref.input !== 0 || ref.output !== 0 || ref.cacheRead !== 0 || ref.cacheWrite !== 0);
-					});
-					if (!priced) unpricedRequests++;
-				} else if (costObj == null && provider && model) {
-					const hasTimestamp =
-						(typeof msg.timestamp === "number" && Number.isFinite(msg.timestamp) && msg.timestamp > 0) ||
-						envelopeTs !== undefined;
-					if (!hasTimestamp && isScheduledCatalogModel(provider, model)) unpricedRequests++;
-				}
-			}
+			const costTotal = recordedUsageCost(msg.usage?.cost)?.total;
+			if (totalTokens > 0 && costTotal === undefined) unpricedRequests++;
 			let start = typeof msg.timestamp === "number" && Number.isFinite(msg.timestamp) ? msg.timestamp : undefined;
 			let end =
 				typeof msg.completedAt === "number" && Number.isFinite(msg.completedAt)

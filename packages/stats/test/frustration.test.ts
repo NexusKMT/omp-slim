@@ -7,7 +7,7 @@ import {
 	type ScoreAnswer,
 	tokenUsage,
 } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { getTestModel } from "../../catalog/test/fixtures/models";
 import { initDb, insertUserMessageStats, upsertFrustrationVerdicts } from "@oh-my-pi/omp-stats/db";
 import {
 	cancelFrustrationRun,
@@ -79,9 +79,7 @@ function verdict(prose: string, pAnnoyed: number, pAngry: number, target: string
 }
 
 function testModel(): Model {
-	const bundled = getBundledModel("openai", "gpt-5.4");
-	if (!bundled) throw new Error("fixture model missing from catalog");
-	return { ...bundled, cost: { ...bundled.cost, input: 1, output: 2 } };
+	return getTestModel("endpoint", "primary", { cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 } });
 }
 
 /** Judge answering every text "angry at the assistant"; `gate` holds requests until released or aborted. */
@@ -175,7 +173,7 @@ describe("frustration dashboard", () => {
 		expect(stats.overall).toEqual({ messages: 7, judged: 3, annoyed: 6, atAssistant: 2, angry: 1 });
 		expect(stats.byModel).toHaveLength(1);
 		expect(stats.byModel[0]).toMatchObject({
-			label: "gpt 5.4",
+			label: "openai/gpt-5.4",
 			messages: 6,
 			judged: 3,
 			annoyed: 5,
@@ -185,72 +183,28 @@ describe("frustration dashboard", () => {
 		expect(stats.judgeAvailable).toBe(false);
 	});
 
-	it("merges provider/spelling variants and orders by class, revision, then family", async () => {
+	it("keeps exact provider and model identities and orders them without inferring aliases", async () => {
 		await initDb();
 		const t = Date.now() - 60_000;
 		insertUserMessageStats([
-			userMessage("a", "weird-model", "custom", {}, t),
-			userMessage("b", "gpt-5.4", "openai", {}, t + 1),
-			userMessage("c", "claude-opus-5-5", "anthropic", {}, t + 2),
-			userMessage("d", "claude-opus-5", "anthropic", {}, t + 3),
-			userMessage("e", "claude-fable-5", "anthropic", {}, t + 4),
-			userMessage("f", "claude-opus-4-8", "anthropic", {}, t + 5),
-			userMessage("g", "claude-opus-4-6", "anthropic", {}, t + 6),
-			userMessage("h", "claude-opus-4.6", "anthropic", {}, t + 7),
+			userMessage("a", "model-2", "endpoint-b", {}, t),
+			userMessage("b", "model-1", "endpoint-a", {}, t + 1),
+			userMessage("c", "model.1", "endpoint-a", {}, t + 2),
+			userMessage("d", "model-1", "endpoint-b", {}, t + 3),
+			userMessage("e", "model-1", "endpoint-a", {}, t + 4),
 		]);
-
 		const { byModel } = await getFrustrationDashboardStats("all");
-
-		expect(byModel.map(row => row.label)).toEqual([
-			"opus 4.6",
-			"opus 4.8",
-			"fable 5",
-			"opus 5",
-			"opus 5.5",
-			"gpt 5.4",
-			"weird-model",
+		expect(byModel.map(row => [row.provider, row.model, row.messages])).toEqual([
+			["endpoint-a", "model-1", 2],
+			["endpoint-a", "model.1", 1],
+			["endpoint-b", "model-1", 1],
+			["endpoint-b", "model-2", 1],
 		]);
 		expect(byModel[0]).toMatchObject({
-			key: "anthropic/opus/4.6.0",
-			modelClass: "anthropic",
-			family: "opus",
-			revision: "4.6.0",
-			messages: 2,
-			firstSeen: t + 6,
+			key: JSON.stringify(["endpoint-a", "model-1"]),
+			label: "endpoint-a/model-1",
+			firstSeen: t + 1,
 		});
-		expect(byModel[0].models.toSorted()).toEqual(["claude-opus-4-6", "claude-opus-4.6"]);
-		expect(byModel.at(-1)).toMatchObject({ key: "weird-model", modelClass: "unknown", revision: null });
-	});
-
-	it("groups DeepSeek Flash aliases and V4 provider variants without merging Pro or V4.1 into V4", async () => {
-		await initDb();
-		const t = Date.now() - 60_000;
-		insertUserMessageStats([
-			userMessage("flash free", "deepseek-v4-flash-free", "opencode-zen", {}, t),
-			userMessage("flash openrouter", "deepseek/deepseek-v4-flash-0731", "openrouter", {}, t + 1),
-			userMessage("flash cline", "deepseek-v4-flash", "cline-pass", {}, t + 2),
-			userMessage("flash crofai", "deepseek-v4-flash-0731", "crofai", {}, t + 3),
-			userMessage("flash prefixed", "cline-free/deepseek-v4-flash", "cline-pass", {}, t + 4),
-			userMessage("pro", "deepseek-v4-pro", "cline-pass", {}, t + 5),
-			userMessage("flash v4.1", "deepseek-v4.1-flash", "cline-pass", {}, t + 6),
-			userMessage("flash native alias", "deepseek-flash", "deepseek", {}, t + 7),
-			userMessage("flash opencode alias", "deepseek-flash", "opencode-go", {}, t + 8),
-		]);
-
-		const { byModel } = await getFrustrationDashboardStats("all");
-		expect(byModel.map(row => [row.key, row.label, row.messages])).toEqual([
-			["deepseek/flash/4.0.0", "flash 4", 5],
-			["deepseek/pro/4.0.0", "pro 4", 1],
-			["deepseek/flash/4.1.0", "flash 4.1", 3],
-		]);
-		expect(byModel[0].models.toSorted()).toEqual([
-			"cline-free/deepseek-v4-flash",
-			"deepseek-v4-flash",
-			"deepseek-v4-flash-0731",
-			"deepseek-v4-flash-free",
-			"deepseek/deepseek-v4-flash-0731",
-		]);
-		expect(byModel[2].models.toSorted()).toEqual(["deepseek-flash", "deepseek-v4.1-flash"]);
 	});
 
 	it("quotes and runs the judge once per unique unjudged prose, streaming verdicts into the dashboard", async () => {
@@ -277,7 +231,7 @@ describe("frustration dashboard", () => {
 			chars,
 			inputTokens,
 			cost: (inputTokens * 1) / 1e6 + (2 * 8 * 2) / 1e6,
-			judge: "openai/gpt-5.4",
+			judge: "endpoint/primary",
 		});
 
 		const started = await startFrustrationRun("all");

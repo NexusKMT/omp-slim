@@ -170,7 +170,7 @@ describe("incremental stats ingestion", () => {
 		});
 	}
 
-	it("limits reads to appended or replaced transcripts across restarts and retains priority accounting", async () => {
+	it("limits reads to appended or replaced transcripts across restarts without inferring legacy priority charges", async () => {
 		const content =
 			tier("priority") +
 			JSON.stringify({ type: "custom", padding: "x".repeat(2_000_000) }) +
@@ -206,11 +206,11 @@ describe("incremental stats ingestion", () => {
 			observer.mockRestore();
 		}
 		expect(getOverallStats().totalRequests).toBe(2);
-		expect(getOverallStats().totalPremiumRequests).toBe(2);
+		expect(getOverallStats().totalPremiumRequests).toBe(0);
 	});
 
 	for (const operation of ["replace", "truncate"] as const) {
-		it(`rebuilds derived totals after ${operation} instead of reusing the old offset and tier`, async () => {
+		it(`rebuilds derived totals after ${operation} instead of reusing the old offset`, async () => {
 			const file = await session(
 				tier("priority") + assistant("old") + JSON.stringify({ type: "custom", padding: "x".repeat(8192) }) + "\n",
 			);
@@ -228,7 +228,7 @@ describe("incremental stats ingestion", () => {
 		});
 	}
 
-	it("upgrades offset-only databases without losing the active tier", async () => {
+	it("upgrades offset-only databases without losing appended requests", async () => {
 		const file = await session(tier("priority") + assistant("first"));
 		await syncAllSessions({ workers: 1 });
 		closeDb();
@@ -241,10 +241,10 @@ describe("incremental stats ingestion", () => {
 		await fs.appendFile(file, assistant("second"));
 		await syncAllSessions({ workers: 1 });
 		expect(getOverallStats().totalRequests).toBe(2);
-		expect(getOverallStats().totalPremiumRequests).toBe(2);
+		expect(getOverallStats().totalPremiumRequests).toBe(0);
 	});
 
-	it("carries service-tier resets through the worker protocol and database restarts", async () => {
+	it("ignores legacy service-tier changes across worker and database restarts", async () => {
 		const file = await session(tier("priority") + assistant("first"));
 		await syncAllSessions({ workers: 2 });
 		closeDb();
@@ -254,10 +254,10 @@ describe("incremental stats ingestion", () => {
 		await fs.appendFile(file, assistant("third"));
 		await syncAllSessions({ workers: 2 });
 		expect(getOverallStats().totalRequests).toBe(3);
-		expect(getOverallStats().totalPremiumRequests).toBe(2);
+		expect(getOverallStats().totalPremiumRequests).toBe(0);
 	}, 15_000);
 
-	it("retries an incomplete final entry without losing its preceding service tier", async () => {
+	it("retries an incomplete final entry following a legacy service-tier change", async () => {
 		const reply = assistant("completed");
 		const split = Math.floor(reply.length / 2);
 		const file = await session(tier("priority") + reply.slice(0, split));
@@ -266,7 +266,7 @@ describe("incremental stats ingestion", () => {
 		await fs.appendFile(file, reply.slice(split));
 		await syncAllSessions({ workers: 1 });
 		expect(getOverallStats().totalRequests).toBe(1);
-		expect(getOverallStats().totalPremiumRequests).toBe(1);
+		expect(getOverallStats().totalPremiumRequests).toBe(0);
 	});
 
 	it("detects a same-inode rewrite that grows past the previous cursor", async () => {

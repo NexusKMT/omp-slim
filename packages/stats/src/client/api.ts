@@ -10,7 +10,6 @@ import type {
 	ModelDashboardStats,
 	OverviewStats,
 	ProviderDashboardStats,
-	ProviderWindowStats,
 	RequestDetails,
 	SessionSummary,
 	SessionTrace,
@@ -219,17 +218,6 @@ export async function getProviderDashboardStats(
 	return fetchJson<ProviderDashboardStats>(`${API_BASE}/stats/providers?range=${encodeURIComponent(range)}`, {
 		signal,
 	});
-}
-
-/** Subscription-window insights (all providers) plus utilization series for `provider` only. */
-export async function getProviderWindowStats(
-	range: TimeRange,
-	provider: string | null,
-	signal?: AbortSignal,
-): Promise<ProviderWindowStats> {
-	const params = new URLSearchParams({ range });
-	if (provider !== null) params.set("provider", provider);
-	return fetchJson<ProviderWindowStats>(`${API_BASE}/stats/provider-windows?${params}`, { signal });
 }
 
 export async function getSessions(limit = 100, q?: string, signal?: AbortSignal): Promise<SessionSummary[]> {

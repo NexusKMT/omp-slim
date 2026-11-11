@@ -49,7 +49,7 @@ const MIN_MESSAGES = 50;
 /** Below this judged share a row is mostly classified by the regex fallback. */
 const MIN_JUDGED_SHARE = 0.5;
 /** Segmented-control value for "every model class". */
-const ALL_CLASSES = "*";
+const ALL_PROVIDERS = "*";
 
 export function FrustrationRoute({ active, range }: FrustrationRouteProps) {
 	const [running, setRunning] = useState(false);
@@ -74,7 +74,7 @@ export function FrustrationRoute({ active, range }: FrustrationRouteProps) {
 		<div className="page">
 			<PageHeader
 				title="Frustration"
-				description={`How often your messages sound annoyed, per model version, in ${meta.windowLabel}.`}
+				description={`How often your messages sound annoyed, per model, in ${meta.windowLabel}.`}
 			/>
 
 			<QueryView query={stats} skeleton={<ChartSkeleton height={96} />}>
@@ -101,7 +101,7 @@ export function FrustrationRoute({ active, range }: FrustrationRouteProps) {
 			<QueryView
 				query={stats}
 				skeleton={
-					<Card index={2} title="Frustration by model version">
+					<Card index={2} title="Frustration by model">
 						<ChartSkeleton height={340} />
 						<TableSkeleton rows={6} />
 					</Card>
@@ -479,16 +479,11 @@ function JudgeResultLine({ job }: { job: FrustrationJobStatus }) {
 // Per-model chart + table
 // ---------------------------------------------------------------------------
 
-/** Chart/filter identity of a model family: `class/family`. */
-function familyKey(row: FrustrationModelStats): string {
-	return `${row.modelClass}/${row.family ?? "unclassified"}`;
-}
-
 function isMostlyRegex(row: FrustrationModelStats): boolean {
 	return row.messages > 0 && row.judged / row.messages < MIN_JUDGED_SHARE;
 }
 
-/** FNV-1a: a stable preferred palette slot per family, independent of range. */
+/** FNV-1a: a stable preferred palette slot per model, independent of range. */
 function hashString(value: string): number {
 	let hash = 0x811c9dc5;
 	for (let i = 0; i < value.length; i++) {
@@ -499,12 +494,12 @@ function hashString(value: string): number {
 }
 
 /**
- * Deterministic family → palette color. Each family starts at its hashed slot
- * and probes forward past taken slots, so families present together stay
+ * Deterministic model → palette color. Each model starts at its hashed slot
+ * and probes forward past taken slots, so modelOptions present together stay
  * distinct (until the palette runs out) and keep their hue across ranges.
  */
-function assignFamilyColors(models: readonly FrustrationModelStats[]): Map<string, string> {
-	const keys = [...new Set(models.map(familyKey))].sort();
+function assignModelColors(models: readonly FrustrationModelStats[]): Map<string, string> {
+	const keys = [...new Set(models.map(row => row.key))].sort();
 	const taken = new Set<number>();
 	const colors = new Map<string, string>();
 	for (const key of keys) {
@@ -519,7 +514,7 @@ function assignFamilyColors(models: readonly FrustrationModelStats[]): Map<strin
 }
 
 /**
- * Shades of one family hue for the three stacked layers. `color-mix` keeps
+ * Shades of one model hue for the three stacked layers. `color-mix` keeps
  * the faint layer see-through on both themes.
  */
 function layerColor(hue: string, layer: Layer): string {
@@ -549,96 +544,94 @@ function percent(part: number, whole: number): number {
 	return whole > 0 ? (part / whole) * 100 : 0;
 }
 
-interface FamilyOption {
+interface ModelOption {
 	key: string;
 	label: string;
 	messages: number;
 }
 
 function FrustrationModelsSection({ models, stale }: { models: FrustrationModelStats[]; stale: boolean }) {
-	const [selectedClass, setSelectedClass] = useState<string | null>(null);
-	const [hiddenFamilies, toggleFamily] = useHiddenSeries();
+	const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+	const [hiddenModels, toggleModel] = useHiddenSeries();
 	const [showSmall, setShowSmall] = useState(false);
 	const [hideRegex, setHideRegex] = useState(false);
 
-	const familyColors = useMemo(() => assignFamilyColors(models), [models]);
+	const modelColors = useMemo(() => assignModelColors(models), [models]);
 
-	const classes = useMemo(() => {
+	const providers = useMemo(() => {
 		const totals = new Map<string, number>();
-		for (const row of models) totals.set(row.modelClass, (totals.get(row.modelClass) ?? 0) + row.messages);
+		for (const row of models) totals.set(row.provider, (totals.get(row.provider) ?? 0) + row.messages);
 		return totals;
 	}, [models]);
 
-	const defaultClass = useMemo(() => {
+	const defaultProvider = useMemo(() => {
 		let best: string | null = null;
 		let bestMessages = -1;
-		for (const [modelClass, messages] of classes) {
+		for (const [provider, messages] of providers) {
 			if (messages > bestMessages) {
-				best = modelClass;
+				best = provider;
 				bestMessages = messages;
 			}
 		}
-		return best ?? ALL_CLASSES;
-	}, [classes]);
+		return best ?? ALL_PROVIDERS;
+	}, [providers]);
 
-	const activeClass =
-		selectedClass !== null && (selectedClass === ALL_CLASSES || classes.has(selectedClass))
-			? selectedClass
-			: defaultClass;
+	const activeProvider =
+		selectedProvider !== null && (selectedProvider === ALL_PROVIDERS || providers.has(selectedProvider))
+			? selectedProvider
+			: defaultProvider;
 
-	const classOptions = useMemo(
+	const providerOptions = useMemo(
 		() => [
-			{ value: ALL_CLASSES, label: "All", title: "Every model class" },
-			...[...classes].map(([modelClass, messages]) => ({
-				value: modelClass,
-				label: modelClass,
+			{ value: ALL_PROVIDERS, label: "All", title: "Every configured provider" },
+			...[...providers].map(([provider, messages]) => ({
+				value: provider,
+				label: provider,
 				title: `${formatInteger(messages)} messages`,
 			})),
 		],
-		[classes],
+		[providers],
 	);
 
-	const inClass = useMemo(
-		() => (activeClass === ALL_CLASSES ? models : models.filter(row => row.modelClass === activeClass)),
-		[models, activeClass],
+	const inProvider = useMemo(
+		() => (activeProvider === ALL_PROVIDERS ? models : models.filter(row => row.provider === activeProvider)),
+		[models, activeProvider],
 	);
 
-	const families = useMemo(() => {
-		const byKey = new Map<string, FamilyOption>();
-		for (const row of inClass) {
-			const key = familyKey(row);
+	const modelOptions = useMemo(() => {
+		const byKey = new Map<string, ModelOption>();
+		for (const row of inProvider) {
+			const key = row.key;
 			const existing = byKey.get(key);
 			if (existing) {
 				existing.messages += row.messages;
 				continue;
 			}
-			const family = row.family ?? "unclassified";
+			const model = row.model;
 			byKey.set(key, {
 				key,
-				label: activeClass === ALL_CLASSES ? `${row.modelClass} · ${family}` : family,
+				label: activeProvider === ALL_PROVIDERS ? `${row.provider} · ${model}` : model,
 				messages: row.messages,
 			});
 		}
 		return [...byKey.values()];
-	}, [inClass, activeClass]);
+	}, [inProvider, activeProvider]);
 
-	const visibleFamilies = useMemo(
-		() => inClass.filter(row => !hiddenFamilies.has(familyKey(row))),
-		[inClass, hiddenFamilies],
+	const visibleModels = useMemo(
+		() => inProvider.filter(row => !hiddenModels.has(row.key)),
+		[inProvider, hiddenModels],
 	);
-	const smallCount = visibleFamilies.filter(row => row.messages < MIN_MESSAGES).length;
-	const regexCount = visibleFamilies.filter(isMostlyRegex).length;
+	const smallCount = visibleModels.filter(row => row.messages < MIN_MESSAGES).length;
+	const regexCount = visibleModels.filter(isMostlyRegex).length;
 	const rows = useMemo(
 		() =>
-			visibleFamilies.filter(
-				row => (showSmall || row.messages >= MIN_MESSAGES) && !(hideRegex && isMostlyRegex(row)),
-			),
-		[visibleFamilies, showSmall, hideRegex],
+			visibleModels.filter(row => (showSmall || row.messages >= MIN_MESSAGES) && !(hideRegex && isMostlyRegex(row))),
+		[visibleModels, showSmall, hideRegex],
 	);
 
 	if (models.length === 0) {
 		return (
-			<Card index={2} title="Frustration by model version" stale={stale}>
+			<Card index={2} title="Frustration by model" stale={stale}>
 				<EmptyState title="No user messages in this range" hint="Try a longer range." />
 			</Card>
 		);
@@ -650,30 +643,30 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
 		<>
 			<Card
 				index={2}
-				title="Frustration by model version"
-				description="Share of user messages per model version. Each bar reaches the annoyed rate; the subsets aimed at the assistant stack inside it."
+				title="Frustration by model"
+				description="Share of user messages per model. Each bar reaches the annoyed rate; the subsets aimed at the assistant stack inside it."
 				stale={stale}
 			>
 				<div className="stack frustration-chart-body">
-					<div className="frustration-classes">
+					<div className="frustration-providers">
 						<Segmented
 							size="sm"
-							aria-label="Model class"
-							options={classOptions}
-							value={activeClass}
-							onChange={setSelectedClass}
+							aria-label="Provider"
+							options={providerOptions}
+							value={activeProvider}
+							onChange={setSelectedProvider}
 						/>
 					</div>
 					<div className="row frustration-filters">
 						<Legend
-							items={families.map(family => ({
-								key: family.key,
-								label: family.label,
-								color: familyColors.get(family.key) ?? SERIES_COLORS[0],
-								value: formatInteger(family.messages),
+							items={modelOptions.map(model => ({
+								key: model.key,
+								label: model.label,
+								color: modelColors.get(model.key) ?? SERIES_COLORS[0],
+								value: formatInteger(model.messages),
 							}))}
-							hidden={hiddenFamilies}
-							onToggle={toggleFamily}
+							hidden={hiddenModels}
+							onToggle={toggleModel}
 						/>
 						<span className="frustration-spacer" />
 						<label className="check" title={`Models with fewer than ${MIN_MESSAGES} messages have noisy rates`}>
@@ -689,15 +682,15 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
 						</label>
 					</div>
 					<EncodingKey hasRegexRows={hasRegexRows} />
-					<FrustrationChart rows={rows} familyColors={familyColors} />
+					<FrustrationChart rows={rows} modelColors={modelColors} />
 				</div>
 			</Card>
-			<FrustrationTable rows={rows} familyColors={familyColors} stale={stale} />
+			<FrustrationTable rows={rows} modelColors={modelColors} stale={stale} />
 		</>
 	);
 }
 
-/** What the marks mean: layer shades, hatching and the trend line (hue = family). */
+/** What the marks mean: layer shades, hatching and the trend line (hue = model). */
 function EncodingKey({ hasRegexRows }: { hasRegexRows: boolean }) {
 	return (
 		<div className="legend frustration-key">
@@ -724,29 +717,23 @@ function EncodingKey({ hasRegexRows }: { hasRegexRows: boolean }) {
 				<span className="swatch frustration-key-swatch" data-variant="hatch" />
 				Hatched: mostly regex fallback{hasRegexRows ? " (run the judge)" : ""}
 			</span>
-			<span className="legend-item dim">Hue = model family</span>
+			<span className="legend-item dim">Hue = model identity</span>
 		</div>
 	);
 }
 
-function FrustrationChart({
-	rows,
-	familyColors,
-}: {
-	rows: FrustrationModelStats[];
-	familyColors: Map<string, string>;
-}) {
+function FrustrationChart({ rows, modelColors }: { rows: FrustrationModelStats[]; modelColors: Map<string, string> }) {
 	const series = useMemo((): ChartSeries[] => {
-		// Bars take their family's hue, so every (layer, family, judged|regex)
-		// combination is its own series with values only in that family's slots.
-		const groups = new Map<string, { family: string; regex: boolean; slots: number[] }>();
+		// Bars take their model's hue, so every (layer, model, judged|regex)
+		// combination is its own series with values only in that model's slots.
+		const groups = new Map<string, { model: string; regex: boolean; slots: number[] }>();
 		rows.forEach((row, i) => {
-			const family = familyKey(row);
+			const model = row.key;
 			const regex = isMostlyRegex(row);
-			const id = `${family}|${regex ? "regex" : "judged"}`;
+			const id = `${model}|${regex ? "regex" : "judged"}`;
 			const group = groups.get(id);
 			if (group) group.slots.push(i);
-			else groups.set(id, { family, regex, slots: [i] });
+			else groups.set(id, { model, regex, slots: [i] });
 		});
 		const out: ChartSeries[] = [];
 		for (const layer of LAYERS) {
@@ -756,7 +743,7 @@ function FrustrationChart({
 				out.push({
 					key: `${layer.key}|${id}`,
 					label: layer.label,
-					color: layerColor(familyColors.get(group.family) ?? SERIES_COLORS[0], layer.key),
+					color: layerColor(modelColors.get(group.model) ?? SERIES_COLORS[0], layer.key),
 					values,
 					pattern: group.regex ? "hatch" : undefined,
 				});
@@ -772,12 +759,12 @@ function FrustrationChart({
 			tooltip: false,
 		});
 		return out;
-	}, [rows, familyColors]);
+	}, [rows, modelColors]);
 
 	if (rows.length === 0) {
 		return (
 			<div className="frustration-chart-empty">
-				<EmptyState title="No model versions match the filters" />
+				<EmptyState title="No models match the filters" />
 			</div>
 		);
 	}
@@ -813,11 +800,11 @@ function FrustrationChart({
 
 function FrustrationTable({
 	rows,
-	familyColors,
+	modelColors,
 	stale,
 }: {
 	rows: FrustrationModelStats[];
-	familyColors: Map<string, string>;
+	modelColors: Map<string, string>;
 	stale: boolean;
 }) {
 	const columns = useMemo(
@@ -828,10 +815,7 @@ function FrustrationTable({
 				sort: row => row.label,
 				render: row => (
 					<span className="row" title={row.key}>
-						<span
-							className="swatch"
-							style={{ background: familyColors.get(familyKey(row)) ?? SERIES_COLORS[0] }}
-						/>
+						<span className="swatch" style={{ background: modelColors.get(row.key) ?? SERIES_COLORS[0] }} />
 						<span className="cell-primary">{row.label}</span>
 					</span>
 				),
@@ -840,7 +824,7 @@ function FrustrationTable({
 				key: "ids",
 				header: "Model IDs",
 				wrap: true,
-				render: row => <span className="mono micro dim">{row.models.join(", ")}</span>,
+				render: row => <span className="mono micro dim">{row.model}</span>,
 			},
 			{
 				key: "messages",
@@ -901,7 +885,7 @@ function FrustrationTable({
 				),
 			},
 		],
-		[familyColors],
+		[modelColors],
 	);
 
 	return (
@@ -917,7 +901,7 @@ function FrustrationTable({
 				rowKey={row => row.key}
 				columns={columns}
 				dense
-				empty={<EmptyState title="No model versions match the filters" />}
+				empty={<EmptyState title="No models match the filters" />}
 			/>
 		</Card>
 	);

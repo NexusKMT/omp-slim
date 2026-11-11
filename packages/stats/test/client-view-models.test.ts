@@ -91,8 +91,8 @@ describe("buildCostSummary", () => {
 	});
 });
 
-describe("API-equivalent cost formatting", () => {
-	it("distinguishes unpriced subscription usage from a zero-dollar estimate", () => {
+describe("recorded cost formatting", () => {
+	it("distinguishes unpriced usage from an explicitly recorded zero charge", () => {
 		expect(formatEstimatedCost(0, 1)).toBe("N/A");
 		expect(formatEstimatedCost(0, 0)).toBe("$0");
 		expect(formatEstimatedCost(1.5, 1)).toBe("$1.50");

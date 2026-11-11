@@ -102,8 +102,8 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
 					<div data-stale={overview.stale} className="stack" style={{ gap: 16 }}>
 						<StatGrid min={190}>
 							<Stat
-								label="API-equivalent cost"
-								title="What this usage would cost at public API rates"
+								label="Recorded cost"
+								title="Costs recorded with each request"
 								value={formatEstimatedCost(overall.totalCost, overall.unpricedRequests)}
 								hint={
 									overall.unpricedRequests > 0

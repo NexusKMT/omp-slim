@@ -17,11 +17,11 @@ Local observability dashboard for AI usage statistics.
 | Cache Rate              | `cache_read / (input + cache_read) * 100`                                  |
 | Cache Savings           | `(uncached prompt cost - actual prompt cost) / uncached prompt cost * 100` |
 | Error Rate              | `count(stopReason=error) / total_calls * 100`                              |
-| API-equivalent estimate | Sum of token usage priced with the matching public API rate card           |
+| Recorded cost | Sum of the costs recorded with each request |
 | Avg Latency             | Mean of `duration`                                                         |
 | TTFT                    | Mean of `ttft` (time to first token)                                       |
 
-Subscription-backed models use matching public API prices when an exact public model exists; these values estimate API-equivalent usage rather than the user's bill. Subscription-only models without a public price are reported as N/A and excluded from dollar totals.
+Costs come from each request's recorded usage, including costs calculated by the client from explicitly configured model prices. Missing costs are reported as N/A and excluded from dollar totals; the dashboard does not infer prices from provider or model names. Token counts, cache usage, and existing historical records remain available.
 
 ## Usage
 

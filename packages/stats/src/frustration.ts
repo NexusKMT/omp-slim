@@ -17,8 +17,6 @@
  * `omp-stats` has none and only shows the regex fallback.
  */
 import { type Judge, judgeQuestions, type Model } from "@oh-my-pi/pi-ai";
-import { compareRevision, parseRevision } from "@oh-my-pi/pi-catalog/compat/revision";
-import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import { getEffectiveTokenCost } from "@oh-my-pi/pi-catalog/models";
 import { logger } from "@oh-my-pi/pi-utils";
 import { getTimeRangeConfig } from "./aggregator";
@@ -57,11 +55,11 @@ export type StatsJudgeProvider = () => Promise<StatsJudge>;
  */
 export const FRUSTRATION_QUESTIONS = judgeQuestions(questionFile);
 
-/** Per-request input-token overhead of {@link FRUSTRATION_QUESTIONS}, measured on jev-1.13. */
+/** Approximate per-request input-token overhead of {@link FRUSTRATION_QUESTIONS}. */
 const REQUEST_OVERHEAD_TOKENS = 561;
-/** Prose characters per input token, measured on jev-1.13. */
+/** Approximate prose characters per input token for the pre-run quote. */
 const CHARS_PER_TOKEN = 5.9;
-/** Output tokens a prompted chat judge bills per request; native judges bill none (zero output price). */
+/** Approximate output tokens per chat judgment for the pre-run quote. */
 const OUTPUT_TOKENS_PER_REQUEST = 8;
 /** Judge requests in flight at the start of a run; {@link AdaptiveLimit} tunes it from there. */
 const INITIAL_CONCURRENCY = 32;
@@ -80,7 +78,7 @@ const CIRCUIT_BREAKER_FAILURES = 25;
 
 const NO_PROVIDER_REASON =
 	"This dashboard was started without a judge (standalone omp-stats). Run `omp stats` to classify.";
-const NO_MODEL_REASON = "No judge model is available. Configure the `judge` model role.";
+const NO_MODEL_REASON = "No primary model is configured. Configure an endpoint and model first.";
 
 let judgeProvider: StatsJudgeProvider | undefined;
 let judgePromise: Promise<StatsJudge> | undefined;
@@ -128,18 +126,12 @@ export function getFrustrationJobStatus(): FrustrationJobStatus {
 	return { ...currentJob };
 }
 
-/**
- * Merge per-(model, provider) rows into catalog identities (`class/family/revision`)
- * so provider and spelling variants share a row. Classified rows sort by class,
- * then revision ascending, then family; unclassified rows follow by first use.
- */
+/** Keep endpoint identity exact; names and versions do not imply equivalent models. */
 export function mergeFrustrationRows(rows: readonly FrustrationModelRow[]): FrustrationModelStats[] {
 	const merged = new Map<string, FrustrationModelStats>();
 	for (const row of rows) {
-		const identity = classifyModel(row.provider ?? "", row.model, { lenient: true });
-		const classified = identity.class !== "unknown" && identity.revision !== undefined;
-		const family = identity.family ?? null;
-		const key = classified ? `${identity.class}/${family ?? ""}/${identity.revision}` : row.model;
+		const provider = row.provider ?? "";
+		const key = JSON.stringify([provider, row.model]);
 		const existing = merged.get(key);
 		if (existing) {
 			existing.messages += row.messages;
@@ -148,19 +140,13 @@ export function mergeFrustrationRows(rows: readonly FrustrationModelRow[]): Frus
 			existing.atAssistant += row.atAssistant;
 			existing.angry += row.angry;
 			existing.firstSeen = Math.min(existing.firstSeen, row.firstSeen);
-			if (!existing.models.includes(row.model)) existing.models.push(row.model);
 			continue;
 		}
-		const revision = classified ? (identity.revision ?? null) : null;
-		// `4.5.0` → `4.5`, `5.0.0` → `5`.
-		const shortRevision = revision?.replace(/(?:\.0)+$/, "");
 		merged.set(key, {
 			key,
-			label: shortRevision ? [family, shortRevision].filter(Boolean).join(" ") : row.model,
-			modelClass: identity.class,
-			family,
-			revision,
-			models: [row.model],
+			label: provider ? `${provider}/${row.model}` : row.model,
+			provider,
+			model: row.model,
 			firstSeen: row.firstSeen,
 			messages: row.messages,
 			judged: row.judged,
@@ -169,23 +155,7 @@ export function mergeFrustrationRows(rows: readonly FrustrationModelRow[]): Frus
 			angry: row.angry,
 		});
 	}
-	return [...merged.values()].sort(compareModelStats);
-}
-
-function compareModelStats(a: FrustrationModelStats, b: FrustrationModelStats): number {
-	const aRevision = a.revision ? parseRevision(a.revision) : undefined;
-	const bRevision = b.revision ? parseRevision(b.revision) : undefined;
-	if (!aRevision || !bRevision) {
-		if (aRevision) return -1;
-		if (bRevision) return 1;
-		return a.firstSeen - b.firstSeen;
-	}
-	if (a.modelClass !== b.modelClass) return a.modelClass < b.modelClass ? -1 : 1;
-	const byRevision = compareRevision(aRevision, bRevision);
-	if (byRevision !== 0) return byRevision;
-	const aFamily = a.family ?? "";
-	const bFamily = b.family ?? "";
-	return aFamily < bFamily ? -1 : aFamily > bFamily ? 1 : 0;
+	return [...merged.values()].sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
 }
 
 /** Payload of `GET /api/stats/frustration`. */

@@ -133,7 +133,7 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
 								value={formatCompact(summary.tokens)}
 							/>
 							<Stat
-								label="API-equivalent cost"
+								label="Recorded cost"
 								title="What these requests would cost at public API rates"
 								value={formatEstimatedCost(summary.cost, summary.unpriced)}
 								hint={summary.unpriced > 0 ? `${formatInteger(summary.unpriced)} unpriced` : undefined}
@@ -271,7 +271,7 @@ const REQUEST_COLUMNS: readonly Column<MessageStats>[] = [
 	{
 		key: "cost",
 		header: "Cost",
-		title: "API-equivalent estimate",
+		title: "recorded cost",
 		align: "right",
 		sort: row => row.usage.cost.total,
 		render: row => <span className="num">{formatMessageCost(row, 4)}</span>,

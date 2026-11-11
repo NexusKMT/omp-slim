@@ -52,7 +52,7 @@
 }
 
 /* Many model classes: scroll sideways rather than wrap (the thumb tracks one row). */
-.frustration-classes {
+.frustration-providers {
 	overflow-x: auto;
 	scrollbar-width: none;
 }
