@@ -1,21 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import type { Context, Model, TJsonSchema, Tool } from "@oh-my-pi/pi-ai/types";
 import {
 	enforceStrictSchema,
 	mergeCompatibleEnumSchemas,
-	normalizeSchemaForCCA,
-	normalizeSchemaForFactoryDroid,
-	normalizeSchemaForGoogle,
 	normalizeSchemaForMCP,
-	normalizeSchemaForMoonshot,
-	sanitizeSchemaForOpenAIResponses,
 	sanitizeSchemaForStrictMode,
 	schemaNeedsDraft202012Upgrade,
-	stripResidualCombiners,
 	tryEnforceStrictSchema,
 	upgradeJsonSchemaTo202012,
 } from "@oh-my-pi/pi-ai/utils/schema";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 // ---------------------------------------------------------------------------
 // mergeCompatibleEnumSchemas
@@ -305,52 +297,6 @@ describe("enforceStrictSchema and tryEnforceStrictSchema", () => {
 // stripResidualCombiners
 // ---------------------------------------------------------------------------
 
-describe("stripResidualCombiners", () => {
-	it("collapses identical anyOf variants to the underlying type", () => {
-		const stripped = stripResidualCombiners({
-			anyOf: [
-				{ type: "string", minLength: 1 },
-				{ type: "string", minLength: 1 },
-			],
-			oneOf: [
-				{ type: "string", pattern: "^a" },
-				{ type: "string", pattern: "^a" },
-			],
-		}) as Record<string, unknown>;
-
-		expect(stripped.type).toBe("string");
-		expect(stripped.anyOf).toBeUndefined();
-		expect(stripped.oneOf).toBeUndefined();
-		expect(stripped.minLength).toBe(1);
-		expect(stripped.pattern).toBe("^a");
-	});
-
-	it("strips residual combiners to a fixpoint at the same node", () => {
-		const normalized = stripResidualCombiners({
-			anyOf: [
-				{ type: "string", description: "A" },
-				{ type: "string", description: "B" },
-			],
-			oneOf: [{ type: "number" }, { type: "number" }],
-		}) as Record<string, unknown>;
-
-		expect(normalized.anyOf).toBeUndefined();
-		expect(normalized.oneOf).toBeUndefined();
-	});
-
-	it("drops array-only keys when mixed-type collapse picks string from anyOf fixpoint", () => {
-		const stripped = stripResidualCombiners({
-			anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
-			description: "pr number, url, or branch",
-		}) as Record<string, unknown>;
-
-		expect(stripped.type).toBe("string");
-		expect(stripped.items).toBeUndefined();
-		expect(stripped.anyOf).toBeUndefined();
-		expect(stripped.description).toBe("pr number, url, or branch");
-	});
-});
-
 // ---------------------------------------------------------------------------
 // normalizeSchemaForCCA
 // ---------------------------------------------------------------------------
@@ -363,8 +309,8 @@ describe("circular schema safety", () => {
 		};
 		(circular.properties as Record<string, unknown>).self = circular;
 
-		// Google normalization breaks the back-edge with an empty schema.
-		expect(normalizeSchemaForGoogle(circular)).toEqual({ type: "object", properties: { self: {} } });
+		// MCP normalization breaks the back-edge with an empty schema.
+		expect(normalizeSchemaForMCP(circular)).toEqual({ type: "object", properties: { self: {} } });
 
 		// Strict-mode sanitization rebuilds the cycle on the sanitized copy rather than recursing forever.
 		const strict = sanitizeSchemaForStrictMode(circular) as { properties: { self: unknown } };
@@ -385,7 +331,7 @@ describe("DAG-shared subtree normalization", () => {
 			properties: { a: shared, b: shared },
 		};
 
-		const result = normalizeSchemaForGoogle(schema) as {
+		const result = normalizeSchemaForMCP(schema) as {
 			properties: { a: Record<string, unknown>; b: Record<string, unknown> };
 		};
 		expect(result.properties.a).toEqual({ type: "string", description: "shared leaf" });
@@ -399,72 +345,10 @@ describe("DAG-shared subtree normalization", () => {
 			properties: Object.freeze({ x: shared, y: shared }),
 		});
 
-		const result = normalizeSchemaForGoogle(schema) as {
+		const result = normalizeSchemaForMCP(schema) as {
 			properties: { x: Record<string, unknown>; y: Record<string, unknown> };
 		};
 		expect(result.properties.x).toEqual({ type: "number" });
 		expect(result.properties.y).toEqual({ type: "number" });
 	});
 });
-
-// ---------------------------------------------------------------------------
-// normalizeSchemaForMoonshot (Moonshot Flavored JSON Schema)
-// ---------------------------------------------------------------------------
-
-const MFJS_FORBIDDEN_KEYWORDS = new Set([
-	"const",
-	"oneOf",
-	"allOf",
-	"nullable",
-	"prefixItems",
-	"minItems",
-	"maxItems",
-	"minLength",
-	"maxLength",
-	"pattern",
-	"format",
-	"minimum",
-	"maximum",
-	"exclusiveMinimum",
-	"exclusiveMaximum",
-	"multipleOf",
-	"uniqueItems",
-	"title",
-	"$schema",
-	"$comment",
-]);
-
-/** Walk schema-keyword positions only and fail on any keyword MFJS rejects. */
-function assertMfjsValid(node: unknown, path = "$"): void {
-	if (Array.isArray(node)) {
-		for (const [i, entry] of node.entries()) assertMfjsValid(entry, `${path}[${i}]`);
-		return;
-	}
-	if (typeof node === "boolean") throw new Error(`MFJS requires an object schema at ${path}`);
-	if (typeof node !== "object" || node === null) return;
-	const obj = node as Record<string, unknown>;
-	for (const key of Object.keys(obj)) {
-		if (MFJS_FORBIDDEN_KEYWORDS.has(key)) throw new Error(`MFJS-forbidden keyword '${key}' at ${path}`);
-	}
-	if ("type" in obj && typeof obj.type !== "string") {
-		throw new Error(`MFJS requires a scalar string 'type' at ${path}, got ${JSON.stringify(obj.type)}`);
-	}
-	if (Array.isArray(obj.enum)) {
-		for (const value of obj.enum) {
-			if (typeof value !== "string" && typeof value !== "number") {
-				throw new Error(`MFJS enum admits only string/number at ${path}, got ${JSON.stringify(value)}`);
-			}
-		}
-	}
-	const props = obj.properties;
-	if (props && typeof props === "object" && !Array.isArray(props)) {
-		for (const [key, value] of Object.entries(props)) assertMfjsValid(value, `${path}.properties.${key}`);
-	}
-	if (Array.isArray(obj.anyOf)) {
-		for (const [i, entry] of obj.anyOf.entries()) assertMfjsValid(entry, `${path}.anyOf[${i}]`);
-	}
-	if (obj.items !== undefined) assertMfjsValid(obj.items, `${path}.items`);
-	if (obj.additionalProperties && typeof obj.additionalProperties === "object") {
-		assertMfjsValid(obj.additionalProperties, `${path}.additionalProperties`);
-	}
-}

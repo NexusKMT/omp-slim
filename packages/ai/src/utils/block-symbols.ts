@@ -19,30 +19,6 @@ export function clearStreamingPartialJson(block: StreamingPartialJsonCarrier): v
 	if (Object.hasOwn(block, kStreamingPartialJson)) block[kStreamingPartialJson] = undefined;
 }
 
-/** Stores a provider-local stream block index without exposing a string-keyed property. */
-export const kStreamingBlockIndex = Symbol("provider.block.index");
-
-/** Stores the last parsed argument prefix length for throttled streaming JSON parsing. */
-export const kStreamingLastParseLen = Symbol("provider.block.lastParseLen");
-
-/**
- * The Cursor interaction envelope's `call_id` for a streamed tool-call block.
- *
- * Tracked separately from the block's own `id` because they are NOT the same
- * key: MCP and Pi blocks are filed under the id inside the call's `args`, which
- * is what the exec channel pairs its result under, while every streamed
- * `ToolCall*Update` correlates on the envelope's `call_id`. Matching
- * completions against the block id would mis-route every call whose args carry
- * their own id.
- */
-export const kStreamingEnvelopeId = Symbol("provider.block.envelopeId");
-
-/** Marks streamed tool-call arguments that already received an authoritative done payload. */
-export const kStreamingArgumentsDone = Symbol("provider.block.argumentsDone");
-
-/** Classifies Cursor's in-flight tool-call kind without leaking provider-private state. */
-export const kStreamingBlockKind = Symbol("provider.block.kind");
-
 /**
  * Marks a `toolCall` content block that Cursor's exec channel already
  * executed server-side (via the coding-agent bridge) and whose result is
@@ -75,41 +51,6 @@ export function isCursorExecResolved(block: CursorExecResolvedCarrier | null | u
  */
 export function copyCursorExecResolved(target: CursorExecResolvedCarrier, source: CursorExecResolvedCarrier): void {
 	if (source[kCursorExecResolved] === true) target[kCursorExecResolved] = true;
-}
-
-/**
- * Marks a text block synthesized by cross-model thinking demotion in
- * `transformMessages`. Converters that flatten adjacent text blocks into one
- * string (openai-completions) insert a paragraph separator after marked
- * blocks; unmarked adjacent blocks keep their original byte sequence.
- * Symbol-keyed so the marker never persists across the JSONL round-trip and
- * never reaches the wire.
- */
-export const kDemotedThinking = Symbol("provider.block.demotedThinking");
-
-/** Carries the demoted-thinking marker without exposing a string-keyed property. */
-export type DemotedThinkingCarrier = object & { [kDemotedThinking]?: boolean };
-
-/** True for text blocks synthesized by cross-model thinking demotion. */
-export function isDemotedThinking(block: DemotedThinkingCarrier | null | undefined): boolean {
-	return block?.[kDemotedThinking] === true;
-}
-
-/**
- * Marks a thinking block that `transformMessages` carried natively from
- * another host serving the same model (see `compat/reasoning-carry` in the
- * catalog). Its host-bound signature and item id are gone, so encoders that
- * replay reasoning from stored payloads (Responses) emit a plaintext item for
- * it instead. Symbol-keyed so the marker never persists or reaches the wire.
- */
-export const kCarriedReasoning = Symbol("provider.block.carriedReasoning");
-
-/** Carries the carried-reasoning marker without exposing a string-keyed property. */
-export type CarriedReasoningCarrier = object & { [kCarriedReasoning]?: boolean };
-
-/** True for thinking blocks carried natively from another host of the same model. */
-export function isCarriedReasoning(block: CarriedReasoningCarrier | null | undefined): boolean {
-	return block?.[kCarriedReasoning] === true;
 }
 
 /**

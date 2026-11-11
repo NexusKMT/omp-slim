@@ -9,7 +9,6 @@ import {
 	enforceStrictSchema,
 	isJsonSchemaValueValid,
 	isValidJsonSchema,
-	sanitizeSchemaForOpenAIResponses,
 	sanitizeSchemaForStrictMode,
 	toolWireSchema,
 	tryEnforceStrictSchema,
@@ -222,7 +221,7 @@ describe("sanitizeSchemaForStrictMode", () => {
 		});
 	});
 
-	it("keeps OpenAI Responses strict schemas valid for nullable MCP enum parameters", () => {
+	it("keeps Chat strict schemas valid for nullable MCP enum parameters", () => {
 		const guideEnum = ["javascript", "python"];
 		const raw = {
 			type: "object",
@@ -242,8 +241,7 @@ describe("sanitizeSchemaForStrictMode", () => {
 			description: "",
 			parameters: structuredClone(raw),
 		});
-		const responses = sanitizeSchemaForOpenAIResponses(wired);
-		const strict = adaptSchemaForStrict(responses, true);
+		const strict = adaptSchemaForStrict(wired, true);
 		const properties = strict.schema.properties as Record<string, Record<string, unknown>>;
 
 		expect(strict.strict).toBe(true);

@@ -110,7 +110,7 @@ it("keeps traversal state off caller graphs that are deep-frozen after a first v
 	expect(enforceStrictSchema(schema)).toEqual(expected);
 });
 
-it("does not fold a const into the caller's own enum array", () => {
+it("preserves const and enum constraints without mutating the caller's schema", () => {
 	const parameters: Record<string, unknown> = {
 		type: "object",
 		properties: { path: { type: "string" } },
@@ -125,5 +125,6 @@ it("does not fold a const into the caller's own enum array", () => {
 	expect(parameters["enum"]).toEqual([{ a: 1 }]);
 	expect(
 		normalized !== null && typeof normalized === "object" && "enum" in normalized ? normalized.enum : undefined,
-	).toEqual([{ a: 1 }, { b: 2 }]);
+	).toEqual([{ a: 1 }]);
+	expect(normalized).toHaveProperty("const", { b: 2 });
 });

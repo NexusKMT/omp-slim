@@ -1,18 +1,7 @@
 /**
- * JSON-POST → SSE transport for OpenAI-wire streaming endpoints (chat
- * completions, responses, azure responses). Replaces the `openai` SDK client:
- *
- * - Retries: `fetchWithRetry` (Retry-After/quota-hint aware; 5xx/408/429 and
- *   transient network errors; `x-should-retry: false` is terminal). Default 6
- *   total attempts — parity with the SDK's former `maxRetries: 5`.
- * - SSE decode: `readSseJson` (spec-compliant framing, `[DONE]`-aware).
- *   `onSseEvent` observers now receive real wire frames instead of events
- *   re-synthesized from decoded SDK objects.
- * - Errors: {@link OpenAIHttpError} exposes `status`/`headers`/`code`
- *   structurally (ProviderHttpError contract — `extractHttpStatusFromError`,
- *   retry-after extraction, copilot transient classification) and carries the
- *   captured response body for the strict-tools fallback and the responses
- *   chain-state detectors, which regex over `error.message`.
+ * JSON POST and SSE transport for standard Chat Completions.
+ * Retries respect Retry-After and caller cancellation. Decoded events preserve
+ * raw frame diagnostics; HTTP failures retain status, headers and body.
  */
 import { fetchWithRetry, readSseJsonOrText, type SseEventObserver } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
