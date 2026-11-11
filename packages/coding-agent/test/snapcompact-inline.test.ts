@@ -385,8 +385,10 @@ describe("SnapcompactInlineTransformer", () => {
 		expect(renderedFonts).toEqual(["6x12", "6x12"]);
 
 		options.shape = "8x13-bw";
-		expect(imageCount(await transformer.transform(context, makeModel()))).toBeGreaterThan(0);
-		expect(renderedFonts).toEqual(["6x12", "6x12", "8x13", "8x13"]);
+		// The standard five-image cap gives the larger shape three frames per result,
+		// so the request keeps the compacted text when both results would overflow.
+		expect(imageCount(await transformer.transform(context, makeModel()))).toBe(0);
+		expect(renderedFonts).toEqual(["6x12", "6x12"]);
 	});
 
 	it("reports per-tool-result savings to the sink for each imaged result only", async () => {
@@ -443,7 +445,7 @@ describe("SnapcompactInlineTransformer", () => {
 	});
 
 	it("compacts text in mixed tool results while preserving every source image and the input context", async () => {
-		const options = withTestShape({ renderSystemPrompt: "all", renderToolResults: true });
+		const options = withTestShape({ renderSystemPrompt: "none", renderToolResults: true });
 		const renderedTexts: string[] = [];
 		const transformer = new SnapcompactInlineTransformer(options, undefined, {
 			async framesFor(text, shape, maxFrames) {
@@ -506,7 +508,7 @@ describe("SnapcompactInlineTransformer", () => {
 		const result = await transformer.transform(context, model);
 
 		expect(estimate.toolResults?.swapped).toBe(1);
-		expect(estimate.systemPrompt?.applied).toBe(true);
+		expect(estimate.systemPrompt?.applied ?? false).toBe(false);
 		const swapped = result.messages[1] as ToolResultMessage;
 		const toolImageIndex = swapped.content.indexOf(toolImage);
 		const secondToolImageIndex = swapped.content.indexOf(secondToolImage);
@@ -574,7 +576,7 @@ describe("SnapcompactInlineTransformer", () => {
 		const transformer = new SnapcompactInlineTransformer(
 			withTestShape({ renderSystemPrompt: "all", renderToolResults: false }),
 		);
-		const longPrompt = denseText(3000);
+		const longPrompt = denseText(5000);
 		const context: Context = {
 			systemPrompt: [longPrompt],
 			messages: [userMessage("do the thing"), toolResult("call_1", SMALL)],
@@ -600,7 +602,7 @@ describe("SnapcompactInlineTransformer", () => {
 				renderToolResults: false,
 			}),
 		);
-		const longContext = denseText(3000);
+		const longContext = denseText(5000);
 		const context: Context = {
 			systemPrompt: [
 				`Core instructions.\n\n<repo-rules>\nYou MUST follow the context files below for all tasks:\n<file path="AGENTS.md">\n${longContext}\n</file>\n</repo-rules>\n\nToday is 2026-06-12.`,

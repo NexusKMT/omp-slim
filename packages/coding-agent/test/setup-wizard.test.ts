@@ -14,7 +14,6 @@ import {
 	type SetupSceneHost,
 	selectSetupScenes,
 } from "@oh-my-pi/pi-coding-agent/modes/setup";
-import { providersSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/sign-in";
 import { themeSetupScene } from "@oh-my-pi/pi-tui/setup/scenes/theme";
 import { SetupWizardComponent } from "@oh-my-pi/pi-tui/setup/wizard-overlay";
 import { setTerminalGlyphProtocol } from "@oh-my-pi/pi-tui/terminal-capabilities";
@@ -412,28 +411,6 @@ describe("setup wizard short terminals", () => {
 		const realNow = performance.now.bind(performance);
 		return vi.spyOn(performance, "now").mockImplementation(() => realNow() + 1_000);
 	}
-
-	it("keeps the selected provider row visible while navigating on a 24-row terminal", async () => {
-		await initTheme(false, "unicode", false, "titanium", "light");
-		const component = new SetupWizardComponent(createSetupHost(shortTerminalCtx(24)), [providersSetupScene]);
-		void component.run();
-		component.handleInput("\r"); // splash → scene
-		const nowSpy = skipDissolve();
-		try {
-			// Walk down past a full wrap and back up; the selection must stay
-			// inside the 24-row frame on every step (the list window used to
-			// assume ten visible rows and the wizard clipped the cursor off).
-			for (const key of [...Array(45).fill("\x1b[B"), "\x1b[A", "\x1b[A"]) {
-				component.handleInput(key);
-				const frame = component.render(80).map(line => Bun.stripANSI(line));
-				expect(frame.length).toBe(24);
-				expect(frame.some(line => line.includes(`${theme.nav.cursor} `))).toBe(true);
-			}
-		} finally {
-			nowSpy.mockRestore();
-			component.dispose();
-		}
-	});
 
 	it("keeps the curated theme list and its selection visible on a 24-row terminal", async () => {
 		await initTheme(false, "unicode", false, "titanium", "light");

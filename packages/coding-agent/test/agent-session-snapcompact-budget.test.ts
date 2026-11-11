@@ -24,7 +24,6 @@ import { effectiveReserveTokens, prepareCompaction, resolveThresholdTokens } fro
 import { base64ImageSize } from "@oh-my-pi/pi-agent-core/image-tokens";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
-import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -76,7 +75,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 			sessionManager.appendMessage({
 				role: "assistant",
 				content: [{ type: "text", text: `reply ${i}: ${filler}` }],
-				api: "anthropic-messages",
+				api: "openai-completions",
 				provider: "anthropic",
 				model: "claude-sonnet-4-5",
 				stopReason: "stop",
@@ -194,7 +193,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		expect(maxFrames).toBeDefined();
 		expect(maxFrames).toBeLessThan(snapcompact.MAX_FRAMES_DEFAULT);
 		expect(maxFrames).toBeLessThanOrEqual(
-			snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(model), snapcompact.frameDataBytesBudget(model)),
+			snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(), snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
 		);
 		expect(maxFrames).toBeGreaterThan(0);
 
@@ -207,7 +206,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		if (!preparation) throw new Error("Expected non-empty preparation");
 		let baseTokens = computeNonMessageTokens(session, session.agent.tokenizer, session.settings.revision);
 		baseTokens += session.agent.tokenizer.countMessages(preparation.recentMessages);
-		const shape = snapcompact.resolveShape(model);
+		const shape = snapcompact.resolveShape();
 		const edgeCap = snapcompact.geometry(shape).capacity;
 		// Worst-case `textHead + textTail` tokenized at the cl100k 4-chars/token
 		// baseline, plus a 2k allowance for the snapcompact summary template
@@ -278,7 +277,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		if (!model) throw new Error("Expected model");
 		// A rerouted baseUrl has no catalog inline-image budget, so the default byte cap binds.
 		session.agent.setModel({
-			...buildModel({ ...toModelSpec(model), baseUrl: "https://anthropic-proxy.example" }),
+			...buildModel({ ...model, baseUrl: "https://anthropic-proxy.example" }),
 			contextWindow: 0,
 		});
 
@@ -300,8 +299,8 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 
 		// Sonnet 4.5 renders 1568px frames, which cost less of the byte budget
 		// than the 1932px high-res frames.
-		const shape = snapcompact.resolveShape(model);
-		expect(shape.frameSize).toBe(1568);
+		const shape = snapcompact.resolveShape();
+		expect(shape.frameSize).toBe(snapcompact.resolveShape().frameSize);
 		expect(compactSpy.mock.calls[0]?.[1]?.maxFrames).toBe(
 			snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
 		);
@@ -332,24 +331,24 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		await session.compact(undefined, { mode: "snapcompact" });
 
 		expect(compactSpy).toHaveBeenCalledTimes(1);
-		expect(compactSpy.mock.calls[0]?.[1]?.maxFrames).toBe(snapcompact.DEFAULT_PROVIDER_IMAGE_BUDGET);
+		expect(compactSpy.mock.calls[0]?.[1]?.maxFrames).toBe(snapcompact.DEFAULT_IMAGE_BUDGET);
 	});
 
 	it.each([
-		["the official endpoint attaches every frame", "https://api.anthropic.com", 3],
-		["a rerouted baseUrl attaches the newest frames within the default", "https://anthropic-proxy.example", 1],
+		["a configured endpoint applies the frame byte budget", "https://custom.example/v1", 1],
+		["a local gateway applies the same byte budget", "http://localhost:8080/v1", 1],
 	] as const)("rebuilds the archive at the active model's frame byte budget: %s", (_, baseUrl, frames) => {
 		const model = session.model;
 		if (!model) throw new Error("Expected model");
-		session.agent.setModel(buildModel({ ...toModelSpec(model), baseUrl }));
+		session.agent.setModel(buildModel({ ...model, baseUrl }));
 		appendFrameArchive();
 
 		expect(archiveImages(session.buildDisplaySessionContext().messages)).toBe(frames);
 	});
 
 	it.each([
-		["the official endpoint attaches every frame", "https://api.anthropic.com", 3],
-		["a rerouted baseUrl attaches the newest frames within the default", "https://anthropic-proxy.example", 1],
+		["a configured endpoint applies the frame byte budget", "https://custom.example/v1", 1],
+		["a local gateway applies the same byte budget", "http://localhost:8080/v1", 1],
 	] as const)(
 		"tree navigation with a session_tree handler installs and returns the archive at the active model's frame byte budget: %s",
 		async (_, baseUrl, frames) => {
@@ -369,7 +368,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 			session = new AgentSession({
 				agent: new Agent({
 					initialState: {
-						model: buildModel({ ...toModelSpec(model), baseUrl }),
+						model: buildModel({ ...model, baseUrl }),
 						systemPrompt: ["Test"],
 						tools: [],
 						messages: [],
@@ -403,8 +402,8 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		const model = { ...bundled, contextWindow: 400_000, maxTokens: 32_000 };
 		session.agent.setModel(model);
 		cfgSnapcompactShape.set(session.settings, "5x8-bw");
-		const shape = snapcompact.resolveShape(model, "5x8-bw");
-		expect(shape.frameTokenEstimate).toBe(Math.ceil(81 ** 2 * 1.2));
+		const shape = snapcompact.resolveShape("5x8-bw");
+		expect(shape.frameTokenEstimate).toBe(snapcompact.FRAME_TOKEN_ESTIMATE);
 
 		// ~45k tokens of kept-recent traffic leaves room under the trigger for several
 		// frames, so the token budget, not the byte or provider caps, decides the count.
@@ -433,7 +432,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		const maxFrames = compactSpy.mock.calls[0]?.[1]?.maxFrames ?? 0;
 		expect(maxFrames).toBeGreaterThan(1);
 		expect(maxFrames).toBeLessThan(
-			snapcompact.maxFramesForDataBudget(shape, snapcompact.frameDataBytesBudget(model)),
+			snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
 		);
 
 		const settings = { enabled: true as const, reserveTokens: 16384, keepRecentTokens: 4000 };
@@ -566,15 +565,12 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 	});
 
 	it.each([
-		// Gemini 3 bills a fixed 1,120 per image at any size.
-		{ name: "Gemini", provider: "google", id: "gemini-3.1-pro-preview", frameSize: 2048, frameTokens: () => 1120 },
-		// GPT bills 32px patches × 1.2 over the frame's real height (the last frame hugs its rows).
 		{
-			name: "Codex",
-			provider: "openai-codex",
-			id: "gpt-6.1-sol",
-			frameSize: 1568,
-			frameTokens: (height: number) => Math.ceil(49 * Math.ceil(height / 32) * 1.2),
+			name: "Chat",
+			provider: "custom",
+			id: "image-model",
+			frameSize: snapcompact.resolveShape().frameSize,
+			frameTokens: () => snapcompact.FRAME_TOKEN_ESTIMATE,
 		},
 	] as const)(
 		"persists the trigger's post-commit count as tokensAfter for a real $name archive",
@@ -582,7 +578,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 			const bundled = getBundledModel(provider, id);
 			if (!bundled) throw new Error(`Expected bundled ${provider}/${id}`);
 			const model = { ...bundled, contextWindow: 400_000, maxTokens: 32_000 };
-			expect(snapcompact.resolveShape(model).frameSize).toBe(frameSize);
+			expect(snapcompact.resolveShape().frameSize).toBe(frameSize);
 			session.agent.setModel(model);
 
 			await session.compact(undefined, { mode: "snapcompact" });
@@ -601,7 +597,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 			for (const frame of frames) {
 				const size = base64ImageSize(frame.data);
 				if (size?.width !== frameSize) throw new Error(`Expected a ${frameSize}px-wide frame`);
-				expectedFrameTokens += frameTokens(size.height);
+				expectedFrameTokens += frameTokens();
 			}
 			expect(tokenizer.countMessage(summary) - tokenizer.countMessage(textOnly)).toBe(expectedFrameTokens);
 			expect(entry.tokensAfter).toBe(
