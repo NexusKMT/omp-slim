@@ -432,7 +432,7 @@ import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "../plan-mode/settings";
 import { combine, type SettingValueOf } from "../config/registry";
 import { cfgAdvisorEnabled, cfgAdvisorMaxNotesPerUpdate } from "../advisor/settings";
 import { cfgExtensionAssistantTextRenderers, cfgExtensionTranscriptPresenters } from "../extensibility/settings";
-import { cfgTierAdvisor } from "../session/settings";
+
 import {
 	cfgCompactionEnabled,
 	cfgCompactionIdleEnabled,
@@ -503,7 +503,6 @@ const cfgLiveUiSettings = combine({
 	"git.enabled": cfgGitEnabled,
 	"advisor.enabled": cfgAdvisorEnabled,
 	"advisor.maxNotesPerUpdate": cfgAdvisorMaxNotesPerUpdate,
-	"tier.advisor": cfgTierAdvisor,
 });
 type LiveUiSettings = SettingValueOf<typeof cfgLiveUiSettings>;
 
@@ -4217,7 +4216,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		if (any("statusLine.sessionAccent")) this.#handleSessionAccentInputsChanged();
 		// Advisor runtime start/stop has no session event; repaint its status segment.
-		if (any("advisor.enabled", "advisor.maxNotesPerUpdate", "tier.advisor")) {
+		if (any("advisor.enabled", "advisor.maxNotesPerUpdate")) {
 			this.statusLine.invalidate();
 			this.ui.requestRender();
 		}

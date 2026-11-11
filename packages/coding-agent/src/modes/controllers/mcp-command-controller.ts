@@ -1,3 +1,4 @@
+import { discoverMcpOAuthStorage } from "../../mcp/oauth-storage";
 /**
  * MCP Command Controller
  *
@@ -789,7 +790,7 @@ export class MCPCommandController {
 	): Promise<OAuthFlowResult> {
 		const { callbacks, release } = this.#oauthFlowCallbacks();
 		try {
-			return await this.#withOAuthEscape((escapeSignal, onClaimed) =>
+			return await this.#withOAuthEscape(async (escapeSignal, onClaimed) =>
 				runMcpOAuthFlow({
 					authUrl,
 					tokenUrl,
@@ -805,7 +806,7 @@ export class MCPCommandController {
 					callbackPath: opts?.callbackPath,
 					redirectUri: opts?.redirectUri,
 					prompt: opts?.prompt,
-					authStorage: this.ctx.session.modelRegistry.authStorage,
+					oauthStorage: await discoverMcpOAuthStorage(this.ctx.settings.getAgentDir()),
 					signal: opts?.abortSignal ? AbortSignal.any([escapeSignal, opts.abortSignal]) : escapeSignal,
 					flowOwner: this.ctx.oauthManualInput,
 					pendingInput: () =>
@@ -963,7 +964,7 @@ export class MCPCommandController {
 	async #handleTestConnection(config: MCPServerConfig, options?: { oauth?: boolean }): Promise<void> {
 		await probeMcpConnection(config, {
 			oauth: options?.oauth,
-			authStorage: this.ctx.session.modelRegistry.authStorage,
+			oauthStorage: await discoverMcpOAuthStorage(this.ctx.settings.getAgentDir()),
 			mcpManager: this.ctx.mcpManager,
 		});
 	}
@@ -1395,7 +1396,7 @@ export class MCPCommandController {
 				resolvedConfig = await this.ctx.mcpManager.prepareConfig(config);
 			} else {
 				const tempManager = new MCPManager(getProjectDir());
-				tempManager.setAuthStorage(this.ctx.session.modelRegistry.authStorage);
+				tempManager.setOAuthStorage(await discoverMcpOAuthStorage(this.ctx.settings.getAgentDir()));
 				resolvedConfig = await tempManager.prepareConfig(config);
 			}
 
@@ -1598,9 +1599,9 @@ export class MCPCommandController {
 			}
 
 			const currentAuth = found.config.auth;
-			const authStorage = this.ctx.session.modelRegistry.authStorage;
+			const oauthStorage = await discoverMcpOAuthStorage(this.ctx.settings.getAgentDir());
 			if (currentAuth?.type === "oauth") {
-				await removeManagedMcpOAuthCredential(authStorage, currentAuth.credentialId);
+				await removeManagedMcpOAuthCredential(oauthStorage, currentAuth.credentialId);
 			}
 			// Also drop this profile's url-keyed binding so the server is truly
 			// signed out even when the config carries no auth block. Runtime
@@ -1609,7 +1610,7 @@ export class MCPCommandController {
 			let removedUrlKeyedCredential = false;
 			if ((found.config.type === "http" || found.config.type === "sse") && found.config.url) {
 				removedUrlKeyedCredential = await removeManagedMcpOAuthCredentials(
-					authStorage,
+					oauthStorage,
 					mcpOAuthCredentialIdsForServerUrl(found.config.url),
 				);
 			}
@@ -1669,9 +1670,9 @@ export class MCPCommandController {
 
 			const { callbacks, release } = this.#oauthFlowCallbacks();
 			try {
-				const outcome = await this.#withOAuthEscape((signal, onClaimed) =>
+				const outcome = await this.#withOAuthEscape(async (signal, onClaimed) =>
 					reauthorizeMcpServer(name, found, {
-						authStorage: this.ctx.session.modelRegistry.authStorage,
+						oauthStorage: await discoverMcpOAuthStorage(this.ctx.settings.getAgentDir()),
 						authChallenge: options.authChallenge,
 						mcpManager: this.ctx.mcpManager,
 						silent: options.silent,

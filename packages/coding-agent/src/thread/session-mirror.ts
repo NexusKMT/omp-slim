@@ -115,7 +115,6 @@ export interface SessionSettingsSource {
 export interface SessionQueuedMessages {
 	readonly steering: readonly string[];
 	readonly followUp: readonly string[];
-	readonly liveSteered: number;
 }
 
 /** User-authored queued messages in queue order, as `popLastQueuedMessage` restores them. */

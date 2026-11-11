@@ -56,7 +56,7 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 			all: ctx.session.modelRegistry.getAll("chat"),
 			current: ctx.session.model,
 		}),
-		refreshModels: () => ctx.session.modelRegistry.refresh("offline"),
+		refreshModels: () => ctx.session.modelRegistry.refresh(),
 		selectModel: async (model, selector) => {
 			const projectScope = cfgModelStorage.get(ctx.settings) === "project";
 			const { switched } = await ctx.session.setModel(model, "default", { selector, persist: !projectScope });

@@ -15,7 +15,7 @@
  */
 import * as path from "node:path";
 import { getMCPConfigPath, getProjectDir, toError } from "@oh-my-pi/pi-utils";
-import type { OAuthController } from "@oh-my-pi/pi-ai/oauth/types";
+import type { OAuthController } from "./oauth-types";
 import { expandEnvVarsDeep } from "../discovery/helpers";
 import { connectToServer, disconnectServer } from "./client";
 import { readMCPConfigFile, updateMCPServer } from "./config-writer";
@@ -32,7 +32,7 @@ import {
 	removeManagedMcpOAuthCredential,
 } from "./oauth-credentials";
 import { MCPOAuthFlow, type MCPStoredOAuthCredential, mcpOAuthCredentialId } from "./oauth-flow";
-import type { AuthStorage } from "../session/auth-storage";
+import type { MCPOAuthStorage } from "./oauth-storage";
 import type { MCPAuthChallenge, MCPAuthConfig, MCPServerConfig } from "./types";
 
 export function withTimeout<T>(
@@ -347,14 +347,14 @@ export async function reconnectMcpManagerServer(
  */
 export async function probeMcpConnection(
 	config: MCPServerConfig,
-	options: { oauth?: boolean; authStorage: AuthStorage; mcpManager?: MCPManager; cwd?: string },
+	options: { oauth?: boolean; oauthStorage: MCPOAuthStorage; mcpManager?: MCPManager; cwd?: string },
 ): Promise<void> {
 	let resolvedConfig: MCPServerConfig;
 	if (options.mcpManager) {
 		resolvedConfig = await options.mcpManager.prepareConfig(config, { oauth: options.oauth });
 	} else {
 		const tempManager = new MCPManager(options.cwd ?? getProjectDir());
-		tempManager.setAuthStorage(options.authStorage);
+		tempManager.setOAuthStorage(options.oauthStorage);
 		resolvedConfig = await tempManager.prepareConfig(config, { oauth: options.oauth });
 	}
 
@@ -375,7 +375,7 @@ export async function resolveMcpOAuthEndpointsFromServer(
 	opts: {
 		authChallenge?: MCPAuthChallenge;
 		signal?: AbortSignal;
-		authStorage: AuthStorage;
+		oauthStorage: MCPOAuthStorage;
 		mcpManager?: MCPManager;
 		cwd?: string;
 	},
@@ -400,7 +400,7 @@ export async function resolveMcpOAuthEndpointsFromServer(
 	try {
 		await probeMcpConnection(stripMcpOAuthAuth(config), {
 			oauth: false,
-			authStorage: opts.authStorage,
+			oauthStorage: opts.oauthStorage,
 			mcpManager: opts.mcpManager,
 			cwd: opts.cwd,
 		});
@@ -476,7 +476,7 @@ export interface McpOAuthFlowRunOptions extends McpOAuthFlowPresentation {
 	callbackPath?: string;
 	redirectUri?: string;
 	prompt?: string;
-	authStorage: AuthStorage;
+	oauthStorage: MCPOAuthStorage;
 	/**
 	 * External cancellation: host abort, Esc, or a wizard's controller. Aborts
 	 * the in-flight flow and throws {@link MCPOAuthCancelledError}.
@@ -607,7 +607,7 @@ export async function runMcpOAuthFlow(opts: McpOAuthFlowRunOptions): Promise<OAu
 			authorizationUrl: flow.authorizationUrl,
 		};
 
-		await opts.authStorage.credentials.set(credentialId, oauthCredential);
+		await opts.oauthStorage.set(credentialId, oauthCredential);
 		opts.onFlowComplete?.();
 
 		return {
@@ -686,7 +686,7 @@ export function persistMcpOAuthResult(
 }
 
 export interface McpReauthOptions extends McpOAuthFlowPresentation {
-	authStorage: AuthStorage;
+	oauthStorage: MCPOAuthStorage;
 	/** Host cancellation; wired before the anonymous probe so the whole reauth is abortable. */
 	signal?: AbortSignal;
 	/** Tool-level `_meta["mcp/www_authenticate"]` challenge that triggered an auto-reauth. */
@@ -735,7 +735,7 @@ export async function reauthorizeMcpServer(
 	found: FoundMcpServer,
 	opts: McpReauthOptions,
 ): Promise<McpReauthOutcome> {
-	const { authStorage } = opts;
+	const { oauthStorage } = opts;
 	if (found.config.enabled === false) {
 		throw new McpReauthRefusalError(`Server "${name}" is disabled. Run /mcp enable ${name} first.`);
 	}
@@ -754,7 +754,7 @@ export async function reauthorizeMcpServer(
 		resolveMcpOAuthEndpointsFromServer(runtimeBaseConfig, {
 			authChallenge: opts.authChallenge,
 			signal: opts.signal,
-			authStorage,
+			oauthStorage,
 			mcpManager: opts.mcpManager,
 			cwd: opts.cwd,
 		}),
@@ -771,7 +771,7 @@ export async function reauthorizeMcpServer(
 	const runtimeAuth = currentAuth ? expandEnvVarsDeep(currentAuth) : undefined;
 	const configuredClientId = runtimeBaseConfig.oauth?.clientId?.trim() || undefined;
 	const configuredClientSecret = runtimeBaseConfig.oauth?.clientSecret;
-	const existingCredential = lookupMcpOAuthCredentialForServer(authStorage, currentAuth, serverUrl)?.credential;
+	const existingCredential = lookupMcpOAuthCredentialForServer(oauthStorage, currentAuth, serverUrl)?.credential;
 	const persistedClientId = runtimeAuth?.clientId?.trim() || undefined;
 	const storedClientId = existingCredential?.clientId?.trim() || undefined;
 	const discoveredClientId = oauth.clientId?.trim() || undefined;
@@ -819,7 +819,7 @@ export async function reauthorizeMcpServer(
 		serverUrl,
 		resource: oauthResource,
 		stripSameOriginResource: oauthResourceIsFallback,
-		authStorage,
+		oauthStorage,
 		signal: opts.signal,
 		flowOwner: opts.flowOwner,
 		pendingInput: opts.pendingInput,
@@ -836,7 +836,7 @@ export async function reauthorizeMcpServer(
 	// after success so cancelling the browser step leaves the previous
 	// session signed in.
 	if (currentAuth?.type === "oauth" && currentAuth.credentialId !== oauthResult.credentialId) {
-		await removeManagedMcpOAuthCredential(authStorage, currentAuth.credentialId);
+		await removeManagedMcpOAuthCredential(oauthStorage, currentAuth.credentialId);
 	}
 
 	// Definition-only entries resolve through the url-keyed binding alone;
@@ -852,7 +852,7 @@ export async function reauthorizeMcpServer(
 	// user-file copy could never override it — it would only leak a
 	// session-owned server definition and its bearer into the global user
 	// config. The fresh url-keyed credential row the flow just wrote to
-	// authStorage is the binding, and the live reconnect applies it now.
+	// oauthStorage is the binding, and the live reconnect applies it now.
 	const hadClientBearerHeader = hasMcpAuthorizationHeader(found.config);
 	const urlKeyedId = serverUrl ? mcpOAuthCredentialId(serverUrl) : undefined;
 	const shouldPersist =

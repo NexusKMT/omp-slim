@@ -168,7 +168,7 @@ export interface RpcSessionState {
 	 *  (and the `queue_update` event) instead of tracking chips independently.
 	 *  `liveSteered` counts the leading `steering` entries already sent into the
 	 *  streaming response; `remove_queued_message` cannot reach them. */
-	queuedMessages: { steering: string[]; followUp: string[]; liveSteered: number };
+	queuedMessages: { steering: string[]; followUp: string[] };
 	todoPhases: TodoPhase[];
 	/** For session dump / export (plain-text parity with /dump). */
 	systemPrompt?: string[];

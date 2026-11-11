@@ -1,3 +1,4 @@
+import { discoverMcpOAuthStorage } from "./mcp/oauth-storage";
 import { resolveConfigValue } from "./config/resolve-config-value";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
 import * as path from "node:path";
@@ -2239,7 +2240,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				const deferredMCPManager = new MCPManager(cwd, cacheStorage ? new MCPToolCache(cacheStorage) : null);
 				ownedMcpManager = deferredMCPManager;
 				mcpManager = deferredMCPManager;
-				deferredMCPManager.setAuthStorage(authStorage);
+				deferredMCPManager.setOAuthStorage(await discoverMcpOAuthStorage(agentDir));
 				toolSession.mcpManager = deferredMCPManager;
 
 				if (cfgMcpNotifications.get(settings)) {
@@ -2286,7 +2287,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				const mcpResult = await logger.time("discoverAndLoadMCPTools", discoverAndLoadMCPTools, cwd, {
 					...mcpDiscoverOptions,
 					cacheStorage: settings.getStorage(),
-					authStorage,
+					oauthStorage: await discoverMcpOAuthStorage(agentDir),
 				});
 				const discoveredMCPManager = mcpResult.manager;
 				ownedMcpManager = discoveredMCPManager;
@@ -3413,14 +3414,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			return async (context: Context, transformModel: Model): Promise<Context> => {
 				let transformed = obfuscator ? obfuscateProviderContext(obfuscator, context) : context;
 				// The archive was sized for the model active at the last context build; a model switch may have lowered the budget.
-				transformed = capArchiveFrameBytes(transformed, transformModel);
+				transformed = capArchiveFrameBytes(transformed);
 				transformed = await snapcompactInline.transform(transformed, transformModel);
 				transformed = clampProviderContextImages(transformed, transformModel);
 				transformed = await normalizeProviderContextImages(transformed);
 				// After the model-specific normalizers: they carry better wording for the
 				// cases they own (STB WebP), so this stays the backstop for everything
 				// else, and it runs before the blob broker uploads any of these bytes.
-				transformed = await dropUnreadableContextImages(transformed, transformModel);
+				transformed = await dropUnreadableContextImages(transformed);
 				transformed = await blobBroker.decorateContext(transformed, transformModel);
 				// Byte budget after decoration: URL/file-referenced images carry no inline bytes.
 				transformed = clampProviderContextImageBytes(transformed, transformModel);
