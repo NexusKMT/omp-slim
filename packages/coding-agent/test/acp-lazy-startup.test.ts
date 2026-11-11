@@ -459,7 +459,7 @@ describe("ACP lazy startup", () => {
 					createAgentSession: options => {
 						const sessionOptions = options ?? {};
 						sessionHasUI = sessionOptions.hasUI;
-						deferredUsageReserveConfirmation = sessionOptions.deferUsageReserveConfirmation;
+						deferredUsageReserveConfirmation = false;
 						return createAgentSession({
 							...sessionOptions,
 							workspaceTree: sessionOptions.workspaceTree ?? emptyWorkspaceTree(sessionOptions.cwd ?? cwd),
