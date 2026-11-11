@@ -16,6 +16,8 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 
 import { cfgStartupQuiet } from "@oh-my-pi/pi-coding-agent/modes/settings";
 
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
+
 describe("InteractiveMode LSP startup events", () => {
 	let authStorage: AuthStorage;
 	let eventBus: EventBus;
@@ -45,10 +47,7 @@ describe("InteractiveMode LSP startup events", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!model) {
-			throw new Error("Expected claude-sonnet-4-5 to exist in registry");
-		}
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 
 		session = new AgentSession({
 			agent: new Agent({

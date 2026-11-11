@@ -14,6 +14,8 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
+
 describe("InteractiveMode fork placement bridge", () => {
 	let tempDir: TempDir;
 	let authStorage: AuthStorage;
@@ -30,8 +32,7 @@ describe("InteractiveMode fork placement bridge", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("Expected claude-sonnet-4-5 to exist in registry");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 
 		session = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),

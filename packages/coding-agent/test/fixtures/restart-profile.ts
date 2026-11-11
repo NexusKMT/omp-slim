@@ -12,6 +12,8 @@ import { SessionManager } from "../../src/session/session-manager";
 import * as workerClient from "../../src/subprocess/worker-client";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
+import { getTestModel as getBundledModel } from "../../../catalog/test/fixtures/models";
+
 if (process.argv[2] === "receive") {
 	const extracted = extractProfileFlags(process.argv.slice(3));
 	// Require argv propagation even on the spawn fallback, whose env could mask a regression.
@@ -34,8 +36,7 @@ if (process.argv[2] === "receive") {
 	await Settings.init({ inMemory: true, cwd: process.cwd() });
 	const authStorage = await AuthStorage.create(path.join(process.cwd(), "auth.db"));
 	const modelRegistry = new ModelRegistry(authStorage);
-	const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-	if (!model) throw new Error("expected bundled model");
+	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 	const sessionManager = SessionManager.create(process.cwd());
 	sessionManager.appendMessage({ role: "user", content: "profile restart marker", timestamp: Date.now() });
 	await sessionManager.ensureOnDisk();

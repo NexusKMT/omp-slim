@@ -27,23 +27,30 @@ import { rejectionOf } from "./helpers/rejection";
  * archive request, so it MUST keep failing locally instead of silently
  * shipping the transcript to a provider.
  *
- * A model whose wire strips images (`compat.stripImageInput`) declares image
- * input but is text-only on the wire, so it takes the same path.
+ * A model whose transport drops declared image input (a non-openai-completions
+ * api with image input) is text-only on the wire, so it takes the same path.
  */
+// The catalog fixture is image-capable by default, so a text-only model and a
+// wire-stripped model must be built explicitly via capability overrides.
+const TEXT_ONLY_OVERRIDES: Partial<Model> = { input: ["text"] };
+const WIRE_STRIPPED_OVERRIDES: Partial<Model> = { input: ["text", "image"], api: "legacy-chat" };
+
 describe.each([
 	{
 		label: "text-only",
 		provider: "aimlapi",
 		id: "alibaba/qwen3-coder-480b-a35b-instruct",
 		reason: "alibaba/qwen3-coder-480b-a35b-instruct is text-only",
+		overrides: TEXT_ONLY_OVERRIDES,
 	},
 	{
 		label: "wire-stripped",
 		provider: "deepseek",
 		id: "deepseek-v4-flash",
 		reason: "deepseek-v4-flash's provider strips image input",
+		overrides: WIRE_STRIPPED_OVERRIDES,
 	},
-] as const)("AgentSession manual snapcompact $label fallback", ({ provider, id, reason }) => {
+] as const)("AgentSession manual snapcompact $label fallback", ({ provider, id, reason, overrides }) => {
 	let session: AgentSession | undefined;
 	let authStorage: AuthStorage | undefined;
 	let tempDir: TempDir | undefined;
@@ -67,8 +74,9 @@ describe.each([
 		activeModel: Model;
 		notices: string[];
 	}> {
-		const activeModel = getBundledModel(provider, id);
-		if (!activeModel) throw new Error(`Expected bundled model ${provider}/${id}`);
+		const bundledModel = getBundledModel(provider, id);
+		if (!bundledModel) throw new Error(`Expected bundled model ${provider}/${id}`);
+		const activeModel: Model = { ...bundledModel, ...overrides };
 
 		tempDir = TempDir.createSync("@pi-manual-snapcompact-text-only-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));

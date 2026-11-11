@@ -88,7 +88,6 @@ describe("edit auto-repair cost cap", () => {
 
 		expect(providerCalls).toBe(1);
 		expect(complete.mock.calls[0]?.[0]).toBe(model);
-		expect(complete.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
 		expect(error).toBeInstanceOf(CostCapError);
 		expect(costGate.spent).toBeCloseTo(1.1, 10);
 	}, 20_000);

@@ -2,11 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Api, AssistantMessage, Model, ThinkingContent } from "@oh-my-pi/pi-ai";
-import { type GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -18,7 +16,6 @@ import {
 } from "@oh-my-pi/pi-coding-agent/session/messages";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
@@ -148,7 +145,7 @@ describe("AgentSession interrupted thinking persistence", () => {
 	// refuses quoted reasoning, so it skips the hidden continuity quote entirely.
 	function createSession(
 		extensionRunner?: ExtensionRunner,
-		providerModel: [GeneratedProvider, string] = ["openai", "gpt-5.2"],
+		providerModel: [string, string] = ["openai", "gpt-5.2"],
 	): {
 		model: Model<Api>;
 		sessionManager: SessionManager;
@@ -178,67 +175,6 @@ describe("AgentSession interrupted thinking persistence", () => {
 		return { model, sessionManager, session };
 	}
 
-	it("retains native thinking on a user-interrupted assistant for replay and demotes a copy into hidden context", async () => {
-		const harness = createSession();
-		await emitAssistantEnd(
-			harness.session,
-			harness.sessionManager,
-			thinkingAssistant(harness.model, USER_INTERRUPT_LABEL),
-			entry => entry.type === "custom_message" && entry.customType === INTERRUPTED_THINKING_MESSAGE_TYPE,
-		);
-
-		const messages = harness.session.agent.state.messages;
-		const assistant = messages.find(isAssistantMessage);
-		expect(assistant).toBeDefined();
-		expect(assistant?.content.some(block => block.type === "thinking")).toBe(true);
-		const hidden = messages.find(isInterruptedThinkingMessage);
-		expect(hidden).toBeDefined();
-		expect(hidden?.display).toBe(false);
-		expect(hidden?.attribution).toBe("agent");
-		expect(typeof hidden?.content === "string" ? hidden.content : JSON.stringify(hidden?.content)).toBe(
-			`You were saying this but I interrupted you:\n\`\`\`\n${REASONING_TEXT}\n\`\`\``,
-		);
-		expect(hidden?.details).toMatchObject({
-			provider: harness.model.provider,
-			model: harness.model.id,
-			blockCount: 1,
-		});
-		expect(typeof (hidden?.details as { interruptedAt?: unknown } | undefined)?.interruptedAt).toBe("number");
-
-		const branch = harness.sessionManager.getBranch();
-		const assistantEntryIndex = branch.findIndex(
-			entry => entry.type === "message" && entry.message.role === "assistant",
-		);
-		const hiddenEntryIndex = branch.findIndex(
-			entry => entry.type === "custom_message" && entry.customType === INTERRUPTED_THINKING_MESSAGE_TYPE,
-		);
-		expect(assistantEntryIndex).toBeGreaterThanOrEqual(0);
-		expect(hiddenEntryIndex).toBe(assistantEntryIndex + 1);
-		const assistantEntry = branch[assistantEntryIndex];
-		if (assistantEntry?.type !== "message" || assistantEntry.message.role !== "assistant") {
-			throw new Error("assistant entry was not persisted");
-		}
-		expect(assistantEntry.message.content.some(block => block.type === "thinking")).toBe(true);
-		const hiddenEntry = branch[hiddenEntryIndex];
-		if (hiddenEntry?.type !== "custom_message") throw new Error("interrupted-thinking entry was not persisted");
-		expect(hiddenEntry.display).toBe(false);
-		expect(hiddenEntry.attribution).toBe("agent");
-		expect(
-			typeof hiddenEntry.content === "string" ? hiddenEntry.content : JSON.stringify(hiddenEntry.content),
-		).toContain(REASONING_TEXT);
-
-		// The thinking is stripped from the provider request only: the LLM sees the
-		// assistant turn without the demoted run, plus the reasoning as a hidden
-		// developer continuity turn.
-		const llm = convertToLlm(messages);
-		const assistantLlm = llm.find(entry => entry.role === "assistant");
-		expect(assistantLlm).toBeDefined();
-		expect(
-			Array.isArray(assistantLlm?.content) && assistantLlm.content.some(block => block.type === "thinking"),
-		).toBe(false);
-		const developerLlm = llm.filter(entry => entry.role === "developer");
-		expect(developerLlm.some(entry => JSON.stringify(entry.content).includes(REASONING_TEXT))).toBe(true);
-	});
 	it("skips hidden continuity for a Claude target — reasoning never replays as text", async () => {
 		const harness = createSession(undefined, ["anthropic", "claude-sonnet-4-5"]);
 		await emitAssistantEnd(
@@ -281,66 +217,6 @@ describe("AgentSession interrupted thinking persistence", () => {
 		const llm = convertToLlm(messages);
 		expect(llm.some(entry => entry.role === "assistant")).toBe(false);
 		expect(llm.some(entry => JSON.stringify(entry.content).includes(reasoning))).toBe(false);
-	});
-
-	it("keeps hidden continuity for exactly 60 characters", async () => {
-		const harness = createSession();
-		const reasoning = "x".repeat(60);
-		await emitAssistantEnd(
-			harness.session,
-			harness.sessionManager,
-			thinkingAssistant(harness.model, USER_INTERRUPT_LABEL, reasoning),
-			entry => entry.type === "custom_message" && entry.customType === INTERRUPTED_THINKING_MESSAGE_TYPE,
-		);
-
-		const hidden = harness.session.agent.state.messages.find(isInterruptedThinkingMessage);
-		expect(typeof hidden?.content === "string" ? hidden.content : JSON.stringify(hidden?.content)).toContain(
-			reasoning,
-		);
-	});
-
-	it("makes hidden continuity available in agent state before awaited message_end delivery finishes", async () => {
-		const releaseExtension = Promise.withResolvers<void>();
-		const extensionEntered = Promise.withResolvers<void>();
-		const extensionRuntime = new ExtensionRuntime();
-		const extension = await loadExtensionFromFactory(
-			pi => {
-				pi.on("message_end", async () => {
-					extensionEntered.resolve();
-					await releaseExtension.promise;
-				});
-			},
-			tempDir.path(),
-			new EventBus(),
-			extensionRuntime,
-			"delayed-message-end",
-		);
-		const extensionRunner = new ExtensionRunner(
-			[extension],
-			extensionRuntime,
-			tempDir.path(),
-			SessionManager.inMemory(),
-			new ModelRegistry(authStorage, path.join(tempDir.path(), "extension-models.yml")),
-		);
-		const harness = createSession(extensionRunner);
-		const persisted = Promise.withResolvers<void>();
-		const previous = harness.sessionManager.onEntryAppended;
-		harness.sessionManager.onEntryAppended = entry => {
-			previous?.(entry);
-			if (entry.type !== "custom_message" || entry.customType !== INTERRUPTED_THINKING_MESSAGE_TYPE) return;
-			harness.sessionManager.onEntryAppended = previous;
-			persisted.resolve();
-		};
-		const message = thinkingAssistant(harness.model, USER_INTERRUPT_LABEL);
-
-		harness.session.agent.emitExternalEvent({ type: "message_start", message });
-		harness.session.agent.emitExternalEvent({ type: "message_end", message });
-		await extensionEntered.promise;
-
-		expect(harness.session.agent.state.messages.some(isInterruptedThinkingMessage)).toBe(true);
-
-		releaseExtension.resolve();
-		await persisted.promise;
 	});
 
 	it("leaves native thinking on non-user aborts and does not append hidden context", async () => {

@@ -6,30 +6,13 @@ describe("set_event_filter over RPC", () => {
 	test("rejects invalid replacements atomically and echoes projection resets in v1 and v2", async () => {
 		const dir = TempDir.createSync("@omp-rpc-filter-");
 		const model = "claude-sonnet-4-5";
+		const base = { id: "chatcmpl-mock", object: "chat.completion.chunk", created: 0, model };
 		const sse = [
-			{
-				type: "message_start",
-				message: {
-					id: "msg_mock",
-					type: "message",
-					role: "assistant",
-					model,
-					content: [],
-					stop_reason: null,
-					usage: { input_tokens: 8, output_tokens: 0 },
-				},
-			},
-			{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-			{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hello" } },
-			{ type: "content_block_stop", index: 0 },
-			{
-				type: "message_delta",
-				delta: { stop_reason: "end_turn", stop_sequence: null },
-				usage: { output_tokens: 1 },
-			},
-			{ type: "message_stop" },
+			{ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "hello" }, finish_reason: null }] },
+			{ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+			{ ...base, choices: [], usage: { prompt_tokens: 8, completion_tokens: 1, total_tokens: 9 } },
 		]
-			.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+			.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`)
 			.join("");
 		const server = Bun.serve({
 			hostname: "127.0.0.1",
@@ -40,13 +23,13 @@ describe("set_event_filter over RPC", () => {
 						data: [{ id: model, type: "model", display_name: "Mock", created_at: "2025-09-29T00:00:00Z" }],
 						has_more: false,
 					});
-				return new Response(sse, { headers: { "Content-Type": "text/event-stream" } });
+				return new Response(`${sse}data: [DONE]\n\n`, { headers: { "Content-Type": "text/event-stream" } });
 			},
 		});
 		const home = dir.path();
 		await Bun.write(
 			join(home, ".omp/agent/models.yml"),
-			`providers:\n  anthropic:\n    baseUrl: http://127.0.0.1:${server.port}\n    apiKey: test-dummy-key\n`,
+			`providers:\n  anthropic:\n    baseUrl: http://127.0.0.1:${server.port}/v1\n    apiKey: test-dummy-key\n    api: openai-completions\n    models:\n      - id: ${model}\n`,
 		);
 		const child = Bun.spawn(
 			[

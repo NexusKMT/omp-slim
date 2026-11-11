@@ -1,9 +1,8 @@
-import { type GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
 import { getTestModels as getBundledModels } from "../../../catalog/test/fixtures/models";
 import { type Model, modelKind } from "@oh-my-pi/pi-catalog/types";
 
 /** Select a bundled chat model by behavior so tests survive catalog roster changes. */
-export function getTestModel(provider: GeneratedProvider, matches?: (model: Model) => boolean): Model {
+export function getTestModel(provider: string, matches?: (model: Model) => boolean): Model {
 	const model = getBundledModels(provider).find(
 		candidate => modelKind(candidate) === "chat" && (matches === undefined || matches(candidate)),
 	);

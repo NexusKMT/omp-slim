@@ -4,7 +4,6 @@ import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-cor
 import type { Message, Model } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockResponseSource } from "@oh-my-pi/pi-ai/providers/mock";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { CustomTool } from "@oh-my-pi/pi-coding-agent/extensibility/custom-tools/types";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -35,11 +34,11 @@ import {
 // invalidates the Anthropic prompt-cache breakpoint placed on the system block
 // and forces a full prefix re-encode on the next request.
 
-function createModel(): Model<"openai-responses"> {
+function createModel(): Model<"openai-completions"> {
 	return buildModel({
 		id: "mock",
 		name: "mock",
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "openai",
 		baseUrl: "https://example.invalid",
 		reasoning: false,
@@ -129,8 +128,6 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 		beforeAgentStartSystemPrompt?: string[];
 		/** Pre-loaded skills handed to the session's hint snapshot. */
 		skills?: Skill[];
-		/** Model binds signed thinking to its prompt prefix, so implicit rebuilds freeze once a reply exists. */
-		prefixBound?: boolean;
 	}
 
 	function newSession(
@@ -163,12 +160,7 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: {
-				model: options.prefixBound
-					? {
-							...createModel(),
-							thinking: { mode: "anthropic-adaptive", efforts: [Effort.High], prefixBinding: true },
-						}
-					: createModel(),
+				model: createModel(),
 				systemPrompt: ["initial"],
 				tools: options.xdev
 					? options.lazyWrite
@@ -1348,68 +1340,6 @@ These tools became available:
 		expect(
 			session.agent.state.messages.filter(m => m.role === "custom" && m.customType === "xdev-mount-notice"),
 		).toHaveLength(0);
-	});
-
-	it("keeps the eval description's tool names fixed when a prefix-bound session mounts an MCP tool", async () => {
-		const { session, contexts } = newSession(async toolNames => `tools:${toolNames.join(",")}`, {
-			xdev: createTestXdevState(),
-			responses: [{ content: ["ok"] }, { content: ["ok"] }],
-			prefixBound: true,
-		});
-		const evalTool = new EvalTool({
-			cwd: process.cwd(),
-			hasUI: false,
-			settings: session.settings,
-			getSessionFile: () => null,
-			getAdvertisedEvalToolNames: () => session.getAdvertisedEvalToolNames(),
-		} as ToolSession);
-		const search = createMcpCustomTool("mcp__nucleus_search", "nucleus", "search", "Search nucleus");
-		const fetch = createMcpCustomTool("mcp__nucleus_fetch", "nucleus", "fetch", "Fetch nucleus");
-		await session.refreshMCPTools([search]);
-		await session.prompt("hi");
-		const boundDescription = evalTool.description;
-		const boundPrompt = session.systemPrompt;
-		expect(boundDescription).toContain("`mcp__nucleus_search`");
-
-		await session.refreshMCPTools([search, fetch]);
-		await session.prompt("again");
-
-		// The cached prefix keeps its bytes; the new tool is callable from cells and announced.
-		expect(evalTool.description).toBe(boundDescription);
-		expect(session.systemPrompt).toEqual(boundPrompt);
-		expect(session.getToolForEvalBridge("mcp__nucleus_fetch")).toBeDefined();
-		expect(mountNoticesIn(contexts[1]).join("\n")).toContain("xd://mcp__nucleus_fetch");
-	});
-
-	it("keeps a held MCP mount out of a prefix-bound prompt across a rebuild that changes nothing else", async () => {
-		const { session, contexts, systemPrompts } = newSession(async toolNames => `tools:${toolNames.join(",")}`, {
-			xdev: createTestXdevState(),
-			responses: [{ content: ["ok"] }, { content: ["ok"] }, { content: ["ok"] }],
-			prefixBound: true,
-			exposeXdevCatalog: true,
-		});
-		const evalTool = new EvalTool({
-			cwd: process.cwd(),
-			hasUI: false,
-			settings: session.settings,
-			getSessionFile: () => null,
-			getAdvertisedEvalToolNames: () => session.getAdvertisedEvalToolNames(),
-		} as ToolSession);
-		const search = createMcpCustomTool("mcp__nucleus_search", "nucleus", "search", "Search nucleus");
-		const fetch = createMcpCustomTool("mcp__nucleus_fetch", "nucleus", "fetch", "Fetch nucleus");
-		await session.refreshMCPTools([search]);
-		await session.prompt("hi");
-		const boundDescription = evalTool.description;
-
-		await session.refreshMCPTools([search, fetch]);
-		await session.prompt("again");
-		// e.g. a body-only `manage_skill update`: nothing the prompt renders changed.
-		await session.refreshBaseSystemPrompt();
-		await session.prompt("third");
-
-		expect(evalTool.description).toBe(boundDescription);
-		expect(systemPrompts[2]).toEqual(systemPrompts[0]);
-		expect(mountNoticesIn(contexts[1]).join("\n")).toContain("xd://mcp__nucleus_fetch");
 	});
 
 	it("announces an unmount after a maintenance rebuild delivered the pending addition", async () => {

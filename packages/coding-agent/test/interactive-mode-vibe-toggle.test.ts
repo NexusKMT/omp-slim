@@ -28,6 +28,7 @@ import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { VibeSessionRegistry } from "@oh-my-pi/pi-coding-agent/vibe/runtime";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 
 function stubTool(name: string): AgentTool {
 	return {
@@ -157,8 +158,7 @@ describe("InteractiveMode vibe mode toggle", () => {
 		resetSettingsForTest();
 		VibeSessionRegistry.resetGlobalForTests();
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("Expected claude-sonnet-4-5 to exist in registry");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		// prompt() preflights credentials via modelRegistry.getApiKey; the
 		// in-memory auth storage has no anthropic key, so stub it.
 		vi.spyOn(modelRegistry, "getApiKey").mockResolvedValue("test-key");

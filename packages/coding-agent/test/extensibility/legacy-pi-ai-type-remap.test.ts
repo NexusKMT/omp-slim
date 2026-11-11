@@ -3,17 +3,9 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
-import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { networkFailureMessage } from "@oh-my-pi/pi-ai/error";
-import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { calculateCost, modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import {
-	getTestModel as getBundledModel,
-	getTestModels as getBundledModels,
-	getTestProviders as getBundledProviders,
-} from "../../../catalog/test/fixtures/models";
 import { Type as TypeBoxShimType } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { isRetryableAssistantError } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-ai-shim";
 import {
@@ -33,16 +25,10 @@ import { removeWithRetries } from "@oh-my-pi/pi-utils";
 // `@sinclair/typebox` is served from.
 installLegacyPiSpecifierShim();
 
-// Use a unique API name as well as a unique source ID: registrations are keyed
-// by API name, so registering the shared `mock` API would replace another
-// suite's module-scoped owner before source-scoped cleanup could run.
-const COMPLETE_API = "legacy-pi-ai-type-remap-complete";
-const COMPLETE_API_SOURCE_ID = "legacy-pi-ai-type-remap.test";
 const tempRoots: string[] = [];
 
 afterEach(() => {
 	vi.restoreAllMocks();
-	unregisterCustomApis(COMPLETE_API_SOURCE_ID);
 });
 
 afterAll(async () => {
@@ -104,12 +90,12 @@ describe("legacy-pi @(scope)/pi-ai root `Type` remap (issue #1437)", () => {
 		expect(typeof loaded.fn).toBe("function");
 	});
 
-	it("re-exports the legacy model catalog and schema helpers from the root", async () => {
+	it("re-exports the legacy cost and schema helpers from the root", async () => {
 		const loaded = (await loadLegacyPiModule(
 			await writeFixtureExtension(
 				[
-					'import { calculateCost, clampThinkingLevel, getBundledModel, getBundledModels, getBundledProviders, getModel, getModels, modelsAreEqual, StringEnum } from "@oh-my-pi/pi-ai";',
-					"export const helpers = { calculateCost, getBundledModel, getBundledModels, getBundledProviders, getModel, getModels, modelsAreEqual };",
+					'import { calculateCost, clampThinkingLevel, modelsAreEqual, StringEnum } from "@oh-my-pi/pi-ai";',
+					"export const helpers = { calculateCost, modelsAreEqual };",
 					"export const supported = clampThinkingLevel({ reasoning: true, thinking: { efforts: ['low', 'high'] } }, 'high');",
 					"export const disabled = clampThinkingLevel({ reasoning: false }, 'high');",
 					'export const schema = StringEnum(["red", "green"] as const, { description: "primary colors" });',
@@ -118,11 +104,6 @@ describe("legacy-pi @(scope)/pi-ai root `Type` remap (issue #1437)", () => {
 		)) as {
 			helpers: {
 				calculateCost: unknown;
-				getBundledModel: unknown;
-				getBundledModels: unknown;
-				getBundledProviders: unknown;
-				getModel: unknown;
-				getModels: unknown;
 				modelsAreEqual: unknown;
 			};
 			supported: string;
@@ -131,11 +112,6 @@ describe("legacy-pi @(scope)/pi-ai root `Type` remap (issue #1437)", () => {
 		};
 
 		expect(loaded.helpers.calculateCost).toBe(calculateCost);
-		expect(loaded.helpers.getModel).toBe(getBundledModel);
-		expect(loaded.helpers.getModels).toBe(getBundledModels);
-		expect(loaded.helpers.getBundledModel).toBe(getBundledModel);
-		expect(loaded.helpers.getBundledModels).toBe(getBundledModels);
-		expect(loaded.helpers.getBundledProviders).toBe(getBundledProviders);
 		expect(loaded.helpers.modelsAreEqual).toBe(modelsAreEqual);
 		expect(loaded.supported).toBe("high");
 		expect(loaded.disabled).toBe("off");
@@ -378,96 +354,6 @@ describe("legacy pi package root remaps (issue #1474)", () => {
 		const loaded = (await loadLegacyPiModule(entry)) as { probe: () => boolean };
 		expect(typeof loaded.probe).toBe("function");
 		expect(canonicalLookupSeen).toBe(true);
-	});
-});
-it("runs the legacy pi-ai compat `complete` export with SoL-Pi's reducer call shape", async () => {
-	const entry = await writeFixtureExtension(
-		[
-			'import { StringEnum, complete, type Model } from "@earendil-works/pi-ai/compat";',
-			'export const schema = StringEnum(["red", "green"] as const);',
-			"export const completeCompat = complete;",
-			"export type LegacyModel = Model;",
-		].join("\n"),
-	);
-
-	const loaded = (await loadLegacyPiModule(entry)) as {
-		schema: { safeParse: (input: unknown) => { success: boolean } };
-		completeCompat: (
-			model: Model<Api>,
-			context: { systemPrompt?: string; messages: Context["messages"] },
-			options?: SimpleStreamOptions & { timeoutMs?: number },
-		) => Promise<AssistantMessage>;
-	};
-	let callCount = 0;
-	let capturedOptions: SimpleStreamOptions | undefined;
-	registerCustomApi(
-		COMPLETE_API,
-		(model, _context, options) => {
-			callCount++;
-			capturedOptions = options;
-			const stream = new AssistantMessageEventStream();
-			queueMicrotask(() => {
-				const message: AssistantMessage = {
-					role: "assistant",
-					content: [{ type: "text", text: "reduced output" }],
-					api: model.api,
-					provider: model.provider,
-					model: model.id,
-					usage: {
-						input: 1,
-						output: 2,
-						cacheRead: 0,
-						cacheWrite: 0,
-						totalTokens: 3,
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-					},
-					stopReason: "stop",
-					timestamp: Date.now(),
-				};
-				stream.push({ type: "start", partial: message });
-				stream.push({ type: "done", reason: "stop", message });
-			});
-			return stream;
-		},
-		COMPLETE_API_SOURCE_ID,
-	);
-	const model = buildModel({
-		id: "reducer",
-		name: "Reducer",
-		api: COMPLETE_API,
-		provider: "legacy-pi-ai-type-remap",
-		baseUrl: "",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 4096,
-		maxTokens: 1024,
-	});
-	const response = await loaded.completeCompat(
-		model,
-		{
-			systemPrompt: "Reduce",
-			messages: [{ role: "user", content: [{ type: "text", text: "payload" }], timestamp: 0 }],
-		},
-		{
-			apiKey: "test-key",
-			cacheRetention: "none",
-			maxTokens: 321,
-			sessionId: "sol-pi-run",
-			signal: AbortSignal.timeout(1000),
-			timeoutMs: 1000,
-		},
-	);
-
-	expect(loaded.schema.safeParse("red").success).toBe(true);
-	expect(loaded.schema.safeParse("blue").success).toBe(false);
-	expect(response.content).toEqual([{ type: "text", text: "reduced output" }]);
-	expect(callCount).toBe(1);
-	expect(capturedOptions).toMatchObject({
-		apiKey: "test-key",
-		cacheRetention: "none",
-		maxTokens: 321,
-		sessionId: "sol-pi-run",
 	});
 });
 

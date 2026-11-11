@@ -12,7 +12,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/utils/image-question";
 import { rejectionOf } from "../helpers/rejection";
 
-function makeProxyModel(id: string, compat?: ModelSpec["compat"]): Model<Api> {
+function makeProxyModel(id: string, vision = true): Model<Api> {
 	return buildModel({
 		id,
 		name: id,
@@ -20,11 +20,10 @@ function makeProxyModel(id: string, compat?: ModelSpec["compat"]): Model<Api> {
 		provider: "myproxy",
 		baseUrl: "https://proxy.example.com/v1",
 		reasoning: false,
-		input: ["text", "image"],
+		input: vision ? ["text", "image"] : ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 128_000,
 		maxTokens: 8_192,
-		compat,
 	} as ModelSpec);
 }
 
@@ -42,15 +41,15 @@ function makeSession(active: Model<Api>, available: Model<Api>[]): ToolSession {
 
 describe("resolveImageQuestionModel wire truth (#9697)", () => {
 	it("rejects a wire-stripped current model even when another vision model is available", () => {
-		const stripped = makeProxyModel("deepseek-v4-flash", { stripImageInput: true });
-		const vision = makeProxyModel("qwen-vl", { stripImageInput: false });
+		const stripped = makeProxyModel("deepseek-v4-flash", false);
+		const vision = makeProxyModel("qwen-vl");
 		expect(() => resolveImageQuestionModel(makeSession(stripped, [stripped, vision]))).toThrow(
 			"does not support image input",
 		);
 	});
 
 	it("throws instead of returning the stripped model when nothing else can see", () => {
-		const stripped = makeProxyModel("deepseek-v4-flash", { stripImageInput: true });
+		const stripped = makeProxyModel("deepseek-v4-flash", false);
 		expect(() => resolveImageQuestionModel(makeSession(stripped, [stripped]))).toThrow(
 			"Current model myproxy/deepseek-v4-flash does not support image input.",
 		);

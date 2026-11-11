@@ -11,6 +11,21 @@ afterEach(() => {
 });
 
 it("drains RPC command responses after stdin EOF while the real stdout pipe is backpressured", async () => {
+	await using dir = await TempDir.create("@rpc-output-drain-");
+	const agentDir = dir.join("agent");
+	await Bun.write(
+		path.join(agentDir, "models.yml"),
+		JSON.stringify({
+			providers: {
+				anthropic: {
+					baseUrl: "http://127.0.0.1:9/v1",
+					api: "openai-completions",
+					auth: "none",
+					models: [{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: false }],
+				},
+			},
+		}),
+	);
 	const child = Bun.spawn(
 		[
 			process.execPath,
@@ -28,7 +43,16 @@ it("drains RPC command responses after stdin EOF while the real stdout pipe is b
 		],
 		{
 			cwd: import.meta.dir,
-			env: { ...process.env, PI_NO_TITLE: "1" },
+			env: {
+				PATH: Bun.env.PATH,
+				HOME: dir.join("home"),
+				PI_CODING_AGENT_DIR: agentDir,
+				XDG_CONFIG_HOME: dir.join("config"),
+				XDG_DATA_HOME: dir.join("data"),
+				XDG_CACHE_HOME: dir.join("cache"),
+				CI: "true",
+				PI_NO_TITLE: "1",
+			},
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",

@@ -28,9 +28,7 @@ const tool = (content: (TextContent | ImageContent)[]): Message => ({
 });
 function images(context: Context): ImageContent[] {
 	return context.messages.flatMap(message =>
-		Array.isArray(message.content)
-			? message.content.filter((part): part is ImageContent => part.type === "image")
-			: [],
+		Array.isArray(message.content) ? (message.content.filter(part => part.type === "image") as ImageContent[]) : [],
 	);
 }
 function assistant(content: AssistantMessage["content"]): AssistantMessage {

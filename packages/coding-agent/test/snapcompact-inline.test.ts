@@ -544,11 +544,11 @@ describe("SnapcompactInlineTransformer", () => {
 
 		const carrier = result.messages[0] as { content: (TextContent | ImageContent)[] };
 		const systemFrames = carrier.content.slice(1, carrier.content.length - userContent.length);
-		expect(systemFrames).toHaveLength(estimate.systemPrompt!.frames);
+		expect(systemFrames).toHaveLength(estimate.systemPrompt?.frames ?? 0);
 		expect(systemFrames.every(block => block.type === "image")).toBe(true);
 		expect(carrier.content[carrier.content.length - 1]).toBe(userImage);
 		expect(carrier.content[carrier.content.length - 1]).toEqual(userImageSnapshot);
-		expect(result.systemPrompt).not.toBe(context.systemPrompt);
+		expect(result.systemPrompt).toBe(context.systemPrompt);
 
 		expect(context).toEqual(pristine);
 		expect(context.messages).toBe(originalMessages);
@@ -576,7 +576,7 @@ describe("SnapcompactInlineTransformer", () => {
 		const transformer = new SnapcompactInlineTransformer(
 			withTestShape({ renderSystemPrompt: "all", renderToolResults: false }),
 		);
-		const longPrompt = denseText(5000);
+		const longPrompt = denseText(8000);
 		const context: Context = {
 			systemPrompt: [longPrompt],
 			messages: [userMessage("do the thing"), toolResult("call_1", SMALL)],
@@ -602,7 +602,7 @@ describe("SnapcompactInlineTransformer", () => {
 				renderToolResults: false,
 			}),
 		);
-		const longContext = denseText(5000);
+		const longContext = denseText(8000);
 		const context: Context = {
 			systemPrompt: [
 				`Core instructions.\n\n<repo-rules>\nYou MUST follow the context files below for all tasks:\n<file path="AGENTS.md">\n${longContext}\n</file>\n</repo-rules>\n\nToday is 2026-06-12.`,

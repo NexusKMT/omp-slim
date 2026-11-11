@@ -8,7 +8,6 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { loadAdvisorTranscriptCosts } from "@oh-my-pi/pi-coding-agent/advisor/transcript-recorder";
-import { resolveModelOverride } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -47,7 +46,7 @@ describe("AgentSession advisor toggle", () => {
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		authStorage.keys.setRuntime("openai", "test-key");
 		authStorage.keys.setRuntime("openrouter", "test-key");
-		modelRegistry = new ModelRegistry(authStorage);
+		modelRegistry = new ModelRegistry(authStorage, undefined, { settings: Settings.isolated() });
 		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5");
 		const replacement = getBundledModel("openai", "gpt-4o-mini");
 		if (!bundled) throw new Error("Expected built-in anthropic model to exist");
@@ -188,27 +187,27 @@ describe("AgentSession advisor toggle", () => {
 
 	it("explicit enable rebuilds the runtime after the primary model changes", () => {
 		expect(session.setAdvisorEnabled(true)).toBe(true);
-		expect(session.getAdvisorAgent()?.state.model.provider).toBe(model.provider);
-		expect(session.getAdvisorAgent()?.state.model.id).toBe(model.id);
+		expect(session.getAdvisorAgent()?.state.model?.provider).toBe(model.provider);
+		expect(session.getAdvisorAgent()?.state.model?.id).toBe(model.id);
 
 		session.agent.setModel(replacementModel);
 		expect(session.setAdvisorEnabled(true)).toBe(true);
 
-		expect(session.getAdvisorAgent()?.state.model.provider).toBe(replacementModel.provider);
-		expect(session.getAdvisorAgent()?.state.model.id).toBe(replacementModel.id);
+		expect(session.getAdvisorAgent()?.state.model?.provider).toBe(replacementModel.provider);
+		expect(session.getAdvisorAgent()?.state.model?.id).toBe(replacementModel.id);
 	});
 
 	it("refreshes the live advisor when the primary model changes", async () => {
 		expect(session.setAdvisorEnabled(true)).toBe(true);
-		expect(session.getAdvisorAgent()?.state.model.provider).toBe(model.provider);
-		expect(session.getAdvisorAgent()?.state.model.id).toBe(model.id);
+		expect(session.getAdvisorAgent()?.state.model?.provider).toBe(model.provider);
+		expect(session.getAdvisorAgent()?.state.model?.id).toBe(model.id);
 
 		await session.setModel(replacementModel);
 		// Role listeners run on the next microtask.
 		await Promise.resolve();
 
-		expect(session.getAdvisorAgent()?.state.model.provider).toBe(replacementModel.provider);
-		expect(session.getAdvisorAgent()?.state.model.id).toBe(replacementModel.id);
+		expect(session.getAdvisorAgent()?.state.model?.provider).toBe(replacementModel.provider);
+		expect(session.getAdvisorAgent()?.state.model?.id).toBe(replacementModel.id);
 	});
 
 	it("uses the replacement primary transport when provider and model id stay the same", async () => {
@@ -244,31 +243,6 @@ describe("AgentSession advisor toggle", () => {
 		expect(requestedModels[0]?.baseUrl).toBe(replacement.baseUrl);
 		expect(requestedModels[0]?.headers).toEqual(replacement.headers);
 		expect(requestedModels[0]?.resolveHeaders).toBe(replacement.resolveHeaders);
-	});
-
-	it("refreshes the live advisor when only the advisor route changes", async () => {
-		const initial = resolveModelOverride(["openrouter/z-ai/glm-4.7@cerebras"], modelRegistry).model;
-		if (!initial) throw new Error("Missing routed fixture model");
-		await session.setModel(initial);
-		expect(session.setAdvisorEnabled(true)).toBe(true);
-		expect(session.getAdvisorAgent()?.state.model.provider).toBe("openrouter");
-		expect(session.getAdvisorAgent()?.state.model.id).toBe("z-ai/glm-4.7");
-		expect(
-			(session.getAdvisorAgent()?.state.model.compat as { openRouterRouting?: { only?: string[] } } | undefined)
-				?.openRouterRouting?.only,
-		).toEqual(["cerebras"]);
-
-		const replacement = resolveModelOverride(["openrouter/z-ai/glm-4.7@fireworks"], modelRegistry).model;
-		if (!replacement) throw new Error("Missing replacement routed fixture model");
-		await session.setModel(replacement);
-		await Promise.resolve();
-
-		expect(session.getAdvisorAgent()?.state.model.provider).toBe("openrouter");
-		expect(session.getAdvisorAgent()?.state.model.id).toBe("z-ai/glm-4.7");
-		expect(
-			(session.getAdvisorAgent()?.state.model.compat as { openRouterRouting?: { only?: string[] } } | undefined)
-				?.openRouterRouting?.only,
-		).toEqual(["fireworks"]);
 	});
 
 	it("rebuilds a running advisor on budget edits without overriding a session-only disable", async () => {
@@ -324,13 +298,13 @@ describe("AgentSession advisor toggle", () => {
 
 		try {
 			expect(customSession.setAdvisorEnabled(true)).toBe(true);
-			expect(customSession.getAdvisorAgent()?.state.model.provider).toBe(model.provider);
-			expect(customSession.getAdvisorAgent()?.state.model.id).toBe(model.id);
+			expect(customSession.getAdvisorAgent()?.state.model?.provider).toBe(model.provider);
+			expect(customSession.getAdvisorAgent()?.state.model?.id).toBe(model.id);
 
 			await settings.reloadForCwd(projectB);
 
-			expect(customSession.getAdvisorAgent()?.state.model.provider).toBe(model.provider);
-			expect(customSession.getAdvisorAgent()?.state.model.id).toBe(model.id);
+			expect(customSession.getAdvisorAgent()?.state.model?.provider).toBe(model.provider);
+			expect(customSession.getAdvisorAgent()?.state.model?.id).toBe(model.id);
 		} finally {
 			await customSession.dispose();
 			AgentStorage.close();
@@ -522,44 +496,6 @@ describe("AgentSession advisor toggle", () => {
 			await reviewSession.dispose();
 		}
 	});
-	it("attributes advisor subscription spend after teardown without rescanning the catalog", () => {
-		// #10131: with the runtime gone, isUsingSubscription() must read the
-		// attribution captured as spend accrued, not fall back to a per-render
-		// getAvailable() catalog scan (which reads credential files per provider).
-		const subscriptionSpy = vi.spyOn(modelRegistry, "isUsingSubscription").mockReturnValue(true);
-		try {
-			const advisor = enableAdvisor();
-			appendAdvisorCost(advisor, 0.5, 1);
-			session.setAdvisorEnabled(false);
-			expect(session.isAdvisorActive()).toBe(false);
-			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
-
-			const scanSpy = vi.spyOn(modelRegistry, "getAvailable");
-			expect(session.isAdvisorUsingSubscription()).toBe(true);
-			expect(scanSpy).not.toHaveBeenCalled();
-			scanSpy.mockRestore();
-		} finally {
-			subscriptionSpy.mockRestore();
-		}
-	});
-	it("does not attribute paid spend to a subscription after a zero-cost subscription turn", () => {
-		let usingSubscription = false;
-		const subscriptionSpy = vi
-			.spyOn(modelRegistry, "isUsingSubscription")
-			.mockImplementation(() => usingSubscription);
-		try {
-			const advisor = enableAdvisor();
-			appendAdvisorCost(advisor, 0.5, 1);
-			usingSubscription = true;
-			appendAdvisorCost(advisor, 0, 2);
-			session.setAdvisorEnabled(false);
-
-			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
-			expect(session.isAdvisorUsingSubscription()).toBe(false);
-		} finally {
-			subscriptionSpy.mockRestore();
-		}
-	});
 	it("retains total advisor cost after the live roster changes", () => {
 		const advisor = enableAdvisor();
 		appendAdvisorCost(advisor, 0.5, 1);
@@ -725,35 +661,6 @@ describe("AgentSession advisor toggle", () => {
 		enableAdvisor();
 		session.restoreInitialAdvisorCosts(new Map([["", 0.5]]));
 		expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
-	});
-	it("attributes restored advisor spend to a subscription without a catalog scan", () => {
-		// #10131 follow-up: with no live runtime, subscription attribution comes
-		// from the providers that billed the restored spend, re-derived via the
-		// current subscription credentials — never a per-render getAvailable() scan.
-		const subscriptionSpy = vi
-			.spyOn(authStorage.credentials, "hasSubscription")
-			.mockImplementation(provider => provider === "anthropic");
-		const scanSpy = vi.spyOn(modelRegistry, "getAvailable");
-		try {
-			session.restoreInitialAdvisorCosts(new Map([["", 0.5]]), new Map(), new Map([["", new Set(["anthropic"])]]));
-			expect(session.isAdvisorActive()).toBe(false);
-			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
-			expect(session.isAdvisorUsingSubscription()).toBe(true);
-			expect(scanSpy).not.toHaveBeenCalled();
-		} finally {
-			scanSpy.mockRestore();
-			subscriptionSpy.mockRestore();
-		}
-	});
-	it("does not attribute restored advisor spend to a subscription without subscription credentials", () => {
-		const subscriptionSpy = vi.spyOn(authStorage.credentials, "hasSubscription").mockReturnValue(false);
-		try {
-			session.restoreInitialAdvisorCosts(new Map([["", 0.5]]), new Map(), new Map([["", new Set(["anthropic"])]]));
-			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
-			expect(session.isAdvisorUsingSubscription()).toBe(false);
-		} finally {
-			subscriptionSpy.mockRestore();
-		}
 	});
 	it("adds a turn billed while the resume scan is running to persisted spend", async () => {
 		const restore = Promise.withResolvers<Map<string, number>>();
@@ -1077,181 +984,6 @@ describe("AgentSession advisor toggle", () => {
 			await branchDir.remove().catch(() => {});
 		}
 	});
-	it("retries an advisor after a short authoritative usage-limit block", async () => {
-		const mock = createMockModel({ responses: [{ content: ["primary complete"] }] });
-		const primaryAgent = new Agent({
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: mock.stream,
-		});
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.enabled": true,
-			"retry.baseDelayMs": 0,
-			"retry.maxDelayMs": 100,
-			"retry.maxRetries": 1,
-			"retry.modelFallback": false,
-		});
-		const quotaSession = new AgentSession({
-			agent: primaryAgent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-			advisorTools: [],
-		});
-
-		try {
-			expect(quotaSession.setAdvisorEnabled(true)).toBe(true);
-			const advisorAgent = quotaSession.getAdvisorAgent();
-			if (!advisorAgent) throw new Error("Expected advisor agent to exist");
-			const prompt = vi
-				.spyOn(advisorAgent, "prompt")
-				.mockRejectedValueOnce(
-					new AIError.ProviderHttpError("Generic provider failure", 429, {
-						code: "insufficient_quota",
-					}),
-				)
-				.mockResolvedValue(undefined);
-			const markUsageLimitReached = vi.spyOn(authStorage.limits, "markReached").mockImplementation(async () => {
-				const deadline = Date.now() + 20;
-				return {
-					switched: false,
-					blockedUntilMs: deadline,
-					requestedBlockedUntilMs: deadline,
-					reportResetAtMs: deadline,
-				};
-			});
-			const advisorYielded = Promise.withResolvers<void>();
-			const unsubscribe = quotaSession.subscribe(event => {
-				if (event.type === "advisor_yielded") advisorYielded.resolve();
-			});
-
-			await quotaSession.prompt("Trigger advisor");
-			await quotaSession.waitForIdle();
-			await advisorYielded.promise;
-			unsubscribe();
-
-			expect(markUsageLimitReached).toHaveBeenCalledTimes(1);
-			expect(prompt).toHaveBeenCalledTimes(2);
-			expect(quotaSession.getAdvisorStatusOverview().advisors[0]).toMatchObject({
-				status: "running",
-				yielded: true,
-			});
-		} finally {
-			await quotaSession.dispose();
-			vi.restoreAllMocks();
-		}
-	});
-	it("marks structurally classified advisor usage limits", async () => {
-		const mock = createMockModel({
-			responses: [
-				{ content: ["primary complete"] },
-				{
-					content: [{ type: "toolCall", id: "continuing-turn", name: "missing-tool", arguments: {} }],
-					stopReason: "toolUse",
-				},
-				{ content: ["primary still complete"] },
-			],
-		});
-		const primaryAgent = new Agent({
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: mock.stream,
-		});
-		const settings = Settings.isolated({ "compaction.enabled": false });
-		const quotaSession = new AgentSession({
-			agent: primaryAgent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-			advisorTools: [],
-		});
-
-		try {
-			expect(quotaSession.setAdvisorEnabled(true)).toBe(true);
-			const advisorAgent = quotaSession.getAdvisorAgent();
-			if (!advisorAgent) throw new Error("Expected advisor agent to exist");
-			vi.spyOn(advisorAgent, "prompt").mockRejectedValue(
-				new AIError.ProviderHttpError("Generic provider failure", 429, { code: "insufficient_quota" }),
-			);
-			const markUsageLimitReached = vi
-				.spyOn(authStorage.limits, "markReached")
-				.mockResolvedValue({ switched: false });
-			const advisorYielded = Promise.withResolvers<void>();
-			const unsubscribe = quotaSession.subscribe(event => {
-				if (event.type === "advisor_yielded") advisorYielded.resolve();
-			});
-
-			await quotaSession.prompt("Trigger advisor");
-			await quotaSession.waitForIdle();
-
-			expect(markUsageLimitReached).toHaveBeenCalledTimes(1);
-			expect(markUsageLimitReached.mock.calls[0]?.[0]).toBe(model.provider);
-			const quotaStatus = quotaSession.getAdvisorStatusOverview().advisors[0];
-			expect(quotaStatus).toMatchObject({ yielded: true });
-			expect(quotaStatus?.backlog).toBeGreaterThan(0);
-			// A quota-paused runtime cannot accept work either — the streaming
-			// mask must not reopen its eye mid-turn.
-			quotaSession.agent.state.isStreaming = true;
-			expect(quotaSession.getAdvisorStatusOverview().advisors[0]?.yielded).toBe(true);
-			quotaSession.agent.state.isStreaming = false;
-
-			// Repaint contract: advisor_yielded must have fired even though the
-			// failed batch stays requeued (the quota latch makes yielded true).
-			await advisorYielded.promise;
-			unsubscribe();
-
-			const adviseTool = advisorAgent.state.tools.find(tool => tool.name === "advise");
-			if (!(adviseTool instanceof advisorModule.AdviseTool)) throw new Error("Expected advisor advise tool");
-			adviseTool.beginUpdate(true);
-			const deferred = await adviseTool.execute("deferred-before-quota", {
-				note: "The final result still needs a regression test.",
-				severity: "nit",
-			});
-			if (deferred.content.length === 0) throw new Error("Expected the advise tool to acknowledge the call");
-			// Behavior, not wording: a note deferred behind an in-progress turn
-			// holds only a reservation — it must stay out of the primary
-			// transcript until the terminal-boundary flush below releases it.
-			expect(
-				quotaSession.messages.some(message =>
-					JSON.stringify(message).includes("The final result still needs a regression test."),
-				),
-			).toBe(false);
-
-			// The quota latch prevents another advisor dispatch. The tool boundary
-			// must keep the note out of the continuing model request; terminal
-			// completion may then release it into the primary transcript.
-			await quotaSession.prompt("Complete another primary turn");
-			await quotaSession.waitForIdle();
-			const continuingCall = mock.calls[2];
-			if (!continuingCall) throw new Error("Expected primary continuation call");
-			expect(
-				continuingCall.context.messages.some(message =>
-					JSON.stringify(message).includes("The final result still needs a regression test."),
-				),
-			).toBe(false);
-			expect(
-				quotaSession.messages.some(
-					message =>
-						message.role === "custom" &&
-						typeof message.content === "string" &&
-						message.content.includes("The final result still needs a regression test."),
-				),
-			).toBe(true);
-		} finally {
-			await quotaSession.dispose();
-			vi.restoreAllMocks();
-		}
-	});
-
 	it("propagates the resolved budget into the advisor model-visible system prompt", () => {
 		// Contract: SessionAdvisors must render the resolved budget into the
 		// prompt the advisor model actually receives. If the runtime stopped

@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import * as ai from "@oh-my-pi/pi-ai";
@@ -7,7 +6,7 @@ import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/mod
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
 
@@ -50,85 +49,6 @@ const TOKENIZER_REPLY =
 	"The screenshot shows a TypeError thrown by the tokenizer. It happens because the input stream is read after it was already closed, so the next token lookup dereferences an undefined buffer. Guarding the read and resetting the cursor when the stream closes should fix it without changing the public API.";
 
 describe("AgentSession title generation disposal", () => {
-	it("isolates the title provider session without changing credentials and aborts it during disposal", async () => {
-		const store = new SqliteAuthCredentialStore(new Database(":memory:"));
-		await store.saveOAuth("anthropic", {
-			access: "account-a-token",
-			refresh: "account-a-refresh",
-			expires: Date.now() + 60_000,
-			accountId: "account-a",
-		});
-		await store.saveOAuth("anthropic", {
-			access: "account-b-token",
-			refresh: "account-b-refresh",
-			expires: Date.now() + 60_000,
-			accountId: "account-b",
-		});
-		const storage = new AuthStorage(store);
-		authStorage = storage;
-		const modelRegistry = new ModelRegistry(storage);
-		await storage.credentials.reload();
-		storage.keys.clearConfig();
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
-		const providerSessionId = "provider-session";
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			modelRoles: { tiny: `${model.provider}/${model.id}` },
-		});
-		const agent = new Agent({
-			getApiKey: () => "test-key",
-			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
-			streamFn: createMockModel({ handler: { content: ["Done"] } }).stream,
-		});
-		const pinnedAccount = storage.oauth.accounts("anthropic").find(account => account.accountId === "account-b");
-		if (!pinnedAccount) throw new Error("Expected account-b credential");
-		expect(storage.sessions.pin("anthropic", providerSessionId, pinnedAccount.credentialId)).toBe(true);
-		let titleProvider: string | undefined;
-		let titleCredentialId: number | undefined;
-		const getApiKey = vi.spyOn(modelRegistry, "getApiKey").mockImplementation(async (requestModel, sessionId) => {
-			titleProvider = requestModel.provider;
-			titleCredentialId = storage.oauth
-				.accounts(requestModel.provider, sessionId)
-				.find(account => account.active)?.credentialId;
-			return "test-key";
-		});
-		const resolver = vi.spyOn(modelRegistry, "resolver");
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-			providerSessionId,
-		});
-		expect(storage.oauth.accounts("anthropic", providerSessionId).find(account => account.active)?.credentialId).toBe(
-			pinnedAccount.credentialId,
-		);
-		const started = Promise.withResolvers<void>();
-		const response = Promise.withResolvers<ai.AssistantMessage>();
-		let requestSignal: AbortSignal | undefined;
-		vi.spyOn(ai, "completeSimple").mockImplementation((_model, _context, options) => {
-			requestSignal = options?.signal;
-			requestSignal?.addEventListener("abort", () => response.resolve(createAssistantMessage("")), { once: true });
-			started.resolve();
-			return response.promise;
-		});
-
-		const generation = session.generateTitle("Investigate shutdown");
-		await started.promise;
-		const titleSessionId = getApiKey.mock.calls[0]?.[1];
-		expect(titleSessionId).toBeTruthy();
-		expect(titleSessionId).not.toBe(providerSessionId);
-		expect(resolver.mock.calls[0]?.[1]).toBe(titleSessionId);
-		expect(titleProvider).toBe("anthropic");
-		expect(titleCredentialId).toBe(pinnedAccount.credentialId);
-		session.beginDispose();
-
-		expect(requestSignal?.aborted).toBe(true);
-		expect(await generation).toBeNull();
-	});
-
 	it("does not start a second auto-title request while the first is still in flight", async () => {
 		authStorage = await AuthStorage.create(":memory:");
 		authStorage.keys.setRuntime("anthropic", "test-key");

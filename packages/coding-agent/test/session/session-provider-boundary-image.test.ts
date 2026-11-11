@@ -15,7 +15,7 @@ import { removeWithRetries } from "@oh-my-pi/pi-utils";
 const TINY_PNG_BASE64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
-function makeProxyModel(id: string, compat?: ModelSpec["compat"]): Model<Api> {
+function makeProxyModel(id: string, input: readonly ("text" | "image")[] = ["text", "image"]): Model<Api> {
 	return buildModel({
 		id,
 		name: id,
@@ -23,11 +23,10 @@ function makeProxyModel(id: string, compat?: ModelSpec["compat"]): Model<Api> {
 		provider: "myproxy",
 		baseUrl: "https://proxy.example.com/v1",
 		reasoning: false,
-		input: ["text", "image"],
+		input,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 128_000,
 		maxTokens: 8_192,
-		compat,
 	} as ModelSpec);
 }
 
@@ -57,17 +56,17 @@ describe("buildImageDescriptionNotice wire truth (#9697)", () => {
 		await removeWithRetries(testDir);
 	});
 
-	it("falls back for a wire-stripped model that declares image input, not for an opted-out one", async () => {
+	it("describes images for a text-only model, not for one whose wire input includes images", async () => {
 		const image: ImageContent = { type: "image", data: TINY_PNG_BASE64, mimeType: "image/png" };
-		const stripped = makeProxyModel("deepseek-v4-flash", { stripImageInput: true });
-		const notice = await new SessionProviderBoundary(makeHost(stripped, testDir)).buildImageDescriptionNotice([
+		const textOnly = makeProxyModel("deepseek-v4-flash", ["text"]);
+		const notice = await new SessionProviderBoundary(makeHost(textOnly, testDir)).buildImageDescriptionNotice([
 			image,
 		]);
 		expect(notice).toBeDefined();
 		expect(JSON.stringify(notice)).toContain("current model does not support image input");
 
-		const optedOut = makeProxyModel("deepseek-v4-flash", { stripImageInput: false });
-		const silent = await new SessionProviderBoundary(makeHost(optedOut, testDir)).buildImageDescriptionNotice([
+		const vision = makeProxyModel("deepseek-v4-flash");
+		const silent = await new SessionProviderBoundary(makeHost(vision, testDir)).buildImageDescriptionNotice([
 			image,
 		]);
 		expect(silent).toBeUndefined();

@@ -7,12 +7,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Type } from "@oh-my-pi/omptype/typebox";
 import type { AgentMessage, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
-import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
-import type { MessageCreateParams } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
-import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
-import { convertToLlm, wrapSteeringForModel } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -752,48 +748,6 @@ describe("ExtensionRunner", () => {
 			expect(errors[0]?.event).toBe("assistant_message");
 			expect(errors[0]?.error).toContain("rewrite failed");
 		});
-		it("preserves Cursor-resolved tool markers across no-op and text rewrite handlers", async () => {
-			fs.writeFileSync(
-				path.join(extensionsDir, "assistant-message-cursor.ts"),
-				`
-				export default function(pi) {
-					pi.on("assistant_message", event => ({ content: event.message.content }));
-					pi.on("assistant_message", event => ({
-						content: [
-							{ ...event.message.content[0], text: "rewritten" },
-							event.message.content[1],
-						],
-					}));
-				}
-				`,
-			);
-			const result = await loadTestExtensions();
-			const runner = new ExtensionRunner(
-				result.extensions,
-				result.runtime,
-				tempDir.path(),
-				sessionManager,
-				modelRegistry,
-			);
-			const resolvedToolCall = {
-				type: "toolCall" as const,
-				id: "call-cursor",
-				name: "read",
-				arguments: { path: "x" },
-				[kCursorExecResolved]: true as const,
-			};
-			const message = {
-				...createAssistantMessage("original"),
-				content: [{ type: "text" as const, text: "original" }, resolvedToolCall],
-			};
-
-			const rewritten = await runner.emitAssistantMessage(message);
-
-			expect(rewritten?.[0]).toMatchObject({ type: "text", text: "rewritten" });
-			expect(rewritten?.[1]).toBe(resolvedToolCall);
-			expect((rewritten?.[1] as typeof resolvedToolCall | undefined)?.[kCursorExecResolved]).toBe(true);
-		});
-
 		it("normalizes each text signature against its original text across chained rewrites", async () => {
 			fs.writeFileSync(
 				path.join(extensionsDir, "assistant-message-signatures.ts"),
@@ -2458,11 +2412,11 @@ describe("ExtensionRunner", () => {
 						const tiers = pi.getServiceTiers();
 						tiers.openai = "scale";
 						pi.appendEntry("service-tier-snapshot", tiers);
-						pi.setServiceTier("google", "flex");
+						pi.setServiceTier("openai", "flex");
 						pi.setServiceTier("openai", undefined);
 					});
 					pi.on("session_start", () => {
-						pi.setServiceTier("anthropic", "scale");
+						pi.setServiceTier("openai", "ultrafast");
 					});
 					pi.on("session_start", () => {
 						pi.setServiceTier("bogus", "priority");
@@ -2525,12 +2479,12 @@ describe("ExtensionRunner", () => {
 			expect(serviceTiers).toEqual({ openai: "priority" });
 			expect(snapshots).toEqual([{ openai: "scale" }]);
 			expect(setCalls).toEqual([
-				["google", "flex"],
+				["openai", "flex"],
 				["openai", undefined],
+				["openai", "ultrafast"],
 			]);
-			expect(errors).toHaveLength(2);
-			expect(errors[0]).toContain('Invalid service tier "scale" for family "anthropic"');
-			expect(errors[1]).toContain('Invalid service tier "priority" for family "bogus"');
+			expect(errors).toHaveLength(1);
+			expect(errors[0]).toContain('Invalid service tier "priority" for family "bogus"');
 		});
 	});
 
@@ -4304,173 +4258,6 @@ describe("ExtensionRunner", () => {
 		});
 	});
 
-	describe("credential_disabled", () => {
-		it("delivers credential_disabled events to subscribed extensions with the typed payload", async () => {
-			const eventsPath = path.join(tempDir.path(), "credential-disabled-events.jsonl");
-			const extCode = `
-				import * as fs from "node:fs";
-
-				export default function(pi) {
-					pi.on("credential_disabled", async (event) => {
-						fs.appendFileSync(
-							${JSON.stringify(eventsPath)},
-							JSON.stringify({
-								type: event.type,
-								provider: event.provider,
-								disabledCause: event.disabledCause,
-							}) + "\\n",
-						);
-					});
-				}
-			`;
-			fs.writeFileSync(path.join(extensionsDir, "credential-disabled.ts"), extCode);
-
-			const result = await loadTestExtensions();
-			const runner = new ExtensionRunner(
-				result.extensions,
-				result.runtime,
-				tempDir.path(),
-				sessionManager,
-				modelRegistry,
-			);
-
-			await runner.emit({ type: "credential_disabled", provider: "anthropic", disabledCause: "invalid_grant" });
-
-			const events = fs
-				.readFileSync(eventsPath, "utf8")
-				.trim()
-				.split("\n")
-				.map(line => JSON.parse(line));
-			expect(events).toEqual([
-				{ type: "credential_disabled", provider: "anthropic", disabledCause: "invalid_grant" },
-			]);
-		});
-
-		it("isolates subscriber failures so other handlers still receive the event", async () => {
-			const eventsPath = path.join(tempDir.path(), "credential-disabled-isolated.jsonl");
-			const ext1Code = `
-				export default function(pi) {
-					pi.on("credential_disabled", async () => {
-						throw new Error("subscriber exploded");
-					});
-				}
-			`;
-			const ext2Code = `
-				import * as fs from "node:fs";
-
-				export default function(pi) {
-					pi.on("credential_disabled", async (event) => {
-						fs.appendFileSync(
-							${JSON.stringify(eventsPath)},
-							JSON.stringify({ provider: event.provider }) + "\\n",
-						);
-					});
-				}
-			`;
-			fs.writeFileSync(path.join(extensionsDir, "ext1-credential-disabled-throws.ts"), ext1Code);
-			fs.writeFileSync(path.join(extensionsDir, "ext2-credential-disabled-records.ts"), ext2Code);
-
-			const result = await loadTestExtensions();
-			const runner = new ExtensionRunner(
-				result.extensions,
-				result.runtime,
-				tempDir.path(),
-				sessionManager,
-				modelRegistry,
-			);
-			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
-			runner.onError(err => {
-				errors.push(err);
-			});
-
-			await runner.emit({ type: "credential_disabled", provider: "anthropic", disabledCause: "invalid_grant" });
-
-			const events = fs
-				.readFileSync(eventsPath, "utf8")
-				.trim()
-				.split("\n")
-				.map(line => JSON.parse(line));
-			expect(events).toEqual([{ provider: "anthropic" }]);
-			expect(errors).toHaveLength(1);
-			expect(errors[0]?.event).toBe("credential_disabled");
-			expect(errors[0]?.error).toContain("subscriber exploded");
-		});
-
-		it("caps the pre-initialize buffer and drops oldest events under pressure", async () => {
-			const eventsPath = path.join(tempDir.path(), "credential-disabled-cap.jsonl");
-			const extCode = `
-				import * as fs from "node:fs";
-
-				export default function(pi) {
-					pi.on("credential_disabled", async (event) => {
-						fs.appendFileSync(
-							${JSON.stringify(eventsPath)},
-							JSON.stringify({ provider: event.provider }) + "\\n",
-						);
-					});
-				}
-			`;
-			fs.writeFileSync(path.join(extensionsDir, "credential-disabled-cap.ts"), extCode);
-
-			const result = await loadTestExtensions();
-			const runner = new ExtensionRunner(
-				result.extensions,
-				result.runtime,
-				tempDir.path(),
-				sessionManager,
-				modelRegistry,
-			);
-
-			// Push 33 events while uninitialized — the 1st should be dropped.
-			for (let i = 0; i < 33; i++) {
-				await runner.emitCredentialDisabled({ provider: `provider-${i}`, disabledCause: "invalid_grant" });
-			}
-
-			runner.initialize(
-				{
-					sendMessage: () => {},
-					sendUserMessage: async () => {},
-					appendEntry: () => {},
-					setLabel: () => {},
-					getActiveTools: () => [],
-					getAllTools: () => [],
-					setActiveTools: async () => {},
-					getCommands: () => [],
-					setModel: async () => false,
-					getThinkingLevel: () => undefined,
-					setThinkingLevel: () => {},
-					getSessionName: () => sessionManager.getSessionName(),
-					setSessionName: async () => {},
-				},
-				{
-					getModel: () => undefined,
-					isIdle: () => true,
-					abort: () => {},
-					hasPendingMessages: () => false,
-					shutdown: () => {},
-					getContextUsage: () => undefined,
-					compact: async () => {},
-					getSystemPrompt: () => [],
-				},
-			);
-
-			// The drained emits inside initialize() are fire-and-forget and run one at a time per
-			// extension; one loop turn lets their microtask chain finish.
-			const drained = Promise.withResolvers<void>();
-			setImmediate(drained.resolve);
-			await drained.promise;
-
-			const events = fs
-				.readFileSync(eventsPath, "utf8")
-				.trim()
-				.split("\n")
-				.map(line => JSON.parse(line));
-			expect(events).toHaveLength(32);
-			// Drop-oldest policy: provider-0 was evicted, provider-1 survived as the head.
-			expect(events[0]?.provider).toBe("provider-1");
-		});
-	});
-
 	describe("mcp_notification", () => {
 		it("delivers mcp_notification events to subscribed extensions with the typed payload", async () => {
 			const eventsPath = path.join(tempDir.path(), "mcp-notification-events.jsonl");
@@ -4878,91 +4665,4 @@ describe("ExtensionRunner", () => {
 		});
 	});
 
-	describe("context prompt caching", () => {
-		it("anchors Anthropic rolling breakpoints on persisted history behind injected messages", async () => {
-			const extensionCode = `
-				export default function(pi) {
-					const name = import.meta.path.endsWith("inject-a.ts") ? "a" : "b";
-					pi.on("context", async event => ({
-						messages: [...event.messages.map(message => ({ ...message })), {
-							role: "custom",
-							customType: "collab-prompt",
-							content: "<probe-" + name + ">",
-							display: false,
-							attribution: "user",
-							timestamp: Date.now(),
-						}],
-					}));
-				}
-			`;
-			await Bun.write(path.join(extensionsDir, "inject-a.ts"), extensionCode);
-			await Bun.write(path.join(extensionsDir, "inject-b.ts"), extensionCode);
-			const result = await loadTestExtensions();
-			const runner = new ExtensionRunner(
-				result.extensions,
-				result.runtime,
-				tempDir.path(),
-				sessionManager,
-				modelRegistry,
-			);
-			const model = getBundledModel<"anthropic-messages">("anthropic", "claude-sonnet-4-5");
-			if (!model) throw new Error("Expected bundled Anthropic model to exist");
-			const messages: AgentMessage[] = [
-				{ role: "user", content: "persisted user", timestamp: 1 },
-				{
-					role: "assistant",
-					content: [{ type: "text", text: "persisted assistant" }],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: model.id,
-					usage: {
-						input: 1,
-						output: 1,
-						cacheRead: 0,
-						cacheWrite: 0,
-						totalTokens: 2,
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-					},
-					stopReason: "stop",
-					timestamp: 2,
-				},
-			];
-			const transformed = await runner.emitContext(messages);
-			let body: MessageCreateParams | undefined;
-			const fetchMock = (async (_input: string | URL | Request, init?: RequestInit) => {
-				body = JSON.parse(String(init?.body ?? "{}")) as MessageCreateParams;
-				return new Response(
-					JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "captured" } }),
-					{ status: 400, headers: { "Content-Type": "application/json" } },
-				);
-			}) as typeof fetch;
-
-			await streamAnthropic(
-				model,
-				{
-					systemPrompt: ["system"],
-					messages: convertToLlm(wrapSteeringForModel(transformed)),
-					tools: [
-						{
-							name: "lookup",
-							description: "Lookup a value",
-							parameters: { type: "object", properties: {}, additionalProperties: false },
-						},
-					],
-				},
-				{ apiKey: "sk-ant-api-test", fetch: fetchMock },
-			)
-				.result()
-				.catch(() => undefined);
-			if (!body) throw new Error("Expected Anthropic wire body");
-
-			const cachedTexts = body.messages.flatMap(message => {
-				if (!Array.isArray(message.content)) return [];
-				return message.content.flatMap(block =>
-					"cache_control" in block && block.cache_control != null && block.type === "text" ? [block.text] : [],
-				);
-			});
-			expect(cachedTexts).toEqual(["persisted user", "persisted assistant"]);
-		});
-	});
 });

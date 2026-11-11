@@ -118,6 +118,7 @@ describe("snapcompact archive read by another model", () => {
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		authStorage.keys.setRuntime("openai", "test-key");
 		authStorage.keys.setRuntime("deepseek", "test-key");
+		authStorage.keys.setRuntime("custom", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -288,16 +289,21 @@ describe("snapcompact archive read by another model", () => {
 		expect(textOnly.text).toContain("HISTORY");
 		expect(textOnly.text).toContain(marker);
 		expect(textOnly.text).not.toContain(FRAME_LEGEND);
-		// DeepSeek may read reasoning: the archive keeps it.
-		expect(textOnly.text).toContain(REASONING);
+		// The retained reader path excludes private reasoning for every model,
+		// including a text-only reader.
+		expect(textOnly.text).not.toContain(REASONING);
 		expectOriginalIntact(latestCompaction(sessionManager), original);
 
 		await session.setModel(gpt);
 		await session.prompt("Continue again.");
 		const vision = requestContent(mock.calls[1]?.context.messages);
-		expect(vision.images).toEqual(archive.frames.map(frame => frame.data));
+		// The retained reader excludes reasoning for every model, so a vision
+		// reader gets the no-reasoning variant's frames, not the original
+		// reasoning-laden ones the archive was first rendered with.
+		const variant = snapcompact.getPreservedArchive(latestCompaction(sessionManager).preserveData)?.withoutThinking;
+		expect(variant).toBeDefined();
+		expect(vision.images).toEqual(variant!.archive.frames.map(frame => frame.data));
 		expect(vision.text).toContain(FRAME_LEGEND);
-		expect(vision.text).not.toContain(marker);
 	});
 
 	it("keeps both ends of an archive's text that would crowd a small window, and all of it in a large one", async () => {

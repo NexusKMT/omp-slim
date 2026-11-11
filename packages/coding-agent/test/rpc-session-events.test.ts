@@ -430,7 +430,13 @@ describe("delta message updates over a real session run", () => {
 				agent,
 				sessionManager: SessionManager.inMemory(),
 				settings: Settings.isolated(),
-				modelRegistry: new ModelRegistry(authStorage, path.join(tempDir, "models.yml")),
+				modelRegistry: new ModelRegistry(authStorage, path.join(tempDir, "models.yml"), {
+					// Isolated settings: a settings-less registry inherits the global
+					// Settings singleton, which can carry the developer's real
+					// disabled-provider config when another suite on the same worker
+					// initialized it, hiding this harness's runtime key.
+					settings: Settings.isolated(),
+				}),
 			});
 
 			// Frames are serialized when emitted, as on the wire: the provider keeps mutating its partial afterwards.

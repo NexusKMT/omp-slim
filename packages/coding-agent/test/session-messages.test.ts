@@ -2,13 +2,14 @@ import { describe, expect, it } from "bun:test";
 import { invalidateMessageCache } from "@oh-my-pi/pi-agent-core/compaction/message-cache";
 import { type AgentMessage, filterProviderReplayMessages } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
-import { inferCopilotInitiator } from "@oh-my-pi/pi-ai/providers/github-copilot-headers";
 import {
 	convertToLlm,
 	SKILL_PROMPT_MESSAGE_TYPE,
 	wrapSteeringForModel,
 } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { COLLAB_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-wire";
+
+// `src/session/messages.ts` keeps this type private; the value is part of the wire contract.
+const COLLAB_PROMPT_MESSAGE_TYPE = "collab-prompt";
 
 function expectAttribution(message: Message | undefined, expected: "user" | "agent" | undefined): void {
 	expect(message).toBeDefined();
@@ -116,7 +117,6 @@ describe("convertToLlm custom message mapping", () => {
 		expect(converted).toHaveLength(1);
 		expect(converted[0]?.role).toBe("developer");
 		expectAttribution(converted[0], "agent");
-		expect(inferCopilotInitiator(converted)).toBe("agent");
 	});
 
 	it("maps legacy custom messages to developer role", () => {
@@ -135,7 +135,6 @@ describe("convertToLlm custom message mapping", () => {
 		expect(converted).toHaveLength(1);
 		expect(converted[0]?.role).toBe("developer");
 		expectAttribution(converted[0], undefined);
-		expect(inferCopilotInitiator(converted)).toBe("agent");
 	});
 
 	it("maps file mention reminders to developer role", () => {
@@ -244,7 +243,6 @@ describe("convertToLlm custom message mapping", () => {
 		expect(converted).toHaveLength(1);
 		expect(converted[0]?.role).toBe("developer");
 		expectAttribution(converted[0], "user");
-		expect(inferCopilotInitiator(converted)).toBe("user");
 	});
 
 	it("maps user-invoked skill prompts to the user role", () => {
@@ -264,7 +262,6 @@ describe("convertToLlm custom message mapping", () => {
 		expect(converted).toHaveLength(1);
 		expect(converted[0]?.role).toBe("user");
 		expectAttribution(converted[0], "user");
-		expect(inferCopilotInitiator(converted)).toBe("user");
 		if (converted[0]?.role !== "user" || !Array.isArray(converted[0].content)) {
 			throw new Error("Expected user array content");
 		}

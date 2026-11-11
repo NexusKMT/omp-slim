@@ -1,10 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
-import { isRecord, readJsonl } from "@oh-my-pi/pi-utils";
+import { isRecord, readJsonl, TempDir } from "@oh-my-pi/pi-utils";
 
 async function expectRpcOwnsStdin(): Promise<void> {
 	const cliPath = path.join(import.meta.dir, "..", "src", "cli.ts");
 	const extensionPath = path.join(import.meta.dir, "fixtures", "locked-stdin-reader.ts");
+	await using temp = await TempDir.create("@rpc-stdin-lock-");
+	await Bun.write(
+		path.join(temp.join("agent"), "models.yml"),
+		JSON.stringify({
+			providers: {
+				anthropic: {
+					baseUrl: "http://127.0.0.1:9/v1",
+					api: "openai-completions",
+					auth: "none",
+					models: [{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: false }],
+				},
+			},
+		}),
+	);
 	const child = Bun.spawn(
 		[
 			"bun",
@@ -20,7 +34,16 @@ async function expectRpcOwnsStdin(): Promise<void> {
 		],
 		{
 			cwd: path.join(import.meta.dir, ".."),
-			env: { ...Bun.env, PI_NO_TITLE: "1" },
+			env: {
+				PATH: Bun.env.PATH,
+				HOME: temp.join("home"),
+				PI_CODING_AGENT_DIR: temp.join("agent"),
+				XDG_CONFIG_HOME: temp.join("config"),
+				XDG_DATA_HOME: temp.join("data"),
+				XDG_CACHE_HOME: temp.join("cache"),
+				CI: "true",
+				PI_NO_TITLE: "1",
+			},
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",

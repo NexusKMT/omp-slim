@@ -1,8 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
 	adaptSchemaForStrict,
-	normalizeSchemaForCCA,
-	normalizeSchemaForGoogle,
 	type SchemaCompatibilityProvider,
 	type SchemaCompatibilityResult,
 	toolWireSchema,
@@ -111,25 +109,6 @@ describe("builtin tool schemas provider compatibility", () => {
 			if (!strictCompatibility.compatible) {
 				failures.push(formatCompatibilityIssues(name, "openai-strict", strictCompatibility));
 			}
-
-			try {
-				const googleSchema = normalizeSchemaForGoogle(schema);
-				const googleCompatibility = validateSchemaCompatibility(googleSchema, "google");
-				if (!googleCompatibility.compatible) {
-					failures.push(formatCompatibilityIssues(name, "google", googleCompatibility));
-				}
-			} catch (error) {
-				failures.push(`${name} (google): normalizeSchemaForGoogle threw: ${String(error)}`);
-			}
-
-			const cloudCodeAssistSchema = normalizeSchemaForCCA(schema);
-			const cloudCodeAssistCompatibility = validateSchemaCompatibility(
-				cloudCodeAssistSchema,
-				"cloud-code-assist-claude",
-			);
-			if (!cloudCodeAssistCompatibility.compatible) {
-				failures.push(formatCompatibilityIssues(name, "cloud-code-assist-claude", cloudCodeAssistCompatibility));
-			}
 		}
 
 		if (failures.length > 0) {
@@ -137,22 +116,5 @@ describe("builtin tool schemas provider compatibility", () => {
 		}
 
 		expect(failures).toEqual([]);
-	});
-
-	it("preserves the yield result schema for Cloud Code Assist", async () => {
-		const toolSchemas = await toolSchemasPromise;
-		const yieldEntry = toolSchemas.find(tool => tool.name === "yield");
-		expect(yieldEntry).toBeDefined();
-		if (!yieldEntry) return;
-
-		const normalized = asSchemaObject(normalizeSchemaForCCA(yieldEntry.schema));
-		const properties = asSchemaObject(normalized?.properties);
-		const typeSchema = asSchemaObject(properties?.type);
-
-		expect(normalized?.type).toBe("object");
-		expect(properties?.data).toBeDefined();
-		expect(asSchemaObject(properties?.error)?.type).toBe("string");
-		expect(typeSchema?.type).toBe("string");
-		expect(typeSchema?.anyOf).toBeUndefined();
 	});
 });

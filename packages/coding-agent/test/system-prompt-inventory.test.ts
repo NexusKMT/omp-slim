@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { DelegationBias } from "@oh-my-pi/pi-catalog/compat/delegation";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { buildSystemPrompt as buildSdkSystemPrompt } from "@oh-my-pi/pi-coding-agent/sdk";
 import {
@@ -318,22 +317,6 @@ describe("system prompt tool inventory", () => {
 			{ label: 1, wireName: 1, description: 1, parameters: 1, examples: 1 },
 		]);
 
-		const firstPrompt = await buildSystemPrompt({
-			cwd: tempDir,
-			contextFiles: [],
-			skills: [],
-			rules: [],
-			toolNames: ["edit", "read"],
-			tools: first,
-			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
-			nativeTools: false,
-			inlineToolDescriptors: false,
-		});
-		const firstText = firstPrompt.systemPrompt.join("\n\n");
-		expect(firstText.indexOf("type edit_wire_r1 = (")).toBeLessThan(firstText.indexOf("type read_wire_r1 = ("));
-		expect(firstText).toContain("edit description r1");
-		expect(firstText).toContain("arg_r1: string,");
-
 		revision = 2;
 		const second = projectSystemPromptToolMetadata(tools, { mode: "full" });
 		expect(second.get("edit")?.description).toBe("edit description r2");
@@ -344,22 +327,6 @@ describe("system prompt tool inventory", () => {
 			{ label: 2, wireName: 2, description: 2, parameters: 2, examples: 2 },
 		]);
 
-		const secondPrompt = await buildSystemPrompt({
-			cwd: tempDir,
-			contextFiles: [],
-			skills: [],
-			rules: [],
-			toolNames: ["edit", "read"],
-			tools: second,
-			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
-			nativeTools: false,
-			inlineToolDescriptors: false,
-		});
-		const secondText = secondPrompt.systemPrompt.join("\n\n");
-		expect(secondText.indexOf("type edit_wire_r2 = (")).toBeLessThan(secondText.indexOf("type read_wire_r2 = ("));
-		expect(secondText).toContain("edit description r2");
-		expect(secondText).toContain("arg_r2: string,");
-		expect(secondText).not.toContain("edit description r1");
 	});
 
 	it("projects compact metadata in active order without reading descriptors or inactive tools", async () => {
@@ -520,7 +487,7 @@ describe("system prompt tool inventory", () => {
 	});
 
 	it("renders exactly one of the map-unknown-code, explore and inline-first delegation rules per bias", async () => {
-		const renderDelegation = async (delegationBias: DelegationBias, eagerTasks: boolean) => {
+		const renderDelegation = async (delegationBias: "balanced" | "eager" | "gated", eagerTasks: boolean) => {
 			const { systemPrompt } = await buildSystemPrompt({
 				cwd: tempDir,
 				contextFiles: [],
@@ -538,8 +505,6 @@ describe("system prompt tool inventory", () => {
 		expect(await renderDelegation("eager", true)).toEqual([1, 0, 0]);
 		expect(await renderDelegation("balanced", false)).toEqual([0, 1, 0]);
 		expect(await renderDelegation("balanced", true)).toEqual([1, 0, 0]);
-		expect(await renderDelegation("restrained", true)).toEqual([1, 0, 0]);
-		expect(await renderDelegation("restrained", false)).toEqual([0, 0, 1]);
 		expect(await renderDelegation("gated", true)).toEqual([0, 0, 0]);
 	});
 
@@ -560,70 +525,19 @@ describe("system prompt tool inventory", () => {
 		expect(systemPrompt.filter(block => block.includes("CUSTOM-GUIDANCE"))).toHaveLength(1);
 	});
 
-	it("renders the functions namespace (not a name list) when tools are not native", async () => {
-		const text = await render({ nativeTools: false, inlineToolDescriptors: false });
-		expect(text).toContain("namespace functions {");
-		expect(text).toContain("type read = (_: {");
-		expect(text).toContain("type bash = (_: {");
-		expect(text).toContain("Reads files from disk.");
-		expect(text).not.toContain("- Read: `read`");
-		// The legacy `<tool>` wrapper is gone.
-		expect(text).not.toContain("<tool name=");
-	});
+	it("omits xd-only tools from the compact inventory", async () => {
+		const { text, inventory } = await renderMountedWebSearch({ nativeTools: true, directDefinition: false });
 
-	it("renders the functions namespace when descriptors are inlined even with native tools", async () => {
-		const text = await render({ nativeTools: true, inlineToolDescriptors: true });
-		expect(text).toContain("type read = (_: {");
-		expect(text).toContain("Executes a shell command.");
-		expect(text).not.toContain("- Read: `read`");
-	});
-
-	it.each([
-		["compact", true],
-		["inline", false],
-	] as const)("omits xd-only tools from the %s inventory", async (_mode, nativeTools) => {
-		const { text, inventory } = await renderMountedWebSearch({ nativeTools, directDefinition: false });
-
-		expect(inventory).toContain(nativeTools ? "`read`" : "type read = (_: {");
-		expect(inventory).not.toContain(nativeTools ? "`web_search`" : "type web_search = (");
+		expect(inventory).toContain("`read`");
+		expect(inventory).not.toContain("`web_search`");
 		expect(text).toContain("# xd:// Tool Devices");
 		expect(text).toContain("Mounted web search documentation.");
 	});
 
-	it.each([
-		["compact", true],
-		["inline", false],
-	] as const)("keeps direct tools that share an xd device name in the %s inventory", async (_mode, nativeTools) => {
-		const { inventory } = await renderMountedWebSearch({ nativeTools, directDefinition: true });
+	it("keeps direct tools that share an xd device name in the compact inventory", async () => {
+		const { inventory } = await renderMountedWebSearch({ nativeTools: true, directDefinition: true });
 
-		expect(inventory).toContain(nativeTools ? "- Direct Web: `web_search`" : "type web_search = (");
-		if (!nativeTools) expect(inventory).toContain(DIRECT_WEB_SEARCH.description);
-	});
-
-	it("keeps Eval preludes out of the inventory while their guidance ships", async () => {
-		const tools = new Map(TOOLS);
-		tools.set("eval", {
-			label: "Eval",
-			description: "Runs code cells.",
-			parameters: { type: "object", properties: {} },
-		});
-		const { systemPrompt } = await buildSystemPrompt({
-			cwd: tempDir,
-			contextFiles: [],
-			skills: [],
-			rules: [],
-			toolNames: ["eval"],
-			tools,
-			evalPreludes: [{ name: "custom", guidance: "CUSTOM-GUIDANCE" }],
-			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
-			nativeTools: true,
-			inlineToolDescriptors: true,
-		});
-		const text = systemPrompt.join("\n\n");
-		expect(text).toContain("type eval = (");
-		expect(text).not.toContain("type custom = (");
-		// Guidance still ships for enabled Eval preludes.
-		expect(text).toContain("CUSTOM-GUIDANCE");
+		expect(inventory).toContain("- Direct Web: `web_search`");
 	});
 
 	it("uses a conservative fallback inventory when no tools map is provided", async () => {

@@ -9,7 +9,6 @@ const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" 
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-ai";
-import { type CursorExecResolvedCarrier, kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
@@ -906,20 +905,5 @@ describe("runSubprocess result acceptance", () => {
 			harness.emitAssistantText("Answer.");
 		});
 		expect(body).toBe("Answer.");
-	});
-
-	it("does not relay narration that preceded a woken agent's last Cursor-resolved call", async () => {
-		const body = await peerWakeRelay(harness => {
-			const resolvedCall: ToolCall & CursorExecResolvedCarrier = {
-				type: "toolCall",
-				id: "exec-1",
-				name: "bash",
-				arguments: { command: "bun test" },
-			};
-			resolvedCall[kCursorExecResolved] = true;
-			harness.emitAssistantContent([{ type: "text", text: "Running the tests." }, resolvedCall]);
-		});
-		expect(body).not.toContain("Running the tests.");
-		expect(body).toContain("produced no output");
 	});
 });

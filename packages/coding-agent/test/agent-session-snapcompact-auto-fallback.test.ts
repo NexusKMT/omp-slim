@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
-import type { Message } from "@oh-my-pi/pi-ai";
+import type { Message, Model } from "@oh-my-pi/pi-ai";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -25,6 +25,8 @@ interface Harness {
 
 interface HarnessOptions {
 	activeModel: { provider: string; id: string };
+	/** Capability overrides so tests can build text-only models from the image-capable fixture. */
+	modelOverrides?: Partial<Model>;
 	seedMessages?: Message[];
 	/** Null leaves compaction.methodOrder at its schema default. */
 	methodOrder?: readonly CompactionMethod[] | null;
@@ -32,8 +34,9 @@ interface HarnessOptions {
 }
 
 async function createHarness(modelRegistry: ModelRegistry, options: HarnessOptions): Promise<Harness> {
-	const activeModel = getBundledModel(options.activeModel.provider, options.activeModel.id);
-	if (!activeModel) throw new Error(`Missing bundled model ${options.activeModel.provider}/${options.activeModel.id}`);
+	const bundledModel = getBundledModel(options.activeModel.provider, options.activeModel.id);
+	if (!bundledModel) throw new Error(`Missing bundled model ${options.activeModel.provider}/${options.activeModel.id}`);
+	const activeModel: Model = { ...bundledModel, ...(options.modelOverrides ?? {}) };
 	const agent = new Agent({
 		initialState: { model: activeModel, systemPrompt: ["Test"], tools: [], messages: [] },
 	});
@@ -130,7 +133,11 @@ describe("AgentSession auto-snapcompact local-blocker fallback", () => {
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		authStorage.keys.setRuntime("openai", "test-key");
 		authStorage.keys.setRuntime("deepseek", "test-key");
-		modelRegistry = new ModelRegistry(authStorage);
+		// Bind the registry to isolated settings: a settings-less registry reads
+		// the process-global Settings singleton, which a suite earlier on the
+		// same bun worker can have initialized with the developer's real config
+		// (all vendor providers disabled), making every key look absent.
+		modelRegistry = new ModelRegistry(authStorage, undefined, { settings: Settings.isolated() });
 	});
 
 	afterEach(async () => {
@@ -146,6 +153,7 @@ describe("AgentSession auto-snapcompact local-blocker fallback", () => {
 	it("uses soft compaction when snapcompact is unavailable for the active model", async () => {
 		const harness = await createHarness(modelRegistry, {
 			activeModel: { provider: "aimlapi", id: "alibaba/qwen3-coder-480b-a35b-instruct" },
+			modelOverrides: { input: ["text"] },
 		});
 		session = harness.session;
 		harness.triggerThreshold();

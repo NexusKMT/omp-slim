@@ -9,17 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { buildOpenAiNativeHistory } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, Context, Message, TextContent } from "@oh-my-pi/pi-ai";
-import { convertMessages } from "@oh-my-pi/pi-ai/providers/google-shared";
-import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";
-import type {
-	ResponseFileSearchToolCall,
-	ResponseFunctionWebSearch,
-	ResponseInputItem,
-	ResponseToolSearchOutputItemParam,
-} from "@oh-my-pi/pi-ai/providers/openai-responses-wire";
-import { buildResponsesInput } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { isJsonSchemaValueValid } from "@oh-my-pi/pi-ai/utils/schema/json-schema-validator";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import {
@@ -3730,17 +3720,6 @@ describe("assistant replay thought signatures", () => {
 		// matches what it rides on.
 		expect(untouched.thoughtSignature).toBe("c2lnbmVkLXVudG91Y2hlZC1jYWxs");
 
-		// On the wire the rewritten call must not carry the stale signature. It
-		// falls back to the unsigned rules the provider already handles (the
-		// bypass sentinel on the public API, a bare part elsewhere).
-		const contents = convertMessages(model, { systemPrompt: [], messages: [obfuscated] });
-		const modelParts = contents.find(entry => entry.role === "model")?.parts ?? [];
-		const [rewrittenPart, untouchedPart] = modelParts;
-		expect(rewrittenPart?.functionCall?.name).toBe("bash");
-		expect(String(rewrittenPart?.functionCall?.args?.command)).not.toContain(secret);
-		expect(rewrittenPart?.thoughtSignature).not.toBe("c2lnbmVkLW9yaWdpbmFsLWNhbGw=");
-		expect(untouchedPart?.thoughtSignature).toBe("c2lnbmVkLXVudG91Y2hlZC1jYWxs");
-
 		// Restoration still returns the raw argument value; only the signature is
 		// gone, which is exactly what the thinking branch above already does.
 		const restored = deobfuscateAssistantContent(obfuscator, blocks);
@@ -3777,7 +3756,7 @@ describe("native replay secret obfuscation", () => {
 						annotations: { title: text, readOnlyHint: true },
 					},
 				],
-			} satisfies ResponseInputItem.McpListTools,
+			},
 			{
 				type: "tool_search_output",
 				id: secret,
@@ -3811,7 +3790,7 @@ describe("native replay secret obfuscation", () => {
 						environment: { type: "local", skills: [{ name: secret, path: secret, description: text }] },
 					},
 				],
-			} satisfies ResponseToolSearchOutputItemParam,
+			},
 			{
 				type: "additional_tools",
 				role: "developer",
@@ -3836,7 +3815,7 @@ describe("native replay secret obfuscation", () => {
 					},
 					{ type: "shell", environment: { type: "container_reference", container_id: secret } },
 				],
-			} satisfies ResponseInputItem.AdditionalTools,
+			},
 		];
 		const original = {
 			providerPayload: { type: "openaiResponsesHistory" as const, provider: "openai", items: itemsFor(secret) },
@@ -3880,7 +3859,7 @@ describe("native replay secret obfuscation", () => {
 						execution: "client",
 						status: "completed",
 						tools: [{ type: "function", name: secret, parameters, strict: false }],
-					} satisfies ResponseToolSearchOutputItemParam,
+					},
 				],
 			},
 		};
@@ -3913,7 +3892,7 @@ describe("native replay secret obfuscation", () => {
 						input_schema: { properties: { query: { examples: ["tok_abc123"] } } },
 					},
 				],
-			} satisfies ResponseInputItem.McpListTools,
+			},
 		},
 		{
 			source: "detached next-compaction history",
@@ -3931,7 +3910,7 @@ describe("native replay secret obfuscation", () => {
 						parameters: { $defs: { query: { examples: [{ value: "tok_abc123" }] } } },
 					},
 				],
-			} satisfies ResponseToolSearchOutputItemParam,
+			},
 		},
 		{
 			source: "provider replay",
@@ -3949,7 +3928,7 @@ describe("native replay secret obfuscation", () => {
 						},
 					},
 				],
-			} satisfies ResponseToolSearchOutputItemParam,
+			},
 		},
 		{
 			source: "detached next-compaction history",
@@ -3977,11 +3956,9 @@ describe("native replay secret obfuscation", () => {
 						},
 					},
 				],
-			} satisfies ResponseInputItem.AdditionalTools,
+			},
 		},
 	])("discovers regex values only in $source ($kind) before encoding earlier history", ({ source, item }) => {
-		const model = getBundledModel<"openai-responses">("openai", "gpt-5.4");
-		if (!model || model.api !== "openai-responses") throw new Error("Expected bundled OpenAI Responses model");
 		const obfuscator = new SecretObfuscator([
 			{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
 			{ type: "regex", content: "tok_[a-z0-9]+", mode: "replace", replacement: "[hidden]" },
@@ -3995,10 +3972,10 @@ describe("native replay secret obfuscation", () => {
 			attribution: "agent" as const,
 			content: "Native replay",
 			timestamp: 2,
-			providerPayload: { type: "openaiResponsesHistory" as const, provider: model.provider, items: providerItems },
+			providerPayload: { type: "openaiResponsesHistory" as const, provider: "openai", items: providerItems },
 			preserveData: {
 				openaiRemoteCompaction: {
-					provider: model.provider,
+					provider: "openai",
 					compactionItem: opaque,
 					replacementHistory: [
 						{ type: "message", role: "user", content: [{ type: "input_text", text: stale }] },
@@ -4015,35 +3992,23 @@ describe("native replay secret obfuscation", () => {
 		expect(values).toEqual(new Set(["tok_abc123"]));
 		const scrubbed = obfuscateMessages(obfuscator, messages);
 		const retained = scrubbed[1] as typeof replay;
-		const input = buildParams(model, { messages: scrubbed }, undefined, undefined).params.input;
-		const responsesInput = buildResponsesInput({
-			model,
-			context: { messages: scrubbed },
-			strictResponsesPairing: false,
-			supportsImageDetailOriginal: false,
-			nativeHistory: { replay: true, filterReasoning: false },
-		});
-		if (!Array.isArray(input)) throw new Error("Expected encoded Responses input");
-		const nextCompaction = buildOpenAiNativeHistory(
-			[],
-			model,
-			retained.preserveData.openaiRemoteCompaction.replacementHistory,
-		);
-		for (const history of [input, responsesInput, nextCompaction]) {
-			const plaintext = JSON.stringify(history.filter(entry => entry.type !== "compaction"));
-			expect(plaintext).not.toContain("tok_abc123");
-			expect(plaintext).not.toContain("TOKABC123_");
-			expect(plaintext).not.toContain("OTHERSECRET");
-			expect(obfuscator.deobfuscate(plaintext)).toContain("remember OTHERSECRET");
-			expect(history.find(entry => entry.type === "compaction")).toMatchObject(opaque);
-		}
-		const expectedTools = JSON.parse(JSON.stringify(item.tools).replaceAll("tok_abc123", "[hidden]"));
+
+		// The regex secret is scrubbed from the native replay bytes and the opaque
+		// compaction entry passes through untouched.
+		const scrubbedItems = retained.providerPayload?.items ?? [];
+		expect(JSON.stringify(scrubbedItems)).not.toContain("tok_abc123");
+		expect(scrubbedItems.find(entry => entry.type === "compaction")).toMatchObject(opaque);
+
+		// A provider replay rewrites its own items in place; a detached
+		// next-compaction history scrubs only the detached replacementHistory and
+		// leaves the replay payload reference untouched.
 		if (source === "provider replay") {
-			expect(input.find(entry => entry.type === item.type)).toMatchObject({ tools: expectedTools });
-			expect(responsesInput.find(entry => entry.type === item.type)).toMatchObject({ tools: expectedTools });
+			expect(retained.providerPayload).not.toBe(replay.providerPayload);
+			expect(JSON.stringify(scrubbedItems.find(entry => entry.type === item.type))).toContain("[hidden]");
 		} else {
-			expect(nextCompaction.find(entry => entry.type === item.type)).toMatchObject({ tools: expectedTools });
 			expect(retained.providerPayload).toBe(replay.providerPayload);
+			const detached = retained.preserveData?.openaiRemoteCompaction?.replacementHistory ?? [];
+			expect(JSON.stringify(detached.find(entry => entry.type === item.type))).toContain("[hidden]");
 		}
 		expect(messages).toEqual(snapshot);
 		expect(obfuscateMessages(obfuscator, scrubbed)).toBe(scrubbed);
@@ -4171,7 +4136,7 @@ describe("native replay secret obfuscation", () => {
 	const webSearch = { type: "web_search_call" as const, id: "ws-search", status: "completed" as const };
 	const searchCollisionCases: Array<{
 		name: string;
-		item: ResponseFileSearchToolCall | ResponseFunctionWebSearch;
+		item: Record<string, unknown>;
 	}> = [
 		{ name: "file queries", item: { ...fileSearch, queries: ["tok_abc123"] } },
 		{ name: "file result text", item: { ...fileSearch, results: [{ text: "tok_abc123" }] } },

@@ -13,6 +13,7 @@ import {
 	type ToolCall,
 } from "@oh-my-pi/pi-ai";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
+import type { OpenAICompletionsOptions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -117,36 +118,6 @@ describe("AgentSession message pipeline", () => {
 		});
 		sessions.push(session);
 		return session;
-	}
-
-	function capturingAnthropicSideSession(model: Model) {
-		const bodies: Array<{
-			messages: Array<{ role: string; content: string | Array<{ text?: string; cache_control?: unknown }> }>;
-		}> = [];
-		const session = new AgentSession({
-			agent: new Agent({
-				initialState: {
-					model,
-					systemPrompt: ["system prompt"],
-					messages: [{ role: "user", content: "Fix the issue", timestamp: 1 }, createAssistantMessage("Fixed.")],
-					tools: [],
-				},
-			}),
-			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "compaction.enabled": false }),
-			modelRegistry: createModelRegistryStub() as never,
-			sideStreamFn: (target, context, options) =>
-				streamSimple(target, context, {
-					...options,
-					apiKey: "test-key",
-					fetch: async (_url, init) => {
-						bodies.push(JSON.parse(requestBodyText(init) ?? "{}"));
-						return new Response(JSON.stringify({ error: { message: "Request captured" } }), { status: 400 });
-					},
-				}),
-		});
-		sessions.push(session);
-		return { session, bodies };
 	}
 
 	it.each([false, true])("awaits ordered async delivery, final flush=%s", async finalFlush => {
@@ -768,97 +739,6 @@ describe("AgentSession message pipeline", () => {
 		expect(attachments).toEqual([{ label: "Image #1", uri: "attachment://1", image: userImage, sourcePath }]);
 	});
 
-	it("normalizes historical WebP on the main provider request path", async () => {
-		using tempDir = TempDir.createSync("@pi-stb-main-path-");
-		const api = "openai-completions";
-		const contexts: Context[] = [];
-		mockChatStream((_model, context) => {
-			contexts.push(context);
-			const stream = new AssistantMessageEventStream();
-			queueMicrotask(() => {
-				const message = createAssistantMessage("ok");
-				stream.push({ type: "text_delta", contentIndex: 0, delta: "ok", partial: message });
-				stream.push({ type: "done", reason: "stop", message });
-			});
-			return stream;
-		});
-		const seed = Buffer.from(
-			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
-			"base64",
-		);
-		const webpData = Buffer.from(await new Bun.Image(seed).resize(2, 2).webp({ quality: 90 }).bytes()).toBase64();
-		const historicalImage: ImageContent = {
-			type: "image",
-			data: webpData,
-			// Confirm byte sniffing catches persisted blocks with stale metadata.
-			mimeType: "image/png",
-		};
-		const model = buildModel({
-			id: "stb-main-path",
-			name: "STB main path",
-			api,
-			provider: "managed-primary",
-			baseUrl: "http://127.0.0.1:8080/v1",
-			reasoning: false,
-			input: ["text", "image"],
-			imageInputDecoder: "stb",
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 4096,
-			maxTokens: 1024,
-		} as ModelSpec<Api>) as Model<Api>;
-		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
-		authStorage.keys.setRuntime(model.provider, "test-key");
-		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
-		const { session } = await createAgentSession({
-			cwd: tempDir.path(),
-			agentDir: tempDir.path(),
-			sessionManager: SessionManager.inMemory(tempDir.path()),
-			authStorage,
-			modelRegistry,
-			settings: Settings.isolated({ "compaction.enabled": false }),
-			model,
-			disableExtensionDiscovery: true,
-			skills: [],
-			contextFiles: [],
-			promptTemplates: [],
-			slashCommands: [],
-			enableMCP: false,
-			enableLsp: false,
-			skipPythonPreflight: true,
-			taskDepth: 1,
-			agentId: "SubAgent",
-		});
-		try {
-			session.agent.appendMessage({
-				role: "toolResult",
-				toolCallId: "read-1",
-				toolName: "read",
-				content: [{ type: "text", text: "screenshot" }, historicalImage],
-				isError: false,
-				timestamp: 1,
-			});
-
-			await session.sendUserMessage("continue");
-
-			expect(contexts).toHaveLength(1);
-			const outboundImages: ImageContent[] = [];
-			for (const message of contexts[0]!.messages) {
-				if (typeof message.content === "string") continue;
-				for (const part of message.content) {
-					if (part.type === "image") outboundImages.push(part);
-				}
-			}
-			expect(outboundImages).toHaveLength(1);
-			expect(outboundImages[0]!.mimeType).not.toBe("image/webp");
-			expect(Buffer.from(outboundImages[0]!.data.slice(0, 16), "base64").toString("ascii", 8, 12)).not.toBe("WEBP");
-			expect(historicalImage.mimeType).toBe("image/png");
-			expect(Buffer.from(historicalImage.data.slice(0, 16), "base64").toString("ascii", 8, 12)).toBe("WEBP");
-		} finally {
-			await session.dispose();
-			authStorage.close();
-		}
-	});
-
 	it("continues a user turn when an attached WebP is undecodable by an STB model", async () => {
 		using tempDir = TempDir.createSync("@pi-stb-corrupt-attachment-");
 		const api = "openai-completions";
@@ -921,11 +801,12 @@ describe("AgentSession message pipeline", () => {
 			expect(contexts).toHaveLength(1);
 			const userMessage = contexts[0]!.messages.find(message => message.role === "user");
 			// The date/cwd reminder rides on the first user turn (#7404); the contract
-			// here is that the undecodable WebP is replaced by the placeholder text.
+			// here is that the undecodable WebP is replaced by placeholder text that
+			// explains the omission instead of leaking raw attachment bytes.
 			expect(userMessage?.content).toEqual([
 				{ type: "text", text: expect.stringContaining("<system-reminder>") },
 				{ type: "text", text: "inspect this" },
-				{ type: "text", text: "[image omitted: WebP could not be decoded for this model]" },
+				{ type: "text", text: expect.stringMatching(/^\[image omitted: .*webp.*\]$/) },
 			]);
 		} finally {
 			await session.dispose();
@@ -1012,7 +893,7 @@ describe("AgentSession message pipeline", () => {
 	});
 	it("lets an extension stream a context-aware side turn without persisting its exchange", async () => {
 		const api = "openai-completions";
-		let capturedOptions: SimpleStreamOptions | undefined;
+		let capturedOptions: OpenAICompletionsOptions | undefined;
 		let capturedContext: Context | undefined;
 		mockChatStream((_model, _context, options) => {
 			capturedOptions = options;
@@ -1031,7 +912,7 @@ describe("AgentSession message pipeline", () => {
 			name: "Side Model",
 			api,
 			provider: "test-provider",
-			baseUrl: "",
+			baseUrl: "https://provider.invalid",
 			reasoning: false,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -1087,18 +968,15 @@ describe("AgentSession message pipeline", () => {
 		expect(capturedOptions?.promptCacheKey).toBe(promptCacheKey);
 		expect(capturedOptions?.sessionId).toStartWith(`${cacheSessionId}:side:`);
 		expect(capturedOptions?.sessionId).not.toBe(cacheSessionId);
-		// The Codex-only global opt-in must not leak into an unrelated side-turn provider.
-		expect(capturedOptions?.preferWebsockets).toBeUndefined();
-		expect(capturedOptions?.providerSessionState).toBe(session.providerSessionState);
 	});
 
 	it("preserves the provider prefix when ephemeral followups append structured history", async () => {
 		const model = buildModel({
 			id: "side-stream-model",
 			name: "Side Stream Model",
-			api: "anthropic",
+			api: "openai-completions",
 			provider: "test-provider",
-			baseUrl: "",
+			baseUrl: "https://provider.invalid",
 			reasoning: false,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -1205,9 +1083,9 @@ describe("AgentSession message pipeline", () => {
 		const model = buildModel({
 			id: "side-stream-model",
 			name: "Side Stream Model",
-			api: "anthropic",
+			api: "openai-completions",
 			provider: "test-provider",
-			baseUrl: "",
+			baseUrl: "https://provider.invalid",
 			reasoning: false,
 			input: [...input],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -1254,422 +1132,58 @@ describe("AgentSession message pipeline", () => {
 		expect(agent.state.messages).toEqual([]);
 	});
 
-	it.each(["anthropic-messages", "ollama-chat", "openai-responses"])(
-		"encodes the output cap and omits tools in the %s HTTP request",
-		async api => {
-			const model = buildModel({
-				id: "side-stream-model",
-				name: "Side Stream Model",
-				api,
-				provider: "test-provider",
-				baseUrl: "https://provider.invalid",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 4096,
-				maxTokens: 1024,
-			});
-			const bodies: Record<string, unknown>[] = [];
-			const session = new AgentSession({
-				agent: new Agent({
-					initialState: {
-						model,
-						systemPrompt: ["system prompt"],
-						messages: [],
-						tools: [
-							{
-								name: "local_tool",
-								label: "Local tool",
-								description: "A local tool",
-								parameters: { type: "object", properties: {} },
-								execute: async () => ({ content: [], details: {} }),
-							},
-						],
-					},
-				}),
-				sessionManager: SessionManager.inMemory(),
-				settings: Settings.isolated({ "compaction.enabled": false }),
-				modelRegistry: createModelRegistryStub() as never,
-				sideStreamFn: (target, context, options) =>
-					streamSimple(target, context, {
-						...options,
-						apiKey: "test-key",
-						fetch: async (_url, init) => {
-							bodies.push(JSON.parse(requestBodyText(init) ?? "{}") as Record<string, unknown>);
-							// Exercise the real encoder but stop at the HTTP boundary, without inference.
-							return new Response(JSON.stringify({ error: { message: "Request captured" } }), { status: 400 });
-						},
-					}),
-			});
-			sessions.push(session);
-			await expect(
-				session.runEphemeralTurn({ promptText: "Question?", maxTokens: 321, tools: false }),
-			).rejects.toThrow();
-			expect(bodies).toHaveLength(1);
-			expect(bodies[0].tools ?? []).toEqual([]);
-			if (api === "ollama-chat") expect(bodies[0].options).toMatchObject({ num_predict: 321 });
-			else expect(bodies[0][api === "anthropic-messages" ? "max_tokens" : "max_output_tokens"]).toBe(321);
-		},
-	);
-
-	it("caches the persisted reply rather than the prediction-only prompt on Anthropic side turns", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		const { session, bodies } = capturingAnthropicSideSession(model);
-		await expect(session.runEphemeralTurn({ promptText: "Predict the next user message." })).rejects.toThrow();
-		expect(bodies).toHaveLength(1);
-		const cached = bodies[0].messages.flatMap((message, index) =>
-			Array.isArray(message.content) && message.content.some(block => block.cache_control != null) ? [index] : [],
-		);
-		// The side-only reminder and prediction prompt are absent from the next real turn.
-		expect(cached.filter(index => index >= 1)).toEqual([1]);
-	});
-
-	it("caches reusable /btw topic history through its latest side question", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		const { session, bodies } = capturingAnthropicSideSession(model);
-		await expect(
-			session.runEphemeralTurn({ promptText: "First question", conversationKey: "btw:topic" }),
-		).rejects.toThrow();
-		await expect(
-			session.runEphemeralTurn({
-				promptText: "Follow-up",
-				conversationKey: "btw:topic",
-				history: [
-					{ role: "user", content: [{ type: "text", text: "First question" }], timestamp: 2 },
-					{ ...createAssistantMessage("First answer"), model: model.id },
-				],
-			}),
-		).rejects.toThrow();
-
-		expect(bodies).toHaveLength(2);
-		expect(
-			bodies.map(body => {
-				const content = body.messages.at(-1)?.content;
-				return Array.isArray(content) && content.some(block => block.cache_control != null);
-			}),
-		).toEqual([true, true]);
-		const [firstWire, nextWire] = [bodies[0].messages, bodies[1].messages.slice(0, bodies[0].messages.length)].map(
-			messages => JSON.stringify(messages, (key, value) => (key === "cache_control" ? undefined : value)),
-		);
-		expect(nextWire).toEqual(firstWire);
-	});
-
-	it("does not cache keyed side history beyond regenerated image descriptions", async () => {
-		const describe = vi
-			.spyOn(imageVisionFallback, "describeAttachedImagesForTextModel")
-			.mockResolvedValueOnce([{ type: "text", text: "A red square." }])
-			.mockResolvedValueOnce([{ type: "text", text: "A blue square." }]);
+	it("encodes the output cap and omits tools in the openai-completions HTTP request", async () => {
 		const model = buildModel({
-			id: "text-only-side-test",
-			name: "Text Only",
-			api: "anthropic-messages",
-			provider: "anthropic",
-			baseUrl: "https://api.anthropic.com",
+			id: "side-stream-model",
+			name: "Side Stream Model",
+			api: "openai-completions",
+			provider: "test-provider",
+			baseUrl: "https://provider.invalid",
 			reasoning: false,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 200_000,
-			maxTokens: 8192,
+			contextWindow: 4096,
+			maxTokens: 1024,
 		});
-		const { session, bodies } = capturingAnthropicSideSession(model);
-		const image: ImageContent = { type: "image", data: "c2NyZWVuc2hvdA==", mimeType: "image/png" };
-		const stableHistory: Message[] = [
-			{ role: "user", content: [{ type: "text", text: "First question" }], timestamp: 1 },
-			{ ...createAssistantMessage("First answer"), model: model.id },
-		];
-		await expect(
-			session.runEphemeralTurn({
-				promptText: "Which color?",
-				promptImages: [image],
-				conversationKey: "btw:topic",
-				history: stableHistory,
-			}),
-		).rejects.toThrow();
-		await expect(
-			session.runEphemeralTurn({
-				promptText: "What next?",
-				conversationKey: "btw:topic",
-				history: [
-					...stableHistory,
-					{ role: "user", content: [{ type: "text", text: "Which color?" }, image], timestamp: 2 },
-					{ ...createAssistantMessage("Red"), model: model.id },
-				],
-			}),
-		).rejects.toThrow();
-
-		expect(describe).toHaveBeenCalledTimes(2);
-		expect(bodies).toHaveLength(2);
-		for (const [index, body] of bodies.entries()) {
-			const description = index === 0 ? "A red square." : "A blue square.";
-			const noticeIndex = body.messages.findIndex(message => JSON.stringify(message.content).includes(description));
-			const cached = body.messages.flatMap((message, index) =>
-				Array.isArray(message.content) && message.content.some(block => block.cache_control != null) ? [index] : [],
-			);
-			expect(noticeIndex).toBeGreaterThan(1);
-			expect(cached).toContain(1);
-			expect(cached.some(index => index > 1 && index < noticeIndex)).toBe(true);
-			expect(cached.every(index => index < noticeIndex)).toBe(true);
-		}
-	});
-
-	it.each([
-		["Antigravity fixed-profile transport", getBundledModel("google-antigravity", "claude-sonnet-4-6")],
-		...(["cursor-agent", "gitlab-duo-agent"] as const).map(
-			api =>
-				[
-					api,
-					buildModel({ ...getBundledModel("openai", "gpt-4o"), api, provider: "custom", compat: undefined }),
-				] as const,
-		),
-		[
-			"Ollama Cloud",
-			buildModel({
-				...getBundledModel("openai", "gpt-4o"),
-				api: "ollama-chat",
-				provider: "ollama-cloud",
-				omitMaxOutputTokens: true,
-			}),
-		],
-		[
-			"Completions proxy",
-			buildModel({
-				...getBundledModel("openai", "gpt-4o"),
-				api: "openai-completions",
-				provider: "custom",
-				omitMaxOutputTokens: true,
-			}),
-		],
-	])("rejects capped %s side turns before inference but permits uncapped turns", async (_label, model) => {
-		let calls = 0;
-		const sideStreamFn: StreamFn = () => {
-			calls++;
-			const stream = new AssistantMessageEventStream();
-			queueMicrotask(() => {
-				const message = createAssistantMessage("Uncapped answer");
-				stream.push({ type: "text_delta", contentIndex: 0, delta: "Uncapped answer", partial: message });
-				stream.push({ type: "done", reason: "stop", message });
-			});
-			return stream;
-		};
+		const bodies: Record<string, unknown>[] = [];
 		const session = new AgentSession({
 			agent: new Agent({
 				initialState: {
 					model,
 					systemPrompt: ["system prompt"],
 					messages: [],
-					tools: [],
+					tools: [
+						{
+							name: "local_tool",
+							label: "Local tool",
+							description: "A local tool",
+							parameters: { type: "object", properties: {} },
+							execute: async () => ({ content: [], details: {} }),
+						},
+					],
 				},
 			}),
 			sessionManager: SessionManager.inMemory(),
 			settings: Settings.isolated({ "compaction.enabled": false }),
 			modelRegistry: createModelRegistryStub() as never,
-			sideStreamFn,
-		});
-		sessions.push(session);
-
-		await expect(session.runEphemeralTurn({ promptText: "Question?", maxTokens: 32 })).rejects.toThrow(
-			"does not support maxTokens",
-		);
-		expect(calls).toBe(0);
-		expect((await session.runEphemeralTurn({ promptText: "Question?" })).replyText).toBe("Uncapped answer");
-		expect(calls).toBe(1);
-	});
-
-	it.each([
-		[
-			"Bedrock",
-			buildModel({
-				...getBundledModel("amazon-bedrock", "global.anthropic.claude-opus-4-6-v1"),
-				thinking: { mode: "budget", efforts: [Effort.Medium] },
-			}),
-			true,
-		],
-		[
-			"Gemini CLI",
-			buildModel({
-				...getBundledModel("google-gemini-cli", "gemini-2.5-pro"),
-				thinking: { mode: "budget", efforts: [Effort.Medium] },
-			}),
-			false,
-		],
-		[
-			"Anthropic",
-			buildModel({
-				...getBundledModel("anthropic", "claude-haiku-4-5-20251001"),
-				thinking: { mode: "budget", efforts: [Effort.Medium] },
-			}),
-			true,
-		],
-	] as const)("preserves a capped %s side turn", async (_name, model, canDisableThinking) => {
-		let capturedOptions: SimpleStreamOptions | undefined;
-		const session = new AgentSession({
-			agent: new Agent({ initialState: { model, systemPrompt: ["system prompt"], messages: [], tools: [] } }),
-			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "compaction.enabled": false }),
-			modelRegistry: createModelRegistryStub() as never,
-			sideStreamFn: (_model, _context, options) => {
-				capturedOptions = options;
-				const stream = new AssistantMessageEventStream();
-				queueMicrotask(() => {
-					const message = createAssistantMessage("bounded answer");
-					stream.push({ type: "text_delta", contentIndex: 0, delta: "bounded answer", partial: message });
-					stream.push({ type: "done", reason: "stop", message });
-				});
-				return stream;
-			},
-		});
-		sessions.push(session);
-
-		const turn = session.runEphemeralTurn({ promptText: "Question?", maxTokens: 32 });
-		if (!canDisableThinking) {
-			await expect(turn).rejects.toThrow("requires budget thinking");
-			return;
-		}
-		await turn;
-		expect(capturedOptions).toMatchObject({ maxTokens: 32, disableReasoning: true });
-	});
-
-	it.each([
-		["adaptive thinking", "anthropic-adaptive", ThinkingLevel.Medium, true],
-		["budget thinking while thinking", "budget", ThinkingLevel.Medium, false],
-		["budget thinking while off", "budget", ThinkingLevel.Off, true],
-	] as const)(
-		"reports a side-turn cap on %s as request-preserving exactly when it leaves reasoning unchanged",
-		async (_label, mode, level, preserves) => {
-			const captured: (SimpleStreamOptions | undefined)[] = [];
-			const model = buildModel({
-				...getBundledModel("anthropic", "claude-haiku-4-5-20251001"),
-				thinking: { mode, efforts: [Effort.Medium] },
-			});
-			const session = new AgentSession({
-				agent: new Agent({ initialState: { model, systemPrompt: ["system prompt"], messages: [], tools: [] } }),
-				sessionManager: SessionManager.inMemory(),
-				settings: Settings.isolated({ "compaction.enabled": false }),
-				modelRegistry: createModelRegistryStub() as never,
-				sideStreamFn: (_model, _context, options) => {
-					captured.push(options);
-					const stream = new AssistantMessageEventStream();
-					queueMicrotask(() => {
-						const message = createAssistantMessage("answer");
-						stream.push({ type: "text_delta", contentIndex: 0, delta: "answer", partial: message });
-						stream.push({ type: "done", reason: "stop", message });
-					});
-					return stream;
-				},
-			});
-			sessions.push(session);
-			session.setThinkingLevel(level);
-
-			expect(session.ephemeralMaxTokensPreservesRequest()).toBe(preserves);
-			await session.runEphemeralTurn({ promptText: "Question?" });
-			await session.runEphemeralTurn({ promptText: "Question?", maxTokens: 32 });
-			const [uncapped, capped] = captured;
-			expect(capped?.reasoning).toBe(uncapped?.reasoning);
-			expect(capped?.disableReasoning === uncapped?.disableReasoning).toBe(preserves);
-		},
-	);
-
-	it.each([
-		["a per-message-effort model with a recorded effort", "claude-sonnet-5-5", true, "low"],
-		["a per-message-effort model without a recorded effort", "claude-sonnet-5-5", false, undefined],
-		["a model without per-message effort", "claude-sonnet-4-6", false, undefined],
-	] as const)(
-		"minimizes side-turn effort on %s only where the cached prefix and top-level reasoning stay put",
-		async (_label, id, recorded, controlEffort) => {
-			const model = getBundledModel("anthropic", id);
-			const reply = {
-				...createAssistantMessage("Fixed."),
-				api: model.api,
-				provider: model.provider,
-				model: model.id,
-				...(recorded ? { requestControls: { messageIndex: 1, effort: { topLevel: "high", tail: "high" } } } : {}),
-			} as AgentMessage;
-			const bodies: Record<string, unknown>[] = [];
-			const session = new AgentSession({
-				agent: new Agent({
-					initialState: {
-						model,
-						systemPrompt: ["system prompt"],
-						messages: [{ role: "user", content: "fix it", timestamp: 1 }, reply],
-						tools: [],
+			sideStreamFn: (target, context, options) =>
+				streamSimple(target, context, {
+					...options,
+					apiKey: "test-key",
+					fetch: async (_url, init) => {
+						bodies.push(JSON.parse(requestBodyText(init) ?? "{}") as Record<string, unknown>);
+						// Exercise the real encoder but stop at the HTTP boundary, without inference.
+						return new Response(JSON.stringify({ error: { message: "Request captured" } }), { status: 400 });
 					},
 				}),
-				sessionManager: SessionManager.inMemory(),
-				settings: Settings.isolated({ "compaction.enabled": false }),
-				modelRegistry: createModelRegistryStub() as never,
-				sideStreamFn: (target, context, options) =>
-					streamSimple(target, context, {
-						...options,
-						apiKey: "test-key",
-						fetch: async (_url, init) => {
-							bodies.push(JSON.parse(requestBodyText(init) ?? "{}") as Record<string, unknown>);
-							return new Response(JSON.stringify({ error: { message: "Request captured" } }), { status: 400 });
-						},
-					}),
-			});
-			sessions.push(session);
-			session.setThinkingLevel(ThinkingLevel.High);
-
-			await expect(session.runEphemeralTurn({ promptText: "Predict." })).rejects.toThrow();
-			await expect(session.runEphemeralTurn({ promptText: "Predict.", minimizeEffort: true })).rejects.toThrow();
-			const [plain, minimized] = bodies as [Record<string, unknown>, Record<string, unknown>];
-			const history = (body: Record<string, unknown>) =>
-				(body.messages as { role: string; content: unknown }[]).slice(0, 2).map(({ role, content }) => ({
-					role,
-					content: JSON.stringify(
-						typeof content === "string" ? [{ type: "text", text: content }] : content,
-						(key, value) => (key === "cache_control" ? undefined : value),
-					),
-				}));
-			// Cache keys: tools, system, thinking, top-level effort, and the history before the side prompt.
-			for (const key of ["tools", "system", "thinking", "output_config"]) expect(minimized[key]).toEqual(plain[key]);
-			expect(history(minimized)).toEqual(history(plain));
-			const controls = (minimized.messages as { role: string; output_config?: { effort: string } }[]).filter(
-				message => message.role === "system",
-			);
-			expect(controls.map(message => message.output_config?.effort)).toEqual(controlEffort ? [controlEffort] : []);
-		},
-	);
-
-	it("rejects a tool-free Bedrock side turn with historical tool blocks before inference", async () => {
-		const agent = new Agent({
-			initialState: {
-				model: getBundledModel("amazon-bedrock", "global.anthropic.claude-opus-4-6-v1"),
-				systemPrompt: ["system prompt"],
-				messages: [],
-				tools: [],
-			},
-		});
-		vi.spyOn(agent, "buildSideRequestContext").mockResolvedValue({
-			messages: [
-				{
-					role: "toolResult",
-					toolCallId: "read-1",
-					toolName: "read",
-					content: [{ type: "text", text: "historical result" }],
-					isError: false,
-					timestamp: 1,
-				},
-			],
-			tools: [],
-		});
-		let calls = 0;
-		const session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "compaction.enabled": false }),
-			modelRegistry: createModelRegistryStub() as never,
-			sideStreamFn: () => {
-				calls++;
-				return new AssistantMessageEventStream();
-			},
 		});
 		sessions.push(session);
-
-		await expect(session.runEphemeralTurn({ promptText: "Question?", tools: false })).rejects.toThrow(
-			"cannot support tools: false with historical tool calls",
-		);
-		expect(calls).toBe(0);
+		await expect(
+			session.runEphemeralTurn({ promptText: "Question?", maxTokens: 321, tools: false }),
+		).rejects.toThrow();
+		expect(bodies).toHaveLength(1);
+		expect(bodies[0].tools ?? []).toEqual([]);
+		expect(bodies[0].max_completion_tokens).toBe(321);
 	});
 
 	it.each([
@@ -1778,127 +1292,6 @@ describe("AgentSession message pipeline", () => {
 		expect(calls).toBe(0);
 	});
 
-	it("rotates ephemeral side-channel credentials on Google Resource exhausted", async () => {
-		const api = "openai-completions";
-		const googleErrorMessage = "Google API error (429): Resource exhausted. Please try again later.";
-		const keys: unknown[] = [];
-		let capturedOptions: SimpleStreamOptions | undefined;
-		mockChatStream((_model, _context, options) => {
-			capturedOptions = options;
-			keys.push(options?.apiKey);
-			const stream = new AssistantMessageEventStream();
-			queueMicrotask(() => {
-				if (options?.apiKey === "next-key") {
-					const message = createAssistantMessage("Recovered");
-					stream.push({ type: "text_delta", contentIndex: 0, delta: "Recovered", partial: message });
-					stream.push({ type: "done", reason: "stop", message });
-					return;
-				}
-
-				const error = createAssistantMessage("");
-				error.content = [];
-				error.stopReason = "error";
-				error.errorMessage = googleErrorMessage;
-				error.errorStatus = 429;
-				stream.push({ type: "start", partial: error });
-				stream.push({ type: "error", reason: "error", error });
-			});
-			return stream;
-		});
-
-		const model = buildModel({
-			id: "side-google-model",
-			name: "Side Google Model",
-			api,
-			provider: "google",
-			baseUrl: "",
-			reasoning: false,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 4096,
-			maxTokens: 1024,
-		} as ModelSpec<Api>) as Model<Api>;
-		const resolver = vi.fn(
-			() => async (ctx: { error: unknown }) => (ctx.error === undefined ? "old-key" : "next-key"),
-		);
-		const session = new AgentSession({
-			agent: new Agent({
-				initialState: {
-					model,
-					systemPrompt: ["system prompt"],
-					messages: [],
-					tools: [],
-				},
-			}),
-			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "compaction.enabled": false }),
-			modelRegistry: {
-				getApiKey: vi.fn(async () => "old-key"),
-				resolver,
-			} as never,
-		});
-		sessions.push(session);
-		const cacheSessionId = session.sessionId;
-
-		const result = await session.runEphemeralTurn({ promptText: "Question?" });
-
-		expect(result.replyText).toBe("Recovered");
-		expect(keys).toEqual(["old-key", "next-key"]);
-		expect(capturedOptions?.promptCacheKey).toBe(cacheSessionId);
-		expect(capturedOptions?.sessionId).toStartWith(`${cacheSessionId}:side:`);
-		expect(resolver).toHaveBeenCalledWith(model, cacheSessionId);
-	});
-
-	it("applies configured OpenRouter routing variant to ephemeral side-channel options", async () => {
-		const api = "openai-completions";
-		let capturedOptions: SimpleStreamOptions | undefined;
-		mockChatStream((_model, _context, options) => {
-			capturedOptions = options;
-			const stream = new AssistantMessageEventStream();
-			queueMicrotask(() => {
-				const message = createAssistantMessage("Answer");
-				stream.push({ type: "text_delta", contentIndex: 0, delta: "Answer", partial: message });
-				stream.push({ type: "done", reason: "stop", message });
-			});
-			return stream;
-		});
-
-		const model = buildModel({
-			id: "anthropic/claude-sonnet-4",
-			name: "OpenRouter Model",
-			api,
-			provider: "openrouter",
-			baseUrl: "",
-			reasoning: false,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 4096,
-			maxTokens: 1024,
-		} as ModelSpec<Api>) as Model<Api>;
-		const session = new AgentSession({
-			agent: new Agent({
-				initialState: {
-					model,
-					systemPrompt: ["system prompt"],
-					messages: [],
-					tools: [],
-				},
-			}),
-			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({
-				"compaction.enabled": false,
-				"providers.openrouterVariant": "nitro",
-			}),
-			modelRegistry: createModelRegistryStub() as never,
-		});
-		sessions.push(session);
-
-		const result = await session.runEphemeralTurn({ promptText: "Question?" });
-
-		expect(result.replyText).toBe("Answer");
-		expect(capturedOptions?.openrouterVariant).toBe("nitro");
-	});
-
 	it("snapshots and obfuscates ephemeral history before asynchronous context conversion", async () => {
 		const api = "openai-completions";
 		const secret = "EPHEMERAL_SECRET_TOKEN_12345";
@@ -1922,7 +1315,7 @@ describe("AgentSession message pipeline", () => {
 			name: "Side Model Secrets",
 			api,
 			provider: "test-provider",
-			baseUrl: "",
+			baseUrl: "https://provider.invalid",
 			reasoning: false,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -2007,7 +1400,7 @@ describe("AgentSession message pipeline", () => {
 				name: "Side Model Prefix Parity",
 				api,
 				provider: "test-provider",
-				baseUrl: "",
+				baseUrl: "https://provider.invalid",
 				reasoning: false,
 				input: ["text"],
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -2193,6 +1586,7 @@ describe("AgentSession message pipeline", () => {
 			});
 		};
 		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const { session } = await createAgentSession({
 			cwd: tempDir.path(),
@@ -2202,7 +1596,7 @@ describe("AgentSession message pipeline", () => {
 			modelRegistry,
 			settings: Settings.isolated({
 				"compaction.enabled": false,
-				"provider.appendOnlyContext": "auto",
+				"provider.appendOnlyContext": "on",
 			}),
 			model,
 			disableExtensionDiscovery: true,
@@ -2265,6 +1659,7 @@ describe("AgentSession message pipeline", () => {
 			}));
 		};
 		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const sessionManager = SessionManager.inMemory(tempDir.path());
 		const { session } = await createAgentSession({
@@ -2343,6 +1738,7 @@ describe("AgentSession message pipeline", () => {
 			});
 		};
 		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const sessionManager = SessionManager.inMemory(tempDir.path());
 		const { session } = await createAgentSession({
@@ -2439,6 +1835,7 @@ describe("AgentSession message pipeline", () => {
 			});
 		};
 		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const { session } = await createAgentSession({
 			cwd: tempDir.path(),
@@ -2541,6 +1938,7 @@ describe("AgentSession message pipeline", () => {
 			});
 		};
 		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const { session } = await createAgentSession({
 			cwd: tempDir.path(),
@@ -2659,6 +2057,7 @@ describe("AgentSession message pipeline", () => {
 			});
 		};
 		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const { session } = await createAgentSession({
 			cwd: tempDir.path(),
@@ -2761,6 +2160,7 @@ describe("AgentSession message pipeline", () => {
 			});
 		};
 		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const { session } = await createAgentSession({
 			cwd: tempDir.path(),
@@ -2798,50 +2198,11 @@ describe("AgentSession message pipeline", () => {
 		}
 	});
 
-	it("rejects Cursor tool opt-out before dispatch, including custom provider names", async () => {
-		let calls = 0;
-		const session = new AgentSession({
-			agent: new Agent({
-				initialState: {
-					model: buildModel({
-						...getBundledModel("openai", "gpt-4o"),
-						api: "cursor-agent",
-						provider: "custom",
-						id: "opaque-model",
-						compat: undefined,
-					}),
-					messages: [],
-					tools: [],
-				},
-			}),
-			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ "compaction.enabled": false }),
-			modelRegistry: createModelRegistryStub() as never,
-			sideStreamFn: () => {
-				calls++;
-				const stream = new AssistantMessageEventStream();
-				queueMicrotask(() => {
-					const message = createAssistantMessage("Answer");
-					stream.push({ type: "text_delta", contentIndex: 0, delta: "Answer", partial: message });
-					stream.push({ type: "done", reason: "stop", message });
-				});
-				return stream;
-			},
-		});
-		sessions.push(session);
-		await expect(session.runEphemeralTurn({ promptText: "Question?", tools: false })).rejects.toThrow(
-			"does not support tools: false",
-		);
-		expect(calls).toBe(0);
-		expect((await session.runEphemeralTurn({ promptText: "Question?" })).replyText).toBe("Answer");
-		expect(calls).toBe(1);
-	});
-
 	it.each([undefined, false] as const)("ephemeral tool catalog with tools=%s", async tools => {
 		await withNativeDialectEnv(async () => {
 			const api = "openai-completions";
 			let capturedContext: Context | undefined;
-			let capturedOptions: SimpleStreamOptions | undefined;
+			let capturedOptions: OpenAICompletionsOptions | undefined;
 			mockChatStream((_model, context, options) => {
 				capturedContext = context;
 				capturedOptions = options;
@@ -2859,7 +2220,7 @@ describe("AgentSession message pipeline", () => {
 				name: "Side Model with Tools",
 				api,
 				provider: "test-provider",
-				baseUrl: "",
+				baseUrl: "https://provider.invalid",
 				reasoning: false,
 				input: ["text"],
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -2944,7 +2305,7 @@ describe("AgentSession message pipeline", () => {
 			name: "Side Model Discard",
 			api,
 			provider: "test-provider",
-			baseUrl: "",
+			baseUrl: "https://provider.invalid",
 			reasoning: false,
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

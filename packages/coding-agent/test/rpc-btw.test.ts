@@ -27,6 +27,19 @@ describe("RPC /btw", () => {
 
 	async function start() {
 		directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-rpc-btw-"));
+		await Bun.write(
+			path.join(directory, "models.yml"),
+			JSON.stringify({
+				providers: {
+					anthropic: {
+						baseUrl: "http://127.0.0.1:9/v1",
+						api: "openai-completions",
+						auth: "none",
+						models: [{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: false }],
+					},
+				},
+			}),
+		);
 		const rpc = new RpcClient({
 			command: [process.execPath, path.join(import.meta.dir, "fixtures", "btw-rpc-agent.ts")],
 			cwd: directory,

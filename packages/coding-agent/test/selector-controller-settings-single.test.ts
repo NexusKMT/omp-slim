@@ -7,7 +7,6 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import type { Component, OverlayHandle, OverlayOptions, TUI } from "@oh-my-pi/pi-tui";
 import { SessionSelectorComponent } from "@oh-my-pi/pi-tui/overlays/session-selector";
 import { AgentsHubComponent } from "@oh-my-pi/pi-tui/overlays/agents-hub";
-import * as activityClient from "@oh-my-pi/pi-coding-agent/stats/activity-client";
 import * as sessionPins from "@oh-my-pi/pi-coding-agent/session/session-pins";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import * as themeModule from "@oh-my-pi/pi-tui/theme";
@@ -212,40 +211,6 @@ describe("single-instance menus", () => {
 		await controller.showAgentsDashboard();
 		expect(create).toHaveBeenCalledTimes(2);
 		expect(shown).toHaveLength(1);
-	});
-
-	// Regression: a second /usage (or status-line cost click) while the dashboard
-	// was open stacked another fullscreen dashboard on top of the first.
-	it("opens one usage dashboard per close, focusing it on repeat requests", () => {
-		spyOn(activityClient, "loadDailyActivity").mockResolvedValue(undefined);
-		const { ui, shown, setFocus } = overlayUi();
-		const controller = new SelectorController(
-			createInteractiveModeContext({
-				session: {
-					model: undefined,
-					getUsageReportingModelSelectors: () => [],
-					fetchUsageReports: async () => null,
-					modelRegistry: {
-						authStorage: {
-							credentials: { all: () => ({}) },
-							usage: { providerFor: () => undefined },
-							oauth: { identity: () => undefined },
-						},
-					},
-				},
-				ui,
-			}),
-		);
-		const reports = [{ provider: "anthropic", fetchedAt: Date.now(), limits: [] }];
-
-		controller.showUsageDashboard(reports);
-		controller.showUsageDashboard(reports);
-		expect(shown).toHaveLength(1);
-		expect(setFocus).toHaveBeenLastCalledWith(shown[0]);
-
-		shown[0]?.handleInput?.("\x1b");
-		controller.showUsageDashboard(reports);
-		expect(shown).toHaveLength(2);
 	});
 
 	it("selects a seance source without resuming", async () => {

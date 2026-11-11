@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
+import { Effort } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -10,6 +10,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../src/config/model-registry";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import type { CustomTool } from "../src/extensibility/custom-tools/types";
 import { resolveLocalUrlToPath } from "../src/internal-urls";
 import { InteractiveMode, shouldEnterPlanModeOnStartup } from "../src/modes/interactive-mode";
@@ -87,12 +88,6 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		resetSettingsForTest();
 	});
 
-	function modelOrThrow(registry: ModelRegistry, id: string): Model<Api> {
-		const model = registry.find("anthropic", id);
-		if (!model) throw new Error(`Expected anthropic model ${id} to exist`);
-		return model;
-	}
-
 	/** Build an InteractiveMode over a brand-new (never-persisted) session.
 	 *  `extraRegistryTools` registers additional tools that are NOT initially
 	 *  active — modeling tools hidden by `tools.discoveryMode === "all"` that
@@ -100,7 +95,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 	 *  entries still have built-in provenance after extension shadowing. */
 	function createHarness(settings: Settings, options: HarnessOptions = {}): InteractiveMode {
 		const registry = new ModelRegistry(authStorage, path.join(tempDir.path(), `models-${Bun.nanoseconds()}.yml`));
-		const initialModel = modelOrThrow(registry, "claude-sonnet-4-5");
+		const initialModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		const readTool = makeTool("read");
 		// AgentSession requires a Map-typed tool registry; `read` is the initial
 		// active tool. Plan approval is a `write` to xd://propose, so plan-mode

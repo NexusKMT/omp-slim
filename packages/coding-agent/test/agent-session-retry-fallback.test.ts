@@ -8,14 +8,12 @@ import {
 	type AssistantMessage,
 	type Message,
 	type Model,
-	type ProviderSessionState,
 	type ToolCall,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -207,10 +205,8 @@ describe("AgentSession same-model recovery", () => {
 
 	beforeEach(() => {
 		// Reset to the shared registry (a few tests reassign it to a scoped
-		// instance) and clear cooldown suppressions left by fallback-path tests
-		// (default 5-minute suppression) so state never leaks between tests.
+		// instance).
 		modelRegistry = sharedRegistry;
-		modelRegistry.clearSuppressedSelectors();
 	});
 
 	afterEach(async () => {
@@ -259,89 +255,6 @@ describe("AgentSession same-model recovery", () => {
 		expect(failingHook).toHaveBeenCalledTimes(1);
 		expect(agent.hasQueuedMessages()).toBe(true);
 		expect(requestedModels).toEqual([]);
-	});
-
-	it("rotates sibling credentials on 402 Payment is required and status-only 402 without invoking model fallback", async () => {
-		const primaryModel = getBundledModel("openai", "gpt-4o") ?? getBundledModel("anthropic", "claude-sonnet-4-5");
-		const fallbackModel = getBundledModel("google", "gemini-1.5-pro") ?? getBundledModel("openai", "gpt-4o-mini");
-		if (!primaryModel || !fallbackModel) {
-			throw new Error("Expected bundled test models to exist");
-		}
-
-		// The mock model reduces a thrown error to its message text (a `status`
-		// property never reaches the AssistantMessage), so carry the 402 inside
-		// the message: the first iteration exercises the quota-worded body, the
-		// second an opaque status-only body.
-		for (const errorToThrow of [new Error("HTTP 402 Payment is required"), new Error("HTTP 402")]) {
-			const requestedCalls: Array<{ model: string; apiKey: string | undefined }> = [];
-			let currentKey = "key-A";
-			const mock = createMockModel();
-			const agent = new Agent({
-				getApiKey: () => currentKey,
-				initialState: {
-					model: primaryModel,
-					systemPrompt: ["Test"],
-					tools: [],
-					messages: [],
-				},
-				streamFn: (model, context, options) => {
-					const apiKey = typeof options?.apiKey === "string" ? options.apiKey : undefined;
-					requestedCalls.push({ model: `${model.provider}/${model.id}`, apiKey });
-					if (requestedCalls.length === 1) {
-						mock.push({ throw: errorToThrow });
-					} else {
-						mock.push({ content: ["ok:sibling-credential-success"] });
-					}
-					return mock.stream(model, context, options);
-				},
-			});
-
-			// `vi.spyOn` on an already-spied method returns the existing spy with
-			// its accumulated call history, so clear it between the parameterized
-			// iterations — each must observe exactly one credential rotation.
-			const markUsageLimitSpy = vi
-				.spyOn(modelRegistry.authStorage.limits, "markReached")
-				.mockClear()
-				.mockImplementation(async () => {
-					currentKey = "key-B";
-					return { switched: true };
-				});
-
-			const settings = Settings.isolated({
-				"compaction.enabled": false,
-				"retry.baseDelayMs": 1,
-				"retry.maxRetries": 2,
-				"retry.modelFallback": true,
-				"retry.fallbackChains": {
-					[`${primaryModel.provider}/${primaryModel.id}`]: [`${fallbackModel.provider}/${fallbackModel.id}`],
-				},
-			});
-
-			session = new AgentSession({
-				agent,
-				sessionManager: SessionManager.inMemory(),
-				settings,
-				modelRegistry,
-			});
-
-			await session.prompt("Prompt requiring credential rotation");
-			await session.waitForIdle();
-
-			expect(markUsageLimitSpy).toHaveBeenCalledTimes(1);
-			expect(requestedCalls).toHaveLength(2);
-			expect(requestedCalls[0]).toEqual({
-				model: `${primaryModel.provider}/${primaryModel.id}`,
-				apiKey: "key-A",
-			});
-			expect(requestedCalls[1]).toEqual({
-				model: `${primaryModel.provider}/${primaryModel.id}`,
-				apiKey: "key-B",
-			});
-			expect(session.model?.provider).toBe(primaryModel.provider);
-			expect(session.model?.id).toBe(primaryModel.id);
-			await session.dispose();
-			session = undefined;
-		}
 	});
 
 	it("surfaces immutable Anthropic thinking errors without retry fallback", async () => {
@@ -1190,161 +1103,6 @@ describe("AgentSession same-model recovery", () => {
 		});
 	});
 
-	it("restarts Responses provider state before retrying stale item-id replay errors", async () => {
-		const model = getBundledModel("openai", "gpt-4o-mini");
-		const fallbackModel = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model || !fallbackModel) {
-			throw new Error("Expected bundled test models to exist");
-		}
-
-		const staleReplayError = "Item with id 'rs_stale' not found.";
-		const requestedModels: string[] = [];
-		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
-		const mock = createMockModel({
-			responses: [{ throw: staleReplayError }, { content: ["Recovered after Responses state reset"] }],
-		});
-		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: (requestedModel, context, options) => {
-				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
-				return mock.stream(requestedModel, context, options);
-			},
-		});
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.baseDelayMs": 5,
-			"retry.maxRetries": 1,
-			"retry.fallbackChains": {
-				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
-			},
-		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-		});
-		session.subscribe(event => {
-			if (event.type === "retry_fallback_applied") {
-				fallbackAppliedEvents.push(event);
-			}
-		});
-		const closeSpy = vi.fn();
-		session.providerSessionState.set("openai-responses:openai", {
-			close: closeSpy,
-		} satisfies ProviderSessionState);
-		const { retryStartEvents, retryEndEvents } = trackRetryEvents(session);
-
-		await session.prompt("Retry stale OpenAI replay");
-		await session.waitForIdle();
-
-		expect(closeSpy).toHaveBeenCalledTimes(1);
-		expect(session.providerSessionState.has("openai-responses:openai")).toBe(true);
-		expect(requestedModels).toEqual([`${model.provider}/${model.id}`, `${model.provider}/${model.id}`]);
-		expect(fallbackAppliedEvents).toHaveLength(0);
-		expect(retryStartEvents).toHaveLength(1);
-		expect(retryStartEvents[0]).toMatchObject({
-			attempt: 1,
-			delayMs: 0,
-			errorMessage: staleReplayError,
-		});
-		expect(retryEndEvents).toHaveLength(1);
-		expect(retryEndEvents[0]).toMatchObject({ success: true, attempt: 1 });
-		const lastAssistant = getLastAssistantMessage(session);
-		expect(lastAssistant.stopReason).toBe("stop");
-		expect(lastAssistant.content).toContainEqual({
-			type: "text",
-			text: "Recovered after Responses state reset",
-		});
-	});
-
-	it("restarts Responses provider state before retrying Zero Data Retention errors", async () => {
-		const model = getBundledModel("openai", "gpt-4o-mini");
-		const fallbackModel = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model || !fallbackModel) {
-			throw new Error("Expected bundled test models to exist");
-		}
-
-		// Mirrors the live wire error from OpenAI ZDR orgs after the in-provider
-		// retry has already exhausted itself; the higher-level retry must still
-		// classify the failure as a stale-replay event so the session reset and
-		// zero-delay backoff fire instead of a model fallback.
-		const zdrReplayError = "400 Previous response cannot be used for this organization due to Zero Data Retention.";
-		const requestedModels: string[] = [];
-		const fallbackAppliedEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
-		const mock = createMockModel({
-			responses: [{ throw: zdrReplayError }, { content: ["Recovered after ZDR reset"] }],
-		});
-		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: (requestedModel, context, options) => {
-				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
-				return mock.stream(requestedModel, context, options);
-			},
-		});
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.baseDelayMs": 5,
-			"retry.maxRetries": 1,
-			"retry.fallbackChains": {
-				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
-			},
-		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-		});
-		session.subscribe(event => {
-			if (event.type === "retry_fallback_applied") {
-				fallbackAppliedEvents.push(event);
-			}
-		});
-		const closeSpy = vi.fn();
-		session.providerSessionState.set("openai-responses:openai", {
-			close: closeSpy,
-		} satisfies ProviderSessionState);
-		const { retryStartEvents, retryEndEvents } = trackRetryEvents(session);
-
-		await session.prompt("Retry ZDR replay");
-		await session.waitForIdle();
-
-		expect(closeSpy).toHaveBeenCalledTimes(1);
-		expect(session.providerSessionState.has("openai-responses:openai")).toBe(true);
-		expect(requestedModels).toEqual([`${model.provider}/${model.id}`, `${model.provider}/${model.id}`]);
-		expect(fallbackAppliedEvents).toHaveLength(0);
-		expect(retryStartEvents).toHaveLength(1);
-		expect(retryStartEvents[0]).toMatchObject({
-			attempt: 1,
-			delayMs: 0,
-			errorMessage: zdrReplayError,
-		});
-		expect(retryEndEvents).toHaveLength(1);
-		expect(retryEndEvents[0]).toMatchObject({ success: true, attempt: 1 });
-		const lastAssistant = getLastAssistantMessage(session);
-		expect(lastAssistant.stopReason).toBe("stop");
-		expect(lastAssistant.content).toContainEqual({ type: "text", text: "Recovered after ZDR reset" });
-	});
-
 	it("auto-retries Anthropic stream-envelope failures before message_stop", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
@@ -1449,126 +1207,6 @@ describe("AgentSession same-model recovery", () => {
 		]);
 		expect(session.retryAttempt).toBe(0);
 		expect(getLastAssistantMessage(session).stopReason).toBe("error");
-	});
-
-	it("resolves awaitInitialBackgroundRefresh for a refresh started after the waiter is armed", async () => {
-		const modelsConfigPath = path.join(tempDir.path(), "late-refresh-models.json");
-		await Bun.write(
-			modelsConfigPath,
-			JSON.stringify({
-				providers: {
-					litellm: {
-						baseUrl: "https://litellm.example.net/v1",
-						api: "openai-completions",
-						discovery: { type: "litellm" },
-					},
-				},
-			}),
-		);
-		const registry = new ModelRegistry(authStorage, modelsConfigPath);
-		const cancelled = new AbortController();
-		const cancelledWaiter = registry.awaitInitialBackgroundRefresh(cancelled.signal);
-		cancelled.abort();
-		await cancelledWaiter;
-
-		// The CLI starts background discovery only after the session — and thus
-		// this awaiter — is constructed, so a waiter armed before any refresh must
-		// still resolve when the later refresh settles (#10048).
-		let settled = false;
-		const waiter = registry.awaitInitialBackgroundRefresh().then(() => {
-			settled = true;
-		});
-		await scheduler.wait(10);
-		expect(settled).toBe(false);
-
-		registry.refreshInBackground("offline");
-		await waiter;
-		expect(settled).toBe(true);
-
-		// Once settled, a fresh waiter resolves immediately.
-		await registry.awaitInitialBackgroundRefresh();
-	});
-
-	it("rebinds the active model to its post-discovery same-selector window (#10488)", async () => {
-		// A discovery-backed provider whose live catalog caps a selector below the
-		// window the pre-discovery snapshot carried at startup — the same class as
-		// the GitHub Copilot gpt-5.6-sol split, where the bundled base ships the
-		// full long-context window and discovery caps it to the default tier.
-		authStorage.keys.setRuntime("ollama-cloud", "ollama-cloud-test-key");
-		const buildTieredModel = (contextWindow: number, input: Model<"ollama-chat">["input"]): Model<"ollama-chat"> =>
-			buildModel({
-				id: "deepseek-v4-tiered",
-				name: "DeepSeek V4 Tiered",
-				api: "ollama-chat",
-				provider: "ollama-cloud",
-				baseUrl: "https://ollama.com",
-				reasoning: true,
-				input,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow,
-				maxTokens: 32_000,
-			});
-		// Post-discovery catalog: the capped entry the registry resolves for the
-		// selector once background discovery settles.
-		writeModelCache(
-			"ollama-cloud",
-			Date.now(),
-			[buildTieredModel(400_000, ["text"])],
-			true,
-			"",
-			path.join(tempDir.path(), "models.db"),
-		);
-		const registry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.json"));
-
-		// The startup-bound model is the pre-discovery snapshot for the SAME
-		// selector with the full long-context window — what buildSessionOptions
-		// pins as options.model before discovery runs.
-		const staleModel = buildTieredModel(1_050_000, ["text", "image"]);
-		const settings = Settings.isolated({ "compaction.enabled": false });
-		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
-			initialState: { model: staleModel, systemPrompt: ["Test"], tools: [], messages: [] },
-			streamFn: () => {
-				throw new Error("Not exercised");
-			},
-		});
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry: registry,
-			rebindModelAfterDiscovery: true,
-		});
-
-		// Stale until discovery settles: the active model and its context-usage
-		// derivation both carry the 1.05M window that contradicts the catalog.
-		expect(session.model?.contextWindow).toBe(1_050_000);
-		expect(session.getContextUsage()?.contextWindow).toBe(1_050_000);
-
-		const { promise: modelChanged, resolve: resolveModelChanged } = Promise.withResolvers<void>();
-		const unsubscribe = session.subscribe(event => {
-			if (event.type === "model_changed") {
-				unsubscribe();
-				resolveModelChanged();
-			}
-		});
-
-		// The CLI starts discovery only after the session is built; the rebind
-		// waiter armed in the constructor resolves once this settles.
-		registry.refreshInBackground("offline");
-		await Promise.race([
-			modelChanged,
-			scheduler.wait(5_000).then(() => {
-				throw new Error("model_changed was not emitted after discovery settled");
-			}),
-		]);
-
-		// Rebound to the same selector's refreshed 400K window without a manual
-		// re-selection; get_state / contextUsage now agree with the catalog.
-		expect(session.model?.id).toBe("deepseek-v4-tiered");
-		expect(session.model?.contextWindow).toBe(400_000);
-		expect(session.getContextUsage()?.contextWindow).toBe(400_000);
 	});
 
 	it("auto-retries Gemini MALFORMED_FUNCTION_CALL after an unexecuted tool call", async () => {
@@ -1982,8 +1620,6 @@ describe("AgentSession same-model recovery", () => {
 		// The abort is a thinking-loop, and the retry stayed on the same model.
 		expect(retryStartEvents).toHaveLength(1);
 		expect(AIError.is(retryStartEvents[0].errorId, AIError.Flag.ThinkingLoop)).toBe(true);
-		// The selector must not be parked on a fallback cooldown by the abort.
-		expect(modelRegistry.isSelectorSuppressed(primarySelector)).toBe(false);
 		const finalAssistant = getLastAssistantMessage(session);
 		expect(finalAssistant.content).toEqual([{ type: "text", text: "Recovered on the same model." }]);
 	});

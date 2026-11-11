@@ -297,16 +297,23 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 
 		await session.compact(undefined, { mode: "snapcompact" });
 
-		// Sonnet 4.5 renders 1568px frames, which cost less of the byte budget
-		// than the 1932px high-res frames.
+		// No catalog window (or per-provider budget) remains, so the retained
+		// generic cap binds: the min of the 3 MB byte budget, the default image
+		// budget, and the engine ceiling. At the default 1568px shape the byte
+		// budget allows 26 frames, but the 5-image budget is the tighter cap.
 		const shape = snapcompact.resolveShape();
-		expect(shape.frameSize).toBe(snapcompact.resolveShape().frameSize);
-		expect(compactSpy.mock.calls[0]?.[1]?.maxFrames).toBe(
-			snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
+		const maxFrames = compactSpy.mock.calls[0]?.[1]?.maxFrames;
+		expect(maxFrames).toBe(
+			Math.min(
+				snapcompact.MAX_FRAMES_DEFAULT,
+				snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET),
+				snapcompact.DEFAULT_IMAGE_BUDGET,
+			),
 		);
-		expect(compactSpy.mock.calls[0]?.[1]?.maxFrames).toBeGreaterThan(
-			Math.floor(snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET / snapcompact.FRAME_DATA_BYTES_ESTIMATE),
+		expect(snapcompact.maxFramesForDataBudget(shape, snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET)).toBeGreaterThan(
+			snapcompact.DEFAULT_IMAGE_BUDGET,
 		);
+		expect(maxFrames).toBe(snapcompact.DEFAULT_IMAGE_BUDGET);
 	});
 
 	it("caps maxFrames at the provider image budget so unknown gateways do not archive frames the send path will drop", async () => {
@@ -496,7 +503,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		const branchEntries = sessionManager.getBranch();
 		const lastEntry = branchEntries[branchEntries.length - 1];
 		if (!lastEntry?.id) throw new Error("Expected branch entry with id");
-		const frame = { data: "A".repeat(20_000_000), mimeType: "image/png", cols: 10, rows: 10, chars: 10 };
+		const frame = { data: "A".repeat(800_000), mimeType: "image/png", cols: 10, rows: 10, chars: 10 };
 		const archiveResult = (frames: number) => ({
 			summary: "stubbed snapcompact",
 			shortSummary: "stub",
@@ -511,7 +518,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 				},
 			},
 		});
-		// 4 frames of 20 MB overshoot the 60 MB frame budget official Anthropic gets; the re-render fits.
+		// 4 frames of 800 KB overshoot the retained 3 MB frame budget; the re-render at 3 frames fits.
 		const compactSpy = vi
 			.spyOn(snapcompact, "compact")
 			.mockResolvedValueOnce(archiveResult(4))
@@ -520,7 +527,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		await session.compact(undefined, { mode: "snapcompact" });
 
 		expect(compactSpy).toHaveBeenCalledTimes(2);
-		// 4 frames × 60 MB budget / 80 MB rendered = 3 frames.
+		// 4 frames × 3 MB budget / 3.2 MB rendered = 3 frames.
 		expect(compactSpy.mock.calls[1]?.[1]).toEqual({ ...compactSpy.mock.calls[0]?.[1], maxFrames: 3 });
 		const entry = sessionManager.getBranch().findLast(e => e.type === "compaction");
 		if (entry?.type !== "compaction") throw new Error("Expected the re-rendered archive to be committed");

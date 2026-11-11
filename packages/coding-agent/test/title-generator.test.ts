@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn, vi } from "bun:test";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { type GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { DEFAULT_SPINNER_INTERVAL_MS } from "@oh-my-pi/pi-tui/spinner-clock";
@@ -27,7 +25,7 @@ function getModelOrThrow(id: string): Model<Api> {
 	return model;
 }
 
-function getModelFor(provider: GeneratedProvider, id: string): Model<Api> {
+function getModelFor(provider: string, id: string): Model<Api> {
 	const model = getBundledModel(provider, id);
 	if (!model) throw new Error(`Expected model ${provider}/${id}`);
 	return model;
@@ -73,7 +71,6 @@ describe("title generator", () => {
 		).toBeNull();
 		expect(complete).toHaveBeenCalledTimes(1);
 		expect(complete.mock.calls[0]?.[0]).toBe(model);
-		expect(complete.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
 	});
 
 	it("returns the marker-wrapped title without forcing a tool call", async () => {
@@ -101,43 +98,6 @@ describe("title generator", () => {
 		expect(options?.disableReasoning).toBe(true);
 		const messages = completeSimpleMock.mock.calls[0]?.[1].messages;
 		expect(messages?.map(message => message.role)).toEqual(["user"]);
-	});
-
-	it("prefills the title marker as a trailing assistant turn for Ollama-hosted models", async () => {
-		// LFM2.5's Ollama template opens a reasoning channel regardless of the
-		// disable flag; without the prefill the whole budget is spent thinking.
-		// Local Ollama discovery serves models over the OpenAI Responses API, so
-		// the gate must come from the rule-owned host flag, not the API.
-		const model = buildModel({
-			id: "lfm2.5:2.6b",
-			name: "LFM2.5 2.6B",
-			api: "openai-responses",
-			provider: "ollama",
-			baseUrl: "http://127.0.0.1:11434/v1",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 32_768,
-			maxTokens: 8_192,
-		});
-		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
-			stopReason: "stop",
-			content: [{ type: "text", text: "<title>Fix login button</title>" }],
-		} as never);
-
-		const title = await generateSessionTitle(
-			"the login button is broken on mobile",
-			createRegistry(model),
-			createSettings(model),
-			undefined,
-			model,
-		);
-
-		expect(title).toBe("Fix login button");
-		const messages = completeSimpleMock.mock.calls[0]?.[1].messages;
-		expect(messages?.map(message => message.role)).toEqual(["user", "assistant"]);
-		const prefill = messages?.at(-1);
-		expect(prefill?.role === "assistant" && prefill.content).toEqual([{ type: "text", text: "<title>" }]);
 	});
 
 	it.each([

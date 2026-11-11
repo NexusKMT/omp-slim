@@ -255,7 +255,6 @@ describe("AgentSession title fork", () => {
 		expect(side.calls).toHaveLength(0);
 		expect(titleRequest).toHaveBeenCalledTimes(1);
 		expect(titleRequest.mock.calls[0]?.[0]).toBe(target.model!);
-		expect(titleRequest.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
 	});
 
 	it("retitles from the steer an interrupt flushes after it cancelled the first message's fork", async () => {

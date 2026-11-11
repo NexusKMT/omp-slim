@@ -49,35 +49,7 @@ describe("current-model background helper calls", () => {
 		);
 		expect(summary).toBe("Preserve the original request and edit constraints.");
 		expect(complete.mock.calls[0]?.[0]).toBe(model);
-		expect(complete.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
 		expect(registry.resolver).toHaveBeenCalledWith(model, sessionManager.getSessionId());
-	});
-
-	it("uses the current model instead of a separate smol role for commit generation", async () => {
-		const model = getModelOrThrow("claude-sonnet-4-5");
-		const settings = createSettings({
-			default: `${model.provider}/${model.id}:high`,
-			smol: "@default:minimal",
-		});
-		const registry = createRegistry(model);
-		const completeSimpleMock = vi.spyOn(ai, "completeSimple").mockResolvedValue({
-			stopReason: "end_turn",
-			content: [{ type: "text", text: "fix scope handling" }],
-		} as never);
-
-		const message = await generateCommitMessage(
-			`diff --git a/x b/x\n+change\n`,
-			registry as never,
-			settings,
-			undefined,
-			model,
-		);
-		expect(message).toBe("fix scope handling");
-		expect(completeSimpleMock.mock.calls[0]?.[0]).toBe(model);
-		expect(completeSimpleMock.mock.calls[0]?.[2]).toMatchObject({
-			disableServerSideFallback: true,
-			maxTokens: 1024,
-		});
 	});
 
 	it("keeps the commit budget reasoning-safe when the catalog disables reasoning", async () => {

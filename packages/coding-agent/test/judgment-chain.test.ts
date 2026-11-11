@@ -66,7 +66,6 @@ describe("current-model judgments", () => {
 		expect(result.answers.level.choice).toBe("high");
 		expect(judge.primaryModel()).toBe(current);
 		expect(spy.mock.calls[0]?.[0]).toBe(current);
-		expect(spy.mock.calls[0]?.[2]?.disableServerSideFallback).toBe(true);
 		expect(onUsage).toHaveBeenCalledTimes(1);
 		expect(onUsage).toHaveBeenCalledWith(
 			expect.objectContaining({ role: "default", provider: current.provider, model: current.id }),

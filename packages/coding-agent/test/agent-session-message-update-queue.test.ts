@@ -24,7 +24,7 @@ async function makeSession() {
 		runtime,
 	);
 	const authStorage = await AuthStorage.create(":memory:");
-	const registry = new ModelRegistry(authStorage, undefined, { ignoreLocalModelConfig: true });
+	const registry = new ModelRegistry(authStorage, undefined);
 	const runner = new ExtensionRunner([extension], runtime, manager.getCwd(), manager, registry);
 	const agent = new Agent({ initialState: { systemPrompt: [], tools: [], messages: [] } });
 	const session = new AgentSession({

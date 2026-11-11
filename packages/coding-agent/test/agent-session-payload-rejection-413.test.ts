@@ -41,7 +41,6 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 	afterEach(async () => {
 		await session?.dispose();
-		modelRegistry.clearSuppressedSelectors();
 		vi.restoreAllMocks();
 	});
 

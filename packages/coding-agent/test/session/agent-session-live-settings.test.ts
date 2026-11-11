@@ -19,7 +19,6 @@ import {
 	cfgTopP,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { cfgTtsrEnabled } from "@oh-my-pi/pi-coding-agent/export/ttsr-settings";
-import { cfgToolsFormat } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 import { cfgInterruptMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 
@@ -141,7 +140,6 @@ describe("AgentSession live settings", () => {
 		cfgPersonality.set(settings, "none");
 		cfgIncludeWorkspaceTree.set(settings, true);
 		cfgTtsrEnabled.set(settings, false);
-		cfgToolsFormat.set(settings, "glm");
 		await Promise.resolve();
 		await live.runToolRegistryMutation(async () => {});
 

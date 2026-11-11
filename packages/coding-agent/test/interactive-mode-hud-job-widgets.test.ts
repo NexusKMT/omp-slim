@@ -14,6 +14,8 @@ import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { JobWidgetEntry, JobWidgetView } from "@oh-my-pi/pi-tui/tools/job-widget";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
+
 function nodes(root: NativeNode): NativeNode[] {
 	const out: NativeNode[] = [root];
 	for (const child of root.c ?? []) if ("k" in child) out.push(...nodes(child));
@@ -62,8 +64,7 @@ describe("InteractiveMode HUD pills", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("Expected claude-sonnet-4-5 to exist in registry");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		session = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),
 			sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),

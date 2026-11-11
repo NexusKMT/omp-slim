@@ -132,6 +132,19 @@ interface RpcServer {
 
 async function startRpcServer(): Promise<RpcServer> {
 	const temp = await TempDir.create("@rpc-compatible-primitives-");
+	await Bun.write(
+		path.join(temp.join("agent"), "models.yml"),
+		JSON.stringify({
+			providers: {
+				anthropic: {
+					baseUrl: "http://127.0.0.1:9/v1",
+					api: "openai-completions",
+					auth: "none",
+					models: [{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: false }],
+				},
+			},
+		}),
+	);
 	const child = Bun.spawn(
 		[
 			process.execPath,
@@ -218,41 +231,6 @@ describe("RPC Pi-compatible primitives (live server)", () => {
 		server = await startRpcServer();
 	});
 	afterAll(() => server.close());
-
-	test("rejects invalid cache warming modes and accepts a subsequent session-scoped mode change", async () => {
-		const { send, next } = server;
-		send({ type: "set_cache_warming", id: "bad-warming", mode: "always" });
-		expect(await next()).toEqual({
-			id: "bad-warming",
-			type: "response",
-			command: "set_cache_warming",
-			success: false,
-			error: "Invalid cache warming mode: always",
-		});
-		send({ type: "set_cache_warming", id: "warming-off", mode: "off" });
-		expect(await next()).toEqual({
-			id: "warming-off",
-			type: "response",
-			command: "set_cache_warming",
-			success: true,
-			data: { mode: "off" },
-		});
-	}, 60000);
-
-	test("set_slow_mode rejects a non-boolean enabled before touching the persisted Claude setting", async () => {
-		const { send, next } = server;
-		send({ type: "get_state", id: "slow-state" });
-		const state = (await next()).data as { slowModeSupported: unknown; slowModeScope: unknown };
-		expect([state.slowModeSupported, state.slowModeScope]).toEqual([true, "global"]);
-		send({ type: "set_slow_mode", id: "slow-bad", enabled: "false" });
-		expect(await next()).toEqual({
-			id: "slow-bad",
-			type: "response",
-			command: "set_slow_mode",
-			success: false,
-			error: "set_slow_mode requires boolean enabled",
-		});
-	}, 60000);
 
 	test("get_entries, get_tree, thinking levels, and command-discovery dialect", async () => {
 		const { send, next } = server;

@@ -43,14 +43,13 @@ const featuresQuestion: ExtensionAskDialogQuestion = {
  * Scripted model: a user message ending in ask arguments as JSON becomes an ask call (omp may prepend
  * context to the first user message); a tool result ends the turn.
  */
-const scriptedAskProvider = `
-import { createAssistantMessageEventStream } from "@oh-my-pi/pi-ai";
-
+function scriptedAskProvider(baseUrl: string): string {
+	return `
 export default function (pi) {
 	pi.registerProvider("scripted", {
-		baseUrl: "http://127.0.0.1:9/v1",
-		apiKey: "scripted-key",
-		api: "scripted-ask",
+		baseUrl: ${JSON.stringify(baseUrl)},
+		api: "openai-completions",
+		auth: "none",
 		models: [{
 			id: "ask",
 			name: "Scripted ask",
@@ -60,35 +59,10 @@ export default function (pi) {
 			contextWindow: 32768,
 			maxTokens: 1024,
 		}],
-		streamSimple: (model, context) => {
-			const stream = createAssistantMessageEventStream();
-			const last = context.messages.findLast(entry => entry.role === "user" || entry.role === "toolResult");
-			const text = last?.role === "user" ? last.content.map(part => part.text ?? "").join("") : "";
-			const argsAt = text.indexOf('{"html"');
-			const message = {
-				role: "assistant",
-				api: model.api,
-				provider: model.provider,
-				model: model.id,
-				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-				timestamp: Date.now(),
-				content: [{ type: "text", text: "done" }],
-				stopReason: "stop",
-			};
-			stream.push({ type: "start", partial: message });
-			if (argsAt >= 0) {
-				const toolCall = { type: "toolCall", id: "ask-" + context.messages.length, name: "ask", arguments: JSON.parse(text.slice(argsAt)) };
-				message.content = [toolCall];
-				message.stopReason = "toolUse";
-				stream.push({ type: "toolcall_start", contentIndex: 0, partial: message });
-				stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: message });
-			}
-			stream.push({ type: "done", reason: message.stopReason, message });
-			return stream;
-		},
 	});
 }
 `;
+}
 
 describe("RPC extension UI", () => {
 	it("keeps extension dialogs headless while tool selections round-trip", async () => {
@@ -398,186 +372,6 @@ await runRpcMode(session);
 		await explicitUnmaskedResult;
 	});
 
-	it("rejects secret login input, completes ordinary OAuth input, and logs the stored account out", async () => {
-		await using temp = await TempDir.create("@rpc-login-");
-		const extensionPath = temp.join("login.mjs");
-		await Bun.write(
-			extensionPath,
-			`
-export default function(pi) {
-  globalThis.fetch = async () => { throw new Error("Offline login fixture refuses network"); };
-  // rpc-alias is a second login for rpc-ordinary's credentials, like openai-codex-device.
-  for (const [id, secret, storeCredentialsAs] of [["rpc-secret", true], ["rpc-ordinary", false], ["rpc-alias", false, "rpc-ordinary"]]) {
-    pi.registerProvider(id, {
-      baseUrl: "http://127.0.0.1:9/v1",
-      api: "openai-completions",
-      models: [{
-        id: "fixture",
-        name: "Offline fixture",
-        reasoning: false,
-        input: ["text"],
-        contextWindow: 4096,
-        maxTokens: 512,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
-      }],
-      oauth: {
-        name: id,
-        storeCredentialsAs,
-        login: async callbacks => {
-          callbacks.onAuth({ url: "https://example.invalid/authorize" });
-          return callbacks.onPrompt({ message: id, ...(secret ? { secret: true } : {}) });
-        }
-      }
-    });
-  }
-}
-`,
-		);
-		const child = Bun.spawn(
-			[
-				process.execPath,
-				path.join(import.meta.dir, "..", "src", "cli.ts"),
-				"--trusted-extension",
-				extensionPath,
-				"--mode",
-				"rpc",
-				"--provider",
-				"anthropic",
-				"--model",
-				"claude-sonnet-4-5",
-			],
-			{
-				cwd: temp.path(),
-				env: {
-					PATH: Bun.env.PATH,
-					HOME: temp.join("home"),
-					PI_CODING_AGENT_DIR: temp.join("agent"),
-					XDG_CONFIG_HOME: temp.join("config"),
-					XDG_DATA_HOME: temp.join("data"),
-					XDG_CACHE_HOME: temp.join("cache"),
-					CI: "true",
-					PI_NO_TITLE: "1",
-				},
-				stdin: "pipe",
-				stdout: "pipe",
-				stderr: "pipe",
-				timeout: 20_000,
-			},
-		);
-		const stdout = new Response(child.stdout).body;
-		if (!stdout) throw new Error("RPC login fixture did not expose stdout");
-		const stderr = new Response(child.stderr).text();
-		const inputTitles: string[] = [];
-		let secretResponse: unknown;
-		let ordinaryResponse: unknown;
-		let loggedInProvidersResponse: unknown;
-		let noProviderResponse: unknown;
-		let accountsResponse: unknown;
-		let logoutResponse: unknown;
-		let staleLogoutResponse: unknown;
-		let providersResponse: unknown;
-		let loggedOutCredentialId: unknown;
-		const send = async (frame: object) => {
-			child.stdin.write(`${JSON.stringify(frame)}\n`);
-			await child.stdin.flush();
-		};
-
-		try {
-			await send({ type: "login", providerId: "rpc-secret", id: "secret" });
-			for await (const frame of readJsonl<unknown>(stdout)) {
-				if (!isRecord(frame)) continue;
-				if (frame.type === "extension_ui_request" && frame.method === "input") {
-					if (typeof frame.id !== "string" || typeof frame.title !== "string") {
-						throw new Error("RPC input request did not carry string id and title");
-					}
-					inputTitles.push(frame.title);
-					await send({ type: "extension_ui_response", id: frame.id, value: crypto.randomUUID() });
-				} else if (frame.type === "response" && frame.id === "secret") {
-					secretResponse = frame;
-					await send({ type: "login", providerId: "rpc-ordinary", id: "ordinary" });
-				} else if (frame.type === "response" && frame.id === "ordinary") {
-					ordinaryResponse = frame;
-					await send({ type: "get_login_providers", id: "loggedIn" });
-				} else if (frame.type === "response" && frame.id === "loggedIn") {
-					loggedInProvidersResponse = frame;
-					await send({ type: "get_logout_accounts", providerId: "rpc-alias", id: "accounts" });
-				} else if (frame.type === "response" && frame.id === "accounts") {
-					accountsResponse = frame;
-					const accounts = isRecord(frame.data) && Array.isArray(frame.data.accounts) ? frame.data.accounts : [];
-					loggedOutCredentialId = isRecord(accounts[0]) ? accounts[0].credentialId : undefined;
-					await send({
-						type: "logout",
-						providerId: "rpc-alias",
-						credentialId: loggedOutCredentialId,
-						id: "logout",
-					});
-				} else if (frame.type === "response" && frame.id === "logout") {
-					logoutResponse = frame;
-					await send({
-						type: "logout",
-						providerId: "rpc-ordinary",
-						credentialId: loggedOutCredentialId,
-						id: "stale",
-					});
-				} else if (frame.type === "response" && frame.id === "stale") {
-					staleLogoutResponse = frame;
-					// Without a provider the credential store would list every provider's accounts.
-					await send({ type: "get_logout_accounts", id: "noProvider" });
-				} else if (frame.type === "response" && frame.id === "noProvider") {
-					noProviderResponse = frame;
-					await send({ type: "get_login_providers", id: "providers" });
-				} else if (frame.type === "response" && frame.id === "providers") {
-					providersResponse = frame;
-					break;
-				}
-			}
-		} finally {
-			child.stdin.end();
-			child.kill();
-			await child.exited;
-		}
-
-		if (!providersResponse) throw new Error(`RPC login fixture did not finish: ${await stderr}`);
-		await stderr;
-		expect(secretResponse).toMatchObject({
-			type: "response",
-			command: "login",
-			success: false,
-			error: expect.stringContaining("requires secret input"),
-		});
-		expect(inputTitles).toEqual(["rpc-ordinary"]);
-		expect(ordinaryResponse).toMatchObject({ type: "response", command: "login", success: true });
-		expect(loggedInProvidersResponse).toMatchObject({
-			data: {
-				providers: expect.arrayContaining([
-					expect.objectContaining({ id: "rpc-ordinary", authenticated: true }),
-					// The alias stores under rpc-ordinary, so it is authenticated by the same credential.
-					expect.objectContaining({ id: "rpc-alias", authenticated: true }),
-				]),
-			},
-		});
-		expect(accountsResponse).toMatchObject({
-			success: true,
-			data: { accounts: [expect.objectContaining({ provider: "rpc-ordinary", active: true })] },
-		});
-		expect(logoutResponse).toEqual({ id: "logout", type: "response", command: "logout", success: true, data: {} });
-		expect(staleLogoutResponse).toMatchObject({
-			command: "logout",
-			success: false,
-			error: expect.stringContaining("is not stored for rpc-ordinary"),
-		});
-		expect(noProviderResponse).toMatchObject({ command: "get_logout_accounts", success: false });
-		expect(providersResponse).toMatchObject({
-			success: true,
-			data: {
-				providers: expect.arrayContaining([
-					expect.objectContaining({ id: "rpc-secret", authenticated: false }),
-					expect.objectContaining({ id: "rpc-ordinary", authenticated: false }),
-					expect.objectContaining({ id: "rpc-alias", authenticated: false }),
-				]),
-			},
-		});
-	}, 30_000);
 });
 
 describe("RPC ask dialog", () => {
@@ -709,8 +503,104 @@ describe("RPC ask dialog", () => {
 
 	it("walks the ask tool's form through select prompts, also after the host opts into ask dialogs", async () => {
 		await using temp = await TempDir.create("@rpc-ask-dialog-");
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			async fetch(request) {
+				const url = new URL(request.url);
+				if (url.pathname.endsWith("/models")) {
+					return Response.json({ object: "list", data: [{ id: "ask", object: "model", owned_by: "scripted" }] });
+				}
+				if (!url.pathname.endsWith("/chat/completions")) return new Response("not found", { status: 404 });
+				const body = (await request.json()) as {
+					messages?: { role?: string; content?: unknown }[];
+					stream?: boolean;
+				};
+				const messages = body.messages ?? [];
+				const last = messages.at(-1);
+				const messageText = (content: unknown): string => {
+					if (typeof content === "string") return content;
+					if (!Array.isArray(content)) return "";
+					return content
+						.map(part => (typeof part === "object" && part !== null && "text" in part ? String(part.text) : ""))
+						.join("");
+				};
+				let reply: { text: string } | { tool: string; args: Record<string, unknown> };
+				if (last?.role === "tool") {
+					reply = { text: "done" };
+				} else {
+					const text = messageText(last?.content);
+					const argsAt = text.indexOf('{"html"');
+					reply =
+						argsAt >= 0
+							? { tool: "ask", args: JSON.parse(text.slice(argsAt)) as Record<string, unknown> }
+							: { text: "done" };
+				}
+				const base = { id: "chatcmpl-ask", object: "chat.completion.chunk", created: 0, model: "ask" };
+				const finish = "text" in reply ? "stop" : "tool_calls";
+				const delta =
+					"text" in reply
+						? { role: "assistant", content: reply.text }
+						: {
+								role: "assistant",
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_ask",
+										type: "function",
+										function: { name: reply.tool, arguments: JSON.stringify(reply.args) },
+									},
+								],
+							};
+				if (!body.stream) {
+					const message =
+						"text" in reply
+							? { role: "assistant", content: reply.text }
+							: {
+									role: "assistant",
+									content: null,
+									tool_calls: [
+										{
+											id: "call_ask",
+											type: "function",
+											function: { name: reply.tool, arguments: JSON.stringify(reply.args) },
+										},
+									],
+								};
+					return Response.json({
+						id: "chatcmpl-ask",
+						object: "chat.completion",
+						created: 0,
+						model: "ask",
+						choices: [{ index: 0, message, finish_reason: finish }],
+						usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+					});
+				}
+				const events = [
+					{ ...base, choices: [{ index: 0, delta, finish_reason: null }] },
+					{ ...base, choices: [{ index: 0, delta: {}, finish_reason: finish }] },
+					{ ...base, choices: [], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
+				].map(chunk => `data: ${JSON.stringify(chunk)}\n\n`);
+				return new Response(`${events.join("")}data: [DONE]\n\n`, {
+					headers: { "Content-Type": "text/event-stream" },
+				});
+			},
+		});
 		const extensionPath = temp.join("scripted-ask.ts");
-		await Bun.write(extensionPath, scriptedAskProvider);
+		await Bun.write(extensionPath, scriptedAskProvider(server.url.origin + "/v1"));
+		await Bun.write(
+			path.join(temp.join("agent"), "models.yml"),
+			JSON.stringify({
+				providers: {
+					anthropic: {
+						baseUrl: "http://127.0.0.1:9/v1",
+						api: "openai-completions",
+						auth: "none",
+						models: [{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: false }],
+					},
+				},
+			}),
+		);
 		const child = Bun.spawn(
 			[
 				process.execPath,
@@ -720,6 +610,10 @@ describe("RPC ask dialog", () => {
 				"--mode",
 				"rpc-ui",
 				"--no-session",
+				"--provider",
+				"anthropic",
+				"--model",
+				"claude-sonnet-4-5",
 			],
 			{
 				cwd: temp.path(),
@@ -785,6 +679,7 @@ describe("RPC ask dialog", () => {
 			child.stdin.end();
 			child.kill();
 			await child.exited;
+			server.stop(true);
 		}
 
 		if (!finished) throw new Error(`RPC ask fixture did not finish: ${await stderr}`);

@@ -19,6 +19,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 
 describe("InteractiveMode paused-plan guard message", () => {
 	let tempDir: TempDir;
@@ -37,8 +38,7 @@ describe("InteractiveMode paused-plan guard message", () => {
 	beforeEach(async () => {
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("Expected claude-sonnet-4-5 to exist in registry");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		vi.spyOn(modelRegistry, "getApiKey").mockResolvedValue("test-key");
 		session = new AgentSession({
 			agent: new Agent({

@@ -25,8 +25,6 @@ type RecoveryRun = {
 	requestedKeys: string[];
 };
 
-const RATE_LIMIT_ERROR =
-	'429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account\'s rate limit. Please try again later."}} retry-after-ms=11180000';
 const SOCKET_CLOSE_MID_STREAM =
 	"The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()";
 const RETRIABLE_SERVER_ERROR = "503 service unavailable: overloaded_error";
@@ -140,7 +138,6 @@ describe("AgentSession retry recovery", () => {
 		vi.spyOn(envApiKey, "getEnvApiKey").mockReturnValue(undefined);
 		await authStorage.credentials.remove("anthropic");
 		authStorage.keys.removeRuntime("anthropic");
-		modelRegistry.clearSuppressedSelectors();
 		sessions = [];
 		managers = [];
 	});
@@ -161,17 +158,13 @@ describe("AgentSession retry recovery", () => {
 		fixtureDir.removeSync();
 	});
 
-	async function runCredentialRecovery(): Promise<RecoveryRun> {
+	async function runRetryRecovery(): Promise<RecoveryRun> {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
 
-		authStorage.keys.removeRuntime("anthropic");
-		await authStorage.credentials.set("anthropic", [
-			{ type: "api_key", key: "anthropic-key-1" },
-			{ type: "api_key", key: "anthropic-key-2" },
-		]);
+		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
 
 		const mock = createMockModel();
 		const requestedKeys: string[] = [];
@@ -187,9 +180,9 @@ describe("AgentSession retry recovery", () => {
 				const apiKey = resolveInitialApiKey(options?.apiKey);
 				requestedKeys.push(apiKey);
 				if (requestedKeys.length === 1) {
-					mock.push({ throw: RATE_LIMIT_ERROR });
+					mock.push({ throw: RETRIABLE_SERVER_ERROR });
 				} else {
-					mock.push({ content: ["recovered after credential switch"], stopReason: "stop" });
+					mock.push({ content: ["recovered after retry"], stopReason: "stop" });
 				}
 				return mock.stream(requestedModel, context, options);
 			},
@@ -218,7 +211,7 @@ describe("AgentSession retry recovery", () => {
 			if (event.type === "auto_retry_end") retryEndEvents.push(event);
 		});
 
-		await session.prompt("Trigger account rate limit recovery");
+		await session.prompt("Trigger transient retry recovery");
 		await session.waitForIdle();
 		await sessionManager.flush();
 
@@ -297,15 +290,15 @@ describe("AgentSession retry recovery", () => {
 	});
 
 	it("marks a recovered retry error, emits it, persists it, and excludes only model-context replay", async () => {
-		const { sessionManager, retryEndEvents, requestedKeys } = await runCredentialRecovery();
+		const { sessionManager, retryEndEvents, requestedKeys } = await runRetryRecovery();
 
-		expect(new Set(requestedKeys)).toEqual(new Set(["anthropic-key-1", "anthropic-key-2"]));
+		expect(requestedKeys).toEqual(["anthropic-test-key", "anthropic-test-key"]);
 		expect(retryEndEvents).toHaveLength(1);
 		expect(retryEndEvents[0]).toMatchObject({ success: true, attempt: 1 });
 		expect(retryEndEvents[0].retryErrors).toHaveLength(1);
 
 		const recoveredEntry = recoveredAssistantEntry(sessionManager);
-		const successfulEntry = successfulAssistantEntry(sessionManager, "recovered after credential switch");
+		const successfulEntry = successfulAssistantEntry(sessionManager, "recovered after retry");
 		const recoveredEvent = retryEndEvents[0].retryErrors?.[0];
 		if (!recoveredEvent) {
 			throw new Error("Expected a recovered error payload on auto_retry_end");
@@ -316,15 +309,15 @@ describe("AgentSession retry recovery", () => {
 		}
 		expect(recoveredEvent.entryId).toBe(recoveredEntry.entry.id);
 		expect(recoveredEvent.persistenceKey).toBeString();
-		expect(recoveredEvent.note).toBe("rate-limited; switched account; retried");
+		expect(recoveredEvent.note).toBe("error; retried");
 		expect(recoveredEvent.retryRecovery).toEqual(recoveredMarker);
 		expect(recoveredEntry.message.stopReason).toBe("error");
 		expect(recoveredEntry.message.retryRecovery).toMatchObject({
 			kind: "auto-retry",
 			status: "recovered",
 			attempt: 1,
-			recovery: "credential",
-			note: "rate-limited; switched account; retried",
+			recovery: "plain",
+			note: "error; retried",
 			supersededBy: {
 				provider: successfulEntry.message.provider,
 				model: successfulEntry.message.model,
@@ -340,7 +333,7 @@ describe("AgentSession retry recovery", () => {
 		).toBe(false);
 		expect(modelContext.messages.at(-1)).toMatchObject({
 			role: "assistant",
-			content: [{ type: "text", text: "recovered after credential switch" }],
+			content: [{ type: "text", text: "recovered after retry" }],
 		});
 
 		const transcriptContext = sessionManager.buildSessionContext({ transcript: true });
@@ -661,20 +654,6 @@ describe("AgentSession retry recovery", () => {
 		errorMessage: CODEX_STEER_REJECTION,
 	};
 
-	it("retries a Codex steering rejection on the selected model", async () => {
-		const { primary, requestedModels, sessionManager } = await runModelRetryRecovery(
-			[steerRejectedAfterThinking, { content: ["recovered on the same model"], stopReason: "stop" }],
-			2,
-			codexModel,
-		);
-
-		expect(requestedModels).toEqual([primary, primary]);
-		successfulAssistantEntry(sessionManager, "recovered on the same model");
-		const errors = assistantEntries(sessionManager).filter(candidate => candidate.message.stopReason === "error");
-		expect(errors).toHaveLength(1);
-		expect(errors[0].message.retryRecovery).toMatchObject({ recovery: "plain" });
-	});
-
 	it("stops without changing models when the Codex steering retry budget is zero", async () => {
 		const { primary, requestedModels, sessionManager } = await runModelRetryRecovery(
 			[steerRejectedAfterThinking],
@@ -726,7 +705,7 @@ describe("AgentSession retry recovery", () => {
 	});
 
 	it("keeps recovered markers durable across session reload and still excludes them from model context", async () => {
-		const { sessionManager } = await runCredentialRecovery();
+		const { sessionManager } = await runRetryRecovery();
 		const sessionFile = sessionManager.getSessionFile();
 		if (!sessionFile) {
 			throw new Error("Expected recovery run to persist a session file");
@@ -740,8 +719,8 @@ describe("AgentSession retry recovery", () => {
 		expect(recoveredEntry.message.retryRecovery).toMatchObject({
 			kind: "auto-retry",
 			status: "recovered",
-			recovery: "credential",
-			note: "rate-limited; switched account; retried",
+			recovery: "plain",
+			note: "error; retried",
 		});
 
 		const modelContext = reloadedManager.buildSessionContext();
@@ -751,7 +730,7 @@ describe("AgentSession retry recovery", () => {
 		).toBe(false);
 		expect(modelContext.messages.at(-1)).toMatchObject({
 			role: "assistant",
-			content: [{ type: "text", text: "recovered after credential switch" }],
+			content: [{ type: "text", text: "recovered after retry" }],
 		});
 	});
 });

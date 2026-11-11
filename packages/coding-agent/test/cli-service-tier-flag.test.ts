@@ -40,7 +40,7 @@ describe("--service-tier", () => {
 		}
 	});
 
-	it("overrides only the OpenAI family in the live session", async () => {
+	it("overrides the OpenAI family in the live session", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
 		const sessionManager = SessionManager.inMemory();
 		try {
@@ -48,7 +48,7 @@ describe("--service-tier", () => {
 				cwd: process.cwd(),
 				agentDir: process.cwd(),
 				modelRegistry: new ModelRegistry(authStorage),
-				settings: Settings.isolated({ "tier.anthropic": "priority" }),
+				settings: Settings.isolated(),
 				sessionManager,
 				openAIServiceTier: "flex",
 				disableExtensionDiscovery: true,
@@ -60,7 +60,7 @@ describe("--service-tier", () => {
 				enableLsp: false,
 			});
 			try {
-				expect(session.serviceTierByFamily).toEqual({ openai: "flex", anthropic: "priority" });
+				expect(session.serviceTierByFamily).toEqual({ openai: "flex" });
 			} finally {
 				await session.dispose();
 			}
@@ -69,12 +69,12 @@ describe("--service-tier", () => {
 		}
 	});
 
-	it("persists a resumed OpenAI override without changing other families", async () => {
+	it("persists a resumed OpenAI override", async () => {
 		using tempDir = TempDir.createSync("@omp-service-tier-resume-");
 		const authStorage = await AuthStorage.create(":memory:");
 		const sessionFile = path.join(tempDir.path(), "session.jsonl");
 		const seededManager = await SessionManager.open(sessionFile, tempDir.path());
-		seededManager.appendServiceTierChange({ openai: "priority", anthropic: "priority", google: "flex" });
+		seededManager.appendServiceTierChange({ openai: "priority" });
 		await seededManager.flush();
 		await seededManager.close();
 		try {
@@ -94,11 +94,7 @@ describe("--service-tier", () => {
 				enableMCP: false,
 				enableLsp: false,
 			});
-			expect(overridden.serviceTierByFamily).toEqual({
-				openai: "flex",
-				anthropic: "priority",
-				google: "flex",
-			});
+			expect(overridden.serviceTierByFamily).toEqual({ openai: "flex" });
 			await overridden.dispose();
 
 			const resumedManager = await SessionManager.open(sessionFile, tempDir.path());
@@ -117,11 +113,7 @@ describe("--service-tier", () => {
 				enableLsp: false,
 			});
 			try {
-				expect(resumed.serviceTierByFamily).toEqual({
-					openai: "flex",
-					anthropic: "priority",
-					google: "flex",
-				});
+				expect(resumed.serviceTierByFamily).toEqual({ openai: "flex" });
 			} finally {
 				await resumed.dispose();
 			}

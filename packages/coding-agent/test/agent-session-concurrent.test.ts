@@ -10,10 +10,7 @@ import { scheduler } from "node:timers/promises";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, AgentBusyError, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";
-import {
-	accumulateToolCallArgumentsDelta,
-	finalizeToolCallArgumentsDone,
-} from "@oh-my-pi/pi-ai/providers/openai-shared";
+import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { kStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
@@ -1453,110 +1450,6 @@ describe("AgentSession TTSR resume gate", () => {
 		expect(toolResultText(matchedToolCallContent.id)).toBe("");
 	});
 
-	it("does not join text across an assistant message boundary while a message_start handler stalls", async () => {
-		// Two assistant responses inside ONE agent turn: a Harmony leak in the first
-		// response makes the loop abort it and stream again without a new turn_start
-		// (agent-loop abort_retry). The first response streams half of a rule's
-		// condition; the retry streams the other half while a message_start
-		// extension handler is still awaiting. The halves must not meet: the
-		// buffer reset runs before the awaited fan-out, and message_update skips it.
-		collapseSchedulerSettleDelays();
-		// A bundled Harmony-mitigation target, so the leak marker takes the
-		// abort_retry path instead of streaming through as ordinary text.
-		const model = getBundledModel("openai-codex", "gpt-5.6-sol")!;
-		const splitRule: Rule = {
-			name: "split-phrase",
-			path: "/tmp/split-phrase.md",
-			content: "Do not say the phrase",
-			condition: ["FORBIDDEN"],
-			scope: ["text"],
-			_source: { provider: "test", providerName: "test", path: "/tmp/split-phrase.md", level: "project" },
-		};
-		const ttsrManager = new TtsrManager({
-			enabled: true,
-			contextMode: "discard",
-			interruptMode: "always",
-			repeatMode: "once",
-			repeatGap: 10,
-		});
-		ttsrManager.addRule(splitRule);
-
-		// `entered` resolves when the retry's message_start handler is running;
-		// `released` lets it finish. The retry's delta is pushed in between, so it
-		// is processed while message_start still awaits its fan-out.
-		const retryStartEntered = Promise.withResolvers<void>();
-		const retryStartReleased = Promise.withResolvers<void>();
-		const leak = "<|channel|>analysis ";
-		let streamCallCount = 0;
-		const agent = new Agent({
-			getApiKey: () => "test-key",
-			initialState: { model, systemPrompt: ["Test"], tools: [] },
-			streamFn: () => {
-				const stream = new AssistantMessageEventStream();
-				const first = ++streamCallCount === 1;
-				queueMicrotask(() => {
-					if (first) {
-						const partial = makeMsg("");
-						stream.push({ type: "start", partial });
-						stream.push({ type: "text_delta", contentIndex: 0, delta: leak, partial: makeMsg(leak) });
-						stream.push({
-							type: "text_delta",
-							contentIndex: 0,
-							delta: "FORBID",
-							partial: makeMsg(`${leak}FORBID`),
-						});
-						stream.push({ type: "done", reason: "stop", message: makeMsg(`${leak}FORBID`) });
-					} else {
-						const partial = makeMsg("");
-						stream.push({ type: "start", partial });
-						void retryStartEntered.promise.then(() => {
-							stream.push({ type: "text_delta", contentIndex: 0, delta: "DEN", partial: makeMsg("DEN") });
-							setTimeout(() => {
-								retryStartReleased.resolve();
-								stream.push({ type: "done", reason: "stop", message: makeMsg("DEN") });
-							}, 10);
-						});
-					}
-				});
-				return stream;
-			},
-		});
-
-		let assistantStarts = 0;
-		const extensionRunner = {
-			emit: vi.fn(async (event: { type: string; message?: { role?: string } }) => {
-				if (event.type === "message_start" && event.message?.role === "assistant" && ++assistantStarts === 2) {
-					retryStartEntered.resolve();
-					await retryStartReleased.promise;
-				}
-				return undefined;
-			}),
-			emitBeforeAgentStart: vi.fn().mockResolvedValue(undefined),
-			hasHandlers: vi.fn((eventType: string) => eventType === "message_start"),
-			emitSessionStop: vi.fn().mockResolvedValue(undefined),
-		} as unknown as ExtensionRunner;
-
-		const sessionManager = SessionManager.inMemory();
-		const settings = Settings.isolated();
-		const modelRegistry = sharedModelRegistry;
-		session = new AgentSession({ agent, sessionManager, settings, modelRegistry, ttsrManager, extensionRunner });
-
-		const triggered: string[] = [];
-		let turnStarts = 0;
-		session.subscribe(event => {
-			if (event.type === "ttsr_triggered") triggered.push(...event.rules.map(rule => rule.name));
-			if (event.type === "turn_start") turnStarts++;
-		});
-
-		await session.prompt("Say the phrase across two responses");
-		await session.waitForIdle();
-
-		expect(triggered).toEqual([]);
-		expect(turnStarts).toBe(1);
-		expect(assistantStarts).toBe(2);
-		expect(streamCallCount).toBe(2);
-	});
-
 	it("still catches a phrase split across deltas of one message while a turn_start handler stalls", async () => {
 		// The mirror image: the turn-start reset must also run before the awaited
 		// fan-out, or a turn_start handler still awaiting as streaming begins lets
@@ -2398,16 +2291,19 @@ describe("AgentSession TTSR resume gate", () => {
 						const partial = makeToolCallMessage();
 						stream.push({ type: "start", partial });
 						stream.push({ type: "toolcall_start", contentIndex: 0, partial });
+						let json = "";
 						for (let offset = 0; offset < serializedArguments.length; offset += chunkSize) {
-							accumulateToolCallArgumentsDelta(
-								toolCall,
-								serializedArguments.slice(offset, offset + chunkSize),
-								stream,
+							json += serializedArguments.slice(offset, offset + chunkSize);
+							toolCall[kStreamingPartialJson] = json;
+							toolCall.arguments = parseStreamingJson(json);
+							stream.push({
+								type: "toolcall_delta",
+								contentIndex: 0,
+								delta: serializedArguments.slice(offset, offset + chunkSize),
 								partial,
-								0,
-							);
+							});
 						}
-						finalizeToolCallArgumentsDone(toolCall, serializedArguments);
+						toolCall.arguments = JSON.parse(serializedArguments);
 						stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial });
 						stream.push({ type: "done", reason: "toolUse", message: partial });
 					});

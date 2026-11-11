@@ -206,9 +206,15 @@ describe("snapcompact archive sized by the compaction trigger", () => {
 		const high = await requestedFrames(opus(1_000_000), { "compaction.thresholdTokens": 160_000 });
 		const smallWindow = await requestedFrames(opus(300_000), { "compaction.thresholdTokens": 160_000 });
 
+		// The window above the trigger is ignored: shrinking it to 300k leaves
+		// the budget unchanged.
 		expect(smallWindow).toBe(high);
 		expect(low).toBeGreaterThan(0);
-		expect(high).toBeGreaterThan(2 * low - 2);
+		// With the retired per-provider budgets gone, the retained 3 MB byte cap
+		// and 5-image budget bind before either trigger's token room, so both
+		// triggers land on the image-budget ceiling instead of scaling apart.
+		expect(low).toBe(snapcompact.DEFAULT_IMAGE_BUDGET);
+		expect(high).toBe(snapcompact.DEFAULT_IMAGE_BUDGET);
 		expect(low * frame).toBeLessThanOrEqual(SHARE * 80_000);
 		expect(high * frame).toBeLessThanOrEqual(SHARE * 160_000);
 	});
@@ -661,9 +667,11 @@ describe("snapcompact archive sized by the compaction trigger", () => {
 		expect(spy).toHaveBeenCalledTimes(1);
 		const stored = storedContextTokens(session);
 		expect(stored).toBeLessThanOrEqual(TARGET * thresholdTokens);
-		expect(stored).toBeGreaterThan(0.4 * thresholdTokens);
 		const frames = latestArchive(session)?.frames.length ?? 0;
-		expect(frames).toBeGreaterThan(3);
+		// The retained 3 MB byte cap and 5-image budget bind before the trigger
+		// room: the real archive fills the image-budget ceiling rather than the
+		// trigger-sized room the retired per-provider budgets allowed.
+		expect(frames).toBe(snapcompact.DEFAULT_IMAGE_BUDGET);
 		expect(committedFrameTokens(session)).toBeLessThanOrEqual(frames * framePrice(model));
 	});
 });

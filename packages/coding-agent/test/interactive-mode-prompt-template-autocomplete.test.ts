@@ -24,6 +24,8 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 
 import { cfgStartupQuiet } from "@oh-my-pi/pi-coding-agent/modes/settings";
 
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
+
 function makeTool(name: string): AgentTool {
 	return {
 		name,
@@ -60,11 +62,9 @@ describe("InteractiveMode prompt-template autocomplete (#2462)", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		cfgStartupQuiet.set(Settings.instance, true);
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		// ModelRegistry (bundled-model load) and the resolved model are immutable across
-		// these tests, so build them once rather than per test.
+		// The resolved model is immutable across these tests, so build it once rather than per test.
 		registry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
-		model = modelOrThrow(registry, "claude-sonnet-4-5");
+		model = getBundledModel<Api>("anthropic", "claude-sonnet-4-5");
 		tools = [makeTool("read")];
 	});
 
@@ -91,12 +91,6 @@ describe("InteractiveMode prompt-template autocomplete (#2462)", () => {
 		tempDir?.removeSync();
 		resetSettingsForTest();
 	});
-
-	function modelOrThrow(registry: ModelRegistry, id: string): Model<Api> {
-		const model = registry.find("anthropic", id);
-		if (!model) throw new Error(`Expected anthropic model ${id} to exist`);
-		return model;
-	}
 
 	function createHarness(templates: PromptTemplate[]): { mode: InteractiveMode; session: AgentSession } {
 		// SessionManager and AgentSession can't be shared: AgentSession.dispose() closes

@@ -392,11 +392,11 @@ describe("structured subagent primitive", () => {
 		const model = buildModel({
 			id: "effort-target",
 			name: "Effort Target",
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "mock",
 			baseUrl: "https://example.com",
 			reasoning: true,
-			thinking: { mode: "budget", efforts: [Effort.Low, Effort.Medium, Effort.High] },
+			thinking: { mode: "effort", efforts: [Effort.Low, Effort.Medium, Effort.High] },
 			input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: 128_000,

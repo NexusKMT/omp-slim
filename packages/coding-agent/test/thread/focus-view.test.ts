@@ -75,7 +75,7 @@ async function mainRegistry(): Promise<ModelRegistry> {
 		authStorage.close();
 		await fs.rm(dir, { recursive: true, force: true });
 	});
-	return new ModelRegistry(authStorage, modelsPath, { cacheDbPath: path.join(dir, "models.db") });
+	return new ModelRegistry(authStorage, modelsPath);
 }
 
 async function startWorker(): Promise<FocusProbe> {
@@ -343,7 +343,9 @@ describe("focused view of a worker-homed agent session", () => {
 		});
 		const render = (): string => stripVTControlCharacters(statusLine.getTopBorder(160).content);
 		const before = render();
-		expect(before).toContain("Sonnet");
+		// The slim fixture carries no vendor display names; the model segment
+		// renders the fixture's id-derived name.
+		expect(before).toContain("claude-sonnet-4-5");
 		const selectors = remote.getAvailableEffortSelectors();
 		const expected = selectors[selectors.indexOf(ThinkingLevel.Low) + 1];
 		const next = remote.cycleThinkingLevel();

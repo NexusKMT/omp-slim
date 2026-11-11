@@ -33,6 +33,7 @@ import { setKeybindings } from "@oh-my-pi/pi-tui";
 import { formatNumber, TempDir } from "@oh-my-pi/pi-utils";
 
 import { cfgPlanAutosave, cfgPlanAutosaveDir } from "@oh-my-pi/pi-coding-agent/plan-mode/settings";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 
 /**
  * Matches the plan-approved synthetic-prompt dispatch. `#approvePlan` calls
@@ -175,10 +176,7 @@ describe("InteractiveMode plan review rendering", () => {
 
 	beforeEach(() => {
 		tempDir = TempDir.createSync("@pi-plan-review-");
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!model) {
-			throw new Error("Expected claude-sonnet-4-5 to exist in registry");
-		}
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 
 		session = new AgentSession({
 			agent: new Agent({
@@ -1415,10 +1413,7 @@ describe("InteractiveMode plan review rendering", () => {
 		mode.stop();
 		await session.dispose();
 
-		const executionModel = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!executionModel?.contextWindow) {
-			throw new Error("Expected test models with context windows");
-		}
+		const executionModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		session = new AgentSession({
 			agent: new Agent({
 				initialState: {
@@ -1465,7 +1460,7 @@ describe("InteractiveMode plan review rendering", () => {
 		expect(selector.mock.calls[0]?.[2]).toEqual([
 			"Approve and execute",
 			"Approve and compact context",
-			`Approve and keep context (~${compactNumber(tokens)} / ${compactNumber(executionModel.contextWindow)})`,
+			`Approve and keep context (~${compactNumber(tokens)} / ${compactNumber(executionModel.contextWindow ?? 0)})`,
 			"Refine plan",
 			"Save and quit",
 		]);
@@ -1829,8 +1824,7 @@ describe("InteractiveMode plan review rendering", () => {
 	for (const choice of ["Approve and execute", "Approve and keep context", "Approve and compact context"]) {
 		it(`keeps a model manually selected during planning when choosing ${choice}`, async () => {
 			await mode.handlePlanModeCommand();
-			const selectedModel = session.modelRegistry.find("anthropic", "claude-opus-4-5");
-			if (!selectedModel) throw new Error("Expected opus in the registry");
+			const selectedModel = getBundledModel("anthropic", "claude-opus-4-5");
 			await session.setModelTemporary(selectedModel, ThinkingLevel.High);
 			const planFilePath = mode.planModePlanFilePath!;
 			const resolvedPlanPath = resolveLocalUrlToPath(planFilePath, {

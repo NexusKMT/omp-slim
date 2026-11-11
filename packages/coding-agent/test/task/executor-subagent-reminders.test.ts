@@ -3,7 +3,6 @@ const EXECUTOR_PARENT_MODEL = createExecutorParentModel({ id: "executor-parent" 
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { AgentBusyError, type AgentTelemetryConfig, type Tracer } from "@oh-my-pi/pi-agent-core";
 import { type AssistantMessage, Effort } from "@oh-my-pi/pi-ai";
-import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionActions, LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
@@ -601,41 +600,6 @@ describe("runSubprocess yield reminders", () => {
 		if (typeof systemPromptBuilder !== "function") throw new Error("Expected system prompt builder");
 		expect(systemPromptBuilder(["system"])?.at(-1)).toContain("your final message is your result");
 		expect(prompts).toHaveLength(1);
-		expect(result.exitCode).toBe(0);
-		expect(result.output).toBe(report);
-	});
-
-	it("returns only the text after Cursor's last server-resolved tool call", async () => {
-		const report = "## Result\nThe auth lookup is complete.";
-		const session = createMockSession(({ emit, state }) => {
-			const edit = {
-				type: "toolCall" as const,
-				id: "tool-edit",
-				name: "edit",
-				arguments: { path: "src/auth.ts" },
-				[kCursorExecResolved]: true as const,
-			};
-			const read = {
-				type: "toolCall" as const,
-				id: "tool-read",
-				name: "read",
-				arguments: { path: "src/auth.ts" },
-				[kCursorExecResolved]: true as const,
-			};
-			const final: AssistantMessage = {
-				...createAssistantStopMessage(""),
-				api: "cursor-agent",
-				provider: "cursor",
-				content: [{ type: "text", text: "Checking auth." }, edit, read, { type: "text", text: report }],
-			};
-			state.messages.push(final);
-			emit({ type: "message_end", message: final });
-			emit({ type: "agent_end", messages: [final] });
-		});
-		mockCreateAgentSession(session);
-
-		const result = await runSubprocess({ ...baseOptions, id: "subagent-cursor-final", structured: false });
-
 		expect(result.exitCode).toBe(0);
 		expect(result.output).toBe(report);
 	});

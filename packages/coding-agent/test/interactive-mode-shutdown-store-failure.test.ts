@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
@@ -49,8 +50,7 @@ describe("InteractiveMode shutdown when the session store keeps failing (#12238)
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("expected bundled model");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		// File-backed (not inMemory): the failure under test comes from the real
 		// storage backend's write path.
 		sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));

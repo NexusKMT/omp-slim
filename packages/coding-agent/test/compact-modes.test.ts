@@ -4,7 +4,7 @@ import { findCompactMode, parseCompactArgs } from "@oh-my-pi/pi-coding-agent/ses
 describe("compact mode registry", () => {
 	it("resolves mode names case-insensitively and rejects unknowns", () => {
 		expect(findCompactMode("SOFT")?.name).toBe("soft");
-		expect(findCompactMode("  Remote ")?.name).toBe("remote");
+		expect(findCompactMode("  Snapcompact ")?.name).toBe("snapcompact");
 		expect(findCompactMode("bogus")).toBeUndefined();
 		expect(findCompactMode("")).toBeUndefined();
 	});
@@ -18,8 +18,8 @@ describe("parseCompactArgs", () => {
 
 	it("detects a leading mode token", () => {
 		expect(parseCompactArgs("soft")).toEqual({ mode: "soft" });
-		expect(parseCompactArgs("remote")).toEqual({ mode: "remote" });
 		expect(parseCompactArgs("snapcompact")).toEqual({ mode: "snapcompact" });
+		expect(parseCompactArgs("remote")).toEqual({ instructions: "remote" });
 	});
 
 	it("splits a mode from its trailing focus instructions", () => {
@@ -27,8 +27,8 @@ describe("parseCompactArgs", () => {
 			mode: "soft",
 			instructions: "focus on the parser bug",
 		});
-		expect(parseCompactArgs("remote   keep auth details")).toEqual({
-			mode: "remote",
+		expect(parseCompactArgs("soft   keep auth details")).toEqual({
+			mode: "soft",
 			instructions: "keep auth details",
 		});
 	});

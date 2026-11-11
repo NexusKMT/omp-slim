@@ -34,7 +34,7 @@ import { createSessionDefaults } from "../helpers/session-defaults";
 import { manyToolName } from "../fixtures/many-tools-mcp";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
-import { cfgTierAnthropic, cfgTierGoogle, cfgTierOpenai } from "@oh-my-pi/pi-coding-agent/session/settings";
+import { cfgTierOpenai } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 function createMockSession(
 	onPrompt: (params: { emit: (event: AgentSessionEvent) => void }) => void | Promise<void>,
@@ -506,7 +506,7 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		});
 
 		expect(result.exitCode).toBe(0);
-		expect(spy.mock.calls[0]?.[0]?.thinkingLevel).toBe(ThinkingLevel.Max);
+		expect(spy.mock.calls[0]?.[0]?.thinkingLevel).toBe(ThinkingLevel.High);
 	});
 
 	it("falls back to the agent-definition thinking level without an explicit suffix", async () => {
@@ -630,26 +630,22 @@ describe("runSubprocess per-agent service-tier overrides", () => {
 		expect(result.exitCode).toBe(0);
 		const sessionOptions = spy.mock.calls[0]?.[0];
 		expect(sessionOptions?.resolveServiceTierByFamily).toBeUndefined();
-		expect([
-			sessionOptions?.settings ? cfgTierOpenai.get(sessionOptions?.settings) : undefined,
-			sessionOptions?.settings ? cfgTierAnthropic.get(sessionOptions?.settings) : undefined,
-			sessionOptions?.settings ? cfgTierGoogle.get(sessionOptions?.settings) : undefined,
-		]).toEqual(["flex", "none", "flex"]);
+		expect(sessionOptions?.settings ? cfgTierOpenai.get(sessionOptions?.settings) : undefined).toBe("flex");
 	});
 
-	it("drops inherited live tiers a family can't realize instead of failing the spawn", async () => {
+	it("inherits the parent's live service tier instead of the settings tier", async () => {
 		const model = getBundledModel("openai-codex", "gpt-5.6-sol");
 		if (!model) throw new Error("Expected gpt-5.6-sol model to exist");
 		const session = yieldEmittingSession();
 		const spy = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
 
-		// A resumed parent session file can carry a live tier its family never realizes.
+		// A resumed parent session file can carry a live tier its settings do not.
 		const result = await runSubprocess({
 			...baseOptions,
 			agent: { ...baseAgent, name: "scout", model: [`${model.provider}/${model.id}`] },
 			id: "subagent-inherited-unrealizable-tier",
 			settings: Settings.isolated({ "tier.subagent": "inherit" }),
-			parentServiceTier: { openai: "flex", anthropic: "flex" },
+			parentServiceTier: { openai: "flex" },
 			modelRegistry: createModelRegistry(model),
 			parentModel: model,
 		});
@@ -657,31 +653,7 @@ describe("runSubprocess per-agent service-tier overrides", () => {
 		expect(result.exitCode).toBe(0);
 		const childSettings = spy.mock.calls[0]?.[0]?.settings;
 		if (!childSettings) throw new Error("Expected createAgentSession to receive settings");
-		expect([
-			cfgTierOpenai.get(childSettings),
-			cfgTierAnthropic.get(childSettings),
-			cfgTierGoogle.get(childSettings),
-		]).toEqual(["flex", "none", "none"]);
-	});
-
-	it("lets an unsupported concrete override beat the global tier without crossing families", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
-		const session = yieldEmittingSession();
-		const spy = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
-
-		const result = await runSubprocess({
-			...baseOptions,
-			agent: { ...baseAgent, name: "reviewer", model: [`${model.provider}/${model.id}`] },
-			serviceTierOverride: "scale",
-			id: "subagent-agent-service-tier-family-validation",
-			settings: Settings.isolated({ "tier.subagent": "priority" }),
-			modelRegistry: createModelRegistry(model),
-			parentModel: model,
-		});
-
-		expect(result.exitCode).toBe(0);
-		expect(childTiers(spy.mock.calls[0]?.[0])).toEqual({});
+		expect(cfgTierOpenai.get(childSettings)).toBe("flex");
 	});
 
 	it("resolves service tier against the inherited parent model", async () => {

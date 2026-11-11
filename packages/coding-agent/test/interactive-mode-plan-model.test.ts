@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import * as path from "node:path";
 import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
@@ -31,8 +32,7 @@ describe("plan mode uses the current model", () => {
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
-		const defaultModel = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!defaultModel) throw new Error("Expected claude-sonnet-4-5 in registry");
+		const defaultModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 
 		session = new AgentSession({
 			agent: new Agent({
@@ -84,8 +84,7 @@ describe("plan mode uses the current model", () => {
 
 	it("preserves a manual model selection when pausing plan mode", async () => {
 		await mode.handlePlanModeCommand();
-		const selectedModel = modelRegistry.find("anthropic", "claude-opus-4-5");
-		if (!selectedModel) throw new Error("Expected opus in the registry");
+		const selectedModel = getBundledModel("anthropic", "claude-opus-4-5");
 		await session.setModelTemporary(selectedModel, ThinkingLevel.High);
 		vi.spyOn(mode, "showHookConfirm").mockResolvedValue(true);
 		await mode.handlePlanModeCommand();

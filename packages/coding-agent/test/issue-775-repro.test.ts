@@ -70,7 +70,7 @@ describe("issue #775: per-model defaultLevel", () => {
 		const opusWithDefault: Model = {
 			...opus,
 			thinking: {
-				mode: "anthropic-adaptive",
+				mode: "effort",
 				efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
 				defaultLevel: Effort.XHigh,
 			},
@@ -87,7 +87,10 @@ describe("issue #775: per-model defaultLevel", () => {
 
 	it("setModel preserves current level when model has no defaultLevel", async () => {
 		const sonnet = getSonnet();
-		const opus = getOpus();
+		const opus = getBundledModel("anthropic", "claude-opus-4-5", {
+			thinking: { mode: "effort", efforts: [Effort.Low, Effort.Medium, Effort.High] },
+		});
+		if (!opus) throw new Error("expected claude-opus-4-5");
 
 		const settings = Settings.isolated({ defaultThinkingLevel: Effort.Medium });
 		await createSession(sonnet, settings);

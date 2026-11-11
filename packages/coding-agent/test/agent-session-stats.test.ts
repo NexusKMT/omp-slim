@@ -9,16 +9,13 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { estimateToolSchemaTokens } from "@oh-my-pi/pi-tui/status-line/context-usage";
+import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 
 describe("AgentSession session stats", () => {
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
 	let session: AgentSession | undefined;
-	const model = (): Model => {
-		const found = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!found) throw new Error("Expected a bundled model");
-		return found;
-	};
+	const model = (): Model => getBundledModel("anthropic", "claude-sonnet-4-5");
 	const appendUsage = (manager: SessionManager, target: Model, input: number, overrides: Partial<Usage> = {}) =>
 		manager.appendModelUsage(
 			{
@@ -97,8 +94,7 @@ describe("AgentSession session stats", () => {
 	});
 
 	it("keeps mixed peak and off-peak charges in session and footer totals after resume", async () => {
-		const target = modelRegistry.find("deepseek", "deepseek-v4-flash");
-		if (!target) throw new Error("Expected bundled DeepSeek Flash");
+		const target = getBundledModel("anthropic", "claude-sonnet-4-5");
 		using tempDir = TempDir.createSync("@omp-session-mixed-cost-");
 		const manager = SessionManager.create(tempDir.path(), tempDir.path());
 		manager.appendMessage({ role: "user", content: "First request", timestamp: 1 });
@@ -182,10 +178,8 @@ describe("AgentSession session stats", () => {
 	});
 
 	it("preserves authoritative provider occupancy above the local transcript estimate", () => {
-		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!model?.contextWindow) {
-			throw new Error("Expected bundled model with a context window");
-		}
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model.contextWindow) throw new Error("Expected bundled model with a context window");
 
 		const userMessage: UserMessage = {
 			role: "user",
@@ -243,10 +237,7 @@ describe("AgentSession session stats", () => {
 	});
 
 	it("treats persisted assistant messages without usage as zero-cost history", async () => {
-		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!model) {
-			throw new Error("Expected bundled model with a context window");
-		}
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 
 		using tempDir = TempDir.createSync("@omp-session-stats-");
 		const sessionFile = `${tempDir.path()}/repro.jsonl`;
@@ -328,10 +319,7 @@ describe("AgentSession session stats", () => {
 	});
 
 	it("reconstructs persisted and active tool-loop context when provider prompt usage is unavailable", async () => {
-		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!model?.contextWindow) {
-			throw new Error("Expected bundled model with a context window");
-		}
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 
 		const outputOnlyUsage = {
 			input: 0,
@@ -419,8 +407,7 @@ describe("AgentSession session stats", () => {
 	});
 
 	it("aggregates provider credits and concrete routed models", () => {
-		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!model) throw new Error("Expected a bundled model");
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 
 		const usage = {
 			input: 1,
@@ -510,56 +497,5 @@ describe("AgentSession session stats", () => {
 		});
 
 		expect(session.getSessionStats().editRejections).toEqual({ unseen_lines: 2, stale_tag: 1 });
-	});
-
-	it("drops anchored tool schemas after switching to a model that defers them", () => {
-		const inlineModel = { ...model(), toolSchemasInContext: true };
-		const deferredModel: Model = { ...inlineModel, toolSchemasInContext: false };
-		const tool: AgentTool = {
-			name: "mcp__catalog__search",
-			label: "Search",
-			description: "Search account records with detailed filters. ".repeat(2_000),
-			parameters: type("object"),
-			execute: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
-		};
-		const agent = new Agent({ initialState: { model: inlineModel, systemPrompt: ["Test"], tools: [tool] } });
-		const schemaTokens = estimateToolSchemaTokens(agent.state.tools, agent.tokenizer);
-		const promptTokens = schemaTokens + 1_000;
-		const messages: Message[] = [
-			{ role: "user", content: "Look up the account.", timestamp: 1 },
-			{
-				role: "assistant",
-				content: [{ type: "text", text: "Found it." }],
-				api: inlineModel.api,
-				provider: inlineModel.provider,
-				model: inlineModel.id,
-				usage: {
-					input: promptTokens,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: promptTokens,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
-				contextSnapshot: { promptTokens, nonMessageTokens: schemaTokens, toolSchemaTokens: schemaTokens },
-				stopReason: "stop",
-				timestamp: 2,
-			},
-		];
-		const sessionManager = SessionManager.inMemory();
-		for (const message of messages) sessionManager.appendMessage(message);
-		agent.replaceMessages(messages);
-		session = new AgentSession({
-			agent,
-			sessionManager,
-			settings: Settings.isolated({ "compaction.enabled": false }),
-			modelRegistry,
-		});
-		const inlineTokens = session.getContextUsage()?.tokens ?? 0;
-
-		agent.setModel(deferredModel);
-
-		expect(inlineTokens).toBeGreaterThanOrEqual(promptTokens);
-		expect(session.getContextUsage()?.tokens).toBe(inlineTokens - schemaTokens);
 	});
 });

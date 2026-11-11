@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { convertAnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic";
-import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { runAnonymizeCommand } from "../src/cli/anonymize-cli";
 import { CliUsageError } from "../src/cli/usage-error";
@@ -84,13 +82,10 @@ describe("omp anonymize output", () => {
 			expect(collectPendingToolCalls(resumed.getBranch())).toContainEqual(
 				expect.objectContaining({ toolName: "edit", toolCallId: "toolu_02editabcdef" }),
 			);
-			const model = getBundledModel<"anthropic-messages">("anthropic", "claude-sonnet-4-5");
-			if (!model) throw new Error("Expected bundled model");
-			const wire = convertAnthropicMessages(convertToLlm(resumed.buildSessionContext().messages), model, false);
-			const result = wire
-				.flatMap(message => (typeof message.content === "string" ? [] : message.content))
-				.find(block => block.type === "tool_result");
-			expect(result?.content).toEqual([{ type: "text", text: expect.stringMatching(/^\[redacted #\d+:/) }]);
+			const toolResult = convertToLlm(resumed.buildSessionContext().messages).find(
+				message => message.role === "toolResult",
+			);
+			expect(toolResult?.content).toEqual([{ type: "text", text: expect.stringMatching(/^\[redacted #\d+:/) }]);
 		} finally {
 			await resumed.close();
 			await seed.close();

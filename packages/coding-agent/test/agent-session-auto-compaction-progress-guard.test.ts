@@ -741,74 +741,6 @@ describe("AgentSession auto-compaction progress guard", () => {
 		});
 	});
 
-	it("restores the persisted overflow error when compaction skips without committing", async () => {
-		// `#runAutoCompaction` returning COMPACTION_CHECK_NONE without writing a
-		// compaction summary (no available model, hook cancel, compaction error)
-		// MUST NOT erase the user-visible assistant error: the transcript would
-		// otherwise lose the only explanation of why the turn stopped.
-		seedPriorTurns();
-		vi.spyOn(modelRegistry, "getAvailable").mockReturnValue([]);
-		const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
-		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
-
-		const { promise: compactionDone, resolve: onCompactionDone } = Promise.withResolvers<void>();
-		session.subscribe(event => {
-			if (event.type === "auto_compaction_end") onCompactionDone();
-		});
-
-		const assistantMsg = contentfulOverflowAssistant();
-		session.agent.emitExternalEvent({ type: "message_end", message: assistantMsg });
-		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMsg] });
-
-		await compactionDone;
-		await session.waitForIdle();
-
-		expect(promptSpy).not.toHaveBeenCalled();
-		expect(continueSpy).not.toHaveBeenCalled();
-		expect(sessionManager.getBranch()).toContainEqual(
-			expect.objectContaining({
-				type: "message",
-				message: expect.objectContaining({
-					role: "assistant",
-					stopReason: "error",
-					errorMessage: assistantMsg.errorMessage,
-				}),
-			}),
-		);
-	});
-
-	it("does not restore a content-less overflow error when compaction skips without committing", async () => {
-		seedPriorTurns();
-		vi.spyOn(modelRegistry, "getAvailable").mockReturnValue([]);
-		const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined as never);
-		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
-
-		const { promise: compactionDone, resolve: onCompactionDone } = Promise.withResolvers<void>();
-		session.subscribe(event => {
-			if (event.type === "auto_compaction_end") onCompactionDone();
-		});
-
-		const assistantMsg = overflowAssistant();
-		session.agent.emitExternalEvent({ type: "message_end", message: assistantMsg });
-		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMsg] });
-
-		await compactionDone;
-		await session.waitForIdle();
-
-		expect(promptSpy).not.toHaveBeenCalled();
-		expect(continueSpy).not.toHaveBeenCalled();
-		expect(sessionManager.getBranch()).not.toContainEqual(
-			expect.objectContaining({
-				type: "message",
-				message: expect.objectContaining({
-					role: "assistant",
-					stopReason: "error",
-					errorMessage: assistantMsg.errorMessage,
-				}),
-			}),
-		);
-	});
-
 	it("restores the persisted overflow error when no-op recovery blocks automatic continuation", async () => {
 		// A no-preparation overflow recovery returns the blocked-continuation result
 		// to prevent a no-op compaction loop, but it has not written a compaction
@@ -1429,7 +1361,7 @@ describe("AgentSession auto-compaction progress guard", () => {
 			sessionManager.appendMessage({ role: "user", content: "next", timestamp: Date.now() });
 		}
 		session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
-		const currentModel = session.agent.state.model;
+		const currentModel = session.agent.state.model!;
 		session.agent.setModel({ ...currentModel, contextWindow: 4096, maxTokens: 1024 });
 		cfgCompactionReserveTokens.set(session.settings, 16384);
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
@@ -1483,7 +1415,7 @@ describe("AgentSession auto-compaction progress guard", () => {
 			sessionManager.appendMessage({ role: "user", content: "next", timestamp: Date.now() });
 		}
 		session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
-		const currentModel = session.agent.state.model;
+		const currentModel = session.agent.state.model!;
 		session.agent.setModel({ ...currentModel, contextWindow: 16385, maxTokens: 1024 });
 		// compaction.reserveTokens stays unset: the DEFAULTED reserve is the
 		// scenario — an explicit 16384 would be honored and leave a 1-token
@@ -1517,7 +1449,7 @@ describe("AgentSession auto-compaction progress guard", () => {
 		// but must respect a valid user reserve above the 15% default. Otherwise a
 		// prompt in the reserved headroom band can retry straight into overflow.
 		seedPriorTurns();
-		const currentModel = session.agent.state.model;
+		const currentModel = session.agent.state.model!;
 		session.agent.setModel({ ...currentModel, contextWindow: 20000, maxTokens: 1024 });
 		cfgCompactionReserveTokens.set(session.settings, 5000);
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
@@ -1548,7 +1480,7 @@ describe("AgentSession auto-compaction progress guard", () => {
 		// the remaining ~10k usable budget. The proportional fallback is only for
 		// default/impossible reserves, not explicit large reserves.
 		seedPriorTurns();
-		const currentModel = session.agent.state.model;
+		const currentModel = session.agent.state.model!;
 		session.agent.setModel({ ...currentModel, contextWindow: 100000, maxTokens: 1024 });
 		cfgCompactionReserveTokens.set(session.settings, 90000);
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();

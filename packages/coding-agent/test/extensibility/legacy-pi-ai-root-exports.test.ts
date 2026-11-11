@@ -1,9 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, FetchImpl } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import {
-	anthropicMessagesApi,
 	collapseSystemMessages,
 	contentText,
 	createInitialSystemMessage,
@@ -24,7 +21,6 @@ import {
 	repairJson,
 	resolveTranscript,
 	resolveTranscriptTools,
-	streamSimpleOpenAIResponses,
 	toToolDeclaration,
 	withoutInitialSystemMessage,
 } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-ai-shim";
@@ -73,103 +69,6 @@ describe("legacy pi-ai shim root exports", () => {
 		expect(parseJsonWithRepair<{ a: number }>("{a: 1,}")).toEqual({ a: 1 });
 		// parseStreamingJson completes a truncated object at the streaming edge.
 		expect(parseStreamingJson<{ a: number }>('{"a": 1')).toEqual({ a: 1 });
-	});
-
-	it.each(["stream", "streamSimple"])("runs the host Anthropic transport through legacy %s", async method => {
-		const urls: string[] = [];
-		const fetchMock: FetchImpl = Object.assign(
-			async (input: string | URL | Request) => {
-				urls.push(input instanceof Request ? input.url : input.toString());
-				return new Response(
-					JSON.stringify({
-						type: "error",
-						error: { type: "invalid_request_error", message: "intentional test response" },
-					}),
-					{ status: 400, headers: { "content-type": "application/json" } },
-				);
-			},
-			{ preconnect: fetch.preconnect },
-		);
-		const model = buildModel({
-			id: "legacy-anthropic-adapter",
-			name: "Legacy Anthropic Adapter",
-			api: "anthropic-messages",
-			provider: "anthropic",
-			baseUrl: "https://anthropic.example.test",
-			reasoning: false,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 200_000,
-			maxTokens: 8_192,
-		});
-
-		const api = anthropicMessagesApi();
-		const stream = method === "stream" ? api.stream : api.streamSimple;
-		const result = await stream(
-			model,
-			{ messages: [{ role: "user", content: "hello", timestamp: 0 }] },
-			{
-				apiKey: "test-key",
-				fetch: fetchMock,
-			},
-		).result();
-
-		expect(result.stopReason).toBe("error");
-		expect(result.errorMessage).toContain("intentional test response");
-		expect(urls).toEqual(["https://anthropic.example.test/v1/messages"]);
-	});
-
-	it("maps legacy simple options before streaming OpenAI Responses", async () => {
-		const requests: unknown[] = [];
-		const fetchMock: FetchImpl = Object.assign(
-			async () =>
-				new Response(
-					JSON.stringify({
-						error: { message: "intentional test response", type: "invalid_request_error" },
-					}),
-					{ status: 400, headers: { "content-type": "application/json" } },
-				),
-			{ preconnect: fetch.preconnect },
-		);
-		const model = buildModel({
-			id: "legacy-simple-options",
-			name: "Legacy Simple Options",
-			api: "openai-responses",
-			provider: "openai",
-			baseUrl: "https://responses.example.test/v1",
-			reasoning: true,
-			compat: {
-				supportsReasoningParams: true,
-				supportsReasoningEffort: true,
-			},
-			thinking: {
-				mode: "effort",
-				efforts: [Effort.High],
-			},
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128_000,
-			maxTokens: 16_384,
-		});
-
-		const result = await streamSimpleOpenAIResponses(
-			model,
-			{ messages: [{ role: "user", content: "hello", timestamp: 0 }] },
-			{
-				apiKey: "test-key",
-				reasoning: Effort.High,
-				hideThinkingSummary: true,
-				fetch: fetchMock,
-				onPayload: request => {
-					requests.push(request);
-				},
-			},
-		).result();
-
-		expect(result.stopReason).toBe("error");
-		expect(requests).toHaveLength(1);
-		expect(requests[0]).toMatchObject({ reasoning: { effort: "high" } });
-		expect(JSON.stringify(requests[0])).not.toContain('"summary"');
 	});
 });
 
