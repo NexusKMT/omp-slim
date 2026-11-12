@@ -69,3 +69,12 @@ P0 全部落地；P1（显式-only 搜索引擎尾）与 P2（blob-broker / 外�
 - models-config-schema-bundle（83 行）：被 models-config.ts 消费，活。
 - web 面 112 文件：无任何死文件/死注册；无已删传输接线残留。
 - aws-sigv4（223 行）：被 blob-broker S3 上传使用，不是 Bedrock 残留。
+
+## 六、裁切后回归修复（2026-11-12 同日晚）
+
+Chat Completions 单一传输裁切（0d73ddd567）在删除兼容键（`reasoningContentField`、`requiresReasoningContentForToolCalls`、`stripThinkingHistory`）时，连带删掉了 reasoning 解码、回显与 wire 侧 thinking 保留，导致 DeepSeek 类端点（moxuna deepseek-v4-pro）在多轮对话中返回 HTTP 400（`The reasoning_content in the thinking mode must be passed back to the API`）。修复分两处提交：
+
+- `99065feb1e`（ai 包）：重新解码 `reasoning_content`/`reasoning`/`reasoning_text` 流 delta 为带 `thinkingSignature` 的 thinking block；编码侧按 `isReasoningSourceSignature` 回显 `reasoning_content`（剔除 Mistral typed-parts 签名）。
+- `dcb5e6b7cf`（agent 包）：删除 `normalizeMessagesForProvider` 对 thinking 的无条件剥离——该剥离在 0d73ddd567 前由 `compat.stripThinkingHistory` 门控，裁切后变为无条件执行，使编码器永远拿不到可回显的 thinking block。wire 策略现在唯一收口在 openai-completions 编码器（thinking 不上线，除 `reasoning_content` 回显外）。
+
+端到端验证（桌面隔离环境 `~/Desktop/omp-slim-test`）：thinking→tool call→follow-up 两轮无 400；resume 已存历史会话的路径同样通过。
