@@ -28,7 +28,23 @@ function sse(...chunks: unknown[]): Response {
 }
 
 function assistant(content: AssistantMessage["content"]): AssistantMessage {
-	return { role: "assistant", content, timestamp: 1 };
+	return {
+		role: "assistant",
+		content,
+		api: "openai-completions",
+		provider: "explicit-gateway",
+		model: "explicit-model",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp: 1,
+	};
 }
 
 describe("DeepSeek-class reasoning replay", () => {
@@ -71,7 +87,14 @@ describe("DeepSeek-class reasoning replay", () => {
 						arguments: { path: "/tmp/x" },
 					},
 				]),
-				{ role: "toolResult", toolCallId: "call-1", content: [{ type: "text", text: "content" }], timestamp: 2 },
+				{
+					role: "toolResult" as const,
+					toolCallId: "call-1",
+					toolName: "read",
+					isError: false,
+					content: [{ type: "text" as const, text: "content" }],
+					timestamp: 2,
+				},
 			],
 		};
 		await streamOpenAICompletions(model, context, { apiKey: "key" }).result();

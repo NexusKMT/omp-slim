@@ -464,6 +464,7 @@
 		"check:types": "bun check --no-script -p tsconfig.json",
 		"lint": "oxlint .",
 		"test": "bun ../../scripts/ci-test-ts.ts coding-agent-heavy --full",
+		"test:live": "bun test test/live",
 		"fix": "oxlint --fix --fix-suggestions . && bun run fmt",
 		"fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts' && bun run format-prompts",
 		"format-prompts": "bun scripts/format-prompts.ts",

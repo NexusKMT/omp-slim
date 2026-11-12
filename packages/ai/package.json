@@ -75,6 +75,7 @@
 		"check:types": "bun check --no-script -p tsconfig.json",
 		"lint": "oxlint .",
 		"test": "bun test --parallel",
+		"test:live": "bun test test/live",
 		"fix": "oxlint --fix --fix-suggestions . && bun run fmt",
 		"fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts'"
 	},
