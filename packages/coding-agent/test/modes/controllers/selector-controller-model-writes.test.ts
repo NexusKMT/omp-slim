@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { getTestModel as getBundledModel } from "../../../../catalog/test/fixtures/models";
@@ -31,6 +32,18 @@ describe("SelectorController model hub writes", () => {
 		tempDir = TempDir.createSync("@pi-selector-model-writes-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
 		authStorage.keys.setRuntime("anthropic", "test-key");
+		writeFileSync(
+			path.join(tempDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  openai:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: gpt-5.6-terra",
+				"        contextWindow: 1050000",
+			].join("\n"),
+		);
 	});
 
 	afterEach(async () => {
@@ -50,7 +63,7 @@ describe("SelectorController model hub writes", () => {
 			agent: new Agent({ initialState: { model: initial, systemPrompt: ["Test"], tools: [], messages: [] } }),
 			sessionManager: SessionManager.inMemory(),
 			settings,
-			modelRegistry: new ModelRegistry(authStorage),
+			modelRegistry: new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml")),
 			obfuscator: new SecretObfuscator([]),
 		});
 		session = live;

@@ -9,9 +9,9 @@ import {
 import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
 
 const MODELS = [
-	{ provider: "anthropic", id: "claude-opus-4-5", contextWindow: 200_000 },
-	{ provider: "anthropic", id: "claude-sonnet-4-5", contextWindow: 200_000 },
-	{ provider: "openai", id: "gpt-5.2", contextWindow: 400_000 },
+	{ provider: "anthropic", id: "claude-opus-4-5", name: "claude-opus-4-5", contextWindow: 200_000 },
+	{ provider: "anthropic", id: "claude-sonnet-4-5", name: "claude-sonnet-4-5", contextWindow: 200_000 },
+	{ provider: "openai", id: "gpt-5.2", name: "gpt-5.2", contextWindow: 400_000 },
 ];
 
 function createRuntime() {

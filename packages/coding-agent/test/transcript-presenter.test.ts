@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -61,7 +62,18 @@ describe("extension transcript presenters", () => {
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		// Leaving a collab guest restores the local session's model, which needs auth for its provider.
 		authStorage.keys.setRuntime("anthropic", "test-key");
-		modelRegistry = new ModelRegistry(authStorage);
+		writeFileSync(
+			path.join(tempDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+			].join("\n"),
+		);
+		modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("Expected claude-sonnet-4-5 to exist in registry");
 		session = new AgentSession({

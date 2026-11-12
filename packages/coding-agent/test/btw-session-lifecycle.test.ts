@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -65,7 +66,18 @@ describe("BTW session boundaries", () => {
 		directory = TempDir.createSync("@omp-btw-session-lifecycle-");
 		await Settings.init({ inMemory: true, cwd: directory.path() });
 		auth = await AuthStorage.create(path.join(directory.path(), "auth.db"));
-		const registry = new ModelRegistry(auth);
+		writeFileSync(
+			path.join(directory.path(), "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+			].join("\n"),
+		);
+		const registry = new ModelRegistry(auth, path.join(directory.path(), "models.yml"));
 		const model = registry.find("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("Expected bundled model");
 		manager = SessionManager.create(directory.path(), directory.path());

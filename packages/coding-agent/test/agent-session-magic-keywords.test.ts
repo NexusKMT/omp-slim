@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Effort } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -35,6 +36,18 @@ const mockEvalTool: AgentTool = {
 	execute: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
 };
 
+/**
+ * Synthetic fixture model for a magic-keyword scenario. The production roster
+ * flagged only `claude-sonnet-5-5` as taking per-message effort
+ * (`compat.supportsPerMessageEffort`); the synthetic fixture leaves the flag
+ * unset, so re-apply it here to preserve the chillax/effort contract.
+ */
+function magicKeywordModel(id: string): Model<"openai-completions"> {
+	return getBundledModel("anthropic", id, {
+		compat: { supportsPerMessageEffort: id === "claude-sonnet-5-5" } as Model<"openai-completions">["compat"],
+	});
+}
+
 async function createMagicKeywordSession(
 	modelRegistry: ModelRegistry,
 	tools: AgentTool[] = [mockTaskTool, mockEvalTool],
@@ -43,8 +56,7 @@ async function createMagicKeywordSession(
 	session: AgentSession;
 	settings: Settings;
 }> {
-	const model = getBundledModel("anthropic", modelId);
-	if (!model) throw new Error("Expected bundled Claude Sonnet model");
+	const model = magicKeywordModel(modelId);
 	const agent = new Agent({
 		initialState: {
 			model,
@@ -217,7 +229,7 @@ describe("AgentSession magic keyword settings", () => {
 			const mock = createMockModel({ responses: [{ content: ["working"] }, { content: ["relaxed"] }] });
 			const agent = new Agent({
 				getApiKey: () => "test-key",
-				initialState: { model: getBundledModel("anthropic", id), systemPrompt: ["Test"], tools: [] },
+				initialState: { model: magicKeywordModel(id), systemPrompt: ["Test"], tools: [] },
 				convertToLlm,
 				streamFn: mock.stream,
 			});

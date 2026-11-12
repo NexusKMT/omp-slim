@@ -50,7 +50,6 @@ function restoreAgentDir(): void {
 }
 
 async function createReloadSession(tempDir: TempDir): Promise<{ session: AgentSession; authStorage: AuthStorage }> {
-	const marker = Bun.nanoseconds().toString(36);
 	const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
 	authStorage.keys.setRuntime("managed-primary", "test-key");
 	const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
@@ -61,7 +60,7 @@ async function createReloadSession(tempDir: TempDir): Promise<{ session: AgentSe
 		authStorage,
 		modelRegistry,
 		settings: Settings.isolated({ "compaction.enabled": false }),
-		model: buildLocalModel(`rules-reload-${marker}`),
+		model: buildLocalModel("openai-completions"),
 		disableExtensionDiscovery: true,
 		skills: [],
 		// rules intentionally omitted so discovery runs against disk.

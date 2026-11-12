@@ -1,4 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -73,7 +75,18 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		settingsDir = TempDir.createSync("@pi-issue-6879-settings-");
 		await Settings.init({ inMemory: true, cwd: settingsDir.path() });
 		authStorage = await AuthStorage.create(":memory:");
-		modelRegistry = new ModelRegistry(authStorage);
+		writeFileSync(
+			path.join(settingsDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+			].join("\n"),
+		);
+		modelRegistry = new ModelRegistry(authStorage, path.join(settingsDir.path(), "models.yml"));
 	});
 
 	beforeEach(() => {

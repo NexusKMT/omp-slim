@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed DeepSeek-class completions replay: reasoning streamed as `reasoning_content`/`reasoning`/`reasoning_text` is now decoded into signed thinking blocks and echoed back on subsequent turns, so endpoints demanding reasoning replay no longer reject follow-ups with HTTP 400.
+- Fixed the mock transport spy (`registerMockApi`) retaining every recorded model context, which kept parked subagent sessions — and their settings overlays — alive until the spy was restored; the spy now drops each call record as soon as it is dispatched, leaving `MockModel.calls` as the inspection surface.
 
 ## [18.18.2] - 2026-11-08
 

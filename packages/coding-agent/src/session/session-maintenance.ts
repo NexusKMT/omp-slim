@@ -1301,6 +1301,7 @@ export class SessionMaintenance {
 			let firstKeptEntryId: string;
 			let tokensBefore: number;
 			let details: unknown;
+			let providerReplayThroughEntryId: string | undefined;
 
 			// Snapcompact runs locally first. The frame cap is sized from the room
 			// under the compaction trigger via #computeSnapcompactMaxFrames (and
@@ -1382,6 +1383,7 @@ export class SessionMaintenance {
 				tokensBefore = compactionPrep.tokensBefore;
 				details = compactionPrep.details;
 				preserveData = compactionPrep.preserveData;
+				providerReplayThroughEntryId = compactionPrep.providerReplayThroughEntryId;
 			} else if (snapcompactResult) {
 				summary = snapcompactResult.summary;
 				shortSummary = snapcompactResult.shortSummary;
@@ -1419,6 +1421,7 @@ export class SessionMaintenance {
 					tokensBefore = result.tokensBefore;
 					details = result.details;
 					preserveData = mergeLlmCompactionPreserveData(compactionPrep.preserveData, result.preserveData);
+					providerReplayThroughEntryId = result.providerReplayThroughEntryId;
 				} catch (err) {
 					if (err instanceof CompactionCancelledError) {
 						if (!compactionAbortController.signal.aborted || err.cause !== undefined) throw err;
@@ -1450,6 +1453,7 @@ export class SessionMaintenance {
 				details,
 				fromExtension,
 				preserveData,
+				providerReplayThroughEntryId,
 				method: fromExtension ? undefined : selectedMethod,
 				advisorResetReason: "compact",
 			});
@@ -1461,6 +1465,7 @@ export class SessionMaintenance {
 				tokensBefore,
 				details,
 				preserveData: snapcompact.stripPreservedArchive(preserveData),
+				...(providerReplayThroughEntryId ? { providerReplayThroughEntryId } : {}),
 			};
 			options?.onComplete?.(compactionResult);
 			return finish(compactionResult);
@@ -2353,6 +2358,7 @@ export class SessionMaintenance {
 		details: unknown;
 		fromExtension: boolean;
 		preserveData: Record<string, unknown> | undefined;
+		providerReplayThroughEntryId?: string;
 		method: CompactionMethod | undefined;
 		advisorResetReason: string;
 		detachExtensionEmit?: boolean;
@@ -2366,6 +2372,7 @@ export class SessionMaintenance {
 				details: args.details,
 				fromExtension: args.fromExtension,
 				preserveData: stripLegacyCompactionData(args.preserveData),
+				providerReplayThroughEntryId: args.providerReplayThroughEntryId,
 				method: args.method,
 				tokensAfter:
 					isRecord(args.details) && args.details.kind === "experimental-context-rollover"
@@ -3258,6 +3265,7 @@ export class SessionMaintenance {
 				tokensBefore: number;
 				details: unknown;
 				preserveData: Record<string, unknown> | undefined;
+				providerReplayThroughEntryId: string | undefined;
 		  }
 		| {
 				kind: "needsLlm";
@@ -3293,6 +3301,7 @@ export class SessionMaintenance {
 				tokensBefore: hookCompaction.tokensBefore,
 				details: hookCompaction.details,
 				preserveData,
+				providerReplayThroughEntryId: hookCompaction.providerReplayThroughEntryId,
 			};
 		}
 

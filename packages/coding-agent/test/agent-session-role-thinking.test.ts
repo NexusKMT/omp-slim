@@ -1,8 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import { Effort } from "@oh-my-pi/pi-ai";
-import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
+import { Effort, type Model } from "@oh-my-pi/pi-ai";
+import { getTestModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -15,6 +16,82 @@ import { createAssistantMessage } from "./helpers/agent-session-setup";
 
 import { cfgDefaultThinkingLevel } from "@oh-my-pi/pi-coding-agent/session/settings";
 
+/**
+ * Per-model thinking ladders the uniform synthetic fixture default loses. These
+ * ids pin production-model capabilities the tests assert against; the fixture
+ * default (`[low, medium, high]`) is only correct for claude-sonnet-4-6.
+ */
+const TEST_MODEL_OVERRIDES: Record<string, Partial<Model>> = {
+	"anthropic/claude-sonnet-4-5": {
+		thinking: {
+			mode: "effort",
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+			defaultLevel: Effort.Medium,
+		},
+	},
+	"anthropic/claude-opus-4-7": {
+		thinking: {
+			mode: "effort",
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+			defaultLevel: Effort.Medium,
+		},
+	},
+	"openai/gpt-4o-mini": {
+		reasoning: false,
+		thinking: undefined,
+	},
+};
+
+const bundledModelCache = new Map<string, Model>();
+
+/** Bundled-catalog lookup: stable references plus the per-model thinking ladder. */
+function getBundledModel(provider: string, id: string): Model | undefined {
+	const key = `${provider}/${id}`;
+	const cached = bundledModelCache.get(key);
+	if (cached) return cached;
+	const model = getTestModel(provider, id, TEST_MODEL_OVERRIDES[key] ?? {});
+	bundledModelCache.set(key, model);
+	return model;
+}
+
+const MODELS_CONFIG = [
+	"providers:",
+	"  anthropic:",
+	"    baseUrl: https://models.example.invalid/v1",
+	"    api: openai-completions",
+	"    models:",
+	"      - id: claude-sonnet-4-5",
+	"        thinking:",
+	"          mode: effort",
+	"          efforts: [minimal, low, medium, high, xhigh]",
+	"          defaultLevel: medium",
+	"      - id: claude-sonnet-4-6",
+	"        thinking:",
+	"          mode: effort",
+	"          efforts: [minimal, low, medium, high]",
+	"          defaultLevel: medium",
+	"      - id: claude-opus-4-7",
+	"        thinking:",
+	"          mode: effort",
+	"          efforts: [minimal, low, medium, high, xhigh, max]",
+	"          defaultLevel: medium",
+	"  openai:",
+	"    baseUrl: https://models.example.invalid/v1",
+	"    api: openai-completions",
+	"    models:",
+	"      - id: gpt-4o-mini",
+	"        reasoning: false",
+	"  google-antigravity:",
+	"    baseUrl: https://models.example.invalid/v1",
+	"    api: openai-completions",
+	"    models:",
+	"      - id: gemini-3.8-flash",
+	"        thinking:",
+	"          mode: effort",
+	"          efforts: [minimal, low, medium, high]",
+	"          defaultLevel: medium",
+].join("\n");
+
 describe("AgentSession single model thinking behavior", () => {
 	let tempDir: TempDir;
 	let fixtureDir: TempDir;
@@ -25,6 +102,7 @@ describe("AgentSession single model thinking behavior", () => {
 
 	beforeAll(async () => {
 		fixtureDir = TempDir.createSync("@pi-role-thinking-fixture-");
+		writeFileSync(path.join(fixtureDir.path(), "models.yml"), MODELS_CONFIG);
 		authStorage = await AuthStorage.create(path.join(fixtureDir.path(), "testauth.db"));
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		authStorage.keys.setRuntime("openai", "test-key");

@@ -32,7 +32,7 @@ describe("AgentSession.getAllToolInfos", () => {
 		const model = buildModel({
 			id: "mock",
 			name: "mock",
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "openai",
 			baseUrl: "https://example.invalid",
 			reasoning: false,
@@ -94,7 +94,7 @@ describe("AgentSession.getAllToolInfos", () => {
 		const model = buildModel({
 			id: "mock",
 			name: "mock",
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "openai",
 			baseUrl: "https://example.invalid",
 			reasoning: false,
@@ -167,7 +167,7 @@ describe("AgentSession.getAllToolInfos", () => {
 		const model = buildModel({
 			id: "mock",
 			name: "mock",
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "openai",
 			baseUrl: "https://example.invalid",
 			reasoning: false,

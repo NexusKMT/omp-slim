@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
+import { TempDir } from "@oh-my-pi/pi-utils";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, Usage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -145,7 +147,20 @@ describe("sumSubagentTreeCost", () => {
 		const auth = await AuthStorage.create(":memory:");
 		const sessions: AgentSession[] = [];
 		try {
-			const models = new ModelRegistry(auth);
+			using modelsDir = TempDir.createSync("@omp-subagent-tree-models-");
+			writeFileSync(
+				path.join(modelsDir.path(), "models.yml"),
+				[
+					"providers:",
+					"  test:",
+					"    baseUrl: https://models.example.invalid/v1",
+					"    api: openai-completions",
+					"    models:",
+					"      - id: test-model",
+					"        contextWindow: 128000",
+				].join("\n"),
+			);
+			const models = new ModelRegistry(auth, path.join(modelsDir.path(), "models.yml"));
 			const model = models.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 			if (!model) throw new Error("Expected a bundled model");
 			const parentManager = SessionManager.inMemory();
@@ -219,7 +234,20 @@ describe("sumSubagentTreeCost", () => {
 		const lifecycle = new AgentLifecycleManager(registry);
 		let resumed: AgentSession | undefined;
 		try {
-			const models = new ModelRegistry(auth);
+			using modelsDir = TempDir.createSync("@omp-subagent-tree-models-");
+			writeFileSync(
+				path.join(modelsDir.path(), "models.yml"),
+				[
+					"providers:",
+					"  test:",
+					"    baseUrl: https://models.example.invalid/v1",
+					"    api: openai-completions",
+					"    models:",
+					"      - id: test-model",
+					"        contextWindow: 128000",
+				].join("\n"),
+			);
+			const models = new ModelRegistry(auth, path.join(modelsDir.path(), "models.yml"));
 			const model = models.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 			if (!model) throw new Error("Expected a bundled model");
 			const manager = SessionManager.inMemory();

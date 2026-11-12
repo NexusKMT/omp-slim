@@ -1,10 +1,6 @@
 /** Model selection over explicitly configured Chat Completions endpoints. */
 import type { Model } from "@oh-my-pi/pi-catalog/types";
-import {
-	MAX_THINKING_SUFFIX_OPTIONS,
-	parseModelString,
-	splitThinkingSuffix,
-} from "@oh-my-pi/pi-tui/overlays/model-selector";
+import { MAX_THINKING_SUFFIX_OPTIONS, splitThinkingSuffix } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { type ConfiguredThinkingLevel, concreteThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ModelRegistry } from "./model-registry";
@@ -276,8 +272,14 @@ interface ExplicitThinkingSelectorOptions {
 }
 
 function isLiteralModelSelector(value: string, options?: ExplicitThinkingSelectorOptions): boolean {
-	const parsed = parseModelString(value);
-	if (parsed) return options?.isLiteralModelId?.(parsed.provider, parsed.id) === true;
+	// Split on the first "/" so a literal model id that ends in a thinking suffix
+	// (e.g. "gateway/release:high") is checked in full before the suffix is stripped.
+	// `parseModelString` strips the suffix first, so the authoritative literal lookup
+	// could miss such an id and misread `:high` as a thinking selector.
+	const slash = value.indexOf("/");
+	if (slash > 0) {
+		return options?.isLiteralModelId?.(value.slice(0, slash), value.slice(slash + 1)) === true;
+	}
 	return options?.isLiteralModelId?.(undefined, value) === true;
 }
 
@@ -495,7 +497,10 @@ export function resolveCliModel(options: {
 		if (resolved.model)
 			return {
 				model: resolved.model,
-				selector,
+				// Suffix-stripped by design: the effort returns separately as
+				// `thinkingLevel`, so composing this selector with a thinking level
+				// must never double-append the suffix.
+				selector: formatModelString(resolved.model),
 				thinkingLevel: resolved.thinkingLevel,
 				configuredPatterns: patterns,
 				configuredPatternIndex,

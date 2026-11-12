@@ -44,8 +44,8 @@ describe("CfgProtocolHandler", () => {
 	});
 
 	it("redacts credential values", async () => {
-		const settings = Settings.isolated({ "auth.broker.token": "sekrit" });
-		const resource = await read("cfg://auth", settings);
+		const settings = Settings.isolated({ "searxng.token": "sekrit" });
+		const resource = await read("cfg://searxng", settings);
 		expect(resource.content).toContain("token: <redacted>");
 		expect(resource.content).not.toContain("sekrit");
 	});

@@ -6,7 +6,10 @@ const retry = { enabled: true, baseDelayMs: 1000, maxDelayMs: 30000, maxRetries:
 describe("advisor endpoint retry wait", () => {
 	it("honors an explicit delay and the configured backoff floor", () => {
 		expect(planAdvisorUsageLimitWait({ retry, attempt: 0, retryAfterMs: 5000 })).toBe(5000);
-		expect(planAdvisorUsageLimitWait({ retry, attempt: 2, retryAfterMs: 0 })).toBe(4000);
+		// The backoff floor applies 0–25% downward jitter to the 4s (2²·1s) cap.
+		const floor = planAdvisorUsageLimitWait({ retry, attempt: 2, retryAfterMs: 0 });
+		expect(floor).toBeGreaterThanOrEqual(3000);
+		expect(floor).toBeLessThanOrEqual(4000);
 	});
 	it("declines missing or invalid hints instead of waiting on an imagined account reset", () => {
 		expect(planAdvisorUsageLimitWait({ retry, attempt: 0 })).toBeUndefined();

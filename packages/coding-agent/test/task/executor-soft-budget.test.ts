@@ -92,7 +92,7 @@ function createMockSession(
 		...createSessionDefaults(),
 		state: { messages: [] } as never,
 		agent: { state: { systemPrompt: ["test"] } } as never,
-		model: { api: "anthropic-messages" } as never,
+		model: { api: "openai-completions" } as never,
 		extensionRunner: undefined as never,
 		sessionManager: { appendSessionInit: () => {} } as never,
 		getActiveToolNames: () => ["read", "yield"],
@@ -297,7 +297,7 @@ describe("runSubprocess soft request budget", () => {
 		// The budget stop forces a synthetic terminal yield.
 		expect(handle.prompts).toHaveLength(2);
 		expect(handle.prompts[1]?.options?.synthetic).toBe(true);
-		expect(handle.prompts[1]?.options?.toolChoice).toEqual({ type: "tool", name: "yield" });
+		expect(handle.prompts[1]?.options?.toolChoice).toEqual({ type: "function", name: "yield" });
 		expect(handle.sentUserMessages).toContainEqual({
 			content: buildBudgetNotice(2, 2),
 			options: { deliverAs: "steer", attribution: "agent" },

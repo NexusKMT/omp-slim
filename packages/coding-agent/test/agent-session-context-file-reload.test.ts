@@ -36,7 +36,7 @@ async function expectContextReload(reset: (session: AgentSession) => Promise<unk
 	const agentsMd = path.join(tempDir.path(), "AGENTS.md");
 	await fs.writeFile(agentsMd, original);
 
-	const api = `context-reload-${marker}`;
+	const api = "openai-completions";
 	const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
 	authStorage.keys.setRuntime("managed-primary", "test-key");
 	const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));

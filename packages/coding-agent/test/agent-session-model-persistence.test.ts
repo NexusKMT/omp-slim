@@ -1,9 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { type Api, type AssistantMessage, type Context, Effort, type ImageContent, type Model } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
+import { getTestModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { type CreateAgentSessionResult, createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
@@ -18,6 +19,67 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
 
+/**
+ * Per-model capabilities the uniform synthetic fixture default loses. These ids
+ * pin production-model thinking ladders the tests assert against.
+ */
+const TEST_MODEL_OVERRIDES: Record<string, Partial<Model<Api>>> = {
+	"zai/glm-5.3": {
+		thinking: {
+			mode: "effort",
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+			defaultLevel: Effort.Max,
+		},
+	},
+};
+
+const bundledModelCache = new Map<string, Model<Api>>();
+
+/** Bundled-catalog lookup: stable references plus per-model thinking ladders. */
+function getBundledModel(provider: string, id: string): Model<Api> {
+	const key = `${provider}/${id}`;
+	const cached = bundledModelCache.get(key);
+	if (cached) return cached;
+	const model = getTestModel(provider, id, TEST_MODEL_OVERRIDES[key] ?? {});
+	bundledModelCache.set(key, model);
+	return model;
+}
+
+/** Shared registry seed: every model id the persistence tests restore or cycle across. */
+const MODELS_CONFIG = [
+	"providers:",
+	"  anthropic:",
+	"    baseUrl: https://models.example.invalid/v1",
+	"    api: openai-completions",
+	"    models:",
+	"      - id: claude-sonnet-4-5",
+	"        input: [text, image]",
+	"      - id: claude-sonnet-4-6",
+	"        input: [text, image]",
+	"  zai:",
+	"    baseUrl: https://models.example.invalid/v1",
+	"    api: openai-completions",
+	"    models:",
+	"      - id: glm-5.3",
+	"        input: [text, image]",
+	"        thinking:",
+	"          mode: effort",
+	"          efforts: [minimal, low, medium, high, xhigh, max]",
+	"          defaultLevel: max",
+	"  openrouter:",
+	"    baseUrl: https://models.example.invalid/v1",
+	"    api: openai-completions",
+	"    models:",
+	"      - id: anthropic/claude-sonnet-4.5",
+	"        input: [text, image]",
+	"  amazon-bedrock:",
+	"    baseUrl: https://models.example.invalid/v1",
+	"    api: openai-completions",
+	"    models:",
+	"      - id: us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+	"        input: [text, image]",
+].join("\n");
+
 describe("AgentSession model persistence", () => {
 	let tempDir: TempDir;
 	let session: AgentSession | undefined;
@@ -31,6 +93,7 @@ describe("AgentSession model persistence", () => {
 
 	beforeAll(async () => {
 		sharedDir = TempDir.createSync("@pi-model-persistence-shared-");
+		writeFileSync(path.join(sharedDir.path(), "models.yml"), MODELS_CONFIG);
 		sharedAuthStorage = await AuthStorage.create(path.join(sharedDir.path(), "auth.db"));
 		sharedAuthStorage.keys.setRuntime("anthropic", "test-key");
 		sharedAuthStorage.keys.setRuntime("zai", "test-key");
@@ -594,12 +657,10 @@ describe("AgentSession model persistence", () => {
 		});
 	}
 
-	it("restores a snapcompact archive at the resumed model's frame payload budget", async () => {
-		const result = await resumeArchivedSession(sharedAuthStorage, sharedModelRegistry);
-		session = result.session;
-
-		expect(archiveImages(result.session.messages)).toBe(3);
-	});
+	// The per-provider archive frame budget (the "official Anthropic API" 120 MB inline-image budget) was
+	// removed by the OMP Slim cutover (commit a2db8eb50c): every archive now carries the uniform
+	// DEFAULT_FRAME_DATA_BYTES_BUDGET, so a 3-frame archive is always capped to 1 frame. The 1-frame
+	// budget path is covered below by "after %s ... to a host without a byte budget".
 
 	/** Switches a session archived on the official Anthropic API to `target`, then returns the archive frames of its next request. */
 	async function archiveFramesAfterSwitch(
@@ -611,6 +672,7 @@ describe("AgentSession model persistence", () => {
 			for (const provider of ["anthropic", "openrouter", "amazon-bedrock"]) {
 				authStorage.keys.setRuntime(provider, "test-key");
 			}
+			writeFileSync(path.join(tempDir.path(), "models.yml"), MODELS_CONFIG);
 			const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 			const result = await resumeArchivedSession(authStorage, modelRegistry);
 			session = result.session;
@@ -663,17 +725,11 @@ describe("AgentSession model persistence", () => {
 		},
 	);
 
-	it("keeps every archive frame in the next request after a switch between official Anthropic models", async () => {
-		const frames = await archiveFramesAfterSwitch(
-			getAnthropicModelOrThrow("claude-sonnet-4-5-20250929"),
-			(active, model) => active.setModel(model),
-		);
-
-		expect(frames).toHaveLength(3);
-	});
+	// "Keeps every archive frame between official Anthropic models" no longer holds: with the uniform
+	// DEFAULT_FRAME_DATA_BYTES_BUDGET (see above), a switch between two openai-completions models caps the
+	// archive to 1 frame, identical to the "host without a byte budget" path already covered above.
 
 	it.each([
-		["a proxy to the official Anthropic API", "anthropic-proxy", "anthropic", 3],
 		["the official Anthropic API to a proxy", "anthropic", "anthropic-proxy", 1],
 	] as const)(
 		"switching sessions from %s installs the archive at the resumed model's frame payload budget",
@@ -682,8 +738,16 @@ describe("AgentSession model persistence", () => {
 			await Bun.write(
 				modelsPath,
 				`providers:
+  anthropic:
+    api: openai-completions
+    baseUrl: https://models.example.invalid/v1
+    models:
+      - id: claude-sonnet-4-5
+        input: [text, image]
+        contextWindow: 200000
+        maxTokens: 64000
   anthropic-proxy:
-    api: anthropic-messages
+    api: openai-completions
     baseUrl: https://anthropic-proxy.example.com
     apiKey: test-key
     models:

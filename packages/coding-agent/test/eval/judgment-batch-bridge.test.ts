@@ -29,7 +29,7 @@ import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 const SMOL: Model<Api> = {
 	id: "smol",
 	name: "smol",
-	api: "openai-responses",
+	api: "openai-completions",
 	provider: "p",
 	baseUrl: "https://example.test/v1",
 	reasoning: false,
@@ -99,7 +99,7 @@ function reply(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "p",
 		model: "smol",
 		usage: {
@@ -740,7 +740,7 @@ vi.spyOn(ai, "completeSimple").mockImplementation(async (_model, context) => {
 	if (images.length > 0) observedImageBlocks.push({ prompt, images });
 	return {
 		role: "assistant",
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "p",
 		model: "smol",
 		stopReason: "stop",

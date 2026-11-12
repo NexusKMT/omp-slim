@@ -16,7 +16,7 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 const modelSpec: ModelSpec<Api> = {
 	id: "shared-lsp-binding",
 	name: "Shared LSP binding",
-	api: "test-shared-lsp-binding",
+	api: "openai-completions",
 	provider: "managed-primary",
 	baseUrl: "http://127.0.0.1:8080/v1",
 	reasoning: false,

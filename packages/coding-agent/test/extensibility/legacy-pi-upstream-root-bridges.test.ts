@@ -48,11 +48,11 @@ describe("legacy shim upstream-root bridges", () => {
 				"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n" +
 				"\n" +
 				"<available_skills>\n" +
-				"  <skill>\n" +
-				"    <name>a&amp;b</name>\n" +
-				'    <description>uses &lt;tags&gt; and "quotes"</description>\n' +
-				"    <location>/s/a&amp;b/SKILL.md</location>\n" +
-				"  </skill>\n" +
+				"<skill>\n" +
+				"<name>a&amp;b</name>\n" +
+				'<description>uses &lt;tags&gt; and "quotes"</description>\n' +
+				"<location>/s/a&amp;b/SKILL.md</location>\n" +
+				"</skill>\n" +
 				"</available_skills>",
 		);
 		expect(caShim.formatSkillsForPrompt(skills, "bash").split("\n")[3]).toBe(

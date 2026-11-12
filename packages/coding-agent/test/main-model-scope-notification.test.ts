@@ -8,7 +8,7 @@ function scopedModel(id: string): ScopedModel {
 		model: buildModel({
 			id,
 			name: id,
-			api: "anthropic-messages",
+			api: "openai-completions",
 			provider: "anthropic",
 			baseUrl: "https://api.anthropic.com",
 			reasoning: false,

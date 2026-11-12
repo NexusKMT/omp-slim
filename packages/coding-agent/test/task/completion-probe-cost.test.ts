@@ -12,6 +12,7 @@ import { startCompletionProbe } from "@oh-my-pi/pi-coding-agent/task/completion-
 import { TempDir } from "@oh-my-pi/pi-utils";
 import * as path from "node:path";
 import { mkdir } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 
 function usage(cost: number): Usage {
 	return {
@@ -44,13 +45,30 @@ async function flushMicrotasks(): Promise<void> {
 describe("completion probe cost persistence", () => {
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
+	let modelsDir: TempDir;
 
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		modelRegistry = new ModelRegistry(authStorage);
+		modelsDir = TempDir.createSync("@omp-completion-probe-models-");
+		writeFileSync(
+			path.join(modelsDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  test:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: test-model",
+				"        contextWindow: 128000",
+			].join("\n"),
+		);
+		modelRegistry = new ModelRegistry(authStorage, path.join(modelsDir.path(), "models.yml"));
 	});
 
-	afterAll(() => authStorage.close());
+	afterAll(() => {
+		authStorage.close();
+		modelsDir.removeSync();
+	});
 
 	it("keeps late successful probe billing in live and cold lifetime totals across branch changes", async () => {
 		const target = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);

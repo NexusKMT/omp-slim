@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { Agent, type AgentMessage, AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
@@ -45,7 +46,18 @@ async function createHarness(options?: { goalEnabled?: boolean }): Promise<Guide
 		"plan.enabled": true,
 	});
 	const authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-	const modelRegistry = new ModelRegistry(authStorage);
+	writeFileSync(
+		path.join(tempDir.path(), "models.yml"),
+		[
+			"providers:",
+			"  anthropic:",
+			"    baseUrl: https://models.example.invalid/v1",
+			"    api: openai-completions",
+			"    models:",
+			"      - id: claude-sonnet-4-5",
+		].join("\n"),
+	);
+	const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 	const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
 	if (!model) {
 		throw new Error("Expected claude-sonnet-4-5 to exist in registry");

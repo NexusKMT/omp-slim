@@ -16,7 +16,7 @@ function buildLocalModel(): Model<Api> {
 	return buildModel({
 		id: "ttsr-live-model",
 		name: "TTSR Live Model",
-		api: `ttsr-live-${Bun.nanoseconds().toString(36)}`,
+		api: "openai-completions",
 		provider: "managed-primary",
 		baseUrl: "http://127.0.0.1:8080/v1",
 		reasoning: false,

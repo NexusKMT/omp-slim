@@ -16,10 +16,10 @@ import { removeWithRetries } from "@oh-my-pi/pi-utils";
 const TINY_PNG_BASE64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
-const visionModel: Model<"openai-responses"> = buildModel({
+const visionModel: Model<"openai-completions"> = buildModel({
 	id: "gpt-4o",
 	name: "GPT-4o",
-	api: "openai-responses",
+	api: "openai-completions",
 	provider: "openai",
 	baseUrl: "https://api.openai.com/v1",
 	reasoning: false,
@@ -29,7 +29,7 @@ const visionModel: Model<"openai-responses"> = buildModel({
 	maxTokens: 4096,
 });
 
-const textModel: Model<"openai-responses"> = { ...visionModel, id: "gpt-4.1-mini", input: ["text"] };
+const textModel: Model<"openai-completions"> = { ...visionModel, id: "gpt-4.1-mini", input: ["text"] };
 
 const image: ImageContent = { type: "image", data: TINY_PNG_BASE64, mimeType: "image/png" };
 describe("text-only attachment preservation", () => {

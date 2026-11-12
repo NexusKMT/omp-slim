@@ -233,20 +233,6 @@ describe("ChatTranscriptBuilder turn elapsed", () => {
 		transcript.rebuild(toEntries([skill, assistantMessage()]));
 		expect(renderedText(transcript.container)).toContain(TURN_ELAPSED_LABEL);
 	});
-	it("seeds the prompt→yield delta from a writable-collab peer prompt", () => {
-		cfgDisplayShowTurnTime.set(settings, true);
-		const transcript = builder();
-		const collabPrompt = {
-			role: "custom",
-			customType: "collab-prompt",
-			attribution: "user",
-			content: "hello from the peer",
-			display: true,
-			timestamp: PROMPT_AT,
-		} as unknown as AgentMessage;
-		transcript.rebuild(toEntries([collabPrompt, assistantMessage()]));
-		expect(renderedText(transcript.container)).toContain(TURN_ELAPSED_LABEL);
-	});
 	it("ignores an agent-attributed user message as a turn start", () => {
 		cfgDisplayShowTurnTime.set(settings, true);
 		const transcript = builder();

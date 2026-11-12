@@ -42,7 +42,9 @@ function setup(options: { responses?: MockResponseSource; beforeImageNotice?: ()
 	const agent = new Agent({
 		getApiKey: () => "test-key",
 		initialState: {
-			model: getBundledModel("zai", "glm-5.3"),
+			// Text-only fixture: the skill-image tests exercise the image-preservation notice path,
+			// which only triggers when the active model does not support image input.
+			model: getBundledModel("zai", "glm-5.3", { input: ["text"] }),
 			systemPrompt: ["Test"],
 			tools: [],
 			messages: [],

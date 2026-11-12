@@ -14,11 +14,11 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 
 const OVERRIDE = "OVERRIDE-FROM-BEFORE-AGENT-START";
 
-function createModel(): Model<"openai-responses"> {
+function createModel(): Model<"openai-completions"> {
 	return buildModel({
 		id: "mock",
 		name: "mock",
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "openai",
 		baseUrl: "https://example.invalid",
 		reasoning: false,

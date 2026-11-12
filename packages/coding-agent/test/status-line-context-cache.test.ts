@@ -65,7 +65,7 @@ function makeSession(opts: {
 	modelInput?: string[];
 }): Fake {
 	const contextWindow = opts.contextWindow ?? 200_000;
-	const model = { id: "test-model", contextWindow, input: opts.modelInput ?? ["text"] };
+	const model = { id: "test-model", api: "openai-completions", contextWindow, input: opts.modelInput ?? ["text"] };
 	let usage: ContextUsage | undefined = "usage" in opts ? opts.usage : { tokens: 1234, contextWindow, percent: 0.6 };
 	let calls = 0;
 	let revision = 0;

@@ -98,7 +98,7 @@ describe("annotations API: submit", () => {
 			source: { kind: "text", text: "alpha\r\n\r\nbeta\r\n\r\n" },
 			notes: [{ line: 4, note: "TESTING 3" }],
 		});
-		expect(result.text).toContain('Feedback on line 4:\n""\nTESTING 3');
+		expect(result.text).toContain('## 1. Feedback on line 4:\n\n""\nTESTING 3');
 	});
 
 	it("rejects a note whose line is outside the source instead of quoting nothing", async () => {

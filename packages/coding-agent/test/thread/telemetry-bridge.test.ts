@@ -207,7 +207,7 @@ describe("telemetry thread service", () => {
 		expect(modelSeen).toMatchObject({
 			id: "mock-model",
 			provider: "mock",
-			api: "mock",
+			api: "openai-completions",
 			contextWindow: 200_000,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			calls: [],

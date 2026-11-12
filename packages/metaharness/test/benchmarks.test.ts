@@ -12,31 +12,22 @@ function jobDir(): string {
 	return dir;
 }
 
-function writeEditResult(dir: string, taskId: string): void {
+/** Write one finished trial dir in the current per-trial result.json schema. */
+function writeEditResult(dir: string, trialName: string): void {
+	const trialDir = path.join(dir, trialName);
+	fs.mkdirSync(trialDir, { recursive: true });
 	fs.writeFileSync(
-		path.join(dir, "result.json"),
+		path.join(trialDir, "result.json"),
 		JSON.stringify({
-			tasks: [
-				{
-					id: taskId,
-					name: "Rename symbol",
-					runs: [
-						{
-							runIndex: 0,
-							success: true,
-							duration: 1200,
-							tokens: { input: 100, output: 20, reasoning: 5 },
-						},
-					],
-				},
-			],
-			summary: {
-				totalRuns: 1,
-				successfulRuns: 1,
-				taskSuccessRate: 1,
-				editSuccessRate: 0.75,
-				totalTokens: { input: 100, output: 20 },
+			started_at: "2026-11-12T10:00:00.000Z",
+			finished_at: "2026-11-12T10:01:12.000Z",
+			agent_result: {
+				cost_usd: 0.4,
+				n_input_tokens: 100,
+				n_output_tokens: 20,
+				n_cache_tokens: 25,
 			},
+			verifier_result: { rewards: { reward: 1 } },
 		}),
 	);
 }
@@ -46,26 +37,28 @@ afterEach(() => {
 });
 
 describe("benchmark adapters", () => {
-	it("normalizes edit attempts, traces, tokens, and declared metrics", () => {
+	it("normalizes edit traces, tokens, and declared metrics from trial result files", () => {
 		const dir = jobDir();
 		writeEditResult(dir, "rename-symbol");
 
 		const snapshot = readBenchmarkSnapshot("edit", dir);
-		expect(snapshot.metrics).toEqual({ task_success_rate: 1, edit_success_rate: 0.75 });
+		expect(snapshot.metrics).toEqual({ success_rate: 1 });
 		expect(snapshot.traces[0]).toMatchObject({
-			name: "rename-symbol__1",
+			name: "rename-symbol",
 			status: "pass",
-			tracePath: path.join("result.dump", "rename-symbol", "run-1.md"),
+			reward: 1,
+			tracePath: path.join("rename-symbol", "agent", "omp.txt"),
 		});
-		expect([snapshot.tokIn, snapshot.tokOut]).toEqual([100, 20]);
+		expect([snapshot.tokIn, snapshot.tokOut, snapshot.tokCache]).toEqual([100, 20, 25]);
+		expect(snapshot.costUsd).toBeCloseTo(0.4);
 	});
 
-	it("links edit traces to the runner's dump file for task ids containing unsafe characters", () => {
+	it("links edit traces to the trial's live agent transcript by trial directory name", () => {
 		const dir = jobDir();
-		writeEditResult(dir, "task/weird");
+		writeEditResult(dir, "task_weird");
 
 		const snapshot = readBenchmarkSnapshot("edit", dir);
-		expect(snapshot.traces[0]?.tracePath).toBe(path.join("result.dump", "task_weird", "run-1.md"));
+		expect(snapshot.traces[0]?.tracePath).toBe(path.join("task_weird", "agent", "omp.txt"));
 	});
 
 	it("normalizes SnapCompact records and weighted quality metrics", () => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -39,7 +40,18 @@ describe("issue #8137 — inline /skill in mode-command prompts", () => {
 		tempDir = TempDir.createSync("@pi-issue-8137-");
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		const modelRegistry = new ModelRegistry(authStorage);
+		writeFileSync(
+			path.join(tempDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+			].join("\n"),
+		);
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 		const defaultModel = modelRegistry.find("anthropic", "claude-sonnet-4-5");
 		if (!defaultModel) throw new Error("Expected claude-sonnet-4-5 in registry");
 

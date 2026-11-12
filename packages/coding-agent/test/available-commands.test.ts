@@ -35,16 +35,15 @@ describe("buildAvailableSlashCommands", () => {
 		const commands = await buildAvailableSlashCommands(session as never, async () => fileCommands);
 		const byName = Object.fromEntries(commands.map(command => [command.name, command]));
 
-		expect(byName.usage.subcommands).toContainEqual({
-			name: "show",
-			description: "Show provider usage and limits",
+		expect(byName.todo.subcommands).toContainEqual({
+			name: "edit",
+			description: "Open todos in $EDITOR (Markdown round-trip)",
 		});
-		expect(byName.usage.subcommands).toContainEqual({
-			name: "reset",
-			description: "Spend a saved provider rate-limit reset",
-			usage: "[provider/credential-id|provider/active]",
+		expect(byName.todo.subcommands).toContainEqual({
+			name: "export",
+			description: "Write todos as Markdown to a file (default: TODO.md)",
+			usage: "[<path>]",
 		});
-		expect(byName["reset-usage"]).toBeUndefined();
 
 		expect(byName.fast.description).toBe("Toggle fast mode");
 		expect(byName["extended-context"].description).toBe("Toggle extended context");

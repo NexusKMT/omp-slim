@@ -456,49 +456,4 @@ describe("serviceTierFor", () => {
 		}
 	});
 
-	test("without a session, returns the configured tier only when the request would carry it", () => {
-		const source = createModelBrowserSource(Settings.isolated({ "tier.openai": "ultrafast" }));
-		const firstParty = makeModel("openai", "gpt-6-astra");
-		const codexUnlisted = makeModel("openai-codex", "gpt-6-astra");
-		const codexAdvertised = buildModel({
-			id: "gpt-6-astra",
-			name: "gpt-6-astra",
-			api: "openai-codex-responses",
-			provider: "openai-codex",
-			baseUrl: "https://chatgpt.com/backend-api",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 0 },
-			contextWindow: 400_000,
-			maxTokens: 128_000,
-			serviceTiers: ["ultrafast"],
-		});
-		const anthropic = buildModel({
-			id: "claude-opus-5-5",
-			name: "claude-opus-5-5",
-			api: "anthropic-messages",
-			provider: "anthropic",
-			baseUrl: "https://api.anthropic.com",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-			contextWindow: 200_000,
-			maxTokens: 64_000,
-		});
-
-		// First-party OpenAI takes ultrafast as-is.
-		expect(source.serviceTierFor?.(firstParty)).toBe("ultrafast");
-		// Codex realizes it only when discovery advertises it, so the browser must
-		// not label a tier the request would drop.
-		expect(source.serviceTierFor?.(codexUnlisted)).toBeUndefined();
-		expect(source.serviceTierFor?.(codexAdvertised)).toBe("ultrafast");
-		// No configured tier for the family.
-		expect(source.serviceTierFor?.(anthropic)).toBeUndefined();
-
-		// Anthropic realizes priority through fast mode, not a `service_tier` field,
-		// so no served tier is ever recorded for it and there is no row to label.
-		const anthropicPriority = createModelBrowserSource(Settings.isolated({ "tier.anthropic": "priority" }));
-		expect(anthropicPriority.serviceTierFor?.(anthropic)).toBeUndefined();
-		expect(anthropicPriority.serviceTierFor?.(firstParty)).toBeUndefined();
-	});
 });

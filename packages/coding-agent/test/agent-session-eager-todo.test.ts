@@ -333,14 +333,10 @@ describe("AgentSession eager todo enforcement", () => {
 		expect(titleInput).toContain("The recovery heuristic should drive the replan title.");
 		expect(titleInput).toContain("replan parser diagnostics");
 		const metadata = completeSimpleMock.mock.calls[0]?.[2]?.metadata;
-		if (!metadata || typeof metadata.user_id !== "string") {
-			throw new Error("Expected title request metadata.user_id");
+		if (!metadata || typeof metadata.session_id !== "string") {
+			throw new Error("Expected title request metadata.session_id");
 		}
-		const userId: unknown = JSON.parse(metadata.user_id);
-		if (!userId || typeof userId !== "object" || !("session_id" in userId) || typeof userId.session_id !== "string") {
-			throw new Error("Expected title request metadata.user_id.session_id");
-		}
-		expect(userId.session_id).not.toBe(session.sessionId);
+		expect(metadata.session_id).not.toBe(session.sessionId);
 	});
 
 	it("keeps a card title's icon and code when a replan refreshes it", async () => {

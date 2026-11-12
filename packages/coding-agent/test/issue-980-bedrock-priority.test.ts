@@ -56,6 +56,6 @@ describe("issue #980 provider-qualified model resolution", () => {
 			},
 		});
 		expect(cliResolved.model).toBeUndefined();
-		expect(cliResolved.error).toContain('Model "anthropic/claude-3-7-sonnet" not found');
+		expect(cliResolved.error).toContain('Model "anthropic/claude-3-7-sonnet" is not configured');
 	});
 });

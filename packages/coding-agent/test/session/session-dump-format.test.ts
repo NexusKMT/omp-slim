@@ -1,11 +1,10 @@
 /**
- * Contract: /dump renders the tool catalog through the shared AI inventory
- * renderer — a simplified TypeScript signature (derived from the wire JSON
- * Schema) plus each tool's examples in the model's native tool-call syntax.
+ * Contract: /dump renders the tool catalog through the local inventory
+ * renderer — each tool's name, description, and wire JSON Schema parameters.
  *
- * Tools carry live arktype schemas; the dump must surface a readable signature
- * (not the schema instance's internals) and must include examples, which the
- * previous `<parameter>`-per-key JSON Schema dump dropped entirely.
+ * Tools carry live arktype schemas; the dump must surface the wire JSON Schema
+ * (not the schema instance's internals) and must not leak arktype metadata into
+ * the output.
  */
 import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
@@ -25,7 +24,7 @@ const ZERO_USAGE: Usage = {
 const HARMONY_MODEL = { provider: "openai", id: "gpt-5", name: "GPT-5" } as Model;
 
 describe("formatSessionDumpText tool parameters", () => {
-	it("renders arktype schemas as a TypeScript signature, not schema internals", () => {
+	it("renders arktype schemas as their wire JSON Schema, not schema internals", () => {
 		const webSearchSchema = type({
 			"query /** search query */": "string",
 			"recency?": "'day' | 'week'",
@@ -42,11 +41,11 @@ describe("formatSessionDumpText tool parameters", () => {
 			],
 		});
 
-		expect(out).toContain("namespace functions {");
-		expect(out).toContain("type web_search = (_: {");
-		expect(out).toContain("// search query");
-		expect(out).toContain("query: string,");
-		expect(out).toContain('recency?: "day" | "week",');
+		expect(out).toContain("### web_search");
+		expect(out).toContain("Searches the web.");
+		expect(out).toContain("Parameters: ");
+		expect(out).toContain('"description":"search query"');
+		expect(out).toContain('"enum":["day","week"]');
 		// Arktype JSON Schema should not leak arktype internals into the dump.
 		expect(out).not.toContain("_arktype");
 		expect(out).not.toContain("ArkType");
@@ -54,7 +53,7 @@ describe("formatSessionDumpText tool parameters", () => {
 		expect(out).not.toContain('<parameter name="type">');
 	});
 
-	it("passes plain JSON-Schema parameters through to a TypeScript signature", () => {
+	it("passes plain JSON-Schema parameters through to the wire schema", () => {
 		const out = formatSessionDumpText({
 			messages: [],
 			tools: [
@@ -70,29 +69,9 @@ describe("formatSessionDumpText tool parameters", () => {
 			],
 		});
 
-		expect(out).toContain("type legacy = (_: {");
-		expect(out).toContain("// a path");
-		expect(out).toContain("path: string,");
-	});
-
-	it("includes tool examples in Python call syntax", () => {
-		const findSchema = type({ paths: "string[]" });
-
-		const out = formatSessionDumpText({
-			messages: [],
-			tools: [
-				{
-					name: "glob",
-					description: "Globs files.",
-					parameters: findSchema,
-					examples: [{ call: { paths: ["src/**/*.ts"] } }],
-				},
-			],
-		});
-
-		expect(out).toContain("## Available Tools");
-		expect(out).toContain("@example");
-		expect(out).toContain('glob(paths=["src/**/*.ts"])');
+		expect(out).toContain("### legacy");
+		expect(out).toContain('"path":{"type":"string","description":"a path"}');
+		expect(out).toContain('"required":["path"]');
 	});
 
 	it("omits the Available Tools section if inlineToolDescriptors is true", () => {

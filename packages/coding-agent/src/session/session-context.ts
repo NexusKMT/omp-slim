@@ -172,8 +172,8 @@ export interface BuildSessionContextOptions {
 	inFlightToolCallIds?: ReadonlySet<string>;
 	/** Price and resolve persisted snapcompact frame payloads on demand. */
 	resolveFrameData?: (data: string) => snapcompact.LazyFrameData | undefined;
-	/** Archive frame bytes the LLM context attaches: the active model's {@link snapcompact.frameDataBytesBudget}
-	 *  (unset: {@link snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET}). */
+	/** Archive frame bytes the LLM context attaches: the shared {@link snapcompact.DEFAULT_FRAME_DATA_BYTES_BUDGET}
+	 *  (a model-less uniform cap since per-provider image budgets were removed). */
 	maxFrameDataBytes?: number;
 	/**
 	 * The model that reads this context. A compaction whose provider-native

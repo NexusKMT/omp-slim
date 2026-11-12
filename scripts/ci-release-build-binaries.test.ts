@@ -24,7 +24,7 @@ describe("Windows release binary target", () => {
 		expect(output).toContain(
 			"DRY RUN Bun.build target=bun-windows-arm64 outfile=packages/coding-agent/binaries/omp-windows-arm64.exe",
 		);
-		expect(output).toContain("external=fastembed,onnxruntime-node");
+		expect(output).toContain("external=@huggingface/transformers,fastembed,onnxruntime-node");
 		expect(output).not.toContain("bun-windows-x64-modern");
 	});
 

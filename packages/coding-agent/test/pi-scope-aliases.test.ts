@@ -11,9 +11,8 @@
  *   - `@plannotator/pi-extension`         ⇒ `@oh-my-pi/pi-agent-core`
  *   - `@runfusion/fusion`                 ⇒ `@oh-my-pi/pi-coding-agent/...`
  *
- * Plus the two upstream-only surfaces that turned up via real-plugin E2E:
+ * Plus the one upstream-only surface that turned up via real-plugin E2E:
  *   - `Key` runtime helper from `pi-tui` (used by plannotator + rpiv-*).
- *   - `pi-ai/oauth` subpath (used by runfusion's bundled extension).
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
@@ -28,10 +27,6 @@ const canonicalCodingAgentExtensions = Bun.resolveSync(
 );
 const canonicalUtils = Bun.resolveSync("@oh-my-pi/pi-utils", import.meta.dir);
 const canonicalTui = Bun.resolveSync("@oh-my-pi/pi-tui", import.meta.dir);
-// Subpath: upstream `pi-ai/oauth` re-exported `utils/oauth/index`; our pi-ai now
-// exposes the same surface at the real `@oh-my-pi/pi-ai/oauth` export, so the
-// legacy `@mariozechner/pi-ai/oauth` specifier canonicalizes straight to it.
-const canonicalAiOauth = Bun.resolveSync("@oh-my-pi/pi-ai/oauth", import.meta.dir);
 
 interface AliasCase {
 	id: string;
@@ -63,15 +58,6 @@ const CASES: readonly AliasCase[] = [
 		aliasSpecifier: "@mariozechner/pi-coding-agent/extensibility/extensions",
 		canonicalPath: canonicalCodingAgentExtensions,
 		symbol: "isToolCallEventType",
-	},
-	// Subpath: legacy `pi-ai/oauth` resolves to the real `@oh-my-pi/pi-ai/oauth`.
-	{
-		id: "mariozechner-ai-oauth",
-		aliasSpecifier: "@mariozechner/pi-ai/oauth",
-		canonicalPath: canonicalAiOauth,
-		// `refreshOAuthToken` is exported by our `oauth/index` and by upstream's
-		// `oauth.d.ts`; it makes a stable probe across both layouts.
-		symbol: "refreshOAuthToken",
 	},
 	// `Key` runtime helper restored on pi-tui (plannotator + rpiv-* import it).
 	{

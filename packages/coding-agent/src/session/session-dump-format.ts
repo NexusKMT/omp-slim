@@ -188,6 +188,63 @@ function headingStamp(message: AgentMessage): string {
 	return stamp;
 }
 
+function isAsciiWhitespace(code: number): boolean {
+	return code === 9 || code === 10 || code === 11 || code === 12 || code === 13 || code === 32;
+}
+
+function trimAsciiStart(text: string, start: number, end: number): number {
+	let cursor = start;
+	while (cursor < end && isAsciiWhitespace(text.charCodeAt(cursor))) cursor++;
+	return cursor;
+}
+
+function trimAsciiEnd(text: string, start: number, end: number): number {
+	let cursor = end;
+	while (cursor > start && isAsciiWhitespace(text.charCodeAt(cursor - 1))) cursor--;
+	return cursor;
+}
+
+/** Index of the matching `</thinking>` for the `<thinking>` at `start`, or -1. */
+function findThinkingClose(text: string, start: number, end: number): number {
+	let depth = 1;
+	let cursor = start;
+	while (cursor < end) {
+		const nextClose = text.indexOf("</thinking>", cursor);
+		if (nextClose < 0 || nextClose >= end) return -1;
+		const nextOpen = text.indexOf("<thinking>", cursor);
+		if (nextOpen >= 0 && nextOpen < nextClose) {
+			depth++;
+			cursor = nextOpen + "<thinking>".length;
+			continue;
+		}
+		depth--;
+		if (depth === 0) return nextClose;
+		cursor = nextClose + "</thinking>".length;
+	}
+	return -1;
+}
+
+/** Unwrap any literal `<thinking>` envelope(s) already present (issue #2700) so the dump never nests tags. */
+function unwrapThinkingEnvelope(text: string): string {
+	const end = trimAsciiEnd(text, 0, text.length);
+	let cursor = trimAsciiStart(text, 0, end);
+	if (cursor >= end || !text.startsWith("<thinking>", cursor)) return text;
+
+	const segments: string[] = [];
+	while (cursor < end) {
+		if (!text.startsWith("<thinking>", cursor)) return text;
+		const innerStart = cursor + "<thinking>".length;
+		const innerEnd = findThinkingClose(text, innerStart, end);
+		if (innerEnd < 0) return text;
+
+		const trimmedInnerEnd = trimAsciiEnd(text, innerStart, innerEnd);
+		const trimmedInnerStart = trimAsciiStart(text, innerStart, trimmedInnerEnd);
+		segments.push(unwrapThinkingEnvelope(text.slice(trimmedInnerStart, trimmedInnerEnd)));
+		cursor = trimAsciiStart(text, innerEnd + "</thinking>".length, end);
+	}
+	return segments.join("\n");
+}
+
 function appendAssistantContent(lines: string[], content: AssistantMessage["content"]): void {
 	for (const c of content) {
 		if (c.type === "text") {
@@ -197,7 +254,7 @@ function appendAssistantContent(lines: string[], content: AssistantMessage["cont
 			if (thinking.length === 0) continue;
 			// Unwrap any literal `<thinking>` envelope already present in the
 			// block (e.g. Opus 4.5 — issue #2700) so the dump never nests tags.
-			lines.push(`<thinking>\n${thinking}\n</thinking>\n`);
+			lines.push(`<thinking>\n${unwrapThinkingEnvelope(thinking)}\n</thinking>\n`);
 		} else if (c.type === "toolCall") {
 			lines.push(`### Tool Call: ${c.name}`);
 			const rawArgs = c.arguments as Record<string, unknown> | undefined;

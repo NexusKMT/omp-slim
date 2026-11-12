@@ -170,6 +170,7 @@ try {
 
 	it("exits cleanly on Ctrl+D while deferred extension loading guards process.exit", async () => {
 		const { exitCode, stdout, stderr } = await runProbe(`
+import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -183,10 +184,21 @@ import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { postmortem, TempDir } from "@oh-my-pi/pi-utils";
 
 const dir = TempDir.createSync("@omp-deferred-quit-");
+writeFileSync(
+	path.join(dir.path(), "models.yml"),
+	[
+		"providers:",
+		"  anthropic:",
+		"    baseUrl: https://models.example.invalid/v1",
+		"    api: openai-completions",
+		"    models:",
+		"      - id: claude-sonnet-4-5",
+	].join("\\n"),
+);
 await Settings.init({ inMemory: true, cwd: dir.path() });
 initTheme();
 const auth = await AuthStorage.create(path.join(dir.path(), "auth.db"));
-const registry = new ModelRegistry(auth);
+const registry = new ModelRegistry(auth, path.join(dir.path(), "models.yml"));
 const model = registry.find("anthropic", "claude-sonnet-4-5");
 if (!model) throw new Error("expected bundled model");
 const session = new AgentSession({

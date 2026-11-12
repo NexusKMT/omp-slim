@@ -63,7 +63,10 @@ function chunkedThinkingLoopStream(model: Model<Api>, options?: SimpleStreamOpti
 		inner.push({ type: "thinking_end", contentIndex: 0, content: thinking.thinking, partial });
 		inner.push({ type: "done", reason: "stop", message: partial });
 	});
-	return withThinkingLoopGuard(model, options, () => inner);
+	// The chunked deltas recycle near-identical paragraphs with cosmetic wording
+	// drift (only the exact-cycle detector runs at the default "exact" level, so
+	// this shape needs the "semantic" near-duplicate heuristic to trip the guard).
+	return withThinkingLoopGuard(model, { ...options, loopGuard: { ...options?.loopGuard, level: "semantic" } }, () => inner);
 }
 
 function successStream(model: Model<Api>): AssistantMessageEventStream {

@@ -70,7 +70,7 @@ function createMockSession(
 		...createSessionDefaults(),
 		state: { messages: [] } as never,
 		agent: { state: { systemPrompt: ["test"] } } as never,
-		model: { api: "anthropic-messages" } as never,
+		model: { api: "openai-completions" } as never,
 		extensionRunner: undefined as never,
 		sessionManager: { appendSessionInit: () => {} } as never,
 		getActiveToolNames: () => ["read", "yield"],
@@ -433,7 +433,7 @@ describe("runSubprocess incremental yield loops", () => {
 
 		// The final reminder pins the model to `yield`.
 		expect(handle.prompts).toHaveLength(4);
-		expect(handle.prompts[3]?.options?.toolChoice).toEqual({ type: "tool", name: "yield" });
+		expect(handle.prompts[3]?.options?.toolChoice).toEqual({ type: "function", name: "yield" });
 		// The pinned yield ends the run with the section it submitted.
 		expect(result.requests).toBeLessThan(YIELD_TURN_CAP);
 		expect(result.aborted).toBe(false);

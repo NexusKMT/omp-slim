@@ -59,7 +59,6 @@ describe("omp stats --summary", () => {
 					cacheRead: 0,
 					cacheWrite: 0,
 					totalTokens: 30,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 				},
 			},
 		};
@@ -78,7 +77,7 @@ describe("omp stats --summary", () => {
 		}
 
 		const output = Bun.stripANSI(lines.join("\n"));
-		expect(output).toContain("API-equivalent estimate: N/A");
+		expect(output).toContain("Recorded Cost: N/A");
 		expect(output).toContain("test-supergrok-without-reference-price: 1 reqs, N/A,");
 		expect(output).toContain("/tmp/summary/: 1 reqs, N/A");
 	});

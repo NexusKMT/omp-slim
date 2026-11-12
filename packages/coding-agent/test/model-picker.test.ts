@@ -17,7 +17,7 @@ function makeModel(provider: string, id: string, contextWindow = 128_000, kind?:
 	return buildModel({
 		id,
 		name: id,
-		api: kind === "image" ? "openai-images" : "ollama-chat",
+		api: "openai-completions",
 		...(kind ? { kind } : {}),
 		provider,
 		baseUrl: "https://example.com",

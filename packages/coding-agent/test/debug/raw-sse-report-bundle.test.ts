@@ -8,10 +8,10 @@ import { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
 import { createReportBundle } from "@oh-my-pi/pi-coding-agent/debug/report-bundle";
 import { getConfigRootDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 
-const model: Model<"anthropic-messages"> = buildModel({
+const model: Model<"openai-completions"> = buildModel({
 	id: "claude-test",
 	name: "Claude Test",
-	api: "anthropic-messages",
+	api: "openai-completions",
 	provider: "anthropic",
 	baseUrl: "https://api.anthropic.com",
 	reasoning: true,

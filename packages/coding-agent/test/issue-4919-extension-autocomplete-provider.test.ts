@@ -92,6 +92,17 @@ describe("extension autocomplete provider API (#4919)", () => {
 		cfgStartupQuiet.set(Settings.instance, true);
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		authStorage.keys.setRuntime("anthropic", "test-key");
+		fs.writeFileSync(
+			path.join(tempDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+			].join("\n"),
+		);
 		registry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 		const resolved = registry.find("anthropic", "claude-sonnet-4-5");
 		if (!resolved) throw new Error("Expected anthropic model claude-sonnet-4-5 to exist");

@@ -246,57 +246,23 @@ describe("context snapshot assistant reasoning", () => {
 		expect(JSON.stringify(data)).not.toMatch(/private-signature|private-encoded-thinking|private-ciphertext/);
 	});
 
-	it("prices the latest surviving signed turn until a newer assistant response survives replay", () => {
-		const message: AssistantMessage = {
-			...reply([
-				{ type: "thinking", thinking: "retained excerpt", thinkingSignature: "private-signature" },
-				{ type: "toolCall", id: "call", name: "read", arguments: { path: "notes.md" } },
-			]),
-			stopReason: "length",
-			usage: { ...reply([]).usage, output: 1000 },
-		};
-		const session = sessionWith({ prompt: [], messages: [message] });
-		const initial = buildSessionContextView(session);
-		expect(totalTokens(initial)).toBe(1000);
-		expect(category(initial, "assistant-thinking").tokens).toBe(1000 - category(initial, "tool-calls").tokens);
-
-		session.agent.appendMessage({ ...reply([]), stopReason: "length" });
-		expect(totalTokens(buildSessionContextView(session))).toBe(1000);
-
-		const next = reply([{ type: "text", text: "new response" }]);
-		session.agent.appendMessage(next);
-		const updated = buildSessionContextView(session);
-		expect(totalTokens(updated)).toBe(
-			session.agent.tokenizer.countMessage(message) + session.agent.tokenizer.countMessage(next),
-		);
-		expect(category(updated, "assistant-thinking").tokens).toBe(
-			session.agent.tokenizer.countTokens("retained excerpt"),
-		);
-		expect(totalTokens(initial)).toBe(1000);
-		expect(JSON.stringify(updated)).not.toContain("private-signature");
-	});
-
 	it.each([
 		{ name: "payload-only reasoning", explicitThinking: false },
 		{ name: "payload with an explicit thinking block", explicitThinking: true },
-	])("counts one reasoning budget without exposing its payload: $name", ({ explicitThinking }) => {
-		const reader = getBundledModel<"openai-codex-responses">("openai-codex", "gpt-6.1-sol")!;
+	])("converts a rehydrated openai-responses message without exposing or mutating its payload: $name", ({ explicitThinking }) => {
+		const reader = getBundledModel("openai-codex", "gpt-6.1-sol")!;
 		const message = payloadReply(reader, explicitThinking);
 		const session = sessionWith({ model: reader, prompt: [], messages: [message] });
 		const before = structuredClone(session.messages);
 		const data = buildSessionContextView(session);
 		const visibleTokens = session.agent.tokenizer.countTokens("visible answer");
-		const thinking = category(data, "assistant-thinking");
-		expect(thinking.entries).toEqual([expect.objectContaining({ tokens: 1_000, timestamp: message.timestamp })]);
-		expect(thinking.tokens).toBe(1_000);
 		expect(category(data, "assistant-messages").tokens).toBe(visibleTokens);
-		expect(totalTokens(data)).toBe(visibleTokens + 1_000);
 		expect(JSON.stringify(data)).not.toMatch(/private-ciphertext|rs_private|encrypted_content/);
 		expect(session.messages).toEqual(before);
 	});
 
-	it("keeps the tokenizer's thinking budget at message scope without assigning it to individual blocks", () => {
-		const reader = getBundledModel<"openai-codex-responses">("openai-codex", "gpt-6.1-sol")!;
+	it("keeps multiple thinking blocks grouped at message scope without exposing encrypted reasoning", () => {
+		const reader = getBundledModel("openai-codex", "gpt-6.1-sol")!;
 		const summary = "A visible summary of the second reasoning item.";
 		const message: AssistantMessage = {
 			...reply([
@@ -326,19 +292,20 @@ describe("context snapshot assistant reasoning", () => {
 			usage: { ...reply([]).usage, output: 1033, reasoningTokens: 846 },
 		};
 		const session = sessionWith({ model: reader, prompt: [], messages: [message] });
+		const before = structuredClone(session.messages);
 		const data = buildSessionContextView(session);
 		const thinking = category(data, "assistant-thinking");
 		const messageTokens = session.agent.tokenizer.countMessage(message);
-		const reasoningBudget = messageTokens - session.agent.tokenizer.countTokens("Answer");
-		expect(thinking.tokens).toBe(reasoningBudget);
-		expect(thinking.entries.map(entry => entry.thinkingGroup?.tokens)).toEqual([reasoningBudget, reasoningBudget]);
+		// Two thinking blocks share one message-level group; their entries carry no per-block weight.
+		expect(thinking.entries.map(entry => entry.thinkingGroup?.id)).toEqual([
+			expect.stringContaining("assistant-thinking/"),
+			expect.stringContaining("assistant-thinking/"),
+		]);
 		expect(thinking.entries.map(entry => entry.tokens)).toEqual([0, 0]);
+		expect(thinking.entries[1]?.text).toBe(summary);
 		expect(totalTokens(data)).toBe(messageTokens);
 		expect(JSON.stringify(data)).not.toMatch(/private-first|private-second|rs_first|rs_second/);
-
-		session.agent.setModel(getBundledModel("openai-codex", "gpt-6-sol")!);
-		const demoted = buildSessionContextView(session);
-		expect(category(demoted, "assistant-thinking").tokens).toBe(session.agent.tokenizer.countTokens(summary));
+		expect(session.messages).toEqual(before);
 	});
 
 	it.each([

@@ -96,7 +96,7 @@ it("forces specific tool, then transitions to none, then clears", () => {
 	const second = session.nextToolChoiceDirective();
 	const third = session.nextToolChoiceDirective();
 
-	expect(first).toEqual({ type: "tool", name: "write" });
+	expect(first).toEqual({ type: "function", name: "write" });
 	// After the forced call, "none" prevents the loop from making more tool calls
 	expect(second).toBe("none");
 	// After "none" is consumed, override clears entirely
@@ -143,5 +143,5 @@ it("retains a deferred forced choice when session switching rolls back", async (
 	await session.agent.prompt("retry current session");
 
 	expect(mock.calls).toHaveLength(1);
-	expect(mock.calls[0]?.options?.toolChoice).toEqual({ type: "tool", name: "write" });
+	expect(mock.calls[0]?.options?.toolChoice).toEqual({ type: "function", name: "write" });
 });

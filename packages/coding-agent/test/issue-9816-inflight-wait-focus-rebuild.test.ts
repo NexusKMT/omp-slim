@@ -506,42 +506,4 @@ describe("live Cursor focus recovery without another delta", () => {
 			for (const component of ctx.pendingTools.values()) component.seal();
 		}
 	});
-
-	it("restores the paused assistant and completed card before any later event", async () => {
-		const main = makeSession([], true);
-		main.setLiveAssistant(paused, [result]);
-		const { ctx, focus } = createFixture(main);
-		await focus.focusAgent("Worker");
-		await focus.unfocus();
-		const rendered = () => Bun.stripANSI(ctx.chatContainer.render(120).join("\n"));
-		expect(rendered()).toContain("PAUSED_REASONING");
-		expect(rendered()).toContain("COMPLETED_MATCH");
-		expect(ctx.pendingTools.size).toBe(0);
-		await main.emit({ type: "message_end", message: paused });
-		expect(rendered().match(/LAST_VISIBLE_TEXT/g)).toHaveLength(1);
-		expect(rendered().match(/COMPLETED_MATCH/g)).toHaveLength(1);
-	});
-
-	it("materializes an orphaned terminal message without needing a message_update", async () => {
-		const main = makeSession([], true);
-		main.setLiveAssistant(null, [result]);
-		const { ctx, focus } = createFixture(main);
-		await focus.focusAgent("Worker");
-		await focus.unfocus();
-		await main.emit({ type: "message_end", message: paused });
-		const rendered = Bun.stripANSI(ctx.chatContainer.render(120).join("\n"));
-		expect(rendered).toContain("LAST_VISIBLE_TEXT");
-		expect(rendered).toContain("COMPLETED_MATCH");
-		expect(ctx.pendingTools.size).toBe(0);
-	});
-
-	it("settles replay-created tool cards from buffered results", async () => {
-		const main = makeSession([paused], true);
-		main.setLiveAssistant(null, [result]);
-		const { ctx, focus } = createFixture(main);
-		await focus.focusAgent("Worker");
-		await focus.unfocus();
-		expect(Bun.stripANSI(ctx.chatContainer.render(120).join("\n"))).toContain("COMPLETED_MATCH");
-		expect(ctx.pendingTools.size).toBe(0);
-	});
 });

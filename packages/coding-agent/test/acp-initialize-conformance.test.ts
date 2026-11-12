@@ -31,7 +31,7 @@ const TEST_MODELS: Model[] = [
 	buildModel({
 		id: "claude-sonnet-4-20250514",
 		name: "Claude Sonnet",
-		api: "anthropic-messages",
+		api: "openai-completions",
 		provider: "anthropic",
 		baseUrl: "https://example.invalid",
 		reasoning: true,

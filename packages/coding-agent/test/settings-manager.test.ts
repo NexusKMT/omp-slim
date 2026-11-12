@@ -239,7 +239,7 @@ describe("Settings", () => {
 				statusLine: {
 					preset: "custom",
 					leftSegments: ["modle", "git", "modle"],
-					rightSegments: ["usage", "sesion", "modle"],
+					rightSegments: ["cost", "sesion", "modle"],
 				},
 			});
 			const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -350,11 +350,11 @@ describe("Settings", () => {
 
 		it("backs up a config corrupted after startup and retains the pending global change for retry", async () => {
 			await writeSettings({
-				auth: { broker: { token: "TOP-SECRET" } },
+				setupVersion: 1,
 				model: "keep/default",
 			});
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			const corrupted = 'auth:\n  broker:\n    token: TOP-SECRET\nmodelRoles:\n  default: "unterminated\n';
+			const corrupted = 'setupVersion: 1\nmodelRoles:\n  default: "unterminated\n';
 			await Bun.write(getConfigPath(), corrupted);
 
 			cfgThemeDark.set(settings, "anthracite");
@@ -368,7 +368,7 @@ describe("Settings", () => {
 
 			await settings.flush();
 			expect(await readSettings()).toEqual({
-				auth: { broker: { token: "TOP-SECRET" } },
+				setupVersion: 1,
 				model: "keep/default",
 				theme: { dark: "anthracite" },
 			});
@@ -1034,7 +1034,7 @@ describe("Settings", () => {
 		it("leaves an unreadable main config untouched and retains its pending change", async () => {
 			const original = YAML.stringify(
 				{
-					auth: { broker: { token: "TOP-SECRET" } },
+					setupVersion: 1,
 					model: "keep/default",
 				},
 				null,
@@ -1053,7 +1053,7 @@ describe("Settings", () => {
 			expect(fs.readdirSync(agentDir).some(name => name.startsWith("config.yml.broken-"))).toBe(false);
 			await settings.flush();
 			expect(await readSettings()).toEqual({
-				auth: { broker: { token: "TOP-SECRET" } },
+				setupVersion: 1,
 				model: "keep/default",
 				theme: { dark: "anthracite" },
 			});

@@ -20,7 +20,7 @@ import { cfgDisabledProviders } from "@oh-my-pi/pi-coding-agent/config/model-set
 const model = buildModel({
 	id: "provider-toggle-binding",
 	name: "Provider toggle binding",
-	api: "test-provider-toggle-binding",
+	api: "openai-completions",
 	provider: "managed-primary",
 	baseUrl: "http://127.0.0.1:8080/v1",
 	reasoning: false,

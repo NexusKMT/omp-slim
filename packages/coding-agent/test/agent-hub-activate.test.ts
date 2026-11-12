@@ -6,6 +6,7 @@ import { createAgentHubRuntime } from "@oh-my-pi/pi-coding-agent/modes/agent-hub
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, Usage } from "@oh-my-pi/pi-ai";
@@ -989,7 +990,20 @@ describe("Agent hub data refresh coalescing", () => {
 		let parentSession: AgentSession | undefined;
 		let childSession: AgentSession | undefined;
 		try {
-			const modelRegistry = new ModelRegistry(authStorage);
+			using modelsDir = TempDir.createSync("@omp-agent-hub-models-");
+			writeFileSync(
+				path.join(modelsDir.path(), "models.yml"),
+				[
+					"providers:",
+					"  test:",
+					"    baseUrl: https://models.example.invalid/v1",
+					"    api: openai-completions",
+					"    models:",
+					"      - id: test-model",
+					"        contextWindow: 128000",
+				].join("\n"),
+			);
+			const modelRegistry = new ModelRegistry(authStorage, path.join(modelsDir.path(), "models.yml"));
 			const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 			if (!model) throw new Error("Expected a bundled model");
 
@@ -1078,7 +1092,20 @@ describe("Agent hub data refresh coalescing", () => {
 		let session: AgentSession | undefined;
 		let lifecycle: AgentLifecycleManager | undefined;
 		try {
-			const modelRegistry = new ModelRegistry(authStorage);
+			using modelsDir = TempDir.createSync("@omp-agent-hub-models-");
+			writeFileSync(
+				path.join(modelsDir.path(), "models.yml"),
+				[
+					"providers:",
+					"  test:",
+					"    baseUrl: https://models.example.invalid/v1",
+					"    api: openai-completions",
+					"    models:",
+					"      - id: test-model",
+					"        contextWindow: 128000",
+				].join("\n"),
+			);
+			const modelRegistry = new ModelRegistry(authStorage, path.join(modelsDir.path(), "models.yml"));
 			const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 			if (!model) throw new Error("Expected a bundled model");
 
@@ -1154,7 +1181,20 @@ describe("Agent hub data refresh coalescing", () => {
 		const authStorage = await AuthStorage.create(":memory:");
 		let session: AgentSession | undefined;
 		try {
-			const modelRegistry = new ModelRegistry(authStorage);
+			using modelsDir = TempDir.createSync("@omp-agent-hub-models-");
+			writeFileSync(
+				path.join(modelsDir.path(), "models.yml"),
+				[
+					"providers:",
+					"  test:",
+					"    baseUrl: https://models.example.invalid/v1",
+					"    api: openai-completions",
+					"    models:",
+					"      - id: test-model",
+					"        contextWindow: 128000",
+				].join("\n"),
+			);
+			const modelRegistry = new ModelRegistry(authStorage, path.join(modelsDir.path(), "models.yml"));
 			const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 			if (!model) throw new Error("Expected a bundled model");
 

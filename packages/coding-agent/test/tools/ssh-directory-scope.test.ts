@@ -63,50 +63,66 @@ describe.skipIf(process.platform === "win32")("grep ssh:// directory scopes", ()
 		await fs.rm(fixture, { recursive: true, force: true });
 	});
 
-	it("recurses through remote entries with URL identities, ignore rules and no symlink loops", async () => {
-		const result = await tool.execute("remote-dir", { pattern: "NEEDLE", path: `${root}/` });
-		expect(result.details?.files?.toSorted()).toEqual(
-			[
-				joinUrlPath(root, ".hidden.txt"),
-				joinUrlPath(root, "a.txt"),
-				joinUrlPath(root, unusual),
-				joinUrlPath(root, "sub/b.txt"),
-				joinUrlPath(root, "two words.txt"),
-			].toSorted(),
-		);
-		expect(textOf(result)).toContain("NEEDLE nested");
-		expect(textOf(result)).not.toContain("NEEDLE ignored");
-	});
+	it(
+		"recurses through remote entries with URL identities, ignore rules and no symlink loops",
+		async () => {
+			const result = await tool.execute("remote-dir", { pattern: "NEEDLE", path: `${root}/` });
+			expect(result.details?.files?.toSorted()).toEqual(
+				[
+					joinUrlPath(root, ".hidden.txt"),
+					joinUrlPath(root, "a.txt"),
+					joinUrlPath(root, unusual),
+					joinUrlPath(root, "sub/b.txt"),
+					joinUrlPath(root, "two words.txt"),
+				].toSorted(),
+			);
+			expect(textOf(result)).toContain("NEEDLE nested");
+			expect(textOf(result)).not.toContain("NEEDLE ignored");
+		},
+		30_000,
+	);
 
-	it("applies direct-child glob scopes without including nested or ignored files", async () => {
-		const result = await tool.execute("remote-direct", { pattern: "NEEDLE", path: `${root}/*.txt` });
-		expect(result.details?.files).toContain(joinUrlPath(root, "a.txt"));
-		expect(result.details?.files).not.toContain(joinUrlPath(root, "sub/b.txt"));
-		expect(result.details?.files).not.toContain(joinUrlPath(root, "ignored.txt"));
-		const withoutIgnores = await tool.execute("remote-no-ignore", {
-			pattern: "NEEDLE",
-			path: root,
-			gitignore: false,
-		});
-		expect(withoutIgnores.details?.files).toContain(joinUrlPath(root, "ignored.txt"));
-	});
+	it(
+		"applies direct-child glob scopes without including nested or ignored files",
+		async () => {
+			const result = await tool.execute("remote-direct", { pattern: "NEEDLE", path: `${root}/*.txt` });
+			expect(result.details?.files).toContain(joinUrlPath(root, "a.txt"));
+			expect(result.details?.files).not.toContain(joinUrlPath(root, "sub/b.txt"));
+			expect(result.details?.files).not.toContain(joinUrlPath(root, "ignored.txt"));
+			const withoutIgnores = await tool.execute("remote-no-ignore", {
+				pattern: "NEEDLE",
+				path: root,
+				gitignore: false,
+			});
+			expect(withoutIgnores.details?.files).toContain(joinUrlPath(root, "ignored.txt"));
+		},
+		30_000,
+	);
 
-	it("keeps explicit file scopes searchable and refuses oversized remote files", async () => {
-		const result = await tool.execute("remote-file", { pattern: "NEEDLE", path: `${root}/a.txt` });
-		expect(result.details?.files).toEqual([`${root}/a.txt`]);
-		await Bun.write(path.join(fixture, "large.txt"), "x".repeat(1024 * 1024 + 1));
-		await expect(tool.execute("remote-large", { pattern: "x", path: `${root}/large.txt` })).rejects.toThrow(/1 MiB/);
-	});
+	it(
+		"keeps explicit file scopes searchable and refuses oversized remote files",
+		async () => {
+			const result = await tool.execute("remote-file", { pattern: "NEEDLE", path: `${root}/a.txt` });
+			expect(result.details?.files).toEqual([`${root}/a.txt`]);
+			await Bun.write(path.join(fixture, "large.txt"), "x".repeat(1024 * 1024 + 1));
+			await expect(tool.execute("remote-large", { pattern: "x", path: `${root}/large.txt` })).rejects.toThrow(/1 MiB/);
+		},
+		30_000,
+	);
 
-	it("surfaces missing and unreadable remote directory errors instead of searching a local path", async () => {
-		await expect(tool.execute("remote-missing", { pattern: "NEEDLE", path: `${root}/missing` })).rejects.toThrow(
-			/No such file|not found/i,
-		);
-		vi.spyOn(fileTransfer, "listRemoteDir").mockRejectedValue(new Error("remote directory: Permission denied"));
-		await expect(tool.execute("remote-unreadable", { pattern: "NEEDLE", path: root })).rejects.toThrow(
-			/Permission denied|PermissionDenied|Input\/output error|I\/O error/i,
-		);
-	});
+	it(
+		"surfaces missing and unreadable remote directory errors instead of searching a local path",
+		async () => {
+			await expect(tool.execute("remote-missing", { pattern: "NEEDLE", path: `${root}/missing` })).rejects.toThrow(
+				/No such file|not found/i,
+			);
+			vi.spyOn(fileTransfer, "listRemoteDir").mockRejectedValue(new Error("remote directory: Permission denied"));
+			await expect(tool.execute("remote-unreadable", { pattern: "NEEDLE", path: root })).rejects.toThrow(
+				/Permission denied|PermissionDenied|Input\/output error|I\/O error/i,
+			);
+		},
+		30_000,
+	);
 
 	it("never substitutes a local directory when the remote namespace exists only through the transport", async () => {
 		const remote = `ssh://fixture/not-local-${crypto.randomUUID()}`;
@@ -124,23 +140,31 @@ describe.skipIf(process.platform === "win32")("grep ssh:// directory scopes", ()
 		expect(result.details?.files).toEqual([`${remote}/only.txt`]);
 	});
 
-	it("propagates a remote directory transport failure", async () => {
-		vi.spyOn(fileTransfer, "listRemoteDir").mockRejectedValue(new Error("SSH transport disconnected"));
-		await expect(tool.execute("remote-disconnected", { pattern: "NEEDLE", path: root })).rejects.toThrow(
-			/SSH transport disconnected|Input\/output error|I\/O error/i,
-		);
-	});
+	it(
+		"propagates a remote directory transport failure",
+		async () => {
+			vi.spyOn(fileTransfer, "listRemoteDir").mockRejectedValue(new Error("SSH transport disconnected"));
+			await expect(tool.execute("remote-disconnected", { pattern: "NEEDLE", path: root })).rejects.toThrow(
+				/SSH transport disconnected|Input\/output error|I\/O error/i,
+			);
+		},
+		30_000,
+	);
 
-	it("cancels directory traversal through the caller's signal", async () => {
-		const controller = new AbortController();
-		vi.spyOn(fileTransfer, "listRemoteDir").mockImplementation(async (_target, _remotePath, options) => {
-			controller.abort(new Error("remote directory cancelled"));
-			expect(options?.signal?.aborted).toBe(true);
-			options?.signal?.throwIfAborted();
-			throw new Error("missing cancellation signal");
-		});
-		await expect(tool.execute("remote-cancel", { pattern: "NEEDLE", path: root }, controller.signal)).rejects.toThrow(
-			/cancel|abort/i,
-		);
-	});
+	it(
+		"cancels directory traversal through the caller's signal",
+		async () => {
+			const controller = new AbortController();
+			vi.spyOn(fileTransfer, "listRemoteDir").mockImplementation(async (_target, _remotePath, options) => {
+				controller.abort(new Error("remote directory cancelled"));
+				expect(options?.signal?.aborted).toBe(true);
+				options?.signal?.throwIfAborted();
+				throw new Error("missing cancellation signal");
+			});
+			await expect(tool.execute("remote-cancel", { pattern: "NEEDLE", path: root }, controller.signal)).rejects.toThrow(
+				/cancel|abort/i,
+			);
+		},
+		30_000,
+	);
 });

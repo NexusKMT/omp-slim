@@ -122,7 +122,7 @@ describe("AgentStorage model perf aggregates", () => {
 				provider: "openai-codex",
 				id: "gpt-6-astra",
 				name: "GPT-6 Astra",
-				api: "openai-codex-responses",
+				api: "openai-completions",
 				baseUrl: "https://example.com",
 				reasoning: true,
 				input: ["text"],

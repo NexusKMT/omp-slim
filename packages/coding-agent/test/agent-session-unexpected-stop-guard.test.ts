@@ -238,7 +238,7 @@ describe("AgentSession unexpected stop guard", () => {
 		await session.prompt("record alpha");
 		await session.waitForIdle();
 
-		expect(mock.calls.map(call => call.options?.toolChoice)).toEqual([{ type: "tool", name: "record" }, "none"]);
+		expect(mock.calls.map(call => call.options?.toolChoice)).toEqual([{ type: "function", name: "record" }, "none"]);
 		expect(spy).not.toHaveBeenCalled();
 		expect(reminderMessages(session.agent.state.messages)).toHaveLength(0);
 	});

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -145,6 +146,7 @@ describe("AgentSession idle compaction async-job deferral", () => {
 				tools: [],
 				messages: [],
 			},
+			streamFn: createMockModel({ handler: () => ({ content: ["ok"] }) }).stream,
 		});
 
 		session = new AgentSession({

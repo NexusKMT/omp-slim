@@ -21,7 +21,21 @@ afterEach(() => {
 });
 
 function fixture() {
-	const model: Model = getBundledModel("deepseek", "deepseek-v4-flash");
+	const model: Model = getBundledModel("deepseek", "deepseek-v4-flash", {
+		cost: {
+			input: 1,
+			output: 2,
+			cacheRead: 0.1,
+			cacheWrite: 1,
+			timeBased: {
+				offPeakMultiplier: 0.25,
+				peakWindows: [
+					{ weekdays: [0, 1, 2, 3, 4, 5, 6], startMinute: 0, endMinute: 240 },
+					{ weekdays: [0, 1, 2, 3, 4, 5, 6], startMinute: 360, endMinute: 1440 },
+				],
+			},
+		},
+	});
 	const state: { model: Model; messages: [] } = { model, messages: [] };
 	const session = {
 		state,

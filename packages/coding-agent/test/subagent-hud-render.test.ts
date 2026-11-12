@@ -7,6 +7,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, setSystemTime, vi } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -944,7 +945,18 @@ describe("InteractiveMode subagent observer UI sync", () => {
 			overrides: { "startup.quiet": true },
 		});
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		const modelRegistry = new ModelRegistry(authStorage);
+		writeFileSync(
+			path.join(tempDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+			].join("\n"),
+		);
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("Expected claude-sonnet-4-5 to exist in registry");
 

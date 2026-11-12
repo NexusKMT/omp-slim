@@ -17,7 +17,7 @@ import { CostCapError, CostGate } from "../../src/session/cost-gate";
 const SMOL: Model<Api> = {
 	id: "smol",
 	name: "smol",
-	api: "openai-responses",
+	api: "openai-completions",
 	provider: "p",
 	baseUrl: "https://example.test/v1",
 	reasoning: false,
@@ -66,7 +66,7 @@ function reply(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "p",
 		model: "smol",
 		usage: {

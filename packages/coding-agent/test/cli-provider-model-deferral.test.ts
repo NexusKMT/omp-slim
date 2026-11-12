@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "bun:
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -22,6 +23,17 @@ describe("--provider with a model the startup catalog lacks", () => {
 		tempDir = path.join(os.tmpdir(), `pi-cli-provider-deferral-${Snowflake.next()}`);
 		fs.mkdirSync(tempDir, { recursive: true });
 		authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
+		writeFileSync(
+			path.join(tempDir, "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+			].join("\n"),
+		);
 		modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
 	});
 
@@ -108,7 +120,7 @@ describe("print-mode suggestions for a provider-qualified miss", () => {
 			);
 			const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
 			expect(exitCode).toBe(1);
-			expect(stderr).toContain('Model "anthropic/gpt-4o" not found');
+			expect(stderr).toContain('Model "anthropic/gpt-4o" is not configured');
 			expect(stderr).not.toContain("openai/");
 		} finally {
 			removeSyncWithRetries(home);

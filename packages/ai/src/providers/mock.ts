@@ -270,11 +270,22 @@ export function streamMock(
 const productionChatStream = chatModule.streamOpenAICompletions;
 /** Intercept only the transport in Bun tests, preserving real runtime guards. */
 export function registerMockApi(_sourceId = "pi-ai/mock"): void {
-	spyOn(chatModule, "streamOpenAICompletions").mockImplementation((model, context, options) =>
-		model instanceof MockModel
-			? streamMock(model, context, options as SimpleStreamOptions)
-			: productionChatStream(model, context, options),
-	);
+	const spy = spyOn(chatModule, "streamOpenAICompletions");
+	spy.mockImplementation((model, context, options) => {
+		try {
+			return model instanceof MockModel
+				? streamMock(model, context, options as SimpleStreamOptions)
+				: productionChatStream(model, context, options);
+		} finally {
+			// The spy records every call's arguments. A recorded model context
+			// retains the whole session graph (tool wrappers -> extension runner
+			// -> native-tool resolver closure), so parked subagent sessions would
+			// stay alive until the spy is restored. Drop each record as soon as
+			// the call is dispatched: the mock's own `model.calls` remain the
+			// inspection surface.
+			spy.mockClear();
+		}
+	});
 }
 
 // =============================================================================

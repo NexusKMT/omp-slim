@@ -12,44 +12,18 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { removeSyncWithRetries, Snowflake, prompt } from "@oh-my-pi/pi-utils";
 import subagentSystemPromptTemplate from "../src/prompts/system/subagent-system-prompt.md" with { type: "text" };
 
-async function expectProviderYieldContract(
-	session: AgentSession,
-	dialect: "native" | "gemini",
-	pooled: boolean,
-): Promise<void> {
+async function expectProviderYieldContract(session: AgentSession, pooled: boolean): Promise<void> {
 	const providerContext = await session.agent.buildSideRequestContext([]);
-	if (dialect === "native") {
-		const providerTool = providerContext.tools?.find(candidate => candidate.name === "yield");
-		if (!providerTool) throw new Error("Missing provider yield tool");
-		const properties = Reflect.get(providerTool.parameters, "properties");
-		if (pooled) {
-			expect(Reflect.get(providerTool.parameters, "required")).toEqual(["key"]);
-			expect(properties).toHaveProperty("key");
-			expect(properties).not.toHaveProperty("type");
-		} else {
-			expect(properties).toHaveProperty("type");
-			expect(properties).not.toHaveProperty("key");
-		}
-		return;
-	}
-
-	const providerSystemPrompt = providerContext.systemPrompt;
-	if (!providerSystemPrompt) throw new Error("Missing provider system prompt");
-	const providerPrompt = providerSystemPrompt.join("\n");
-	expect(providerPrompt.match(/type yield =/g)).toHaveLength(1);
-	const yieldStart = providerPrompt.indexOf("type yield =");
-	const nextType = providerPrompt.indexOf("\ntype ", yieldStart + 1);
-	const namespaceEnd = providerPrompt.indexOf("\n\n} // namespace functions", yieldStart + 1);
-	let yieldEnd = nextType;
-	if (yieldEnd < 0 || (namespaceEnd >= 0 && namespaceEnd < yieldEnd)) yieldEnd = namespaceEnd;
-	if (yieldEnd < 0) throw new Error("Missing provider yield declaration boundary");
-	const yieldDeclaration = providerPrompt.slice(yieldStart, yieldEnd);
+	const providerTool = providerContext.tools?.find(candidate => candidate.name === "yield");
+	if (!providerTool) throw new Error("Missing provider yield tool");
+	const properties = Reflect.get(providerTool.parameters, "properties");
 	if (pooled) {
-		expect(yieldDeclaration).toContain("key: 1,");
-		expect(yieldDeclaration).not.toContain("type?:");
+		expect(Reflect.get(providerTool.parameters, "required")).toEqual(["key"]);
+		expect(properties).toHaveProperty("key");
+		expect(properties).not.toHaveProperty("type");
 	} else {
-		expect(yieldDeclaration).toContain("type?:");
-		expect(yieldDeclaration).not.toContain("key:");
+		expect(properties).toHaveProperty("type");
+		expect(properties).not.toHaveProperty("key");
 	}
 }
 
@@ -73,11 +47,8 @@ describe("SDK workpool yield schema", () => {
 		if (fs.existsSync(registryDir)) removeSyncWithRetries(registryDir);
 	});
 
-	for (const [dialect, toolSettings] of [
-		["native", {}],
-		["gemini", { "tools.format": "gemini" }],
-	] as const) {
-		it("keeps the provider yield contract synchronized through a pooled turn (" + dialect + ")", async () => {
+	for (const toolSettings of [{}] as const) {
+		it("keeps the provider yield contract synchronized through a pooled turn", async () => {
 			const { session } = await createAgentSession({
 				cwd: registryDir,
 				agentDir: registryDir,
@@ -112,7 +83,7 @@ describe("SDK workpool yield schema", () => {
 			if (!tool) throw new Error("Missing yield tool");
 			expect(Reflect.get(tool.parameters, "properties")).toHaveProperty("type");
 			expect(Reflect.get(tool.parameters, "properties")).not.toHaveProperty("key");
-			await expectProviderYieldContract(session, dialect, false);
+			await expectProviderYieldContract(session, false);
 
 			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
 			expect(Reflect.get(tool.parameters, "required")).toEqual(["key"]);
@@ -122,7 +93,7 @@ describe("SDK workpool yield schema", () => {
 			const activeTool = session.agent.state.tools.find(candidate => candidate.name === "yield");
 			if (!activeTool) throw new Error("Missing active yield tool");
 			expect(Reflect.get(activeTool.parameters, "required")).toEqual(["key"]);
-			await expectProviderYieldContract(session, dialect, true);
+			await expectProviderYieldContract(session, true);
 			const result = await tool.execute("yield-pool-1", { key: 1, data: { answer: 42 } });
 			expect(result.details).toMatchObject({ type: ["pool#1"], complete: true });
 
@@ -130,9 +101,9 @@ describe("SDK workpool yield schema", () => {
 			const clearedProperties = Reflect.get(tool.parameters, "properties");
 			expect(clearedProperties).toHaveProperty("type");
 			expect(clearedProperties).not.toHaveProperty("key");
-			await expectProviderYieldContract(session, dialect, false);
+			await expectProviderYieldContract(session, false);
 		});
-		it("serializes concurrent yield contract transitions in call order (" + dialect + ")", async () => {
+		it("serializes concurrent yield contract transitions in call order", async () => {
 			const { session } = await createAgentSession({
 				cwd: registryDir,
 				agentDir: registryDir,
@@ -170,9 +141,9 @@ describe("SDK workpool yield schema", () => {
 			const clear = session.setWorkPoolYieldItems([]);
 			await Promise.all([install, clear, session.whenWorkPoolYieldSettled()]);
 			expect(session.getWorkPoolYieldItems()).toEqual([]);
-			await expectProviderYieldContract(session, dialect, false);
+			await expectProviderYieldContract(session, false);
 		});
-		it("rolls back the runtime contract when the prompt refresh fails (" + dialect + ")", async () => {
+		it("rolls back the runtime contract when the prompt refresh fails", async () => {
 			const { session } = await createAgentSession({
 				cwd: registryDir,
 				agentDir: registryDir,
@@ -212,11 +183,11 @@ describe("SDK workpool yield schema", () => {
 			await expect(session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }])).rejects.toThrow("rebuild boom");
 			expect(session.getWorkPoolYieldItems()).toEqual([]);
 			await session.whenWorkPoolYieldSettled();
-			await expectProviderYieldContract(session, dialect, false);
+			await expectProviderYieldContract(session, false);
 			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
-			await expectProviderYieldContract(session, dialect, true);
+			await expectProviderYieldContract(session, true);
 		});
-		it("restores the last published contract when overlapping transitions both fail (" + dialect + ")", async () => {
+		it("restores the last published contract when overlapping transitions both fail", async () => {
 			const { session } = await createAgentSession({
 				cwd: registryDir,
 				agentDir: registryDir,
@@ -260,9 +231,9 @@ describe("SDK workpool yield schema", () => {
 			await expect(clear).rejects.toThrow("second boom");
 			await session.whenWorkPoolYieldSettled();
 			expect(session.getWorkPoolYieldItems()).toEqual([]);
-			await expectProviderYieldContract(session, dialect, false);
+			await expectProviderYieldContract(session, false);
 		});
-		it("converges an overlapping install and failing clear to the cleared contract (" + dialect + ")", async () => {
+		it("converges an overlapping install and failing clear to the cleared contract", async () => {
 			const { session } = await createAgentSession({
 				cwd: registryDir,
 				agentDir: registryDir,
@@ -306,11 +277,11 @@ describe("SDK workpool yield schema", () => {
 			await expect(clear).rejects.toThrow("rebuild boom");
 			await session.whenWorkPoolYieldSettled();
 			expect(session.getWorkPoolYieldItems()).toEqual([]);
-			await expectProviderYieldContract(session, dialect, false);
+			await expectProviderYieldContract(session, false);
 			await session.setWorkPoolYieldItems([{ id: "pool#1", index: 1 }]);
-			await expectProviderYieldContract(session, dialect, true);
+			await expectProviderYieldContract(session, true);
 		});
-		it("re-renders the pooled instructions from the live yield contract (" + dialect + ")", async () => {
+		it("re-renders the pooled instructions from the live yield contract", async () => {
 			// The base-prompt rebuild must re-render the real subagent completion
 			// block against the live item set on every transition: install shows the
 			// keyed workpool protocol, clearing restores the ordinary one. Markers

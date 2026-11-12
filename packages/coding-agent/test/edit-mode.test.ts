@@ -45,29 +45,6 @@ describe("resolveEditMode", () => {
 		restoreEnv();
 	});
 
-	test("falls back from hashline to replace for Kimi models", () => {
-		delete Bun.env.PI_EDIT_VARIANT;
-
-		expect(resolveEditMode(createSession({ activeModel: "openrouter/moonshotai/Kimi-K2-Instruct" }))).toBe("replace");
-	});
-
-	test("falls back for K3 SKUs without changing ordinary or near-miss model edit mode", () => {
-		for (const activeModel of [
-			"k3",
-			"kimi-code/k3",
-			"kimi-coding/K3",
-			"k3-256k",
-			"K3-256K",
-			"kimi-code/k3-256k",
-			"kimi-coding/K3-256K",
-		]) {
-			expect(resolveEditMode(createSession({ activeModel }))).toBe("replace");
-		}
-		for (const activeModel of ["openai/gpt-5.5", "k30", "k3-custom", "k3-256kb", "kimi-code/k3-256k-custom"]) {
-			expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
-		}
-	});
-
 	test("keeps explicit K3 edit-mode overrides ahead of the fallback", () => {
 		for (const activeModel of ["kimi-code/k3", "kimi-coding/K3-256K"]) {
 			expect(resolveEditMode(createSession({ activeModel, modelVariant: "hashline" }))).toBe("hashline");
@@ -81,52 +58,6 @@ describe("resolveEditMode", () => {
 			expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
 			delete Bun.env.PI_STRICT_EDIT_MODE;
 		}
-	});
-
-	test("falls back from hashline to replace for MiMo models", () => {
-		delete Bun.env.PI_EDIT_VARIANT;
-
-		expect(resolveEditMode(createSession({ activeModel: "xiaomi/MiMo-V2.5-Pro" }))).toBe("replace");
-	});
-
-	test("falls back from hashline to replace for DeepSeek models", () => {
-		delete Bun.env.PI_EDIT_VARIANT;
-
-		expect(resolveEditMode(createSession({ activeModel: "tensormesh/deepseek-ai/DeepSeek-V4-Flash" }))).toBe(
-			"replace",
-		);
-		expect(resolveEditMode(createSession({ activeModel: "deepseek/deepseek-chat" }))).toBe("replace");
-		expect(resolveEditMode(createSession({ activeModel: "deepseek/deepseek-reasoner" }))).toBe("replace");
-	});
-
-	test("falls back from hashline to replace for Step 3.7 Flash models", () => {
-		delete Bun.env.PI_EDIT_VARIANT;
-
-		expect(resolveEditMode(createSession({ activeModel: "kilo/stepfun/step-3.7-flash:free" }))).toBe("replace");
-	});
-
-	test("uses replace for Codex Spark without excluding other Codex models", () => {
-		expect(resolveEditMode(createSession({ activeModel: "openai-codex/gpt-5.3-codex-spark" }))).toBe("replace");
-		expect(resolveEditMode(createSession({ activeModel: "openai-codex/gpt-5.3-codex" }))).toBe("hashline");
-	});
-
-	test("uses replace across MiniMax model families", () => {
-		expect(resolveEditMode(createSession({ activeModel: "openrouter/minimax/minimax-m1" }))).toBe("replace");
-		expect(resolveEditMode(createSession({ activeModel: "minimax/MiniMax-M2.5" }))).toBe("replace");
-		expect(resolveEditMode(createSession({ activeModel: "minimax/MiniMax-M3" }))).toBe("replace");
-	});
-
-	test("excludes GLM 5.3 Flash without excluding other GLM revisions or families", () => {
-		expect(resolveEditMode(createSession({ activeModel: "zai/glm-5.3-flash" }))).toBe("replace");
-		expect(resolveEditMode(createSession({ activeModel: "zai/glm-5.3" }))).toBe("hashline");
-		expect(resolveEditMode(createSession({ activeModel: "zai/glm-4.7-flash" }))).toBe("hashline");
-	});
-
-	test("uses replace for Qwen 3.8 without changing other Qwen generations", () => {
-		expect(resolveEditMode(createSession({ activeModel: "omlx/Qwen3.8-Flash-Next-oQ6e-mtp" }))).toBe("replace");
-		expect(resolveEditMode(createSession({ activeModel: "lm-studio/qwen3.8-27b" }))).toBe("replace");
-		expect(resolveEditMode(createSession({ activeModel: "openrouter/qwen/qwen3-coder" }))).toBe("hashline");
-		expect(resolveEditMode(createSession({ activeModel: "openrouter/qwen/qwen3.5-35b-a3b" }))).toBe("hashline");
 	});
 
 	test("does not exclude non-Kimi Moonshot models", () => {

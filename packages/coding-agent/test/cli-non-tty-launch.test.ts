@@ -26,6 +26,20 @@ async function launchWithoutTerminal(
 ): Promise<LaunchRun> {
 	const home = tempDir.join("home");
 	fs.mkdirSync(home, { recursive: true });
+	// Seed a cutover-valid models.yml so the explicit `--provider`/`--model`
+	// resolves against an isolated catalog (the production catalog was removed).
+	fs.mkdirSync(path.join(home, ".omp", "agent"), { recursive: true });
+	fs.writeFileSync(
+		path.join(home, ".omp", "agent", "models.yml"),
+		[
+			"providers:",
+			"  anthropic:",
+			"    baseUrl: https://models.example.invalid/v1",
+			"    api: openai-completions",
+			"    models:",
+			"      - id: claude-sonnet-4-5",
+		].join("\n"),
+	);
 	// An isolated home, minimal environment, and explicit authenticated model
 	// keep prompts off ambient cloud credentials and keyless on-device models.
 	const env: Record<string, string | undefined> = {

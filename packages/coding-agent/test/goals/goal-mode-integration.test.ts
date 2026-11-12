@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
+import { writeFileSync } from "node:fs";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
@@ -58,7 +59,18 @@ async function createSharedFixture(): Promise<SharedFixture> {
 	const authStorage = await AuthStorage.create(path.join(baseDir.path(), "testauth.db"));
 	// The real prompt path gates on a resolvable key; never rely on ambient env.
 	authStorage.keys.setRuntime("anthropic", "test-key");
-	const modelRegistry = new ModelRegistry(authStorage);
+	writeFileSync(
+		path.join(baseDir.path(), "models.yml"),
+		[
+			"providers:",
+			"  anthropic:",
+			"    baseUrl: https://models.example.invalid/v1",
+			"    api: openai-completions",
+			"    models:",
+			"      - id: claude-sonnet-4-5",
+		].join("\n"),
+	);
+	const modelRegistry = new ModelRegistry(authStorage, path.join(baseDir.path(), "models.yml"));
 	const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
 	if (!model) {
 		throw new Error("Expected claude-sonnet-4-5 to exist in registry");

@@ -5728,11 +5728,15 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// state released above. Its disk writes are already dead — the release
 		// SEALED the session manager (a revival may reopen the same JSONL
 		// through a new manager the moment dispose returns, and this manager
-		// must never race that writer) — so re-run only the in-memory reset,
-		// and lift the account pools, once the pipeline genuinely settles. The
-		// extension runner bounds hook runtime, so this deferred pass is not
-		// unbounded.
+		// must never race that writer) — so re-run only the in-memory reset
+		// once the pipeline genuinely settles. The extension runner bounds hook
+		// runtime, so this deferred pass is not unbounded.
 		if (!drained) {
+			void (async () => {
+				await this.agent.waitForIdle();
+				await this.#drainInFlightEventHandlers();
+				this.#releaseRetainedSessionMemory();
+			})().catch(error => logger.warn("Deferred dispose finalization failed", { error: String(error) }));
 		}
 	}
 

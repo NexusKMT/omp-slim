@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as bashExecutor from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
@@ -40,6 +39,17 @@ describe("AgentSession bash session ownership", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = createInMemoryAuthStorage();
 		authStorage.keys.setRuntime("anthropic", "test-key");
+		fs.writeFileSync(
+			path.join(tempDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+			].join("\n"),
+		);
 		additionalManagers = [];
 	});
 
@@ -57,7 +67,8 @@ describe("AgentSession bash session ownership", () => {
 		extensionRunner?: ExtensionRunner,
 		responseContent: () => string[] = () => ["Done"],
 	): AgentSession {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 		const mock = createMockModel({ handler: () => ({ content: responseContent() }) });
 		const agent = new Agent({
@@ -65,7 +76,6 @@ describe("AgentSession bash session ownership", () => {
 			initialState: { model, systemPrompt: ["Test"], tools: [] },
 			streamFn: mock.stream,
 		});
-		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 		session = new AgentSession({
 			agent,
 			sessionManager,

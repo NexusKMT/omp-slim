@@ -278,8 +278,8 @@ export class SshProtocolHandler implements ProtocolHandler {
 		// Classify before reading. A FIFO with no writer would block `head` until the
 		// timeout, and a device (e.g. /dev/zero) would stream the whole probe, so a
 		// special file must fail fast. Only a regular file is read; a directory lists.
-		// `missing`/stat-failure falls through to the read so its original remote stderr
-		// (e.g. "No such file or directory") still surfaces.
+		// A stat failure (host/connection issue) falls through to the read so its
+		// original remote stderr (e.g. "No such file or directory") still surfaces.
 		let kind: RemotePathKind | undefined;
 		try {
 			kind = await statRemotePath(target, remotePath, { signal: context?.signal });
@@ -293,6 +293,13 @@ export class SshProtocolHandler implements ProtocolHandler {
 			throw new Error(
 				`ssh://: ${remotePath} is not a regular file (FIFO, socket, or device); ssh:// reads UTF-8 text files only — use \`bash\` with a remote SSH command for special files`,
 			);
+		}
+		// `stat` already classified the path: a confirmed `missing` needs no
+		// follow-up read (whose `head` would only re-find the absence). Only a
+		// failed stat (host/connection issue) falls through to the read so its
+		// original remote stderr still surfaces.
+		if (kind === "missing") {
+			throw Object.assign(new Error(`ssh://: ${remotePath}: No such file or directory`), { code: "ENOENT" });
 		}
 		const fileResult = await readRemoteFile(target, remotePath, {
 			maxBytes: SSH_TEXT_MAX_BYTES,

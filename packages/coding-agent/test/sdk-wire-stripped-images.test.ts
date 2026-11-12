@@ -34,8 +34,9 @@ describe("session image replacement on a wire that strips images", () => {
 
 	it("replaces history images with text before the provider transforms run", async () => {
 		using tempDir = TempDir.createSync("@pi-wire-stripped-images-");
-		// Declares image input; `compat.stripImageInput` drops images on the wire.
-		const model = getBundledModel("deepseek", "deepseek-v4-flash");
+		// Text-only model: the session replaces history images before the provider
+		// transform runs, so the wire's last-resort strip never fires.
+		const model = getBundledModel("deepseek", "deepseek-v4-flash", { input: ["text"] });
 		const bodies: string[] = [];
 		const fetchStub = Object.assign(
 			async (_input: string | URL | Request, init?: RequestInit | BunFetchRequestInit) => {

@@ -51,6 +51,7 @@ interface CleanupPassDeadline {
 // Active cleanup callbacks in registration order. Registrations survive
 // keep-alive passes; `lastPass` enforces at-most-once invocation per pass.
 const callbackList: CleanupRegistration[] = [];
+
 // Tracks cleanup run state (to prevent recursion/reentry issues).
 let cleanupStage: "idle" | "running" | "complete" = "idle";
 let cleanupPass = 0;

@@ -184,8 +184,8 @@ describe("setup wizard model selection", () => {
 					modelRegistry: {
 						getAvailable: () => available,
 						getAll: () => available,
-						refresh: async (strategy: string) => {
-							if (strategy === "online-if-uncached") available = [CUSTOM_MODEL];
+						refresh: async () => {
+							available = [CUSTOM_MODEL];
 						},
 					},
 					setModel,

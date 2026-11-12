@@ -128,7 +128,7 @@ describe("StatusLineComponent", () => {
 		expect(border).not.toContain("%");
 	});
 
-	it("renders primary and advisor costs separately with subscription indicator in Unicode preset", () => {
+	it("renders primary and advisor costs separately in Unicode preset", () => {
 		const statusLine = statusLines.track(
 			new StatusLineComponent(
 				makeSessionWithLastMessage(null, {
@@ -141,10 +141,10 @@ describe("StatusLineComponent", () => {
 		);
 
 		const stripped = statusLine.getTopBorder(WIDE_ENOUGH_FOR_COST_SEGMENT).content.replace(/\x1b\[[0-9;]*m/g, "");
-		expect(stripped).toContain("S2.67 + 👁 $0.41");
+		expect(stripped).toContain("$2.67 + 👁 0.41");
 	});
 
-	it("renders advisor cost with subscription prefix when advisor is on subscription in Unicode preset", () => {
+	it("renders advisor cost alongside the primary cost in Unicode preset", () => {
 		const statusLine = statusLines.track(
 			new StatusLineComponent(
 				makeSessionWithLastMessage(null, {
@@ -158,7 +158,7 @@ describe("StatusLineComponent", () => {
 		);
 
 		const stripped = statusLine.getTopBorder(WIDE_ENOUGH_FOR_COST_SEGMENT).content.replace(/\x1b\[[0-9;]*m/g, "");
-		expect(stripped).toContain("S2.67 + 👁 0.41");
+		expect(stripped).toContain("$2.67 + 👁 0.41");
 	});
 
 	it("renders ASCII preset fallback with (adv) for advisor costs", async () => {
@@ -179,7 +179,7 @@ describe("StatusLineComponent", () => {
 				),
 			);
 			const stripped = statusLine.getTopBorder(WIDE_ENOUGH_FOR_COST_SEGMENT).content.replace(/\x1b\[[0-9;]*m/g, "");
-			expect(stripped).toContain("S2.67 + 0.41 (adv)");
+			expect(stripped).toContain("$2.67 + 0.41 (adv)");
 		} finally {
 			setThemeInstance(baseTheme);
 		}
@@ -197,11 +197,11 @@ describe("StatusLineComponent", () => {
 		);
 
 		const stripped = statusLine.getTopBorder(WIDE_ENOUGH_FOR_COST_SEGMENT).content.replace(/\x1b\[[0-9;]*m/g, "");
-		expect(stripped).toContain("S2.67");
+		expect(stripped).toContain("$2.67");
 		expect(stripped).not.toContain("(adv)");
 	});
 
-	it("renders Nerd Font symbols for subscription and advisor costs", async () => {
+	it("renders Nerd Font symbols for advisor costs", async () => {
 		const baseTheme = await getThemeByName("dark");
 		if (!baseTheme) throw new Error("theme unavailable");
 		const nerdTheme = await loadTheme("dark", { symbolPresetOverride: "nerd" });
@@ -219,7 +219,7 @@ describe("StatusLineComponent", () => {
 				),
 			);
 			const stripped = statusLine.getTopBorder(WIDE_ENOUGH_FOR_COST_SEGMENT).content.replace(/\x1b\[[0-9;]*m/g, "");
-			expect(stripped).toContain("\u{f067a} 2.67 + \uea70 0.41");
+			expect(stripped).toContain("$2.67 + \uea70 0.41");
 		} finally {
 			setThemeInstance(baseTheme);
 		}

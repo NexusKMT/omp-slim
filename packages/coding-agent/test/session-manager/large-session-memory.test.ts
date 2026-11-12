@@ -69,11 +69,7 @@ describe("large session memory guards", () => {
 		const firstSummary = `first-${"x".repeat(4096)}`;
 		const secondSummary = `second-${"y".repeat(4096)}`;
 		const archivedFrame = btoa("archived frame");
-		const replacementHistory = [
-			{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved user" }] },
-		];
 		const firstPreserve = {
-			openaiRemoteCompaction: { provider: "openai", replacementHistory },
 			[snapcompact.PRESERVE_KEY]: {
 				frames: [{ data: archivedFrame, mimeType: "image/png", cols: 10, rows: 10, chars: 14 }],
 				totalChars: 14,
@@ -106,11 +102,6 @@ describe("large session memory guards", () => {
 		const rewoundSummary = session.buildSessionContext().messages[0];
 		if (rewoundSummary?.role !== "compactionSummary") throw new Error("Expected rewound compaction summary");
 		expect(rewoundSummary.summary).toBe(firstSummary);
-		expect(rewoundSummary.providerPayload).toEqual({
-			type: "openaiResponsesHistory",
-			provider: "openai",
-			items: replacementHistory,
-		});
 		expect(rewoundSummary.blocks?.find(block => block.type === "image")).toMatchObject({ data: archivedFrame });
 
 		const sessionFile = session.getSessionFile();

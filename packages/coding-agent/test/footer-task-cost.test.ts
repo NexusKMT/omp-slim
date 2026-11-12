@@ -8,6 +8,9 @@
  * transcript window, so compaction does not roll the totals back.
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { writeFileSync } from "node:fs";
+import * as path from "node:path";
+import { TempDir } from "@oh-my-pi/pi-utils";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { statusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
@@ -31,7 +34,20 @@ afterAll(() => {
 describe("FooterComponent session cost", () => {
 	it("counts a task toolResult's usage in the footer total", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
-		const modelRegistry = new ModelRegistry(authStorage);
+		using modelsDir = TempDir.createSync("@omp-footer-models-");
+		writeFileSync(
+			path.join(modelsDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  test:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: test-model",
+				"        contextWindow: 128000",
+			].join("\n"),
+		);
+		const modelRegistry = new ModelRegistry(authStorage, path.join(modelsDir.path(), "models.yml"));
 		const target = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 		if (!target) throw new Error("Expected bundled model with a context window");
 
@@ -102,7 +118,20 @@ describe("FooterComponent session cost", () => {
 
 	it("keeps pre-compaction cost in the footer total", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
-		const modelRegistry = new ModelRegistry(authStorage);
+		using modelsDir = TempDir.createSync("@omp-footer-models-");
+		writeFileSync(
+			path.join(modelsDir.path(), "models.yml"),
+			[
+				"providers:",
+				"  test:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: test-model",
+				"        contextWindow: 128000",
+			].join("\n"),
+		);
+		const modelRegistry = new ModelRegistry(authStorage, path.join(modelsDir.path(), "models.yml"));
 		const target = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
 		if (!target) throw new Error("Expected bundled model with a context window");
 

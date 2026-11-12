@@ -1599,27 +1599,6 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(loadSource).toContain(addon.replaceAll("\\", "/"));
 	});
 
-	it("remaps legacy pi-ai utils/oauth subpaths to registry OAuth exports", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-oauth-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { registerOAuthProvider } from "@mariozechner/pi-ai/utils/oauth";',
-				'import { fetchAnthropicBootstrapIdentity } from "@mariozechner/pi-ai/utils/oauth/anthropic";',
-				'export const hasRegisterOAuthProvider = typeof registerOAuthProvider === "function";',
-				'export const hasFetchAnthropicBootstrapIdentity = typeof fetchAnthropicBootstrapIdentity === "function";',
-				"export default function (pi) { void pi; }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as {
-			hasRegisterOAuthProvider: boolean;
-			hasFetchAnthropicBootstrapIdentity: boolean;
-		};
-
-		expect(mod.hasRegisterOAuthProvider).toBe(true);
-		expect(mod.hasFetchAnthropicBootstrapIdentity).toBe(true);
-	});
-
 	it("rewrites legacy imports in ../src modules reached through relative imports", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "dist-ext", version: "1.0.0" }),

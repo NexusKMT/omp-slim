@@ -18,11 +18,11 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 const OVERRIDE = "OVERRIDE-SYSTEM-PROMPT-LIFEOS_ROUTE";
 const REBUILT_BASE = "REBUILT-BASE-WITH-TOOL-CATALOG";
 
-function createModel(): Model<"openai-responses"> {
+function createModel(): Model<"openai-completions"> {
 	return buildModel({
 		id: "mock",
 		name: "mock",
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "openai",
 		baseUrl: "https://example.invalid",
 		reasoning: false,

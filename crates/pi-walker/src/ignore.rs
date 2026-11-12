@@ -589,6 +589,15 @@ async fn ancestor_frames(
 	root: &Path,
 	buf: &mut Vec<u8>,
 ) -> Option<Arc<Frame>> {
+	// A `scheme://` root has no host-repository ancestry worth walking to the
+	// scheme root: each `.git`/`.jj` probe above a remote mount is a remote
+	// round-trip (a subprocess over ssh://), and the walk root's own
+	// `.gitignore` is still applied during the walk. Skip the climb so remote
+	// directory scopes stay proportional to the files searched, not to the
+	// path's depth.
+	if pi_vfs::is_virtual_path(root) {
+		return None;
+	}
 	async fn exists(session: &mut Session, dir: &Path, name: &str) -> bool {
 		session
 			.stat(&pi_vfs::child_path(dir, OsStr::new(name)), true)

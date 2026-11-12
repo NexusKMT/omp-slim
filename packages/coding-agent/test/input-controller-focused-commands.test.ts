@@ -1,10 +1,9 @@
 /**
  * Focused subagent views are chat-only, except for viewer-scoped commands: `/btw`
  * asks a side question about the focused transcript, `/jobs` lists the focused
- * agent's background jobs, `/usage` reports account-wide limits, and `/effort`
- * adjusts the focused agent's thinking. Model selection belongs to the main
- * session. Everything else, and mutating forms such as `/usage reset` and
- * `/jobs kill`, still requires returning to main.
+ * agent's background jobs, and `/effort` adjusts the focused agent's thinking.
+ * Model selection belongs to the main session. Everything else, and mutating
+ * forms such as `/jobs kill`, still requires returning to main.
  *
  * Failure mode if this regresses: these commands silently do nothing (or steer the
  * agent) in a focused view, an agent selects a different model, or its thinking
@@ -59,10 +58,8 @@ function createFocusedContext() {
 		showStatus: vi.fn(),
 		showError: vi.fn(),
 		updatePendingMessagesDisplay: vi.fn(),
-		handleUsageCommand: vi.fn(async () => {}),
 		handleBtwCommand: vi.fn(async () => {}),
 		handleJobsCommand: vi.fn(async () => {}),
-		showResetUsageSelector: vi.fn(async () => {}),
 		withLocalSubmission: vi.fn(async <T>(_text: string, fn: () => Promise<T>) => fn()),
 	};
 	return { ctx: ctx as unknown as InteractiveModeContext, raw: ctx, editor, prompt, resume };
@@ -90,12 +87,6 @@ describe("focused subagent view slash commands", () => {
 			expect(editor.clearDraft).toHaveBeenCalledWith(shortcut);
 			expect(raw.withLocalSubmission).not.toHaveBeenCalled();
 		}
-	});
-
-	it("runs /usage from the focused view", async () => {
-		const { raw, prompt } = await submit("/usage");
-		expect(raw.handleUsageCommand).toHaveBeenCalledTimes(1);
-		expect(prompt).not.toHaveBeenCalled();
 	});
 
 	it("runs /jobs from the focused view", async () => {
@@ -229,15 +220,6 @@ describe("focused subagent view slash commands", () => {
 		const { editor, prompt } = await submit("/compact");
 		expect(editor.getText()).toBe("/compact");
 		expect(prompt).not.toHaveBeenCalled();
-	});
-
-	it("keeps the mutating /usage reset form gated to the main session", async () => {
-		for (const text of ["/usage reset", "/usage reset anthropic/active"]) {
-			const { raw, editor } = await submit(text);
-			expect(raw.showResetUsageSelector).not.toHaveBeenCalled();
-			expect(raw.handleUsageCommand).not.toHaveBeenCalled();
-			expect(editor.getText()).toBe(text);
-		}
 	});
 
 	it("keeps the mutating /jobs kill form gated to the main session", async () => {

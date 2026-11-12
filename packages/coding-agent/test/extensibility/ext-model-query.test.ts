@@ -5,11 +5,11 @@ import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-regis
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createExtensionModelQuery } from "../../src/extensibility/extensions/model-api";
 
-function model(id: string, name: string, provider: string): Model<"anthropic-messages"> {
+function model(id: string, name: string, provider: string): Model<"openai-completions"> {
 	return buildModel({
 		id,
 		name,
-		api: "anthropic-messages",
+		api: "openai-completions",
 		provider,
 		baseUrl: "https://example.test",
 		reasoning: false,

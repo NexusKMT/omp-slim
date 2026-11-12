@@ -22,7 +22,15 @@ describe("advisor auto thinking level", () => {
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		authStorage.keys.setRuntime("google", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
-		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5");
+		// The auto level must resolve above the advisor's medium fallback; the
+		// synthetic fixture defaults to medium, so pin the ladder's default high.
+		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5", {
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.Medium, Effort.High],
+				defaultLevel: Effort.High,
+			},
+		});
 		if (!bundled) throw new Error("Expected bundled anthropic/claude-sonnet-4-5 to exist");
 		model = bundled;
 	});
