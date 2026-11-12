@@ -544,7 +544,6 @@ const TOOL_ENUM_VALUES: Record<string, ReadonlySet<string>> = {
 		"native",
 		"raw",
 		"image",
-		"jina",
 		"trafilatura",
 		"md-suffix",
 		"content-negotiation",

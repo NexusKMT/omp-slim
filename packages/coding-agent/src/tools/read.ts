@@ -30,13 +30,6 @@ import {
 	prompt,
 } from "@oh-my-pi/pi-utils";
 import { peekFile } from "@oh-my-pi/pi-utils/peek-file";
-import {
-	cfgIdaAvailable,
-	EXECUTABLE_SNIFF_BYTES,
-	isExecutableFile,
-	isExecutableHeader,
-	isIdaDatabasePath,
-} from "../ida";
 import { normalizeToLF } from "../edit/normalize";
 import { getEditStore, recordFullySeenRows } from "../edit/store";
 import { extractUriScheme, InternalUrlRouter, type SchemeSpec, sessionResolveContext } from "../internal-urls";
@@ -160,7 +153,6 @@ import {
 	selToOffsetLimit,
 } from "./read-selector";
 import { splitAddressableFileLines } from "@oh-my-pi/pi-tui/tools/hashline-format";
-import { readBinary, resolveBinaryViewPath } from "./read-binary";
 import { readSqlite, resolveSqliteReadPath } from "./read-sqlite";
 import { parseJsonSelector, readJson, resolveJsonReadPath, splitJsonQueryTarget } from "./read-json";
 import {
@@ -1114,7 +1106,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	get description(): string {
 		return prompt.render(readDescription, {
 			IS_HL_MODE: resolveFileDisplayMode(this.session).hashLines,
-			BINARY_VIEWS: cfgIdaAvailable.get(this.session.settings),
 		});
 	}
 	readonly parameters = readSchema;
@@ -2052,16 +2043,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					literalSplit = await splitPathAndSelPreferringLiteral(readPath, this.session.cwd);
 				}
 			}
-
-			// `bin:main`, `bin:imports`, `bin:main:10-40`: an executable/IDB prefix
-			// routes to an IDA view; `:raw` keeps the byte-verbatim escape hatch.
-			if (question === undefined) {
-				const binaryParsed = parseSel(literalSplit.sel);
-				if (!isRawSelector(binaryParsed)) {
-					const binaryView = await resolveBinaryViewPath(this.session, literalSplit.path);
-					if (binaryView) return readBinary(this.session, binaryView, binaryParsed, signal);
-				}
-			}
 		}
 
 		const localTarget = await this.#applyVideoSelectorFallback(literalSplit, readPath);
@@ -2347,20 +2328,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				(wholeFileBytes
 					? isProbablyBinaryHeader(wholeFileBytes.subarray(0, BINARY_SNIFF_BYTES))
 					: await isProbablyBinary(absolutePath));
-			// Executables and IDBs open in IDA instead of being refused. Speculative
-			// reads (lexicalAbsolutePath set) never launch IDA; they fall back to an
-			// ordinary execution that does.
-			if (
-				looksBinary &&
-				lexicalAbsolutePath === undefined &&
-				cfgIdaAvailable.get(this.session.settings) &&
-				(isIdaDatabasePath(absolutePath) ||
-					(wholeFileBytes
-						? isExecutableHeader(wholeFileBytes.subarray(0, EXECUTABLE_SNIFF_BYTES))
-						: await isExecutableFile(absolutePath)))
-			) {
-				return readBinary(this.session, { absolutePath, view: "" }, parsed, signal);
-			}
 			if (looksBinary) {
 				return toolResult<ReadToolDetails>({ resolvedPath: renderAbsolutePath, suffixResolution })
 					.text(

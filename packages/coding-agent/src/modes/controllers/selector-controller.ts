@@ -39,13 +39,6 @@ import type {
 	SessionPickHandler,
 } from "../../modes/types";
 
-import {
-	createForeignSessionStore,
-	foreignSessionInfoToSessionInfo,
-	foreignSessionSourceName,
-	persistForeignSession,
-} from "../../session/foreign-session-import";
-import type { ForeignSessionInfo, ForeignSessionSource } from "../../session/foreign-session-store";
 import { previewModelCompactionPoint, setModelCompactionPoint } from "../../session/model-compaction-threshold";
 import { isTranscriptEntry, type TranscriptEntry } from "../../session/session-context";
 import { isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
@@ -1325,55 +1318,12 @@ export class SelectorController {
 		}
 	}
 
-	async showSessionSelector(source?: ForeignSessionSource, onSelect?: SessionPickHandler): Promise<void> {
+	async showSessionSelector(onSelect?: SessionPickHandler): Promise<void> {
 		let sessions: SessionInfo[];
 		let onSelectSession: (session: SessionInfo) => Promise<boolean>;
 		let selectorOptions: SessionSelectorOptions<SessionInfo>;
 
-		if (source) {
-			const sourceName = foreignSessionSourceName(source);
-			const store = createForeignSessionStore(source);
-			let foreignSessions: ForeignSessionInfo[];
-			try {
-				foreignSessions = await store.list();
-			} catch (error) {
-				this.ctx.showError(
-					`Failed to list ${sourceName} sessions: ${error instanceof Error ? error.message : String(error)}`,
-				);
-				return;
-			}
-			if (foreignSessions.length === 0) {
-				this.ctx.showWarning(`No ${sourceName} sessions found`);
-				return;
-			}
-			const foreignByPath = new Map(foreignSessions.map(session => [session.path, session]));
-			sessions = foreignSessions.map(foreignSessionInfoToSessionInfo);
-			onSelectSession = async session => {
-				try {
-					await this.ctx.settings.flush();
-				} catch (error) {
-					this.ctx.showError(
-						`Failed to save pending settings: ${error instanceof Error ? error.message : String(error)}`,
-					);
-					return false;
-				}
-				const foreignSession = foreignByPath.get(session.path);
-				if (!foreignSession) throw new Error(`Selected ${sourceName} session is no longer available`);
-				const imported = await persistForeignSession(store, foreignSession, {
-					fallbackCwd: this.ctx.sessionManager.getCwd(),
-					suppressBreadcrumb: true,
-				});
-				const sessionFile = imported.getSessionFile();
-				if (!sessionFile) throw new Error(`Failed to persist ${sourceName} session`);
-				await imported.close();
-				return await this.handleResumeSession(sessionFile, { settingsFlushed: true });
-			};
-			selectorOptions = {
-				title: `Import ${sourceName} Session`,
-				scopeLabel: false,
-				showCwd: true,
-			};
-		} else {
+		{
 			const [listing, pinnedIds] = await Promise.all([
 				SessionManager.listForPicker(
 					this.ctx.sessionManager.getCwd(),

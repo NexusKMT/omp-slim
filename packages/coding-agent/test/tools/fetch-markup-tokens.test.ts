@@ -172,17 +172,4 @@ describe("read URL: native rendering keeps only the head metadata a reader uses"
 		expect(text).toContain("meta-viewport: KEPT_AS_BODY_TEXT");
 		expect(text).not.toContain("meta_omitted");
 	});
-
-	it("leaves another reader's output as it came", async () => {
-		const markdown = `---\nlicense: Do not redistribute\nmeta-og:title: Example\n---\n\n# Example\n\n${PROSE}`;
-		const { text } = await readPage(DOCS_PAGE, {
-			method: "jina",
-			provider: "jina",
-			reader: () => new Response(`Markdown Content:\n${markdown}`),
-		});
-
-		expect(text).toContain("license: Do not redistribute");
-		expect(text).toContain("meta-og:title: Example");
-		expect(text).not.toContain("meta_omitted");
-	});
 });

@@ -47,12 +47,12 @@ describe("web search directive pipeline", () => {
 
 	it("passes the parsed query to the HTTP provider and post-filters ignored constraints", async () => {
 		let seen: SearchParams | undefined;
-		const context = await stubProvider("brave", async params => {
+		const context = await stubProvider("google", async params => {
 			seen = params;
-			return { provider: "brave", sources: SOURCES };
+			return { provider: "google", sources: SOURCES };
 		});
 
-		const result = await runSearchQuery({ query: "guide site:docs.example.com", engine: "brave" }, context);
+		const result = await runSearchQuery({ query: "guide site:docs.example.com", engine: "google" }, context);
 
 		expect(seen).not.toHaveProperty("model");
 		expect(seen).not.toHaveProperty("modelRegistry");
@@ -63,9 +63,9 @@ describe("web search directive pipeline", () => {
 	});
 
 	it("relaxes a constraint that matches nothing and leads the LLM text with a note", async () => {
-		const context = await stubProvider("brave", async () => ({ provider: "brave", sources: SOURCES }));
+		const context = await stubProvider("google", async () => ({ provider: "google", sources: SOURCES }));
 
-		const result = await runSearchQuery({ query: "guide site:nowhere.example", engine: "brave" }, context);
+		const result = await runSearchQuery({ query: "guide site:nowhere.example", engine: "google" }, context);
 
 		expect(result.details.response.sources).toHaveLength(SOURCES.length);
 		expect(result.content[0]?.text).toStartWith(
@@ -74,20 +74,20 @@ describe("web search directive pipeline", () => {
 	});
 
 	it.each<[string, string, SearchProviderId]>([
-		["keeps X-only queries on the selected HTTP engine", "tern site:x.com", "brave"],
-		["keeps the HTTP engine for queries that are not X-only", "tern site:x.com site:github.com", "brave"],
+		["keeps X-only queries on the selected HTTP engine", "tern site:x.com", "google"],
+		["keeps the HTTP engine for queries that are not X-only", "tern site:x.com site:github.com", "google"],
 	])("%s", async (_caseName, query, expectedProvider) => {
-		const context = await stubProvider("brave", async () => ({ provider: "brave", sources: SOURCES }));
+		const context = await stubProvider("google", async () => ({ provider: "google", sources: SOURCES }));
 
-		const result = await runSearchQuery({ query, engine: "brave" }, context);
+		const result = await runSearchQuery({ query, engine: "google" }, context);
 
 		expect(result.details.response.provider).toBe(expectedProvider);
 	});
 
 	it("allows explicit selection of an HTTP engine", async () => {
-		const context = await stubProvider("jina", async params => ({
-			provider: "jina",
-			sources: [{ title: params.query, url: "https://jina.example" }],
+		const context = await stubProvider("google", async params => ({
+			provider: "google",
+			sources: [{ title: params.query, url: "https://google.example" }],
 		}));
 		const exaProvider: provider.SearchProvider = {
 			id: "exa",

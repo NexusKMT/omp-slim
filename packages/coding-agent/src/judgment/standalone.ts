@@ -7,7 +7,7 @@ import { resolvePrimaryModelSelection } from "../config/model-resolver";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
-import { type ChainJudge, resolveJudge, sharedJudgmentCache } from ".";
+import { type ChainJudge, resolveJudge } from ".";
 
 export interface StandaloneJudge {
 	judge: ChainJudge;
@@ -36,7 +36,6 @@ export async function openStandaloneJudge(cwd: string, purpose: string): Promise
 				sessionModel: resolvePrimaryModelSelection(settings, registry.getAvailable())?.model,
 				sessionId: Bun.randomUUIDv7(),
 				purpose,
-				cache: sharedJudgmentCache(),
 			}),
 			settings,
 			close: () => authStorage.close(),

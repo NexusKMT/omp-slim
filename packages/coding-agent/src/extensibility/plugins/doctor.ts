@@ -23,7 +23,6 @@ export async function runDoctorChecks(): Promise<DoctorCheck[]> {
 
 	// Check API keys
 	const apiKeys = [
-		{ name: "ANTHROPIC_API_KEY", description: "Anthropic API" },
 		{ name: "OPENAI_API_KEY", description: "OpenAI API" },
 		{ name: "EXA_API_KEY", description: "Exa search" },
 	];

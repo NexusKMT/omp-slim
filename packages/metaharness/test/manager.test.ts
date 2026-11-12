@@ -247,44 +247,20 @@ describe("ManagerServer API", () => {
 		expect(deleteUnknown.status).toBe(404);
 	});
 
-	it("serves edit and SnapCompact metrics and native traces through one API", async () => {
+	it("serves SnapCompact metrics and native traces through one API", async () => {
 		const jobsDir = makeJobsDir();
 		const manager = new ManagerServer(jobsDir);
-		for (const benchmark of ["edit", "snapcompact"] as const) {
-			const jobName = `${benchmark}-arm`;
-			manager.store.registerLaunch({
-				benchmark,
-				jobName,
-				dataset: benchmark === "edit" ? "typescript-edit" : "squad-dev",
-				agent: benchmark,
-				models: ["test/model"],
-				pid: process.pid,
-			});
-			manager.store.markExit(jobName, 0);
-		}
-		const editDir = path.join(jobsDir, "edit-arm");
-		fs.writeFileSync(
-			path.join(editDir, "result.json"),
-			JSON.stringify({
-				tasks: [
-					{
-						id: "rename",
-						name: "Rename",
-						runs: [{ runIndex: 0, success: true, duration: 10, tokens: { input: 8, output: 2, reasoning: 0 } }],
-					},
-				],
-				summary: {
-					totalRuns: 1,
-					successfulRuns: 1,
-					taskSuccessRate: 1,
-					editSuccessRate: 1,
-					totalTokens: { input: 8, output: 2 },
-				},
-			}),
-		);
-		fs.mkdirSync(path.join(editDir, "result.dump", "rename"), { recursive: true });
-		fs.writeFileSync(path.join(editDir, "result.dump", "rename", "run-1.md"), "# conversation\n\nassistant answer");
-		const snapDir = path.join(jobsDir, "snapcompact-arm");
+		const jobName = "snapcompact-arm";
+		manager.store.registerLaunch({
+			benchmark: "snapcompact",
+			jobName,
+			dataset: "squad-dev",
+			agent: "snapcompact",
+			models: ["test/model"],
+			pid: process.pid,
+		});
+		manager.store.markExit(jobName, 0);
+		const snapDir = path.join(jobsDir, jobName);
 		fs.writeFileSync(
 			path.join(snapDir, "records.jsonl"),
 			`${JSON.stringify({ cond: "text", chunk: 0, pos_rel: 0, q: "question", answer: "answer", golds: ["gold"], em: 0, f1: 0.5 })}\n`,
@@ -302,16 +278,6 @@ describe("ManagerServer API", () => {
 		});
 		const base = `http://localhost:${server.port}`;
 
-		const edit = (await (await fetch(`${base}/api/runs/edit-arm`)).json()) as {
-			run: { benchmark: string; metrics: Record<string, number> };
-			traces: Array<{ name: string }>;
-		};
-		expect(edit.run).toMatchObject({ benchmark: "edit", metrics: { task_success_rate: 1, edit_success_rate: 1 } });
-		const editTrace = (await (
-			await fetch(`${base}/api/runs/edit-arm/traces/${encodeURIComponent(edit.traces[0].name)}`)
-		).json()) as { entries: Array<{ kind: string; text: string }> };
-		expect(editTrace.entries).toEqual([{ kind: "conversation", text: "# conversation\n\nassistant answer" }]);
-
 		const snap = (await (await fetch(`${base}/api/runs/snapcompact-arm`)).json()) as {
 			run: { benchmark: string; metrics: Record<string, number> };
 			traces: Array<{ name: string }>;
@@ -326,14 +292,14 @@ describe("ManagerServer API", () => {
 		const jobsDir = makeJobsDir();
 		const manager = new ManagerServer(jobsDir);
 		manager.store.registerLaunch({
-			benchmark: "edit",
-			jobName: "edit-x",
-			dataset: "typescript-edit",
-			agent: "edit",
+			benchmark: "snapcompact",
+			jobName: "snap-x",
+			dataset: "squad-dev",
+			agent: "snapcompact",
 			models: ["m/x"],
 			pid: process.pid,
 		});
-		manager.store.markExit("edit-x", 1);
+		manager.store.markExit("snap-x", 1);
 		// A live harbor run: pid is this test process, never marked exited.
 		manager.store.registerLaunch({
 			benchmark: "harbor",
@@ -365,7 +331,7 @@ describe("ManagerServer API", () => {
 		};
 
 		expect(await resumeError("nope")).toMatch(/not found/);
-		expect(await resumeError("edit-x")).toMatch(/only harbor/);
+		expect(await resumeError("snap-x")).toMatch(/only harbor/);
 		expect(await resumeError("job-live")).toMatch(/already running/);
 		expect(await resumeError("job-bare")).toMatch(/no harbor config.json/);
 	});

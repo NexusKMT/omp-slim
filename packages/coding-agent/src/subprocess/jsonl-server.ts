@@ -26,11 +26,11 @@ export interface JsonLineServerOptions<Req, Res> {
 /**
  * Newline-JSON request loop over a native {@link IpcServer}: the server half of
  * the machine-shared workers (`shared-worker.ts` is the client half;
- * `mlx-server.py` mirrors it in Python) and of the text-prediction daemon.
- * Owns one endpoint — binding, owner-only permissions, and taking over a
- * crashed predecessor's socket are native; a live owner makes {@link serve}
- * reject with `EADDRINUSE` — feeds every connection's request lines to
- * `onRequest`, and exits the process once idle.
+ * `mlx-server.py` mirrors it in Python). Owns one endpoint — binding,
+ * owner-only permissions, and taking over a crashed predecessor's socket are
+ * native; a live owner makes {@link serve} reject with `EADDRINUSE` — feeds
+ * every connection's request lines to `onRequest`, and exits the process once
+ * idle.
  */
 export class JsonLineServer<Req, Res> {
 	#options: JsonLineServerOptions<Req, Res>;

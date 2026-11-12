@@ -360,16 +360,17 @@ describe("SnapcompactInlineTransformer", () => {
 	it("applies option changes on the next request, re-rendering cached frames when the shape changes", async () => {
 		const options = withTestShape({ renderSystemPrompt: "none", renderToolResults: false });
 		const renderedFonts: string[] = [];
-		const transformer = new SnapcompactInlineTransformer(options, undefined, {
-			async framesFor(text, shape) {
-				renderedFonts.push(shape.font);
-				return Array.from({ length: snapcompact.frames(text, { shape }) }, () => ({
-					type: "image" as const,
-					data: "ZnJhbWU=",
-					mimeType: "image/png",
-				}));
-			},
+		const spy = spyOn(snapcompact, "renderMany");
+		spy.mockImplementation(async (text, opts) => {
+			const shape = opts?.shape ?? snapcompact.resolveShape(TEST_SHAPE);
+			renderedFonts.push(shape.font);
+			return Array.from({ length: snapcompact.frames(text, { shape }) }, () => ({
+				type: "image" as const,
+				data: "ZnJhbWU=",
+				mimeType: "image/png",
+			}));
 		});
+		const transformer = new SnapcompactInlineTransformer(options);
 		const context = makeContext();
 
 		expect(await transformer.transform(context, makeModel())).toBe(context);
@@ -447,17 +448,20 @@ describe("SnapcompactInlineTransformer", () => {
 	it("compacts text in mixed tool results while preserving every source image and the input context", async () => {
 		const options = withTestShape({ renderSystemPrompt: "none", renderToolResults: true });
 		const renderedTexts: string[] = [];
-		const transformer = new SnapcompactInlineTransformer(options, undefined, {
-			async framesFor(text, shape, maxFrames) {
-				renderedTexts.push(text);
-				const count = Math.min(snapcompact.frames(text, { shape }), maxFrames ?? Number.POSITIVE_INFINITY);
-				return Array.from({ length: count }, () => ({
-					type: "image" as const,
-					data: "ZnJhbWU=",
-					mimeType: "image/png",
-				}));
-			},
+		const spy = spyOn(snapcompact, "renderMany");
+		spy.mockImplementation(async (text, opts) => {
+			renderedTexts.push(text);
+			const count = Math.min(
+				snapcompact.frames(text, { shape: opts?.shape ?? snapcompact.resolveShape(TEST_SHAPE) }),
+				opts?.maxFrames ?? Number.POSITIVE_INFINITY,
+			);
+			return Array.from({ length: count }, () => ({
+				type: "image" as const,
+				data: "ZnJhbWU=",
+				mimeType: "image/png",
+			}));
 		});
+		const transformer = new SnapcompactInlineTransformer(options);
 		const toolImage: ImageContent = {
 			type: "image",
 			data: "dG9vbC1pbWFnZS1ieXRlcw==",

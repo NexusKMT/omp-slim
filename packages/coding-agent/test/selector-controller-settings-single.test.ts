@@ -245,7 +245,7 @@ describe("single-instance menus", () => {
 			overlayCountAtSelection.push(overlayStack.length);
 		});
 
-		await controller.showSessionSelector(undefined, selected);
+		await controller.showSessionSelector(selected);
 
 		const selector = shown[0] as SessionSelectorComponent<SessionInfo>;
 		selector.handleInput("\r");

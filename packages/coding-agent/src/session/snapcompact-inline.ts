@@ -27,7 +27,6 @@ import {
 import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import { prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
-import type { SnapcompactFrameSink } from "../blob-broker/service";
 import contextFramesNote from "../prompts/system/snapcompact-context-frames-note.md" with { type: "text" };
 import contextStub from "../prompts/system/snapcompact-context-stub.md" with { type: "text" };
 import readNoteTemplate from "../prompts/system/snapcompact-read-note.md" with { type: "text" };
@@ -720,8 +719,6 @@ interface FrameCacheEntry {
 	/** Serialized shape the frames were rendered with; a shape change re-renders. */
 	shapeKey: string;
 	frames: ImageContent[];
-	/** Frame-sink generation the frames were minted under. */
-	generation: number | undefined;
 }
 
 /**
@@ -739,7 +736,6 @@ export class SnapcompactInlineTransformer {
 	constructor(
 		private readonly options: SnapcompactInlineOptions,
 		private readonly onToolResultSavings?: SnapcompactSavingsSink,
-		private readonly frameSink?: SnapcompactFrameSink,
 	) {}
 
 	async transform(context: Context, model: Model): Promise<Context> {
@@ -833,18 +829,14 @@ export class SnapcompactInlineTransformer {
 		if (plan.systemPrompt && userIndex >= 0 && systemPromptTarget) {
 			const hash = Bun.hash(systemPromptTarget.text);
 			let cached = this.#systemCache;
-			const generation = this.frameSink?.generation;
-			if (!cached || cached.hash !== hash || cached.shapeKey !== shapeKey || cached.generation !== generation) {
+			if (!cached || cached.hash !== hash || cached.shapeKey !== shapeKey) {
 				cached = {
 					hash,
 					shapeKey,
-					generation,
-					frames:
-						(await this.frameSink?.framesFor(systemPromptTarget.text, shape, MAX_SYSTEM_PROMPT_FRAMES)) ??
-						(await snapcompact.renderMany(systemPromptTarget.text, {
-							shape,
-							maxFrames: MAX_SYSTEM_PROMPT_FRAMES,
-						})),
+					frames: await snapcompact.renderMany(systemPromptTarget.text, {
+						shape,
+						maxFrames: MAX_SYSTEM_PROMPT_FRAMES,
+					}),
 				};
 				this.#systemCache = cached;
 			}
@@ -874,15 +866,12 @@ export class SnapcompactInlineTransformer {
 		shapeKey: string,
 	): Promise<ImageContent[]> {
 		const hash = Bun.hash(text);
-		const generation = this.frameSink?.generation;
 		const cached = cache.get(key);
-		if (cached && cached.hash === hash && cached.shapeKey === shapeKey && cached.generation === generation) {
+		if (cached && cached.hash === hash && cached.shapeKey === shapeKey) {
 			return cached.frames;
 		}
-		// A frame sink defers rasterization until a provider actually fetches
-		// the frame URL — the cache then holds tiny placeholders, not pixels.
-		const frames = (await this.frameSink?.framesFor(text, shape)) ?? (await snapcompact.renderMany(text, { shape }));
-		cache.set(key, { hash, shapeKey, frames, generation });
+		const frames = await snapcompact.renderMany(text, { shape });
+		cache.set(key, { hash, shapeKey, frames });
 		return frames;
 	}
 }

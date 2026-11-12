@@ -12,7 +12,7 @@ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { formatBytes, formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
 import { sessionResolveContext } from "../../internal-urls/context";
 import { InternalUrlFilesystem } from "../../internal-urls/url-filesystem";
-import { hasNativeJudge, journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "../../judgment";
+import { journalJudgmentUsage, resolveJudge } from "../../judgment";
 import findDescription from "../../prompts/tools/find.md" with { type: "text" };
 import type { ToolSession } from "..";
 import { resolveToolTier } from "../approval";
@@ -45,15 +45,13 @@ const RANGES_SHOWN = 3;
 export const FIND_TIMEOUT_MS = 20_000;
 
 /**
- * Resolve `find.enabled` for a session: `auto` enables `find` only when the
- * judge role is backed by a native System One model ({@link hasNativeJudge})
- * rather than a prompted small model. Gates tool creation and the `find` hints
- * in sibling tool prompts.
+ * Resolve `find.enabled` for a session: `auto` keeps `find` off by default
+ * (there is no native judge; explicit prompting spends the chat model's
+ * tokens). Gates tool creation and the `find` hints in sibling tool prompts.
  */
 export function isFindEnabled(session: ToolSession): boolean {
 	const mode = cfgFindEnabled.get(session.settings);
-	if (mode !== "auto") return mode === "on";
-	return session.modelRegistry !== undefined && hasNativeJudge(session.settings, session.modelRegistry);
+	return mode !== "auto" ? mode === "on" : false;
 }
 
 /** Semantic search tool: describe a behavior, get files and line ranges that implement it. */
@@ -105,7 +103,6 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			purpose: "find",
 			onUsage: journalJudgmentUsage(this.session.sessionManager),
 			telemetry: this.session.getTelemetry?.(),
-			cache: sharedJudgmentCache(),
 			costGate: this.session.costGate,
 		});
 		const started = performance.now();

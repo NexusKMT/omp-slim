@@ -18,7 +18,7 @@ import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { runSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search";
 import * as provider from "@oh-my-pi/pi-coding-agent/web/search/provider";
 import type { SearchParams } from "@oh-my-pi/pi-coding-agent/web/search/providers/base";
-import { searchBrave } from "@oh-my-pi/pi-coding-agent/web/search/providers/brave";
+import { searchGoogle } from "@oh-my-pi/pi-coding-agent/web/search/providers/google";
 import { withHardTimeout } from "@oh-my-pi/pi-coding-agent/web/search/providers/utils";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { type SearchProviderId, type SearchResponse } from "@oh-my-pi/pi-coding-agent/web/search/types";
@@ -65,7 +65,7 @@ describe("Brave provider hard-timeout wiring", () => {
 
 	it("hands fetch a composed signal even with no caller signal", async () => {
 		const context = createSearchContext();
-		context.authStorage.keys.setRuntime("brave", "brave-test-key");
+		context.authStorage.keys.setRuntime("google", "brave-test-key");
 		let capturedSignal: AbortSignal | null | undefined;
 		const fetchMock: FetchImpl = async (_input, init) => {
 			capturedSignal = init?.signal;
@@ -75,7 +75,7 @@ describe("Brave provider hard-timeout wiring", () => {
 			});
 		};
 
-		await searchBrave({
+		await searchGoogle({
 			query: "ping",
 			fetch: fetchMock,
 			authStorage: context.authStorage,

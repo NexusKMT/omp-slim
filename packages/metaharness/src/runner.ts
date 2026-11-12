@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { ModelsConfigFile } from "@oh-my-pi/pi-coding-agent/config/models-config";
 /**
  * Harbor benchmark runner for the local `omp` build.
  *
@@ -1258,25 +1258,29 @@ function buildMountsJson(source: SourceMount | null): string | null {
 const PI_UPSTREAM_SYSTEM_PROMPT = path.join(AGENT_DIR, "pi-upstream-system.md");
 
 /**
- * Catalog facts for each `provider/model` the upstream agent needs in its
+ * Model facts for each `provider/model` the upstream agent needs in its
  * `models.json`: wire api, limits, modalities and cost, so its usage accounting
- * matches omp's for the same model.
+ * matches omp's for the same model. Read from the host's `models.yml` (the
+ * post-vendor-catalog source of truth); unknown models fall back to the
+ * upstream agent's own defaults.
  */
 function upstreamModelSpecs(cfg: Config): Array<Record<string, unknown>> {
+	const configured = ModelsConfigFile.load()?.providers ?? {};
 	return cfg.models.map(spec => {
 		const slash = spec.indexOf("/");
-		const provider = spec.slice(0, slash) as GeneratedProvider;
+		const provider = spec.slice(0, slash);
 		const id = spec.slice(slash + 1);
-		const model = getBundledModel(provider, id);
+		const providerConfig = configured[provider];
+		const model = providerConfig?.models.find(entry => entry.id === id);
 		return {
 			provider,
 			id,
-			api: model.api,
-			reasoning: model.reasoning,
-			input: model.input,
-			contextWindow: model.contextWindow,
-			maxTokens: model.maxTokens,
-			cost: model.cost,
+			api: model?.api ?? providerConfig?.api ?? "openai-completions",
+			reasoning: model?.reasoning ?? false,
+			input: model?.input ?? ["text"],
+			contextWindow: model?.contextWindow ?? 128000,
+			maxTokens: model?.maxTokens ?? 16384,
+			cost: model?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		};
 	});
 }

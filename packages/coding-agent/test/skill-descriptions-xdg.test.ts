@@ -114,6 +114,28 @@ describe("skill description failure caching and shutdown", () => {
 
 	beforeEach(async () => {
 		tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-skill-description-failures-"));
+		// The bundled vendor catalog is gone: models now resolve from `models.yml`.
+		fs.writeFileSync(
+			path.join(tempDir, "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://api.anthropic.com/v1",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+				"        name: Claude Sonnet 4.5",
+				"        contextWindow: 200000",
+				"        maxTokens: 8192",
+				"        input: [text, image]",
+				"      - id: claude-opus-4-5",
+				"        name: Claude Opus 4.5",
+				"        contextWindow: 200000",
+				"        maxTokens: 8192",
+				"        input: [text, image]",
+				"",
+			].join("\n"),
+			"utf8",
+		);
 	});
 
 	afterEach(async () => {
@@ -403,10 +425,41 @@ describe("previewSkillDescription", () => {
 
 describe("skill description compressor model selection", () => {
 	const authStorages: AuthStorage[] = [];
+	let tempDir = "";
+
+	beforeEach(async () => {
+		tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-skill-description-selection-"));
+		// The bundled vendor catalog is gone: models now resolve from `models.yml`.
+		fs.writeFileSync(
+			path.join(tempDir, "models.yml"),
+			[
+				"providers:",
+				"  anthropic:",
+				"    baseUrl: https://api.anthropic.com/v1",
+				"    models:",
+				"      - id: claude-sonnet-4-5",
+				"        name: Claude Sonnet 4.5",
+				"        contextWindow: 200000",
+				"        maxTokens: 8192",
+				"        input: [text, image]",
+				"      - id: claude-opus-4-5",
+				"        name: Claude Opus 4.5",
+				"        contextWindow: 200000",
+				"        maxTokens: 8192",
+				"        input: [text, image]",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
 		for (const storage of authStorages.splice(0)) storage.close();
+		if (tempDir) {
+			fs.rmSync(tempDir, { recursive: true, force: true });
+			tempDir = "";
+		}
 	});
 
 	it("uses the current model object and follows a manual selection without discovering other catalogs", async () => {
@@ -414,7 +467,7 @@ describe("skill description compressor model selection", () => {
 		authStorages.push(authStorage);
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		const settings = Settings.isolated({ model: "anthropic/claude-opus-4-5", modelRoles: { smol: "missing/cheap" } });
-		const registry = new ModelRegistry(authStorage, undefined, { settings });
+		const registry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"), { settings });
 		const base = registry.find("anthropic", "claude-sonnet-4-5");
 		if (!base) throw new Error("Missing fixture model");
 		let selected: Model | undefined = { ...base, baseUrl: "https://selected.invalid/v1" };
@@ -427,7 +480,6 @@ describe("skill description compressor model selection", () => {
 		const compressor = createSkillDescriptionCompressor(registry, { getModel: () => selected });
 		await compressor.compress("migration", "Plan migrations", "Compress");
 		expect(request.mock.calls[0][0]).toBe(selected);
-		expect(request.mock.calls[0][2]).toMatchObject({ disableServerSideFallback: true });
 		selected = { ...base, baseUrl: "https://manually-selected.invalid/v1" };
 		await compressor.compress("migration", "Plan migrations", "Compress again");
 		expect(request.mock.calls[1][0]).toBe(selected);

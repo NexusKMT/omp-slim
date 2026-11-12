@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import type { AssistantMessage, Context, ImageContent, Message, TextContent, Tool } from "@oh-my-pi/pi-ai";
 import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { decorateContextImages } from "@oh-my-pi/pi-coding-agent/blob-broker/context-images";
 import {
 	capArchiveFrameBytes,
 	clampProviderContextImageBytes,
@@ -160,12 +159,6 @@ describe("Chat image byte budget", () => {
 		expect(clampProviderContextImageBytes(context, model, { maxRequestBytes: 100000 })).toBe(context);
 		const schemaHeavy = { ...context, tools: [{ ...liveTool, description: "x".repeat(50000) }] };
 		expect(images(clampProviderContextImageBytes(schemaHeavy, model, { maxRequestBytes: 100000 }))).toHaveLength(0);
-	});
-	it("keeps images after URL decoration moves their bytes off the wire", () => {
-		const context: Context = { messages: [user([image("A".repeat(10000))])] };
-		const decorated = decorateContextImages(context, () => "https://images.example/frame.png");
-		expect(clampProviderContextImageBytes(decorated, model, { maxInlineImageBytes: 1 })).toBe(decorated);
-		expect(images(context)[0].url).toBeUndefined();
 	});
 	it("uses the same defaults for every custom endpoint and bypasses text-only models", () => {
 		const context: Context = { messages: [user([image("A".repeat(7000000))])] };

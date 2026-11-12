@@ -44,20 +44,9 @@ Sources: [`packages/omptype/README.md`](../packages/omptype/README.md), [`packag
 - Runtime behavior: schema calls return the validated value or `type.errors`; `.assert()` returns the value or throws; `.allows()` performs a boolean check.
 - Limits: this is an intentionally focused compatibility surface rather than a complete implementation of every ArkType, TypeBox, or Zod API.
 
-### `packages/typescript-edit-benchmark` — TypeScript edit fixture engine
-
-Sources: [`packages/typescript-edit-benchmark/package.json`](../packages/typescript-edit-benchmark/package.json), [`packages/typescript-edit-benchmark/src/generate.ts`](../packages/typescript-edit-benchmark/src/generate.ts), [`packages/typescript-edit-benchmark/src/tasks.ts`](../packages/typescript-edit-benchmark/src/tasks.ts), [`packages/typescript-edit-benchmark/src/verify.ts`](../packages/typescript-edit-benchmark/src/verify.ts), and the runner in [`packages/metaharness/adapters/edit/cli.ts`](../packages/metaharness/adapters/edit/cli.ts).
-
-- Package: private `@oh-my-pi/typescript-edit-benchmark`; support library with no standalone bin.
-- Feature: generates, loads, formats, and verifies TypeScript mutation fixtures consumed by the metaharness edit adapter.
-- Fixture generation: `bun packages/typescript-edit-benchmark/src/generate.ts [--typescript-dir <path>] [generator options]` from the repository root. It scans JS/JSX/TS/TSX; without a source path it shallow-clones `badlogic/pi-mono` into a temporary directory and scans `packages/`. Output defaults to `packages/typescript-edit-benchmark/fixtures.tar.gz`; current generator controls include `--count-scale`, `--seed`, `--categories`, and difficulty/score filters.
-- Benchmark execution: `bun run --cwd packages/metaharness bench:edit -- --model <provider/model> [options]`, or launch an `edit` run from the metaharness dashboard/API.
-- Runner inputs include provider/model, thinking level, runs per task, timeouts, concurrency, task IDs, fixture directory or `.tar.gz`, edit strategy, guided mode, retry/turn limits, output path/format, and fixture validation/listing flags.
-- Fixtures contain task metadata, a prompt, input files, and expected files. The runner copies each run's inputs to an isolated working directory under `runs/rb-*/`, records optional conversation dumps, and writes Markdown or JSON results.
-
 ### `packages/metaharness` — unified benchmark manager
 
-Sources: [`packages/metaharness/README.md`](../packages/metaharness/README.md), [`packages/metaharness/package.json`](../packages/metaharness/package.json), [`packages/metaharness/src/server.ts`](../packages/metaharness/src/server.ts), [`packages/metaharness/src/runner.ts`](../packages/metaharness/src/runner.ts), [`packages/metaharness/src/tb/cli.ts`](../packages/metaharness/src/tb/cli.ts), and [`packages/metaharness/adapters/edit/cli.ts`](../packages/metaharness/adapters/edit/cli.ts).
+Sources: [`packages/metaharness/README.md`](../packages/metaharness/README.md), [`packages/metaharness/package.json`](../packages/metaharness/package.json), [`packages/metaharness/src/server.ts`](../packages/metaharness/src/server.ts), [`packages/metaharness/src/runner.ts`](../packages/metaharness/src/runner.ts), and [`packages/metaharness/src/tb/cli.ts`](../packages/metaharness/src/tb/cli.ts).
 
 - Package: private `@oh-my-pi/pi-metaharness`; bin: `metaharness`.
 - Feature: one dashboard, SQLite store, REST/SSE API, and normalized experiment → run → trace model for Harbor datasets (default `terminal-bench@2.0`), TypeScript edit, and SnapCompact benchmarks.

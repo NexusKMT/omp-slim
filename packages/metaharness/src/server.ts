@@ -380,12 +380,10 @@ export class ManagerServer {
 	launch(request: LaunchRequest): { jobName: string; pid: number } {
 		if (!request.model) throw new Error("model is required");
 		const benchmark = request.benchmark ?? "harbor";
-		if (benchmark !== "harbor" && benchmark !== "edit" && benchmark !== "snapcompact") {
+		if (benchmark !== "harbor" && benchmark !== "snapcompact") {
 			throw new Error(`unsupported benchmark: ${benchmark}`);
 		}
-		const dataset =
-			request.dataset ??
-			(benchmark === "harbor" ? "terminal-bench@2.0" : benchmark === "edit" ? "typescript-edit" : "squad-dev");
+		const dataset = request.dataset ?? (benchmark === "harbor" ? "terminal-bench@2.0" : "squad-dev");
 		const jobName = request.jobName ?? defaultJobName(request.model);
 		if (this.#children.has(jobName) || this.#store.getRun(jobName)?.status === "running") {
 			throw new Error(`run ${jobName} is already running`);
@@ -395,14 +393,7 @@ export class ManagerServer {
 
 		let argv: string[];
 		let cwd: string;
-		if (benchmark === "edit") {
-			cwd = PKG_DIR;
-			argv = ["bun", "adapters/edit/cli.ts", "--model", request.model, "--output", path.join(jobDir, "result.json")];
-			if (request.tasks !== undefined) argv.push("--max-tasks", String(request.tasks));
-			if (request.include?.length) argv.push("--tasks", request.include.join(","));
-			if (request.concurrency !== undefined) argv.push("--task-concurrency", String(request.concurrency));
-			if (request.attempts !== undefined) argv.push("--runs", String(request.attempts));
-		} else if (benchmark === "snapcompact") {
+		if (benchmark === "snapcompact") {
 			cwd = PKG_DIR;
 			argv = ["uv", "run", "src/adapters/snapcompact.py", "--model", request.model, "--output-dir", jobDir];
 			if (request.tasks !== undefined) argv.push("--limit-paras", String(request.tasks));

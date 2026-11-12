@@ -75,8 +75,6 @@ import { bindEffects, combine } from "./config/registry";
 import { Settings } from "./config/settings";
 
 import "./discovery";
-import { LiveImageUrlService } from "./blob-broker/service";
-import { wrapStreamFnWithBlobUrlFallback } from "./blob-broker/stream-fallback";
 import { initializeWithSettings } from "./discovery";
 import { setInvocationConfiguredExtensions, withOmpExtensionRootScope } from "./discovery/omp-extension-roots";
 import { disposeVmContextsByOwner } from "./eval/js/context-manager";
@@ -3379,14 +3377,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// redacted from text before snapcompact rasterizes it into PNG frames. Clamp
 		// to the provider budget before normalizing decoder-incompatible images so
 		// dropped historical images never pay a transcode cost.
-		// URL-mirrored images: providers that fetch image URLs get a broker URL
-		// instead of inline base64. Decoration runs LAST among image transforms so
-		// the served bytes are exactly the bytes that would have shipped inline.
-		// Live-bound: `images.urls.*` changes rebuild the service between requests.
-		const blobBroker = new LiveImageUrlService(settings, () => sessionManager.getCwd());
-		disposeCallbacks.add(() => blobBroker.dispose());
-		// Always installed; the getter-backed options are snapshotted per request,
-		// so `snapcompact.*` changes apply on the next call (a no-op while both are off).
+		// Live-bound: `snapcompact.*` options are snapshotted per request, so
+		// setting changes apply on the next call (a no-op while both are off).
 		const snapcompactInline = new SnapcompactInlineTransformer(
 			{
 				get renderSystemPrompt() {
@@ -3402,9 +3394,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// Journal the tokens each imaged tool result keeps off the wire
 			// (frames never reach session.jsonl, so this is their only trace).
 			createSnapcompactSavingsRecorder(() => sessionManager.getSessionFile() ?? null),
-			// With a serving blob broker, frames become lazy URLs: rasterized
-			// only when a provider fetches them, never held as pixels here.
-			blobBroker,
 		);
 		// One transform per conversation: the date/cwd reminder remembers what each
 		// conversation was sent, so the main loop and every advisor get their own.
@@ -3419,10 +3408,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				transformed = clampProviderContextImages(transformed, transformModel);
 				transformed = await normalizeProviderContextImages(transformed);
 				// After the model-specific normalizers: they carry better wording for the
-				// cases they own (STB WebP), so this stays the backstop for everything
-				// else, and it runs before the blob broker uploads any of these bytes.
+				// cases they own (STB WebP), so this stays the backstop for everything else.
 				transformed = await dropUnreadableContextImages(transformed);
-				transformed = await blobBroker.decorateContext(transformed, transformModel);
 				// Byte budget after decoration: URL/file-referenced images carry no inline bytes.
 				transformed = clampProviderContextImageBytes(transformed, transformModel);
 				// Keep per-request volatility out of the system prompt: the date/cwd
@@ -3480,10 +3467,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// slot, preventing the nested-spawn deadlock from issue #3749.
 		// Every attempt this session sends (primary, side-channel, and advisor) passes the session tree's cost gate once it holds its
 		// concurrency slot, and adds its cost to the gate before releasing the slot.
-		const settingsBoundStreamFn = wrapStreamFnWithBlobUrlFallback(
-			guardStreamFn(createSettingsAwareStreamFn(settings), currentCostGate),
-			() => blobBroker.current,
-		);
+		const settingsBoundStreamFn = guardStreamFn(createSettingsAwareStreamFn(settings), currentCostGate);
 		// Outbound credential-pattern redaction follows THIS session's `secrets.enabled` per
 		// request, not the process-wide switch (the newest effect holder's): concurrent ACP/SDK
 		// sessions in one process each keep their own policy.

@@ -121,7 +121,7 @@ export const SEANCE_SLASH_COMMAND: SlashCommandSpec = {
 			return;
 		}
 		if (!parsed.source) {
-			runtime.ctx.showSessionSelector(undefined, session => consultSeance(runtime.ctx, session.path));
+			runtime.ctx.showSessionSelector(session => consultSeance(runtime.ctx, session.path));
 			return;
 		}
 		await consultSeance(runtime.ctx, parsed.source, runtime.ctx.sessionManager.getSessionDir());

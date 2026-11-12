@@ -27,9 +27,6 @@ import type { Settings } from "../config/settings";
 import type { CostGateApi } from "../session/cost-gate";
 import type { SessionManager } from "../session/session-manager";
 import { normalizeModelContextImages } from "../utils/image-loading";
-import type { JudgmentCache } from "./cache";
-
-export * from "./cache";
 
 /** Usage of one billed judgment attempt, recorded on the session ledger by callers. */
 export interface JudgmentUsage {
@@ -53,8 +50,6 @@ export interface JudgeDeps {
 	purpose: string;
 	onUsage?: (usage: JudgmentUsage) => void;
 	telemetry?: AgentTelemetryConfig;
-	/** Retained for callers that share historical judgment caches. Chat judgments do not use it. */
-	cache?: JudgmentCache;
 	costGate?: CostGateApi;
 }
 
@@ -84,14 +79,6 @@ export function journalJudgmentUsage(manager: Partial<JudgmentUsageLedger> | und
 	return usage => {
 		manager.appendModelUsage(usage, { sessionId, parentId: manager.getLeafId() });
 	};
-}
-
-/** Kept for consumers that distinguish explicit prompted judgments from native-only automation. */
-export type JudgeKind = "native" | "local" | "online";
-
-/** Native auxiliary judges are disabled; automatic features must not spend the chat model's tokens. */
-export function hasNativeJudge(_settings: Settings, _registry: ModelRegistry): boolean {
-	return false;
 }
 
 /** Create an explicit judgment facade bound to the caller's current model. */
@@ -139,7 +126,7 @@ export class ChainJudge implements Judge {
 		return this.withCandidate(judge => judge.judge(prepared, options), options);
 	}
 
-	async withCandidate<T>(run: (judge: Judge, kind: JudgeKind) => Promise<T>, options: JudgeOptions = {}): Promise<T> {
+	async withCandidate<T>(run: (judge: Judge) => Promise<T>, options: JudgeOptions = {}): Promise<T> {
 		const model = this.#requireModel();
 		const signal = options.signal;
 		this.#deps.costGate?.admit();
@@ -164,7 +151,7 @@ export class ChainJudge implements Judge {
 						startedAt: attempt.timestamp,
 					}),
 			});
-			return run(withCandidateSignal(new TextJudge(backend), signal), "online");
+			return run(withCandidateSignal(new TextJudge(backend), signal));
 		});
 	}
 

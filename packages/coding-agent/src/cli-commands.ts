@@ -49,11 +49,6 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.anonymizeHelp,
 	},
 	{
-		name: "bench",
-		load: () => import("./commands/bench").then(m => m.default),
-		help: commandHelp.benchHelp,
-	},
-	{
 		name: "cleanse",
 		load: () => import("./commands/cleanse").then(m => m.default),
 		help: commandHelp.cleanseHelp,
@@ -113,17 +108,6 @@ export const commands: CommandEntry[] = [
 		name: "grievances",
 		load: () => import("./commands/grievances").then(m => m.default),
 		help: commandHelp.grievancesHelp,
-	},
-	{
-		name: "images",
-		load: () => import("./commands/images").then(m => m.default),
-		aliases: ["img"],
-		help: commandHelp.imagesHelp,
-	},
-	{
-		name: "if-bench",
-		load: () => import("./commands/if-bench").then(m => m.default),
-		help: commandHelp.ifBenchHelp,
 	},
 	{
 		name: "install",

@@ -1,6 +1,6 @@
 import { clearSubmittedText } from "./helpers/draft";
 
-import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "../judgment";
+import { journalJudgmentUsage, resolveJudge } from "../judgment";
 import type { AgentSession } from "../session/agent-session";
 
 import {
@@ -94,7 +94,6 @@ function launchSessionStatsDashboard(
 		purpose: "stats_frustration",
 		onUsage: journalJudgmentUsage(owner.sessionManager),
 		telemetry: owner.session.agent.telemetry,
-		cache: sharedJudgmentCache(),
 	});
 	return launchStatsDashboard(args, async () => judge);
 }

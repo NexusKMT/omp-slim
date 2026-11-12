@@ -75,7 +75,7 @@ describe("/seance", () => {
 			);
 			registerTaskTool(ctx, execute as AgentTool["execute"]);
 			let onSelected: ((session: SessionInfo) => Promise<void> | void) | undefined;
-			ctx.showSessionSelector = vi.fn((_title, onSelect) => {
+			ctx.showSessionSelector = vi.fn((onSelect) => {
 				onSelected = onSelect as (session: SessionInfo) => Promise<void>;
 			}) as InteractiveModeContext["showSessionSelector"];
 			ctx.showHookSelector = vi.fn();

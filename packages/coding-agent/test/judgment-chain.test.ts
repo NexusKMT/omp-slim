@@ -4,7 +4,7 @@ import * as ai from "@oh-my-pi/pi-ai";
 import { getTestModel as getBundledModel } from "../../catalog/test/fixtures/models";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ChainJudge, hasNativeJudge } from "@oh-my-pi/pi-coding-agent/judgment";
+import { ChainJudge } from "@oh-my-pi/pi-coding-agent/judgment";
 
 const CURRENT = getBundledModel("anthropic", "claude-sonnet-4-6")!;
 const request = {
@@ -72,10 +72,9 @@ describe("current-model judgments", () => {
 		);
 	});
 
-	it("never discovers a native or local auxiliary judge", async () => {
+	it("never discovers an auxiliary judge", async () => {
 		const models = registry();
 		const settings = Settings.isolated({});
-		expect(hasNativeJudge(settings, models)).toBe(false);
 		await expect(new ChainJudge({ settings, registry: models, purpose: "eval" }).judge(request)).rejects.toThrow(
 			"no current chat model",
 		);

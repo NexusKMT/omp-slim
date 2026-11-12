@@ -31,7 +31,6 @@ import {
 	type JudgmentUsage,
 	journalJudgmentUsage,
 	resolveJudge,
-	sharedJudgmentCache,
 } from "../judgment";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { withBridgeTimeoutPause } from "./bridge-timeout";
@@ -250,7 +249,6 @@ export function sessionJudge(
 		sessionId: session.getSessionId?.() ?? undefined,
 		purpose,
 		telemetry: session.getTelemetry?.(),
-		cache: sharedJudgmentCache(),
 		costGate: session.costGate,
 		onUsage:
 			onUsage && journal

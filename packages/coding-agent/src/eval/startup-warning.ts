@@ -45,14 +45,14 @@ export async function resolveFirstLaunchPythonEvalWarning({
 	settings,
 	signal,
 }: {
-	args: Pick<Args, "continue" | "resume" | "fromClaude" | "fromCodex" | "tools" | "noTools">;
+	args: Pick<Args, "continue" | "resume" | "tools" | "noTools">;
 	lastChangelogVersion: string | undefined;
 	cwd: string;
 	settings: Settings;
 	signal?: AbortSignal;
 }): Promise<string | undefined> {
 	if (lastChangelogVersion !== undefined) return undefined;
-	if (args.continue || args.resume || args.fromClaude || args.fromCodex) return undefined;
+	if (args.continue || args.resume) return undefined;
 	// An explicit --tools list wins over --no-tools, matching session tool selection.
 	const evalExposed = args.tools ? args.tools.includes("eval") : !args.noTools;
 	if (!evalExposed) return undefined;

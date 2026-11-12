@@ -20,9 +20,7 @@ import * as goalsSettings from "../goals/settings";
 import * as titleSettings from "../utils/title-settings";
 import * as extensibilitySettings from "../extensibility/settings";
 import * as webSettings from "../web/settings";
-import * as idaSettings from "../ida/settings";
 import * as mcpSettings from "../mcp/settings";
-import * as blobBrokerSettings from "../blob-broker/settings";
 import * as secretsSettings from "../secrets/settings";
 import * as commitSettings from "../commit/settings";
 import * as cliGcSettings from "../cli/gc-settings";
@@ -47,9 +45,7 @@ const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	titleSettings,
 	extensibilitySettings,
 	webSettings,
-	idaSettings,
 	mcpSettings,
-	blobBrokerSettings,
 	secretsSettings,
 	commitSettings,
 	cliGcSettings,

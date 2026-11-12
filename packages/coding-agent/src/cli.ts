@@ -33,9 +33,7 @@ import { isNativeShell, runNativeShell } from "./cli/native-shell";
 import { extractProfileFlags } from "./cli/profile-bootstrap";
 import {
 	AUTO_UPDATE_WORKER_ARG,
-	BLOB_BROKER_WORKER_ARG,
 	DAEMON_BROKER_WORKER_ARG,
-	IDA_HOST_WORKER_ARG,
 	LSP_MUX_WORKER_ARG,
 	PARENT_WATCHDOG_WORKER_ARG,
 	STATS_ACTIVITY_WORKER_ARG,
@@ -147,8 +145,6 @@ async function runSmokeTest(): Promise<void> {
 	// Other smoke dependencies stay lazy so normal CLI startup does not load their worker clients.
 	const { smokeTestDaemonBroker } = await import("./launch/client");
 	const { smokeTestLspMux } = await import("./lsp/mux/daemon");
-	const { smokeTestIdaHost } = await import("./ida/client");
-	const { smokeTestBlobBroker } = await import("./blob-broker/daemon");
 	const { smokeTestTerminalOutputWorker } = await import("./launch/terminal-output-worker-client");
 	const { smokeTestSubagentWorker } = await import("./thread/subagent-worker");
 	await smokeTestSyncWorker();
@@ -169,8 +165,6 @@ async function runSmokeTest(): Promise<void> {
 	await smokeTestJsEvalWorker();
 	await smokeTestDaemonBroker();
 	await smokeTestLspMux();
-	await smokeTestIdaHost();
-	await smokeTestBlobBroker();
 	await smokeTestTerminalOutputWorker();
 	await smokeTestSubagentWorker();
 	process.stdout.write("smoke-test: ok\n");
@@ -263,16 +257,6 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === LSP_MUX_WORKER_ARG) {
 		const { startLspMuxFromEnvironment } = await import("./lsp/mux/server");
 		await startLspMuxFromEnvironment();
-		return true;
-	}
-	if (arg === IDA_HOST_WORKER_ARG) {
-		const { startIdaHostFromEnvironment } = await import("./ida/host");
-		await startIdaHostFromEnvironment();
-		return true;
-	}
-	if (arg === BLOB_BROKER_WORKER_ARG) {
-		const { startBlobBrokerFromEnvironment } = await import("./blob-broker/server");
-		await startBlobBrokerFromEnvironment();
 		return true;
 	}
 	if (arg === AUTO_UPDATE_WORKER_ARG) {

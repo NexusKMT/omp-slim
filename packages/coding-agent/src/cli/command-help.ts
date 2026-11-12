@@ -11,11 +11,6 @@ export const anonymizeHelp = {
 		"Write a shareable copy of a session and its subagents: turn contents redacted, metadata kept, paths and literals replaced by consistent mock tokens",
 } satisfies CommandMetadata;
 
-export const benchHelp = {
-	description:
-		"Benchmark models: TTFT/prefill vs decode throughput with p50/p95, across chat, prefill, generation, and prompt-cache workloads, or single-user vs parallel load (--detailed)",
-} satisfies CommandMetadata;
-
 export const cleanseHelp = {
 	description: "Detect and fix project diagnostics with weighted parallel subagents",
 } satisfies CommandMetadata;
@@ -39,10 +34,6 @@ export const galleryHelp = {
 } satisfies CommandMetadata;
 
 export const gcHelp = { description: "Run storage garbage collection" } satisfies CommandMetadata;
-export const ifBenchHelp = {
-	description:
-		"Benchmark instruction following and working memory: one cached thread of glyph array actions with a moving cat-sound directive",
-} satisfies CommandMetadata;
 export const gitHelp = {
 	description: "Interactive fullscreen git UI: split diff viewer, staging sidebar, and commit composer",
 } satisfies CommandMetadata;
@@ -55,10 +46,6 @@ export const grepHelp = { description: "Test grep tool" } satisfies CommandMetad
 
 export const grievancesHelp = {
 	description: "View, clean, or push reported tool issues (auto-QA grievances)",
-} satisfies CommandMetadata;
-
-export const imagesHelp = {
-	description: "Inspect, diagnose, probe, and purge image publication backends",
 } satisfies CommandMetadata;
 
 export const installHelp = {

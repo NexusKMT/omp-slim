@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import { handleGitHub, parseGitHubUrl, stripActionsLogTimestamps } from "@oh-my-pi/pi-coding-agent/web/scrapers/github";
-import { handleGitHubGist } from "@oh-my-pi/pi-coding-agent/web/scrapers/github-gist";
 
 const SKIP = !Bun.env.WEB_FETCH_INTEGRATION;
 
@@ -64,54 +63,6 @@ describe.skipIf(SKIP)("handleGitHub", () => {
 		expect(result?.method).toBe("github-issues");
 		expect(result?.contentType).toBe("text/markdown");
 		expect(result?.content.length).toBeGreaterThan(0);
-	});
-});
-
-// =============================================================================
-// GitHub Gist Tests
-// =============================================================================
-
-describe.skipIf(SKIP)("handleGitHubGist", () => {
-	it("returns null for non-gist URLs", async () => {
-		const result = await handleGitHubGist("https://example.com", 10000);
-		expect(result).toBeNull();
-	});
-
-	it("returns null for gist.github.com root", async () => {
-		const result = await handleGitHubGist("https://gist.github.com/", 10000);
-		expect(result).toBeNull();
-	});
-
-	it("fetches a public gist with username", async () => {
-		// Using a valid public gist ID (may change but structure should be consistent)
-		const result = await handleGitHubGist("https://gist.github.com/gaearon/edf814aeee85062bc9b9830aeaf27b88", 20000);
-		expect(result).not.toBeNull();
-		expect(result?.method).toBe("github-gist");
-		expect(result?.contentType).toBe("text/markdown");
-		expect(result?.content).toContain("Gist by");
-		expect(result?.content).toContain("Created:");
-		expect(result?.content).toContain("Updated:");
-		expect(result?.content).toContain("Files:");
-		expect(result?.content).toContain("```");
-		expect(result?.content).toContain("---");
-	});
-
-	it("fetches a public gist without username in URL", async () => {
-		// Same gist, accessed via short URL (without username)
-		const result = await handleGitHubGist("https://gist.github.com/edf814aeee85062bc9b9830aeaf27b88", 20000);
-		expect(result).not.toBeNull();
-		expect(result?.method).toBe("github-gist");
-		expect(result?.content).toContain("Gist by");
-	});
-
-	it("returns null for invalid gist ID format", async () => {
-		const result = await handleGitHubGist("https://gist.github.com/invalid-gist-id!", 10000);
-		expect(result).toBeNull();
-	});
-
-	it("returns null for nonexistent gist", async () => {
-		const result = await handleGitHubGist("https://gist.github.com/0000000000000000000000000000000000000000", 20000);
-		expect(result).toBeNull();
 	});
 });
 

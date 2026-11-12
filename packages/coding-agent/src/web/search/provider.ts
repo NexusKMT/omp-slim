@@ -10,20 +10,9 @@ type ProviderLoader = () => Promise<SearchProvider>;
 type ProviderRegistry<TId extends string> = { [Id in TId]: ProviderLoader };
 
 const PROVIDER_LOADERS: ProviderRegistry<SearchEngineId> = {
-	zai: () => import("./providers/zai").then(m => new m.ZaiProvider()),
 	exa: () => import("./providers/exa").then(m => new m.ExaProvider()),
-	tinyfish: () => import("./providers/tinyfish").then(m => new m.TinyFishProvider()),
-	keenable: () => import("./providers/keenable").then(m => new m.KeenableProvider()),
-	jina: () => import("./providers/jina").then(m => new m.JinaProvider()),
-	kagi: () => import("./providers/kagi").then(m => new m.KagiProvider()),
-	tavily: () => import("./providers/tavily").then(m => new m.TavilyProvider()),
 	firecrawl: () => import("./providers/firecrawl").then(m => new m.FirecrawlProvider()),
-	brave: () => import("./providers/brave").then(m => new m.BraveProvider()),
-	deepseek: () => import("./providers/deepseek").then(m => new m.DeepSeekProvider()),
-	kimi: () => import("./providers/kimi").then(m => new m.KimiProvider()),
 	parallel: () => import("./providers/parallel").then(m => new m.ParallelProvider()),
-	synthetic: () => import("./providers/synthetic").then(m => new m.SyntheticProvider()),
-	ollama: () => import("./providers/ollama").then(m => new m.OllamaProvider()),
 	searxng: () => import("./providers/searxng").then(m => new m.SearXNGProvider()),
 	duckduckgo: () => import("./providers/duckduckgo").then(m => new m.DuckDuckGoProvider()),
 	google: () => import("./providers/google").then(m => new m.GoogleProvider()),
@@ -57,9 +46,6 @@ export interface SearchProviderFailure {
 export function formatSearchProviderFailure(error: unknown, provider: { id: string; label: string }): string {
 	if (error instanceof SearchProviderError) {
 		if (error.status === 401 || error.status === 403) {
-			if (error.provider === "zai") {
-				return error.message;
-			}
 			return `${getSearchProviderLabel(error.provider)} authorization failed (${error.status}). Check API key or base URL.`;
 		}
 		return error.message;

@@ -871,7 +871,8 @@ type RpcModelLookupSession = Pick<AgentSession, "getAvailableModels" | "modelReg
 /**
  * The available model with exactly this provider and id. Models missing from
  * the current catalog wait for in-flight background discovery first: on cold
- * start, discovery-backed providers (proxy / ollama / etc.) populate seconds
+ * start, discovery-backed providers (proxy / models.yml `discovery:` / imported
+ * coding-agent configs) populate seconds
  * after session ready. Catalog hits skip the wait, so the RPC queue is not
  * stalled behind unrelated discovery.
  */

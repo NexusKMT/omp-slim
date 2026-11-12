@@ -6,8 +6,7 @@
  * each measure is better, what competes, the focus row, and which computed
  * takeaway titles the chart — and {@link planFromAnswers} turns the answers
  * into a {@link ChartPlan}, each answer only above its confidence gate and the
- * TUI's local guess everywhere else. An on-device judge only picks the kind
- * (keyword answers), keeping the rest of the guess.
+ * TUI's local guess everywhere else.
  */
 import {
 	type Answer,
@@ -63,15 +62,8 @@ const PICK_TIMEOUT_MS = 15_000;
  */
 export async function pickTableChart(request: TableChartRequest, judge: ChainJudge): Promise<ChartPlan | null> {
 	const options = { signal: AbortSignal.timeout(PICK_TIMEOUT_MS) };
-	return judge.withCandidate(async (candidate, kind) => {
+	return judge.withCandidate(async candidate => {
 		const { state, questions } = judgeRequest(request);
-		if (kind === "local") {
-			// Keyword answers only carry the kind; the rest of the guess stands.
-			const { answers } = await candidate.judge({ state, questions: { kind: kindQuestion(request) } }, options);
-			const choice = answers.kind.choice;
-			if (!isOption(QUESTIONS.kind.criteria, choice)) return request.guess;
-			return choice === "none" ? null : { ...request.guess, kind: choice };
-		}
 		const { answers } = await candidate.judge({ state, questions }, options);
 		return planFromAnswers(request, answers);
 	}, options);

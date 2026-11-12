@@ -338,8 +338,6 @@ describe("SessionManager + indexed backend durability", () => {
 		expect(body).toContain("second turn");
 	});
 
-	// The size-check conflict after pruning is covered against the real backend in
-	// sql-session-storage-manager.test.ts.
 	it("recovers IndexedSessionStorage after a rejected deferred publish", async () => {
 		const { backend, storage, manager } = await makeManager();
 		const sessionFile = manager.getSessionFile();

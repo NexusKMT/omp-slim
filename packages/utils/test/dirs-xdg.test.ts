@@ -6,7 +6,6 @@ import {
 	__resetProfileSnapshotForTests,
 	getAgentDir,
 	getGlobalDaemonRuntimeDir,
-	getPredictStateDir,
 	getSkillDescriptionsDbPath,
 	setAgentDir,
 	setProfile,
@@ -63,7 +62,7 @@ describe("XDG-aware runtime paths", () => {
 	});
 
 	it.skipIf(!xdgPlatform)(
-		"routes skill descriptions db and predict state under an initialized $XDG_DATA_HOME/omp",
+		"routes skill descriptions db under an initialized $XDG_DATA_HOME/omp",
 		async () => {
 			const xdgData = path.join(tempRoot, "data");
 			await fs.mkdir(path.join(xdgData, "omp"), { recursive: true });
@@ -71,29 +70,8 @@ describe("XDG-aware runtime paths", () => {
 			setAgentDir(defaultAgentDir);
 
 			expect(getSkillDescriptionsDbPath()).toBe(path.join(xdgData, "omp", "skill-descriptions.db"));
-			expect(getPredictStateDir(undefined, "ngram")).toBe(path.join(xdgData, "omp", "predict", "ngram"));
-			// The daemon passes its agent dir explicitly; the default dir still resolves to XDG.
-			expect(getPredictStateDir(defaultAgentDir, "ngram")).toBe(path.join(xdgData, "omp", "predict", "ngram"));
 		},
 	);
-
-	it.skipIf(!xdgPlatform)("adopts legacy predict state once when XDG relocates it", async () => {
-		const legacy = path.join(defaultAgentDir, "predict", "ngram");
-		await fs.mkdir(legacy, { recursive: true });
-		await Bun.write(path.join(legacy, "cursor.json"), JSON.stringify({ historyId: 42 }));
-		const xdgData = path.join(tempRoot, "data");
-		await fs.mkdir(path.join(xdgData, "omp"), { recursive: true });
-		process.env.XDG_DATA_HOME = xdgData;
-		setAgentDir(defaultAgentDir);
-
-		const stateDir = getPredictStateDir(defaultAgentDir, "ngram");
-		expect(await Bun.file(path.join(stateDir, "cursor.json")).json()).toEqual({ historyId: 42 });
-
-		// Once adopted, XDG state is authoritative: later legacy writes by older versions are not re-copied.
-		await Bun.write(path.join(legacy, "cursor.json"), JSON.stringify({ historyId: 7 }));
-		getPredictStateDir(defaultAgentDir, "ngram");
-		expect(await Bun.file(path.join(stateDir, "cursor.json")).json()).toEqual({ historyId: 42 });
-	});
 
 	it.skipIf(!xdgPlatform)("shares the global daemon runtime dir across profiles and custom agent dirs", async () => {
 		const xdgState = path.join(tempRoot, "state");
@@ -119,6 +97,5 @@ describe("XDG-aware runtime paths", () => {
 		setAgentDir(custom);
 
 		expect(getSkillDescriptionsDbPath()).toBe(path.join(custom, "skill-descriptions.db"));
-		expect(getPredictStateDir(custom, "ngram")).toBe(path.join(custom, "predict", "ngram"));
 	});
 });

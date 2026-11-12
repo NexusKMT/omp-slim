@@ -507,27 +507,11 @@ async function parseFeedToMarkdown(content: string, maxItems = 10): Promise<stri
 }
 
 /**
- * Cap on any single remote reader-mode request (Parallel, Firecrawl, Jina) so a
+ * Cap on any single remote reader-mode request (Parallel, Firecrawl) so a
  * stalled remote endpoint cannot consume the whole reader-mode budget and starve
  * the local fallback renderers (trafilatura, lynx, native). See #1449.
  */
 const REMOTE_READER_MAX_MS = 10_000;
-const JINA_MARKDOWN_MARKER = "Markdown Content:";
-const JINA_READER_MAX_BYTES = 2 * 1024 * 1024;
-/** Jina's header warning that its own fetch got an error status, so the body is the error page. */
-const JINA_TARGET_FAILED_RE = /^Warning: Target URL returned error/m;
-
-function parseJinaReaderContent(responseBody: string): string | null {
-	const markerStart = responseBody.indexOf(JINA_MARKDOWN_MARKER);
-	if (markerStart < 0) return null;
-	if (JINA_TARGET_FAILED_RE.test(responseBody.slice(0, markerStart))) return null;
-
-	const content = responseBody.slice(markerStart + JINA_MARKDOWN_MARKER.length).trim();
-	if (content.length < 100 || content.startsWith("Loading...") || content.startsWith("Please enable JavaScript")) {
-		return null;
-	}
-	return content;
-}
 
 /**
  * Markdown image whose destination is an inline `data:` URI. The label allows
@@ -612,7 +596,7 @@ function pruneFrontMatter(markdown: string): string {
 }
 
 /** Reader backends for {@link renderHtmlToText}, in default priority order. */
-export type FetchProvider = "native" | "trafilatura" | "lynx" | "parallel" | "firecrawl" | "jina";
+export type FetchProvider = "native" | "trafilatura" | "lynx" | "parallel" | "firecrawl";
 
 const FETCH_PROVIDER_ORDER: readonly FetchProvider[] = [
 	"native",
@@ -620,11 +604,10 @@ const FETCH_PROVIDER_ORDER: readonly FetchProvider[] = [
 	"lynx",
 	"parallel",
 	"firecrawl",
-	"jina",
 ];
 
 /** Reader backends that fetch the URL from their own servers, so a wall refusing this host may let them in. */
-const REMOTE_FETCH_PROVIDERS: readonly FetchProvider[] = ["parallel", "firecrawl", "jina"];
+const REMOTE_FETCH_PROVIDERS: readonly FetchProvider[] = ["parallel", "firecrawl"];
 /** Wording of a page that shows nothing until JavaScript runs. */
 const JS_GATE_PHRASES = [
 	"enable javascript",
@@ -719,22 +702,6 @@ export async function renderHtmlToText(
 		firecrawl: async () => {
 			if (!findFirecrawlApiKey(storage)) return null;
 			return scrapeWithFirecrawl(url, { signal: remoteSignal(), fetch: fetchImpl }, storage);
-		},
-		jina: async () => {
-			const apiKey = findCredential(storage, getEnvApiKey("jina"), "jina");
-			const headers: Record<string, string> = {
-				Accept: "text/markdown",
-				"X-No-Cache": "true",
-			};
-			if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-			const response = await fetchImpl(`https://r.jina.ai/${url}`, {
-				headers,
-				signal: remoteSignal(),
-			});
-			if (!response.ok) return null;
-			const contentLength = Number(response.headers.get("content-length"));
-			if (Number.isFinite(contentLength) && contentLength > JINA_READER_MAX_BYTES) return null;
-			return parseJinaReaderContent(await response.text());
 		},
 	};
 
@@ -1575,7 +1542,7 @@ async function renderUrl(
 		}
 
 		// 5D: Render HTML via the reader-backend chain
-		// (native/trafilatura/lynx/parallel/firecrawl/jina)
+		// (native/trafilatura/lynx/parallel/firecrawl)
 		const htmlResult = await renderHtmlToText(
 			finalUrl,
 			rawContent,

@@ -109,13 +109,6 @@ import type { AgentSession } from "./session/agent-session";
 import type { AuthStorage } from "./session/auth-storage";
 import { describePendingToolCalls } from "./session/exit-diagnostics";
 import {
-	createForeignSessionStore,
-	foreignSessionInfoToSessionInfo,
-	foreignSessionSourceName,
-	persistForeignSession,
-} from "./session/foreign-session-import";
-import type { ForeignSessionInfo, ForeignSessionSource, ForeignSessionStore } from "./session/foreign-session-store";
-import {
 	findSessionContinuation,
 	type PickerListing,
 	readSessionInfo,
@@ -209,7 +202,7 @@ type SessionPicker = (
 ) => Promise<SessionInfo | null>;
 
 /** Resume/import-only graph boundary; ordinary launches never construct a picker. */
-async function loadSessionPicker(init?: { foreign?: boolean }): Promise<SessionPicker> {
+async function loadSessionPicker(): Promise<SessionPicker> {
 	const [{ selectSession }, { HistoryStorage }, { loadPinnedSessionIds, setSessionPinned }, { FileSessionStorage }] =
 		await Promise.all([
 			import("@oh-my-pi/pi-tui/apps/session-picker"),
@@ -231,15 +224,9 @@ async function loadSessionPicker(init?: { foreign?: boolean }): Promise<SessionP
 				await storage.deleteSessionWithArtifacts(session.path);
 				return true;
 			},
-			// Foreign import pickers list source-owned sessions, so rename and
-			// pins are native pickers only.
-			...(init?.foreign
-				? {}
-				: {
-						renameSession: (session: SessionInfo, title: string) =>
-							SessionManager.renameSessionTitle(session.path, title, { cwd: session.cwd }),
-						setSessionPinned: (session: SessionInfo, pinned: boolean) => setSessionPinned(session.id, pinned),
-					}),
+			renameSession: (session: SessionInfo, title: string) =>
+				SessionManager.renameSessionTitle(session.path, title, { cwd: session.cwd }),
+			setSessionPinned: (session: SessionInfo, pinned: boolean) => setSessionPinned(session.id, pinned),
 			loadAllSessions: () => SessionManager.listAllForPicker(storage),
 		});
 	};
@@ -869,27 +856,6 @@ function exitForSessionResolutionError(error: SessionResolutionError): never {
 	process.exit(1);
 }
 
-function resolveForeignSessionSource(
-	parsed: Pick<Args, "continue" | "fork" | "fromClaude" | "fromCodex" | "noSession" | "resume">,
-): ForeignSessionSource | undefined {
-	if (parsed.fromClaude && parsed.fromCodex) {
-		throw new SessionResolutionError("--from-claude and --from-codex cannot be used together");
-	}
-	const source = parsed.fromClaude ? "claude" : parsed.fromCodex ? "codex" : undefined;
-	if (!source) return undefined;
-	if (parsed.noSession) {
-		throw new SessionResolutionError(`--from-${source} requires session persistence`);
-	}
-	if (parsed.continue || parsed.resume || parsed.fork) {
-		throw new SessionResolutionError(`--from-${source} cannot be combined with --continue, --resume, or --fork`);
-	}
-	return source;
-}
-
-function isForeignSessionImport(parsed: Pick<Args, "fromClaude" | "fromCodex">): boolean {
-	return parsed.fromClaude === true || parsed.fromCodex === true;
-}
-
 type MissingCwdMoveResult =
 	| { status: "not-needed" }
 	| { status: "declined" }
@@ -1360,7 +1326,7 @@ export async function buildSessionOptions(
 		cwd: parsed.cwd ?? getProjectDir(),
 		autoApprove: parsed.autoApprove ?? false,
 	};
-	const restoringSession = Boolean(parsed.continue || parsed.resume || isForeignSessionImport(parsed));
+	const restoringSession = Boolean(parsed.continue || parsed.resume);
 	if (parsed.serviceTier !== undefined) {
 		options.openAIServiceTier = serviceTierSettingToTier(parsed.serviceTier) ?? null;
 	}
@@ -1662,7 +1628,6 @@ interface RunRootCommandDependencies {
 	discoverAuthStorage?: typeof discoverAuthStorage;
 	selectSession?: SessionPicker;
 	runAcpMode?: RunAcpMode;
-	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
 	settings?: Settings;
 	forceSetupWizard?: boolean;
 }
@@ -1918,92 +1883,26 @@ export async function runRootCommand(
 		// id from UUID-shaped values owned by later extension flags.
 		normalizeContinueSessionArgs(parsedArgs, rawArgs);
 
-		// Resolve native resume/fork flags or import one foreign transcript into a
-		// fresh persisted OMP session before constructing the AgentSession.
+		// Resolve native resume/fork flags before constructing the AgentSession.
 		const explicitSessionSelection = Boolean(
-			parsedArgs.continue ||
-			parsedArgs.resume ||
-			parsedArgs.fork ||
-			parsedArgs.restore ||
-			isForeignSessionImport(parsedArgs),
+			parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore,
 		);
 		let sessionManager: SessionManager | undefined;
-		let foreignSource: ForeignSessionSource | undefined;
 		// A resumed session whose conversation went on in another file resumes that file; say so.
 		const resumedContinuations: SessionContinuation[] = [];
 		try {
-			foreignSource = resolveForeignSessionSource(parsedArgs);
-			if (foreignSource) {
-				if (isProtocolMode) {
-					throw new SessionResolutionError(`--from-${foreignSource} is not supported in ${mode} mode`);
-				}
-				const sourceName = foreignSessionSourceName(foreignSource);
-				const store = (deps.createForeignSessionStore ?? createForeignSessionStore)(foreignSource);
-				let foreignSessions: ForeignSessionInfo[];
-				try {
-					foreignSessions = await logger.time(`list${sourceName}Sessions`, () => store.list());
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					throw new SessionResolutionError(`Failed to list ${sourceName} sessions: ${message}`);
-				}
-				if (foreignSessions.length === 0) {
-					writeStartupNotice(parsedArgs, `${chalk.dim(`No ${sourceName} sessions found`)}\n`);
-					stopStartupWatchdog();
-					process.exit(0);
-				}
-				const choices = foreignSessions.map(foreignSessionInfoToSessionInfo);
-				pauseStartupWatchdog();
-				let selected: SessionInfo | null;
-				try {
-					const selectSessionImpl = deps.selectSession ?? (await loadSessionPicker({ foreign: true }));
-					selected = await logger.time(`select${sourceName}Session`, selectSessionImpl, choices, {
-						title: `Import ${sourceName} Session`,
-						scopeLabel: false,
-						showCwd: true,
-						allowDelete: false,
-						allowGlobalScope: false,
-						historySearch: false,
-					});
-				} finally {
-					resumeStartupWatchdog();
-				}
-				if (!selected) {
-					writeStartupNotice(parsedArgs, `${chalk.dim(`No ${sourceName} session selected`)}\n`);
-					stopStartupWatchdog();
-					process.exit(0);
-				}
-				const foreignSession = foreignSessions.find(
-					session => session.id === selected.id && session.path === selected.path,
-				);
-				if (!foreignSession) {
-					throw new SessionResolutionError(`Selected ${sourceName} session is no longer available`);
-				}
-				try {
-					sessionManager = await logger.time(
-						`import${sourceName}Session`,
-						persistForeignSession,
-						store,
-						foreignSession,
-						{ fallbackCwd: cwd, sessionDir: parsedArgs.sessionDir },
-					);
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					throw new SessionResolutionError(`Failed to import ${sourceName} session: ${message}`);
-				}
-			} else {
-				sessionManager = await logger.time(
-					"createSessionManager",
-					createSessionManager,
-					parsedArgs,
-					cwd,
-					settingsInstance,
-					promptMoveSession,
-					{
-						nativeFlagOwnership: "preliminary",
-						onSessionContinuation: continuation => resumedContinuations.push(continuation),
-					},
-				);
-			}
+			sessionManager = await logger.time(
+				"createSessionManager",
+				createSessionManager,
+				parsedArgs,
+				cwd,
+				settingsInstance,
+				promptMoveSession,
+				{
+					nativeFlagOwnership: "preliminary",
+					onSessionContinuation: continuation => resumedContinuations.push(continuation),
+				},
+			);
 		} catch (error: unknown) {
 			if (error instanceof SessionResolutionError) {
 				exitForSessionResolutionError(error);
@@ -2013,7 +1912,7 @@ export async function runRootCommand(
 		// Only createSessionManager's implicit auto-resume promotes continue here.
 		const autoResumed = !explicitSessionSelection && parsedArgs.continue === true;
 
-		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager && !parsedArgs.noSession) {
+		if (typeof parsedArgs.resume === "string" && sessionManager && !parsedArgs.noSession) {
 			const previousCwd = cwd;
 			const recordedCwd = sessionManager.getRecordedCwd() ?? sessionManager.getCwd();
 			const resumedProject = await switchToResumedProject(
@@ -2133,7 +2032,7 @@ export async function runRootCommand(
 			if (isInteractive) notifs.push({ kind: "warn", message: notice });
 			else process.stderr.write(`${chalk.yellow(notice)}\n`);
 		}
-		if (sessionManager && (parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource)) {
+		if (sessionManager && (parsedArgs.continue || parsedArgs.resume || parsedArgs.fork)) {
 			const pendingToolWarning = describePendingToolCalls(sessionManager.getBranch());
 			if (pendingToolWarning) {
 				logger.warn("Resumed session has pending tool calls", {
@@ -2304,7 +2203,7 @@ export async function runRootCommand(
 				isInteractive &&
 				parsedArgs.unrecognizedFlags.length === 0 &&
 				!parsedArgs.tools?.length &&
-				!(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore || foreignSource);
+				!(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore);
 			const extensionsResult = parsedArgs.trustedExtensions?.length
 				? { ...(await loadTrustedSessionExtensions(sessionOptions, cwd, eventBus)), deferredPaths: [] }
 				: await loadSessionExtensions(sessionOptions, cwd, settingsInstance, eventBus, {
@@ -2382,7 +2281,7 @@ export async function runRootCommand(
 			const showStartupSplash = shouldShowStartupSplash({
 				configured: cfgStartupShowSplash.get(settingsInstance),
 				isInteractive,
-				resuming: Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
+				resuming: Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork),
 				quiet: cfgStartupQuiet.get(settingsInstance),
 				timing: Boolean($env.PI_TIMING),
 				stdinIsTTY: process.stdin.isTTY,
@@ -2414,7 +2313,7 @@ export async function runRootCommand(
 			}
 			// Resumed and imported sessions neither show nor advance the startup changelog.
 			const showsStartupChangelog =
-				isInteractive && !(parsedArgs.continue || parsedArgs.resume || isForeignSessionImport(parsedArgs));
+				isInteractive && !(parsedArgs.continue || parsedArgs.resume);
 
 			const preloadProviderRegistrations =
 				isInteractive && autoResumed ? extensionsResult.runtime.pendingProviderRegistrations.slice() : [];
@@ -2593,7 +2492,7 @@ export async function runRootCommand(
 					process.exit(1);
 				}
 				process.stderr.write(`${chalk.yellow("\nSet an API key environment variable:")}\n`);
-				process.stderr.write("  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.\n");
+				process.stderr.write("  OPENAI_API_KEY (or <PROVIDER>_API_KEY for your models.yml provider)\n");
 				process.stderr.write(`${chalk.yellow(`\nOr create ${ModelsConfigFile.path()}`)}\n`);
 				process.exit(1);
 			}
@@ -2656,7 +2555,7 @@ export async function runRootCommand(
 						setToolUIContext,
 						lspServers,
 						mcpManager,
-						Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
+						Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork),
 						deps.forceSetupWizard === true,
 						showStartupSplash,
 						eventBus,

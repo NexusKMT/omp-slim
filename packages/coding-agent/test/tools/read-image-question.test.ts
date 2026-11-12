@@ -16,10 +16,10 @@ const TINY_PNG_BASE64 =
 const TINY_SVG =
 	'<svg xmlns="http://www.w3.org/2000/svg" width="12" height="7"><rect width="12" height="7" fill="red"/></svg>';
 
-const visionModel: Model<"openai-responses"> = buildModel({
+const visionModel: Model<"openai-completions"> = buildModel({
 	id: "gpt-4o",
 	name: "GPT-4o",
-	api: "openai-responses",
+	api: "openai-completions",
 	provider: "openai",
 	baseUrl: "https://api.openai.com/v1",
 	reasoning: false,
@@ -29,15 +29,15 @@ const visionModel: Model<"openai-responses"> = buildModel({
 	maxTokens: 4096,
 });
 
-const textOnlyModel: Model<"openai-responses"> = {
+const textOnlyModel: Model<"openai-completions"> = {
 	...visionModel,
 	id: "gpt-4.1",
 	input: ["text"],
 };
 
 interface CreateSessionOptions {
-	availableModels?: Model<"openai-responses">[];
-	activeModel?: Model<"openai-responses">;
+	availableModels?: Model<"openai-completions">[];
+	activeModel?: Model<"openai-completions">;
 	imageAttachments?: ImageAttachmentEntry[];
 }
 
@@ -48,7 +48,7 @@ interface CompleteSimpleStub {
 
 function createSession(
 	cwd: string,
-	model: Model<"openai-responses">,
+	model: Model<"openai-completions">,
 	apiKey: string | undefined = "test-key",
 	settings = Settings.isolated(),
 	options: CreateSessionOptions = {},
@@ -231,7 +231,6 @@ describe("read image questions", () => {
 		});
 		await new ReadTool(session, stub.fn).execute("call", { path: `${imagePath}?q=What color?` });
 		expect(stub.calls[0]?.[0]).toBe(current);
-		expect(stub.calls[0]?.[2]).toMatchObject({ disableServerSideFallback: true });
 	});
 
 	it("does not use another available vision model when the current model is text-only", async () => {

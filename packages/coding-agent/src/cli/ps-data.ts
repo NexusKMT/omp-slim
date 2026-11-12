@@ -229,10 +229,10 @@ function compareRows(a: PsDaemonRow, b: PsDaemonRow): number {
 /**
  * Collect the scopes selected by `all`/`target`: every scope with `all`; one
  * scope for an explicit `--dir`/`--global` target; otherwise the current
- * project plus the machine-global services (shared by all projects, e.g. the
- * text-prediction daemon) that have a live process — their exited history
- * only shows with `--all` or `--global`. Discovered scopes that are empty and
- * brokerless are hidden; the current project always shows.
+ * project plus the machine-global services (shared by all projects) that have
+ * a live process — their exited history only shows with `--all` or
+ * `--global`. Discovered scopes that are empty and brokerless are hidden; the
+ * current project always shows.
  */
 export async function collectReports(all: boolean, target: PsTarget): Promise<PsScopeReport[]> {
 	if (!all && (target.dir !== undefined || target.global !== undefined)) {

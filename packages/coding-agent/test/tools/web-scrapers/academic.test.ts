@@ -1,78 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { handleArxiv } from "@oh-my-pi/pi-coding-agent/web/scrapers/arxiv";
-import { handleIacr } from "@oh-my-pi/pi-coding-agent/web/scrapers/iacr";
 import { handlePubMed } from "@oh-my-pi/pi-coding-agent/web/scrapers/pubmed";
-import { handleSemanticScholar } from "@oh-my-pi/pi-coding-agent/web/scrapers/semantic-scholar";
 import type { RenderResult } from "@oh-my-pi/pi-coding-agent/web/scrapers/types";
 
 const SKIP = !Bun.env.WEB_FETCH_INTEGRATION;
-
-describe.skipIf(SKIP)("handleSemanticScholar", () => {
-	it("fetches a known paper", async () => {
-		// "Attention Is All You Need" paper
-		const result = await handleSemanticScholar(
-			"https://www.semanticscholar.org/paper/Attention-is-All-you-Need-Vaswani-Shazeer/204e3073870fae3d05bcbc2f6a8e263d9b72e776",
-			20,
-		);
-		expect(result).not.toBeNull();
-		expect(result?.method).toBe("semantic-scholar");
-		// API may be rate-limited or fail, verify handler structure
-		if (
-			!result?.content.includes("Too Many Requests") &&
-			!result?.content.includes("Failed to fetch") &&
-			!result?.content.includes("Failed to parse")
-		) {
-			expect(result?.content).toContain("Attention");
-			expect(result?.contentType).toBe("text/markdown");
-		}
-		expect(result?.truncated).toBe(false);
-	});
-
-	it("handles invalid paper ID format", async () => {
-		const result = await handleSemanticScholar("https://www.semanticscholar.org/paper/invalid", 20);
-		expect(result).not.toBeNull();
-		expect(result?.method).toBe("semantic-scholar");
-		expect(result?.content).toContain("Failed to extract paper ID");
-		expect(result?.notes).toContain("Invalid URL format");
-	});
-
-	it("extracts paper ID from various URL formats", async () => {
-		const paperId = "204e3073870fae3d05bcbc2f6a8e263d9b72e776";
-		const urls = [
-			`https://www.semanticscholar.org/paper/Attention-is-All-you-Need-Vaswani-Shazeer/${paperId}`,
-			`https://www.semanticscholar.org/paper/${paperId}`,
-		];
-
-		for (const url of urls) {
-			const result = await handleSemanticScholar(url, 20);
-			expect(result).not.toBeNull();
-			expect(result?.method).toBe("semantic-scholar");
-			// API may be rate-limited or fail
-			if (
-				!result?.content.includes("Too Many Requests") &&
-				!result?.content.includes("Failed to fetch") &&
-				!result?.content.includes("Failed to parse")
-			) {
-				expect(result?.content).toContain("Attention");
-			}
-		}
-	});
-
-	it("includes metadata in formatted output", async () => {
-		const result = await handleSemanticScholar(
-			"https://www.semanticscholar.org/paper/Attention-is-All-you-Need-Vaswani-Shazeer/204e3073870fae3d05bcbc2f6a8e263d9b72e776",
-			20,
-		);
-		expect(result).not.toBeNull();
-		// Only check metadata if API call succeeded (not rate-limited)
-		if (!result?.content.includes("Too Many Requests") && !result?.content.includes("Failed to fetch")) {
-			expect(result?.content).toMatch(/Year:/);
-			expect(result?.content).toMatch(/Citations:/);
-			expect(result?.content).toMatch(/Authors:/);
-			expect(result?.content).toContain("Vaswani");
-		}
-	});
-});
 
 describe.skipIf(SKIP)("handlePubMed", () => {
 	let cachedKnownPubMed: RenderResult | null | undefined;
@@ -172,39 +103,6 @@ describe.skipIf(SKIP)("handleArxiv", () => {
 			expect(result?.content).toContain("Vaswani");
 			expect(result?.content).toMatch(/Abstract/);
 			expect(result?.content).toMatch(/Published:/);
-		}
-	});
-});
-
-describe.skipIf(SKIP)("handleIacr", () => {
-	it("fetches a known ePrint", async () => {
-		// Using a well-known paper
-		const result = await handleIacr("https://eprint.iacr.org/2023/123", 30000);
-		expect(result).not.toBeNull();
-		expect(result?.method).toBe("iacr");
-		expect(result?.contentType).toBe("text/markdown");
-		if (!result?.content.includes("Too Many Requests") && !result?.content.includes("Failed to fetch")) {
-			expect(result?.content).toContain("ePrint:");
-			expect(result?.content).toContain("2023/123");
-		}
-		expect(result?.truncated).toBe(false);
-	});
-
-	it("includes paper metadata", async () => {
-		const result = await handleIacr("https://eprint.iacr.org/2023/123", 30000);
-		expect(result).not.toBeNull();
-		if (!result?.content.includes("Too Many Requests") && !result?.content.includes("Failed to fetch")) {
-			expect(result?.content).toContain("ePrint:");
-			expect(result?.content).toMatch(/Abstract/);
-		}
-	});
-
-	it("handles PDF URLs", async () => {
-		const result = await handleIacr("https://eprint.iacr.org/2023/123.pdf", 30000);
-		expect(result).not.toBeNull();
-		expect(result?.method).toBe("iacr");
-		if (!result?.content.includes("Too Many Requests") && !result?.content.includes("Failed to fetch")) {
-			expect(result?.notes?.some(n => n.includes("PDF"))).toBe(true);
 		}
 	});
 });

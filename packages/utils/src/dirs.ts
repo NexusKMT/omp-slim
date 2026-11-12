@@ -852,16 +852,6 @@ export function getCommitCacheDbPath(): string {
 	return dirs.rootSubdir(path.join("cache", "commit-inference.db"), "cache");
 }
 
-/**
- * Get the judgment answer cache database path (~/.omp/cache/judgment-cache.db).
- * Honors `OMP_JUDGMENT_CACHE_DB` so tests and operators can isolate the cache.
- */
-export function getJudgmentCacheDbPath(): string {
-	const override = process.env.OMP_JUDGMENT_CACHE_DB;
-	if (override) return override;
-	return dirs.rootSubdir(path.join("cache", "judgment-cache.db"), "cache");
-}
-
 /** Get the legacy Pi extension parse cache database path. */
 export function getLegacyPiExtensionCacheDbPath(): string {
 	return dirs.rootSubdir(path.join("cache", "legacy-pi-extension-cache.db"), "cache");
@@ -983,13 +973,6 @@ export function getComposerCacheDbPath(agentDir?: string): string {
 export function getSkillDescriptionsDbPath(agentDir?: string): string {
 	return dirs.agentSubdir(agentDir, "skill-descriptions.db", "data");
 }
-/** Get the text-predict engine state directory (~/.omp/agent/predict/<method>; XDG default: $XDG_DATA_HOME/omp/predict/<method>). Adopts legacy engine state on first XDG resolution. */
-export function getPredictStateDir(agentDir: string | undefined, method: string): string {
-	const subdir = path.join("predict", method);
-	const stateDir = dirs.agentSubdir(agentDir, subdir, "data");
-	adoptLegacyDir(path.join(agentDir ?? dirs.agentDir, subdir), stateDir);
-	return stateDir;
-}
 
 /** Get the sessions directory (~/.omp/agent/sessions). */
 export function getSessionsDir(agentDir?: string): string {
@@ -1067,29 +1050,6 @@ function adoptLegacyFile(legacyPath: string, targetPath: string): void {
 	} catch {
 		// Opportunistic: a copy race or unwritable XDG dir falls back to a fresh
 		// file at the new path — the pre-adoption behavior.
-	}
-}
-
-/**
- * Best-effort one-time copy of a legacy directory to its redirected XDG
- * location, so learned state survives enabling XDG. The copy is staged next to
- * the target and renamed into place, so a reader never sees a partial tree and
- * a concurrent adopter cannot clobber a finished one. The legacy directory is
- * left in place for older omp versions sharing the profile.
- */
-function adoptLegacyDir(legacyPath: string, targetPath: string): void {
-	if (targetPath === legacyPath) return;
-	const staging = `${targetPath}.adopt-${process.pid}`;
-	try {
-		if (fs.existsSync(targetPath) || !fs.statSync(legacyPath, { throwIfNoEntry: false })?.isDirectory()) return;
-		fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-		fs.rmSync(staging, { recursive: true, force: true });
-		fs.cpSync(legacyPath, staging, { recursive: true });
-		fs.renameSync(staging, targetPath);
-	} catch {
-		// Opportunistic: a lost race or unwritable XDG dir falls back to fresh
-		// state at the new path — the pre-adoption behavior.
-		fs.rmSync(staging, { recursive: true, force: true });
 	}
 }
 

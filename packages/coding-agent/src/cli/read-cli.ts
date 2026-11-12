@@ -11,7 +11,6 @@ import { resolvePrimaryModelSelection } from "../config/model-resolver";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { initializeWithSettings } from "../discovery";
-import { releaseIdaDatabases } from "../ida";
 import { loadSkills } from "../extensibility/skills";
 import { closeDaemonClients } from "../launch/client";
 import { discoverAndLoadMCPTools } from "../mcp/loader";
@@ -125,8 +124,6 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 			if (MCPManager.instance() === mcpManager) MCPManager.setInstance(undefined);
 		}
 		authStorage?.close();
-		// Saves unsaved IDA changes and drops the host sockets that would keep the event loop alive.
-		await releaseIdaDatabases();
 		await closeDaemonClients();
 	}
 

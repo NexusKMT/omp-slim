@@ -3466,25 +3466,12 @@ export class Settings {
 			"compaction.remote",
 			"compaction.remoteEndpoint",
 			"compaction.remoteStreamingV2Enabled",
-			"images.urls.options.provider-files",
-			"images.urls.credentials.provider-files",
 		];
 		for (const prefix of retiredProviderSettings) {
 			deleteByPath(raw, prefix.split("."));
 			for (const key of Object.keys(raw)) {
 				if (key === prefix || key.startsWith(`${prefix}.`)) delete raw[key];
 			}
-		}
-		for (const key of ["images.urls.options", "images.urls.credentials"]) {
-			const value = raw[key];
-			if (isRecord(value)) delete value["provider-files"];
-		}
-		const imageUrls = getByPath(raw, ["images", "urls"]);
-		if (isRecord(imageUrls) && Array.isArray(imageUrls.backends)) {
-			imageUrls.backends = imageUrls.backends.filter(backend => backend !== "provider-files");
-		}
-		if (Array.isArray(raw["images.urls.backends"])) {
-			raw["images.urls.backends"] = raw["images.urls.backends"].filter(backend => backend !== "provider-files");
 		}
 
 		// The old model namespace held stream/tool loop guards. Keep those controls

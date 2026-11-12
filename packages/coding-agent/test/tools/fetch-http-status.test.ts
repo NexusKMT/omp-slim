@@ -106,12 +106,6 @@ describe("read URL answered by a bot wall", () => {
 
 	it.each([
 		{
-			reader: "the post",
-			body: `Title: Software 2.0\n\nMarkdown Content:\n${POST_MARKDOWN}`,
-			method: "jina",
-			note: "read through jina",
-		},
-		{
 			reader: "its own block page",
 			body: "Title: \n\nWarning: Target URL returned error 403: Forbidden\n\nMarkdown Content:\nYou've been blocked by network security.\n\nTo continue, log in to your Reddit account or use your developer token",
 			method: "blocked",
@@ -135,16 +129,10 @@ describe("read URL answered by a bot wall", () => {
 
 		expect(result.method).toBe(method);
 		expect(result.notes).toContain(note);
-		if (method === "jina") {
-			expect(result.text).toContain("Neural networks are not just another classifier");
-			expect(result.finalUrl).toEndWith("/canonical");
-			expect(result.remoteCalls.find(url => url.startsWith("https://r.jina.ai/"))).toEndWith("/canonical");
-		} else {
-			expect(result.text).not.toMatch(/blocked by network security|(Enable|Turn on) JavaScript/);
-			expect(result.notes).toContain("no reader backend got past it");
-			expect(result.notes).toContain("external browser, save its text to a local file");
-			expect(result.notes).not.toContain("browser tool");
-		}
+		expect(result.text).not.toMatch(/blocked by network security|(Enable|Turn on) JavaScript/);
+		expect(result.notes).toContain("no reader backend got past it");
+		expect(result.notes).toContain("external browser, save its text to a local file");
+		expect(result.notes).not.toContain("browser tool");
 	});
 
 	it("returns the challenge body as fetched for :raw", async () => {
@@ -169,8 +157,9 @@ describe("read URL answered by a bot wall", () => {
 			`Markdown Content:\n${POST_MARKDOWN}`,
 		);
 
-		expect(result.method).toBe("jina");
+		expect(result.method).toBe("blocked");
 		expect(result.notes).toContain("JavaScript challenge, HTTP 200");
+		expect(result.notes).toContain("no reader backend got past it");
 	});
 
 	it("names the bot wall on a 403 challenge without sending the URL to a remote reader", async () => {

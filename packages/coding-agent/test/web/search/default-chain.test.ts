@@ -56,14 +56,14 @@ describe("HTTP web search selection", () => {
 		const find = vi.spyOn(modelRegistry, "find").mockImplementation(() => {
 			throw new Error("HTTP search must not select a chat model");
 		});
-		await runSearchQuery({ query: "anything", engine: "brave" }, { modelRegistry });
-		expect(attempted).toEqual(["brave"]);
+		await runSearchQuery({ query: "anything", engine: "google" }, { modelRegistry });
+		expect(attempted).toEqual(["google"]);
 		expect(find).not.toHaveBeenCalled();
 	});
 
 	it("keeps an explicit engine for X site queries", async () => {
-		await runSearchQuery({ query: "tern site:x.com", engine: "brave" }, { authStorage });
-		expect(attempted).toEqual(["brave"]);
+		await runSearchQuery({ query: "tern site:x.com", engine: "google" }, { authStorage });
+		expect(attempted).toEqual(["google"]);
 	});
 
 	it("rejects retired model overrides before attempting a search", async () => {

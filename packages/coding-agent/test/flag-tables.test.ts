@@ -223,20 +223,6 @@ describe("parseArgs @file parsing with quotes", () => {
 	});
 });
 
-describe("foreign session import flags", () => {
-	it("parses each source flag without consuming the initial message", () => {
-		const claude = parseArgs(["--from-claude", "continue this session"]);
-		const codex = parseArgs(["--from-codex", "continue this session"]);
-
-		expect(claude.fromClaude).toBe(true);
-		expect(claude.messages).toEqual(["continue this session"]);
-		expect(claude.unrecognizedFlags).toEqual([]);
-		expect(codex.fromCodex).toBe(true);
-		expect(codex.messages).toEqual(["continue this session"]);
-		expect(codex.unrecognizedFlags).toEqual([]);
-	});
-});
-
 describe("restartArgv (/restart relaunch argv)", () => {
 	it("keeps configuration flags, drops positionals, and appends --restore", () => {
 		expect(restartArgv(["--model", "gpt-5", "fix the bug", "@notes.md"], "sid")).toEqual([
