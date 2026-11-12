@@ -271,14 +271,6 @@
 			"types": "./src/extensibility/plugins/marketplace/*.ts",
 			"import": "./src/extensibility/plugins/marketplace/*.ts"
 		},
-		"./ida": {
-			"types": "./src/ida/index.ts",
-			"import": "./src/ida/index.ts"
-		},
-		"./ida/*": {
-			"types": "./src/ida/*.ts",
-			"import": "./src/ida/*.ts"
-		},
 		"./internal-urls": {
 			"types": "./src/internal-urls/index.ts",
 			"import": "./src/internal-urls/index.ts"
@@ -290,14 +282,6 @@
 		"./eval": {
 			"types": "./src/eval/index.ts",
 			"import": "./src/eval/index.ts"
-		},
-		"./if-bench": {
-			"types": "./src/if-bench/index.ts",
-			"import": "./src/if-bench/index.ts"
-		},
-		"./if-bench/*": {
-			"types": "./src/if-bench/*.ts",
-			"import": "./src/if-bench/*.ts"
 		},
 		"./eval/js/*": {
 			"types": "./src/eval/js/*.ts",
