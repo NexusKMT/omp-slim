@@ -17,6 +17,8 @@ export interface ChatCompletionAssistantMessageParam {
 	role: "assistant";
 	content: string | null;
 	tool_calls?: ChatCompletionMessageFunctionToolCall[];
+	/** DeepSeek-class thinking echo: replay of the model's reasoning content. */
+	reasoning_content?: string;
 }
 export interface ChatCompletionToolMessageParam {
 	role: "tool";
@@ -54,5 +56,9 @@ export interface ChatCompletionDelta {
 	role?: string;
 	content?: string | null;
 	refusal?: string | null;
+	/** Reasoning aliases used by DeepSeek-class and llama.cpp-style endpoints. */
+	reasoning_content?: string | null;
+	reasoning?: string | null;
+	reasoning_text?: string | null;
 	tool_calls?: { index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }[];
 }

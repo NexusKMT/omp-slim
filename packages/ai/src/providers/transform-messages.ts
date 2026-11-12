@@ -153,9 +153,18 @@ export function transformMessages<TApi extends Api>(
 		if (message.role === "assistant") {
 			malformedQueues.clear();
 			const content: AssistantMessage["content"] = [];
+			let survives = false;
 			for (const block of message.content) {
 				if (block.type === "text") {
 					content.push({ type: "text", text: redactSensitiveCredentials(block.text.toWellFormed()) });
+					survives = true;
+					continue;
+				}
+				// Preserve thinking blocks for the encoder: DeepSeek-class
+				// endpoints require reasoning replay, and the completions
+				// encoder echoes only reasoning-source-signed blocks.
+				if (block.type === "thinking") {
+					content.push(block);
 					continue;
 				}
 				if (block.type !== "toolCall") continue;
@@ -181,8 +190,9 @@ export function transformMessages<TApi extends Api>(
 					name: block.name,
 					arguments: redactSensitiveInObject(args).result as ToolCall["arguments"],
 				});
+				survives = true;
 			}
-			if (content.length)
+			if (survives)
 				normalized.push({ ...message, content, providerPayload: undefined, requestControls: undefined });
 		} else if (message.role === "toolResult") {
 			const queue = malformedQueues.get(message.toolCallId);

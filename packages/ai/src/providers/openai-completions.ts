@@ -11,6 +11,7 @@ import type {
 	ServiceTier,
 	StreamOptions,
 	TextContent,
+	ThinkingContent,
 	Tool,
 	ToolCall,
 	ToolChoice,
@@ -32,6 +33,10 @@ import { adaptSchemaForStrict, toolWireSchema } from "../utils/schema";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { mapToOpenAICompletionsToolChoice } from "../utils/tool-choice";
 import { transportFetch } from "../utils/transport-fetch";
+import {
+	isReasoningSourceSignature,
+	MISTRAL_CONTENT_PARTS_SIGNATURE,
+} from "../utils/reasoning-source";
 import type {
 	ChatCompletionChunk,
 	ChatCompletionContentPart,
@@ -98,7 +103,26 @@ export function convertMessages(model: Model<"openai-completions">, context: Con
 					type: "function" as const,
 					function: { name: block.name, arguments: JSON.stringify(block.arguments) },
 				}));
-			messages.push({ role: "assistant", content: text || null, ...(calls.length ? { tool_calls: calls } : {}) });
+			// DeepSeek-class endpoints demand the model's reasoning content be
+			// replayed on subsequent turns: they reject the request (HTTP 400)
+			// when a turn that previously emitted thinking goes out without it.
+			const nonEmptyThinking = message.content.filter(
+				(block): block is ThinkingContent =>
+					block.type === "thinking" && block.thinking.trim().length > 0,
+			);
+			const reasoningSignature = nonEmptyThinking[0]?.thinkingSignature;
+			const reasoningEcho =
+				nonEmptyThinking.length > 0 &&
+				isReasoningSourceSignature(reasoningSignature ?? "") &&
+				reasoningSignature !== MISTRAL_CONTENT_PARTS_SIGNATURE
+					? nonEmptyThinking.map(block => block.thinking).join("\n")
+					: undefined;
+			messages.push({
+				role: "assistant",
+				content: text || null,
+				...(calls.length ? { tool_calls: calls } : {}),
+				...(reasoningEcho !== undefined ? { reasoning_content: reasoningEcho } : {}),
+			});
 		} else if (message.role === "toolResult") {
 			const text = message.content
 				.filter((block): block is TextContent => block.type === "text")
@@ -246,6 +270,7 @@ export function streamOpenAICompletions(
 		const signal = abortTracker.requestSignal;
 		const tools = new Map<number, { block: ToolCall; contentIndex: number; json: string; ended: boolean }>();
 		let text: { block: TextContent; contentIndex: number; ended: boolean } | undefined;
+		let thinking: { block: ThinkingContent; contentIndex: number; ended: boolean } | undefined;
 		let stopPreResponse = () => {};
 		const endBlocks = () => {
 			if (text && !text.ended) {
@@ -269,6 +294,15 @@ export function streamOpenAICompletions(
 						partial: output,
 					});
 				}
+			if (thinking && !thinking.ended) {
+				thinking.ended = true;
+				stream.push({
+					type: "thinking_end",
+					contentIndex: thinking.contentIndex,
+					content: thinking.block.thinking,
+					partial: output,
+				});
+			}
 		};
 		try {
 			signal.throwIfAborted();
@@ -364,6 +398,38 @@ export function streamOpenAICompletions(
 				if (!choice) continue;
 				const delta = choice.delta ?? choice.message;
 				if (delta) {
+					// DeepSeek-class endpoints stream thinking under reasoning aliases.
+					// Use the first non-empty field so a chunk carrying several
+					// aliases for the same text does not duplicate the thinking.
+					let reasoningField: string | undefined;
+					let reasoningDelta = "";
+					for (const field of ["reasoning_content", "reasoning", "reasoning_text"] as const) {
+						const value = delta[field];
+						if (typeof value === "string" && value.length > 0) {
+							reasoningField = field;
+							reasoningDelta = value;
+							break;
+						}
+					}
+					if (reasoningField && reasoningDelta) {
+						if (!thinking) {
+							const block: ThinkingContent = {
+								type: "thinking",
+								thinking: "",
+								thinkingSignature: reasoningField,
+							};
+							thinking = { block, contentIndex: output.content.length, ended: false };
+							output.content.push(block);
+							stream.push({ type: "thinking_start", contentIndex: thinking.contentIndex, partial: output });
+						}
+						thinking.block.thinking += reasoningDelta;
+						stream.push({
+							type: "thinking_delta",
+							contentIndex: thinking.contentIndex,
+							delta: reasoningDelta,
+							partial: output,
+						});
+					}
 					const content = delta.content ?? delta.refusal;
 					if (content) {
 						if (!text) {
@@ -399,7 +465,7 @@ export function streamOpenAICompletions(
 							});
 						}
 					}
-					if (content || delta.tool_calls?.length) output.ttft ??= performance.now() - started;
+					if (content || reasoningDelta || delta.tool_calls?.length) output.ttft ??= performance.now() - started;
 				}
 				if (choice.finish_reason) {
 					finished = true;
