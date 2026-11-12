@@ -6,6 +6,10 @@
 
 - OMP Slim removes the browser cookie-capture login callback; Perplexity email-code, token and API-key authentication remain supported.
 
+### Fixed
+
+- Fixed DeepSeek-class completions replay: reasoning streamed as `reasoning_content`/`reasoning`/`reasoning_text` is now decoded into signed thinking blocks and echoed back on subsequent turns, so endpoints demanding reasoning replay no longer reject follow-ups with HTTP 400.
+
 ## [18.18.2] - 2026-11-08
 
 ### Added

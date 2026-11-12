@@ -7,6 +7,10 @@
 - Removed the browser proxy transport and its custom streaming protocol.
 - Removed vendor execution channels, native protocol replay, and tool-call dialect translation; agent requests now use standard Chat Completions with the explicitly configured model.
 
+### Fixed
+
+- Fixed provider-context normalization dropping every assistant thinking block, so the openai-completions encoder can replay `reasoning_content` on follow-up turns (DeepSeek-class endpoints reject requests that omit it with HTTP 400).
+
 ## [18.18.2] - 2026-11-08
 
 ### Added
