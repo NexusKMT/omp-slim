@@ -650,32 +650,6 @@ function createDetailedCapture(config: AgentLoopConfig): {
 	};
 }
 
-export function normalizeMessagesForProvider(
-	messages: Context["messages"],
-	_model: AgentLoopConfig["model"],
-): Context["messages"] {
-	let hasThinking = false;
-	for (const message of messages) {
-		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
-		for (const block of message.content) {
-			if (block.type === "thinking") {
-				hasThinking = true;
-				break;
-			}
-		}
-		if (hasThinking) break;
-	}
-	if (!hasThinking) return messages;
-
-	return messages.map(message => {
-		if (message.role !== "assistant" || !Array.isArray(message.content)) {
-			return message;
-		}
-		const filtered = message.content.filter(block => block.type !== "thinking");
-		return filtered.length === message.content.length ? message : { ...message, content: filtered };
-	});
-}
-
 /** Schema description of the injected `i` field when neither `PI_INTENT_DESC` nor the caller sets one. */
 const DEFAULT_INTENT_FIELD_DESCRIPTION = "concise intent";
 const INTENT_SCHEMA_UNION_KEYS = ["anyOf", "oneOf"] as const;
@@ -1519,11 +1493,10 @@ async function prepareProviderCall(
 	}
 
 	const llmMessages = await config.convertToLlm(messages);
-	const normalizedMessages = normalizeMessagesForProvider(llmMessages, model);
 	const pruneToolDescriptions = !!config.pruneToolDescriptions;
 	let llmContext: Context;
 	if (config.appendOnlyContext) {
-		config.appendOnlyContext.syncMessages(normalizedMessages);
+		config.appendOnlyContext.syncMessages(llmMessages);
 		llmContext = config.appendOnlyContext.build(context, {
 			intentTracing: !!config.intentTracing,
 			intentDescription: config.intentDescription,
@@ -1532,7 +1505,7 @@ async function prepareProviderCall(
 	} else {
 		llmContext = {
 			systemPrompt: context.systemPrompt,
-			messages: normalizedMessages,
+			messages: llmMessages,
 			tools: normalizeTools(context.tools, {
 				injectIntent: !!config.intentTracing,
 				intentDescription: config.intentDescription,

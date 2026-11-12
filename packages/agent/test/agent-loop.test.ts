@@ -648,6 +648,59 @@ describe("agentLoop with AgentMessage", () => {
 		expect(finalTurn.content).toContainEqual({ type: "text", text: "done after recovery" });
 	});
 
+	it("keeps signed reasoning thinking in the follow-up provider context for the encoder echo", async () => {
+		const executedParams: Array<{ value: string }> = [];
+		const toolSchema = type({ value: "string" });
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executedParams.push(params);
+				return {
+					content: [{ type: "text", text: `echoed: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "thinking", thinking: "reasoning before echo", thinkingSignature: "reasoning_content" },
+						{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "hello" } },
+					],
+					stopReason: "toolUse",
+				},
+				{ content: ["done after echo"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		// DeepSeek-class endpoints demand the assistant's reasoning be replayed on
+		// follow-up turns: the loop must hand the encoder the thinking block.
+		const streamFn: typeof mock.stream = (model, callContext, options) => {
+			if (mock.calls.length === 1) {
+				const assistant = callContext.messages.find(m => m.role === "assistant");
+				expect(assistant?.content.some(block => block.type === "thinking")).toBe(true);
+			}
+			return mock.stream(model, callContext, options);
+		};
+
+		const messages = await agentLoop(
+			[createUserMessage("run echo")],
+			context,
+			config,
+			undefined,
+			streamFn,
+		).result();
+
+		expect(executedParams).toEqual([{ value: "hello" }]);
+		expect(messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+	});
+
 	it("runs completed tool calls after an Anthropic stream envelope truncation error", async () => {
 		const executedParams: Array<{ value: string }> = [];
 		const toolSchema = type({ value: "string" });

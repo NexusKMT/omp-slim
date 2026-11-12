@@ -25,7 +25,6 @@ import {
 	agentLoop,
 	agentLoopContinue,
 	createSyntheticToolResultMessage,
-	normalizeMessagesForProvider,
 	normalizeTools,
 	steeringQueueState,
 	unpairedToolCallTail,
@@ -782,14 +781,13 @@ export class Agent {
 	): Promise<Context> {
 		const model = this.#state.model;
 		if (!model) throw new Error("No active model on agent");
-		const messages = normalizeMessagesForProvider(llmMessages, model);
 		const tools =
 			normalizeTools(this.#state.tools, {
 				injectIntent: this.#intentTracing,
 				intentDescription: this.#intentDescription,
 				pruneDescriptions: this.#pruneToolDescriptions,
 			}) ?? [];
-		let context: Context = { systemPrompt, messages, tools };
+		let context: Context = { systemPrompt, messages: llmMessages, tools };
 		// Side requests reuse the main loop's sent definitions without recording their own; attached before the
 		// transform too, so a request-size clamp in it measures them.
 		context = this.#sentToolDefinitions.withInactiveTools(context);
