@@ -39,7 +39,6 @@ export const PtySession = nativeBindings.PtySession ?? missingNativeClass("PtySe
 export const RunTrace = nativeBindings.RunTrace ?? missingNativeClass("RunTrace");
 export const Shell = nativeBindings.Shell ?? missingNativeClass("Shell");
 export const ShellVisualization = nativeBindings.ShellVisualization ?? missingNativeClass("ShellVisualization");
-export const TextPredictor = nativeBindings.TextPredictor ?? missingNativeClass("TextPredictor");
 export const TtyWriter = nativeBindings.TtyWriter ?? missingNativeClass("TtyWriter");
 export const VcsGitRepo = nativeBindings.VcsGitRepo ?? missingNativeClass("VcsGitRepo");
 export const VcsJjWorkspace = nativeBindings.VcsJjWorkspace ?? missingNativeClass("VcsJjWorkspace");

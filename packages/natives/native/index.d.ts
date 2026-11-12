@@ -477,53 +477,6 @@ export declare class ShellVisualization {
   present(options: ShellVizOptions): string
 }
 
-/** One word-completion engine running on its own thread. */
-export declare class TextPredictor {
-  /**
-   * Spawn the engine thread and start opening the engine; load errors
-   * surface from [`TextPredictor::ready`] and every later call.
-   *
-   * # Errors
-   * Returns an error when the engine thread cannot be spawned.
-   */
-  constructor(options: TextPredictorOptions)
-  /**
-   * Resolve once the engine has loaded.
-   *
-   * # Errors
-   * Rejects with the engine's load error (missing weights, corrupt state).
-   */
-  ready(): Promise<void>
-  /**
-   * Ghost text for `prefix` typed after `before`, or `null`.
-   *
-   * # Errors
-   * Rejects when the engine failed to load.
-   */
-  complete(before: string, prefix: string): Promise<PredictedWord | null>
-  /**
-   * Learn from submitted prompts, in submission order.
-   *
-   * # Errors
-   * Rejects when the engine failed to load.
-   */
-  observe(prompts: Array<string>): Promise<void>
-  /**
-   * Learn from a suggestion the user accepted (`true`) or typed past.
-   *
-   * # Errors
-   * Rejects when the engine failed to load.
-   */
-  feedback(before: string, prefix: string, suggestion: string, accepted: boolean): Promise<void>
-  /**
-   * Flush learned state to the state directory.
-   *
-   * # Errors
-   * Rejects when the engine failed to load or the state cannot be written.
-   */
-  persist(): Promise<void>
-}
-
 /**
  * Dedicated writer thread for one terminal fd.
  *
@@ -2665,14 +2618,6 @@ export interface PowerAssertionOptions {
   display?: boolean
 }
 
-/** Ghost text for the word being typed. */
-export interface PredictedWord {
-  /** Characters to paint after the typed prefix. */
-  suffix: string
-  /** Engine-calibrated probability that `suffix` is exactly right. */
-  confidence: number
-}
-
 /** Current state of a process reference. */
 export declare enum ProcessStatus {
   /** The referenced process is still running. */
@@ -3486,18 +3431,6 @@ export declare function supportsLanguage(lang: string): boolean
 export interface SvgCell {
   widthPx: number
   heightPx: number
-}
-
-/** Options for [`TextPredictor::new`]. */
-export interface TextPredictorOptions {
-  /** Engine: `ngram`, `smollm`, or `apple`. */
-  method: string
-  /** Private directory for persisted learned state. */
-  stateDir: string
-  /** Directory holding downloaded model weights (`smollm` only). */
-  modelDir?: string
-  /** Show threshold override; omit for the engine's tuned default. */
-  showThreshold?: number
 }
 
 /**
