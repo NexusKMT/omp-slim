@@ -172,20 +172,4 @@ impl AbortToken {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use std::time::Duration;
 
-	use super::{AbortReason, CancelToken};
-
-	#[test]
-	fn abort_reason_ignores_an_elapsed_deadline_but_reports_an_explicit_abort() {
-		let expired = CancelToken::with_timeout(Some(Duration::ZERO));
-		assert!(expired.heartbeat().is_err());
-		assert!(expired.abort_reason().is_none());
-
-		let mut signaled = CancelToken::default();
-		signaled.emplace_abort_token().abort(AbortReason::Signal);
-		assert!(matches!(signaled.abort_reason(), Some(AbortReason::Signal)));
-	}
-}

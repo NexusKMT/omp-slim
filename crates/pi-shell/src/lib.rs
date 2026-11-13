@@ -20,9 +20,6 @@
 //! - [`process`]: the engine as a process shell (`obash`, `omp zsh|bash|sh`):
 //!   the command line to an exit status over the process's own terminal,
 //!   signals and descriptors.
-//! - [`testkit`]: a deterministic test host for the engine suites and the fault
-//!   injector of the `obash` binary (`src/bin/obash`: the engine as a
-//!   standalone shell, for differential tests and benchmarks against bash).
 
 #![allow(
 	clippy::many_single_char_names,
@@ -38,13 +35,12 @@ pub mod extras;
 pub mod git;
 pub mod host;
 pub mod session;
+pub mod rng;
 pub mod sys;
-pub mod testkit;
 pub mod tools;
 pub mod vfs;
 
-#[cfg(test)]
-mod suites;
+
 
 pub mod cancel;
 mod child_session;

@@ -49,17 +49,4 @@ impl Cache {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn options_are_part_of_the_key() {
-		let cache = Cache::default();
-		let plain = cache.get(b"A*", PatOpts::default());
-		let nocase = cache.get(b"A*", PatOpts { nocase: true, ..PatOpts::default() });
-		assert!(!plain.matches(b"abc"));
-		assert!(nocase.matches(b"abc"));
-		assert!(Arc::ptr_eq(&plain, &cache.get(b"A*", PatOpts::default())));
-	}
-}

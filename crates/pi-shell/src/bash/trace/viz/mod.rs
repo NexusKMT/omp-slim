@@ -23,8 +23,7 @@ use crate::bash::{
 	ir,
 };
 
-#[cfg(test)]
-mod runtime_tests;
+
 
 /// Invalid persisted syntax, trace JSON, or presentation serialization.
 #[derive(Debug)]

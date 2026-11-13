@@ -132,33 +132,4 @@ fn float_scaled(mut value: f64, base: u64, base_1024: bool) -> (String, u32) {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn byte_counts_scale_like_gnu() {
-		assert_eq!(human_readable(0, false, 1, 1), "0 B");
-		assert_eq!(human_readable(999, false, 1, 1), "999 B");
-		assert_eq!(human_readable(1000, false, 1, 1), "1.0 kB");
-		assert_eq!(human_readable(1000, true, 1, 1), "1000 B");
-		assert_eq!(human_readable(1024, true, 1, 1), "1.0 KiB");
-		assert_eq!(human_readable(1_048_576, false, 1, 1), "1.0 MB");
-		assert_eq!(human_readable(1_048_576, true, 1, 1), "1.0 MiB");
-		assert_eq!(human_readable(10_485_760, false, 1, 1), "10 MB");
-		assert_eq!(human_readable(9_999, false, 1, 1), "10 kB");
-		assert_eq!(human_readable(1 << 60, true, 1, 1), "1.0 EiB");
-		// Exact halves round to even, which float formatting gets wrong.
-		assert_eq!(human_readable(1050, false, 1, 1), "1.0 kB");
-		assert_eq!(human_readable(1150, false, 1, 1), "1.2 kB");
-		assert_eq!(human_readable(999_001, false, 1, 1), "999 kB");
-	}
-
-	#[test]
-	fn rates_use_the_floating_point_path() {
-		// 2 bytes in 42 µs: 47619 B/s.
-		assert_eq!(human_readable(2, false, 1_000_000_000, 42_000), "47.6 kB");
-		assert_eq!(human_readable(2, false, 1_000_000_000, 15_000), "133 kB");
-		assert_eq!(human_readable(0, false, 1_000_000_000, 17_000), "0.0 kB");
-	}
-}

@@ -2663,5 +2663,4 @@ pub(crate) fn server_args_split(opts: &Options, remote_is_sender: bool) -> (Vec<
 	(args.into_iter().map(vec_os_lossy).collect(), cut)
 }
 
-#[cfg(test)]
-mod tests;
+

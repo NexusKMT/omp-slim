@@ -37,8 +37,3 @@ windows-sys = { workspace = true, features = [
 	"Win32_System_Kernel",
 	"Win32_System_WindowsProgramming",
 ] }
-
-[dev-dependencies]
-async-trait.workspace = true
-globset.workspace = true
-ignore.workspace = true

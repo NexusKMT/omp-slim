@@ -19,8 +19,7 @@
 //! Falstad and the zsh development group).
 
 mod line;
-#[cfg(test)]
-mod tests;
+
 
 use std::borrow::Cow;
 

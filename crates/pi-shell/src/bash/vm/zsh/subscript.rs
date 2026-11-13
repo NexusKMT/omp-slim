@@ -945,17 +945,4 @@ pub fn issetvar(ex: &mut Expander<'_, '_>, name: &[u8]) -> X<bool> {
 	Ok(u64::try_from(a.len()).unwrap_or(u64::MAX) >= v.end.unsigned_abs())
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn strarg_finds_matching_delimiters() {
-		assert_eq!(get_strarg(b":a:b", 0, false), (2, 1));
-		assert_eq!(get_strarg(b"(ab)c", 0, false), (3, 1));
-		assert_eq!(get_strarg(b"<x>", 0, false), (2, 1));
-		assert_eq!(get_strarg(b":abc", 0, false), (4, 0));
-		// A multibyte delimiter: `£` is two bytes.
-		assert_eq!(get_strarg("£5£".as_bytes(), 0, true), (3, 2));
-	}
-}

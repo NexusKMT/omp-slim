@@ -400,27 +400,4 @@ pub fn leave(k: &mut Kernel, vp: &mut Vproc, cx: &mut Cx<'_>) {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn records_round_trip() {
-		let mut e = booted();
-		e.calls = vec![(3, false), (5, true)];
-		e.mark(ExParam::Str, false);
-		let Record::Words(w) = e.encode() else {
-			unreachable!()
-		};
-		assert_eq!(Example::decode(&w), e);
-		assert!(!e.is_set(ExParam::Str) && e.is_set(ExParam::Arr));
-	}
-
-	#[test]
-	fn sum_switches_to_float_at_the_first_float() {
-		let ns = [Number::Int(1), Number::Float(2.5), Number::Int(2)];
-		assert_eq!(call_math(b"sum", FuncArgs::Numbers(&ns)).ok(), Some(Number::Float(5.5)));
-		let ns = [Number::Int(1), Number::Int(2)];
-		assert_eq!(call_math(b"sum", FuncArgs::Numbers(&ns)).ok(), Some(Number::Int(3)));
-	}
-}

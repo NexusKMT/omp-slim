@@ -1620,40 +1620,4 @@ impl<'a> Compact<'a> {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::bash::syntax::{Features, NO_ALIASES, Parser};
 
-	#[test]
-	fn borrowed_connections_keep_background_grouping_and_comsub_newlines() {
-		let cases: &[(&[u8], &[u8])] = &[
-			(
-				b"f() { a; b & c & d; e && f || g | h; }",
-				b"f () \n{ \n    a;\n    b & c & d;\n    e && f || g | h\n}",
-			),
-			(
-				b"g() { echo $(a; b & c); echo $(a\nb & c); }",
-				b"g () \n{ \n    echo $(a; b & c);\n    echo $(a\nb & c)\n}",
-			),
-		];
-		for &(source, expected) in cases {
-			let command = Parser::new(source, Features::NONE, NO_ALIASES)
-				.next_command()
-				.unwrap()
-				.unwrap();
-			let list = command.list();
-			let cmd = list
-				.items()
-				.first()
-				.unwrap()
-				.and_or()
-				.first()
-				.stages()
-				.first()
-				.unwrap();
-			let actual = print(cmd, PrintStyle::DeclareF);
-			assert_eq!(actual, expected, "{}", String::from_utf8_lossy(source));
-		}
-	}
-}

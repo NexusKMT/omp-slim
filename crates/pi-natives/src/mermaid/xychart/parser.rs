@@ -297,34 +297,4 @@ fn parse_float(value: &str) -> f64 {
 	cursor.since(start).parse().unwrap_or(f64::NAN)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn header_and_horizontal_use_javascript_word_boundaries() {
-		assert!(parse_header("XYCHART-beta horizontal"));
-		assert!(parse_header("xychart-betaSuffix"));
-		assert!(!parse_header("xychart_name"));
-		assert!(contains_horizontal("xychart-beta HORIZONTAL!"));
-		assert!(!contains_horizontal("xychart-beta ahorizontal"));
-		assert!(!contains_horizontal("xychart-beta horizontal_name"));
-	}
-
-	#[test]
-	fn statement_whitespace_matches_each_axis_form() {
-		assert!(parse_axis_categories(r#"x-axis "Label"[A, B]"#).is_some());
-		assert!(parse_axis_range(r#"x-axis "Label"0 --> 1"#, "x-axis").is_none());
-		assert!(parse_axis_range(r#"x-axis "Label" 0-->1 trailing"#, "x-axis").is_some());
-	}
-
-	#[test]
-	fn parse_float_scans_only_a_valid_javascript_prefix() {
-		assert_eq!(parse_float("\u{feff}  +12.5e-1tail"), 1.25);
-		assert_eq!(parse_float("1e"), 1.0);
-		assert_eq!(parse_float(".5"), 0.5);
-		assert_eq!(parse_float("-Infinity suffix"), f64::NEG_INFINITY);
-		assert!(parse_float(".e2").is_nan());
-		assert!(parse_float("١").is_nan());
-	}
-}

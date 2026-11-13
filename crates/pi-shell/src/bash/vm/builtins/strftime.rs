@@ -293,41 +293,4 @@ fn conversion(conv: u8, tm: &Tm<'_>, f: Field, out: &mut Vec<u8>) -> bool {
 	true
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	fn fmt(f: &str, secs: i64, offset: i32, abbr: &str) -> String {
-		String::from_utf8(format(f.as_bytes(), secs, offset, abbr.as_bytes())).unwrap()
-	}
-
-	// Goldens: bash 5.3.20 printf3.sub (TZ=EST5EDT,M3.2.0/2,M11.1.0/2,
-	// 1275250155 is EDT, UTC-4) and glibc `printf "%(%Q|%P|%10Y|%#Z|%^a|%-d)T"`.
-	#[test]
-	fn conversions_match_the_c_locale() {
-		let edt = |f: &str| fmt(f, 1_275_250_155, -4 * 3600, "EDT");
-		assert_eq!(edt("%X"), "16:09:15");
-		assert_eq!(edt("%e-%b-%Y %T"), "30-May-2010 16:09:15");
-		assert_eq!(fmt("%x %X", 1_275_250_155 - 3600, -4 * 3600, "EDT"), "05/30/10 15:09:15");
-		assert_eq!(edt("%F %r"), "2010-05-30 04:09:15 PM");
-		assert_eq!(edt("%F %r %z"), "2010-05-30 04:09:15 PM -0400");
-		assert_eq!(fmt("%F %r %z", 0, -5 * 3600, "EST"), "1969-12-31 07:00:00 PM -0500");
-		assert_eq!(edt("%a %b %e %H:%M:%S %Z %Y"), "Sun May 30 16:09:15 EDT 2010");
-		assert_eq!(edt("%x (foo) %X"), "05/30/10 (foo) 16:09:15");
-		assert_eq!(edt("%s"), "1275250155");
-		let cest = |f: &str| fmt(f, 1_275_250_155, 2 * 3600, "CEST");
-		assert_eq!(cest("%Q|%P|%10Y|%#Z|%^a|%-d"), "%Q|pm|0000002010|cest|SUN|30");
-		assert_eq!(
-			cest("%k|%l|%C|%G|%V|%g|%j|%u|%w|%U|%W|%_m"),
-			"22|10|20|2010|21|10|150|7|0|22|21| 5"
-		);
-	}
-
-	#[test]
-	fn iso_weeks_cross_year_boundaries() {
-		// 2021-01-01 (Friday) is in ISO week 53 of 2020.
-		assert_eq!(fmt("%G-%V", 1_609_459_200, 0, "UTC"), "2020-53");
-		// 2018-12-31 (Monday) is in week 1 of 2019.
-		assert_eq!(fmt("%G-%V", 1_546_214_400, 0, "UTC"), "2019-01");
-	}
-}

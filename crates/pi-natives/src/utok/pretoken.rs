@@ -11,9 +11,6 @@ use crate::utok::{scan, utf::Unit};
 
 /// A family's piece splitter.
 pub enum Splitter {
-	/// Compiled regex chain (test-only differential oracle; UTF-8 input).
-	#[cfg(test)]
-	Regex(Vec<fancy_regex::Regex>),
 	/// tiktoken `o200k_base` scanner.
 	O200k,
 	/// tiktoken `cl100k_base` scanner.
@@ -27,24 +24,9 @@ pub enum Splitter {
 }
 
 impl Splitter {
-	/// Compile a regex chain oracle. Panics on invalid patterns
-	/// (compile-time constants).
-	#[cfg(test)]
-	pub fn new(patterns: &[&str]) -> Self {
-		Self::Regex(
-			patterns
-				.iter()
-				.map(|p| fancy_regex::Regex::new(p).expect("utoken: invalid split pattern"))
-				.collect(),
-		)
-	}
+	
 
-	/// Whether this splitter needs `&str` input (the engine transcodes
-	/// non-UTF-8 flavors before calling in).
-	#[cfg(test)]
-	pub const fn is_regex(&self) -> bool {
-		matches!(self, Self::Regex(_))
-	}
+	
 
 	/// Feed every piece of `units` to `f`, in order, covering the input
 	/// exactly. `Regex` requires `U = u8` holding valid UTF-8.
@@ -55,66 +37,10 @@ impl Splitter {
 			Self::DeepSeek => scan::deepseek::for_each_piece(units, &mut f),
 			Self::Kimi => scan_loop(units, &mut f, scan::kimi::next_piece),
 			Self::Qwen => scan_loop(units, &mut f, scan::qwen::next_piece),
-			#[cfg(test)]
-			Self::Regex(_) => {
-				let bytes = U::as_utf8(units).expect("utoken: regex splitter requires UTF-8 input");
-				let text =
-					std::str::from_utf8(bytes).expect("utoken: regex splitter requires valid UTF-8");
-				for piece in self.split(text) {
-					let range = text
-						.substr_range(piece)
-						.expect("regex piece borrows from text");
-					f(&units[range]);
-				}
-			},
 		}
 	}
 
-	/// Split `text` into pieces (any variant; `&str` view). Test-only:
-	/// scanner differentials compare piece lists against the regex oracle.
-	#[cfg(test)]
-	pub fn split<'t>(&self, text: &'t str) -> Vec<&'t str> {
-		match self {
-			#[cfg(test)]
-			Self::Regex(stages) => {
-				let mut pieces = vec![text];
-				for re in stages {
-					let mut next = Vec::with_capacity(pieces.len());
-					for piece in pieces {
-						let mut last = 0usize;
-						for m in re.find_iter(piece) {
-							let m = m.expect("utoken: regex engine error");
-							if m.start() > last {
-								next.push(&piece[last..m.start()]);
-							}
-							if !m.as_str().is_empty() {
-								next.push(m.as_str());
-							}
-							last = m.end();
-						}
-						if last < piece.len() {
-							next.push(&piece[last..]);
-						}
-					}
-					pieces = next;
-				}
-				pieces
-			},
-			_ => {
-				let mut pieces = Vec::new();
-				// Scanner boundaries are codepoint boundaries, so byte
-				// ranges are valid `str` slices.
-				self.for_each_piece(text.as_bytes(), |p| {
-					let range = text
-						.as_bytes()
-						.subslice_range(p)
-						.expect("scanner piece borrows from text");
-					pieces.push(&text[range]);
-				});
-				pieces
-			},
-		}
-	}
+	
 }
 
 /// Drive a single-stage scanner over `units`.

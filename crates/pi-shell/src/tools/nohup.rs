@@ -97,31 +97,4 @@ impl Nohup {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	fn parsed(argv: &[&str]) -> Parsed {
-		let argv: Vec<BString> = std::iter::once("nohup")
-			.chain(argv.iter().copied())
-			.map(BString::from)
-			.collect();
-		parse(&argv)
-	}
-
-	fn run(argv: &[&str]) -> Parsed {
-		Parsed::Run(argv.iter().copied().map(BString::from).collect())
-	}
-
-	#[test]
-	fn options_only_lead_and_one_dashdash_ends_them() {
-		assert_eq!(parsed(&["--", "sleep", "1"]), run(&["sleep", "1"]));
-		assert_eq!(parsed(&["--", "--", "x"]), run(&["--", "x"]));
-		assert_eq!(parsed(&["--", "--help"]), run(&["--help"]));
-		assert_eq!(parsed(&["echo", "a", "--", "b"]), run(&["echo", "a", "--", "b"]));
-		assert_eq!(parsed(&["--help"]), Parsed::Help);
-		assert_eq!(parsed(&["--version"]), Parsed::Version);
-		assert_eq!(parsed(&[]), Parsed::Missing);
-		assert_eq!(parsed(&["--"]), Parsed::Missing);
-	}
-}

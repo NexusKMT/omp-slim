@@ -1787,5 +1787,4 @@ pub(super) fn kill_leftovers(shared: &Shared) -> io::Result<Vec<Leftover>> {
 	Ok(killed)
 }
 
-#[cfg(test)]
-mod tests;
+

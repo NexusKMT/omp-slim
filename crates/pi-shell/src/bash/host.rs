@@ -53,7 +53,7 @@ pub type SpawnFuture = Pin<Box<dyn Future<Output = io::Result<Box<dyn ExtProc>>>
 /// Everything the engine needs from its environment.
 ///
 /// `obash` implements it over the OS (`NativeHost`); an embedding host
-/// over its tool registry, its VFS and its sandbox; the testkit with fakes.
+/// over its tool registry, its VFS and its sandbox.
 pub trait Host {
 	/// Resolve a command name before PATH search (functions and aliases are
 	/// already handled by the engine).

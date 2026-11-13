@@ -1746,7 +1746,7 @@ impl Live {
 // Size guards for the idle-vproc target (≤ 2 KiB): an idle background job
 // holds one boxed `Vproc`, one `Frame`, one boxed `Scratch` and one boxed
 // `ExecState`, so every byte here is a byte per idle vproc. Raise a bound
-// only with the testkit `memory` bench's numbers in hand.
+// only with the `memory` bench's numbers in hand.
 // zsh support added the boxed zsh side table `Vproc::zsh` (8 B; `Frame` is
 // unchanged, its zsh state lives there and in `FrameKind`): the memory
 // bench measured 1,785 B per idle vproc with it (target ≤ 2,048).
@@ -1766,7 +1766,7 @@ const _: () = assert!(size_of::<ScratchIo>() <= 248, "ScratchIo grew (zsh suppor
 const _: () =
 	assert!(size_of::<RedirProgress>() <= 48, "RedirProgress grew (zsh support is zero cost)");
 
-/// `size_of` of the structures an idle vproc holds, by name: the testkit
+/// `size_of` of the structures an idle vproc holds, by name: the
 /// `memory` bench prints them as its `memory sizes:` line beside the bytes
 /// per idle vproc. Measurement only.
 pub const fn vproc_layout() -> [(&'static str, usize); 5] {

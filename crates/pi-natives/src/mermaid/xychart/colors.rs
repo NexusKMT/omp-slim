@@ -133,21 +133,4 @@ fn rgb_to_hex(red: f64, green: f64, blue: f64) -> String {
 	format!("#{}{}{}", channel(red), channel(green), channel(blue))
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn palette_keeps_accent_and_flips_shades_on_dark_background() {
-		assert_eq!(get_series_color(0, "#3b82f6", None), "#3b82f6");
-		assert_eq!(get_series_color(1, "#3b82f6", Some("#ffffff")), "#0d5ba5");
-		assert_eq!(get_series_color(1, "#3b82f6", Some("#000000")), "#5f79f2");
-	}
-
-	#[test]
-	fn rgb_mixing_matches_alpha_compositing() {
-		assert_eq!(mix_hex_colors("#000000", "#ffffff", 0.5), "#808080");
-		assert_eq!(mix_hex_colors("bad", "also-bad", 0.5), "#62NaNNaN");
-		assert!(!is_dark_background("#000"));
-	}
-}

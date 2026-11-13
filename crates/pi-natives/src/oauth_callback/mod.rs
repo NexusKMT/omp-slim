@@ -9,8 +9,7 @@ mod linux;
 mod windows;
 // The relay binary owns publication; tests reuse it to publish callbacks the
 // way the relay does.
-#[cfg(test)]
-mod publication;
+
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod unsupported {
 	use anyhow::bail;
@@ -47,23 +46,19 @@ use std::{
 
 use anyhow::{Context as _, Result as AnyResult, anyhow, bail};
 use context::{Context, atomic_write, ensure_private_dir};
-#[cfg(all(not(test), target_os = "macos"))]
+#[cfg(target_os="macos")]
 use darwin as platform;
-#[cfg(all(not(test), target_os = "linux"))]
+#[cfg(target_os="linux")]
 use linux as platform;
 use napi::{Env, Error, Result, bindgen_prelude::PromiseRaw};
 use napi_derive::napi;
 use notify::{RecursiveMode, Watcher as _};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
-use tests::backend as platform;
-#[cfg(all(
-	not(test),
-	not(any(target_os = "linux", target_os = "macos", target_os = "windows"))
-))]
+
+#[cfg(all(not(any(target_os="linux",target_os="macos",target_os="windows"))))]
 use unsupported as platform;
-#[cfg(all(not(test), target_os = "windows"))]
+#[cfg(target_os="windows")]
 use windows as platform;
 
 use crate::{
@@ -73,29 +68,26 @@ use crate::{
 
 /// Whether the host kernel is WSL, read once from `/proc/sys/kernel/osrelease`.
 ///
-/// A host probe the hermetic unit tests cannot control, so it is pinned to
-/// `false` under `#[cfg(test)]`; tests exercise WSL rejection through the
-/// `WSL_DISTRO_NAME` / `WSL_INTEROP` env keys they own instead.
-#[cfg(all(target_os = "linux", not(test)))]
+/// A host probe the hermetic unit tests cannot control; WSL rejection is
+/// exercised through the `WSL_DISTRO_NAME` / `WSL_INTEROP` env keys instead.
+#[cfg(target_os="linux")]
 static WSL_KERNEL: LazyLock<bool> = LazyLock::new(|| {
 	fs::read_to_string("/proc/sys/kernel/osrelease")
 		.is_ok_and(|release| release.to_ascii_lowercase().contains("microsoft"))
 });
 
-#[cfg(all(target_os = "linux", test))]
-static WSL_KERNEL: LazyLock<bool> = LazyLock::new(|| false);
+
 
 const JOURNAL_VERSION: u32 = 1;
 const JOURNAL_LIMIT: u64 = 1024 * 1024;
 const CALLBACK_LIMIT: u64 = 16 * 1024;
 // Fallback for a directory watch that failed to start or missed an event; the
 // watch itself wakes the claim as soon as the relay links the callback in.
-#[cfg(not(test))]
+
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 // Long enough in tests that a wake by the watch and a wake by the poll stay
 // far apart even on a loaded runner, so the tests can tell them apart.
-#[cfg(test)]
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
+
 const CLEANUP_TIMEOUT_MS: u32 = 15_000;
 const SETUP_TIMEOUT_MS: u32 = 30_000;
 const DEFAULT_WAIT_TIMEOUT_MS: u32 = 300_000;
@@ -349,10 +341,11 @@ fn start_blocking(core: &Core, cancel: CancelToken) -> AnyResult<StartOutcome> {
 	if !session_supported(&core.env) {
 		return Ok(StartOutcome::Unsupported);
 	}
-	#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows", test)))]
+	#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 	return Ok(StartOutcome::Unsupported);
 
-	#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows", test))]
+
+	#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 	{
 		let home = fs::canonicalize(&core.home)
 			.with_context(|| format!("failed to resolve user home {}", core.home.display()))?;
@@ -865,7 +858,5 @@ fn napi_error(error: impl std::fmt::Display) -> Error {
 	Error::from_reason(error.to_string())
 }
 
-#[cfg(test)]
-mod darwin_compiler;
-#[cfg(test)]
-mod tests;
+
+

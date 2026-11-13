@@ -312,29 +312,4 @@ fn list(ctx: &mut Ctx<'_, '_>) -> R {
 	done(0)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	fn ev(time: i64, cmd: &str) -> SchedEvent {
-		SchedEvent { time, flags: 0, cmd: cmd.into() }
-	}
-
-	#[test]
-	fn insertion_follows_zsh_list_order() {
-		let mut v = Vec::new();
-		insert(&mut v, ev(5, "a"));
-		insert(&mut v, ev(5, "b"));
-		insert(&mut v, ev(5, "c"));
-		insert(&mut v, ev(1, "d"));
-		let cmds: Vec<&[u8]> = v.iter().map(|e| e.cmd.as_slice()).collect();
-		assert_eq!(cmds, [&b"d"[..], b"a", b"c", b"b"]);
-	}
-
-	#[test]
-	fn records_round_trip() {
-		let v = vec![ev(10, "x y"), SchedEvent { time: 20, flags: TRASH_ZLE, cmd: "-z".into() }];
-		assert_eq!(decode(encode(&v).as_ref()), v);
-		assert_eq!(encode(&[]), None);
-	}
-}

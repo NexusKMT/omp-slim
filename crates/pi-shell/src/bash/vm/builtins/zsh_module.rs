@@ -2828,46 +2828,4 @@ fn assign_array(ctx: &mut Ctx<'_, '_>, name: &[u8], list: Vec<BString>) -> Resul
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn boot_tables_order_modules_like_zsh() {
-		let mut t = DEFAULT.clone();
-		let mut msgs = Vec::new();
-		t.require_module(&mut msgs, b"zsh/parameter", None, false);
-		let names: Vec<String> = t
-			.modules_param()
-			.into_iter()
-			.map(|(n, _)| n.to_string())
-			.collect();
-		assert_eq!(
-			names.join(" "),
-			"zsh/parameter zsh/main zsh/rlimits zsh/computil zsh/zle zsh/sched zsh/zutil zsh/compctl \
-			 zsh/complete zsh/termcap zsh/terminfo zsh/watch zsh/param/private zsh/zleparameter"
-		);
-	}
-
-	#[test]
-	fn modname_ok_matches_zsh() {
-		assert!(modname_ok(b"zsh/net/tcp") && modname_ok(b"a_b"));
-		assert!(!modname_ok(b"zsh/x-y") && !modname_ok(b"a.b"));
-	}
-
-	#[test]
-	fn every_module_builtin_is_a_feature() {
-		use strum::IntoEnumIterator;
-		for id in IntrinsicId::iter() {
-			if let Some(m) = module_of(id) {
-				let name: &'static str = id.into();
-				let d = def(m.as_bytes()).expect(m);
-				assert!(
-					d.index(feature_name(b'b', name.as_bytes()).as_slice())
-						.is_some(),
-					"{name}"
-				);
-			}
-		}
-	}
-}

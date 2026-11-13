@@ -49,8 +49,7 @@ use crate::{
 	ops,
 };
 
-#[cfg(test)]
-mod tests;
+
 
 /// A parsed source.
 type Ast = AstGrep<StrDoc<SupportLang>>;

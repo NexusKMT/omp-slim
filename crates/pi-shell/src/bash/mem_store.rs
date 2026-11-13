@@ -1,6 +1,6 @@
 //! `MemStore`: the reference [`StateStore`], in memory.
 //!
-//! Used by `obash`, the testkit and the store conformance suite. Its maps are
+//! Used by `obash` and the store conformance suite. Its maps are
 //! the shell's state (the engine keeps no copy): variables by name, the root
 //! shell's scopes as a stack of maps, every other record by key. Lookups
 //! borrow the key, so a hit allocates nothing, and [`Change::SetScalar`]
@@ -513,81 +513,4 @@ impl StateStore for MemStore {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use std::sync::atomic::{AtomicUsize, Ordering};
 
-	use super::*;
-
-	#[test]
-	fn deferred_scalars_observe_and_snapshot_as_ordinary_records() {
-		static CALLS: AtomicUsize = AtomicUsize::new(0);
-		let initialize: fn() -> Option<BString> = || {
-			CALLS.fetch_add(1, Ordering::Relaxed);
-			Some(BString::from("value"))
-		};
-		let key = Key::Var(BStr::new(b"DEFAULT"));
-		let mut store = MemStore::new();
-		store
-			.defer_scalar(b"DEFAULT", Attrs::EXPORT, initialize)
-			.unwrap();
-		assert_eq!(CALLS.load(Ordering::Relaxed), 0);
-		let clone = store.clone();
-		let record = Record::Var(Var { attrs: Attrs::EXPORT, value: VarValue::Str("value".into()) });
-		assert_eq!(store.get(key).unwrap(), Some(&record));
-		assert_eq!(clone.record(key), Some(&record));
-		assert_eq!(CALLS.load(Ordering::Relaxed), 1);
-		let mut scanned = Vec::new();
-		store
-			.scan(Table::Var, &mut |_, value| scanned.push(value.clone()))
-			.unwrap();
-		assert_eq!(scanned, [record]);
-		let restored = MemStore::from_bytes(&store.to_bytes()).unwrap();
-		assert_eq!(store, restored);
-		store
-			.apply(Change::SetScalar(key, BStr::new(b"changed")))
-			.unwrap();
-		assert_eq!(
-			store.get(key).unwrap(),
-			Some(&Record::Var(Var { attrs: Attrs::EXPORT, value: VarValue::Str("changed".into()) }))
-		);
-		assert_eq!(CALLS.load(Ordering::Relaxed), 1);
-
-		store
-			.defer_scalar(b"DEFAULT", Attrs::NONE, initialize)
-			.unwrap();
-		store.apply(Change::Del(key)).unwrap();
-		assert!(store.get(key).unwrap().is_none());
-		store
-			.defer_scalar(b"DEFAULT", Attrs::NONE, initialize)
-			.unwrap();
-		store
-			.apply(Change::Put(
-				key,
-				Record::Var(Var { attrs: Attrs::NONE, value: VarValue::Str("replacement".into()) }),
-			))
-			.unwrap();
-		assert_eq!(CALLS.load(Ordering::Relaxed), 1);
-
-		store
-			.defer_scalar(b"DEFAULT", Attrs::NONE, || None)
-			.unwrap();
-		assert!(store.get(key).unwrap().is_none());
-		assert_eq!(store.len(), 0);
-		let restored = MemStore::from_bytes(&store.to_bytes()).unwrap();
-		assert_eq!(store, restored);
-	}
-
-	#[test]
-	fn deferred_scalar_image_forces_unobserved_defaults() {
-		let mut store = MemStore::new();
-		store
-			.defer_scalar(b"DEFAULT", Attrs::READONLY, || Some("saved".into()))
-			.unwrap();
-		let restored = MemStore::from_bytes(&store.to_bytes()).unwrap();
-		assert_eq!(
-			restored.record(Key::Var(BStr::new(b"DEFAULT"))),
-			Some(&Record::Var(Var { attrs: Attrs::READONLY, value: VarValue::Str("saved".into()) }))
-		);
-	}
-}

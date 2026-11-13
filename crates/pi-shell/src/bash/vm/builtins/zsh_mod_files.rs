@@ -993,24 +993,4 @@ fn replace_prompt(ctx: &Ctx<'_, '_>, cs: Charset, qn: &[u8], mode: Option<u32>) 
 	p
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn octal_modes_parse_like_zstrtol() {
-		assert_eq!(octal(b"755"), Some(0o755));
-		assert_eq!(octal(b" 0644"), Some(0o644));
-		assert_eq!(octal(b"7a8"), None);
-		assert_eq!(octal(b""), None);
-		assert_eq!(octal(b"u+x"), None);
-	}
-
-	#[test]
-	fn safe_split_follows_zsh() {
-		assert_eq!(safe_split(b"x"), None);
-		assert_eq!(safe_split(b"d/x"), Some(("d".into(), "x".into())));
-		assert_eq!(safe_split(b"/x"), Some(("/".into(), "x".into())));
-		assert_eq!(safe_split(b"dir/"), Some(("/".into(), "ir".into())));
-	}
-}

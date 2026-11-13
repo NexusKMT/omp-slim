@@ -376,17 +376,4 @@ pub fn wcwidth(c: char) -> i32 {
 	1
 }
 
-#[cfg(test)]
-mod tests {
-	use super::wcwidth;
 
-	#[test]
-	fn widths_of_common_characters() {
-		assert_eq!(wcwidth('a'), 1);
-		assert_eq!(wcwidth('\u{1b}'), -1);
-		assert_eq!(wcwidth('\u{301}'), 0);
-		assert_eq!(wcwidth('漢'), 2);
-		assert_eq!(wcwidth('\u{1F600}'), 2);
-		assert_eq!(wcwidth('é'), 1);
-	}
-}

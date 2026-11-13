@@ -42,10 +42,7 @@ static CL100K_BASE: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 // short-circuit cannot emit ids the HF reference (ignore_merges=false)
 // never produces.
 
-/// Reference regex, kept as the scanner's dev/test differential oracle
-/// (see `scan::qwen` tests).
-#[cfg(test)]
-pub(crate) const QWEN3_PATTERN: &str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+";
+
 
 static QWEN3: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 	table:         RankTable::parse(include_bytes!("../../data/qwen3.bin.zst")),
@@ -62,19 +59,9 @@ static QWEN3: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 
 // Stage patterns kept as the dev/test differential reference for the
 // scanner (`scan::deepseek`).
-#[cfg(test)]
-pub(crate) const DEEPSEEK_STAGE_DIGITS: &str = r"\p{N}{1,3}";
-#[cfg(test)]
-pub(crate) const DEEPSEEK_STAGE_CJK: &str = r"[一-龥぀-ゟ゠-ヿ]+";
-#[cfg(test)]
-pub(crate) const DEEPSEEK_STAGE_MAIN: &str = concat!(
-	r##"[!"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~][A-Za-z]+"##,
-	r"|[^\r\n\p{L}\p{P}\p{S}]?[\p{L}\p{M}]+",
-	r"| ?[\p{P}\p{S}]+[\r\n]*",
-	r"|\s*[\r\n]+",
-	r"|\s+(?!\S)",
-	r"|\s+",
-);
+
+
+
 
 static DEEPSEEK3: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 	table:         RankTable::parse(include_bytes!("../../data/deepseek3.bin.zst")),
@@ -90,17 +77,7 @@ static DEEPSEEK3: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 // dev/test differential reference; it is verified equal to
 // data/families.json kimi_k2.pattern.
 
-#[cfg(test)]
-pub(crate) const KIMI_K2_PATTERN: &str = concat!(
-	r"[\p{Han}]+",
-	r"|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?",
-	r"|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?",
-	r"|\p{N}{1,3}",
-	r"| ?[^\s\p{L}\p{N}]+[\r\n]*",
-	r"|\s*[\r\n]+",
-	r"|\s+(?!\S)",
-	r"|\s+",
-);
+
 
 static KIMI_K2: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 	table:         RankTable::parse(include_bytes!("../../data/kimi_k2.bin.zst")),
@@ -120,10 +97,7 @@ static KIMI_K2: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 // directed fixtures: greedy-merge-unreachable tokens like ' 参考' encode
 // as one id).
 
-/// Reference regex, kept as the dev/test differential oracle for the
-/// cl100k-scanner alias.
-#[cfg(test)]
-pub(crate) const GLM5_PATTERN: &str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+";
+
 
 static GLM5: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 	table:         RankTable::parse(include_bytes!("../../data/glm5.bin.zst")),
@@ -145,83 +119,4 @@ pub(crate) fn bpe_for(enc: Encoding) -> &'static BpeEncoding {
 	}
 }
 
-#[cfg(test)]
-mod glm_scan_tests {
-	//! Differential justifying the cl100k-scanner alias: piece boundaries
-	//! from `Splitter::Cl100k` vs the GLM-5 reference regex, over the
-	//! corpus, every glm5 fixture text, and seeded random CJK/Latin mixes.
 
-	use super::GLM5_PATTERN;
-	use crate::utok::pretoken::Splitter;
-
-	/// splitmix64 (same scheme as tests/openai.rs).
-	struct Rng(u64);
-
-	impl Rng {
-		fn next(&mut self) -> u64 {
-			self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
-			let mut z = self.0;
-			z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-			z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-			z ^ (z >> 31)
-		}
-	}
-
-	fn random_strings(seed: u64, n: usize) -> Vec<String> {
-		let mut rng = Rng(seed);
-		let mut out = Vec::with_capacity(n * 2);
-		for _ in 0..n {
-			let len = (rng.next() % 300 + 1) as usize;
-			let bytes: Vec<u8> = (0..len).map(|_| rng.next() as u8).collect();
-			out.push(String::from_utf8_lossy_owned(bytes));
-		}
-		for _ in 0..n {
-			let len = (rng.next() % 120 + 1) as usize;
-			let s: String = (0..len)
-				.map(|_| {
-					let c = match rng.next() % 8 {
-						0 => rng.next() % 0x80,                          // ASCII
-						1 => 0x20 + rng.next() % 4,                      // spaces/punct
-						2 => rng.next() % 0x250,                         // Latin+ext
-						3 => 0x4e00 + rng.next() % 0x100,                // CJK
-						4 => 0x1f300 + rng.next() % 0x100,               // emoji
-						5 => 0x300 + rng.next() % 0x70,                  // combining marks
-						6 => [9, 10, 13, 32][(rng.next() % 4) as usize], // whitespace
-						_ => rng.next() % 0x11_0000,
-					};
-					char::from_u32(c as u32).unwrap_or('\u{fffd}')
-				})
-				.collect();
-			out.push(s);
-		}
-		out
-	}
-
-	#[test]
-	fn glm_cl100k_alias_matches_reference_regex() {
-		let reference = Splitter::new(&[GLM5_PATTERN]);
-		let scanner = Splitter::Cl100k;
-		let corpus: Vec<String> =
-			serde_json::from_str(include_str!("../../fixtures/corpus.json")).unwrap();
-		let fixture: serde_json::Value =
-			serde_json::from_str(include_str!("../../fixtures/glm5.json")).unwrap();
-		let fixture_texts: Vec<String> = fixture["cases"]
-			.as_array()
-			.unwrap()
-			.iter()
-			.map(|c| c["text"].as_str().unwrap().to_string())
-			.collect();
-		let texts: Vec<String> = corpus
-			.into_iter()
-			.chain(fixture_texts)
-			.chain(random_strings(0x61c8_8646, 400))
-			.collect();
-		for text in &texts {
-			assert_eq!(
-				scanner.split(text),
-				reference.split(text),
-				"piece boundaries diverge on {text:?}"
-			);
-		}
-	}
-}

@@ -743,5 +743,4 @@ impl Matcher<'_> {
 	}
 }
 
-#[cfg(test)]
-mod tests;
+

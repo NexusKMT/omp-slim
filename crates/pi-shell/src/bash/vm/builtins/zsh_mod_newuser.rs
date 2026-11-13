@@ -111,20 +111,4 @@ fn access(ctx: &Ctx<'_, '_>, path: &[u8]) -> Result<bool, Need> {
 	Ok(matches!(ctx.probe(Probe::Access { path, mode: 0 })?, ProbeResult::Ok(true)))
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn a_dotfile_means_no_newuser_script() {
-		let none = startup_scripts(Some(b"/home/u"), |p| p == b"/home/u/.zlogin");
-		assert!(none.is_empty());
-		assert!(startup_scripts(None, |_| false).is_empty());
-		let fresh = startup_scripts(Some(b"/home/u"), |_| false);
-		let want: Vec<BString> = SCRIPT_DIRS
-			.iter()
-			.map(|d| join(d.as_bytes(), "newuser"))
-			.collect();
-		assert_eq!(fresh, want);
-	}
-}

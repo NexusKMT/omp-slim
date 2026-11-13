@@ -61,24 +61,3 @@ libc.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 winreg.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
-
-# The engine benches print their own statistics.
-[[bench]]
-name = "frames"
-harness = false
-[[bench]]
-name = "create"
-harness = false
-# Safepoint overhead needs a second run with `--features no-safepoint-check`.
-[[bench]]
-name = "overhead"
-harness = false
-[[bench]]
-name = "memory"
-harness = false
-[[bench]]
-name = "sys_spawn"
-harness = false

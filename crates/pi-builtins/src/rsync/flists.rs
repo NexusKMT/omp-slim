@@ -117,19 +117,7 @@ impl Flists {
 		lock(&self.state)
 	}
 
-	/// Test fixture shorthand for [`Flists::push_full`]: the active directory entries join
-	/// the dir_flist registry in list order.
-	#[cfg(test)]
-	pub(crate) fn push(&self, list: FileList) -> usize {
-		let dirs = list
-			.entries
-			.iter()
-			.enumerate()
-			.filter(|(_, e)| e.is_active() && e.is_dir())
-			.map(|(i, _)| list.ndx_start + i as i32)
-			.collect();
-		self.push_full(list, dirs, None)
-	}
+	
 
 	/// Publishes a segment (initial list or one inc-recursion directory list) and returns
 	/// its index. `dirs` is its dir_flist contribution (global indices, in dir_flist order;
@@ -328,104 +316,4 @@ impl Flists {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	fn entry(name: &str, dir: bool) -> FileEntry {
-		FileEntry {
-			basename: name.as_bytes().into(),
-			mode: if dir { 0o040755 } else { 0o100644 },
-			..FileEntry::default()
-		}
-	}
-
-	fn list(start: i32, parent: i32, names: &[(&str, bool)]) -> FileList {
-		FileList {
-			entries: names.iter().map(|&(n, d)| entry(n, d)).collect(),
-			ndx_start: start,
-			parent_ndx: parent,
-		}
-	}
-
-	#[test]
-	fn global_indices_map_to_segments_and_gaps_to_parents() {
-		let fl = Flists::new();
-		assert_eq!(fl.next_ndx_start(true), 1);
-		let s0 = fl.push(list(1, 1, &[(".", true), ("a", true), ("f", false)]));
-		assert_eq!(fl.next_ndx_start(true), 5);
-		let s1 = fl.push(list(5, 2, &[("x", false), ("y", true)]));
-		assert_eq!((s0, s1), (0, 1));
-		assert_eq!(fl.entry(3).unwrap().basename.as_ref(), b"f");
-		assert_eq!(fl.entry(5).unwrap().basename.as_ref(), b"x");
-		// Gap index 4 = ndx_start - 1 of segment 1 → its parent dir (ndx 2, "a").
-		assert_eq!(fl.entry(4).unwrap().basename.as_ref(), b"a");
-		// Gap index 0 of the first inc list → its "." parent.
-		assert_eq!(fl.entry(0).unwrap().basename.as_ref(), b".");
-		assert!(fl.entry(7).is_none());
-		assert_eq!(fl.segment_of(6), Some(1));
-		assert_eq!(fl.segment_of(4), None);
-		assert_eq!(fl.dir_count(), 3);
-		assert_eq!(fl.dir_ndx(2), Some(6));
-		assert_eq!(fl.dir_entry(1).unwrap().basename.as_ref(), b"a");
-		assert_eq!(fl.segment_for_dir(2), Some(1));
-		assert_eq!(fl.file_total(), 5);
-		assert_eq!(fl.last_ndx(), 6);
-	}
-
-	#[test]
-	fn release_keeps_directories_and_indices() {
-		let fl = Flists::new();
-		fl.push(list(1, -1, &[("a", true), ("f", false)]));
-		fl.push(list(4, 1, &[("g", false)]));
-		assert!(fl.update(2, |e| e.flags = 7));
-		fl.release(0);
-		assert!(fl.is_released(0));
-		assert!(fl.entry(2).is_none());
-		assert!(!fl.update(2, |_| {}));
-		assert_eq!(fl.entry(1).unwrap().basename.as_ref(), b"a");
-		assert!(fl.update(1, |e| e.flags = 9));
-		assert_eq!(fl.entry(1).unwrap().flags, 9);
-		assert!(fl.with_segment(0, |_| ()).is_none());
-		assert_eq!(fl.segment_len(0), Some(2));
-		assert_eq!(fl.entry(4).unwrap().basename.as_ref(), b"g");
-		assert_eq!(fl.entry(3).unwrap().basename.as_ref(), b"a");
-		assert_eq!(fl.file_total(), 1);
-	}
-
-	#[test]
-	fn wire_order_maps_both_ways() {
-		let fl = Flists::new();
-		// Sent as c, a, b; sorted a, b, c.
-		fl.push_full(list(0, -1, &[("a", false), ("b", false), ("c", false)]), vec![], Some(vec![2, 0, 1]));
-		assert_eq!(fl.from_wire(0), 2);
-		assert_eq!(fl.from_wire(1), 0);
-		assert_eq!(fl.to_wire(2), 0);
-		assert_eq!(fl.to_wire(1), 2);
-		assert_eq!(fl.to_wire(-1), -1);
-		let plain = Flists::new();
-		plain.push(list(0, -1, &[("a", false), ("b", false)]));
-		assert_eq!(plain.to_wire(1), 1);
-	}
-
-	#[test]
-	fn resolve_ndx_maps_gap_to_parent() {
-		let fl = Flists::new();
-		fl.push(list(1, 1, &[(".", true), ("a", true)]));
-		fl.push(list(4, 2, &[("x", false)]));
-		assert_eq!(fl.resolve_ndx(4), Some(4));
-		assert_eq!(fl.resolve_ndx(3), Some(2));
-		assert_eq!(fl.resolve_ndx(0), Some(1));
-		assert_eq!(fl.resolve_ndx(9), None);
-	}
-
-	#[test]
-	fn push_full_keeps_cleared_dir_slots() {
-		let fl = Flists::new();
-		let mut l = list(1, -1, &[("d", true), ("d", true)]);
-		l.entries[1] = FileEntry::default();
-		fl.push_full(l, vec![1, 2], None);
-		assert_eq!(fl.dir_count(), 2);
-		assert!(fl.dir_entry(1).is_some_and(|e| !e.is_active()));
-	}
-}

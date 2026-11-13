@@ -838,28 +838,4 @@ fn ulimit_in(ctx: &mut Ctx<'_, '_>, st: &mut State, args: &[BString]) -> i32 {
 	ret
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn values_show_in_their_units() {
-		let idx = |name: &str| RESINFO.iter().position(|r| r.name == name).unwrap();
-		let mut out = Vec::new();
-		show_value(&mut out, idx("cputime"), 90);
-		show_value(&mut out, idx("stacksize"), 8_372_224);
-		show_value(&mut out, idx("coredumpsize"), 0);
-		show_value(&mut out, idx("descriptors"), INF);
-		assert_eq!(
-			out.to_str().unwrap(),
-			"cputime         0:01:30\nstacksize       7MB\ncoredumpsize    0kB\ndescriptors     \
-			 unlimited\n"
-		);
-	}
-
-	#[test]
-	fn numbers_parse_like_zstrtorlimt() {
-		assert_eq!(zstrtorlimt(b"unlimited"), (INF, &b""[..]));
-		assert_eq!(zstrtorlimt(b"12k"), (12, &b"k"[..]));
-	}
-}

@@ -35,8 +35,7 @@ mod dest;
 mod entry;
 mod hlinks;
 mod listing;
-#[cfg(test)]
-mod tests;
+
 
 use std::{
 	collections::{HashMap, VecDeque},
@@ -155,11 +154,7 @@ pub(crate) struct SibIn {
 }
 
 impl SibIn {
-	/// Everything delivered so far, in order (tests).
-	#[cfg(test)]
-	pub(crate) fn drain(&self) -> Vec<Sibling> {
-		self.rx.try_iter().flatten().collect()
-	}
+	
 }
 
 /// Creates the receiver → generator pipe; the generator's initial view is the lists

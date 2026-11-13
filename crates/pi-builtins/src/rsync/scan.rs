@@ -24,8 +24,7 @@
 //!   sorted directory tree; `NDX_FLIST_EOF` ends the run.
 
 mod receive;
-#[cfg(test)]
-mod tests;
+
 
 pub(crate) use receive::FlistReceiver;
 

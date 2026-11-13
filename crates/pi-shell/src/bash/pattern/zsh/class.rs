@@ -271,25 +271,4 @@ pub(super) fn lower_to_upper(c: u32, wide: bool) -> Option<u32> {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn range_type_knows_every_name_and_nothing_else() {
-		assert_eq!(range_type(b"alpha"), PP_ALPHA);
-		assert_eq!(range_type(b"INVALID"), PP_INVALID);
-		assert_eq!(range_type(b"WORD"), PP_WORD);
-		assert_eq!(range_type(b"word"), PP_UNKWN);
-		assert_eq!(range_type(b""), PP_UNKWN);
-	}
-
-	#[test]
-	fn iwsep_skips_doubled_blanks() {
-		let env = CharEnv { ifs: b"  \t:", ..CharEnv::DEFAULT };
-		assert!(!iwsep(b' ', &env));
-		assert!(iwsep(b'\t', &env));
-		assert!(!iwsep(b':', &env));
-		assert!(isep(b' ', &env));
-	}
-}

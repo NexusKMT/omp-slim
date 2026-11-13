@@ -31,8 +31,7 @@
 //!
 //! **Leak checks.** The spawner remembers every group (session, job) it
 //! created; [`NativeSpawner::leftovers`] lists the processes still in them,
-//! [`NativeSpawner::kill_leftovers`] kills those. The testkit calls them after
-//! each case.
+//! [`NativeSpawner::kill_leftovers`] kills those.
 
 #[cfg(unix)]
 mod unix;

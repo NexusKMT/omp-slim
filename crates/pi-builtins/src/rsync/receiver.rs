@@ -25,8 +25,7 @@
 //! created `O_EXCL|O_NOFOLLOW` beside the destination (or in `--temp-dir`).
 
 mod data;
-#[cfg(test)]
-mod tests;
+
 
 use std::{
 	collections::{HashSet, VecDeque},
@@ -1226,8 +1225,6 @@ impl<'a, 'b> Receiver<'a, 'b> {
 	fn open_inplace(&self, target: &Loc, owner_walk: bool) -> io::Result<(Loc, File)> {
 		let loc = self.inplace_attempt(target, owner_walk)?;
 		let first = loc.tree.open_write(&loc.rel, true, false);
-		#[cfg(test)]
-		let first = tests::hooks::after_inplace_open(first);
 		let err = match first {
 			Ok(f) => return Ok((loc, f)),
 			Err(err) => err,

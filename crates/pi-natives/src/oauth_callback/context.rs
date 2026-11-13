@@ -5,7 +5,7 @@ use std::{
 	path::{Path, PathBuf},
 	sync::atomic::{AtomicU64, Ordering},
 };
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 use std::{
 	fs::File,
 	io::Read,
@@ -14,20 +14,20 @@ use std::{
 	time::Duration,
 };
 
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 use anyhow::bail;
 use anyhow::{Context as _, Result, anyhow};
 
 use crate::task::CancelToken;
 
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 const COMMAND_OUTPUT_LIMIT: u64 = 1024 * 1024;
 // Helper commands usually finish within milliseconds, so polling starts fast
 // and backs off; a slow command then costs at most 10 wakeups per second, each
 // with a try_wait and two metadata calls.
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 const COMMAND_POLL_INITIAL: Duration = Duration::from_millis(5);
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 const COMMAND_POLL_MAX: Duration = Duration::from_millis(100);
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -43,13 +43,9 @@ pub(super) struct Context {
 	pub(super) home:          PathBuf,
 	pub(super) env:           BTreeMap<String, String>,
 	pub(super) cancel:        CancelToken,
-	#[cfg(test)]
-	pub(super) runner:        Option<Runner>,
 }
 
-#[cfg(test)]
-pub(super) type Runner =
-	std::sync::Arc<dyn Fn(&Path, &[String]) -> anyhow::Result<String> + Send + Sync>;
+
 
 impl Context {
 	/// Construct a transaction context and its fixed callback/helper paths.
@@ -77,8 +73,6 @@ impl Context {
 			home,
 			env,
 			cancel,
-			#[cfg(test)]
-			runner: None,
 		}
 	}
 
@@ -99,13 +93,9 @@ impl Context {
 
 	/// Run one executable directly with bounded output and cooperative tree
 	/// cleanup.
-	#[cfg(any(unix, test))]
+	#[cfg(unix)]
 	pub(super) fn run(&self, program: &Path, args: &[String]) -> Result<String> {
 		self.check()?;
-		#[cfg(test)]
-		if let Some(runner) = &self.runner {
-			return runner(program, args);
-		}
 
 		ensure_private_dir(&self.directory)?;
 		let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -183,7 +173,7 @@ impl Context {
 	}
 }
 
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 fn private_output_file(path: &Path) -> Result<File> {
 	let mut options = OpenOptions::new();
 	options.write(true).create_new(true);
@@ -197,14 +187,14 @@ fn private_output_file(path: &Path) -> Result<File> {
 		.with_context(|| format!("failed to create {}", path.display()))
 }
 
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 fn file_len(path: &Path) -> Result<u64> {
 	Ok(fs::metadata(path)
 		.with_context(|| format!("failed to inspect {}", path.display()))?
 		.len())
 }
 
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 fn read_bounded(path: &Path) -> Result<Vec<u8>> {
 	let file = File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
 	let mut bytes = Vec::new();
@@ -218,7 +208,7 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>> {
 	Ok(bytes)
 }
 
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 fn terminate_child_tree(child: &mut std::process::Child) {
 	if let Ok(pid) = i32::try_from(child.id())
 		&& let Some(process) = pi_shell::proctree::Process::from_pid(pid)
@@ -228,7 +218,7 @@ fn terminate_child_tree(child: &mut std::process::Child) {
 	let _ = child.kill();
 }
 
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 fn remove_command_outputs(stdout: &Path, stderr: &Path) {
 	let _ = fs::remove_file(stdout);
 	let _ = fs::remove_file(stderr);

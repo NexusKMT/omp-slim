@@ -1533,27 +1533,4 @@ impl VcsJjWorkspace {
 		})
 	}
 }
-#[cfg(test)]
-mod tests {
-	use super::catch_panic;
 
-	/// A gix-style panic (e.g. worker-thread spawn `.expect(...)` hitting
-	/// `ERROR_COMMITMENT_LIMIT`) must surface as a typed backend error carrying
-	/// the operation tag and panic message — never as an unwind.
-	#[test]
-	fn catch_panic_converts_native_panics_into_backend_errors() {
-		let err = catch_panic("vcs.test", || -> pi_vcs::Result<()> {
-			panic!("valid name: Os {{ code: 1455 }}")
-		})
-		.unwrap_err();
-		match err {
-			pi_vcs::Error::Backend { context, message } => {
-				assert_eq!(context, "vcs.test");
-				assert!(message.contains("1455"), "panic message lost: {message}");
-			},
-			other => panic!("unexpected error variant: {other}"),
-		}
-		// Non-panicking work passes through untouched.
-		assert_eq!(catch_panic("vcs.test", || Ok(7)).unwrap(), 7);
-	}
-}

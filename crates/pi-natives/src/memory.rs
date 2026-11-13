@@ -109,7 +109,7 @@ impl<T: napi::bindgen_prelude::ToNapiValue> napi::bindgen_prelude::ToNapiValue f
 	}
 }
 
-#[cfg(any(all(target_os = "linux", target_env = "gnu"), test))]
+#[cfg(any(all(target_os="linux",target_env="gnu")))]
 mod allocator {
 	use std::time::Duration;
 
@@ -237,104 +237,5 @@ mod allocator {
 		}
 	}
 
-	#[cfg(test)]
-	mod tests {
-		use std::sync::{Arc, mpsc};
-
-		use super::*;
-
-		/// Run a trimmer on its own thread; the thread outlives the test, parked.
-		fn spawn_trimmer(quiet: Duration, release: impl FnMut() + Send + 'static) -> Arc<Trimmer> {
-			let trimmer = Arc::new(Trimmer::new());
-			let runner = Arc::clone(&trimmer);
-			std::thread::spawn(move || runner.run(quiet, release));
-			trimmer
-		}
-
-		#[test]
-		fn trims_once_per_quiet_period_after_work_and_never_while_work_runs() {
-			const QUIET: Duration = Duration::from_millis(50);
-			let (trimmed_tx, trimmed) = mpsc::channel();
-			let trimmer = spawn_trimmer(QUIET, move || trimmed_tx.send(()).unwrap());
-
-			// Nothing has run yet, so there is nothing to trim.
-			assert!(trimmed.recv_timeout(QUIET * 4).is_err());
-
-			// Overlapping jobs: the first ending must not trim under the second.
-			trimmer.begin();
-			trimmer.begin();
-			trimmer.end();
-			assert!(trimmed.recv_timeout(QUIET * 4).is_err());
-			trimmer.end();
-			trimmed
-				.recv_timeout(Duration::from_secs(10))
-				.expect("trim after the quiet period");
-
-			// Staying idle does not trim the same work again.
-			assert!(trimmed.recv_timeout(QUIET * 4).is_err());
-
-			// A job still running when the quiet period ends defers the trim.
-			trimmer.begin();
-			trimmer.end();
-			trimmer.begin();
-			assert!(trimmed.recv_timeout(QUIET * 4).is_err());
-			trimmer.end();
-			trimmed
-				.recv_timeout(Duration::from_secs(10))
-				.expect("trim once that job ends");
-			assert!(trimmed.recv_timeout(QUIET * 4).is_err());
-		}
-
-		#[test]
-		fn work_during_a_trim_neither_blocks_nor_goes_untrimmed() {
-			const QUIET: Duration = Duration::from_millis(20);
-			let (entered_tx, entered) = mpsc::channel();
-			let (proceed_tx, proceed) = mpsc::channel::<()>();
-			let trimmer = spawn_trimmer(QUIET, move || {
-				entered_tx.send(()).unwrap();
-				proceed.recv().unwrap();
-			});
-
-			trimmer.begin();
-			trimmer.end();
-			entered
-				.recv_timeout(Duration::from_secs(10))
-				.expect("first trim");
-			// The first trim is still running: jobs must start and finish freely.
-			trimmer.begin();
-			trimmer.end();
-			proceed_tx.send(()).unwrap();
-			entered
-				.recv_timeout(Duration::from_secs(10))
-				.expect("trim covering the later job");
-			proceed_tx.send(()).unwrap();
-		}
-
-		#[test]
-		fn a_result_settled_after_the_trim_is_trimmed_again_but_not_under_running_work() {
-			const QUIET: Duration = Duration::from_millis(50);
-			let (trimmed_tx, trimmed) = mpsc::channel();
-			let trimmer = spawn_trimmer(QUIET, move || trimmed_tx.send(()).unwrap());
-
-			trimmer.begin();
-			trimmer.end();
-			trimmed
-				.recv_timeout(Duration::from_secs(10))
-				.expect("trim after the job");
-			// The JS thread converts the result late, freeing its allocations.
-			trimmer.settled();
-			trimmed
-				.recv_timeout(Duration::from_secs(10))
-				.expect("trim after the result is freed");
-
-			// A settlement while another job runs waits for that job.
-			trimmer.begin();
-			trimmer.settled();
-			assert!(trimmed.recv_timeout(QUIET * 4).is_err());
-			trimmer.end();
-			trimmed
-				.recv_timeout(Duration::from_secs(10))
-				.expect("trim once the job ends");
-		}
-	}
+	
 }

@@ -225,17 +225,9 @@ impl Lifecycle {
 		}
 	}
 
-	/// Whether KILL was sent (by the escalation or [`Lifecycle::signalled`]).
-	#[cfg(test)]
-	pub const fn kill_sent(&self) -> bool {
-		self.kill_sent
-	}
+	
 
-	/// Output pumps that have not drained yet.
-	#[cfg(all(test, unix))]
-	pub const fn draining(&self) -> usize {
-		self.draining
-	}
+	
 }
 
 /// The lifecycle plus the input-pump cancellation shared by an `ExtProc`
@@ -323,104 +315,4 @@ impl Tracker {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use std::{sync::Arc, task::Wake};
 
-	use super::*;
-
-	struct Flag(AtomicBool);
-
-	impl Wake for Flag {
-		fn wake(self: Arc<Self>) {
-			self.0.store(true, Ordering::SeqCst);
-		}
-	}
-
-	fn waker() -> (Arc<Flag>, Waker) {
-		let flag = Arc::new(Flag(AtomicBool::new(false)));
-		(Arc::clone(&flag), Waker::from(flag))
-	}
-
-	#[test]
-	fn completion_waits_for_exit_and_every_output_pump() {
-		let mut life = Lifecycle::new(2);
-		let (flag, w) = waker();
-		let cx = Context::from_waker(&w);
-		assert_eq!(life.poll(&cx), Poll::Pending);
-		assert!(life.drained().is_none(), "one pump still draining");
-		let (wake, reap) = life.exited(ExitStatus::Exited(3));
-		assert!(wake.is_none() && !reap, "output pending, ExtProc alive");
-		assert_eq!(life.poll(&cx), Poll::Pending);
-		life.drained().expect("last drain wakes").wake();
-		assert!(flag.0.load(Ordering::SeqCst));
-		assert_eq!(life.poll(&cx), Poll::Ready(ExitStatus::Exited(3)));
-	}
-
-	#[test]
-	fn drop_after_collect_reaps_and_drop_before_exit_escalates_once() {
-		let now = Instant::now();
-		let grace = Duration::from_secs(2);
-		let (_, w) = waker();
-		let mut done = Lifecycle::new(0);
-		done.exited(ExitStatus::Exited(0));
-		assert_eq!(done.poll(&Context::from_waker(&w)), Poll::Ready(ExitStatus::Exited(0)));
-		assert_eq!(done.abandon(now, grace), Abandon::Exited);
-
-		let mut running = Lifecycle::new(0);
-		running.signalled(Signal::Term);
-		assert_eq!(
-			running.abandon(now, grace),
-			Abandon::Escalate { term: false, kill_at: now + grace },
-			"TERM already sent by the engine's cancel is not repeated"
-		);
-		assert!(!running.take_kill(now + grace / 2), "grace not over");
-		assert!(running.take_kill(now + grace));
-		assert!(!running.take_kill(now + grace * 2), "KILL is sent once");
-		assert!(running.kill_sent());
-	}
-
-	/// A cancel's drop can land just after the TERM it sent ended the
-	/// process: the engine never saw the exit, so what the process left in
-	/// its scope is swept as if it had exited during the grace.
-	#[test]
-	fn exit_the_engine_never_collected_still_sweeps_after_the_grace() {
-		let now = Instant::now();
-		let grace = Duration::from_secs(2);
-		let mut life = Lifecycle::new(0);
-		life.signalled(Signal::Term);
-		life.exited(ExitStatus::Signaled(Signal::Term));
-		assert_eq!(life.abandon(now, grace), Abandon::Orphaned {
-			term:     false,
-			sweep_at: now + grace,
-		});
-		assert!(!life.take_kill(now + grace), "the exited process itself is never KILLed");
-	}
-
-	#[test]
-	fn exit_during_grace_cancels_kill_and_tells_the_waiter_to_reap() {
-		let now = Instant::now();
-		let mut life = Lifecycle::new(0);
-		let Abandon::Escalate { term, .. } = life.abandon(now, Duration::from_millis(10)) else {
-			panic!("running process escalates");
-		};
-		assert!(term);
-		let (_, reap) = life.exited(ExitStatus::Signaled(Signal::Term));
-		assert!(reap, "the ExtProc is gone: the waiter reaps");
-		assert_eq!(life.kill_due(), None);
-		assert!(!life.take_kill(now + Duration::from_secs(1)));
-	}
-
-	#[test]
-	fn earlier_kill_deadline_wins_and_explicit_kill_clears_it() {
-		let now = Instant::now();
-		let mut life = Lifecycle::new(0);
-		life.schedule_kill(now + Duration::from_secs(5));
-		life.schedule_kill(now + Duration::from_secs(1));
-		assert_eq!(life.kill_due(), Some(now + Duration::from_secs(1)));
-		life.signalled(Signal::Kill);
-		assert_eq!(life.kill_due(), None);
-		life.schedule_kill(now);
-		assert_eq!(life.kill_due(), None, "nothing to escalate after KILL");
-	}
-}

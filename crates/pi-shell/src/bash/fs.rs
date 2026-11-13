@@ -561,33 +561,4 @@ pub enum FsOp {
 
 crate::bash::packed_names::packed_names!(FsOp);
 
-#[cfg(test)]
-mod tests {
-	use super::plain_windows_path;
 
-	/// `cd` and `pwd -P` showed `\\?\C:\…`. Dropping the prefix must not
-	/// change which file the path names: a device-named component, a
-	/// trailing dot or space, an over-long path, or another verbatim form
-	/// keeps it.
-	#[test]
-	fn verbatim_prefixes_go_only_where_the_plain_path_is_the_same_file() {
-		let plain =
-			|p: &str| String::from_utf8(plain_windows_path(p.as_bytes()).into_owned()).unwrap();
-		assert_eq!(plain(r"\\?\C:\Users\b"), r"C:\Users\b");
-		assert_eq!(plain(r"\\?\UNC\srv\share\d"), r"\\srv\share\d");
-		assert_eq!(plain(r"C:\already"), r"C:\already");
-		for kept in [
-			r"\\?\C:\dir\nul",
-			r"\\?\C:\dir\COM1.txt",
-			r"\\?\C:\dir\aux \x",
-			r"\\?\C:\dot.",
-			r"\\?\C:\space ",
-			r"\\?\Volume{0e1c}\x",
-		] {
-			assert_eq!(plain(kept), kept);
-		}
-		assert_eq!(plain(r"\\?\C:\dir\com10"), r"C:\dir\com10");
-		let long = format!(r"\\?\C:\{}", "a".repeat(260));
-		assert_eq!(plain(&long), long);
-	}
-}

@@ -1416,17 +1416,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fancy-regex"
-version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d301f5bf187b3c295fce6468d3875037a0bccc5f6b151c63cac2f85babf21912"
-dependencies = [
- "bit-set",
- "regex-automata",
- "regex-syntax",
-]
-
-[[package]]
 name = "faster-hex"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4622,9 +4611,7 @@ version = "18.18.3"
 dependencies = [
  "anyhow",
  "ast-grep-core",
- "async-trait",
  "futures",
- "parking_lot",
  "phf",
  "pi-vfs",
  "pi-walker",
@@ -4638,8 +4625,6 @@ dependencies = [
  "tree-sitter-cpp",
  "tree-sitter-css",
  "tree-sitter-diff",
- "tree-sitter-elisp",
- "tree-sitter-fortran",
  "tree-sitter-go",
  "tree-sitter-html",
  "tree-sitter-java",
@@ -4648,9 +4633,7 @@ dependencies = [
  "tree-sitter-md",
  "tree-sitter-python",
  "tree-sitter-regex",
- "tree-sitter-ruby",
  "tree-sitter-rust",
- "tree-sitter-swift",
  "tree-sitter-toml-ng",
  "tree-sitter-typescript",
  "tree-sitter-yaml",
@@ -4663,7 +4646,6 @@ name = "pi-builtins"
 version = "18.18.3"
 dependencies = [
  "ansi-width",
- "anyhow",
  "argmax",
  "async-trait",
  "base64 0.23.1",
@@ -4672,7 +4654,7 @@ dependencies = [
  "chrono",
  "clap",
  "dns-lookup",
- "fancy-regex 0.17.0",
+ "fancy-regex",
  "flate2",
  "flume",
  "foldhash 0.2.0",
@@ -4727,7 +4709,6 @@ dependencies = [
  "sha1",
  "sha2 0.10.9",
  "smallvec",
- "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -4754,10 +4735,7 @@ dependencies = [
  "pi-walker",
  "regex",
  "serde_json",
- "tempfile",
  "thiserror 2.0.21",
- "tokio",
- "tree-sitter-lua",
  "xutf",
  "xxhash-rust",
 ]
@@ -4787,7 +4765,6 @@ dependencies = [
  "crc32fast",
  "data-encoding",
  "either",
- "fancy-regex 0.17.0",
  "fastrand",
  "find-msvc-tools",
  "flate2",
@@ -4835,7 +4812,6 @@ dependencies = [
  "simd-adler32",
  "smallvec",
  "syntect",
- "tiktoken-rs",
  "tinyvec",
  "tokio",
  "tokio-util",
@@ -4888,7 +4864,6 @@ dependencies = [
  "serde_json",
  "smallvec",
  "strum",
- "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -4908,7 +4883,6 @@ dependencies = [
  "jj-lib",
  "libc",
  "pi-iso",
- "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -4931,15 +4905,12 @@ dependencies = [
 name = "pi-walker"
 version = "18.18.3"
 dependencies = [
- "async-trait",
  "flume",
  "futures",
- "globset",
  "grep-matcher",
  "grep-pcre2",
  "grep-regex",
  "grep-searcher",
- "ignore",
  "libc",
  "memchr",
  "parking_lot",
@@ -6019,20 +5990,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tiktoken-rs"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aeff724640cfe13037336ddf35befdffd2909cbdb65cf041cc8a4cf8c584cfa"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "bstr",
- "fancy-regex 0.19.2",
- "regex",
- "rustc-hash",
-]
-
-[[package]]
 name = "tiny-keccak"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6292,26 +6249,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-sitter-elisp"
-version = "1.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b8b82ab7474028f20d2119285566f219209ebdbeec767fa28025b70f94f8cf3"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-fortran"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea5fea41363a9b59666001dc26c4b356d4e164da27c6ce31145e00aba6bf9b16"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
 name = "tree-sitter-go"
 version = "0.25.0"
 dependencies = [
@@ -6367,16 +6304,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
-name = "tree-sitter-lua"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8daaf5f4235188a58603c39760d5fa5d4b920d36a299c934adddae757f32a10c"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
 name = "tree-sitter-md"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6407,30 +6334,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-sitter-ruby"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be0484ea4ef6bb9c575b4fdabde7e31340a8d2dbc7d52b321ac83da703249f95"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
 name = "tree-sitter-rust"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439e577dbe07423ec2582ac62c7531120dbfccfa6e5f92406f93dd271a120e45"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-swift"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe36052155b9dd69ca82b3b8f1b4ccfb2d867125ac1a4db1dd7331829242668c"
 dependencies = [
  "cc",
  "tree-sitter-language",

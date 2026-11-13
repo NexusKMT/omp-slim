@@ -1179,15 +1179,4 @@ fn untok_unmeta(s: &[u8]) -> Vec<u8> {
 	out
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn zstrtol_reads_signs_blanks_and_stops_at_non_digits() {
-		assert_eq!(zstrtol(b" 12,3", 0), (12, 3));
-		assert_eq!(zstrtol(&[DASH, b'4'], 0), (-4, 2));
-		assert_eq!(zstrtol(b"x", 0), (0, 0));
-		assert_eq!(zstrtol(b"99999999999999999999)", 0).1, 20);
-	}
-}

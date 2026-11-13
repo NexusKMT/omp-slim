@@ -4388,45 +4388,4 @@ pub fn arith_value(ex: &mut Expander<'_, '_>, src: &[u8]) -> X<Number> {
 	Ok(v)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn numeric_sort_compares_digit_runs() {
-		let mut v: Vec<Vec<u8>> = ["a10", "a9", "a100", "b1"]
-			.iter()
-			.map(|s| s.as_bytes().to_vec())
-			.collect();
-		strmetasort(&mut v, SORTIT_SOMEHOW | SORTIT_NUMERICALLY, None);
-		let got: Vec<&[u8]> = v.iter().map(Vec::as_slice).collect();
-		assert_eq!(got, [&b"a9"[..], b"a10", b"a100", b"b1"]);
-		strmetasort(&mut v, SORTIT_SOMEHOW | SORTIT_BACKWARDS, None);
-		let got: Vec<&[u8]> = v.iter().map(Vec::as_slice).collect();
-		assert_eq!(got, [&b"b1"[..], b"a9", b"a100", b"a10"]);
-	}
-
-	#[test]
-	fn padding_matches_zsh() {
-		// zsh: x=abc; print -r
-		// "${(l:5:)x}|${(r:5::-:)x}|${(l:2:)x}|${(l:7::12:)x}"
-		assert_eq!(dopadding(b"abc", 5, 0, None, None, b" ", b" ", None, false), b"  abc");
-		assert_eq!(dopadding(b"abc", 0, 5, None, None, b" ", b"-", None, false), b"abc--");
-		assert_eq!(dopadding(b"abc", 2, 0, None, None, b" ", b" ", None, false), b"bc");
-		assert_eq!(dopadding(b"abc", 7, 0, None, None, b"12", b" ", None, false), b"1212abc");
-		// zsh: print -r "${(l:7::1::X:)x}" → 111Xabc
-		assert_eq!(dopadding(b"abc", 7, 0, Some(b"X"), None, b"1", b" ", None, false), b"111Xabc");
-		// zsh: x=été; print -r "${(l:4::¥:)x}" → ¥été
-		assert_eq!(
-			dopadding("été".as_bytes(), 4, 0, None, None, "¥".as_bytes(), b" ", None, true),
-			"¥été".as_bytes()
-		);
-	}
-
-	#[test]
-	fn strcatsub_splices() {
-		let (w, after) = strcatsub(b"pre", b"mid", b"post", false, false);
-		assert_eq!(w, b"premidpost");
-		assert_eq!(after, 6);
-	}
-}

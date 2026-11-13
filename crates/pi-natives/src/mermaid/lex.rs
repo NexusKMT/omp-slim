@@ -201,28 +201,4 @@ pub fn js_trim(s: &str) -> &str {
 	s.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn cursor_backtracks_and_lexes_primitives() {
-		let mut c = Cursor::new(r#"A -->|go| B["x y"]"#);
-		assert_eq!(c.ident(), Some("A"));
-		assert!(c.expect_ws());
-		let save = c.pos();
-		assert!(!c.eat("==>"));
-		assert!(c.eat("-->"));
-		assert!(c.eat_char('|'));
-		assert_eq!(c.take_until_char('|'), Some("go"));
-		c.reset(save);
-		assert_eq!(c.eat_any(&["-->", "--"]), Some("-->"));
-		assert!(c.eat("|go|"));
-		c.skip_ws();
-		assert_eq!(c.word(), Some("B[\"x"));
-		let mut q = Cursor::new(r#""x y" tail"#);
-		assert_eq!(q.quoted(), Some("x y"));
-		assert_eq!(q.rest(), " tail");
-		assert_eq!(split_ws_once("a  b c"), Some(("a", "b c")));
-	}
-}

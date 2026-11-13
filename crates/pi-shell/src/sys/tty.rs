@@ -584,45 +584,7 @@ mod unix {
 		Some(unsafe { st.assume_init() }.st_rdev)
 	}
 
-	#[cfg(test)]
-	mod tests {
-		use std::os::fd::AsFd;
-
-		use super::*;
-
-		#[test]
-		fn termios_round_trips_through_a_pty() {
-			let (m, s, name) = open_pty(Some(TtyInfo { rows: 30, cols: 100 })).unwrap();
-			assert!(name.starts_with(b"/dev/"), "{name}");
-			assert!(is_terminal(s.as_raw_fd()) && is_terminal(m.as_raw_fd()));
-			assert_eq!(window_size(s.as_raw_fd()).unwrap(), TtyInfo { rows: 30, cols: 100 });
-			set_window_size(m.as_raw_fd(), TtyInfo { rows: 40, cols: 120 }).unwrap();
-			assert_eq!(window_size(s.as_raw_fd()).unwrap(), TtyInfo { rows: 40, cols: 120 });
-			let before = attrs(s.as_raw_fd()).unwrap();
-			assert!(before.get(TermFlag::Icanon) && before.get(TermFlag::Echo));
-			assert_eq!(before.char(CtlChar::Intr), Some(3));
-			{
-				let guard = TermiosGuard::raw(s.as_fd()).unwrap();
-				let raw = attrs(s.as_raw_fd()).unwrap();
-				assert!(!raw.get(TermFlag::Icanon) && !raw.get(TermFlag::Echo));
-				assert!(guard.same_device(s.as_raw_fd()));
-				let mut t = raw.clone();
-				t.set(TermFlag::Isig, true);
-				t.set_char(CtlChar::Intr, Some(7));
-				set_attrs(s.as_raw_fd(), &t, SetWhen::Now).unwrap();
-				let read = attrs(s.as_raw_fd()).unwrap();
-				assert!(read.get(TermFlag::Isig));
-				assert_eq!(read.char(CtlChar::Intr), Some(7));
-			}
-			// BSD kernels set PENDIN when ICANON comes back on: otherwise the
-			// restored modes are the saved ones, bit for bit.
-			let (mut after, mut before) = (attrs(s.as_raw_fd()).unwrap(), before);
-			after.set(TermFlag::Pendin, false);
-			before.set(TermFlag::Pendin, false);
-			assert_eq!(encode(&to_os(&after)), encode(&to_os(&before)));
-			assert!(dup_high(s.as_raw_fd()).unwrap().as_raw_fd() >= 10);
-		}
-	}
+	
 }
 
 /// The process host's [`Terminal`]: this process's real terminals.

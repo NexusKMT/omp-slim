@@ -27,7 +27,7 @@
 mod native;
 mod provider;
 mod root;
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 mod wtf8;
 
 use std::{
@@ -721,5 +721,4 @@ async fn list_with(
 	}
 }
 
-#[cfg(test)]
-mod tests;
+

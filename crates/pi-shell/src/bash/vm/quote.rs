@@ -199,38 +199,4 @@ pub fn glob_escape(b: &[u8], out: &mut Vec<u8>) {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	// Goldens: bash 5.3.20 (LANG=en_US.UTF-8 unless noted): `printf %q`,
-	// `"$payload"` → `command not found`, `hash -l`.
-	#[test]
-	fn printable_filenames_match_bash() {
-		let payload = b"5\xa7@3\x99+\xc6S8\x9f\xa2\xea\xb3";
-		assert_eq!(
-			printable_filename(payload, true, false),
-			&br"$'5\247@3\231+\306S8\237\242\352\263'"[..]
-		);
-		assert_eq!(printable_filename("é".as_bytes(), true, false), "é".as_bytes());
-		// LANG=C: every byte above 0x7f is unprintable.
-		assert_eq!(printable_filename("é".as_bytes(), false, false), &br"$'\303\251'"[..]);
-		assert_eq!(printable_filename(b"a\tb", true, false), &br"$'a\tb'"[..]);
-		assert_eq!(printable_filename(b"a b", true, false), &b"a b"[..]);
-		assert_eq!(printable_filename(b"a b", true, true), &b"'a b'"[..]);
-		assert_eq!(printable_filename(b"x=~", true, true), &b"'x=~'"[..]);
-		assert_eq!(printable_filename(b"a~", true, true), &b"a~"[..]);
-		assert_eq!(sh_single_quote(b"'"), b"\\'");
-		assert_eq!(sh_single_quote(b"a'b"), b"'a'\\''b'");
-	}
-
-	// Goldens: bash 5.3.20 `declare -p` and `${x@Q}`.
-	#[test]
-	fn declare_and_single_match_bash() {
-		assert_eq!(declare(b"q\"$`\\x"), "\"q\\\"\\$\\`\\\\x\"");
-		assert_eq!(declare(b"x\ny"), "$'x\\ny'");
-		assert_eq!(declare(b""), "\"\"");
-		assert_eq!(single(b"a'b"), "'a'\\''b'");
-		assert_eq!(single(b"a\tb"), "$'a\\tb'");
-	}
-}

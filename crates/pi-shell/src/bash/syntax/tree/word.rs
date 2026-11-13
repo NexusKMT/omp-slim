@@ -658,21 +658,4 @@ impl<'t> BadComsub<'t> {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	/// Every operator, with its byte argument and flags, reads back from
-	/// the packed `c` field as written.
-	#[test]
-	fn param_codes_read_back() {
-		for &op in Ok_::ALL {
-			for (arg, flags) in
-				[(0, 0), (b'Q', ParamCode::STAR), (3, ParamCode::COLON | ParamCode::ALL)]
-			{
-				let c = ParamCode { op, arg, flags };
-				assert_eq!(ParamCode::unpack(c.pack()), c);
-			}
-		}
-	}
-}

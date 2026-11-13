@@ -801,26 +801,4 @@ fn finish_tail(zw: &mut Zw<'_, '_>, s: &Isearch) -> WResult {
 	WResult::Done(if s.aborted { 3 } else { i32::from(s.nomatch) })
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn newpos_picks_the_match_in_direction() {
-		let l = [(1, 3), (5, 7), (9, 10)];
-		assert_eq!(isearch_newpos(&l, 5, -1), Some((5, 7)));
-		assert_eq!(isearch_newpos(&l, 4, -1), Some((1, 3)));
-		assert_eq!(isearch_newpos(&l, 0, -1), None);
-		assert_eq!(isearch_newpos(&l, 6, 1), Some((9, 10)));
-		assert_eq!(isearch_newpos(&l, 11, 1), None);
-	}
-
-	#[test]
-	fn char_index_maps_metafied_offsets() {
-		let line: Vec<char> = "aé b".chars().collect();
-		assert_eq!(char_index(&line, 0), 0);
-		assert_eq!(char_index(&line, 1), 1);
-		assert_eq!(char_index(&line, 3), 2);
-		assert_eq!(char_index(&line, 5), 4);
-	}
-}

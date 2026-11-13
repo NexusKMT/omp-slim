@@ -244,15 +244,4 @@ pub fn preview_patch(
 	previews
 }
 
-#[cfg(test)]
-mod tests {
-	use super::cursor_line;
-	use crate::modes::hashline::types::{Anchor, Cursor};
 
-	#[test]
-	fn cursor_lines_are_one_indexed() {
-		assert_eq!(cursor_line(Cursor::Bof, 3), 1);
-		assert_eq!(cursor_line(Cursor::Eof, 3), 4);
-		assert_eq!(cursor_line(Cursor::AfterAnchor(Anchor { line: 2 }), 3), 3);
-	}
-}

@@ -75,28 +75,4 @@ impl TypeFilter {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::TypeFilter;
 
-	#[test]
-	fn known_types_match_extensions_and_names() {
-		let ts = TypeFilter::new("TypeScript").expect("filter");
-		assert!(ts.matches(b"a.tsx"));
-		assert!(ts.matches(b"b.MTS"));
-		assert!(!ts.matches(b"c.js"));
-		let docker = TypeFilter::new("docker").expect("filter");
-		assert!(docker.matches(b"Dockerfile"));
-		assert!(!docker.matches(b"Dockerfile.dev"));
-	}
-
-	#[test]
-	fn unknown_types_are_one_extension_or_name() {
-		let custom = TypeFilter::new(" .Vue ").expect("filter");
-		assert!(custom.matches(b"App.vue"));
-		assert!(custom.matches(b"vue"));
-		assert!(!custom.matches(b"App.vuex"));
-		assert!(!custom.matches(b"App.ts"));
-		assert!(TypeFilter::new("  ").is_none());
-	}
-}

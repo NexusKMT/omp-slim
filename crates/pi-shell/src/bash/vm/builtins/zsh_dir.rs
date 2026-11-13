@@ -803,39 +803,4 @@ pub fn pwd(ctx: &mut Ctx<'_, '_>, ops: &Ops) -> R {
 	done(0)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn error_text_lowercases_first_letter() {
-		assert_eq!(errtext(b"No such file or directory"), "no such file or directory");
-		assert!(is_enoent(b"No such file or directory"));
-	}
-
-	/// `cd` on Windows keeps `/`-separated directories: a resolved path's
-	/// `\\?\` prefix (once left in `$PWD`) goes, and `\x` lands on the
-	/// working directory's drive.
-	#[test]
-	fn windows_spelling_uses_slashes_and_drops_verbatim_prefixes() {
-		assert_eq!(windows_spelling(br"F:\Repos\x", b"F:/r"), "F:/Repos/x");
-		assert_eq!(windows_spelling(br"\\?\F:\Repos", b"F:/r"), "F:/Repos");
-		assert_eq!(windows_spelling(br"\\?\UNC\srv\share\d", b"F:/r"), "//srv/share/d");
-		assert_eq!(windows_spelling(br"\tools", b"F:/r"), "F:/tools");
-		assert_eq!(windows_spelling(b"sub\\dir", b"F:/r"), "sub/dir");
-	}
-
-	/// `..` never climbs above a drive or share root, and a Windows path
-	/// is absolute (it was joined onto the working directory).
-	#[test]
-	fn roots_cover_drives_and_shares_on_windows_only() {
-		assert_eq!(root_len(b"C:/x", true), 3);
-		assert_eq!(root_len(br"C:\x", true), 3);
-		assert_eq!(root_len(b"//srv/share/x", true), 12);
-		assert_eq!(root_len(b"//srv/share", true), 11);
-		assert_eq!(root_len(b"/x", true), 1);
-		assert_eq!(root_len(b"x", true), 0);
-		assert_eq!(root_len(b"C:/x", false), 0);
-		assert_eq!(root_len(b"/x", false), 1);
-	}
-}

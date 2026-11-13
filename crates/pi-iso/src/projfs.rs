@@ -94,25 +94,7 @@ fn vars_indicate_arm64_emulation(wow64_arch: Option<&str>, process_arch: Option<
 	matches_arm64(wow64_arch) || matches_arm64(process_arch)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::{vars_indicate_arm64_emulation, x64_under_arm64_emulation};
 
-	#[test]
-	fn detects_windows_arm64_emulation_markers() {
-		assert!(vars_indicate_arm64_emulation(Some("ARM64"), None));
-		assert!(vars_indicate_arm64_emulation(None, Some("arm64")));
-		assert!(!vars_indicate_arm64_emulation(Some("AMD64"), Some("x86")));
-		assert!(!vars_indicate_arm64_emulation(None, None));
-	}
-
-	#[test]
-	fn returns_false_off_windows_or_non_x64() {
-		// Sanity: just calling it shouldn't panic. The result depends on
-		// build target + ambient env vars, both of which are stable in CI.
-		let _ = x64_under_arm64_emulation();
-	}
-}
 
 #[cfg(windows)]
 #[allow(

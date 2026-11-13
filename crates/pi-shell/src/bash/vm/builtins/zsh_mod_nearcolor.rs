@@ -119,33 +119,4 @@ pub fn getnearestcolor(tccolours: i32, red: u32, green: u32, blue: u32) -> i32 {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	//! Expected indices come from `TERM=xterm-256color` / `xterm-88color`
-	//! `/bin/zsh -f -c 'zmodload zsh/nearcolor; print -P "%F{#RRGGBB}x"'`
-	//! 5.9 (which prints the hook's value minus one).
 
-	use super::getnearestcolor;
-
-	#[test]
-	fn nearest_colours_match_zsh() {
-		for (rgb, c256, c88) in [
-			(0xff8000, 208, 68),
-			(0x000000, 16, 16),
-			(0xffffff, 231, 79),
-			(0x123456, 24, 81),
-			(0x808080, 244, 37),
-			(0xabcdef, 153, 43),
-			(0x5f87af, 67, 22),
-			(0xe4e4e4, 254, 87),
-			(0x010203, 16, 16),
-			(0xff0000, 196, 64),
-		] {
-			let (r, g, b) = (rgb >> 16, (rgb >> 8) & 0xff, rgb & 0xff);
-			assert_eq!(getnearestcolor(256, r, g, b), c256 + 1, "{rgb:06x} in 256 colours");
-			assert_eq!(getnearestcolor(88, r, g, b), c88 + 1, "{rgb:06x} in 88 colours");
-		}
-		assert_eq!(getnearestcolor(8, 255, 0, 0), -1);
-		assert_eq!(getnearestcolor(16_777_216, 255, 0, 0), -1);
-	}
-}

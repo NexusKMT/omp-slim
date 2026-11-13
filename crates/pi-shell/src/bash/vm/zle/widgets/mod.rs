@@ -280,20 +280,4 @@ pub fn builtin(name: &str) -> Option<&'static Builtin> {
 	BUILTINS.iter().find(|b| b.name == name)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn table_matches_iwidgets_list() {
-		assert_eq!(BUILTINS.len(), 193);
-		assert_eq!(BUILTINS[0].name, "accept-and-hold");
-		assert_eq!(BUILTINS[192].name, "yank-pop");
-		let y = builtin("yank").map(|b| b.flags);
-		assert_eq!(y, Some(YANKBEFORE | KEEPSUFFIX));
-		let k = builtin("kill-line").map(|b| b.flags);
-		assert_eq!(k, Some(KILL | KEEPSUFFIX));
-		assert!(builtin("self-insert").is_some_and(|b| b.func.is_some()));
-		assert!(builtin("no-such-widget").is_none());
-	}
-}

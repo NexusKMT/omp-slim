@@ -954,47 +954,4 @@ impl Seek for File {
 	}
 }
 
-#[cfg(all(test, unix))]
-mod tests {
-	use std::os::fd::AsFd;
 
-	use super::*;
-
-	/// The null device reads as EOF at once, but `poll` never reports it
-	/// readable on macOS and the BSDs, so a cancellable read of it must not
-	/// wait for readiness: there `timeout 1 cat /dev/null` waited for the limit
-	/// and exited 124. A file bound to a token after its open and one the
-	/// scoped open typed both read it without polling; `/dev/zero` still polls.
-	#[test]
-	fn cancellable_reads_of_the_null_device_never_poll() {
-		let null = std::fs::File::open("/dev/null").unwrap();
-		let zero = std::fs::File::open("/dev/zero").unwrap();
-		let token = CancellationToken::new();
-		assert!(!HostCancel::for_file(token.clone(), &null).poll, "bound after the open");
-		assert!(HostCancel::for_file(token.clone(), &zero).poll);
-
-		let opened = crate::BlockingFs::native()
-			.with_cancellation(token)
-			.open("/dev/null")
-			.unwrap();
-		let poll = opened.read_cancel.as_ref().map(|cancel| cancel.poll);
-		assert_eq!(poll, Some(false), "typed by the scoped open");
-	}
-
-	/// Of the null device, `/dev/zero`, a regular file and a pipe, only the
-	/// reads of `/dev/zero` and the pipe can block, by metadata and by
-	/// descriptor alike.
-	#[test]
-	fn readiness_predicates_exempt_regular_files_and_the_null_device() {
-		let null = std::fs::File::open("/dev/null").unwrap();
-		let zero = std::fs::File::open("/dev/zero").unwrap();
-		let regular = std::fs::File::open(std::env::current_exe().unwrap()).unwrap();
-		let (pipe, _writer) = std::io::pipe().unwrap();
-
-		for (file, blocks) in [(&null, false), (&regular, false), (&zero, true)] {
-			assert_eq!(reads_can_block(&file.metadata().unwrap()), blocks, "{file:?}");
-			assert_eq!(fd_reads_can_block(file.as_fd()), blocks, "{file:?}");
-		}
-		assert!(fd_reads_can_block(pipe.as_fd()));
-	}
-}

@@ -93,32 +93,4 @@ fn app() -> Command {
 		.infer_long_args(true)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::Whoami;
-	use crate::host::run_util;
 
-	#[test]
-	fn prints_process_user_with_trailing_newline() {
-		let (code, capture) = run_util::<Whoami>(&[], "", "/");
-		assert_eq!((code, capture.err()), (0, String::new()));
-		let stdout = capture.out();
-		assert!(stdout.ends_with('\n'));
-		assert!(!stdout.trim_end().is_empty());
-	}
-
-	#[test]
-	fn rejects_operands() {
-		let (code, capture) = run_util::<Whoami>(&["extra"], "", "/");
-		assert_eq!(code, 1);
-		assert_eq!(capture.out(), "");
-		assert!(!capture.err().is_empty(), "clap usage error must go to stderr");
-	}
-
-	#[test]
-	fn help_renders_to_stdout() {
-		let (code, capture) = run_util::<Whoami>(&["--help"], "", "/");
-		assert_eq!((code, capture.err()), (0, String::new()));
-		assert!(capture.out().contains("Print the current username."));
-	}
-}

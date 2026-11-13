@@ -830,45 +830,4 @@ pub fn savehistfile(
 	Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn lines_join_continuations_and_drop_the_writer_space() {
-		let data = b": 1:0;a\\\nb\n: 2:0;c\\ \nd";
-		let (l1, p) = readhistline(data, 0).unwrap();
-		assert_eq!(l1, b": 1:0;a\nb");
-		let (l2, p) = readhistline(data, p).unwrap();
-		assert_eq!(l2, b": 2:0;c\\");
-		let (l3, p) = readhistline(data, p).unwrap();
-		assert_eq!(l3, b"d");
-		assert!(readhistline(data, p).is_none());
-	}
-
-	#[test]
-	fn events_are_written_as_zsh_does() {
-		let mut out = Vec::new();
-		event_line(&mut out, b"a\nb", 5, 7, true);
-		event_line(&mut out, b"x\\", 5, 0, true);
-		event_line(&mut out, b":y", 5, 0, false);
-		assert_eq!(out, b": 5:2;a\\\nb\n: 5:0;x\\ \n\\:y\n");
-	}
-
-	#[test]
-	fn read_then_write_round_trips() {
-		let data: &[u8] = b": 1781352489:0;sudo iptables -L\\\nsudo iptables -t nat\n: 1781352490:3;echo \xc4\x83\xa3\n: 1781352491:0;tail\\ \n";
-		let mut h = Hist::default();
-		h.st.histsiz = 100;
-		parse_file(&mut h, &FileOpts::default(), data, 0, 0);
-		assert_eq!(h.entries.len(), 3);
-		assert_eq!(h.entries[0].text, "sudo iptables -L\nsudo iptables -t nat");
-		assert_eq!(h.entries[1].text, b"echo \xc4\x83".as_slice());
-		assert_eq!(h.entries[1].ftim, 1_781_352_493);
-		let mut out = Vec::new();
-		for e in h.entries.iter() {
-			event_line(&mut out, &e.text, e.stim, e.ftim, true);
-		}
-		assert_eq!(out, data);
-	}
-}

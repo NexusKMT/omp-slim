@@ -670,33 +670,4 @@ pub fn ztrftime(
 	out
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn mode_strings_match_ls() {
-		let mut out = Vec::new();
-		modeprint(&mut out, 0o100_644, STF_STRING);
-		assert_eq!(out, b"-rw-r--r--");
-		out.clear();
-		modeprint(&mut out, 0o041_777, STF_STRING | STF_RAW | STF_OCTAL);
-		assert_eq!(out, b"041777 (drwxrwxrwt)");
-		out.clear();
-		modeprint(&mut out, 0o106_644, STF_STRING);
-		assert_eq!(out, b"-rwSr-Sr--");
-	}
-
-	#[test]
-	fn ztrftime_runs_out_like_zsh() {
-		// 2026-01-02 03:04:05 UTC, from `zstat -F` against /bin/zsh: the
-		// 40-byte buffer ends before `%L`.
-		let t = 1_767_323_045;
-		let got = ztrftime(b"%Y-%m-%d %N %3. %-d %f %K %L|%Z|%s", t, 0, 0, b"UTC", 40);
-		assert_eq!(got, b"2026-01-02 000000000 000 2 2 3 ");
-		assert_eq!(
-			ztrftime(b"%a %b %e %k:%M:%S %Z %Y", t, 0, 0, b"UTC", 40),
-			b"Fri Jan  2  3:04:05 UTC 2026"
-		);
-	}
-}

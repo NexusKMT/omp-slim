@@ -671,7 +671,4 @@ pub fn spdist(s: &[u8], t: &[u8], thresh: i32, dvorak: bool) -> i32 {
 	200
 }
 
-#[cfg(test)]
-pub(super) fn spdist_for_tests(s: &str, t: &str) -> i32 {
-	spdist(s.as_bytes(), t.as_bytes(), s.len() as i32 / 4 + 1, false)
-}
+

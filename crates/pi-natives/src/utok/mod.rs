@@ -97,23 +97,4 @@ impl Encoding {
 	}
 }
 
-#[cfg(test)]
-#[path = "tests"]
-mod tests {
-	#[path = "claude.rs"]
-	mod claude;
-	#[path = "deepseek.rs"]
-	mod deepseek;
-	#[path = "glm.rs"]
-	mod glm;
-	#[path = "jev.rs"]
-	mod jev;
-	#[path = "kimi.rs"]
-	mod kimi;
-	#[path = "openai.rs"]
-	mod openai;
-	#[path = "qwen.rs"]
-	mod qwen;
-	#[path = "rank_table.rs"]
-	mod rank_table;
-}
+

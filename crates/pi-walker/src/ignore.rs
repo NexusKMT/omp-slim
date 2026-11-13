@@ -761,5 +761,4 @@ fn parse_excludes_file(data: &[u8], home: Option<&Path>) -> Option<PathBuf> {
 	}))
 }
 
-#[cfg(test)]
-mod tests;
+

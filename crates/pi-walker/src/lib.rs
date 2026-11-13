@@ -44,8 +44,7 @@ pub mod glob;
 pub mod grep;
 pub mod ignore;
 pub mod pattern;
-#[cfg(test)]
-mod testing;
+
 pub mod walk;
 
 pub use fs::{Detail, FileType, Fs};

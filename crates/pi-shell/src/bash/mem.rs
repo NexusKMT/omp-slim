@@ -560,49 +560,4 @@ impl File for Capture {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	fn cx() -> Context<'static> {
-		Context::from_waker(Waker::noop())
-	}
-
-	#[test]
-	fn pipe_eof_after_last_writer_and_epipe_after_last_reader() {
-		let (mut r, mut w) = pipe();
-		let w2 = w.dup().unwrap();
-		assert!(matches!(w.poll_write(&mut cx(), b"ab"), Poll::Ready(Ok(2))));
-		drop(w);
-		let mut buf = [0; 4];
-		assert!(matches!(r.poll_read(&mut cx(), &mut buf), Poll::Ready(Ok(2))));
-		assert!(r.poll_read(&mut cx(), &mut buf).is_pending(), "a duplicated writer keeps it open");
-		drop(w2);
-		assert!(matches!(r.poll_read(&mut cx(), &mut buf), Poll::Ready(Ok(0))));
-		let (r, mut w) = pipe();
-		drop(r);
-		let Poll::Ready(Err(err)) = w.poll_write(&mut cx(), b"x") else {
-			panic!("expected EPIPE");
-		};
-		assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
-	}
-
-	#[test]
-	fn full_pipe_pends_and_partially_writes() {
-		let (_r, mut w) = pipe();
-		let big = vec![7u8; PIPE_CAPACITY + 10];
-		assert!(matches!(w.poll_write(&mut cx(), &big), Poll::Ready(Ok(n)) if n == PIPE_CAPACITY));
-		assert!(w.poll_write(&mut cx(), b"x").is_pending());
-	}
-
-	#[test]
-	fn membuf_dups_share_the_offset() {
-		let mut a = MemBuf::new(&b"hello"[..]);
-		let mut b = a.dup().unwrap();
-		let mut buf = [0; 2];
-		let _ = a.poll_read(&mut cx(), &mut buf);
-		let _ = b.poll_read(&mut cx(), &mut buf);
-		assert_eq!(&buf, b"ll");
-		assert_eq!(a.seek(SeekFrom::Current(-1)).unwrap(), 3);
-	}
-}

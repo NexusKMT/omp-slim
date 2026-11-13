@@ -3,7 +3,7 @@
 //!
 //! [`Host::sockets`](crate::bash::Host::sockets) returns a [`Sockets`] when
 //! the host may open OS sockets (the process shell, `omp zsh`); hosts
-//! without them (agent shells, the testkit) return `None`, and the socket
+//! without them (agent shells) return `None`, and the socket
 //! builtins report the operation as unsupported.
 //!
 //! Sockets come back as [`File`]s of

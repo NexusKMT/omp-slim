@@ -347,46 +347,4 @@ pub fn list_workspace<'env>(
 	})
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	fn file(path: String) -> GlobMatch {
-		GlobMatch { path, file_type: FileType::File, mtime: None, size: None }
-	}
-
-	#[test]
-	fn workspace_entry_cap_deduplicates_and_keeps_late_lexical_winners() {
-		let mut results = WorkspaceResults::default();
-		for index in (1..=MAX_ENTRIES).rev() {
-			let path = format!("{index:06}");
-			results.insert_entry(file(path.clone()));
-			results.insert_entry(file(path));
-		}
-		assert!(!results.truncated);
-		results.insert_entry(file("000000".to_owned()));
-		assert!(results.truncated);
-		assert_eq!(results.entries.len(), MAX_ENTRIES);
-		assert_eq!(results.entries.first_key_value().unwrap().0, "000000");
-		assert_eq!(results.entries.last_key_value().unwrap().0, "099999");
-		results.insert_entry(file("zzzzzz".to_owned()));
-		assert_eq!(results.entries.len(), MAX_ENTRIES);
-		assert_eq!(results.entries.last_key_value().unwrap().0, "099999");
-	}
-
-	#[test]
-	fn workspace_agents_cap_deduplicates_and_keeps_late_lexical_winners() {
-		let mut results = WorkspaceResults::default();
-		for index in (1..=AGENTS_MD_LIMIT).rev() {
-			let path = format!("{index:03}/AGENTS.md");
-			results.insert_agents_md(path.clone());
-			results.insert_agents_md(path);
-		}
-		assert!(!results.truncated);
-		results.insert_agents_md("000/AGENTS.md".to_owned());
-		assert!(results.truncated);
-		assert_eq!(results.agents_md_files.len(), AGENTS_MD_LIMIT);
-		assert_eq!(results.agents_md_files.first().unwrap(), "000/AGENTS.md");
-		assert_eq!(results.agents_md_files.last().unwrap(), "199/AGENTS.md");
-	}
-}

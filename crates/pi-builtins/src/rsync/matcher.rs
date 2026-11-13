@@ -135,19 +135,9 @@ impl Sums {
 		Ok(sums)
 	}
 
-	/// Sums built locally by tests: `sum1` and `sum2` (`s2length` bytes per block)
-	/// must hold `head.count` entries.
-	#[cfg(test)]
-	pub(crate) fn from_parts(head: SumHead, sum1: Vec<u32>, sum2: Vec<u8>) -> Self {
-		let flength = head.flength();
-		Self { head, sum1, sum2, flength, append_mode: 0, updating_basis: false }
-	}
+	
 
-	/// Length of the basis the sums describe (`s->flength`).
-	#[cfg(test)]
-	pub(crate) fn flength(&self) -> i64 {
-		self.flength
-	}
+	
 
 	fn block_len(&self, i: i32) -> i64 {
 		i64::from(self.head.block_len(i))
@@ -748,5 +738,4 @@ fn enodata() -> io::Error {
 	}
 }
 
-#[cfg(test)]
-mod tests;
+

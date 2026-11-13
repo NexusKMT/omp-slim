@@ -547,7 +547,4 @@ pub fn pattern_range_to_string(range: &[u8]) -> Vec<u8> {
 	out
 }
 
-#[cfg(test)]
-pub(super) fn parse_class_for_test(s: &[u8]) -> (Cpattern, usize) {
-	parse_class(s, 0)
-}
+

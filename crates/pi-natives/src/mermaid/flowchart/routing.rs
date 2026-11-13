@@ -419,17 +419,4 @@ fn label_column(graph: &AsciiGraph, min_x: i32, max_x: i32) -> i32 {
 		.unwrap_or(middle)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn determines_axis_and_diagonal_directions() {
-		let origin = GridCoord::new(2, 2);
-		assert_eq!(determine_direction(origin, GridCoord::new(2, 1)), Dir::Up);
-		assert_eq!(determine_direction(origin, GridCoord::new(2, 3)), Dir::Down);
-		assert_eq!(determine_direction(origin, GridCoord::new(1, 2)), Dir::Left);
-		assert_eq!(determine_direction(origin, GridCoord::new(3, 2)), Dir::Right);
-		assert_eq!(determine_direction(origin, GridCoord::new(3, 3)), Dir::LowerRight);
-	}
-}

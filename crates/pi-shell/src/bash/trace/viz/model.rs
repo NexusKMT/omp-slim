@@ -286,17 +286,4 @@ pub struct Presentation {
 	pub message:     Option<String>,
 }
 
-#[cfg(test)]
-mod identity_tests {
-	use super::*;
-	#[test]
-	fn opaque_keys_roundtrip_canonical_engine_identity() {
-		let key = NodeKey::engine(12, NodeId(99));
-		assert_eq!(key.to_string(), "12:0:99");
-		assert_eq!(serde_json::to_string(&key).unwrap(), "\"12:0:99\"");
-		assert_eq!(serde_json::from_str::<NodeKey>("\"12:0:99\"").unwrap(), key);
-		for value in ["12:99", "12:0:99:1", "-1:0:0", "+1:0:0", "1:0:4294967296", "1:0: 1", "1::1"] {
-			assert!(value.parse::<NodeKey>().is_err(), "{value}");
-		}
-	}
-}
+

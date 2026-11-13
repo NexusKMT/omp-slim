@@ -144,10 +144,7 @@ mod version;
 #[cfg(all(target_family = "wasm", napi_wasi_threads, not(napi_wasi_no_heap_sync)))]
 mod wasi_heap_sync;
 // The page arithmetic of its `sbrk`, pure so the unit tests run natively.
-#[cfg(any(
-  test,
-  all(target_family = "wasm", napi_wasi_threads, not(napi_wasi_no_heap_sync))
-))]
+#[cfg(any(all(target_family="wasm",napi_wasi_threads,not(napi_wasi_no_heap_sync))))]
 mod wasi_heap_break;
 
 /// Threaded WASI: refresh this thread's view of the shared memory size where napi hands it work

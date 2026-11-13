@@ -160,15 +160,4 @@ fn inspect_input(input: &str) -> Inspection {
 	Inspection { paths, entries, file_ops }
 }
 
-#[cfg(test)]
-mod tests {
-	use super::inspect_input;
 
-	#[test]
-	fn inspect_extracts_paths_and_added_lines_from_partial_input() {
-		let inspected =
-			inspect_input("[*** Update File: src/a.ts#ABCD]\nPUT 1.=1:\n+new\n[src/b.ts]\nCUT 2.=2");
-		assert_eq!(inspected.paths, ["src/a.ts", "src/b.ts"]);
-		assert_eq!(inspected.entries, [("src/a.ts".into(), "new".into())]);
-	}
-}

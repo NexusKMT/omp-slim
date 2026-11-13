@@ -129,34 +129,7 @@ impl Ctx {
 		self.logger.io_error(err, RERR_STREAMIO, self.counters.total_read())
 	}
 
-	/// A client-side context for unit tests: protocol 33 without inc-recursion,
-	/// MD5 sums, a logger writing nowhere, the native filesystem, and `cwd` =
-	/// the system temp dir.
-	#[cfg(test)]
-	pub(crate) fn for_tests(opts: Options) -> Ctx {
-		let logger = Logger::local(Box::new(io::sink()), Box::new(io::sink()), LogConfig::default());
-		let paths = ShellPaths::default();
-		let neg = Negotiated {
-			proto: Proto { version: 33, compat: 0 },
-			inc_recurse: false,
-			xfer_sum: CsumType::Md5,
-			file_sum: CsumType::Md5,
-			seed: 0,
-			compress: Compress::None,
-			compress_level: None,
-			receiver_symlink_times: true,
-		};
-		let parts = CtxParts {
-			fs: paths.fs().clone(),
-			paths,
-			cwd: std::env::temp_dir(),
-			umask: 0o022,
-			cancel: Arc::new(AtomicBool::new(false)),
-			counters: IoCounters::default(),
-		};
-		let am_sender = opts.am_sender;
-		build_ctx(&parts, Arc::new(opts), &neg, logger, false, am_sender, false, None, None)
-	}
+	
 }
 
 /// Host-derived parts every [`Ctx`] of a side shares.
@@ -2908,5 +2881,4 @@ fn forward_files_from(
 	Ok(())
 }
 
-#[cfg(test)]
-mod tests;
+

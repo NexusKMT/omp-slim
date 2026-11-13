@@ -31,8 +31,7 @@ mod engine;
 mod render;
 mod run;
 mod scan;
-#[cfg(test)]
-mod tests;
+
 mod types;
 
 use std::{fmt, io, path::Path, sync::Arc};

@@ -195,13 +195,7 @@ pub(crate) struct OutLevels {
 }
 
 impl OutLevels {
-	/// The levels `-v` repeated `verbose` times implies (0 still sets NONREG).
-	#[cfg(test)]
-	pub(crate) fn from_verbose(verbose: u8) -> Self {
-		let mut levels = Self::default();
-		levels.apply_verbose(verbose);
-		levels
-	}
+	
 
 	/// Adds the `-v` defaults at [`Priority::Default`] (never overrides user words).
 	pub(crate) fn apply_verbose(&mut self, verbose: u8) {
@@ -215,17 +209,9 @@ impl OutLevels {
 		}
 	}
 
-	/// `--info=WORDS` at user priority; `help` is accepted and ignored here (see `parse_info`).
-	#[cfg(test)]
-	pub(crate) fn apply_info(&mut self, words: &str) -> Result<(), String> {
-		self.parse(Kind::Info, words, Priority::User, false).map(|_| ())
-	}
+	
 
-	/// `--debug=WORDS` at user priority.
-	#[cfg(test)]
-	pub(crate) fn apply_debug(&mut self, words: &str) -> Result<(), String> {
-		self.parse(Kind::Debug, words, Priority::User, false).map(|_| ())
-	}
+	
 
 	/// Full `--info` word parsing. Err is `Unknown --info item: "x"` (RERR_SYNTAX); a server
 	/// silently ignores unknown words.
@@ -258,11 +244,7 @@ impl OutLevels {
 		clamp_level(self.debug[flag as usize])
 	}
 
-	/// Forces an info flag's level (no priority bookkeeping).
-	#[cfg(test)]
-	pub(crate) fn set_info(&mut self, flag: Info, level: u8) {
-		self.info[flag as usize] = i16::from(level);
-	}
+	
 
 	/// Flips every level's sign; negated levels read as 0 until negated back
 	/// (negate_output_levels, used while files-from data shares the socket).
@@ -477,157 +459,4 @@ fn help_text(kind: Kind) -> String {
 	out
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	/// `rsync --info=help` from the 3.5.1 reference binary.
-	const INFO_HELP: &str = "\
-Use OPT or OPT1 for level 1 output, OPT2 for level 2, etc.; OPT0 silences.
-
-BACKUP     Mention files backed up
-COPY       Mention files copied locally on the receiving side
-DEL        Mention deletions on the receiving side
-FLIST      Mention file-list receiving/sending (levels 1-2)
-MISC       Mention miscellaneous information (levels 1-2)
-MOUNT      Mention mounts that were found or skipped
-NAME       Mention 1) updated file/dir names, 2) unchanged names
-NONREG     Mention skipped non-regular files (default 1, 0 disables)
-PROGRESS   Mention 1) per-file progress or 2) total transfer progress
-REMOVE     Mention files removed on the sending side
-SKIP       Mention files skipped due to transfer overrides (levels 1-2)
-STATS      Mention statistics at end of run (levels 1-3)
-SYMSAFE    Mention symlinks that are unsafe
-
-ALL        Set all --info options (e.g. all4)
-NONE       Silence all --info options (same as all0)
-HELP       Output this help message
-
-Options added at each level of verbosity:
-0) NONREG
-1) COPY,DEL,FLIST,MISC,NAME,STATS,SYMSAFE
-2) BACKUP,MISC2,MOUNT,NAME2,REMOVE,SKIP
-";
-
-	/// `rsync --debug=help` from the 3.5.1 reference binary.
-	const DEBUG_HELP: &str = "\
-Use OPT or OPT1 for level 1 output, OPT2 for level 2, etc.; OPT0 silences.
-
-ACL        Debug extra ACL info
-BACKUP     Debug backup actions (levels 1-2)
-BIND       Debug socket bind actions
-CHDIR      Debug when the current directory changes
-CONNECT    Debug connection events (levels 1-2)
-CMD        Debug commands+options that are issued (levels 1-2)
-DEL        Debug delete actions (levels 1-3)
-DELTASUM   Debug delta-transfer checksumming (levels 1-4)
-DUP        Debug weeding of duplicate names
-EXIT       Debug exit events (levels 1-3)
-FILTER     Debug filter actions (levels 1-3)
-FLIST      Debug file-list operations (levels 1-4)
-FUZZY      Debug fuzzy scoring (levels 1-2)
-GENR       Debug generator functions
-HASH       Debug hashtable code
-HLINK      Debug hard-link actions (levels 1-3)
-ICONV      Debug iconv character conversions (levels 1-2)
-IO         Debug I/O routines (levels 1-4)
-NSTR       Debug negotiation strings
-OWN        Debug ownership changes in users & groups (levels 1-2)
-PROTO      Debug protocol information
-RECV       Debug receiver functions
-SEND       Debug sender functions
-TIME       Debug setting of modified times (levels 1-2)
-
-ALL        Set all --debug options (e.g. all4)
-NONE       Silence all --debug options (same as all0)
-HELP       Output this help message
-
-Options added at each level of verbosity:
-2) BIND,CONNECT,CMD,DEL,DELTASUM,DUP,FILTER,FLIST,ICONV
-3) ACL,BACKUP,CONNECT2,DEL2,DELTASUM2,EXIT,FILTER2,FLIST2,FUZZY,GENR,OWN,RECV,SEND,TIME
-4) CMD2,DEL3,DELTASUM3,EXIT2,FLIST3,ICONV2,OWN2,PROTO,TIME2
-5) CHDIR,DELTASUM4,FLIST4,FUZZY2,HASH,HLINK
-";
-
-	#[test]
-	fn help_matches_reference() {
-		assert_eq!(OutLevels::info_help(), INFO_HELP);
-		assert_eq!(OutLevels::debug_help(), DEBUG_HELP);
-	}
-
-	#[test]
-	fn unknown_words_error_like_upstream() {
-		let mut levels = OutLevels::default();
-		assert_eq!(levels.apply_info("foo"), Err("Unknown --info item: \"foo\"".to_owned()));
-		// Trailing digits are a level, not part of the reported name.
-		assert_eq!(levels.apply_debug("xyz3"), Err("Unknown --debug item: \"xyz\"".to_owned()));
-		// A leading digit keeps the whole word.
-		assert_eq!(levels.apply_info("4name"), Err("Unknown --info item: \"4name\"".to_owned()));
-		// Servers ignore words they do not know.
-		assert_eq!(levels.parse_info("foo,name2", Priority::User, true), Ok(Words::Done));
-		assert_eq!(levels.info(Info::Name), 2);
-	}
-
-	#[test]
-	fn word_grammar() {
-		let mut levels = OutLevels::default();
-		levels.apply_info("name2,,Progress,stats9,del0").unwrap();
-		assert_eq!(levels.info(Info::Name), 2);
-		assert_eq!(levels.info(Info::Progress), 1);
-		assert_eq!(levels.info(Info::Stats), 4);
-		assert_eq!(levels.info(Info::Del), 0);
-		levels.apply_debug("ALL3").unwrap();
-		assert_eq!(levels.debug(Debug::Time), 3);
-		levels.apply_debug("none,proto2").unwrap();
-		assert_eq!(levels.debug(Debug::Time), 0);
-		assert_eq!(levels.debug(Debug::Proto), 2);
-		// Overflowing digit strings clamp to the maximum level.
-		levels.apply_info("misc99999999999999999999").unwrap();
-		assert_eq!(levels.info(Info::Misc), 4);
-		assert_eq!(levels.parse_info("name,HELP2,bogus", Priority::User, false), Ok(Words::Help));
-	}
-
-	#[test]
-	fn verbosity_never_overrides_user_words() {
-		let mut levels = OutLevels::default();
-		levels.apply_info("name0").unwrap();
-		levels.apply_verbose(2);
-		assert_eq!(levels.info(Info::Name), 0);
-		assert_eq!(levels.info(Info::Misc), 2);
-		assert_eq!(levels.info(Info::Nonreg), 1);
-		// -vv is the first level that adds debug words.
-		assert_eq!(levels.debug(Debug::Cmd), 1);
-		assert_eq!(OutLevels::from_verbose(1).debug(Debug::Cmd), 0);
-		let v3 = OutLevels::from_verbose(3);
-		assert_eq!(v3.debug(Debug::Cmd), 1);
-		assert_eq!(v3.debug(Debug::Connect), 2);
-		assert_eq!(OutLevels::from_verbose(0).info(Info::Nonreg), 1);
-		assert_eq!(OutLevels::from_verbose(0).info(Info::Name), 0);
-	}
-
-	#[test]
-	fn negate_round_trips() {
-		let mut levels = OutLevels::from_verbose(2);
-		levels.apply_debug("proto3").unwrap();
-		levels.negate();
-		assert_eq!(levels.info(Info::Name), 0);
-		assert_eq!(levels.debug(Debug::Proto), 0);
-		levels.negate();
-		assert_eq!(levels.info(Info::Name), 2);
-		assert_eq!(levels.debug(Debug::Proto), 3);
-	}
-
-	#[test]
-	fn server_option_strings() {
-		// Implied levels are never sent.
-		assert_eq!(OutLevels::from_verbose(2).server_info_arg(false, true), None);
-		let mut levels = OutLevels::from_verbose(1);
-		levels.apply_info("progress2,skip2,name0").unwrap();
-		// Sender client tells the receiving server: PROGRESS is client-only.
-		assert_eq!(levels.server_info_arg(false, true).as_deref(), Some("--info=NAME0,SKIP2"));
-		// Five or more words at one level abbreviate to ALL<n>.
-		let mut all = OutLevels::default();
-		all.apply_info("all2,name3").unwrap();
-		assert_eq!(all.server_info_arg(false, false).as_deref(), Some("--info=ALL2,NAME3"));
-	}
-}

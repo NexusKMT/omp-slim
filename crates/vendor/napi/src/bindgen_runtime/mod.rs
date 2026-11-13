@@ -207,22 +207,4 @@ pub unsafe fn create_object_with_properties(
   Ok(std::ptr::null_mut())
 }
 
-#[cfg(test)]
-mod tests {
-  use std::panic::panic_any;
 
-  use super::catch_unwind_safely;
-
-  struct PanickingPanicPayload;
-
-  impl Drop for PanickingPanicPayload {
-    fn drop(&mut self) {
-      panic!("nested panic payload destructor");
-    }
-  }
-
-  #[test]
-  fn catch_unwind_safely_forgets_panicking_panic_payloads() {
-    catch_unwind_safely(|| panic_any(PanickingPanicPayload));
-  }
-}

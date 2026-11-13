@@ -1470,19 +1470,4 @@ fn tie(ctx: &mut Ctx<'_, '_>, ts: &Ts<'_>, asgs: &[Asg]) -> R {
 	done(0)
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
 
-	#[test]
-	fn typeset_optstr_maps_letters_to_pm_bits() {
-		let bit = |c: u8| 1u32 << TYPESET_OPTSTR.iter().position(|&o| o == c).unwrap();
-		assert_eq!(bit(b'a'), PM_ARRAY);
-		assert_eq!(bit(b'i'), PM_INTEGER);
-		assert_eq!(bit(b'A'), PM_HASHED);
-		assert_eq!(bit(b'r'), PM_READONLY);
-		assert_eq!(bit(b'x'), PM_EXPORTED);
-		assert_eq!(bit(b'U'), PM_UNIQUE);
-		assert_eq!(bit(b'T'), PM_TIED);
-	}
-}

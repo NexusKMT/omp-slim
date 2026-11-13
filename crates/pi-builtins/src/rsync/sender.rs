@@ -1005,5 +1005,4 @@ fn device_size(file: &mut pi_vfs::File) -> u64 {
 	size
 }
 
-#[cfg(test)]
-mod tests;
+

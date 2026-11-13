@@ -13,7 +13,7 @@
 //! Nothing blocks: a read that would wait parks the builtin on a one-byte
 //! input probe; what it read so far stays in the command's entry, so the
 //! re-run continues where it stopped. Hosts without terminals (agent
-//! shells, the testkit) cannot open a pty: `zpty` fails with zsh's
+//! shells) cannot open a pty: `zpty` fails with zsh's
 //! `can't open pseudo terminal` message.
 //!
 //! Ported from zsh 5.9 `Src/Modules/zpty.c` (MIT-style licence, Copyright
