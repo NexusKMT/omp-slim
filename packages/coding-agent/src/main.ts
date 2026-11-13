@@ -2312,8 +2312,7 @@ export async function runRootCommand(
 				}).finally(unregisterPythonEvalProbe);
 			}
 			// Resumed and imported sessions neither show nor advance the startup changelog.
-			const showsStartupChangelog =
-				isInteractive && !(parsedArgs.continue || parsedArgs.resume);
+			const showsStartupChangelog = isInteractive && !(parsedArgs.continue || parsedArgs.resume);
 
 			const preloadProviderRegistrations =
 				isInteractive && autoResumed ? extensionsResult.runtime.pendingProviderRegistrations.slice() : [];

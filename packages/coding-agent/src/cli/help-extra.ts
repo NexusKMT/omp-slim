@@ -9,10 +9,8 @@ export function getExtraHelpText(): string {
   NODE_EXTRA_CA_CERTS        - CA bundle path (or inline PEM) for server certificate validation
 
   ${chalk.dim("# Search & Tools")}
-  EXA_API_KEY                - Exa web search
-  FIRECRAWL_API_KEY          - Firecrawl web search + fetch reader backend
+  FIRECRAWL_API_KEY          - Firecrawl fetch reader backend
   PARALLEL_API_KEY           - Parallel web search + fetch reader backend
-  SEARXNG_ENDPOINT           - SearXNG instance endpoint
 
   ${chalk.dim("# Configuration")}
   OMP_PROFILE                 - Named profile for isolated agent state (same as --profile)

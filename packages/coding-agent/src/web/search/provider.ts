@@ -10,16 +10,7 @@ type ProviderLoader = () => Promise<SearchProvider>;
 type ProviderRegistry<TId extends string> = { [Id in TId]: ProviderLoader };
 
 const PROVIDER_LOADERS: ProviderRegistry<SearchEngineId> = {
-	exa: () => import("./providers/exa").then(m => new m.ExaProvider()),
-	firecrawl: () => import("./providers/firecrawl").then(m => new m.FirecrawlProvider()),
 	parallel: () => import("./providers/parallel").then(m => new m.ParallelProvider()),
-	searxng: () => import("./providers/searxng").then(m => new m.SearXNGProvider()),
-	duckduckgo: () => import("./providers/duckduckgo").then(m => new m.DuckDuckGoProvider()),
-	google: () => import("./providers/google").then(m => new m.GoogleProvider()),
-	ecosia: () => import("./providers/ecosia").then(m => new m.EcosiaProvider()),
-	startpage: () => import("./providers/startpage").then(m => new m.StartpageProvider()),
-	mojeek: () => import("./providers/mojeek").then(m => new m.MojeekProvider()),
-	public: () => import("./providers/public").then(m => new m.PublicWebProvider()),
 };
 
 const providerInstances = new Map<string, Promise<SearchProvider>>();

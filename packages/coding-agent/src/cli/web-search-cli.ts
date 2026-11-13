@@ -122,7 +122,7 @@ ${chalk.bold("Arguments:")}
   query      Search query text
 
 ${chalk.bold("Options:")}
-  --engine <name>     HTTP search engine (for example, duckduckgo)
+  --engine <name>     HTTP search engine (for example, parallel)
   --recency <value>   Recency filter (when supported): ${RECENCY_OPTIONS.join(", ")}
   -l, --limit <n>     Max results to return
   --compact           Render condensed output
@@ -135,8 +135,8 @@ ${chalk.bold("Query directives:")}
   lenient post-filter (a constraint matching nothing is relaxed, not fatal).
 
 ${chalk.bold("Examples:")}
-  ${APP_NAME} q --engine=duckduckgo "what's the color of the sky"
-  ${APP_NAME} q --engine=public --recency=week "latest TypeScript changes"
+  ${APP_NAME} q --engine=parallel "what's the color of the sky"
+  ${APP_NAME} q --engine=parallel --recency=week "latest TypeScript changes"
   ${APP_NAME} q 'transformer scaling site:arxiv.org after:2024 -site:reddit.com'
 `);
 }

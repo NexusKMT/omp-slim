@@ -192,8 +192,7 @@ export function transformMessages<TApi extends Api>(
 				});
 				survives = true;
 			}
-			if (survives)
-				normalized.push({ ...message, content, providerPayload: undefined, requestControls: undefined });
+			if (survives) normalized.push({ ...message, content, providerPayload: undefined, requestControls: undefined });
 		} else if (message.role === "toolResult") {
 			const queue = malformedQueues.get(message.toolCallId);
 			if (queue?.shift()) continue;

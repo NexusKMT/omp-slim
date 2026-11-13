@@ -33,10 +33,7 @@ import { adaptSchemaForStrict, toolWireSchema } from "../utils/schema";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { mapToOpenAICompletionsToolChoice } from "../utils/tool-choice";
 import { transportFetch } from "../utils/transport-fetch";
-import {
-	isReasoningSourceSignature,
-	MISTRAL_CONTENT_PARTS_SIGNATURE,
-} from "../utils/reasoning-source";
+import { isReasoningSourceSignature, MISTRAL_CONTENT_PARTS_SIGNATURE } from "../utils/reasoning-source";
 import type {
 	ChatCompletionChunk,
 	ChatCompletionContentPart,
@@ -107,8 +104,7 @@ export function convertMessages(model: Model<"openai-completions">, context: Con
 			// replayed on subsequent turns: they reject the request (HTTP 400)
 			// when a turn that previously emitted thinking goes out without it.
 			const nonEmptyThinking = message.content.filter(
-				(block): block is ThinkingContent =>
-					block.type === "thinking" && block.thinking.trim().length > 0,
+				(block): block is ThinkingContent => block.type === "thinking" && block.thinking.trim().length > 0,
 			);
 			const reasoningSignature = nonEmptyThinking[0]?.thinkingSignature;
 			const reasoningEcho =

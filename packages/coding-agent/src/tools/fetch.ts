@@ -598,13 +598,7 @@ function pruneFrontMatter(markdown: string): string {
 /** Reader backends for {@link renderHtmlToText}, in default priority order. */
 export type FetchProvider = "native" | "trafilatura" | "lynx" | "parallel" | "firecrawl";
 
-const FETCH_PROVIDER_ORDER: readonly FetchProvider[] = [
-	"native",
-	"trafilatura",
-	"lynx",
-	"parallel",
-	"firecrawl",
-];
+const FETCH_PROVIDER_ORDER: readonly FetchProvider[] = ["native", "trafilatura", "lynx", "parallel", "firecrawl"];
 
 /** Reader backends that fetch the URL from their own servers, so a wall refusing this host may let them in. */
 const REMOTE_FETCH_PROVIDERS: readonly FetchProvider[] = ["parallel", "firecrawl"];

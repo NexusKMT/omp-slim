@@ -10,15 +10,6 @@
  */
 export const SEARCH_PROVIDER_LABELS = {
 	parallel: "Parallel",
-	exa: "Exa",
-	firecrawl: "Firecrawl",
-	searxng: "SearXNG",
-	startpage: "Startpage",
-	duckduckgo: "DuckDuckGo",
-	ecosia: "Ecosia",
-	google: "Google",
-	mojeek: "Mojeek",
-	public: "Public Web",
 } as const;
 
 /** Id of a search implementation; see {@link SEARCH_PROVIDER_LABELS}. */

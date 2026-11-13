@@ -150,10 +150,7 @@ interface SearchCandidate {
 function searchCandidates(params: SearchQueryParams): SearchCandidate[] {
 	if (Object.hasOwn(params, "model")) throw new Error("Web search model overrides are not supported.");
 	if (params.engine && !isRegisteredSearchEngine(params.engine)) throw new Error("Unknown HTTP search engine.");
-	// Preserve the automatic retrieval routes; other paid engines require explicit selection.
-	const engines: readonly SearchEngineId[] = params.engine
-		? [params.engine]
-		: ["parallel", "exa", "firecrawl", "searxng", "startpage", "duckduckgo", "ecosia", "google", "mojeek", "public"];
+	const engines: readonly SearchEngineId[] = params.engine ? [params.engine] : ["parallel"];
 	return engines.map(engine => ({ engine, explicit: params.engine !== undefined }));
 }
 
