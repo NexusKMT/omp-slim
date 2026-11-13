@@ -18,7 +18,7 @@ Source: `packages/ai/src/auth-broker/`, `packages/ai/src/auth-gateway/`, `packag
                 │                                                            │
   developer ──▶ │  ┌──────────────────────────┐    ┌────────────────────┐    │
   laptop /      │  │  omp auth-broker serve   │◀──▶│  SQLite agent.db    │    │
-  CI / robomp   │  │  - holds refresh tokens  │    │  (canonical writer)│    │
+  CI             │  │  - holds refresh tokens  │    │  (canonical writer)│    │
                 │  │  - background refresher  │    └────────────────────┘    │
                 │  │  /v1/{snapshot,refresh,…}│                              │
                 │  └─────────┬────────────────┘                              │
@@ -34,7 +34,7 @@ Source: `packages/ai/src/auth-broker/`, `packages/ai/src/auth-gateway/`, `packag
                              │  bearer ($CONFIG_DIR/auth-gateway.token)
                              ▼
                   gateway clients
-                  (llm-git, macOS widget, robomp containers, IDE plugins, …)
+                  (llm-git, macOS widget, IDE plugins, …)
                                 │
                                 ▼ provider request with broker-resolved credential
                   api.anthropic.com / api.openai.com / …

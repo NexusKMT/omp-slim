@@ -1,6 +1,5 @@
 # Build context for the pi-root `Dockerfile` (oh-my-pi/pi:dev). Shadows
-# .dockerignore for this file only. Robomp uses Dockerfile.robomp +
-# Dockerfile.robomp.dockerignore alongside.
+# .dockerignore for this file only.
 
 # Heavy build outputs — must never reach the build context. Patterns are
 # depth-agnostic (`**/`) to match .gitignore semantics: dockerignore anchors
@@ -64,10 +63,6 @@ packages/natives/native/.build/
 **/*.node
 packages/ai/test/.temp-images/
 sdk/python/omp-rpc/src/omp_rpc.egg-info/
-python/robomp/data/
-python/robomp/.cache/
-python/robomp/src/robomp/static/
-python/robomp/web/dist/
 
 # Scratch files the repo creates ad-hoc.
 syntax.jsonl
@@ -79,5 +74,5 @@ pi-*.html
 **/.venv/
 
 # Secrets. Should never be in the image regardless. Depth-agnostic: a bare
-# `.env` misses `python/robomp/.env`, which `COPY . /pi/` would bake in.
+# `.env` misses nested `.env` files, which `COPY . /pi/` would bake in.
 **/.env

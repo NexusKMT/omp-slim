@@ -17,7 +17,7 @@
 #     docker run --rm oh-my-pi/pi:dev --help
 #     docker run --rm -it -v "$PWD":/work oh-my-pi/pi:dev cli    # interactive omp
 #
-# Consume as a base in another Dockerfile (see Dockerfile.robomp):
+# Consume as a base in another Dockerfile:
 #     ARG PI_BASE=oh-my-pi/pi:dev
 #     FROM ${PI_BASE} AS pi-base
 ###############################################################################
@@ -69,7 +69,6 @@ COPY --parents \
     Cargo.toml Cargo.lock rust-toolchain.toml \
     packages/*/package.json \
     packages/tsconfig.workspace.json \
-    python/robomp/web/package.json \
     crates/*/Cargo.toml \
     /pi/
 
@@ -127,7 +126,7 @@ RUN python -m build --wheel --outdir /out
 ############################
 # 3) pi-base — python + bun + rustup + natives + omp_rpc + omp shim
 #
-# Sharable runtime base. Derived images (pi-runtime below, Dockerfile.robomp)
+# Sharable runtime base. Derived images (pi-runtime below)
 # extend this and overlay their own source tree. Default PI_ROOT=/work/pi is
 # friendly to derived images that mount a host pi checkout there; pi-runtime
 # overrides it to /pi because its source is baked in.
@@ -159,7 +158,7 @@ RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}" \
 # `#!/usr/bin/env node` package bins (oxlint, oxfmt, …) run for every uid.
 # Bun's own fallback is a /tmp/bun-node-<hash> dir created 0700 by the first
 # user that needs it; the image build runs as root, so it would bake a dir
-# no robomp slot user can enter.
+# no other uid can enter.
 RUN mkdir -p /usr/local/bun-node-fallback-bin \
     && ln -s /opt/bun/bin/bun /usr/local/bun-node-fallback-bin/node
 
@@ -217,7 +216,6 @@ COPY --parents \
     tsconfig.base.json tsconfig.json \
     packages/*/package.json \
     packages/tsconfig.workspace.json \
-    python/robomp/web/package.json \
     /pi/
 
 RUN bun install --frozen-lockfile --ignore-scripts

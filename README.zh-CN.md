@@ -665,7 +665,7 @@ Issue 和 Pull Request 向所有人开放。开放 PR 目前处于**试行**阶�
 
 OMP 基于 [MIT 许可证](LICENSE) 发布。
 
-第三方代码和内置（vendored）的上游代码，包括 `crates/pi-builtins/LICENSE` 中标明的第三方部分，仍遵循各自上游的许可证。每个发布的组件都附带自己的 `THIRD-PARTY-NOTICES.txt`：CLI（`packages/coding-agent`）、原生插件（`packages/natives`）和 robomp（`python/robomp`）。`omp --license` 会打印 CLI 和原生插件的许可声明。
+第三方代码和内置（vendored）的上游代码，包括 `crates/pi-builtins/LICENSE` 中标明的第三方部分，仍遵循各自上游的许可证。每个发布的组件都附带自己的 `THIRD-PARTY-NOTICES.txt`：CLI（`packages/coding-agent`）和原生插件（`packages/natives`）。`omp --license` 会打印 CLI 和原生插件的许可声明。
 
 © 2025 Mario Zechner  
 © 2025-2026 Can Bölük  

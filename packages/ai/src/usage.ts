@@ -237,7 +237,7 @@ export interface ClientUsageReport {
 	installId: string;
 	/** Human-readable machine name for display surfaces. */
 	hostname?: string;
-	/** Application label for the process that burned the tokens (e.g. `omp`, `robomp`). */
+	/** Application label for the process that burned the tokens (e.g. `omp`). */
 	app?: string;
 	entries: ObservedUsageEntry[];
 }
