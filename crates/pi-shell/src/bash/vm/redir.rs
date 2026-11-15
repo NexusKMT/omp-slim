@@ -631,7 +631,10 @@ fn defer(
 
 /// Whether redirection `r` to `target` opens a FIFO for one direction only,
 /// the open that waits for the other end (`O_RDWR` never does). A stat the
-/// filesystem cannot answer at once counts as no.
+/// filesystem cannot answer at once counts as a FIFO: the job defers the
+/// open rather than start it and race the answer (which a 0 ms-latency
+/// filesystem would win, installing the open here instead of leaving it to
+/// the process).
 fn waits_on_fifo(cx: &mut Cx<'_>, vp: &Vproc, r: &RedirIr, target: &BString) -> bool {
 	let one_way = matches!(
 		r.op,
@@ -646,7 +649,14 @@ fn waits_on_fifo(cx: &mut Cx<'_>, vp: &Vproc, r: &RedirIr, target: &BString) -> 
 		return false;
 	}
 	let path = absolute(&vp.cwd, target);
-	matches!(cx.host.fs().stat(BStr::new(&path), true), FsPoll::Ready(Ok(st)) if st.kind == StatKind::Fifo)
+	match cx.host.fs().stat(BStr::new(&path), true) {
+		FsPoll::Ready(Ok(st)) => st.kind == StatKind::Fifo,
+		// A stat that cannot answer at once may still be a FIFO: count it
+		// as one, so the open is decided (and left to the process) before
+		// it starts.
+		FsPoll::Pending(_) => true,
+		FsPoll::Ready(Err(_)) => false,
+	}
 }
 
 /// Whether the job's lone external may leave the open of `path` and the

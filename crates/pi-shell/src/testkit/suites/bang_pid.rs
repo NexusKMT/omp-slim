@@ -384,7 +384,6 @@ fn an_exec_like_callout_hands_its_job_to_the_program() {
 // forked child opens it); without the host's consent the job keeps its
 // virtual pid rather than wait.
 #[test]
-#[ignore = "load-sensitive: MemFs 0ms-latency timer races the background open/defer decision under full-parallel nextest"]
 fn a_redirection_that_would_wait_is_left_to_the_process() {
 	let world = World::new();
 	let fs = MemFs::with_latency(7, 1.0, 1);
