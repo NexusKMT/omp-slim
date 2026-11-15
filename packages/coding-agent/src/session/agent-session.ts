@@ -707,6 +707,18 @@ const INTERRUPTED_THINKING_MIN_CHARS = 60;
 const SESSION_CWD_CHANGE_REJECTED = Symbol("sessionCwdChangeRejected");
 
 /**
+ * Whether a reader `model` may receive assistant reasoning replayed into its
+ * context. Slim models a single axis: a reader includes thinking iff it is a
+ * thinking model — `thinking.mode === "effort"` (the effort ladder that streams
+ * reasoning). (Upstream gates this on the `classifier-cot-extraction` catalog
+ * axis — Anthropic's `reasoning_extraction` classifier refuses quoted reasoning
+ * — which slim's metadata has no counterpart for.)
+ */
+function readerIncludesThinking(model: Model): boolean {
+	return model.thinking?.mode === "effort";
+}
+
+/**
  * Translate a `power.sleepPrevention` mode into `PowerAssertion.start` options,
  * or `undefined` when the mode asks for no assertion at all.
  */
@@ -3780,14 +3792,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * run into hidden continuity context for the next turn. Short fragments are
 	 * omitted; `convertToLlm` still strips their incomplete thinking from replay.
 	 *
-	 * Skipped for readers whose classifier refuses quoted reasoning (the
-	 * `classifier-cot-extraction` catalog axis): the continuity quote replays the
-	 * model's own reasoning as conversation text, which Anthropic's
-	 * `reasoning_extraction` classifier refuses (verified live against Fable 5 —
-	 * the quoted fragment trips it even inside a full agentic request on
-	 * OAuth/subscription auth). transform-messages already drops the unsigned
-	 * trailing run from replay, so nothing else is lost. With no model to resolve
-	 * the reader from, the quote is skipped too.
+	 * Skipped for readers that do not receive replayed reasoning
+	 * (`readerIncludesThinking`): a non-reasoning reader gains nothing from the
+	 * continuity quote, and with no model to resolve the reader from the quote is
+	 * skipped too. transform-messages already drops the unsigned trailing run
+	 * from replay, so nothing else is lost.
 	 *
 	 * The original thinking stays on the assistant message so live render, reload,
 	 * and display-reset rebuilds keep showing it.
@@ -3797,7 +3806,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	): CustomMessage<InterruptedThinkingDetails> | undefined {
 		if (message.stopReason !== "aborted" || !isUserInterruptAbort(message)) return undefined;
 		const reader = this.agent.state.model ?? this.#modelRegistry.find(message.provider, message.model);
-		if (!reader || !false) return undefined;
+		if (!reader || !readerIncludesThinking(reader)) return undefined;
 		const demoted = demoteInterruptedThinking(message);
 		if (!demoted || demoted.reasoning.length < INTERRUPTED_THINKING_MIN_CHARS) return undefined;
 		const interruptedAt = Date.now();
