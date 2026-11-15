@@ -55,7 +55,7 @@ use napi_derive::napi;
 use notify::{RecursiveMode, Watcher as _};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-#[cfg(all(not(any(target_os = "linux", target_os = "macos", target_os = "windows"))))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 use unsupported as platform;
 #[cfg(target_os = "windows")]
 use windows as platform;

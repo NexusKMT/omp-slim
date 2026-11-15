@@ -109,7 +109,7 @@ impl<T: napi::bindgen_prelude::ToNapiValue> napi::bindgen_prelude::ToNapiValue f
 	}
 }
 
-#[cfg(any(all(target_os = "linux", target_env = "gnu")))]
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
 mod allocator {
 	use std::time::Duration;
 
