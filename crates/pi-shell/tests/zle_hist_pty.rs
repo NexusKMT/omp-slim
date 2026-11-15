@@ -162,7 +162,8 @@ fn history_beginning_search_with_histfindnodups() {
 /// line (`<echo two> 8 8`) races the capture; real zsh redraws it away before
 /// the frame. Reproducible only under full-parallel nextest, passes alone.
 #[test]
-#[ignore = "load-sensitive: stray re-echo lines in screen capture under full-parallel nextest (passes in isolation)"]
+#[ignore = "load-sensitive: stray re-echo lines in screen capture under full-parallel nextest \
+            (passes in isolation)"]
 fn history_beginning_search_end_functions() {
 	let rc = format!(
 		"{SHOW}fpath=(/usr/share/zsh/5.9/functions)\nautoload -Uz history-search-end\nzle -N \
@@ -247,7 +248,8 @@ fn incremental_search_quoted_insert_and_paste() {
 }
 
 #[test]
-#[ignore = "load-sensitive: incremental-search screen capture shows raw/incomplete state under full-parallel nextest (passes in isolation)"]
+#[ignore = "load-sensitive: incremental-search screen capture shows raw/incomplete state under \
+            full-parallel nextest (passes in isolation)"]
 fn incremental_search_with_histfindnodups() {
 	same("setopt histfindnodups\n", "\x12two\x12\x12");
 }
@@ -316,7 +318,8 @@ fn incremental_search_hooks_and_match_parameters() {
 }
 
 #[test]
-#[ignore = "load-sensitive: incremental-search screen capture shows raw/incomplete state under full-parallel nextest (passes in isolation)"]
+#[ignore = "load-sensitive: incremental-search screen capture shows raw/incomplete state under \
+            full-parallel nextest (passes in isolation)"]
 fn incremental_search_with_argument_keys() {
 	let rc = "w() { zle history-incremental-search-backward thr; print -r -- \"st=$? <$BUFFER>\" \
 	          >>~/log }\nzle -N w\nbindkey '^T' w\nbindkey -M isearch '^M' accept-search\n";

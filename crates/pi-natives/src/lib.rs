@@ -103,9 +103,9 @@ const NAPI_TOKIO_MAX_BLOCKING_THREADS: usize = 8;
 /// helpers (`count_tokens`, vendored `sort`), but the global pool cannot
 /// recover if its first lazy initialization fails after Windows refuses worker
 /// threads.
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 const RAYON_MAX_THREADS: usize = 8;
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 const RAYON_RESERVED_NON_RAYON_THREADS: usize = 1;
 
 /// Windows worker count we'd *like*, before checking what the OS will actually
@@ -123,19 +123,19 @@ fn desired_rayon_threads() -> usize {
 	clamped_rayon_threads(std::thread::available_parallelism().map_or(1, |threads| threads.get()))
 }
 
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 fn clamped_rayon_threads(threads: usize) -> usize {
 	threads.clamp(1, RAYON_MAX_THREADS)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 enum RayonPoolPlan {
 	WorkerThreads(usize),
 	SkipGlobalPool,
 }
 
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 fn rayon_pool_plan(desired: usize, spawnable: usize) -> RayonPoolPlan {
 	let desired = clamped_rayon_threads(desired);
 	let workers = spawnable
@@ -202,7 +202,7 @@ fn probe_spawnable_workers(target: usize) -> usize {
 /// Rayon stores global initialization in a `Once`, so a failed
 /// `build_global()` call would permanently poison the process for later
 /// parallel work.
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 fn rayon_probe_target(desired: usize) -> usize {
 	clamped_rayon_threads(desired).saturating_add(RAYON_RESERVED_NON_RAYON_THREADS)
 }

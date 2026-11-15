@@ -41,8 +41,8 @@ use pi_shell::{
 		Platform, RestoreError, RestoreOpts, RunId, Shell, SigSet, Signal, Step, StoreError, Vpid,
 	},
 	process::{NativeHost, no_callouts, wait_runnable},
-	sys::Parker,
 	rng::Rng,
+	sys::Parker,
 };
 
 /// Environment variable counting nested obash instances under a fault run.

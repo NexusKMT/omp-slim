@@ -1154,9 +1154,6 @@ fn cli_text_owned_capped(
 		.stdout)
 }
 
-
-
-
 /// Test lowers the cap for its own invocations without truncating captures in
 /// tests running concurrently.
 #[cfg(test)]
@@ -1354,7 +1351,6 @@ fn cap_bytes(mut bytes: Vec<u8>, max: Option<usize>) -> ShowResult {
 	}
 	ShowResult { bytes, truncated }
 }
-
 
 #[cfg(test)]
 mod tests {

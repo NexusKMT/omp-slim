@@ -54,13 +54,15 @@ fn same(drive: impl Fn(&mut Pty) -> io::Result<()>) {
 }
 
 #[test]
-#[ignore = "genuine ZLE screen diff: obash leaves a transient partial-echo 'ech%' cursor artifact real zsh redraws away (reproducible in isolation, not load)"]
+#[ignore = "genuine ZLE screen diff: obash leaves a transient partial-echo 'ech%' cursor artifact \
+            real zsh redraws away (reproducible in isolation, not load)"]
 fn and_or_at_line_end_continues_on_ps2() {
 	same(|pty| keys(pty, "echo x y ||\recho z\rfalse &&\recho no\recho done\r"));
 }
 
 #[test]
-#[ignore = "load-sensitive: stray partial-echo 'fp%' in screen capture under full-parallel nextest (passes in isolation)"]
+#[ignore = "load-sensitive: stray partial-echo 'fp%' in screen capture under full-parallel nextest \
+            (passes in isolation)"]
 fn autoloaded_file_reads_comments_in_an_interactive_shell() {
 	same(|pty| keys(pty, "fpath=(~ $fpath); autoload -Uz tf; tf; echo $?\r"));
 }

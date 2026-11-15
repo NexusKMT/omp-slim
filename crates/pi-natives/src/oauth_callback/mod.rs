@@ -46,19 +46,18 @@ use std::{
 
 use anyhow::{Context as _, Result as AnyResult, anyhow, bail};
 use context::{Context, atomic_write, ensure_private_dir};
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 use darwin as platform;
-#[cfg(target_os="linux")]
+#[cfg(target_os = "linux")]
 use linux as platform;
 use napi::{Env, Error, Result, bindgen_prelude::PromiseRaw};
 use napi_derive::napi;
 use notify::{RecursiveMode, Watcher as _};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-
-#[cfg(all(not(any(target_os="linux",target_os="macos",target_os="windows"))))]
+#[cfg(all(not(any(target_os = "linux", target_os = "macos", target_os = "windows"))))]
 use unsupported as platform;
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 use windows as platform;
 
 use crate::{
@@ -70,13 +69,11 @@ use crate::{
 ///
 /// A host probe the hermetic unit tests cannot control; WSL rejection is
 /// exercised through the `WSL_DISTRO_NAME` / `WSL_INTEROP` env keys instead.
-#[cfg(target_os="linux")]
+#[cfg(target_os = "linux")]
 static WSL_KERNEL: LazyLock<bool> = LazyLock::new(|| {
 	fs::read_to_string("/proc/sys/kernel/osrelease")
 		.is_ok_and(|release| release.to_ascii_lowercase().contains("microsoft"))
 });
-
-
 
 const JOURNAL_VERSION: u32 = 1;
 const JOURNAL_LIMIT: u64 = 1024 * 1024;
@@ -345,7 +342,6 @@ fn start_blocking(core: &Core, cancel: CancelToken) -> AnyResult<StartOutcome> {
 	}
 	#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 	return Ok(StartOutcome::Unsupported);
-
 
 	#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 	{
@@ -859,6 +855,3 @@ fn session_supported(env: &BTreeMap<String, String>) -> bool {
 fn napi_error(error: impl std::fmt::Display) -> Error {
 	Error::from_reason(error.to_string())
 }
-
-
-

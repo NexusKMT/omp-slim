@@ -88,7 +88,8 @@ const LOOPS: &str = "f() { local i; for i in 1 2 3; do echo \"$1 $i\"; done; }; 
                      \"$p\" = \"$$\" ] && echo same-pid; echo end $i";
 
 #[test]
-#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under full-parallel nextest"]
+#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under \
+            full-parallel nextest"]
 fn exec_mode_restores_in_a_new_process_like_the_plain_run() {
 	let (plain, line) = same_as_plain(LOOPS, "1:3", "exec", &[]);
 	assert!(String::from_utf8_lossy(&plain.stdout).ends_with("same-pid\nend 30\n"));
@@ -103,7 +104,8 @@ fn exec_mode_restores_in_a_new_process_like_the_plain_run() {
 /// units it can still run (function bodies, the frames' units), as a host
 /// in a new process needs them.
 #[test]
-#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under full-parallel nextest"]
+#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under \
+            full-parallel nextest"]
 fn exec_mode_events_name_only_announced_units() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("events.jsonl");
@@ -310,7 +312,8 @@ fn a_script_on_stdin_continues_after_exec() {
 /// obash, or the re-issued read waited forever (source6.sub). Now the read
 /// is reported lost and the snapshot skipped, in either mode.
 #[test]
-#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under full-parallel nextest"]
+#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under \
+            full-parallel nextest"]
 fn a_fifo_read_in_flight_survives_snapshots() {
 	let dir = tempfile::tempdir().unwrap();
 	let fifo = dir.path().join("fifo");
@@ -334,7 +337,8 @@ const EXTERNAL_IN_FLIGHT: &str = "/bin/sleep 0.3 & /bin/sh -c :; i=0; while [ $i
 /// Under the default policy a snapshot that would lose the external in
 /// flight is not restored; the run matches the plain one.
 #[test]
-#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under full-parallel nextest"]
+#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under \
+            full-parallel nextest"]
 fn snapshots_losing_an_external_are_skipped_by_default() {
 	let (_, line) = same_as_plain(EXTERNAL_IN_FLIGHT, "1:7", "exec", &[]);
 	assert!(num(&line, "skipped_ext") > 0, "{line:?}");
@@ -346,7 +350,8 @@ fn snapshots_losing_an_external_are_skipped_by_default() {
 /// retries at every following safepoint: the snapshot is restored as soon
 /// as the external is gone (here: after `wait`), and nothing is logged lost.
 #[test]
-#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under full-parallel nextest"]
+#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under \
+            full-parallel nextest"]
 fn the_defer_policy_restores_once_the_external_is_gone() {
 	let script = format!("{EXTERNAL_IN_FLIGHT}; echo after; echo end");
 	let dir = tempfile::tempdir().unwrap();
@@ -366,7 +371,8 @@ fn the_defer_policy_restores_once_the_external_is_gone() {
 /// `PI_SHELL_FAULT_LOST=restore` restores anyway and logs the loss, which
 /// makes the kit exclude the run.
 #[test]
-#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under full-parallel nextest"]
+#[ignore = "load-sensitive: fault-injected obash subprocess exceeds 30s harness LIMIT under \
+            full-parallel nextest"]
 fn the_restore_policy_restores_and_logs_the_loss() {
 	let dir = tempfile::tempdir().unwrap();
 	let log = dir.path().join("lost.log");

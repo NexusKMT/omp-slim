@@ -45,8 +45,6 @@ pub(super) struct Context {
 	pub(super) cancel:        CancelToken,
 }
 
-
-
 impl Context {
 	/// Construct a transaction context and its fixed callback/helper paths.
 	pub(super) fn new(
@@ -64,16 +62,7 @@ impl Context {
 			"callback-helper"
 		};
 		let helper_path = directory.join(helper_name);
-		Self {
-			id,
-			scheme,
-			directory,
-			callback_path,
-			helper_path,
-			home,
-			env,
-			cancel,
-		}
+		Self { id, scheme, directory, callback_path, helper_path, home, env, cancel }
 	}
 
 	/// Check this transaction's cooperative cancellation deadline.

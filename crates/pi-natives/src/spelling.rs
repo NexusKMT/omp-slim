@@ -5,7 +5,8 @@
 //! strings use the same indexing unit, so ranges cross N-API without remapping.
 //! Other platforms expose the same API as an unavailable, no-op backend.
 //! All `AppKit` work runs serially on the one process-wide spelling thread in
-//! `pi_predict::apple::appkit`, so the singleton keeps a stable thread identity.
+//! `pi_predict::apple::appkit`, so the singleton keeps a stable thread
+//! identity.
 
 use napi_derive::napi;
 
