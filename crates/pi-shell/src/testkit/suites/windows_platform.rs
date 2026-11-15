@@ -51,7 +51,6 @@ fn default_path_splits_into_its_directories() {
 
 /// zsh on Windows reports MSYS2's `OSTYPE` (plugins branch on
 /// `[[ $OSTYPE == msys* ]]`), not `linux-gnu`.
-#[cfg(not(target_os = "macos"))]
 #[test]
 fn ostype_is_msys() {
 	let (out, _) = zsh_on_windows(&[], "print -r -- $OSTYPE");

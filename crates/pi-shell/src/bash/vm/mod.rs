@@ -1339,7 +1339,10 @@ pub fn zsh_startup_values(
 	}
 	out.push((&b"LOGNAME"[..], Var::scalar(user.name, Attrs::EXPORT), false));
 	let (_, release, machine) = cx.host.uname().unwrap_or_default();
-	let macos = cfg!(target_os = "macos");
+	// The host's build only shapes these when the engine emulates that host
+	// (`cfg!(target_os = "macos")` is the host's, not the engine's, OS): a
+	// Windows engine on a macOS host must not report Apple's `OSTYPE`.
+	let macos = platform == crate::bash::ids::Platform::MacOs && cfg!(target_os = "macos");
 	// The configure-time `MACHTYPE`, `VENDOR` and `OSTYPE` of the system's
 	// zsh (Apple's build reports `x86_64` on every Mac).
 	let machtype = if macos {
