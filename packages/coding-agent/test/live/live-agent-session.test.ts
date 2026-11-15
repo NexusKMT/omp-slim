@@ -111,9 +111,7 @@ describe.skipIf(!live)("live AgentSession end-to-end", () => {
 			const turn1 = assistants(session.agent.state.messages)[0];
 			expect(turn1).toBeTruthy();
 			expect(turn1!.stopReason).toBe("toolUse");
-			expect(turn1!.content).toContainEqual(
-				expect.objectContaining({ type: "toolCall", name: "record" }),
-			);
+			expect(turn1!.content).toContainEqual(expect.objectContaining({ type: "toolCall", name: "record" }));
 			// Reasoning model: the signed thinking block must be stored for replay.
 			const thinking = turn1!.content.filter(block => block.type === "thinking");
 			expect(thinking.length).toBeGreaterThan(0);
@@ -126,9 +124,9 @@ describe.skipIf(!live)("live AgentSession end-to-end", () => {
 			expect(stored.length).toBeGreaterThanOrEqual(2);
 			expect(stored.some(m => m.stopReason === "error")).toBe(false);
 			// The final turn answered (no 400-class wire failure aborted it).
-			const finalText = stored[stored.length - 1]!.content
-				.map(block => (block.type === "text" ? block.text : ""))
-				.join(" ");
+			const finalText = stored[stored.length - 1]!.content.map(block =>
+				block.type === "text" ? block.text : "",
+			).join(" ");
 			expect(finalText.toLowerCase()).toContain("live-session");
 
 			// LLM view must retain the signed thinking for the encoder replay.

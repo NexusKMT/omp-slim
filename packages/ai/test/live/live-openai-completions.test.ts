@@ -2,14 +2,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { streamOpenAICompletions } from "../../src/providers/openai-completions";
-import type {
-	AssistantMessage,
-	AssistantMessageEventStream,
-	Context,
-	Message,
-	Model,
-	Tool,
-} from "../../src/types";
+import type { AssistantMessage, AssistantMessageEventStream, Context, Message, Model, Tool } from "../../src/types";
 
 /**
  * Live integration tests against a real Chat Completions endpoint.
@@ -104,7 +97,9 @@ describe.skipIf(!live)("live Chat Completions (reasoning + wire contract)", () =
 	it("decodes reasoning_content into signed thinking blocks and populates usage", async () => {
 		const model = liveModel();
 		const message = await collect(
-			liveCall(model, { messages: [user("Think briefly about why the sky is blue, then answer with the single word: blue.")] }),
+			liveCall(model, {
+				messages: [user("Think briefly about why the sky is blue, then answer with the single word: blue.")],
+			}),
 		);
 		expect(message.stopReason).toBe("stop");
 		const thinking = message.content.filter(
