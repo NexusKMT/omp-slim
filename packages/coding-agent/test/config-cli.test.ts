@@ -274,8 +274,9 @@ describe("config list --scope", () => {
 				"    models: [openai/gpt-5]",
 				"compaction:",
 				"  enabled: false",
-				"searxng:",
-				"  token: secret-token",
+				"dev:",
+				"  autoqaPush:",
+				"    token: secret-token",
 				"",
 			].join("\n"),
 		);
@@ -283,13 +284,13 @@ describe("config list --scope", () => {
 
 		const layer = await listLayer("global");
 
-		expect(Object.keys(layer).toSorted()).toEqual(["compaction.enabled", "enabledModels", "searxng.token"]);
+		expect(Object.keys(layer).toSorted()).toEqual(["compaction.enabled", "dev.autoqaPush.token", "enabledModels"]);
 		expect(layer.enabledModels.value).toEqual([
 			"anthropic/claude-sonnet-4-5",
 			{ path: projectDir.path(), models: ["openai/gpt-5"] },
 		]);
 		expect(layer["compaction.enabled"]).toMatchObject({ value: false, type: "boolean" });
-		expect(layer["searxng.token"]).toEqual({
+		expect(layer["dev.autoqaPush.token"]).toEqual({
 			redacted: true,
 			type: "string",
 			description: expect.any(String),
@@ -317,7 +318,7 @@ describe("config list --scope", () => {
 		if (!testAgentDir) throw new Error("Test directory was not initialized");
 		await Bun.write(
 			path.join(testAgentDir.path(), "config.yml"),
-			"compaction:\n  enabled: false\nsearxng:\n  token: secret-token\n",
+			"compaction:\n  enabled: false\ndev:\n  autoqaPush:\n    token: secret-token\n",
 		);
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -325,7 +326,7 @@ describe("config list --scope", () => {
 
 		const text = Bun.stripANSI(logSpy.mock.calls.map(call => String(call[0] ?? "")).join("\n"));
 		expect(text).toContain("compaction.enabled = false");
-		expect(text).toContain("searxng.token = ********");
+		expect(text).toContain("dev.autoqaPush.token = ********");
 		expect(text).not.toContain("secret-token");
 		expect(text).not.toContain("defaultThinkingLevel");
 	});

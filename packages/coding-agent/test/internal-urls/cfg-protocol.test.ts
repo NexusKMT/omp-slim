@@ -11,7 +11,7 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 
 import { cfgAdvisorEnabled, cfgAdvisorSyncBacklog } from "@oh-my-pi/pi-coding-agent/advisor/settings";
 import { cfgEditFuzzyMatch } from "@oh-my-pi/pi-coding-agent/edit/settings";
-import { cfgSearxngEndpoint } from "@oh-my-pi/pi-coding-agent/web/settings";
+import { cfgDevAutoqaPushEndpoint } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import type { InternalWriteResult } from "@oh-my-pi/pi-coding-agent/internal-urls/types";
 
 function sessionWith(settings: Settings, caller: Partial<ToolSession> = {}): ToolSession {
@@ -42,8 +42,8 @@ describe("CfgProtocolHandler", () => {
 	});
 
 	it("redacts credential values", async () => {
-		const settings = Settings.isolated({ "searxng.token": "sekrit" });
-		const resource = await read("cfg://searxng", settings);
+		const settings = Settings.isolated({ "dev.autoqaPush.token": "sekrit" });
+		const resource = await read("cfg://dev.autoqaPush", settings);
 		expect(resource.content).toContain("token: <redacted>");
 		expect(resource.content).not.toContain("sekrit");
 	});
@@ -167,7 +167,7 @@ describe("CfgProtocolHandler", () => {
 		}
 	});
 
-	it("asks normally for writes a fallback environment variable only defaults", async () => {
+	it("asks normally for a write no environment variable shadows, session-only then saved", async () => {
 		const settings = Settings.isolated();
 		const asked: CfgChangeRequest[] = [];
 		setCfgApprovalHost({
@@ -175,21 +175,14 @@ describe("CfgProtocolHandler", () => {
 			applied: () => {},
 			persistentSettings: settings,
 		});
-		const previous = Bun.env.SEARXNG_ENDPOINT;
-		Bun.env.SEARXNG_ENDPOINT = "http://env.example";
-		try {
-			const session = await write("cfg://searxng/endpoint", '"http://session.example"', settings);
-			expect(session.details?.cfg).toMatchObject({ outcome: "applied" });
-			expect(cfgSearxngEndpoint.get(settings)).toBe("http://session.example");
+		const session = await write("cfg://dev.autoqaPush/endpoint", '"http://session.example"', settings);
+		expect(session.details?.cfg).toMatchObject({ outcome: "applied" });
+		expect(cfgDevAutoqaPushEndpoint.get(settings)).toBe("http://session.example");
 
-			await write("cfg://searxng/endpoint/save", '"http://saved.example"', settings);
-			expect(cfgSearxngEndpoint.get(settings)).toBe("http://saved.example");
-			expect(asked).toHaveLength(2);
-			expect(asked.map(request => request.shadowedBy)).toEqual([undefined, undefined]);
-		} finally {
-			if (previous === undefined) delete Bun.env.SEARXNG_ENDPOINT;
-			else Bun.env.SEARXNG_ENDPOINT = previous;
-		}
+		await write("cfg://dev.autoqaPush/endpoint/save", '"http://saved.example"', settings);
+		expect(cfgDevAutoqaPushEndpoint.get(settings)).toBe("http://saved.example");
+		expect(asked).toHaveLength(2);
+		expect(asked.map(request => request.shadowedBy)).toEqual([undefined, undefined]);
 	});
 
 	it("persists /save writes to the host settings and mirrors them into a separate session instance", async () => {

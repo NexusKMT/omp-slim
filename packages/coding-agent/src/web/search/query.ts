@@ -112,7 +112,7 @@ export interface QuerySyntax {
 	dateRange?: boolean;
 }
 
-/** Full Google-style syntax: engines that parse the classic operator set (Google, Startpage, Ecosia, Brave, Kagi, Mojeek, SearXNG…). */
+/** Full Google-style syntax: the classic operator set, for upstreams that parse all of it. */
 export const GOOGLE_QUERY_SYNTAX: QuerySyntax = {
 	phrases: true,
 	negation: true,
@@ -635,43 +635,6 @@ export function formatQuery(q: StructuredQuery, syntax: QuerySyntax = {}): strin
 		result = fallback.join(" ").trim();
 	}
 	return result || q.raw.trim();
-}
-
-/**
- * Build the engine query for a credential-free HTML engine (Google,
- * Startpage, DuckDuckGo, Ecosia, Mojeek, SearXNG, and the Public Web
- * fan-out over them).
- *
- * Canonicalizes directives via {@link formatQuery} with the engine's
- * {@link QuerySyntax} (default: full Google syntax), after demoting the
- * operators that zero-match across the scraper set: engines only match
- * `site:` against a bare domain (a path yields zero results everywhere),
- * and DuckDuckGo ignores `inurl:` entirely — so either operator silently
- * empties the result set. The raw URL as a plain term matches fine, so
- * bare-domain `site:` filters are kept while path-carrying `site:` and all
- * `inurl:` values become plain keywords; the demotion is structural (before
- * formatting), so OR-grouped and quoted directives are covered. Negated
- * forms (`-site:`, `-inurl:`) pass through untouched — demoting them would
- * invert an exclusion into a search term; the pipeline post-filter
- * ({@link applyQueryConstraints}) enforces every demoted or unsupported
- * constraint on the returned sources. Directive-free queries pass through
- * byte-identical.
- */
-export function formatScraperQuery(
-	query: string,
-	parsedQuery?: StructuredQuery,
-	syntax: QuerySyntax = GOOGLE_QUERY_SYNTAX,
-): string {
-	const parsed = parsedQuery ?? parseSearchQuery(query);
-	if (!parsed.hasDirectives) return query;
-	const demoted = [...parsed.sites.filter(site => site.includes("/")), ...parsed.inUrl];
-	const downgraded: StructuredQuery = {
-		...parsed,
-		sites: parsed.sites.filter(site => !site.includes("/")),
-		inUrl: [],
-		terms: [...parsed.terms, ...demoted.map(text => ({ text }))],
-	};
-	return formatQuery(downgraded, syntax);
 }
 
 /** Hostname (lowercased) and pathname of a URL, or undefined when unparsable. */

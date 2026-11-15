@@ -4,7 +4,7 @@ export * from "@oh-my-pi/pi-tui/tools/web-search-types";
 
 /** One provider that failed before another answered, or before the search gave up. */
 export interface SearchFailureDetail {
-	/** HTTP search engine id, such as `brave` or `exa`. */
+	/** HTTP search engine id, such as `parallel`. */
 	provider: string;
 	label: string;
 	/** Flattened, length-capped reason, as the LLM-facing fallback note quotes it. */

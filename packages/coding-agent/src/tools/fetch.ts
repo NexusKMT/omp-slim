@@ -623,7 +623,7 @@ const BLOCK_PAGE_MAX_CHARS = 2048;
 
 /**
  * Render HTML to markdown by trying reader backends in priority order: native
- * (in-process), trafilatura, lynx, Parallel, Firecrawl, then Jina. The
+ * (in-process), trafilatura, lynx, Parallel, then Firecrawl. The
  * `providers.fetch` setting picks the order — `auto` uses the default above; any
  * specific backend is tried first, then the remaining backends as fallbacks.
  * Every backend's output must clear the same length and JavaScript-gate checks,
@@ -632,7 +632,7 @@ const BLOCK_PAGE_MAX_CHARS = 2048;
  * chain to those backends, in the same order.
  *
  * The overall `timeout` budget bounds the whole call; remote backends (Parallel,
- * Firecrawl, Jina) are additionally capped at `REMOTE_READER_MAX_MS` so a hung
+ * Firecrawl) are additionally capped at `REMOTE_READER_MAX_MS` so a hung
  * endpoint cannot starve later renderers — especially the purely-local native
  * converter, which always works on already-loaded HTML. Only a real `userSignal`
  * cancellation aborts the chain (#1449).

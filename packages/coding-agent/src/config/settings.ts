@@ -3543,39 +3543,12 @@ export class Settings {
 			delete raw[`task.${key}`];
 		}
 
-		// Consolidate the retired Exa suite toggles onto the sole remaining
-		// provider switch. The old runtime required both `enabled` and
-		// `enableSearch`, so preserve that AND semantics when both are present.
-		// Researcher and Websets were removed with the standalone Exa tools.
-		const exaObj = isRecord(raw.exa) ? raw.exa : undefined;
-		const exaEnabledValues = [
-			exaObj?.enabled,
-			raw["exa.enabled"],
-			exaObj?.enableSearch,
-			raw["exa.enableSearch"],
-		].filter((value): value is boolean => typeof value === "boolean");
-		const hasFlatExaSetting =
-			"exa.enabled" in raw ||
-			"exa.enableSearch" in raw ||
-			"exa.enableResearcher" in raw ||
-			"exa.enableWebsets" in raw;
-		if (exaObj || hasFlatExaSetting) {
-			const exaRoot = exaObj ?? {};
-			if (exaEnabledValues.length > 0) {
-				exaRoot.enabled = exaEnabledValues.every(Boolean);
-			}
-			delete exaRoot.enableSearch;
-			delete exaRoot.enableResearcher;
-			delete exaRoot.enableWebsets;
-			if (Object.keys(exaRoot).length > 0) {
-				raw.exa = exaRoot;
-			} else {
-				delete raw.exa;
-			}
-			delete raw["exa.enabled"];
-			delete raw["exa.enableSearch"];
-			delete raw["exa.enableResearcher"];
-			delete raw["exa.enableWebsets"];
+		// The standalone Exa search settings are retired: Exa now arrives as an
+		// MCP server, so nothing reads `exa.*` (the old suite toggles, `enabled`,
+		// and `searchDelayMs` included). Drop them so older configs still load.
+		delete raw.exa;
+		for (const key of Object.keys(raw)) {
+			if (key.startsWith("exa.")) delete raw[key];
 		}
 
 		// OMP Slim no longer ships native desktop control.

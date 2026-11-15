@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import {
 	applyQueryConstraints,
 	formatQuery,
-	formatScraperQuery,
 	GOOGLE_QUERY_SYNTAX,
 	matchesQueryConstraints,
 	matchesSite,
@@ -169,40 +168,6 @@ describe("formatQuery", () => {
 	it("falls back to constraint values for directive-only queries", () => {
 		const q = parseSearchQuery("site:kubernetes.io filetype:yaml");
 		expect(formatQuery(q, {})).toBe("kubernetes.io yaml");
-	});
-});
-
-describe("formatScraperQuery", () => {
-	it("demotes path-carrying site: and inurl: to plain terms, keeping bare-domain site:", () => {
-		expect(formatScraperQuery("site:github.com/can1357/oh-my-pi inurl:releases site:github.com 17.1.1 release")).toBe(
-			"17.1.1 release github.com/can1357/oh-my-pi releases site:github.com",
-		);
-	});
-
-	it("demotes every site in an OR-groupable multi-site query when all carry paths", () => {
-		expect(formatScraperQuery("cve site:nvd.nist.gov/vuln site:mitre.org/cgi-bin")).toBe(
-			"cve nvd.nist.gov/vuln mitre.org/cgi-bin",
-		);
-	});
-
-	it("passes negated site:/inurl: through as operators", () => {
-		expect(formatScraperQuery("foo -site:github.com/x -inurl:bar")).toBe("foo -site:github.com/x -inurl:bar");
-	});
-
-	it("passes directive-free queries through byte-identical", () => {
-		expect(formatScraperQuery("github.com/can1357/oh-my-pi 17.1.1 release")).toBe(
-			"github.com/can1357/oh-my-pi 17.1.1 release",
-		);
-	});
-
-	it("respects a narrower engine syntax while still demoting hostile operators", () => {
-		expect(
-			formatScraperQuery("a site:x.com site:y.com/z inurl:w", undefined, {
-				phrases: true,
-				negation: true,
-				site: true,
-			}),
-		).toBe("a y.com/z w site:x.com");
 	});
 });
 

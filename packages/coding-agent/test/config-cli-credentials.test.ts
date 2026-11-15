@@ -10,7 +10,7 @@ import { createSettingsHost } from "../src/config/settings-ui";
 
 describe("credential settings", () => {
 	it("marks every known credential, including those with no settings panel entry", () => {
-		for (const path of ["searxng.token", "searxng.basicPassword", "dev.autoqaPush.token"] as const) {
+		for (const path of ["dev.autoqaPush.token"] as const) {
 			expect(lookup(path)?.isCredential).toBe(true);
 		}
 	});
@@ -32,7 +32,7 @@ describe("credential settings", () => {
 
 describe("credential masking reaches every surface", () => {
 	it("keeps credentials with no panel entry out of the panel entirely", () => {
-		for (const path of ["searxng.token", "dev.autoqaPush.token"] as const) {
+		for (const path of ["dev.autoqaPush.token"] as const) {
 			expect(getSettingDef(createSettingsHost().entries, path)).toBeUndefined();
 		}
 	});
@@ -96,39 +96,39 @@ describe("config list output", () => {
 	}
 
 	it("masks a configured credential and never prints it", async () => {
-		await runConfigCommand({ action: "set", key: "searxng.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "dev.autoqaPush.token", value: SECRET, flags: { json: true } });
 		const output = await humanList();
-		expect(output).toContain("searxng.token = ********");
+		expect(output).toContain("dev.autoqaPush.token = ********");
 		expect(output).not.toContain(SECRET);
 	});
 
 	it("omits the value and flags redaction in JSON, rather than emitting a placeholder", async () => {
-		await runConfigCommand({ action: "set", key: "searxng.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "dev.autoqaPush.token", value: SECRET, flags: { json: true } });
 		const { raw, parsed } = await jsonList();
 		// A consumer must not be able to write the stand-in back as the credential.
 		expect(raw).not.toContain(SECRET);
 		expect(raw).not.toContain("********");
-		expect(parsed["searxng.token"]).toMatchObject({ redacted: true });
-		expect(parsed["searxng.token"]).not.toHaveProperty("value");
+		expect(parsed["dev.autoqaPush.token"]).toMatchObject({ redacted: true });
+		expect(parsed["dev.autoqaPush.token"]).not.toHaveProperty("value");
 	});
 
 	it("does not report an unset credential as configured", async () => {
 		// Redacting on classification alone would make a fresh install look like
 		// every credential is already set.
 		const output = await humanList();
-		expect(output).not.toContain("searxng.token = ********");
+		expect(output).not.toContain("dev.autoqaPush.token = ********");
 		const { parsed } = await jsonList();
-		expect(parsed["searxng.token"]).not.toHaveProperty("redacted");
+		expect(parsed["dev.autoqaPush.token"]).not.toHaveProperty("redacted");
 	});
 
 	it("does not report a cleared credential as configured", async () => {
 		// The settings panel persists "" when a credential is cleared and renders
 		// that as unset; `config list` must agree, or a cleared token looks set.
-		await runConfigCommand({ action: "set", key: "searxng.token", value: SECRET, flags: { json: true } });
-		await runConfigCommand({ action: "set", key: "searxng.token", value: "", flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "dev.autoqaPush.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "dev.autoqaPush.token", value: "", flags: { json: true } });
 		const output = await humanList();
-		expect(output).not.toContain("searxng.token = ********");
+		expect(output).not.toContain("dev.autoqaPush.token = ********");
 		const { parsed } = await jsonList();
-		expect(parsed["searxng.token"]).not.toHaveProperty("redacted");
+		expect(parsed["dev.autoqaPush.token"]).not.toHaveProperty("redacted");
 	});
 });

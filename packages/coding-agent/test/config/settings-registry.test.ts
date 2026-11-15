@@ -14,10 +14,14 @@ import {
 	cfgTopP,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
-import { cfgEditFuzzyMatch, cfgEditModelVariants } from "@oh-my-pi/pi-coding-agent/edit/settings";
+import {
+	cfgEditFuzzyMatch,
+	cfgEditFuzzyThreshold,
+	cfgEditModelVariants,
+} from "@oh-my-pi/pi-coding-agent/edit/settings";
 import { cfgTaskMaxConcurrency } from "@oh-my-pi/pi-coding-agent/task/settings";
 import { cfgEvalPy } from "@oh-my-pi/pi-coding-agent/eval/settings";
-import { cfgSearxngBasicPassword, cfgSearxngEndpoint } from "@oh-my-pi/pi-coding-agent/web/settings";
+import { cfgDevAutoqaPushToken } from "@oh-my-pi/pi-coding-agent/tools/settings";
 
 const tick = () => Promise.resolve();
 
@@ -42,15 +46,15 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void): void
 }
 
 describe("settings registry", () => {
-	it("ranks a runtime override over an override env, that env over persisted layers, and a fallback env only over the default", () => {
-		withEnv({ PI_EDIT_FUZZY: "0", SEARXNG_ENDPOINT: "https://env.example" }, () => {
+	it("ranks a runtime override over an environment variable, and that over persisted layers and the default", () => {
+		withEnv({ PI_EDIT_FUZZY: "0", PI_EDIT_FUZZY_THRESHOLD: "0.4" }, () => {
 			const settings = Settings.isolated();
 			cfgEditFuzzyMatch.set(settings, true);
-			cfgSearxngEndpoint.set(settings, "https://cfg.example");
+			cfgEditFuzzyThreshold.set(settings, 0.9);
 			expect(cfgEditFuzzyMatch.get(settings)).toBe(false);
 			expect(cfgEditFuzzyMatch.provenance(settings)).toBe("env");
-			expect(cfgSearxngEndpoint.get(settings)).toBe("https://cfg.example");
-			expect(cfgSearxngEndpoint.provenance(settings)).toBe("global");
+			expect(cfgEditFuzzyThreshold.get(settings)).toBe(0.4);
+			expect(cfgEditFuzzyThreshold.provenance(settings)).toBe("env");
 
 			// A CLI flag or session-only write is more specific than the environment.
 			cfgEditFuzzyMatch.override(settings, true);
@@ -60,8 +64,8 @@ describe("settings registry", () => {
 			expect(cfgEditFuzzyMatch.get(settings)).toBe(false);
 
 			const bare = Settings.isolated();
-			expect(cfgSearxngEndpoint.get(bare)).toBe("https://env.example");
-			expect(cfgSearxngEndpoint.isConfigured(bare)).toBe(true);
+			expect(cfgEditFuzzyThreshold.get(bare)).toBe(0.4);
+			expect(cfgEditFuzzyThreshold.provenance(bare)).toBe("env");
 		});
 	});
 
@@ -79,17 +83,17 @@ describe("settings registry", () => {
 		});
 	});
 
-	it("treats a configured null as unset for fallback env vars and provenance", () => {
-		withEnv({ SEARXNG_BASIC_PASSWORD: "env-secret" }, () => {
-			const cleared = Settings.isolated({ "searxng.basicPassword": null });
-			expect(cfgSearxngBasicPassword.get(cleared)).toBe("env-secret");
-			expect(cfgSearxngBasicPassword.provenance(cleared)).toBe("env");
-		});
-		withEnv({ SEARXNG_BASIC_PASSWORD: undefined }, () => {
-			const cleared = Settings.isolated({ "searxng.basicPassword": null });
-			expect(cfgSearxngBasicPassword.isConfigured(cleared)).toBe(false);
-			expect(cfgSearxngBasicPassword.provenance(cleared)).toBe("default");
-		});
+	it("reads a configured null as unset and reports the default provenance", () => {
+		const cleared = Settings.isolated({ "dev.autoqaPush.token": null });
+		expect(cfgDevAutoqaPushToken.get(cleared)).toBeUndefined();
+		expect(cfgDevAutoqaPushToken.isConfigured(cleared)).toBe(false);
+		expect(cfgDevAutoqaPushToken.provenance(cleared)).toBe("default");
+
+		const configured = Settings.isolated();
+		cfgDevAutoqaPushToken.set(configured, "token");
+		expect(cfgDevAutoqaPushToken.get(configured)).toBe("token");
+		expect(cfgDevAutoqaPushToken.isConfigured(configured)).toBe(true);
+		expect(cfgDevAutoqaPushToken.provenance(configured)).toBe("global");
 	});
 
 	it("rejects writes whose value does not fit the setting's type", () => {
