@@ -470,7 +470,8 @@
     "gen:rpc": "bun scripts/gen-rpc/index.ts",
     "prepack": "bun run gen:bundle",
     "bench:guard": "bun scripts/bench-guard.ts",
-    "test": "bun ../../scripts/ci-test-ts.ts coding-agent-heavy --full"
+    "test": "bun ../../scripts/ci-test-ts.ts coding-agent-heavy --full",
+    "test:live": "bun test test/live"
   },
   "dependencies": {
     "@babel/parser": "catalog:",
