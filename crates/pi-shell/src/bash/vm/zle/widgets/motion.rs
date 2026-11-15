@@ -269,4 +269,57 @@ pub fn exchangepointandmark(zw: &mut Zw<'_, '_>) -> WResult {
 	WResult::Done(exchange_point_and_mark(zw.ed))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	fn ed(s: &str, cs: usize) -> Editor {
+		let mut e = Editor::new(Context::LineStart, 0);
+		e.line = s.chars().collect();
+		e.cs = cs;
+		e
+	}
+
+	#[test]
+	fn chars_and_lines() {
+		let mut e = ed("ab\ncd\nef", 7);
+		e.zmod.mult = -3;
+		assert_eq!(forward_char(&mut e), 0);
+		assert_eq!(e.cs, 4);
+		e.zmod.mult = 10;
+		assert_eq!(forward_char(&mut e), 0);
+		assert_eq!(e.cs, 8);
+		e.zmod.mult = 1;
+		assert_eq!(beginning_of_line(&mut e), 0);
+		assert_eq!(e.cs, 6);
+		// From a line start: the start of the line before.
+		assert_eq!(beginning_of_line(&mut e), 0);
+		assert_eq!(e.cs, 3);
+		assert_eq!(end_of_line(&mut e), 0);
+		assert_eq!(e.cs, 5);
+		assert_eq!(end_of_line(&mut e), 0);
+		assert_eq!(e.cs, 8);
+		e.zmod.mult = 2;
+		e.cs = 1;
+		assert_eq!(end_of_line(&mut e), 0);
+		assert_eq!(e.cs, 5);
+	}
+
+	#[test]
+	fn mark() {
+		let mut e = ed("abcd", 3);
+		assert_eq!(set_mark_command(&mut e), 0);
+		assert_eq!((e.mark, e.region_active), (3, 1));
+		e.cs = 1;
+		e.region_active = 0;
+		assert_eq!(exchange_point_and_mark(&mut e), 0);
+		assert_eq!((e.cs, e.mark, e.region_active), (3, 1, 1));
+		e.zmod.mult = -1;
+		e.region_active = 0;
+		assert_eq!(exchange_point_and_mark(&mut e), 0);
+		assert_eq!((e.cs, e.mark, e.region_active), (1, 3, 0));
+		assert_eq!(set_mark_command(&mut e), 0);
+		assert_eq!(e.mark, 3);
+	}
+}

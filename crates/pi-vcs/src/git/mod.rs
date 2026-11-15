@@ -135,7 +135,17 @@ impl GitRepo {
 	}
 }
 
-
+/// Pin the worktree index mtime to reproduce same-tick snapshot races in tests.
+#[cfg(test)]
+pub(crate) fn pin_index_mtime(repo: &GitRepo) {
+	let pinned = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+	std::fs::File::options()
+		.write(true)
+		.open(repo.info().git_dir.join("index"))
+		.expect("open index")
+		.set_modified(pinned)
+		.expect("pin index mtime");
+}
 /// Discover repository metadata for `dir` without opening gitoxide.
 ///
 /// The walk goes up `dir`'s real path, as git does: a shell reports the
@@ -349,4 +359,208 @@ fn strip_config_comment(line: &str) -> &str {
 	line
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{fs, process::Command};
 
+	use super::*;
+
+	fn run_git(root: &Path, args: &[&str]) {
+		let output = Command::new("git")
+			.current_dir(root)
+			.args(args)
+			.output()
+			.unwrap();
+		assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+	}
+
+	#[test]
+	fn reftable_detection_honors_quotes_and_comments() {
+		assert!(config_has_reftable("[extensions]\n\trefStorage = reftable\n"));
+		assert!(config_has_reftable("[extensions]\nrefstorage = \"reftable\" ; comment\n"));
+		assert!(!config_has_reftable("[extensions]\nrefstorage = files\n"));
+		assert!(!config_has_reftable("[core]\nrefstorage = reftable\n"));
+		assert!(!config_has_reftable("[extensions]\n# refstorage = reftable\n"));
+	}
+
+	#[test]
+	fn gitdir_pointer_parsing() {
+		assert_eq!(
+			parse_gitdir_pointer("gitdir: /a/b/.git/worktrees/x\n"),
+			Some("/a/b/.git/worktrees/x")
+		);
+		assert_eq!(parse_gitdir_pointer("gitdir:../relative"), Some("../relative"));
+		assert_eq!(parse_gitdir_pointer("not a pointer"), None);
+		assert_eq!(parse_gitdir_pointer("gitdir:   "), None);
+	}
+
+	#[test]
+	fn discovery_ignores_an_empty_dot_git_directory() {
+		let temp = tempfile::tempdir().unwrap();
+		let fence = temp.path().join("fence");
+		fs::create_dir_all(fence.join(".git")).unwrap();
+		let project = fence.join("project");
+		fs::create_dir_all(&project).unwrap();
+
+		// `git rev-parse` walks past a `.git` directory without `HEAD`; with no
+		// repository above the temp dir, discovery must come up empty instead of
+		// adopting the fence and failing later on the missing `HEAD`.
+		let found = discover_info(&project).unwrap();
+		assert!(found.is_none(), "unpopulated `.git` reported as a repository: {found:?}");
+	}
+
+	#[test]
+	fn discovery_walks_past_an_empty_dot_git_to_the_enclosing_repository() {
+		let temp = tempfile::tempdir().unwrap();
+		run_git(temp.path(), &["init", "-q", "-b", "main"]);
+		let fence = temp.path().join("fence");
+		fs::create_dir_all(fence.join(".git")).unwrap();
+		let project = fence.join("project");
+		fs::create_dir_all(&project).unwrap();
+
+		let info = discover_info(&project)
+			.unwrap()
+			.expect("enclosing repository");
+		assert_eq!(info.repo_root, std::path::absolute(temp.path()).unwrap());
+		assert_eq!(info.git_dir, info.repo_root.join(".git"));
+	}
+
+	#[test]
+	fn discovery_ignores_a_gitfile_whose_target_has_no_head() {
+		let temp = tempfile::tempdir().unwrap();
+		let fence = temp.path().join("fence");
+		let project = fence.join("project");
+		fs::create_dir_all(&project).unwrap();
+		fs::create_dir_all(fence.join("store")).unwrap();
+		fs::write(fence.join(".git"), "gitdir: store\n").unwrap();
+
+		let found = discover_info(&project).unwrap();
+		assert!(
+			found.is_none(),
+			"gitfile to an unpopulated directory reported as a repository: {found:?}"
+		);
+	}
+
+	#[test]
+	fn discovery_accepts_a_fresh_repository_with_an_unborn_head() {
+		let temp = tempfile::tempdir().unwrap();
+		run_git(temp.path(), &["init", "-q", "-b", "main"]);
+		let nested = temp.path().join("src");
+		fs::create_dir_all(&nested).unwrap();
+
+		let info = discover_info(&nested).unwrap().expect("primary checkout");
+		let root = std::path::absolute(temp.path()).unwrap();
+		assert_eq!(info.repo_root, root);
+		assert_eq!(info.git_dir, root.join(".git"));
+		assert_eq!(info.common_dir, info.git_dir);
+		assert!(info.head_path.is_file());
+		assert!(
+			!GitRepo::discover(&nested)
+				.unwrap()
+				.unwrap()
+				.is_linked_worktree()
+		);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn discovery_follows_a_symlink_into_a_checkouts_subdirectory() {
+		let temp = tempfile::tempdir().unwrap();
+		let repo = temp.path().join("monorepo");
+		fs::create_dir_all(repo.join("projects/app")).unwrap();
+		run_git(&repo, &["init", "-q", "-b", "main"]);
+		// `cd ~/app` through `~/app -> ~/monorepo/projects/app`: the shell's
+		// `$PWD` keeps the link, whose parents hold no `.git`.
+		let link = temp.path().join("app");
+		std::os::unix::fs::symlink(repo.join("projects/app"), &link).unwrap();
+
+		let info = discover_info(&link)
+			.unwrap()
+			.expect("the checkout the link leads into");
+		assert_eq!(info.repo_root, fs::canonicalize(&repo).unwrap());
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn discovery_through_a_symlink_into_another_checkout_finds_that_checkout() {
+		let temp = tempfile::tempdir().unwrap();
+		let a = temp.path().join("repos/A");
+		let b = temp.path().join("repos/B");
+		fs::create_dir_all(&a).unwrap();
+		fs::create_dir_all(b.join("subdir")).unwrap();
+		run_git(&a, &["init", "-q", "-b", "main"]);
+		run_git(&b, &["init", "-q", "-b", "main"]);
+		// `cd /repos/A/link` through `link -> /repos/B/subdir`: the spelled
+		// parents reach A, but the shell works in B, as git sees it.
+		let link = a.join("link");
+		std::os::unix::fs::symlink(b.join("subdir"), &link).unwrap();
+
+		let info = discover_info(&link)
+			.unwrap()
+			.expect("the checkout the link leads into");
+		assert_eq!(info.repo_root, fs::canonicalize(&b).unwrap());
+		let info = discover_info(&a).unwrap().expect("checkout A");
+		assert_eq!(
+			info.repo_root,
+			std::path::absolute(&a).unwrap(),
+			"spelled when it is the same checkout"
+		);
+	}
+
+	#[test]
+	fn discovery_accepts_a_linked_worktree_gitfile() {
+		let temp = tempfile::tempdir().unwrap();
+		let main = temp.path().join("main");
+		fs::create_dir_all(&main).unwrap();
+		run_git(&main, &["init", "-q", "-b", "main"]);
+		run_git(&main, &["config", "user.name", "VCS Test"]);
+		run_git(&main, &["config", "user.email", "vcs@example.com"]);
+		run_git(&main, &["commit", "-q", "--allow-empty", "-m", "init"]);
+		let linked = temp.path().join("linked");
+		run_git(&main, &["worktree", "add", "-q", linked.to_str().unwrap(), "-b", "wt"]);
+		assert!(linked.join(".git").is_file(), "linked worktree `.git` is a gitfile");
+
+		let info = discover_info(&linked).unwrap().expect("linked worktree");
+		assert_eq!(info.repo_root, std::path::absolute(&linked).unwrap());
+		assert!(info.head_path.is_file());
+		assert_ne!(info.git_dir, info.common_dir);
+		assert!(
+			GitRepo::discover(&linked)
+				.unwrap()
+				.unwrap()
+				.is_linked_worktree()
+		);
+	}
+
+	#[test]
+	fn gix_opens_checkouts_whose_directory_name_ends_in_dot_git() {
+		let temp = tempfile::tempdir().unwrap();
+		let main = temp.path().join("repo.git");
+		fs::create_dir_all(&main).unwrap();
+		run_git(&main, &["init", "-q", "-b", "main"]);
+		run_git(&main, &["config", "user.name", "VCS Test"]);
+		run_git(&main, &["config", "user.email", "vcs@example.com"]);
+		run_git(&main, &["commit", "-q", "--allow-empty", "-m", "init"]);
+		let linked = temp.path().join("linked.git");
+		run_git(&main, &["worktree", "add", "-q", linked.to_str().unwrap(), "-b", "wt"]);
+
+		// gix treats a `*.git` path as the metadata directory itself, so the
+		// checkout root must never be handed to it in place of the `.git` entry.
+		for (root, git_dir) in
+			[(&main, main.join(".git")), (&linked, main.join(".git/worktrees/linked.git"))]
+		{
+			let repo = GitRepo::discover(root).unwrap().expect("checkout");
+			for opened in [repo.gix().unwrap(), repo.gix_fresh().unwrap()] {
+				assert_eq!(
+					fs::canonicalize(opened.git_dir()).unwrap(),
+					fs::canonicalize(&git_dir).unwrap()
+				);
+				assert_eq!(
+					fs::canonicalize(opened.workdir().expect("non-bare checkout")).unwrap(),
+					fs::canonicalize(root).unwrap()
+				);
+				opened.head_id().expect("HEAD resolves");
+			}
+		}
+	}
+}

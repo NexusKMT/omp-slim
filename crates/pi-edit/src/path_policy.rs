@@ -662,4 +662,421 @@ fn leading_comment_text(content: &str, styles: &[&str]) -> String {
 	result.join("\n")
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::files::{FileCache, FileSource};
 
+	fn policy(root: &Path) -> PathPolicy {
+		PathPolicy {
+			cwd:                  root.to_owned(),
+			home_dir:             root.join("home"),
+			url_schemes:          vec!["sbx".into(), "ro".into()],
+			url_alias_schemes:    vec!["sbx".into()],
+			plan_writable_roots:  vec![root.join("sandbox")],
+			plan_active:          false,
+			block_auto_generated: true,
+		}
+	}
+
+	fn answer(absolute: Option<PathBuf>, error: Option<&str>, plan_writable: bool) -> UrlResolution {
+		UrlResolution { absolute, error: error.map(str::to_owned), plan_writable }
+	}
+
+	#[test]
+	fn unwraps_only_strict_hashline_headers() {
+		assert_eq!(unwrap_hashline_header_path("[src/a.ts#Ab12]  \n"), "src/a.ts");
+		assert_eq!(unwrap_hashline_header_path("[src/a.ts]"), "src/a.ts");
+		assert_eq!(unwrap_hashline_header_path("[src/a.ts#bad]"), "[src/a.ts#bad]");
+		assert_eq!(unwrap_hashline_header_path("[conf##host.a#1234]"), "conf##host.a");
+		assert_eq!(unwrap_hashline_header_path("[conf##host.a]"), "[conf##host.a]");
+	}
+
+	#[test]
+	fn resolves_plain_expanded_and_internal_paths() {
+		let tmp = tempfile::tempdir().unwrap();
+		let p = policy(tmp.path());
+		let urls = HashMap::new();
+		assert_eq!(p.resolve("/", &urls).unwrap().absolute, tmp.path());
+		assert_eq!(p.resolve("@~/x", &urls).unwrap().absolute, tmp.path().join("home/x"));
+		assert_eq!(p.resolve(":./x", &urls).unwrap().absolute, tmp.path().join("./x"));
+		// The file URL's `/tmp/...` path maps to a POSIX root; on Windows it
+		// resolves onto the current drive instead (`C:\tmp\...`).
+		#[cfg(unix)]
+		assert_eq!(
+			p.resolve("file:///tmp/a%20b", &urls).unwrap().absolute,
+			PathBuf::from("/tmp/a b")
+		);
+		// Scheme-colon names without a slash, Windows drives, and `./`-prefixed
+		// URI-shaped names are plain paths.
+		assert_eq!(p.resolve("sbx:x", &urls).unwrap().absolute, tmp.path().join("sbx:x"));
+		assert_eq!(p.resolve("./other://x", &urls).unwrap().absolute, tmp.path().join("other:/x"));
+		assert!(p.resolve("C:/x", &urls).is_ok());
+		assert!(matches!(
+			p.resolve("[@SBX://x.md#AB12]", &urls),
+			Err(EditError::UnresolvedUrl(url)) if url == "SBX://x.md"
+		));
+	}
+
+	#[test]
+	fn uri_shaped_targets_are_host_urls_or_refused_never_working_tree_paths() {
+		let tmp = tempfile::tempdir().unwrap();
+		let p = policy(tmp.path());
+		let urls = HashMap::new();
+		// Alias scheme: `sbx:/../x` reaches the host (which refuses traversal)
+		// instead of lexically collapsing to `<cwd>/x`.
+		assert!(matches!(
+			p.resolve("[sbx:/../src/main.rs#AB12]", &urls),
+			Err(EditError::UnresolvedUrl(url)) if url == "sbx://../src/main.rs"
+		));
+		// Registered scheme without the alias, and an unregistered scheme:
+		// refused like `write` refuses them.
+		for (authored, suggestion) in [("ro:/a.md", Some("'ro://a.md'")), ("bogus://a.md", None)] {
+			let Err(EditError::Apply(message)) = p.resolve(authored, &urls) else {
+				panic!("{authored} must be refused");
+			};
+			assert!(message.contains(&format!("'{authored}'")), "{message}");
+			if let Some(suggestion) = suggestion {
+				assert!(message.contains(suggestion), "{message}");
+			}
+			assert!(p.url_target(authored).is_none(), "{authored}");
+		}
+	}
+
+	#[test]
+	fn strips_windows_verbatim_prefixes() {
+		assert_eq!(strip_windows_verbatim(r"\\?\C:\work\a.rs"), r"C:\work\a.rs");
+		assert_eq!(strip_windows_verbatim(r"\\?\UNC\server\share\a.rs"), r"\\server\share\a.rs");
+		assert_eq!(strip_windows_verbatim(r"\\?\unc\server\share"), r"\\server\share");
+		assert_eq!(strip_windows_verbatim(r"\\server\share"), r"\\server\share");
+		assert_eq!(expand_path(r"\\?\UNC\server\share\a.rs", Path::new("")), r"\\server\share\a.rs");
+		// Verbatim forms without a plain spelling keep their prefix: stripped,
+		// they would become relative paths naming a different file.
+		for kept in [
+			r"\\?\GLOBALROOT\Device\HarddiskVolume1\a.rs",
+			r"\\?\Volume{0b1c2d3e-0000-0000-0000-100000000000}\a.rs",
+			r"\\?\C:",
+		] {
+			assert_eq!(strip_windows_verbatim(kept), kept);
+		}
+	}
+
+	#[test]
+	fn plain_prefix_rebuilds_only_disk_and_unc_verbatim_prefixes() {
+		use std::ffi::OsStr;
+		assert_eq!(plain_prefix(Prefix::VerbatimDisk(b'C'), true), Some("C:".into()));
+		assert_eq!(
+			plain_prefix(Prefix::VerbatimUNC(OsStr::new("server"), OsStr::new("share")), true),
+			Some(r"\\server\share".into())
+		);
+		assert_eq!(plain_prefix(Prefix::VerbatimDisk(b'C'), false), None);
+		for kept in [
+			Prefix::Verbatim(OsStr::new("GLOBALROOT")),
+			Prefix::Verbatim(OsStr::new("Volume{0b1c2d3e-0000-0000-0000-100000000000}")),
+			Prefix::Disk(b'C'),
+			Prefix::UNC(OsStr::new("server"), OsStr::new("share")),
+		] {
+			assert_eq!(plain_prefix(kept, true), None);
+		}
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn plan_mode_judges_where_the_write_physically_lands() {
+		let tmp = tempfile::tempdir().unwrap();
+		let sandbox = tmp.path().join("sandbox");
+		let outside = tmp.path().join("outside");
+		std::fs::create_dir_all(&sandbox).unwrap();
+		std::fs::create_dir_all(&outside).unwrap();
+		std::os::unix::fs::symlink(&outside, sandbox.join("link")).unwrap();
+		std::os::unix::fs::symlink(outside.join("victim.txt"), sandbox.join("dangling")).unwrap();
+		let mut p = policy(tmp.path());
+		p.plan_active = true;
+		let urls = HashMap::new();
+		let refused = |target: PathBuf| {
+			p.enforce_write(target.to_str().unwrap(), FileOp::Create, None, &urls)
+				.is_err()
+		};
+		assert!(refused(sandbox.join("link/escape.txt")));
+		assert!(refused(sandbox.join("link/new-dir/escape.txt")));
+		assert!(refused(sandbox.join("dangling")));
+		assert!(!refused(sandbox.join("nested/new/plan.md")));
+		// `link/..` is lexical: it names `sandbox/plan.md`, and that is the
+		// path the writer receives.
+		let dotted = sandbox.join("link/../plan.md");
+		assert!(!refused(dotted.clone()));
+		assert_eq!(
+			p.resolve(dotted.to_str().unwrap(), &urls).unwrap().absolute,
+			sandbox.join("plan.md")
+		);
+	}
+
+	#[test]
+	fn url_targets_miss_until_provided_then_use_the_host_answer() {
+		let tmp = tempfile::tempdir().unwrap();
+		let mut files = FileCache::new(policy(tmp.path()));
+		let err = files.resolve("[sbx://plan.md#AB12]", true).unwrap_err();
+		assert_eq!(err.to_string(), "Internal URL not resolved yet: sbx://plan.md");
+		assert!(files.resolve("sbx://plan.md", false).is_err());
+		assert!(files.resolve("ro://a.md", false).is_err());
+		assert_eq!(files.take_unresolved(), ["sbx://plan.md", "ro://a.md"]);
+		assert!(files.take_unresolved().is_empty());
+
+		let backing = tmp.path().join("elsewhere/plan.md");
+		files.provide("sbx://plan.md".into(), answer(Some(backing.clone()), None, true));
+		let resolved = files.resolve("[sbx://plan.md#AB12]", true).unwrap();
+		assert_eq!(resolved.absolute, backing);
+		assert_eq!(resolved.display, "sbx://plan.md");
+
+		files.provide(
+			"ro://a.md".into(),
+			answer(Some(tmp.path().join("a.md")), Some("ro://a.md is read-only"), false),
+		);
+		assert_eq!(
+			files.resolve("ro://a.md", false).unwrap_err().to_string(),
+			"ro://a.md is read-only"
+		);
+		files.provide("ro://gone.md".into(), answer(None, None, false));
+		assert_eq!(
+			files
+				.resolve("ro://gone.md", false)
+				.unwrap_err()
+				.to_string(),
+			"No local file backs ro://gone.md"
+		);
+		assert!(files.take_unresolved().is_empty());
+	}
+
+	#[test]
+	fn plan_mode_allows_only_plan_writable_targets() {
+		let tmp = tempfile::tempdir().unwrap();
+		let mut p = policy(tmp.path());
+		p.plan_active = true;
+		let urls = HashMap::from([
+			("sbx://plan.md".to_owned(), answer(Some(tmp.path().join("x/plan.md")), None, true)),
+			("ro://a.md".to_owned(), answer(Some(tmp.path().join("sandbox/a.md")), None, false)),
+		]);
+		let sandboxed = tmp.path().join("sandbox/plan.md");
+		assert!(
+			p.enforce_write("sbx://plan.md", FileOp::Update, None, &urls)
+				.is_ok()
+		);
+		assert!(
+			p.enforce_write(sandboxed.to_str().unwrap(), FileOp::Create, None, &urls)
+				.is_ok()
+		);
+		for refused in ["ro://a.md", "sbx://other.md", "a"] {
+			assert!(
+				p.enforce_write(refused, FileOp::Update, None, &urls)
+					.unwrap_err()
+					.to_string()
+					.contains("working tree is read-only"),
+				"{refused}"
+			);
+		}
+		assert_eq!(
+			p.enforce_write("sbx://plan.md", FileOp::Delete, None, &urls)
+				.unwrap_err()
+				.to_string(),
+			"Plan mode: deleting files is not allowed."
+		);
+		assert_eq!(
+			p.enforce_write(sandboxed.to_str().unwrap(), FileOp::Update, Some("b"), &urls)
+				.unwrap_err()
+				.to_string(),
+			"Plan mode: renaming files is not allowed."
+		);
+	}
+
+	fn recovery_matches(authored: &str, path: &str, file_type: FileType) -> bool {
+		let name = path.rsplit('/').next().unwrap();
+		RecoveryGlob::new(authored)
+			.unwrap()
+			.matches(path.as_bytes(), name.as_bytes(), file_type)
+	}
+
+	#[test]
+	fn recovery_glob_matches_whole_trailing_components() {
+		assert!(recovery_matches("src/a.ts", "deep/src/a.ts", FileType::File));
+		assert!(recovery_matches("./src/a.ts", "src/a.ts", FileType::File));
+		assert!(recovery_matches("src\\a.ts", "deep/src/a.ts", FileType::File));
+		assert!(recovery_matches("deep/src/", "x/deep/src", FileType::Dir));
+		assert!(!recovery_matches("src/a.ts", "deep/mysrc/a.ts", FileType::File));
+		assert!(!recovery_matches("src/a.ts", "deep/src/a.ts.bak", FileType::File));
+		assert!(!recovery_matches("src/a.ts", "deep/src/a.ts", FileType::Symlink));
+	}
+
+	#[test]
+	fn recovery_glob_takes_metacharacters_literally() {
+		assert!(recovery_matches("src/[id].ts", "app/src/[id].ts", FileType::File));
+		assert!(!recovery_matches("src/[id].ts", "app/src/i.ts", FileType::File));
+		assert!(recovery_matches("a*b?.ts", "x/a*b?.ts", FileType::File));
+		assert!(!recovery_matches("a*b.ts", "x/aXXb.ts", FileType::File));
+	}
+
+	#[test]
+	fn recovery_glob_refuses_empty_targets() {
+		for authored in ["", "./", "/", "\\"] {
+			assert!(RecoveryGlob::new(authored).is_none(), "{authored:?}");
+		}
+	}
+
+	#[test]
+	fn detects_generated_names_and_leading_comments_only() {
+		let tmp = tempfile::tempdir().unwrap();
+		let p = policy(tmp.path());
+		assert!(
+			p.auto_generated_message("foo.pb.go", b"")
+				.unwrap()
+				.contains("detected marker: \"foo.pb.go\"")
+		);
+		assert!(
+			p.auto_generated_message(
+				"foo.go",
+				b"// Code generated by protoc. DO NOT EDIT.\npackage foo"
+			)
+			.unwrap()
+			.contains("Code generated by protoc")
+		);
+		assert!(
+			p.auto_generated_message("foo.go", b"package foo\n// @generated")
+				.is_none()
+		);
+		assert!(
+			p.auto_generated_message("guard.txt", b"// @generated")
+				.is_none()
+		);
+	}
+
+	#[test]
+	fn ambiguous_generated_basename_requires_content_marker() {
+		let tmp = tempfile::tempdir().unwrap();
+		let p = policy(tmp.path());
+		assert!(
+			p.auto_generated_message(
+				"internal/services/organizations/generated.go",
+				b"package organizations\n\nfunc Build() {}\n"
+			)
+			.is_none()
+		);
+		assert!(p.auto_generated_message("generated.ts", b"").is_none());
+		assert!(
+			p.auto_generated_message(
+				"internal/services/organizations/generated.go",
+				b"// Code generated by x. DO NOT EDIT.\n\npackage organizations\n"
+			)
+			.unwrap()
+			.contains("Code generated by x")
+		);
+		assert!(
+			p.auto_generated_message(
+				"generated.go",
+				b"// Code generated from schema.graphql; DO NOT EDIT.\n\npackage api\n"
+			)
+			.is_some()
+		);
+		assert!(
+			p.auto_generated_message("zz_generated.deepcopy.go", b"package v1\n")
+				.unwrap()
+				.contains("detected marker: \"zz_generated.deepcopy.go\"")
+		);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn refuses_fifo_reads_without_blocking() {
+		let tmp = tempfile::tempdir().unwrap();
+		let fifo = tmp.path().join("pipe");
+		assert!(
+			std::process::Command::new("mkfifo")
+				.arg(&fifo)
+				.status()
+				.unwrap()
+				.success()
+		);
+		let mut files = FileCache::new(policy(tmp.path()));
+		let (sender, receiver) = std::sync::mpsc::channel();
+		std::thread::spawn(move || {
+			let _ = sender.send(
+				files
+					.read("pipe")
+					.map(|_| ())
+					.map_err(|error| error.to_string()),
+			);
+		});
+		// A regression blocks the reader in open(2) forever; an O_RDWR open never
+		// blocks and counts as a writer, so it releases that reader before the
+		// test fails.
+		let result = receiver
+			.recv_timeout(std::time::Duration::from_secs(5))
+			.unwrap_or_else(|_| {
+				let _writer = std::fs::OpenOptions::new()
+					.read(true)
+					.write(true)
+					.open(&fifo);
+				panic!("reading a FIFO blocked instead of being refused")
+			});
+		let error = result.unwrap_err();
+		assert!(error.contains("it is a FIFO"), "unexpected error: {error}");
+	}
+
+	#[test]
+	fn permits_hand_authored_openapi_json() {
+		let tmp = tempfile::tempdir().unwrap();
+		let p = policy(tmp.path());
+		assert!(
+			p.auto_generated_message(
+				"api.openapi.json",
+				br#"{"openapi":"3.1.0","info":{"title":"Demo","version":"v1"}}"#
+			)
+			.is_none()
+		);
+	}
+
+	// POSIX paths have no prefix component, so `\\?\C:\…` is an ordinary
+	// relative path there and the strip is correctly a no-op.
+	#[cfg(windows)]
+	#[test]
+	fn strips_verbatim_prefix_from_windows_paths() {
+		assert_eq!(
+			strip_windows_verbatim_path(PathBuf::from(r"\\?\C:\proj\a.ts")),
+			PathBuf::from(r"C:\proj\a.ts")
+		);
+		assert_eq!(
+			strip_windows_verbatim_path(PathBuf::from(r"C:\proj\a.ts")),
+			PathBuf::from(r"C:\proj\a.ts")
+		);
+	}
+
+	#[test]
+	fn allows_recovery_when_cwd_is_verbatim_and_store_key_is_cleaned() {
+		// On Windows `std::fs::canonicalize` yields the verbatim `\\?\C:\…` cwd
+		// while the hashline store key keeps the cleaned `C:\…` form; recovery
+		// between the two must not be silently rejected. On POSIX the two forms
+		// coincide, so the same assertions hold.
+		let tmp = tempfile::tempdir().unwrap();
+		let verbatim_cwd = std::fs::canonicalize(tmp.path()).unwrap();
+		let cleaned_cwd = strip_windows_verbatim_path(verbatim_cwd.clone());
+		let p = policy(&verbatim_cwd);
+		assert!(p.allow_tag_path_recovery("a.ts", &cleaned_cwd.join("a.ts")));
+		assert!(p.allow_tag_path_recovery("a.ts", &verbatim_cwd.join("a.ts")));
+		// Recovery outside the cwd stays rejected.
+		assert!(!p.allow_tag_path_recovery("a.ts", &cleaned_cwd.parent().unwrap().join("a.ts")));
+	}
+
+	#[test]
+	fn canonicalizes_existing_parent() {
+		let tmp = tempfile::tempdir().unwrap();
+		let missing = tmp.path().join("missing.txt");
+		// canonical_key strips the `\\?\` verbatim prefix std canonicalize
+		// yields on Windows; apply the same cleaning to the expectation.
+		assert_eq!(
+			canonical_key(&missing),
+			strip_windows_verbatim_path(
+				std::fs::canonicalize(tmp.path())
+					.unwrap()
+					.join("missing.txt")
+			)
+		);
+	}
+}

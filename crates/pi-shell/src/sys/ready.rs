@@ -335,4 +335,51 @@ fn wait(wake: RawFd, watched: &[Watched]) -> (bool, Vec<u64>) {
 	(woke, ready)
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		sync::Arc,
+		task::Wake,
+		time::{Duration, Instant},
+	};
 
+	use super::*;
+
+	struct Unpark(thread::Thread);
+
+	impl Wake for Unpark {
+		fn wake(self: Arc<Self>) {
+			self.0.unpark();
+		}
+	}
+
+	#[test]
+	fn a_watch_wakes_once_the_pipe_becomes_readable() {
+		let (r, mut w) = io::pipe().unwrap();
+		assert!(!now(r.as_raw_fd(), READ).unwrap());
+		assert!(now(w.as_raw_fd(), WRITE).unwrap());
+		let waker = Waker::from(Arc::new(Unpark(thread::current())));
+		let _watch = watch(r.as_raw_fd(), READ, &waker).unwrap();
+		let writer = thread::spawn(move || {
+			thread::sleep(Duration::from_millis(50));
+			w.write_all(b"x").unwrap();
+			w
+		});
+		let deadline = Instant::now() + Duration::from_secs(10);
+		while !now(r.as_raw_fd(), READ).unwrap() {
+			assert!(Instant::now() < deadline);
+			thread::park_timeout(Duration::from_millis(100));
+		}
+		drop(writer.join().unwrap());
+		assert!(now(r.as_raw_fd(), READ).unwrap(), "hang-up also counts as ready");
+	}
+
+	#[test]
+	fn dropping_a_watch_forgets_it() {
+		let (r, _w) = io::pipe().unwrap();
+		let watch = watch(r.as_raw_fd(), READ, Waker::noop()).unwrap();
+		let id = watch.0;
+		drop(watch);
+		assert!(!POLLER.entries.lock().iter().any(|e| e.id == id));
+	}
+}

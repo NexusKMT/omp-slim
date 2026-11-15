@@ -719,5 +719,3 @@ pub(super) fn restore(context: &Context, snapshot: &Snapshot) -> Result<()> {
 		remove_own_registration(context, snapshot, &active)
 	}
 }
-
-

@@ -424,4 +424,37 @@ pub(crate) const fn mode_is_special(m: u32) -> bool {
 	mode_is_sock(m) || mode_is_fifo(m)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn mode_helpers_classify_every_file_type() {
+		let cases = [
+			(S_IFDIR | 0o755, "dir"),
+			(S_IFREG | 0o644, "reg"),
+			(S_IFLNK | 0o777, "lnk"),
+			(S_IFCHR | 0o600, "chr"),
+			(S_IFBLK | 0o600, "blk"),
+			(S_IFIFO | 0o600, "fifo"),
+			(S_IFSOCK | 0o600, "sock"),
+		];
+		for (mode, kind) in cases {
+			assert_eq!(mode_is_dir(mode), kind == "dir", "{kind}");
+			assert_eq!(mode_is_reg(mode), kind == "reg", "{kind}");
+			assert_eq!(mode_is_lnk(mode), kind == "lnk", "{kind}");
+			assert_eq!(mode_is_device(mode), kind == "chr" || kind == "blk", "{kind}");
+			assert_eq!(mode_is_special(mode), kind == "fifo" || kind == "sock", "{kind}");
+		}
+		// Socket (0o140000) shares bits with directory and regular: no false positives.
+		assert!(!mode_is_dir(S_IFSOCK) && !mode_is_reg(S_IFSOCK) && !mode_is_lnk(S_IFSOCK));
+		// Block (0o060000) contains the directory and char bits.
+		assert!(!mode_is_dir(S_IFBLK) && !mode_is_chr(S_IFBLK));
+	}
+
+	#[test]
+	fn known_message_codes_match_upstream_dispatch() {
+		let known: Vec<u8> = (0..=255u8).filter(|&c| msg_code_is_known(c)).collect();
+		assert_eq!(known, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 22, 33, 42, 86, 100, 101, 102]);
+	}
+}

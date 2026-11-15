@@ -1009,4 +1009,252 @@ impl AsyncUtility for AstGrep {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::host::run_async_util;
 
+	const A_RS: &str = "fn main() {\n    let a = foo(1);\n    let b = 2;\n    let c = foo(a, b);\n    println!(\"{}\", c);\n}\n";
+	const B_RS: &str = "fn g() -> i32 {\n    foo(3)\n}\n";
+
+	/// `big.rs`: twenty `let` lines with `foo(1)` on line 3 and `foo(2)` on line 15.
+	fn big_rs() -> String {
+		(1..=20)
+			.map(|line| match line {
+				3 => "    foo(1);\n".to_owned(),
+				15 => "    foo(2);\n".to_owned(),
+				_ => format!("    let x{line} = 0;\n"),
+			})
+			.collect()
+	}
+
+	fn tree() -> tempfile::TempDir {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("a.rs"), A_RS).unwrap();
+		std::fs::write(tree.path().join("b.rs"), B_RS).unwrap();
+		std::fs::write(tree.path().join("big.rs"), big_rs()).unwrap();
+		tree
+	}
+
+	async fn run(tree: &tempfile::TempDir, args: &[&str]) -> (i32, String, String) {
+		let (code, capture) = run_async_util::<AstGrep>(args, "", tree.path()).await;
+		(code, capture.out(), capture.err())
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn default_prints_path_line_and_text() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($A)", "-l", "rust", "a.rs"]).await;
+		assert_eq!((code, out.as_str()), (0, "a.rs:2:    let a = foo(1);\n"), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn heading_always_prints_numbered_block_per_file() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["-p", "foo($$$A)", "--heading", "always", "a.rs"]).await;
+		assert_eq!((code, out.as_str()), (0, "a.rs\n2│    let a = foo(1);\n4│    let c = foo(a, b);\n\n"), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn context_lines_are_separated_between_groups() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($A)", "-C", "1", "big.rs"]).await;
+		assert_eq!(
+			(code, out.as_str()),
+			(
+				0,
+				"big.rs:2:    let x2 = 0;\nbig.rs:3:    foo(1);\nbig.rs:4:    let x4 = 0;\n--\nbig.rs:14:    let x14 = \
+				 0;\nbig.rs:15:    foo(2);\nbig.rs:16:    let x16 = 0;\n"
+			),
+			"{err}"
+		);
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($A)", "-A", "1", "--heading", "always", "big.rs"]).await;
+		assert_eq!(
+			(code, out.as_str()),
+			(0, "big.rs\n3│    foo(1);\n4│    let x4 = 0;\n╴┤\n15│    foo(2);\n16│    let x16 = 0;\n\n"),
+			"{err}"
+		);
+	}
+
+	#[test]
+	fn preview_preserves_unicode_and_unterminated_lines() {
+		let mut out = Vec::new();
+		print_diff(&mut out, "file", "α\n古", "α\n新", 3);
+		assert_eq!(
+			String::from_utf8(out).unwrap(),
+			"file\n@@ -0,2 +0,2 @@\n1 1│ α\n2  │-古  2│+新"
+		);
+	}
+
+	#[test]
+	fn preview_numbers_empty_sides_and_zero_context_hunks() {
+		let mut out = Vec::new();
+		print_diff(&mut out, "file", "", "α\n", 0);
+		assert_eq!(String::from_utf8(out).unwrap(), "file\n@@ -0,0 +0,1 @@\n  1│+α\n");
+
+		let mut out = Vec::new();
+		print_diff(&mut out, "file", "old\nsame\nlast\n", "new\nsame\nend\n", 0);
+		assert_eq!(
+			String::from_utf8(out).unwrap(),
+			"file\n@@ -0,1 +0,1 @@\n1  │-old\n  1│+new\n@@ -2,1 +2,1 @@\n3  │-last\n  3│+end\n"
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn rewrite_prints_diff_hunks() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($A)", "-r", "bar($A)", "big.rs"]).await;
+		assert_eq!(
+			(code, out.as_str()),
+			(
+				0,
+				"big.rs\n@@ -0,6 +0,6 @@\n1 1│     let x1 = 0;\n2 2│     let x2 = 0;\n3  │-    foo(1);\n  3│+    \
+				 bar(1);\n4 4│     let x4 = 0;\n5 5│     let x5 = 0;\n6 6│     let x6 = 0;\n@@ -11,7 +11,7 @@\n12 12│     \
+				 let x12 = 0;\n13 13│     let x13 = 0;\n14 14│     let x14 = 0;\n15   │-    foo(2);\n   15│+    \
+				 bar(2);\n16 16│     let x16 = 0;\n17 17│     let x17 = 0;\n18 18│     let x18 = 0;\n"
+			),
+			"{err}"
+		);
+		assert_eq!(std::fs::read_to_string(tree.path().join("big.rs")).unwrap(), big_rs());
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn update_all_rewrites_files_and_reports_count() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($A)", "-r", "bar($A)", "-l", "rust", "-U", "a.rs", "b.rs"]).await;
+		assert_eq!((code, out.as_str(), err.as_str()), (0, "", "Applied 2 changes\n"));
+		assert_eq!(std::fs::read_to_string(tree.path().join("a.rs")).unwrap(), A_RS.replace("foo(1)", "bar(1)"));
+		assert_eq!(std::fs::read_to_string(tree.path().join("b.rs")).unwrap(), B_RS.replace("foo(3)", "bar(3)"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn json_pretty_prints_match_array() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($$$A)", "-l", "rust", "--json", "b.rs"]).await;
+		let expected = r#"[
+{
+  "text": "foo(3)",
+  "range": {
+    "byteOffset": {
+      "start": 20,
+      "end": 26
+    },
+    "start": {
+      "line": 1,
+      "column": 4
+    },
+    "end": {
+      "line": 1,
+      "column": 10
+    }
+  },
+  "file": "b.rs",
+  "lines": "    foo(3)",
+  "charCount": {
+    "leading": 4,
+    "trailing": 0
+  },
+  "language": "Rust",
+  "metaVariables": {
+    "single": {},
+    "multi": {
+      "A": [
+        {
+          "text": "3",
+          "range": {
+            "byteOffset": {
+              "start": 24,
+              "end": 25
+            },
+            "start": {
+              "line": 1,
+              "column": 8
+            },
+            "end": {
+              "line": 1,
+              "column": 9
+            }
+          }
+        }
+      ]
+    },
+    "transformed": {}
+  }
+}
+]
+"#;
+		assert_eq!((code, out.as_str()), (0, expected), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn json_stream_prints_one_object_per_line() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($A)", "--json=stream", "b.rs"]).await;
+		let expected = concat!(
+			r#"{"text":"foo(3)","range":{"byteOffset":{"start":20,"end":26},"start":{"line":1,"column":4},"end":{"line":1,"column":10}},"#,
+			r#""file":"b.rs","lines":"    foo(3)","charCount":{"leading":4,"trailing":0},"language":"Rust","#,
+			r#""metaVariables":{"single":{"A":{"text":"3","range":{"byteOffset":{"start":24,"end":25},"start":{"line":1,"column":8},"end":{"line":1,"column":9}}}},"multi":{},"transformed":{}}}"#,
+			"\n"
+		);
+		assert_eq!((code, out.as_str()), (0, expected), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn json_compact_with_rewrite_includes_replacement() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($A)", "-r", "bar($A)", "--json=compact", "b.rs"]).await;
+		let expected = concat!(
+			r#"[{"text":"foo(3)","range":{"byteOffset":{"start":20,"end":26},"start":{"line":1,"column":4},"end":{"line":1,"column":10}},"#,
+			r#""file":"b.rs","lines":"    foo(3)","charCount":{"leading":4,"trailing":0},"replacement":"bar(3)","replacementOffsets":{"start":20,"end":26},"language":"Rust","#,
+			r#""metaVariables":{"single":{"A":{"text":"3","range":{"byteOffset":{"start":24,"end":25},"start":{"line":1,"column":8},"end":{"line":1,"column":9}}}},"multi":{},"transformed":{}}}]"#,
+			"\n"
+		);
+		assert_eq!((code, out.as_str()), (0, expected), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn files_with_matches_lists_matching_files() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($$$A)", "--files-with-matches", "a.rs", "b.rs", "big.rs"]).await;
+		assert_eq!((code, out.as_str()), (0, "a.rs\nb.rs\nbig.rs\n"), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn no_match_exits_one() {
+		let tree = tree();
+		assert_eq!(run(&tree, &["run", "-p", "nope($A)", "a.rs"]).await, (1, String::new(), String::new()));
+		assert_eq!(run(&tree, &["run", "-p", "nope($A)", "--json", "a.rs"]).await, (1, "[]\n".to_owned(), String::new()));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn directory_operand_displays_relative_paths() {
+		let tree = tree();
+		let (code, out, err) = run(&tree, &["run", "-p", "foo($A)", "-l", "rust"]).await;
+		assert_eq!((code, out.as_str()), (0, "a.rs:2:    let a = foo(1);\nb.rs:2:    foo(3)\nbig.rs:3:    foo(1);\nbig.rs:15:    foo(2);\n"), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn stdin_requires_lang_and_reads_code() {
+		let (code, capture) = run_async_util::<AstGrep>(&["run", "-p", "foo($A)", "-l", "rust", "--stdin"], "let x = foo(1);\n", "/").await;
+		assert_eq!((code, capture.out().as_str()), (0, "STDIN:1:let x = foo(1);\n"), "{}", capture.err());
+		let (code, capture) = run_async_util::<AstGrep>(&["run", "-p", "foo($A)", "--stdin"], "", "/").await;
+		assert_eq!(
+			(code, capture.err().as_str()),
+			(
+				3,
+				"Error: Language must be specified for code from StdIn.\nHelp: Please use `--lang` to specify the code \
+				 language.\nSee also: https://ast-grep.github.io/guide/tooling-overview.html#parse-code-from-stdin\n\n"
+			)
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn unsupported_features_exit_two() {
+		let tree = tree();
+		assert_eq!(run(&tree, &["scan"]).await, (2, String::new(), "ast-grep: scan is not supported by the built-in ast-grep\n".to_owned()));
+		assert_eq!(
+			run(&tree, &["run", "-p", "foo", "--interactive", "a.rs"]).await,
+			(2, String::new(), "ast-grep: --interactive is not supported by the built-in ast-grep\n".to_owned())
+		);
+	}
+}

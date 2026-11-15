@@ -1374,5 +1374,161 @@ fn write_ps_help(mut output: impl Write) -> io::Result<()> {
 	)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn parses_output_field_lists_and_overrides() {
+		let argv = vec!["-o".to_string(), "pid:8=PROCESS,user,args=COMMAND".to_string()];
+		let ParsePsResult::Options(options) =
+			parse_ps_args(&argv, &ShellPaths::default()).expect("valid output fields")
+		else {
+			panic!("expected parsed options");
+		};
+
+		assert!(options.custom_format);
+		assert_eq!(options.columns.len(), 3);
+		assert!(matches!(options.columns[0].field, PsField::Pid));
+		assert_eq!(options.columns[0].header, "PROCESS");
+		assert_eq!(options.columns[0].min_width, 8);
+		assert!(matches!(options.columns[1].field, PsField::User));
+		assert_eq!(options.columns[1].header, "USER");
+		assert!(matches!(options.columns[2].field, PsField::Args));
+		assert_eq!(options.columns[2].header, "COMMAND");
+	}
+
+	#[test]
+	fn parses_apple_user_time_field() {
+		let mut columns = Vec::new();
+		parse_ps_format("utime,putime", &mut columns).expect("Apple user-time keywords");
+		assert!(columns.iter().all(|column| matches!(column.field, PsField::UserTime)));
+	}
+
+	#[test]
+	fn rejects_unknown_output_field() {
+		let error = parse_ps_format("pid,definitely_not_a_field", &mut Vec::new())
+			.expect_err("unknown fields must fail");
+		assert_eq!(error, (1, "unknown output format specifier 'definitely_not_a_field'".to_string()));
+	}
+
+	#[test]
+	fn dashed_r_sorts_by_cpu_while_bare_r_selects_running() {
+		for argv in [&["-Ao", "pid,comm", "-r"][..], &["-axr"][..]] {
+			let argv: Vec<String> = argv.iter().map(ToString::to_string).collect();
+			let ParsePsResult::Options(options) =
+				parse_ps_args(&argv, &ShellPaths::default()).expect("valid -r")
+			else {
+				panic!("expected parsed options");
+			};
+			assert!(!options.running_only, "{argv:?}");
+			assert!(matches!(options.sort[..], [PsSort { field: PsSortField::Cpu, descending: true }]));
+		}
+
+		let ParsePsResult::Options(options) =
+			parse_ps_args(&["axr".to_string()], &ShellPaths::default()).expect("valid bare r")
+		else {
+			panic!("expected parsed options");
+		};
+		assert!(options.running_only);
+		assert!(options.sort.is_empty());
+	}
+
+	#[test]
+	fn unknown_options_name_themselves_and_point_at_system_ps() {
+		for (args, named) in [
+			(&["-eo", "pid,args", "--forest"][..], "unrecognized option '--forest'"),
+			(&["--cols=200", "-e"][..], "unrecognized option '--cols'"),
+			(&["-eH"][..], "unsupported option '-H'"),
+		] {
+			let argv: Vec<String> = args.iter().map(ToString::to_string).collect();
+			let Err((code, message)) = parse_ps_args(&argv, &ShellPaths::default()) else {
+				panic!("{args:?} must be rejected");
+			};
+			assert_eq!(code, 1, "{args:?}");
+			let hint = message
+				.strip_prefix(named)
+				.and_then(|rest| rest.strip_prefix("; "))
+				.unwrap_or_else(|| panic!("{args:?}: {message:?} must start with {named:?}"));
+			assert!(hint.contains("'ps --help'"), "{args:?}: {message:?}");
+			assert!(hint.contains("system ps"), "{args:?}: {message:?}");
+			assert!(hint.contains("full path"), "{args:?}: {message:?}");
+		}
+	}
+
+	#[test]
+	fn parses_sort_keys_and_directions() {
+		let mut sort = Vec::new();
+		parse_ps_sort("-pcpu,+pid command", &mut sort).expect("valid sort keys");
+		assert_eq!(sort.len(), 3);
+		assert!(matches!(sort[0].field, PsSortField::Cpu));
+		assert!(sort[0].descending);
+		assert!(matches!(sort[1].field, PsSortField::Pid));
+		assert!(!sort[1].descending);
+		assert!(matches!(sort[2].field, PsSortField::Command));
+		assert!(!sort[2].descending);
+
+		let error = parse_ps_sort("bogus", &mut Vec::new()).expect_err("unknown keys must fail");
+		assert_eq!(error, (1, "unknown sort specifier 'bogus'".to_string()));
+	}
+
+	#[test]
+	fn formats_elapsed_time_boundaries() {
+		assert_eq!(format_ps_elapsed(Duration::from_secs(0)), "00:00");
+		assert_eq!(format_ps_elapsed(Duration::from_secs(65)), "01:05");
+		assert_eq!(format_ps_elapsed(Duration::from_secs(3_661)), "01:01:01");
+		assert_eq!(format_ps_elapsed(Duration::from_secs(90_061)), "1-01:01:01");
+	}
+
+	#[test]
+	fn formats_split_time_with_centisecond_rounding() {
+		assert_eq!(format_ps_split_time(Duration::from_micros(4_999)), "0:00.00");
+		assert_eq!(format_ps_split_time(Duration::from_micros(5_000)), "0:00.01");
+		assert_eq!(format_ps_split_time(Duration::from_micros(59_995_000)), "1:00.00");
+		assert_eq!(format_ps_split_time(Duration::from_secs(3_725)), "62:05.00");
+	}
+
+	#[test]
+	fn formats_start_time_by_age() {
+		let started_at = UNIX_EPOCH.checked_add(Duration::from_secs(1_704_164_640)).unwrap();
+		assert_eq!(
+			format_ps_start(Some(started_at), Some(Duration::from_secs(60)), &TimeZone::UTC, false),
+			"03:04"
+		);
+		assert_eq!(
+			format_ps_start(Some(started_at), Some(Duration::from_hours(24)), &TimeZone::UTC, false),
+			"Jan02"
+		);
+		assert_eq!(
+			format_ps_start(
+				Some(started_at),
+				Some(Duration::from_hours(180 * 24)),
+				&TimeZone::UTC,
+				false,
+			),
+			"2024"
+		);
+		assert_eq!(
+			format_ps_start(Some(started_at), None, &TimeZone::UTC, true),
+			"Tue Jan  2 03:04:00 2024"
+		);
+		assert_eq!(format_ps_start(None, None, &TimeZone::UTC, false), "?");
+	}
+
+	#[test]
+	fn non_ascii_option_in_a_cluster_is_reported_not_a_panic() {
+		for (arg, message) in [
+			("-é", "unsupported option '-é'"),
+			("-eé", "unsupported option '-é'"),
+			// `-o` takes the rest of the cluster, here `é`, as its value.
+			("-eoé", "unknown output format specifier 'é'"),
+		] {
+			let Err((code, error)) = parse_ps_args(&[arg.to_string()], &ShellPaths::default()) else {
+				panic!("{arg:?} must be rejected");
+			};
+			assert_eq!(code, 1, "{arg:?}");
+			assert!(error.starts_with(message), "{arg:?}: {error}");
+		}
+	}
+}
 

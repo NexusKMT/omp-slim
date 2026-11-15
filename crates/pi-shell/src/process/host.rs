@@ -671,7 +671,20 @@ fn open_fds() -> Vec<i32> {
 	fds
 }
 
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+fn open_fds_spans_directory_batches() {
+	use std::os::fd::AsRawFd;
 
+	let files: Vec<_> = (0..96)
+		.map(|_| std::fs::File::open("/dev/null").unwrap())
+		.collect();
+	let fds = open_fds();
+	for file in &files {
+		assert!(fds.contains(&file.as_raw_fd()), "missing descriptor {}", file.as_raw_fd());
+	}
+	assert!(fds.iter().all(|&fd| fd > 2));
+}
 
 /// Whether `fd` is a file, directory, pipe, socket or device (what a user
 /// redirects), not an anonymous kernel object such as a kqueue or eventfd.

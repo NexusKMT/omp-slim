@@ -67,4 +67,44 @@ pub(crate) fn push_wide(dst: &mut Vec<u16>, src: &[u8]) {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	/// Unpaired surrogates survive UTF-16 -> WTF-8 -> UTF-16; paired ones
+	/// become ordinary UTF-8.
+	#[test]
+	fn wtf8_round_trips_unpaired_surrogates() {
+		let cases: [&[u16]; 5] =
+			[&[0x61, 0x62], &[0xd83d, 0xde00], &[0xd800], &[0x61, 0xdc00, 0x62], &[
+				0xdbff, 0xd800, 0xdfff,
+			]];
+		for wide in cases {
+			let mut wtf8 = Vec::new();
+			push_wtf8(&mut wtf8, wide.iter().copied());
+			let mut back = Vec::new();
+			push_wide(&mut back, &wtf8);
+			assert_eq!(back, wide, "round trip of {wide:x?} via {wtf8:x?}");
+		}
+		let mut wtf8 = Vec::new();
+		push_wtf8(&mut wtf8, [0xd83d, 0xde00, 0xd800]);
+		assert_eq!(wtf8, b"\xf0\x9f\x98\x80\xed\xa0\x80");
+	}
+
+	#[test]
+	fn wide_maps_slashes_and_replaces_malformed_bytes() {
+		let mut wide = Vec::new();
+		push_wide(&mut wide, b"a/b\xffc\xe2\x82");
+		assert_eq!(wide, [0x61, 0x5c, 0x62, 0xfffd, 0x63, 0xfffd, 0xfffd]);
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn wtf8_matches_os_str_encoding() {
+		use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+		let wide = [0x61, 0xd800, 0xd83d, 0xde00];
+		let mut wtf8 = Vec::new();
+		push_wtf8(&mut wtf8, wide);
+		assert_eq!(wtf8, OsString::from_wide(&wide).as_encoded_bytes());
+	}
+}

@@ -748,4 +748,149 @@ struct Expire {
 	max_unique: i64,
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::{MemStore, fd::FdTable, ids::Vpid, vm::state::Overlay};
 
+	fn shell() -> (MemStore, Root, Vproc) {
+		let mut store = MemStore::new();
+		let root = Root::load(&mut store).unwrap();
+		let vp = Vproc::new(Vpid(1), None, FdTable::default(), BString::from("/"), None, false);
+		(store, root, vp)
+	}
+
+	#[test]
+	fn history_pending_edits_do_not_change_store_or_snapshots() {
+		let (mut store, mut root, mut vp) = shell();
+		hist(&["first"]).save(&mut root, &mut store, &mut vp);
+		{
+			let mut pending = Hist::take(&root, &mut store, &vp).unwrap();
+			pending.events_mut()[0].text = "abandoned".into();
+			let saved = Hist::load(&root, &mut store, &vp).unwrap();
+			assert_eq!(saved.entries[0].text, "first");
+		}
+		let mut h = Hist::take(&root, &mut store, &vp).unwrap();
+		assert_eq!(h.entries[0].text, "first");
+		let i = h.prepnext(false);
+		h.events_mut()[i].text = "second".into();
+		h.save(&mut root, &mut store, &mut vp);
+		let mut restored = MemStore::from_bytes(&store.to_bytes()).unwrap();
+		let fresh = Root::load(&mut restored).unwrap();
+		let h = Hist::load(&fresh, &mut restored, &vp).unwrap();
+		assert_eq!(
+			h.entries
+				.iter()
+				.map(|e| e.text.as_slice())
+				.collect::<Vec<_>>(),
+			[b"first".as_slice(), b"second"]
+		);
+	}
+
+	#[test]
+	fn history_overlay_edits_stay_out_of_root_cache() {
+		let (mut store, mut root, mut vp) = shell();
+		hist(&["parent"]).save(&mut root, &mut store, &mut vp);
+		let mut sub = Vproc::new(
+			Vpid(2),
+			Some(vp.vpid),
+			FdTable::default(),
+			BString::from("/"),
+			Some(Overlay::default()),
+			true,
+		);
+		// A state-only save creates an overlay without changing the events.
+		let h = Hist::load(&root, &mut store, &sub).unwrap();
+		h.save(&mut root, &mut store, &mut sub);
+		let mut h = Hist::take(&root, &mut store, &sub).unwrap();
+		h.events_mut()[0].text = "child".into();
+		h.save(&mut root, &mut store, &mut sub);
+		assert_eq!(Hist::load(&root, &mut store, &sub).unwrap().entries[0].text, "child");
+		assert_eq!(Hist::take(&root, &mut store, &vp).unwrap().entries[0].text, "parent");
+	}
+
+	fn hist(texts: &[&str]) -> Hist {
+		let mut h = Hist::default();
+		for t in texts {
+			let i = h.prepnext(false);
+			h.events_mut()[i].text = BString::from(*t);
+			h.addhistnode(i);
+		}
+		h
+	}
+
+	#[test]
+	fn history_duplicates_are_removed_after_readonly_save_and_stack_restore() {
+		let (mut store, mut root, mut vp) = shell();
+		hist(&["one", "two"]).save(&mut root, &mut store, &mut vp);
+		Hist::load(&root, &mut store, &vp)
+			.unwrap()
+			.save(&mut root, &mut store, &mut vp);
+		let mut h = Hist::take(&root, &mut store, &vp).unwrap();
+		h.st.ignore_all_dups = true;
+		let i = h.prepnext(false);
+		h.events_mut()[i].text = " one".into();
+		h.addhistnode(i);
+		assert_eq!(
+			h.entries
+				.iter()
+				.map(|e| e.text.as_slice())
+				.collect::<Vec<_>>(),
+			[b"two".as_slice(), b" one"]
+		);
+		let restored = hist(&["restored"]).entries;
+		h.replace_events(Arc::unwrap_or_clone(restored));
+		let i = h.prepnext(false);
+		h.events_mut()[i].text = " restored".into();
+		h.addhistnode(i);
+		assert_eq!(h.entries.len(), 1);
+		assert_eq!(h.entries[0].text, " restored");
+	}
+
+	#[test]
+	fn numbering_and_navigation() {
+		let h = hist(&["a", "b", "c"]);
+		assert_eq!(h.st.curhist, 3);
+		assert_eq!(h.gethistent(2, 0), Some(1));
+		assert_eq!(h.gethistent(9, -1), Some(2));
+		assert_eq!(h.gethistent(9, 1), None);
+		assert_eq!(h.addhistnum(3, -1, 0), 2);
+		assert_eq!(h.addhistnum(1, -5, 0), 0);
+		assert_eq!(h.addhistnum(3, 5, 0), 4);
+	}
+
+	#[test]
+	fn duplicates_are_marked_and_dropped_with_ignore_all_dups() {
+		let mut h = hist(&["ls", "pwd", "  ls"]);
+		assert_eq!(h.entries[0].flags & HIST_DUP, HIST_DUP);
+		h.st.ignore_all_dups = true;
+		let i = h.prepnext(false);
+		h.events_mut()[i].text = BString::from("pwd");
+		h.addhistnode(i);
+		assert_eq!(
+			h.entries
+				.iter()
+				.map(|e| e.text.to_string())
+				.collect::<Vec<_>>(),
+			["ls", "  ls", "pwd"]
+		);
+	}
+
+	#[test]
+	fn histsize_expires_the_oldest_or_dups_first() {
+		let mut h = hist(&["a", "b", "a", "c"]);
+		h.st.histsiz = 3;
+		h.st.savehistsiz = 10;
+		h.resize(true);
+		assert_eq!(
+			h.entries
+				.iter()
+				.map(|e| e.text.to_string())
+				.collect::<Vec<_>>(),
+			["b", "a", "c"]
+		);
+		h.st.histsiz = 2;
+		h.resize(false);
+		assert_eq!(h.entries.iter().map(|e| e.num).collect::<Vec<_>>(), [3, 4]);
+	}
+}

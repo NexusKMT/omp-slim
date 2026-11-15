@@ -429,4 +429,23 @@ fn executable(path: &Path) -> Option<bool> {
 	(path.is_file() || path.with_extension("exe").is_file()).then_some(true)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn quoting_survives_single_quotes() {
+		let mut out = Vec::new();
+		quote(&mut out, b"it's");
+		assert_eq!(out, b"'it'\\''s'");
+	}
+
+	#[test]
+	fn only_shell_names_are_variables() {
+		assert!(is_name("PATH"));
+		assert!(is_name("_x1"));
+		assert!(!is_name("1x"));
+		assert!(!is_name("a-b"));
+		assert!(!is_name(""));
+	}
+}

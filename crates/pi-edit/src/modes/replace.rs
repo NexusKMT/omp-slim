@@ -250,4 +250,31 @@ impl ModeEngine for ReplaceEngine {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn engine() -> ReplaceEngine {
+		ReplaceEngine { allow_fuzzy: true, fuzzy_threshold: 0.95 }
+	}
+
+	#[test]
+	fn reports_path_qualified_occurrences() {
+		let error = engine()
+			.replace("one\none\n", "one", "two", false, "a.txt")
+			.unwrap_err();
+		assert!(
+			error
+				.to_string()
+				.starts_with("Found 2 occurrences in a.txt")
+		);
+	}
+
+	#[test]
+	fn reports_path_qualified_match_error() {
+		let error = engine()
+			.replace("alpha\n", "omega", "two", false, "a.txt")
+			.unwrap_err();
+		assert!(error.to_string().contains("match in a.txt"));
+	}
+}

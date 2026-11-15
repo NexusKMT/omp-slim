@@ -270,4 +270,15 @@ fn read_run(ctx: &Ctx<'_, '_>, spec: &Spec<'_>, run: u64) -> Result<Batch, super
 	Ok(batch)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn counts_must_fit_an_unsigned_int() {
+		assert_eq!(unsigned(b"5"), Some(5));
+		assert_eq!(unsigned(b"-1"), None);
+		assert_eq!(unsigned(b"x"), None);
+		assert_eq!(unsigned(b"4294967296"), None);
+	}
+}

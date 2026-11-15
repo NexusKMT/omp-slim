@@ -930,4 +930,176 @@ fn pathbuf_from_stdout() -> Result<PathBuf, TouchError> {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		fs::{self, FileTimes},
+		path::{Path, PathBuf},
+		time::{SystemTime, UNIX_EPOCH},
+	};
 
+	use clap::Parser;
+
+	use super::{ChangeTimes, Touch, Utility, determine_atime_mtime_change, unix_time, uu_app};
+	use crate::host::{Host, run_util};
+
+	fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
+		let dir = tempfile::tempdir().unwrap();
+		let canonical = fs::canonicalize(dir.path()).unwrap();
+		(dir, canonical)
+	}
+
+	fn times_of(path: &Path) -> (SystemTime, SystemTime) {
+		let metadata = fs::metadata(path).unwrap();
+		(metadata.accessed().unwrap(), metadata.modified().unwrap())
+	}
+
+	fn unix_seconds(time: SystemTime) -> u64 {
+		time.duration_since(UNIX_EPOCH).unwrap().as_secs()
+	}
+
+	fn set_file_times(path: PathBuf, atime: SystemTime, mtime: SystemTime) -> std::io::Result<()> {
+		fs::set_times(path, FileTimes::new().set_accessed(atime).set_modified(mtime))
+	}
+
+	fn run_with_tz(cwd: &Path, args: &[&str], tz: &str) -> (i32, crate::host::Capture) {
+		let (mut host, capture) = Host::for_test("touch", Vec::new(), cwd);
+		host.set_test_var("TZ", tz);
+		let argv = std::iter::once("touch").chain(args.iter().copied());
+		let parsed = Touch::try_parse_from(argv).unwrap();
+		let code = parsed.run(&mut host);
+		(code, capture)
+	}
+
+	#[test]
+	fn relative_operand_creates_file_under_host_cwd() {
+		let (_dir, root) = canonical_tempdir();
+		let filename = format!("touch-host-cwd-regression-{}", std::process::id());
+		let process_path = std::env::current_dir().unwrap().join(&filename);
+		assert!(!process_path.exists());
+
+		let (code, capture) = run_util::<Touch>(&[&filename], "", &root);
+		assert_eq!(code, 0);
+		assert_eq!(capture.out(), "");
+		assert_eq!(capture.err(), "");
+		assert!(root.join(filename).is_file());
+		assert!(!process_path.exists());
+	}
+
+	#[test]
+	fn no_create_on_missing_file_is_silent_success() {
+		let (_dir, root) = canonical_tempdir();
+		let (code, capture) = run_util::<Touch>(&["-c", "missing.txt"], "", &root);
+		assert_eq!(code, 0);
+		assert_eq!(capture.out(), "");
+		assert_eq!(capture.err(), "");
+		assert!(!root.join("missing.txt").exists());
+	}
+
+	#[test]
+	fn reference_copies_times_from_relative_reference() {
+		let (_dir, root) = canonical_tempdir();
+		fs::write(root.join("ref"), b"x").unwrap();
+		let ref_atime = unix_time(1_000_000);
+		let ref_mtime = unix_time(2_000_000);
+		set_file_times(root.join("ref"), ref_atime, ref_mtime).unwrap();
+
+		let (code, capture) = run_util::<Touch>(&["-r", "ref", "new"], "", &root);
+		assert_eq!(code, 0);
+		assert_eq!(capture.out(), "");
+		assert_eq!(capture.err(), "");
+		assert_eq!(times_of(&root.join("new")), (ref_atime, ref_mtime));
+	}
+
+	#[test]
+	fn date_sets_times_to_fixed_utc_instant() {
+		let (_dir, root) = canonical_tempdir();
+		let (code, capture) =
+			run_util::<Touch>(&["-d", "2001-02-03 04:05:06", "f"], "", &root);
+		assert_eq!(code, 0);
+		assert_eq!(capture.err(), "");
+		let (atime, mtime) = times_of(&root.join("f"));
+		assert_eq!(unix_seconds(mtime), 981_173_106);
+		assert_eq!(unix_seconds(atime), 981_173_106);
+	}
+
+	#[test]
+	fn modification_only_preserves_existing_atime() {
+		let (_dir, root) = canonical_tempdir();
+		fs::write(root.join("f"), b"x").unwrap();
+		let old_atime = unix_time(1_111);
+		let old_mtime = unix_time(2_222);
+		set_file_times(root.join("f"), old_atime, old_mtime).unwrap();
+
+		let (code, capture) =
+			run_util::<Touch>(&["-m", "-d", "@981173106", "f"], "", &root);
+		assert_eq!(code, 0);
+		assert_eq!(capture.err(), "");
+		let (atime, mtime) = times_of(&root.join("f"));
+		assert_eq!(atime, old_atime, "-m must not change atime");
+		assert_eq!(mtime, unix_time(981_173_106));
+	}
+
+	#[test]
+	fn shell_timezone_controls_date_and_timestamp_parsing() {
+		let (_dir, root) = canonical_tempdir();
+		let (code, capture) = run_with_tz(&root, &["-d", "2001-02-03", "date"], "Asia/Tokyo");
+		assert_eq!(code, 0);
+		assert_eq!(capture.err(), "");
+		assert_eq!(unix_seconds(times_of(&root.join("date")).1), 981_126_000);
+
+		let (code, capture) =
+			run_with_tz(&root, &["-t", "200102030405.06", "stamp"], "Asia/Tokyo");
+		assert_eq!(code, 0);
+		assert_eq!(capture.err(), "");
+		assert_eq!(unix_seconds(times_of(&root.join("stamp")).1), 981_140_706);
+	}
+
+	#[test]
+	fn missing_operand_is_usage_error() {
+		let (code, capture) = run_util::<Touch>(&[], "", ".");
+		assert_eq!(code, 1);
+		assert_eq!(capture.out(), "");
+		assert!(capture.err().contains("missing file operand"));
+		assert!(capture.err().contains("Try 'touch --help'"));
+	}
+
+	#[test]
+	fn help_renders_to_stdout() {
+		let (code, capture) = run_util::<Touch>(&["--help"], "", ".");
+		assert_eq!(code, 0);
+		assert!(capture.out().contains("Usage:"));
+		assert!(capture.out().contains("access and modification times"));
+		assert_eq!(capture.err(), "");
+	}
+
+	#[test]
+	fn time_word_and_flags_select_change_times() {
+		assert_eq!(
+			ChangeTimes::Both,
+			determine_atime_mtime_change(&uu_app().try_get_matches_from(["touch", "f"]).unwrap())
+		);
+		assert_eq!(
+			ChangeTimes::Both,
+			determine_atime_mtime_change(
+				&uu_app()
+					.try_get_matches_from(["touch", "-a", "-m", "--time", "modify", "f"])
+					.unwrap()
+			)
+		);
+		assert_eq!(
+			ChangeTimes::AtimeOnly,
+			determine_atime_mtime_change(
+				&uu_app()
+					.try_get_matches_from(["touch", "--time", "access", "f"])
+					.unwrap()
+			)
+		);
+		assert_eq!(
+			ChangeTimes::MtimeOnly,
+			determine_atime_mtime_change(
+				&uu_app().try_get_matches_from(["touch", "-m", "f"]).unwrap()
+			)
+		);
+	}
+}

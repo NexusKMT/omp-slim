@@ -1047,4 +1047,82 @@ mod os {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use pi_shell::bash::{Lost, NativeRef, RunId, SigSet, Signal, Vpid};
 
+	use super::{Resume, Stats, bits_of_set, parse_fault, set_of_bits};
+
+	#[test]
+	fn a_continuation_survives_its_command_line() {
+		let resume = Resume {
+			image_fd: 11,
+			run:      RunId(3),
+			events:   0x1f,
+			depth:    2,
+			clock_ns: 123_456_789,
+			ignored:  1 << 12,
+			sigmask:  1 << 9,
+			stats:    Stats {
+				snapshots:    9,
+				restored:     7,
+				skipped:      2,
+				skipped_ext:  2,
+				skipped_task: 0,
+				skipped_fd:   1,
+				lost:         0,
+				pauses:       4,
+				deferred:     3,
+			},
+		};
+		assert_eq!(Resume::decode(&resume.encode()).unwrap(), resume);
+	}
+
+	#[test]
+	fn a_malformed_continuation_is_refused() {
+		for bad in [
+			"",
+			"run=1",
+			"img=2,run=1",
+			"img=11",
+			"img=11,run=1,bogus=3",
+			"img=11,run=x",
+			"img=11;run=1",
+		] {
+			assert!(Resume::decode(bad).is_err(), "{bad:?} was accepted");
+		}
+	}
+
+	#[test]
+	fn fault_specs_need_a_seed_and_a_positive_k() {
+		assert_eq!(parse_fault("1:97"), Ok((1, 97)));
+		for bad in ["1", "x:3", "1:0", "1:-2", ":5"] {
+			assert!(parse_fault(bad).is_err(), "{bad:?} was accepted");
+		}
+	}
+
+	#[test]
+	fn signal_sets_round_trip_through_os_numbers() {
+		let set = SigSet::EMPTY
+			.with(Signal::Int)
+			.with(Signal::Pipe)
+			.with(Signal::Usr1);
+		assert_eq!(set_of_bits(bits_of_set(set)), set);
+		assert_eq!(set_of_bits(0), SigSet::EMPTY);
+	}
+
+	#[test]
+	fn a_skip_counts_each_kind_of_loss_once() {
+		let mut stats = Stats::default();
+		stats.skip(&[
+			Lost::Ext { vpid: Vpid(2), pid: 10 },
+			Lost::Ext { vpid: Vpid(3), pid: 11 },
+			Lost::Fd { vpid: Vpid(2), fd: 3, kind: pi_shell::bash::FileKind::Pipe },
+		]);
+		stats.skip(&[Lost::Task { vpid: Vpid(2), native: NativeRef(1) }]);
+		assert_eq!(
+			(stats.skipped, stats.skipped_ext, stats.skipped_task, stats.skipped_fd),
+			(2, 1, 1, 1)
+		);
+	}
+}

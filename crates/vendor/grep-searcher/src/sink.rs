@@ -461,7 +461,16 @@ impl<'b> SinkContext<'b> {
         &self.kind
     }
 
-    
+    /// Return an iterator over the lines in this match.
+    ///
+    /// This always yields exactly one line (and that one line may contain just
+    /// the line terminator).
+    ///
+    /// Lines yielded by this iterator include their terminators.
+    #[cfg(test)]
+    pub(crate) fn lines(&self) -> LineIter<'b> {
+        LineIter::new(self.line_term.as_byte(), self.bytes)
+    }
 
     /// Returns the absolute byte offset of the start of this context. This
     /// offset is absolute in that it is relative to the very beginning of the

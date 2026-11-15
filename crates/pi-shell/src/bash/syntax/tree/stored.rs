@@ -257,4 +257,20 @@ impl<'de> Visitor<'de> for KidsSeed<'_> {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::{K, Tree};
 
+	#[test]
+	fn a_child_past_the_last_node_is_a_load_error() {
+		// One `Word` node (head: kind, no optional fields; id, lo, length)
+		// whose child code is zigzag(0 - 7): node 7 of a one-node tree.
+		let node = (K::Word as u8, 0u32, 0u32, 0u32, vec![13u64]);
+		let bytes = postcard::to_stdvec(&(Vec::<u8>::new(), vec![node])).unwrap();
+		assert!(postcard::from_bytes::<Tree>(&bytes).is_err());
+		// Without that child the same node loads.
+		let ok = (K::Word as u8, 0u32, 0u32, 0u32, Vec::<u64>::new());
+		let bytes = postcard::to_stdvec(&(Vec::<u8>::new(), vec![ok])).unwrap();
+		assert_eq!(postcard::from_bytes::<Tree>(&bytes).unwrap().nodes.len(), 1);
+	}
+}

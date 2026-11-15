@@ -826,4 +826,219 @@ fn lookup_group(key: GrKey<'_>) -> Option<(Vec<u8>, u32)> {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	#[cfg(unix)]
+	use crate::rsync::consts::CF_VARINT_FLIST_FLAGS;
 
+	fn parse(spec: &str, kind: Kind) -> Result<NameMap, RsyncError> {
+		parse_name_map(spec, kind, None)
+	}
+
+	fn err_text(r: Result<NameMap, RsyncError>) -> (i32, String) {
+		let e = r.expect_err("expected a parse error");
+		(e.code, e.message.unwrap_or_default())
+	}
+
+	#[test]
+	fn usermap_rules_keep_command_line_order() {
+		let map = parse("5:7,10-20:8,*:9,bob:0", Kind::User).unwrap();
+		assert_eq!(
+			map.rules,
+			vec![
+				MapRule { from: MapFrom::Ids { low: 5, high: 0 }, to: 7 },
+				MapRule { from: MapFrom::Ids { low: 10, high: 20 }, to: 8 },
+				MapRule { from: MapFrom::Wild(b"*".to_vec()), to: 9 },
+				MapRule { from: MapFrom::Name(b"bob".to_vec()), to: 0 },
+			]
+		);
+		assert_eq!(map.lookup(5, b""), Some(7));
+		assert_eq!(map.lookup(15, b"x"), Some(8));
+		assert_eq!(map.lookup(21, b""), Some(9));
+		assert_eq!(map.lookup(21, b"bob"), Some(9));
+	}
+
+	#[test]
+	fn usermap_syntax_errors_match_upstream() {
+		assert_eq!(
+			err_text(parse("abc", Kind::User)),
+			(RERR_SYNTAX, "No colon found in --usermap: abc".into())
+		);
+		assert_eq!(
+			err_text(parse("abc:", Kind::Group)),
+			(RERR_SYNTAX, "No name found after colon --groupmap: abc:".into())
+		);
+		assert_eq!(
+			err_text(parse("1x:0", Kind::User)),
+			(RERR_SYNTAX, "Invalid number in --usermap: 1x".into())
+		);
+		assert_eq!(
+			err_text(parse("1-:0", Kind::User)),
+			(RERR_SYNTAX, "Invalid number in --usermap: 1-".into())
+		);
+		assert_eq!(
+			err_text(parse("1-2-3:0", Kind::User)),
+			(RERR_SYNTAX, "Invalid number in --usermap: 1-2-3".into())
+		);
+		assert_eq!(
+			err_text(parse("4294967296:0", Kind::User)),
+			(RERR_SYNTAX, "Invalid ID number: 4294967296".into())
+		);
+		assert_eq!(
+			err_text(parse("1:4294967296", Kind::User)),
+			(RERR_SYNTAX, "Invalid ID number: 4294967296".into())
+		);
+		// Items are examined from the last one backwards.
+		assert_eq!(
+			err_text(parse("nocolon,x:", Kind::User)),
+			(RERR_SYNTAX, "No name found after colon --usermap: x:".into())
+		);
+		// An empty item has no colon.
+		assert_eq!(
+			err_text(parse("1:0,,2:0", Kind::User)),
+			(RERR_SYNTAX, "No colon found in --usermap: ".into())
+		);
+	}
+
+	#[test]
+	fn id_parse_wraps_like_upstream() {
+		// 9999999999 wraps without tripping upstream's overflow check.
+		assert_eq!(id_parse("9999999999").unwrap(), 9_999_999_999u64 as u32);
+		assert_eq!(id_parse("4294967295").unwrap(), u32::MAX);
+	}
+
+	#[test]
+	fn unknown_target_names_are_dropped() {
+		let map = parse("1:no-such-user-xyzzy-42,2:0", Kind::User).unwrap();
+		assert_eq!(map.rules, vec![MapRule { from: MapFrom::Ids { low: 2, high: 0 }, to: 0 }]);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn names_and_numbers_resolve_locally() {
+		assert_eq!(uid_name(0).as_deref(), Some(&b"root"[..]));
+		assert_eq!(name_uid(b"root"), Some(0));
+		assert_eq!(name_uid(b"no-such-user-xyzzy-42"), None);
+		let map = parse("joe:root", Kind::User).unwrap();
+		assert_eq!(map.lookup(77, b"joe"), Some(0));
+		assert_eq!(map.lookup(77, b"jo"), None);
+	}
+
+	#[test]
+	fn wildcard_rules_match_sender_names() {
+		let map = parse("us?r:5,[a-c]*:6,*:7", Kind::User).unwrap();
+		assert_eq!(map.lookup(1, b"user"), Some(5));
+		assert_eq!(map.lookup(1, b"bob"), Some(6));
+		assert_eq!(map.lookup(1, b"zed"), Some(7));
+		// A nameless id still matches "*" (it is compared as the empty name).
+		assert_eq!(map.lookup(1, b""), Some(7));
+	}
+
+	fn opts(inc: bool) -> FlistOpts {
+		FlistOpts { preserve_uid: true, preserve_gid: true, inc_recurse: inc, ..FlistOpts::default() }
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn id_lists_round_trip_all_protocols() {
+		for (version, compat) in [(29, 0), (30, 0), (31, CF_VARINT_FLIST_FLAGS), (33, CF_ID0_NAMES)] {
+			let p = Proto::new(version, compat);
+			let o = opts(false);
+			let mut tx = IdLists::new(p, &o);
+			assert_eq!(tx.add_uid(0).as_deref(), Some(&b"root"[..]));
+			assert_eq!(tx.add_uid(0), None);
+			tx.add_uid(4_000_000_001);
+			let gname = tx.add_gid(0);
+			assert!(gname.is_some());
+			let mut wire = Vec::new();
+			tx.send_lists(&mut wire, p, &o).unwrap();
+			let mut rx = IdLists::new(p, &o);
+			let mut r = &wire[..];
+			rx.recv_lists(&mut r, p, &o).unwrap();
+			assert!(r.is_empty(), "v{version}: trailing bytes");
+			if compat & CF_ID0_NAMES != 0 {
+				assert_eq!(rx.recv_uids.len(), 1);
+				assert_eq!(rx.recv_uids[0].name.as_deref(), Some(&b"root"[..]));
+			} else {
+				// Id 0 and nameless ids are never listed: just the two terminators.
+				let expected: &[u8] = if version >= 30 { &[0, 0] } else { &[0; 8] };
+				assert_eq!(wire, expected);
+			}
+		}
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn id_list_golden_bytes() {
+		let p = Proto::new(31, 0);
+		let mut tx = IdLists::default();
+		tx.sent_uids = vec![(5, Some(b"ab".to_vec())), (6, None), (300, Some(b"c".to_vec()))];
+		let mut wire = Vec::new();
+		tx.send_lists(&mut wire, p, &opts(false)).unwrap();
+		// Newest first; varint 300 = 0x81 0x2c; uid list then empty gid list.
+		assert_eq!(wire, [0x81, 0x2c, 1, b'c', 5, 2, b'a', b'b', 0, 0]);
+		let p0 = Proto::new(31, CF_ID0_NAMES);
+		let mut wire = Vec::new();
+		IdLists::default()
+			.send_lists(&mut wire, p0, &FlistOpts { preserve_uid: true, ..FlistOpts::default() })
+			.unwrap();
+		assert_eq!(wire, [0, 4, b'r', b'o', b'o', b't']);
+		let mut none = Vec::new();
+		IdLists::default().send_lists(&mut none, p0, &opts(true)).unwrap();
+		assert!(none.is_empty());
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn receiver_maps_by_name_and_rules() {
+		let p = Proto::new(31, 0);
+		let mut o = opts(false);
+		o.am_root = true;
+		let mut ids = IdLists::new(p, &o);
+		ids.set_maps(p, &o, Some(parse("100-199:0", Kind::User).unwrap()), None);
+		// Sender's uid 1234 is called "root" over there: mapped by name.
+		let mut wire = Vec::new();
+		wire.write_varint30(p, 1234).unwrap();
+		wire.extend_from_slice(&[4, b'r', b'o', b'o', b't', 0, 0]);
+		ids.recv_lists(&mut &wire[..], p, &o).unwrap();
+		let mut list = FileList::default();
+		for uid in [1234u32, 150, 4_000_000_000] {
+			list.entries.push(crate::rsync::flist::FileEntry {
+				basename: b"f".to_vec().into_boxed_slice(),
+				uid,
+				..Default::default()
+			});
+		}
+		ids.map_entries(&mut list);
+		let uids: Vec<u32> = list.entries.iter().map(|e| e.uid).collect();
+		assert_eq!(uids, [0, 0, 4_000_000_000]);
+		assert_eq!(ids.match_uid(150), 0);
+		assert_eq!(ids.match_uid(7), 7);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn non_root_marks_foreign_groups() {
+		let p = Proto::new(31, 0);
+		let o = opts(false);
+		let mut ids = IdLists::new(p, &o);
+		let (_, skip) = ids.match_gid_flags(4_000_000_123);
+		assert!(skip);
+		// SAFETY: getegid has no preconditions.
+		let own = unsafe { libc::getegid() };
+		let (gid, skip) = ids.match_gid_flags(own);
+		assert_eq!(gid, own);
+		assert!(!skip);
+	}
+
+	#[test]
+	fn inline_names_truncate_at_nul() {
+		let p = Proto::new(31, 0);
+		let mut ids = IdLists::new(p, &opts(true));
+		let wire = [3u8, b'x', 0, b'y'];
+		let uid = ids.recv_user_name(&mut &wire[..], 42).unwrap();
+		assert_eq!(uid, 42);
+		assert_eq!(ids.recv_uids[0].name.as_deref(), Some(&b"x"[..]));
+	}
+}

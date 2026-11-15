@@ -558,4 +558,38 @@ fn limit_one(
 	true
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	// Golden: bash 5.3.20 `times` formatting (`0m0.004s`).
+	#[test]
+	fn cpu_times_print_minutes_seconds_and_milliseconds() {
+		assert_eq!(timeval(4_000_000), "0m0.004s");
+		assert_eq!(timeval(61_234_999_999), "1m1.234s");
+	}
+
+	// Golden: bash 5.3.20 `ulimit -a` on macOS.
+	#[test]
+	fn limits_print_like_printone() {
+		let core = LIMITS.iter().find(|l| l.opt == b'c').unwrap();
+		let mut out = Vec::new();
+		print_one(&mut out, core, Some(0), true);
+		assert_eq!(out, b"core file size              (blocks, -c) 0\n");
+		let files = LIMITS.iter().find(|l| l.opt == b'n').unwrap();
+		let mut out = Vec::new();
+		print_one(&mut out, files, Some(1_048_576), true);
+		assert_eq!(out, b"open files                          (-n) 1048576\n");
+		let mut out = Vec::new();
+		print_one(&mut out, core, None, false);
+		assert_eq!(out, b"unlimited\n");
+	}
+
+	#[test]
+	fn unlimited_is_the_largest_value() {
+		assert!(le(Some(5), None));
+		assert!(!le(None, Some(5)));
+		assert!(le(None, None));
+		assert!(le(Some(3), Some(3)));
+	}
+}

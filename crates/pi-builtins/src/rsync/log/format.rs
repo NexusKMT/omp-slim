@@ -516,4 +516,123 @@ fn expand_escape(
 	Some(text)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn big_num_levels() {
+		let cases: [(i64, [&str; 4]); 7] = [
+			(0, ["0", "0", "0", "0"]),
+			(999, ["999", "999", "999", "999"]),
+			(1000, ["1000", "1,000", "1.00K", "1,000"]),
+			(1023, ["1023", "1,023", "1.02K", "1,023"]),
+			(1024, ["1024", "1,024", "1.02K", "1.00K"]),
+			(1_000_000, ["1000000", "1,000,000", "1.00M", "976.56K"]),
+			(1_234_567, ["1234567", "1,234,567", "1.23M", "1.18M"]),
+		];
+		for (n, expected) in cases {
+			for (human, want) in expected.iter().enumerate() {
+				assert_eq!(big_num(n, human as u8), *want, "big_num({n}, {human})");
+			}
+		}
+		assert_eq!(big_num(-1_234_567, 1), "-1,234,567");
+		assert_eq!(big_num(-2048, 3), "-2.00K");
+		assert_eq!(big_num(i64::MIN, 0), "-9223372036854775808");
+		assert_eq!(big_num(5 * 1024_i64.pow(5), 3), "5.00P");
+		assert_eq!(big_num(123_456, 1), "123,456");
+		assert_eq!(big_num(12_345, 1), "12,345");
+	}
+
+	#[test]
+	fn big_dnum_levels() {
+		// Values from the reference --stats summaries.
+		assert_eq!(big_dnum(2_480_766.0, 1, 2), "2,480,766.00");
+		assert_eq!(big_dnum(212.0, 2, 2), "212.00");
+		assert_eq!(big_dnum(1_239_606.0 / 318.0, 1, 2), "3,898.13");
+		assert_eq!(big_dnum(2_480_766.0, 2, 2), "2.48M");
+		assert_eq!(big_dnum(0.999_37, 1, 2), "1.00");
+		assert_eq!(big_dnum(0.006, 1, 3), "0.006");
+		assert_eq!(big_dnum(2_480_766.0, 0, 2), "2480766.00");
+	}
+
+	#[test]
+	fn permstrings() {
+		assert_eq!(&permstring(0o040_755), b"drwxr-xr-x");
+		assert_eq!(&permstring(0o100_644), b"-rw-r--r--");
+		assert_eq!(&permstring(0o104_755), b"-rwsr-xr-x");
+		assert_eq!(&permstring(0o102_644), b"-rw-r-Sr--");
+		assert_eq!(&permstring(0o041_777), b"drwxrwxrwt");
+		assert_eq!(&permstring(0o120_777), b"lrwxrwxrwx");
+	}
+
+	const CTX: ItemizeCtx =
+		ItemizeCtx { local_server: true, preserve_mtimes: true, receiver_symlink_times: true };
+
+	fn item(iflags: u32, mode: u32) -> String {
+		String::from_utf8(itemize(iflags, mode, "recv", CTX).to_vec()).unwrap()
+	}
+
+	#[test]
+	fn itemize_strings_match_reference() {
+		// Every expected string below was printed by the 3.5.1 reference (`-i`/`-ii`).
+		let reg = 0o100_644;
+		let dir = 0o040_755;
+		let lnk = 0o120_777;
+		assert_eq!(item(ITEM_TRANSFER | ITEM_IS_NEW, reg), ">f+++++++++");
+		assert_eq!(item(ITEM_LOCAL_CHANGE | ITEM_IS_NEW, dir), "cd+++++++++");
+		assert_eq!(item(ITEM_LOCAL_CHANGE | ITEM_IS_NEW, lnk), "cL+++++++++");
+		assert_eq!(
+			item(ITEM_LOCAL_CHANGE | ITEM_XNAME_FOLLOWS | ITEM_IS_NEW, reg),
+			"hf+++++++++"
+		);
+		assert_eq!(item(ITEM_TRANSFER | ITEM_REPORT_SIZE, reg), ">f.s.......");
+		assert_eq!(item(ITEM_TRANSFER | ITEM_REPORT_TIME, reg), ">f..t......");
+		assert_eq!(item(ITEM_LOCAL_CHANGE | ITEM_REPORT_CHANGE, lnk), "cLc........");
+		assert_eq!(item(ITEM_REPORT_PERMS, reg), ".f...p.....");
+		assert_eq!(
+			item(ITEM_LOCAL_CHANGE | ITEM_XNAME_FOLLOWS | ITEM_REPORT_SIZE, reg),
+			"hf.s......."
+		);
+		assert_eq!(item(ITEM_DELETED, reg), "*deleting  ");
+		assert_eq!(item(ITEM_REPORT_TIME, dir), ".d..t......");
+		// -ii: unchanged items show spaces.
+		assert_eq!(item(0, dir), ".d         ");
+		assert_eq!(item(0, lnk), ".L         ");
+		assert_eq!(item(ITEM_LOCAL_CHANGE | ITEM_XNAME_FOLLOWS, reg), "hf         ");
+		// A non-local sender shows `<`.
+		let remote = ItemizeCtx { local_server: false, ..CTX };
+		assert_eq!(&itemize(ITEM_TRANSFER, reg, "send", remote), b"<f.........");
+		assert_eq!(&itemize(ITEM_TRANSFER, reg, "send", CTX), b">f.........");
+		// Time letters: T when times are not preserved or symlink times cannot be set.
+		let no_t = ItemizeCtx { preserve_mtimes: false, ..CTX };
+		assert_eq!(&itemize(ITEM_REPORT_TIME, reg, "recv", no_t), b".f..T......");
+		let no_lt = ItemizeCtx { receiver_symlink_times: false, ..CTX };
+		assert_eq!(&itemize(ITEM_REPORT_TIME, lnk, "recv", no_lt), b".L..T......");
+		assert_eq!(
+			item(ITEM_REPORT_TIME | ITEM_REPORT_TIMEFAIL, lnk),
+			".L..T......"
+		);
+		// Remaining attribute letters.
+		let attrs = ITEM_REPORT_OWNER
+			| ITEM_REPORT_GROUP
+			| ITEM_REPORT_ATIME
+			| ITEM_REPORT_ACL
+			| ITEM_REPORT_XATTR;
+		assert_eq!(item(attrs, reg), ".f....oguax");
+		assert_eq!(item(ITEM_REPORT_ATIME | ITEM_REPORT_CRTIME, reg), ".f......b..");
+		assert_eq!(item(ITEM_REPORT_CRTIME, reg), ".f......n..");
+		assert_eq!(item(ITEM_TRANSFER | ITEM_MISSING_DATA, reg), ">f?????????");
+		assert_eq!(item(ITEM_TRANSFER, 0o020_644), ">D.........");
+		assert_eq!(item(ITEM_TRANSFER, 0o010_644), ">S.........");
+	}
+
+	#[test]
+	fn format_has() {
+		assert!(log_format_has(b"%i %n%L", b'i'));
+		assert!(log_format_has(b"%'-10b", b'b'));
+		assert!(!log_format_has(b"%%i", b'i'));
+		assert!(!log_format_has(b"%n", b'i'));
+		assert!(!log_format_has(b"100%", b'i'));
+	}
+}

@@ -436,4 +436,45 @@ pub fn adjust_indentation(old_text: &str, actual_text: &str, new_text: &str) -> 
 	apply_indent_delta(new_text, delta, indent_char)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn line_ending_detection_prefers_first_terminator() {
+		assert_eq!(detect_line_ending("a\r\nb\n"), LineEnding::CrLf);
+		assert_eq!(detect_line_ending("a\nb\r\n"), LineEnding::Lf);
+		assert_eq!(detect_line_ending("abc"), LineEnding::Lf);
+	}
+
+	#[test]
+	fn lf_normalization_round_trips() {
+		assert_eq!(normalize_to_lf("a\r\nb\rc\n"), "a\nb\nc\n");
+		assert_eq!(restore_line_endings("a\nb", LineEnding::CrLf), "a\r\nb");
+		assert_eq!(strip_bom("\u{FEFF}x"), (BOM, "x"));
+	}
+
+	#[test]
+	fn adjust_indentation_shifts_uniformly() {
+		assert_eq!(
+			adjust_indentation("foo()\nbar()", "    foo()\n    bar()", "baz()\nqux()"),
+			"    baz()\n    qux()"
+		);
+		assert_eq!(adjust_indentation("    foo()", "  foo()", "    bar()"), "  bar()");
+		assert_eq!(adjust_indentation("foo()", "foo()", "  bar()"), "  bar()");
+	}
+
+	#[test]
+	fn adjust_indentation_converts_tabs_to_spaces() {
+		assert_eq!(
+			adjust_indentation("\tfoo()", "    foo()", "\tbar()\n\t\tbaz()"),
+			"    bar()\n        baz()"
+		);
+	}
+
+	#[test]
+	fn fuzzy_normalization_folds_punctuation() {
+		assert_eq!(normalize_for_fuzzy("  a \t b \u{201C}x\u{2014}y\u{201F}  "), "a b \u{201C}x-y\"");
+		assert_eq!(normalize_unicode(" caf\u{E9} \u{2260} 1\u{2010}"), "caf\u{E9} != 1-");
+	}
+}

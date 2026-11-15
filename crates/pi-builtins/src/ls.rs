@@ -1013,7 +1013,46 @@ fn indicator_value_is_disabled(indicator: Indicator, value: &str) -> bool {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn style_manager(
+		colors: &LsColors,
+		indicator_codes: FxHashMap<Indicator, String>,
+	) -> StyleManager<'_> {
+		StyleManager {
+			current_style: None,
+			initial_reset_is_done: false,
+			colors,
+			indicator_codes,
+			ln_color_from_target: false,
+		}
+	}
+
+	#[test]
+	fn has_indicator_style_ignores_fallback_styles() {
+		let colors = LsColors::from_string("ex=00:fi=32");
+		let manager = style_manager(&colors, FxHashMap::default());
+		assert!(!manager.has_indicator_style(Indicator::ExecutableFile));
+	}
+
+	#[test]
+	fn has_indicator_style_detects_explicit_styles() {
+		let colors = LsColors::from_string("ex=01;32");
+		let manager = style_manager(&colors, FxHashMap::default());
+		assert!(manager.has_indicator_style(Indicator::ExecutableFile));
+	}
+
+	#[test]
+	fn has_indicator_style_detects_raw_codes() {
+		let colors = LsColors::empty();
+		let mut indicator_codes = FxHashMap::default();
+		indicator_codes.insert(Indicator::Directory, "01;34".to_string());
+		let manager = style_manager(&colors, indicator_codes);
+		assert!(manager.has_indicator_style(Indicator::Directory));
+	}
+}
 }
 mod config {
 //! Configuration parsing for the `ls` builtin.
@@ -2282,7 +2321,162 @@ pub fn update_positions(dired: &mut DiredOutput, start: usize, end: usize, line_
 }
 
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn test_calculate_dired() {
+		let output_display = "sample_output".to_string();
+		let dfn = "sample_file".to_string();
+		let dired = DiredOutput {
+			dired_positions:    vec![BytePosition { start: 5, end: 10 }],
+			subdired_positions: vec![],
+			padding:            0,
+			line_offset:        11,
+		};
+		let (start, end) = calculate_dired(&dired, output_display.len(), dfn.len());
+
+		assert_eq!(start, 24);
+		assert_eq!(end, 35);
+	}
+
+	#[test]
+	fn test_calculate_subdired() {
+		let mut dired = DiredOutput {
+			dired_positions:    vec![
+				BytePosition { start: 0, end: 3 },
+				BytePosition { start: 4, end: 7 },
+				BytePosition { start: 8, end: 11 },
+			],
+			subdired_positions: vec![],
+			padding:            0,
+			line_offset:        12,
+		};
+		let path_len = 5;
+		calculate_subdired(&mut dired, path_len);
+		assert_eq!(dired.subdired_positions, vec![BytePosition { start: 14, end: 19 }],);
+	}
+
+	#[test]
+	fn test_add_dir_name() {
+		let mut dired = DiredOutput {
+			dired_positions:    vec![
+				BytePosition { start: 0, end: 3 },
+				BytePosition { start: 4, end: 7 },
+				BytePosition { start: 8, end: 11 },
+			],
+			subdired_positions: vec![],
+			padding:            0,
+			line_offset:        0,
+		};
+		let dir_len = 5;
+		add_dir_name(&mut dired, dir_len);
+		assert_eq!(dired, DiredOutput {
+			dired_positions:    vec![
+				BytePosition { start: 0, end: 3 },
+				BytePosition { start: 4, end: 7 },
+				BytePosition { start: 8, end: 11 },
+			],
+			subdired_positions: vec![],
+			// 9 = 5 for dir_len + 2 for "  " + 1 for : + 1 for \n
+			padding:            9,
+			line_offset:        0,
+		});
+	}
+
+	#[test]
+	fn test_add_total() {
+		let mut dired = DiredOutput {
+			dired_positions:    vec![
+				BytePosition { start: 0, end: 3 },
+				BytePosition { start: 4, end: 7 },
+				BytePosition { start: 8, end: 11 },
+			],
+			subdired_positions: vec![],
+			padding:            0,
+			line_offset:        12,
+		};
+		// if we have "total: 2"
+		let total_len = 8;
+		add_total(&mut dired, total_len);
+		// 10 = 8 (len) + 2 ("  ")
+		assert_eq!(dired.padding, 10);
+	}
+
+	#[test]
+	fn test_add_dir_name_and_total() {
+		// test when we have
+		//   dirname:
+		//   total 0
+		//   -rw-r--r-- 1 sylvestre sylvestre 0 Sep 30 09:41 ab
+
+		let mut dired = DiredOutput {
+			dired_positions:    vec![
+				BytePosition { start: 0, end: 3 },
+				BytePosition { start: 4, end: 7 },
+				BytePosition { start: 8, end: 11 },
+			],
+			subdired_positions: vec![],
+			padding:            0,
+			line_offset:        12,
+		};
+		let dir_len = 5;
+		add_dir_name(&mut dired, dir_len);
+		// 9 = 2 ("  ") + 1 (\n) + 5 + 1 (: of dirname)
+		assert_eq!(dired.padding, 9);
+
+		let total_len = 8;
+		add_total(&mut dired, total_len);
+		assert_eq!(dired.padding, 19);
+	}
+
+	#[test]
+	fn test_dired_update_positions() {
+		let mut dired = DiredOutput {
+			dired_positions:    vec![BytePosition { start: 5, end: 10 }],
+			subdired_positions: vec![],
+			padding:            10,
+			line_offset:        0,
+		};
+
+		// Test with adjust = true
+		update_positions(&mut dired, 15, 20, 1);
+		let last_position = dired.dired_positions.last().unwrap();
+		assert_eq!(last_position.start, 25); // 15 + 10 (end of the previous position)
+		assert_eq!(last_position.end, 30); // 20 + 10 (end of the previous position)
+
+		// Test with adjust = false
+		update_positions(&mut dired, 30, 35, 1);
+		let last_position = dired.dired_positions.last().unwrap();
+		assert_eq!(last_position.start, 30);
+		assert_eq!(last_position.end, 35);
+	}
+
+	#[test]
+	fn test_calculate_and_update_positions() {
+		let mut dired = DiredOutput {
+			dired_positions:    vec![
+				BytePosition { start: 0, end: 3 },
+				BytePosition { start: 4, end: 7 },
+				BytePosition { start: 8, end: 11 },
+			],
+			subdired_positions: vec![],
+			padding:            5,
+			line_offset:        12,
+		};
+		let output_display_len = 15;
+		let dfn_len = 5;
+		calculate_and_update_positions(&mut dired, output_display_len, dfn_len, 20);
+		assert_eq!(dired.dired_positions, vec![
+			BytePosition { start: 0, end: 3 },
+			BytePosition { start: 4, end: 7 },
+			BytePosition { start: 8, end: 11 },
+			BytePosition { start: 32, end: 37 },
+		]);
+		assert_eq!(dired.padding, 0);
+	}
+}
 }
 /// The BSD file-flags column behind `ls -O`.
 ///
@@ -2347,7 +2541,58 @@ mod file_flags {
 		names(metadata.native().map_or(0, |meta| meta.st_flags()))
 	}
 
-	
+	#[cfg(test)]
+	mod tests {
+		use std::ffi::CString;
+
+		use super::*;
+		use crate::{
+			host::{Host, Utility},
+			ls::{Ls, uu_app},
+		};
+
+		#[test]
+		fn names_fflagstostr_bits_in_order() {
+			// A file with every owner-settable bit set: `ls -lO` prints these in
+			// `fflagstostr`'s order, not by bit value.
+			let user =
+				libc::UF_NODUMP | libc::UF_IMMUTABLE | libc::UF_APPEND | libc::UF_OPAQUE | libc::UF_HIDDEN;
+			assert_eq!(names(user), "uappnd,uchg,nodump,opaque,hidden");
+			// `/usr/lib/dyld`: restricted, compressed.
+			assert_eq!(names(SF_RESTRICTED | libc::UF_COMPRESSED), "restricted,compressed");
+			// Unnamed bits are dropped, not rendered as hex.
+			assert_eq!(names(libc::UF_TRACKED | 0x0000_0100), "-");
+			assert_eq!(names(0), "-");
+		}
+
+		/// Failure mode: `ls -lO` failed with "unexpected argument '-O'", so a
+		/// caller could not see which files are compressed, immutable, or hidden.
+		#[test]
+		fn long_format_shows_the_flags_column() {
+			let dir = tempfile::tempdir().unwrap();
+			let file = dir.path().join("flagged");
+			std::fs::write(&file, b"x").unwrap();
+			// SAFETY: the path is a valid NUL-terminated C string for a file this
+			// test owns, and `chflags` only reads it.
+			let path = CString::new(file.as_os_str().as_encoded_bytes()).unwrap();
+			let set = unsafe { libc::chflags(path.as_ptr(), libc::UF_HIDDEN) };
+			assert_eq!(set, 0, "cannot set UF_HIDDEN: {}", std::io::Error::last_os_error());
+
+			let matches = uu_app().try_get_matches_from(["ls", "-lO", "flagged"]).unwrap();
+			let (mut host, capture) = Host::for_test("ls", "", dir.path());
+			assert_eq!(Ls { matches }.run(&mut host), 0);
+
+			let out = capture.out();
+			let fields: Vec<&str> = out.split_whitespace().collect();
+			// BSD puts the flags right of the group: mode, links, owner, group,
+			// flags, size, date…
+			assert_eq!(fields.get(4), Some(&"hidden"), "{out}");
+			assert_eq!(fields.last(), Some(&"flagged"), "{out}");
+
+			let cleared = unsafe { libc::chflags(path.as_ptr(), 0) };
+			assert_eq!(cleared, 0, "cannot clear UF_HIDDEN: {}", std::io::Error::last_os_error());
+		}
+	}
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
@@ -5433,4 +5678,102 @@ fn get_security_context<'a>(
 	Cow::Borrowed(SUBSTITUTE_STRING)
 }
 
+#[cfg(test)]
+mod integration_tests {
+	use std::{
+		fs::{File, FileTimes},
+		time::UNIX_EPOCH,
+	};
 
+	use clap::Parser;
+
+	use super::{Ls, Utility};
+	use crate::host::{Host, run_util};
+
+	#[test]
+	fn resolves_operands_against_the_shell_working_directory() {
+		let dir = tempfile::tempdir().unwrap();
+		File::create(dir.path().join("visible-name")).unwrap();
+		let (code, capture) = run_util::<Ls>(&["visible-name"], "", dir.path());
+		assert_eq!(code, 0);
+		assert_eq!(capture.out(), "visible-name\n");
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn resolves_msys_drive_alias_operands() {
+		let dir = tempfile::tempdir().unwrap();
+		File::create(dir.path().join("visible-name")).unwrap();
+		let native = dir.path().to_string_lossy().replace('\\', "/");
+		let (drive, tail) = native
+			.split_once(":/")
+			.unwrap_or_else(|| panic!("expected drive-qualified temp path, got {native:?}"));
+		let alias = format!("/{}/{}", drive.to_ascii_lowercase(), tail);
+
+		let (code, capture) = run_util::<Ls>(&[&alias], "", dir.path());
+
+		assert_eq!(code, 0);
+		assert_eq!(capture.out(), "visible-name\n");
+	}
+
+	#[test]
+	fn reads_quoting_style_from_the_shell_environment() {
+		let dir = tempfile::tempdir().unwrap();
+		let (mut host, capture) = Host::for_test("ls", "", dir.path());
+		host.set_test_var("QUOTING_STYLE", "not-a-style");
+		let ls = Ls::try_parse_from(["ls"]).unwrap();
+		assert_eq!(ls.run(&mut host), 0);
+		assert!(capture.err().contains("Ignoring invalid value of environment variable"));
+	}
+
+	#[test]
+	fn formats_times_in_the_shell_timezone() {
+		let dir = tempfile::tempdir().unwrap();
+		let file = File::create(dir.path().join("epoch")).unwrap();
+		file.set_times(FileTimes::new().set_modified(UNIX_EPOCH)).unwrap();
+		let (mut host, capture) = Host::for_test("ls", "", dir.path());
+		host.set_test_var("TZ", "America/Los_Angeles");
+		let ls = Ls::try_parse_from(["ls", "-l", "--full-time", "epoch"]).unwrap();
+		assert_eq!(ls.run(&mut host), 0);
+		assert!(capture.out().contains("1969-12-31 16:00:00.000000000 -0800"));
+	}
+
+	#[test]
+	fn size_sort_breaks_ties_by_name() {
+		let dir = tempfile::tempdir().unwrap();
+		// Created out of name order, and enough of them that a listing order
+		// following creation (tmpfs) or a hash (ext4) is not name order by luck.
+		for name in ["e", "h", "b", "j", "a", "g", "c", "i", "f", "d"] {
+			std::fs::write(dir.path().join(name), b"same").unwrap();
+		}
+
+		let (code, capture) = run_util::<Ls>(&["-S"], "", dir.path());
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n");
+
+		let (code, capture) = run_util::<Ls>(&["-Sr"], "", dir.path());
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "j\ni\nh\ng\nf\ne\nd\nc\nb\na\n");
+	}
+
+	#[test]
+	fn group_directories_first_keeps_the_sort_within_each_group() {
+		let dir = tempfile::tempdir().unwrap();
+		// More than 20 entries: below that an unstable sort runs as an
+		// insertion sort and happens to keep each group in order.
+		for i in 0..15 {
+			std::fs::create_dir(dir.path().join(format!("d{i:02}"))).unwrap();
+			std::fs::write(dir.path().join(format!("f{i:02}")), vec![b'x'; i + 1]).unwrap();
+		}
+
+		let (code, capture) = run_util::<Ls>(&["--group-directories-first", "-S"], "", dir.path());
+		assert_eq!(code, 0, "{}", capture.err());
+		// Empty directories tie on size and fall back to name order; files
+		// run largest first.
+		let expected: String = (0..15)
+			.map(|i| format!("d{i:02}\n"))
+			.chain((0..15).rev().map(|i| format!("f{i:02}\n")))
+			.collect();
+		assert_eq!(capture.out(), expected);
+	}
+}

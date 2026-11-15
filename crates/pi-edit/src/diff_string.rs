@@ -1235,4 +1235,396 @@ fn parse_hunks(diff: &str, recover_line_numbers: bool) -> Result<Vec<DiffHunk>, 
 	Ok(hunks)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn source(path: &str) -> BlockContextSource<'_> {
+		BlockContextSource { path: Some(path), lang: None, streaming: false }
+	}
+
+	#[test]
+	fn collapses_unchanged_lines_between_distant_edits() {
+		let old_lines = (1..=20)
+			.map(|line| format!("line {line}"))
+			.collect::<Vec<_>>();
+		let mut new_lines = old_lines.clone();
+		new_lines[1] = "line 2 changed".to_owned();
+		new_lines[17] = "line 18 changed".to_owned();
+		let result = generate_diff_string(
+			&old_lines.join("\n"),
+			&new_lines.join("\n"),
+			Some(2),
+			&BlockContextSource::default(),
+		);
+		let lines = result.diff.split('\n').collect::<Vec<_>>();
+		assert!(
+			!lines
+				.iter()
+				.any(|line| line.ends_with("|...") || line.ends_with("|…"))
+		);
+		let line_four = lines.iter().position(|line| *line == " 4|line 4").unwrap();
+		assert_eq!(lines[line_four + 1], " 16|line 16");
+		assert!(lines.contains(&"-2|line 2"));
+		assert!(lines.contains(&"+2|line 2 changed"));
+		assert!(lines.contains(&"-18|line 18"));
+		assert!(lines.contains(&"+18|line 18 changed"));
+		assert!(!lines.contains(&" 8|line 8"));
+		assert!(!lines.contains(&" 12|line 12"));
+	}
+
+	#[test]
+	fn adds_matching_bracket_line_beyond_context() {
+		let old = [
+			"function outer() {",
+			"  const value = 1;",
+			"  const two = 2;",
+			"  const three = 3;",
+			"  const four = 4;",
+			"  return value + two + three + four;",
+			"}",
+		];
+		let mut new = old;
+		new[0] = "function renamed() {";
+		let result =
+			generate_diff_string(&old.join("\n"), &new.join("\n"), Some(1), &source("sample.ts"));
+		let lines = result.diff.split('\n').collect::<Vec<_>>();
+		assert!(lines.contains(&"-1|function outer() {"));
+		assert!(lines.contains(&"+1|function renamed() {"));
+		assert!(lines.contains(&""));
+		assert!(!lines.contains(&"..."));
+		assert!(lines.contains(&" 7|}"));
+		assert!(!lines.contains(&" 5|  const four = 4;"));
+		assert!(!lines.contains(&" 6|  return value + two + three + four;"));
+	}
+
+	#[test]
+	fn normalizes_gap_rows_around_block_context() {
+		let old = [
+			"function alpha() {",
+			"  const a1 = 1;",
+			"  const a2 = 2;",
+			"  const a3 = 3;",
+			"  const a4 = 4;",
+			"  return a1;",
+			"}",
+			"// spacer",
+			"function beta() {",
+			"  const b1 = 1;",
+			"  const b2 = 2;",
+			"  const b3 = 3;",
+			"  const b4 = 4;",
+			"  return b1;",
+			"}",
+		];
+		let mut new = old;
+		new[1] = "  const a1 = 100;";
+		new[13] = "  return b1 + 1;";
+		let result =
+			generate_diff_string(&old.join("\n"), &new.join("\n"), Some(1), &source("sample.ts"));
+		let lines = result.diff.split('\n').collect::<Vec<_>>();
+		let closer = lines.iter().position(|line| *line == " 7|}").unwrap();
+		let opener = lines
+			.iter()
+			.position(|line| *line == " 9|function beta() {")
+			.unwrap();
+		assert!(opener > closer);
+		assert_eq!(lines[closer - 1], "");
+		assert_eq!(lines[closer + 1], "");
+		assert_eq!(lines[opener - 1], "");
+		assert_eq!(lines[opener + 1], "");
+		assert!(!lines.windows(2).any(|pair| pair == ["", ""]));
+		assert_ne!(lines.first(), Some(&""));
+		assert_ne!(lines.last(), Some(&""));
+	}
+
+	#[test]
+	fn drops_gap_between_contiguous_boundaries() {
+		let old = [
+			"function alpha() {",
+			"  const a1 = 1;",
+			"  const a2 = 2;",
+			"  const a3 = 3;",
+			"  const a4 = 4;",
+			"  return a1;",
+			"}",
+			"function beta() {",
+			"  const b1 = 1;",
+			"  const b2 = 2;",
+			"  const b3 = 3;",
+			"  const b4 = 4;",
+			"  return b1;",
+			"}",
+		];
+		let mut new = old;
+		new[1] = "  const a1 = 100;";
+		new[12] = "  return b1 + 1;";
+		let result =
+			generate_diff_string(&old.join("\n"), &new.join("\n"), Some(1), &source("sample.ts"));
+		let lines = result.diff.split('\n').collect::<Vec<_>>();
+		let closer = lines.iter().position(|line| *line == " 7|}").unwrap();
+		let opener = lines
+			.iter()
+			.position(|line| *line == " 8|function beta() {")
+			.unwrap();
+		assert_eq!(opener, closer + 1);
+	}
+
+	#[test]
+	fn translates_new_block_context_to_old_line_numbers() {
+		let old = [
+			"function outer() {",
+			"  const a = 1;",
+			"  const keep = 2;",
+			"  const b = 3;",
+			"  return a + keep + b;",
+			"}",
+		];
+		let new = [
+			"function outer() {",
+			"  const a = 10;",
+			"  const a2 = 11;",
+			"  const keep = 2;",
+			"  const b = 30;",
+			"  const b2 = 31;",
+			"  return a + keep + b;",
+			"}",
+		];
+		let result =
+			generate_diff_string(&old.join("\n"), &new.join("\n"), Some(1), &source("sample.ts"));
+		let lines = result.diff.split('\n').collect::<Vec<_>>();
+		assert_eq!(
+			lines
+				.iter()
+				.filter(|line| line.ends_with("|}"))
+				.copied()
+				.collect::<Vec<_>>(),
+			[" 6|}"]
+		);
+		let context_numbers = lines
+			.iter()
+			.filter(|line| line.starts_with(' '))
+			.map(|line| line[1..].split('|').next().unwrap().parse::<u32>().unwrap())
+			.collect::<Vec<_>>();
+		let mut sorted = context_numbers.clone();
+		sorted.sort_unstable();
+		assert_eq!(context_numbers, sorted);
+		assert_eq!(
+			lines
+				.iter()
+				.filter(|line| line.contains("|  const keep = 2;"))
+				.copied()
+				.collect::<Vec<_>>(),
+			[" 3|  const keep = 2;"]
+		);
+	}
+
+	#[test]
+	fn compact_preview_counts_and_renumbers() {
+		let diff = [" 1|alpha", "-2|beta", "+2|DELTA", "+3|EPSILON", " 3|gamma"].join("\n");
+		let preview = build_compact_diff_preview(&diff, &CompactDiffOptions::default());
+		assert_eq!(preview.preview, "1:alpha\n2:DELTA\n3:EPSILON\n4:gamma");
+		assert_eq!(preview.added_lines, 2);
+		assert_eq!(preview.removed_lines, 1);
+	}
+
+	#[test]
+	fn compact_preview_renumbers_after_range_expansion() {
+		let diff =
+			[" 1|a1", " 2|a2", "-3|a3", "-4|a4", "+3|X", "+4|Y", "+5|Z", " 5|a5", " 6|a6", " 7|a7"]
+				.join("\n");
+		let preview = build_compact_diff_preview(&diff, &CompactDiffOptions::default());
+		assert_eq!(preview.preview.split('\n').collect::<Vec<_>>(), [
+			"1:a1", "2:a2", "3:X", "4:Y", "5:Z", "6:a5", "7:a6", "8:a7"
+		]);
+	}
+
+	#[test]
+	fn compact_preview_collapses_long_added_runs() {
+		let diff = (0..7)
+			.map(|index| format!("+{}|line {}", 10 + index, index + 1))
+			.collect::<Vec<_>>()
+			.join("\n");
+		let preview = build_compact_diff_preview(&diff, &CompactDiffOptions::default());
+		assert_eq!(preview.preview, "10:line 1\n11:line 2\n…\n15:line 6\n16:line 7");
+		assert_eq!((preview.added_lines, preview.removed_lines), (7, 0));
+	}
+
+	#[test]
+	fn compact_preview_honors_added_run_options() {
+		let diff = (0..8)
+			.map(|index| format!("+{}|line {}", 1 + index, index + 1))
+			.collect::<Vec<_>>()
+			.join("\n");
+		let options =
+			CompactDiffOptions { max_added_run_context: Some(1), max_unchanged_run: Some(3) };
+		assert_eq!(build_compact_diff_preview(&diff, &options).preview, "1:line 1\n…\n8:line 8");
+		let alias =
+			CompactDiffOptions { max_added_run_context: None, max_unchanged_run: Some(1) };
+		assert_eq!(build_compact_diff_preview(&diff, &alias).preview, "1:line 1\n…\n8:line 8");
+	}
+
+	#[test]
+	fn compact_preview_normalizes_separators() {
+		let preview = build_compact_diff_preview(
+			" 1|alpha\n...\n...\n…\n 20|omega",
+			&CompactDiffOptions::default(),
+		);
+		assert_eq!(preview.preview, "1:alpha\n…\n20:omega");
+		let preview = build_compact_diff_preview(
+			"\n 1|alpha\n\n-5|beta\n\n 9|gamma\n\n-12|omitted",
+			&CompactDiffOptions::default(),
+		);
+		assert_eq!(preview.preview, "1:alpha\n\n8:gamma");
+		assert_eq!(preview.removed_lines, 2);
+	}
+
+	#[test]
+	fn parses_simple_and_multiple_hunks() {
+		let hunks = parse_diff_hunks("@@ def f():\n-    pass\n+    return 123").unwrap();
+		assert_eq!(hunks.len(), 1);
+		assert_eq!(hunks[0].change_context.as_deref(), Some("def f():"));
+		assert_eq!(hunks[0].old_lines, ["    pass"]);
+		assert_eq!(hunks[0].new_lines, ["    return 123"]);
+		assert_eq!(
+			parse_diff_hunks("@@\n-bar\n+BAR\n@@\n-qux\n+QUX")
+				.unwrap()
+				.len(),
+			2
+		);
+	}
+
+	#[test]
+	fn parses_context_and_eof_markers() {
+		let hunks = parse_diff_hunks("@@\n foo\n-bar\n+baz\n qux").unwrap();
+		assert_eq!(hunks[0].old_lines, ["foo", "bar", "qux"]);
+		assert_eq!(hunks[0].new_lines, ["foo", "baz", "qux"]);
+		assert!(
+			parse_diff_hunks("@@\n+new line").unwrap()[0]
+				.change_context
+				.is_none()
+		);
+		assert!(parse_diff_hunks("@@\n+line\n*** End of File").unwrap()[0].is_end_of_file);
+	}
+
+	#[test]
+	fn parses_headers_hints_and_wrappers() {
+		let hunk = parse_diff_hunks(
+			"*** Begin Patch\n*** Update File: a.txt\n@@ -12,2 +13,3 @@ name\n-old\n+new\n*** End \
+			 Patch",
+		)
+		.unwrap()
+		.remove(0);
+		assert_eq!((hunk.old_start_line, hunk.new_start_line), (Some(12), Some(13)));
+		assert_eq!(hunk.change_context.as_deref(), Some("name"));
+		let hint = parse_diff_hunks("@@ lines 7-9\n-a\n+b").unwrap().remove(0);
+		assert_eq!((hint.old_start_line, hint.new_start_line), (Some(7), Some(7)));
+		let top = parse_diff_hunks("@@ top of file\n-a\n+b")
+			.unwrap()
+			.remove(0);
+		assert_eq!((top.old_start_line, top.new_start_line), (Some(1), Some(1)));
+	}
+
+	#[test]
+	fn normalizes_diff_and_create_content() {
+		assert_eq!(
+			normalize_diff("*** Begin Patch\n*** Update File: a\n@@\n-old\n+new\n*** End Patch\n"),
+			"@@\n-old\n+new"
+		);
+		assert_eq!(normalize_create_content("+ one\n+two\n"), "one\ntwo\n");
+		assert_eq!(normalize_create_content("one\n+two"), "one\n+two");
+	}
+
+	#[test]
+	fn rejects_multi_file_diff() {
+		let error =
+			parse_diff_hunks("diff --git a/a b/a\n@@\n-a\n+b\ndiff --git a/b b/b\n@@\n-c\n+d")
+				.unwrap_err();
+		assert_eq!(
+			error.to_string(),
+			"Diff contains 2 file markers. Single-file patches cannot contain multi-file markers."
+		);
+	}
+
+	#[test]
+	fn generates_numbered_unified_diff() {
+		let result =
+			LineDiff::new("a\nb\nc\n", "a\nB\nc\n").unified(Some(1), &BlockContextSource::default());
+		assert_eq!(result.diff, "@@ -1,3 +1,3 @@\n 1|a\n-2|b\n+2|B\n 3|c");
+		assert_eq!(result.first_changed_line, Some(2));
+	}
+
+	#[test]
+	fn unified_diff_omits_duplicate_and_boundary_gap_rows() {
+		let old = [
+			"function alpha() {",
+			"  const a1 = 1;",
+			"  const a2 = 2;",
+			"  const a3 = 3;",
+			"  const a4 = 4;",
+			"  return a1;",
+			"}",
+			"// spacer",
+			"function beta() {",
+			"  const b1 = 1;",
+			"  const b2 = 2;",
+			"  const b3 = 3;",
+			"  const b4 = 4;",
+			"  return b1;",
+			"}",
+		];
+		let mut new = old;
+		new[1] = "  const a1 = 100;";
+		new[13] = "  return b1 + 1;";
+
+		let result =
+			LineDiff::new(&old.join("\n"), &new.join("\n")).unified(Some(1), &source("sample.ts"));
+		let lines = result.diff.split('\n').collect::<Vec<_>>();
+		let closer = lines.iter().position(|line| *line == " 7|}").unwrap();
+		let opener = lines
+			.iter()
+			.position(|line| *line == " 9|function beta() {")
+			.unwrap();
+		assert!(opener > closer);
+		assert_eq!(lines[closer - 1], "");
+		assert_eq!(lines[closer + 1], "");
+		assert_eq!(lines[opener - 1], "");
+		assert_eq!(lines[opener + 1], "");
+		assert!(!lines.windows(2).any(|pair| pair == ["", ""]));
+		assert_ne!(lines.first(), Some(&""));
+		assert_ne!(lines.last(), Some(&""));
+
+		let contiguous_old = [
+			"function alpha() {",
+			"  const a1 = 1;",
+			"  const a2 = 2;",
+			"  const a3 = 3;",
+			"  const a4 = 4;",
+			"  return a1;",
+			"}",
+			"function beta() {",
+			"  const b1 = 1;",
+			"  const b2 = 2;",
+			"  const b3 = 3;",
+			"  const b4 = 4;",
+			"  return b1;",
+			"}",
+		];
+		let mut contiguous_new = contiguous_old;
+		contiguous_new[1] = "  const a1 = 100;";
+		contiguous_new[12] = "  return b1 + 1;";
+
+		let contiguous_result = LineDiff::new(&contiguous_old.join("\n"), &contiguous_new.join("\n"))
+			.unified(Some(1), &source("sample.ts"));
+		let contiguous_lines = contiguous_result.diff.split('\n').collect::<Vec<_>>();
+		let contiguous_closer = contiguous_lines
+			.iter()
+			.position(|line| *line == " 7|}")
+			.unwrap();
+		let contiguous_opener = contiguous_lines
+			.iter()
+			.position(|line| *line == " 8|function beta() {")
+			.unwrap();
+		assert_eq!(contiguous_opener, contiguous_closer + 1);
+	}
+}

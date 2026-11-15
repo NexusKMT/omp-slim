@@ -473,4 +473,47 @@ impl Task for Refusal {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn gates_follow_pis_switches() {
+		let gate = |pairs: &'static [(&'static str, &'static str)]| {
+			ExtrasGate::from_env(|name| pairs.iter().find(|(k, _)| *k == name).map(|(_, v)| *v))
+		};
+		let all = ExtrasGate::default();
+		assert!(all.native("sort".into()).is_some());
+		assert!(all.native("sleep".into()).is_some());
+		assert!(all.runs_commands("xargs".into()));
+		assert!(all.native("xargs".into()).is_none(), "command runners are tools");
+		assert!(all.native("timeout".into()).is_none(), "timeout is a tool");
+		assert!(all.native("no-such-extra".into()).is_none());
+
+		let off = gate(&[("PI_DISABLE_UUTILS_BUILTINS", "1")]);
+		assert!(off.native("sort".into()).is_none());
+		assert!(!off.runs_commands("xargs".into()));
+		assert!(off.native("sleep".into()).is_some(), "process builtins are not gated");
+
+		let destructive = gate(&[("PI_DISABLE_UUTILS_DESTRUCTIVE", "true")]);
+		for name in ["rm", "mv", "cp", "ln", "dd"] {
+			assert!(destructive.native(name.into()).is_none(), "{name}");
+		}
+		assert!(destructive.native("cat".into()).is_some());
+
+		let rm = gate(&[("PI_DISABLE_RM_BUILTIN", "1"), ("PI_DISABLE_MV_BUILTIN", "0")]);
+		assert!(rm.native("rm".into()).is_none());
+		assert!(rm.native("mv".into()).is_some());
+	}
+
+	#[test]
+	fn native_refs_name_their_extra() {
+		let gate = ExtrasGate::default();
+		for name in ["cat", "sort", "ps", "sleep", "sg", "ast-grep"] {
+			if let Some(cmd) = gate.native(name.into()) {
+				assert_eq!(native_name(cmd), Some(name));
+			}
+		}
+		assert_eq!(native_name(SUSPEND), None);
+	}
+}

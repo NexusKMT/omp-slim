@@ -144,4 +144,13 @@ mod windows {
 	}
 }
 
-
+#[cfg(all(test, windows))]
+mod tests {
+	/// An ordinary Windows user read as uid 0 got zsh's root prompt `#`.
+	#[test]
+	fn a_windows_user_is_not_uid_zero() {
+		let user = super::read_user();
+		assert_ne!(user.uid, 0);
+		assert_ne!(user.gid, 0);
+	}
+}

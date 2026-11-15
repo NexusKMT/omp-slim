@@ -1207,4 +1207,78 @@ pub fn test(ctx: &mut Ctx<'_, '_>, args: &[BString], bracket: bool) -> R {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn parse(args: &[&str]) -> Result<(Node, bool), String> {
+		let argv: Vec<BString> = args.iter().map(|a| BString::from(*a)).collect();
+		let mut p = TestParser {
+			args:   &argv,
+			pos:    0,
+			cur:    0,
+			tok:    Tok::Null,
+			tokstr: None,
+			posix:  false,
+		};
+		p.lex();
+		match p.cond() {
+			Ok(n) if p.tok != Tok::LexErr => Ok((n, p.cur < argv.len() && p.tok != Tok::Null)),
+			Err(Perr::Cond(m)) => Err(m),
+			_ => Err(
+				if p.tokstr.is_some() {
+					"parse error"
+				} else {
+					"argument expected"
+				}
+				.into(),
+			),
+		}
+	}
+
+	fn prim(op: CondOp, l: &str, r: &str) -> Node {
+		Node::Prim { op, l: l.into(), r: r.into() }
+	}
+
+	#[test]
+	fn test_grammar_follows_posix_argument_counts() {
+		assert_eq!(parse(&["foo"]).unwrap().0, prim(CondOp::Unary(b'n'), "foo", ""));
+		assert_eq!(parse(&["-t"]).unwrap().0, prim(CondOp::Unary(b't'), "1", ""));
+		assert_eq!(parse(&["!", "=", "!"]).unwrap().0, prim(CondOp::StrEq, "!", "!"));
+		assert_eq!(parse(&["-z", "("]).unwrap().0, prim(CondOp::Unary(b'z'), "(", ""));
+		assert_eq!(
+			parse(&["!", "-a", "!"]).unwrap().0,
+			Node::And(
+				Box::new(prim(CondOp::Unary(b'n'), "!", "")),
+				Box::new(prim(CondOp::Unary(b'n'), "!", ""))
+			)
+		);
+	}
+
+	#[test]
+	fn test_grammar_reports_leftovers_and_errors() {
+		assert!(parse(&["-n", "foo", "scrimble"]).unwrap().1);
+		assert!(
+			parse(&["-n", "foo", "-a", "-n", "bar", "scrimble"])
+				.unwrap()
+				.1
+		);
+		assert_eq!(parse(&["a", "b"]).unwrap_err(), "parse error: condition expected: a");
+		assert_eq!(parse(&["x", "-q", "y"]).unwrap().0, Node::Mod {
+			name:  "-q".into(),
+			infix: true,
+			args:  vec!["x".into(), "y".into()],
+		});
+		assert_eq!(parse(&["(", "a"]).unwrap_err(), "argument expected");
+	}
+
+	#[test]
+	fn operators() {
+		assert_eq!(binary_op(b"-nt"), Some(CondOp::Nt));
+		assert_eq!(binary_op(b"-fail"), None);
+		assert_eq!(unary_op(b"-v"), Some(CondOp::Unary(b'v')));
+		assert_eq!(unary_op(b"-fail"), None);
+		assert!(is_cond_binary_op(b"-eq"));
+		assert!(!is_cond_binary_op(b"-a"));
+	}
+}

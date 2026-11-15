@@ -931,4 +931,77 @@ fn add_cursor_key(km: &mut Keymap, cap: Option<&BString>, widget: &str, defchar:
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn names(k: &Keymaps) -> String {
+		k.names()
+			.iter()
+			.map(ToString::to_string)
+			.collect::<Vec<_>>()
+			.join(" ")
+	}
+
+	#[test]
+	fn keymaps_order_follows_zshs_hash_table() {
+		// zsh: for n in a b c d e f; bindkey -N $n; print -l $keymaps
+		let mut k = Keymaps::new(false);
+		for n in [&b"a"[..], b"b", b"c", b"d", b"e", b"f"] {
+			assert!(k.create(n, None, false).is_ok());
+		}
+		assert_eq!(
+			names(&k),
+			"vicmd command viins visual emacs a b c d .safe e f isearch viopp main"
+		);
+		// zsh: bindkey -D a b; bindkey -d; print -l $keymaps
+		assert_eq!(k.unlink(b"a", false), Ok(()));
+		assert_eq!(k.unlink(b"b", false), Ok(()));
+		k.reset(false);
+		assert_eq!(names(&k), "command vicmd viins visual emacs .safe isearch viopp main");
+	}
+
+	#[test]
+	fn lookup_and_prefixes() {
+		let k = Keymaps::new(false);
+		assert_eq!(k.lookup(b"emacs", b"\x01"), Some(&Bind::widget("beginning-of-line")));
+		assert_eq!(k.lookup(b"emacs", b"\x03"), None);
+		assert_eq!(k.lookup(b"emacs", b"\x1bOA"), Some(&Bind::widget("up-line-or-history")));
+		assert_eq!(k.lookup(b"emacs", b"\x1b"), None);
+		assert!(k.is_prefix(b"emacs", b"\x1b"));
+		assert!(k.is_prefix(b"emacs", b"\x1bO"));
+		assert!(!k.is_prefix(b"emacs", b"\x1bOA"));
+		assert!(!k.is_prefix(b"emacs", b"a"));
+		assert_eq!(k.lookup(b"viins", b"\x1b"), Some(&Bind::widget("vi-cmd-mode")));
+		assert!(k.is_prefix(b"viins", b"\x1b"));
+		assert_eq!(k.lookup(b"vicmd", b"g~~"), Some(&Bind::Str("g~g~".into())));
+		assert_eq!(k.lookup(b".safe", b"\r"), Some(&Bind::widget(".accept-line")));
+		assert!(!k.exists(b"nope"));
+		assert!(!k.is_prefix(b"nope", b""));
+		assert!(k.immortal(b".safe"));
+		assert!(!k.immortal(b"emacs"));
+		let mut seen = Vec::new();
+		k.scan(b"command", &mut |s, b| seen.push((s.to_vec(), b.clone())));
+		assert_eq!(seen, [
+			(b"\x07".to_vec(), Bind::widget("send-break")),
+			(b"\n".to_vec(), Bind::widget("accept-line")),
+			(b"\r".to_vec(), Bind::widget("accept-line")),
+		]);
+	}
+
+	#[test]
+	fn safe_is_immutable_and_immortal() {
+		let mut k = Keymaps::new(false);
+		let safe = k.open(b".safe").expect(".safe");
+		assert_eq!(k.bind(safe, b"a", None), Err(BindError::Immutable));
+		assert_eq!(k.unlink(b".safe", false), Err(UnlinkError::Protected));
+		assert_eq!(k.unlink(b"nope", false), Err(UnlinkError::NoSuchKeymap));
+		let emacs = k.open(b"emacs").expect("emacs");
+		assert_eq!(k.link(emacs, b".safe", false), Err(Protected));
+		assert_eq!(k.bind(emacs, b"", None), Err(BindError::Empty));
+		// The immortal name only goes when asked to ignore it (complist's
+		// cleanup).
+		assert_eq!(k.unlink(b".safe", true), Ok(()));
+		assert!(!k.exists(b".safe"));
+	}
+}

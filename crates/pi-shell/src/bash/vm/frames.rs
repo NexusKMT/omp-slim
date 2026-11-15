@@ -1340,4 +1340,48 @@ fn valid(u: &Unit) -> bool {
 		&& ops_ok
 }
 
+#[cfg(test)]
+mod tests {
+	use std::task::{Context, Poll, Waker};
 
+	use super::{FdImager, FdRebuild};
+	use crate::bash::{fd::FdRef, mem::MemObj};
+
+	#[test]
+	fn a_pipe_and_its_shared_ends_survive_an_image() {
+		let (r, w) = crate::bash::mem::pipe();
+		let (r, w) = (FdRef::mem(r), FdRef::mem(w));
+		let w2 = w.dup().unwrap();
+		let mut cx = Context::from_waker(Waker::noop());
+		assert!(matches!(w.poll_write(&mut cx, b"ab"), Poll::Ready(Ok(2))));
+		let mut img = FdImager::default();
+		// Slots 1 and 2 share one fd object; `w2` is a duplicate of it.
+		let ids = [img.fd(&r), img.fd(&w), img.fd(&w), img.fd(&w2)];
+		assert_eq!(ids[1], ids[2], "one fd object has one index");
+		assert_ne!(ids[1], ids[3], "a duplicate is its own fd object");
+		assert_eq!(img.mems.len(), 1, "every end refers to one pipe");
+		drop((r, w, w2));
+		let mut stdio = [None, None, None];
+		let mut back = FdRebuild {
+			built: vec![None; img.objs.len()],
+			objs:  img.objs,
+			mems:  img
+				.mems
+				.into_iter()
+				.map(|m| MemObj::rebuild(m, Waker::noop()))
+				.collect(),
+			stdio: &mut stdio,
+		};
+		let [r, w, w_again, w2] = ids.map(|i| back.build(i, |_| None));
+		// The rebuild table holds every built fd until restore ends.
+		drop(back);
+		assert!(w.same(&w_again), "shared slots stay shared");
+		let mut buf = [0; 4];
+		assert!(matches!(r.poll_read(&mut cx, &mut buf), Poll::Ready(Ok(2))));
+		assert_eq!(&buf[..2], b"ab", "buffered bytes come back");
+		drop((w, w_again));
+		assert!(r.poll_read(&mut cx, &mut buf).is_pending(), "the duplicate writer keeps it open");
+		drop(w2);
+		assert!(matches!(r.poll_read(&mut cx, &mut buf), Poll::Ready(Ok(0))), "then EOF");
+	}
+}

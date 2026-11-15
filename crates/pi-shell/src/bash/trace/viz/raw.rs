@@ -404,4 +404,105 @@ fn rows(script: &str, layers: Layers, owners: &[Located], colors: &[Located]) ->
 		})
 		.collect()
 }
-
+#[cfg(test)]
+mod tests {
+	use super::*;
+	#[test]
+	fn exact_original_all_layers() {
+		let script = "# comment 😀\n\techo 'a b'  # retained\n\necho \\\n  tail\n";
+		for mask in 0..32 {
+			let layers = Layers {
+				color:   mask & 1 != 0,
+				inline:  mask & 2 != 0,
+				idioms:  mask & 4 != 0,
+				effects: mask & 8 != 0,
+				unwrap:  mask & 16 != 0,
+			};
+			let rows = rows(script, layers, &[], &[]);
+			assert_eq!(
+				rows
+					.iter()
+					.map(|row| row
+						.segments
+						.iter()
+						.map(|s| s.text.as_str())
+						.collect::<String>())
+					.collect::<Vec<_>>()
+					.join("\n"),
+				script
+			);
+			assert!(
+				rows
+					.iter()
+					.flat_map(|r| &r.segments)
+					.all(|s| !s.text.contains('\n'))
+			);
+		}
+	}
+	#[test]
+	fn literal_slices_exact_unicode_and_newlines() {
+		let prepared = Static { rows: rows("a😀\n\n'b'\n", Layers::default(), &[], &[]) };
+		let selected = slice(&prepared, [1, 8]).unwrap();
+		assert_eq!(
+			selected
+				.iter()
+				.map(|segment| segment.text.as_str())
+				.collect::<String>(),
+			"😀\n\n'b'"
+		);
+		assert_eq!(selected.first().unwrap().range, Some([1, 3]));
+		assert!(slice(&prepared, [2, 3]).is_none());
+		assert!(slice(&prepared, [2, 2]).is_none());
+		assert!(slice(&prepared, [0, 20]).is_none());
+		assert_eq!(
+			slice(&prepared, [3, 5])
+				.unwrap()
+				.iter()
+				.map(|s| s.text.as_str())
+				.collect::<String>(),
+			"\n\n"
+		);
+		assert_eq!(slice(&prepared, [8, 9]).unwrap()[0].text, "\n");
+	}
+	#[test]
+	fn trivia_never_recolors_quoted_hashes() {
+		use crate::bash::syntax::NodeId;
+		let key = NodeKey::engine(0, NodeId(1));
+		let owners = [Located { key, range: [0, 20], style: None }];
+		let mut colors = vec![Located { key, range: [5, 8], style: Some("str".into()) }];
+		trivia("echo '#' # tail", &owners, &mut colors);
+		assert_eq!(
+			colors
+				.iter()
+				.filter(|c| c.style.as_deref() == Some("comment"))
+				.map(|c| c.range)
+				.collect::<Vec<_>>(),
+			vec![[9, 15]]
+		);
+		let result = rows("echo '#' # tail", Layers::default(), &owners, &colors);
+		assert_eq!(
+			result[0]
+				.segments
+				.iter()
+				.map(|s| s.text.as_str())
+				.collect::<String>(),
+			"echo '#' # tail"
+		);
+	}
+	#[test]
+	fn smallest_canonical_owner_and_structural_style() {
+		use crate::bash::syntax::NodeId;
+		let outer = NodeKey::engine(2, NodeId(9));
+		let inner = NodeKey::engine(2, NodeId(4));
+		let owners = [Located { key: outer, range: [0, 6], style: None }, Located {
+			key:   inner,
+			range: [2, 4],
+			style: None,
+		}];
+		let colors = [Located { key: inner, range: [2, 4], style: Some("str structural".into()) }];
+		let layers = Layers { color: false, ..Layers::default() };
+		let result = rows("a 😀 b", layers, &owners, &colors);
+		assert_eq!(result[0].segments[1].node, Some(inner));
+		assert_eq!(result[0].segments[1].style.as_deref(), Some("structural"));
+	}
+}

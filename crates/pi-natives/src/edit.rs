@@ -1095,4 +1095,217 @@ pub fn notebook_to_editable_text(json: String, display_path: String) -> Result<S
 	pi_edit::notebook::notebook_to_editable_text(&json, &display_path).map_err(reason)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	/// A fresh directory removed on drop.
+	struct Scratch(PathBuf);
+
+	impl Scratch {
+		fn new(name: &str) -> Self {
+			let path =
+				std::env::temp_dir().join(format!("pi-natives-edit-{name}-{}", std::process::id()));
+			let _ = std::fs::remove_dir_all(&path);
+			std::fs::create_dir_all(&path).unwrap();
+			Self(path)
+		}
+
+		fn write(&self, relative: &str, content: &str) {
+			let path = self.0.join(relative);
+			std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+			std::fs::write(path, content).unwrap();
+		}
+	}
+
+	impl Drop for Scratch {
+		fn drop(&mut self) {
+			let _ = std::fs::remove_dir_all(&self.0);
+		}
+	}
+
+	const ADD_PATCH: &str =
+		"*** Begin Patch\n*** Add File: pi-edit-session-test.txt\n+hi\n*** End Patch\n";
+
+	const UPDATE_PATCH: &str =
+		"*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch\n";
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn recovers_the_one_file_with_a_matching_suffix() {
+		let tree = Scratch::new("unique");
+		tree.write("deep/src/a.ts", "");
+		tree.write("deep/src/other.ts", "");
+		let recovered = recover_one(&tree.0, "src/a.ts").await.unwrap();
+		assert_eq!(recovered.display, "deep/src/a.ts");
+		assert_eq!(recovered.absolute, tree.0.join("deep/src/a.ts"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn recovers_hidden_entries_and_directories() {
+		let tree = Scratch::new("hidden");
+		tree.write(".config/app/settings.json", "");
+		assert_eq!(
+			recover_one(&tree.0, "app/settings.json")
+				.await
+				.unwrap()
+				.display,
+			".config/app/settings.json"
+		);
+		assert_eq!(recover_one(&tree.0, "./app/").await.unwrap().display, ".config/app");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn declines_ambiguous_and_absent_suffixes() {
+		let tree = Scratch::new("ambiguous");
+		tree.write("deep/src/a.ts", "");
+		tree.write("other/src/a.ts", "");
+		assert!(recover_one(&tree.0, "src/a.ts").await.is_none());
+		assert!(recover_one(&tree.0, "src/missing.ts").await.is_none());
+		assert!(recover_one(&tree.0, "/").await.is_none());
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn does_not_search_git_metadata() {
+		let tree = Scratch::new("git");
+		tree.write(".git/objects/a.ts", "");
+		tree.write("deep/a.ts", "");
+		assert_eq!(recover_one(&tree.0, "a.ts").await.unwrap().display, "deep/a.ts");
+	}
+
+	/// The recovery walk stays off the host scheduler pool. The host's only
+	/// worker is held for the whole test, so a recovery that needs it never
+	/// answers; the wait is bounded off the runtime, whose timers cannot fire
+	/// either.
+	#[test]
+	fn recovery_walks_off_the_host_scheduler() {
+		let tree = Scratch::new("placement");
+		tree.write("deep/src/a.ts", "");
+		let host = napi::tokio::runtime::Builder::new_multi_thread()
+			.worker_threads(1)
+			.enable_all()
+			.build()
+			.unwrap();
+		let (occupied_tx, occupied_rx) = std::sync::mpsc::channel::<()>();
+		let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+		// The host's only scheduler worker, busy the way a filesystem syscall
+		// makes it busy: not yielding.
+		host.spawn(async move {
+			let _ = occupied_tx.send(());
+			let _ = release_rx.recv();
+		});
+		occupied_rx.recv().unwrap();
+
+		let (done_tx, done_rx) = std::sync::mpsc::channel();
+		let root = tree.0.clone();
+		std::thread::spawn(move || {
+			let recovered = host.block_on(recover_one(&root, "src/a.ts"));
+			let _ = done_tx.send(recovered.map(|resolved| resolved.display));
+		});
+		let recovered = done_rx.recv_timeout(Duration::from_secs(30));
+		// Let the occupying task go, so the walk this test may have left
+		// queued on the host finishes instead of outliving the test.
+		let _ = release_tx.send(());
+		assert_eq!(
+			recovered.ok().flatten().as_deref(),
+			Some("deep/src/a.ts"),
+			"the recovery walk needed a host scheduler worker, so it runs where it can starve every \
+			 other native call"
+		);
+	}
+
+	/// The preview settles on the recovered path: the first pass misses
+	/// `src/a.ts`, the search answers it, and the rerun previews the match.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn settled_preview_recovers_a_missing_path() {
+		let tree = Scratch::new("preview");
+		tree.write("deep/src/a.ts", "old\n");
+		let shared = Arc::new(shared_with_finished_patch(&tree.0, UPDATE_PATCH));
+		let batch = settled_preview(&shared).await.unwrap();
+		assert_eq!(batch.files.len(), 1, "{batch:?}");
+		assert_eq!(batch.files[0].display, "deep/src/a.ts");
+		assert!(batch.files[0].error.is_none(), "{batch:?}");
+	}
+
+	/// An ambiguous suffix stays unrecovered: the preview reports the miss.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn settled_preview_keeps_an_ambiguous_path_unrecovered() {
+		let tree = Scratch::new("preview-ambiguous");
+		tree.write("deep/src/a.ts", "old\n");
+		tree.write("other/src/a.ts", "old\n");
+		let shared = Arc::new(shared_with_finished_patch(&tree.0, UPDATE_PATCH));
+		let batch = settled_preview(&shared).await.unwrap();
+		assert!(batch.files[0].error.is_some(), "{batch:?}");
+		assert!(
+			batch
+				.files
+				.iter()
+				.all(|file| !file.display.ends_with("/src/a.ts")),
+			"{batch:?}"
+		);
+	}
+
+	fn shared_with_finished_patch(cwd: &Path, patch: &str) -> Shared {
+		let config = SessionConfig {
+			mode:               EditMode::ApplyPatch,
+			policy:             PathPolicy {
+				cwd:                  cwd.to_path_buf(),
+				home_dir:             cwd.to_path_buf(),
+				url_schemes:          Vec::new(),
+				url_alias_schemes:    Vec::new(),
+				plan_writable_roots:  Vec::new(),
+				plan_active:          false,
+				block_auto_generated: true,
+			},
+			allow_fuzzy:        true,
+			fuzzy_threshold:    0.95,
+			enforce_seen_lines: false,
+			max_columns:        512,
+			raw_input:          false,
+		};
+		let (wake, _rx) = flume::bounded::<()>(1);
+		let shared = Shared {
+			session: Arc::new(napi::tokio::sync::Mutex::new(Session::new(
+				config,
+				store::EditStore::new(),
+			))),
+			cwd: cwd.to_path_buf(),
+			queue: parking_lot::Mutex::new(Vec::new()),
+			closed: AtomicBool::new(false),
+			applying: AtomicBool::new(false),
+			wake,
+			resolve_url: None,
+		};
+		let args = serde_json::json!({
+			"input": patch,
+		});
+		shared.enqueue(ArgOp::SetArgs(args.to_string()));
+		shared.enqueue(ArgOp::Finish);
+		shared
+	}
+
+	/// `finish()` then `apply()` while the final preview pass holds the lock:
+	/// the pass has drained the queue into the session, so releasing it on
+	/// seeing `closed` would leave `apply` an empty buffer. Fails on the
+	/// single shared `closed` flag.
+	#[tokio::test]
+	async fn preview_pass_keeps_buffers_when_apply_closed_the_session() {
+		let shared = shared_with_finished_patch(&std::env::temp_dir(), ADD_PATCH);
+		let mut session = shared.session.lock().await;
+		shared.begin_apply();
+		assert!(shared.preview_pass(&mut session).is_none());
+		assert!(shared.queue.lock().is_empty(), "the pass drained the queue");
+		let batch = session.preview();
+		assert!(!batch.streaming);
+		assert_eq!(batch.files.len(), 1, "{batch:?}");
+	}
+
+	/// A pass that sees `close()` still frees the buffers.
+	#[tokio::test]
+	async fn preview_pass_releases_buffers_after_close() {
+		let shared = shared_with_finished_patch(&std::env::temp_dir(), ADD_PATCH);
+		let mut session = shared.session.lock().await;
+		shared.closed.store(true, Ordering::Release);
+		assert!(shared.preview_pass(&mut session).is_none());
+		assert!(session.preview().files.is_empty());
+	}
+}

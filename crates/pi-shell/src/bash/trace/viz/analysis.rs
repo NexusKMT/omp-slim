@@ -1167,4 +1167,6 @@ fn effects(call: &Call<'_>, references: &[Reference], tainted: &HashSet<String>)
 	result
 }
 
-
+#[cfg(test)]
+#[path = "analysis_tests.rs"]
+mod tests;

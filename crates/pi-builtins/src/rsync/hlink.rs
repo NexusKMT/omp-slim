@@ -206,4 +206,123 @@ fn match_groups(list: &mut FileList, mut inc: Option<Prior<'_>>) -> Result<(), R
 	Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::rsync::flist::FileEntry;
 
+	const REG: u32 = 0o100644;
+
+	fn file(name: &str, hlink: Hlink) -> FileEntry {
+		let flags = if hlink == Hlink::None { 0 } else { FLAG_HLINKED };
+		FileEntry {
+			basename: name.as_bytes().to_vec().into_boxed_slice(),
+			mode: REG,
+			flags,
+			hlink,
+			..FileEntry::default()
+		}
+	}
+
+	#[test]
+	fn tracker_assigns_leaders_and_followers() {
+		let mut t = HlinkTracker::new(Proto::new(31, 0));
+		assert_eq!(t.assign(1, 10, 2, REG, 0), Hlink::Leader);
+		assert_eq!(t.assign(1, 11, 1, REG, 1), Hlink::None);
+		assert_eq!(t.assign(1, 12, 3, 0o040755, 2), Hlink::None);
+		assert_eq!(t.assign(2, 10, 2, REG, 3), Hlink::Leader);
+		assert_eq!(t.assign(1, 10, 2, REG, 4), Hlink::Follower(0));
+		t.clear();
+		assert_eq!(t.assign(1, 10, 2, REG, 5), Hlink::Leader);
+		let mut old = HlinkTracker::new(Proto::new(29, 0));
+		assert_eq!(old.assign(1, 10, 2, REG, 0), Hlink::DevIno(1, 10));
+		assert_eq!(old.assign(1, 10, 2, REG, 1), Hlink::DevIno(1, 10));
+	}
+
+	#[test]
+	fn groups_by_leader_index() {
+		// Sorted list: b(→0), a(first, wire #0), c(lone, wire #5), d(→0).
+		let mut list = FileList::default();
+		list.entries.push(file("b", Hlink::Follower(0)));
+		list.entries.push(file("a", Hlink::First(0)));
+		list.entries.push(file("c", Hlink::First(5)));
+		list.entries.push(file("d", Hlink::Follower(0)));
+		list.entries.push(file("plain", Hlink::None));
+		match_hard_links(&mut list, Proto::new(31, 0));
+		let e = &list.entries;
+		assert_eq!(e[0].flags & (FLAG_HLINK_FIRST | FLAG_HLINK_LAST), FLAG_HLINK_FIRST);
+		assert_eq!(e[0].hlink, Hlink::Linked { gnum: 0, prev: -1 });
+		assert_eq!(e[1].flags & (FLAG_HLINK_FIRST | FLAG_HLINK_LAST), 0);
+		assert_eq!(e[1].hlink, Hlink::Linked { gnum: 0, prev: 0 });
+		assert_eq!(e[3].flags & FLAG_HLINK_LAST, FLAG_HLINK_LAST);
+		assert_eq!(e[3].hlink, Hlink::Linked { gnum: 0, prev: 1 });
+		// The lone member stops being a hard link.
+		assert_eq!(e[2].flags & (FLAG_HLINKED | FLAG_HLINK_FIRST), 0);
+		assert_eq!(e[2].flags & FLAG_HLINK_DONE, FLAG_HLINK_DONE);
+		assert_eq!(e[4].flags, 0);
+		assert_eq!(e[4].hlink, Hlink::None);
+	}
+
+	#[test]
+	fn groups_by_dev_ino_before_protocol_30() {
+		let mut list = FileList { ndx_start: 0, ..FileList::default() };
+		list.entries.push(file("x", Hlink::DevIno(1, 7)));
+		list.entries.push(file("y", Hlink::DevIno(2, 7)));
+		list.entries.push(file("z", Hlink::DevIno(1, 7)));
+		match_hard_links(&mut list, Proto::new(29, 0));
+		let e = &list.entries;
+		assert_eq!(e[0].flags & FLAG_HLINK_FIRST, FLAG_HLINK_FIRST);
+		assert_eq!(e[2].flags & FLAG_HLINK_LAST, FLAG_HLINK_LAST);
+		assert_eq!(e[2].hlink, Hlink::Linked { gnum: 0, prev: 0 });
+		assert_eq!(e[1].flags & FLAG_HLINKED, 0);
+	}
+
+	#[test]
+	fn incremental_groups_continue_across_lists() {
+		let mut m = HlinkMatcher::new();
+		let mut first = FileList { ndx_start: 1, ..FileList::default() };
+		first.entries.push(file("a", Hlink::First(1)));
+		m.match_list(&mut first, &mut |_| unreachable!()).unwrap();
+		// A single member stays hard-linked under inc-recurse; it is both first and last.
+		assert_eq!(first.entries[0].flags & (FLAG_HLINK_FIRST | FLAG_HLINK_LAST), FLAG_HLINK_FIRST | FLAG_HLINK_LAST);
+		assert_eq!(m.prior(1), Some(&PriorHlink::Pending(1)));
+
+		let mut second = FileList { ndx_start: 3, ..FileList::default() };
+		second.entries.push(file("b", Hlink::Follower(1)));
+		let mut cleared = Vec::new();
+		m.match_list(&mut second, &mut |ndx| {
+			cleared.push(ndx);
+			true
+		})
+		.unwrap();
+		assert_eq!(cleared, [1]);
+		assert_eq!(second.entries[0].hlink, Hlink::Linked { gnum: 1, prev: 1 });
+		assert_eq!(second.entries[0].flags & (FLAG_HLINK_FIRST | FLAG_HLINK_LAST), FLAG_HLINK_LAST);
+		assert_eq!(m.prior(1), Some(&PriorHlink::Pending(3)));
+
+		// The earlier list is gone: the next member starts over as first.
+		let mut third = FileList { ndx_start: 5, ..FileList::default() };
+		third.entries.push(file("c", Hlink::Follower(1)));
+		m.match_list(&mut third, &mut |_| false).unwrap();
+		assert_eq!(third.entries[0].flags & FLAG_HLINK_FIRST, FLAG_HLINK_FIRST);
+		assert_eq!(third.entries[0].hlink, Hlink::Linked { gnum: 1, prev: -1 });
+
+		// A finished group neither chains nor becomes first.
+		m.set_done(1, b"a".to_vec());
+		let mut fourth = FileList { ndx_start: 7, ..FileList::default() };
+		fourth.entries.push(file("d", Hlink::Follower(1)));
+		m.match_list(&mut fourth, &mut |_| unreachable!()).unwrap();
+		assert_eq!(fourth.entries[0].flags & (FLAG_HLINK_FIRST | FLAG_HLINK_LAST), FLAG_HLINK_LAST);
+		assert_eq!(m.prior(1), Some(&PriorHlink::Done(b"a".to_vec())));
+	}
+
+	#[test]
+	fn back_reference_to_unknown_group_is_rejected() {
+		let mut m = HlinkMatcher::new();
+		let mut list = FileList { ndx_start: 10, ..FileList::default() };
+		list.entries.push(file("x", Hlink::Follower(4)));
+		let err = m.match_list(&mut list, &mut |_| true).unwrap_err();
+		assert_eq!(err.code, RERR_PROTOCOL);
+		assert_eq!(err.message.as_deref(), Some("hard-link gnum 4 precedes flist start 10"));
+	}
+}

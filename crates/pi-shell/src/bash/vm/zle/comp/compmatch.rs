@@ -19,7 +19,8 @@
 
 mod join;
 mod parse;
-
+#[cfg(test)]
+mod tests;
 
 use std::sync::Arc;
 

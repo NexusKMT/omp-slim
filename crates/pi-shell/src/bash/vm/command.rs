@@ -5237,4 +5237,27 @@ fn build_env(k: &Kernel, cx: &mut Cx<'_>, vp: &Vproc) -> Result<EnvView, StoreEr
 	Ok(EnvView::new(pairs))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::{fpath_dirs, looks_binary};
+	use crate::bash::ids::Platform;
 
+	/// `$fpath` joins Windows directories with `;`; the autoload search
+	/// split `FPATH` on `:` and looked in `C` and `/fn`, never finding the
+	/// function.
+	#[test]
+	fn fpath_dirs_split_on_the_platform_separator() {
+		assert_eq!(fpath_dirs(Some(b"C:/a/fn;D:/b"), Platform::Windows), ["C:/a/fn", "D:/b"]);
+		assert_eq!(fpath_dirs(Some(b"/a:/b"), Platform::Linux), ["/a", "/b"]);
+	}
+
+	// bash `check_binary_file`: only a NUL on the first line (within 80
+	// bytes) makes a file binary.
+	#[test]
+	fn binary_check_looks_at_the_first_line_only() {
+		assert!(!looks_binary(b"(echo \"$1\")\n"));
+		assert!(looks_binary(b"\x7fELF\x02\x01\x01\0\0"));
+		assert!(!looks_binary(b"echo hi\n\0binary after the first line"));
+		assert!(!looks_binary(b""));
+	}
+}

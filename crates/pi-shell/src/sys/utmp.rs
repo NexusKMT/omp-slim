@@ -89,4 +89,13 @@ pub fn logins() -> io::Result<Logins> {
 	Err(io::ErrorKind::Unsupported.into())
 }
 
-
+#[cfg(all(test, any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
+mod tests {
+	#[test]
+	fn entries_are_user_sessions_with_names() {
+		// A build machine may have no sessions; those it has carry a user.
+		if let Ok(l) = super::logins() {
+			assert!(l.entries.iter().all(|e| !e.user.is_empty()));
+		}
+	}
+}

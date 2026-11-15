@@ -870,4 +870,307 @@ fn is_isdir(err: &io::Error) -> bool {
 	err.kind() == io::ErrorKind::IsADirectory
 }
 
+#[cfg(all(test, unix))]
+mod tests {
+	use std::{
+		ffi::OsString,
+		path::Path,
+	};
 
+	use super::*;
+	use crate::rsync::{
+		delete::test_support::*,
+		options::Options,
+	};
+
+	/// Destination of the backup reference fixture.
+	fn fixture(dst: &Path) {
+		put(dst, "a", "old");
+		put(dst, "extra", "x");
+		put(dst, "extra~", "pre");
+		link(dst, "lnk", "tgt");
+		put(dst, "sub/yy", "y");
+		put(dst, "sub/inner/ii", "i");
+		put(dst, "sub/s", "s");
+	}
+
+	fn backup_opts(dir: Option<&str>, suffix: &str) -> Options {
+		Options {
+			delete_mode: true,
+			delete_during: 1,
+			recurse: 2,
+			do_xfers: true,
+			make_backups: true,
+			backup_dir: dir.map(OsString::from),
+			backup_suffix: Some(OsString::from(suffix)),
+			..Options::default()
+		}
+	}
+
+	const OUT: Out = Out { verbose: 1, info: Some("backup"), format: Some(b"%n%L"), itemize: 0 };
+
+	/// `rsync -r --delete -v --info=backup <opts> src/ dst/` minus the transfer of `a`.
+	fn run(dst: &Path, opts: Options, rules: &[&[u8]]) -> String {
+		let (ctx, trees, sink) = setup(dst, opts, &OUT);
+		let mut filters = filters(&ctx, dst, rules, false);
+		let flists = flists(&ctx, &[("a", REG), ("sub", DIR), ("sub/s", REG)]);
+		let mut del = Deleter::new(&ctx);
+		del.full_pass(&ctx, &trees, &flists, &mut filters).unwrap();
+		sink.text()
+	}
+
+	#[test]
+	fn default_suffix_backups_match_reference() {
+		let dir = tempfile::tempdir().unwrap();
+		fixture(dir.path());
+		// Options add "P *~" for -b with --delete (no --backup-dir).
+		let out = run(dir.path(), backup_opts(None, "~"), &[b"P *~"]);
+		assert_eq!(
+			out,
+			"backed up lnk to lnk~\ndeleting lnk\nbacked up extra to extra~\ndeleting extra\n\
+			 backed up sub/inner/ii to sub/inner/ii~\ndeleting sub/inner/ii\n\
+			 cannot delete non-empty directory: sub/inner\n\
+			 backed up sub/yy to sub/yy~\ndeleting sub/yy\n"
+		);
+		assert_eq!(
+			listing(dir.path()),
+			[
+				"a: old", "extra~: x", "lnk~ -> tgt", "sub/", "sub/inner/", "sub/inner/ii~: i",
+				"sub/s: s", "sub/yy~: y",
+			]
+		);
+	}
+
+	#[test]
+	fn custom_suffix_backs_up_old_backups_too() {
+		let dir = tempfile::tempdir().unwrap();
+		fixture(dir.path());
+		let out = run(dir.path(), backup_opts(None, ".bak"), &[b"P *.bak"]);
+		assert_eq!(
+			out,
+			"backed up lnk to lnk.bak\ndeleting lnk\nbacked up extra~ to extra~.bak\n\
+			 deleting extra~\nbacked up extra to extra.bak\ndeleting extra\n\
+			 backed up sub/inner/ii to sub/inner/ii.bak\ndeleting sub/inner/ii\n\
+			 cannot delete non-empty directory: sub/inner\n\
+			 backed up sub/yy to sub/yy.bak\ndeleting sub/yy\n"
+		);
+		assert_eq!(
+			listing(dir.path()),
+			[
+				"a: old", "extra.bak: x", "extra~.bak: pre", "lnk.bak -> tgt", "sub/", "sub/inner/",
+				"sub/inner/ii.bak: i", "sub/s: s", "sub/yy.bak: y",
+			]
+		);
+	}
+
+	#[test]
+	fn backup_dir_recreates_structure_like_reference() {
+		for (suffix, tail) in [("", ""), (".old", ".old")] {
+			let dir = tempfile::tempdir().unwrap();
+			fixture(dir.path());
+			let out = run(dir.path(), backup_opts(Some("bk"), suffix), &[]);
+			assert_eq!(
+				out,
+				format!(
+					"backed up lnk to bk/lnk{tail}\ndeleting lnk\n\
+					 backed up extra~ to bk/extra~{tail}\ndeleting extra~\n\
+					 backed up extra to bk/extra{tail}\ndeleting extra\n\
+					 backed up sub/inner/ii to bk/sub/inner/ii{tail}\ndeleting sub/inner/ii\n\
+					 deleting sub/inner/\n\
+					 backed up sub/yy to bk/sub/yy{tail}\ndeleting sub/yy\n"
+				)
+			);
+			let expected: Vec<String> = [
+				"a: old".to_owned(),
+				"bk/".to_owned(),
+				format!("bk/extra{tail}: x"),
+				format!("bk/extra~{tail}: pre"),
+				format!("bk/lnk{tail} -> tgt"),
+				"bk/sub/".to_owned(),
+				"bk/sub/inner/".to_owned(),
+				format!("bk/sub/inner/ii{tail}: i"),
+				format!("bk/sub/yy{tail}: y"),
+				"sub/".to_owned(),
+				"sub/s: s".to_owned(),
+			]
+			.into();
+			let mut got = listing(dir.path());
+			got.sort();
+			let mut want = expected;
+			want.sort();
+			assert_eq!(got, want);
+		}
+	}
+
+	#[test]
+	fn absolute_backup_dir_outside_destination() {
+		let dir = tempfile::tempdir().unwrap();
+		let bk = tempfile::tempdir().unwrap();
+		let bk_dir = bk.path().join("new/deeper");
+		fixture(dir.path());
+		let shown = bk_dir.to_string_lossy().into_owned();
+		let out = run(dir.path(), backup_opts(Some(&shown), ""), &[]);
+		assert!(out.starts_with(&format!("backed up lnk to {shown}/lnk\ndeleting lnk\n")), "{out}");
+		assert_eq!(
+			listing(&bk_dir),
+			["extra: x", "extra~: pre", "lnk -> tgt", "sub/", "sub/inner/", "sub/inner/ii: i", "sub/yy: y"]
+		);
+		assert_eq!(listing(dir.path()), ["a: old", "sub/", "sub/s: s"]);
+	}
+
+	#[test]
+	fn keeping_the_original_hard_links_and_replaces_old_backup() {
+		let dir = tempfile::tempdir().unwrap();
+		put(dir.path(), "a", "old");
+		put(dir.path(), "a~/inner", "stale");
+		let (ctx, trees, _) = setup(dir.path(), backup_opts(None, "~"), &OUT);
+		let outcome = make_backup(&ctx, &trees, b"a", false).unwrap();
+		assert_eq!(outcome, BackupOutcome::Duplicated);
+		assert_eq!(listing(dir.path()), ["a: old", "a~: old"]);
+		let a = std::fs::metadata(dir.path().join("a")).unwrap();
+		let b = std::fs::metadata(dir.path().join("a~")).unwrap();
+		assert_eq!(std::os::unix::fs::MetadataExt::ino(&a), std::os::unix::fs::MetadataExt::ino(&b));
+
+		assert_eq!(make_backup(&ctx, &trees, b"missing", true).unwrap(), BackupOutcome::Absent);
+		assert_eq!(make_backup(&ctx, &trees, b"a", true).unwrap(), BackupOutcome::Moved);
+		assert_eq!(listing(dir.path()), ["a~: old"]);
+	}
+
+	#[test]
+	fn backup_names_and_paths() {
+		let dir = tempfile::tempdir().unwrap();
+		put(dir.path(), "d/f", "f");
+		let (ctx, trees, _) = setup(dir.path(), backup_opts(Some("./bk"), ""), &OUT);
+		assert_eq!(backup_name(&ctx, b"d/f"), b"bk/d/f");
+		let (tree, path) = backup_path(&ctx, &trees, b"d/f").unwrap().unwrap();
+		assert_eq!(path, Path::new("d/f"));
+		assert!(tree.lstat(Path::new("d")).unwrap().is_dir(), "parents are created");
+		assert!(dir.path().join("bk/d").is_dir());
+
+		let (ctx, _, _) = setup(dir.path(), backup_opts(None, "~"), &OUT);
+		assert_eq!(backup_name(&ctx, b"d/f"), b"d/f~");
+		assert!(is_backup_file(&ctx, b"d/f~"));
+		assert!(!is_backup_file(&ctx, b"~"));
+	}
+
+	#[test]
+	fn dry_run_reports_without_touching() {
+		let dir = tempfile::tempdir().unwrap();
+		fixture(dir.path());
+		let before = listing(dir.path());
+		let opts = Options { dry_run: true, do_xfers: false, ..backup_opts(Some("bk"), "") };
+		let out = run(dir.path(), opts, &[]);
+		assert!(out.starts_with("backed up lnk to bk/lnk\ndeleting lnk\n"), "{out}");
+		assert_eq!(listing(dir.path()), before);
+	}
+
+	/// B16: `rsync -a --backup --backup-dir=opd/sub src/ dest/` where `dest/opd` is the
+	/// operator's own symlink to a directory outside the destination: upstream follows
+	/// it (exit 0) and the old file lands in `outside/sub/f0`.
+	#[test]
+	fn relative_backup_dir_through_own_symlink() {
+		let base = tempfile::tempdir().unwrap();
+		let dest = base.path().join("dest");
+		let outside = base.path().join("outside");
+		std::fs::create_dir_all(&outside).unwrap();
+		put(&dest, "f0", "OLD");
+		link(&dest, "opd", outside.to_str().unwrap());
+		let (ctx, trees, _) = setup(&dest, backup_opts(Some("opd/sub"), ""), &OUT);
+
+		let (tree, path) = backup_path(&ctx, &trees, b"f0").unwrap().expect("backup dir accepted");
+		assert_eq!(path, Path::new("f0"));
+		assert!(tree.lstat(Path::new(".")).unwrap().is_dir());
+
+		assert_eq!(make_backup(&ctx, &trees, b"f0", false).unwrap(), BackupOutcome::Duplicated);
+		assert_eq!(std::fs::read_to_string(outside.join("sub/f0")).unwrap(), "OLD");
+		assert_eq!(std::fs::read_to_string(dest.join("f0")).unwrap(), "OLD");
+	}
+
+	/// The relative walk starts at the destination itself: `..` may leave it (an
+	/// operator path), relative symlinks are spliced, and `--confine-root` bounds it.
+	#[test]
+	fn relative_backup_dir_walk_is_anchored_at_destination() {
+		let base = tempfile::tempdir().unwrap();
+		let base = std::fs::canonicalize(base.path()).unwrap();
+		let dest = base.join("dest");
+		put(&dest, "f0", "OLD");
+		std::fs::create_dir_all(dest.join("real")).unwrap();
+		link(&dest, "rel", "real");
+
+		let (ctx, trees, _) = setup(&dest, backup_opts(Some("../outside/sub"), ""), &OUT);
+		assert!(backup_path(&ctx, &trees, b"f0").unwrap().is_some());
+		assert!(base.join("outside/sub").is_dir(), "`..` climbs out of the destination");
+
+		let (ctx, trees, _) = setup(&dest, backup_opts(Some("rel/deep"), ""), &OUT);
+		assert!(backup_path(&ctx, &trees, b"f0").unwrap().is_some());
+		assert!(dest.join("real/deep").is_dir(), "relative symlink target spliced");
+
+		let confined = Options {
+			confine_root: Some(dest.clone().into_os_string()),
+			..backup_opts(Some("../escape"), "")
+		};
+		let (ctx, trees, _) = setup(&dest, confined, &OUT);
+		assert!(backup_path(&ctx, &trees, b"f0").unwrap().is_none());
+		assert!(!base.join("escape").exists(), "nothing created outside --confine-root");
+
+		// As root, symlinks owned by another user are untrusted: one on the way to the
+		// destination does not matter (upstream starts at the destination), one inside
+		// the backup path is refused.
+		if crate::rsync::ids::effective_uid() != Some(0) {
+			return;
+		}
+		link(&base, "via", dest.to_str().unwrap());
+		std::os::unix::fs::lchown(base.join("via"), Some(1), Some(1)).unwrap();
+		let (ctx, trees, _) = setup(&base.join("via"), backup_opts(Some("bk"), ""), &OUT);
+		assert!(backup_path(&ctx, &trees, b"f0").unwrap().is_some());
+		assert!(dest.join("bk").is_dir());
+
+		link(&dest, "foreign", base.to_str().unwrap());
+		std::os::unix::fs::lchown(dest.join("foreign"), Some(1), Some(1)).unwrap();
+		let (ctx, trees, _) = setup(&dest, backup_opts(Some("foreign/sub"), ""), &OUT);
+		assert!(backup_path(&ctx, &trees, b"f0").unwrap().is_none());
+		assert!(!base.join("sub").exists());
+	}
+
+	/// B11: under `--fake-super` a special file is a regular placeholder plus the
+	/// stat xattr; its backup copy must be another inert 0600 placeholder (upstream
+	/// do_mknod with am_root < 0), never a live FIFO.
+	#[test]
+	fn fake_super_special_backup_is_a_placeholder() {
+		let dir = tempfile::tempdir().unwrap();
+		put(dir.path(), "victim", "");
+		let opts = Options { am_root: -1, preserve_specials: true, ..backup_opts(None, "~") };
+		let (mut ctx, trees, _) = setup(dir.path(), opts, &OUT);
+		ctx.meta.fake_super = true;
+		let fifo = meta::FakeStat { mode: 0o010600, rdev_major: 0, rdev_minor: 0, uid: 0, gid: 0 };
+		let xstat = std::ffi::OsStr::new(meta::XSTAT_ATTR);
+		if trees.dest.set_xattr(Path::new("victim"), xstat, &fifo.encode(), false).is_err() {
+			// No xattr support on this file system: nothing to represent.
+			return;
+		}
+		let st = source_lstat(&ctx, &trees.dest, Path::new("victim")).unwrap();
+		assert!(mode_is_fifo(st.mode()), "the stat xattr is overlaid");
+
+		let outcome =
+			duplicate(&ctx, &trees.dest, Path::new("victim"), &st, &trees.dest, Path::new("victim~"), b"victim", b"victim~")
+				.unwrap();
+		assert_eq!(outcome, BackupOutcome::Duplicated);
+		let real = std::fs::symlink_metadata(dir.path().join("victim~")).unwrap();
+		assert!(real.file_type().is_file(), "placeholder, not a FIFO");
+		let raw = trees.dest.get_xattr(Path::new("victim~"), xstat, false).unwrap().expect("stat record");
+		let stat = meta::FakeStat::decode(&raw).expect("valid stat record");
+		assert_eq!(stat.mode & 0o170000, 0o010000);
+		let overlaid = source_lstat(&ctx, &trees.dest, Path::new("victim~")).unwrap();
+		assert!(mode_is_fifo(overlaid.mode()), "x_lstat sees the FIFO again");
+
+		// Without --fake-super the special file itself is recreated.
+		let plain = tempfile::tempdir().unwrap();
+		let opts = Options { preserve_specials: true, ..backup_opts(None, "~") };
+		let (ctx, trees, _) = setup(plain.path(), opts, &OUT);
+		nix::unistd::mkfifo(&plain.path().join("p"), nix::sys::stat::Mode::from_bits_truncate(0o600)).unwrap();
+		let st = source_lstat(&ctx, &trees.dest, Path::new("p")).unwrap();
+		duplicate(&ctx, &trees.dest, Path::new("p"), &st, &trees.dest, Path::new("p~"), b"p", b"p~").unwrap();
+		let real = std::fs::symlink_metadata(plain.path().join("p~")).unwrap();
+		assert!(std::os::unix::fs::FileTypeExt::is_fifo(&real.file_type()));
+	}
+}

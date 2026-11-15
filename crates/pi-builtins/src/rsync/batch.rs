@@ -380,4 +380,96 @@ pub(crate) fn write_shell_file(
 	})
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn os(v: &[&str]) -> Vec<OsString> {
+		v.iter().map(OsString::from).collect()
+	}
+
+	/// Captured from rsync 3.5.1: `rsync -a --exclude='*.o' --write-batch=foo src/ dst/`.
+	#[test]
+	fn script_matches_reference_with_filters() {
+		let raw = os(&["/opt/homebrew/bin/rsync", "-a", "--exclude=*.o", "--write-batch=foo", "src/", "dst/"]);
+		let cooked = os(&["src/", "dst/"]);
+		let text = shell_script(&raw, &cooked, &[b"- *.o".to_vec()], false, 33, &|_| false).unwrap();
+		assert_eq!(
+			String::from_utf8(text).unwrap(),
+			"'/opt/homebrew/bin/rsync' --filter='._-' '-a' --read-batch='foo' ${1:-'dst/'} <<'#E#'\n- *.o\n#E#\n"
+		);
+	}
+
+	/// Captured from rsync 3.5.1: `rsync -a --only-write-batch b2 -v src/ dst2/`.
+	#[test]
+	fn script_matches_reference_separate_value() {
+		let raw = os(&["/opt/homebrew/bin/rsync", "-a", "--only-write-batch", "b2", "-v", "src/", "dst2/"]);
+		let cooked = os(&["src/", "dst2/"]);
+		let text = shell_script(&raw, &cooked, &[], false, 33, &|_| false).unwrap();
+		assert_eq!(
+			String::from_utf8(text).unwrap(),
+			"'/opt/homebrew/bin/rsync' '-a' --read-batch 'b2' '-v' ${1:-'dst2/'}\n"
+		);
+	}
+
+	#[test]
+	fn script_quotes_and_rejects_newline_rules() {
+		let raw = os(&["rsync", "--out-format=%n it's", "--write-batch=b", "s", "host:d'x"]);
+		let cooked = os(&["s", "host:d'x"]);
+		let text = shell_script(&raw, &cooked, &[], false, 33, &|_| false).unwrap();
+		assert_eq!(
+			String::from_utf8(text).unwrap(),
+			"'rsync' --out-format='%n it'\\''s' --read-batch='b' ${1:-'d'\\''x'}\n"
+		);
+		let err = shell_script(&raw, &cooked, &[b"- a\nb".to_vec()], false, 33, &|_| false).unwrap_err();
+		assert_eq!(err.code, RERR_SYNTAX);
+	}
+
+	#[test]
+	fn stream_flags_round_trip() {
+		let o = Options { recurse: 2, preserve_uid: true, inplace: true, append_mode: 2, ..Options::default() };
+		let flags = stream_flags(&o);
+		assert_eq!(flags, 1 | 2 | (1 << 12) | (1 << 14));
+		let logger = Logger::local(Box::new(io::sink()), Box::new(io::sink()), Default::default());
+		let mut target = Options::default();
+		check_batch_flags(&mut target, flags, 33, &logger).unwrap();
+		assert_eq!(target.recurse, 1);
+		assert!(target.preserve_uid && target.inplace);
+		assert_eq!(target.append_mode, 2);
+		let iconv = Options { iconv_opt: Some("utf8".into()), ..Options::default() };
+		let err = check_batch_flags(&mut Options::default(), stream_flags(&iconv), 33, &logger).unwrap_err();
+		assert_eq!(err.message.as_deref(), Some("Please specify the --iconv option to use this batch file."));
+	}
+
+	/// Captured from rsync 3.5.1 (`-a --write-batch=foo src/ dst/`): flags 0x9f.
+	#[test]
+	fn archive_stream_flags_match_reference() {
+		let argv: Vec<OsString> = ["-a", "--write-batch=foo", "src/", "dst/"].iter().map(OsString::from).collect();
+		let Ok(crate::rsync::options::Parsed::Run(o)) = crate::rsync::options::parse(&argv, &|_| None) else {
+			panic!("parse failed");
+		};
+		assert_eq!(stream_flags(&o), 0x9f);
+	}
+
+	/// The batch header written before the recorded stream. A 3.5.1 batch file
+	/// starts `9f000000 21000000 81ff …`: flags, protocol 33, compat 0x1ff as the
+	/// varint `81 ff`, then the seed.
+	#[test]
+	fn header_layout() {
+		let buf: SharedBatch = Arc::new(Mutex::new(Box::new(Vec::new())));
+		struct Probe(Arc<Mutex<Vec<u8>>>);
+		impl Write for Probe {
+			fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+				self.0.lock().unwrap().extend_from_slice(b);
+				Ok(b.len())
+			}
+			fn flush(&mut self) -> io::Result<()> {
+				Ok(())
+			}
+		}
+		let sink = Arc::new(Mutex::new(Vec::new()));
+		*buf.lock().unwrap() = Box::new(Probe(Arc::clone(&sink)));
+		write_header(&buf, Proto { version: 33, compat: 0x1ff }, 0x01ac_6aee).unwrap();
+		assert_eq!(*sink.lock().unwrap(), [0x21, 0, 0, 0, 0x81, 0xff, 0xee, 0x6a, 0xac, 0x01]);
+	}
+}

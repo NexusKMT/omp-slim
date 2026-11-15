@@ -48,4 +48,23 @@ enum Failure {
 	Publish(std::io::Error),
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn requires_exactly_two_operands() {
+		for arguments in [
+			vec![OsString::from("relay")],
+			vec![OsString::from("relay"), OsString::from("callback.url")],
+			vec![
+				OsString::from("relay"),
+				OsString::from("callback.url"),
+				OsString::from("omp://callback"),
+				OsString::from("extra"),
+			],
+		] {
+			assert!(matches!(run(arguments), Err(Failure::Usage)));
+		}
+	}
+}

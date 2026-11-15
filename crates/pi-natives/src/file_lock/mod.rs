@@ -132,4 +132,31 @@ impl Drop for FileLock {
 }
 
 // Android has no probe (`unix::is_held` reports Unsupported).
+#[cfg(all(test, not(target_os = "android")))]
+mod tests {
+	use std::time::{SystemTime, UNIX_EPOCH};
 
+	use super::platform::{is_held, try_acquire};
+
+	#[test]
+	fn probe_sees_holder_without_taking_the_lock() {
+		let nonce = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.expect("system clock")
+			.as_nanos();
+		let path =
+			std::env::temp_dir().join(format!("omp-file-lock-probe-{}-{nonce}", std::process::id()));
+		let path = path.to_str().expect("utf-8 temp path");
+		assert!(!is_held(path).expect("probe unlocked path"));
+		let mut lease = try_acquire(path).expect("acquire").expect("free lease");
+		assert!(is_held(path).expect("probe held path"));
+		lease.release().expect("release");
+		assert!(!is_held(path).expect("probe released path"));
+		// A probe never leaves the path held for the next acquirer.
+		let mut successor = try_acquire(path)
+			.expect("reacquire")
+			.expect("probe left the lease free");
+		successor.release().expect("release successor");
+		let _ = std::fs::remove_file(path);
+	}
+}

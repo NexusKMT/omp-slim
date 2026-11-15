@@ -693,4 +693,157 @@ fn mode_changed(
 	(old_mode ^ new_mode) & MODE_BITS != 0
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
+	use uucore::display::Quotable;
+
+	use super::Chmod;
+	use crate::host::run_util;
+
+	fn mode(path: &Path) -> u32 {
+		fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
+	}
+
+	fn set(path: &Path, mode: u32) {
+		fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+	}
+
+	fn fixture() -> tempfile::TempDir {
+		let dir = tempfile::tempdir().unwrap();
+		fs::write(dir.path().join("f"), "").unwrap();
+		set(&dir.path().join("f"), 0o664);
+		fs::create_dir(dir.path().join("d")).unwrap();
+		set(&dir.path().join("d"), 0o2775);
+		fs::write(dir.path().join("d/x"), "").unwrap();
+		set(&dir.path().join("d/x"), 0o666);
+		std::os::unix::fs::symlink("nope", dir.path().join("d/dl")).unwrap();
+		dir
+	}
+
+	fn chmod(dir: &Path, argv: &[&str]) -> (i32, String, String) {
+		let (code, capture) = run_util::<Chmod>(argv, "", dir);
+		(code, capture.out(), capture.err())
+	}
+
+	#[test]
+	fn octal_mode_keeps_directory_set_id_unless_five_digits() {
+		let dir = fixture();
+		assert_eq!(chmod(dir.path(), &["644", "f"]).0, 0);
+		assert_eq!(mode(&dir.path().join("f")), 0o644);
+		let (code, out, _) = chmod(dir.path(), &["-v", "0755", "d"]);
+		assert_eq!((code, out.as_str()), (0, "mode of 'd' changed from 2775 (rwxrwsr-x) to 2755 (rwxr-sr-x)\n"));
+		let (_, out, _) = chmod(dir.path(), &["-v", "00755", "d"]);
+		assert_eq!(out, "mode of 'd' changed from 2755 (rwxr-sr-x) to 0755 (rwxr-xr-x)\n");
+	}
+
+	#[test]
+	fn verbose_and_changes_reporting() {
+		let dir = fixture();
+		let (_, out, _) = chmod(dir.path(), &["-v", "u+x", "f"]);
+		assert_eq!(out, "mode of 'f' changed from 0664 (rw-rw-r--) to 0764 (rwxrw-r--)\n");
+		let (_, out, _) = chmod(dir.path(), &["-v", "u+x", "f"]);
+		assert_eq!(out, "mode of 'f' retained as 0764 (rwxrw-r--)\n");
+		let (_, out, _) = chmod(dir.path(), &["-c", "u+x", "f"]);
+		assert_eq!(out, "");
+	}
+
+	#[test]
+	fn symbolic_modes_follow_gnu_semantics() {
+		let dir = fixture();
+		chmod(dir.path(), &["u=g,o=u", "f"]);
+		assert_eq!(mode(&dir.path().join("f")), 0o666);
+		chmod(dir.path(), &["a=rX", "d", "f"]);
+		assert_eq!(mode(&dir.path().join("d")), 0o2555);
+		assert_eq!(mode(&dir.path().join("f")), 0o444);
+		chmod(dir.path(), &["+t,g-s,u+w", "d"]);
+		assert_eq!(mode(&dir.path().join("d")), 0o1755);
+	}
+
+	#[test]
+	fn recursive_skips_symlinks_found_in_the_walk() {
+		let dir = fixture();
+		let (code, out, err) = chmod(dir.path(), &["-R", "-v", "go-w", "d"]);
+		assert_eq!((code, err.as_str()), (0, ""));
+		assert!(out.contains("neither symbolic link 'd/dl' nor referent has been changed\n"));
+		assert_eq!(mode(&dir.path().join("d/x")), 0o644);
+	}
+
+	#[test]
+	fn dangling_symlink_operand_is_an_error() {
+		let dir = fixture();
+		let (code, out, err) = chmod(dir.path(), &["-v", "755", "d/dl"]);
+		assert_eq!(code, 1);
+		assert_eq!(err, "chmod: cannot operate on dangling symlink 'd/dl'\n");
+		assert_eq!(out, "'d/dl' could not be accessed\n");
+	}
+
+	#[test]
+	fn option_spelled_mode_warns_about_umask_surprises() {
+		let dir = fixture();
+		let (code, _, err) = chmod(dir.path(), &["-w", "f"]);
+		// The test process umask is 022 in CI and on developer machines.
+		if crate::host::process_umask() == 0o022 {
+			assert_eq!(code, 1);
+			assert_eq!(err, "chmod: f: new permissions are r--rw-r--, not r--r--r--\n");
+			assert_eq!(mode(&dir.path().join("f")), 0o464);
+		}
+		let (code, _, err) = chmod(dir.path(), &["-v", "--", "a-w", "f"]);
+		assert_eq!((code, err.as_str()), (0, ""));
+		assert_eq!(mode(&dir.path().join("f")), 0o444);
+	}
+
+	#[test]
+	fn reference_copies_the_mode() {
+		let dir = fixture();
+		fs::write(dir.path().join("g"), "").unwrap();
+		set(&dir.path().join("g"), 0o600);
+		assert_eq!(chmod(dir.path(), &["--reference=f", "g"]).0, 0);
+		assert_eq!(mode(&dir.path().join("g")), 0o664);
+		let (code, _, err) = chmod(dir.path(), &["--reference=nope", "g"]);
+		assert_eq!((code, err.as_str()), (1, "chmod: failed to get attributes of 'nope': No such file or directory\n"));
+		let (code, _, err) = chmod(dir.path(), &["--reference=f", "-w", "g"]);
+		assert_eq!(code, 1);
+		assert_eq!(err, "chmod: cannot combine mode and --reference options\nTry 'chmod --help' for more information.\n");
+	}
+
+	#[test]
+	fn usage_and_access_errors() {
+		let dir = fixture();
+		let try_help = "Try 'chmod --help' for more information.\n";
+		assert_eq!(chmod(dir.path(), &["999", "f"]), (1, String::new(), format!("chmod: invalid mode: '999'\n{try_help}")));
+		assert_eq!(chmod(dir.path(), &["u+7", "f"]).2, format!("chmod: invalid mode: 'u+7'\n{try_help}"));
+		// GNU rejects these; `uucore::mode` alone would accept them.
+		for mode in ["u+x,", ",u+x", " 755"] {
+			assert_eq!(chmod(dir.path(), &[mode, "f"]).2, format!("chmod: invalid mode: {}\n{try_help}", mode.quote()));
+		}
+		assert_eq!(mode(&dir.path().join("f")), 0o664);
+		assert_eq!(chmod(dir.path(), &["+x"]).2, format!("chmod: missing operand after '+x'\n{try_help}"));
+		assert_eq!(chmod(dir.path(), &["-w"]).2, format!("chmod: missing operand\n{try_help}"));
+		assert_eq!(
+			chmod(dir.path(), &["u+x", "missing"]),
+			(1, String::new(), "chmod: cannot access 'missing': No such file or directory\n".into())
+		);
+		assert_eq!(chmod(dir.path(), &["-f", "u+x", "missing"]), (1, String::new(), String::new()));
+		assert_eq!(
+			chmod(dir.path(), &["-R", "-P", "--dereference", "1", "f"]).2,
+			"chmod: -R --dereference requires either -H or -L\n"
+		);
+	}
+
+	#[test]
+	fn preserve_root_refuses_recursion_on_root() {
+		let dir = fixture();
+		std::os::unix::fs::symlink("/", dir.path().join("root")).unwrap();
+		let (code, out, err) = chmod(dir.path(), &["-R", "--preserve-root", "755", "/"]);
+		assert_eq!((code, out.as_str()), (1, ""));
+		assert_eq!(
+			err,
+			"chmod: it is dangerous to operate recursively on '/'\nchmod: use --no-preserve-root to override this failsafe\n"
+		);
+		let (code, _, err) = chmod(dir.path(), &["-R", "--preserve-root", "755", "root"]);
+		assert_eq!(code, 1);
+		assert!(err.starts_with("chmod: it is dangerous to operate recursively on 'root' (same as '/')\n"));
+	}
+}

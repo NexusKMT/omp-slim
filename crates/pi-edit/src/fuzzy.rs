@@ -246,7 +246,11 @@ fn levenshtein_slices<T: PartialEq>(a: &[T], b: &[T]) -> usize {
 	row[shorter.len()]
 }
 
-
+#[inline]
+#[cfg(test)]
+fn levenshtein_chars(a: &[char], b: &[char]) -> usize {
+	levenshtein_slices(a, b)
+}
 
 /// Levenshtein edit distance over Unicode scalar values.
 ///
@@ -1407,4 +1411,429 @@ pub fn replace_text(
 	Ok(ReplaceOutcome::Replaced(ReplaceResult { content: output, count: 1 }))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn fast_distances_match_reference_across_block_boundaries() {
+		// Patterns straddling the 64-row word boundaries of the bit-parallel
+		// distance, with non-ASCII rows and texts shorter, equal and longer.
+		let mut state = 0x5eed_u64;
+		let mut next = |bound: usize| {
+			state = state
+				.wrapping_mul(6_364_136_223_846_793_005)
+				.wrapping_add(1);
+			((state >> 33) as usize) % bound
+		};
+		let alphabet = ['a', 'b', 'é', '界'];
+		for pattern_len in [0, 1, 63, 64, 65, 127, 128, 129] {
+			for _ in 0..40 {
+				let pattern: Vec<char> = (0..pattern_len).map(|_| alphabet[next(4)]).collect();
+				let mut text = pattern.clone();
+				for _ in 0..next(12) {
+					let at = next(text.len() + 1);
+					match next(3) {
+						0 => text.insert(at, alphabet[next(4)]),
+						1 if at < text.len() => drop(text.remove(at)),
+						_ if at < text.len() => text[at] = alphabet[next(4)],
+						_ => {},
+					}
+				}
+				let expected = levenshtein_chars(&pattern, &text);
+				assert_eq!(PatternDistance::new(&pattern).distance(&text), expected);
+				for max in [0, expected.saturating_sub(1), expected, expected + 3] {
+					assert_eq!(
+						levenshtein_within(&pattern, &text, max),
+						(expected <= max).then_some(expected),
+						"len {pattern_len} max {max}"
+					);
+				}
+			}
+		}
+	}
+
+	fn options(allow_fuzzy: bool) -> FindMatchOptions<'static> {
+		FindMatchOptions { allow_fuzzy, threshold: None, excluded_ranges: &[] }
+	}
+
+	#[test]
+	fn exact_match_and_multiple_occurrences() {
+		let found = find_match("line1\nline2\nline3", "line2", &options(false));
+		assert_eq!(found.matched.as_ref().map(|matched| matched.start_line), Some(2));
+		assert_eq!(found.matched.as_ref().map(|matched| matched.confidence), Some(1.0));
+
+		let multiple = find_match("foo\nbar\nfoo", "foo", &options(false));
+		assert!(multiple.matched.is_none());
+		assert_eq!(multiple.occurrences, Some(2));
+		assert_eq!(multiple.occurrence_lines, Some(vec![1, 3]));
+		assert_eq!(multiple.occurrence_previews.as_ref().map(Vec::len), Some(2));
+	}
+
+	#[test]
+	fn tab_space_and_internal_whitespace_normalization() {
+		for (content, target) in [
+			("\tfoo\n\t\tbar\n\tbaz", "  foo\n    bar\n  baz"),
+			("  foo\n    bar\n  baz", "\tfoo\n\t\tbar\n\tbaz"),
+			("   foo\n      bar\n   baz", "  foo\n    bar\n  baz"),
+			("foo   bar    baz", "foo bar baz"),
+		] {
+			let outcome = find_match(content, target, &options(true));
+			assert!(outcome.matched.is_some(), "failed to match {target:?}");
+			assert!(outcome.matched.unwrap().confidence >= DEFAULT_FUZZY_THRESHOLD);
+		}
+	}
+
+	#[test]
+	fn fallback_ignores_inconsistent_indentation() {
+		let outcome = find_match(
+			"\t\t\tline1\n\t\t\tline2\n\t\tline3\n\t\t\tline4",
+			"      line1\n      line2\n      line3\n      line4",
+			&options(true),
+		);
+		assert!(outcome.matched.is_some());
+
+		let varied =
+			find_match("  a\n    b\n   c\n    d", "  a\n    b\n    c\n    d", &options(true));
+		assert!(varied.matched.is_some());
+	}
+
+	#[test]
+	fn single_line_trailing_space_and_empty_line_cases() {
+		let single =
+			find_match("prefix\n\t\t\t\"value\",\nsuffix", "          \"value\",", &options(true));
+		assert!(single.matched.is_some());
+		let trailing = find_match("line1  \nline2\t", "line1\nline2", &options(true));
+		assert!(trailing.matched.is_some());
+		let empty_line = find_match("line1\n\nline3", "line1\n\nline3", &options(false));
+		assert_eq!(
+			empty_line
+				.matched
+				.as_ref()
+				.map(|matched| matched.confidence),
+			Some(1.0)
+		);
+		assert_eq!(find_match("some content", "", &options(true)), MatchOutcome::default());
+		assert!(
+			find_match("short", "this is much longer than the content", &options(true))
+				.matched
+				.is_none()
+		);
+	}
+
+	#[test]
+	fn threshold_and_dominant_fuzzy_match() {
+		let strict = FindMatchOptions {
+			allow_fuzzy:     true,
+			threshold:       Some(0.99),
+			excluded_ranges: &[],
+		};
+		assert!(
+			find_match("function foo() {}", "function bar() {}", &strict)
+				.matched
+				.is_none()
+		);
+		let lenient = FindMatchOptions {
+			allow_fuzzy:     true,
+			threshold:       Some(0.7),
+			excluded_ranges: &[],
+		};
+		assert!(
+			find_match("function foo() {}", "function bar() {}", &lenient)
+				.matched
+				.is_some()
+		);
+
+		let target = "a".repeat(50);
+		let content = format!("{}b\n{}cccccc", "a".repeat(49), "a".repeat(44));
+		let dominant = find_match(&content, &target, &FindMatchOptions {
+			allow_fuzzy:     true,
+			threshold:       Some(0.8),
+			excluded_ranges: &[],
+		});
+		assert_eq!(dominant.dominant_fuzzy, Some(true));
+		assert_eq!(dominant.fuzzy_matches, Some(2));
+	}
+
+	#[test]
+	fn excluded_ranges_hide_exact_and_fuzzy_candidates() {
+		let range = ExcludedRange { start_index: 0, end_index: 3 };
+		let exact = find_match("foo\nfoo", "foo", &FindMatchOptions {
+			allow_fuzzy:     false,
+			threshold:       None,
+			excluded_ranges: &[range],
+		});
+		assert_eq!(exact.matched.as_ref().map(|matched| matched.start_index), Some(4));
+
+		let fuzzy = find_match("food\nfool", "foox", &FindMatchOptions {
+			allow_fuzzy:     true,
+			threshold:       Some(0.7),
+			excluded_ranges: &[ExcludedRange { start_index: 0, end_index: 4 }],
+		});
+		assert_eq!(fuzzy.matched.as_ref().map(|matched| matched.start_line), Some(2));
+	}
+
+	#[test]
+	fn sequence_matching_ladder() {
+		assert_eq!(
+			seek_sequence(&["foo", "bar", "baz"], &["bar", "baz"], 0, false, true).index,
+			Some(1)
+		);
+		assert_eq!(
+			seek_sequence(&["foo   ", "bar\t\t"], &["foo", "bar"], 0, false, true).strategy,
+			Some(SequenceMatchStrategy::TrimTrailing)
+		);
+		assert_eq!(
+			seek_sequence(&["    foo   ", "   bar\t"], &["foo", "bar"], 0, false, true).strategy,
+			Some(SequenceMatchStrategy::Trim)
+		);
+		assert_eq!(
+			seek_sequence(&["a", "b", "c", "d", "e"], &["d", "e"], 0, true, true).index,
+			Some(3)
+		);
+		assert_eq!(
+			seek_sequence(
+				&["import asyncio  # local import – avoids top‑level dep"],
+				&["import asyncio  # local import - avoids top-level dep"],
+				0,
+				false,
+				true
+			)
+			.strategy,
+			Some(SequenceMatchStrategy::Unicode)
+		);
+		assert_eq!(seek_sequence(&["foo", "bar"], &[], 5, false, true).index, Some(5));
+		assert_eq!(seek_sequence(&["one"], &["too", "many"], 0, false, true).index, None);
+		let minor = seek_sequence(
+			&["function greet() {", "  console.log(\"Hello!\");", "}"],
+			&["function greet() {", "  console.log(\"Hello!\")  ", "}"],
+			0,
+			false,
+			true,
+		);
+		assert_eq!(minor.index, Some(0));
+		assert!(minor.confidence >= SEQUENCE_FUZZY_THRESHOLD);
+	}
+
+	#[test]
+	fn sequence_fuzzy_and_character_fallback() {
+		let lines = [
+			"function calculateTotal(items) {",
+			"  let sum = 0;",
+			"  for (const item of items) {",
+			"    sum += item.price * item.quantity;",
+			"  }",
+			"  return sum;",
+			"}",
+		];
+		let result = seek_sequence(
+			&lines,
+			&["  for (const item of items)  {", "    sum += item.price*item.quantity;"],
+			0,
+			false,
+			true,
+		);
+		assert_eq!(result.index, Some(2));
+		assert!(result.confidence > 0.9);
+	}
+
+	#[test]
+	fn context_matching_ladder() {
+		assert_eq!(
+			find_context_line(&["function foo() {"], "function foo() {", 0, true, false).strategy,
+			Some(ContextMatchStrategy::Exact)
+		);
+		assert_eq!(
+			find_context_line(&["  function foo()  {"], "function foo() {", 0, true, false).strategy,
+			Some(ContextMatchStrategy::Prefix)
+		);
+		assert_eq!(
+			find_context_line(
+				&["const msg = \"Hello – World\";"],
+				"const msg = \"Hello - World\";",
+				0,
+				true,
+				false
+			)
+			.index,
+			Some(0)
+		);
+		assert_eq!(
+			find_context_line(
+				&["function calculateTotalWithTax(items, taxRate) {"],
+				"function calculateTotalWithTax(items",
+				0,
+				true,
+				false
+			)
+			.strategy,
+			Some(ContextMatchStrategy::Prefix)
+		);
+		assert_eq!(
+			find_context_line(&["// comment: calculateTotal here"], "calculateTotal", 0, true, false)
+				.strategy,
+			Some(ContextMatchStrategy::Substring)
+		);
+		let fuzzy = find_context_line(
+			&["functoin calclateTotal(itms) {"],
+			"function calculateTotal(items) {",
+			0,
+			true,
+			false,
+		);
+		assert_eq!(fuzzy.strategy, Some(ContextMatchStrategy::Fuzzy));
+		assert!(fuzzy.confidence > 0.8);
+	}
+
+	#[test]
+	fn match_error_matches_typescript_formatter() {
+		let closest = FuzzyMatch {
+			actual_text: "alpha\ngamma".to_owned(),
+			start_index: 10,
+			start_line:  4,
+			confidence:  0.874,
+		};
+		assert_eq!(
+			format_match_error("src/a.ts", "alpha\nbeta", Some(&closest), true, 0.95, None),
+			"Could not find a close enough match in src/a.ts.\n\nClosest match (87% similar) at line \
+			 4:\n  - beta\n  + gamma\nClosest match was below the 95% similarity threshold."
+		);
+		assert_eq!(
+			format_match_error("src/a.ts", "x", None, false, 0.95, None),
+			"Could not find the exact text in src/a.ts. The old text must match exactly including \
+			 all whitespace and newlines."
+		);
+		assert_eq!(
+			format_match_error("src/a.ts", "alpha\nbeta", Some(&closest), true, 0.95, Some(3)),
+			"Could not find a close enough match in src/a.ts.\n\nClosest match (87% similar) at line \
+			 4:\n  - beta\n  + gamma\nFound 3 high-confidence matches. Provide more context to make \
+			 it unique."
+		);
+		assert_eq!(
+			format_match_error("src/a.ts", "alpha\nbeta", Some(&closest), false, 0.95, None),
+			"Could not find the exact text in src/a.ts.\n\nClosest match (87% similar) at line 4:\n  \
+			 - beta\n  + gamma\nFuzzy matching is disabled. Enable 'Edit fuzzy match' in settings to \
+			 accept high-confidence matches."
+		);
+		assert_eq!(
+			format_match_error("src/a.ts", "x", None, true, 0.95, None),
+			"Could not find a close enough match in src/a.ts."
+		);
+	}
+
+	#[test]
+	fn occurrence_error_includes_preview_limit_suffix() {
+		let outcome = MatchOutcome {
+			occurrences: Some(7),
+			occurrence_previews: Some(vec!["preview".to_owned()]),
+			..MatchOutcome::default()
+		};
+		assert_eq!(
+			format_occurrence_error("a.ts", &outcome),
+			"Found 7 occurrences in a.ts (showing first 5 of 7):\n\npreview\n\nAdd more context \
+			 lines to disambiguate."
+		);
+	}
+
+	fn replaced(outcome: ReplaceOutcome) -> ReplaceResult {
+		match outcome {
+			ReplaceOutcome::Replaced(result) => result,
+			ReplaceOutcome::Missed(outcome) => panic!("expected a replacement, missed: {outcome:?}"),
+		}
+	}
+
+	#[test]
+	fn replace_text_adjusts_indentation() {
+		let result = replaced(
+			replace_text("    foo\n    bar", "foo\nbar", "foo\nbaz\nbar", true, false, None).unwrap(),
+		);
+		assert_eq!(result, ReplaceResult {
+			content: "    foo\n    baz\n    bar".to_owned(),
+			count:   1,
+		});
+
+		let deindented = replaced(
+			replace_text(
+				"    foo\n    bar",
+				"        foo\n        bar",
+				"        foo\n        baz",
+				true,
+				false,
+				Some(0.9),
+			)
+			.unwrap(),
+		);
+		assert_eq!(deindented.content, "    foo\n    baz");
+	}
+
+	#[test]
+	fn replace_text_all_exact_and_fuzzy() {
+		assert_eq!(
+			replaced(replace_text("foo foo", "foo", "bar", false, true, None).unwrap()),
+			ReplaceResult { content: "bar bar".to_owned(), count: 2 }
+		);
+		let old = "a".repeat(50);
+		let first = format!("{}b", "a".repeat(49));
+		let second = format!("{}cccccc", "a".repeat(44));
+		let new = format!("{old}\nexpanded");
+		assert_eq!(
+			replaced(
+				replace_text(&format!("{first}\n{second}"), &old, &new, true, true, Some(0.8)).unwrap()
+			),
+			ReplaceResult { content: format!("{new}\n{new}"), count: 2 }
+		);
+	}
+
+	#[test]
+	fn replace_text_misses_on_ambiguity_and_normalizes_line_endings() {
+		let ReplaceOutcome::Missed(ambiguous) =
+			replace_text("foo\nbar\nfoo", "foo", "x", false, false, None).unwrap()
+		else {
+			panic!("two exact occurrences must not be replaced");
+		};
+		assert_eq!(ambiguous.occurrences, Some(2));
+		assert_eq!(
+			replaced(replace_text("a\r\nb", "a\r\nb", "c\r\nd", false, false, None).unwrap()),
+			ReplaceResult { content: "c\nd".to_owned(), count: 1 }
+		);
+		let ReplaceOutcome::Missed(missing) =
+			replace_text("abc", "missing", "x", false, false, None).unwrap()
+		else {
+			panic!("an absent string must not be replaced");
+		};
+		assert!(missing.matched.is_none());
+	}
+
+	#[test]
+	fn empty_old_text_is_an_apply_error() {
+		assert_eq!(
+			replace_text("x", "", "y", false, false, None)
+				.unwrap_err()
+				.to_string(),
+			"oldText must not be empty."
+		);
+	}
+
+	#[test]
+	fn levenshtein_and_similarity_fast_paths_match_unicode_fallback() {
+		// Equal strings (including empty) take the O(1) equality fast path.
+		assert_eq!(levenshtein_distance("hello", "hello"), 0);
+		assert_eq!(similarity("", ""), 1.0);
+
+		// Empty vs non-empty counts Unicode scalar values, not UTF-8 byte length.
+		assert_eq!(levenshtein_distance("", "世界"), 2);
+		assert_eq!(levenshtein_distance("世界", ""), 2);
+		assert_eq!(similarity("abc", ""), 0.0);
+
+		// Pure ASCII uses the byte-slice path without Vec<char> allocation.
+		assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
+		assert!((similarity("kitten", "sitting") - (1.0 - 3.0 / 7.0)).abs() < 1e-9);
+
+		// Non-ASCII falls back to char-level comparison across UTF-8 byte
+		// lengths.
+		assert_eq!(levenshtein_distance("café", "cafe"), 1);
+		assert!((similarity("café", "cafe") - 0.75).abs() < 1e-9);
+		assert_eq!(levenshtein_distance("世界", "世間"), 1);
+		assert!((similarity("世界", "世間") - 0.5).abs() < 1e-9);
+	}
+}

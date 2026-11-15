@@ -415,4 +415,194 @@ impl Pattern {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn m(p: &str, s: &str) -> bool {
+		Pattern::compile(p.as_bytes(), PatOpts { extglob: true, ..PatOpts::default() })
+			.matches(s.as_bytes())
+	}
+
+	#[test]
+	fn star_question_and_escapes() {
+		assert!(m("*", ""));
+		assert!(m("a*b*c", "aXXbYc"));
+		assert!(!m("a*b*c", "aXXbY"));
+		assert!(m("a?c", "abc"));
+		assert!(!m("a?c", "ac"));
+		assert!(m("\\*", "*"));
+		assert!(!m("\\*", "x"));
+		assert!(m("a\\", "a\\"), "a trailing backslash is literal");
+	}
+
+	#[test]
+	fn unclosed_bracket_and_group_are_literal() {
+		assert!(m("[ab", "[ab"));
+		assert!(m("@(a", "@(a"));
+	}
+
+	#[test]
+	fn brackets_ranges_negation_and_classes() {
+		assert!(m("[a-c]x", "bx"));
+		assert!(!m("[!a-c]x", "bx"));
+		assert!(m("[^a-c]x", "dx"));
+		assert!(m("[]]", "]"));
+		assert!(m("[[:digit:]][[:alpha:]]", "1a"));
+		assert!(!m("[[:upper:]]", "a"));
+	}
+
+	/// bash 5.3 in the C locale (posixpat.tests and neighbours).
+	#[test]
+	fn collating_symbols_equivalence_classes_and_odd_brackets() {
+		for (pat, s, want) in [
+			("[[.hyphen.]-9]", "-", true),
+			("[[.a.]-[.z.]]", "p", true),
+			("[[.space.]]", " ", true),
+			("[[.grave-accent.]]", " ", false),
+			("[[.-.]-9]", "4", true),
+			("[[.yyz.]-[.z.]]", "c", false),
+			("[[.yyz.][.a.]-z]", "c", true),
+			("[[.a.]-[.Z.]]", "p", false),
+			("[[.a.]-[.zz.]p]", "p", true),
+			("[[.aa.]-[.z.]p]", "p", true),
+			("[[.cb.]a-Za]*", "abc", true),
+			("[[.space.][.tab.][.newline.]]", "\t", true),
+			("[[:alpha:]][[=b=]][[:ascii:]]", "abc", true),
+			("[[:alpha:]][[=B=]][[:ascii:]]", "abc", false),
+			("[[=b=]", "a", false),
+			("[[=b=]", "[=b=]", false),
+			("[[:al:]", "a", false),
+			("[[:al:]x]", "x", true),
+			("[:al:]", "a", true),
+			("[[:alpha:]123]", "1", true),
+			("[[:alpha:]\\]", "a", false),
+			("[[=space=]]", " ", true),
+			("[[.].]]", "]", true),
+			("[a-[:alpha:]]", ":", false),
+			("[]-a]", "^", true),
+			("[!]]", "a", true),
+			("[\\]]", "]", true),
+			("[a\\-z]", "-", true),
+			("[[:upper:]]", "a", false),
+		] {
+			assert_eq!(m(pat, s), want, "{pat:?} vs {s:?}");
+		}
+		assert!(
+			Pattern::compile(b"[[.zz.]]", PatOpts::default()).matches(&[0xff]),
+			"an unknown symbol is byte 0xff"
+		);
+	}
+
+	/// `nocasematch` folds bytes and range bounds, not class tests.
+	#[test]
+	fn nocase_brackets_fold_like_bash() {
+		let nc = |p: &str, s: &str| {
+			Pattern::compile(p.as_bytes(), PatOpts { nocase: true, ..PatOpts::default() })
+				.matches(s.as_bytes())
+		};
+		assert!(!nc("[[:upper:]]", "a"));
+		assert!(nc("[A-Z]", "q"));
+		assert!(!nc("[Z-a]", "z"));
+		assert!(nc("[[=A=]]", "a"));
+	}
+
+	#[test]
+	fn extglob_forms() {
+		assert!(m("@(ab|cd)", "cd"));
+		assert!(!m("@(ab|cd)", "abcd"));
+		assert!(m("?(ab)c", "c"));
+		assert!(m("?(ab)c", "abc"));
+		assert!(m("*(ab)c", "ababc"));
+		assert!(!m("+(ab)c", "c"));
+		assert!(m("+(ab)c", "abc"));
+		assert!(m("!(foo)", "bar"));
+		assert!(!m("!(foo)", "foo"));
+		assert!(m("!(foo)*", "foo"), "`!(foo)` may match the empty prefix");
+		assert!(m("x@(a|b*(c))y", "xbcccy"));
+	}
+
+	#[test]
+	fn extglob_off_keeps_operators_literal() {
+		let p = Pattern::compile(b"@(a|b)", PatOpts::default());
+		assert!(p.matches(b"@(a|b)"));
+		assert!(!p.matches(b"a"));
+	}
+
+	#[test]
+	fn nocase_matches_both_cases() {
+		let p = Pattern::compile(b"ab[c]", PatOpts { nocase: true, ..PatOpts::default() });
+		assert!(p.matches(b"ABC"));
+	}
+
+	/// Brute force over every split, straight through the matcher.
+	fn brute(p: &Pattern, s: &[u8]) -> [Option<usize>; 4] {
+		let m = |t: &[u8]| strmatch(&p.src, t, p.flags);
+		let n = s.len();
+		[
+			(0..=n).find(|&i| m(&s[..i])),
+			(0..=n).rev().find(|&i| m(&s[..i])),
+			(0..=n).rev().find(|&i| m(&s[i..])),
+			(0..=n).find(|&i| m(&s[i..])),
+		]
+	}
+
+	/// The literal/`*` fast paths answer exactly what the matcher does.
+	#[test]
+	fn fast_shapes_agree_with_the_matcher() {
+		let pats = ["", "*", "**", "a", "ab", "a*", "*b", "*/", ".*", "*a*", "a\\*", "\\*x", "x\\"];
+		let subjects =
+			["", "a", "ab", "ba", "aXbYab", "/usr/lib/x.so", "a.b.c", "*x", "x\\", "aa*", "\\"];
+		for pat in pats {
+			let p = Pattern::compile(pat.as_bytes(), PatOpts::default());
+			assert_ne!(p.shape, Shape::General, "{pat:?} has a fast shape");
+			for s in subjects {
+				let s = s.as_bytes();
+				let [sp, lp, ss, ls] = brute(&p, s);
+				let ctx = (pat, String::from_utf8_lossy(s));
+				assert_eq!(p.matches(s), strmatch(&p.src, s, p.flags), "{ctx:?}");
+				assert_eq!(p.prefix(s, false), sp, "{ctx:?}");
+				assert_eq!(p.prefix(s, true), lp, "{ctx:?}");
+				assert_eq!(p.suffix(s, false), ss, "{ctx:?}");
+				assert_eq!(p.suffix(s, true), ls, "{ctx:?}");
+				for from in 0..=s.len() {
+					let want = (from..=s.len()).find_map(|a| {
+						(a..=s.len())
+							.rev()
+							.find(|&b| strmatch(&p.src, &s[a..b], p.flags))
+							.map(|b| a..b)
+					});
+					assert_eq!(p.find(s, from), want, "{ctx:?} from {from}");
+				}
+			}
+		}
+		assert_eq!(Shape::of(b"a?", PatOpts::default()), Shape::General);
+		assert_eq!(Shape::of(b"*\\", PatOpts::default()), Shape::General, "`*\\` matches nothing");
+		assert!(!Pattern::compile(b"*\\", PatOpts::default()).matches(b"a\\"));
+		assert_eq!(
+			Shape::of(b"*(a)", PatOpts { extglob: true, ..PatOpts::default() }),
+			Shape::General
+		);
+		assert_eq!(Shape::of(b"*(a)", PatOpts::default()), Shape::Suffix(b"(a)"[..].into()));
+	}
+
+	/// In a UTF-8 locale `?` and brackets take a whole character, and
+	/// positions stay on character boundaries.
+	#[test]
+	fn utf8_matches_by_character() {
+		let u = PatOpts { utf8: true, ..PatOpts::default() };
+		assert!(Pattern::compile(b"a?b", u).matches("aéb".as_bytes()));
+		assert!(!Pattern::compile(b"a?b", PatOpts::default()).matches("aéb".as_bytes()));
+		assert!(Pattern::compile("[é]".as_bytes(), u).matches("é".as_bytes()));
+		assert!(Pattern::compile(b"[[:alpha:]]", u).matches("é".as_bytes()));
+		assert!(!Pattern::compile(b"[[:alpha:]]", PatOpts::default()).matches("é".as_bytes()));
+		let q = Pattern::compile(b"?", u);
+		assert_eq!(q.prefix("éa".as_bytes(), false), Some(2));
+		assert_eq!(q.suffix("aé".as_bytes(), false), Some(1));
+		assert_eq!(q.find("éé".as_bytes(), 0), Some(0..2));
+		let nc = PatOpts { nocase: true, ..u };
+		assert!(Pattern::compile("É".as_bytes(), nc).matches("é".as_bytes()));
+		// Invalid UTF-8 falls back to bytes.
+		assert!(Pattern::compile(b"a??", u).matches(b"a\xc3\x28"));
+	}
+}

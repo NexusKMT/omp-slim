@@ -1086,7 +1086,26 @@ mod read {
 		}
 	}
 
-	
+	#[cfg(test)]
+	mod tests {
+		use std::io::{BufReader, Cursor, Read};
+
+		#[test]
+		fn json_bom_can_span_input_buffers_without_losing_other_prefixes() {
+			for input in [
+				&b"\xef\xbb\xbf{\"ok\":true}"[..],
+				&b"123"[..],
+				&b"\xef"[..],
+				&b"\xef\xbb"[..],
+				&b"\xef\xbb\xbf\xef\xbb\xbf1"[..],
+			] {
+				let mut read = super::json_reader(BufReader::with_capacity(1, Cursor::new(input))).unwrap();
+				let mut output = Vec::new();
+				read.read_to_end(&mut output).unwrap();
+				assert_eq!(output, super::json_bytes(input));
+			}
+		}
+	}
 }
 
 mod output {
@@ -1792,4 +1811,609 @@ fn run_tests(
 }
 
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		collections::HashMap,
+		io,
+		io::Write,
+		path::PathBuf,
+		sync::{atomic::Ordering, mpsc},
+		thread,
+		time::{Duration, Instant},
+	};
 
+	use clap::Parser as _;
+
+	use super::Jq;
+	use crate::host::{Host, Utility, run_util};
+
+	fn run_jq_in(
+		cwd: PathBuf,
+		env: HashMap<String, String>,
+		args: &[&str],
+		stdin: &str,
+	) -> (i32, String, String) {
+		let (mut host, capture) = Host::for_test("jq", stdin, cwd);
+		for (key, value) in env {
+			host.set_test_var(&key, &value);
+		}
+		let argv = std::iter::once("jq").chain(args.iter().copied());
+		let code = match Jq::try_parse_from(argv) {
+			Ok(parsed) => parsed.run(&mut host),
+			Err(error) => {
+				let rendered = error.to_string();
+				if error.use_stderr() {
+					let _ = write!(host.stderr, "{rendered}");
+					i32::from(Jq::USAGE_ERROR)
+				} else {
+					let _ = write!(host.stdout, "{rendered}");
+					0
+				}
+			},
+		};
+		(code, capture.out(), capture.err())
+	}
+
+	fn run_jq(args: &[&str], stdin: &str) -> (i32, String, String) {
+		let (code, capture) = run_util::<Jq>(args, stdin, ".");
+		(code, capture.out(), capture.err())
+	}
+
+	/// Records every write it receives, and fails each one when `fail` is set.
+	#[derive(Default)]
+	struct Writes {
+		calls: Vec<Vec<u8>>,
+		fail:  bool,
+	}
+
+	impl Write for Writes {
+		fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+			self.calls.push(buf.to_vec());
+			if self.fail { Err(io::Error::other("disk full")) } else { Ok(buf.len()) }
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	/// Runs jq with `out` as its standard output; returns the exit status.
+	fn run_jq_into(out: &mut Writes, args: &[&str], stdin: &str) -> i32 {
+		let (mut host, _) = Host::for_test("jq", stdin, ".");
+		let argv = std::iter::once("jq").chain(args.iter().copied());
+		let cli = Jq::try_parse_from(argv).expect("valid arguments").cli;
+		super::real_main(&cli, &mut host, out, false).unwrap_or_else(|error| error.report())
+	}
+
+	#[test]
+	fn identity_pretty_prints() {
+		let (code, out, err) = run_jq(&["."], "{\"a\":1}");
+		assert_eq!(code, 0);
+		assert_eq!(out, "{\n  \"a\": 1\n}\n");
+		assert_eq!(err, "");
+	}
+
+	#[test]
+	fn compact_output() {
+		let (code, out, _) = run_jq(&["-c", ".a"], "{\"a\":[1,2]}");
+		assert_eq!(code, 0);
+		assert_eq!(out, "[1,2]\n");
+	}
+
+	#[test]
+	fn raw_output_strips_quotes() {
+		let (code, out, _) = run_jq(&["-r", ".s"], "{\"s\":\"x y\"}");
+		assert_eq!(code, 0);
+		assert_eq!(out, "x y\n");
+
+		let (code, out, _) = run_jq(&[".s"], "{\"s\":\"x y\"}");
+		assert_eq!(code, 0);
+		assert_eq!(out, "\"x y\"\n");
+	}
+
+	#[test]
+	fn null_input_evaluates_filter() {
+		let (code, out, _) = run_jq(&["-n", "1+2"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "3\n");
+	}
+
+	#[test]
+	fn cancellation_stops_a_filter_before_its_first_output() {
+		let (mut host, capture) = Host::for_test("jq", "", ".");
+		let cancel = host.cancel_flag_for_test();
+		let stdout = capture.stdout_buffer();
+		let (tx, rx) = mpsc::channel();
+		let worker = thread::spawn(move || {
+			let jq = Jq::try_parse_from([
+				"jq", "-n", "--unbuffered", "0, ([range(0; 1000000000)] | length)",
+			])
+			.expect("valid filter");
+			let code = jq.run(&mut host);
+			tx.send((code, capture.out())).expect("test receiver");
+		});
+		let deadline = Instant::now() + Duration::from_secs(2);
+		while stdout.lock().is_empty() && Instant::now() < deadline {
+			thread::sleep(Duration::from_millis(5));
+		}
+		assert_eq!(&*stdout.lock(), b"0\n", "filter did not begin evaluation");
+		cancel.store(true, Ordering::Relaxed);
+		let (code, output) = rx.recv_timeout(Duration::from_secs(2)).expect("cancelled filter still running");
+		worker.join().expect("jq worker");
+		assert_eq!(code, 0);
+		assert_eq!(output, "0\n", "cancelled filter must not publish a partial array length");
+	}
+
+	#[test]
+	fn slurp_collects_documents() {
+		let (code, out, _) = run_jq(&["-s", "length"], "{\"a\":1}\n{\"b\":2}\n");
+		assert_eq!(code, 0);
+		assert_eq!(out, "2\n");
+	}
+
+	#[test]
+	fn named_arg_binds_variable() {
+		let (code, out, _) = run_jq(&["-n", "--arg", "k", "v", "$k"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "\"v\"\n");
+	}
+
+	#[test]
+	fn argjson_binds_json_value() {
+		let (code, out, _) = run_jq(&["-nc", "--argjson", "k", "[1,2]", "$k"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "[1,2]\n");
+	}
+
+	#[test]
+	fn exit_status_flag() {
+		// false -> 1
+		let (code, out, _) = run_jq(&["-n", "-e", "false"], "");
+		assert_eq!(code, 1);
+		assert_eq!(out, "false\n");
+
+		// null (missing key) -> 1
+		let (code, out, _) = run_jq(&["-e", ".missing"], "{}");
+		assert_eq!(code, 1);
+		assert_eq!(out, "null\n");
+
+		// truthy -> 0
+		let (code, ..) = run_jq(&["-e", "."], "true");
+		assert_eq!(code, 0);
+
+		// no output at all -> 4 (jaq-specific; jq also uses 4 here)
+		let (code, ..) = run_jq(&["-n", "-e", "empty"], "");
+		assert_eq!(code, 4);
+	}
+
+	#[test]
+	fn compile_error_exits_3_with_diagnostic() {
+		let (code, out, err) = run_jq(&["("], "null");
+		assert_eq!(code, 3);
+		assert_eq!(out, "", "compile error must not produce output");
+		assert!(err.contains("Error:"), "diagnostic on stderr: {err:?}");
+		assert!(err.contains("<inline>"), "names the filter source: {err:?}");
+	}
+
+	#[test]
+	fn runtime_error_exits_5_with_diagnostic() {
+		// indexing a number is a runtime (Jaq) error
+		let (code, out, err) = run_jq(&[".[0]"], "1");
+		assert_eq!(code, 5);
+		assert_eq!(out, "");
+		assert!(err.starts_with("Error:"), "diagnostic on stderr: {err:?}");
+	}
+
+	#[test]
+	fn usage_error_exits_2() {
+		let (code, _, err) = run_jq(&["--bogus", "."], "");
+		assert_eq!(code, 2);
+		assert!(err.contains("unknown flag: --bogus"), "stderr: {err:?}");
+	}
+
+	#[test]
+	fn indexing_null_yields_null_like_jq() {
+		for (filter, input, expected) in [
+			(".a.b", "{}", "null\n"),
+			(".[0]", "null", "null\n"),
+			(".a[0].b", "{}", "null\n"),
+			("getpath([\"a\",\"b\"])", "{}", "null\n"),
+			(".a.b // \"x\"", "{}", "\"x\"\n"),
+			("has(\"a\")", "null", "false\n"),
+		] {
+			let (code, out, err) = run_jq(&["-c", filter], input);
+			assert_eq!((code, out.as_str(), err.as_str()), (0, expected, ""), "{filter} on {input}");
+		}
+	}
+
+	#[test]
+	fn tabular_formats_render_scalar_fields() {
+		let input = r#"[null,true,false,0,-12,1.5,9007199254740993,"","text"]"#;
+		for (format, expected) in [
+			("@csv", ",true,false,0,-12,1.5,9007199254740993,\"\",\"text\"\n"),
+			("@tsv", "\ttrue\tfalse\t0\t-12\t1.5\t9007199254740993\t\ttext\n"),
+		] {
+			let (code, out, err) = run_jq(&["-r", format], input);
+			assert_eq!((code, out.as_str(), err.as_str()), (0, expected, ""), "{format}");
+		}
+	}
+
+	#[test]
+	fn csv_quotes_strings_and_doubles_inner_quotes() {
+		let input = r#"["a,\"b\"\r\n\\z","é"]"#;
+		let (code, out, err) = run_jq(&["-r", "@csv"], input);
+		assert_eq!((code, out.as_str(), err.as_str()), (0, "\"a,\"\"b\"\"\r\n\\z\",\"é\"\n", ""));
+	}
+
+	#[test]
+	fn tsv_escapes_only_tab_newline_carriage_return_and_backslash() {
+		let input = r#"["\t\n\r\\","literal\\t","a,\"b\"","é"]"#;
+		let (code, out, err) = run_jq(&["-r", "@tsv"], input);
+		let expected = "\\t\\n\\r\\\\\tliteral\\\\t\ta,\"b\"\té\n";
+		assert_eq!((code, out.as_str(), err.as_str()), (0, expected, ""));
+	}
+
+	#[test]
+	fn tabular_formats_accept_empty_rows() {
+		for format in ["@csv", "@tsv"] {
+			let (code, out, err) = run_jq(&["-r", format], "[]");
+			assert_eq!((code, out.as_str(), err.as_str()), (0, "\n", ""), "{format}");
+		}
+	}
+
+	#[test]
+	fn tabular_formats_render_nan_as_empty_and_clamp_infinity() {
+		for (format, expected) in [
+			("@csv", ",1.7976931348623157e+308,-1.7976931348623157e+308\n"),
+			("@tsv", "\t1.7976931348623157e+308\t-1.7976931348623157e+308\n"),
+		] {
+			let filter = format!("[nan, infinite, -infinite] | {format}");
+			let (code, out, err) = run_jq(&["-nr", &filter], "");
+			assert_eq!((code, out.as_str(), err.as_str()), (0, expected, ""), "{format}");
+		}
+	}
+
+	#[test]
+	fn tabular_formats_reject_nonarrays_and_nested_containers() {
+		for format in ["@csv", "@tsv"] {
+			for input in ["null", "true", "1", "\"text\"", "{}", "[[]]", "[{}]", "[1,[]]", "[1,{}]"] {
+				let (code, out, err) = run_jq(&["-r", format], input);
+				assert_eq!(code, 5, "{format} on {input}: {err}");
+				assert!(out.is_empty(), "{format} on {input}: {out:?}");
+				assert!(err.contains("cannot serialise"), "{format} on {input}: {err}");
+			}
+		}
+	}
+
+	#[test]
+	fn defines_jq_builtins_jaq_lacks() {
+		let (code, out, err) = run_jq(&["-c", "[.[] | IN(2, 3)], IN(.[]; 5)"], "[1,2]");
+		assert_eq!((code, out.as_str(), err.as_str()), (0, "[false,true]\nfalse\n", ""));
+
+		let (code, out, err) = run_jq(&["-r", "@csv, @tsv"], "[1,\"a\\\"b\\tc\",null,true]");
+		assert_eq!((code, err.as_str()), (0, ""));
+		assert_eq!(out, "1,\"a\"\"b\tc\",,true\n1\ta\"b\\tc\t\ttrue\n");
+
+		// jq counts the line a value ends on, its newline included
+		let input = "{\"a\":\n1}\n\n\n{\"b\":2}\n3";
+		let (code, out, err) = run_jq(&["-c", "[input_line_number, input_filename]"], input);
+		let expected = "[2,\"<stdin>\"]\n[5,\"<stdin>\"]\n[5,\"<stdin>\"]\n";
+		assert_eq!((code, out.as_str(), err.as_str()), (0, expected, ""));
+
+		let (code, out, _) = run_jq(&["-Rc", "[., input_line_number]"], "a\nb");
+		assert_eq!((code, out.as_str()), (0, "[\"a\",1]\n[\"b\",1]\n"));
+
+		// with `-n`, nothing is read until `input` asks
+		let (code, out, _) = run_jq(&["-nc", "[input_filename], [input, input_filename]"], "1 2");
+		assert_eq!((code, out.as_str()), (0, "[null]\n[1,\"<stdin>\"]\n"));
+	}
+
+	#[test]
+	fn file_operands_form_one_input_stream() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("a.json"), "{\"a\":1}\n{\"a\":2}\n").expect("write a");
+		std::fs::write(dir.path().join("b.json"), "{\"b\":3}\n").expect("write b");
+		let jq = |args: &[&str]| {
+			let args = [args, &["a.json", "b.json"]].concat();
+			run_jq_in(dir.path().to_path_buf(), HashMap::new(), &args, "")
+		};
+
+		// `-s` slurps every file into one array
+		let (code, out, err) = jq(&["-c", "-s", "map(keys[0])"]);
+		assert_eq!((code, out.as_str(), err.as_str()), (0, "[\"a\",\"a\",\"b\"]\n", ""));
+
+		// `input` reads on into the next file
+		let (code, out, _) = jq(&["-nc", "[inputs | input_filename]"]);
+		assert_eq!((code, out.as_str()), (0, "[\"a.json\",\"a.json\",\"b.json\"]\n"));
+
+		let (code, out, _) = jq(&["-c", "[input_filename, input_line_number]"]);
+		assert_eq!((code, out.as_str()), (0, "[\"a.json\",1]\n[\"a.json\",2]\n[\"b.json\",1]\n"));
+
+		let (code, out, _) = jq(&["-nsc", "[input_filename, input_line_number]"]);
+		assert_eq!((code, out.as_str()), (0, "[null,0]\n"), "slurping waits for `input`");
+
+		let (code, out, _) = jq(&["-Rs", "."]);
+		let concatenated = "\"{\\\"a\\\":1}\\n{\\\"a\\\":2}\\n{\\\"b\\\":3}\\n\"\n";
+		assert_eq!((code, out.as_str()), (0, concatenated));
+	}
+
+	#[test]
+	fn unreadable_operand_is_reported_and_skipped() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("in.json"), "1").expect("write input");
+		let (code, out, err) =
+			run_jq_in(dir.path().to_path_buf(), HashMap::new(), &[".", "nope.json", "in.json"], "");
+		assert_eq!(code, 2);
+		assert_eq!(out, "1\n", "readable operands are still processed");
+		assert!(err.starts_with("Error: nope.json: "), "stderr names the operand: {err:?}");
+
+		// operands are opened as the input stream reaches them
+		let (code, out, err) =
+			run_jq_in(dir.path().to_path_buf(), HashMap::new(), &["halt", "in.json", "nope.json"], "");
+		assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
+
+		// a data file jaq cannot parse
+		std::fs::write(dir.path().join("bad.json"), "1 xyz").expect("write bad input");
+		let args = ["-n", "--slurpfile", "n", "bad.json", "$n"];
+		let (code, _, err) = run_jq_in(dir.path().to_path_buf(), HashMap::new(), &args, "");
+		assert_eq!(code, 2);
+		assert!(err.starts_with("Error: "), "stderr: {err:?}");
+	}
+
+	#[test]
+	fn output_stays_json_where_jaq_extends_it() {
+		let (code, out, _) = run_jq(&["-nc", "[nan, infinite, -infinite]"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "[null,1.7976931348623157e+308,-1.7976931348623157e+308]\n");
+
+		for filter in ["{(1): 2}", "[{(1): 2}]", "{a: 1, b: {(2): 3}}"] {
+			let (code, out, err) = run_jq(&["-nc", filter], "");
+			assert_eq!((code, out.as_str()), (5, ""), "nothing of {filter} is written");
+			assert!(err.contains("as object key\n"), "stderr: {err:?}");
+		}
+		let (code, _, err) = run_jq(&["-nc", "{(1): 2} | debug | empty"], "");
+		assert_eq!(code, 5);
+		assert!(err.starts_with("Error: cannot use 1 as object key\n"), "stderr: {err:?}");
+
+		// jaq keeps number literals as written, and reads some JSON cannot spell;
+		// those print respelled with every digit kept
+		let input = "[0.50,+1.5,1e2,+9007199254740993.0,+01e-999]";
+		let (code, out, _) = run_jq(&["-c", ". + [\"01.5\" | tonumber]"], input);
+		assert_eq!((code, out.as_str()), (0, "[0.50,1.5,1e2,9007199254740993.0,1e-999,1.5]\n"));
+
+		// byte strings print as JSON strings, and raw with `-r`
+		let (code, out, _) = run_jq(&["-n", "\"hi\" | tobytes"], "");
+		assert_eq!((code, out.as_str()), (0, "\"hi\"\n"));
+		let (code, out, _) = run_jq(&["-nr", "\"hi\" | tobytes"], "");
+		assert_eq!((code, out.as_str()), (0, "hi\n"));
+	}
+
+	#[test]
+	fn tonumber_parses_one_number_literal_like_jq() {
+		let input = "[\"021\",\"+17.1\",\"-3\",\"1.50\",5]";
+		let (code, out, _) = run_jq(&["-c", "map(tonumber)"], input);
+		assert_eq!((code, out.as_str()), (0, "[21,17.1,-3,1.50,5]\n"));
+
+		let input = "[\"1 2\",\" 1\",\"0x10\",\"\",null]";
+		let (code, out, _) = run_jq(&["-c", "map(try tonumber catch \"no\")"], input);
+		assert_eq!((code, out.as_str()), (0, "[\"no\",\"no\",\"no\",\"no\",\"no\"]\n"));
+	}
+
+	#[test]
+	fn relative_file_operand_resolves_against_scope_cwd() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("in.json"), "{\"a\":[1,2]}").expect("write input");
+		// relative operand: must resolve against ScopeIo.cwd, not the process cwd
+		let (code, out, err) =
+			run_jq_in(dir.path().to_path_buf(), HashMap::new(), &["-c", ".a", "in.json"], "");
+		assert_eq!(code, 0, "stderr: {err:?}");
+		assert_eq!(out, "[1,2]\n");
+	}
+
+	#[test]
+	fn missing_file_operand_exits_2() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		let (code, out, err) =
+			run_jq_in(dir.path().to_path_buf(), HashMap::new(), &[".", "nope.json"], "");
+		assert_eq!(code, 2);
+		assert_eq!(out, "");
+		assert!(err.contains("nope.json"), "stderr names the operand: {err:?}");
+	}
+
+	#[test]
+	fn in_place_edit_rewrites_relative_file() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("in.json"), "{\"a\":1}").expect("write input");
+		let (code, _, err) =
+			run_jq_in(dir.path().to_path_buf(), HashMap::new(), &["-c", "-i", ".a", "in.json"], "");
+		assert_eq!(code, 0, "stderr: {err:?}");
+		let rewritten = std::fs::read_to_string(dir.path().join("in.json")).expect("read back");
+		assert_eq!(rewritten, "1\n");
+	}
+
+	/// Truncating an input file after jq loaded it must not fault the host
+	/// process; the loaded bytes stay readable.
+	#[test]
+	fn input_file_truncated_after_load_stays_readable() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		let path = dir.path().join("in.json");
+		let json = format!("[{}]", vec!["1"; 8192].join(","));
+		std::fs::write(&path, &json).expect("write input");
+		let loaded = super::read::load_file(&pi_vfs::BlockingFs::native(), &path).expect("load");
+		std::fs::File::options()
+			.write(true)
+			.open(&path)
+			.and_then(|file| file.set_len(0))
+			.expect("truncate input");
+		assert_eq!(&loaded[..], json.as_bytes());
+	}
+
+	#[test]
+	fn in_place_edit_leaves_file_on_error() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("in.json"), "1 \"a\" 2").expect("write input");
+		let (code, _, _) =
+			run_jq_in(dir.path().to_path_buf(), HashMap::new(), &["-i", ". + 1", "in.json"], "");
+		assert_eq!(code, 5);
+		let kept = std::fs::read_to_string(dir.path().join("in.json")).expect("read back");
+		assert_eq!(kept, "1 \"a\" 2");
+	}
+
+	#[test]
+	fn error_in_one_input_does_not_stop_the_rest() {
+		// like jq, report it and go on; the exit status follows the last input
+		let (code, out, err) = run_jq(&[". + 1"], "1 \"a\" 2");
+		assert_eq!((code, out.as_str()), (0, "2\n3\n"));
+		assert_eq!(err, "Error: cannot calculate \"a\" + 1\n");
+
+		let (code, out, err) = run_jq(&[". + 1"], "1 2 \"a\"");
+		assert_eq!((code, out.as_str()), (5, "2\n3\n"));
+		assert_eq!(err, "Error: cannot calculate \"a\" + 1\n");
+
+		// also when the error is raised while printing
+		let (code, out, err) = run_jq(&["-c", "{(.): 1}"], "\"a\" 1 \"b\"");
+		assert_eq!((code, out.as_str()), (0, "{\"a\":1}\n{\"b\":1}\n"));
+		assert_eq!(err, "Error: cannot use 1 as object key\n");
+
+		// a failed write still ends the run
+		let mut out = Writes { fail: true, ..Writes::default() };
+		assert_eq!(run_jq_into(&mut out, &["."], "1 2 3"), 2);
+		assert_eq!(out.calls, [b"1\n"]);
+	}
+
+	#[test]
+	fn printer_writes_each_value_at_once() {
+		let mut out = Writes::default();
+		assert_eq!(run_jq_into(&mut out, &["."], "{\"a\":[1,\"x\"]} 2"), 0);
+		let pretty: &[u8] = b"{\n  \"a\": [\n    1,\n    \"x\"\n  ]\n}\n";
+		assert_eq!(out.calls, [pretty, b"2\n"]);
+	}
+
+	#[test]
+	fn invalid_trailing_json_on_stdin_fails() {
+		let (code, out, err) = run_jq(&["-c", "."], "{\"a\":1} xyz");
+		assert_eq!(code, 5);
+		assert_eq!(out, "{\"a\":1}\n", "valid leading document is still emitted");
+		assert!(err.contains("Error:"), "stderr diagnostic: {err:?}");
+	}
+
+	#[test]
+	fn env_var_and_dollar_env_read_scope_environment() {
+		let env = HashMap::from([("FOO".to_string(), "bar".to_string())]);
+		let (code, out, _) = run_jq_in(PathBuf::from("."), env, &["-n", "$ENV.FOO, env.FOO"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "\"bar\"\n\"bar\"\n", "$ENV and env read the shell env");
+	}
+
+	#[test]
+	fn halt_returns_instead_of_killing_process() {
+		let (code, out, err) = run_jq(&["-n", "1, halt, 2"], "");
+		assert_eq!(code, 0, "halt exits 0");
+		assert_eq!(out, "1\n", "outputs before halt are emitted, none after");
+		assert_eq!(err, "");
+	}
+
+	#[test]
+	fn halt_error_prints_message_and_exit_code() {
+		let (code, out, err) = run_jq(&["-n", "\"bye\\n\" | halt_error(3)"], "");
+		assert_eq!((code, out.as_str(), err.as_str()), (3, "", "bye\n"), "string printed raw");
+
+		let (code, _, err) = run_jq(&["-n", "{\"a\":1} | halt_error"], "");
+		assert_eq!((code, err.as_str()), (5, "{\"a\":1}\n"), "anything else as JSON");
+
+		let (code, _, err) = run_jq(&["-n", "null | halt_error(1)"], "");
+		assert_eq!((code, err.as_str()), (1, ""), "null prints nothing");
+
+		let (code, _, err) = run_jq(&["-n", "[nan, infinite] | halt_error(7)"], "");
+		assert_eq!((code, err.as_str()), (7, "[null,1.7976931348623157e+308]\n"), "still JSON");
+
+		let (code, _, err) = run_jq(&["-n", "\"msg\" | halt_error(\"x\")"], "");
+		assert_eq!(code, 5);
+		assert!(err.starts_with("Error: cannot use \"x\" as integer\n"), "nothing printed: {err:?}");
+	}
+
+	#[test]
+	fn stderr_filter_writes_to_scope_stderr() {
+		let (code, out, err) = run_jq(&["-n", "\"msg\" | stderr | length"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "3\n", "stderr is an identity filter");
+		assert_eq!(err, "msg", "raw string on stderr, no newline");
+	}
+
+	#[test]
+	fn debug_filter_writes_to_scope_stderr() {
+		let (code, out, err) = run_jq(&["-nc", "[1,2] | debug"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "[1,2]\n");
+		assert_eq!(err, "[\"DEBUG:\",[1,2]]\n");
+
+		let (code, out, err) = run_jq(&["-nc", "0 | debug(1, 2)"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "0\n", "the input passes through once");
+		assert_eq!(err, "[\"DEBUG:\",1]\n[\"DEBUG:\",2]\n");
+	}
+
+	#[test]
+	fn rawfile_and_slurpfile_resolve_against_scope_cwd() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("raw.txt"), "hi").expect("write raw");
+		std::fs::write(dir.path().join("vals.json"), "1 2").expect("write vals");
+		let (code, out, err) = run_jq_in(
+			dir.path().to_path_buf(),
+			HashMap::new(),
+			&["-nc", "--rawfile", "r", "raw.txt", "--slurpfile", "v", "vals.json", "$r, $v"],
+			"",
+		);
+		assert_eq!(code, 0, "stderr: {err:?}");
+		assert_eq!(out, "\"hi\"\n[1,2]\n");
+	}
+
+	#[test]
+	fn version_flag_prints_and_exits_0() {
+		let (code, out, _) = run_jq(&["--version"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "jaq 3.1.1\n");
+	}
+
+	#[test]
+	fn tab_and_indent_control_pretty_printing() {
+		let (code, out, _) = run_jq(&["--tab", "."], "{\"a\":1}");
+		assert_eq!(code, 0);
+		assert_eq!(out, "{\n\t\"a\": 1\n}\n");
+
+		let (code, out, _) = run_jq(&["--indent", "4", "."], "{\"a\":1}");
+		assert_eq!(code, 0);
+		assert_eq!(out, "{\n    \"a\": 1\n}\n");
+	}
+
+	#[test]
+	fn from_file_reads_filter_relative_to_scope_cwd() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("f.jq"), ".a + 1").expect("write filter");
+		let (code, out, err) =
+			run_jq_in(dir.path().to_path_buf(), HashMap::new(), &["-f", "f.jq"], "{\"a\":1}");
+		assert_eq!(code, 0, "stderr: {err:?}");
+		assert_eq!(out, "2\n");
+	}
+
+	#[test]
+	fn join_output_omits_newlines() {
+		let (code, out, _) = run_jq(&["-j", ".[]"], "[\"a\",\"b\"]");
+		assert_eq!(code, 0);
+		assert_eq!(out, "ab");
+	}
+
+	#[test]
+	fn unbuffered_flag_is_accepted() {
+		let (code, out, err) = run_jq(&["--unbuffered", "-c", ".[]"], "[1,{\"a\":2}]");
+		assert_eq!((code, out.as_str(), err.as_str()), (0, "1\n{\"a\":2}\n", ""));
+	}
+
+	#[test]
+	fn positional_args_after_double_dash_args() {
+		let (code, out, _) = run_jq(&["-nc", "$ARGS.positional", "--args", "x", "y"], "");
+		assert_eq!(code, 0);
+		assert_eq!(out, "[\"x\",\"y\"]\n");
+	}
+}

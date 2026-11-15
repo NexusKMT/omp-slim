@@ -333,4 +333,76 @@ fn app() -> Command {
 		)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::host::run_util;
 
+	fn run(args: &[&str]) -> (i32, Vec<u8>, String) {
+		let (code, cap) = run_util::<Id>(args, "", ".");
+		(code, cap.stdout(), cap.err())
+	}
+
+	#[test]
+	fn default_format_rejects_name_real_and_zero() {
+		let msg = "id: printing only names or real IDs requires -u, -g, or -G\n";
+		assert_eq!(run(&["-n"]), (1, Vec::new(), msg.into()));
+		assert_eq!(run(&["-r"]), (1, Vec::new(), msg.into()));
+		assert_eq!(run(&["-z"]), (1, Vec::new(), "id: option --zero not permitted in default format\n".into()));
+	}
+
+	#[test]
+	fn more_than_one_choice_is_a_usage_error() {
+		let (code, out, err) = run(&["-ug"]);
+		assert_eq!((code, out.is_empty()), (1, true));
+		assert!(!err.is_empty());
+	}
+
+	#[test]
+	fn context_is_unsupported() {
+		assert_eq!(
+			run(&["-Z"]),
+			(1, Vec::new(), "id: --context (-Z) works only on an SELinux-enabled kernel\n".into())
+		);
+	}
+
+	#[test]
+	fn root_by_name_and_number_agree() {
+		let (code, by_name, _) = run(&["-u", "root"]);
+		assert_eq!((code, by_name), (0, b"0\n".to_vec()));
+		let (code, by_num, _) = run(&["-un", "0"]);
+		assert_eq!((code, by_num), (0, b"root\n".to_vec()));
+	}
+
+	#[test]
+	fn unknown_user_fails_but_continues() {
+		let (code, out, err) = run(&["-u", "nosuchuser", "root"]);
+		assert_eq!((code, out), (1, b"0\n".to_vec()));
+		assert!(err.starts_with("id: 'nosuchuser': no such user"), "{err}");
+		let (code, _, err) = run(&["99999"]);
+		assert_eq!((code, err.as_str()), (1, "id: '99999': no such user\n"));
+	}
+
+	#[test]
+	fn zero_group_lists_for_several_users_end_with_double_nul() {
+		let (code, out, _) = run(&["-zG", "root", "root"]);
+		assert_eq!(code, 0);
+		assert!(out.ends_with(b"\0\0") && out.starts_with(b"0\0"));
+		let (_, single, _) = run(&["-zG", "root"]);
+		assert!(single.ends_with(b"\0") && !single.ends_with(b"\0\0"));
+	}
+
+	#[test]
+	fn current_group_list_starts_with_egid_without_duplicates() {
+		let (code, out, _) = run(&["-G"]);
+		assert_eq!(code, 0);
+		let ids: Vec<u32> = String::from_utf8(out).unwrap().split_whitespace().map(|s| s.parse().unwrap()).collect();
+		assert_eq!(ids[0], getegid());
+		assert!(!ids[1..].contains(&ids[0]));
+	}
+
+	#[test]
+	fn dedup_follows_mgetgroups() {
+		assert_eq!(mgetgroups_dedup(vec![20, 20, 1, 1, 20, 2, 1]), vec![20, 1, 2, 1]);
+	}
+}

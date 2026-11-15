@@ -316,4 +316,26 @@ fn ensure_actor(diagram: &mut SequenceDiagram, actor_ids: &mut Vec<String>, id: 
 	});
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn message_capture_boundaries_follow_lazy_fields_and_arrow_backtracking() {
+		for (line, expected) in [
+			("A->>B: x", ("A", "->>", None, "B", "x")),
+			("A-->>B: x", ("A", "-->>", None, "B", "x")),
+			("Alice-x Bob: y", ("Alice", "-x", None, "Bob", "y")),
+			("A-->>: x", ("A", "-->", None, ">", "x")),
+			("A->+: x", ("A", "->", None, "+", "x")),
+			("A->B:: x", ("A", "->", None, "B", ": x")),
+		] {
+			let parsed = parse_message(line).unwrap();
+			assert_eq!(
+				(parsed.from, parsed.operator, parsed.activation, parsed.to, parsed.label),
+				expected,
+				"{line}",
+			);
+		}
+	}
+}

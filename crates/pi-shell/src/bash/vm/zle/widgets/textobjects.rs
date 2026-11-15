@@ -349,4 +349,53 @@ pub fn selectargument(zw: &mut Zw<'_, '_>) -> WResult {
 	WResult::Done(select_argument(zw.ed, inner, comments))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	fn ed(s: &str, cs: usize) -> Editor {
+		let mut e = Editor::new(Context::LineStart, 0);
+		e.line = s.chars().collect();
+		e.cs = cs;
+		e.keymap = bstr::BString::from("vicmd");
+		e.ls.virangeflag = true;
+		e
+	}
+
+	#[test]
+	fn words_for_operators() {
+		// `daw` on "two": the word and the blank after it.
+		let mut e = ed("one two three", 5);
+		assert_eq!(select_word(&mut e, true, false), 0);
+		assert_eq!((e.mark, e.cs), (4, 8));
+		let mut e = ed("one two three", 5);
+		assert_eq!(select_word(&mut e, false, false), 0);
+		assert_eq!((e.mark, e.cs), (4, 7));
+		// The last word: the blank before it instead.
+		let mut e = ed("one two", 5);
+		assert_eq!(select_word(&mut e, true, false), 0);
+		assert_eq!((e.mark, e.cs), (3, 7));
+	}
+
+	#[test]
+	fn shell_words() {
+		let mut e = ed("ls \"a b\" c", 5);
+		assert_eq!(select_argument(&mut e, false, false), 0);
+		assert_eq!((e.mark, e.cs), (2, 8));
+		let mut e = ed("ls \"a b\" c", 5);
+		assert_eq!(select_argument(&mut e, true, false), 0);
+		assert_eq!((e.mark, e.cs), (4, 7));
+		let mut e = ed("echo ${x:-y}", 7);
+		assert_eq!(select_argument(&mut e, true, false), 0);
+		assert_eq!((e.mark, e.cs), (7, 11));
+	}
+
+	#[test]
+	fn meta_conversion() {
+		let line: Vec<char> = "aé".chars().collect();
+		// "é" is c3 a9; a9 is no meta byte, c3 neither.
+		assert_eq!(meta_to_char(&line, 1), 1);
+		assert_eq!(meta_to_char(&line, 3), 2);
+	}
+}

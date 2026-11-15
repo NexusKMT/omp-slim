@@ -1075,4 +1075,308 @@ pub(crate) fn open_operator_dir(
 	owner_walk_open(bytes, sys::TRAVERSE, 0, &walk)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn clean(name: &str, flags: u32) -> String {
+		match clean_fname_flags(name.as_bytes(), flags) {
+			Ok(v) => String::from_utf8(v).unwrap(),
+			Err(v) => format!("ERR:{}", String::from_utf8(v).unwrap()),
+		}
+	}
+
+	#[test]
+	fn clean_fname_collapses_dot_dot_like_upstream() {
+		for (input, want) in [
+			("a/b/../c", "a/c"),
+			("/x/y/../z", "/x/z"),
+			("a/../b", "b"),
+			("p/q/r/../../s", "p/s"),
+			("d/e/..", "d"),
+			("../x", "../x"),
+			("a/../../x", "../x"),
+			("/../x", "/x"),
+			("a/b/../../..", ".."),
+		] {
+			assert_eq!(clean(input, CFN_COLLAPSE_DOT_DOT_DIRS), want, "{input}");
+		}
+	}
+
+	#[test]
+	fn clean_fname_basic_compaction() {
+		for (input, flags, want) in [
+			("a//b/./c/", 0, "a/b/c"),
+			("./a", 0, "a"),
+			("", 0, "."),
+			("/", 0, "/"),
+			("//a//", 0, "/a"),
+			("a/.", 0, "a/."),
+			("a/.", CFN_DROP_TRAILING_DOT_DIR, "a"),
+			("a/b/", CFN_KEEP_TRAILING_SLASH, "a/b/"),
+			("./a/./b", CFN_KEEP_DOT_DIRS, "./a/./b"),
+			("a/../b", 0, "a/../b"),
+			(".", 0, "."),
+			("./", 0, "."),
+		] {
+			assert_eq!(clean(input, flags), want, "{input} {flags}");
+		}
+		assert_eq!(clean_fname(b"x//y/../z/", true), b"x/z");
+		assert_eq!(clean_fname(b"x//y/../z/", false), b"x/y/../z");
+	}
+
+	#[test]
+	fn clean_fname_refuse_reports_partially_compacted_buffer() {
+		assert_eq!(clean("a/b", CFN_REFUSE_DOT_DOT_DIRS), "a/b");
+		assert_eq!(clean("..", CFN_REFUSE_DOT_DOT_DIRS), "ERR:..");
+		assert_eq!(clean("./a/../x", CFN_REFUSE_DOT_DOT_DIRS), "ERR:a/a/../x");
+		assert_eq!(clean("a/..", CFN_REFUSE_DOT_DOT_DIRS), "ERR:a/..");
+		// "..." and "..x" are ordinary names.
+		assert_eq!(clean("a/.../..x", CFN_REFUSE_DOT_DOT_DIRS), "a/.../..x");
+	}
+
+	#[test]
+	fn sanitize_path_table() {
+		for (input, root, depth, want) in [
+			("../../a/b", None, 0, "a/b"),
+			("/etc/passwd", Some(&b""[..]), 0, "etc/passwd"),
+			("/etc/passwd", Some(&b"/mod"[..]), 0, "/mod/etc/passwd"),
+			("/etc/passwd", Some(&b"/"[..]), 0, "/etc/passwd"),
+			("a/../../b", None, 0, "b"),
+			("a/./b/", None, 0, "a/b/"),
+			("a/.", None, 0, "a/"),
+			("..", None, 1, ".."),
+			("../../x", None, 1, "../x"),
+			("../x/../../y", None, 1, "../y"),
+			("./././", None, 0, "."),
+			("", None, 0, "."),
+			("/../x", Some(&b"/r"[..]), 3, "/r/x"),
+		] {
+			let got = sanitize_path(input.as_bytes(), root, depth);
+			assert_eq!(String::from_utf8(got).unwrap(), want, "{input} {root:?} {depth}");
+		}
+		assert_eq!(sanitize_path_flags(b"./a/./b", None, 0, true), b"./a/./b");
+	}
+
+	#[test]
+	fn received_names() {
+		assert_eq!(check_received_name(b"a/b/c", false).unwrap(), b"a/b/c");
+		assert_eq!(check_received_name(b"", false).unwrap(), b"");
+		assert!(check_received_name(b"a/...b", false).is_ok());
+		for bad in [&b"../x"[..], b"a/../b", b"a/..", b"/etc/passwd", b"a/./../b"] {
+			let err = check_received_name(bad, false).unwrap_err();
+			assert_eq!(err.code, RERR_UNSUPPORTED);
+			assert_eq!(err.site, Some(("flist.c", 1079)));
+		}
+		let err = check_received_name(b"./a/../x", false).unwrap_err();
+		assert_eq!(
+			err.message.as_deref(),
+			Some("ABORTING due to unsafe pathname from sender: a/a/../x")
+		);
+		assert_eq!(check_received_name(b"/abs//x/./y", true).unwrap(), b"/abs/x/y");
+		assert!(check_received_name(b"/abs/../y", true).is_err());
+	}
+
+	#[test]
+	fn unsafe_symlink_matches_upstream_table() {
+		let pwd = "/home/user/work";
+		let abs_src = format!("{pwd}/from/safe");
+		let cases: &[(&str, &str, bool)] = &[
+			("file", "from", false),
+			("dir/file", "from", false),
+			("dir/./file", "from", false),
+			("dir/.", "from", false),
+			("dir/", "from", false),
+			("/etc/passwd", "from", true),
+			("//../etc/passwd", "from", true),
+			("//./etc/passwd", "from", true),
+			("./foo", "from", false),
+			("../foo", "from", true),
+			("./../foo", "from", true),
+			(".//../foo", "from", true),
+			("./../foo", "from/..", true),
+			("../dest", "from/dir", false),
+			("../../dest", "from//dir", true),
+			("..//../dest", "from/dir", true),
+			("..", "from/file", false),
+			("../..", "from/file", true),
+			("..//..", "from//file", true),
+			("dir/..", "from", true),
+			("dir/../..", "from", true),
+			("dir/..//..", "from", true),
+			("", "from", true),
+			("../../unsafe/unsafefile", "from/safe", true),
+			("..//../unsafe/unsafefile", "from/safe", true),
+			("../files/file1", "from/safe", false),
+			("../../unsafe/unsafefile", "safe", true),
+			("../files/file1", "safe", true),
+			("../../unsafe/unsafefile", &abs_src, false),
+			("../files/file1", &abs_src, false),
+		];
+		for &(target, src, want) in cases {
+			assert_eq!(unsafe_symlink(target.as_bytes(), src.as_bytes()), want, "{target} {src}");
+		}
+	}
+
+	#[test]
+	fn confinement() {
+		let root = Path::new("/srv/data");
+		assert!(within_confine(Path::new("/srv/data"), root));
+		assert!(within_confine(Path::new("/srv/data/x/y"), root));
+		assert!(within_confine(Path::new("/srv/data/x"), Path::new("/srv/data/")));
+		assert!(!within_confine(Path::new("/srv/database"), root));
+		assert!(!within_confine(Path::new("/srv"), root));
+		assert!(!within_confine(Path::new("/etc/passwd"), root));
+		assert!(within_confine(Path::new("/anything"), Path::new("/")));
+		assert!(within_confine(Path::new("/dev/fd"), root));
+		assert!(!within_confine(Path::new("/dev/fd/notanumber"), root));
+		assert_eq!(fd_pin_tail(b"/dev/stdin"), Some(&b"/0"[..]));
+		assert_eq!(fd_pin_tail(b"/dev/stdinx"), None);
+		assert_eq!(fd_pin_tail(b"/proc/self/fd/3"), Some(&b"/3"[..]));
+		assert_eq!(fd_pin_tail(b"/proc/123/fd"), Some(&b""[..]));
+		assert_eq!(fd_pin_tail(b"/proc/abc/fd"), None);
+		assert!(is_exact_fd_pin(b"/dev/fd/12"));
+		assert!(!is_exact_fd_pin(b"/dev/fd/12/x"));
+		assert!(!is_exact_fd_pin(b"/dev/fd/"));
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn confinement_accepts_either_separator_on_windows() {
+		let root = Path::new(r"C:\data\jail");
+		assert!(within_confine(Path::new(r"C:\data\jail\x\y"), root));
+		assert!(within_confine(Path::new("C:/data/jail/x"), root));
+		assert!(!within_confine(Path::new(r"C:\data\jailbreak"), root));
+		assert!(!within_confine(Path::new(r"C:\data"), root));
+		assert_eq!(&*path_bytes(Path::new(r"a\b/c")), b"a/b/c");
+	}
+
+	#[cfg(unix)]
+	mod walk {
+	use std::{fs, os::unix::fs::symlink};
+
+	use super::*;
+
+	fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
+		let dir = tempfile::tempdir().unwrap();
+		let real = fs::canonicalize(dir.path()).unwrap();
+		(dir, real)
+	}
+
+	fn walk_bytes(path: &Path, trusted: &dyn Fn(u32) -> bool, flags: libc::c_int) -> io::Result<OwnedFd> {
+		let walk = OwnerWalk { confine: None, trusted };
+		owner_walk_open(path.as_os_str().as_bytes(), flags, 0o600, &walk)
+	}
+
+	#[test]
+	fn operator_walk_follows_own_symlinks_and_refuses_untrusted_ones() {
+		let (_guard, base) = canonical_tempdir();
+		fs::create_dir(base.join("real")).unwrap();
+		fs::write(base.join("real/rules"), b"- *.o\n").unwrap();
+		symlink("real", base.join("link")).unwrap();
+		symlink("rules", base.join("real/leaf")).unwrap();
+
+		// Our own symlinks (parent and leaf) are followed.
+		let fd = walk_bytes(&base.join("link/leaf"), &trusted_owner, libc::O_RDONLY).unwrap();
+		let text = std::io::read_to_string(std::fs::File::from(fd)).unwrap();
+		assert_eq!(text, "- *.o\n");
+
+		// A walk that trusts only root rejects our symlinks: parent component…
+		let only_root = |uid: u32| uid == 0;
+		let err = walk_bytes(&base.join("link/rules"), &only_root, libc::O_RDONLY).unwrap_err();
+		assert!(is_untrusted_symlink(&err));
+		assert_eq!(os_errno(&err), Some(libc::ELOOP));
+		// …and leaf.
+		let err = walk_bytes(&base.join("real/leaf"), &only_root, libc::O_RDONLY).unwrap_err();
+		assert!(is_untrusted_symlink(&err));
+		// Real directories still work under the strict rule.
+		assert!(walk_bytes(&base.join("real/rules"), &only_root, libc::O_RDONLY).is_ok());
+	}
+
+	#[test]
+	fn operator_walk_creates_and_refuses_untrusted_parent_for_writes() {
+		let (_guard, base) = canonical_tempdir();
+		fs::create_dir(base.join("logs")).unwrap();
+		fs::create_dir(base.join("victim")).unwrap();
+		symlink("victim", base.join("planted")).unwrap();
+		let only_root = |uid: u32| uid == 0;
+		let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND;
+		walk_bytes(&base.join("logs/new.log"), &only_root, flags).unwrap();
+		assert!(base.join("logs/new.log").exists());
+		let err = walk_bytes(&base.join("planted/evil.log"), &only_root, flags).unwrap_err();
+		assert!(is_untrusted_symlink(&err));
+		assert!(!base.join("victim/evil.log").exists());
+	}
+
+	#[test]
+	fn operator_walk_errors() {
+		let (_guard, base) = canonical_tempdir();
+		fs::write(base.join("file"), b"x").unwrap();
+		let err = walk_bytes(&base.join("file/x"), &trusted_owner, libc::O_RDONLY).unwrap_err();
+		assert_eq!(err.raw_os_error(), Some(libc::ENOTDIR));
+		// A directory leaf opens like upstream's openat(); a path that ends in
+		// a slash resolves to a directory and needs O_DIRECTORY.
+		assert!(walk_bytes(&base, &trusted_owner, libc::O_RDONLY).is_ok());
+		let mut slashed = base.clone().into_os_string();
+		slashed.push("/");
+		let err = walk_bytes(Path::new(&slashed), &trusted_owner, libc::O_RDONLY).unwrap_err();
+		assert_eq!(err.raw_os_error(), Some(libc::EISDIR));
+		assert!(
+			walk_bytes(Path::new(&slashed), &trusted_owner, libc::O_RDONLY | libc::O_DIRECTORY)
+				.is_ok()
+		);
+		let err = walk_bytes(&base.join("missing"), &trusted_owner, libc::O_RDONLY).unwrap_err();
+		assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
+		symlink("loop", base.join("loop")).unwrap();
+		let err = walk_bytes(&base.join("loop"), &trusted_owner, libc::O_RDONLY).unwrap_err();
+		assert_eq!(err.raw_os_error(), Some(libc::ELOOP));
+	}
+
+	#[test]
+	fn operator_walk_confine_root() {
+		let (_guard, base) = canonical_tempdir();
+		fs::create_dir(base.join("jail")).unwrap();
+		fs::write(base.join("secret"), b"s").unwrap();
+		fs::write(base.join("jail/ok"), b"o").unwrap();
+		symlink("../secret", base.join("jail/escape")).unwrap();
+		let jail = base.join("jail");
+		let walk = OwnerWalk { confine: Some(&jail), trusted: &trusted_owner };
+		let open = |p: &Path| owner_walk_open(p.as_os_str().as_bytes(), libc::O_RDONLY, 0, &walk);
+		assert!(open(&jail.join("ok")).is_ok());
+		let err = open(&jail.join("escape")).unwrap_err();
+		assert_eq!(err.raw_os_error(), Some(libc::ELOOP));
+		let err = open(&base.join("secret")).unwrap_err();
+		assert_eq!(err.raw_os_error(), Some(libc::ELOOP));
+	}
+
+	#[test]
+	fn operator_file_helpers_round_trip() {
+		let (_guard, base) = canonical_tempdir();
+		let vfs = BlockingFs::native();
+		let log = base.join("run.log");
+		{
+			let mut file = create_operator_file(&vfs, &log, true, false).unwrap();
+			std::io::Write::write_all(&mut file, b"one\n").unwrap();
+		}
+		{
+			let mut file = create_operator_file(&vfs, &log, true, false).unwrap();
+			std::io::Write::write_all(&mut file, b"two\n").unwrap();
+		}
+		let file = open_operator_file(&vfs, &log, false).unwrap();
+		assert!(batch_input_ok(&file).unwrap());
+		assert_eq!(fs::read(&log).unwrap(), b"one\ntwo\n");
+		let batch = base.join("batch");
+		{
+			let mut file = create_operator_file(&vfs, &batch, false, false).unwrap();
+			std::io::Write::write_all(&mut file, b"long contents").unwrap();
+		}
+		{
+			let mut file = create_operator_file(&vfs, &batch, false, false).unwrap();
+			std::io::Write::write_all(&mut file, b"short").unwrap();
+		}
+		assert_eq!(fs::read(&batch).unwrap(), b"short");
+		let dir = open_operator_file(&vfs, &base, false).unwrap();
+		assert!(!batch_input_ok(&dir).unwrap());
+	}
+	}
+}

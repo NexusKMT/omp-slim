@@ -409,4 +409,107 @@ pub fn getcols_from(s: &[u8], opts: &Opts) -> Listcols {
 	mc
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::pattern::zsh::CharEnv;
 
+	fn opts() -> Opts {
+		Opts { extended_glob: true, ..Opts::default() }
+	}
+
+	fn col(mc: &Listcols, i: usize) -> &[u8] {
+		mc.col(i).unwrap_or_default()
+	}
+
+	#[test]
+	fn defaults_when_empty() {
+		let mc = getcols_from(b"", &opts());
+		assert_eq!(col(&mc, COL_DI), b"1;31");
+		assert_eq!(col(&mc, COL_LC), b"\x1b[");
+		assert_eq!(col(&mc, COL_RC), b"m");
+		assert_eq!(mc.col(COL_EC), None);
+		assert_eq!(mc.col(COL_HI), None);
+		assert_eq!(col(&mc, COL_OR), b"1;36");
+		assert_eq!(col(&mc, COL_MI), b"0");
+		assert_eq!(col(&mc, COL_MA), b"7");
+	}
+
+	#[test]
+	fn unset_uses_standout() {
+		let mc = getcols_unset(Some(b"\x1b[7m"), Some(b"\x1b[27m"));
+		assert_eq!(col(&mc, COL_MA), b"\x1b[7m");
+		assert_eq!(col(&mc, COL_EC), b"\x1b[27m");
+		assert_eq!(col(&mc, COL_DI), b"");
+		let mc = getcols_unset(None, None);
+		assert_eq!(col(&mc, COL_MA), b"7");
+		assert_eq!(col(&mc, COL_EC), b"");
+	}
+
+	#[test]
+	fn file_types_and_extensions() {
+		let mc = getcols_from(b"di=01;34:ln=target:*.c=33:ex=1;32:xx=9:ma=4", &opts());
+		assert_eq!(col(&mc, COL_DI), b"01;34");
+		assert_eq!(mc.flags, LC_FOLLOW_SYMLINKS);
+		assert_eq!(col(&mc, COL_LN), b"1;36");
+		assert_eq!(col(&mc, COL_EX), b"1;32");
+		assert_eq!(col(&mc, COL_MA), b"4");
+		assert_eq!(mc.exts.len(), 1);
+		assert_eq!(mc.exts[0].ext, b".c");
+		assert_eq!(mc.exts[0].col, b"33");
+	}
+
+	#[test]
+	fn escapes() {
+		let mc = getcols_from(b"lc=\\e[:rc=\\_m:ec=a\\:b:no=^?x", &opts());
+		assert_eq!(col(&mc, COL_LC), b"\x1b[");
+		assert_eq!(col(&mc, COL_RC), b" m");
+		assert_eq!(col(&mc, COL_EC), b"a:b");
+		assert_eq!(col(&mc, COL_NO), b"\x7fx");
+		// zsh's `^X` masks the caret itself.
+		let mc = getcols_from(b"no=^A", &opts());
+		assert_eq!(col(&mc, COL_NO), b"\x1e");
+		// …and its octal escapes start from the digit's code.
+		let mc = getcols_from(b"no=\\101", &opts());
+		assert_eq!(col(&mc, COL_NO), &[((49u32 * 8 + 48) * 8 + 49).to_le_bytes()[0]]);
+	}
+
+	#[test]
+	fn patterns_and_groups() {
+		let mc = getcols_from(b"=(#b)(f*)(o)=0=31=32:(grp)di=35", &opts());
+		assert_eq!(mc.pats.len(), 1);
+		let pc = &mc.pats[0];
+		assert!(pc.prog.is_none());
+		assert_eq!(pc.cols, vec![b"0".to_vec(), b"31".to_vec(), b"32".to_vec()]);
+		assert!(pc.pat.matches(b"foo", &CharEnv::DEFAULT));
+		assert!(!pc.pat.matches(b"bar", &CharEnv::DEFAULT));
+		assert_eq!(mc.files[COL_DI].len(), 1);
+		let di = &mc.files[COL_DI][0];
+		assert_eq!(di.col.as_deref(), Some(&b"35"[..]));
+		let g = di.prog.as_ref().expect("group pattern");
+		assert!(g.matches(b"grp", &CharEnv::DEFAULT));
+		assert_eq!(mc.exts.len(), 0);
+		// A group pattern before `=`: the pattern `*.z`.
+		let mc = getcols_from(b"(x|y)=*.z=36", &opts());
+		assert_eq!(mc.pats.len(), 1);
+		assert!(
+			mc.pats[0]
+				.prog
+				.as_ref()
+				.expect("group")
+				.matches(b"y", &CharEnv::DEFAULT)
+		);
+		assert!(mc.pats[0].pat.matches(b"a.z", &CharEnv::DEFAULT));
+		assert_eq!(mc.pats[0].cols, vec![b"36".to_vec()]);
+	}
+
+	#[test]
+	fn unterminated_definitions() {
+		let mc = getcols_from(b"di", &opts());
+		assert_eq!(col(&mc, COL_DI), b"1;31");
+		let mc = getcols_from(b"*.c", &opts());
+		assert!(mc.exts.is_empty());
+		let mc = getcols_from(b"=foo", &opts());
+		assert!(mc.pats.is_empty());
+	}
+}

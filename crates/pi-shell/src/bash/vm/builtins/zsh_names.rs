@@ -1959,4 +1959,21 @@ fn pat_enables(ctx: &mut Ctx<'_, '_>, args: &[BString], enabling: bool) -> R {
 	done(0)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn function_text_tab_expansion() {
+		assert_eq!(expand_text(b"f () {\n\tif x\n\t\tthen\n}", 2), b"f () {\n  if x\n    then\n}");
+		assert_eq!(expand_text(b"f () {\n\tx\n}", -1), b"f () {\nx\n}");
+		assert_eq!(expand_text(b"f () {\n\tx\n}", 0), b"f () {\n\tx\n}");
+	}
+
+	#[test]
+	fn reserved_words_are_zsh_s() {
+		let is = |w: &[u8]| word_list(RESWDS).any(|r| r == w);
+		assert!(is(b"foreach") && is(b"typeset") && is(b"!") && is(b"while"));
+		assert!(!is(b"print") && !is(b""));
+	}
+}

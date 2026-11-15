@@ -527,4 +527,48 @@ fn nanos(d: Duration) -> u64 {
 	u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn labels_group_their_nested_trees() {
+		let mut labels = Labels::default();
+		let outer = labels.fresh(0);
+		let inner = labels.fresh(outer);
+		let innermost = labels.fresh(inner);
+		let other = labels.fresh(0);
+		assert_eq!(labels.group(outer), [outer, inner, innermost]);
+		assert_eq!(labels.group(other), [other]);
+		labels.release(&labels.group(inner));
+		assert_eq!(labels.group(outer), [outer]);
+	}
+
+	#[test]
+	fn tools_follow_the_session_environment() {
+		let env = |pairs: &[(&str, &str)]| -> Vec<(BString, BString)> {
+			pairs.iter().map(|&(k, v)| (k.into(), v.into())).collect()
+		};
+		let runtime = tokio::runtime::Builder::new_current_thread()
+			.build()
+			.expect("runtime");
+		let config =
+			|pairs: &[(&str, &str)]| ToolConfig::from_env(&env(pairs), None, runtime.handle().clone());
+		let plain = config(&[]);
+		assert_eq!(plain.lookup("timeout".into()), Some(TIMEOUT));
+		assert_eq!(plain.lookup("nohup".into()), Some(NOHUP));
+		assert_eq!(plain.lookup("git".into()), None);
+		assert_eq!(plain.lookup("xargs".into()), Some(EXTRA));
+		assert_eq!(plain.lookup("sort".into()), None);
+		assert!(plain.native_extra("sort".into()).is_some());
+		let layered = config(&[("PI_GIT_GUARD", "1"), ("PI_DISABLE_NOHUP_BUILTIN", "true")]);
+		assert_eq!(layered.lookup("git".into()), Some(GIT));
+		assert_eq!(layered.lookup("nohup".into()), None);
+		let off = config(&[("PI_SMART_GIT", "false"), ("PI_GIT_GUARD", "0")]);
+		assert_eq!(off.lookup("git".into()), None);
+		let no_utils = config(&[("PI_DISABLE_UUTILS_BUILTINS", "1")]);
+		assert_eq!(no_utils.lookup("xargs".into()), None);
+		assert!(no_utils.native_extra("sort".into()).is_none());
+		assert_eq!(no_utils.lookup("timeout".into()), Some(TIMEOUT));
+	}
+}

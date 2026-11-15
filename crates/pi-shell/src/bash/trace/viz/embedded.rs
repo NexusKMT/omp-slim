@@ -549,4 +549,80 @@ pub fn highlight(
 	}
 	result
 }
-
+#[cfg(test)]
+mod tests {
+	use super::*;
+	fn owned(words: &[&str]) -> Vec<String> {
+		words.iter().map(|w| (*w).to_owned()).collect()
+	}
+	fn heredoc(words: &[&str], target: &str, body: &str) -> &'static str {
+		heredoc_language(&owned(words), &owned(&[target]), "EOF", body)
+	}
+	fn argument(words: &[&str], index: usize) -> Option<&'static str> {
+		argument_language(&owned(words), index)
+	}
+	#[test]
+	fn option_operands_are_not_programs() {
+		let a = ["jq", "--arg", "name", "value", ".name"];
+		assert_eq!(argument(&a, 3), None);
+		assert_eq!(argument(&a, 4), Some("jq"));
+	}
+	#[test]
+	fn heredocs_are_read_by_the_program_behind_launchers() {
+		assert_eq!(heredoc(&["uv", "run", "--with", "numpy", "python", "-"], "", ""), "py");
+		assert_eq!(heredoc(&["timeout", "-k", "5", "60", "python3", "-"], "", ""), "py");
+		assert_eq!(heredoc(&["sudo", "-u", "root", "env", "A=1", "bash"], "", ""), "bash");
+		// No remote command: the remote login shell reads the script.
+		assert_eq!(heredoc(&["ssh", "-o", "BatchMode=yes", "host"], "", ""), "bash");
+		assert_eq!(heredoc(&["ssh", "host", "sudo bash -s"], "", ""), "bash");
+		assert_eq!(heredoc(&["ssh", "host", "python3", "-"], "", ""), "py");
+		assert_eq!(heredoc(&["ssh", "host", "uptime"], "", ""), "text");
+	}
+	#[test]
+	fn heredoc_without_a_reader_is_named_by_shebang_then_target() {
+		assert_eq!(heredoc(&["cat"], "/tmp/run", "#!/usr/bin/env -S python3 -u\nimport os"), "py");
+		assert_eq!(heredoc(&["cat"], "x.json", "#!/bin/sh\necho"), "bash");
+		assert_eq!(heredoc(&["cat"], "/src/lib.rs", ""), "rust");
+		// A bare word is no file extension.
+		assert_eq!(heredoc(&["cat"], "py", ""), "text");
+	}
+	#[test]
+	fn inline_programs_are_found_behind_launchers() {
+		assert_eq!(argument(&["uv", "run", "python", "-c", "code"], 4), Some("py"));
+		assert_eq!(argument(&["env", "-i", "A=1", "bun", "-e", "code"], 5), Some("js"));
+		assert_eq!(argument(&["docker", "run", "--rm", "img", "bash", "-euc", "s"], 6), Some("bash"));
+		assert_eq!(argument(&["ssh", "-p", "22", "host", "script"], 4), Some("bash"));
+		assert_eq!(argument(&["ssh", "host", "ls", "-la"], 2), None);
+		assert_eq!(shell_script(&owned(&["ssh", "host", "bash", "-c", "s"])), Some((4, true)));
+		assert_eq!(shell_script(&owned(&["bash", "--rcfile", "x", "-c", "s"])), None);
+	}
+	#[test]
+	fn rust_lifetimes_do_not_open_strings() {
+		let s = highlight(
+			"fn f<'a>(s: &'a str) -> char { 'x' }",
+			"rust",
+			NodeKey::engine(0, crate::bash::syntax::NodeId::default()),
+			None,
+			Layers::default(),
+		);
+		let strings: Vec<&str> = s
+			.iter()
+			.filter(|s| s.style.as_deref() == Some("str"))
+			.map(|s| s.text.as_str())
+			.collect();
+		assert_eq!(strings, ["'x'"]);
+	}
+	#[test]
+	fn tokenization_preserves_unicode_and_rows() {
+		let t = "print('λ')\n# comment\n";
+		let s = highlight(
+			t,
+			"py",
+			NodeKey::engine(0, crate::bash::syntax::NodeId::default()),
+			None,
+			Layers::default(),
+		);
+		assert_eq!(s.iter().map(|s| s.text.as_str()).collect::<String>(), t);
+		assert!(s.iter().any(|s| s.style.as_deref() == Some("comment")));
+	}
+}

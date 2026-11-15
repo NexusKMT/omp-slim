@@ -3336,4 +3336,52 @@ pub fn let_(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 	done(i32::from(last == 0))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn compound_text_round_trips_the_expanders_quoting() {
+		let elems = parse_compound(b"'a b' ['k']='v' [x]+=$'i\\n' \"q\\\"\" plain");
+		assert_eq!(elems, vec![
+			(None, false, BString::from("a b")),
+			(Some(BString::from("k")), false, BString::from("v")),
+			(Some(BString::from("x")), true, BString::from("i\n")),
+			(None, false, BString::from("q\"")),
+			(None, false, BString::from("plain")),
+		]);
+	}
+
+	#[test]
+	fn assignment_arguments_split_at_the_first_equals() {
+		assert_eq!(
+			split_assignment(b"a[1]+=x=y", false),
+			(&b"a"[..], Some(&b"1"[..]), true, Some(&b"x=y"[..]))
+		);
+		assert_eq!(split_assignment(b"name", false), (&b"name"[..], None, false, None));
+		assert_eq!(
+			split_assignment(b"m[foo[bar]=bleh", true),
+			(&b"m"[..], Some(&b"foo[bar"[..]), false, Some(&b"bleh"[..]))
+		);
+	}
+
+	// Goldens: bash 5.3.20 `declare -p`.
+	#[test]
+	fn declare_p_formats_scalars_and_arrays() {
+		let mut out = Vec::new();
+		declare_line(b"x", Some(&Var::scalar("a\"b", Attrs::EXPORT)), &mut out);
+		assert_eq!(out, b"declare -x x=\"a\\\"b\"");
+		let uu = Var {
+			attrs: Attrs::NONE,
+			value: VarValue::Indexed(vec![(0, "".into()), (1, "kghfjk".into()), (3, "i\n".into())]),
+		};
+		out.clear();
+		declare_line(b"uu", Some(&uu), &mut out);
+		assert_eq!(out, b"declare -a uu=([0]=\"\" [1]=\"kghfjk\" [3]=$'i\\n')");
+		let m =
+			Var { attrs: Attrs::NONE, value: VarValue::Assoc(vec![("k".into(), "v".into())].into()) };
+		out.clear();
+		declare_line(b"m", Some(&m), &mut out);
+		assert_eq!(out, b"declare -A m=([k]=\"v\" )");
+	}
+}

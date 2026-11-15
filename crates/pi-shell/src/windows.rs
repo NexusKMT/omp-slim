@@ -314,4 +314,151 @@ fn is_windows_style_path(value: &str) -> bool {
 	value.starts_with("\\\\")
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{cell::Cell, fs};
 
+	use super::*;
+
+	fn git_install_fixture() -> tempfile::TempDir {
+		let root = tempfile::tempdir().expect("Git installation fixture");
+		let cmd = root.path().join("cmd");
+		let bin = root.path().join("bin");
+		let usr_bin = root.path().join("usr").join("bin");
+		for path in [&cmd, &bin, &usr_bin] {
+			fs::create_dir_all(path).expect("Git path fixture");
+		}
+		fs::write(cmd.join("git.exe"), []).expect("cmd Git fixture");
+		fs::write(bin.join("git.exe"), []).expect("bin Git fixture");
+		fs::write(usr_bin.join("ls.exe"), []).expect("usr/bin fixture");
+		root
+	}
+
+	#[test]
+	fn git_discovery_queries_each_source_once_per_invocation_and_remains_fresh() {
+		let registry_calls = Cell::new(0);
+		let where_calls = Cell::new(0);
+
+		for _ in 0..2 {
+			let discovery = discover_git_with(
+				|| {
+					registry_calls.update(|v| v + 1);
+					None
+				},
+				|| {
+					where_calls.update(|v| v + 1);
+					None
+				},
+			);
+			assert!(discovery.install_roots.is_empty());
+			assert!(discovery.paths.is_empty());
+		}
+
+		assert_eq!(registry_calls.get(), 2);
+		assert_eq!(where_calls.get(), 2);
+	}
+
+	#[test]
+	fn git_discovery_preserves_provider_and_candidate_order() {
+		let registry_root = git_install_fixture();
+		let where_root = git_install_fixture();
+		let registry_path = registry_root.path().to_string_lossy().into_owned();
+		let where_path = where_root.path().to_string_lossy().into_owned();
+
+		let discovery = discover_git_with(|| Some(registry_path), || Some(where_path));
+
+		assert_eq!(discovery.install_roots, vec![
+			registry_root.path().to_path_buf(),
+			where_root.path().to_path_buf()
+		]);
+		assert_eq!(discovery.paths, vec![
+			registry_root
+				.path()
+				.join("cmd")
+				.to_string_lossy()
+				.into_owned(),
+			registry_root
+				.path()
+				.join("bin")
+				.to_string_lossy()
+				.into_owned(),
+			registry_root
+				.path()
+				.join("usr")
+				.join("bin")
+				.to_string_lossy()
+				.into_owned(),
+			where_root.path().join("cmd").to_string_lossy().into_owned(),
+			where_root.path().join("bin").to_string_lossy().into_owned(),
+			where_root
+				.path()
+				.join("usr")
+				.join("bin")
+				.to_string_lossy()
+				.into_owned(),
+		]);
+	}
+
+	#[test]
+	fn git_discovery_deduplicates_the_same_installation_from_both_sources() {
+		let root = git_install_fixture();
+		let registry_path = root.path().to_string_lossy().into_owned();
+		let where_path = registry_path.clone();
+
+		let discovery = discover_git_with(|| Some(registry_path), || Some(where_path));
+
+		assert_eq!(discovery.install_roots, vec![root.path().to_path_buf()]);
+		assert_eq!(discovery.paths, vec![
+			root.path().join("cmd").to_string_lossy().into_owned(),
+			root.path().join("bin").to_string_lossy().into_owned(),
+			root
+				.path()
+				.join("usr")
+				.join("bin")
+				.to_string_lossy()
+				.into_owned(),
+		]);
+	}
+
+	#[test]
+	fn git_discovery_keeps_valid_candidates_when_duplicate_root_spellings_differ() {
+		let root = git_install_fixture();
+		let clean_path = root.path().to_string_lossy().into_owned();
+		let decorated_path = format!("  \"{clean_path}\"  ");
+
+		let discovery = discover_git_with(|| Some(decorated_path), || Some(clean_path));
+
+		assert_eq!(discovery.paths, vec![
+			root.path().join("cmd").to_string_lossy().into_owned(),
+			root.path().join("bin").to_string_lossy().into_owned(),
+			root
+				.path()
+				.join("usr")
+				.join("bin")
+				.to_string_lossy()
+				.into_owned(),
+		]);
+	}
+
+	#[test]
+	fn drive_letter_segments_translate_to_windows_paths() {
+		assert_eq!(translate_msys_segment("/c/Users/foo", &[]).as_deref(), Some("C:\\Users\\foo"),);
+		assert_eq!(translate_msys_segment("/d", &[]).as_deref(), Some("D:\\"),);
+	}
+
+	#[test]
+	fn windows_style_segments_are_left_alone() {
+		assert_eq!(translate_msys_segment("C:\\Windows\\System32", &[]), None);
+		assert_eq!(translate_msys_segment("\\\\server\\share", &[]), None);
+		assert_eq!(translate_msys_segment("relative\\path", &[]), None);
+	}
+
+	#[test]
+	fn is_drive_letter_only_matches_single_alphabetic_chars() {
+		assert!(is_drive_letter("c"));
+		assert!(is_drive_letter("Z"));
+		assert!(!is_drive_letter(""));
+		assert!(!is_drive_letter("cc"));
+		assert!(!is_drive_letter("1"));
+	}
+}

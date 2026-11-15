@@ -800,4 +800,85 @@ pub fn vibackwardblankwordend(zw: &mut Zw<'_, '_>) -> WResult {
 	WResult::Done(vi_backward_blank_word_end(zw.ed))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	fn ed(s: &str, cs: usize) -> Editor {
+		let mut e = Editor::new(Context::LineStart, 0);
+		e.line = s.chars().collect();
+		e.cs = cs;
+		e.keymap = bstr::BString::from("vicmd");
+		e
+	}
+
+	#[test]
+	fn word_classes() {
+		assert_eq!(wordclass(' '), 0);
+		assert_eq!(wordclass('_'), 1);
+		assert_eq!(wordclass('あ'), 1);
+		assert_eq!(wordclass('-'), 2);
+		assert_eq!(wordclass('\0'), 3);
+		assert_eq!(wordclass('\n'), 3);
+	}
+
+	#[test]
+	fn words() {
+		let mut e = ed("one two--three", 0);
+		vi_forward_word(&mut e);
+		assert_eq!(e.cs, 4);
+		vi_forward_word(&mut e);
+		assert_eq!(e.cs, 7);
+		vi_forward_word_end(&mut e);
+		assert_eq!(e.cs, 8);
+		vi_backward_word(&mut e);
+		assert_eq!(e.cs, 7);
+		vi_backward_word_end(&mut e);
+		assert_eq!(e.cs, 6);
+		e.cs = 0;
+		vi_forward_blank_word(&mut e);
+		assert_eq!(e.cs, 4);
+		// The NUL past the end is no blank: the end itself (the core then
+		// steps back onto the last character in command mode).
+		vi_forward_blank_word_end(&mut e);
+		assert_eq!(e.cs, 14);
+	}
+
+	#[test]
+	fn brackets_and_columns() {
+		let mut e = ed("{ ({[}]) }", 0);
+		assert_eq!(vi_match_bracket(&mut e), 0);
+		assert_eq!(e.cs, 9);
+		assert_eq!(vi_match_bracket(&mut e), 0);
+		assert_eq!(e.cs, 0);
+		e.zmod.mult = 3;
+		vi_goto_column(&mut e);
+		assert_eq!(e.cs, 2);
+		e.zmod.mult = 1;
+		let mut e = ed("abc", 0);
+		e.zmod.mult = 1;
+		assert_eq!(vi_end_of_line(&mut e), 0);
+		assert_eq!(e.cs, 3);
+	}
+
+	#[test]
+	fn finds() {
+		let mut vi = ViState::default();
+		let mut e = ed("a-b-c-d", 0);
+		vi.vfindchar = Some('-');
+		vi.vfinddir = 1;
+		vi.tailadd = -1;
+		assert_eq!(vi_find_char(&mut vi, &mut e, false), 0);
+		assert_eq!(e.cs, 0);
+		assert_eq!(vi_find_char(&mut vi, &mut e, true), 0);
+		assert_eq!(e.cs, 2);
+		// `T-` from just after a `-` steps over it and finds none before.
+		assert_eq!(vi_rev_repeat_find(&mut vi, &mut e), 1);
+		assert_eq!(e.cs, 2);
+		vi.tailadd = 0;
+		e.zmod.mult = 9;
+		assert_eq!(vi_find_char(&mut vi, &mut e, true), 1);
+		assert_eq!(e.cs, 2);
+	}
+}

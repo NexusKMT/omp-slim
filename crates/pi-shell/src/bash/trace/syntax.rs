@@ -288,4 +288,61 @@ impl UnitSyntax {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::{
+		ids::ModeId,
+		syntax::{Features, Parser},
+	};
 
+	#[test]
+	fn archive_round_trip_preserves_native_syntax_and_origin() {
+		let source = b"f() { printf '%s' \"$1\"; }\n";
+		let (syntax, _) = UnitSyntax::parse_boundary(source, Features::NONE.bits(), &[], 3).unwrap();
+		let syntax = syntax.with_parent(SourceParent { unit: 2, node: 7, lo: 12, hi: 40 });
+		let encoded = serde_json::to_string(&syntax).unwrap();
+		let decoded: UnitSyntax = serde_json::from_str(&encoded).unwrap();
+		assert_eq!(decoded, syntax);
+		assert_eq!(serde_json::to_string(&decoded).unwrap(), encoded);
+	}
+
+	#[test]
+	fn archive_rejects_unknown_version_before_decoding_a_tree() {
+		let encoded = serde_json::to_string(&STANDARD.encode([ARCHIVE_VERSION + 1])).unwrap();
+		let error = serde_json::from_str::<UnitSyntax>(&encoded).unwrap_err();
+		assert!(
+			error
+				.to_string()
+				.contains("unsupported native syntax archive version")
+		);
+	}
+
+	#[test]
+	fn deferred_definition_restores_real_alias_syntax_before_discarding_deferred_input() {
+		struct Alias;
+		impl syn::AliasLookup for Alias {
+			fn alias(&self, name: &[u8]) -> Option<&[u8]> {
+				(name == b"say").then_some(b"printf preserved".as_slice())
+			}
+		}
+		let source = b"f() { say; }";
+		let cc = Parser::new(source, Features::NONE, &Alias)
+			.next_command()
+			.unwrap()
+			.unwrap();
+		let deferred = ir::lower_deferred(&cc, source, ModeId::Bash, Features::NONE).unwrap();
+		let saved = postcard::to_allocvec(deferred.funcs[0].body.as_ref()).unwrap();
+		let restored: ir::Unit = postcard::from_bytes(&saved).unwrap();
+		assert!(restored.trace_syntax.get().is_none());
+		let observed = ir::materialize(&restored, true).unwrap();
+		assert!(observed.trace_syntax.get().is_some());
+		let unobserved = ir::materialize(&restored, false).unwrap();
+		assert!(unobserved.trace_syntax.get().is_none());
+		assert_eq!(observed.nodes, unobserved.nodes);
+		assert_eq!(observed.id, unobserved.id);
+		let archive = serde_json::to_string(observed.trace_syntax.get().unwrap().as_ref()).unwrap();
+		let decoded: UnitSyntax = serde_json::from_str(&archive).unwrap();
+		assert_eq!(&decoded, observed.trace_syntax.get().unwrap().as_ref());
+	}
+}

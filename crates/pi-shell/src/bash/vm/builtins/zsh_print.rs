@@ -1437,4 +1437,63 @@ fn strtoul_underscore(s: &[u8], octal_zeroes: bool) -> Option<u64> {
 	Some(calc)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn int(value: i64, flags: CFlags, width: i64, prec: Option<usize>) -> String {
+		let mut out = Vec::new();
+		fmt_int(&mut out, value, flags, width, prec);
+		String::from_utf8(out).unwrap()
+	}
+
+	fn flt(value: f64, conv: u8, flags: CFlags, width: i64, prec: Option<usize>) -> String {
+		let mut out = Vec::new();
+		fmt_float(&mut out, value, conv, flags, width, prec);
+		String::from_utf8(out).unwrap()
+	}
+
+	#[test]
+	fn c_integer_conversions_match_printf3() {
+		assert_eq!(int(5, CFlags::default(), 0, Some(3)), "005");
+		assert_eq!(int(5, CFlags { plus: true, ..CFlags::default() }, 0, None), "+5");
+		assert_eq!(int(5, CFlags { space: true, ..CFlags::default() }, 0, None), " 5");
+		assert_eq!(int(42, CFlags { left: true, ..CFlags::default() }, 5, None), "42   ");
+		assert_eq!(int(-42, CFlags { zero: true, ..CFlags::default() }, 6, None), "-00042");
+		let mut o = Vec::new();
+		fmt_uint(&mut o, 255, b'x', CFlags { zero: true, ..CFlags::default() }, 5, None);
+		fmt_uint(&mut o, 255, b'x', CFlags { alt: true, ..CFlags::default() }, 0, None);
+		fmt_uint(&mut o, 8, b'o', CFlags { alt: true, ..CFlags::default() }, 0, None);
+		assert_eq!(o, b"000ff0xff010");
+	}
+
+	#[test]
+	fn c_float_conversions_match_printf3() {
+		assert_eq!(flt(1.23456, b'f', CFlags::default(), 5, Some(2)), " 1.23");
+		assert_eq!(flt(1234.5, b'e', CFlags::default(), 0, None), "1.234500e+03");
+		assert_eq!(flt(0.0001, b'g', CFlags::default(), 0, None), "0.0001");
+		assert_eq!(flt(12345.678, b'e', CFlags::default(), 5, Some(1)), "1.2e+04");
+		assert_eq!(flt(0.000_012_34, b'G', CFlags::default(), 0, None), "1.234E-05");
+		assert_eq!(flt(100_000.0, b'g', CFlags::default(), 0, None), "100000");
+		assert_eq!(flt(1_000_000.0, b'g', CFlags::default(), 0, None), "1e+06");
+	}
+
+	#[test]
+	fn tab_expansion_indentation_only_or_all() {
+		let mut o = Vec::new();
+		zexpandtabs(b"\ta\tb", 4, 0, false, false, &mut o);
+		assert_eq!(o, b"    a\tb");
+		o.clear();
+		zexpandtabs(b"a\tb", 4, 0, true, false, &mut o);
+		assert_eq!(o, b"a   b");
+	}
+
+	#[test]
+	fn unsigned_constants() {
+		assert_eq!(strtoul_underscore(b"0x1F", false), Some(31));
+		assert_eq!(strtoul_underscore(b"1_000", false), Some(1000));
+		assert_eq!(strtoul_underscore(b"010", true), Some(8));
+		assert_eq!(strtoul_underscore(b"010", false), Some(10));
+		assert_eq!(strtoul_underscore(b"1+2", false), None);
+	}
+}

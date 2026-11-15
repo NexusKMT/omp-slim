@@ -68,7 +68,8 @@ pub mod pty;
 pub mod shell;
 pub mod summary;
 pub mod task;
-
+#[cfg(test)]
+pub(crate) mod testing;
 pub mod text;
 pub mod tokens;
 pub mod tty_writer;
@@ -363,4 +364,46 @@ pub fn omp_install_tokio_runtime() {
 	configure_rayon_pool();
 }
 
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+	use super::{
+		RAYON_MAX_THREADS, RayonPoolPlan, clamped_rayon_threads, rayon_pool_plan, rayon_probe_target,
+	};
 
+	#[test]
+	fn rayon_threads_are_capped_for_windows_commit_pressure() {
+		assert_eq!(clamped_rayon_threads(0), 1);
+		assert_eq!(clamped_rayon_threads(1), 1);
+		assert_eq!(clamped_rayon_threads(RAYON_MAX_THREADS + 1), RAYON_MAX_THREADS);
+	}
+
+	#[test]
+	fn rayon_probe_includes_reserved_non_rayon_capacity() {
+		assert_eq!(rayon_probe_target(4), 5);
+		assert_eq!(
+			rayon_probe_target(RAYON_MAX_THREADS + 4),
+			RAYON_MAX_THREADS + super::RAYON_RESERVED_NON_RAYON_THREADS
+		);
+	}
+
+	#[test]
+	fn rayon_uses_requested_pool_when_probe_covers_request_and_reserve() {
+		assert_eq!(rayon_pool_plan(4, 5), RayonPoolPlan::WorkerThreads(4));
+		assert_eq!(
+			rayon_pool_plan(RAYON_MAX_THREADS + 4, usize::MAX),
+			RayonPoolPlan::WorkerThreads(RAYON_MAX_THREADS)
+		);
+	}
+
+	#[test]
+	fn rayon_uses_worker_pool_after_reserving_non_rayon_capacity() {
+		assert_eq!(rayon_pool_plan(4, 3), RayonPoolPlan::WorkerThreads(2));
+		assert_eq!(rayon_pool_plan(1, 2), RayonPoolPlan::WorkerThreads(1));
+	}
+
+	#[test]
+	fn rayon_skips_global_pool_when_only_reserved_capacity_can_spawn() {
+		assert_eq!(rayon_pool_plan(4, 1), RayonPoolPlan::SkipGlobalPool);
+		assert_eq!(rayon_pool_plan(1, 0), RayonPoolPlan::SkipGlobalPool);
+	}
+}

@@ -81,4 +81,39 @@ impl Pathext {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn parsing_normalizes_dots_case_and_blanks() {
+		let p = Pathext::parse(Some(OsStr::new(" .EXE;cmd;; .Py ")));
+		assert_eq!(p.exts, [".exe", ".cmd", ".py"]);
+		assert_eq!(Pathext::parse(Some(OsStr::new(";;"))).exts, Pathext::FALLBACK);
+		assert_eq!(Pathext::parse(None).exts, Pathext::FALLBACK);
+	}
+
+	#[test]
+	fn extension_match_is_case_insensitive() {
+		let p = Pathext::parse(None);
+		assert!(p.has_executable_extension(Path::new("tool.EXE")));
+		assert!(!p.has_executable_extension(Path::new("tool.txt")));
+		assert!(!p.has_executable_extension(Path::new("tool")));
+	}
+
+	#[test]
+	fn resolve_appends_extensions_in_order() {
+		let dir = std::env::temp_dir().join(format!("obash-pathext-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).unwrap();
+		std::fs::write(dir.join("t.cmd"), b"").unwrap();
+		std::fs::write(dir.join("t.bat"), b"").unwrap();
+		let p = Pathext::parse(None);
+		assert_eq!(
+			p.resolve(dir.join("t")),
+			Some(dir.join("t.bat")),
+			".bat precedes .cmd in the fallback list"
+		);
+		assert_eq!(p.resolve(dir.join("missing")), None);
+		std::fs::remove_dir_all(&dir).unwrap();
+	}
+}

@@ -778,4 +778,398 @@ async fn await_drain(
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		sync::{
+			Arc,
+			atomic::{AtomicBool, Ordering},
+		},
+		time::Duration,
+	};
 
+	use flume;
+	use pi_shell::{
+		ShellRunOptions as CoreShellRunOptions,
+		cancel::{AbortReason, CancelToken},
+	};
+	use tokio::time;
+
+	use super::{
+		BRIDGE_QUEUE_CHUNKS, CoreShell, FORWARD_STALL_TIMEOUT, INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT,
+		ShellRunResult, await_drain, pump_chunks,
+	};
+
+	/// Regression for #4078: the reader→JS bridge queue must stay bounded when
+	/// the JS side (here: a deliberately slow `forward`) cannot keep up with a
+	/// fast producer, and backpressure must never drop or reorder chunks. On
+	/// the pre-fix bridge (`flume::unbounded` + fire-and-forget
+	/// `ThreadsafeFunctionCallMode::NonBlocking`) the same harness accumulates
+	/// the producer's entire surplus in the queue (measured: a 32 MiB stream
+	/// queued all `33_554_432` bytes while the consumer stalled).
+	#[tokio::test(flavor = "multi_thread")]
+	async fn bridge_pump_bounds_queue_and_delivers_all_bytes() {
+		const CHUNKS: usize = 512;
+		const CHUNK_BYTES: usize = 4096;
+		let (tx, rx) = flume::bounded::<String>(BRIDGE_QUEUE_CHUNKS);
+		let producer = tokio::spawn(async move {
+			let mut expected = String::with_capacity(CHUNKS * CHUNK_BYTES);
+			let mut max_queued = 0usize;
+			for i in 0..CHUNKS {
+				let chunk = format!("[{i:06}]{}", "x".repeat(CHUNK_BYTES - 8));
+				expected.push_str(&chunk);
+				tx.send_async(chunk)
+					.await
+					.expect("pump should outlive the producer");
+				max_queued = max_queued.max(tx.len());
+			}
+			(expected, max_queued)
+		});
+
+		let mut received = String::with_capacity(CHUNKS * CHUNK_BYTES);
+		time::timeout(
+			Duration::from_secs(30),
+			pump_chunks(rx, FORWARD_STALL_TIMEOUT, None, async |payload: String| {
+				received.push_str(&payload);
+				// Emulate a busy JS event loop: each napi callback takes a while.
+				time::sleep(Duration::from_micros(500)).await;
+				true
+			}),
+		)
+		.await
+		.expect("pump should finish once the producer hangs up");
+
+		let (expected, max_queued) = producer.await.expect("producer task");
+		assert!(
+			max_queued <= BRIDGE_QUEUE_CHUNKS,
+			"bridge queue grew past its bound: {max_queued} chunks",
+		);
+		assert_eq!(received.len(), expected.len(), "bytes were dropped or duplicated");
+		assert_eq!(received, expected, "chunks must arrive losslessly and in order");
+	}
+
+	/// When the JS side dies (`forward` fails: threadsafe function aborted on
+	/// env teardown), the pump must drop its receiver so parked and future
+	/// sends fail fast — the pipe readers keep draining the child instead of
+	/// wedging it on a full bridge queue.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn bridge_pump_death_disconnects_channel_without_blocking_senders() {
+		let (tx, rx) = flume::bounded::<String>(4);
+		let pump =
+			tokio::spawn(pump_chunks(rx, FORWARD_STALL_TIMEOUT, None, async |_payload: String| false));
+		let producer = tokio::spawn(async move {
+			let mut disconnected = 0usize;
+			for _ in 0..64 {
+				if tx.send_async("x".repeat(1024)).await.is_err() {
+					disconnected += 1;
+				}
+			}
+			disconnected
+		});
+		let disconnected = time::timeout(Duration::from_secs(5), producer)
+			.await
+			.expect("sends must not park once the consumer died")
+			.expect("producer task");
+		assert!(disconnected > 0, "channel should disconnect after the pump stops");
+		time::timeout(Duration::from_secs(5), pump)
+			.await
+			.expect("pump should exit after forward fails")
+			.expect("pump task");
+	}
+
+	/// A successful run must wait for every accepted bridge chunk even when a
+	/// slow JavaScript consumer takes longer than the interrupted-run bound.
+	/// Bounding this path reports success while silently dropping queued output.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn await_drain_preserves_slow_output_after_success() {
+		let (tx, rx) = flume::bounded::<String>(BRIDGE_QUEUE_CHUNKS);
+		let forwarded = Arc::new(AtomicBool::new(false));
+		let observed = Arc::clone(&forwarded);
+		let handle = napi::tokio::spawn(pump_chunks(
+			rx,
+			FORWARD_STALL_TIMEOUT,
+			None,
+			async move |_payload: String| {
+				time::sleep(INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT + Duration::from_millis(100)).await;
+				observed.store(true, Ordering::Release);
+				true
+			},
+		));
+		tx.send("accepted".to_string())
+			.expect("pump should be connected");
+		drop(tx);
+		let result = Ok(ShellRunResult {
+			exit_code:   Some(0),
+			cancelled:   false,
+			timed_out:   false,
+			minimized:   None,
+			working_dir: None,
+		});
+
+		time::timeout(
+			INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT + Duration::from_secs(2),
+			await_drain(Some(handle), &result),
+		)
+		.await
+		.expect("successful completion must drain slow accepted output");
+		assert!(
+			forwarded.load(Ordering::Acquire),
+			"accepted output was dropped before success returned"
+		);
+	}
+
+	/// Regression for #10308: a grandchild that inherits the stdout pipe keeps a
+	/// pipe-reader task alive after an interrupted run resolves, so one
+	/// bridge-queue sender is never dropped and `pump_chunks` never sees channel
+	/// disconnect. `await_drain` must return after the interrupted-run bound and
+	/// abort the pump instead of wedging the native promise forever.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn await_drain_returns_when_a_reader_orphans_a_sender_after_timeout() {
+		let (tx, rx) = flume::bounded::<String>(BRIDGE_QUEUE_CHUNKS);
+		let orphan = tx.clone();
+		let handle = napi::tokio::spawn(pump_chunks(
+			rx,
+			FORWARD_STALL_TIMEOUT,
+			None,
+			async |_payload: String| true,
+		));
+		drop(tx);
+		let result = Ok(ShellRunResult {
+			exit_code:   None,
+			cancelled:   false,
+			timed_out:   true,
+			minimized:   None,
+			working_dir: None,
+		});
+		let started = time::Instant::now();
+		time::timeout(
+			INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT + Duration::from_secs(2),
+			await_drain(Some(handle), &result),
+		)
+		.await
+		.expect("await_drain must return when an interrupted reader orphans a sender");
+		assert!(
+			started.elapsed() >= INTERRUPTED_DRAIN_SHUTDOWN_TIMEOUT,
+			"await_drain returned before its bound; the drain was not actually blocked",
+		);
+		// The pump was aborted, so its receiver is dropped: the orphaned sender
+		// now observes a disconnected channel instead of parking forever.
+		assert!(
+			orphan.send("late".to_string()).is_err(),
+			"aborting the pump must disconnect the channel"
+		);
+	}
+
+	/// Regression for #12657: a single chunk-forward that never returns (a
+	/// wedged JS `call_async` while the child still has megabytes buffered) must
+	/// not park the pump forever. The pump abandons the stalled forward after
+	/// `stall_timeout` and returns, dropping `rx` so the pipe reader parked on a
+	/// full bridge disconnects, the child unblocks and exits, and the run
+	/// settles instead of stranding as `running`.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn pump_disconnects_when_a_single_forward_wedges() {
+		const STALL: Duration = Duration::from_millis(100);
+		let (tx, rx) = flume::bounded::<String>(BRIDGE_QUEUE_CHUNKS);
+		// Prime one chunk so the pump enters `forward`, which then wedges.
+		tx.send("first".to_string()).expect("send primes the pump");
+		let started = time::Instant::now();
+		let pump = napi::tokio::spawn(pump_chunks(rx, STALL, None, async |_payload: String| {
+			std::future::pending::<bool>().await
+		}));
+		time::timeout(STALL + Duration::from_secs(5), pump)
+			.await
+			.expect("pump must return after the per-forward stall deadline")
+			.expect("pump task");
+		assert!(
+			started.elapsed() >= STALL,
+			"pump returned before its stall deadline; the forward was not actually blocked",
+		);
+		// The pump dropped `rx`, so a pipe reader's send now fails fast instead
+		// of parking forever — the deadlock breaker.
+		assert!(
+			tx.send_async("late".to_string()).await.is_err(),
+			"the wedged pump must disconnect the bridge so the pipe reader unblocks",
+		);
+	}
+
+	mod child_session_action_tests {
+		use pi_shell::{ChildSessionAction, child_session_action};
+
+		#[test]
+		fn interactive_with_terminal_stdin_takes_foreground() {
+			assert_eq!(child_session_action(true, true, false), ChildSessionAction::TakeForeground);
+			assert_eq!(child_session_action(true, true, true), ChildSessionAction::TakeForeground);
+		}
+
+		#[test]
+		fn non_terminal_stdin_detaches_regardless_of_pipeline() {
+			assert_eq!(child_session_action(true, false, false), ChildSessionAction::DetachSession);
+			// A leading-new-pgroup stage of a pipeline still detaches: setsid
+			// keeps it off the host's controlling tty.
+			assert_eq!(child_session_action(true, false, true), ChildSessionAction::DetachSession);
+		}
+
+		#[test]
+		fn non_interactive_with_terminal_stdin_does_nothing() {
+			assert_eq!(child_session_action(false, true, false), ChildSessionAction::None);
+		}
+
+		#[test]
+		fn non_interactive_terminal_stdin_in_pipeline_does_nothing() {
+			assert_eq!(child_session_action(false, true, true), ChildSessionAction::None);
+		}
+
+		#[test]
+		fn embedded_host_with_non_terminal_stdin_detaches() {
+			assert_eq!(child_session_action(false, false, false), ChildSessionAction::DetachSession);
+		}
+
+		#[test]
+		fn pipeline_stage_with_non_terminal_stdin_detaches() {
+			// Regression: an interactive child inside a pipeline (`zsh -i | awk`)
+			// must not stay in the host session and seize its tty. Pre-fix this
+			// returned `None`, leaving the stage attached and able to SIGTTIN the
+			// host.
+			assert_eq!(child_session_action(false, false, true), ChildSessionAction::DetachSession);
+		}
+	}
+
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn embedded_external_command_runs_in_its_own_session() {
+		let shell = CoreShell::new(None);
+		let (tx, rx) = flume::unbounded::<String>();
+		let handle = tokio::spawn(async move {
+			shell
+				.run(
+					CoreShellRunOptions {
+						command:    "sh -c 'printf \"%d\\n\" \"$$\"; sleep 0.5'".to_string(),
+						cwd:        None,
+						env:        None,
+						timeout_ms: None,
+						filesystem: None,
+						pipe_taps:  None,
+						trace:      None,
+					},
+					Some(tx),
+					CancelToken::default(),
+				)
+				.await
+		});
+		let child_pid = time::timeout(Duration::from_secs(5), rx.recv_async())
+			.await
+			.expect("timed out waiting for child pid")
+			.expect("missing child pid chunk")
+			.trim()
+			.parse::<i32>()
+			.expect("child pid parses");
+		// SAFETY: `getsid(0)` only queries the current process session; the
+		// return value is checked below. Inside a PID namespace (e.g. the
+		// containerized CI runner) the host's session leader can live outside
+		// the namespace, so `getsid(0)` legitimately reports 0 — only -1 is a
+		// real failure. The meaningful invariant is that the child detached
+		// into its own session (`child_sid == child_pid`, distinct from host).
+		let host_sid = unsafe { libc::getsid(0) };
+		assert!(host_sid >= 0, "getsid(0) failed: {}", std::io::Error::last_os_error());
+		// SAFETY: `child_pid` is a live positive PID reported by the child; the
+		// return value is checked below.
+		let child_sid = unsafe { libc::getsid(child_pid) };
+		assert!(child_sid > 0, "getsid({child_pid}) failed: {}", std::io::Error::last_os_error());
+		let result = handle
+			.await
+			.expect("shell task panicked")
+			.expect("shell run");
+		assert_eq!(result.exit_code, Some(0));
+		assert_ne!(child_sid, host_sid);
+		assert_eq!(child_sid, child_pid);
+	}
+
+	#[tokio::test]
+	async fn read_output_stops_when_cancelled_before_pipe_eof() {
+		let shell = CoreShell::new(None);
+		let mut cancel = CancelToken::default();
+		let abort = cancel.emplace_abort_token();
+		let handle = tokio::spawn(async move {
+			shell
+				.run(
+					CoreShellRunOptions {
+						command:    "sh -c 'sleep 30 & wait'".to_string(),
+						cwd:        None,
+						env:        None,
+						timeout_ms: None,
+						filesystem: None,
+						pipe_taps:  None,
+						trace:      None,
+					},
+					None,
+					cancel,
+				)
+				.await
+		});
+
+		time::sleep(Duration::from_millis(10)).await;
+		abort.abort(AbortReason::Signal);
+		let result = time::timeout(Duration::from_secs(3), handle)
+			.await
+			.expect("shell run should stop after cancellation")
+			.expect("shell task should not panic")
+			.expect("shell run should return");
+		assert!(result.cancelled);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn timeout_drains_pipeline_output_before_stopping_reader() {
+		let shell = CoreShell::new(None);
+		let (tx, rx) = flume::unbounded::<String>();
+		// The downstream stage reads and writes exactly five complete lines
+		// before it emits READY, then blocks in a sixth read. READY therefore
+		// proves the reader, rather than merely the producer or pipe, consumed
+		// the asserted output. Cancellation makes the sixth read return EOF.
+		let mut cancel = CancelToken::default();
+		let abort = cancel.emplace_abort_token();
+		let handle = tokio::spawn(async move {
+			shell
+				.run(
+					CoreShellRunOptions {
+						command:    "{ printf 'x\\nx\\nx\\nx\\nx\\n'; sleep 30; } | { for _ in 1 2 3 4 \
+						             5; do IFS= read -r line; printf '%s\\n' \"$line\"; done; printf \
+						             'READY\\n' >&2; read -r; }"
+							.to_string(),
+						cwd:        None,
+						env:        None,
+						timeout_ms: None,
+						filesystem: None,
+						pipe_taps:  None,
+						trace:      None,
+					},
+					Some(tx),
+					cancel,
+				)
+				.await
+		});
+		let mut output = String::new();
+		time::timeout(Duration::from_secs(30), async {
+			while !output.contains("READY") {
+				output.push_str(
+					&rx.recv_async()
+						.await
+						.expect("shell output closed before readiness"),
+				);
+			}
+		})
+		.await
+		.expect("producer did not become ready");
+		abort.abort(AbortReason::Timeout);
+		let result = time::timeout(Duration::from_secs(10), handle)
+			.await
+			.expect("shell run did not stop after timeout")
+			.expect("shell task panicked")
+			.expect("shell run");
+		while let Ok(chunk) = rx.recv_async().await {
+			output.push_str(&chunk);
+		}
+
+		assert!(result.timed_out);
+		assert_eq!(output.lines().filter(|line| *line == "x").count(), 5);
+	}
+}

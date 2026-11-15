@@ -183,4 +183,58 @@ mod imp {
 	}
 }
 
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+	use std::{
+		ffi::OsStr,
+		fs,
+		os::unix::{ffi::OsStrExt, fs::symlink},
+	};
 
+	use super::*;
+
+	#[test]
+	fn clone_tree_skips_top_level_entry_and_preserves_symlink() {
+		let nonce = format!(
+			"pi-iso-clone-tree-{}-{}",
+			std::process::id(),
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.unwrap()
+				.as_nanos()
+		);
+		let root = std::env::temp_dir().join(nonce);
+		let lower = root.join("lower");
+		let merged = root.join("merged");
+		fs::create_dir_all(lower.join("nested")).unwrap();
+		fs::create_dir_all(lower.join(".git")).unwrap();
+		fs::write(lower.join("file"), "file").unwrap();
+		fs::write(lower.join("nested/child"), "child").unwrap();
+		fs::write(lower.join(".git/config"), "skip").unwrap();
+		symlink("file", lower.join("link")).unwrap();
+		// Special files at the checkout root (debug sockets, fifos) are
+		// rejected by `clonefile` with EINVAL and must be skipped, not fatal.
+		let fifo = std::ffi::CString::new(lower.join("debug.fifo").as_os_str().as_bytes()).unwrap();
+		// SAFETY: `fifo` is a valid NUL-terminated path that outlives the call.
+		assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+
+		let result = backend().clone_tree(&lower, &merged, &[OsStr::new(".git")]);
+		if matches!(result, Err(crate::IsoError::Unavailable(_))) {
+			let _ = fs::remove_dir_all(root);
+			return;
+		}
+		result.unwrap();
+		assert!(!merged.join(".git").exists());
+		assert!(fs::symlink_metadata(merged.join("debug.fifo")).is_err());
+		assert_eq!(fs::read_to_string(merged.join("file")).unwrap(), "file");
+		assert_eq!(fs::read_to_string(merged.join("nested/child")).unwrap(), "child");
+		assert_eq!(fs::read_link(merged.join("link")).unwrap(), std::path::Path::new("file"));
+		assert!(
+			fs::symlink_metadata(merged.join("link"))
+				.unwrap()
+				.file_type()
+				.is_symlink()
+		);
+		fs::remove_dir_all(root).unwrap();
+	}
+}

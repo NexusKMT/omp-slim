@@ -239,4 +239,51 @@ fn word_end(s: &[u8], mut i: usize) -> usize {
 	i.min(n)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn words(s: &str) -> Vec<&str> {
+		let w = lex_words(s.as_bytes(), false);
+		w.chunks(2)
+			.map(|p| &s[p[0] as usize..p[1] as usize])
+			.collect()
+	}
+
+	/// Goldens: zsh 5.9 `$historywords` of the same lines read with `-i`.
+	#[test]
+	fn lexer_words_match_zsh() {
+		assert_eq!(words(": a;b|c>d 2>&1 &&e \"x y\" 'q' $(ls -l) ${x:-y} `pwd` x=1 a\\[1]=2"), [
+			":", "a", ";", "b", "|", "c", ">", "d", "2>&", "1", "&&", "e", "\"x y\"", "'q'",
+			"$(ls -l)", "${x:-y}", "`pwd`", "x=1", "a\\[1]=2"
+		]);
+		assert_eq!(words("if true\nthen : x; fi"), ["if", "true", "\n", "then", ":", "x", ";", "fi"]);
+		assert_eq!(words(": a # comment"), [":", "a", "#", "comment"]);
+		assert_eq!(words(": {a,b} <<<str >>/dev/null <(true) &>/dev/null >| /dev/null 3<&0"), [
+			":",
+			"{a,b}",
+			"<<<",
+			"str",
+			">>",
+			"/dev/null",
+			"<(true)",
+			"&>",
+			"/dev/null",
+			">|",
+			"/dev/null",
+			"3<&",
+			"0"
+		]);
+	}
+
+	#[test]
+	fn comments_record_no_word() {
+		let s = b"echo a # c";
+		assert_eq!(lex_words(s, true), [0, 4, 5, 6]);
+	}
+
+	#[test]
+	fn blank_words_skip_continuations() {
+		assert_eq!(blank_words(b" a\\\n b  c"), [1, 3, 5, 6, 8, 9]);
+	}
+}

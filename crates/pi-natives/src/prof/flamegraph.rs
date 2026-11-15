@@ -137,4 +137,83 @@ fn escape_xml(output: &mut String, value: &str) {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::generate;
 
+	fn frame_rect(svg: &str, title: &str) -> (f64, f64, f64) {
+		let frame = svg.split_once(&format!("<g><title>{title} (")).unwrap().1;
+		let rect = frame
+			.split_once("<rect ")
+			.unwrap()
+			.1
+			.split_once("/>")
+			.unwrap()
+			.0;
+		let attribute = |name| {
+			rect
+				.split_once(&format!("{name}=\""))
+				.unwrap()
+				.1
+				.split_once('"')
+				.unwrap()
+				.0
+				.parse::<f64>()
+				.unwrap()
+		};
+		(attribute("x"), attribute("y"), attribute("width"))
+	}
+
+	#[test]
+	fn merged_stacks_have_proportional_nested_frames_and_escaped_names() {
+		let svg = generate("parent;left 1\nparent;right<&\" 4\nparent;left 1\nother 6\n").unwrap();
+		let (parent_x, parent_y, parent_width) = frame_rect(&svg, "parent");
+		let (left_x, left_y, left_width) = frame_rect(&svg, "left");
+		let (right_x, right_y, right_width) = frame_rect(&svg, "right&lt;&amp;&quot;");
+		let (_, _, other_width) = frame_rect(&svg, "other");
+		assert_eq!(parent_width, 590.0);
+		assert_eq!(other_width, parent_width);
+		assert!((left_width - parent_width / 3.0).abs() < 0.001);
+		assert!((right_width - parent_width * 2.0 / 3.0).abs() < 0.001);
+		assert_eq!(left_x, parent_x);
+		assert!((right_x - left_x - left_width).abs() < 0.001);
+		assert!((right_x + right_width - parent_x - parent_width).abs() < 0.001);
+		assert!(left_y < parent_y && right_y < parent_y);
+		assert!(svg.contains("right&lt;&amp;&quot; (4 μs, 33.33%)</title>"));
+		assert!(svg.contains(">right&lt;&amp;&quot;</text>"));
+		assert!(!svg.contains("right<&\""));
+	}
+
+	#[test]
+	fn tiny_frames_are_hidden_without_redistributing_their_samples() {
+		let svg = generate("parent;tiny 1\nparent;visible 1999\n").unwrap();
+		assert!(!svg.contains("<title>tiny ("));
+		let (parent_x, _, parent_width) = frame_rect(&svg, "parent");
+		let (visible_x, _, visible_width) = frame_rect(&svg, "visible");
+		assert!(visible_x > parent_x);
+		assert!((visible_width / parent_width - 1999.0 / 2000.0).abs() < 0.000001);
+		assert_eq!(generate("parent;visible 1999\nparent;tiny 1\n"), Some(svg));
+	}
+
+	#[test]
+	fn labels_truncate_at_character_boundaries_and_keep_full_titles() {
+		let svg = generate("abé日xyzz 5\nother 95\n").unwrap();
+		assert!(svg.contains("<title>abé日xyzz (5 μs, 5.00%)</title>"));
+		assert!(svg.contains(">abé日x..</text>"));
+	}
+
+	#[test]
+	fn empty_zero_and_invalid_samples_have_no_graph() {
+		for folded in [
+			"",
+			"\n",
+			"zero 0\n",
+			"missing-count",
+			"negative -1",
+			"bad count",
+			"a 18446744073709551615\na 1\n",
+		] {
+			assert!(generate(folded).is_none(), "{folded}");
+		}
+	}
+}

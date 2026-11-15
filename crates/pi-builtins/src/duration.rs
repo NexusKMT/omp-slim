@@ -39,4 +39,24 @@ pub fn parse_duration(input: &str) -> Option<Duration> {
 	Duration::try_from_secs_f64(value * multiplier).map_or(Some(Duration::MAX), Some)
 }
 
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
 
+	use super::parse_duration;
+
+	#[test]
+	fn units_fractions_and_infinity() {
+		assert_eq!(parse_duration("1.5"), Some(Duration::from_millis(1500)));
+		assert_eq!(parse_duration("2m"), Some(Duration::from_secs(120)));
+		assert_eq!(parse_duration("1h"), Some(Duration::from_secs(3600)));
+		assert_eq!(parse_duration("1d"), Some(Duration::from_secs(86400)));
+		assert_eq!(parse_duration("0.0001"), Some(Duration::from_micros(100)));
+		assert_eq!(parse_duration("+inf"), Some(Duration::MAX));
+		assert_eq!(parse_duration("INFINITY"), Some(Duration::MAX));
+		assert_eq!(parse_duration("1e400"), Some(Duration::MAX));
+		for bad in ["", "-1", "nan", "1x", "soon"] {
+			assert_eq!(parse_duration(bad), None, "{bad}");
+		}
+	}
+}

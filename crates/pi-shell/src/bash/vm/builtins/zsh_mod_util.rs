@@ -93,4 +93,22 @@ pub fn ztrftime(ex: &mut Expander<'_, '_>, fmt: &[u8], secs: i64) -> X<Vec<u8>> 
 	Ok(super::strftime::format(&f, secs, offset, &abbr))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn zstrtol_reads_like_zsh() {
+		assert_eq!(zstrtol(b"12x"), (12, &b"x"[..]));
+		assert_eq!(zstrtol(b"x"), (0, &b"x"[..]));
+		assert_eq!(zstrtol(b" -3"), (-3, &b""[..]));
+		assert_eq!(zstrtol(b"-"), (0, &b""[..]));
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn errno_text_is_lowercased_except_eio() {
+		assert_eq!(zsh_errmsg(&io::Error::from_raw_os_error(libc::EINVAL)), "invalid argument");
+		assert_eq!(zsh_errmsg(&io::ErrorKind::Interrupted.into()), "interrupt");
+	}
+}

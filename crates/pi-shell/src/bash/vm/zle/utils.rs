@@ -1035,4 +1035,156 @@ pub fn ungetchar(ed: &mut Editor, c: char) {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	fn ed(s: &str, cs: usize) -> Editor {
+		let mut e = Editor::new(Context::LineStart, 0);
+		e.line = s.chars().collect();
+		e.cs = cs;
+		e
+	}
+
+	fn line(e: &Editor) -> String {
+		e.line.iter().collect()
+	}
+
+	#[test]
+	fn spaceinline_and_shiftchars_move_mark() {
+		let mut e = ed("abcdef", 2);
+		e.mark = 4;
+		spaceinline(&mut e, 2);
+		assert_eq!(e.line.len(), 8);
+		assert_eq!(e.mark, 6);
+		e.line[2] = 'X';
+		e.line[3] = 'Y';
+		assert_eq!(line(&e), "abXYcdef");
+		shiftchars(&mut e, 1, 3);
+		assert_eq!(line(&e), "acdef");
+		// zsh: mark >= to + cnt moves back by cnt.
+		assert_eq!(e.mark, 3);
+		e.mark = 2;
+		shiftchars(&mut e, 1, 2);
+		assert_eq!(e.mark, 1);
+	}
+
+	#[test]
+	fn successive_kills_append_and_rotate_the_ring() {
+		let mut zle = Zle::new(false);
+		let mut e = ed("one two", 7);
+		backkill(&mut zle, &mut e, 3, cutflags::RAW | cutflags::FRONT);
+		assert_eq!(
+			zle.cutbuf
+				.as_ref()
+				.map(|c| c.buf.iter().collect::<String>()),
+			Some("two".into())
+		);
+		// The first cut does not push the unset buffer.
+		assert!(zle.kring.is_empty());
+		e.lastcmd = wflags::KILL;
+		backkill(&mut zle, &mut e, 4, cutflags::RAW | cutflags::FRONT);
+		assert_eq!(
+			zle.cutbuf
+				.as_ref()
+				.map(|c| c.buf.iter().collect::<String>()),
+			Some("one two".into())
+		);
+		e.lastcmd = 0;
+		e.line = "xyz".chars().collect();
+		e.cs = 0;
+		forekill(&mut zle, &mut e, 2, cutflags::RAW);
+		assert_eq!(line(&e), "z");
+		assert_eq!(
+			zle.cutbuf
+				.as_ref()
+				.map(|c| c.buf.iter().collect::<String>()),
+			Some("xy".into())
+		);
+		assert_eq!(zle.kring.len(), 1);
+		assert_eq!(zle.kring_size, KRINGCTDEF);
+		// "1 got the kills, shifting.
+		assert_eq!(zle.vibuf[27].as_ref().map(|c| c.buf.len()), Some(2));
+		assert_eq!(zle.vibuf[28].as_ref().map(|c| c.buf.len()), Some(4));
+	}
+
+	#[test]
+	fn setline_toend_and_bounds() {
+		let mut e = ed("", 9);
+		setline(&mut e, b"hello", ZSL_TOEND);
+		assert_eq!(e.cs, 5);
+		e.keymap = BString::from("vicmd");
+		setline(&mut e, b"hi", ZSL_TOEND);
+		assert_eq!(e.cs, 1);
+		e.cs = 7;
+		setline(&mut e, b"abc", 0);
+		assert_eq!(e.cs, 3);
+	}
+
+	#[test]
+	fn combining_alignment() {
+		let mut e = ed("ae\u{301}x", 2);
+		e.ls.combining = true;
+		ccleft(&mut e);
+		assert_eq!(e.cs, 1);
+		e.cs = 2;
+		ccright(&mut e);
+		assert_eq!(e.cs, 3);
+		e.cs = 1;
+		inccs(&mut e);
+		assert_eq!(e.cs, 3);
+		deccs(&mut e);
+		assert_eq!(e.cs, 1);
+		e.ls.combining = false;
+		e.cs = 1;
+		inccs(&mut e);
+		assert_eq!(e.cs, 2);
+	}
+
+	#[test]
+	fn lines_and_columns() {
+		let mut e = ed("abc\nde\nfghij", 9);
+		assert_eq!(findline(&e), (7, 12));
+		assert_eq!(upline_by(&mut e, 1), 0);
+		// Column 2 clipped to the end of "de".
+		assert_eq!(e.cs, 6);
+		assert_eq!(upline_by(&mut e, 1), 0);
+		assert_eq!(e.cs, 2);
+		assert_eq!(upline_by(&mut e, 1), 1);
+		assert_eq!(downline_by(&mut e, 2), 0);
+		assert_eq!(e.cs, 9);
+		assert_eq!(downline_by(&mut e, -1), 0);
+		assert_eq!(e.cs, 6);
+	}
+
+	#[test]
+	fn messages_and_bindings() {
+		assert_eq!(format_msg(b"a\x01b\n\x7f", false), "a^Ab\n^?");
+		assert_eq!(format_msg("\u{85}é".as_bytes(), false), "\\M-^Eé");
+		assert_eq!(bindztrdup(b"\x1bx", false), b"\"^[x\"");
+		// `\` becomes `\\`; quoting doubles the pending backslashes and
+		// escapes `$`: five backslashes in all.
+		assert_eq!(bindztrdup(b"\\$", false), b"\"\\\\\\\\\\$\"");
+		assert_eq!(bindztrdup(b"\xe1", false), b"\"\\M-a\"");
+		assert_eq!(zlequery_answer(Some('\t')), (true, 'y'));
+		assert_eq!(zlequery_answer(Some('Y')), (true, 'y'));
+		assert_eq!(zlequery_answer(Some('\n')), (false, 'n'));
+		assert_eq!(zlequery_answer(None), (false, 'n'));
+	}
+
+	#[test]
+	fn overwrite_insert() {
+		let mut e = ed("abc\nd", 1);
+		e.insmode = false;
+		doinsert(&mut e, &['X', 'Y', 'Z']);
+		// Overwriting stops at the newline, which is kept.
+		assert_eq!(line(&e), "aXYZ\nd");
+		assert_eq!(e.cs, 4);
+		let mut e = ed("ab", 1);
+		e.zmod.mult = -2;
+		doinsert(&mut e, &['x']);
+		assert_eq!(line(&e), "axxb");
+		assert_eq!(e.cs, 1);
+	}
+}

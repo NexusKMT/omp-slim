@@ -1157,6 +1157,14 @@ fn cli_text_owned_capped(
 
 
 
+/// Test lowers the cap for its own invocations without truncating captures in
+/// tests running concurrently.
+#[cfg(test)]
+fn path_list_capture_limit() -> usize {
+	tests::CAPTURE_LIMIT.get()
+}
+
+#[cfg(not(test))]
 const fn path_list_capture_limit() -> usize {
 	super::cli::OUTPUT_LIMIT_BYTES
 }
@@ -1348,3 +1356,429 @@ fn cap_bytes(mut bytes: Vec<u8>, max: Option<usize>) -> ShowResult {
 }
 
 
+#[cfg(test)]
+mod tests {
+	use std::{fs, process::Command};
+
+	use tempfile::TempDir;
+
+	use super::*;
+
+	type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
+	fn git(cwd: &Path, args: &[&str]) -> std::result::Result<String, Box<dyn std::error::Error>> {
+		let output = Command::new("git").current_dir(cwd).args(args).output()?;
+		if !output.status.success() {
+			return Err(
+				format!("git {} failed: {}", args.join(" "), String::from_utf8_lossy(&output.stderr))
+					.into(),
+			);
+		}
+		Ok(String::from_utf8(output.stdout)?)
+	}
+
+	fn repo() -> std::result::Result<(TempDir, GitRepo), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		git(dir.path(), &["init", "-b", "main"])?;
+		git(dir.path(), &["config", "user.name", "Test User"])?;
+		git(dir.path(), &["config", "user.email", "test@example.com"])?;
+		let repo = GitRepo::require(dir.path())?;
+		Ok((dir, repo))
+	}
+
+	fn commit(cwd: &Path, name: &str, contents: &str, subject: &str) -> TestResult {
+		fs::write(cwd.join(name), contents)?;
+		git(cwd, &["add", name])?;
+		git(cwd, &["commit", "-m", subject])?;
+		Ok(())
+	}
+
+	#[test]
+	fn bounded_logs_read_only_the_requested_prefix_like_git_log() -> TestResult {
+		let (dir, repo) = repo()?;
+		commit(dir.path(), "one", "one\n", "first")?;
+		let first = repo.head_sha()?.ok_or("missing HEAD")?;
+		commit(dir.path(), "two", "two\n", "second")?;
+		commit(dir.path(), "three", "three\n", "third")?;
+		assert_eq!(repo.log_subjects(1)?, ["third"]);
+		assert!(repo.log_subjects(0)?.is_empty());
+		assert!(repo.log_onelines(0)?.is_empty());
+		assert_eq!(
+			repo.log_onelines(1)?,
+			git(dir.path(), &["log", "-1", "--oneline", "--no-decorate"])?
+				.lines()
+				.map(str::to_owned)
+				.collect::<Vec<_>>()
+		);
+		fs::remove_file(
+			dir.path()
+				.join(".git/objects")
+				.join(&first[..2])
+				.join(&first[2..]),
+		)?;
+		// A fresh handle cannot satisfy the missing ancestor from an object
+		// cache. A prefix that stops before it never reads it, as `git log -1`
+		// does not; a walk that reaches it reports it.
+		let repo = GitRepo::require(dir.path())?;
+		assert_eq!(repo.log_subjects(1)?, ["third"]);
+		assert_eq!(repo.log_onelines(1)?.len(), 1);
+		assert!(repo.log_subjects(0)?.is_empty());
+		for result in [repo.log_subjects(3), repo.log_onelines(3)] {
+			assert!(matches!(result, Err(Error::Backend { context: "git rev-list", .. })));
+		}
+		Ok(())
+	}
+
+	#[test]
+	fn submodule_paths_skip_escaping_and_self_referential_entries() -> TestResult {
+		let outer = tempfile::tempdir()?;
+		let root = outer.path().join("root");
+		fs::create_dir_all(root.join("sub"))?;
+		fs::create_dir_all(outer.path().join("victim"))?;
+		git(&root, &["init", "-q"])?;
+		git(&root.join("sub"), &["init", "-q"])?;
+		git(&outer.path().join("victim"), &["init", "-q"])?;
+		// `.` and `a/..` would re-enqueue the root forever; `../victim` and the
+		// absolute path point at a real checkout outside the repository.
+		let absolute = outer.path().join("victim");
+		fs::write(
+			root.join(".gitmodules"),
+			format!(
+				"[submodule \"self\"]\n\tpath = .\n[submodule \"up\"]\n\tpath = sub/..\n[submodule \
+				 \"escape\"]\n\tpath = ../victim\n[submodule \"abs\"]\n\tpath = {}\n[submodule \
+				 \"sub\"]\n\tpath = sub\n",
+				absolute.display()
+			),
+		)?;
+		assert_eq!(GitRepo::require(&root)?.submodule_paths()?, ["sub"]);
+		Ok(())
+	}
+
+	thread_local! {
+		/// Retention cap consulted by [`path_list_capture_limit`]; per-thread so
+		/// lowering it here cannot truncate captures in concurrent tests.
+		pub(super) static CAPTURE_LIMIT: std::cell::Cell<usize> =
+			const { std::cell::Cell::new(super::super::cli::OUTPUT_LIMIT_BYTES) };
+	}
+
+	/// Run `f` with the path-list capture cap lowered to `limit`.
+	fn with_capture_limit<R>(limit: usize, f: impl FnOnce() -> R) -> R {
+		struct Restore(usize);
+		impl Drop for Restore {
+			fn drop(&mut self) {
+				CAPTURE_LIMIT.set(self.0);
+			}
+		}
+		let _restore = Restore(CAPTURE_LIMIT.get());
+		CAPTURE_LIMIT.set(limit);
+		f()
+	}
+
+	/// Create `count` untracked files whose combined path bytes exceed any small
+	/// capture cap, and return them in the order git reports.
+	fn untracked_fixture(
+		root: &Path,
+		count: usize,
+	) -> std::result::Result<Vec<String>, Box<dyn std::error::Error>> {
+		let mut expected = Vec::with_capacity(count);
+		for index in 0..count {
+			let name = format!("{}-{index:03}.txt", "u".repeat(40));
+			fs::write(root.join(&name), "x")?;
+			expected.push(name);
+		}
+		expected.sort();
+		Ok(expected)
+	}
+
+	#[test]
+	fn is_dirty_answers_from_a_capped_capture() -> TestResult {
+		let (dir, repo) = repo()?;
+		let root = dir.path();
+		commit(root, "tracked", "tracked\n", "tracked")?;
+		assert!(!repo.is_dirty()?);
+
+		// Enough entries that the porcelain rendering outgrows
+		// DIRTY_PROBE_CAPTURE_LIMIT, so the answer has to survive a capture that
+		// was cut short rather than depend on reading the whole listing.
+		untracked_fixture(root, 150)?;
+		let full = repo.status_porcelain(&StatusOptions::default())?;
+		assert!(
+			full.len() > DIRTY_PROBE_CAPTURE_LIMIT,
+			"fixture must outgrow the probe cap, got {} bytes",
+			full.len()
+		);
+		assert!(repo.is_dirty()?);
+		Ok(())
+	}
+
+	#[test]
+	fn ls_files_returns_every_untracked_path_when_the_capture_truncates() -> TestResult {
+		let (dir, repo) = repo()?;
+		let root = dir.path();
+		commit(root, "tracked", "tracked\n", "tracked")?;
+		let expected = untracked_fixture(root, 60)?;
+		// Pin the precondition: at this cap the subprocess capture really is cut
+		// short, so the equality below is evidence of the in-process retry and
+		// not of a capture that happened to fit.
+		let capped = cli_text_owned_capped(
+			root,
+			&["ls-files".to_owned(), "-z".to_owned(), "--others".to_owned()],
+			super::super::cli::SYNC_TIMEOUT,
+			256,
+		)?;
+		assert!(super::super::cli::is_truncated(&capped), "fixture must overflow the cap");
+
+		let listed = with_capture_limit(256, || repo.ls_files(true, true))?;
+		assert_eq!(listed, expected);
+		Ok(())
+	}
+
+	/// Initialize a reftable repository, or report that this git cannot.
+	///
+	/// `--ref-format` arrived in git 2.45. There is no way to fake the fixture
+	/// on an older binary: writing `extensions.refstorage = reftable` by hand
+	/// makes git reject the repository outright, so every command in the test
+	/// would fail for the wrong reason.
+	fn init_reftable(root: &Path) -> std::result::Result<bool, Box<dyn std::error::Error>> {
+		let out = Command::new("git")
+			.current_dir(root)
+			.args(["init", "-q", "-b", "main", "--ref-format=reftable"])
+			.output()?;
+		if out.status.success() {
+			return Ok(true);
+		}
+		let stderr = String::from_utf8_lossy(&out.stderr);
+		if stderr.contains("ref-format") {
+			eprintln!("skipping reftable coverage: this git has no --ref-format ({})", stderr.trim());
+			return Ok(false);
+		}
+		Err(format!("git init --ref-format=reftable failed: {stderr}").into())
+	}
+
+	#[test]
+	fn reftable_ls_files_errors_rather_than_returning_a_truncated_prefix() -> TestResult {
+		let dir = tempfile::tempdir()?;
+		let root = dir.path();
+		if !init_reftable(root)? {
+			return Ok(());
+		}
+		git(root, &["config", "user.name", "Test User"])?;
+		git(root, &["config", "user.email", "test@example.com"])?;
+		let repo = GitRepo::require(root)?;
+		assert!(repo.is_reftable(), "fixture must use reftable ref storage");
+		let expected = untracked_fixture(root, 60)?;
+
+		// Uncapped, the reftable repo reads through the same CLI path.
+		assert_eq!(repo.ls_files(true, true)?, expected);
+
+		// Capped, there is no in-process walk to fall back to, so a short list
+		// must surface as an error instead of a silent prefix.
+		let err = with_capture_limit(256, || repo.ls_files(true, true))
+			.expect_err("truncated reftable listing must fail");
+		assert!(err.to_string().contains("capture limit"), "unexpected error: {err}");
+		Ok(())
+	}
+
+	#[test]
+	fn read_head_branch_detached_unborn_and_packed() -> TestResult {
+		let (dir, repo) = repo()?;
+		assert_eq!(repo.head()?, HeadState::Ref {
+			ref_name: "refs/heads/main".to_owned(),
+			branch:   Some("main".to_owned()),
+			commit:   None,
+		});
+		commit(dir.path(), "one", "one\n", "one")?;
+		let sha = git(dir.path(), &["rev-parse", "HEAD"])?.trim().to_owned();
+		assert_eq!(repo.head_sha()?, Some(sha.clone()));
+		git(dir.path(), &["pack-refs", "--all", "--prune"])?;
+		assert_eq!(repo.head_sha()?, Some(sha.clone()));
+		git(dir.path(), &["checkout", "--detach"])?;
+		assert_eq!(repo.head()?, HeadState::Detached { commit: Some(sha) });
+		assert_eq!(repo.current_branch()?, None);
+		Ok(())
+	}
+
+	#[test]
+	fn merge_base_resolves_rejects_and_errors() -> TestResult {
+		let (dir, repo) = repo()?;
+		let root = dir.path();
+		commit(root, "base", "base\n", "base")?;
+		let fork = git(root, &["rev-parse", "HEAD"])?.trim().to_owned();
+
+		git(root, &["checkout", "-b", "feature"])?;
+		commit(root, "feature", "feature\n", "feature")?;
+		git(root, &["checkout", "main"])?;
+		commit(root, "advance", "advance\n", "advance")?;
+
+		// Divergent branches share the fork commit as their merge base.
+		assert_eq!(repo.merge_base("main", "feature")?, Some(fork));
+
+		// Orphan branch has no common ancestor: `None`, not an error.
+		git(root, &["checkout", "--orphan", "orphan"])?;
+		git(root, &["rm", "-rf", "."])?;
+		commit(root, "other", "other\n", "orphan")?;
+		assert_eq!(repo.merge_base("main", "orphan")?, None);
+
+		// A missing ref is a fatal failure, never reported as "no merge base".
+		assert!(repo.merge_base("main", "does-not-exist").is_err());
+		Ok(())
+	}
+	#[test]
+	fn read_status_porcelain_survives_output_larger_than_pipe_buffer() -> TestResult {
+		let (dir, repo) = repo()?;
+		commit(dir.path(), "seed", "seed\n", "initial")?;
+		// >64 KiB of porcelain output: the sync CLI runner used to poll
+		// `try_wait` without draining the pipes, so a chatty child blocked on
+		// a full pipe and died as a spurious `CliTimeout`.
+		for i in 0..3000 {
+			fs::write(
+				dir.path()
+					.join(format!("untracked-scratch-file-{i:04}.txt")),
+				"x\n",
+			)?;
+		}
+		let text = repo.status_porcelain(&StatusOptions {
+			untracked: UntrackedMode::All,
+			..Default::default()
+		})?;
+		assert_eq!(text.lines().count(), 3000);
+		Ok(())
+	}
+
+	#[test]
+	fn read_status_matches_porcelain_oracle() -> TestResult {
+		let (dir, repo) = repo()?;
+		commit(dir.path(), "rename-me", "rename\n", "initial")?;
+		fs::write(dir.path().join("staged"), "staged\n")?;
+		git(dir.path(), &["add", "staged"])?;
+		fs::write(dir.path().join("staged"), "staged\nmodified\n")?;
+		git(dir.path(), &["mv", "rename-me", "renamed"])?;
+		fs::write(dir.path().join("untracked"), "new\n")?;
+		// Intent-to-add (`git add -N`) must surface as an unstaged addition
+		// (` A`); it was previously skipped and invisible to the git TUI.
+		fs::write(dir.path().join("promised"), "promised\n")?;
+		git(dir.path(), &["add", "-N", "promised"])?;
+		// An untracked DIRECTORY must collapse to one entry (git porcelain
+		// default) — the status line summary counted 25 instead of 5 on a
+		// real repo when this used per-file emission.
+		fs::create_dir(dir.path().join("newdir"))?;
+		fs::write(dir.path().join("newdir").join("a"), "a\n")?;
+		fs::write(dir.path().join("newdir").join("b"), "b\n")?;
+		// Directories containing no files anywhere beneath them are invisible
+		// to `git status`, even when nested (regression: phantom `?? undefined/`
+		// entries for empty scaffold dirs).
+		fs::create_dir_all(dir.path().join("empty").join("nested"))?;
+		let expected = git(dir.path(), &["status", "--porcelain", "--untracked-files=normal"])?;
+		let actual = repo.status_porcelain(&StatusOptions::default())?;
+		assert_eq!(actual.as_bytes(), expected.as_bytes());
+		// The in-process gitoxide fallback (hosts without a git binary) must
+		// render the same bytes as the CLI-first public path.
+		let fallback = repo.status_porcelain_gix(&StatusOptions::default())?;
+		assert_eq!(fallback.as_bytes(), expected.as_bytes());
+		assert_eq!(repo.status_summary()?, StatusSummary {
+			staged:    2,
+			unstaged:  2,
+			untracked: 2,
+		});
+		Ok(())
+	}
+
+	#[test]
+	fn read_range_is_oldest_first_and_config_is_trimmed() -> TestResult {
+		let (dir, repo) = repo()?;
+		commit(dir.path(), "one", "one\n", "one")?;
+		let base = git(dir.path(), &["rev-parse", "HEAD"])?.trim().to_owned();
+		commit(dir.path(), "two", "two\n", "two")?;
+		let second = git(dir.path(), &["rev-parse", "HEAD"])?.trim().to_owned();
+		commit(dir.path(), "three", "three\n", "three")?;
+		let third = git(dir.path(), &["rev-parse", "HEAD"])?.trim().to_owned();
+		assert_eq!(repo.rev_list_range(&base, "HEAD")?, vec![second, third]);
+		git(dir.path(), &["config", "custom.value", "  configured  "])?;
+		assert_eq!(repo.config_get("custom.value")?, Some("configured".to_owned()));
+		assert_eq!(repo.config_get("custom.missing")?, None);
+		Ok(())
+	}
+
+	#[test]
+	fn read_objects_logs_and_refs() -> TestResult {
+		let (dir, repo) = repo()?;
+		commit(dir.path(), "one", "one\n", "first subject")?;
+		let first = repo.head_sha()?.ok_or("missing HEAD")?;
+		commit(dir.path(), "two", "two\n", "second subject")?;
+		let second = repo.head_sha()?.ok_or("missing HEAD")?;
+		git(dir.path(), &["tag", "-a", "v1.2.0", "-m", "release", "HEAD"])?;
+
+		assert_eq!(repo.resolve_ref("main")?, Some(second.clone()));
+		assert!(repo.ref_exists("refs/heads/main")?);
+		assert_eq!(repo.tags_at("HEAD")?, vec!["v1.2.0"]);
+		assert_eq!(repo.list_branches(false)?, vec!["main"]);
+		assert_eq!(repo.log_subjects(2)?, vec!["second subject", "first subject"]);
+		let expected_onelines: Vec<_> =
+			git(dir.path(), &["log", "-2", "--oneline", "--no-decorate"])?
+				.lines()
+				.map(str::to_owned)
+				.collect();
+		assert_eq!(repo.log_onelines(2)?, expected_onelines);
+		assert_eq!(repo.rev_list_touching("HEAD", "two", 10)?, vec![second.clone()]);
+		assert_eq!(repo.ls_tree("HEAD", &[])?, vec!["one", "two"]);
+		let shown = repo.show_blob("HEAD:two", Some(3))?;
+		assert_eq!(shown.bytes, b"two");
+		assert!(shown.truncated);
+		let details = repo.commit_details("HEAD")?;
+		assert_eq!(details.sha, second);
+		assert_eq!(details.parents, vec![first]);
+		assert_eq!(details.author.name, "Test User");
+		assert_eq!(details.message, "second subject");
+
+		git(dir.path(), &["remote", "add", "origin", "https://example.test/repo"])?;
+		assert_eq!(repo.remote_list()?, vec!["origin"]);
+		assert_eq!(repo.remote_url("origin")?.as_deref(), Some("https://example.test/repo"));
+		assert_eq!(repo.lfs_media_dir()?, Some(repo.info().common_dir.join("lfs").join("objects")));
+		assert_eq!(repo.head_watch_target(), repo.info().head_path);
+		Ok(())
+	}
+
+	#[test]
+	fn read_ls_files_honors_standard_excludes() -> TestResult {
+		let (dir, repo) = repo()?;
+		commit(dir.path(), "tracked", "tracked\n", "initial")?;
+		fs::write(dir.path().join(".gitignore"), "ignored\n")?;
+		fs::write(dir.path().join("ignored"), "ignored\n")?;
+		fs::write(dir.path().join("visible"), "visible\n")?;
+		let all = repo.ls_files(true, false)?;
+		let expected_all: Vec<_> = git(dir.path(), &["ls-files", "--others"])?
+			.lines()
+			.map(str::to_owned)
+			.collect();
+		assert_eq!(all, expected_all);
+		let filtered = repo.ls_files(true, true)?;
+		let expected_filtered: Vec<_> =
+			git(dir.path(), &["ls-files", "--others", "--exclude-standard"])?
+				.lines()
+				.map(str::to_owned)
+				.collect();
+		assert_eq!(filtered, expected_filtered);
+		Ok(())
+	}
+
+	#[test]
+	fn read_worktrees_and_remote_default_branch() -> TestResult {
+		let (dir, repo) = repo()?;
+		commit(dir.path(), "tracked", "tracked\n", "initial")?;
+		git(dir.path(), &["update-ref", "refs/remotes/origin/main", "HEAD"])?;
+		git(dir.path(), &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"])?;
+		assert_eq!(repo.default_branch()?, Some("main".to_owned()));
+
+		let linked = dir.path().join("linked");
+		let linked_text = linked.to_string_lossy().into_owned();
+		git(dir.path(), &["worktree", "add", "-b", "linked-branch", &linked_text])?;
+		let worktrees = repo.worktrees()?;
+		assert_eq!(worktrees.len(), 2);
+		assert_eq!(worktrees[0].path, dir.path());
+		// git records the real path, with `/` separators on Windows; compare
+		// resolved locations rather than spellings.
+		assert_eq!(worktrees[1].path.canonicalize()?, linked.canonicalize()?);
+		assert_eq!(worktrees[1].branch.as_deref(), Some("refs/heads/linked-branch"));
+		Ok(())
+	}
+}

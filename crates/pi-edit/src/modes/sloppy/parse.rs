@@ -2158,4 +2158,25 @@ pub fn operation_payload(
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn marker_lines_keep_indentation() {
+		assert_eq!(marker_line_content("  ＋value", ADD_LINE).as_deref(), Some("  value"));
+		assert!(has_marker_lines("anchor\n  －old"));
+	}
+
+	#[test]
+	fn operation_payload_restores_inline_desired_text() {
+		let operation =
+			parse_operations("«\nconst \u{27ea}old\u{2502}new\u{27eb};", "const old;\n", "a.ts")
+				.unwrap()
+				.remove(0);
+		let payload = operation_payload(&operation, "a.ts", true, None);
+		let round_trip = parse_operations(&payload, "const old;\n", "a.ts").unwrap();
+		assert_eq!(round_trip[0].rewrite, operation.rewrite);
+		assert!(round_trip[0].all);
+	}
+}

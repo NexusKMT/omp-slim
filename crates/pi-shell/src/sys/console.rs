@@ -736,4 +736,26 @@ impl Terminal for WindowsConsole {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	/// The shell's normal modes read back as they were set, and ZLE's raw
+	/// modes turn line input and echo off and virtual-terminal input on
+	/// (else arrows arrive as nothing ZLE can bind).
+	#[test]
+	fn modes_round_trip_and_raw_input_is_virtual_terminal_input() {
+		let cooked = ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT;
+		let t = termios_of(cooked, false, false);
+		assert!(t.get(TermFlag::Icanon) && t.get(TermFlag::Echo) && t.get(TermFlag::Isig));
+		assert_eq!(input_mode_of(&t, cooked), cooked);
+		let mut raw = t;
+		raw.set(TermFlag::Icanon, false);
+		raw.set(TermFlag::Echo, false);
+		let m = input_mode_of(&raw, cooked);
+		assert_eq!(m, ENABLE_PROCESSED_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT);
+		// Echo without line input is refused by the console: dropped.
+		raw.set(TermFlag::Echo, true);
+		assert_eq!(input_mode_of(&raw, cooked) & ENABLE_ECHO_INPUT, 0);
+	}
+}

@@ -175,6 +175,10 @@ impl WasmGrammar {
 		if let Some(language) = self.loaded.get() {
 			return Ok(language.clone());
 		}
+		#[cfg(test)]
+		if let Some(language) = test_stand_in(self.language) {
+			return Ok(self.loaded.get_or_init(|| language).clone());
+		}
 		let _guard = LOAD_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
 		if let Some(language) = self.loaded.get() {
 			return Ok(language.clone());
@@ -207,7 +211,18 @@ impl WasmGrammar {
 	}
 }
 
-
+/// Natively compiled grammar crates (dev-dependencies) standing in for the
+/// wasm grammars this crate's tests parse, so they run without downloads.
+#[cfg(test)]
+fn test_stand_in(language: &str) -> Option<Language> {
+	Some(match language {
+		"emacs-lisp" => tree_sitter_elisp::LANGUAGE.into(),
+		"fortran" => tree_sitter_fortran::LANGUAGE.into(),
+		"ruby" => tree_sitter_ruby::LANGUAGE.into(),
+		"swift" => tree_sitter_swift::LANGUAGE.into(),
+		_ => return None,
+	})
+}
 
 /// Parses `source` as `language`, on this thread's wasm-capable parser when
 /// `language` is a wasm grammar.
@@ -250,4 +265,115 @@ fn parse_wasm(language: &Language, source: &str, old_tree: Option<&Tree>) -> Res
 	})
 }
 
+#[cfg(all(test, feature = "wasm"))]
+mod tests {
+	use ast_grep_core::{MatchStrictness, tree_sitter::LanguageExt};
 
+	use super::*;
+	use crate::{
+		SupportLang,
+		language::wasm_grammars::INI,
+		ops,
+		summary::{SummaryOptions, summarize_code},
+	};
+
+	/// `tree-sitter-ini` 1.4.0 as built by stencil-hq/wasm-grammars.
+	const INI_WASM: &[u8] = include_bytes!("testdata/ini.wasm");
+	const SOURCE: &str = "[core]\nname = pi\nmode = fast\n";
+
+	fn summary_parsed() -> bool {
+		summarize_code(SummaryOptions {
+			code:               SOURCE.to_owned(),
+			lang:               Some("ini".to_owned()),
+			path:               None,
+			min_body_lines:     None,
+			min_comment_lines:  None,
+			unfold_until_lines: None,
+			unfold_limit_lines: None,
+		})
+		.expect("summary succeeds")
+		.parsed
+	}
+
+	#[test]
+	fn wasm_grammar_parses_once_its_module_is_installed() {
+		let dir = std::env::temp_dir().join(format!("pi-ast-grammars-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).expect("create grammar dir");
+		set_grammar_dir(dir.clone());
+
+		assert!(!INI.is_installed());
+		assert!(matches!(INI.load(), Err(GrammarError::NotInstalled { language: "ini" })));
+		assert!(!summary_parsed(), "a missing grammar summarizes like an unsupported language");
+
+		std::fs::write(dir.join(INI.file), INI_WASM).expect("install module");
+		assert!(INI.is_installed());
+		assert!(INI.load().expect("module loads").is_wasm());
+		assert!(summary_parsed());
+
+		// INI settings only parse inside a section, so the pattern brings one and
+		// selects the setting.
+		let pattern = ops::compile_pattern(
+			"[any]\nmode = fast\n",
+			Some("setting"),
+			&MatchStrictness::Smart,
+			SupportLang::Ini,
+		)
+		.expect("pattern compiles through the wasm grammar");
+		let matches: Vec<String> = SupportLang::Ini
+			.ast_grep(SOURCE)
+			.root()
+			.find_all(pattern)
+			.map(|node| node.text().into_owned())
+			.collect();
+		assert_eq!(matches, ["mode = fast\n"]);
+
+		std::fs::remove_dir_all(dir).ok();
+	}
+
+	/// Languages instantiated in this thread's wasm store, read without
+	/// replacing the store.
+	fn wasm_store_language_count() -> usize {
+		WASM_PARSER.with_borrow_mut(|slot| {
+			let parser = &mut slot.as_mut().expect("parser kept").parser;
+			let store = parser.take_wasm_store().expect("parser has a store");
+			let count = store.language_count();
+			parser.set_wasm_store(store).expect("store goes back");
+			count
+		})
+	}
+
+	#[test]
+	fn wasm_parser_retires_its_store_after_the_budget() {
+		let language = WasmStore::new(&ENGINE)
+			.expect("create store")
+			.load_language(INI.symbol, INI_WASM)
+			.expect("module loads");
+		let tree = parse(&language, SOURCE, None)
+			.expect("parse runs")
+			.expect("tree");
+		assert!(!tree.root_node().has_error());
+		assert_eq!(wasm_store_language_count(), 1);
+
+		// Mark the current store with a second instance, then exhaust its budget.
+		// The marker must stay alive: a dropped language no longer counts.
+		let _marker = WASM_PARSER.with_borrow_mut(|slot| {
+			let wasm = slot.as_mut().expect("parser kept");
+			let mut store = wasm.parser.take_wasm_store().expect("parser has a store");
+			let marker = store
+				.load_language(INI.symbol, INI_WASM)
+				.expect("module loads");
+			wasm.parser.set_wasm_store(store).expect("store goes back");
+			wasm.parsed = WASM_STORE_BYTE_BUDGET;
+			marker
+		});
+		assert_eq!(wasm_store_language_count(), 2);
+
+		let tree = parse(&language, SOURCE, None)
+			.expect("parse runs")
+			.expect("tree");
+		assert!(!tree.root_node().has_error(), "the replacement store runs the wasm grammar");
+		assert_eq!(wasm_store_language_count(), 1, "the exhausted store was dropped, not reused");
+		let parsed = WASM_PARSER.with_borrow(|slot| slot.as_ref().expect("parser kept").parsed);
+		assert_eq!(parsed, SOURCE.len());
+	}
+}

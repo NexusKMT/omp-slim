@@ -1155,4 +1155,526 @@ impl Utility for Xargs {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn make_arg_init(s: &str) -> Argument {
+		Argument { arg: s.to_owned().into(), kind: ArgumentKind::Initial }
+	}
+
+	fn make_arg_hard(s: &str) -> Argument {
+		Argument { arg: s.to_owned().into(), kind: ArgumentKind::HardTerminated }
+	}
+
+	fn make_arg_soft(s: &str) -> Argument {
+		Argument { arg: s.to_owned().into(), kind: ArgumentKind::SoftTerminated }
+	}
+
+	#[derive(Clone)]
+	struct AlwaysRejectLimiter;
+
+	impl CommandSizeLimiter for AlwaysRejectLimiter {
+		fn try_arg(
+			&mut self,
+			arg: Argument,
+			_cursor: LimiterCursor<'_>,
+		) -> Result<Argument, ExhaustedCommandSpace> {
+			Err(ExhaustedCommandSpace { arg, out_of_chars: false })
+		}
+
+		fn dyn_clone(&self) -> Box<dyn CommandSizeLimiter> {
+			Box::new(self.clone())
+		}
+	}
+
+	fn empty_cursor() -> LimiterCursor<'static> {
+		LimiterCursor { limiters: &mut [] }
+	}
+
+	enum Chunk {
+		Data(&'static [u8]),
+		Error(io::ErrorKind),
+	}
+
+	struct ChunkReader {
+		chunks:  Vec<Chunk>,
+		current: usize,
+	}
+
+	impl ChunkReader {
+		fn new(chunks: Vec<Chunk>) -> Self {
+			Self { chunks, current: 0 }
+		}
+	}
+
+	impl Read for ChunkReader {
+		fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+			if self.current >= self.chunks.len() {
+				return Ok(0);
+			}
+
+			match &mut self.chunks[self.current] {
+				Chunk::Data(data) => {
+					let byte_count = std::cmp::min(data.len(), buf.len());
+					buf[..byte_count].copy_from_slice(&(*data)[..byte_count]);
+					if byte_count == data.len() {
+						self.current += 1;
+					} else {
+						*data = &(*data)[byte_count..];
+					}
+
+					Ok(byte_count)
+				},
+				Chunk::Error(kind) => {
+					self.current += 1;
+					Err(io::Error::new(*kind, "Synthesized error"))
+				},
+			}
+		}
+	}
+
+	#[test]
+	fn test_chars_limiter() {
+		let mut limiter = MaxCharsCommandSizeLimiter::new(6);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abcd"), empty_cursor())
+				.is_err()
+		);
+		assert!(limiter.try_arg(make_arg_hard("a"), empty_cursor()).is_ok());
+	}
+
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn large_input_is_split_into_successful_external_commands() {
+		let arg_max = unsafe { libc::sysconf(libc::_SC_ARG_MAX) } as usize;
+		// String bytes alone fit, but the argv pointers force multiple batches.
+		// Use a real external executable so an oversized batch surfaces E2BIG.
+		let count = arg_max / 256;
+		let input = format!("{}\n", "x".repeat(255)).repeat(count);
+		let (code, stdout, stderr) = xargs_in(
+			&std::env::current_dir().unwrap(),
+			&["/bin/sh", "-c", "printf \"%s\\n\" \"$#\"", "sh"],
+			&input,
+		)
+		.await;
+		assert_eq!(code, 0, "{stderr}");
+		assert!(stderr.is_empty(), "{stderr}");
+		let batches: Vec<usize> = stdout.lines().map(|line| line.parse().unwrap()).collect();
+		assert!(batches.len() > 1, "input was not split into multiple commands");
+		assert_eq!(batches.iter().sum::<usize>(), count);
+		assert!(batches.iter().all(|&count| count > 0));
+	}
+
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn oversized_environment_rejects_command_without_panicking() {
+		let arg_max = unsafe { libc::sysconf(libc::_SC_ARG_MAX) } as usize;
+		// These short strings fit on their own, but their envp pointers do not.
+		let names: Vec<String> = (0..arg_max / 20).map(|i| format!("XARGS_{i:08}")).collect();
+		let exports: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), "")).collect();
+		let (code, stdout, stderr) =
+			xargs_with_env(&std::env::temp_dir(), &["/bin/echo"], "x\n", &exports).await;
+		assert_eq!(code, 1, "{stderr}");
+		assert_eq!(stdout, "");
+		assert!(
+			stderr.contains("Base command and environment are too large"),
+			"an environment that exhausts ARG_MAX must reject the base command: {stderr}"
+		);
+	}
+
+	#[test]
+	fn test_chars_limiter_asks_cursor() {
+		let mut rejects: [Box<dyn CommandSizeLimiter>; 1] = [Box::new(AlwaysRejectLimiter)];
+		let reject_cursor = LimiterCursor { limiters: &mut rejects };
+
+		let mut limiter = MaxCharsCommandSizeLimiter::new(5);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), reject_cursor)
+				.is_err()
+		);
+		// Ensure the limiter didn't update before trying the cursor.
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_ok()
+		);
+	}
+
+	#[test]
+	fn test_args_limiter() {
+		let mut limiter = MaxArgsCommandSizeLimiter::new(2);
+		// Should not count initial arguments.
+		for _ in 1..3 {
+			assert!(
+				limiter
+					.try_arg(make_arg_init("abc"), empty_cursor())
+					.is_ok()
+			);
+		}
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_err()
+		);
+	}
+
+	#[test]
+	fn test_args_limiter_asks_cursor() {
+		let mut rejects: [Box<dyn CommandSizeLimiter>; 1] = [Box::new(AlwaysRejectLimiter)];
+		let reject_cursor = LimiterCursor { limiters: &mut rejects };
+
+		let mut limiter = MaxArgsCommandSizeLimiter::new(1);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), reject_cursor)
+				.is_err()
+		);
+		// Ensure the limiter didn't update before trying the cursor.
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_ok()
+		);
+	}
+
+	#[test]
+	fn test_lines_limiter() {
+		let mut limiter = MaxLinesCommandSizeLimiter::new(2);
+		assert!(
+			limiter
+				.try_arg(make_arg_soft("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_soft("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_soft("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_soft("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_ok()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_soft("abc"), empty_cursor())
+				.is_err()
+		);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_err()
+		);
+	}
+
+	#[test]
+	fn test_lines_limiter_asks_cursor() {
+		let mut rejects: [Box<dyn CommandSizeLimiter>; 1] = [Box::new(AlwaysRejectLimiter)];
+		let reject_cursor = LimiterCursor { limiters: &mut rejects };
+
+		let mut limiter = MaxLinesCommandSizeLimiter::new(1);
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), reject_cursor)
+				.is_err()
+		);
+		// Ensure the limiter didn't update before trying the cursor.
+		assert!(
+			limiter
+				.try_arg(make_arg_hard("abc"), empty_cursor())
+				.is_ok()
+		);
+	}
+
+	#[test]
+	fn test_whitespace_delimited_reader() {
+		let mut reader = WhitespaceDelimitedArgumentReader::new(ChunkReader::new(vec![
+			Chunk::Data(b"abc "),
+			Chunk::Data(b" def"),
+			Chunk::Data(b"\nghi\t\tj"),
+			Chunk::Data(b"kl\n"),
+			Chunk::Data(b"mn"),
+			Chunk::Error(io::ErrorKind::Interrupted),
+			Chunk::Data(b"\\\t\\ o 'ab"),
+			Chunk::Data(b" \"' \"xy' z\""),
+		]));
+		let (mut host, _) = Host::for_test("xargs", "", ".");
+
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_soft("abc"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_hard("def"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_soft("ghi"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_hard("jkl"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_soft("mn\t o"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_soft("ab \""));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_soft("xy' z"));
+		assert_eq!(reader.next(&mut host).unwrap(), None);
+	}
+
+	#[test]
+	fn test_byte_delimited_reader() {
+		let mut reader = ByteDelimitedArgumentReader::new(
+			ChunkReader::new(vec![
+				Chunk::Data(b"ab"),
+				Chunk::Error(io::ErrorKind::Interrupted),
+				Chunk::Data(b"c!de!"),
+				Chunk::Data(b"!ef!!gh"),
+				Chunk::Data(b"!ij"),
+			]),
+			b'!',
+		);
+		let (mut host, _) = Host::for_test("xargs", "", ".");
+
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_hard("abc"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_hard("de"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_hard("ef"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_hard("gh"));
+		assert_eq!(reader.next(&mut host).unwrap().unwrap(), make_arg_hard("ij"));
+		assert_eq!(reader.next(&mut host).unwrap(), None);
+	}
+
+	#[test]
+	fn test_delimiter_parsing() {
+		assert_eq!(parse_delimiter("a").unwrap(), b'a');
+		assert_eq!(parse_delimiter("\\x61").unwrap(), b'a');
+		assert_eq!(parse_delimiter("\\x00061").unwrap(), b'a');
+		assert_eq!(parse_delimiter("\\0141").unwrap(), b'a');
+		assert_eq!(parse_delimiter("\\0000141").unwrap(), b'a');
+		assert_eq!(parse_delimiter("\\n").unwrap(), b'\n');
+
+		assert!(parse_delimiter("\\0").is_err());
+		assert!(parse_delimiter("\\x").is_err());
+		assert!(parse_delimiter("\\").is_err());
+		assert!(parse_delimiter("abc").is_err());
+	}
+
+	/// Runs `xargs ARGV` from `cwd`, its commands served by the test runner
+	/// (extras first, then programs on `PATH`).
+	async fn xargs_in(cwd: &std::path::Path, argv: &[&str], stdin: &str) -> (i32, String, String) {
+		xargs_with_env(cwd, argv, stdin, &[]).await
+	}
+
+	async fn xargs_with_env(
+		cwd: &std::path::Path,
+		argv: &[&str],
+		stdin: &str,
+		env: &[(&str, &str)],
+	) -> (i32, String, String) {
+		let argv: Vec<&str> = std::iter::once("xargs").chain(argv.iter().copied()).collect();
+		crate::host::run_extra(&argv, stdin, cwd, env).await
+	}
+
+	async fn run_simple(argv: &[&str], stdin: &str) -> (i32, String, String) {
+		xargs_in(&std::env::temp_dir(), argv, stdin).await
+	}
+
+	#[tokio::test]
+	async fn child_stdout_is_captured_through_host() {
+		let (code, out, err) = run_simple(&["echo"], "a b c\n").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "a b c\n");
+		assert_eq!(err, "");
+	}
+
+	#[tokio::test]
+	async fn max_args_batches_into_two_invocations() {
+		let (code, out, _) = run_simple(&["-n", "2", "echo"], "a b c\n").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "a b\nc\n");
+	}
+
+	#[tokio::test]
+	async fn default_mode_honors_quotes() {
+		let (code, out, _) = run_simple(&["sh", "-c", "echo $#", "_"], "\"a b\" c\n").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "2\n");
+	}
+
+	#[tokio::test]
+	async fn null_mode_preserves_spaces_and_newlines() {
+		let (code, out, _) = run_simple(&["-0", "echo"], "a b\0c\nd\0").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "a b c\nd\n");
+	}
+
+	#[tokio::test]
+	async fn replace_places_item_mid_command() {
+		let (code, out, _) =
+			run_simple(&["-I", "{}", "echo", "hello", "{}", "!"], "world\n").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "hello world !\n");
+	}
+
+	#[tokio::test]
+	async fn failing_child_yields_123() {
+		let (code, out, _) = run_simple(&["false"], "x\n").await;
+		assert_eq!(code, 123);
+		assert_eq!(out, "");
+	}
+
+	/// Contract: a builtin that runs and fails is a failed command (123) with
+	/// the shell's own diagnostic, not a command that could not be run (126).
+	#[tokio::test]
+	async fn failing_builtin_yields_123() {
+		let (code, _, err) = run_simple(&["cd"], "definitely-missing-dir\n").await;
+		assert_eq!(code, 123);
+		assert!(err.contains("cd:"), "got: {err:?}");
+		assert!(!err.contains("could not be run"), "got: {err:?}");
+	}
+
+	#[tokio::test]
+	async fn missing_command_yields_127() {
+		let (code, _, err) = run_simple(&["definitely-not-a-real-command-xyz"], "x\n").await;
+		assert_eq!(code, 127);
+		assert_eq!(err, "xargs: definitely-not-a-real-command-xyz: No such file or directory\n");
+	}
+
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn unexecutable_command_yields_126() {
+		let file = tempfile::NamedTempFile::new().expect("temporary command");
+		let command = file.path().to_str().expect("utf8 temporary path");
+		let (code, _, err) = run_simple(&[command], "x\n").await;
+		assert_eq!(code, 126);
+		assert!(err.contains("could not be run"), "got: {err:?}");
+	}
+
+	#[tokio::test]
+	async fn exit_255_child_yields_124() {
+		let (code, _, err) = run_simple(&["sh", "-c", "exit 255", "_"], "x\n").await;
+		assert_eq!(code, 124);
+		assert!(err.contains("255"), "got: {err:?}");
+	}
+
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn signalled_child_yields_125() {
+		let (code, _, err) = run_simple(&["sh", "-c", "kill -9 $$", "_"], "x\n").await;
+		assert_eq!(code, 125);
+		assert_eq!(err, "xargs: sh: terminated by signal 9\n");
+	}
+
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn exit_137_child_yields_123_not_signal() {
+		let (code, _, err) = run_simple(&["sh", "-c", "exit 137", "_"], "x\n").await;
+		assert_eq!(code, 123);
+		assert!(!err.contains("signal"), "got: {err:?}");
+	}
+
+	/// Contract: `-P N` runs up to N commands at once. Each command waits (up
+	/// to 5s) until all three have started, which only succeeds concurrently.
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn max_procs_runs_commands_concurrently() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		let script = "touch \"$1\"; i=0; while [ \"$(ls | wc -l)\" -lt 3 ]; do i=$((i+1)); [ $i -gt \
+		              500 ] && exit 1; sleep 0.01; done";
+		let (code, _, err) =
+			xargs_in(dir.path(), &["-n", "1", "-P", "3", "sh", "-c", script, "_"], "a b c\n").await;
+		assert_eq!(code, 0, "stderr: {err:?}");
+	}
+
+	#[tokio::test]
+	async fn no_run_if_empty_skips_command() {
+		let (code, out, err) = run_simple(&["-r", "echo"], "").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "");
+		assert_eq!(err, "");
+	}
+
+	#[tokio::test]
+	async fn empty_input_without_r_runs_default_echo_once() {
+		let (code, out, _) = run_simple(&[], "").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "\n");
+	}
+
+	#[tokio::test]
+	async fn replace_mode_skips_empty_input_without_r() {
+		let result = run_simple(&["-I", "{}", "echo", "{}"], "").await;
+		assert_eq!(result, (0, String::new(), String::new()));
+	}
+
+	#[tokio::test]
+	async fn verbose_echoes_command_line_to_stderr() {
+		let (code, out, err) = run_simple(&["-t", "echo", "a"], "b\n").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "a b\n");
+		assert_eq!(err, "echo a b\n");
+	}
+
+	#[tokio::test]
+	async fn children_run_in_host_cwd() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		let (code, _, err) =
+			xargs_in(dir.path(), &["sh", "-c", "touch \"$1\"", "_"], "made.txt\n").await;
+		assert_eq!(code, 0, "stderr: {err:?}");
+		assert!(dir.path().join("made.txt").exists());
+	}
+
+	#[tokio::test]
+	async fn children_see_host_environment() {
+		let (code, out, _) = xargs_with_env(
+			&std::env::temp_dir(),
+			&["sh", "-c", "echo \"$XVAR\"", "_"],
+			"x\n",
+			&[("XVAR", "hello")],
+		)
+		.await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "hello\n");
+	}
+
+	#[tokio::test]
+	async fn arg_file_resolves_against_host_cwd() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("items.txt"), "a b\n").expect("write items");
+		let (code, out, _) = xargs_in(dir.path(), &["-a", "items.txt", "echo"], "").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "a b\n");
+	}
+
+	#[tokio::test]
+	async fn interactive_confirmation_reads_stdin_and_prompts_stderr() {
+		let dir = tempfile::TempDir::new().expect("tempdir");
+		std::fs::write(dir.path().join("items.txt"), "a\n").expect("write items");
+		let (code, out, err) =
+			xargs_in(dir.path(), &["-a", "items.txt", "-p", "echo"], "y\n").await;
+		assert_eq!(code, 0);
+		assert_eq!(out, "a\n");
+		assert_eq!(err, "echo a ?...");
+	}
+}

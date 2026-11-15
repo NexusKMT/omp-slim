@@ -918,4 +918,28 @@ static LANG_ALIASES: phf::Map<&'static str, SupportLang> = phf_map! {
 "zig"            => SupportLang::Zig,
 };
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn infers_cuda_sources_and_headers_as_cpp() {
+		assert_eq!(SupportLang::from_path(Path::new("kernel.cu")), Some(SupportLang::Cpp));
+		assert_eq!(SupportLang::from_path(Path::new("kernel.cuh")), Some(SupportLang::Cpp));
+	}
+
+	#[test]
+	fn infers_languages_from_extensions_in_any_case() {
+		assert_eq!(SupportLang::from_path(Path::new("analysis.R")), Some(SupportLang::R));
+		assert_eq!(SupportLang::from_path(Path::new("solver.F90")), Some(SupportLang::Fortran));
+		assert_eq!(SupportLang::from_path(Path::new("MAIN.PY")), Some(SupportLang::Python));
+		assert_eq!(SupportLang::from_path(Path::new("kernel.C")), Some(SupportLang::Cpp));
+		assert_eq!(SupportLang::from_path(Path::new("kernel.c")), Some(SupportLang::C));
+	}
+
+	#[test]
+	fn resolves_cuda_language_aliases_as_cpp() {
+		assert_eq!(SupportLang::from_alias("cu"), Some(SupportLang::Cpp));
+		assert_eq!(SupportLang::from_alias("cuh"), Some(SupportLang::Cpp));
+	}
+}

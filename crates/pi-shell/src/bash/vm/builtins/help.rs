@@ -248,4 +248,44 @@ fn manpage(out: &mut Vec<u8>, e: &Entry, version: &str) {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn all() -> Vec<(&'static Entry, bool)> {
+		TABLE.iter().map(|e| (e, true)).collect()
+	}
+
+	// Goldens: bash 5.3.20 `help | sed 1,8d` with COLUMNS=80 (C and UTF-8
+	// locales differ only at truncation boundaries).
+	#[test]
+	fn listing_matches_bash_columns() {
+		let c = listing(&all(), 80, false);
+		let lines: Vec<&str> = c.lines().collect();
+		assert_eq!(
+			lines[7],
+			" ! PIPELINE                              history [-c] [-d offset] [n] or hist>"
+		);
+		assert_eq!(lines[45], " help [-dms] [pattern ...]");
+		let u = listing(&all(), 80, true);
+		assert!(u.contains(
+			" coproc [NAME] command [redirections]    source [-p path] filename [argument>\n"
+		));
+		assert!(c.contains(
+			" coproc [NAME] command [redirections]    source [-p path] filename [arguments>\n"
+		));
+		let narrow = listing(&all(), 57, true);
+		assert!(narrow.ends_with(" help [-dms] [pattern ...>\n"));
+	}
+
+	// Golden: bash 5.3.20 `help shift`.
+	#[test]
+	fn long_doc_indents_by_four() {
+		let shift = TABLE.iter().find(|e| e.name == "shift").unwrap();
+		let mut out = Vec::new();
+		long_doc(&mut out, shift, false);
+		let text = String::from_utf8(out).unwrap();
+		assert!(text.starts_with("shift: shift [n]\n    Shift positional parameters.\n    \n"));
+		assert!(text.ends_with("    Returns success unless N is negative or greater than $#.\n"));
+	}
+}

@@ -1372,4 +1372,93 @@ fn remove_extension(value: &str) -> String {
 }
 
 
+#[cfg(test)]
+mod tests {
+	use std::fs;
 
+	use tempfile::{Builder, TempDir};
+
+	use clap::Parser;
+
+	use super::{FdCli, fd_tree_options};
+	use crate::host::{Host, run_async_util};
+
+	/// Build a fresh temp directory containing a single matchable file plus a
+	/// filler file, so the walker has more than one entry to iterate. Both the
+	/// walker-level regressions below and the positive-path search test assert
+	/// against this seed.
+	fn seeded_tree(tag: &str) -> TempDir {
+		let tree = Builder::new()
+			.prefix(&format!("pi-fd-cancel-{tag}-"))
+			.tempdir()
+			.expect("temp tree should be created");
+		fs::write(tree.path().join("haystack.txt"), b"needle\n")
+			.expect("seed file should be written");
+		fs::write(tree.path().join("filler.txt"), b"filler\n")
+			.expect("filler file should be written");
+		tree
+	}
+
+	// Dropping the cursor mid-walk ends the traversal; a fresh one still sees every entry.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn dropping_the_walk_visits_nothing() {
+		let tree = seeded_tree("stream");
+		let (host, _) = Host::for_test("fd", "", tree.path());
+		host.cancel_for_test();
+		let cli = FdCli::try_parse_from(["fd", "-u"]).expect("fd args parse");
+		let (fs, opts) = (pi_walker::Fs::native(), fd_tree_options(&cli));
+		let mut walk = pi_walker::walk::Tree::new(&fs, tree.path(), &opts)
+			.await
+			.expect("tree opens");
+		assert!(walk.next().await.is_some(), "the root is reported");
+		drop(walk);
+		let mut walk = pi_walker::walk::Tree::new(&fs, tree.path(), &opts)
+			.await
+			.expect("tree opens");
+		let mut visited = 0_usize;
+		while walk.next().await.is_some() {
+			visited += 1;
+		}
+		assert_eq!(visited, 3, "root plus both seeded files");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn walk_completes_normally() {
+		let tree = seeded_tree("normal");
+		let path = tree.path().to_str().expect("utf8 path");
+		let (code, capture) = run_async_util::<FdCli>(&["haystack", path], "", tree.path()).await;
+
+		assert_eq!(code, 0);
+		assert!(
+			capture.out().contains("haystack.txt"),
+			"stdout should list the match: {:?}",
+			capture.stdout()
+		);
+		assert!(capture.err().is_empty(), "stderr should stay clean: {:?}", capture.stderr());
+	}
+
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn walks_a_symlinked_root_operand_but_not_nested_links() {
+		let tree = Builder::new().prefix("fd-root-link").tempdir().expect("tempdir");
+		fs::create_dir_all(tree.path().join("real/sub")).expect("mkdir");
+		fs::write(tree.path().join("real/a.txt"), "").expect("write");
+		std::os::unix::fs::symlink("real", tree.path().join("link")).expect("link");
+		fs::create_dir(tree.path().join("parent")).expect("mkdir");
+		std::os::unix::fs::symlink("../real", tree.path().join("parent/inner")).expect("link");
+		let list = async |args: &[&str]| {
+			let (code, capture) = run_async_util::<FdCli>(args, "", tree.path()).await;
+			let mut lines: Vec<String> = capture.out().lines().map(|line| line.trim_end_matches('/').to_owned()).collect();
+			lines.sort();
+			(code, lines)
+		};
+
+		assert_eq!(list(&[".", "link"]).await, (0, vec!["link/a.txt".to_owned(), "link/sub".to_owned()]));
+		// Links met during the walk are listed, not entered, unless -L asks.
+		assert_eq!(list(&[".", "parent"]).await, (0, vec!["parent/inner".to_owned()]));
+		assert_eq!(
+			list(&["-L", ".", "parent"]).await,
+			(0, vec!["parent/inner".to_owned(), "parent/inner/a.txt".to_owned(), "parent/inner/sub".to_owned()])
+		);
+	}
+}

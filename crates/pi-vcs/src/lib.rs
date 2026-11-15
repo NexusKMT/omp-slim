@@ -338,4 +338,161 @@ pub fn is_pure_jj(dir: &Path) -> Result<bool> {
 fn is_strict_descendant(child: &Path, ancestor: &Path) -> bool {
 	child != ancestor && child.starts_with(ancestor)
 }
+#[cfg(test)]
+mod tests {
+	use std::{fs, path::Path, process::Command};
 
+	use super::*;
+
+	// Diff oracles pass `--no-ext-diff`: a developer's `diff.external` (e.g.
+	// difftastic) would otherwise replace git's patch with its own output.
+	fn run_git(root: &Path, args: &[&str]) -> String {
+		let output = Command::new("git")
+			.current_dir(root)
+			.args(args)
+			.output()
+			.unwrap();
+		assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+		String::from_utf8(output.stdout).unwrap()
+	}
+
+	fn init_git(root: &Path) {
+		run_git(root, &["init", "-q"]);
+		run_git(root, &["config", "user.name", "VCS Test"]);
+		run_git(root, &["config", "user.email", "vcs@example.com"]);
+	}
+
+	#[test]
+	fn repo_reports_backend_capabilities() {
+		let git_dir = tempfile::tempdir().unwrap();
+		init_git(git_dir.path());
+		let git = detect(git_dir.path()).unwrap().unwrap();
+		assert!(git.supports(Feature::StagedDiff));
+		assert!(git.supports(Feature::RevDiff));
+
+		let jj_dir = tempfile::tempdir().unwrap();
+		fs::create_dir_all(jj_dir.path().join(".jj/repo")).unwrap();
+		let jj = detect(jj_dir.path()).unwrap().unwrap();
+		assert!(!jj.supports(Feature::StagedDiff));
+		assert!(!jj.supports(Feature::RevDiff));
+	}
+
+	#[test]
+	fn jj_rejects_git_only_diff_options() {
+		let temp = tempfile::tempdir().unwrap();
+		fs::create_dir_all(temp.path().join(".jj/repo")).unwrap();
+		let repo = detect(temp.path()).unwrap().unwrap();
+
+		let staged = repo
+			.diff_text(&DiffOptions { cached: true, ..DiffOptions::default() })
+			.unwrap_err();
+		assert_eq!(staged.kind(), "Unsupported");
+		assert!(matches!(staged, Error::Unsupported {
+			operation: "stagedDiff",
+			backend:   VcsKind::Jj,
+		}));
+
+		let revision = repo
+			.diff_text(&DiffOptions { base: Some("main".to_owned()), ..DiffOptions::default() })
+			.unwrap_err();
+		assert_eq!(revision.kind(), "Unsupported");
+		assert!(matches!(revision, Error::Unsupported {
+			operation: "revDiff",
+			backend:   VcsKind::Jj,
+		}));
+
+		let capped = repo
+			.diff_text(&DiffOptions { max_bytes: Some(1), ..DiffOptions::default() })
+			.unwrap_err();
+		assert_eq!(capped.kind(), "Unsupported");
+		assert!(matches!(capped, Error::Unsupported {
+			operation: "diffMaxBytes",
+			backend:   VcsKind::Jj,
+		}));
+	}
+
+	#[test]
+	fn git_uncommitted_diff_matches_head_with_staged_and_unstaged_changes() {
+		let temp = tempfile::tempdir().unwrap();
+		init_git(temp.path());
+		fs::write(temp.path().join("tracked.txt"), "base\n").unwrap();
+		run_git(temp.path(), &["add", "tracked.txt"]);
+		run_git(temp.path(), &["commit", "-q", "-m", "base"]);
+
+		fs::write(temp.path().join("tracked.txt"), "base\nunstaged\n").unwrap();
+		fs::write(temp.path().join("staged.txt"), "staged\n").unwrap();
+		run_git(temp.path(), &["add", "staged.txt"]);
+
+		let expected = run_git(temp.path(), &["diff", "--no-ext-diff", "HEAD"]);
+		let actual = detect(temp.path())
+			.unwrap()
+			.unwrap()
+			.uncommitted_diff(&[])
+			.unwrap();
+
+		assert_eq!(actual, expected);
+	}
+
+	#[test]
+	fn display_prefers_jj_on_equal_root_ties() {
+		let temp = tempfile::tempdir().unwrap();
+		init_git(temp.path());
+		fs::create_dir_all(temp.path().join(".jj/repo")).unwrap();
+		assert!(matches!(detect(temp.path()).unwrap(), Some(Repo::Git(_))));
+		assert!(matches!(detect_for_display(temp.path()).unwrap(), Some(Repo::Jj(_))));
+	}
+
+	#[test]
+	fn display_matches_detect_for_pure_and_nested_roots() {
+		// Pure git.
+		let git_dir = tempfile::tempdir().unwrap();
+		init_git(git_dir.path());
+		assert!(matches!(detect(git_dir.path()).unwrap(), Some(Repo::Git(_))));
+		assert!(matches!(detect_for_display(git_dir.path()).unwrap(), Some(Repo::Git(_))));
+
+		// Pure jj.
+		let jj_dir = tempfile::tempdir().unwrap();
+		fs::create_dir_all(jj_dir.path().join(".jj/repo")).unwrap();
+		assert!(matches!(detect(jj_dir.path()).unwrap(), Some(Repo::Jj(_))));
+		assert!(matches!(detect_for_display(jj_dir.path()).unwrap(), Some(Repo::Jj(_))));
+
+		// Nested git checkout under an outer jj workspace: the strictly
+		// deeper git root still wins in both detectors.
+		let outer = tempfile::tempdir().unwrap();
+		fs::create_dir_all(outer.path().join(".jj/repo")).unwrap();
+		let inner = outer.path().join("sub");
+		fs::create_dir_all(&inner).unwrap();
+		init_git(&inner);
+		assert!(matches!(detect(&inner).unwrap(), Some(Repo::Git(_))));
+		assert!(matches!(detect_for_display(&inner).unwrap(), Some(Repo::Git(_))));
+
+		// Jj nested inside an unrelated git checkout: the deeper root wins
+		// in both detectors.
+		let git_outer = tempfile::tempdir().unwrap();
+		init_git(git_outer.path());
+		let jj_inner = git_outer.path().join("sub");
+		fs::create_dir_all(jj_inner.join(".jj/repo")).unwrap();
+		assert!(matches!(detect(&jj_inner).unwrap(), Some(Repo::Jj(_))));
+		assert!(matches!(detect_for_display(&jj_inner).unwrap(), Some(Repo::Jj(_))));
+	}
+
+	#[test]
+	fn git_uncommitted_diff_matches_both_unborn_head_comparisons() {
+		let temp = tempfile::tempdir().unwrap();
+		init_git(temp.path());
+		fs::write(temp.path().join("new.txt"), "staged\n").unwrap();
+		run_git(temp.path(), &["add", "new.txt"]);
+		fs::write(temp.path().join("new.txt"), "staged\nunstaged\n").unwrap();
+
+		let expected = git::join_patches(&[
+			run_git(temp.path(), &["diff", "--no-ext-diff"]),
+			run_git(temp.path(), &["diff", "--no-ext-diff", "--cached"]),
+		]);
+		let actual = detect(temp.path())
+			.unwrap()
+			.unwrap()
+			.uncommitted_diff(&[])
+			.unwrap();
+		assert_eq!(actual, expected);
+	}
+}

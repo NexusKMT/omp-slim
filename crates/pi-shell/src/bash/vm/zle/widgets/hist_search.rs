@@ -761,4 +761,54 @@ pub fn vihistorysearchforward(zw: &mut Zw<'_, '_>) -> WResult {
 	vi_history_search(zw, 1)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn chars(s: &str) -> Vec<char> {
+		s.chars().collect()
+	}
+
+	#[test]
+	fn zlinecmp_orders_like_zsh() {
+		assert_eq!(zlinecmp(&chars("echo"), &chars("echo")), 0);
+		assert_eq!(zlinecmp(&chars("echo hi"), &chars("echo")), -1);
+		assert_eq!(zlinecmp(&chars("ECHO"), &chars("echo")), 1);
+		assert_eq!(zlinecmp(&chars("ECHO hi"), &chars("echo")), 2);
+		assert_eq!(zlinecmp(&chars("echo"), &chars("ECHO")), 3);
+		assert_eq!(zlinecmp(&chars("ls"), &chars("echo")), 3);
+		assert_eq!(zlinecmp(&chars(""), &chars("")), 0);
+	}
+
+	#[test]
+	fn zlinefind_both_ways() {
+		let h = chars("abcabc");
+		assert_eq!(zlinefind(&h, 0, &chars("bc"), 1, 1), Some(1));
+		assert_eq!(zlinefind(&h, 2, &chars("bc"), 1, 1), Some(4));
+		assert_eq!(zlinefind(&h, 6, &chars("bc"), -1, 1), Some(4));
+		assert_eq!(zlinefind(&h, 3, &chars("bc"), -1, 1), Some(1));
+		assert_eq!(zlinefind(&h, 0, &chars("BC"), 1, 3), None);
+		assert_eq!(zlinefind(&chars("aBC"), 0, &chars("bc"), 1, 3), Some(1));
+		assert_eq!(zlinefind(&chars("aBC"), 0, &chars("bc"), 1, 1), None);
+	}
+
+	#[test]
+	fn strtol10_reads_like_zstrtol() {
+		assert_eq!(strtol10(b" -2x"), -2);
+		assert_eq!(strtol10(b"+7"), 7);
+		assert_eq!(strtol10(b"010"), 10);
+		assert_eq!(strtol10(b"z"), 0);
+	}
+
+	#[test]
+	fn search_prefix_is_the_first_word() {
+		let mut st = SearchState::default();
+		let mut ed = Editor::new(super::super::super::Context::LineStart, 0);
+		ed.line = chars("echo hi there");
+		ed.histline = 5;
+		assert_eq!(search_prefix(&mut st, &mut ed, 5, false), chars("echo "));
+		ed.line = chars("ls");
+		assert_eq!(search_prefix(&mut st, &mut ed, 5, false), chars("ls"));
+		assert_eq!(st.histpos, 2);
+	}
+}

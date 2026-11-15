@@ -735,7 +735,13 @@ pub(crate) struct SumHead {
 }
 
 impl SumHead {
-	
+	/// Upstream sum_sizes_sqroot sizing for a basis of `len` bytes (first pass,
+	/// short strong sums). `count == -1` means the length cannot be described.
+	/// The generator sizes with [`SumHead::sized`]; this first-pass form serves tests.
+	#[cfg(test)]
+	pub(crate) fn for_len(len: i64, block_size_opt: u32, proto: Proto, xfer_sum_len: usize) -> Self {
+		Self::sized(len, block_size_opt, proto, xfer_sum_len, consts::SHORT_SUM_LENGTH as i32)
+	}
 
 	/// sum_sizes_sqroot with an explicit `csum_length` (SUM_LENGTH in the redo pass).
 	pub(crate) fn sized(
@@ -882,6 +888,471 @@ fn max_block_len(proto: Proto) -> i64 {
 	i64::from(if proto.version < 30 { consts::OLD_MAX_BLOCK_SIZE } else { consts::MAX_BLOCK_SIZE })
 }
 
+/// Deterministic data shared by the checksum and token tests: the same bytes the
+/// reference captures were made from.
+#[cfg(test)]
+pub(crate) mod capture {
+	/// Pseudo-random bytes: x = x*1103515245+12345, byte = x>>16.
+	pub(crate) fn lcg_bytes(n: usize, seed: u32) -> Vec<u8> {
+		let mut x = seed;
+		(0..n)
+			.map(|_| {
+				x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+				(x >> 16) as u8
+			})
+			.collect()
+	}
 
+	/// Compressible text built from eight words with the same generator.
+	pub(crate) fn lcg_text(n: usize, seed: u32) -> Vec<u8> {
+		const WORDS: [&[u8]; 8] =
+			[b"alpha", b"beta", b"gamma", b"delta", b"rsync", b"block", b"token", b"zlib"];
+		let mut x = seed;
+		let mut out = Vec::new();
+		while out.len() < n {
+			x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+			out.extend_from_slice(WORDS[((x >> 16) % 8) as usize]);
+			out.push(b' ');
+		}
+		out.truncate(n);
+		out
+	}
 
+	/// Basis of the token-stream capture (2228 bytes, blocks of 700).
+	pub(crate) fn token_basis() -> Vec<u8> {
+		[lcg_text(2100, 1), lcg_bytes(128, 2)].concat()
+	}
 
+	/// Source of the token-stream capture: matches of blocks 0, 1, 2 and the
+	/// 128-byte tail, with literals that reuse block-0 text in between.
+	pub(crate) fn token_source() -> Vec<u8> {
+		let basis = token_basis();
+		[
+			&basis[..1400],
+			b"LITERAL-".as_slice(),
+			&basis[100..600],
+			&basis[1400..2100],
+			&lcg_text(900, 3),
+			&basis[2100..],
+		]
+		.concat()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{
+		capture::{lcg_bytes, token_source},
+		*,
+	};
+
+	fn p33() -> Proto {
+		Proto::new(33, consts::CF_CHKSUM_SEED_FIX)
+	}
+
+	fn to_hex(b: &[u8]) -> String {
+		b.iter().map(|b| format!("{b:02x}")).collect()
+	}
+
+	/// Basis blocks of the block-sum capture: 3×700 bytes + a 128-byte remainder.
+	fn capture_blocks() -> Vec<Vec<u8>> {
+		lcg_bytes(2228, 9).chunks(700).map(<[u8]>::to_vec).collect()
+	}
+
+	/// Asserts the strong sums the reference generator sent for `capture_blocks`
+	/// (redo pass, full-length sums) with `--checksum-seed=seed`.
+	fn check_blocks(kind: CsumType, seed: i32, p: Proto, expected: [&str; 4]) {
+		let strong = Strong { kind, seed, proto: p };
+		for (block, want) in capture_blocks().iter().zip(expected) {
+			let got = strong.block(block);
+			assert_eq!(got.len(), kind.digest_len());
+			assert_eq!(to_hex(&got[..want.len() / 2]), want, "{kind:?} seed {seed}");
+		}
+	}
+
+	#[test]
+	fn checksum1_matches_reference_block_sums() {
+		let blocks = capture_blocks();
+		let want = [0x43de_f3c8, 0xf4e4_f664, 0xf007_02bb, 0xcb4a_03f4];
+		for (block, want) in blocks.iter().zip(want) {
+			assert_eq!(checksum1(block), want);
+		}
+		assert_eq!(checksum1(&[]), 0);
+		// Bytes >= 0x80 count as negative (signed char).
+		assert_eq!(checksum1(&[0xff]), 0xffff_ffff);
+		assert_eq!(checksum1(&[0x80, 0x01]), 0xff01_ff81);
+	}
+
+	#[test]
+	fn rolling_matches_recomputation_over_random_windows() {
+		let data = lcg_bytes(5000, 77);
+		for &window in &[1usize, 2, 3, 5, 64, 700, 1024] {
+			let mut roll = Rolling::new(&data[..window]);
+			assert_eq!(roll.value(), checksum1(&data[..window]));
+			for start in 1..=data.len() - window {
+				roll.roll(data[start - 1], data[start + window - 1]);
+				assert_eq!(roll.value(), checksum1(&data[start..start + window]), "w={window} s={start}");
+			}
+			// Shrink at EOF.
+			let mut start = data.len() - window;
+			while start < data.len() {
+				roll.rollout(data[start]);
+				start += 1;
+				assert_eq!(roll.value(), checksum1(&data[start..]));
+			}
+		}
+	}
+
+	#[test]
+	fn md4_matches_rfc1320_vectors() {
+		let cases: [(&[u8], &str); 5] = [
+			(b"", "31d6cfe0d16ae931b73c59d7e0c089c0"),
+			(b"abc", "a448017aaf21d8525fc10ae87aa6729d"),
+			(b"message digest", "d9130a8164549fe818874806e1c7014b"),
+			(b"abcdefghijklmnopqrstuvwxyz", "d79e1c308aa5bbcdeea8ed63df412da9"),
+			(
+				b"12345678901234567890123456789012345678901234567890123456789012345678901234567890",
+				"e33b4ddc9c38f2199c3e7b164fcc0536",
+			),
+		];
+		for (input, want) in cases {
+			let mut md = Md4::new(33);
+			md.update(input);
+			assert_eq!(to_hex(&md.finish(false)), want);
+		}
+	}
+
+	#[test]
+	fn md4_block_sums_with_appended_seed_match_reference() {
+		let want = [
+			"99fcd2ebe8f304293ee376fa108a8b68",
+			"5fac68a79a794844319fc88d1d930092",
+			"883e1fe5826e8f556edbd45a8d07a583",
+			"208036d57beee4ea661df5c140f6622f",
+		];
+		// Protocol 29 (MD4_OLD) and a negotiated "md4" at protocol 33 agree.
+		check_blocks(CsumType::Md4Old, 12345, Proto::new(29, 0), want);
+		check_blocks(CsumType::Md4, 12345, p33(), want);
+	}
+
+	#[test]
+	fn md5_seed_order_follows_seed_fix() {
+		let prepend = [
+			"16cd6a4661c7f024706ff6293aa71927",
+			"0bb3ac3299881e6865cfa13867afb966",
+			"44924c89a448b1af9877fe437f5aac68",
+			"00959c12c2042d1bd195b15b9fc4270e",
+		];
+		check_blocks(CsumType::Md5, 12345, p33(), prepend);
+		check_blocks(CsumType::Md5, 12345, Proto::new(30, consts::CF_CHKSUM_SEED_FIX), prepend);
+		// A protocol-30+ peer without CF_CHKSUM_SEED_FIX appends the seed.
+		check_blocks(CsumType::Md5, 12345, Proto::new(31, 0), [
+			"fdf3e18589f53e3ad9b0da9d85e78c6e",
+			"b4c5290f46429da2a5429e6537c9af17",
+			"3c35a6c5d8b108030187c064268345c3",
+			"e63ada5849b868259611c8bf020930b0",
+		]);
+		check_blocks(CsumType::Md5, -5, p33(), [
+			"0b642590689992228ef5e7d852fbc75e",
+			"ae1b83cf5b6cdfadf56eff92e99d1b67",
+			"5be32ad11ae2cf3b9f2f35fb8184f037",
+			"623ca9d1a05f2cab2125c600076223a2",
+		]);
+	}
+
+	#[test]
+	fn sha1_and_xxhash_block_sums_match_reference() {
+		check_blocks(CsumType::Sha1, 12345, p33(), [
+			"88d25e30b59b8087a70fc16f0aaead3b",
+			"d507756c66f4bf8aff1187cf6422c303",
+			"ee175b4e846ce1be45d314bbda05c585",
+			"d15d97ecdf375134180de0a2cb71f0ad",
+		]);
+		check_blocks(CsumType::Xxh64, 12345, p33(), [
+			"bdfe4a802e6f615d",
+			"aff68070da8d9816",
+			"b4a144ee10b97e0f",
+			"a6236604971a5222",
+		]);
+		check_blocks(CsumType::Xxh3, 12345, p33(), [
+			"c44eddb311895746",
+			"5fe7a1e08878e7f0",
+			"6459d56aa2fca6c8",
+			"97abb034aa4585d9",
+		]);
+		check_blocks(CsumType::Xxh128, 12345, p33(), [
+			"c44eddb311895746202f1620da30c4e8",
+			"5fe7a1e08878e7f0f2aa763632a58d83",
+			"6459d56aa2fca6c893500407aa6b974c",
+			"eff6d05827572ce9eb6895d8b0a65293",
+		]);
+		// Negative seeds are sign-extended into the 64-bit xxhash seed.
+		check_blocks(CsumType::Xxh64, -5, p33(), [
+			"ea9ac427b93a299b",
+			"0b76b494be688699",
+			"4480d855ba6d2882",
+			"80824c53a095e0ed",
+		]);
+		check_blocks(CsumType::Xxh128, -5, p33(), [
+			"79745ba2c7f8152893ef3a1ba920188a",
+			"d615b808200deb16c3439e52642aba5a",
+			"f9a5a3dd86f7347615a4fd8da3534767",
+			"5742b3937098993de7cabecb0267a291",
+		]);
+	}
+
+	#[test]
+	fn legacy_md4_skips_padding_for_aligned_input() {
+		let data = lcg_bytes(128, 3);
+		let busted = Strong { kind: CsumType::Md4Busted, seed: 0, proto: Proto::new(26, 0) };
+		let old = Strong { kind: CsumType::Md4Old, seed: 0, proto: Proto::new(29, 0) };
+		// 128 bytes: busted returns the raw state after two blocks, old pads.
+		let mut raw = [0x6745_2301u32, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476];
+		for chunk in data.as_chunks::<64>().0 {
+			md4_compress(&mut raw, chunk);
+		}
+		let raw: Vec<u8> = raw.iter().flat_map(|w| w.to_le_bytes()).collect();
+		assert_eq!(busted.block(&data), raw);
+		assert_ne!(old.block(&data), raw);
+		// Unaligned input is padded normally by every variant.
+		assert_eq!(busted.block(&data[..100]), old.block(&data[..100]));
+		// Empty input: busted yields the initial state.
+		assert_eq!(to_hex(&busted.block(&[])), "0123456789abcdeffedcba9876543210");
+		// A seed of 60 bytes + 4 seed bytes is aligned too.
+		let seeded = Strong { kind: CsumType::Md4Archaic, seed: 7, proto: Proto::new(20, 0) };
+		let mut expect = [0x6745_2301u32, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476];
+		let mut block = [0u8; 64];
+		block[..60].copy_from_slice(&data[..60]);
+		block[60..].copy_from_slice(&7i32.to_le_bytes());
+		md4_compress(&mut expect, &block);
+		let expect: Vec<u8> = expect.iter().flat_map(|w| w.to_le_bytes()).collect();
+		assert_eq!(seeded.block(&data[..60]), expect);
+	}
+
+	#[test]
+	fn md4_before_protocol_27_counts_only_32_bits() {
+		// The bit count only differs for inputs >= 512 MiB; check the padding block
+		// directly instead: the high word of the length field must be zero.
+		let mut short = Md4::new(26);
+		let mut full = Md4::new(27);
+		short.total = 1 << 32;
+		full.total = 1 << 32;
+		assert_ne!(short.finish(false), full.finish(false));
+	}
+
+	fn file_sum(kind: CsumType, seed: i32, p: Proto, data: &[u8]) -> String {
+		let mut digest = Strong { kind, seed, proto: p }.file();
+		for chunk in data.chunks(1000) {
+			digest.update(chunk);
+		}
+		to_hex(&digest.finish())
+	}
+
+	#[test]
+	fn transfer_file_sums_match_reference() {
+		let src = token_source();
+		let p = p33();
+		assert_eq!(file_sum(CsumType::Md4Old, 12345, Proto::new(29, 0), &src), "4ebc81d1ed4225aad279595d15eeed7a");
+		assert_eq!(file_sum(CsumType::Md5, 12345, Proto::new(30, 0), &src), "88daea5a522e3e5d07e276282f7570e6");
+		assert_eq!(file_sum(CsumType::Md4, 12345, p, &src), "bad775a36e234d3b21e6b00d8af5b17c");
+		assert_eq!(file_sum(CsumType::Sha1, 12345, p, &src), "1388d52c99e794807025b028c0e95f2eee75a1c3");
+		assert_eq!(file_sum(CsumType::Xxh64, 12345, p, &src), "0f830ce18508eb10");
+		assert_eq!(file_sum(CsumType::Xxh3, 12345, p, &src), "672b4ba4dd71ec7e");
+		assert_eq!(file_sum(CsumType::Xxh128, 12345, p, &src), "672b4ba4dd71ec7effa45ed1afba4d6e");
+		assert_eq!(file_sum(CsumType::None, 12345, p, &src), "00");
+	}
+
+	#[test]
+	fn file_checksum_matches_reference_listing() {
+		let mut big = Vec::new();
+		for i in 0..100_000u32 {
+			big.push(((i * 7 + 3) % 256) as u8);
+		}
+		let cases: [(CsumType, &[u8], &str); 10] = [
+			(CsumType::Md4, b"hello world\n", "97668ab2f29d0115bd0d1161b9bec520"),
+			(CsumType::Md4, &[0; 64], "2f6f7b10c5cadca6d5770f428c899ba7"),
+			(CsumType::Md4, &big, "f3609f9a4fc2732b996dfc6a9abf6642"),
+			(CsumType::Md5, &big, "59f08777fcd1aa2b8e0c8f892cfaae09"),
+			(CsumType::Sha1, b"hello world\n", "22596363b3de40b06f981fb85d82312e8c0ed511"),
+			(CsumType::Xxh64, b"hello world\n", "5215e13b207d6d8c"),
+			(CsumType::Xxh3, &[], "2d06800538d394c2"),
+			(CsumType::Xxh3, &big, "0c056f6fcc340974"),
+			(CsumType::Xxh128, b"hello world\n", "eefac9d87100cd1336b2e733a5484425"),
+			(CsumType::Xxh128, &big, "d9e155dd16e141d00c056f6fcc340974"),
+		];
+		for (kind, data, want) in cases {
+			let mut sum = file_checksum(kind, 999, p33(), &mut &data[..]).unwrap();
+			// The listing prints xxhash values most significant byte first.
+			if matches!(kind, CsumType::Xxh64 | CsumType::Xxh3 | CsumType::Xxh128) {
+				sum.reverse();
+			}
+			assert_eq!(to_hex(&sum), want, "{kind:?}");
+		}
+	}
+
+	#[test]
+	fn checksum_choice_parsing() {
+		assert_eq!(ChecksumChoice::parse("auto").unwrap(), ChecksumChoice::default());
+		assert_eq!(ChecksumChoice::parse("AUTO,auto").unwrap(), ChecksumChoice::default());
+		assert_eq!(
+			ChecksumChoice::parse("MD5").unwrap(),
+			ChecksumChoice { xfer: Some(CsumType::Md5), file: Some(CsumType::Md5) }
+		);
+		assert_eq!(
+			ChecksumChoice::parse("xxhash,auto").unwrap(),
+			ChecksumChoice { xfer: Some(CsumType::Xxh64), file: None }
+		);
+		assert_eq!(ChecksumChoice::parse("foo").unwrap_err(), "unknown checksum name: foo");
+		assert_eq!(ChecksumChoice::parse("foo,md5").unwrap_err(), "unknown checksum name: foo,md5");
+		assert_eq!(ChecksumChoice::parse("md5,bar").unwrap_err(), "unknown checksum name: bar");
+		assert_eq!(ChecksumChoice::parse(",md5").unwrap_err(), "unknown checksum name: ,md5");
+		assert_eq!(ChecksumChoice::parse("md5,").unwrap_err(), "unknown checksum name: ");
+		assert_eq!(ChecksumChoice::parse("").unwrap_err(), "unknown checksum name: ");
+		let (x, f) = ChecksumChoice::parse("sha1,auto").unwrap().resolve(Proto::new(29, 0));
+		assert_eq!((x, f), (CsumType::Sha1, CsumType::Md4Old));
+	}
+
+	#[test]
+	fn defaults_per_protocol() {
+		assert_eq!(CsumType::default_for(Proto::new(33, 0)), CsumType::Md5);
+		assert_eq!(CsumType::default_for(Proto::new(29, 0)), CsumType::Md4Old);
+		assert_eq!(CsumType::default_for(Proto::new(26, 0)), CsumType::Md4Busted);
+		assert_eq!(CsumType::default_for(Proto::new(20, 0)), CsumType::Md4Archaic);
+		assert_eq!(CsumType::Md4Archaic.flist_len(), 2);
+		assert_eq!(CsumType::Md4Archaic.digest_len(), 16);
+	}
+
+	#[test]
+	fn negotiation_lists_match_reference_wire() {
+		assert_eq!(checksum_list(None, false).join(" "), "xxh128 xxh3 xxh64 md5 md4 sha1");
+		assert_eq!(checksum_list(None, true).join(" "), "xxh128 xxh3 xxh64 md5 md4 sha1 none");
+		let env = Some("md5 XXHASH foo md5 none&sha1");
+		assert_eq!(checksum_list(env, false).join(" "), "md5 xxh64 none");
+		assert_eq!(checksum_list(env, true).join(" "), "sha1");
+		assert_eq!(checksum_list(Some("  \t"), false).len(), 6);
+		assert_eq!(checksum_list(Some("&md5"), false).len(), 6);
+		assert_eq!(checksum_list(Some("bogus"), false), ["INVALID"]);
+	}
+
+	#[test]
+	fn pick_prefers_our_order() {
+		let ours = checksum_list(None, false);
+		let theirs = b"xxh128 xxh3 xxh64 md5 md4 sha1 none";
+		assert_eq!(pick(&ours, theirs, false).as_deref(), Some("xxh128"));
+		assert_eq!(pick(&["md5", "xxh64", "none"], b"sha1 XXHASH md5", false).as_deref(), Some("md5"));
+		assert_eq!(pick(&["xxh64", "md5"], b"sha1 XXHASH md5", false).as_deref(), Some("xxh64"));
+		assert_eq!(pick(&["md5", "xxh64", "none"], b"sha1", true), None);
+		assert_eq!(pick(&["INVALID"], b"md5", true), None);
+		// Non-negotiating peer: the fixed string.
+		assert_eq!(pick(&ours, b"md5", false).as_deref(), Some("md5"));
+	}
+
+	#[test]
+	fn negotiation_failure_text() {
+		let err = negotiate_failure("checksum", &["md5", "xxh64", "none"], b"sha1", false, true);
+		assert_eq!(err.code, exit::RERR_UNSUPPORTED);
+		assert_eq!(err.site, Some(("compat.c", 406)));
+		assert_eq!(
+			err.message.as_deref(),
+			Some("Failed to negotiate a checksum choice.\nServer list: sha1\nClient list: md5 xxh64 none")
+		);
+		let silent = negotiate_failure("checksum", &["sha1"], b"md5", true, true);
+		assert_eq!(silent.message, None);
+		let invalid = negotiate_failure("checksum", &["INVALID"], b"md5", true, false);
+		assert_eq!(
+			invalid.message.as_deref(),
+			Some("Failed to negotiate a checksum choice.\nClient list: md5\nServer list: INVALID")
+		);
+	}
+
+	#[test]
+	fn env_validation_of_explicit_choice() {
+		assert!(checksum_env_allows(None, CsumType::Md5, CsumType::Md5));
+		assert!(checksum_env_allows(Some("xxh64&  "), CsumType::Sha1, CsumType::Sha1));
+		assert!(checksum_env_allows(Some("&md4 md5"), CsumType::Md4Old, CsumType::Md5));
+		assert!(!checksum_env_allows(Some("&md5"), CsumType::Md4Old, CsumType::Md5));
+		assert!(!checksum_env_allows(Some("md5"), CsumType::Md5, CsumType::Sha1));
+	}
+
+	#[test]
+	fn sum_sizes_follow_upstream_math() {
+		let p = p33();
+		let cases: [(i64, [i32; 4]); 9] = [
+			(0, [0, 700, 2, 0]),
+			(1, [1, 700, 2, 1]),
+			(700, [1, 700, 2, 0]),
+			(701, [2, 700, 2, 1]),
+			(490_001, [701, 700, 2, 1]),
+			(1 << 20, [1024, 1024, 2, 0]),
+			(10_000_000, [3165, 3160, 2, 1760]),
+			(4 << 30, [65536, 65536, 4, 0]),
+			(1 << 40, [8_388_608, 131_072, 6, 0]),
+		];
+		for (len, [count, blength, s2length, remainder]) in cases {
+			assert_eq!(
+				SumHead::for_len(len, 0, p, 16),
+				SumHead { count, blength, s2length, remainder },
+				"len {len}"
+			);
+		}
+		// Protocol 29 caps at OLD_MAX_BLOCK_SIZE instead.
+		assert_eq!(SumHead::for_len(1 << 40, 0, Proto::new(29, 0), 16), SumHead {
+			count: 1_048_576,
+			blength: 1_048_576,
+			s2length: 5,
+			remainder: 0,
+		});
+		assert_eq!(SumHead::for_len(1 << 20, 1000, p, 16), SumHead {
+			count: 1049,
+			blength: 1000,
+			s2length: 2,
+			remainder: 576,
+		});
+		// Redo pass: full strong sums, capped by the digest length.
+		assert_eq!(SumHead::sized(1 << 20, 0, p, 16, 16).s2length, 16);
+		assert_eq!(SumHead::sized(1 << 20, 0, p, 8, 16).s2length, 8);
+		assert_eq!(SumHead::for_len(1 << 40, 0, p, 1).s2length, 1);
+		assert_eq!(SumHead::for_len(-1, 0, p, 16).count, -1);
+		assert_eq!(SumHead::for_len(1 << 62, 0, p, 16).count, -1);
+	}
+
+	fn head_bytes(fields: [i32; 4]) -> Vec<u8> {
+		fields.iter().flat_map(|v| v.to_le_bytes()).collect()
+	}
+
+	#[test]
+	fn sum_head_round_trip() {
+		let head = SumHead { count: 3165, blength: 3160, s2length: 2, remainder: 1760 };
+		let mut buf = Vec::new();
+		head.write(&mut buf, p33()).unwrap();
+		assert_eq!(buf, head_bytes([3165, 3160, 2, 1760]));
+		assert_eq!(SumHead::read(&mut buf.as_slice(), p33(), 16).unwrap(), head);
+		assert_eq!(head.flength(), 10_000_000);
+		assert_eq!(head.block_len(3164), 1760);
+		assert_eq!(head.block_len(0), 3160);
+	}
+
+	#[test]
+	fn sum_head_validation() {
+		let read = |fields: [i32; 4], p: Proto| {
+			SumHead::read_as(&mut head_bytes(fields).as_slice(), p, 16, Role::Receiver)
+		};
+		let err = read([5, 0, 2, 0], p33()).unwrap_err();
+		assert_eq!(err.code, exit::RERR_PROTOCOL);
+		assert_eq!(err.message.as_deref(), Some("Invalid zero block length [receiver]"));
+		assert_eq!(err.site, Some(("io.c", 2266)));
+		assert!(read([0, 0, 0, 0], p33()).is_ok());
+		let msg = |fields, p| read(fields, p).unwrap_err().message.unwrap();
+		assert_eq!(msg([-1, 700, 2, 0], p33()), "Invalid checksum count -1 [receiver]");
+		assert_eq!(msg([1, 131_073, 2, 0], p33()), "Invalid block length 131073 [receiver]");
+		assert!(read([1, 131_073, 2, 0], Proto::new(29, 0)).is_ok());
+		assert_eq!(msg([1, -5, 2, 0], p33()), "Invalid block length -5 [receiver]");
+		assert_eq!(msg([1, 700, 17, 0], p33()), "Invalid checksum length 17 [receiver]");
+		assert_eq!(msg([1, 700, -1, 0], p33()), "Invalid checksum length -1 [receiver]");
+		assert_eq!(msg([1, 700, 2, 701], p33()), "Invalid remainder length 701 [receiver]");
+		assert_eq!(msg([1, 700, 2, -1], p33()), "Invalid remainder length -1 [receiver]");
+		// Truncated input is a stream error, not a panic.
+		let short = SumHead::read(&mut &head_bytes([1, 700, 2, 0])[..10], p33(), 16).unwrap_err();
+		assert_ne!(short.code, exit::RERR_OK);
+	}
+}

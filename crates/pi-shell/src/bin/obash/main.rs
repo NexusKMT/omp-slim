@@ -195,7 +195,7 @@ fn bytes(s: &OsString) -> BString {
 /// The process entry point: [`obash`]'s status, after flushing stdout (no
 /// std runtime runs at exit). A panic reports as std's runtime would:
 /// status 101.
-
+#[cfg(not(test))]
 #[unsafe(no_mangle)]
 extern "C" fn main(
 	_argc: std::ffi::c_int,

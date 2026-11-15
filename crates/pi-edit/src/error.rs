@@ -172,4 +172,58 @@ impl EditError {
 /// Convenience alias used throughout the crate.
 pub type EditResult<T> = Result<T, EditError>;
 
+#[cfg(test)]
+mod tests {
+	use std::collections::BTreeSet;
 
+	use super::*;
+
+	#[test]
+	fn kinds_lists_exactly_what_kind_returns() {
+		let rejections = [
+			Rejection::StaleTag,
+			Rejection::UnknownTag,
+			Rejection::OtherFileTag,
+			Rejection::MissingTag,
+			Rejection::HeaderOnly,
+			Rejection::UnseenLines,
+			Rejection::OutOfRange,
+			Rejection::AmbiguousBoundary,
+			Rejection::NoChange,
+			Rejection::FileNotFound,
+		];
+		// No wildcard: a new variant has to be added to `rejections` above.
+		for reason in rejections {
+			match reason {
+				Rejection::StaleTag
+				| Rejection::UnknownTag
+				| Rejection::OtherFileTag
+				| Rejection::MissingTag
+				| Rejection::HeaderOnly
+				| Rejection::UnseenLines
+				| Rejection::OutOfRange
+				| Rejection::AmbiguousBoundary
+				| Rejection::NoChange
+				| Rejection::FileNotFound => {},
+			}
+		}
+		let io = |kind| EditError::Io { path: "a".into(), source: std::io::Error::from(kind) };
+		let mut errors = vec![
+			EditError::parse("x"),
+			EditError::apply("x"),
+			EditError::InvalidUtf8 { display: "a".into(), valid_up_to: 0 },
+			EditError::matched("x"),
+			EditError::Plan("x".into()),
+			EditError::UnresolvedUrl("x".into()),
+			io(std::io::ErrorKind::NotFound),
+			io(std::io::ErrorKind::PermissionDenied),
+			EditError::Writer("x".into()),
+			EditError::InFile { path: "a".into(), source: Box::new(EditError::apply("x")) },
+		];
+		errors.extend(rejections.map(|reason| EditError::rejected(reason, "x")));
+		let returned: BTreeSet<_> = errors.iter().map(EditError::kind).collect();
+		let listed: BTreeSet<_> = EditError::KINDS.iter().copied().collect();
+		assert_eq!(listed.len(), EditError::KINDS.len());
+		assert_eq!(returned, listed);
+	}
+}

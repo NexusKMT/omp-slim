@@ -1345,4 +1345,109 @@ fn hex_float_text(v: f64, prec: Option<usize>, alt: bool) -> String {
 	format!("0x{lead}{point}{digits}p{}{}", if e < 0 { '-' } else { '+' }, e.unsigned_abs())
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::builtins::io::split_ref;
 
+	fn esc(s: &str, for_b: bool) -> (Vec<u8>, usize, bool) {
+		let mut out = Vec::new();
+		let (n, c, _) = tescape(s.as_bytes(), for_b, locale::Charset::Utf8, &mut out);
+		(out, n, c)
+	}
+
+	// Goldens: bash 5.3.20 `printf 'x\c'` keeps `\c`, `%b` stops at it;
+	// `\0nnn` takes three digits after the 0 only in `%b`.
+	#[test]
+	fn escapes_follow_tescape() {
+		assert_eq!(esc("c", false), (b"\\".to_vec(), 0, false));
+		assert_eq!(esc("c", true), (Vec::new(), 1, true));
+		assert_eq!(esc("1017", true), (b"A".to_vec(), 3, false));
+		assert_eq!(esc("0101", true), (b"A".to_vec(), 4, false));
+		assert_eq!(esc("0101", false), (b"\x08".to_vec(), 3, false));
+		assert_eq!(esc("\"", true), (b"\\".to_vec(), 0, false));
+		assert_eq!(esc("\"", false), (b"\"".to_vec(), 1, false));
+		assert_eq!(esc("x41", false), (b"A".to_vec(), 3, false));
+		assert_eq!(esc("xg", false), (b"\\".to_vec(), 0, false));
+		assert_eq!(esc("u00e9", false), ("é".as_bytes().to_vec(), 5, false));
+	}
+
+	// Goldens: bash 5.3.20 `printf '%q %q %q %q %q %#q' '~a' 'a=~b' 'a:~' '#x'
+	// 'x#' 'a b'`, `printf '%q' $'B\315' é` in C and UTF-8 locales.
+	#[test]
+	fn quoting_matches_bash() {
+		let q = |s: &[u8], alt, utf8| String::from_utf8_lossy(&quote(s, alt, utf8)).into_owned();
+		assert_eq!(q(b"~a", false, true), "\\~a");
+		assert_eq!(q(b"a=~b", false, true), "a=\\~b");
+		assert_eq!(q(b"a:~", false, true), "a:\\~");
+		assert_eq!(q(b"#x", false, true), "\\#x");
+		assert_eq!(q(b"x#", false, true), "x#");
+		assert_eq!(q(b"a b", true, true), "'a b'");
+		assert_eq!(q(b"no-quotes-needed", false, true), "no-quotes-needed");
+		assert_eq!(q(b"quotes;needed", false, true), "quotes\\;needed");
+		assert_eq!(q(b"B\xcd", false, true), "$'B\\315'");
+		assert_eq!(q("é".as_bytes(), false, true), "é");
+		assert_eq!(q("é".as_bytes(), false, false), "$'\\303\\251'");
+		assert_eq!(q(b"a\x80", false, true), "$'a\\200'");
+		assert_eq!(q(b"", false, true), "''");
+	}
+
+	#[test]
+	fn integers_parse_like_strtoimax() {
+		assert_eq!(strtonum(b" 12").signed(), (12, false));
+		assert_eq!(strtonum(b"0x10").signed(), (16, false));
+		assert_eq!(strtonum(b"010").signed(), (8, false));
+		assert_eq!(strtonum(b"0x").end, 1);
+		assert_eq!(strtonum(b"9223372036854775825").signed(), (i64::MAX, true));
+		assert_eq!(strtonum(b"-9223372036854775815").signed(), (i64::MIN, true));
+		assert_eq!(strtonum(b"-1").unsigned(), (u64::MAX, false));
+		assert_eq!(strtonum(b"+").end, 0);
+	}
+
+	#[test]
+	fn floats_parse_like_strtod() {
+		assert_eq!(strtod(b"1.5x"), (1.5, 3, false));
+		assert_eq!(strtod(b"1e3"), (1000.0, 3, false));
+		assert_eq!(strtod(b"1e"), (1.0, 1, false));
+		assert_eq!(strtod(b"0x1.8p1"), (3.0, 7, false));
+		assert!(strtod(b"-inf").0.is_infinite());
+		assert!(strtod(b"1e-320").2);
+		assert_eq!(strtod(b"abc").1, 0);
+	}
+
+	// Goldens: bash 5.3.20 on macOS `printf '%e %g %G %#g %05.1f %-8.3e| %.0e
+	// %#.0f %a %A %.2a %10.1a %a'`.
+	#[test]
+	fn float_conversions_match_c() {
+		assert_eq!(float(0.0, b'e', false, None), "0.000000e+00");
+		assert_eq!(float(1e100, b'g', false, None), "1e+100");
+		assert_eq!(float(1e-10, b'G', false, None), "1E-10");
+		assert_eq!(float(1.0, b'g', true, None), "1.00000");
+		assert_eq!(float(2.345, b'f', false, Some(1)), "2.3");
+		assert_eq!(float(12345.678, b'e', false, Some(3)), "1.235e+04");
+		assert_eq!(float(5.0, b'e', false, Some(0)), "5e+00");
+		assert_eq!(float(3.0, b'f', true, Some(0)), "3.");
+		assert_eq!(float(1.0, b'a', false, None), "0x1p+0");
+		assert_eq!(float(255.0, b'A', false, None), "0X1.FEP+7");
+		assert_eq!(float(1.0, b'a', false, Some(2)), "0x1.00p+0");
+		assert_eq!(float(3.3, b'a', false, Some(1)), "0x1.ap+1");
+		assert_eq!(float(0.1, b'a', false, None), "0x1.999999999999ap-4");
+		assert_eq!(float(1e-320, b'a', false, None), "0x1.fap-1064");
+		assert_eq!(float(f64::INFINITY, b'f', false, None), "inf");
+		assert_eq!(float(f64::NAN, b'F', false, None), "NAN");
+	}
+
+	#[test]
+	fn references_split_into_name_and_subscript() {
+		assert_eq!(split_ref(b"a"), Some((&b"a"[..], None)));
+		assert_eq!(split_ref(b"a[1]"), Some((&b"a"[..], Some(&b"1"[..]))));
+		assert_eq!(split_ref(b"invalid-var"), None);
+		assert_eq!(split_ref(b"a[]"), None);
+	}
+
+	#[test]
+	fn time_formats_nest_parentheses() {
+		assert_eq!(time_format(b"%x (foo) %X)T rest"), Ok((&b"%x (foo) %X"[..], 13)));
+		assert_eq!(time_format(b"abde)Z"), Err(b'Z'));
+	}
+}

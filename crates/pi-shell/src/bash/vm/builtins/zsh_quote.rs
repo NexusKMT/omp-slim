@@ -276,4 +276,36 @@ pub fn quotestring_backslash(s: &[u8], shownull: bool, o: QuoteOpts) -> Vec<u8> 
 	out
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn quotestring_backslash_matches_zsh_printf_q() {
+		let o = QuoteOpts::default();
+		assert_eq!(quotestring_backslash(b"", true, o), b"''");
+		assert_eq!(quotestring_backslash(b"a b", true, o), b"a\\ b");
+		assert_eq!(quotestring_backslash(b"a\nb", true, o), b"a$'\\n'b");
+		assert_eq!(quotestring_backslash(b"~x", true, o), b"\\~x");
+		assert_eq!(quotestring_backslash(b"a=b", true, o), b"a=b");
+		assert_eq!(quotestring_backslash(b"a#", true, o), b"a\\#");
+		assert_eq!(quotestring_backslash(b"\x7f", true, o), b"$'\\177'");
+	}
+
+	#[test]
+	fn quotedzputs_forms() {
+		let cs = Charset::default();
+		assert_eq!(quotedzputs(b"", false, cs), b"''");
+		assert_eq!(quotedzputs(b"plain", false, cs), b"plain");
+		assert_eq!(quotedzputs(b"a b", false, cs), b"'a b'");
+		assert_eq!(quotedzputs(b"it's", false, cs), b"'it'\\''s'");
+		assert_eq!(quotedzputs(b"l\0o", false, cs), b"$'l\\C-@o'");
+		let cs = Charset { bang: b'!', bang_special: true, ..cs };
+		assert_eq!(quotedzputs(b"!", false, cs), b"'!'");
+		assert_eq!(quotedzputs(b"x!y", false, cs), b"'x!y'");
+		assert_eq!(quotedzputs(b"!", false, Charset { bang_special: false, ..cs }), b"!");
+		let cs = Charset { bang: b'^', ..cs };
+		assert_eq!(quotedzputs(b"!", false, cs), b"!");
+		assert_eq!(quotedzputs(b"x^y", false, cs), b"'x^y'");
+	}
+}

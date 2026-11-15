@@ -458,4 +458,178 @@ fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> std::io::Result<()> {
 	std::fs::File::open(path)?.set_modified(mtime)
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		fs,
+		path::{Path, PathBuf},
+		sync::atomic::{AtomicU64, Ordering},
+		time::{SystemTime, UNIX_EPOCH},
+	};
 
+	use super::*;
+
+	/// The non-git `start` path mirrors file and directory mtimes, including
+	/// on readonly files, so the mtime-skipping diff stays fast.
+	#[cfg(unix)]
+	#[test]
+	fn rcopy_preserves_file_and_dir_mtimes() {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let root = TempDirGuard::new();
+		let lower = root.path().join("lower");
+		let sub = lower.join("sub");
+		fs::create_dir_all(&sub).expect("create lower/sub");
+		let file = sub.join("file.txt");
+		fs::write(&file, b"hello").expect("write lower file");
+		let file_mtime = UNIX_EPOCH + std::time::Duration::new(1_000_000_000, 123_456_789);
+		let dir_mtime = UNIX_EPOCH + std::time::Duration::new(1_100_000_000, 0);
+		fs::File::open(&file)
+			.and_then(|f| f.set_modified(file_mtime))
+			.expect("set file mtime");
+		fs::set_permissions(&file, fs::Permissions::from_mode(0o444)).expect("make file readonly");
+		fs::File::open(&sub)
+			.and_then(|d| d.set_modified(dir_mtime))
+			.expect("set dir mtime");
+
+		let merged = root.path().join("merged");
+		RcopyBackend.start(&lower, &merged).expect("rcopy start");
+
+		let mtime = |path: &Path| {
+			fs::metadata(path)
+				.and_then(|m| m.modified())
+				.expect("mtime")
+		};
+		assert_eq!(mtime(&merged.join("sub/file.txt")), file_mtime);
+		assert_eq!(mtime(&merged.join("sub")), dir_mtime);
+	}
+
+	/// A directory symlink must be recreated as a directory link; Windows
+	/// cannot traverse a file link that points at a directory.
+	#[cfg(windows)]
+	#[test]
+	fn rcopy_recreates_directory_symlink_as_directory_link() {
+		use std::os::windows::fs::FileTypeExt as _;
+
+		let root = TempDirGuard::new();
+		let lower = root.path().join("lower");
+		fs::create_dir_all(lower.join("target")).expect("create lower/target");
+		fs::write(lower.join("target/inner.txt"), b"inner").expect("write inner file");
+		if let Err(err) = std::os::windows::fs::symlink_dir("target", lower.join("link")) {
+			// Creating symlinks needs Developer Mode or the symlink privilege.
+			eprintln!("skipping: cannot create directory symlink: {err}");
+			return;
+		}
+
+		let merged = root.path().join("merged");
+		RcopyBackend.start(&lower, &merged).expect("rcopy start");
+
+		let link = merged.join("link");
+		let file_type = fs::symlink_metadata(&link)
+			.expect("link metadata")
+			.file_type();
+		assert!(file_type.is_symlink_dir(), "expected a directory link, got {file_type:?}");
+		assert_eq!(fs::read(link.join("inner.txt")).expect("read through link"), b"inner");
+	}
+
+	struct TempDirGuard(PathBuf);
+
+	impl TempDirGuard {
+		fn new() -> Self {
+			static COUNTER: AtomicU64 = AtomicU64::new(0);
+			let nanos = SystemTime::now()
+				.duration_since(UNIX_EPOCH)
+				.expect("system time should be after epoch")
+				.as_nanos();
+			let dir = std::env::temp_dir().join(format!(
+				"pi-iso-rcopy-test-{}-{nanos}-{}",
+				std::process::id(),
+				COUNTER.fetch_add(1, Ordering::Relaxed)
+			));
+			fs::create_dir_all(&dir).expect("create temp test directory");
+			Self(dir)
+		}
+
+		fn path(&self) -> &Path {
+			&self.0
+		}
+	}
+
+	impl Drop for TempDirGuard {
+		fn drop(&mut self) {
+			let _ = fs::remove_dir_all(&self.0);
+		}
+	}
+
+	/// An executable stub standing in for `git`.
+	#[cfg(unix)]
+	fn stub(root: &TempDirGuard, script: &str) -> PathBuf {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let path = root.path().join("git");
+		fs::write(&path, format!("#!/bin/sh\n{script}\n")).expect("write stub git");
+		fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("make stub executable");
+		path
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn run_program_drains_stderr_while_writing_stdin() {
+		let root = TempDirGuard::new();
+		let git = stub(
+			&root,
+			"printf 'simulated apply failure\\n' >&2\nyes x | head -c 4194304 >&2\ncat \
+			 >/dev/null\nexit 42",
+		);
+
+		let patch = Arc::new(vec![b'p'; 4 * 1024 * 1024]);
+		let output = run_program(&git, root.path(), &["apply"], Some(patch), GIT_LIMITS)
+			.expect("stub consumes stdin and exits");
+		let err = checked("git apply", output).expect_err("exit 42 is a failure");
+		assert!(
+			err.to_string()
+				.starts_with("git apply (exit 42): simulated apply failure")
+		);
+	}
+
+	/// A `git` that never exits is killed at the deadline instead of blocking
+	/// isolation setup forever (#17901).
+	#[cfg(unix)]
+	#[test]
+	fn run_program_kills_a_child_that_never_exits() {
+		let root = TempDirGuard::new();
+		let git = stub(&root, "exec sleep 30");
+		let limits = Limits { exit: Duration::from_millis(200), drain: Duration::from_secs(5) };
+
+		let started = Instant::now();
+		let err = run_program(&git, root.path(), &["worktree", "add"], None, limits)
+			.expect_err("stalled child must fail");
+		assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
+		assert!(err.to_string().contains("did not exit within 200ms"), "{err}");
+	}
+
+	/// Output pipes that another process still holds after `git` exits must not
+	/// keep the caller waiting for EOF (#17901).
+	#[cfg(unix)]
+	#[test]
+	fn run_program_returns_when_pipes_outlive_the_child() {
+		let root = TempDirGuard::new();
+		let pid_file = root.path().join("holder.pid");
+		let git = stub(
+			&root,
+			&format!("printf out\nsleep 30 &\necho $! > '{}'\nexit 0", pid_file.display()),
+		);
+		let limits = Limits { exit: Duration::from_secs(10), drain: Duration::from_millis(200) };
+
+		let started = Instant::now();
+		let result = run_program(&git, root.path(), &["worktree", "add"], None, limits);
+		let elapsed = started.elapsed();
+		if let Ok(pid) = fs::read_to_string(&pid_file) {
+			let _ = Command::new("kill").arg(pid.trim()).status();
+		}
+		let output = result.expect("child exited 0");
+		assert!(elapsed < Duration::from_secs(10), "took {elapsed:?}");
+		assert!(output.status.success());
+		assert_eq!(output.stdout, b"out");
+	}
+}

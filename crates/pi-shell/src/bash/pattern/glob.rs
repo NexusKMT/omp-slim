@@ -132,4 +132,37 @@ fn extglob_skipname(pat: &[u8], name: &[u8], opts: SkipOpts) -> bool {
 	true
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn pattern_detection_matches_glob_pattern_p() {
+		assert!(glob_pattern_p(b"*.c"));
+		assert!(!glob_pattern_p(b"\\*.c"));
+		assert!(glob_pattern_p(b"a[bc]"));
+		assert!(!glob_pattern_p(b"a["));
+		assert!(glob_pattern_p(b"@(a|b)"));
+		assert!(!glob_pattern_p(b"a\\"), "a trailing backslash makes it literal");
+	}
+
+	#[test]
+	fn dirscan_skips_slashes_inside_extglob_groups() {
+		assert_eq!(dirscan(b"a/b/c"), Some(3));
+		assert_eq!(dirscan(b"a/@(b/c)"), Some(1));
+		assert_eq!(dirscan(b"abc"), None);
+	}
+
+	#[test]
+	fn leading_dots_need_an_explicit_dot() {
+		let def = SkipOpts { dotglob: false, skipdots: true };
+		assert!(skipname(b"*", b".a", def));
+		assert!(!skipname(b".*", b".a", def));
+		assert!(skipname(b".*", b"..", def), "globskipdots");
+		let dot = SkipOpts { dotglob: true, skipdots: false };
+		assert!(!skipname(b"*", b".a", dot));
+		assert!(skipname(b"*", b"..", dot));
+		assert!(!skipname(b"@(.foo|*)", b".foo", def));
+		assert!(skipname(b"@(foo|*)", b".foo", def));
+	}
+}

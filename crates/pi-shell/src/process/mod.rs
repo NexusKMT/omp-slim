@@ -911,4 +911,51 @@ pub fn wait_runnable(parker: &mut Parker, shell: &Shell, root: Vpid) {
 	}
 }
 
+#[cfg(all(test, windows))]
+mod tests {
+	use super::*;
 
+	/// A zsh on `PATH` (an MSYS2 or Git for Windows `…\usr\bin`) lends its
+	/// function library: `fpath` lists its site and library directories,
+	/// spelled with `/`, ahead of the default install directories.
+	#[test]
+	fn fpath_comes_from_the_zsh_on_path() {
+		let root = tempfile::tempdir().expect("zsh install fixture");
+		let lib = root.path().join("usr/share/zsh/5.9/functions");
+		std::fs::create_dir_all(lib.join("Completion/Unix")).expect("library");
+		std::fs::write(lib.join("Completion/Unix/_ls"), "").expect("function");
+		std::fs::write(lib.join("compinit"), "").expect("function");
+		std::fs::write(lib.join("Completion/Unix.zwc"), "").expect("digest");
+		std::fs::create_dir_all(root.path().join("usr/share/zsh/site-functions")).expect("site");
+		let r = root.path().to_string_lossy().replace('\\', "/");
+		let path = format!("C:\\Windows;{}\\usr\\bin\\", root.path().display());
+		let env = [(BString::from("PATH"), BString::from(path))];
+		let want: Vec<BString> = [
+			"/usr/local/share/zsh/site-functions",
+			"/usr/share/zsh/site-functions",
+			"/usr/share/zsh/5.9/functions",
+			"/usr/share/zsh/5.9/functions/Completion/Unix",
+		]
+		.into_iter()
+		.map(|d| BString::from(format!("{r}{d}")))
+		.collect();
+		assert_eq!(system_fpath(&env), Some(want));
+	}
+
+	/// Windows spells the search path `Path`; imported verbatim, zsh saw no
+	/// `PATH`, fell back to `/bin:/usr/bin:…` and found no program by name.
+	#[test]
+	fn windows_path_is_imported_as_path() {
+		let env = [("Path", "C:\\Windows;C:\\tools"), ("Other", "x")]
+			.map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)));
+		let out = windows_environment(env.into_iter());
+		let path = out
+			.iter()
+			.find(|(k, _)| k == "PATH")
+			.map(|(_, v)| v.to_string())
+			.expect("PATH imported");
+		assert!(path.starts_with("C:\\Windows;C:\\tools"), "{path}");
+		assert!(!out.iter().any(|(k, _)| k == "Path"));
+		assert!(out.iter().any(|(k, v)| k == "Other" && v == "x"));
+	}
+}

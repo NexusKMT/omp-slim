@@ -659,4 +659,272 @@ fn effective_command(scheme: &str) -> Result<OsString> {
 	Ok(OsString::from_wide(&output[..end]))
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		collections::BTreeMap,
+		fs,
+		sync::atomic::{AtomicU64, Ordering},
+		time::{SystemTime, UNIX_EPOCH},
+	};
 
+	use super::*;
+	use crate::task::CancelToken;
+
+	static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+	struct DisposableScheme {
+		scheme:    String,
+		directory: std::path::PathBuf,
+	}
+
+	impl DisposableScheme {
+		fn new() -> (Self, Context) {
+			let unique = format!(
+				"{}-{}-{}",
+				std::process::id(),
+				SystemTime::now()
+					.duration_since(UNIX_EPOCH)
+					.unwrap()
+					.as_nanos(),
+				TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+			);
+			let scheme = format!("omp-oauth-test-{unique}");
+			let directory = std::env::temp_dir().join(format!("omp oauth callback {unique}"));
+			fs::create_dir_all(&directory).unwrap();
+			let context = Context::new(
+				directory.clone(),
+				directory.clone(),
+				scheme.clone(),
+				"0123456789abcdef0123456789abcdef".to_owned(),
+				BTreeMap::new(),
+				CancelToken::default(),
+			);
+			fs::copy(std::env::current_exe().unwrap(), &context.helper_path).unwrap();
+			(Self { scheme, directory }, context)
+		}
+	}
+
+	impl Drop for DisposableScheme {
+		fn drop(&mut self) {
+			let _ = HKCU.delete_subkey_all(format!("Software\\Classes\\{}", self.scheme));
+			let _ = fs::remove_dir_all(&self.directory);
+		}
+	}
+
+	fn untouched_snapshot(context: &Context) -> Snapshot {
+		let layout = Layout::new(&context.scheme);
+		Snapshot {
+			version:   SNAPSHOT_VERSION,
+			scheme:    context.scheme.clone(),
+			root_path: layout.root,
+			id:        context.id.clone(),
+			keys:      layout
+				.paths
+				.into_iter()
+				.map(|path| KeySnapshot { path, present: false })
+				.collect(),
+			values:    layout
+				.values
+				.into_iter()
+				.map(|(path, name)| ValueSnapshot { path, name, value: None })
+				.collect(),
+		}
+	}
+
+	#[test]
+	fn command_quotes_native_paths_and_url_as_data() {
+		let helper = Path::new(r#"C:\Program Files\omp\callback "helper".exe"#);
+		let callback = Path::new(r"C:\OAuth callbacks\pending\");
+		let command = relay_command(helper, callback).unwrap();
+		assert_eq!(
+			command,
+			OsString::from(
+				r#""C:\Program Files\omp\callback \"helper\".exe" "C:\OAuth callbacks\pending\\" "%1""#
+			)
+		);
+	}
+
+	#[test]
+	fn command_rewrites_canonicalized_verbatim_paths_the_shell_cannot_launch() {
+		let command = relay_command(
+			Path::new(r"\\?\C:\Users\dev\.omp\oauth\callback-helper.exe"),
+			Path::new(r"\\?\C:\Users\dev\.omp\oauth\callback.url"),
+		)
+		.unwrap();
+		assert_eq!(
+			command,
+			OsString::from(
+				r#""C:\Users\dev\.omp\oauth\callback-helper.exe" "C:\Users\dev\.omp\oauth\callback.url" "%1""#
+			)
+		);
+	}
+
+	#[test]
+	fn command_rewrites_verbatim_unc_paths_to_their_shell_form() {
+		let command = relay_command(
+			Path::new(r"\\?\UNC\files\home\dev\callback-helper.exe"),
+			Path::new(r"\\?\UNC\files\home\dev\callback.url"),
+		)
+		.unwrap();
+		assert_eq!(
+			command,
+			OsString::from(
+				r#""\\files\home\dev\callback-helper.exe" "\\files\home\dev\callback.url" "%1""#
+			)
+		);
+	}
+
+	#[test]
+	fn command_refuses_volume_paths_instead_of_registering_a_dead_handler() {
+		let error = relay_command(
+			Path::new(r"\\?\Volume{d0e5f6a7-0000-0000-0000-000000000000}\callback-helper.exe"),
+			Path::new(r"\\?\Volume{d0e5f6a7-0000-0000-0000-000000000000}\callback.url"),
+		)
+		.unwrap_err()
+		.to_string();
+		assert!(error.contains("cannot launch"), "{error}");
+	}
+
+	#[test]
+	fn command_preserves_non_utf8_windows_path_units() {
+		let helper = std::path::PathBuf::from(OsString::from_wide(&[
+			b'C' as u16,
+			b':' as u16,
+			b'\\' as u16,
+			0xd800,
+			b'.' as u16,
+			b'e' as u16,
+			b'x' as u16,
+			b'e' as u16,
+		]));
+		let command = relay_command(&helper, Path::new(r"C:\callback.url")).unwrap();
+		assert!(command.encode_wide().any(|unit| unit == 0xd800));
+	}
+
+	#[test]
+	fn snapshot_validation_rejects_other_registry_paths_and_nonces() {
+		let (_guard, context) = DisposableScheme::new();
+		let mut snapshot = untouched_snapshot(&context);
+		snapshot.values[0].path = "Software\\Classes\\another-scheme".to_owned();
+		assert!(validate_snapshot(&context, &snapshot).is_err());
+		snapshot.values[0].path = snapshot.root_path.clone();
+		snapshot.id = "ffffffffffffffffffffffffffffffff".to_owned();
+		assert!(validate_snapshot(&context, &snapshot).is_err());
+	}
+
+	#[test]
+	fn registration_restores_raw_values_and_keeps_unrelated_values() {
+		let (_guard, context) = DisposableScheme::new();
+		let layout = Layout::new(&context.scheme);
+		let prior =
+			RawValue { value_type: REG_BINARY.clone() as u32, bytes: vec![0, 0xff, 7, 3] };
+		write_value(&layout.root, DEFAULT_VALUE, &prior).unwrap();
+		let unrelated = reg_sz(OsStr::new("leave me"));
+		write_value(&layout.root, "Unrelated", &unrelated).unwrap();
+
+		let snapshot = prepare(&context).unwrap();
+		activate(&context, &snapshot).unwrap();
+		restore(&context, &snapshot).unwrap();
+
+		assert_eq!(read_value(&layout.root, DEFAULT_VALUE).unwrap(), Some(prior));
+		assert_eq!(read_value(&layout.root, "Unrelated").unwrap(), Some(unrelated));
+		assert_eq!(read_value(&layout.root, "URL Protocol").unwrap(), None);
+		assert_eq!(read_value(&layout.root, MARKER_NAME).unwrap(), None);
+	}
+
+	#[test]
+	fn recovery_preserves_external_command_and_retains_ownership_marker() {
+		let (_guard, context) = DisposableScheme::new();
+		let layout = Layout::new(&context.scheme);
+		let snapshot = prepare(&context).unwrap();
+		activate(&context, &snapshot).unwrap();
+		let external = reg_sz(OsStr::new(r#""C:\Other App\other.exe" "%1""#));
+		write_value(&layout.paths[3], DEFAULT_VALUE, &external).unwrap();
+
+		let error = restore(&context, &snapshot).unwrap_err().to_string();
+		assert!(error.contains("externally changed"));
+		assert_eq!(read_value(&layout.paths[3], DEFAULT_VALUE).unwrap(), Some(external));
+		assert_eq!(read_value(&layout.root, MARKER_NAME).unwrap(), Some(marker_value(&context.id)));
+	}
+
+	#[test]
+	fn recovery_accepts_legacy_verbatim_commands_written_before_the_shell_fix() {
+		let (_guard, context) = DisposableScheme::new();
+		// Pre-#11907 binaries saw canonicalized (`\\?\`) paths and registered
+		// them as-is; rebuild the same transaction in verbatim form so the
+		// legacy encoding diverges from the normalized one.
+		let verbatim = Context::new(
+			context.home,
+			PathBuf::from(format!(r"\\?\{}", context.directory.display())),
+			context.scheme,
+			context.id,
+			BTreeMap::new(),
+			CancelToken::default(),
+		);
+		let snapshot = prepare(&verbatim).unwrap();
+		let legacy = legacy_relay_command(&verbatim.helper_path, &verbatim.callback_path).unwrap();
+		let normalized = relay_command(&verbatim.helper_path, &verbatim.callback_path).unwrap();
+		assert_ne!(legacy, normalized, "test requires paths that normalize");
+		// Simulate the older binary's activation: the registry holds the legacy
+		// command plus this transaction's marker.
+		for (entry, desired) in snapshot
+			.values
+			.iter()
+			.zip(owned_values(&verbatim, &legacy).iter())
+		{
+			write_value(&entry.path, &entry.name, desired).unwrap();
+		}
+		// The new binary must recognize the legacy command as owned and roll the
+		// transaction back instead of retaining the journal as conflicted.
+		restore(&verbatim, &snapshot).unwrap();
+		for entry in &snapshot.values {
+			assert_eq!(read_value(&entry.path, &entry.name).unwrap(), entry.value);
+		}
+	}
+
+	#[test]
+	fn recovery_falls_back_to_legacy_commands_for_volume_paths_the_shell_refuses() {
+		let (_guard, context) = DisposableScheme::new();
+		// Volume/device paths predate the shell fix too, but the normalized form
+		// refuses them while the legacy encoding still succeeds. Recovery must
+		// fall back to the legacy command instead of retaining the journal.
+		let verbatim = Context::new(
+			context.home,
+			PathBuf::from(r"\\?\Volume{d0e5f6a7-0000-0000-0000-000000000000}\omp-oauth-test"),
+			context.scheme,
+			context.id,
+			BTreeMap::new(),
+			CancelToken::default(),
+		);
+		assert!(
+			relay_command(&verbatim.helper_path, &verbatim.callback_path).is_err(),
+			"test requires a path the shell refuses"
+		);
+		let legacy = legacy_relay_command(&verbatim.helper_path, &verbatim.callback_path).unwrap();
+		let snapshot = prepare(&verbatim).unwrap();
+		for (entry, desired) in snapshot
+			.values
+			.iter()
+			.zip(owned_values(&verbatim, &legacy).iter())
+		{
+			write_value(&entry.path, &entry.name, desired).unwrap();
+		}
+		restore(&verbatim, &snapshot).unwrap();
+		for entry in &snapshot.values {
+			assert_eq!(read_value(&entry.path, &entry.name).unwrap(), entry.value);
+		}
+	}
+
+	#[test]
+	fn recovery_rolls_back_an_activation_that_only_installed_its_nonce() {
+		let (_guard, context) = DisposableScheme::new();
+		let layout = Layout::new(&context.scheme);
+		let snapshot = prepare(&context).unwrap();
+		write_value(&layout.root, MARKER_NAME, &marker_value(&context.id)).unwrap();
+
+		restore(&context, &snapshot).unwrap();
+
+		assert!(!key_exists(&layout.root).unwrap());
+	}
+}

@@ -631,4 +631,45 @@ impl ModeEngine for ApplyPatchEngine {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn parses_heredoc_wrapper() {
+		let parsed = parse_apply_patch(
+			"<<'EOF'\n*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch\nEOF",
+		)
+		.unwrap();
+		assert_eq!(parsed, vec![ApplyPatchEntry {
+			path:   "a.txt".into(),
+			op:     Operation::Create,
+			rename: None,
+			diff:   Some("hello\n".into()),
+		}]);
+	}
+
+	#[test]
+	fn requires_envelope_markers() {
+		assert_eq!(
+			parse_apply_patch("*** Add File: a")
+				.unwrap_err()
+				.to_string(),
+			"The first line of the patch must be '*** Begin Patch'"
+		);
+		assert_eq!(
+			parse_apply_patch("*** Begin Patch\n*** Add File: a\n+x")
+				.unwrap_err()
+				.to_string(),
+			"The last line of the patch must be '*** End Patch'"
+		);
+	}
+
+	#[test]
+	fn summary_orders_operations() {
+		assert_eq!(
+			format_apply_codex_patch_summary(&["a".into()], &["m".into()], &["d".into()]),
+			"Success. Updated the following files:\nA a\nM m\nD d"
+		);
+	}
+}

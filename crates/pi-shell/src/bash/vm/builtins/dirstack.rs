@@ -383,4 +383,29 @@ pub fn popd(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 	dirs(ctx, &[])
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	// bash `get_dirstack_index` over a stack of 3 below the cwd.
+	#[test]
+	fn indexes_count_from_the_cwd_or_the_bottom() {
+		assert_eq!(slot(0, true, 3), Slot::Cwd);
+		assert_eq!(slot(1, true, 3), Slot::Entry(0));
+		assert_eq!(slot(3, true, 3), Slot::Entry(2));
+		assert_eq!(slot(0, false, 3), Slot::Entry(2));
+		assert_eq!(slot(3, false, 3), Slot::Cwd);
+		assert_eq!(slot(4, true, 3), Slot::Out);
+		assert_eq!(slot(9, false, 3), Slot::Out);
+		assert_eq!(slot(0, false, 0), Slot::Cwd);
+	}
+
+	#[test]
+	fn home_prefix_becomes_a_tilde() {
+		assert_eq!(polite(Some(b"/home/u"), b"/home/u/x", false), "~/x");
+		assert_eq!(polite(Some(b"/home/u"), b"/home/u", false), "~");
+		assert_eq!(polite(Some(b"/home/u"), b"/home/ux", false), "/home/ux");
+		assert_eq!(polite(Some(b"/home/u"), b"/home/u/x", true), "/home/u/x");
+		assert_eq!(polite(Some(b"/"), b"/x", false), "/x");
+	}
+}

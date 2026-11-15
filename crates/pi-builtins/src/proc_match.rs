@@ -1031,4 +1031,17 @@ fn write_proc_match_help(
 	Ok(())
 }
 
+#[cfg(all(test, windows))]
+mod tests {
+	use std::path::PathBuf;
 
+	use super::*;
+
+	#[test]
+	fn resolves_msys_drive_alias_pidfiles() {
+		assert_eq!(
+			ShellPaths::with_cwd(r"C:\workspace").resolve("/c/Users/Adam/app.pid"),
+			PathBuf::from(r"C:\Users\Adam\app.pid"),
+		);
+	}
+}

@@ -45,7 +45,8 @@ mod provider;
 mod runtime;
 mod types;
 
-
+#[cfg(test)]
+mod tests;
 
 pub use dir::{DirEntry, ReadDir};
 pub use error::{

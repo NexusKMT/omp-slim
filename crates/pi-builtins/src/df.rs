@@ -1721,4 +1721,301 @@ fn stat_operand(host: &Host, name: &OsStr) -> io::Result<(PathBuf, Stat)> {
 	Ok((resolved, stat))
 }
 
+#[cfg(test)]
+mod tests {
+	use clap::Parser;
 
+	use super::*;
+
+	/// Runs `df` with `args` and exported `env`, from the repository's
+	/// crate directory. Returns `(status, stdout, stderr)`.
+	fn run(env: &[(&str, &str)], args: &[&str]) -> (i32, String, String) {
+		let (mut host, capture) = Host::for_test("df", "", env!("CARGO_MANIFEST_DIR"));
+		for (key, value) in env {
+			host.set_test_var(key, value);
+		}
+		let argv: Vec<OsString> = std::iter::once("df")
+			.chain(args.iter().copied())
+			.map(OsString::from)
+			.collect();
+		let code = match Df::try_parse_from(argv) {
+			Ok(parsed) => crate::host::run_caught::<Df>(parsed, &mut host),
+			Err(error) => {
+				let _ = write!(host.stderr, "{error}");
+				i32::from(Df::USAGE_ERROR)
+			},
+		};
+		(code, capture.out(), capture.err())
+	}
+
+	fn usage(message: &str) -> String {
+		format!("df: {message}\nTry 'df --help' for more information.\n")
+	}
+
+	/// Mount point printed for the `/` operand: the root, or on Windows the
+	/// drive root holding the crate directory.
+	fn root_target() -> String {
+		let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+		crate_dir.ancestors().last().unwrap_or(crate_dir).to_string_lossy().into_owned()
+	}
+
+	#[test]
+	fn usage_errors_exit_one() {
+		for args in [
+			&["--output=size,bogus"][..],
+			&["-i", "--output"],
+			&["--output", "-T"],
+			&["-P", "--output"],
+			&["--bogus"],
+			&["-B"],
+			&["--total=1"],
+		] {
+			let (code, out, err) = run(&[], args);
+			assert_eq!((code, out.as_str()), (1, ""), "{args:?}");
+			assert!(err.starts_with("error: "), "{args:?}: {err}");
+		}
+	}
+
+	#[test]
+	fn output_field_named_twice_is_rejected() {
+		assert_eq!(
+			run(&[], &["--output=size", "--output=used,size"]),
+			(1, String::new(), usage("option --output: field 'size' used more than once"))
+		);
+	}
+
+	#[test]
+	fn bare_output_lists_every_field() {
+		let (code, out, err) = run(&[], &["--output", "/"]);
+		assert_eq!((code, err.as_str()), (0, ""));
+		let header: Vec<&str> = out.lines().next().unwrap().split_whitespace().collect();
+		assert_eq!(header, [
+			"Filesystem",
+			"Type",
+			"Inodes",
+			"IUsed",
+			"IFree",
+			"IUse%",
+			"1K-blocks",
+			"Used",
+			"Avail",
+			"Use%",
+			"File",
+			"Mounted",
+			"on"
+		]);
+	}
+
+	#[test]
+	fn block_size_errors() {
+		let cases: [(&[&str], &str); 4] = [
+			(&["-B", "0"], "invalid --block-size argument '0'"),
+			(&["--block-size=x"], "invalid --block-size argument 'x'"),
+			(&["-B1KiBx"], "invalid suffix in --block-size argument '1KiBx'"),
+			(&["-B", "1Y"], "--block-size argument '1Y' too large"),
+		];
+		for (args, message) in cases {
+			assert_eq!(
+				run(&[], args),
+				(1, String::new(), format!("df: {message}\n")),
+				"args: {args:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn fs_type_both_selected_and_excluded_reports_each_newest_first() {
+		assert_eq!(
+			run(&[], &["-t", "a", "-t", "b", "-x", "b", "-x", "a"]),
+			(
+				1,
+				String::new(),
+				"df: file system type 'b' both selected and excluded\ndf: file system type 'a' both \
+				 selected and excluded\n"
+					.into()
+			)
+		);
+	}
+
+	#[test]
+	fn missing_operand_is_reported_without_no_file_systems_message() {
+		assert_eq!(
+			run(&[], &["/nonexistent-df-operand"]),
+			(1, String::new(), "df: /nonexistent-df-operand: No such file or directory\n".into())
+		);
+		assert_eq!(run(&[], &[""]), (1, String::new(), "df: '': No such file or directory\n".into()));
+	}
+
+	#[test]
+	fn a_failing_operand_does_not_hide_the_others() {
+		let (code, out, err) = run(&[], &["--output=target", "/nonexistent-df-operand", "/"]);
+		assert_eq!(code, 1);
+		assert_eq!(err, "df: /nonexistent-df-operand: No such file or directory\n");
+		assert_eq!(out, format!("Mounted on\n{}\n", root_target()));
+	}
+
+	#[test]
+	fn virtual_operands_are_rejected_rather_than_misreported() {
+		assert_eq!(
+			run(&[], &["mem://df-probe"]),
+			(1, String::new(), "df: mem://df-probe: No such file or directory\n".into())
+		);
+	}
+
+	#[test]
+	fn no_matching_file_system_is_an_error() {
+		assert_eq!(
+			run(&[], &["-t", "no-such-fs-type"]),
+			(1, String::new(), "df: no file systems processed\n".into())
+		);
+	}
+
+	#[test]
+	fn operand_selects_the_mount_holding_it() {
+		let (code, out, err) = run(&[], &["--output=file,target", "src", "/"]);
+		assert_eq!((code, err.as_str()), (0, ""));
+		let lines: Vec<&str> = out.lines().collect();
+		assert_eq!(lines.len(), 3, "{out}");
+		assert!(lines[0].starts_with("File Mounted on"), "{out}");
+		// Relative operands resolve against the shell's directory and print
+		// as given.
+		let root = root_target();
+		assert!(lines[1].starts_with(&format!("src  {root}")), "{out}");
+		assert_eq!(lines[2], format!("/    {root}"));
+	}
+
+	#[test]
+	fn posix_format_uses_capacity_and_posixly_correct_block_size() {
+		let (code, out, _) = run(&[("POSIXLY_CORRECT", "1")], &["-P", "/"]);
+		assert_eq!(code, 0);
+		let header = out.lines().next().expect("header line");
+		let words: Vec<&str> = header.split_whitespace().collect();
+		assert_eq!(words, [
+			"Filesystem",
+			"512-blocks",
+			"Used",
+			"Available",
+			"Capacity",
+			"Mounted",
+			"on"
+		]);
+
+		let (_, out, _) = run(&[], &["-P", "/"]);
+		assert!(out.lines().next().unwrap().contains(" 1024-blocks "), "{out}");
+	}
+
+	#[test]
+	fn block_size_comes_from_options_then_environment() {
+		let header = |env: &[(&str, &str)], args: &[&str]| {
+			let (code, out, err) = run(env, args);
+			assert_eq!((code, err.as_str()), (0, ""), "{env:?} {args:?}");
+			out.lines()
+				.next()
+				.unwrap()
+				.split_whitespace()
+				.nth(1)
+				.unwrap()
+				.to_owned()
+		};
+		assert_eq!(header(&[], &["/"]), "1K-blocks");
+		assert_eq!(header(&[("DF_BLOCK_SIZE", "1M")], &["/"]), "1M-blocks");
+		assert_eq!(header(&[("BLOCK_SIZE", "2K")], &["/"]), "2K-blocks");
+		assert_eq!(header(&[("BLOCKSIZE", "1000")], &["/"]), "1kB-blocks");
+		// An unusable DF_BLOCK_SIZE falls back to the default.
+		assert_eq!(header(&[("DF_BLOCK_SIZE", "0")], &["/"]), "1K-blocks");
+		assert_eq!(header(&[("DF_BLOCK_SIZE", "1M")], &["-k", "/"]), "1K-blocks");
+		// The last scaling option wins.
+		assert_eq!(header(&[], &["-k", "-h", "/"]), "Size");
+		assert_eq!(header(&[], &["-h", "-k", "/"]), "1K-blocks");
+		assert_eq!(header(&[], &["-B", "1536", "/"]), "1.6kB-blocks");
+		assert_eq!(header(&[], &["-B", "1KB", "/"]), "1kB-blocks");
+		assert_eq!(header(&[], &["-B", "1KiB", "/"]), "1K-blocks");
+		assert_eq!(header(&[], &["-B", "0x10", "/"]), "16B-blocks");
+	}
+
+	#[test]
+	fn unit_only_block_size_also_suffixes_values() {
+		let (code, out, _) = run(&[], &["--output=size", "-B", "KiB", "/"]);
+		assert_eq!(code, 0);
+		let lines: Vec<&str> = out.lines().collect();
+		assert_eq!(lines[0].trim(), "1KiB-blocks");
+		assert!(lines[1].trim().ends_with("KiB"), "{out}");
+	}
+
+	#[test]
+	fn total_row_names_target_dash_when_source_is_shown() {
+		let (code, out, _) = run(&[], &["--total", "--output=source,target", "/"]);
+		assert_eq!(code, 0);
+		// The dash sits in the target column, after the source padding.
+		let target_column = out.lines().next().and_then(|header| header.find("Mounted on")).unwrap();
+		assert_eq!(out.lines().last(), Some(format!("{:<target_column$}-", "total").as_str()), "{out}");
+		let (_, out, _) = run(&[], &["--total", "--output=target", "/"]);
+		assert_eq!(out, format!("Mounted on\n{}\ntotal\n", root_target()));
+	}
+
+	#[test]
+	fn block_header_prefers_the_exact_base() {
+		let header = |bytes| block_header(bytes, NumericSymbols::C);
+		assert_eq!(header(1024), "1K");
+		assert_eq!(header(1 << 20), "1M");
+		assert_eq!(header(1000), "1kB");
+		assert_eq!(header(1536), "1.6kB");
+		assert_eq!(header(512), "512B");
+		assert_eq!(header(16), "16B");
+		// Divisible by both at first, then by neither: a tie goes to 1000.
+		assert_eq!(header(1_024_000), "1.1MB");
+	}
+
+	#[test]
+	fn percent_rounds_up_and_marks_unknown_values() {
+		let values = |used: u64, available: u64| Values {
+			units: 1,
+			total: used + available,
+			available,
+			negate_available: false,
+			available_to_root: available,
+			used,
+			negate_used: false,
+		};
+		assert_eq!(percent(&values(1, 199)), b"1%");
+		assert_eq!(percent(&values(0, 10)), b"0%");
+		assert_eq!(percent(&values(10, 0)), b"100%");
+		assert_eq!(percent(&values(0, 0)), b"-");
+		assert_eq!(percent(&values(u64::MAX, 0)), b"-");
+	}
+
+	#[test]
+	fn cells_replace_control_characters() {
+		assert_eq!(replace_problematic(b"a\tb\x7f\xc3\xa9", false, true), b"a?b?\xc3\xa9");
+		assert_eq!(replace_problematic(b"a\xff\xc3\xa9", true, true), b"a?\xc3\xa9");
+		assert_eq!(replace_problematic(b"a\xc3\xa9", true, false), b"a??");
+		assert_eq!(mbswidth("é字".as_bytes(), true), Some(3));
+		assert_eq!(mbswidth("é".as_bytes(), false), None);
+		assert_eq!(mbswidth(b"\xff", true), None);
+	}
+
+	#[test]
+	fn duplicate_devices_keep_the_entry_nearest_the_root_in_place() {
+		let dir = tempfile::tempdir().unwrap();
+		let child = dir.path().join("child");
+		std::fs::create_dir(&child).unwrap();
+		let (mut host, _capture) = Host::for_test("df", "", dir.path());
+		let mut state = DfState::new(&host);
+		let mount = |devname: &str, dir: &Path| Mount {
+			devname:  devname.to_owned(),
+			mountdir: dir.as_os_str().to_owned(),
+			mntroot:  None,
+			fstype:   "test".to_owned(),
+			dummy:    false,
+			remote:   false,
+			dev:      Dev::Unknown,
+		};
+		state.mounts =
+			vec![mount("/dev/one", &child), mount("tmpfs", dir.path()), mount("/dev/one", dir.path())];
+		// A real device name beats a pseudo one; then the shorter mount point
+		// wins, taking the slot of the entry it replaces.
+		assert_eq!(state.filter_mount_list(&mut host, false), vec![2]);
+		// -a keeps every entry.
+		assert_eq!(state.filter_mount_list(&mut host, true), vec![0, 1, 2]);
+	}
+}

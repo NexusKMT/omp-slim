@@ -420,4 +420,40 @@ pub trait Terminal {
 	fn open_pty(&mut self, size: Option<TtyInfo>) -> io::Result<Pty>;
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn flags_and_chars_round_trip() {
+		let mut t = Termios::default();
+		for f in TermFlag::ALL {
+			assert!(!t.get(f));
+			t.set(f, true);
+			assert!(t.get(f));
+		}
+		t.set(TermFlag::Echo, false);
+		assert!(!t.get(TermFlag::Echo));
+		assert!(t.get(TermFlag::Icanon));
+		t.set_char(CtlChar::Intr, Some(3));
+		assert_eq!(t.char(CtlChar::Intr), Some(3));
+		assert_eq!(t.char(CtlChar::Susp), None);
+	}
+
+	#[test]
+	fn make_raw_clears_line_discipline() {
+		let mut t = Termios::default();
+		for f in [TermFlag::Icanon, TermFlag::Echo, TermFlag::Isig, TermFlag::Icrnl, TermFlag::Opost]
+		{
+			t.set(f, true);
+		}
+		t.set(TermFlag::Hupcl, true);
+		t.min = 0;
+		t.time = 5;
+		t.make_raw();
+		assert!(!t.get(TermFlag::Icanon) && !t.get(TermFlag::Echo) && !t.get(TermFlag::Isig));
+		assert!(!t.get(TermFlag::Icrnl) && !t.get(TermFlag::Opost));
+		assert!(t.get(TermFlag::Hupcl));
+		assert_eq!((t.min, t.time, t.char_size), (1, 0, 8));
+	}
+}

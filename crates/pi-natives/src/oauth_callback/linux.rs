@@ -656,5 +656,3 @@ pub(super) fn restore(context: &Context, snapshot: &Snapshot) -> anyhow::Result<
 	}
 	Ok(())
 }
-
-

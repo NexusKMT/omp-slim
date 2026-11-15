@@ -885,4 +885,53 @@ fn expand_globs_with<T>(
 	Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn meta_detection_matches_unquoted_glob_pattern_p() {
+		assert!(has_meta(b"*.c", false));
+		assert!(!has_meta(b"\\*.c", false));
+		assert!(has_meta(b"a[bc]", false));
+		assert!(!has_meta(b"[", false), "`[` alone (the test builtin) is literal");
+		assert!(has_meta(b"a[]", false), "bash tries `a[]` as a pattern");
+		assert!(!has_meta(b"a[/]", false), "a `/` ends the bracket");
+		assert!(!has_meta(b"@(a|b)", false));
+		assert!(has_meta(b"@(a|b)", true));
+		assert!(!has_meta(b"tmp\\/a", false));
+	}
+
+	#[test]
+	fn globsort_values_follow_setup_globsort() {
+		let p = |v: &str| GlobSort::parse(Some(v.as_bytes()));
+		assert_eq!(GlobSort::parse(None), GlobSort::default());
+		assert_eq!(p(""), GlobSort::default());
+		assert_eq!(p("-name"), GlobSort { key: SortKey::Name, reverse: true });
+		assert_eq!(p("-"), GlobSort { key: SortKey::Name, reverse: true });
+		assert_eq!(p("+mtime"), GlobSort { key: SortKey::Mtime, reverse: false });
+		assert_eq!(p("-nonsense"), GlobSort::default(), "unknown keys ignore the sign");
+		assert_eq!(p(" nosort"), GlobSort { key: SortKey::Unsorted, reverse: false });
+	}
+
+	#[test]
+	fn globignore_splits_outside_brackets_and_groups() {
+		assert_eq!(ignore_patterns(b".*:*c:?"), [&b".*"[..], b"*c", b"?"]);
+		assert_eq!(ignore_patterns(b"[:]x:@(a:b)"), [&b"[:]x"[..], b"@(a:b)"]);
+		assert_eq!(ignore_patterns(b""), Vec::<&[u8]>::new());
+		let pats = [Pattern::compile(b"*c", PatOpts::globignore(false, false, false))];
+		assert!(!acceptable(b"abc", &pats));
+		assert!(acceptable(b"abd", &pats));
+		assert!(!acceptable(b"dir/..", &[]));
+	}
+
+	#[test]
+	fn paths_join_like_bash() {
+		assert_eq!(makepath(b".", b"a", true), "a");
+		assert_eq!(makepath(b".", b"a", false), "./a");
+		assert_eq!(makepath(b"", b"a", false), "./a");
+		assert_eq!(makepath(b"x/", b"a", false), "x/a");
+		assert_eq!(dir_to_array(b"d", vec!["a".into(), "".into()]), ["d/a", "d/"]);
+		assert_eq!(dequote(b"t\\mp\\"), "tmp");
+	}
+}

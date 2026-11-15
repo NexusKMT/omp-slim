@@ -136,4 +136,129 @@ pub fn shape_attachment_point(
 	renderer(shape).attachment_point(dir, dims, base)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn rendered(shape: NodeShape, label: &str, use_ascii: bool) -> String {
+		let opts = ShapeRenderOptions { use_ascii, padding: 1 };
+		let dims = shape_dimensions(shape, label, &opts);
+		render_shape(shape, label, &dims, &opts).to_plain_string()
+	}
+
+	#[test]
+	fn renders_every_shape_in_unicode_and_ascii() {
+		let cases = [
+			(
+				NodeShape::Rectangle,
+				"┌───┐\n│   │\n│ X │\n│   │\n└───┘",
+				"+---+\n|   |\n| X |\n|   |\n+---+",
+			),
+			(
+				NodeShape::Rounded,
+				"╭───╮\n│   │\n│ X │\n│   │\n╰───╯",
+				".---.\n|   |\n| X |\n|   |\n'---'",
+			),
+			(
+				NodeShape::Diamond,
+				"◇───◇\n│   │\n│ X │\n│   │\n◇───◇",
+				"<--->\n|   |\n| X |\n|   |\n<--->",
+			),
+			(
+				NodeShape::Stadium,
+				"╭─────╮\n│     │\n│  X  │\n│     │\n╰─────╯",
+				"(-----)\n(     )\n(  X  )\n(     )\n(-----)",
+			),
+			(
+				NodeShape::Circle,
+				"◯───◯\n│   │\n│ X │\n│   │\n◯───◯",
+				"o---o\n|   |\n| X |\n|   |\no---o",
+			),
+			(
+				NodeShape::Subroutine,
+				"┌┬───┬┐\n││   ││\n││ X ││\n││   ││\n└┴───┴┘",
+				"++---++\n||   ||\n|| X ||\n||   ||\n++---++",
+			),
+			(
+				NodeShape::DoubleCircle,
+				"◎───◎\n│   │\n│ X │\n│   │\n◎───◎",
+				"@---@\n|   |\n| X |\n|   |\n@---@",
+			),
+			(
+				NodeShape::Hexagon,
+				"⌜───⌝\n│   │\n│ X │\n│   │\n⌞───⌟",
+				"*---*\n|   |\n| X |\n|   |\n*---*",
+			),
+			(
+				NodeShape::Cylinder,
+				"╭───╮\n│───│\n│   │\n│ X │\n│   │\n│───│\n╰───╯",
+				".---.\n|---|\n|   |\n| X |\n|   |\n|---|\n'---'",
+			),
+			(
+				NodeShape::Asymmetric,
+				"▷───┐\n│   │\n│ X │\n│   │\n▷───┘",
+				">---+\n|   |\n| X |\n|   |\n>---+",
+			),
+			(
+				NodeShape::Trapezoid,
+				"/───\\\n│   │\n│ X │\n│   │\n└───┘",
+				"/---\\\n|   |\n| X |\n|   |\n+---+",
+			),
+			(
+				NodeShape::TrapezoidAlt,
+				"┌───┐\n│   │\n│ X │\n│   │\n\\───/",
+				"+---+\n|   |\n| X |\n|   |\n\\---/",
+			),
+			(NodeShape::StateStart, "╭───╮\n│ ● │\n╰───╯", ".---.\n| * |\n'---'"),
+			(NodeShape::StateEnd, "╔═══╗\n║ ◎ ║\n╚═══╝", "#===#\n# * #\n#===#"),
+		];
+
+		for (shape, unicode, ascii) in cases {
+			assert_eq!(rendered(shape, "X", false), unicode, "Unicode {shape:?}");
+			assert_eq!(rendered(shape, "X", true), ascii, "ASCII {shape:?}");
+		}
+	}
+
+	#[test]
+	fn attachment_points_follow_box_and_state_rules() {
+		let opts = ShapeRenderOptions { use_ascii: false, padding: 1 };
+		let dims = shape_dimensions(NodeShape::Rectangle, "X", &opts);
+		let base = DrawingCoord::new(10, 20);
+		let expected = [
+			(Dir::Up, DrawingCoord::new(12, 20)),
+			(Dir::Down, DrawingCoord::new(12, 24)),
+			(Dir::Left, DrawingCoord::new(10, 22)),
+			(Dir::Right, DrawingCoord::new(14, 22)),
+			(Dir::UpperLeft, DrawingCoord::new(10, 20)),
+			(Dir::UpperRight, DrawingCoord::new(14, 20)),
+			(Dir::LowerLeft, DrawingCoord::new(10, 24)),
+			(Dir::LowerRight, DrawingCoord::new(14, 24)),
+			(Dir::Middle, DrawingCoord::new(12, 22)),
+		];
+		for (dir, point) in expected {
+			assert_eq!(shape_attachment_point(NodeShape::Rectangle, dir, &dims, base), point,);
+		}
+
+		let state_dims = shape_dimensions(NodeShape::StateStart, "", &opts);
+		assert_eq!(
+			shape_attachment_point(NodeShape::StateStart, Dir::UpperLeft, &state_dims, base),
+			DrawingCoord::new(12, 21),
+		);
+	}
+
+	#[test]
+	fn centers_multiline_labels_with_reference_flooring() {
+		let unicode = "┌────┐\n│    │\n│    │\n│ A  │\n│ BB │\n│    │\n└────┘";
+		let ascii = "+----+\n|    |\n|    |\n| A  |\n| BB |\n|    |\n+----+";
+		assert_eq!(rendered(NodeShape::Rectangle, "A\nBB", false), unicode);
+		assert_eq!(rendered(NodeShape::Rectangle, "A\nBB", true), ascii);
+	}
+
+	#[test]
+	fn centers_wide_cjk_and_emoji_by_display_columns() {
+		let unicode = "┌──────┐\n│      │\n│ 界🙂 │\n│      │\n└──────┘";
+		let ascii = "+------+\n|      |\n| 界🙂 |\n|      |\n+------+";
+		assert_eq!(rendered(NodeShape::Rectangle, "界🙂", false), unicode);
+		assert_eq!(rendered(NodeShape::Rectangle, "界🙂", true), ascii);
+	}
+}

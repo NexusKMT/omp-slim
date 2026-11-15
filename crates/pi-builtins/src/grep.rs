@@ -1895,5 +1895,505 @@ impl AsyncUtility for Grep {
 }
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		io::{self, Read, Write},
+		sync::Arc,
+	};
 
+	use parking_lot::Mutex;
+
+	use super::*;
+	use crate::openfile as openfiles;
+	use crate::host::{Host, run_async_util};
+	#[cfg(unix)]
+	use crate::host::tree_with_sparse_file;
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn path_separator_rewrites_the_native_separator_on_windows() {
+		// Defends: --path-separator must rewrite the platform's own separator
+		// too, or Windows paths keep mixing `\` and the configured separator.
+		let mut out = Vec::new();
+		RecordFormat {
+			path_separator: Some(b'#'),
+			null_paths:     false,
+			terminator:     b'\n',
+		}
+		.write_path(&mut out, b"a\\b/c")
+		.unwrap();
+		if cfg!(windows) {
+			assert_eq!(out, b"a#b#c");
+		} else {
+			assert_eq!(out, b"a\\b#c");
+		}
+	}
+
+	struct SnapshottingStdin {
+		pos:      usize,
+		snapped:  bool,
+		stdout:   Arc<Mutex<Option<Arc<Mutex<Vec<u8>>>>>>,
+		snapshot: Arc<Mutex<Vec<u8>>>,
+	}
+
+	const SNAPSHOT_INPUT: &[u8] = b"hit\nmiss\n";
+
+	impl Read for SnapshottingStdin {
+		fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+			if self.pos < SNAPSHOT_INPUT.len() {
+				let n = buf.len().min(SNAPSHOT_INPUT.len() - self.pos);
+				buf[..n].copy_from_slice(&SNAPSHOT_INPUT[self.pos..self.pos + n]);
+				self.pos += n;
+				return Ok(n);
+			}
+			// Input exhausted: grep is back asking for more. Whatever it has
+			// already flushed to stdout is what a live consumer would see now.
+			if !self.snapped {
+				let stdout = self.stdout.lock().clone().expect("stdout buffer is initialized");
+				*self.snapshot.lock() = stdout.lock().clone();
+				self.snapped = true;
+			}
+			Ok(0)
+		}
+	}
+
+	impl Write for SnapshottingStdin {
+		fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+			Ok(buf.len())
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	impl openfiles::Stream for SnapshottingStdin {}
+
+	async fn run(args: &[&str], stdin: &str) -> (i32, String, String) {
+		let (code, capture) = run_async_util::<Grep>(args, stdin, "/").await;
+		(code, capture.out(), capture.err())
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn stdin_matches_are_visible_before_eof() {
+		let stdout = Arc::new(Mutex::new(None));
+		let snapshot = Arc::new(Mutex::new(Vec::new()));
+		let stdin = Box::new(SnapshottingStdin {
+			pos: 0,
+			snapped: false,
+			stdout: Arc::clone(&stdout),
+			snapshot: Arc::clone(&snapshot),
+		});
+		let (mut host, capture) = Host::for_test_with_stdin("grep", stdin, "/");
+		*stdout.lock() = Some(capture.stdout_buffer());
+
+		let parsed = Grep::try_parse_from(["grep", "hit", "-"]).unwrap();
+		assert_eq!(parsed.run(&mut host).await, 0, "{}", capture.err());
+
+		// A regression re-buffering grep's output makes matches invisible until EOF.
+		assert_eq!(snapshot.lock().as_slice(), b"hit\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn max_count_and_no_match_statuses_are_gnu_compatible() {
+		let (code, out, err) = run(&["-m1", "hit"], "hit\nmiss\nhit\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "hit\n");
+		let (code, out, _) = run(&["absent"], "hit\n").await;
+		assert_eq!(code, 1);
+		assert!(out.is_empty());
+	}
+
+	/// `-e` exists so a pattern may start with `-` (GNU grep); clap used to
+	/// read `-e --canary` as an unknown `--canary` flag and exit 2.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn regexp_operand_may_start_with_a_dash() {
+		let input = "x --canary\n-> y\nz\n";
+		let (code, out, err) = run(&["-e", "--canary"], input).await;
+		assert_eq!((code, out.as_str()), (0, "x --canary\n"), "{err}");
+		let (code, out, err) = run(&["-ne", "->", "--regexp", "-z"], input).await;
+		assert_eq!((code, out.as_str()), (0, "2:-> y\n"), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn pattern_file_is_resolved_against_shell_cwd() {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("patterns"), "alpha\nbeta\n").unwrap();
+		std::fs::write(tree.path().join("haystack"), "alpha\ngamma\nbeta\n").unwrap();
+		let (code, capture) = run_async_util::<Grep>(&["-f", "patterns", "haystack"], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "alpha\nbeta\n");
+	}
+
+	/// A file with no line terminator used to make grep buffer it whole: on a
+	/// sparse file that is an endless line of NUL bytes, and the host process
+	/// grew until the kernel killed it. Now that file is a per-file error and
+	/// the walk still reports matches in the other files.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn line_longer_than_the_limit_is_a_file_error_not_unbounded_memory() {
+		let tree = tree_with_sparse_file();
+
+		let (code, capture) = run_async_util::<Grep>(&["-rl", "needle", "."], "", tree.path()).await;
+
+		assert_eq!(code, 2, "an unreadable file makes the status 2, as in GNU grep");
+		assert_eq!(capture.out(), "./small\n");
+		let err = capture.err();
+		assert!(err.contains("grep: ./big: line longer than 256 MiB, not searched"), "{err}");
+	}
+
+	/// `-f` used to read the whole pattern file into memory, so pointing it at
+	/// a sparse file (or an endless stdin) killed the host. Now an over-size
+	/// pattern file is refused before anything is searched.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn pattern_file_larger_than_the_limit_is_refused() {
+		let tree = tree_with_sparse_file();
+
+		let (code, capture) = run_async_util::<Grep>(&["-f", "big", "small"], "", tree.path()).await;
+
+		assert_eq!(code, 2);
+		assert_eq!(capture.out(), "");
+		let err = capture.err();
+		assert!(err.contains("grep: big: pattern file larger than 256 MiB"), "{err}");
+	}
+
+	/// Drains `input` through the line bound, as the searcher would, and
+	/// returns the typed limit error if one stopped it.
+	fn drain_bounded(input: impl Read, terminator: Option<u8>) -> Option<String> {
+		let mut input = input;
+		let mut run = 0;
+		let mut buf = vec![0u8; 64 * 1024];
+		loop {
+			let read = input.read(&mut buf).unwrap();
+			if read == 0 {
+				return None;
+			}
+			match check_run(terminator, &mut run, &buf[..read]) {
+				Ok(()) => {},
+				Err(error) => {
+					assert!(
+						error.get_ref().is_some_and(|inner| inner.is::<LineLimitExceeded>()),
+						"untyped error: {error}"
+					);
+					return Some(describe_search_error(&error));
+				},
+			}
+		}
+	}
+
+	/// The bound counts the unterminated run, including one that a terminator
+	/// later in the same read closes: a line one byte over fails with the typed
+	/// error whether or not it is ever terminated, and a terminator resets it.
+	#[test]
+	fn line_bound_fails_one_byte_past_the_limit_with_a_typed_error() {
+		let limit = MAX_LINE_BYTES as u64;
+		let line = || io::repeat(b'x').take(limit);
+
+		assert_eq!(drain_bounded(line().chain(&b"\n"[..]).chain(line()), Some(b'\n')), None);
+		let over = Some("line longer than 256 MiB, not searched".to_owned());
+		assert_eq!(drain_bounded(line().chain(&b"x"[..]), Some(b'\n')), over);
+		assert_eq!(drain_bounded(line().chain(&b"x\nshort\n"[..]), Some(b'\n')), over);
+		assert_eq!(
+			drain_bounded(line().chain(&b"\n"[..]).chain(line()).chain(&b"\n"[..]), None),
+			Some("file larger than 256 MiB, not searched".to_owned())
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn perl_mode_supports_lookbehind() {
+		let (code, out, err) = run(&["-P", "(?<=foo)bar"], "foobar\nbar\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "foobar\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn compact_numeric_context_is_rewritten_before_clap() {
+		let input = "a\nhit\nb\ngap\nc\nhit\nd\n";
+		let (code, out, err) = run(&["-1", "--group-separator=@", "hit"], input).await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "a\nhit\nb\n@\nc\nhit\nd\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn recursive_rules_filter_walk_and_preserve_relative_names() {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("keep.rs"), "hit\n").unwrap();
+		std::fs::write(tree.path().join("drop.txt"), "hit\n").unwrap();
+		std::fs::create_dir(tree.path().join("vendor")).unwrap();
+		std::fs::write(tree.path().join("vendor/hidden.rs"), "hit\n").unwrap();
+		let (code, capture) = run_async_util::<Grep>(&["-r", "--include=*.rs", "--exclude-dir=vendor", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert!(capture.out().contains("keep.rs:hit"));
+		assert!(!capture.out().contains("drop.txt"));
+		assert!(!capture.out().contains("hidden.rs"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn recursive_search_prints_files_in_path_order() {
+		let tree = tempfile::tempdir().unwrap();
+		let files = ["t/z.txt", "t/b/1.txt", "t/a/c/2.txt", "t/a/b/3.txt", "t/a/0.txt", "t/m.txt"];
+		for file in files {
+			let path = tree.path().join(file);
+			std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+			std::fs::write(path, "hit\n").unwrap();
+		}
+		let (code, capture) = run_async_util::<Grep>(&["-rl", "hit", "t"], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		let expected: String = ["t/a/0.txt", "t/a/b/3.txt", "t/a/c/2.txt", "t/b/1.txt", "t/m.txt", "t/z.txt"]
+			.iter()
+			.map(|path| format!("{}\n", path.replace('/', std::path::MAIN_SEPARATOR_STR)))
+			.collect();
+		assert_eq!(capture.out(), expected);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn quiet_match_wins_over_later_error() {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("hit"), "needle\n").unwrap();
+		let (code, capture) = run_async_util::<Grep>(&["-q", "needle", "hit", "missing"], "", tree.path()).await;
+		assert_eq!(code, 0);
+		assert!(capture.out().is_empty());
+		assert!(capture.err().is_empty());
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn byte_offsets_labels_and_nul_separators_are_rendered() {
+		let (code, out, err) = run(&["-bn", "hit"], "no\nhit\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2:3:hit\n");
+		let (code, out, err) = run(&["--label=pipe", "-HZ", "hit"], "hit\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out.as_bytes(), b"pipe\0hit\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn basic_mode_is_posix_bre_and_extended_mode_is_strict() {
+		let (code, out, err) = run(&["-A", "1", "fail)"], "ok\n(1 fail)\nnext\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "(1 fail)\nnext\n");
+		let (code, _, err) = run(&["-E", "fail)"], "fail)\n").await;
+		assert_eq!(code, 2);
+		assert!(err.contains("grep:"));
+		// In a BRE a bare `+` is a LITERAL, so `fo+` does not match `foooo`.
+		// This assertion previously expected `foooo`, which is ERE
+		// behaviour; `/usr/bin/grep -e 'fo+' -e 'bar)' -h` on this input
+		// prints `bar)` alone on both GNU and BSD grep. Use `fo\+` for the
+		// quantifier.
+		let (code, out, err) =
+			run(&["-e", "fo+", "-e", "bar)", "-h"], "foooo\nbar)\nbaz\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "bar)\n");
+		let (code, out, err) = run(&["-e", r"fo\+", "-h"], "foooo\nbar)\nbaz\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "foooo\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn gnu_basic_alternation_and_color_aliases_are_supported() {
+		let input = "\"tools.xdev\": {}\n\"tools.toolbox\": {}\n\"tools.other\": {}\n";
+		let (code, out, err) = run(&["-c", r"tools.xdev\|tools.toolbox"], input).await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n");
+		for color in ["--color=auto", "--color=always", "--color=never", "--color"] {
+			let (code, out, err) = run(&[color, "foo"], "foo\nbar\n").await;
+			assert_eq!(code, 0, "{err}");
+			assert_eq!(out, "foo\n");
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn version_is_reported_on_stdout() {
+		let (code, out, err) = run(&["--version"], "").await;
+		assert_eq!(code, 0);
+		assert!(err.is_empty());
+		assert!(out.contains("grep") && out.contains("pi-uu-grep"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn repetition_with_no_operand_is_literal_in_bre_and_invalid_in_ere() {
+		// Measured against GNU/BSD grep 2.6.0 on the same fixture. Before
+		// this, every BRE row below returned 5 - the whole file - because
+		// `^+` reached the engine as an operator and compiled to `(?:^)+`,
+		// matching the empty string at every line start.
+		let input = "alpha\n+added\n-removed\n context\n+another\n";
+		for (pattern, want) in
+			[("^+", "2\n"), ("^*", "0\n"), ("^?", "0\n"), ("*x", "0\n"), ("^\\+", "2\n")]
+		{
+			let (code, out, err) = run(&["-c", pattern], input).await;
+			assert!(code == 0 || code == 1, "{pattern}: {err}");
+			assert_eq!(out, want, "pattern {pattern}");
+		}
+
+		// The forms that already agreed must not regress.
+		for (pattern, want) in [("+added", "1\n"), ("[+]", "2\n"), ("a\\+", "3\n")] {
+			let (code, out, err) = run(&["-c", pattern], input).await;
+			assert_eq!(code, 0, "{pattern}: {err}");
+			assert_eq!(out, want, "pattern {pattern}");
+		}
+
+		// ERE rejects it outright, as the real grep does, rather than
+		// silently accepting a repeated anchor. The anchor breaks adjacency
+		// to an earlier atom too: `a^+` repeats `^`, not `a`.
+		for pattern in ["^+", "a^+", "a$*"] {
+			let (code, _, err) = run(&["-Ec", pattern], input).await;
+			assert_eq!(code, 2, "-E {pattern:?} must be rejected");
+			assert!(err.contains("grep:"), "{pattern}: {err}");
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn no_operand_brace_interval_is_rejected_through_grep() {
+		// Covered here rather than only in the translator, because the failure
+		// mode was invisible at that level: `^\{2\}` translated to `^{2}`,
+		// which `grep-regex` ACCEPTS as `(?:^){2}` and matches at every line
+		// start, so the whole file came back with exit 0.
+		let input = "alpha\n+added\n-removed\n context\n+another\n";
+		for pattern in [r"^\{2\}", r"^\{1,4\}", r"\{1,4\}", r"\(\{2\}\)", r"a\|\{2\}"] {
+			let (code, out, err) = run(&["-c", pattern], input).await;
+			assert_eq!(code, 2, "{pattern} must be rejected, got {out:?}");
+			assert!(err.contains("repetition-operator operand invalid"), "{pattern}: {err}");
+		}
+		// With an operand it is an ordinary quantifier and still works.
+		let (code, out, err) = run(&["-c", r"a\{1,2\}"], input).await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "3\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn literal_brace_is_not_rejected_by_the_operand_check() {
+		// `grep -E '^{"'` is a real pattern - the common JSON-line filter -
+		// and GNU grep accepts it, because a `{` that opens no interval is a
+		// literal. An earlier revision of this guard exited 2 on it.
+		let input = "{\"a\":1}\n{foo\nplain\n";
+		for args in
+			[vec!["-c", "^{"], vec!["-Ec", "^\\{"], vec!["-Ec", "^\\{\""], vec!["-c", "{foo"]]
+		{
+			let (code, _, err) = run(&args, input).await;
+			assert!(code == 0 || code == 1, "{args:?} must not error: {err}");
+			assert!(!err.contains("operand invalid"), "{args:?}: {err}");
+		}
+		let (code, out, err) = run(&["-c", "^{"], input).await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n");
+
+		// NOT asserted here, and a known divergence: `-E '{a}'` and `-E 'a{'`
+		// are literals to GNU grep but `regex` rejects them in its own parser,
+		// which it did before this operand check existed. Making those literal
+		// means rewriting ERE patterns rather than validating them.
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn unsupported_backreference_falls_back_to_the_users_own_text() {
+		// `grep-regex` cannot compile a back-reference, so the pattern is
+		// matched literally. That literal must be what the user typed: after
+		// translation the pattern reads `(a)\1`, and escaping THAT made
+		// `\(a\)\1` match the text `(a)\1` instead of `\(a\)\1`.
+		let (code, out, err) = run(&["-c", r"\(a\)\1"], "x\\(a\\)\\1y\nnope\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "1\n", "fallback must match the original pattern text");
+		let (code, out, _) = run(&["-c", r"\(a\)\1"], "x(a)\\1y\nnope\n").await;
+		assert_eq!(code, 1, "translated text must not be what is matched");
+		assert_eq!(out, "0\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn only_the_first_caret_of_a_branch_anchors() {
+		// Measured: `grep -c '^^'` counts lines beginning with a literal
+		// caret, and `sed 's/^^/X/'` rewrites only those. Treating the second
+		// caret as another anchor matched every line.
+		let input = "^a\naaa\n^^b\n";
+		let (code, out, err) = run(&["-c", "^^"], input).await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n");
+		let (code, out, err) = run(&["-c", r"^\^"], input).await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n", "the escaped form must agree with the bare one");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_dollar_before_a_branch_boundary_still_anchors() {
+		// `$` anchors at the end of a BRE BRANCH, not only at the end of the
+		// whole pattern. Escaping it made the first branch unmatchable, so
+		// lines ending in `a` were silently dropped from the result.
+		let input = "a\nb\nca\nxb\nz\nax\n";
+		let (code, out, err) = run(&["-c", r"a$\|b"], input).await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "4\n", "a, b, ca and xb all match");
+
+		// The same alternation written the other way round must agree.
+		let (_, out, err) = run(&["-c", r"b\|a$"], input).await;
+		assert_eq!(out, "4\n", "{err}");
+
+		// And inside a group, where `\)` ends the branch instead of `\|`.
+		let (_, out, err) = run(&["-c", r"\(a$\)"], input).await;
+		assert_eq!(out, "2\n", "{err}");
+
+		// A `$` that ends neither is still a literal dollar sign.
+		let (_, out, err) = run(&["-c", "a$b"], "a$b\nab\n").await;
+		assert_eq!(out, "1\n", "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn bracket_expressions_are_not_translated_as_bre() {
+		// Inside `[...]` the BRE operators are ordinary characters. The
+		// translator used to read `\(` as a group opener, producing a pattern
+		// the engine refused, which then fell back to a literal match.
+		let input = "has ( paren\nhas \\ slash\nplain\n";
+		let (code, out, err) = run(&["-c", r"[\(]"], input).await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n", "a backslash OR a parenthesis, as measured");
+
+		// `]` first is a literal, `^` still negates, and a character class
+		for (pattern, want) in
+			[(r"[]x]", "1\n"), (r"[^abc]", "3\n"), (r"[[:digit:]]", "1\n"), (r"[*+]", "1\n")]
+		{
+			let (code, out, err) = run(&["-c", pattern], "]\nq7\n*\nabc\n").await;
+			assert_eq!(code, 0, "{pattern}: {err}");
+			assert_eq!(out, want, "{pattern}");
+		}
+
+		// An unterminated bracket expression is not silently swallowed as an
+		// empty class: the engine refuses it. In `grep` it then reaches the
+		// pre-existing literal fallback - the same path back-references take -
+		// so it matches the typed text rather than erroring the way real grep
+		// does. That divergence predates this change and is unchanged by it;
+		// `sed`, which has no such fallback, reports the error.
+		let (code, out, err) = run(&["-c", "a[d"], "a[d\nplain\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "1\n", "falls back to the literal text the user typed");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_brace_that_opens_no_interval_is_literal_in_an_ere() {
+		// Every expectation below is a measurement from /usr/bin/grep against
+		// this same input, not a reading of the spec.
+		let input = "{a}\na{\n{foo\na{1}b\nplain\n}\n[{]\n";
+		for (pattern, want) in [
+			("{a}", "1\n"),
+			("a{", "2\n"),
+			("{foo", "1\n"),
+			("}", "3\n"),
+			("[{]", "5\n"),
+			(r"\{a\}", "1\n"),
+			// Still a real interval, and still applied.
+			("a{1}", "4\n"),
+			("a{1,2}", "4\n"),
+		] {
+			let (code, out, err) = run(&["-Ec", pattern], input).await;
+			assert_eq!(code, 0, "-E {pattern}: {err}");
+			assert_eq!(out, want, "-E {pattern}");
+		}
+
+		// The two brace patterns real grep REFUSES must stay refused. A `{`
+		// followed by a digit is an attempted interval: unterminated, it is
+		// "braces not balanced", and with no operand it is "repetition-operator
+		// operand invalid". Escaping those would convert a diagnosed mistake
+		// into a silent literal match.
+		for pattern in ["a{1,2", "{1}"] {
+			let (code, out, _) = run(&["-Ec", pattern], input).await;
+			assert_eq!(code, 2, "-E {pattern} must stay an error, got {out:?}");
+		}
+	}
+}
 

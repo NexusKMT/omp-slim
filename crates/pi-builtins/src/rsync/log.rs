@@ -19,7 +19,8 @@ use std::{
 	time::Duration,
 };
 
-
+#[cfg(all(test, unix))]
+pub(crate) use format::itemize;
 pub(crate) use format::{ItemizeCtx, big_num, log_format_has, permstring, timestring};
 use format::{FormatEnv, FormatItem, expand};
 pub(crate) use levels::{Debug, Info, OutLevels, Priority, Words};
@@ -929,4 +930,433 @@ fn sum_as_hex(kind: CsumType, sum: &[u8], len: usize) -> Option<Vec<u8>> {
 	Some(out)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::rsync::consts::{ITEM_IS_NEW, ITEM_REPORT_PERMS, ITEM_REPORT_SIZE};
 
+	#[derive(Clone, Default)]
+	struct Buf(Arc<Mutex<Vec<u8>>>);
+
+	impl Write for Buf {
+		fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+			lock(&self.0).extend_from_slice(data);
+			Ok(data.len())
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	impl Buf {
+		fn text(&self) -> String {
+			String::from_utf8_lossy(&lock(&self.0)).into_owned()
+		}
+
+		fn bytes(&self) -> Vec<u8> {
+			lock(&self.0).clone()
+		}
+	}
+
+	fn utc() -> Option<jiff::tz::TimeZone> {
+		Some(jiff::tz::TimeZone::UTC)
+	}
+
+	fn client(cfg: LogConfig) -> (Logger, Buf, Buf) {
+		let (out, err) = (Buf::default(), Buf::default());
+		(Logger::local(Box::new(out.clone()), Box::new(err.clone()), cfg), out, err)
+	}
+
+	fn base_cfg(format: &str) -> LogConfig {
+		LogConfig {
+			out_format: Some(format.as_bytes().to_vec()),
+			human_readable: 1,
+			local_server: true,
+			preserve_mtimes: true,
+			receiver_symlink_times: true,
+			preserve_uid: true,
+			preserve_gid: true,
+			time_zone: utc(),
+			levels: OutLevels::from_verbose(0),
+			..LogConfig::default()
+		}
+	}
+
+	#[test]
+	fn routing_info_stdout_errors_stderr() {
+		let (logger, out, err) = client(LogConfig::default());
+		logger.rprintf(LogCode::Info, b"hello\n");
+		logger.rprintf(LogCode::Error, b"bad\n");
+		logger.rprintf(LogCode::Warning, b"warn\n");
+		logger.rprintf(LogCode::Log, b"only the log\n");
+		logger.rprintf(LogCode::Client, b"client\n");
+		assert_eq!(out.text(), "hello\nclient\n");
+		assert_eq!(err.text(), "bad\nwarn\n");
+		assert!(!logger.got_xfer_error());
+		logger.with_role(Role::Generator).rprintf(LogCode::ErrorXfer, b"x\n");
+		assert!(logger.got_xfer_error());
+	}
+
+	#[test]
+	fn quiet_and_stderr_all() {
+		let (logger, out, err) = client(LogConfig { quiet: true, ..LogConfig::default() });
+		logger.rprintf(LogCode::Info, b"hidden\n");
+		logger.rprintf(LogCode::Error, b"shown\n");
+		assert_eq!((out.text(), err.text()), (String::new(), "shown\n".to_owned()));
+		let (logger, out, err) =
+			client(LogConfig { stderr_mode: STDERR_ALL, ..LogConfig::default() });
+		logger.rprintf(LogCode::Info, b"info\n");
+		assert_eq!((out.text(), err.text()), (String::new(), "info\n".to_owned()));
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn rsyserr_format() {
+		let (logger, _, err) = client(LogConfig::default());
+		let error = io::Error::from(io::ErrorKind::NotFound);
+		logger.with_role(Role::Sender).rsyserr(LogCode::Error, &error, b"change_dir \"/nonexist\" failed");
+		assert_eq!(
+			err.text(),
+			"rsync: [sender] change_dir \"/nonexist\" failed: No such file or directory (2)\n"
+		);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn rsyserr_uses_os_errno() {
+		let (logger, _, err) = client(LogConfig::default());
+		let error = io::Error::from_raw_os_error(libc::EROFS);
+		logger.with_role(Role::PreReceiver).rsyserr(LogCode::Error, &error, b"mkdir \"/x\" failed");
+		assert_eq!(
+			err.text(),
+			format!("rsync: [Receiver] mkdir \"/x\" failed: Read-only file system ({})\n", libc::EROFS)
+		);
+	}
+
+	#[test]
+	fn names_are_escaped_like_the_reference() {
+		// Captured: `\001` and invalid UTF-8 escape, valid UTF-8, tab, and DEL pass, and a
+		// literal `\#123` gets its backslash escaped.
+		let (logger, out, _) = client(LogConfig::default());
+		logger.rprintf(LogCode::Info, b"a\x01b\n");
+		logger.rprintf(LogCode::Info, "caf\u{e9}\n".as_bytes());
+		logger.rprintf(LogCode::Info, b"x\\#123y\n");
+		logger.rprintf(LogCode::Info, b"t\tz\x7fd\n");
+		logger.rprintf(LogCode::Info, b"l1 -> b\xffc\xc3\n");
+		assert_eq!(
+			out.bytes(),
+			b"a\\#001b\ncaf\xc3\xa9\nx\\#134#123y\nt\tz\x7fd\nl1 -> b\\#377c\\#303\n".to_vec()
+		);
+		let (logger, out, _) = client(LogConfig { eight_bit_output: true, ..LogConfig::default() });
+		logger.rprintf(LogCode::Info, b"l1 -> b\xffc\xc3 \xc2\x85\x01\n");
+		assert_eq!(out.bytes(), b"l1 -> b\xffc\xc3 \xc2\x85\\#001\n".to_vec());
+	}
+
+	#[test]
+	fn carriage_returns_and_pending_newline() {
+		let (logger, out, _) = client(LogConfig::default());
+		logger.rprintf(LogCode::Client, b"\r  progress\r");
+		logger.set_needs_newline(1);
+		logger.rprintf(LogCode::Info, b"next\n");
+		assert_eq!(out.text(), "\r  progress\r\nnext\n");
+	}
+
+	#[test]
+	fn server_forwards_with_old_protocol_mapping() {
+		let sent = Arc::new(Mutex::new(Vec::new()));
+		let sink_log = Arc::clone(&sent);
+		let sink: RemoteSink = Arc::new(move |code, data: &[u8]| {
+			lock(&sink_log).push((code, data.to_vec()));
+			Ok(())
+		});
+		let err = Buf::default();
+		let logger = Logger::remote_with_stderr(
+			sink,
+			Box::new(err.clone()),
+			LogConfig { am_server: true, stderr_mode: STDERR_CLIENT, ..LogConfig::default() },
+		);
+		logger.rprintf(LogCode::Info, b"i\n");
+		logger.rprintf(LogCode::Error, b"e\n");
+		logger.set_protocol(29);
+		logger.rprintf(LogCode::Error, b"e29\n");
+		logger.rprintf(LogCode::Warning, b"w29\n");
+		logger.rprintf(LogCode::Client, b"c\n");
+		assert_eq!(
+			*lock(&sent),
+			vec![
+				(LogCode::Info, b"i\n".to_vec()),
+				(LogCode::Error, b"e\n".to_vec()),
+				(LogCode::ErrorXfer, b"e29\n".to_vec()),
+				(LogCode::Info, b"w29\n".to_vec()),
+				(LogCode::Info, b"c\n".to_vec()),
+			]
+		);
+		assert_eq!(err.text(), "");
+	}
+
+	#[test]
+	fn server_errors_go_to_stderr_by_default() {
+		let sent = Arc::new(Mutex::new(Vec::new()));
+		let sink_log = Arc::clone(&sent);
+		let sink: RemoteSink = Arc::new(move |code, _: &[u8]| {
+			lock(&sink_log).push(code);
+			Ok(())
+		});
+		let err = Buf::default();
+		let logger = Logger::remote_with_stderr(
+			sink,
+			Box::new(err.clone()),
+			LogConfig { am_server: true, ..LogConfig::default() },
+		);
+		logger.rprintf(LogCode::Info, b"info\n");
+		logger.rprintf(LogCode::Error, b"oops\n");
+		assert_eq!(*lock(&sent), vec![LogCode::Info]);
+		assert_eq!(err.text(), "oops\n");
+	}
+
+	#[test]
+	fn unsendable_messages_fall_back_to_stderr() {
+		let sink: RemoteSink = Arc::new(|_, _: &[u8]| Err(io::Error::other("not multiplexed")));
+		let err = Buf::default();
+		let logger = Logger::remote_with_stderr(
+			sink,
+			Box::new(err.clone()),
+			LogConfig { am_server: true, stderr_mode: STDERR_CLIENT, ..LogConfig::default() },
+		);
+		logger.rprintf(LogCode::Info, b"early\n");
+		assert_eq!(err.text(), "early\n");
+	}
+
+	fn sample(name: &'static [u8], mode: u32, iflags: u32) -> LogItem<'static> {
+		LogItem {
+			name,
+			mode,
+			size: 5000,
+			mtime: 1_577_836_800,
+			uid: 501,
+			gid: 0,
+			iflags,
+			op: "send",
+			bytes_xfer: 5043,
+			bytes_csum: 16,
+			..LogItem::default()
+		}
+	}
+
+	#[test]
+	fn out_format_escapes_and_justification() {
+		// Format and outputs captured from `rsync -aH --out-format=...` (3.5.1).
+		let format = "[%o][%n][%f][%10l][%-10l|][%'l][%''l][%'''l][%B][%U][%G][%L][%b][%'b][%c]\
+		              [%M][%i][%%][%x][%5n|][%-5i|]";
+		let (logger, out, _) = client(base_cfg(format));
+		let big = LogItem {
+			dir_prefix: Some(b"src"),
+			..sample(b"big", 0o100_644, ITEM_TRANSFER | ITEM_IS_NEW)
+		};
+		logger.log_item(LogCode::Info, &big);
+		let link = LogItem {
+			size: 3,
+			link: Some(b"big"),
+			bytes_xfer: 0,
+			bytes_csum: 0,
+			dir_prefix: Some(b"src"),
+			mtime: 0,
+			..sample(b"lnk", 0o120_755, ITEM_LOCAL_CHANGE | ITEM_IS_NEW)
+		};
+		logger.log_item(LogCode::Info, &link);
+		let lines = out.text();
+		let mut lines = lines.lines();
+		assert_eq!(
+			lines.next().unwrap(),
+			"[send][big][src/big][      5000][5000      |][5,000][5.00K][4.88K][rw-r--r--][501][0][]\
+			 [5043][5,043][16][2020/01/01-00:00:00][>f+++++++++][%][%x][  big|][>f+++++++++|]"
+		);
+		assert_eq!(
+			lines.next().unwrap(),
+			"[send][lnk][src/lnk][         3][3         |][3][3][3][rwxr-xr-x][501][0][ -> big][0]\
+			 [0][0][1970/01/01-00:00:00][cL+++++++++][%][%x][  lnk|][cL+++++++++|]"
+		);
+	}
+
+	#[test]
+	fn top_dir_hard_link_and_padding_edge_cases() {
+		let (logger, out, _) =
+			client(base_cfg("[%05n][%05U][%-05l][%05l][%0'8l][%'08b]%|%10L|%-4L|%h%m%P%u|%G|%'"));
+		let dir = LogItem {
+			name: b".",
+			mode: 0o040_755,
+			size: 96,
+			dir_prefix: Some(b"src"),
+			..LogItem::default()
+		};
+		logger.log_item(LogCode::Info, &dir);
+		let hard = LogItem {
+			hlink: Some(b"hl"),
+			size: 2,
+			bytes_xfer: 45,
+			skip_group: true,
+			..sample(b"sub/f", 0o100_600, ITEM_TRANSFER)
+		};
+		logger.log_item(LogCode::Info, &hard);
+		let blank_l = format!("|{}|{}|", " ".repeat(14), " ".repeat(8));
+		assert_eq!(
+			out.text(),
+			format!(
+				"[000./][00000][96   ][00096][%0'8l][00000000]%{blank_l}%h%P%u|0|%'\n\
+				 [sub/f][00501][2    ][00002][%0'8l][00000045]%| => {}hl| => hl  |%h%P%u|DEFAULT|%'\n",
+				" ".repeat(8)
+			)
+		);
+	}
+
+	#[test]
+	fn deletions_use_deleting_n_or_the_itemize_format() {
+		let mut cfg = base_cfg("%i %n%L");
+		cfg.itemize_changes = 1;
+		let (logger, out, _) = client(cfg);
+		logger.log_delete(b"extra", S_IFREG);
+		logger.from_peer_deleted(b"gone\0");
+		assert_eq!(out.text(), "*deleting   extra\n*deleting   gone/\n");
+		let mut cfg = base_cfg("%n");
+		cfg.levels.set_info(Info::Del, 1);
+		let (logger, out, _) = client(cfg);
+		logger.log_delete(b"old", S_IFREG);
+		assert_eq!(out.text(), "deleting old\n");
+		let (logger, out, _) = client(LogConfig::default());
+		logger.log_delete(b"quiet", S_IFREG);
+		assert_eq!(out.text(), "");
+	}
+
+	#[test]
+	fn maybe_log_item_rules() {
+		let (logger, out, _) = client(base_cfg("%i %n%L"));
+		// Unchanged file, single -i: not shown.
+		logger.maybe_log_item(&sample(b"same", 0o100_644, 0), true);
+		// Perms changed: shown.
+		logger.maybe_log_item(&sample(b"perm", 0o100_644, ITEM_REPORT_PERMS), true);
+		assert_eq!(out.text(), ".f...p..... perm\n");
+		let mut cfg = base_cfg("%i %n%L");
+		cfg.itemize_changes = 2;
+		let (logger, out, _) = client(cfg);
+		logger.maybe_log_item(&sample(b"same", 0o100_644, 0), true);
+		assert_eq!(out.text(), format!(".f{}same\n", " ".repeat(10)));
+	}
+
+	#[test]
+	fn checksum_escape() {
+		let digest: Vec<u8> = (0u8..16).collect();
+		let (logger, out, _) = client(base_cfg("%C|%n"));
+		logger.log_item(
+			LogCode::Info,
+			&LogItem { checksum: Some(&digest), ..sample(b"a", 0o100_644, ITEM_TRANSFER) },
+		);
+		logger.log_item(LogCode::Info, &sample(b".", 0o040_755, 0));
+		logger.set_checksums(CsumType::Xxh64, CsumType::Xxh64);
+		logger.log_item(
+			LogCode::Info,
+			&LogItem { checksum: Some(&digest[..8]), ..sample(b"b", 0o100_644, ITEM_TRANSFER) },
+		);
+		assert_eq!(
+			out.text(),
+			"000102030405060708090a0b0c0d0e0f|a\n                                |./\n\
+			 0706050403020100|b\n"
+		);
+	}
+
+	#[test]
+	fn log_file_lines_and_exit() {
+		let file = Buf::default();
+		let cfg = LogConfig {
+			log_file: Some("x.log".into()),
+			time_zone: utc(),
+			human_readable: 1,
+			..base_cfg("%n%L")
+		};
+		let (logger, out, err) = client(cfg);
+		logger.set_log_file(Box::new(file.clone()));
+		logger.rprintf(LogCode::Log, b"building file list\n");
+		logger.log_item(LogCode::Info, &sample(b"big\x1b", 0o100_644, ITEM_TRANSFER | ITEM_IS_NEW));
+		let stats = Stats { total_written: 10, total_read: 2, total_size: 7, ..Stats::default() };
+		logger.finish(exit::RERR_PARTIAL, Some(("main.c", 1412)), &stats, false);
+		let text = file.text();
+		let pid = std::process::id();
+		let lines: Vec<&str> = text.lines().collect();
+		assert_eq!(lines.len(), 3, "{text}");
+		let stamp_len = "2026/10/29 00:39:06".len();
+		assert_eq!(&lines[0][stamp_len..], format!(" [{pid}] building file list"));
+		assert_eq!(&lines[1][stamp_len..], format!(" [{pid}] >f+++++++++ big\\#033"));
+		assert_eq!(
+			&lines[2][stamp_len..],
+			format!(
+				" [{pid}] rsync error: some files/attrs were not transferred (see previous errors) \
+				 (code 23) at main.c(1412) [client=3.5.1]"
+			)
+		);
+		assert_eq!(out.text(), "big\\#033\n");
+		assert!(err.text().starts_with("rsync error: some files/attrs"));
+		// A successful run logs the totals line to the file only.
+		let file = Buf::default();
+		let (logger, out, _) = client(LogConfig { log_file: Some("y.log".into()), ..LogConfig::default() });
+		logger.set_log_file(Box::new(file.clone()));
+		logger.finish(0, None, &stats, false);
+		assert!(file.text().ends_with("] sent 10 bytes  received 2 bytes  total size 7\n"));
+		assert_eq!(out.text(), "");
+	}
+
+	#[test]
+	fn finish_prints_trailers() {
+		let (logger, out, err) = client(LogConfig::default());
+		logger.set_needs_newline(1);
+		logger.with_role(Role::Sender).finish(
+			exit::RERR_VANISHED,
+			Some(("main.c", 1338)),
+			&Stats::default(),
+			false,
+		);
+		assert_eq!(out.text(), "\n");
+		assert_eq!(
+			err.text(),
+			"rsync warning: some files vanished before they could be transferred (code 24) at \
+			 main.c(1338) [sender=3.5.1]\n"
+		);
+		let (logger, _, err) = client(LogConfig::default());
+		logger.finish(0, None, &Stats::default(), false);
+		logger.finish(exit::RERR_PARTIAL, None, &Stats::default(), true);
+		assert_eq!(err.text(), "");
+	}
+
+	#[test]
+	fn summary_goes_through_logger() {
+		let mut cfg = LogConfig { human_readable: 1, ..LogConfig::default() };
+		cfg.levels.set_info(Info::Stats, 1);
+		let (logger, out, _) = client(cfg);
+		let stats = Stats { total_written: 229, total_read: 48, total_size: 1_239_620, ..Stats::default() };
+		logger.output_summary(&stats, 33, Some(Duration::ZERO), true, false);
+		assert_eq!(
+			out.text(),
+			"\nsent 229 bytes  received 48 bytes  554.00 bytes/sec\ntotal size is 1,239,620  \
+			 speedup is 4,475.16 (DRY RUN)\n"
+		);
+	}
+
+	#[test]
+	fn overlong_messages_truncate() {
+		let (logger, out, _) = client(LogConfig::default());
+		let mut long = vec![b'a'; BIGPATHBUFLEN + 10];
+		long.push(b'\n');
+		logger.rprintf(LogCode::Info, &long);
+		let text = out.bytes();
+		assert_eq!(text.len(), BIGPATHBUFLEN - 1);
+		assert!(text.ends_with(b"aaa[...]\n"));
+	}
+
+	#[test]
+	fn format_too_long_is_fatal() {
+		let format = "x".repeat(MAXPATHLEN + 1);
+		let (logger, _, err) = client(base_cfg(&format));
+		logger.log_item(LogCode::Info, &sample(b"a", 0o100_644, ITEM_TRANSFER | ITEM_REPORT_SIZE));
+		assert_eq!(err.text(), "log-format string is WAY too long!\n");
+		assert_eq!(logger.take_fatal().map(|e| e.code), Some(exit::RERR_MESSAGEIO));
+	}
+}

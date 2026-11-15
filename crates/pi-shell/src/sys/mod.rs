@@ -29,7 +29,7 @@ pub mod cmdline;
 pub mod console;
 mod fs;
 mod fs_ops;
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 mod job;
 pub mod langinfo;
 mod lifecycle;
@@ -70,4 +70,5 @@ pub const PATH_MAX: usize = libc::PATH_MAX as usize;
 #[cfg(not(unix))]
 pub const PATH_MAX: usize = 4096;
 
-
+#[cfg(test)]
+mod suites;

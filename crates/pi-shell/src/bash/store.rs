@@ -1576,4 +1576,108 @@ impl OptId {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use std::hash::BuildHasher;
 
+	use bstr::{BStr, BString};
+
+	use super::{AssocArray, Attrs, Key, KeyBuf, MiscKey, OptId, TrapKey};
+	use crate::bash::{
+		ids::{JobId, Vpid},
+		zshopt::ZshOpt,
+	};
+
+	#[test]
+	fn assoc_index_preserves_order_clone_and_snapshot_representation() {
+		let entries: Vec<_> = (0..256)
+			.map(|i| (BString::from(format!("k{i}")), BString::from(format!("v{i}"))))
+			.collect();
+		let mut array = AssocArray::from(entries.clone());
+		assert_eq!(&*array, entries.as_slice());
+		let encoded = postcard::to_allocvec(&array).unwrap();
+		assert_eq!(encoded, postcard::to_allocvec(&entries).unwrap());
+		let restored: AssocArray = postcard::from_bytes(&encoded).unwrap();
+		for (k, v) in &entries {
+			assert_eq!(restored.get(k), Some(v));
+		}
+		let copy = array.clone();
+		array.insert("k5".into(), "changed".into());
+		assert_eq!(array[5].0, BString::from("k5"));
+		array.remove(b"k3");
+		array.insert("k3".into(), "last".into());
+		assert_eq!(array.last().unwrap().0, BString::from("k3"));
+		for (k, v) in array.iter() {
+			assert_eq!(array.get(k), Some(v));
+		}
+		assert_eq!(&*copy, entries.as_slice());
+		assert_eq!(array.get(b"missing"), None);
+		array.value_mut(b"k5").extend_from_slice(b"+");
+		array.value_mut(b"new").extend_from_slice(b"new");
+		assert_eq!(array.get(b"k5"), Some(&BString::from("changed+")));
+		assert_eq!(array.last().unwrap().0, BString::from("new"));
+		let duplicates = vec![
+			(BString::from("k"), BString::from("first")),
+			(BString::from("k"), BString::from("second")),
+		];
+		let mut duplicates = AssocArray::from(duplicates);
+		assert_eq!(duplicates.get(b"k"), Some(&BString::from("first")));
+		duplicates.remove(b"k");
+		assert_eq!(duplicates.get(b"k"), Some(&BString::from("second")));
+	}
+
+	/// A borrowed key must hash like its owned form, or cache lookups by
+	/// `Key` miss entries inserted as `KeyBuf` and load stale store records.
+	#[test]
+	fn key_hashes_match_key_buf() {
+		let s = hashbrown::DefaultHashBuilder::default();
+		let keys = [
+			Key::Var(BStr::new("PATH")),
+			Key::Func(BStr::new("f")),
+			Key::Alias(BStr::new("ll")),
+			Key::Opt(OptId::Errexit),
+			Key::Trap(TrapKey::Exit),
+			Key::Job(JobId(3)),
+			Key::Proc(Vpid(7)),
+			Key::DirStack,
+			Key::CmdHash(BStr::new("ls")),
+			Key::Misc(MiscKey::Umask),
+			Key::Scope(2),
+			Key::Local { depth: 1, name: BStr::new("x") },
+			Key::ZshOpt(ZshOpt::Extendedglob),
+			Key::ZshAlias { suffix: true, name: BStr::new("txt") },
+		];
+		for key in keys {
+			assert_eq!(s.hash_one(key), s.hash_one(key.to_buf()), "{key:?}");
+		}
+		// Same bytes under different tables stay distinct.
+		assert_ne!(s.hash_one(Key::Var(BStr::new("x"))), s.hash_one(KeyBuf::Func("x".into())));
+	}
+
+	/// zsh's packed width and base fields stay apart from the flags and
+	/// from each other, and the whole word fits a JS number.
+	#[test]
+	fn attrs_pack_width_and_base_beside_the_flags() {
+		let a = Attrs::ZSH_RIGHT_Z
+			.with(Attrs::INTEGER)
+			.with_width(65535)
+			.with_base(16);
+		assert_eq!(a.width(), 65535);
+		assert_eq!(a.base(), 16);
+		assert_eq!(a.flags(), Attrs::ZSH_RIGHT_Z.with(Attrs::INTEGER));
+		assert_eq!(a.with_width(3).base(), 16);
+		assert_eq!(Attrs::from_bits(a.bits()), Some(a));
+		assert_eq!(Attrs::from_bits(1 << 53), None);
+		assert!(Attrs::ZSH_ONLY.contains(Attrs::ZSH_FLOAT_F.with(Attrs::ZSH_HIDEVAL)));
+		assert!(!Attrs::ZSH_ONLY.contains(Attrs::TEMP));
+	}
+
+	/// An image written while `Attrs` was 16 bits (a postcard varint) reads
+	/// back unchanged now that it is 64.
+	#[test]
+	fn attrs_decode_from_the_16_bit_encoding() {
+		let old = postcard::to_allocvec(&0x1abc_u16).expect("encodes");
+		let new: Attrs = postcard::from_bytes(&old).expect("decodes");
+		assert_eq!(new.bits(), 0x1abc);
+	}
+}

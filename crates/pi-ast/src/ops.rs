@@ -220,4 +220,100 @@ pub fn apply_edits<'e>(
 	Ok(output)
 }
 
+#[cfg(test)]
+mod tests {
+	use std::collections::HashMap;
 
+	use ast_grep_core::{MatchStrictness, source::Edit, tree_sitter::LanguageExt};
+	use tokio_util::sync::CancellationToken;
+
+	use super::{SupportLang, apply_edits, compile_pattern, resolve_supported_lang};
+	use crate::search::{self, Mode, Rewrite};
+
+	#[test]
+	fn emacs_lisp_pattern_binds_metavariables() {
+		let lang = SupportLang::EmacsLisp;
+		let pattern = compile_pattern("(defun $NAME $$$BODY)", None, &MatchStrictness::Smart, lang)
+			.expect("elisp pattern should compile");
+		let ast = lang.ast_grep("(defun greet (name)\n  (message \"Hello %s\" name)\n)");
+		let matched = ast.root().find(pattern).expect("defun should match");
+		let env = HashMap::<String, String>::from(matched.get_env().clone());
+		assert_eq!(env.get("NAME").map(String::as_str), Some("greet"));
+	}
+
+	#[test]
+	fn emacs_lisp_rewrite_substitutes_captures() {
+		let rules =
+			[("(message $FORMAT $ARG)".to_owned(), "(format-message $FORMAT $ARG)".to_owned())];
+		let rewrite = Rewrite {
+			rules:               &rules,
+			lang:                None,
+			selector:            None,
+			strictness:          MatchStrictness::Smart,
+			max_replacements:    usize::MAX,
+			max_files:           usize::MAX,
+			fail_on_parse_error: false,
+			skip_overlaps:       false,
+			mode:                Mode::Render,
+		};
+		let edit = search::rewrite_source(
+			"(defun greet (name)\n  (message \"Hello %s\" name))\n",
+			SupportLang::EmacsLisp,
+			&rewrite,
+			&CancellationToken::new(),
+		)
+		.expect("rewrite succeeds");
+		assert_eq!(edit.changes.len(), 1);
+		assert_eq!(edit.content, "(defun greet (name)\n  (format-message \"Hello %s\" name))\n");
+	}
+
+	#[test]
+	fn resolves_supported_language_aliases() {
+		assert_eq!(resolve_supported_lang("ts").ok(), Some(SupportLang::TypeScript));
+		assert_eq!(resolve_supported_lang("jsx").ok(), Some(SupportLang::JavaScript));
+		assert_eq!(resolve_supported_lang("rs").ok(), Some(SupportLang::Rust));
+		assert_eq!(resolve_supported_lang("kotlin").ok(), Some(SupportLang::Kotlin));
+		assert_eq!(resolve_supported_lang("bash").ok(), Some(SupportLang::Bash));
+		assert_eq!(resolve_supported_lang("c").ok(), Some(SupportLang::C));
+		assert_eq!(resolve_supported_lang("cpp").ok(), Some(SupportLang::Cpp));
+		assert_eq!(resolve_supported_lang("tla").ok(), Some(SupportLang::Tlaplus));
+		assert_eq!(resolve_supported_lang("pluscal").ok(), Some(SupportLang::Tlaplus));
+		assert_eq!(resolve_supported_lang("emacs-lisp").ok(), Some(SupportLang::EmacsLisp));
+		assert_eq!(resolve_supported_lang("elisp").ok(), Some(SupportLang::EmacsLisp));
+		assert_eq!(resolve_supported_lang("el").ok(), Some(SupportLang::EmacsLisp));
+		assert_eq!(resolve_supported_lang("f90").ok(), Some(SupportLang::Fortran));
+		assert!(resolve_supported_lang("brainfuck").is_err());
+	}
+
+	#[test]
+	fn apply_edits_applies_non_overlapping_edits() {
+		let source = "const answer = 41;";
+		let edits = vec![
+			Edit::<String> { position: 6, deleted_length: 6, inserted_text: b"value".to_vec() },
+			Edit::<String> { position: 15, deleted_length: 2, inserted_text: b"42".to_vec() },
+		];
+		let output = apply_edits(source, &edits).expect("edits should apply");
+		assert_eq!(output, "const value = 42;");
+	}
+
+	#[test]
+	fn apply_edits_rejects_overlaps() {
+		let source = "abcdef";
+		let edits = vec![
+			Edit::<String> { position: 1, deleted_length: 3, inserted_text: b"x".to_vec() },
+			Edit::<String> { position: 2, deleted_length: 1, inserted_text: b"y".to_vec() },
+		];
+		assert!(apply_edits(source, &edits).is_err());
+	}
+
+	#[test]
+	fn apply_edits_dedupes_identical_edits() {
+		let source = "abcdef";
+		let edits = vec![
+			Edit::<String> { position: 1, deleted_length: 3, inserted_text: b"x".to_vec() },
+			Edit::<String> { position: 1, deleted_length: 3, inserted_text: b"x".to_vec() },
+		];
+		let output = apply_edits(source, &edits).expect("identical edits should collapse to one");
+		assert_eq!(output, "axef");
+	}
+}

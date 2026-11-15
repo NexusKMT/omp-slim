@@ -2296,4 +2296,333 @@ impl AsyncUtility for Rg {
 }
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::host::run_async_util;
+	#[cfg(unix)]
+	use crate::host::tree_with_sparse_file;
 
+	async fn run(args: &[&str], stdin: &str) -> (i32, String, String) {
+		let (code, capture) = run_async_util::<Rg>(args, stdin, "/").await;
+		(code, capture.out(), capture.err())
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn max_count_stops_after_one_match() {
+		let (code, out, err) = run(&["-m1", "hit", "-"], "hit\nmiss\nhit\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "hit\n");
+	}
+
+	/// `-e` exists so a pattern may start with `-` (ripgrep); clap used to
+	/// read `-e --canary` as an unknown `--canary` flag and exit 2.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn regexp_operand_may_start_with_a_dash() {
+		let (code, out, err) = run(&["-e", "--canary", "-"], "x --canary\ny\n").await;
+		assert_eq!((code, out.as_str()), (0, "x --canary\n"), "{err}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn crlf_anchors_end_of_line_before_carriage_return() {
+		// Defends: `--crlf` must configure the matcher and searcher with the
+		// same terminator; a mismatch fails every search with a config error.
+		let (code, out, err) = run(&["--crlf", "-c", "x$", "-"], "ax\r\nbx\nc\r\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "2\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn count_skips_files_without_matches_unless_include_zero() {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("a"), "hit\nhit\n").unwrap();
+		std::fs::write(tree.path().join("b"), "miss\n").unwrap();
+		let count = async |args: &[&str]| {
+			let (code, capture) = run_async_util::<Rg>(args, "", tree.path()).await;
+			(code, capture.out())
+		};
+
+		assert_eq!(count(&["-c", "hit", "a", "b"]).await, (0, "a:2\n".to_owned()));
+		assert_eq!(count(&["--count-matches", "hit", "a", "b"]).await, (0, "a:2\n".to_owned()));
+		assert_eq!(count(&["-c", "hit", "b"]).await, (1, String::new()));
+		assert_eq!(count(&["-c", "--include-zero", "hit", "a", "b"]).await, (0, "a:2\nb:0\n".to_owned()));
+		assert_eq!(count(&["-c", "--include-zero", "--no-include-zero", "hit", "a", "b"]).await, (0, "a:2\n".to_owned()));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn pcre2_supports_lookbehind() {
+		let (code, out, err) = run(&["--pcre2", "(?<=foo)bar", "-"], "foobar\nbar\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "foobar\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn replacement_expands_named_capture() {
+		let (code, out, err) = run(&["-o", "--replace=${word}-x", "(?P<word>foo)", "-"], "foo bar\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "foo-x\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn json_emits_search_events_and_summary() {
+		let (code, out, err) = run(&["--json", "hit", "-"], "miss\nhit\n").await;
+		assert_eq!(code, 0, "{err}");
+		let events: Vec<serde_json::Value> = out.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+		let kinds: Vec<_> = events.iter().map(|event| event["type"].as_str().unwrap()).collect();
+		assert_eq!(kinds, ["begin", "match", "end", "summary"]);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn ignore_file_is_resolved_against_shell_cwd() {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("keep.txt"), "hit\n").unwrap();
+		std::fs::write(tree.path().join("skip.txt"), "hit\n").unwrap();
+		std::fs::write(tree.path().join("rules.ignore"), "skip.txt\n").unwrap();
+		let (code, capture) = run_async_util::<Rg>(&["--ignore-file=rules.ignore", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert!(capture.out().contains("keep.txt:hit\n"));
+		assert!(!capture.out().contains("skip.txt"));
+	}
+
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn follows_a_symlinked_root_operand_but_not_nested_links() {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::create_dir_all(tree.path().join("real/sub")).unwrap();
+		std::fs::write(tree.path().join("real/a.txt"), "hit\n").unwrap();
+		std::fs::write(tree.path().join("real/sub/b.txt"), "hit\n").unwrap();
+		std::os::unix::fs::symlink("real", tree.path().join("link")).unwrap();
+		std::fs::create_dir(tree.path().join("parent")).unwrap();
+		std::os::unix::fs::symlink("../real", tree.path().join("parent/inner")).unwrap();
+		let files = async |args: &[&str]| {
+			let (code, capture) = run_async_util::<Rg>(args, "", tree.path()).await;
+			let mut lines: Vec<String> = capture.out().lines().map(str::to_owned).collect();
+			lines.sort();
+			(code, lines)
+		};
+
+		let linked = (0, vec!["link/a.txt".to_owned(), "link/sub/b.txt".to_owned()]);
+		assert_eq!(files(&["-l", "hit", "link"]).await, linked);
+		assert_eq!(files(&["-l", "--no-follow", "hit", "link"]).await, linked);
+		assert_eq!(files(&["--files", "link"]).await, linked);
+		// Links met during the walk stay unfollowed unless -L asks for them.
+		assert_eq!(files(&["-l", "hit", "parent"]).await, (1, Vec::new()));
+		assert_eq!(
+			files(&["-l", "-L", "hit", "parent"]).await,
+			(0, vec!["parent/inner/a.txt".to_owned(), "parent/inner/sub/b.txt".to_owned()])
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn recursive_search_prints_files_in_path_order() {
+		let tree = tempfile::tempdir().unwrap();
+		for file in ["z.txt", "b/1.txt", "a/c/2.txt", "a/b/3.txt", "a/0.txt", "m.txt"] {
+			let path = tree.path().join(file);
+			std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+			std::fs::write(path, "hit\n").unwrap();
+		}
+		let sorted = "a/0.txt\na/b/3.txt\na/c/2.txt\nb/1.txt\nm.txt\nz.txt\n";
+		let (code, capture) = run_async_util::<Rg>(&["-l", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), sorted);
+		let (code, capture) = run_async_util::<Rg>(&["--sortr", "path", "-l", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		let reversed: String = sorted.lines().rev().map(|line| format!("{line}\n")).collect();
+		assert_eq!(capture.out(), reversed);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn files_mode_preserves_relative_paths() {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::create_dir(tree.path().join("sub")).unwrap();
+		std::fs::write(tree.path().join("sub/file.txt"), "x\n").unwrap();
+		let (code, capture) = run_async_util::<Rg>(&["--files", "sub"], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "sub/file.txt\n");
+	}
+
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn auto_engine_and_byte_offsets_match_ripgrep() {
+		let (code, out, err) = run(&["--engine=auto", "(?<=foo)bar", "-"], "foobar\nbar\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "foobar\n");
+		let (code, out, err) = run(&["--byte-offset", "hit", "-"], "zero\nhit\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "5:hit\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn encoding_and_case_insensitive_globs_apply_to_files() {
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("utf16.txt"), b"h\0i\0t\0\n\0").unwrap();
+		let (code, capture) =
+			run_async_util::<Rg>(&["--encoding=utf-16le", "hit", "utf16.txt"], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "hit\n");
+		std::fs::write(tree.path().join("UPPER.TXT"), "hit\n").unwrap();
+		let (code, capture) = run_async_util::<Rg>(
+			&["--glob-case-insensitive", "--glob=*.txt", "hit", "."],
+			"",
+			tree.path(),
+		).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert!(capture.out().contains("UPPER.TXT:hit\n"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn search_zip_decompresses_gzip() {
+		let tree = tempfile::tempdir().unwrap();
+		let gzip = [
+			31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 203, 205, 44, 46, 230, 202, 200, 44, 225, 2,
+			0, 26, 30, 21, 140, 9, 0, 0, 0,
+		];
+		std::fs::write(tree.path().join("sample.gz"), gzip).unwrap();
+		let (code, capture) =
+			run_async_util::<Rg>(&["--search-zip", "hit", "sample.gz"], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "hit\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn line_numbers_stay_off_when_piped_unless_requested() {
+		// Defends: the builtin's output is always consumed piped, where real
+		// rg omits line numbers; `1:` prefixes sprouting by default break
+		// text consumers. `-n` opts in, `-N` beats `-n`.
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("a.txt"), "miss\nhit\n").unwrap();
+		let (code, capture) = run_async_util::<Rg>(&["hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a.txt:hit\n");
+		let (code, capture) = run_async_util::<Rg>(&["-n", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a.txt:2:hit\n");
+		let (code, capture) = run_async_util::<Rg>(&["-n", "-N", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a.txt:hit\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn null_terminates_paths_without_trailing_newline() {
+		// Defends: `rg -l0 | xargs -0` must see `path\0`, not `path\0\n`.
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::write(tree.path().join("a.txt"), "hit\n").unwrap();
+		let (code, capture) = run_async_util::<Rg>(&["-l0", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a.txt\0");
+		// Match lines: `path\0text` with no `:` after the NUL; with -n the
+		// line number follows the NUL (`path\0N:text`).
+		let (code, capture) = run_async_util::<Rg>(&["-0", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a.txt\0hit\n");
+		let (code, capture) = run_async_util::<Rg>(&["-n0", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a.txt\01:hit\n");
+		// --files-without-match also emits bare `path\0`. (Exit code for this
+		// mode is a pre-existing divergence outside this test's contract.)
+		let (_code, capture) =
+			run_async_util::<Rg>(&["--files-without-match", "-0", "nope", "."], "", tree.path()).await;
+		assert_eq!(capture.out(), "a.txt\0");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn last_case_flag_wins() {
+		// Defends: real rg resolves -s/-i/-S by last occurrence, not by a
+		// fixed precedence.
+		let (code, out, err) = run(&["-s", "-i", "HIT", "-"], "hit\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "hit\n");
+		let (code, out, _) = run(&["-i", "-s", "HIT", "-"], "hit\n").await;
+		assert_eq!(code, 1);
+		assert_eq!(out, "");
+		// -i then -S: smart case wins, and an uppercase pattern stays sensitive.
+		let (code, _, _) = run(&["-i", "-S", "HIT", "-"], "hit\n").await;
+		assert_eq!(code, 1);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn compat_flags_are_accepted() {
+		// Defends: `--no-config`/`-j`/`--threads`/`--no-column` must not be
+		// clap parse errors.
+		let (code, out, err) = run(&["--no-config", "-j2", "-S", "hit", "-"], "hit\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "hit\n");
+		let (code, out, err) =
+			run(&["--threads", "4", "-n", "--column", "--no-column", "hit", "-"], "hit\n").await;
+		assert_eq!(code, 0, "{err}");
+		assert_eq!(out, "1:hit\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn path_separator_replaces_slash() {
+		// Defends: --path-separator must rewrite `/` in printed paths and
+		// reject multi-byte separators like real rg.
+		let tree = tempfile::tempdir().unwrap();
+		std::fs::create_dir(tree.path().join("sub")).unwrap();
+		std::fs::write(tree.path().join("sub/a.txt"), "hit\n").unwrap();
+		let (code, capture) =
+			run_async_util::<Rg>(&["--path-separator", "|", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "sub|a.txt:hit\n");
+		let (code, capture) =
+			run_async_util::<Rg>(&["--path-separator", "::", "hit", "."], "", tree.path()).await;
+		assert_eq!(code, 2);
+		assert!(capture.err().contains("exactly one byte"));
+		// An explicit operand is printed as spelled (`-H`: a lone file operand
+		// prints no path otherwise); on Windows its native `\` separators are
+		// rewritten too, so displayed paths stay uniform.
+		let (code, capture) = run_async_util::<Rg>(
+			&["--path-separator", "|", "-H", "hit", if cfg!(windows) { "sub\\a.txt" } else { "sub/a.txt" }],
+			"",
+			tree.path(),
+		).await;
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "sub|a.txt:hit\n");
+	}
+
+	/// `rg -a` searches a sparse file as one endless line of NUL bytes; with no
+	/// bound on the line buffer the host process grew until the kernel killed
+	/// it. Now that file is a per-file error and the other files are searched.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn text_search_of_a_line_longer_than_the_limit_is_a_file_error() {
+		let tree = tree_with_sparse_file();
+
+		let (code, capture) = run_async_util::<Rg>(&["-a", "needle", "."], "", tree.path()).await;
+
+		assert_eq!(code, 2, "{}", capture.err());
+		assert!(capture.out().lines().any(|line| line.ends_with("small:needle")), "{}", capture.out());
+		let err = capture.err();
+		assert!(err.contains("big: line longer than 256 MiB, not searched"), "{err}");
+	}
+
+	/// A multi-line search (`-U`) that can match across lines buffers the whole
+	/// file, which on a sparse file grew the host without bound.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn multiline_text_search_of_a_file_larger_than_the_limit_is_a_file_error() {
+		let tree = tree_with_sparse_file();
+
+		let (code, capture) = run_async_util::<Rg>(&["-U", "-a", "needle\\n", "."], "", tree.path()).await;
+
+		assert_eq!(code, 2, "{}", capture.err());
+		assert!(capture.out().lines().any(|line| line.ends_with("small:needle")), "{}", capture.out());
+		let err = capture.err();
+		assert!(err.contains("big: file larger than 256 MiB, not searched"), "{err}");
+	}
+
+	/// `-f` used to read the whole pattern file into memory; on a sparse file
+	/// that killed the host. Now an over-size pattern file is refused.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn pattern_file_larger_than_the_limit_is_refused() {
+		let tree = tree_with_sparse_file();
+
+		let (code, capture) = run_async_util::<Rg>(&["-f", "big", "small"], "", tree.path()).await;
+
+		assert_eq!(code, 2);
+		assert_eq!(capture.out(), "");
+		let err = capture.err();
+		assert!(err.contains("rg: big: pattern file larger than 256 MiB"), "{err}");
+	}
+}

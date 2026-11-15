@@ -65,7 +65,8 @@ mod mbchar;
 mod prog;
 mod token;
 
-
+#[cfg(test)]
+mod tests;
 
 use core::{fmt, ops};
 

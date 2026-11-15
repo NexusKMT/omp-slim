@@ -537,4 +537,110 @@ fn parse_int(text: &[u8]) -> Option<i64> {
 	std::str::from_utf8(text).ok()?.parse().ok()
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::syntax::tree::{NameB, OpB};
 
+	/// A test word part.
+	enum P {
+		Lit(&'static str),
+		SQuote(&'static str),
+		/// `$name` / `${name}`.
+		Var(&'static str, bool),
+	}
+
+	/// The alternatives of `parts`, each part shown as text: literals as
+	/// they are, `$name`/`${name}`, single quotes with their text, anything
+	/// else `<atom>`.
+	fn alts(parts: &[P]) -> Option<Vec<Vec<String>>> {
+		let mut t = Tree::default();
+		let ids: Vec<_> = parts
+			.iter()
+			.map(|p| match *p {
+				P::Lit(s) => t.text_part(TextPk::Lit, s.as_bytes()),
+				P::SQuote(s) => t.text_part(TextPk::SQuote, s.as_bytes()),
+				P::Var(n, braced) => t.param(NameB::Var(n.as_bytes()), None, OpB::None, braced, false),
+			})
+			.collect();
+		let root = t.word(crate::bash::syntax::Span::default(), &ids);
+		let (out, words) = expand(st::Word::of(&t, root)).expect("under the word limit")?;
+		let show = |p: st::WordPart<'_>| match p.get() {
+			st::Part::Lit(b) => String::from_utf8_lossy(b).into_owned(),
+			st::Part::SQuote(b) => format!("'{}'", String::from_utf8_lossy(b)),
+			st::Part::Param(p) => match (p.name(), p.braced()) {
+				(st::ParamName::Var(n), false) => format!("${}", String::from_utf8_lossy(n)),
+				(st::ParamName::Var(n), true) => format!("${{{}}}", String::from_utf8_lossy(n)),
+				_ => String::from("<atom>"),
+			},
+			_ => String::from("<atom>"),
+		};
+		Some(
+			words
+				.iter()
+				.map(|&w| st::Word::at(&out, w).parts().iter().map(show).collect())
+				.collect(),
+		)
+	}
+
+	fn words(s: &'static str) -> Vec<String> {
+		match alts(&[P::Lit(s)]) {
+			None => vec![s.to_owned()],
+			Some(alts) => alts.into_iter().map(|parts| parts.concat()).collect(),
+		}
+	}
+
+	// Goldens: bash 5.3.20.
+	#[test]
+	fn alternatives_nest_and_combine() {
+		assert_eq!(words("{a,b}{1..2}"), ["a1", "a2", "b1", "b2"]);
+		assert_eq!(words("a{,b}"), ["a", "ab"]);
+		assert_eq!(words("{a,{b,c}d}"), ["a", "bd", "cd"]);
+		assert_eq!(words("{a}"), ["{a}"]);
+		assert_eq!(words("{}"), ["{}"]);
+		assert_eq!(words("x{a,b"), ["x{a,b"]);
+	}
+
+	// Goldens: upstream braces.tests / braces.right.
+	#[test]
+	fn unclosed_braces_are_skipped_and_results_not_rescanned() {
+		assert_eq!(words("a-{bdef-{g,i}-c"), ["a-{bdef-g-c", "a-{bdef-i-c"]);
+		assert_eq!(words("{1..{7..9}}"), ["{1..7}", "{1..8}", "{1..9}"]);
+		let w = words("{{1..3}..{7..9}}");
+		assert_eq!(w.len(), 9);
+		assert_eq!(w[..4], ["{1..7}", "{1..8}", "{1..9}", "{2..7}"]);
+		assert_eq!(words("{Z..a}")[1..4], ["[", "''", "]"]);
+	}
+
+	#[test]
+	fn sequences_pad_step_and_reverse() {
+		assert_eq!(words("{01..03}"), ["01", "02", "03"]);
+		assert_eq!(words("{a..c..2}"), ["a", "c"]);
+		assert_eq!(words("{5..1}"), ["5", "4", "3", "2", "1"]);
+		assert_eq!(words("{1..10..4}"), ["1", "5", "9"]);
+		assert_eq!(words("{-1..1}"), ["-1", "0", "1"]);
+		assert_eq!(words("{1..a}"), ["{1..a}"]);
+	}
+
+	#[test]
+	fn quoted_parts_are_opaque() {
+		let parts = [P::Lit("{a,"), P::SQuote("b,c"), P::Lit("}")];
+		let alts = alts(&parts).unwrap();
+		assert_eq!(alts.len(), 2);
+		assert_eq!(alts[1], ["'b,c'"]);
+	}
+
+	fn var(name: &'static str, braced: bool) -> P {
+		P::Var(name, braced)
+	}
+
+	// Goldens: bash 5.3.20 `var=baz varx=vx; echo $var{x,y} ${var}{x,y}`
+	// prints `vx vy bazx bazy`.
+	#[test]
+	fn unbraced_names_absorb_expanded_name_characters() {
+		let got = alts(&[var("var", false), P::Lit("{x,y-}")]).unwrap();
+		assert_eq!(got, [vec!["$varx"], vec!["$vary", "-"]]);
+		let got = alts(&[var("var", true), P::Lit("{x,y}")]).unwrap();
+		assert_eq!(got[0], ["${var}", "x"]);
+	}
+}

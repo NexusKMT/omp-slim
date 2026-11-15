@@ -109,4 +109,74 @@ macro_rules! packed_names {
 
 pub(crate) use packed_names;
 
+#[cfg(test)]
+mod tests {
+	use std::str::FromStr;
 
+	use strum::{IntoEnumIterator, VariantNames};
+
+	use crate::bash::{
+		diag::DiagCode,
+		event::{EventKind, NodeKind},
+		host::Rlimit,
+		ids::{IntrinsicId, ModeId},
+		ir::Opcode,
+		signal::Signal,
+		store::{MiscKey, OptId, Table},
+		zshopt::ZshOpt,
+	};
+
+	/// Variant `i` in declaration order is named `VARIANTS[i]` (no
+	/// explicit discriminant shifts `e as usize`).
+	fn by_iter<E>()
+	where
+		E: IntoEnumIterator + VariantNames + Copy + std::fmt::Debug,
+		&'static str: From<E>,
+	{
+		assert_eq!(E::iter().count(), E::VARIANTS.len());
+		for (v, &name) in E::iter().zip(E::VARIANTS) {
+			assert!(!name.is_empty(), "{v:?} has no name");
+			assert_eq!(<&'static str>::from(v), name, "{v:?}");
+		}
+	}
+
+	/// Every name parses (strum) to the variant it is the packed name of.
+	fn by_parse<E>()
+	where
+		E: FromStr + VariantNames + Copy,
+		&'static str: From<E>,
+	{
+		for &name in E::VARIANTS {
+			let v = E::from_str(name)
+				.ok()
+				.unwrap_or_else(|| panic!("{name} does not parse"));
+			assert_eq!(<&'static str>::from(v), name);
+		}
+	}
+
+	#[test]
+	fn packed_names_follow_declaration_order() {
+		by_iter::<ZshOpt>();
+		by_iter::<IntrinsicId>();
+		by_iter::<OptId>();
+		by_iter::<Signal>();
+		by_iter::<EventKind>();
+		by_iter::<Table>();
+		by_iter::<Rlimit>();
+		by_iter::<DiagCode>();
+		by_parse::<ZshOpt>();
+		by_parse::<IntrinsicId>();
+		by_parse::<OptId>();
+		by_parse::<Signal>();
+		by_parse::<Opcode>();
+		by_parse::<MiscKey>();
+		by_parse::<NodeKind>();
+		by_parse::<ModeId>();
+	}
+
+	#[test]
+	fn display_pads_like_str() {
+		assert_eq!(format!("{:>8}", ZshOpt::Xtrace), "  xtrace");
+		assert_eq!(format!("{:<6}|", Signal::Int), "INT   |");
+	}
+}

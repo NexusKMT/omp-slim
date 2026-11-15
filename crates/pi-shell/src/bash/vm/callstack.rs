@@ -422,4 +422,51 @@ pub fn definition_line(u: &Unit) -> u32 {
 		.map_or(u.line, |n| u.line + n.line)
 }
 
+#[cfg(test)]
+mod tests {
+	use bstr::BString;
 
+	use super::{Call, CallKind};
+
+	fn function(name: &str, argv: Option<&[&str]>, depth: u32) -> Call {
+		Call {
+			kind: CallKind::Function {
+				name: BString::from(name),
+				file: BString::from("f.sh"),
+				line: 3,
+				argv: argv.map(|a| a.iter().map(|s| BString::from(*s)).collect()),
+			},
+			depth,
+		}
+	}
+
+	// Golden: bash 5.3.20 under `extdebug`, `f1 1 x` → `f2 2 y`: BASH_ARGV
+	// is `y 2 x 1` then the script's arguments, BASH_ARGC `2 2 0`.
+	#[test]
+	fn argv_pushes_read_innermost_first_with_arguments_reversed() {
+		let calls = [
+			Call { kind: CallKind::Args(Vec::new()), depth: 0 },
+			function("f1", Some(&["1", "x"]), 1),
+			function("f2", Some(&["2", "y"]), 2),
+		];
+		let argv: Vec<BString> = calls
+			.iter()
+			.rev()
+			.filter_map(|c| c.kind.argv())
+			.flat_map(|a| a.iter().rev().cloned())
+			.collect();
+		assert_eq!(argv, ["y", "2", "x", "1"]);
+		let argc: Vec<usize> = calls
+			.iter()
+			.rev()
+			.filter_map(|c| c.kind.argv())
+			.map(<[BString]>::len)
+			.collect();
+		assert_eq!(argc, [2, 2, 0]);
+	}
+
+	#[test]
+	fn a_function_without_extdebug_pushes_no_arguments() {
+		assert_eq!(function("f", None, 1).kind.argv(), None);
+	}
+}

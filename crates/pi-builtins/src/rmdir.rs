@@ -287,4 +287,198 @@ fn remove_parents(host: &mut Host, dir: &OsStr, opts: &Opts) {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{fs, path::PathBuf};
 
+	use super::*;
+	use crate::host::run_util;
+
+	fn run(cwd: &Path, args: &[&str]) -> (i32, String, String) {
+		let (code, capture) = run_util::<Rmdir>(args, "", cwd.to_path_buf());
+		(code, capture.out(), capture.err())
+	}
+
+	fn tempdir() -> (tempfile::TempDir, PathBuf) {
+		let dir = tempfile::tempdir().unwrap();
+		let canon = fs::canonicalize(dir.path()).unwrap();
+		(dir, canon)
+	}
+
+	#[test]
+	fn removes_empty_dir_relative_to_host_cwd() {
+		let (_d, root) = tempdir();
+		fs::create_dir(root.join("e")).unwrap();
+		assert_eq!(run(&root, &["e"]), (0, String::new(), String::new()));
+		assert!(!root.join("e").exists());
+	}
+
+	#[test]
+	fn non_empty_fails_unless_ignored() {
+		let (_d, root) = tempdir();
+		fs::create_dir_all(root.join("n/x")).unwrap();
+		assert_eq!(
+			run(&root, &["n"]),
+			(1, String::new(), "rmdir: failed to remove 'n': Directory not empty\n".into())
+		);
+		assert_eq!(
+			run(&root, &["--ignore-fail-on-non-empty", "n"]),
+			(0, String::new(), String::new())
+		);
+		assert!(root.join("n/x").exists());
+	}
+
+	#[test]
+	fn parents_removes_every_ancestor() {
+		let (_d, root) = tempdir();
+		fs::create_dir_all(root.join("a/b/c")).unwrap();
+		assert_eq!(run(&root, &["-p", "a//b/c/"]), (0, String::new(), String::new()));
+		assert!(!root.join("a").exists());
+	}
+
+	#[test]
+	fn parents_verbose_stops_at_non_empty_ancestor() {
+		let (_d, root) = tempdir();
+		fs::create_dir_all(root.join("p/q/r")).unwrap();
+		fs::create_dir(root.join("p/s")).unwrap();
+		assert_eq!(
+			run(&root, &["-pv", "p/q/r"]),
+			(
+				1,
+				"rmdir: removing directory, 'p/q/r'\nrmdir: removing directory, \
+				 'p/q'\nrmdir: removing directory, 'p'\n"
+					.into(),
+				"rmdir: failed to remove directory 'p': Directory not empty\n".into()
+			)
+		);
+		fs::create_dir_all(root.join("p/q")).unwrap();
+		assert_eq!(
+			run(&root, &["-p", "--ignore-fail-on-non-empty", "p/q"]),
+			(0, String::new(), String::new())
+		);
+	}
+
+	#[test]
+	fn missing_and_file_operands_continue() {
+		let (_d, root) = tempdir();
+		fs::write(root.join("f"), "").unwrap();
+		fs::create_dir(root.join("e")).unwrap();
+		assert_eq!(
+			run(&root, &["x", "f", "e"]),
+			(
+				1,
+				String::new(),
+				"rmdir: failed to remove 'x': No such file or directory\nrmdir: failed to remove \
+				 'f': Not a directory\n"
+					.into()
+			)
+		);
+		assert!(!root.join("e").exists());
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn symlink_without_slash_is_not_a_directory() {
+		let (_d, root) = tempdir();
+		fs::create_dir(root.join("d")).unwrap();
+		std::os::unix::fs::symlink("d", root.join("l")).unwrap();
+		assert_eq!(
+			run(&root, &["l"]),
+			(1, String::new(), "rmdir: failed to remove 'l': Not a directory\n".into())
+		);
+	}
+
+	/// Linux refuses `rmdir("l/")` with ENOTDIR and GNU explains why; macOS
+	/// removes the target directory.
+	#[cfg(unix)]
+	#[test]
+	fn symlink_with_trailing_slash_follows_platform() {
+		let (_d, root) = tempdir();
+		fs::create_dir(root.join("d")).unwrap();
+		std::os::unix::fs::symlink("d", root.join("l")).unwrap();
+		let result = run(&root, &["l/"]);
+		if cfg!(target_os = "linux") {
+			assert_eq!(
+				result,
+				(1, String::new(), "rmdir: failed to remove 'l/': Symbolic link not followed\n".into())
+			);
+		} else {
+			assert_eq!(result, (0, String::new(), String::new()));
+			assert!(!root.join("d").exists());
+		}
+	}
+
+	#[test]
+	fn dot_operand_is_invalid() {
+		let (_d, root) = tempdir();
+		fs::create_dir(root.join("e")).unwrap();
+		assert_eq!(
+			run(&root, &["e/."]),
+			(1, String::new(), "rmdir: failed to remove 'e/.': Invalid argument\n".into())
+		);
+		assert!(root.join("e").exists());
+	}
+
+	/// Linux refuses a final `..` with ENOTEMPTY; Windows must not fold it away
+	/// and remove the parent (here the empty working directory).
+	#[cfg(any(target_os = "linux", windows))]
+	#[test]
+	fn dot_dot_operand_is_refused() {
+		let (_d, root) = tempdir();
+		assert_eq!(
+			run(&root, &["x/.."]),
+			(1, String::new(), "rmdir: failed to remove 'x/..': No such file or directory\n".into())
+		);
+		fs::create_dir(root.join("e")).unwrap();
+		assert_eq!(
+			run(&root, &["e/.."]),
+			(1, String::new(), "rmdir: failed to remove 'e/..': Directory not empty\n".into())
+		);
+		assert_eq!(run(&root, &["--ignore-fail-on-non-empty", "e/.."]), (0, String::new(), String::new()));
+		assert!(root.join("e").exists());
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn normalized_operands_do_not_remove_another_directory() {
+		for operand in ["e.", "e ", "e./child"] {
+			let (dir, root) = tempdir();
+			fs::create_dir(root.join("e")).unwrap();
+			if operand == "e./child" {
+				fs::create_dir(root.join("e/child")).unwrap();
+			}
+			fs::create_dir(root.join("victim")).unwrap();
+			for cwd in [root.as_path(), dir.path()] {
+				assert_eq!(run(cwd, &[operand]).0, 1, "{operand}");
+				assert!(root.join("e").is_dir(), "{operand}");
+				if operand == "e./child" {
+					assert!(root.join("e/child").is_dir(), "{operand}");
+				}
+				assert!(root.join("victim").is_dir(), "{operand}");
+			}
+		}
+	}
+
+	/// A verbatim cwd is accessed literally, so its trailing-dot components
+	/// must not make every relative operand unremovable.
+	#[cfg(windows)]
+	#[test]
+	fn verbatim_cwd_components_are_not_scanned() {
+		let (_dir, root) = tempdir();
+		let literal = root.join("literal.");
+		fs::create_dir(&literal).unwrap();
+		fs::create_dir(literal.join("child")).unwrap();
+		assert_eq!(run(&literal, &["child"]), (0, String::new(), String::new()));
+		assert!(!literal.join("child").exists());
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn explicit_verbatim_operands_keep_literal_trailing_dots() {
+		let (_dir, root) = tempdir();
+		let literal = root.join("literal.");
+		fs::create_dir(&literal).unwrap();
+		assert_eq!(run(&root, &[literal.to_str().unwrap()]).0, 0);
+		assert!(!literal.exists());
+	}
+}

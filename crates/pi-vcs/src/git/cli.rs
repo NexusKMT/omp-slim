@@ -668,4 +668,108 @@ pub async fn clone(
 	Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	/// Set on the re-executed child; carries the fixture repository it should
+	/// probe. Its presence is what tells the test body which side it is on.
+	const ENV_PROBE_REPO: &str = "PI_VCS_TEST_ENV_PROBE_REPO";
+
+	/// Asks git to report the ambient variables it was started with. A `!`-alias
+	/// is the only way to make git print its own environment.
+	const ENV_PROBE_ALIAS: &str = r#"!printf 'LC_ALL=[%s] LC_CTYPE=[%s] LC_MESSAGES=[%s] LITERAL=[%s] ICASE=[%s]' "$LC_ALL" "$LC_CTYPE" "$LC_MESSAGES" "$GIT_LITERAL_PATHSPECS" "$GIT_ICASE_PATHSPECS""#;
+
+	/// A git left in the host's process group shares its terminal and can read
+	/// the TUI's keystrokes and terminal replies (Tern TSP events leaked into
+	/// the composer with their leading bytes missing). Both runners must start
+	/// it in its own session.
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn runners_start_git_outside_the_host_process_group() {
+		let dir = tempfile::tempdir().expect("tempdir");
+		let args = ["-c".to_owned(), "alias.pgid=!ps -o pgid= -p $$".to_owned(), "pgid".to_owned()];
+		// SAFETY: getpgrp has no preconditions.
+		let host = unsafe { libc::getpgrp() };
+		let sync = run_sync(dir.path(), &args, SYNC_TIMEOUT).expect("sync runner");
+		let spawned = run(dir.path(), &args, &RunOptions::default())
+			.await
+			.expect("async runner");
+		for out in [sync, spawned] {
+			assert_eq!(out.exit_code, 0, "alias failed: {out:?}");
+			let pgid: i32 = out.stdout.trim().parse().expect("pgid");
+			assert_ne!(pgid, host, "git shares the host's process group: {out:?}");
+		}
+	}
+
+	/// Two guarantees this crate builds on top of, both of which depend on what
+	/// the child process actually receives:
+	///
+	/// - The ownership fallback reads git's diagnostic, and `LC_ALL` outranks
+	///   `LC_MESSAGES`, so an inherited one hands back a translated message that
+	///   [`is_dubious_ownership`] cannot match.
+	/// - The `:(literal)` magic this crate builds is only explicit once the
+	///   global pathspec modes are gone; `GIT_LITERAL_PATHSPECS=1` would turn
+	///   the prefix into filename text and match nothing.
+	///
+	/// Asserted through [`run_sync`] rather than [`apply_env`] directly, because
+	/// the regression this covers was the synchronous builder not calling the
+	/// helper. The variables have to be present before the process starts, and
+	/// `set_var` in a running test binary is observable by every other thread,
+	/// so the probe runs in a re-executed copy of this test binary spawned with
+	/// them already in its environment.
+	#[test]
+	fn sync_runner_pins_message_locale_and_scrubs_pathspec_modes() {
+		if let Some(repo) = std::env::var_os(ENV_PROBE_REPO) {
+			let out = run_sync(
+				Path::new(&repo),
+				&["-c".to_owned(), format!("alias.envprobe={ENV_PROBE_ALIAS}"), "envprobe".to_owned()],
+				SYNC_TIMEOUT,
+			)
+			.expect("run alias");
+
+			assert_eq!(out.exit_code, 0, "alias failed: {out:?}");
+			assert!(out.stdout.contains("LC_ALL=[]"), "LC_ALL leaked: {out:?}");
+			assert!(out.stdout.contains("LC_MESSAGES=[C]"), "messages not pinned: {out:?}");
+			// The character locale is preserved so paths keep round-tripping as
+			// UTF-8; only the message locale is forced.
+			assert!(
+				out.stdout.contains("LC_CTYPE=[fr_FR.UTF-8]"),
+				"UTF-8 character locale dropped: {out:?}"
+			);
+			assert!(out.stdout.contains("LITERAL=[]"), "literal pathspec mode leaked: {out:?}");
+			assert!(out.stdout.contains("ICASE=[]"), "icase pathspec mode leaked: {out:?}");
+			return;
+		}
+
+		let dir = tempfile::tempdir().expect("tempdir");
+		let init = std::process::Command::new("git")
+			.args(["init", "-q", "-b", "main"])
+			.current_dir(dir.path())
+			.status()
+			.expect("spawn git init");
+		assert!(init.success(), "git init failed");
+
+		let name = format!(
+			"{}::sync_runner_pins_message_locale_and_scrubs_pathspec_modes",
+			module_path!()
+				.split_once("::")
+				.expect("crate-qualified module path")
+				.1
+		);
+		let child = std::process::Command::new(std::env::current_exe().expect("test binary"))
+			.args(["--exact", &name, "--nocapture", "--test-threads=1"])
+			.env(ENV_PROBE_REPO, dir.path())
+			.env("LC_ALL", "fr_FR.UTF-8")
+			.env("GIT_LITERAL_PATHSPECS", "1")
+			.env("GIT_ICASE_PATHSPECS", "1")
+			.output()
+			.expect("re-exec test binary");
+		assert!(
+			child.status.success(),
+			"environment probe failed:\n{}{}",
+			String::from_utf8_lossy(&child.stdout),
+			String::from_utf8_lossy(&child.stderr)
+		);
+	}
+}

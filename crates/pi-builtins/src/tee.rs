@@ -277,6 +277,8 @@ impl Write for MultiWriter {
 enum Writer {
 	File(File),
 	Stdout(OpenFile),
+	#[cfg(test)]
+	Test(Box<dyn Write + Send>),
 }
 
 impl Write for Writer {
@@ -284,6 +286,8 @@ impl Write for Writer {
 		match self {
 			Self::File(file) => file.write(buf),
 			Self::Stdout(stdout) => stdout.write(buf),
+			#[cfg(test)]
+			Self::Test(writer) => writer.write(buf),
 		}
 	}
 
@@ -291,6 +295,8 @@ impl Write for Writer {
 		match self {
 			Self::File(file) => file.flush(),
 			Self::Stdout(stdout) => stdout.flush(),
+			#[cfg(test)]
+			Self::Test(writer) => writer.flush(),
 		}
 	}
 }
@@ -369,4 +375,157 @@ fn app() -> Command {
 		)
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		ffi::OsString,
+		io::{self, Read, Write},
+	};
 
+	#[cfg(unix)]
+	use crate::openfile::OpenFile;
+	use pi_vfs::OpenOptions;
+
+	use super::{MultiWriter, NamedWriter, OutputErrorMode, Tee, Writer};
+	#[cfg(unix)]
+	use crate::host::{SIGPIPE_EXIT_CODE, run_caught};
+	use crate::host::{Host, run_util};
+
+	struct BrokenPipe;
+
+	impl Write for BrokenPipe {
+		fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+			Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed pipe"))
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	#[test]
+	fn copies_to_stdout() {
+		let (code, capture) = run_util::<Tee>(&[], "hello\n", "/");
+		assert_eq!(code, 0);
+		assert_eq!(capture.out(), "hello\n");
+		assert_eq!(capture.err(), "");
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn output_error_mode_controls_sigpipe_policy() {
+		fn run(args: &[&str], cwd: &std::path::Path) -> (i32, crate::host::Capture) {
+			let (mut host, capture) = Host::for_test("tee", "contents", cwd);
+			let (reader, writer) = std::io::pipe().unwrap();
+			drop(reader);
+			host.set_test_stdout(OpenFile::from(writer));
+			let argv = std::iter::once(OsString::from("tee"))
+				.chain(args.iter().copied().map(OsString::from))
+				.collect::<Vec<_>>();
+			let parsed = <Tee as clap::Parser>::try_parse_from(argv).unwrap();
+			(run_caught::<Tee>(parsed, &mut host), capture)
+		}
+
+		let cwd = tempfile::tempdir().unwrap();
+		let (code, capture) = run(&["default"], cwd.path());
+		assert_eq!(code, SIGPIPE_EXIT_CODE);
+		assert_eq!(capture.err(), "");
+
+		let (code, capture) = run(&["-p", "nopipe"], cwd.path());
+		assert_eq!(code, 0);
+		assert_eq!(std::fs::read(cwd.path().join("nopipe")).unwrap(), b"contents");
+		assert_eq!(capture.err(), "");
+	}
+
+	#[test]
+	fn dash_copies_to_stdout_again() {
+		let (code, capture) = run_util::<Tee>(&["-"], "hello", "/");
+		assert_eq!(code, 0);
+		assert_eq!(capture.out(), "hellohello");
+	}
+
+	#[test]
+	fn relative_output_is_resolved_under_host_cwd() {
+		let cwd = tempfile::tempdir().unwrap();
+		let (code, capture) = run_util::<Tee>(&["output"], "contents", cwd.path());
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "contents");
+		assert_eq!(std::fs::read(cwd.path().join("output")).unwrap(), b"contents");
+	}
+
+	#[test]
+	fn append_preserves_existing_contents() {
+		let cwd = tempfile::tempdir().unwrap();
+		std::fs::write(cwd.path().join("output"), "before").unwrap();
+		let (code, capture) = run_util::<Tee>(&["-a", "output"], "after", cwd.path());
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(std::fs::read(cwd.path().join("output")).unwrap(), b"beforeafter");
+	}
+
+	#[test]
+	fn default_mode_continues_after_an_output_open_error() {
+		let cwd = tempfile::tempdir().unwrap();
+		let (code, capture) = run_util::<Tee>(&["missing/output", "good"], "contents", cwd.path());
+		assert_eq!(code, 1);
+		assert_eq!(std::fs::read(cwd.path().join("good")).unwrap(), b"contents");
+		assert!(capture.err().contains("missing/output"));
+	}
+
+	#[test]
+	fn warn_nopipe_silences_broken_stdout_and_keeps_file_output() {
+		let destination = tempfile::NamedTempFile::new().unwrap();
+		let (host, capture) = Host::for_test("tee", Vec::new(), "/");
+		let file = host
+			.fs()
+			.open_with(destination.path(), OpenOptions::new().write(true))
+			.unwrap();
+		let mut output = MultiWriter::new(
+			vec![
+				NamedWriter {
+					name:  OsString::from("standard output"),
+					inner: Writer::Test(Box::new(BrokenPipe)),
+				},
+				NamedWriter { name: OsString::from("file"), inner: Writer::File(file) },
+			],
+			Some(OutputErrorMode::WarnNoPipe),
+			host.stderr_clone(),
+		);
+
+		output.write_all(b"contents").unwrap();
+		assert!(!output.error_occurred());
+		drop(output);
+		let mut contents = Vec::new();
+		destination.reopen().unwrap().read_to_end(&mut contents).unwrap();
+		assert_eq!(contents, b"contents");
+		assert_eq!(capture.err(), "");
+	}
+
+	#[test]
+	fn warn_reports_broken_stdout_but_keeps_file_output() {
+		let destination = tempfile::NamedTempFile::new().unwrap();
+		let (host, capture) = Host::for_test("tee", Vec::new(), "/");
+		let file = host
+			.fs()
+			.open_with(destination.path(), OpenOptions::new().write(true))
+			.unwrap();
+		let mut output = MultiWriter::new(
+			vec![
+				NamedWriter {
+					name:  OsString::from("standard output"),
+					inner: Writer::Test(Box::new(BrokenPipe)),
+				},
+				NamedWriter { name: OsString::from("file"), inner: Writer::File(file) },
+			],
+			Some(OutputErrorMode::Warn),
+			host.stderr_clone(),
+		);
+
+		output.write_all(b"contents").unwrap();
+		assert!(output.error_occurred());
+		drop(output);
+		let mut contents = Vec::new();
+		destination.reopen().unwrap().read_to_end(&mut contents).unwrap();
+		assert_eq!(contents, b"contents");
+		assert!(capture.err().contains("standard output"));
+	}
+}

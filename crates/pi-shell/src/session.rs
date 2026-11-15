@@ -848,4 +848,1093 @@ impl Driver {
 	}
 }
 
+#[cfg(all(test, unix))]
+mod tests {
+	use std::{io, io::Read, os::unix::ffi::OsStrExt, time::Instant};
 
+	use super::*;
+	use crate::sys::StdFs;
+
+	fn session() -> Session {
+		let env = std::env::vars_os()
+			.map(|(k, v)| (BString::from(k.as_bytes()), BString::from(v.as_bytes())))
+			.collect();
+		let cwd = std::env::current_dir().unwrap();
+		Session::new(SessionConfig {
+			env,
+			cwd: BString::from(cwd.as_os_str().as_bytes()),
+			fs: Box::new(StdFs::default()),
+			vfs: None,
+			runtime: tokio::runtime::Handle::current(),
+			output_decoding: None,
+		})
+		.unwrap()
+	}
+
+	/// A command's outcome and its stdout and stderr, read through pipes on
+	/// threads (the pipes are drained while the command runs).
+	struct Captured {
+		outcome: RunOutcome,
+		stdout:  String,
+		stderr:  String,
+	}
+
+	async fn capture(session: &mut Session, options: RunOptions) -> Captured {
+		let (out_r, out_w) = io::pipe().unwrap();
+		let (err_r, err_w) = io::pipe().unwrap();
+		let drain = |mut r: io::PipeReader| {
+			std::thread::spawn(move || {
+				let mut s = String::new();
+				r.read_to_string(&mut s).unwrap();
+				s
+			})
+		};
+		let (out, err) = (drain(out_r), drain(err_r));
+		let stdout = std::fs::File::from(std::os::fd::OwnedFd::from(out_w));
+		let stderr = if options.text_capture {
+			drop(err_w);
+			stdout.try_clone().unwrap()
+		} else {
+			std::fs::File::from(std::os::fd::OwnedFd::from(err_w))
+		};
+		let stdio = RunStdio {
+			stdin:  Some(std::fs::File::open("/dev/null").unwrap()),
+			stdout: Some(stdout),
+			stderr: Some(stderr),
+		};
+		let outcome = session
+			.run_with(options, stdio, CancellationToken::new())
+			.await
+			.unwrap();
+		Captured { outcome, stdout: out.join().unwrap(), stderr: err.join().unwrap() }
+	}
+
+	async fn sh(session: &mut Session, command: &str) -> Captured {
+		capture(session, RunOptions::new(command)).await
+	}
+
+	fn alive(pid: i32) -> bool {
+		// SAFETY: signal 0 only probes existence.
+		unsafe { libc::kill(pid, 0) == 0 }
+	}
+
+	/// Exercise tracing through the real engine, native tools, spawner and
+	/// capture pipes, never `FakeHost`'s synthetic command implementations.
+	async fn trace_capture(
+		session: &mut Session,
+		command: &str,
+	) -> (Captured, Arc<crate::bash::trace::RunTrace>) {
+		let trace = Arc::new(crate::bash::trace::RunTrace::new(command));
+		let options =
+			RunOptions { events: Some(trace.clone()), text_capture: true, ..RunOptions::new(command) };
+		let captured = capture(session, options).await;
+		(captured, trace)
+	}
+
+	fn trace_output(snapshot: &crate::bash::trace::Snapshot) -> String {
+		let mut out = String::new();
+		for entry in &snapshot.history {
+			if let crate::bash::trace::history::HistoryData::Output { text, .. } = &entry.data {
+				out.push_str(&String::from_utf8_lossy(text));
+			}
+		}
+		out
+	}
+
+	fn producer_source<'a>(
+		snapshot: &'a crate::bash::trace::Snapshot,
+		event: &crate::bash::trace::history::HistoryEvent,
+	) -> &'a [u8] {
+		let unit = &snapshot.units[event.u.expect("attributed unit") as usize];
+		let node = &unit.nodes[event.n.expect("attributed node") as usize];
+		let source = match unit.at {
+			Some(at) => &snapshot.script[at as usize..],
+			None => unit.source.as_ref().expect("unlocated source").as_slice(),
+		};
+		&source[node.lo as usize..node.hi as usize]
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_descriptor_wrappers_keep_thin_handles_and_shared_identity() {
+		use crate::bash::{CmdTag, FdFlags, FdRef, Host, RunId, StdFd, Vpid};
+		let mut host = PiHost::new(Box::new(StdFs::default()), tokio::runtime::Handle::current());
+		host.set_event_sink(Some(Arc::new(crate::bash::trace::RunTrace::new(""))));
+		let (_reader, writer) = io::pipe().unwrap();
+		host.streams().install(
+			[None, Some(std::fs::File::from(std::os::fd::OwnedFd::from(writer))), None],
+			false,
+		);
+		let base = FdRef::from_file(Host::stdio(&mut host, StdFd::Stdout).unwrap());
+		let first = CmdTag { run: RunId(1), vpid: Vpid(1), seq: 1 };
+		let tagged = base.clone().with_tag(first);
+		let retagged = tagged.clone().with_tag(CmdTag { seq: 2, ..first });
+		assert!(base.same(&tagged) && tagged.same(&retagged));
+		assert!(base.downgrade().is(&retagged) && tagged.downgrade().is(&base));
+		base.set_flags(FdFlags::CLOEXEC);
+		assert_eq!(tagged.flags(), FdFlags::CLOEXEC);
+		retagged.set_flags(FdFlags::FLOCK);
+		assert_eq!(base.flags(), FdFlags::FLOCK);
+		assert_eq!(tagged.flags(), FdFlags::FLOCK);
+		assert_eq!(base.output_key(), retagged.output_key());
+		assert!(
+			!tagged.dup().unwrap().same(&base),
+			"dup retains its preexisting new-object identity"
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_visible_output_covers_builtin_native_external_and_loop_iterations() {
+		use crate::bash::trace::history::HistoryData;
+		let mut session = session();
+		let script = "for i in one two three; do echo \"$i\"; done; printf 'builtin\\n'; \
+		              /usr/bin/printf 'external\\n'; seq 1 2";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		assert_eq!(captured.stdout, "one\ntwo\nthree\nbuiltin\nexternal\n1\n2\n");
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		let mut loop_executions = std::collections::HashSet::new();
+		for event in &snapshot.history {
+			if let HistoryData::Output { .. } = event.data {
+				let source = producer_source(&snapshot, event);
+				if source == b"echo \"$i\"" {
+					loop_executions.insert(event.command.expect("loop execution identity"));
+				}
+			}
+		}
+		assert_eq!(loop_executions.len(), 3);
+		let owned_json = serde_json::to_value(&snapshot).unwrap();
+		let borrowed_json: serde_json::Value = serde_json::from_str(&trace.snapshot_json()).unwrap();
+		assert_eq!(
+			borrowed_json, owned_json,
+			"zero-copy polling preserves the owned snapshot contract"
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_pipeline_redirection_substitution_and_merged_stderr_are_real_visible_output() {
+		use crate::bash::trace::history::HistoryData;
+		let mut session = session();
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("hidden");
+		let script = format!(
+			"echo pipeline | /bin/cat; /bin/sh -c 'printf out; printf err >&2' 2>&1; /usr/bin/printf \
+			 hidden >'{}'; value=$(/usr/bin/printf substitution); echo \"$value\"",
+			path.display()
+		);
+		let (captured, trace) = trace_capture(&mut session, &script).await;
+		assert_eq!(captured.stdout, "pipeline\nouterrsubstitution\n");
+		assert_eq!(captured.stderr, "");
+		assert_eq!(std::fs::read_to_string(path).unwrap(), "hidden");
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		for event in &snapshot.history {
+			if let HistoryData::Output { fd, .. } = &event.data {
+				assert_eq!(*fd, 1, "stderr merged to stdout names the final capture descriptor");
+				let source = producer_source(&snapshot, event);
+				assert!(
+					source == b"/bin/cat"
+						|| source.starts_with(b"/bin/sh -c")
+						|| source == b"echo \"$value\"",
+					"intermediate pipe/file/substitution bytes must not be terminal output: {:?}",
+					String::from_utf8_lossy(source)
+				);
+			}
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_pipeline_and_background_children_keep_their_real_engine_tags() {
+		use crate::bash::trace::history::HistoryData;
+		let mut session = session();
+		let script = "echo start; printf 'one\\ntwo\\n' | tr a-z A-Z; (echo background) & wait";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		assert_eq!(captured.stdout, "start\nONE\nTWO\nbackground\n");
+		let snapshot = trace.snapshot();
+		assert_eq!(
+			trace_output(&snapshot),
+			captured.stdout,
+			"child run queues are empty, not absent output"
+		);
+		let root = snapshot
+			.history
+			.iter()
+			.find_map(|entry| match &entry.data {
+				HistoryData::Output { text, .. } if text.as_slice() == b"start\n" => entry.command,
+				_ => None,
+			})
+			.expect("root execution tag");
+		let mut children = std::collections::HashSet::new();
+		for entry in &snapshot.history {
+			if let HistoryData::Output { text, .. } = &entry.data {
+				let command = entry.command.expect("actual writer execution tag");
+				producer_source(&snapshot, entry);
+				if text.as_slice() != b"start\n" {
+					assert_ne!(
+						command.vpid, root.vpid,
+						"pipeline/background output comes from child vprocs"
+					);
+					children.insert(command.vpid);
+				}
+			}
+		}
+		assert_eq!(children.len(), 2);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_separate_stderr_capture_keeps_descriptor_two() {
+		let mut session = session();
+		let script = "/bin/sh -c 'printf external >&2'; printf builtin >&2";
+		let trace = Arc::new(crate::bash::trace::RunTrace::new(script));
+		let options = RunOptions { events: Some(trace.clone()), ..RunOptions::new(script) };
+		let captured = capture(&mut session, options).await;
+		assert_eq!(captured.stdout, "");
+		assert_eq!(captured.stderr, "externalbuiltin");
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stderr);
+		assert!(
+			snapshot
+				.history
+				.iter()
+				.filter_map(|entry| match entry.data {
+					crate::bash::trace::history::HistoryData::Output { fd, .. } => Some(fd),
+					_ => None,
+				})
+				.all(|fd| fd == 2)
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_shared_capture_preserves_external_stdout_stderr_interleaving() {
+		let mut session = session();
+		let script =
+			"/bin/sh -c 'printf a; printf b >&2; printf c; printf d >&2'; printf builtin >&2";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		assert_eq!(captured.stdout, "abcdbuiltin");
+		assert_eq!(captured.stderr, "");
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		for entry in &snapshot.history {
+			if let crate::bash::trace::history::HistoryData::Output { fd, .. } = entry.data {
+				assert_eq!(fd, 1, "one merged capture keeps one stream identity");
+				producer_source(&snapshot, entry);
+			}
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_background_interleaving_preserves_output_order_and_producer() {
+		use crate::bash::trace::history::HistoryData;
+		let mut session = session();
+		let script = "{ /usr/bin/printf a1; /bin/sleep 0.03; /usr/bin/printf a2; } & { \
+		              /usr/bin/printf b1; /bin/sleep 0.01; /usr/bin/printf b2; } & wait";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		for text in ["a1", "a2", "b1", "b2"] {
+			assert!(captured.stdout.contains(text));
+		}
+		for event in &snapshot.history {
+			if let HistoryData::Output { text, .. } = &event.data {
+				let source = String::from_utf8_lossy(producer_source(&snapshot, event));
+				assert_eq!(source, format!("/usr/bin/printf {}", String::from_utf8_lossy(text)));
+			}
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_unit_bytes_include_heredoc_but_not_the_next_command() {
+		use crate::bash::syntax::{Features, parse_all};
+
+		let mut session = session();
+		let script = "cat <<'EOF'\npayload\nEOF\necho next";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		assert_eq!(captured.stdout, "payload\nnext\n");
+		let snapshot = trace.snapshot();
+		let unit = &snapshot.units[0];
+		let start = unit.at.unwrap() as usize;
+		let source = &snapshot.script[start..start + unit.bytes as usize];
+		assert_eq!(source, b"cat <<'EOF'\npayload\nEOF");
+		assert_eq!(parse_all(source, Features::NONE).unwrap().commands.len(), 1);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_assignments_scopes_status_and_replay_order_are_retained() {
+		use crate::bash::{event::AssignScope, trace::history::HistoryData};
+		let mut session = session();
+		let script = "GLOBAL=outer; f() { local LOCAL=inner; ENV=value /usr/bin/printf '%s' \
+		              \"$LOCAL\"; }; f; false";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		assert_eq!(captured.stdout, "inner");
+		let snapshot = trace.snapshot();
+		assert_eq!(snapshot.status, Some(1));
+		assert!(matches!(snapshot.history.first().unwrap().data, HistoryData::RunStart));
+		assert!(matches!(snapshot.history.last().unwrap().data, HistoryData::RunEnd { status: 1 }));
+		assert!(
+			snapshot
+				.history
+				.windows(2)
+				.all(|pair| pair[0].seq < pair[1].seq)
+		);
+		for (name, value, expected_scope) in [
+			("GLOBAL", "outer", AssignScope::Global),
+			("LOCAL", "inner", AssignScope::Local),
+			("ENV", "value", AssignScope::Env),
+		] {
+			assert!(
+				snapshot.history.iter().any(|entry| matches!(&entry.data,
+				HistoryData::Assign { name: n, value: v, scope, full_len }
+					if n.as_slice() == name.as_bytes() && v.as_slice() == value.as_bytes()
+						&& *scope == expected_scope && *full_len == value.len())),
+				"{name} assignment scope/value"
+			);
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_quiet_external_output_advances_revision_before_command_end() {
+		let mut session = session();
+		let gates = tempfile::tempdir().unwrap();
+		let next = gates.path().join("next");
+		let end = gates.path().join("end");
+		let script = format!(
+			"/bin/sh -c 'printf first; while [ ! -e \"{}\" ]; do sleep 0.01; done; printf second; \
+			 while [ ! -e \"{}\" ]; do sleep 0.01; done'",
+			next.display(),
+			end.display()
+		);
+		let trace = Arc::new(crate::bash::trace::RunTrace::new(script.as_str()));
+		let options = RunOptions {
+			events: Some(trace.clone()),
+			text_capture: true,
+			..RunOptions::new(script.as_str())
+		};
+		let probe = async {
+			let first = loop {
+				if trace_output(&trace.snapshot()) == "first" {
+					let revision = trace.version();
+					std::fs::write(&next, []).unwrap();
+					break revision;
+				}
+				tokio::task::yield_now().await;
+			};
+			loop {
+				let snapshot = trace.snapshot();
+				if trace_output(&snapshot) == "firstsecond" {
+					assert!(trace.version() > first, "coalescing changes the poll revision");
+					assert!(snapshot.status.is_none(), "output is visible before CmdEnd/RunEnd");
+					std::fs::write(&end, []).unwrap();
+					break;
+				}
+				tokio::task::yield_now().await;
+			}
+		};
+		let (captured, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+			tokio::join!(capture(&mut session, options), probe)
+		})
+		.await
+		.expect("live output callback");
+		assert_eq!(captured.stdout, "firstsecond");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_assignment_retains_full_value_length_when_value_is_cut() {
+		use crate::bash::trace::history::HistoryData;
+		let mut session = session();
+		let value = "a".repeat(400);
+		let script = format!("LONG={value}");
+		let (_, trace) = trace_capture(&mut session, &script).await;
+		assert!(
+			trace
+				.snapshot()
+				.history
+				.iter()
+				.any(|entry| matches!(&entry.data,
+			HistoryData::Assign { name, value, full_len, .. }
+				if name.as_slice() == b"LONG" && value.len() == 256 && *full_len == 400))
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_builtin_setters_report_actual_values_scopes_vpids_and_source() {
+		use crate::bash::{event::AssignScope, trace::history::HistoryData};
+		let mut session = session();
+		let script = "x=first\nx=second\nread -r choice <<< deploy\nfor item in build test; do :; \
+		              done\nf() { local x=local; read x <<< changed; }; f\nexport \
+		              exported=value\ndeclare -i number=1\n((number+=2))\nlet number++\nprintf -v \
+		              formatted '%s' rendered\n";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		assert_eq!(captured.outcome.status, 0);
+		let snapshot = trace.snapshot();
+		for (name, value, scope, source) in [
+			("x", "first", AssignScope::Global, "x=first"),
+			("x", "second", AssignScope::Global, "x=second"),
+			("choice", "deploy", AssignScope::Global, "read -r choice"),
+			("item", "build", AssignScope::Global, "for item"),
+			("item", "test", AssignScope::Global, "for item"),
+			("x", "local", AssignScope::Local, "local x=local"),
+			("x", "changed", AssignScope::Local, "read x"),
+			("exported", "value", AssignScope::Global, "export exported=value"),
+			("number", "3", AssignScope::Global, "((number+=2))"),
+			("number", "4", AssignScope::Global, "let number++"),
+			("formatted", "rendered", AssignScope::Global, "printf -v formatted"),
+		] {
+			let entry = snapshot
+				.history
+				.iter()
+				.find(|entry| {
+					matches!(&entry.data,
+				HistoryData::Assign { name: n, value: v, scope: actual_scope, full_len }
+				if n.as_slice() == name.as_bytes() && v.as_slice() == value.as_bytes()
+					&& *actual_scope == scope && *full_len == value.len())
+				})
+				.unwrap_or_else(|| panic!("missing setter {name}={value} with scope {scope:?}"));
+			assert!(entry.vpid.is_some(), "all real setter events carry their vproc");
+			assert!(
+				String::from_utf8_lossy(producer_source(&snapshot, entry)).starts_with(source),
+				"setter source for {name}={value}"
+			);
+		}
+		let (_, rejected) =
+			trace_capture(&mut session, "readonly locked=initial; read locked <<< rejected").await;
+		assert!(
+			!rejected
+				.snapshot()
+				.history
+				.iter()
+				.any(|entry| matches!(&entry.data,
+			HistoryData::Assign { value, .. } if value.as_slice() == b"rejected"))
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_raw_file_capture_preserves_bytes_and_finalizes_utf8_only_at_eof() {
+		use std::io::Seek;
+		let mut session = session();
+		for (command, expected) in
+			[("/usr/bin/printf '\\377'", b"\xff".as_slice()), ("printf '\\303'", b"\xc3".as_slice())]
+		{
+			let mut output = tempfile::tempfile().unwrap();
+			let trace = Arc::new(crate::bash::trace::RunTrace::new(command));
+			let options = RunOptions { events: Some(trace.clone()), ..RunOptions::new(command) };
+			let streams =
+				RunStdio { stdout: Some(output.try_clone().unwrap()), ..RunStdio::default() };
+			let result = session
+				.run_with(options, streams, CancellationToken::new())
+				.await
+				.unwrap();
+			assert_eq!(result.status, 0);
+			output.rewind().unwrap();
+			let mut bytes = Vec::new();
+			output.read_to_end(&mut bytes).unwrap();
+			assert_eq!(bytes, expected, "tracing cannot transcode raw caller files");
+			let snapshot = trace.snapshot();
+			assert_eq!(trace_output(&snapshot), "\u{fffd}");
+			assert!(snapshot.history.iter().any(|entry| matches!(
+				entry.data,
+				crate::bash::trace::history::HistoryData::Output { .. }
+			) && entry.u.is_some()
+				&& entry.n.is_some()));
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_extra_output_alias_keeps_one_real_kernel_stream() {
+		let mut session = session();
+		let script = "exec 3>&1; /bin/sh -c 'printf a; printf b >&3; printf c'";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		assert_eq!(captured.stdout, "abc");
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		for entry in &snapshot.history {
+			if let crate::bash::trace::history::HistoryData::Output { .. } = entry.data {
+				assert_eq!(
+					producer_source(&snapshot, entry),
+					b"/bin/sh -c 'printf a; printf b >&3; printf c'"
+				);
+			}
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_utf8_continues_across_commands_with_exact_fragment_provenance() {
+		use crate::bash::trace::history::HistoryData;
+		let mut session = session();
+		let (captured, trace) = trace_capture(&mut session, "printf '\\303'; printf '\\251'").await;
+		assert_eq!(captured.stdout, "é");
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		let mixed = snapshot
+			.history
+			.iter()
+			.find_map(|entry| match &entry.data {
+				HistoryData::Output { text, contributors, .. } if text.as_slice() == "é".as_bytes() => {
+					Some((entry, contributors))
+				},
+				_ => None,
+			})
+			.expect("one decoded scalar");
+		assert!(
+			mixed.0.u.is_none() && mixed.0.n.is_none() && mixed.0.command.is_none(),
+			"a scalar made by two commands has no invented primary producer"
+		);
+		assert_eq!(
+			mixed
+				.1
+				.iter()
+				.flat_map(|entry| entry.bytes.iter().copied())
+				.collect::<Vec<_>>(),
+			"é".as_bytes()
+		);
+		assert_eq!(mixed.1.len(), 2);
+		assert!(
+			mixed
+				.1
+				.iter()
+				.all(|entry| entry.u.is_some() && entry.n.is_some() && entry.command.is_some())
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_sibling_deferred_functions_keep_each_materialized_setter_span() {
+		use crate::bash::trace::history::HistoryData;
+		let mut session = session();
+		let script = "outer() { a() { local x=first; }; b() { local x=second; read x <<< third; }; \
+		              a; b; a; }; outer";
+		let (_, trace) = trace_capture(&mut session, script).await;
+		let snapshot = trace.snapshot();
+		for (value, source) in
+			[("first", "local x=first"), ("second", "local x=second"), ("third", "read x <<< third")]
+		{
+			for entry in snapshot.history.iter().filter(|entry| matches!(&entry.data,
+				HistoryData::Assign { name, value: actual, .. } if name.as_slice() == b"x" && actual.as_slice() == value.as_bytes()))
+			{
+				assert_eq!(producer_source(&snapshot, entry), source.as_bytes(), "materializing a sibling must not restore empty word placeholders");
+			}
+			assert!(snapshot.history.iter().any(|entry| matches!(&entry.data,
+				HistoryData::Assign { name, value: actual, .. } if name.as_slice() == b"x" && actual.as_slice() == value.as_bytes())));
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_cached_function_units_are_announced_lazily_to_each_run() {
+		let mut session = session();
+		let (_, first) = trace_capture(&mut session, "f() { echo hello; }; f").await;
+		assert_eq!(trace_output(&first.snapshot()), "hello\n");
+		let (captured, trace) = trace_capture(&mut session, "f").await;
+		assert_eq!(captured.stdout, "hello\n");
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		for entry in &snapshot.history {
+			if let crate::bash::trace::history::HistoryData::Output { .. } = entry.data {
+				assert_eq!(producer_source(&snapshot, entry), b"echo hello");
+			}
+		}
+		assert!(snapshot.units.iter().any(|unit| {
+			unit.at.is_none()
+				&& unit
+					.source
+					.as_ref()
+					.is_some_and(|source| source.as_slice().contains_str("echo hello"))
+		}));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_tool_child_run_keeps_root_epoch_status_and_producer() {
+		use crate::bash::trace::history::HistoryData;
+		let mut session = session();
+		let gates = tempfile::tempdir().unwrap();
+		let gate = gates.path().join("finish");
+		let script = format!(
+			"timeout 1 /usr/bin/printf hi; /bin/sh -c 'while [ ! -e \"{}\" ]; do sleep 0.01; done'; \
+			 /usr/bin/false",
+			gate.display()
+		);
+		let trace = Arc::new(crate::bash::trace::RunTrace::new(script.as_str()));
+		let options = RunOptions {
+			events: Some(trace.clone()),
+			text_capture: true,
+			..RunOptions::new(script.as_str())
+		};
+		let probe = async {
+			loop {
+				let snapshot = trace.snapshot();
+				if snapshot
+					.history
+					.iter()
+					.any(|entry| matches!(entry.data, HistoryData::RunEnd { status: 0 }))
+				{
+					assert_eq!(snapshot.status, None, "a tool child cannot complete the root snapshot");
+					assert_eq!(trace_output(&snapshot), "hi");
+					std::fs::write(&gate, []).unwrap();
+					break;
+				}
+				tokio::task::yield_now().await;
+			}
+		};
+		let (captured, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+			tokio::join!(capture(&mut session, options), probe)
+		})
+		.await
+		.expect("tool child finishes while the root waits");
+		assert_eq!(captured.outcome.status, 1);
+		let snapshot = trace.snapshot();
+		assert_eq!(snapshot.status, Some(1));
+		assert_eq!(snapshot.history.first().unwrap().t_ns, 0);
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		for entry in &snapshot.history {
+			if let HistoryData::Output { .. } = entry.data {
+				let unit = &snapshot.units[entry.u.expect("tool output has an actual unit") as usize];
+				let producer =
+					&unit.nodes[entry.n.expect("tool output has an actual command") as usize];
+				assert_eq!(producer.argv, ["/usr/bin/printf", "hi"]);
+			}
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_old_background_tool_runs_cannot_claim_the_next_root() {
+		let mut session = session();
+		let (_, old) =
+			trace_capture(&mut session, "{ /bin/sleep 0.05; timeout 1 /usr/bin/printf old; } &").await;
+		let old_version = old.version();
+		let (captured, next) = trace_capture(&mut session, "/bin/sleep 0.15; echo next").await;
+		assert_eq!(captured.stdout, "next\n");
+		assert_eq!(trace_output(&next.snapshot()), captured.stdout);
+		assert_eq!(old.version(), old_version);
+		assert!(
+			!next
+				.snapshot()
+				.history
+				.iter()
+				.any(|entry| matches!(&entry.data,
+			crate::bash::trace::history::HistoryData::CmdExpanded { argv, .. }
+				if argv.iter().any(|arg| arg.as_slice() == b"old")))
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_utf8_split_writes_and_merged_stderr_preserve_text() {
+		let mut session = session();
+		// Separate real external writes split both an accented character and
+		// an emoji across kernel writes; sleep encourages relay/pump boundaries.
+		let script = "/bin/sh -c 'printf \"\\303\"; sleep 0.02; printf \"\\251\"; printf \"\\360\" \
+		              >&2; sleep 0.02; printf \"\\237\\230\\200\" >&2' 2>&1";
+		let (captured, trace) = trace_capture(&mut session, script).await;
+		assert_eq!(captured.stdout, "é😀");
+		let snapshot = trace.snapshot();
+		assert_eq!(trace_output(&snapshot), captured.stdout);
+		for entry in snapshot.history {
+			if let crate::bash::trace::history::HistoryData::Output { text, .. } = entry.data {
+				assert!(std::str::from_utf8(&text).is_ok());
+				assert!(entry.u.is_some() && entry.n.is_some());
+			}
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_history_and_output_caps_are_explicit_and_bounded() {
+		use crate::bash::trace::history::{
+			HISTORY_BYTES, HISTORY_EVENTS, HISTORY_OUTPUT_BYTES, HistoryData,
+		};
+		let mut session = session();
+		let (captured, trace) = trace_capture(
+			&mut session,
+			"for ((i=0; i<4500; i++)); do :; done; /usr/bin/head -c 2200000 /dev/zero | /usr/bin/tr \
+			 '\\000' x",
+		)
+		.await;
+		assert_eq!(captured.outcome.status, 0);
+		assert_eq!(captured.stdout.len(), 2_200_000);
+		let snapshot = trace.snapshot();
+		assert!(snapshot.history_truncated);
+		assert!(snapshot.history.len() <= HISTORY_EVENTS);
+		let bytes: usize = snapshot
+			.history
+			.iter()
+			.map(|entry| match &entry.data {
+				HistoryData::Output { text, .. } => text.len(),
+				_ => 0,
+			})
+			.sum();
+		assert!(bytes <= HISTORY_OUTPUT_BYTES);
+		assert!(trace.snapshot_json().len() <= HISTORY_BYTES * 2);
+		assert!(matches!(snapshot.history.last().unwrap().data, HistoryData::RunEnd { status: 0 }));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_cancelled_run_detaches_its_observer_before_the_next_call() {
+		let mut session = session();
+		let trace = Arc::new(crate::bash::trace::RunTrace::new("/bin/sleep 30"));
+		let cancel = CancellationToken::new();
+		let trigger = cancel.clone();
+		let children = session.children();
+		let cancellation = async move {
+			while children.pids().is_empty() {
+				tokio::task::yield_now().await;
+			}
+			trigger.cancel();
+		};
+		let options = RunOptions { events: Some(trace.clone()), ..RunOptions::new("/bin/sleep 30") };
+		let (outcome, ()) =
+			tokio::join!(session.run_with(options, RunStdio::default(), cancel), cancellation,);
+		assert!(outcome.unwrap().cancelled);
+		let old_version = trace.version();
+		let (captured, next) = trace_capture(&mut session, "echo after-cancel").await;
+		assert_eq!(captured.stdout, "after-cancel\n");
+		assert_eq!(trace_output(&next.snapshot()), captured.stdout);
+		assert_eq!(trace.version(), old_version);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trace_old_background_work_never_enters_a_successive_run() {
+		let mut session = session();
+		let (_, first) = trace_capture(&mut session, "(/bin/sleep 0.1; /usr/bin/printf old) &").await;
+		let first_version = first.version();
+		let (captured, second) = trace_capture(&mut session, "/bin/sleep 0.2; echo new").await;
+		assert_eq!(captured.stdout, "new\n");
+		assert_eq!(trace_output(&second.snapshot()), "new\n");
+		assert_eq!(first.version(), first_version, "closed run streams stop observing late output");
+		let snapshot = second.snapshot();
+		let runs: std::collections::HashSet<_> = snapshot
+			.history
+			.iter()
+			.filter_map(|entry| entry.command.map(|command| command.run))
+			.collect();
+		assert_eq!(runs.len(), 1, "events from the old background run are filtered too");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn echo_is_captured_through_a_pipe() {
+		let mut s = session();
+		let c = sh(&mut s, "echo hi").await;
+		assert_eq!((c.outcome.status, c.stdout.as_str()), (0, "hi\n"));
+		assert!(!c.outcome.cancelled);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn exec_standard_redirections_end_at_run_boundary() {
+		let mut s = session();
+		let first = sh(&mut s, "exec >/dev/null; echo hidden").await;
+		assert_eq!(first.stdout, "");
+		assert_eq!(sh(&mut s, "echo hi").await.stdout, "hi\n");
+
+		sh(&mut s, "exec 2>/dev/null").await;
+		let missing = sh(&mut s, "ls /nope").await;
+		assert_ne!(missing.outcome.status, 0);
+		assert!(missing.stderr.contains("/nope"), "stderr: {:?}", missing.stderr);
+
+		let dir = tempfile::tempdir().unwrap();
+		let input = dir.path().join("input");
+		std::fs::write(&input, "first\nsecond\n").unwrap();
+		let command = format!("exec <'{}'; read -r x; echo \"$x\"", input.display());
+		assert_eq!(sh(&mut s, &command).await.stdout, "first\n");
+		assert_eq!(sh(&mut s, "read -r x || echo eof").await.stdout, "eof\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn exec_higher_fds_persist_across_runs() {
+		let mut s = session();
+		let dir = tempfile::tempdir().unwrap();
+		let output = dir.path().join("output");
+		let command = format!("exec 3>'{}' 4>&1", output.display());
+		assert_eq!(sh(&mut s, &command).await.outcome.status, 0);
+		let c = sh(&mut s, "echo file >&3; echo captured >&4").await;
+		assert_eq!(c.stdout, "captured\n");
+		assert_eq!(std::fs::read_to_string(output).unwrap(), "file\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn background_output_stays_with_starting_run() {
+		for command in [
+			"(sleep 0.3; echo late) &",
+			"(sleep 0.3; /bin/echo late) &",
+			"{ sleep 0.3; echo late >&2; } &",
+		] {
+			let mut s = session();
+			s.run(command, RunStdio::default(), CancellationToken::new())
+				.await
+				.unwrap();
+			let next = sh(&mut s, "sleep 1; echo second").await;
+			assert_eq!(next.stdout, "second\n", "{command}");
+			assert_eq!(next.stderr, "", "{command}");
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn background_output_is_captured_when_waited_in_starting_run() {
+		let mut s = session();
+		let c = sh(&mut s, "(sleep 0.1; echo job; echo error >&2) & wait").await;
+		assert_eq!((c.outcome.status, c.stdout.as_str(), c.stderr.as_str()), (0, "job\n", "error\n"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn background_external_holding_pipe_does_not_delay_run() {
+		let mut s = session();
+		let (_reader, writer) = io::pipe().unwrap();
+		let stdio = RunStdio {
+			stdout: Some(std::fs::File::from(std::os::fd::OwnedFd::from(writer))),
+			..RunStdio::default()
+		};
+		let outcome = tokio::time::timeout(
+			Duration::from_secs(1),
+			s.run("/bin/sleep 2 &", stdio, CancellationToken::new()),
+		)
+		.await
+		.expect("a background external holding stdout must not delay the run")
+		.unwrap();
+		assert_eq!(outcome.status, 0);
+		assert_eq!(sh(&mut s, "wait %1").await.outcome.status, 0);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn background_job_remains_waitable_in_later_run() {
+		let mut s = session();
+		s.run("(sleep 0.1; exit 7) &", RunStdio::default(), CancellationToken::new())
+			.await
+			.unwrap();
+		assert_eq!(sh(&mut s, "sleep 0.3; wait %1").await.outcome.status, 7);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn statuses_follow_bash() {
+		let mut s = session();
+		assert_eq!(sh(&mut s, "false").await.outcome.status, 1);
+		let c = sh(&mut s, "nosuchcmd").await;
+		assert_eq!(c.outcome.status, 127);
+		assert!(c.stderr.contains("nosuchcmd: command not found"), "stderr: {:?}", c.stderr);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn state_persists_across_runs() {
+		let mut s = session();
+		let dir = tempfile::tempdir().unwrap();
+		let dir = dir.path().canonicalize().unwrap();
+		let cd = format!("x=41; f() {{ echo \"f$((x + 1))\"; }}; cd '{}'", dir.display());
+		assert_eq!(sh(&mut s, &cd).await.outcome.status, 0);
+		let c = sh(&mut s, "f; pwd").await;
+		assert_eq!(c.stdout, format!("f42\n{}\n", dir.display()));
+		assert_eq!(c.outcome.cwd, BString::from(dir.as_os_str().as_bytes()));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn per_run_env_is_visible_in_that_run_only() {
+		let mut s = session();
+		sh(&mut s, "KEEP=old").await;
+		let options = RunOptions {
+			env: vec![("ONLY".into(), "one".into()), ("KEEP".into(), "new".into())],
+			..RunOptions::new("echo \"$ONLY $KEEP\"; env | grep '^ONLY='")
+		};
+		let c = capture(&mut s, options).await;
+		assert_eq!(c.stdout, "one new\nONLY=one\n");
+		let c = sh(&mut s, "echo \"${ONLY-unset} $KEEP\"").await;
+		assert_eq!(c.stdout, "unset old\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn cwd_override_applies_and_persists() {
+		let mut s = session();
+		let dir = tempfile::tempdir().unwrap();
+		let dir = dir.path().canonicalize().unwrap();
+		let path = BString::from(dir.as_os_str().as_bytes());
+		let options = RunOptions { cwd: Some(path.clone()), ..RunOptions::new("/bin/pwd") };
+		let c = capture(&mut s, options).await;
+		assert_eq!(c.stdout, format!("{}\n", dir.display()));
+		assert_eq!(sh(&mut s, "pwd").await.outcome.cwd, path);
+		let err = s
+			.run_with(
+				RunOptions { cwd: Some("rel".into()), ..RunOptions::new(":") },
+				RunStdio::default(),
+				CancellationToken::new(),
+			)
+			.await
+			.unwrap_err();
+		assert!(matches!(err, SessionError::RelativeCwd(_)));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn exit_ends_the_command_not_the_session() {
+		let mut s = session();
+		assert_eq!(sh(&mut s, "y=7; exit 3; y=8").await.outcome.status, 3);
+		assert_eq!(sh(&mut s, "set -e; false; echo no").await.outcome.status, 1);
+		let c = sh(&mut s, "echo $y").await;
+		assert_eq!((c.outcome.status, c.stdout.as_str()), (0, "7\n"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn outcome_says_whether_exit_ended_the_command() {
+		let mut s = session();
+		assert!(!sh(&mut s, "false").await.outcome.exited);
+		assert!(sh(&mut s, "exit 0").await.outcome.exited);
+		assert!(sh(&mut s, "set -e; false; echo no").await.outcome.exited);
+		assert!(!sh(&mut s, "set +e; (exit 4)").await.outcome.exited);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn live_external_jobs_counts_background_externals_until_they_end() {
+		let mut s = session();
+		assert_eq!(s.live_external_jobs().await.unwrap(), 0);
+		// The sleep writes elsewhere: holding the captured pipes, as an
+		// external started in the background does, it would keep `capture`
+		// reading until it exits.
+		let started = sh(&mut s, "/bin/sleep 30 >/dev/null 2>&1 & { :; } &").await;
+		assert_eq!(started.outcome.status, 0);
+		assert_eq!(s.live_external_jobs().await.unwrap(), 1);
+		assert_eq!(sh(&mut s, "kill %1; wait %1").await.outcome.status, 143);
+		assert_eq!(s.live_external_jobs().await.unwrap(), 0);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn pipe_taps_and_reported_errors_last_one_run() {
+		#[derive(Default)]
+		struct Taps(Mutex<Vec<(String, String, Arc<Mirror>)>>);
+		#[derive(Default)]
+		struct Mirror(Mutex<(Vec<u8>, bool)>);
+		impl PipeTap for Taps {
+			fn open(
+				&self,
+				producer: &bstr::BStr,
+				consumer: &bstr::BStr,
+			) -> Option<Arc<dyn crate::bash::PipeMirror>> {
+				let mirror = Arc::new(Mirror::default());
+				self
+					.0
+					.lock()
+					.push((producer.to_string(), consumer.to_string(), Arc::clone(&mirror)));
+				Some(mirror)
+			}
+		}
+		impl crate::bash::PipeMirror for Mirror {
+			fn write(&self, bytes: &[u8]) {
+				self.0.lock().0.extend_from_slice(bytes);
+			}
+
+			fn close(&self) {
+				self.0.lock().1 = true;
+			}
+		}
+
+		let mut s = session();
+		let taps = Arc::new(Taps::default());
+		let options = RunOptions {
+			pipe_tap: Some(Arc::clone(&taps) as Arc<dyn PipeTap>),
+			reported_error: Some(Arc::new(AtomicBool::new(false))),
+			..RunOptions::new("printf 'x\\ny\\n' | /usr/bin/sort -r")
+		};
+		let c = capture(&mut s, options).await;
+		assert_eq!(c.stdout, "y\nx\n");
+		{
+			let taps = taps.0.lock();
+			let [(producer, consumer, mirror)] = taps.as_slice() else {
+				panic!("one tapped pipe: {}", taps.len());
+			};
+			assert!(producer.starts_with("printf") && consumer.contains("sort"));
+			assert_eq!(*mirror.0.lock(), (b"x\ny\n".to_vec(), true));
+		}
+		// The next run is untapped.
+		sh(&mut s, "printf z | /usr/bin/sort").await;
+		assert_eq!(taps.0.lock().len(), 1);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn url_paths_are_absolute_working_directories() {
+		let mut s = session();
+		// No provider serves the scheme: the directory check fails, the
+		// path is not joined onto the current directory.
+		let c = sh(&mut s, "cd virtual://nowhere").await;
+		assert_ne!(c.outcome.status, 0);
+		assert!(c.stderr.contains("virtual://nowhere"), "stderr: {:?}", c.stderr);
+		assert!(!c.stderr.contains("/virtual:"), "joined onto the cwd: {:?}", c.stderr);
+		let options = RunOptions { cwd: Some("virtual://dir".into()), ..RunOptions::new(":") };
+		let outcome = s
+			.run_with(options, RunStdio::default(), CancellationToken::new())
+			.await
+			.unwrap();
+		assert_eq!(outcome.cwd, "virtual://dir");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn pipeline_into_an_external() {
+		let mut s = session();
+		let c = sh(&mut s, "printf 'a\\nb\\n' | /usr/bin/sort -r").await;
+		assert_eq!((c.outcome.status, c.stdout.as_str()), (0, "b\na\n"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn external_runs_in_its_own_session_and_cancel_stops_it() {
+		let mut s = session();
+		let children = s.children();
+		let cancel = CancellationToken::new();
+		let probe = {
+			let cancel = cancel.clone();
+			let children = children.clone();
+			async move {
+				let pid = loop {
+					if let Some(&pid) = children.pids().first() {
+						break pid;
+					}
+					tokio::time::sleep(Duration::from_millis(10)).await;
+				};
+				// SAFETY: getpgid/getsid/getpgrp only read process ids.
+				let ids = unsafe { (libc::getpgid(pid), libc::getsid(pid), libc::getpgrp()) };
+				cancel.cancel();
+				(pid, ids)
+			}
+		};
+		let started = Instant::now();
+		let (outcome, (pid, (pgid, sid, own_group))) =
+			tokio::join!(s.run("/bin/sleep 30", RunStdio::default(), cancel.clone()), probe);
+		let outcome = outcome.unwrap();
+		assert!(outcome.cancelled);
+		assert_eq!(outcome.status, 143);
+		assert!(started.elapsed() < Duration::from_secs(5), "cancel took {:?}", started.elapsed());
+		assert_eq!((pgid, sid), (pid, pid), "the external leads its own session");
+		assert_ne!(pgid, own_group);
+		assert!(children.pids().is_empty(), "no run in flight");
+		let gone = Instant::now();
+		while alive(pid) && gone.elapsed() < Duration::from_secs(3) {
+			tokio::time::sleep(Duration::from_millis(20)).await;
+		}
+		assert!(!alive(pid), "sleep {pid} survived the cancel");
+		// The session is still usable.
+		assert_eq!(sh(&mut s, "echo ok").await.stdout, "ok\n");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn trapped_term_escalates_to_kill() {
+		let mut s = session();
+		let cancel = CancellationToken::new();
+		let trigger = cancel.clone();
+		tokio::spawn(async move {
+			tokio::time::sleep(Duration::from_millis(200)).await;
+			trigger.cancel();
+		});
+		let started = Instant::now();
+		let outcome = s
+			.run("trap 'while :; do :; done' TERM; while :; do :; done", RunStdio::default(), cancel)
+			.await
+			.unwrap();
+		assert!(outcome.cancelled);
+		assert_eq!(outcome.status, 137);
+		assert!(started.elapsed() < Duration::from_secs(4), "took {:?}", started.elapsed());
+	}
+
+	#[test]
+	fn signals_to_pi_and_its_ancestors_are_refused() {
+		use crate::host::check_signal_target;
+		let me = i32::try_from(std::process::id()).unwrap();
+		// SAFETY: getppid/getpgrp have no preconditions.
+		let (parent, group) = unsafe { (libc::getppid(), libc::getpgrp()) };
+		for pid in [me, parent, 0, -1, -group] {
+			let err = check_signal_target(pid).unwrap_err();
+			assert_eq!(err.kind(), io::ErrorKind::PermissionDenied, "pid {pid}");
+		}
+		let mut child = std::process::Command::new("/bin/sleep")
+			.arg("5")
+			.spawn()
+			.unwrap();
+		let pid = i32::try_from(child.id()).unwrap();
+		assert!(check_signal_target(pid).is_ok());
+		child.kill().unwrap();
+		child.wait().unwrap();
+	}
+}

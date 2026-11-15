@@ -102,4 +102,5 @@ mod line_buffer;
 mod lines;
 mod searcher;
 mod sink;
-
+#[cfg(test)]
+mod testutil;

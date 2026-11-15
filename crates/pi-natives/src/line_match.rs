@@ -210,4 +210,66 @@ impl LineMatcher {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn core(patterns: &[&str]) -> LineMatcherCore {
+		LineMatcherCore::new(&patterns.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>()).unwrap()
+	}
+
+	#[test]
+	fn line_match_named_groups_both_syntaxes() {
+		let matcher = core(&[r"req (?P<n>\d+) rps=(?<rps>[\d.]+)"]);
+		assert_eq!(matcher.group_names(), vec![vec!["n".to_owned(), "rps".to_owned()]]);
+		assert_eq!(matcher.match_lines("x\nreq 8 rps=56\r\n"), LineMatchColumns {
+			lines: vec![1],
+			rules: vec![0],
+			spans: vec![4, 5, 10, 12],
+		});
+	}
+
+	#[test]
+	fn line_match_multiple_rules_ordered() {
+		let m = core(&[r"b(?<x>\d)", r"a(?<y>\d)"]).match_lines("a1 b2\nnone\nb3");
+		assert_eq!(m, LineMatchColumns {
+			lines: vec![0, 0, 2],
+			rules: vec![0, 1, 0],
+			spans: vec![4, 5, 1, 2, 1, 2],
+		});
+	}
+
+	#[test]
+	fn line_match_first_match_only_and_optional_groups() {
+		let m = core(&[r"(?<d>\d)(?<opt>z)?"]).match_lines("1 2z 3");
+		assert_eq!(m, LineMatchColumns { lines: vec![0], rules: vec![0], spans: vec![0, 1, -1, -1] });
+	}
+
+	#[test]
+	fn line_match_unnamed_groups_are_not_reported() {
+		let m = core(&[r"^(\w+) (?<v>\d+)"]).match_lines("rps 12");
+		assert_eq!(m.spans, vec![4, 6]);
+	}
+
+	#[test]
+	fn line_match_spans_count_utf16_units() {
+		// `✓` is 3 bytes and 1 UTF-16 unit; `𝄞` is 4 bytes and 2 units.
+		let m = core(&[r"(?<mark>\S) (?<name>\S+) (?<n>\d+)"]).match_lines("✓ lint 7\n𝄞 x 12");
+		assert_eq!(m.spans, vec![0, 1, 2, 6, 7, 8, 0, 2, 3, 4, 5, 7]);
+	}
+
+	#[test]
+	fn line_match_empty_patterns_match_nothing() {
+		assert_eq!(core(&[]).match_lines("anything\n"), LineMatchColumns::default());
+	}
+
+	#[test]
+	fn line_match_invalid_pattern_names_index() {
+		let error = LineMatcherCore::new(&["ok".to_owned(), "x".to_owned(), "(".to_owned()])
+			.err()
+			.unwrap();
+		assert!(error.starts_with("pattern 2: regex parse error"), "{error}");
+		let error = LineMatcherCore::new(&["(".to_owned()]).err().unwrap();
+		assert!(error.starts_with("pattern 0: regex parse error"), "{error}");
+	}
+}

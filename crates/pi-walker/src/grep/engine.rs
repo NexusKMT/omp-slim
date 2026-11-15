@@ -297,4 +297,106 @@ fn next_char(s: &str, at: usize) -> char {
 	s[at..].chars().next().unwrap_or('\0')
 }
 
+#[cfg(test)]
+mod tests {
+	use grep_matcher::Matcher;
 
+	use super::*;
+
+	#[test]
+	fn preserves_unicode_property_escapes() {
+		assert_eq!(sanitize_braces(r"\p{Greek}"), r"\p{Greek}");
+		assert_eq!(sanitize_braces(r"\x{41}"), r"\x{41}");
+		assert_eq!(sanitize_braces(r"\p{Greek"), r"\p{Greek");
+	}
+
+	#[test]
+	fn escapes_non_quantifier_braces() {
+		assert_eq!(sanitize_braces("${platform}"), "$\\{platform\\}");
+		assert_eq!(sanitize_braces("a{b}"), "a\\{b\\}");
+		assert_eq!(sanitize_braces("x{2"), "x\\{2");
+	}
+
+	#[test]
+	fn preserves_valid_quantifiers() {
+		for pattern in ["a{2,4}", "a{2}", "a{2,}", "é{3}"] {
+			assert_eq!(sanitize_braces(pattern), pattern);
+		}
+	}
+
+	#[test]
+	fn preserves_escaped_parentheses() {
+		assert_eq!(escape_unescaped_parentheses(r"foo\(bar\)"), r"foo\(bar\)");
+	}
+
+	#[test]
+	fn escapes_literal_parentheses() {
+		assert_eq!(
+			escape_unescaped_parentheses("fetchAnthropicProvider("),
+			r"fetchAnthropicProvider\("
+		);
+		assert_eq!(
+			escape_unescaped_parentheses("fetchAnthropicProvider()"),
+			r"fetchAnthropicProvider\(\)"
+		);
+	}
+
+	#[test]
+	fn invalid_regex_falls_back_to_literal() {
+		for (pattern, hay, miss) in [
+			("foo[bar", &b"x foo[bar y"[..], &b"foobar"[..]),
+			("+++", &b"a+++b"[..], &b"ab"[..]),
+			("fail)", &b"(1 fail)"[..], &b"failure"[..]),
+		] {
+			let engine = Engine::compile(pattern, false, false)
+				.unwrap_or_else(|e| panic!("`{pattern}` should fall back to literal, got: {e}"));
+			assert!(engine.is_match(hay).unwrap(), "`{pattern}` should match {hay:?}");
+			assert!(!engine.is_match(miss).unwrap(), "`{pattern}` should not match {miss:?}");
+		}
+	}
+
+	#[test]
+	fn stray_parenthesis_preserves_surrounding_regex() {
+		let engine = Engine::compile("foo.*(bar", false, false).expect("retry with escaped paren");
+		assert!(engine.is_match(b"fooXYZ(bar").unwrap());
+		assert!(!engine.is_match(b"foobar").unwrap());
+	}
+
+	#[test]
+	fn valid_regex_is_not_escaped() {
+		let engine = Engine::compile("fo+", false, false).expect("valid regex");
+		assert!(matches!(engine, Engine::Rust(_)));
+		assert!(engine.is_match(b"foooo").unwrap());
+		assert!(!engine.is_match(b"bar").unwrap());
+	}
+
+	#[test]
+	fn pcre2_serves_lookaround_and_backreferences() {
+		for (pattern, hit, miss) in [
+			(r"foo(?=bar)", &b"foobar"[..], &b"foobaz"[..]),
+			(r"(?<=x)foo", b"xfoo", b"yfoo"),
+			(r"\b(\w+)\s+\1\b", b"same same", b"same other"),
+		] {
+			let engine = Engine::compile(pattern, false, false).expect("PCRE2 pattern");
+			assert!(matches!(engine, Engine::Pcre(_)), "{pattern}");
+			assert!(engine.is_match(hit).unwrap(), "{pattern}");
+			assert!(!engine.is_match(miss).unwrap(), "{pattern}");
+		}
+	}
+
+	#[test]
+	fn ignore_case_applies_to_both_engines() {
+		for pattern in ["needle", r"needle(?=s)"] {
+			let engine = Engine::compile(pattern, true, false).expect("compile");
+			assert!(engine.is_match(b"NEEDLES").unwrap(), "{pattern}");
+		}
+	}
+
+	#[test]
+	fn jit_setting_parses_overrides() {
+		assert!(pcre2_jit_enabled(Some("1")));
+		assert!(!pcre2_jit_enabled(Some("0")));
+		assert!(!pcre2_jit_enabled(Some("FALSE")));
+		assert_eq!(pcre2_jit_enabled(Some("")), !cfg!(target_os = "macos"));
+	}
+}

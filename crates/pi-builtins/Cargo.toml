@@ -87,6 +87,7 @@ rustc-hash = "2.1.1"
 self_cell = "1.0.4"
 serde_json = "1"
 smallvec.workspace = true
+tempfile = "3.15.0"
 tokio-util = "0.7"
 xutf.workspace = true
 libc = "0.2.172"
@@ -172,6 +173,10 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_SystemServices",
   "Win32_System_WindowsProgramming",
 ] }
+
+[dev-dependencies]
+anyhow = "1.0.102"
+tempfile = "3"
 
 [features]
 default = ["utils"]

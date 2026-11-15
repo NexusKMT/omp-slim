@@ -1527,4 +1527,104 @@ pub fn unquote(s: &[u8]) -> BString {
 	out
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::builtins::history::model::Entry;
 
+	fn hist(events: &[&str]) -> Hist {
+		let mut h = Hist::default();
+		h.st.histsiz = 100;
+		for e in events {
+			let i = h.prepnext(false);
+			h.events_mut()[i].text = BString::from(*e);
+			h.events_mut()[i].words = lex_words(e.as_bytes(), false);
+			h.addhistnode(i);
+		}
+		h
+	}
+
+	/// One event of `lines` read by `h` (zsh `hbegin` … `hend`): the parser's
+	/// text and the history text, or the error message.
+	fn event(h: &mut Hist, lines: &[&str]) -> Result<(String, String), String> {
+		h.st.curhist += 1;
+		h.st.histactive = super::super::model::HA_ACTIVE;
+		h.st.linked = true;
+		let defev = h.addhistnum(h.st.curhist, -1, HIST_FOREIGN);
+		h.curline = Some(LineState { defev, lex: Lex::new(), ..LineState::default() });
+		let mut out = String::new();
+		let o = BangOpts::default();
+		let none = |_: &crate::bash::vm::proc::Probe| None;
+		let mut steps = Steps::new(&none, 0);
+		for l in lines {
+			match expand_line(h, l.as_bytes(), &o, &mut steps) {
+				Ok(t) => out.push_str(&t.to_str_lossy()),
+				Err(Stop::Error(BangError(d, _))) => {
+					h.st.curhist -= 1;
+					h.st.linked = false;
+					return Err(d.map_or_else(String::new, |d| d.to_string()));
+				},
+				Err(Stop::Pending(_)) => panic!("no I/O expected"),
+			}
+		}
+		let ls = h.curline.take().unwrap();
+		h.st.curhist -= 1;
+		h.st.linked = false;
+		let text = ls.chline.to_str_lossy().trim_end_matches('\n').to_owned();
+		let i = h.prepnext(false);
+		h.events_mut()[i] = Entry {
+			text: text.clone().into(),
+			num: h.st.curhist,
+			words: lex_words(text.as_bytes(), false),
+			..Entry::default()
+		};
+		Ok((out, text))
+	}
+
+	/// Goldens: zsh 5.9 `-i` reading the lines from a pipe.
+	#[test]
+	fn designators_and_modifiers() {
+		let mut h = hist(&["echo a b c"]);
+		assert_eq!(event(&mut h, &["!!\n"]).unwrap().0, "echo a b c\n");
+		assert_eq!(event(&mut h, &["echo !$ !^\n"]).unwrap().0, "echo c a\n");
+		assert_eq!(event(&mut h, &["!-2:s/a/X/\n"]).unwrap().0, "echo X b c\n");
+		assert_eq!(event(&mut h, &["echo !#\n"]).unwrap().0, "echo echo \n");
+		assert_eq!(event(&mut h, &["^b^Q\n"]), Err("substitution failed".into()));
+	}
+
+	#[test]
+	fn quoting_rules() {
+		let mut h = hist(&["echo 'a!!'"]);
+		let (out, text) = event(&mut h, &["echo \"b!!\" \\!! c!\n"]).unwrap();
+		assert_eq!(out, "echo \"becho 'a!!'\" !! c!\n");
+		assert_eq!(text, "echo \"becho 'a!!'\" \\!! c!");
+		let (out, _) = event(&mut h, &["echo '!!' $'!!' !\"!!\n"]).unwrap();
+		assert_eq!(out, "echo '!!' $'!!' !!\n");
+	}
+
+	#[test]
+	fn errors() {
+		let mut h = hist(&["echo a b"]);
+		assert_eq!(event(&mut h, &["!foo\n"]), Err("event not found: foo".into()));
+		assert_eq!(event(&mut h, &["!!:3\n"]), Err("no such word in event".into()));
+		assert_eq!(event(&mut h, &["!!:z\n"]), Err("illegal modifier: z".into()));
+		assert_eq!(event(&mut h, &["!?zz?\n"]), Err("no such event: zz".into()));
+	}
+
+	#[test]
+	fn path_modifiers() {
+		let mut s = BString::from("/a/b/c.tar.gz");
+		assert!(remtpath(&mut s, 0));
+		assert_eq!(s, "/a/b");
+		let mut s = BString::from("c.tar.gz");
+		assert!(remtext(&mut s));
+		assert_eq!(s, "c.tar");
+		let mut s = BString::from("x");
+		assert!(!remtpath(&mut s, 0));
+		assert_eq!(s, ".");
+		let mut s = BString::from("/a/b/c");
+		assert!(remlpaths(&mut s, 0));
+		assert_eq!(s, "c");
+		assert_eq!(quote(b"a b'c"), "'a' 'b'\\''c'");
+	}
+}

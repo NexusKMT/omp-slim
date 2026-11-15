@@ -1065,4 +1065,180 @@ pub fn version_text() -> Vec<u8> {
 	.into_bytes()
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn argv(words: &[&str]) -> Vec<BString> {
+		words.iter().map(|w| BString::from(*w)).collect()
+	}
+
+	fn err(words: &[&str]) -> String {
+		let e = ShellArgs::parse(&argv(words)).expect_err("rejected");
+		String::from_utf8(e.render(b"/x/bash")).expect("utf-8")
+	}
+
+	// bash 5.3.20: `bash -c 'echo $0' a b` → `$0` = a, `$1` = b.
+	#[test]
+	fn command_takes_name_and_args() {
+		let a = ShellArgs::parse(&argv(&["bash", "-ex", "-c", "echo $0", "a", "b"])).unwrap();
+		assert_eq!(a.input, Input::Command("echo $0".into()));
+		assert_eq!(a.dollar0, "a");
+		assert_eq!(a.args, argv(&["b"]));
+		assert_eq!(a.options, vec![(OptId::Errexit, true), (OptId::Xtrace, true)]);
+	}
+
+	// `-c` reads its command after all option groups: `bash -c -e cmd`.
+	#[test]
+	fn command_comes_after_the_options() {
+		let a = ShellArgs::parse(&argv(&["bash", "-c", "-e", "true"])).unwrap();
+		assert_eq!(a.input, Input::Command("true".into()));
+		assert_eq!(a.options, vec![(OptId::Errexit, true)]);
+	}
+
+	#[test]
+	fn script_and_stdin_operands() {
+		let a = ShellArgs::parse(&argv(&["bash", "--norc", "s.sh", "-x"])).unwrap();
+		assert_eq!(a.input, Input::Script("s.sh".into()));
+		assert_eq!((a.dollar0.as_slice(), a.args.clone()), (&b"s.sh"[..], argv(&["-x"])));
+		assert!(a.norc);
+		let a = ShellArgs::parse(&argv(&["bash", "-s", "a", "b"])).unwrap();
+		assert_eq!((a.input, a.args), (Input::Stdin, argv(&["a", "b"])));
+		// `--` ends the options: `bash -- -c` runs a script named `-c`.
+		let a = ShellArgs::parse(&argv(&["bash", "--", "-c"])).unwrap();
+		assert_eq!(a.input, Input::Script("-c".into()));
+	}
+
+	// Messages and order of bash 5.3.20's invocation errors.
+	#[test]
+	fn errors_match_bash() {
+		assert_eq!(err(&["bash", "-c"]), "/x/bash: -c: option requires an argument\n");
+		assert_eq!(err(&["bash", "--rcfile"]), "/x/bash: rcfile: option requires an argument\n");
+		assert!(err(&["bash", "--badopt"]).starts_with(
+			"/x/bash: --badopt: invalid option\nUsage:\t/x/bash [GNU long option] [option] ...\n"
+		));
+		let q = err(&["bash", "-q"]);
+		assert!(q.starts_with("/x/bash: -q: invalid option\n"));
+		assert!(q.ends_with(
+			"Shell options:\n\t-ilrsD or -c command or -O shopt_option\t\t(invocation \
+			 only)\n\t-abefhkmnptuvxBCEHPT or -o option\n"
+		));
+		// A long option after the letters is parsed as letters.
+		assert!(err(&["bash", "-x", "--posix"]).starts_with("/x/bash: --: invalid option\n"));
+		assert_eq!(
+			err(&["bash", "-o", "badopt", "-c", ":"]),
+			"/x/bash: line 0: bash: badopt: invalid option name\n"
+		);
+		assert_eq!(
+			err(&["bash", "-O", "checkhash", "-O", "badopt", "-c", ":"]),
+			"/x/bash: line 0: badopt: invalid shell option name\n"
+		);
+		// `-o` names are checked while parsing, `-O` names after `-c`.
+		assert_eq!(
+			err(&["bash", "-O", "badopt", "-c"]),
+			"/x/bash: -c: option requires an argument\n"
+		);
+		// A shopt name is not a `set -o` name.
+		assert!(err(&["bash", "-o", "checkhash"]).contains("checkhash: invalid option name"));
+	}
+
+	#[test]
+	fn help_and_version_end_the_parse() {
+		let a = ShellArgs::parse(&argv(&["bash", "--help", "-q"])).unwrap();
+		assert!(a.help);
+		let a = ShellArgs::parse(&argv(&["bash", "-version"])).unwrap();
+		assert!(a.version);
+	}
+
+	#[test]
+	fn invoked_as_sh_or_login() {
+		let a = ShellArgs::parse(&argv(&["/bin/sh", "-c", ":"])).unwrap();
+		assert!(a.sh);
+		assert_eq!(a.startup_options(&[], false), vec![(OptId::Posix, true)]);
+		let a = ShellArgs::parse(&argv(&["-bash"])).unwrap();
+		assert!(a.login_name && !a.login_flag);
+		assert!(
+			a.startup_options(&[], false)
+				.contains(&(OptId::LoginShell, true))
+		);
+	}
+
+	// Imported SHELLOPTS/BASHOPTS turn their options on after the
+	// arguments (`+B` loses to an inherited `braceexpand`).
+	#[test]
+	fn inherited_option_lists() {
+		let env = vec![
+			(BString::from("SHELLOPTS"), BString::from("braceexpand:noglob:bogus")),
+			(BString::from("BASHOPTS"), BString::from("checkhash")),
+		];
+		let a = ShellArgs::parse(&argv(&["bash", "+B", "-c", ":"])).unwrap();
+		assert_eq!(a.startup_options(&env, false), vec![
+			(OptId::Braceexpand, false),
+			(OptId::Braceexpand, true),
+			(OptId::Noglob, true),
+			(OptId::Checkhash, true),
+		]);
+	}
+
+	#[test]
+	fn zsh_executable_stays_zsh_under_another_argv0() {
+		let a = ShellArgs::parse_exe(&argv(&["foo*", "-fc", ":"]), b"/x/Src/zsh").unwrap();
+		assert_eq!((a.mode, a.dollar0.as_slice()), (ModeId::Zsh, &b"foo*"[..]));
+		let a = ShellArgs::parse_exe(&argv(&["", "-fc", ":"]), b"/x/zsh").unwrap();
+		assert_eq!(a.mode, ModeId::Zsh);
+		let a = ShellArgs::parse_exe(&argv(&["sh", "-c", ":"]), b"/x/zsh").unwrap();
+		assert_eq!(a.mode, ModeId::ZshSh);
+		let a = ShellArgs::parse_exe(&argv(&["foo", "-c", ":"]), b"/x/obash").unwrap();
+		assert_eq!(a.mode, ModeId::Bash);
+	}
+
+	#[test]
+	fn bash_argv0_names_unnamed_shells() {
+		let env = vec![(BString::from("BASH_ARGV0"), BString::from("this-bash"))];
+		let a = ShellArgs::parse(&argv(&["/x/bash", "-c", "echo $0"])).unwrap();
+		assert_eq!(a.dollar0_in(&env), "this-bash");
+		let a = ShellArgs::parse(&argv(&["/x/bash", "-c", "echo $0", "named"])).unwrap();
+		assert_eq!(a.dollar0_in(&env), "named");
+	}
+
+	#[test]
+	fn startup_files_follow_run_startup_files() {
+		let env = vec![(BString::from("BASH_ENV"), BString::from("${HOME}/env"))];
+		let home_env = vec![
+			(BString::from("BASH_ENV"), BString::from("$H/env")),
+			(BString::from("H"), BString::from("/h")),
+		];
+		let a = ShellArgs::parse(&argv(&["bash", "-c", ":"])).unwrap();
+		assert_eq!(a.startup_files(&home_env, b"/h", false).unwrap(), vec![vec![BString::from(
+			"/h/env"
+		)]]);
+		// Posix mode and `sh` skip BASH_ENV.
+		let a = ShellArgs::parse(&argv(&["bash", "--posix", "-c", ":"])).unwrap();
+		assert!(a.startup_files(&env, b"/h", false).unwrap().is_empty());
+		// `--login`: the profiles, then BASH_ENV for a non-interactive shell.
+		let a = ShellArgs::parse(&argv(&["bash", "--login", "-c", ":"])).unwrap();
+		let files = a.startup_files(&home_env, b"/h", false).unwrap();
+		assert_eq!(files[0], vec![BString::from("/etc/profile")]);
+		assert_eq!(files[1], argv(&["/h/.bash_profile", "/h/.bash_login", "/h/.profile"]));
+		assert_eq!(files[2], argv(&["/h/env"]));
+		// Interactive: `~/.bashrc`, or `--rcfile` (long options come first:
+		// bash rejects `-i --rcfile` with `--: invalid option`).
+		let a = ShellArgs::parse(&argv(&["bash", "--rcfile", "/r", "-i"])).unwrap();
+		assert_eq!(a.startup_files(&[], b"/h", true).unwrap(), vec![argv(&["/r"])]);
+		let env = vec![(BString::from("BASH_ENV"), BString::from("$(id)"))];
+		let a = ShellArgs::parse(&argv(&["bash", "-c", ":"])).unwrap();
+		assert!(a.startup_files(&env, b"/h", false).is_err());
+	}
+
+	#[test]
+	fn bare_dash_o_lists_options() {
+		let a = ShellArgs::parse(&argv(&["bash", "-e", "+o"])).unwrap();
+		let text = String::from_utf8(a.listing_text().unwrap()).unwrap();
+		assert!(text.contains("set -o emacs\n"));
+		assert!(text.contains("set -o errexit\n"));
+		assert!(text.starts_with("set +o allexport\nset -o braceexpand\n"));
+		let a = ShellArgs::parse(&argv(&["bash", "-O"])).unwrap();
+		let text = String::from_utf8(a.listing_text().unwrap()).unwrap();
+		assert!(text.starts_with("array_expand_once   \toff\n"));
+	}
+}

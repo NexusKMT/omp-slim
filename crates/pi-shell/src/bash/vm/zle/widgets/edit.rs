@@ -341,4 +341,77 @@ pub fn processcmd(zw: &mut Zw<'_, '_>) -> WResult {
 	WResult::Done(process_cmd(zw.zle, zw.ed, &widget, &s, o))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	fn ed(s: &str, cs: usize) -> Editor {
+		let mut e = Editor::new(Context::LineStart, 0);
+		e.line = s.chars().collect();
+		e.cs = cs;
+		e
+	}
+
+	fn line(e: &Editor) -> String {
+		e.line.iter().collect()
+	}
+
+	#[test]
+	fn gosmacs() {
+		let mut e = ed("abc", 3);
+		assert_eq!(gosmacs_transpose_chars(&mut e), 0);
+		assert_eq!((line(&e).as_str(), e.cs), ("acb", 3));
+		e.cs = 0;
+		assert_eq!(gosmacs_transpose_chars(&mut e), 0);
+		assert_eq!((line(&e).as_str(), e.cs), ("cab", 2));
+		let mut e = ed("a", 0);
+		assert_eq!(gosmacs_transpose_chars(&mut e), 1);
+	}
+
+	#[test]
+	fn pound() {
+		let mut e = ed("  ls\necho", 3);
+		assert_eq!(pound_insert(&mut e), 0);
+		assert_eq!(line(&e), "  #ls\n#echo");
+		assert!(e.done);
+		assert_eq!(pound_insert(&mut e), 0);
+		assert_eq!(line(&e), "  ls\necho");
+	}
+
+	#[test]
+	fn copy_words() {
+		let wc = WordChars::new(None);
+		let mut e = ed("aa bb ", 6);
+		assert_eq!(copy_prev_word(&mut e, &wc), 0);
+		// The word back to the cursor, blanks after it included.
+		assert_eq!((line(&e).as_str(), e.cs), ("aa bb bb ", 9));
+		e.zmod.mult = 3;
+		assert_eq!(copy_prev_word(&mut e, &wc), 0);
+		assert_eq!(line(&e), "aa bb bb aa ");
+		e.zmod.mult = 9;
+		assert_eq!(copy_prev_word(&mut e, &wc), 1);
+		// zsh's `gotword` stops at a word ending one before the cursor:
+		// right after `c`, the word before it is copied (as /bin/zsh does).
+		let mut e = ed("echo 'a b' c", 12);
+		assert_eq!(copy_prev_shell_word(&mut e), 0);
+		assert_eq!(line(&e), "echo 'a b' c'a b'");
+		e.zmod.mult = 2;
+		assert_eq!(copy_prev_shell_word(&mut e), 0);
+		assert_eq!(line(&e), "echo 'a b' c'a b''a b'");
+		let mut e = ed("echo 'a b' c ", 13);
+		assert_eq!(copy_prev_shell_word(&mut e), 0);
+		assert_eq!(line(&e), "echo 'a b' c c");
+	}
+
+	#[test]
+	fn quoting() {
+		let mut e = ed("it's", 0);
+		assert_eq!(quote_line(&mut e), 0);
+		assert_eq!((line(&e).as_str(), e.cs), ("'it'\\''s'", 9));
+		let mut e = ed("echo a b", 8);
+		e.mark = 5;
+		assert_eq!(quote_region(&mut e), 0);
+		assert_eq!((line(&e).as_str(), e.cs, e.mark), ("echo 'a b'", 10, 5));
+	}
+}

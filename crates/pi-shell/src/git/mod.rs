@@ -642,4 +642,334 @@ fn physical_path(path: &Path) -> Option<PathBuf> {
 	std::path::absolute(path).ok()
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn parse(line: &str) -> Option<AddRequest> {
+		AddRequest::parse(&line.split(' ').map(str::to_owned).collect::<Vec<_>>())
+	}
+
+	fn request(path: &str) -> AddRequest {
+		AddRequest { path: path.to_owned(), ..AddRequest::default() }
+	}
+
+	#[test]
+	fn parses_worktree_add_like_git() {
+		assert_eq!(parse("worktree add ../wt"), Some(request("../wt")));
+		assert_eq!(
+			parse("-C repo --no-pager worktree add -qfbfeat ../wt main"),
+			Some(AddRequest {
+				dirs: vec!["repo".to_owned()],
+				commit_ish: Some("main".to_owned()),
+				new_branch: Some("feat".to_owned()),
+				quiet: true,
+				..request("../wt")
+			})
+		);
+		// Options may follow operands; abbreviations and negations resolve;
+		// the last of a repeated option wins.
+		assert_eq!(
+			parse("worktree add ../wt --det --no-q -B x -B y --no-detach"),
+			Some(AddRequest { new_branch: Some("y".to_owned()), reset: true, ..request("../wt") })
+		);
+		assert_eq!(
+			parse("worktree add --lo --reas=busy --no-guess ../wt"),
+			Some(AddRequest {
+				lock: Some("busy".to_owned()),
+				guess_remote: Some(false),
+				..request("../wt")
+			})
+		);
+		assert_eq!(
+			parse("worktree add --lock --reason x --no-reason --no-track ../wt"),
+			Some(AddRequest {
+				lock: Some(DEFAULT_LOCK_REASON.to_owned()),
+				track: Some(false),
+				..request("../wt")
+			})
+		);
+		// `--` and `--end-of-options` make dash-led operands literal.
+		assert_eq!(parse("worktree add -- -wt"), Some(request("-wt")));
+		assert_eq!(parse("worktree add --end-of-options -wt"), Some(request("-wt")));
+	}
+
+	/// Every form below has behavior pi-vcs does not reproduce, or is an
+	/// error git must report itself.
+	#[test]
+	fn leaves_other_invocations_to_git() {
+		for line in [
+			"status",
+			"worktree list",
+			"-c core.abbrev=12 worktree add ../wt",
+			"--git-dir=.git worktree add ../wt",
+			"worktree add",
+			"worktree add ../wt main extra",
+			"worktree add --orphan ../wt",
+			"worktree add --no-checkout ../wt",
+			"worktree add --reason x ../wt",
+			"worktree add --r x ../wt",
+			"worktree add --detach=yes ../wt",
+			"worktree add -h",
+			"worktree add -qx ../wt",
+			"worktree add -b x --detach ../wt",
+			"worktree add -b x -B y ../wt",
+			"worktree add -b",
+		] {
+			assert_eq!(parse(line), None, "{line}");
+		}
+	}
+
+	/// Runs `git` reading the same config sources the builtin's gix does: the
+	/// real global/system files at their default paths (gix ignores
+	/// `GIT_CONFIG_GLOBAL`/`SYSTEM`/`NOSYSTEM`, ignoring these matches it),
+	/// and never `GIT_CONFIG_PARAMETERS` (gix does not read it at all).
+	/// `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` are left alone: gix reads those
+	/// from the process environment, so the helper must see them too.
+	#[cfg(unix)]
+	pub(super) fn git(dir: &Path, args: &[&str]) -> String {
+		let output = std::process::Command::new("git")
+			.args(args)
+			.current_dir(dir)
+			.env_remove("GIT_CONFIG_GLOBAL")
+			.env_remove("GIT_CONFIG_SYSTEM")
+			.env_remove("GIT_CONFIG_NOSYSTEM")
+			.env_remove("GIT_CONFIG_PARAMETERS")
+			.output()
+			.expect("run git");
+		assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+		String::from_utf8(output.stdout).expect("utf8 git output")
+	}
+
+	/// Repository with one commit, an ignored build cache, and a
+	/// `post-checkout` hook that records its arguments and directory.
+	#[cfg(unix)]
+	pub(super) fn fixture() -> (tempfile::TempDir, PathBuf) {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let temp = tempfile::tempdir().expect("tempdir");
+		let repo = std::fs::canonicalize(temp.path())
+			.expect("canonical tempdir")
+			.join("repo");
+		std::fs::create_dir(&repo).expect("create repo");
+		git(&repo, &["init", "-q", "-b", "main"]);
+		git(&repo, &["config", "user.name", "t"]);
+		git(&repo, &["config", "user.email", "t@t"]);
+		// Pin what a developer's global config would change, locally so the
+		// builtin's gix reads see it too: signing makes `git commit` and
+		// `git tag` need a key (and a tag a message), and a global
+		// `core.hooksPath` would skip the hook below. Absolute, because
+		// `hook_path` joins a relative one onto the linked worktree's root.
+		let hooks = repo.join(".git/hooks");
+		git(&repo, &["config", "commit.gpgSign", "false"]);
+		git(&repo, &["config", "tag.gpgSign", "false"]);
+		git(&repo, &["config", "core.hooksPath", &hooks.to_string_lossy()]);
+		// The builtin hands a form to git when these change worktree or branch
+		// behavior, so the parity cases below need git's defaults.
+		git(&repo, &["config", "worktree.useRelativePaths", "false"]);
+		git(&repo, &["config", "worktree.guessRemote", "false"]);
+		git(&repo, &["config", "branch.autoSetupMerge", "true"]);
+		std::fs::write(repo.join(".gitignore"), "cache/\n").expect("write gitignore");
+		std::fs::write(repo.join("tracked.txt"), "tracked\n").expect("write tracked");
+		git(&repo, &["add", "."]);
+		git(&repo, &["commit", "-q", "-m", "first commit"]);
+		std::fs::create_dir(repo.join("cache")).expect("create cache");
+		std::fs::write(repo.join("cache/blob"), "warm").expect("write cache");
+		let hook = hooks.join("post-checkout");
+		std::fs::write(&hook, "#!/bin/sh\necho \"$* $PWD\" > ../hook.log\necho hook-out\n")
+			.expect("write hook");
+		std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("chmod hook");
+		(temp, repo)
+	}
+
+	/// Runs `command` in a one-shot shell with the builtin layers whose
+	/// variables (`PI_SMART_GIT`, `PI_GIT_GUARD`) are in `layers` on, the
+	/// others off.
+	///
+	/// The shell exports the test process's environment, where any
+	/// `GIT_CONFIG*` variable would hand every `git` call to the binary and
+	/// leave the builtin untested, so the command unsets them first. Setting
+	/// the process environment instead would race the other tests' threads.
+	#[cfg(unix)]
+	pub(super) async fn run_with(
+		repo: &Path,
+		command: &str,
+		layers: &[&str],
+	) -> (Option<i32>, String) {
+		use std::{
+			io::{Read as _, Seek as _},
+			os::unix::ffi::OsStrExt as _,
+		};
+
+		use bstr::BString;
+
+		use crate::session::{RunOptions, RunStdio, Session, SessionConfig};
+
+		let mut env: Vec<(BString, BString)> = std::env::vars_os()
+			.filter(|(name, _)| {
+				!["PI_SMART_GIT", "PI_GIT_GUARD", "PI_GIT_GUARD_OVNFS"]
+					.contains(&name.to_str().unwrap_or(""))
+			})
+			.map(|(k, v)| (BString::from(k.as_bytes()), BString::from(v.as_bytes())))
+			.collect();
+		env.push(("PI_GIT_GUARD_OVNFS".into(), "".into()));
+		for name in ["PI_SMART_GIT", "PI_GIT_GUARD"] {
+			let on = if layers.contains(&name) { "1" } else { "0" };
+			env.push((name.into(), on.into()));
+		}
+		let mut session = Session::new(SessionConfig {
+			env,
+			cwd: BString::from(repo.as_os_str().as_bytes()),
+			fs: Box::new(crate::sys::StdFs::default()),
+			vfs: None,
+			runtime: tokio::runtime::Handle::current(),
+			output_decoding: None,
+		})
+		.expect("session");
+		// stdout and stderr share one file (and its offset), so the
+		// transcript keeps their order.
+		let mut out = tempfile::tempfile().expect("transcript");
+		let stdio = RunStdio {
+			stdin:  Some(std::fs::File::open("/dev/null").expect("/dev/null")),
+			stdout: Some(out.try_clone().expect("clone transcript")),
+			stderr: Some(out.try_clone().expect("clone transcript")),
+		};
+		let options = RunOptions::new(format!("unset -v \"${{!GIT_CONFIG@}}\"; {command}"));
+		let outcome = session
+			.run_with(options, stdio, tokio_util::sync::CancellationToken::new())
+			.await
+			.expect("run");
+		out.rewind().expect("rewind transcript");
+		let mut text = String::new();
+		out.read_to_string(&mut text).expect("read transcript");
+		(Some(outcome.status), text)
+	}
+
+	#[cfg(unix)]
+	async fn run(repo: &Path, command: &str) -> (Option<i32>, String) {
+		run_with(repo, command, &["PI_SMART_GIT"]).await
+	}
+
+	/// Without `PI_SMART_GIT`, `git` is the plain binary: no clone, so the
+	/// ignored cache stays behind.
+	#[cfg(target_os = "macos")]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn worktree_add_is_plain_git_unless_opted_in() {
+		let (_temp, repo) = fixture();
+		let (code, output) = run_with(&repo, "git worktree add ../wt", &[]).await;
+		assert_eq!(code, Some(0), "{output}");
+		let wt = repo.parent().expect("parent").join("wt");
+		assert!(wt.join("tracked.txt").exists(), "git checked out the worktree");
+		assert!(!wt.join("cache/blob").exists(), "git never copies ignored files");
+	}
+
+	/// Only the copy-on-write clone carries ignored files; git never does. The
+	/// macOS temp dir is APFS, where the clone always works.
+	#[cfg(unix)]
+	fn assert_cloned(worktree: &Path) {
+		if cfg!(target_os = "macos") {
+			assert_eq!(
+				std::fs::read_to_string(worktree.join("cache/blob")).expect("cloned cache"),
+				"warm"
+			);
+		}
+	}
+
+	/// The in-process path must leave a worktree git itself accepts, print
+	/// git's report, and run `post-checkout` like git does.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn worktree_add_creates_git_compatible_worktree() {
+		let (_temp, repo) = fixture();
+		let (code, output) = run(&repo, "git worktree add ../wt").await;
+		assert_eq!(code, Some(0), "{output}");
+
+		let wt = repo.parent().expect("parent").join("wt");
+		let head = git(&repo, &["rev-parse", "HEAD"]);
+		let head = head.trim();
+		let short = git(&repo, &["rev-parse", "--short", "HEAD"]);
+		assert!(output.contains("Preparing worktree (new branch 'wt')"), "{output}");
+		assert!(
+			output.contains(&format!("HEAD is now at {} first commit", short.trim())),
+			"{output}"
+		);
+		assert!(output.contains("hook-out"), "hook stdout reaches the transcript: {output}");
+
+		let listed = git(&repo, &["worktree", "list", "--porcelain"]);
+		assert!(
+			listed.contains(&format!("worktree {}\nHEAD {head}\nbranch refs/heads/wt", wt.display())),
+			"{listed}"
+		);
+		assert_eq!(git(&wt, &["status", "--porcelain"]), "");
+		let hook_log = std::fs::read_to_string(repo.parent().expect("parent").join("hook.log"))
+			.expect("post-checkout ran");
+		assert_eq!(hook_log.trim(), format!("{} {head} 1 {}", "0".repeat(head.len()), wt.display()));
+		assert_cloned(&wt);
+	}
+
+	/// Detaching at a tag, checking out an existing branch, resetting one with
+	/// `-B`, and locking are distinct git outcomes the builtin must reproduce.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn worktree_add_reproduces_git_target_forms() {
+		let (_temp, repo) = fixture();
+		git(&repo, &["branch", "side"]);
+		git(&repo, &["branch", "old"]);
+		git(&repo, &["tag", "v1"]);
+		let was = git(&repo, &["rev-parse", "--short", "old"]);
+		git(&repo, &["commit", "-q", "--allow-empty", "-m", "second"]);
+
+		let (code, output) = run(
+			&repo,
+			"git worktree add -q ../tagged v1 && git worktree add ../side side && git worktree add \
+			 --lock --reason busy -B old ../old",
+		)
+		.await;
+		assert_eq!(code, Some(0), "{output}");
+		assert!(!output.contains("detached HEAD"), "-q silences the report: {output}");
+		assert!(output.contains("Preparing worktree (checking out 'side')"), "{output}");
+		assert!(
+			output.contains(&format!(
+				"Preparing worktree (resetting branch 'old'; was at {})",
+				was.trim()
+			)),
+			"{output}"
+		);
+
+		let parent = repo.parent().expect("parent");
+		assert_eq!(
+			git(&parent.join("tagged"), &["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+			"HEAD"
+		);
+		assert_eq!(git(&parent.join("side"), &["symbolic-ref", "--short", "HEAD"]).trim(), "side");
+		assert!(git(&repo, &["branch", "--list", "v1"]).is_empty(), "a tag must not become a branch");
+		assert_eq!(git(&repo, &["rev-parse", "old"]), git(&repo, &["rev-parse", "HEAD"]));
+		assert!(
+			git(&repo, &["reflog", "-1", "--format=%gs", "old"]).starts_with("branch: Reset to HEAD"),
+			"-B records a reset, not a creation"
+		);
+		let listed = git(&repo, &["worktree", "list", "--porcelain"]);
+		assert!(listed.contains("branch refs/heads/old\nlocked busy\n"), "{listed}");
+		assert_cloned(&parent.join("old"));
+	}
+
+	/// Anything the builtin does not serve still reaches git with its
+	/// arguments, output, and exit status intact.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn unsupported_invocations_run_the_git_binary() {
+		let (_temp, repo) = fixture();
+		let (code, output) =
+			run(&repo, "git worktree add --no-checkout ../bare-wt && git rev-parse --abbrev-ref HEAD")
+				.await;
+		assert_eq!(code, Some(0), "{output}");
+		assert!(output.ends_with("main\n"), "{output}");
+		let wt = repo.parent().expect("parent").join("bare-wt");
+		assert!(!wt.join("tracked.txt").exists(), "--no-checkout handled by git");
+
+		// Branch already checked out: git's own fatal error and status.
+		let (code, output) = run(&repo, "git worktree add ../again main").await;
+		assert_eq!(code, Some(128));
+		assert!(output.contains("fatal: 'main' is already"), "{output}");
+	}
+}

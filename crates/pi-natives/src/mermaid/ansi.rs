@@ -298,4 +298,37 @@ pub fn colorize_text(text: &str, hex: &str, mode: ColorMode) -> String {
 	out
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn palette_mapping_matches_reference() {
+		assert_eq!(rgb_to_256(0x27, 0x27, 0x2a), 232 + 4);
+		assert_eq!(rgb_to_256(255, 0, 0), 196);
+		assert_eq!(ansi16_fg("#ff0000"), "\x1b[91m");
+		assert_eq!(ansi16_fg("#ff4040"), "\x1b[31m");
+		assert_eq!(ansi16_fg("#27272a"), "\x1b[90m");
+		assert_eq!(truecolor_fg("#abc"), "\x1b[38;2;170;187;204m");
+	}
+
+	#[test]
+	fn line_groups_runs_and_leaves_spaces_bare() {
+		let theme = Theme::default();
+		let cells = [
+			("─", Some(CharRole::Line)),
+			("─", Some(CharRole::Line)),
+			(" ", None),
+			("A", Some(CharRole::Text)),
+			("<", None),
+		];
+		assert_eq!(
+			colorize_line(&cells, &theme, ColorMode::Truecolor),
+			"\x1b[38;2;113;113;122m──\x1b[0m \x1b[38;2;39;39;42mA\x1b[0m<"
+		);
+		assert_eq!(
+			colorize_line(&cells, &theme, ColorMode::Html),
+			"<span style=\"color:#71717a\">──</span> <span style=\"color:#27272a\">A</span>&lt;"
+		);
+	}
+}

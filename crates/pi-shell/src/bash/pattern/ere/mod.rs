@@ -172,4 +172,5 @@ impl fmt::Display for RegexError {
 
 impl core::error::Error for RegexError {}
 
-
+#[cfg(test)]
+mod tests;

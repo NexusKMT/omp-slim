@@ -388,4 +388,83 @@ impl Timeout {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn parsed(line: &str) -> Parsed {
+		let argv: Vec<BString> = line.split(' ').map(BString::from).collect();
+		parse(&argv)
+	}
+
+	fn options(line: &str) -> Options {
+		match parsed(line) {
+			Parsed::Run(opts) => opts,
+			other => panic!("{line}: {other:?}"),
+		}
+	}
+
+	fn failure(line: &str) -> String {
+		match parsed(line) {
+			Parsed::Fail(msg) => msg,
+			other => panic!("{line}: {other:?}"),
+		}
+	}
+
+	#[test]
+	fn gnu_spellings_parse() {
+		let opts = options("timeout -s INT -k 2s 10s cmd arg");
+		assert_eq!(opts.signal, Signal::Int);
+		assert_eq!(opts.kill_after, Some(Duration::from_secs(2)));
+		assert_eq!(opts.limit, Some(Duration::from_secs(10)));
+		assert_eq!(opts.command, ["cmd", "arg"]);
+
+		let opts =
+			options("timeout --signal=KILL --kill-after=1 --preserve-status --foreground -v 5 cmd");
+		assert_eq!(opts.signal, Signal::Kill);
+		assert!(opts.preserve && opts.foreground && opts.verbose);
+
+		let opts = options("timeout -vsHUP --kill 3 0.5 cmd");
+		assert_eq!((opts.signal, opts.kill_after), (Signal::Hup, Some(Duration::from_secs(3))));
+		assert_eq!(opts.limit, Some(Duration::from_millis(500)));
+
+		// `--` before the duration ends the options.
+		assert_eq!(options("timeout -- 5 cmd").limit, Some(Duration::from_secs(5)));
+		// The command's own options belong to the command.
+		assert_eq!(options("timeout 5 grep -v -e x").command, ["grep", "-v", "-e", "x"]);
+		// Zero disables the limit.
+		assert_eq!(options("timeout 0 cmd").limit, None);
+		assert_eq!(options("timeout 1m cmd").limit, Some(Duration::from_secs(60)));
+	}
+
+	#[test]
+	fn signal_spellings_follow_kill() {
+		for spec in ["TERM", "term", "SIGTERM", "sigterm", "15"] {
+			assert_eq!(options(&format!("timeout -s {spec} 1 cmd")).signal, Signal::Term, "{spec}");
+		}
+		for spec in ["NOSUCH", "EXIT", "0"] {
+			assert_eq!(
+				failure(&format!("timeout -s {spec} 1 cmd")),
+				format!("timeout: '{spec}': invalid signal\n")
+			);
+		}
+	}
+
+	/// Usage errors exit 125 with GNU's messages, `--help` prints on stdout.
+	#[test]
+	fn usage_errors_are_timeouts_own() {
+		assert_eq!(failure("timeout invalid cmd"), "timeout: invalid time interval 'invalid'\n");
+		assert_eq!(failure("timeout -1 cmd"), "timeout: invalid time interval '-1'\n");
+		assert_eq!(failure("timeout -k bogus 1 cmd"), "timeout: invalid time interval 'bogus'\n");
+		assert!(failure("timeout").starts_with("timeout: missing operand\n"));
+		assert!(failure("timeout 5").starts_with("timeout: missing operand\n"));
+		assert!(failure("timeout -x 5 cmd").starts_with("timeout: invalid option -- 'x'\n"));
+		assert!(
+			failure("timeout --nope 5 cmd").starts_with("timeout: unrecognized option '--nope'\n")
+		);
+		assert!(failure("timeout -s").starts_with("timeout: option requires an argument -- 's'\n"));
+		assert!(
+			matches!(parsed("timeout --help"), Parsed::Print(text) if text.starts_with("Usage: timeout"))
+		);
+	}
+}

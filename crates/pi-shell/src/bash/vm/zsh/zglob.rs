@@ -1724,4 +1724,40 @@ fn glob_words(
 		.collect())
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn glob_qualifiers_are_recognised_at_the_end() {
+		let o = Opts::default();
+		let w = [b'*', INPAR, b'/', OUTPAR];
+		assert_eq!(checkglobqual(&w, false, &o), Some((1, 1)));
+		assert_eq!(checkglobqual(&w, true, &o), None);
+		let alt = [INPAR, b'a', BAR, b'b', OUTPAR];
+		assert_eq!(checkglobqual(&alt, false, &o), None);
+		let eo = Opts { extended_glob: true, ..Opts::default() };
+		let q = [b'x', INPAR, POUND, b'q', b'N', OUTPAR];
+		assert_eq!(checkglobqual(&q, true, &eo), Some((1, 2)));
+	}
+
+	#[test]
+	fn mode_specs_parse_like_zsh() {
+		let mut i = 0;
+		// `no` covers only the nine permission bits the digits name.
+		assert_eq!(qgetmodespec(b"755", &mut i).ok(), Some(0o755 | (0o022 << 12)));
+		let mut i = 0;
+		let v = qgetmodespec(b":u+x:", &mut i).ok();
+		assert_eq!(v, Some(0o100));
+	}
+
+	#[test]
+	fn file_type_markers() {
+		let mut st = unreachable_stat();
+		st.kind = StatKind::Dir;
+		assert_eq!(file_type(&st), b'/');
+		st.kind = StatKind::File;
+		st.mode = 0o755;
+		assert_eq!(file_type(&st), b'*');
+	}
+}

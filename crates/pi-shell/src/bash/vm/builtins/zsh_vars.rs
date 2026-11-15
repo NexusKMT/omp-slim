@@ -1133,4 +1133,22 @@ pub fn read(ctx: &mut Ctx<'_, '_>, ops: &Ops, args: &[BString]) -> R {
 	done(i32::from(last.is_none()))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn ifs_classes_follow_zsh_typtab() {
+		let ifs = Ifs { ifs: BString::from(" \t\n:") };
+		assert!(ifs.sep(b":") && !ifs.wsep(b":"));
+		assert!(ifs.sep(b" ") && ifs.wsep(b" "));
+		let doubled = Ifs { ifs: BString::from("  :") };
+		assert!(doubled.sep(b" ") && !doubled.wsep(b" "));
+	}
+
+	#[test]
+	fn characters_split_utf8_only_when_multibyte() {
+		assert_eq!(chars("é".as_bytes(), true).len(), 1);
+		assert_eq!(chars("é".as_bytes(), false).len(), 2);
+	}
+}

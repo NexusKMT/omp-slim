@@ -386,4 +386,58 @@ fn report(p: &Prof) -> String {
 	out
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn records_round_trip() {
+		let p = Prof {
+			funcs: vec![Pfunc { name: "f".into(), calls: 2, time: 1.5, self_: 0.25 }, Pfunc {
+				name:  "g h".into(),
+				calls: 1,
+				time:  0.125,
+				self_: 0.125,
+			}],
+			arcs:  vec![Parc { from: 0, to: 1, calls: 1, time: 0.125, self_: 0.125 }],
+			stack: vec![Sfunc { f: 0, beg: 3.0, prev: 2.0, arc: None, depth: 4 }],
+		};
+		let Record::Words(w) = p.encode() else {
+			unreachable!()
+		};
+		assert_eq!(Prof::decode(&w), p);
+	}
+
+	#[test]
+	fn report_lists_callers_and_callees() {
+		let p = Prof {
+			funcs: vec![Pfunc { name: "outer".into(), calls: 1, time: 4.0, self_: 1.0 }, Pfunc {
+				name:  "inner".into(),
+				calls: 2,
+				time:  3.0,
+				self_: 3.0,
+			}],
+			arcs:  vec![Parc { from: 0, to: 1, calls: 2, time: 3.0, self_: 3.0 }],
+			stack: Vec::new(),
+		};
+		let rule =
+			"-----------------------------------------------------------------------------------";
+		let want = format!(
+				"num  calls                time                       self            name\n{rule}\n \
+				 1)    2           3.00     1.50   75.00%      3.00     1.50   75.00%  inner\n 2)    \
+				 1           4.00     4.00  100.00%      1.00     1.00   25.00%  outer\n\n{rule}\n\n \
+				 2)    1           4.00     4.00  100.00%      1.00     1.00   25.00%  outer\n       \
+				 2/2         3.00     1.50   75.00%      3.00     1.50             inner \
+				 [1]\n\n{rule}\n\n       2/2         3.00     1.50   75.00%      3.00     1.50             \
+				 outer [2]\n 1)    2           3.00     1.50   75.00%      3.00     1.50   75.00%  \
+				 inner\n"
+			);
+		assert_eq!(report(&p), want);
+	}
+
+	#[test]
+	fn c_float_formatting() {
+		assert_eq!(f2(f64::NAN, 6), "   nan");
+		assert_eq!(f2(1.0 / 3.0, 8), "    0.33");
+	}
+}

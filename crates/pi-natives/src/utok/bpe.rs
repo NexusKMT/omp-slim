@@ -523,6 +523,9 @@ pub(crate) fn for_each_piece<U: Unit>(
 	}
 	// Non-UTF-8 flavors: owned UTF-8 needed only when NFC actually has
 	// work to do, or while the test-only regex oracle is active.
+	#[cfg(test)]
+	let regex_splitter = splitter.is_regex();
+	#[cfg(not(test))]
 	let regex_splitter = false;
 	if (nfc && !nfc_quick(units)) || regex_splitter {
 		let s = decode_lossy(units);
@@ -596,4 +599,27 @@ fn nfc_quick<U: Unit>(units: &[U]) -> bool {
 	xutf::is_nfc_codepoints(Cps(units, 0))
 }
 
+#[cfg(test)]
+mod memo_tests {
+	use super::*;
 
+	/// The table check is the only guard against another table's entry in
+	/// the probed slot: the table id also feeds the slot hash, so two tables
+	/// rarely share a slot for one key, and only a planted entry reaches it.
+	#[test]
+	fn other_tables_entry_in_the_probed_slot_is_recounted() {
+		let table = RankTable {
+			pairs:         vec![u32::MAX; 65536].into_boxed_slice().try_into().unwrap(),
+			short:         HashMap::default(),
+			long:          FxMap::default(),
+			max_token_len: 1,
+			id:            7,
+		};
+		let key = pack(b"abab").unwrap();
+		let mut memo = PieceMemo::new();
+		*memo.slot(key, 7) = MemoSlot { key, table: 8, count: 999 };
+		// No merges: four single-byte tokens.
+		assert_eq!(table.count_merged(b"abab", &mut memo), 4);
+		assert_eq!(table.count_merged(b"abab", &mut memo), 4);
+	}
+}

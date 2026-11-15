@@ -205,4 +205,47 @@ pub(crate) fn metacharinc(pat: &[u8], pos: &mut usize, mb: bool) -> u32 {
 	invalid(first)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn charprev_matches_forward_boundaries() {
+		// "é", a stray continuation byte, an invalid lead, "€", "a".
+		let s = b"\xc3\xa9\xa9\xc3a\xe2\x82\xaca";
+		let mut bounds = alloc_bounds(s);
+		bounds.reverse();
+		for w in bounds.windows(2) {
+			assert_eq!(charprev(s, 0, w[0], s.len(), true), w[1], "before {}", w[0]);
+		}
+	}
+
+	fn alloc_bounds(s: &[u8]) -> Vec<usize> {
+		let mut v = vec![0];
+		let mut x = 0;
+		while x < s.len() {
+			x = charnext(s, x, s.len(), true);
+			v.push(x);
+		}
+		v
+	}
+
+	#[test]
+	fn charsub_counts_remaining_bytes_after_invalid() {
+		assert_eq!(charsub("aé€".as_bytes(), 0, 6, true), 3);
+		assert_eq!(charsub(b"a\xffbc", 0, 4, true), 4);
+		assert_eq!(charsub("é".as_bytes(), 0, 2, false), 2);
+	}
+
+	#[test]
+	fn metacharinc_decodes_metafied_multibyte() {
+		// "é" is c3 a9; 0xa9 is not a meta byte, "ƃ" is c6 83 and 0x83 is.
+		let p = [0xc6, META, 0x83 ^ 32, b'x'];
+		let mut i = 0;
+		assert_eq!(metacharinc(&p, &mut i, true), 'ƃ' as u32);
+		assert_eq!(i, 3);
+		let mut j = 0;
+		assert_eq!(metacharinc(&p, &mut j, false), 0xc6);
+		assert_eq!(j, 1);
+	}
+}

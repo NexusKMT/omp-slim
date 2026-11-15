@@ -121,4 +121,75 @@ pub fn resolve_dir(dir: &str) -> String {
 	text
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn sanitizes_stem_per_char() {
+		assert_eq!(sanitize_stem("a b"), "a_b");
+		assert_eq!(sanitize_stem("Ok.name_1-x"), "Ok.name_1-x");
+		assert_eq!(sanitize_stem("a/b\\c:é"), "a_b_c__");
+	}
+
+	#[test]
+	fn hash16_is_sixteen_hex_digits_and_stable() {
+		let hash = hash16(b"abc");
+		assert_eq!(hash.len(), 16);
+		assert!(
+			hash
+				.bytes()
+				.all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+		);
+		assert_eq!(hash, hash16(b"abc"));
+		assert_ne!(hash, hash16(b"abd"));
+	}
+
+	#[test]
+	fn unix_endpoint_keeps_short_paths_in_dir() {
+		assert_eq!(unix_endpoint("/tmp/x", "a b", 501, 104), "/tmp/x/a_b.sock");
+		assert_eq!(unix_endpoint("/", "s", 501, 104), "/s.sock");
+	}
+
+	#[test]
+	fn unix_endpoint_relocates_at_sun_path_threshold() {
+		// `<dir>/<stem>.sock` plus NUL must fit in `sun_path_max`.
+		let name = "n";
+		let suffix_len = "/n.sock".len();
+		let fits = format!("/{}", "d".repeat(104 - 1 - suffix_len - 1));
+		let direct = format!("{fits}/n.sock");
+		assert_eq!(direct.len(), 103);
+		assert_eq!(unix_endpoint(&fits, name, 501, 104), direct);
+
+		let too_long = format!("{fits}d");
+		let relocated = unix_endpoint(&too_long, name, 501, 104);
+		let mut key = too_long.clone().into_bytes();
+		key.push(0);
+		key.extend_from_slice(name.as_bytes());
+		assert_eq!(relocated, format!("/tmp/omp-501/{}.sock", hash16(&key)));
+		// Linux's larger sun_path keeps the same directory in place.
+		assert_eq!(unix_endpoint(&too_long, name, 501, 108), format!("{too_long}/n.sock"));
+	}
+
+	#[test]
+	fn relocation_hash_separates_dir_and_name() {
+		let dir = format!("/{}", "x".repeat(200));
+		assert_ne!(unix_endpoint(&dir, "ab", 0, 104), unix_endpoint(&format!("{dir}a"), "b", 0, 104));
+	}
+
+	#[test]
+	fn windows_pipe_name_shape() {
+		let name = windows_pipe_name(r"C:\Users\Me\Proj", "my sock");
+		assert_eq!(name, format!(r"\\.\pipe\omp-my_sock-{}", hash16(br"c:\users\me\proj")));
+		assert_eq!(name, windows_pipe_name(r"c:\users\me\PROJ", "my sock"));
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn resolve_dir_normalizes_lexically() {
+		assert_eq!(resolve_dir("/a/b/../c/./d/"), "/a/c/d");
+		assert_eq!(resolve_dir("/.."), "/");
+		let cwd = std::env::current_dir().unwrap();
+		assert_eq!(resolve_dir("x"), cwd.join("x").to_str().unwrap());
+	}
+}

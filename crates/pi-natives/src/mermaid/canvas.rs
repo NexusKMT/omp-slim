@@ -653,4 +653,68 @@ impl Canvas {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn dotted_and_solid_crossings_keep_both_lines() {
+		for (base_line, crossing) in [("───", '┆'), ("┄┄┄", '│')] {
+			let mut base = Canvas::new(3, 1);
+			base.draw_text(DrawingCoord::new(0, 0), base_line, true);
+			let mut overlay = Canvas::new(3, 1);
+			overlay.set(1, 0, Cell::from(crossing));
+			base.merge(DrawingCoord::new(0, 0), false, &[&overlay]);
+			let expected: String = base_line
+				.chars()
+				.take(1)
+				.chain(['┼'])
+				.chain(base_line.chars().skip(2))
+				.collect();
+			assert_eq!(base.to_plain_string().trim_end(), expected);
+		}
+	}
+
+	#[test]
+	fn merge_resolves_junctions_and_keeps_first_label() {
+		let mut base = Canvas::new(3, 1);
+		base.draw_text(DrawingCoord::new(0, 0), "─A─", true);
+		let mut overlay = Canvas::new(3, 1);
+		overlay.draw_text(DrawingCoord::new(0, 0), "│B ", true);
+		let mut merged = base.clone();
+		merged.merge(DrawingCoord::new(0, 0), false, &[&overlay]);
+		// draw_text grows one column past the text, as the reference does.
+		assert_eq!(merged.to_plain_string(), "┼A─ ");
+		base.merge(DrawingCoord::new(0, 0), true, &[&overlay]);
+		assert_eq!(base.to_plain_string(), "│A─ ");
+	}
+
+	#[test]
+	fn wide_glyphs_stay_paired_and_serialize_to_one_column_each() {
+		let mut canvas = Canvas::new(1, 1);
+		canvas.draw_text(DrawingCoord::new(0, 0), "日x", true);
+		assert_eq!(canvas.width(), 4);
+		assert!(canvas.get(1, 0).unwrap().is_wide_pad());
+		assert_eq!(canvas.to_plain_string(), "日x ");
+		canvas.write_cell(1, 0, Cell::from('-'));
+		assert_eq!(canvas.to_plain_string(), " -x ");
+	}
+
+	#[test]
+	fn flip_remaps_direction_glyphs() {
+		let mut canvas = Canvas::new(1, 3);
+		canvas.set(0, 0, Cell::from('▼'));
+		canvas.set(0, 1, Cell::from('│'));
+		canvas.set(0, 2, Cell::from('┘'));
+		canvas.flip_vertical_remapped();
+		assert_eq!(canvas.to_plain_string(), "┐\n│\n▲");
+	}
+
+	#[test]
+	fn role_canvas_grows_on_set() {
+		let mut roles = RoleCanvas::new(1, 1);
+		roles.set_role(3, 2, CharRole::Text);
+		assert_eq!((roles.width(), roles.height()), (4, 3));
+		assert_eq!(roles.get(3, 2), Some(&Some(CharRole::Text)));
+	}
+}

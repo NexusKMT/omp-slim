@@ -107,4 +107,41 @@ pub fn zgetline(zw: &mut Zw<'_, '_>) -> WResult {
 	WResult::Done(get_line(zw.zle, zw.ed))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	fn ed(s: &str, cs: usize, context: Context) -> Editor {
+		let mut e = Editor::new(context, 0);
+		e.line = s.chars().collect();
+		e.cs = cs;
+		e
+	}
+
+	#[test]
+	fn push_and_get() {
+		let mut zle = Zle::new(false);
+		let mut e = ed("echo hi", 4, Context::LineStart);
+		e.zmod.mult = 2;
+		assert_eq!(push_line(&mut zle, &mut e), 0);
+		assert_eq!(zle.bufstack, vec![BString::from("echo hi"), BString::default()]);
+		assert_eq!((e.line.len(), e.cs, zle.stack_cs), (0, 0, Some(4)));
+		assert_eq!(get_line(&mut zle, &mut e), 0);
+		assert_eq!(get_line(&mut zle, &mut e), 0);
+		assert_eq!(e.line.iter().collect::<String>(), "echo hi");
+		assert_eq!(get_line(&mut zle, &mut e), 1);
+	}
+
+	#[test]
+	fn push_input_on_a_continuation_line() {
+		let mut zle = Zle::new(false);
+		let mut e = ed("done", 4, Context::LineCont);
+		e.hline = Some(BString::from("for i in 1; do\n"));
+		assert_eq!(push_input(&mut zle, &mut e), 0);
+		assert_eq!(zle.bufstack, vec![BString::from("for i in 1; do\ndone"), BString::default()]);
+		assert_eq!(zle.stack_cs, Some(19));
+		assert!(e.done && e.aborted);
+		assert_eq!(e.zmod.mult, 1);
+	}
+}

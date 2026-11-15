@@ -38,7 +38,8 @@ mod backup;
 mod batch;
 mod checksum;
 mod chmod;
-
+#[cfg(test)]
+mod conformance;
 mod consts;
 mod cstr;
 mod daemon;

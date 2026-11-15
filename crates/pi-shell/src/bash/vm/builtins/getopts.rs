@@ -269,4 +269,15 @@ fn atoi(text: &[u8]) -> i64 {
 	if neg { v.wrapping_neg() } else { v }
 }
 
+#[cfg(test)]
+mod tests {
+	use super::atoi;
 
+	#[test]
+	fn atoi_stops_at_junk() {
+		assert_eq!(atoi(b" 12x"), 12);
+		assert_eq!(atoi(b"-3"), -3);
+		assert_eq!(atoi(b""), 0);
+		assert_eq!(atoi(b"x1"), 0);
+	}
+}

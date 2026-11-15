@@ -555,4 +555,19 @@ impl Sockets for NativeSockets {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn socket_addresses_round_trip_through_c() {
+		for addr in [
+			SockAddr::Inet("127.0.0.1:5555".parse().unwrap()),
+			SockAddr::Inet("[::1]:80".parse().unwrap()),
+			SockAddr::Unix(BString::from("/tmp/x.sock")),
+		] {
+			let (ss, len) = to_c(&addr);
+			assert_eq!(from_c(&ss, len).unwrap(), addr);
+		}
+	}
+}

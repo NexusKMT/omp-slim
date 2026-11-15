@@ -985,4 +985,275 @@ fn local_bookmarks_for_commit(repo: &dyn Repo, commit_id: &CommitId) -> Vec<Stri
 		.collect()
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{collections::BTreeMap, fs, path::Path, process::Command};
 
+	use super::*;
+
+	fn init_internal_jj(root: &Path) {
+		let settings = user_settings().unwrap();
+		let runtime = tokio::runtime::Builder::new_current_thread()
+			.enable_all()
+			.build()
+			.unwrap();
+		runtime
+			.block_on(Workspace::init_internal_git(&settings, root, gix::hash::Kind::Sha1))
+			.unwrap();
+	}
+
+	fn jj_available() -> bool {
+		Command::new("jj").arg("--version").output().is_ok()
+	}
+
+	fn run_jj(root: &Path, args: &[&str]) -> String {
+		let output = Command::new("jj")
+			.current_dir(root)
+			.env("JJ_USER", "VCS Test")
+			.env("JJ_EMAIL", "vcs@example.com")
+			.args(args)
+			.output()
+			.unwrap();
+		assert!(output.status.success(), "jj {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+		String::from_utf8(output.stdout).unwrap()
+	}
+
+	fn parse_label(raw: &str) -> Option<String> {
+		let mut change_id = None;
+		for line in raw.lines() {
+			let (change, bookmarks) = line.split_once('|').unwrap_or((line, ""));
+			if change_id.is_none() && !change.trim().is_empty() {
+				change_id = Some(change.trim().to_owned());
+			}
+			if !bookmarks.trim().is_empty() {
+				return Some(bookmarks.split_whitespace().collect::<Vec<_>>().join(" "));
+			}
+		}
+		change_id
+	}
+
+	fn parse_summary(raw: &str) -> StatusSummary {
+		let mut summary = StatusSummary::default();
+		for line in raw.lines() {
+			match line.trim().as_bytes().first() {
+				Some(b'A') => summary.untracked += 1,
+				Some(_) => summary.unstaged += 1,
+				None => {},
+			}
+		}
+		summary
+	}
+
+	fn patch_files(raw: &str) -> BTreeSet<String> {
+		raw.lines()
+			.filter_map(|line| line.strip_prefix("diff --git a/"))
+			.filter_map(|line| line.split_once(" b/").map(|(_, path)| path.to_owned()))
+			.collect()
+	}
+
+	fn parse_status_nul(raw: &str) -> Vec<(String, Vec<String>)> {
+		let mut entries = Vec::new();
+		let mut index = 0;
+		while index + 3 <= raw.len() {
+			let token = raw[index..index + 3].to_owned();
+			index += 3;
+			let Some(path_end) = raw[index..].find('\0').map(|offset| index + offset) else {
+				break;
+			};
+			let mut paths = vec![raw[index..path_end].to_owned()];
+			index = path_end + 1;
+			if token.starts_with('R') || token.starts_with('C') {
+				let Some(path_end) = raw[index..].find('\0').map(|offset| index + offset) else {
+					break;
+				};
+				paths.push(raw[index..path_end].to_owned());
+				index = path_end + 1;
+			}
+			entries.push((token, paths));
+		}
+		entries
+	}
+
+	fn patch_numstat(raw: &str) -> BTreeMap<String, (u32, u32)> {
+		let mut counts = BTreeMap::new();
+		let mut current = None;
+		for line in raw.lines() {
+			if let Some(header) = line.strip_prefix("diff --git a/") {
+				current = header.split_once(" b/").map(|(_, path)| path.to_owned());
+				if let Some(path) = &current {
+					counts.insert(path.clone(), (0, 0));
+				}
+				continue;
+			}
+			let Some(path) = &current else {
+				continue;
+			};
+			let count = counts.get_mut(path).unwrap();
+			if line.starts_with('+') && !line.starts_with("+++") {
+				count.0 += 1;
+			} else if line.starts_with('-') && !line.starts_with("---") {
+				count.1 += 1;
+			}
+		}
+		counts
+	}
+
+	#[test]
+	fn portable_jj_reads_work_without_the_jj_cli() {
+		let temp = tempfile::tempdir().unwrap();
+		init_internal_jj(temp.path());
+		fs::write(temp.path().join("alpha.txt"), "one\ntwo\n").unwrap();
+		let repo = crate::detect(temp.path()).unwrap().unwrap();
+		assert_eq!(repo.kind(), crate::VcsKind::Jj);
+		assert_eq!(repo.primary_root(), temp.path());
+		assert_eq!(repo.watch_target(), temp.path().join(".jj/repo/op_heads/heads"));
+
+		let patch = repo.diff_text(&crate::DiffOptions::default()).unwrap();
+		assert!(patch.contains("diff --git a/alpha.txt b/alpha.txt"));
+		assert_eq!(repo.status_porcelain(&StatusOptions::default()).unwrap(), "A  alpha.txt\n");
+		let nul = repo
+			.status_porcelain(&StatusOptions { nul_terminated: true, ..StatusOptions::default() })
+			.unwrap();
+		assert_eq!(parse_status_nul(&nul), vec![("A  ".to_owned(), vec!["alpha.txt".to_owned()])]);
+		assert_eq!(repo.changed_files(&crate::DiffOptions::default()).unwrap(), vec!["alpha.txt"]);
+		assert_eq!(repo.numstat(&crate::DiffOptions::default()).unwrap(), vec![NumstatEntry {
+			path:    "alpha.txt".to_owned(),
+			added:   Some(2),
+			removed: Some(0),
+		}]);
+		assert_eq!(repo.ls_files(false, false).unwrap(), vec!["alpha.txt"]);
+		assert_eq!(repo.ls_files(true, true).unwrap(), Vec::<String>::new());
+
+		let head = repo.head_id().unwrap().unwrap();
+		let details = repo.commit_details("@").unwrap();
+		assert_eq!(details.sha, head);
+		assert_eq!(details.parents, Vec::<String>::new());
+		assert_eq!(details.message, "");
+		assert_eq!(repo.log_subjects(1).unwrap(), vec![""]);
+		let lines = repo.log_onelines(1).unwrap();
+		assert_eq!(lines.len(), 1);
+		let (change_id, subject) = lines[0].split_once(' ').unwrap();
+		assert!(change_id.len() >= 8);
+		assert_eq!(subject, "");
+	}
+
+	// Regression: `require_jj_diff_options` used to reject `max_bytes` on every
+	// jj operation that shared it, even though only `diff_text` renders text
+	// and needs the cap honored. A caller reusing one `DiffOptions` across
+	// `diffText`/`changedFiles`/`numstat` calls got `Unsupported` on the two
+	// operations that never look at `max_bytes` at all.
+	#[test]
+	fn max_bytes_is_inert_for_non_rendering_jj_queries() {
+		let temp = tempfile::tempdir().unwrap();
+		init_internal_jj(temp.path());
+		fs::write(temp.path().join("alpha.txt"), "one\ntwo\n").unwrap();
+		let repo = crate::detect(temp.path()).unwrap().unwrap();
+
+		let capped = crate::DiffOptions { max_bytes: Some(1), ..crate::DiffOptions::default() };
+		assert_eq!(repo.changed_files(&capped).unwrap(), vec!["alpha.txt"]);
+		assert_eq!(repo.numstat(&capped).unwrap(), vec![NumstatEntry {
+			path:    "alpha.txt".to_owned(),
+			added:   Some(2),
+			removed: Some(0),
+		}]);
+
+		let err = repo.diff_text(&capped).unwrap_err();
+		assert_eq!(err.kind(), "Unsupported");
+		assert!(matches!(err, crate::Error::Unsupported {
+			operation: "diffMaxBytes",
+			backend:   crate::VcsKind::Jj,
+		}));
+	}
+
+	#[test]
+	fn jj_operations_match_cli() {
+		if !jj_available() {
+			return;
+		}
+		let temp = tempfile::tempdir().unwrap();
+		run_jj(temp.path(), &["git", "init", "."]);
+		std::fs::write(temp.path().join("alpha.txt"), "one\ntwo\n").unwrap();
+		run_jj(temp.path(), &["bookmark", "create", "main", "-r", "@"]);
+		let workspace = JjWorkspace::require(temp.path()).unwrap();
+
+		let label_raw = run_jj(temp.path(), &[
+			"log",
+			"--no-graph",
+			"--ignore-working-copy",
+			"-r",
+			"@ | heads(::@ & bookmarks())",
+			"-T",
+			"change_id.shortest(8) ++ \"|\" ++ local_bookmarks ++ \"\\n\"",
+		]);
+		assert_eq!(workspace.working_copy_label().unwrap(), parse_label(&label_raw));
+
+		let summary_raw =
+			run_jj(temp.path(), &["diff", "-r", "@", "--summary", "--ignore-working-copy"]);
+		assert_eq!(workspace.status_summary().unwrap(), parse_summary(&summary_raw));
+
+		let expected_patch = run_jj(temp.path(), &["diff", "--git", "--ignore-working-copy"]);
+		let actual_patch = workspace.diff_text(&[], false).unwrap();
+		assert_eq!(patch_files(&actual_patch), patch_files(&expected_patch));
+		assert_eq!(
+			actual_patch
+				.lines()
+				.filter(|line| line.starts_with("@@ "))
+				.count(),
+			expected_patch
+				.lines()
+				.filter(|line| line.starts_with("@@ "))
+				.count()
+		);
+	}
+
+	#[test]
+	fn jj_portable_status_log_and_numstat_match_cli_fixture() {
+		if !jj_available() {
+			return;
+		}
+		let temp = tempfile::tempdir().unwrap();
+		run_jj(temp.path(), &["git", "init", "."]);
+		fs::write(temp.path().join("rename.txt"), "rename\n").unwrap();
+		fs::write(temp.path().join("delete.txt"), "delete\n").unwrap();
+		fs::write(temp.path().join("modify.txt"), "before\n").unwrap();
+		run_jj(temp.path(), &["commit", "-m", "base"]);
+		fs::rename(temp.path().join("rename.txt"), temp.path().join("renamed.txt")).unwrap();
+		fs::remove_file(temp.path().join("delete.txt")).unwrap();
+		fs::write(temp.path().join("modify.txt"), "after\n").unwrap();
+		fs::write(temp.path().join("added.txt"), "added\n").unwrap();
+		let workspace = JjWorkspace::require(temp.path()).unwrap();
+		let patch = workspace.diff_text(&[], true).unwrap();
+
+		let lines = workspace
+			.status_porcelain(&StatusOptions::default())
+			.unwrap();
+		assert!(lines.contains("A  added.txt\n"));
+		assert!(lines.contains("D  delete.txt\n"));
+		assert!(lines.contains("M  modify.txt\n"));
+		assert!(lines.contains("R  rename.txt -> renamed.txt\n"));
+		let nul = workspace
+			.status_porcelain(&StatusOptions { nul_terminated: true, ..StatusOptions::default() })
+			.unwrap();
+		let framed = parse_status_nul(&nul);
+		assert!(
+			framed
+				.contains(&("R  ".to_owned(), vec!["renamed.txt".to_owned(), "rename.txt".to_owned()]))
+		);
+
+		let actual_numstat = workspace
+			.numstat(&[])
+			.unwrap()
+			.into_iter()
+			.map(|entry| (entry.path, (entry.added.unwrap(), entry.removed.unwrap())))
+			.collect::<BTreeMap<_, _>>();
+		assert_eq!(actual_numstat, patch_numstat(&patch));
+		assert_eq!(workspace.ls_files(true).unwrap(), Vec::<String>::new());
+
+		let log = workspace.log_onelines(2).unwrap();
+		assert_eq!(log.len(), 2);
+		assert!(log[1].ends_with(" base"));
+		let details = workspace.commit_details("@").unwrap();
+		assert_eq!(details.sha, workspace.head_id().unwrap().unwrap());
+		assert_eq!(details.parents.len(), 1);
+	}
+}

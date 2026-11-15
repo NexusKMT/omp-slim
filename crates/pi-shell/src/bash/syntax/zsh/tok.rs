@@ -228,4 +228,29 @@ pub const fn has_token(s: &[u8]) -> bool {
 	false
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn metafy_round_trips_every_byte() {
+		let raw: Vec<u8> = (0..=255).collect();
+		let m = metafy(&raw);
+		assert!(m.iter().all(|&c| c != 0));
+		assert_eq!(unmetafy(&m), raw);
+	}
+
+	#[test]
+	fn untokenize_maps_tokens_and_drops_nularg() {
+		let mut s = alloc::vec![STAR, b'a', SNULL, b'b', SNULL, NULARG, BNULLKEEP, b'c', STRING];
+		untokenize(&mut s);
+		assert_eq!(s, b"*a'b'\\c$");
+	}
+
+	#[test]
+	fn untokenize_keeps_metafied_bytes() {
+		let mut s = metafy(&[0x85, b'x']);
+		untokenize(&mut s);
+		assert_eq!(unmetafy(&s), [0x85, b'x']);
+	}
+}

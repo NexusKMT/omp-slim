@@ -49,3 +49,13 @@ tree-sitter-typescript.workspace = true
 tree-sitter-yaml.workspace = true
 xutf.workspace = true
 xxhash-rust.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+parking_lot.workspace = true
+# Natively compiled stand-ins for wasm grammars the tests parse (see
+# `language::grammar::WasmGrammar::register`).
+tree-sitter-elisp.workspace = true
+tree-sitter-fortran.workspace = true
+tree-sitter-ruby.workspace = true
+tree-sitter-swift.workspace = true

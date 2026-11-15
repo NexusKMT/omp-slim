@@ -577,4 +577,5 @@ pub(crate) fn give_session(fs: &Fs, session: Session) {
 	}
 }
 
-
+#[cfg(test)]
+mod tests;

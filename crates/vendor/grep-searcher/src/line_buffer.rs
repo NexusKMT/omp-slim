@@ -262,7 +262,12 @@ impl<'b, R: io::Read> LineBufferReader<'b, R> {
         self.line_buffer.buffer()
     }
 
-    
+    /// Return the buffer as a BStr, used for convenient equality checking
+    /// in tests only.
+    #[cfg(test)]
+    fn bstr(&self) -> &bstr::BStr {
+        self.buffer().as_bstr()
+    }
 
     /// Consume the number of bytes provided. This must be less than or equal
     /// to the number of bytes returned by `buffer`.
@@ -270,7 +275,14 @@ impl<'b, R: io::Read> LineBufferReader<'b, R> {
         self.line_buffer.consume(amt);
     }
 
-    
+    /// Consumes the remainder of the buffer. Subsequent calls to `buffer` are
+    /// guaranteed to return an empty slice until the buffer is refilled.
+    ///
+    /// This is a convenience function for `consume(buffer.len())`.
+    #[cfg(test)]
+    fn consume_all(&mut self) {
+        self.line_buffer.consume_all();
+    }
 }
 
 /// A line buffer manages a (typically fixed) buffer for holding lines.
@@ -364,7 +376,15 @@ impl LineBuffer {
         self.absolute_byte_offset += amt as u64;
     }
 
-    
+    /// Consumes the remainder of the buffer. Subsequent calls to `buffer` are
+    /// guaranteed to return an empty slice until the buffer is refilled.
+    ///
+    /// This is a convenience function for `consume(buffer.len())`.
+    #[cfg(test)]
+    fn consume_all(&mut self) {
+        let amt = self.buffer().len();
+        self.consume(amt);
+    }
 
     /// Fill the contents of this buffer by discarding the part of the buffer
     /// that has been consumed. The free space created by discarding the
@@ -601,4 +621,415 @@ fn replace_bytes(
     Some(first_pos)
 }
 
+#[cfg(test)]
+mod tests {
+    use bstr::ByteVec;
 
+    use super::*;
+
+    const SHERLOCK: &'static str = "\
+For the Doctor Watsons of this world, as opposed to the Sherlock
+Holmeses, success in the province of detective work must always
+be, to a very large extent, the result of luck. Sherlock Holmes
+can extract a clew from a wisp of straw or a flake of cigar ash;
+but Doctor Watson has to have it taken out for him and dusted,
+and exhibited clearly, with a label attached.\
+";
+
+    fn s(slice: &str) -> String {
+        slice.to_string()
+    }
+
+    fn replace_str(
+        slice: &str,
+        src: u8,
+        replacement: u8,
+    ) -> (String, Option<usize>) {
+        let mut dst = Vec::from(slice);
+        let result = replace_bytes(&mut dst, src, replacement);
+        (dst.into_string().unwrap(), result)
+    }
+
+    #[test]
+    fn replace() {
+        assert_eq!(replace_str("", b'b', b'z'), (s(""), None));
+        assert_eq!(replace_str("a", b'a', b'a'), (s("a"), None));
+        assert_eq!(replace_str("a", b'b', b'z'), (s("a"), None));
+        assert_eq!(replace_str("abc", b'b', b'z'), (s("azc"), Some(1)));
+        assert_eq!(replace_str("abb", b'b', b'z'), (s("azz"), Some(1)));
+        assert_eq!(replace_str("aba", b'a', b'z'), (s("zbz"), Some(0)));
+        assert_eq!(replace_str("bbb", b'b', b'z'), (s("zzz"), Some(0)));
+        assert_eq!(replace_str("bac", b'b', b'z'), (s("zac"), Some(0)));
+    }
+
+    #[test]
+    fn buffer_basics1() {
+        let bytes = "homer\nlisa\nmaggie";
+        let mut linebuf = LineBufferBuilder::new().build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nlisa\n");
+        assert_eq!(rdr.absolute_byte_offset(), 0);
+        rdr.consume(5);
+        assert_eq!(rdr.absolute_byte_offset(), 5);
+        rdr.consume_all();
+        assert_eq!(rdr.absolute_byte_offset(), 11);
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "maggie");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), None);
+    }
+
+    #[test]
+    fn buffer_basics2() {
+        let bytes = "homer\nlisa\nmaggie\n";
+        let mut linebuf = LineBufferBuilder::new().build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nlisa\nmaggie\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), None);
+    }
+
+    #[test]
+    fn buffer_basics3() {
+        let bytes = "\n";
+        let mut linebuf = LineBufferBuilder::new().build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), None);
+    }
+
+    #[test]
+    fn buffer_basics4() {
+        let bytes = "\n\n";
+        let mut linebuf = LineBufferBuilder::new().build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "\n\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), None);
+    }
+
+    #[test]
+    fn buffer_empty() {
+        let bytes = "";
+        let mut linebuf = LineBufferBuilder::new().build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), None);
+    }
+
+    #[test]
+    fn buffer_zero_capacity() {
+        let bytes = "homer\nlisa\nmaggie";
+        let mut linebuf = LineBufferBuilder::new().capacity(0).build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        while rdr.fill().unwrap() {
+            rdr.consume_all();
+        }
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), None);
+    }
+
+    #[test]
+    fn buffer_small_capacity() {
+        let bytes = "homer\nlisa\nmaggie";
+        let mut linebuf = LineBufferBuilder::new().capacity(1).build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        let mut got = vec![];
+        while rdr.fill().unwrap() {
+            got.push_str(rdr.buffer());
+            rdr.consume_all();
+        }
+        assert_eq!(bytes, got.as_bstr());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), None);
+    }
+
+    #[test]
+    fn buffer_limited_capacity1() {
+        let bytes = "homer\nlisa\nmaggie";
+        let mut linebuf = LineBufferBuilder::new()
+            .capacity(1)
+            .buffer_alloc(BufferAllocation::Error(5))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\n");
+        rdr.consume_all();
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "lisa\n");
+        rdr.consume_all();
+
+        // This returns an error because while we have just enough room to
+        // store maggie in the buffer, we *don't* have enough room to read one
+        // more byte, so we don't know whether we're at EOF or not, and
+        // therefore must give up.
+        assert!(rdr.fill().is_err());
+
+        // We can mush on though!
+        assert_eq!(rdr.bstr(), "m");
+        rdr.consume_all();
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "aggie");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+    }
+
+    #[test]
+    fn buffer_limited_capacity2() {
+        let bytes = "homer\nlisa\nmaggie";
+        let mut linebuf = LineBufferBuilder::new()
+            .capacity(1)
+            .buffer_alloc(BufferAllocation::Error(6))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\n");
+        rdr.consume_all();
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "lisa\n");
+        rdr.consume_all();
+
+        // We have just enough space.
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "maggie");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+    }
+
+    #[test]
+    fn buffer_limited_capacity3() {
+        let bytes = "homer\nlisa\nmaggie";
+        let mut linebuf = LineBufferBuilder::new()
+            .capacity(1)
+            .buffer_alloc(BufferAllocation::Error(0))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.fill().is_err());
+        assert_eq!(rdr.bstr(), "");
+    }
+
+    #[test]
+    fn buffer_binary_none() {
+        let bytes = "homer\nli\x00sa\nmaggie\n";
+        let mut linebuf = LineBufferBuilder::new().build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nli\x00sa\nmaggie\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), None);
+    }
+
+    #[test]
+    fn buffer_binary_quit1() {
+        let bytes = "homer\nli\x00sa\nmaggie\n";
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Quit(b'\x00'))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nli");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), 8);
+        assert_eq!(rdr.binary_byte_offset(), Some(8));
+    }
+
+    #[test]
+    fn buffer_binary_quit2() {
+        let bytes = "\x00homer\nlisa\nmaggie\n";
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Quit(b'\x00'))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "");
+        assert_eq!(rdr.absolute_byte_offset(), 0);
+        assert_eq!(rdr.binary_byte_offset(), Some(0));
+    }
+
+    #[test]
+    fn buffer_binary_quit3() {
+        let bytes = "homer\nlisa\nmaggie\n\x00";
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Quit(b'\x00'))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nlisa\nmaggie\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64 - 1);
+        assert_eq!(rdr.binary_byte_offset(), Some(bytes.len() as u64 - 1));
+    }
+
+    #[test]
+    fn buffer_binary_quit4() {
+        let bytes = "homer\nlisa\nmaggie\x00\n";
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Quit(b'\x00'))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nlisa\nmaggie");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64 - 2);
+        assert_eq!(rdr.binary_byte_offset(), Some(bytes.len() as u64 - 2));
+    }
+
+    #[test]
+    fn buffer_binary_quit5() {
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Quit(b'u'))
+            .build();
+        let mut rdr = LineBufferReader::new(SHERLOCK.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(
+            rdr.bstr(),
+            "\
+For the Doctor Watsons of this world, as opposed to the Sherlock
+Holmeses, s\
+"
+        );
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), 76);
+        assert_eq!(rdr.binary_byte_offset(), Some(76));
+        assert_eq!(SHERLOCK.as_bytes()[76], b'u');
+    }
+
+    #[test]
+    fn buffer_binary_convert1() {
+        let bytes = "homer\nli\x00sa\nmaggie\n";
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Convert(b'\x00'))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nli\nsa\nmaggie\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), Some(8));
+    }
+
+    #[test]
+    fn buffer_binary_convert2() {
+        let bytes = "\x00homer\nlisa\nmaggie\n";
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Convert(b'\x00'))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "\nhomer\nlisa\nmaggie\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), Some(0));
+    }
+
+    #[test]
+    fn buffer_binary_convert3() {
+        let bytes = "homer\nlisa\nmaggie\n\x00";
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Convert(b'\x00'))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nlisa\nmaggie\n\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), Some(bytes.len() as u64 - 1));
+    }
+
+    #[test]
+    fn buffer_binary_convert4() {
+        let bytes = "homer\nlisa\nmaggie\x00\n";
+        let mut linebuf = LineBufferBuilder::new()
+            .binary_detection(BinaryDetection::Convert(b'\x00'))
+            .build();
+        let mut rdr = LineBufferReader::new(bytes.as_bytes(), &mut linebuf);
+
+        assert!(rdr.buffer().is_empty());
+
+        assert!(rdr.fill().unwrap());
+        assert_eq!(rdr.bstr(), "homer\nlisa\nmaggie\n\n");
+        rdr.consume_all();
+
+        assert!(!rdr.fill().unwrap());
+        assert_eq!(rdr.absolute_byte_offset(), bytes.len() as u64);
+        assert_eq!(rdr.binary_byte_offset(), Some(bytes.len() as u64 - 2));
+    }
+}

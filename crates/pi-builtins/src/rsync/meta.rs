@@ -971,4 +971,607 @@ impl Snap {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		sync::{Arc, Mutex},
+		time::{Duration, UNIX_EPOCH},
+	};
 
+	use super::*;
+	use crate::rsync::{
+		log::{LogConfig, OutLevels},
+		tree::TreeOpts,
+	};
+
+	const T0: i64 = 1_700_000_000;
+
+	fn vmeta(mode: u32, size: u64) -> Metadata {
+		Metadata::new(FileType::from_mode(mode), size, Permissions::from_mode(mode))
+	}
+
+	fn at(secs: i64, nsec: u32) -> SystemTime {
+		UNIX_EPOCH + Duration::new(secs.unsigned_abs(), nsec)
+	}
+
+	fn with_mtime(meta: Metadata, secs: i64, nsec: u32) -> Metadata {
+		meta.with_modified(at(secs, nsec))
+	}
+
+	fn entry(mode: u32) -> FileEntry {
+		FileEntry { basename: Box::from(&b"f"[..]), mode, mtime: T0, ..FileEntry::default() }
+	}
+
+	#[derive(Clone, Default)]
+	struct Sink(Arc<Mutex<Vec<u8>>>);
+
+	impl io::Write for Sink {
+		fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+			self.0.lock().unwrap().extend_from_slice(buf);
+			Ok(buf.len())
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	impl Sink {
+		fn contains(&self, needle: &[u8]) -> bool {
+			self.0.lock().unwrap().windows(needle.len()).any(|w| w == needle)
+		}
+	}
+
+	fn logger_with(levels: OutLevels) -> (Logger, Sink) {
+		let sink = Sink::default();
+		let cfg = LogConfig { levels, ..LogConfig::default() };
+		(Logger::local(Box::new(sink.clone()), Box::new(sink.clone()), cfg), sink)
+	}
+
+	fn logger() -> (Logger, Sink) {
+		logger_with(OutLevels::default())
+	}
+
+	fn tree(dir: &tempfile::TempDir) -> Tree {
+		Tree::open(&pi_vfs::BlockingFs::native(), dir.path(), &TreeOpts::default()).unwrap()
+	}
+
+	struct NoHooks;
+
+	impl AttrHooks for NoHooks {}
+
+	fn set_file_attrs(
+		tree: &Tree,
+		rel: &Path,
+		entry: &FileEntry,
+		local: Option<&Metadata>,
+		opts: &MetaOpts,
+		flags: u32,
+		logger: &Logger,
+	) -> io::Result<u32> {
+		set_file_attrs_with(tree, rel, entry, local, opts, flags, logger, &mut NoHooks)
+	}
+
+	fn attr_changes(entry: &FileEntry, local: &Metadata, opts: &MetaOpts) -> u32 {
+		attr_changes_with(entry, local, opts, &ItemCtx::default())
+	}
+
+	#[cfg(unix)]
+	fn read_fake_stat(tree: &Tree, rel: &Path) -> io::Result<Option<FakeStat>> {
+		fake_stat_for(tree, rel, &tree.lstat(rel)?)
+	}
+
+	#[test]
+	fn dest_mode_matrix() {
+		// (opts, default perms for new entries = 0777 & ~umask)
+		let off = |umask: u32, executability| {
+			(MetaOpts { executability, ..MetaOpts::default() }, 0o777 & !umask)
+		};
+		let perms = (MetaOpts { perms: true, ..MetaOpts::default() }, 0o700);
+		// (flist mode, existing mode, exists, (opts, dflt perms), expected)
+		let cases: &[(u32, Option<u32>, bool, (MetaOpts, u32), u32)] = &[
+			// -p: the sender's mode stands, new or existing.
+			(0o104755, Some(0o100600), true, perms.clone(), 0o104755),
+			(0o104755, None, false, perms.clone(), 0o104755),
+			// New entries: umask-limited, special bits dropped.
+			(0o104755, None, false, off(0o022, false), 0o100755),
+			(0o100666, None, false, off(0o022, false), 0o100644),
+			(0o100755, None, false, off(0o077, false), 0o100700),
+			(0o042775, None, false, off(0o022, false), 0o040755),
+			(0o100600, None, false, off(0o022, true), 0o100600),
+			// "Exists" without a stat, or a stat that does not count (just-created dir).
+			(0o100777, None, true, off(0o022, false), 0o100755),
+			(0o100777, Some(0o100600), false, off(0o022, false), 0o100755),
+			// Existing entries keep their permissions...
+			(0o100755, Some(0o100640), true, off(0o022, false), 0o100640),
+			(0o104755, Some(0o100640), true, off(0o077, false), 0o100640),
+			// ...with -E granting x where readable when the source is executable...
+			(0o100755, Some(0o100640), true, off(0o022, true), 0o100750),
+			(0o104755, Some(0o100644), true, off(0o022, true), 0o100755),
+			// ...but not touching an already-executable file...
+			(0o100755, Some(0o100711), true, off(0o022, true), 0o100711),
+			// ...and dropping x when the source is not executable.
+			(0o100644, Some(0o100755), true, off(0o022, true), 0o100644),
+			(0o100600, Some(0o100640), true, off(0o022, true), 0o100640),
+			// -E only concerns regular files.
+			(0o040755, Some(0o040700), true, off(0o022, true), 0o040700),
+			// The type always comes from the file list.
+			(0o100644, Some(0o120777), true, off(0o022, false), 0o100777),
+		];
+		for (i, (flist, existing, exists, (opts, dflt), want)) in cases.iter().enumerate() {
+			let got = dest_mode_with(*flist, *existing, *exists, *dflt, opts);
+			assert_eq!(got, *want, "case {i}: {flist:o} {existing:?} {exists}: got {got:o}");
+		}
+		// A default-ACL mask only matters for new entries.
+		let opts = off(0o022, false).0;
+		assert_eq!(dest_mode_with(0o100777, None, false, 0o750, &opts), 0o100750);
+		assert_eq!(dest_mode_with(0o100777, Some(0o100600), true, 0o750, &opts), 0o100600);
+	}
+
+	#[test]
+	fn same_mtime_modify_window() {
+		let window = |modify_window| MetaOpts { modify_window, ..MetaOpts::default() };
+		let mut e = entry(0o100644);
+		e.mtime_nsec = 500;
+		let local = |secs, nsec| with_mtime(vmeta(0o100644, 0), secs, nsec);
+
+		// 0: whole seconds only.
+		assert!(same_mtime(&e, &local(T0, 999), &window(0)));
+		assert!(!same_mtime(&e, &local(T0 + 1, 500), &window(0)));
+		// Positive: that many seconds either way, nanoseconds ignored.
+		assert!(same_mtime(&e, &local(T0 + 1, 0), &window(1)));
+		assert!(same_mtime(&e, &local(T0 - 1, 0), &window(1)));
+		assert!(!same_mtime(&e, &local(T0 + 2, 500), &window(1)));
+		assert!(!same_mtime(&e, &local(T0 - 2, 500), &window(1)));
+		// Negative: seconds and nanoseconds must both match (100 ns apart: Windows
+		// file times have 100 ns resolution).
+		assert!(!same_mtime(&e, &local(T0, 600), &window(-1)));
+		assert!(same_mtime(&e, &local(T0, 500), &window(-1)));
+		// Accurate comparisons ignore the window.
+		assert!(!mtime_matches(&e, &local(T0 + 1, 500), &window(5), true));
+		assert!(!mtime_matches(&e, &local(T0, 0), &window(0), true));
+		assert!(mtime_matches(&e, &local(T0, 500), &window(5), true));
+		// Unknown local time never matches.
+		assert!(!same_mtime(&e, &vmeta(0o100644, 0), &window(0)));
+		// Extreme values do not overflow.
+		assert!(!same_time(i64::MIN, 0, i64::MAX, 0, 1));
+		assert!(same_time(i64::MAX, 0, i64::MAX - 3, 0, 3));
+	}
+
+	#[test]
+	fn attr_changes_bits() {
+		let base = MetaOpts { times: true, perms: true, ..MetaOpts::default() };
+		let e = entry(0o100644);
+		let same = with_mtime(vmeta(0o100644, 0), T0, 0).with_owner(10, 20);
+		assert_eq!(attr_changes(&e, &same, &base), 0);
+		assert!(attrs_unchanged(&e, &same, &base, None));
+
+		// Size (regular files only), time, and perms (a write-bit change, the one
+		// permission Windows stores).
+		let other = with_mtime(vmeta(0o100444, 7), T0 + 1, 0).with_owner(10, 20);
+		assert_eq!(
+			attr_changes(&e, &other, &base),
+			ITEM_REPORT_SIZE | ITEM_REPORT_TIME | ITEM_REPORT_PERMS
+		);
+		assert!(!attrs_unchanged(&e, &other, &base, None));
+		let dir = entry(0o040755);
+		let local_dir = with_mtime(vmeta(0o040755, 7), T0 + 1, 0);
+		assert_eq!(attr_changes(&dir, &local_dir, &base), ITEM_REPORT_TIME);
+
+		// Without -p, -E compares only executability.
+		let exec = MetaOpts { times: true, executability: true, ..MetaOpts::default() };
+		let local_exec = with_mtime(vmeta(0o100711, 0), T0, 0);
+		let want = if cfg!(unix) { ITEM_REPORT_PERMS } else { 0 };
+		assert_eq!(attr_changes(&e, &local_exec, &exec), want);
+		assert_eq!(attr_changes(&e, &with_mtime(vmeta(0o100600, 0), T0, 0), &exec), 0);
+
+		// Omitted dir times: T only when the entry is transferred/changed and not matched.
+		let omit = MetaOpts { omit_dir_times: true, ..base.clone() };
+		assert_eq!(attr_changes(&dir, &local_dir, &omit), 0);
+		let ctx = |iflags, xname| ItemCtx { iflags, xname, ..ItemCtx::default() };
+		let changed = ctx(ITEM_LOCAL_CHANGE, None);
+		assert_eq!(attr_changes_with(&dir, &local_dir, &omit, &changed), ITEM_REPORT_TIME);
+		let matched = ctx(ITEM_LOCAL_CHANGE | ITEM_MATCHED, None);
+		assert_eq!(attr_changes_with(&dir, &local_dir, &omit, &matched), 0);
+		let empty_xname = ctx(ITEM_TRANSFER | ITEM_XNAME_FOLLOWS, Some(&b""[..]));
+		assert_eq!(attr_changes_with(&dir, &local_dir, &omit, &empty_xname), 0);
+		let xname = ctx(ITEM_TRANSFER | ITEM_XNAME_FOLLOWS, Some(&b"x"[..]));
+		assert_eq!(attr_changes_with(&dir, &local_dir, &omit, &xname), ITEM_REPORT_TIME);
+
+		// A symlink whose time could not be set reports the failure flags on change.
+		let mut link = entry(0o120777);
+		link.flags |= FLAG_TIME_FAILED;
+		let local_link = with_mtime(vmeta(0o120777, 0), T0 + 9, 0);
+		let failed = ItemCtx {
+			iflags: ITEM_LOCAL_CHANGE,
+			timeset_failed_flags: symlink_timeset_failed_flags(31, false),
+			..ItemCtx::default()
+		};
+		assert_eq!(
+			attr_changes_with(&link, &local_link, &base, &failed),
+			ITEM_REPORT_TIME | ITEM_REPORT_TIMEFAIL
+		);
+		assert_eq!(attr_changes(&link, &local_link, &base), 0);
+		// -J: symlink time differences are not reported or compared.
+		link.flags = 0;
+		let omit_links = MetaOpts { omit_link_times: true, ..base.clone() };
+		assert_eq!(attr_changes(&link, &local_link, &omit_links), 0);
+		assert!(attrs_unchanged(&link, &local_link, &omit_links, None));
+
+		// Ownership: uid only as root (or fake-super), gid unless FLAG_SKIP_GROUP.
+		let mut owned = entry(0o100644);
+		owned.uid = 11;
+		owned.gid = 21;
+		let owners = MetaOpts { owner: true, group: true, ..base.clone() };
+		assert_eq!(attr_changes(&owned, &same, &owners), ITEM_REPORT_GROUP);
+		let root = MetaOpts { am_root: true, ..owners.clone() };
+		assert_eq!(attr_changes(&owned, &same, &root), ITEM_REPORT_OWNER | ITEM_REPORT_GROUP);
+		let fake = MetaOpts { fake_super: true, ..owners.clone() };
+		assert_eq!(attr_changes(&owned, &same, &fake), ITEM_REPORT_OWNER | ITEM_REPORT_GROUP);
+		owned.flags |= FLAG_SKIP_GROUP;
+		assert_eq!(attr_changes(&owned, &same, &root), ITEM_REPORT_OWNER);
+		// Unknown local ownership is never reported.
+		assert_eq!(attr_changes(&owned, &with_mtime(vmeta(0o100644, 0), T0, 0), &root), 0);
+
+		// -U: atime of non-directories, whole seconds.
+		let atimes = MetaOpts { atimes: true, ..base.clone() };
+		let mut e_at = entry(0o100644);
+		e_at.atime = T0 - 50;
+		let local_at = same.clone().with_accessed(at(T0 - 50, 999));
+		assert_eq!(attr_changes(&e_at, &local_at, &atimes), 0);
+		let local_at = same.clone().with_accessed(at(T0 - 49, 0));
+		assert_eq!(attr_changes(&e_at, &local_at, &atimes), ITEM_REPORT_ATIME);
+
+		// -N: creation time from the context, else the metadata.
+		let crtimes = MetaOpts { crtimes: true, ..base.clone() };
+		let mut e_cr = entry(0o100644);
+		e_cr.crtime = T0 - 100;
+		let cr_ctx = ItemCtx { crtime: Some(T0 - 100), ..ItemCtx::default() };
+		assert_eq!(attr_changes_with(&e_cr, &same, &crtimes, &cr_ctx), 0);
+		assert_eq!(attr_changes(&e_cr, &same, &crtimes), ITEM_REPORT_CRTIME);
+		let local_cr = same.clone().with_created(at(T0 - 100, 0));
+		assert_eq!(attr_changes(&e_cr, &local_cr, &crtimes), 0);
+		assert!(!attrs_unchanged(&e_cr, &same, &crtimes, None));
+		assert!(attrs_unchanged(&e_cr, &same, &crtimes, Some(T0 - 100)));
+	}
+
+	#[test]
+	fn timeset_failed_flags_by_protocol() {
+		assert_eq!(symlink_timeset_failed_flags(29, true), ITEM_REPORT_TIME);
+		assert_eq!(symlink_timeset_failed_flags(29, false), ITEM_REPORT_TIME | ITEM_REPORT_TIMEFAIL);
+		assert_eq!(symlink_timeset_failed_flags(30, true), ITEM_REPORT_TIME | ITEM_REPORT_TIMEFAIL);
+	}
+
+	#[test]
+	fn fake_stat_codec() {
+		// Values written by rsync 3.5.1 --fake-super (macOS).
+		let f = FakeStat { mode: 0o104755, rdev_major: 0, rdev_minor: 0, uid: 501, gid: 0 };
+		assert_eq!(f.encode(), b"104755 0,0 501:0");
+		assert_eq!(FakeStat::decode(b"104755 0,0 501:0"), Some(f));
+		let fifo = FakeStat { mode: 0o10644, rdev_major: 0, rdev_minor: 0, uid: 501, gid: 0 };
+		assert_eq!(FakeStat::decode(b"10644 0,0 501:0"), Some(fifo));
+
+		let dev = FakeStat { mode: 0o20600, rdev_major: 4, rdev_minor: 64, uid: 0, gid: 5 };
+		assert_eq!(FakeStat::decode(&dev.encode()), Some(dev));
+		let max = FakeStat {
+			mode: 0o177777,
+			rdev_major: u32::MAX,
+			rdev_minor: u32::MAX,
+			uid: u32::MAX,
+			gid: u32::MAX,
+		};
+		assert_eq!(FakeStat::decode(&max.encode()), Some(max));
+
+		// sscanf leniency: whitespace before numbers, signs, trailing junk.
+		let lenient = FakeStat::decode(b"  100644\t 1,+2 \n3:4 trailing").unwrap();
+		assert_eq!(
+			lenient,
+			FakeStat { mode: 0o100644, rdev_major: 1, rdev_minor: 2, uid: 3, gid: 4 }
+		);
+		let negative = FakeStat::decode(b"100644 -1,0 -2:0").unwrap();
+		assert_eq!((negative.rdev_major, negative.uid), (u32::MAX, u32::MAX - 1));
+
+		for bad in [
+			&b""[..],
+			b"garbage",
+			b"100644",
+			b"100644 0,0 0",
+			b"100644 0 ,0 0:0",
+			b"100644 0,0 0 :0",
+			b"100644 0,0\x000:0",
+			b"1006448 0,0 0:0",
+			b"100644 0;0 0:0",
+		] {
+			assert_eq!(FakeStat::decode(bad), None, "{:?}", String::from_utf8_lossy(bad));
+		}
+	}
+
+	#[test]
+	fn set_file_attrs_sets_times() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("f"), b"data").unwrap();
+		let tree = tree(&dir);
+		let (logger, _sink) = logger();
+		let rel = Path::new("f");
+		// Without -p the caller has already put the local permissions in the entry.
+		let mut e = entry(tree.lstat(rel).unwrap().mode());
+		e.mtime = 1_000_000_000;
+		e.mtime_nsec = 123_456_700;
+		let opts = MetaOpts { times: true, ..MetaOpts::default() };
+
+		let local = tree.lstat(rel).unwrap();
+		let bits = set_file_attrs(&tree, rel, &e, Some(&local), &opts, 0, &logger).unwrap();
+		assert_eq!(bits, ITEM_REPORT_TIME);
+		let modified = std::fs::metadata(dir.path().join("f")).unwrap().modified().unwrap();
+		assert_eq!(modified, at(1_000_000_000, 123_456_700));
+		// Already right: nothing to do (statting it ourselves this time).
+		assert_eq!(set_file_attrs(&tree, rel, &e, None, &opts, 0, &logger).unwrap(), 0);
+
+		// Within --modify-window nothing changes, unless the time must be accurate.
+		let window = MetaOpts { modify_window: 10, ..opts.clone() };
+		e.mtime += 3;
+		assert_eq!(set_file_attrs(&tree, rel, &e, None, &window, 0, &logger).unwrap(), 0);
+		let bits = set_file_attrs(&tree, rel, &e, None, &window, ATTRS_ACCURATE_TIME, &logger);
+		assert_eq!(bits.unwrap(), ITEM_REPORT_TIME);
+		// ATTRS_SKIP_MTIME leaves it alone.
+		e.mtime += 100;
+		assert_eq!(set_file_attrs(&tree, rel, &e, None, &opts, ATTRS_SKIP_MTIME, &logger).unwrap(), 0);
+		let modified = std::fs::metadata(dir.path().join("f")).unwrap().modified().unwrap();
+		assert_eq!(modified, at(1_000_000_003, 123_456_700));
+
+		// -U sets the access time (whole seconds).
+		let atimes = MetaOpts { atimes: true, ..opts.clone() };
+		e.mtime = 1_000_000_003;
+		e.atime = 1_100_000_000;
+		let bits = set_file_attrs(&tree, rel, &e, None, &atimes, 0, &logger).unwrap();
+		assert_eq!(bits, ITEM_REPORT_ATIME);
+		let accessed = std::fs::metadata(dir.path().join("f")).unwrap().accessed().unwrap();
+		assert_eq!(accessed, at(1_100_000_000, 0));
+	}
+
+	#[test]
+	fn set_file_attrs_reports_uptodate() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("f"), b"").unwrap();
+		let tree = tree(&dir);
+		let (logger, sink) = logger_with(OutLevels::from_verbose(2));
+		let rel = Path::new("f");
+		let e = entry(tree.lstat(rel).unwrap().mode());
+		let opts = MetaOpts::default();
+		assert_eq!(set_file_attrs(&tree, rel, &e, None, &opts, ATTRS_REPORT, &logger).unwrap(), 0);
+		logger.flush();
+		assert!(sink.contains(b"f is uptodate\n"));
+	}
+
+	#[test]
+	fn set_file_attrs_stat_failure_is_logged() {
+		let dir = tempfile::tempdir().unwrap();
+		let tree = tree(&dir);
+		let (logger, sink) = logger();
+		let e = entry(0o100644);
+		let opts = MetaOpts { times: true, ..MetaOpts::default() };
+		let rel = Path::new("missing");
+		assert_eq!(set_file_attrs(&tree, rel, &e, None, &opts, 0, &logger).unwrap(), 0);
+		logger.flush();
+		let mut want = b"stat ".to_vec();
+		want.extend_from_slice(&full_fname(&tree, rel));
+		want.extend_from_slice(b" failed");
+		assert!(sink.contains(&want));
+		// Recorded so the run ends with "some files/attrs were not transferred" (23).
+		assert!(logger.got_xfer_error());
+		// A dry run does not even look.
+		let dry = MetaOpts { dry_run: true, ..opts };
+		assert_eq!(set_file_attrs(&tree, rel, &e, None, &dry, 0, &logger).unwrap(), ITEM_REPORT_CHANGE);
+	}
+
+	#[cfg(unix)]
+	mod unix {
+		use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+
+		use super::*;
+
+		fn mode_of(path: &Path) -> u32 {
+			std::fs::symlink_metadata(path).unwrap().mode()
+		}
+
+		fn chmod(path: &Path, mode: u32) {
+			std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+		}
+
+		#[test]
+		fn perms_and_times_applied_in_one_pass() {
+			let dir = tempfile::tempdir().unwrap();
+			let path = dir.path().join("f");
+			std::fs::write(&path, b"data").unwrap();
+			chmod(&path, 0o600);
+			let tree = tree(&dir);
+			let (logger, _sink) = logger();
+			let rel = Path::new("f");
+			let mut e = entry(0o100754);
+			e.mtime = 1_000_000_000;
+			e.mtime_nsec = 123_456_789;
+			let opts = MetaOpts { perms: true, times: true, ..MetaOpts::default() };
+
+			// A dry run reports without touching anything.
+			let dry = MetaOpts { dry_run: true, ..opts.clone() };
+			let local = tree.lstat(rel).unwrap();
+			let bits = set_file_attrs(&tree, rel, &e, Some(&local), &dry, 0, &logger).unwrap();
+			assert_eq!(bits, ITEM_REPORT_PERMS | ITEM_REPORT_TIME);
+			assert_eq!(mode_of(&path) & 0o7777, 0o600);
+
+			let bits = set_file_attrs(&tree, rel, &e, Some(&local), &opts, 0, &logger).unwrap();
+			assert_eq!(bits, ITEM_REPORT_PERMS | ITEM_REPORT_TIME);
+			let meta = std::fs::symlink_metadata(&path).unwrap();
+			assert_eq!(meta.mode() & 0o7777, 0o754);
+			assert_eq!((meta.mtime(), meta.mtime_nsec()), (1_000_000_000, 123_456_789));
+			assert_eq!(set_file_attrs(&tree, rel, &e, None, &opts, 0, &logger).unwrap(), 0);
+
+			// Not root: a different owner is neither attempted nor reported; the
+			// group we already have is left alone.
+			let owners = MetaOpts { owner: true, group: true, ..opts.clone() };
+			let mut other = e.clone();
+			other.uid = meta.uid().wrapping_add(1);
+			other.gid = meta.gid();
+			assert_eq!(set_file_attrs(&tree, rel, &other, None, &owners, 0, &logger).unwrap(), 0);
+			assert_eq!(std::fs::symlink_metadata(&path).unwrap().uid(), meta.uid());
+		}
+
+		#[test]
+		fn omitted_dir_and_link_times() {
+			let dir = tempfile::tempdir().unwrap();
+			std::fs::create_dir(dir.path().join("d")).unwrap();
+			chmod(&dir.path().join("d"), 0o755);
+			symlink("target", dir.path().join("l")).unwrap();
+			let tree = tree(&dir);
+			let (logger, _sink) = logger();
+			let before = std::fs::symlink_metadata(dir.path().join("d")).unwrap().mtime();
+
+			let mut d = entry(0o040755);
+			d.mtime = 1_000_000_000;
+			let opts = MetaOpts { perms: true, times: true, omit_dir_times: true, ..MetaOpts::default() };
+			assert_eq!(set_file_attrs(&tree, Path::new("d"), &d, None, &opts, 0, &logger).unwrap(), 0);
+			assert_eq!(std::fs::symlink_metadata(dir.path().join("d")).unwrap().mtime(), before);
+			let opts = MetaOpts { omit_dir_times: false, ..opts };
+			let bits = set_file_attrs(&tree, Path::new("d"), &d, None, &opts, 0, &logger).unwrap();
+			assert_eq!(bits, ITEM_REPORT_TIME);
+
+			let mut l = entry(tree.lstat(Path::new("l")).unwrap().mode());
+			l.mtime = 1_000_000_000;
+			let opts = MetaOpts { times: true, omit_link_times: true, ..MetaOpts::default() };
+			assert_eq!(set_file_attrs(&tree, Path::new("l"), &l, None, &opts, 0, &logger).unwrap(), 0);
+			let opts = MetaOpts { omit_link_times: false, ..opts };
+			let bits = set_file_attrs(&tree, Path::new("l"), &l, None, &opts, 0, &logger).unwrap();
+			// Either the symlink's own time was set, or the platform cannot.
+			assert!(bits == ITEM_REPORT_TIME || bits == ITEM_REPORT_TIMEFAIL, "{bits:#x}");
+			if bits == ITEM_REPORT_TIME {
+				let link = std::fs::symlink_metadata(dir.path().join("l")).unwrap();
+				assert_eq!(link.mtime(), 1_000_000_000);
+			}
+		}
+
+		#[test]
+		fn new_dir_keeps_inherited_setgid_without_perms() {
+			let dir = tempfile::tempdir().unwrap();
+			let path = dir.path().join("d");
+			std::fs::create_dir(&path).unwrap();
+			chmod(&path, 0o2755);
+			if mode_of(&path) & S_ISGID == 0 {
+				return; // the platform refuses setgid on this directory
+			}
+			let tree = tree(&dir);
+			let (logger, _sink) = logger();
+			let mut d = entry(0o040755);
+			d.flags |= FLAG_DIR_CREATED;
+			let opts = MetaOpts::default();
+			let local = tree.lstat(Path::new("d")).unwrap();
+			let bits = set_file_attrs(&tree, Path::new("d"), &d, Some(&local), &opts, 0, &logger);
+			assert_eq!(bits.unwrap(), 0);
+			assert_eq!(mode_of(&path) & 0o7777, 0o2755);
+		}
+
+		/// Whether the filesystem under `dir` takes our stat xattr at all.
+		fn xattrs_usable(tree: &Tree, rel: &Path) -> bool {
+			match tree.set_xattr(rel, OsStr::new(XSTAT_ATTR), b"0 0,0 0:0", false) {
+				Ok(()) => {
+					tree.remove_xattr(rel, OsStr::new(XSTAT_ATTR), false).unwrap();
+					true
+				},
+				Err(err) if is_no_xattr(&err) || err.kind() == io::ErrorKind::PermissionDenied => false,
+				Err(err) => panic!("set_xattr: {err}"),
+			}
+		}
+
+		#[test]
+		fn fake_super_round_trip() {
+			let dir = tempfile::tempdir().unwrap();
+			let path = dir.path().join("f");
+			std::fs::write(&path, b"data").unwrap();
+			chmod(&path, 0o644);
+			let tree = tree(&dir);
+			let rel = Path::new("f");
+			if !xattrs_usable(&tree, rel) {
+				return;
+			}
+			let (logger, _sink) = logger();
+			let real = std::fs::symlink_metadata(&path).unwrap();
+
+			assert_eq!(read_fake_stat(&tree, rel).unwrap(), None);
+			let stat = FakeStat { mode: 0o104755, rdev_major: 0, rdev_minor: 0, uid: 0, gid: 0 };
+			write_fake_stat(&tree, rel, &stat).unwrap();
+			assert_eq!(read_fake_stat(&tree, rel).unwrap(), Some(stat));
+			let raw = tree.get_xattr(rel, OsStr::new(XSTAT_ATTR), false).unwrap();
+			assert_eq!(raw.as_deref(), Some(&b"104755 0,0 0:0"[..]));
+
+			// x_lstat folds the record in only with --fake-super.
+			let fake = MetaOpts { fake_super: true, ..MetaOpts::default() };
+			let seen = x_lstat(&tree, rel, &fake, &logger).unwrap();
+			assert_eq!((seen.mode(), seen.uid(), seen.gid()), (0o104755, Some(0), Some(0)));
+			assert_eq!(seen.len(), 4);
+			assert_eq!(seen.mtime(), Some(real.mtime()));
+			let plain = x_lstat(&tree, rel, &MetaOpts::default(), &logger).unwrap();
+			assert_eq!((plain.mode(), plain.uid()), (real.mode(), Some(real.uid())));
+
+			// A corrupt record is fatal (exit 11) with upstream's message.
+			tree.set_xattr(rel, OsStr::new(XSTAT_ATTR), b"garbage", false).unwrap();
+			let err = read_fake_stat(&tree, rel).unwrap_err();
+			let fatal = corrupt_fake_stat(&err).unwrap();
+			assert_eq!(fatal.code, RERR_FILEIO);
+			let mut want = format!("Corrupt {XSTAT_ATTR} xattr attached to ").into_bytes();
+			want.extend_from_slice(&full_fname(&tree, rel));
+			want.extend_from_slice(b": \"garbage\"");
+			assert_eq!(fatal.message.as_deref(), Some(&*String::from_utf8_lossy(&want)));
+			assert!(x_lstat(&tree, rel, &fake, &logger).is_err());
+			assert!(corrupt_fake_stat(&io::Error::other("x")).is_none());
+		}
+
+		#[test]
+		fn fake_super_set_file_attrs() {
+			let dir = tempfile::tempdir().unwrap();
+			let path = dir.path().join("f");
+			std::fs::write(&path, b"data").unwrap();
+			chmod(&path, 0o644);
+			let tree = tree(&dir);
+			let rel = Path::new("f");
+			if !xattrs_usable(&tree, rel) {
+				return;
+			}
+			let (logger, _sink) = logger();
+			let real = std::fs::symlink_metadata(&path).unwrap();
+			let opts = MetaOpts {
+				fake_super: true,
+				perms: true,
+				owner: true,
+				group: true,
+				..MetaOpts::default()
+			};
+
+			// Root-owned setuid file: recorded in the xattr, disk gets plain owner-rw perms.
+			let mut e = entry(0o104755);
+			e.mtime = real.mtime();
+			e.uid = 0;
+			e.gid = real.gid().wrapping_add(1);
+			let local = x_lstat(&tree, rel, &opts, &logger).unwrap();
+			let bits = set_file_attrs(&tree, rel, &e, Some(&local), &opts, 0, &logger).unwrap();
+			let mut want = ITEM_REPORT_GROUP | ITEM_REPORT_PERMS;
+			if real.uid() != 0 {
+				want |= ITEM_REPORT_OWNER;
+			}
+			assert_eq!(bits, want);
+			assert_eq!(mode_of(&path) & 0o7777, 0o755);
+			let stored = read_fake_stat(&tree, rel).unwrap().unwrap();
+			assert_eq!(stored, FakeStat { mode: 0o104755, rdev_major: 0, rdev_minor: 0, uid: 0, gid: e.gid });
+			// Seen through the record, everything already matches.
+			let local = x_lstat(&tree, rel, &opts, &logger).unwrap();
+			assert_eq!(set_file_attrs(&tree, rel, &e, Some(&local), &opts, 0, &logger).unwrap(), 0);
+
+			// Once the real file says it all, the record goes away.
+			let mut plain = entry(0o100644);
+			plain.mtime = real.mtime();
+			plain.uid = real.uid();
+			plain.gid = real.gid();
+			set_file_attrs(&tree, rel, &plain, None, &opts, 0, &logger).unwrap();
+			assert_eq!(read_fake_stat(&tree, rel).unwrap(), None);
+			assert_eq!(mode_of(&path) & 0o7777, 0o644);
+		}
+	}
+}

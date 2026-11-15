@@ -104,3 +104,9 @@ zlib-rs = "0.6"
 # participates in resolution, but the unused-dependency lint stays quiet.
 [target."cfg(false)".dependencies]
 find-msvc-tools.workspace = true
+
+[dev-dependencies]
+fancy-regex.workspace = true # utok scanner differential oracle
+shlex.workspace = true
+tiktoken-rs.workspace = true # utok openai differential oracle
+xkeysym = "=0.2.1"

@@ -746,7 +746,10 @@ fn merge_path_values(_existing: &str, incoming: &str) -> String {
 	incoming.to_string()
 }
 
-
+#[cfg(test)]
+async fn create_session(config: &ShellConfig) -> Result<ShellSessionCore> {
+	create_session_for_run(config, None).await
+}
 
 /// Copies the host environment into `vars` (the shell's starting
 /// environment, every entry exported), merging duplicate `PATH` values and
@@ -2010,4 +2013,5 @@ fn pipe_to_files(label: &str) -> Result<(fs::File, fs::File)> {
 	Ok((fs::File::from(Owned::from(r)), fs::File::from(Owned::from(w))))
 }
 
-
+#[cfg(test)]
+mod tests;

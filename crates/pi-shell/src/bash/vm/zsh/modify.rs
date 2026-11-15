@@ -561,4 +561,47 @@ fn apply(
 	Ok(s)
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn h(s: &str, n: usize) -> String {
+		let mut v = s.as_bytes().to_vec();
+		remtpath(&mut v, n);
+		String::from_utf8(v).unwrap()
+	}
+
+	fn t(s: &str, n: usize) -> String {
+		let mut v = s.as_bytes().to_vec();
+		remlpaths(&mut v, n);
+		String::from_utf8(v).unwrap()
+	}
+
+	#[test]
+	fn head_and_tail_modifiers_match_zsh() {
+		// zsh: x=/a/b/c.d; print $x:h $x:t ${x:h2} ${x:t2}
+		assert_eq!(h("/a/b/c.d", 0), "/a/b");
+		assert_eq!(h("c.d", 0), ".");
+		assert_eq!(h("/c", 0), "/");
+		assert_eq!(h("/a/b/c.d", 2), "/a");
+		assert_eq!(t("/a/b/c.d", 1), "c.d");
+		assert_eq!(t("/a/b/c.d", 2), "b/c.d");
+		assert_eq!(t("a/b/", 1), "b");
+	}
+
+	#[test]
+	fn extension_modifiers() {
+		let mut v = b"dir.x/file.tar.gz".to_vec();
+		remtext(&mut v);
+		assert_eq!(v, b"dir.x/file.tar");
+		let mut v = b"dir.x/file".to_vec();
+		rembutext(&mut v);
+		assert_eq!(v, b"");
+	}
+
+	#[test]
+	fn absolute_paths_resolve_dots() {
+		assert_eq!(chabspath(b"../x/./y", b"/a/b"), b"/a/x/y");
+		assert_eq!(chabspath(b"/..", b"/"), b"/");
+	}
+}

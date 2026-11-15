@@ -1353,4 +1353,376 @@ mod sys {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use std::io::Cursor;
 
+	#[cfg(any(target_os = "linux", target_os = "android"))]
+	use super::posix::*;
+	use super::*;
+	use crate::rsync::exit::RERR_PROTOCOL;
+
+	/// Ids/names from the reference capture (uid 501 "can", gid 20 "staff");
+	/// receiving maps uid u → u + 10000 and gid g → g + 20000.
+	#[derive(Default)]
+	struct FakeIds {
+		sent_users: Vec<u32>,
+		sent_groups: Vec<u32>,
+		received_names: Vec<(u32, Vec<u8>)>,
+	}
+
+	impl AclIdMap for FakeIds {
+		fn add_uid(&mut self, uid: u32) -> Option<Vec<u8>> {
+			if self.sent_users.contains(&uid) {
+				return None;
+			}
+			self.sent_users.push(uid);
+			(uid == 501).then(|| b"can".to_vec())
+		}
+
+		fn add_gid(&mut self, gid: u32) -> Option<Vec<u8>> {
+			if self.sent_groups.contains(&gid) {
+				return None;
+			}
+			self.sent_groups.push(gid);
+			(gid == 20).then(|| b"staff".to_vec())
+		}
+
+		fn recv_user_name(&mut self, r: &mut dyn Read, uid: u32) -> Result<u32, RsyncError> {
+			let len = r.read_u8().map_err(RsyncError::from_stream)?;
+			let name = r.read_bytes(len.into(), 255).map_err(RsyncError::from_stream)?;
+			self.received_names.push((uid, name));
+			Ok(uid + 10000)
+		}
+
+		fn recv_group_name(&mut self, r: &mut dyn Read, gid: u32) -> Result<u32, RsyncError> {
+			let len = r.read_u8().map_err(RsyncError::from_stream)?;
+			let name = r.read_bytes(len.into(), 255).map_err(RsyncError::from_stream)?;
+			self.received_names.push((gid, name));
+			Ok(gid + 20000)
+		}
+
+		fn match_uid(&mut self, uid: u32) -> u32 {
+			uid + 10000
+		}
+
+		fn match_gid(&mut self, gid: u32) -> u32 {
+			gid + 20000
+		}
+	}
+
+	const DIR_MODE: u32 = 0o040755;
+	const FILE_MODE: u32 = 0o100644;
+
+	/// The macOS ACL `group:staff deny delete`, `user:can allow read,write`.
+	fn osx_names() -> Vec<IdAccess> {
+		vec![IdAccess { id: 20, access: 0x8000 }, IdAccess { id: 501, access: 0x3001 | NAME_IS_USER }]
+	}
+
+	/// `rsync -rA --only-write-batch` (3.5.1, macOS) for `.` (no ACL) then `a`.
+	const GOLDEN_DIR: &[u8] = &[0x00, 0x00, 0x00, 0x00];
+	const GOLDEN_A_INC: &[u8] = b"\x00\x10\x02\x14\xc2\x01\x00\x05staff\x81\xf5\xc0\x07\xc0\x03can";
+	const GOLDEN_A_NO_INC: &[u8] = b"\x00\x10\x02\x14\xc2\x00\x00\x81\xf5\xc0\x06\xc0";
+
+	fn osx_file() -> AclSet {
+		AclSet { access: Some(RsyncAcl { names: osx_names(), ..RsyncAcl::default() }), default: None }
+	}
+
+	fn osx_dir() -> AclSet {
+		AclSet { access: Some(RsyncAcl::default()), default: Some(RsyncAcl::default()) }
+	}
+
+	#[test]
+	fn sender_matches_reference_bytes() {
+		for (inc_recurse, golden) in [(true, GOLDEN_A_INC), (false, GOLDEN_A_NO_INC)] {
+			let mut sender = AclSender::new(AclOpts { inc_recurse, ..AclOpts::default() });
+			let mut ids = FakeIds::default();
+			let mut out = Vec::new();
+			sender.send(&mut out, &osx_dir(), DIR_MODE, &mut ids).unwrap();
+			assert_eq!(out, GOLDEN_DIR);
+			out.clear();
+			sender.send(&mut out, &osx_file(), FILE_MODE, &mut ids).unwrap();
+			assert_eq!(out, golden);
+			out.clear();
+			// Repeats are cache indices; names were registered for the id lists.
+			sender.send(&mut out, &osx_file(), FILE_MODE, &mut ids).unwrap();
+			assert_eq!(out, [0x02]);
+			assert_eq!(ids.sent_users, [501]);
+			assert_eq!(ids.sent_groups, [20]);
+		}
+	}
+
+	#[test]
+	fn numeric_ids_send_no_names() {
+		let mut sender = AclSender::new(AclOpts { inc_recurse: true, numeric_ids: true, ..AclOpts::default() });
+		let mut ids = FakeIds::default();
+		let mut out = Vec::new();
+		sender.send(&mut out, &osx_file(), FILE_MODE, &mut ids).unwrap();
+		assert_eq!(out, GOLDEN_A_NO_INC);
+		assert!(ids.sent_users.is_empty());
+	}
+
+	#[test]
+	fn osx_receiver_decodes_reference_bytes() {
+		let mut stream = GOLDEN_DIR.to_vec();
+		stream.extend(GOLDEN_A_INC);
+		stream.push(0x02);
+		let mut r = Cursor::new(stream);
+		let opts = AclOpts { inc_recurse: true, ..AclOpts::default() };
+		let mut recv = AclReceiver::with_flavor(opts, 1 << 30, Flavor::Osx);
+		let mut ids = FakeIds::default();
+		assert_eq!(recv.recv(&mut r, DIR_MODE, &mut ids).unwrap(), (0, Some(0)));
+		assert_eq!(recv.recv(&mut r, FILE_MODE, &mut ids).unwrap(), (1, None));
+		assert_eq!(recv.recv(&mut r, FILE_MODE, &mut ids).unwrap(), (1, None));
+		let acl = recv.access(1).unwrap();
+		assert_eq!(acl.names, [IdAccess { id: 20020, access: 0x8000 }, IdAccess {
+			id: 10501,
+			access: 0x3001 | NAME_IS_USER
+		}]);
+		assert_eq!(acl.mask_obj, NO_ENTRY);
+		assert_eq!(ids.received_names, [(20, b"staff".to_vec()), (501, b"can".to_vec())]);
+	}
+
+	#[test]
+	fn posix_receiver_rejects_osx_access_words() {
+		let mut recv = AclReceiver::with_flavor(AclOpts::default(), 0, Flavor::Posix);
+		let err = recv.recv(&mut Cursor::new(GOLDEN_A_NO_INC.to_vec()), FILE_MODE, &mut FakeIds::default()).unwrap_err();
+		assert_eq!(err.code, RERR_STREAMIO);
+		assert_eq!(err.message.as_deref(), Some("recv_acl_access: value out of range: 8000"));
+		// Fake-super stores whatever arrives.
+		let opts = AclOpts { fake_super: true, ..AclOpts::default() };
+		let mut recv = AclReceiver::with_flavor(opts, 0, Flavor::Posix);
+		recv.recv(&mut Cursor::new(GOLDEN_A_NO_INC.to_vec()), FILE_MODE, &mut FakeIds::default()).unwrap();
+	}
+
+	#[test]
+	fn receiver_rejects_bad_indices_and_counts() {
+		let mut recv = AclReceiver::with_flavor(AclOpts::default(), 0, Flavor::Posix);
+		let err = recv.recv(&mut Cursor::new([0x03u8]), FILE_MODE, &mut FakeIds::default()).unwrap_err();
+		assert_eq!(err.code, RERR_STREAMIO);
+		assert_eq!(err.message.as_deref(), Some("recv_acl_index: ACL_TYPE_ACCESS ACL index 3 > 0"));
+
+		// count 65537
+		let err = recv
+			.recv(&mut Cursor::new([0x00, XMIT_NAME_LIST, 0xc1, 0x01, 0x00]), FILE_MODE, &mut FakeIds::default())
+			.unwrap_err();
+		assert_eq!(err.code, RERR_PROTOCOL);
+		assert_eq!(err.message.as_deref(), Some("wire value ACL count out of range: 65537 not in [0,65536] [receiver]"));
+
+		let mut small = AclReceiver::with_flavor(AclOpts::default(), 16, Flavor::Posix);
+		let err = small
+			.recv(&mut Cursor::new([0x00, XMIT_NAME_LIST, 0x02]), FILE_MODE, &mut FakeIds::default())
+			.unwrap_err();
+		assert_eq!(err.message.as_deref(), Some("[receiver] exceeded --max-alloc=16 setting (file=acls.c, line=932)"));
+
+		let err = recv
+			.recv(&mut Cursor::new([0x00, XMIT_USER_OBJ]), FILE_MODE, &mut FakeIds::default())
+			.unwrap_err();
+		assert_eq!(err.code, RERR_STREAMIO, "EOF");
+	}
+
+	fn posix_access() -> RsyncAcl {
+		RsyncAcl {
+			names: vec![IdAccess { id: 1000, access: 7 | NAME_IS_USER }, IdAccess { id: 100, access: 5 }],
+			user_obj: 6,
+			group_obj: 4,
+			mask_obj: 7,
+			other_obj: 4,
+		}
+	}
+
+	fn posix_default() -> RsyncAcl {
+		RsyncAcl {
+			names: vec![IdAccess { id: 100, access: 7 }],
+			user_obj: 7,
+			group_obj: 5,
+			mask_obj: 7,
+			other_obj: 0,
+		}
+	}
+
+	#[test]
+	fn posix_round_trip_with_access_and_default_acls() {
+		let mode = 0o040774; // group bits rwx == the mask
+		let set = AclSet { access: Some(posix_access()), default: Some(posix_default()) };
+		let mut sender = AclSender::new(AclOpts::default());
+		let mut out = Vec::new();
+		sender.send(&mut out, &set, mode, &mut FakeIds::default()).unwrap();
+		sender.send(&mut out, &set, mode, &mut FakeIds::default()).unwrap();
+
+		let mut recv = AclReceiver::with_flavor(AclOpts::default(), 0, Flavor::Posix);
+		let mut r = Cursor::new(out);
+		assert_eq!(recv.recv(&mut r, mode, &mut FakeIds::default()).unwrap(), (0, Some(0)));
+		assert_eq!(recv.recv(&mut r, mode, &mut FakeIds::default()).unwrap(), (0, Some(0)));
+		assert_eq!(r.position() as usize, r.get_ref().len());
+
+		// The access ACL travels condensed; the mask comes back from the group bits.
+		let access = recv.access(0).unwrap();
+		assert_eq!(access.user_obj, NO_ENTRY);
+		assert_eq!(access.group_obj, 4);
+		assert_eq!(access.mask_obj, 7);
+		assert_eq!(access.other_obj, NO_ENTRY);
+		assert_eq!(access.names, posix_access().names);
+		assert_eq!(recv.default_acl(0).unwrap(), &posix_default());
+
+		// Received data matches the original locally.
+		let wanted = recv.get(Some(0), Some(0));
+		assert!(!differs(&set, &wanted, mode));
+		let mut other = set.clone();
+		other.access.as_mut().unwrap().names[1].access = 4;
+		assert!(differs(&other, &wanted, mode));
+		let mut other = set.clone();
+		other.default = Some(RsyncAcl::default());
+		assert!(differs(&other, &wanted, mode));
+		assert!(!differs(&other, &wanted, 0o100774), "default ACLs only matter for directories");
+	}
+
+	#[test]
+	fn posix_receiver_computes_missing_masks() {
+		// Access: names but no mask → mask from the mode's group bits.
+		let wire = [0x00, XMIT_NAME_LIST, 0x01, 0x81, 0xf4, (5 << 2) | 2];
+		let mut recv = AclReceiver::with_flavor(AclOpts::default(), 0, Flavor::Posix);
+		recv.recv(&mut Cursor::new(wire), 0o100650, &mut FakeIds::default()).unwrap();
+		assert_eq!(recv.access(0).unwrap().mask_obj, 5);
+		// Default: union of the named entries and the group object.
+		let dir = [
+			0x00,
+			0x00,
+			0x00,
+			XMIT_USER_OBJ | XMIT_GROUP_OBJ | XMIT_OTHER_OBJ | XMIT_NAME_LIST,
+			7,
+			1,
+			0,
+			0x01,
+			0x64,
+			4 << 2,
+		];
+		recv.recv(&mut Cursor::new(dir), 0o040700, &mut FakeIds::default()).unwrap();
+		assert_eq!(recv.default_acl(0).unwrap().mask_obj, 5);
+	}
+
+	#[test]
+	fn names_without_inc_recursion_are_remapped_after_the_id_lists() {
+		let mut out = Vec::new();
+		AclSender::new(AclOpts::default())
+			.send(&mut out, &osx_file(), FILE_MODE, &mut FakeIds::default())
+			.unwrap();
+		let mut recv = AclReceiver::with_flavor(AclOpts::default(), 0, Flavor::Osx);
+		recv.recv(&mut Cursor::new(out), FILE_MODE, &mut FakeIds::default()).unwrap();
+		assert_eq!(recv.access(0).unwrap().names, osx_names(), "ids kept until the lists arrive");
+		recv.remap_ids(&mut FakeIds::default());
+		let ids: Vec<u32> = recv.access(0).unwrap().names.iter().map(|ida| ida.id).collect();
+		assert_eq!(ids, [20020, 10501]);
+	}
+
+	#[test]
+	fn strip_and_compare_follow_mode_bits() {
+		let mut acl = posix_access();
+		acl.strip_perms(0o100674);
+		assert_eq!((acl.user_obj, acl.group_obj, acl.mask_obj, acl.other_obj), (NO_ENTRY, 4, NO_ENTRY, NO_ENTRY));
+		let mut plain = RsyncAcl::fake_perms(0o100640);
+		plain.strip_perms(0o100640);
+		assert_eq!(plain, RsyncAcl::default());
+
+		let full = posix_access();
+		let mut condensed = full.clone();
+		condensed.strip_perms(0o100674);
+		condensed.mask_obj = 7; // the receiver restores the mask from the mode
+		assert!(full.equal_enough(&condensed, 0o100674));
+		// A condensed ACL without group_obj means it equaled the mode's group bits.
+		let mut no_group = condensed.clone();
+		no_group.group_obj = NO_ENTRY;
+		assert!(full.equal_enough(&no_group, 0o100644));
+		assert!(!full.equal_enough(&no_group, 0o100654));
+		assert!(!full.equal_enough(&RsyncAcl::default(), 0o100644), "mask presence differs");
+		assert_eq!(acl_mode_bits(&full), 0o674);
+		assert_eq!(acl_mode_bits(&RsyncAcl::fake_perms(0o751)), 0o751);
+	}
+
+	#[cfg(any(target_os = "linux", target_os = "android"))]
+	#[test]
+	fn posix_xattr_blob_conversions() {
+		let entries = [
+			PosixEntry { tag: RACL_OTHER, perm: 4, id: RACL_UNDEFINED_ID },
+			PosixEntry { tag: RACL_GROUP, perm: 5, id: 100 },
+			PosixEntry { tag: RACL_USER, perm: 7, id: 1000 },
+			PosixEntry { tag: RACL_USER_OBJ, perm: 6, id: RACL_UNDEFINED_ID },
+			PosixEntry { tag: RACL_MASK, perm: 7, id: RACL_UNDEFINED_ID },
+			PosixEntry { tag: RACL_GROUP_OBJ, perm: 4, id: 0 },
+			PosixEntry { tag: RACL_USER, perm: 5, id: 7 },
+		];
+		let blob = encode_posix_acl_xattr(&entries);
+		assert_eq!(&blob[..4], &[2, 0, 0, 0]);
+		assert_eq!(blob.len(), 4 + 7 * 8);
+		// Canonical order; the id of an object entry is always undefined.
+		assert_eq!(&blob[4..12], &[0x01, 0, 6, 0, 0xff, 0xff, 0xff, 0xff]);
+		assert_eq!(&blob[12..20], &[0x02, 0, 5, 0, 7, 0, 0, 0]);
+		assert_eq!(&blob[28..36], &[0x04, 0, 4, 0, 0xff, 0xff, 0xff, 0xff]);
+		let parsed = parse_posix_acl_xattr(&blob).unwrap();
+		assert_eq!(parsed.len(), 7);
+		let acl = posix_entries_to_acl(&parsed);
+		assert_eq!((acl.user_obj, acl.group_obj, acl.mask_obj, acl.other_obj), (6, 4, 7, 4));
+		assert_eq!(acl.names, [
+			IdAccess { id: 7, access: 5 | NAME_IS_USER },
+			IdAccess { id: 1000, access: 7 | NAME_IS_USER },
+			IdAccess { id: 100, access: 5 },
+		]);
+		// And back: the packed entries serialize to the same blob.
+		assert_eq!(encode_posix_acl_xattr(&acl_to_posix_entries(&acl)), blob);
+
+		assert!(parse_posix_acl_xattr(&[2, 0, 0]).is_none());
+		assert!(parse_posix_acl_xattr(&[1, 0, 0, 0]).is_none());
+		assert!(parse_posix_acl_xattr(&[2, 0, 0, 0, 1]).is_none());
+		assert_eq!(parse_posix_acl_xattr(&[2, 0, 0, 0]).unwrap(), []);
+	}
+
+	#[cfg(any(target_os = "linux", target_os = "android"))]
+	#[test]
+	fn posix_entry_unpacking_ignores_duplicates_and_unknown_tags() {
+		let acl = posix_entries_to_acl(&[
+			PosixEntry { tag: RACL_USER_OBJ, perm: 7, id: RACL_UNDEFINED_ID },
+			PosixEntry { tag: RACL_USER_OBJ, perm: 0, id: RACL_UNDEFINED_ID },
+			PosixEntry { tag: 0x40, perm: 7, id: 3 },
+			PosixEntry { tag: RACL_GROUP, perm: 0o17, id: 9 },
+		]);
+		assert_eq!(acl.user_obj, 7);
+		assert_eq!(acl.names, [IdAccess { id: 9, access: 7 }]);
+		assert_eq!(acl.other_obj, NO_ENTRY);
+	}
+
+	#[cfg(any(target_os = "linux", target_os = "android"))]
+	#[test]
+	fn packing_fills_condensed_objects_from_the_mode() {
+		let mut condensed = posix_access();
+		condensed.strip_perms(0o100674);
+		condensed.mask_obj = 7; // as received: the mask is restored from the mode
+		let mut entries = acl_to_posix_entries(&condensed);
+		let mode = apply_mode_to_entries(&mut entries, &condensed, 0o100600, 0o100674);
+		assert_eq!(mode, 0o100674);
+		let acl = posix_entries_to_acl(&entries);
+		assert_eq!((acl.user_obj, acl.group_obj, acl.mask_obj, acl.other_obj), (6, 4, 7, 4));
+
+		// setgid turning off: group/other stay closed until the chmod.
+		let mut entries = acl_to_posix_entries(&condensed);
+		let mode = apply_mode_to_entries(&mut entries, &condensed, 0o102600, 0o100674);
+		assert_eq!(mode, 0o102600);
+		assert_eq!(posix_entries_to_acl(&entries).other_obj, 0);
+		// sticky turning on for a directory does the same.
+		let mut entries = acl_to_posix_entries(&condensed);
+		assert_eq!(apply_mode_to_entries(&mut entries, &condensed, 0o040755, 0o041775), 0o040700);
+	}
+
+	#[test]
+	fn fake_super_blob_round_trip() {
+		let mut acl = posix_access();
+		acl.strip_perms(0o100674);
+		let blob = encode_fake_acl(&acl);
+		assert_eq!(&blob[..16], &[0x80, 0, 0, 0, 4, 0, 0, 0, 0x80, 0, 0, 0, 0x80, 0, 0, 0]);
+		assert_eq!(&blob[16..24], &[0xe8, 0x03, 0, 0, 7, 0, 0, 0x80]);
+		let back = decode_fake_acl(&blob, 0o100674).unwrap();
+		assert_eq!((back.user_obj, back.group_obj, back.mask_obj, back.other_obj), (6, 4, NO_ENTRY, 4));
+		assert_eq!(back.names, acl.names);
+		assert!(decode_fake_acl(&blob[..20], 0).is_none());
+		assert!(decode_fake_acl(&blob[..12], 0).is_none());
+	}
+}

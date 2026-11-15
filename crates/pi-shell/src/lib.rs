@@ -37,10 +37,12 @@ pub mod host;
 pub mod session;
 pub mod rng;
 pub mod sys;
+pub mod testkit;
 pub mod tools;
 pub mod vfs;
 
-
+#[cfg(test)]
+mod suites;
 
 pub mod cancel;
 mod child_session;

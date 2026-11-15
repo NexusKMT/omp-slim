@@ -93,4 +93,50 @@ pub fn get(r: Rlimit) -> io::Result<(Option<u64>, Option<u64>)> {
 	}
 }
 
+#[cfg(all(test, unix))]
+mod tests {
+	use strum::IntoEnumIterator;
 
+	use super::*;
+
+	#[test]
+	fn mapped_resources_follow_the_platform() {
+		let mapped: Vec<Rlimit> = Rlimit::iter().filter(|r| resource(*r).is_some()).collect();
+		let base = [
+			Rlimit::Core,
+			Rlimit::Data,
+			Rlimit::Fsize,
+			Rlimit::Memlock,
+			Rlimit::Rss,
+			Rlimit::Stack,
+			Rlimit::Cpu,
+			Rlimit::Nproc,
+			Rlimit::Nofile,
+			Rlimit::Vmem,
+		];
+		for r in base {
+			assert!(mapped.contains(&r), "{r:?} exists on every Unix");
+		}
+		for r in [Rlimit::Npts, Rlimit::Kqueues, Rlimit::Sbsize, Rlimit::Threads, Rlimit::Swap] {
+			assert!(!mapped.contains(&r), "{r:?} is FreeBSD-only");
+		}
+		let linux_only = [Rlimit::Locks, Rlimit::Rtprio, Rlimit::Rttime];
+		assert!(
+			linux_only
+				.iter()
+				.all(|r| mapped.contains(r) == cfg!(target_os = "linux"))
+		);
+		assert_eq!(get(Rlimit::Swap).unwrap_err().kind(), io::ErrorKind::Unsupported);
+	}
+
+	#[test]
+	fn host_limits_read_back_with_infinity_as_none() {
+		let (soft, hard) = get(Rlimit::Nofile).unwrap();
+		let soft = soft.expect("the open-files soft limit is finite");
+		assert!(hard.is_none_or(|h| soft <= h));
+		assert_eq!(to_raw(None), libc::RLIM_INFINITY);
+		assert_eq!(from_raw(to_raw(None)), None);
+		assert_eq!(from_raw(to_raw(Some(64))), Some(64));
+		assert_eq!(to_raw(Some(u64::MAX)), libc::RLIM_INFINITY, "too large saturates to unlimited");
+	}
+}

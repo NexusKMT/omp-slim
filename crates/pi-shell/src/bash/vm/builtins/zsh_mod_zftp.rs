@@ -2183,4 +2183,36 @@ fn ctx_forget(ctx: &mut Ctx<'_, '_>) {
 	ctx.store_record(KeyBuf::Misc(MiscKey::Zftp), None);
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn pasv_replies_parse_like_sscanf() {
+		let a = pasv_addr(b"Entering Passive Mode (127,0,0,1,4,1)").unwrap();
+		assert_eq!(a, "127.0.0.1:1025".parse().unwrap());
+		assert!(pasv_addr(b"Entering Passive Mode (127,0,0,1)").is_none());
+		assert_eq!(pasv_addr(b"=10,1,2,3,256,7").unwrap(), "10.1.2.3:7".parse().unwrap());
+	}
+
+	#[test]
+	fn epsv_replies_follow_rfc_2428() {
+		assert_eq!(epsv_port(b"Entering Extended Passive Mode (|||6446|)"), Some(6446));
+		assert_eq!(epsv_port(b"(!!!0021!)"), Some(21));
+		assert_eq!(epsv_port(b"(|||70000|)"), None);
+		assert_eq!(epsv_port(b"(||6446|)"), None);
+	}
+
+	#[test]
+	fn mdtm_is_utc_ftp_time() {
+		assert_eq!(mdtm(0), "19700101000000");
+		assert_eq!(mdtm(1_577_934_245), "20200102030405");
+	}
+
+	#[test]
+	fn zstrtol_takes_a_leading_number() {
+		assert_eq!(zstrtol(b" 1234 bytes"), 1234);
+		assert_eq!(zstrtol(b"-5x"), -5);
+		assert_eq!(zstrtol(b"x"), 0);
+	}
+}

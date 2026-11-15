@@ -1022,4 +1022,170 @@ fn zsh_select_list(items: &[BString], start: u32, columns: usize, lines: usize) 
 	(out, u32::try_from(more).unwrap_or(0))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn echo_out(args: &[&str]) -> String {
+		let args: Vec<BString> = args.iter().map(|a| BString::from(*a)).collect();
+		let mut out = Vec::new();
+		echo_bytes(&args, &mut out, false, true);
+		String::from_utf8(out).unwrap()
+	}
+
+	// Goldens from bash 5.3.20: `echo -e "a\tb" -n; echo -n x; echo; echo -E
+	// "a\\tb"; echo -- -n; echo -nn y; echo`.
+	#[test]
+	fn option_words_only_lead_and_only_from_n_e_e() {
+		assert_eq!(echo_out(&["-e", "a\\tb", "-n"]), "a\tb -n\n");
+		assert_eq!(echo_out(&["-n", "x"]), "x");
+		assert_eq!(echo_out(&["-E", "a\\tb"]), "a\\tb\n");
+		assert_eq!(echo_out(&["--", "-n"]), "-- -n\n");
+		assert_eq!(echo_out(&["-nn", "y"]), "y");
+		assert_eq!(echo_out(&["-"]), "-\n");
+		assert_eq!(echo_out(&["-nx"]), "-nx\n");
+	}
+
+	#[test]
+	fn escapes_decode_octal_hex_unicode_and_stop_at_backslash_c() {
+		assert_eq!(echo_out(&["-e", "\\0101\\x42\\u00e9"]), "AB\u{e9}\n");
+		assert_eq!(echo_out(&["-e", "a\\cb", "c"]), "a");
+		assert_eq!(echo_out(&["-e", "\\xzz\\q\\"]), "\\xzz\\q\\\n");
+	}
+
+	fn marked(s: &str, raw: bool) -> Line {
+		let mut st = LineState::default();
+		st.feed(s.as_bytes(), raw, Some(b'\n'), Charset::Utf8);
+		st.finish()
+	}
+
+	/// `read` into `n` variables, as the builtin splits.
+	fn vars(input: &str, ifs: &str, count: usize) -> Vec<String> {
+		let (ifs, line) = (Ifs::new(ifs.as_bytes(), Charset::Utf8), marked(input, false));
+		let mut at = skip_ifs_ws(&ifs, &line);
+		let mut out = Vec::new();
+		for _ in 1..count {
+			let value = if at < line.len() {
+				let (word, next) = field(&ifs, &line, at);
+				at = next;
+				word
+			} else {
+				BString::default()
+			};
+			out.push(value.to_string());
+		}
+		out.push(last_value(&ifs, &line, at).to_string());
+		out
+	}
+
+	// Goldens: bash 5.3.20 `IFS=… read a b <<< …; echo "[$a][$b]"`.
+	#[test]
+	fn last_variable_takes_the_rest_minus_one_trailing_delimiter() {
+		assert_eq!(vars("x:y:\n", ":", 2), ["x", "y"]);
+		assert_eq!(vars("x:y:z:\n", ":", 2), ["x", "y:z:"]);
+		assert_eq!(vars(" x : y :  \n", ": ", 2), ["x", "y"]);
+		assert_eq!(vars("  lead  trail  \n", " \t\n", 1), ["lead  trail"]);
+		assert_eq!(vars("a\\ b c\n", " \t\n", 2), ["a b", "c"]);
+	}
+
+	// Golden: bash 5.3.20 read9.sub: with a non-default IFS every `isspace`
+	// character in it is IFS whitespace (trailing `\t\r\f\v` go), a space
+	// outside IFS stays.
+	#[test]
+	fn non_default_ifs_whitespace_is_isspace() {
+		assert_eq!(vars("  line\tb \t\r\x0c\x0b\n", "\t\r\x0c\x0b", 2), ["  line", "b "]);
+		assert_eq!(vars("a : b\n", ": ", 2), ["a", "b"]);
+		assert_eq!(vars("a :: b\n", ": ", 3), ["a", "", "b"]);
+	}
+
+	// Goldens: bash 5.3.20 read.tests `echo " a  b\ " | read x [y]`: the
+	// last variable keeps an escaped blank only when it is a single field.
+	#[test]
+	fn escaped_trailing_blank_survives_only_in_a_single_field() {
+		assert_eq!(vars(" a  b\\ \n", " \t\n", 2), ["a", "b "]);
+		assert_eq!(vars(" a  b\\ \n", " \t\n", 1), ["a  b"]);
+		assert_eq!(vars(" a  b  \n", " \t\n", 1), ["a  b"]);
+	}
+
+	// `read -n` counts characters: a UTF-8 character's bytes count once,
+	// backslashes and NULs not at all.
+	#[test]
+	fn character_count_follows_bash() {
+		let mut st = LineState::default();
+		st.feed("é\\x\0y".as_bytes(), false, Some(b'\n'), Charset::Utf8);
+		assert_eq!(st.line.len(), 3);
+		assert!(st.full(3));
+		let mut st = LineState::default();
+		st.feed(&[0xc3], false, Some(b'\n'), Charset::Utf8);
+		assert!(!st.full(1));
+		assert_eq!(st.want(1), 1);
+		let mut st = LineState::default();
+		st.feed(&[0xc3, 0xa9], false, None, Charset::Bytes);
+		assert_eq!(st.line.len(), 2);
+	}
+
+	// Goldens: bash 5.3.20 glob2.sub under `LC_ALL=zh_TW.big5`: α is
+	// \xa3\x5c; its `\` byte is part of the character, not an escape, and
+	// an IFS of α splits on the whole character.
+	#[test]
+	fn multibyte_characters_are_read_and_split_whole() {
+		let big5 = Charset::Encoding(encoding_rs::BIG5);
+		let mut st = LineState::default();
+		st.feed(b"\xa3\\ b c\n", false, Some(b'\n'), big5);
+		let line = st.finish();
+		let ws = Ifs::new(b" \t\n", big5);
+		let at = skip_ifs_ws(&ws, &line);
+		let (first, next) = field(&ws, &line, at);
+		assert_eq!(first, &b"\xa3\\"[..]);
+		assert_eq!(field(&ws, &line, next).0, "b");
+		let mut st = LineState::default();
+		st.feed(b"A\xa3\\B\n", false, Some(b'\n'), big5);
+		let line = st.finish();
+		assert_eq!(split_all(&Ifs::new(b"\xa3\\", big5), &line), ["A", "B"]);
+		// A UTF-8 IFS character splits only on itself, not on its bytes.
+		let mut st = LineState::default();
+		st.feed("aébé".as_bytes(), true, None, Charset::Utf8);
+		assert_eq!(split_all(&Ifs::new("é".as_bytes(), Charset::Utf8), &st.finish()), ["a", "b"]);
+	}
+
+	#[test]
+	fn read_a_splits_every_field_and_keeps_empty_inner_ones() {
+		let f: Vec<String> = split_all(&Ifs::new(b":", Charset::Utf8), &marked("a::b:\n", false))
+			.into_iter()
+			.map(|b| b.to_string())
+			.collect();
+		assert_eq!(f, ["a", "", "b"]);
+		let f: Vec<String> =
+			split_all(&Ifs::new(b"/", Charset::Utf8), &marked("/kghfjk/jkfzuk/i\n", true))
+				.into_iter()
+				.map(|b| b.to_string())
+				.collect();
+		assert_eq!(f, ["", "kghfjk", "jkfzuk", "i\n"].map(|s| s.trim_end_matches('\n').to_owned()));
+	}
+
+	#[test]
+	fn backslash_newline_continues_unless_raw() {
+		let mut st = LineState::default();
+		assert!(!st.feed(b"x\\\n", false, Some(b'\n'), Charset::Utf8));
+		assert!(LineState::default().feed(b"x\\\n", true, Some(b'\n'), Charset::Utf8));
+		// An escaped delimiter other than newline is kept.
+		let mut st = LineState::default();
+		assert!(!st.feed(b"a\\;", false, Some(b';'), Charset::Utf8));
+		assert!(st.feed(b"b;", false, Some(b';'), Charset::Utf8));
+		assert_eq!(st.finish().all(), "a;b");
+	}
+
+	// Golden: bash 5.3.20 `select x in $(seq 30)` with COLUMNS unset.
+	#[test]
+	fn select_menu_columns_match_bash() {
+		let items: Vec<BString> = (1..=30).map(|i| BString::from(i.to_string())).collect();
+		let menu = String::from_utf8(select_menu(&items, 80)).unwrap();
+		let first = menu.lines().next().unwrap();
+		assert_eq!(
+			first,
+			"1) 1\t 4) 4\t 7) 7\t10) 10\t13) 13\t16) 16\t19) 19\t22) 22\t25) 25\t28) 28"
+		);
+		let items: Vec<BString> = ["a", "b", "c"].map(BString::from).to_vec();
+		assert_eq!(String::from_utf8(select_menu(&items, 80)).unwrap(), "1) a\n2) b\n3) c\n");
+	}
+}

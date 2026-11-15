@@ -873,6 +873,500 @@ fn merge_reader<'a>(
 	}
 }
 
+/// Fixtures shared by the deletion and backup tests.
+#[cfg(all(test, unix))]
+pub(crate) mod test_support {
+	use std::{
+		fs,
+		path::Path,
+		sync::{Arc, Mutex},
+	};
 
+	use super::*;
+	use crate::rsync::{
+		filter::{FilterConfig, RuleArg},
+		flist::FileList,
+		log::{LogConfig, Logger, OutLevels, Role},
+		options::Options,
+		tree::TreeOpts,
+		wire::Proto,
+	};
 
+	pub(crate) const DIR: u32 = 0o040755;
+	pub(crate) const REG: u32 = 0o100644;
 
+	/// A shared byte sink standing in for stdout and stderr (one stream, emission order).
+	#[derive(Clone, Default)]
+	pub(crate) struct Sink(Arc<Mutex<Vec<u8>>>);
+
+	impl Write for Sink {
+		fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+			self.0.lock().unwrap().extend_from_slice(buf);
+			Ok(buf.len())
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	impl Sink {
+		pub(crate) fn text(&self) -> String {
+			String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+		}
+	}
+
+	/// Output settings of a test run.
+	pub(crate) struct Out {
+		pub verbose: u8,
+		pub info: Option<&'static str>,
+		pub format: Option<&'static [u8]>,
+		pub itemize: u8,
+	}
+
+	/// `-n -i`.
+	pub(crate) const ITEMIZE: Out = Out { verbose: 0, info: None, format: Some(b"%i %n%L"), itemize: 1 };
+	/// `-v`.
+	pub(crate) const VERBOSE: Out = Out { verbose: 1, info: None, format: Some(b"%n%L"), itemize: 0 };
+
+	pub(crate) fn put(root: &Path, rel: &str, data: &str) {
+		let path = root.join(rel);
+		fs::create_dir_all(path.parent().unwrap()).unwrap();
+		fs::write(path, data).unwrap();
+	}
+
+	pub(crate) fn link(root: &Path, rel: &str, target: &str) {
+		std::os::unix::fs::symlink(target, root.join(rel)).unwrap();
+	}
+
+	/// The receiving side of a test run: generator context, destination trees, output.
+	pub(crate) fn setup(dest: &Path, opts: Options, out: &Out) -> (Ctx, DestTrees, Sink) {
+		let mut levels = OutLevels::from_verbose(out.verbose);
+		if let Some(words) = out.info {
+			levels.apply_info(words).unwrap();
+		}
+		let dry_run = opts.dry_run;
+		let mut ctx = Ctx::for_tests(opts);
+		let sink = Sink::default();
+		let cfg = LogConfig {
+			levels,
+			out_format: out.format.map(<[u8]>::to_vec),
+			itemize_changes: out.itemize,
+			dry_run,
+			..LogConfig::default()
+		};
+		ctx.logger = Logger::local(Box::new(sink.clone()), Box::new(sink.clone()), cfg)
+			.with_role(Role::Generator);
+		ctx.proto = Proto::new(33, 0);
+		ctx.inc_recurse = false;
+		ctx.am_root = false;
+		ctx.am_server = false;
+		ctx.meta.dry_run = dry_run;
+		let dest_tree = Tree::open(&ctx.fs, dest, &TreeOpts::default()).unwrap();
+		let trees = DestTrees {
+			dest: dest_tree,
+			single_file: None,
+			partial_dir: None,
+			temp_dir: None,
+			backup_dir: None,
+			alt_dirs: Vec::new(),
+			dry_missing: false,
+			dest_dev: None,
+		};
+		(ctx, trees, sink)
+	}
+
+	/// Receiver-side rules as the generator holds them after option parsing.
+	pub(crate) fn filters(ctx: &Ctx, dest: &Path, rules: &[&[u8]], delete_excluded: bool) -> Filters {
+		let cfg = FilterConfig {
+			delete_mode: true,
+			delete_excluded,
+			local_server: true,
+			role: Role::Generator,
+			..FilterConfig::default()
+		};
+		let mut filters = Filters::new(cfg);
+		for rule in rules {
+			filters.add(RuleArg::Filter(rule), &|_| Err(io::ErrorKind::NotFound.into())).unwrap();
+		}
+		// The client-side exchange resolves which one-sided rules apply locally (a
+		// --delete-excluded exclude becomes sender-only); a local copy writes nothing.
+		let mut wire = Vec::new();
+		filters.send(&mut wire, ctx.proto, true).unwrap();
+		filters.set_curr_dir(&paths::path_bytes(dest));
+		filters.set_logger(Some(ctx.logger.clone()));
+		filters
+	}
+
+	pub(crate) fn entry(name: &str, mode: u32, flags: u32) -> FileEntry {
+		let name = name.as_bytes();
+		let (dirname, basename) = paths::split_name(name);
+		FileEntry { dirname: dirname.into(), basename: basename.into(), mode, flags, ..FileEntry::default() }
+	}
+
+	/// A sender file list (non-incremental): `.` as the top content dir plus `items`.
+	pub(crate) fn flists(ctx: &Ctx, items: &[(&str, u32)]) -> Arc<Flists> {
+		let mut entries = vec![entry(".", DIR, FLAG_TOP_DIR | FLAG_CONTENT_DIR)];
+		for &(name, mode) in items {
+			let flags = if mode_is_dir(mode) { FLAG_CONTENT_DIR } else { 0 };
+			entries.push(entry(name, mode, flags));
+		}
+		let mut list = FileList { entries, ndx_start: 0, parent_ndx: -1 };
+		list.sort_and_clean(ctx.proto, false, &ctx.logger);
+		let flists = Flists::new();
+		flists.push(list);
+		flists.set_eof();
+		flists
+	}
+
+	/// Global index of `name` in segment 0.
+	pub(crate) fn ndx_of(flists: &Flists, name: &str) -> i32 {
+		flists.with_segment(0, |l| l.find(name.as_bytes())).flatten().unwrap() as i32
+	}
+
+	/// `find dir | sort` with contents and link targets.
+	pub(crate) fn listing(root: &Path) -> Vec<String> {
+		fn walk(root: &Path, rel: &Path, out: &mut Vec<String>) {
+			let mut names: Vec<_> =
+				fs::read_dir(root.join(rel)).unwrap().map(|e| e.unwrap().file_name()).collect();
+			names.sort();
+			for name in names {
+				let child = rel.join(&name);
+				let path = root.join(&child);
+				let shown = child.to_string_lossy().into_owned();
+				let meta = fs::symlink_metadata(&path).unwrap();
+				if meta.file_type().is_symlink() {
+					out.push(format!("{shown} -> {}", fs::read_link(&path).unwrap().display()));
+				} else if meta.is_dir() {
+					out.push(format!("{shown}/"));
+					walk(root, &child, out);
+				} else {
+					out.push(format!("{shown}: {}", fs::read_to_string(&path).unwrap().trim_end()));
+				}
+			}
+		}
+		let mut out = Vec::new();
+		walk(root, Path::new(""), &mut out);
+		out
+	}
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+	use std::{fs, path::Path};
+
+	use super::{test_support::*, *};
+	use crate::rsync::options::Options;
+
+	/// The destination of the main reference fixture (see each test for the command).
+	fn main_fixture(dst: &Path) {
+		put(dst, "a", "a");
+		put(dst, "sub/s", "s");
+		put(dst, "extra", "x");
+		put(dst, "keep1", "k");
+		put(dst, "excl1", "e");
+		put(dst, "excl_r", "r");
+		put(dst, "zz", "z");
+		put(dst, "sub/yy", "y");
+		put(dst, "gone/deep/f", "d");
+		put(dst, "gone/g", "g");
+		put(dst, "gone/keep2", "kk");
+		link(dst, "lnk", "nowhere");
+		put(dst, "keepdir/q", "q");
+	}
+
+	const MAIN_SRC: &[(&str, u32)] = &[("a", REG), ("sub", DIR), ("sub/s", REG)];
+	const MAIN_RULES: &[&[u8]] = &[b"P keep*", b"R excl_r", b"- excl*"];
+
+	fn opts(dry_run: bool) -> Options {
+		Options {
+			dry_run,
+			do_xfers: !dry_run,
+			delete_mode: true,
+			delete_during: 1,
+			recurse: 2,
+			..Options::default()
+		}
+	}
+
+	/// Runs the deletion pass over the main fixture: root first, then `sub`.
+	fn run_main(dst: &Path, opts: Options, out: &Out, rules: &[&[u8]], delete_excluded: bool) -> (Ctx, String) {
+		let (ctx, trees, sink) = setup(dst, opts, out);
+		let mut filters = filters(&ctx, dst, rules, delete_excluded);
+		let flists = flists(&ctx, MAIN_SRC);
+		let mut del = Deleter::new(&ctx);
+		del.full_pass(&ctx, &trees, &flists, &mut filters).unwrap();
+		del.finish(&ctx);
+		(ctx, sink.text())
+	}
+
+	// rsync -r --delete -n -i -f 'P keep*' -f 'R excl_r' -f '- excl*' src/ dst/
+	#[test]
+	fn protect_exclude_and_risk_match_reference_dry_run() {
+		let dir = tempfile::tempdir().unwrap();
+		main_fixture(dir.path());
+		let before = listing(dir.path());
+		let (_, out) = run_main(dir.path(), opts(true), &ITEMIZE, MAIN_RULES, false);
+		assert_eq!(
+			out,
+			"*deleting   gone/deep/f\n*deleting   gone/deep/\n*deleting   gone/g\n\
+			 cannot delete non-empty directory: gone\n*deleting   zz\n*deleting   lnk\n\
+			 *deleting   extra\n*deleting   excl_r\n*deleting   sub/yy\n"
+		);
+		assert_eq!(listing(dir.path()), before, "a dry run changes nothing");
+	}
+
+	// Same command with -v instead of -n -i.
+	#[test]
+	fn real_run_leaves_reference_tree_and_counts() {
+		let dir = tempfile::tempdir().unwrap();
+		main_fixture(dir.path());
+		let (ctx, out) = run_main(dir.path(), opts(false), &VERBOSE, MAIN_RULES, false);
+		assert_eq!(
+			out,
+			"deleting gone/deep/f\ndeleting gone/deep/\ndeleting gone/g\n\
+			 cannot delete non-empty directory: gone\ndeleting zz\ndeleting lnk\n\
+			 deleting extra\ndeleting excl_r\ndeleting sub/yy\n"
+		);
+		assert_eq!(
+			listing(dir.path()),
+			[
+				"a: a", "excl1: e", "gone/", "gone/keep2: kk", "keep1: k", "keepdir/", "keepdir/q: q",
+				"sub/", "sub/s: s",
+			]
+		);
+		let stats = ctx.stats.lock().unwrap();
+		assert_eq!(
+			(stats.deleted_files, stats.deleted_dirs, stats.deleted_symlinks),
+			(8, 1, 1)
+		);
+	}
+
+	// rsync -r --delete --delete-excluded -n -i -f 'P keep*' -f '- excl*' src/ dst/
+	#[test]
+	fn delete_excluded_drops_exclude_protection_only() {
+		let dir = tempfile::tempdir().unwrap();
+		main_fixture(dir.path());
+		let rules: &[&[u8]] = &[b"P keep*", b"- excl*"];
+		let (_, out) = run_main(dir.path(), opts(true), &ITEMIZE, rules, true);
+		assert_eq!(
+			out,
+			"*deleting   gone/deep/f\n*deleting   gone/deep/\n*deleting   gone/g\n\
+			 cannot delete non-empty directory: gone\n*deleting   zz\n*deleting   lnk\n\
+			 *deleting   extra\n*deleting   excl_r\n*deleting   excl1\n*deleting   sub/yy\n"
+		);
+	}
+
+	// rsync -r --delete --max-delete=2 -n -i src/ dst/  (exit 25)
+	#[test]
+	fn max_delete_stops_and_reports_skipped() {
+		let dir = tempfile::tempdir().unwrap();
+		main_fixture(dir.path());
+		let o = Options { max_delete: 2, ..opts(true) };
+		let (ctx, out) = run_main(dir.path(), o, &ITEMIZE, &[], false);
+		assert_eq!(
+			out,
+			"*deleting   keepdir/q\n*deleting   keepdir/\n\
+			 cannot delete non-empty directory: gone/deep\ncannot delete non-empty directory: gone\n\
+			 Deletions stopped due to --max-delete limit (11 skipped)\n"
+		);
+		assert_ne!(ctx.io_error.load(Ordering::Relaxed) & IOERR_DEL_LIMIT, 0);
+	}
+
+	// rsync -r --delete --max-delete=0 -n -i src/ dst/  (exit 25)
+	#[test]
+	fn max_delete_zero_deletes_nothing() {
+		let dir = tempfile::tempdir().unwrap();
+		main_fixture(dir.path());
+		let o = Options { max_delete: 0, ..opts(true) };
+		let (_, out) = run_main(dir.path(), o, &ITEMIZE, &[], false);
+		assert_eq!(
+			out,
+			"cannot delete non-empty directory: keepdir\n\
+			 cannot delete non-empty directory: gone/deep\ncannot delete non-empty directory: gone\n\
+			 Deletions stopped due to --max-delete limit (12 skipped)\n"
+		);
+	}
+
+	// rsync -r --delete -n -i -f '-p *.o' [-f '- core'] src/ dst/
+	#[test]
+	fn perishable_rules_do_not_keep_a_deleted_directory() {
+		for (rules, expected) in [
+			(
+				&[&b"-p *.o"[..]][..],
+				"*deleting   d1/sub/f.o\n*deleting   d1/sub/\n*deleting   d1/f.o\n*deleting   d1/core\n\
+				 *deleting   d1/\n",
+			),
+			(
+				&[&b"-p *.o"[..], &b"- core"[..]][..],
+				"*deleting   d1/sub/f.o\n*deleting   d1/sub/\n*deleting   d1/f.o\n\
+				 cannot delete non-empty directory: d1\n",
+			),
+		] {
+			let dir = tempfile::tempdir().unwrap();
+			put(dir.path(), "d1/core", "x");
+			put(dir.path(), "d1/f.o", "y");
+			put(dir.path(), "d1/sub/f.o", "z");
+			let (ctx, trees, sink) = setup(dir.path(), opts(true), &ITEMIZE);
+			let mut filters = filters(&ctx, dir.path(), rules, false);
+			let flists = flists(&ctx, &[]);
+			let mut del = Deleter::new(&ctx);
+			del.delete_in_dir(&ctx, &trees, &flists, &mut filters, b".", ndx_of(&flists, ".")).unwrap();
+			assert_eq!(sink.text(), expected);
+		}
+	}
+
+	// rsync -r src/ dst/ where src/d is a file and dst/d a non-empty dir (no --delete/--force)
+	#[test]
+	fn make_room_without_recursion_keeps_non_empty_dir() {
+		let dir = tempfile::tempdir().unwrap();
+		put(dir.path(), "d/c", "c");
+		let o = Options { delete_mode: false, delete_during: 0, ..opts(false) };
+		let (ctx, trees, sink) = setup(dir.path(), o, &VERBOSE);
+		let filters = filters(&ctx, dir.path(), &[], false);
+		let mut del = Deleter::new(&ctx);
+		let ret = del.delete_item(&ctx, &trees, &filters, b"d", DIR, DEL_FOR_FILE);
+		assert_eq!(ret, DelResult::DirNotEmpty);
+		assert_eq!(
+			sink.text(),
+			"cannot delete non-empty directory: d\ncould not make way for new regular file: d\n"
+		);
+		assert_eq!(listing(dir.path()), ["d/", "d/c: c"]);
+		assert_eq!(ctx.stats.lock().unwrap().deleted_files, 0);
+	}
+
+	// rsync -r --delete -n -i: the make-room deletion logs the contents, not the dir.
+	#[test]
+	fn make_room_with_recursion_logs_contents_only() {
+		let dir = tempfile::tempdir().unwrap();
+		put(dir.path(), "d/c", "c");
+		let (ctx, trees, sink) = setup(dir.path(), opts(true), &ITEMIZE);
+		let filters = filters(&ctx, dir.path(), &[], false);
+		let mut del = Deleter::new(&ctx);
+		let ret = del.delete_item(&ctx, &trees, &filters, b"d", DIR, DEL_FOR_FILE | DEL_RECURSE);
+		assert_eq!(ret, DelResult::Deleted);
+		assert_eq!(sink.text(), "*deleting   d/c\n");
+	}
+
+	#[test]
+	fn io_error_skips_deletion_with_one_notice() {
+		let dir = tempfile::tempdir().unwrap();
+		main_fixture(dir.path());
+		let (ctx, trees, sink) = setup(dir.path(), opts(false), &VERBOSE);
+		ctx.io_error.fetch_or(IOERR_GENERAL, Ordering::Relaxed);
+		let mut filters = filters(&ctx, dir.path(), &[], false);
+		let flists = flists(&ctx, MAIN_SRC);
+		let mut del = Deleter::new(&ctx);
+		let before = listing(dir.path());
+		del.delete_in_dir(&ctx, &trees, &flists, &mut filters, b".", ndx_of(&flists, ".")).unwrap();
+		del.delete_in_dir(&ctx, &trees, &flists, &mut filters, b"sub", ndx_of(&flists, "sub")).unwrap();
+		assert_eq!(sink.text(), "IO error encountered -- skipping file deletion\n");
+		assert_eq!(listing(dir.path()), before);
+
+		let o = Options { ignore_errors: true, ..opts(false) };
+		let (ctx, trees, sink) = setup(dir.path(), o, &VERBOSE);
+		ctx.io_error.fetch_or(IOERR_GENERAL, Ordering::Relaxed);
+		let mut del = Deleter::new(&ctx);
+		del.delete_in_dir(&ctx, &trees, &flists, &mut filters, b"sub", ndx_of(&flists, "sub")).unwrap();
+		assert_eq!(sink.text(), "deleting sub/yy\n");
+	}
+
+	#[test]
+	fn read_only_entries_owned_by_us_are_deleted() {
+		let dir = tempfile::tempdir().unwrap();
+		put(dir.path(), "ro/f", "f");
+		use std::os::unix::fs::PermissionsExt;
+		let ro = dir.path().join("ro");
+		fs::set_permissions(ro.join("f"), fs::Permissions::from_mode(0o444)).unwrap();
+		fs::set_permissions(&ro, fs::Permissions::from_mode(0o555)).unwrap();
+		let (ctx, trees, sink) = setup(dir.path(), opts(false), &VERBOSE);
+		let mut filters = filters(&ctx, dir.path(), &[], false);
+		let flists = flists(&ctx, &[]);
+		let mut del = Deleter::new(&ctx);
+		del.delete_in_dir(&ctx, &trees, &flists, &mut filters, b".", ndx_of(&flists, ".")).unwrap();
+		assert_eq!(sink.text(), "deleting ro/f\ndeleting ro/\n");
+		assert!(listing(dir.path()).is_empty());
+	}
+
+	#[test]
+	fn delete_delay_queues_until_replayed() {
+		let dir = tempfile::tempdir().unwrap();
+		main_fixture(dir.path());
+		let o = Options { delete_during: 2, ..opts(false) };
+		let (ctx, trees, sink) = setup(dir.path(), o, &VERBOSE);
+		let mut filters = filters(&ctx, dir.path(), MAIN_RULES, false);
+		let flists = flists(&ctx, MAIN_SRC);
+		let mut del = Deleter::new(&ctx);
+		del.delete_in_dir(&ctx, &trees, &flists, &mut filters, b".", ndx_of(&flists, ".")).unwrap();
+		del.delete_in_dir(&ctx, &trees, &flists, &mut filters, b"sub", ndx_of(&flists, "sub")).unwrap();
+		del.leave_all(&mut filters);
+		assert_eq!(sink.text(), "");
+		assert!(dir.path().join("zz").exists());
+		del.run_delayed(&ctx, &trees, &filters).unwrap();
+		assert_eq!(
+			sink.text(),
+			"deleting gone/deep/f\ndeleting gone/deep/\ndeleting gone/g\n\
+			 cannot delete non-empty directory: gone\ndeleting zz\ndeleting lnk\n\
+			 deleting extra\ndeleting excl_r\ndeleting sub/yy\n"
+		);
+	}
+
+	/// NDX_DEL_STATS as the reference server generator wrote it after
+	/// `rsync -r --delete src/ host:dst/` over the main fixture (14 deletions: 10 files,
+	/// 3 dirs, 1 symlink): `ff 02 0a 03 01 00 00`.
+	#[test]
+	fn del_stats_bytes_match_reference() {
+		let dir = tempfile::tempdir().unwrap();
+		main_fixture(dir.path());
+		let (ctx, _) = run_main(dir.path(), opts(false), &VERBOSE, &[], false);
+		let del = Deleter::new(&ctx);
+		let mut out = Vec::new();
+		let mut ndx = NdxCodec::new(ctx.proto);
+		del.send_stats(&ctx, &mut out, &mut ndx).unwrap();
+		assert_eq!(out, [0xff, 0x02, 0x0a, 0x03, 0x01, 0x00, 0x00]);
+
+		let mut batch_ctx = ctx.clone();
+		let mut o = (*ctx.opts).clone();
+		o.read_batch = true;
+		batch_ctx.opts = Arc::new(o);
+		let mut out = Vec::new();
+		del.send_stats(&batch_ctx, &mut out, &mut NdxCodec::new(ctx.proto)).unwrap();
+		assert_eq!(out, [0xfd, 0xff, 0xff, 0xff, 0x0a, 0x03, 0x01, 0x00, 0x00]);
+
+		let mut old_ctx = ctx.clone();
+		old_ctx.proto = crate::rsync::wire::Proto::new(30, 0);
+		let mut out = Vec::new();
+		del.send_stats(&old_ctx, &mut out, &mut NdxCodec::new(old_ctx.proto)).unwrap();
+		assert!(out.is_empty());
+	}
+
+	/// B8: per-directory merge files are opened like upstream's parse_filter_file —
+	/// operator paths that may leave the destination (`../rules`), but never past
+	/// `--confine-root`, where they read as missing and the rule is dropped.
+	#[test]
+	fn merge_files_honor_confine_root() {
+		let base = tempfile::tempdir().unwrap();
+		let base = fs::canonicalize(base.path()).unwrap();
+		let root = base.join("root");
+		let dest = root.join("dest");
+		put(&dest, "inside", "+ x\n");
+		put(&root, "rules", "- y\n");
+		put(&base, "outside-secret", "secretword\n");
+
+		let (ctx, trees, _) = setup(&dest, opts(false), &VERBOSE);
+		let del = Deleter::new(&ctx);
+		let read = del.reader(&trees.dest);
+		assert_eq!(read(b"inside").unwrap().as_deref(), Some(&b"+ x\n"[..]));
+		assert_eq!(read(b"../rules").unwrap().as_deref(), Some(&b"- y\n"[..]));
+		assert_eq!(read(b"missing").unwrap(), None);
+
+		let confined = Options { confine_root: Some(root.clone().into_os_string()), ..opts(false) };
+		let (ctx, trees, _) = setup(&dest, confined, &VERBOSE);
+		let del = Deleter::new(&ctx);
+		let read = del.reader(&trees.dest);
+		assert_eq!(read(b"../rules").unwrap().as_deref(), Some(&b"- y\n"[..]));
+		assert!(!matches!(read(b"../../outside-secret"), Ok(Some(_))), "outside --confine-root");
+		let abs = base.join("outside-secret");
+		assert!(!matches!(read(abs.to_str().unwrap().as_bytes()), Ok(Some(_))));
+	}
+}

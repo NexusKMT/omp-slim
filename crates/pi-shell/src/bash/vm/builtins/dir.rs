@@ -347,6 +347,60 @@ fn symbolic_mode(mode: &[u8], initial: u32) -> Result<u32, String> {
 	}
 }
 
+#[cfg(test)]
+mod umask_tests {
+	use super::symbolic_mode;
 
+	// Goldens: bash 5.3.20 builtins8.sub, starting from umask 022 (bits
+	// 0755): `umask u=r+w; umask -S` → u=rw,g=rx,o=rx, and so on.
+	#[test]
+	fn symbolic_modes_follow_bash() {
+		let mask = |m: &str| !symbolic_mode(m.as_bytes(), 0o755).unwrap() & 0o777;
+		assert_eq!(mask("u=r+w"), 0o122);
+		assert_eq!(mask("u=r-w"), 0o322);
+		// u=rwx,g=rwx,o=
+		assert_eq!(mask("g+u,o+rwx-u"), 0o007);
+		assert_eq!(mask("u=rwx,g=rwx,o=rx"), 0o002);
+		// u=rwx,g=rx,o=rwx
+		assert_eq!(mask("o=u"), 0o020);
+		assert_eq!(mask("g+X"), 0o022);
+		assert!(symbolic_mode(b"u=rwz", 0o755).is_err());
+		assert!(symbolic_mode(b"q", 0o755).is_err());
+	}
+}
 
+#[cfg(test)]
+mod tests {
+	use super::logical;
 
+	#[test]
+	fn logical_paths_resolve_dot_and_dotdot_textually() {
+		assert_eq!(logical(b"/a/b", b"../c/./d"), "/a/c/d");
+		assert_eq!(logical(b"/a", b"/x/../y"), "/y");
+		assert_eq!(logical(b"/", b".."), "/");
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn logical_windows_paths_preserve_drive_and_share_roots() {
+		assert_eq!(logical(br"C:\work\app", br"..\src\.\module"), br"C:\work\src\module".as_slice());
+		assert_eq!(logical(br"C:\work\app", br"D:\other\..\target"), br"D:\target".as_slice());
+		assert_eq!(
+			logical(br"\\server\share\a", br"..\..\..\target"),
+			br"\\server\share\target".as_slice()
+		);
+		assert_eq!(logical(br"\\?\C:\work\a", br"..\target"), br"\\?\C:\work\target".as_slice());
+		assert_eq!(logical(b"virtual://dir", br"C:\work"), br"C:\work".as_slice());
+		assert_eq!(logical(b"virtual://dir", br"C:\work\..\target"), br"C:\target".as_slice());
+		assert_eq!(logical(b"virtual://dir", br"\\server\share\a"), br"\\server\share\a".as_slice());
+	}
+
+	#[test]
+	fn logical_url_paths_keep_their_root() {
+		assert_eq!(logical(b"/home", b"virtual://dir"), "virtual://dir");
+		assert_eq!(logical(b"virtual://dir", b"sub/./x"), "virtual://dir/sub/x");
+		assert_eq!(logical(b"virtual://dir", b"../../up"), "virtual://up");
+		assert_eq!(logical(b"virtual://", b".."), "virtual://");
+		assert_eq!(logical(b"virtual://dir", b"/tmp"), "/tmp");
+	}
+}

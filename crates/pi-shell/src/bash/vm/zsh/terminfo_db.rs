@@ -1747,4 +1747,139 @@ pub fn tputs(cap: &[u8]) -> Vec<u8> {
 	out
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	const SETAF: &[u8] = b"\x1b[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m";
+	const SGR: &[u8] = b"%?%p9%t\x1b(0%e\x1b(B%;\x1b[0%?%p6%t;1%;%?%p5%t;2%;%?%p2%t;4%;%?%p1%p3%|%t;7%;%?%p4%t;5%;%?%p7%t;8%;m";
+
+	/// Without a database (Windows) ZLE had no cursor motion and left every
+	/// edit on screen: the embedded entry must parse with what it needs.
+	#[test]
+	fn embedded_console_entry_has_cursor_motion() {
+		let info = parse(WINDOWS_CONSOLE_ENTRY).expect("parses");
+		assert_eq!(info.s("cub1"), Some(&b"\x08"[..]));
+		assert!(info.s("cup").is_some() && info.s("el").is_some());
+	}
+
+	#[test]
+	fn tparm_xterm_caps() {
+		let cup = b"\x1b[%i%p1%d;%p2%dH";
+		assert_eq!(tparm(cup, &[TParm::Num(5), TParm::Num(10)]), b"\x1b[6;11H");
+		assert_eq!(tparm(cup, &[TParm::Num(1)]), b"\x1b[2;1H");
+		assert_eq!(tparm(SETAF, &[TParm::Num(1)]), b"\x1b[31m");
+		assert_eq!(tparm(SETAF, &[TParm::Num(9)]), b"\x1b[91m");
+		assert_eq!(tparm(SETAF, &[TParm::Num(300)]), b"\x1b[38;5;300m");
+		let ms = b"\x1b]52;%p1%s;%p2%s\x07";
+		assert_eq!(tparm(ms, &[TParm::Num(0), TParm::Num(0)]), b"\x1b]52;;\x07");
+		assert_eq!(tparm(ms, &[TParm::Str(b"c"), TParm::Str(b"eA==")]), b"\x1b]52;c;eA==\x07");
+	}
+
+	#[test]
+	fn tparm_formats_and_ops() {
+		assert_eq!(
+			tparm(b"%p1%02d|%p1%:-4d|%p1%#x|%p1%X|%p1%o", &[TParm::Num(10)]),
+			b"10|10  |0xa|A|12"
+		);
+		assert_eq!(tparm(b"%'a'%c%{66}%c%p1%c", &[TParm::Num(0)]), b"aB\x80");
+		assert_eq!(
+			tparm(b"%p1%p2%m%d %p1%p2%/%d %p1%!%d %p1%~%d", &[TParm::Num(7), TParm::Num(3)]),
+			b"1 2 0 -8"
+		);
+		assert_eq!(tparm(b"%p1%Pa%ga%ga%+%d", &[TParm::Num(4)]), b"8");
+		assert_eq!(tparm(b"%?%p1%t1%e%p2%t2%e3%;", &[TParm::Num(0), TParm::Num(1)]), b"2");
+		assert_eq!(tparm(b"%?%p1%t1%e%p2%t2%e3%;", &[TParm::Num(0), TParm::Num(0)]), b"3");
+		assert_eq!(tparm(b"%p1%l%d", &[TParm::Str(b"abc")]), b"3");
+		assert_eq!(tparm(b"%p1%s%p1%l%d", &[TParm::Str(b"abc")]), b"abc3");
+		// The termcap hack: no `%p`, the parameters are pre-pushed.
+		assert_eq!(tparm(b"\x1b[%d;%dH", &[TParm::Num(3), TParm::Num(4)]), b"\x1b[3;4H");
+	}
+
+	#[test]
+	fn tgoto_styles() {
+		assert_eq!(tgoto(b"\x1b[%i%p1%d;%p2%dH", 4, 3), b"\x1b[4;5H");
+		assert_eq!(tgoto(b"\x1b[%i%d;%dH", 4, 3), b"\x1b[4;5H");
+		assert_eq!(tgoto(b"\x1b=%+ %+ ", 4, 3), b"\x1b=#$");
+		assert_eq!(tgoto(b"%r%2,%3", 4, 3), b"04,003");
+		assert_eq!(tgoto_bc(b"%.", 0, 0, Some(b"\x1bD")), b"\x01\x1bD");
+		assert_eq!(tgoto(b"%.", 0, 0), b"\x80");
+	}
+
+	#[test]
+	fn tputs_strips_padding() {
+		assert_eq!(tputs(b"\x1b[?5h$<100/>\x1b[?5l"), b"\x1b[?5h\x1b[?5l");
+		assert_eq!(tputs(b"a$<5*>b$<2.5>c"), b"abc");
+		assert_eq!(tputs(b"$x$<y>$<1"), b"$x$<y>$<1");
+	}
+
+	#[test]
+	fn trim_sgr0_xterm() {
+		let fix = trim_sgr0(b"\x1b(B\x1b[m", SGR, Some(b"\x1b(0"), Some(b"\x1b(B"));
+		assert_eq!(fix.as_deref(), Some(&b"\x1b[0m"[..]));
+	}
+
+	#[test]
+	fn tables_have_ncurses_sizes() {
+		assert_eq!(bool_names().count(), BOOLCOUNT);
+		assert_eq!(bool_codes().count(), BOOLCOUNT);
+		assert_eq!(num_names().count(), NUMCOUNT);
+		assert_eq!(num_codes().count(), NUMCOUNT);
+		assert_eq!(str_names().count(), STRCOUNT);
+		assert_eq!(str_codes().count(), STRCOUNT);
+	}
+
+	/// A legacy compiled entry: names, `am`, `cols#80`, `cub1=^H`,
+	/// `sgr0`, then the extended `AX` and `Ms`.
+	fn entry() -> Vec<u8> {
+		let mut b = Vec::new();
+		let short = |b: &mut Vec<u8>, v: i16| b.extend_from_slice(&v.to_le_bytes());
+		let names = b"t1|test\0";
+		let table = b"\x08\0\x1b[m\0";
+		for v in [MAGIC as i16, names.len() as i16, 2, 1, 40, table.len() as i16] {
+			short(&mut b, v);
+		}
+		b.extend_from_slice(names);
+		b.extend_from_slice(&[0, 1]);
+		short(&mut b, 80);
+		let mut offs = [-1i16; 40];
+		offs[14] = 0; // cub1
+		offs[39] = 2; // sgr0
+		for o in offs {
+			short(&mut b, o);
+		}
+		b.extend_from_slice(table);
+		// Extended: 1 bool, 0 nums, 1 string.
+		let ext_table = b"\x1b]52;%p1%s\x07\0AX\0Ms\0";
+		for v in [1, 0, 1, 3, ext_table.len() as i16] {
+			short(&mut b, v);
+		}
+		b.push(1);
+		b.push(0);
+		for o in [0i16, 0, 3] {
+			short(&mut b, o);
+		}
+		b.extend_from_slice(ext_table);
+		b
+	}
+
+	#[test]
+	fn parses_legacy_entry_with_extensions() {
+		let mut ti = parse(&entry()).expect("entry parses");
+		ti.setupterm();
+		ti.tgetent();
+		assert!(ti.flag("am"));
+		assert!(!ti.flag("bw"));
+		assert_eq!(ti.flag_known("AX"), Some(true));
+		assert_eq!(ti.flag_known("nope"), None);
+		assert_eq!(ti.num("cols"), Some(80));
+		assert_eq!(ti.num("lines"), Some(24));
+		assert_eq!(ti.tc_num("co"), Some(80));
+		assert_eq!(ti.str("Ms"), Some(&b"\x1b]52;%p1%s\x07"[..]));
+		assert_eq!(ti.tc_str("Ms").as_deref(), Some(&b"\x1b]52;%p1%s\x07"[..]));
+		assert!(ti.tc_flag("AX"));
+		assert!(ti.tc_flag("bs"));
+		assert_eq!(ti.tc_str("bc"), None);
+		assert_eq!(ti.tc_str("me").as_deref(), Some(&b"\x1b[m"[..]));
+	}
+}

@@ -196,4 +196,271 @@ fn preceding_by_pos(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    const SHERLOCK: &'static str = "\
+For the Doctor Watsons of this world, as opposed to the Sherlock
+Holmeses, success in the province of detective work must always
+be, to a very large extent, the result of luck. Sherlock Holmes
+can extract a clew from a wisp of straw or a flake of cigar ash;
+but Doctor Watson has to have it taken out for him and dusted,
+and exhibited clearly, with a label attached.\
+";
+
+    fn m(start: usize, end: usize) -> Match {
+        Match::new(start, end)
+    }
+
+    fn lines(text: &str) -> Vec<&str> {
+        let mut results = vec![];
+        let mut it = LineStep::new(b'\n', 0, text.len());
+        while let Some(m) = it.next_match(text.as_bytes()) {
+            results.push(&text[m]);
+        }
+        results
+    }
+
+    fn line_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
+        let mut results = vec![];
+        let mut it = LineStep::new(b'\n', 0, text.len());
+        while let Some(m) = it.next_match(text.as_bytes()) {
+            results.push(m.start()..m.end());
+        }
+        results
+    }
+
+    fn prev(text: &str, pos: usize, count: usize) -> usize {
+        preceding_by_pos(text.as_bytes(), pos, b'\n', count)
+    }
+
+    fn loc(text: &str, start: usize, end: usize) -> Match {
+        locate(text.as_bytes(), b'\n', Match::new(start, end))
+    }
+
+    #[test]
+    fn line_count() {
+        assert_eq!(0, count(b"", b'\n'));
+        assert_eq!(1, count(b"\n", b'\n'));
+        assert_eq!(2, count(b"\n\n", b'\n'));
+        assert_eq!(2, count(b"a\nb\nc", b'\n'));
+    }
+
+    #[test]
+    fn line_locate() {
+        let t = SHERLOCK;
+        let lines = line_ranges(t);
+
+        assert_eq!(
+            loc(t, lines[0].start, lines[0].end),
+            m(lines[0].start, lines[0].end)
+        );
+        assert_eq!(
+            loc(t, lines[0].start + 1, lines[0].end),
+            m(lines[0].start, lines[0].end)
+        );
+        assert_eq!(
+            loc(t, lines[0].end - 1, lines[0].end),
+            m(lines[0].start, lines[0].end)
+        );
+        assert_eq!(
+            loc(t, lines[0].end, lines[0].end),
+            m(lines[1].start, lines[1].end)
+        );
+
+        assert_eq!(
+            loc(t, lines[5].start, lines[5].end),
+            m(lines[5].start, lines[5].end)
+        );
+        assert_eq!(
+            loc(t, lines[5].start + 1, lines[5].end),
+            m(lines[5].start, lines[5].end)
+        );
+        assert_eq!(
+            loc(t, lines[5].end - 1, lines[5].end),
+            m(lines[5].start, lines[5].end)
+        );
+        assert_eq!(
+            loc(t, lines[5].end, lines[5].end),
+            m(lines[5].start, lines[5].end)
+        );
+    }
+
+    #[test]
+    fn line_locate_weird() {
+        assert_eq!(loc("", 0, 0), m(0, 0));
+
+        assert_eq!(loc("\n", 0, 1), m(0, 1));
+        assert_eq!(loc("\n", 1, 1), m(1, 1));
+
+        assert_eq!(loc("\n\n", 0, 0), m(0, 1));
+        assert_eq!(loc("\n\n", 0, 1), m(0, 1));
+        assert_eq!(loc("\n\n", 1, 1), m(1, 2));
+        assert_eq!(loc("\n\n", 1, 2), m(1, 2));
+        assert_eq!(loc("\n\n", 2, 2), m(2, 2));
+
+        assert_eq!(loc("a\nb\nc", 0, 1), m(0, 2));
+        assert_eq!(loc("a\nb\nc", 1, 2), m(0, 2));
+        assert_eq!(loc("a\nb\nc", 2, 3), m(2, 4));
+        assert_eq!(loc("a\nb\nc", 3, 4), m(2, 4));
+        assert_eq!(loc("a\nb\nc", 4, 5), m(4, 5));
+        assert_eq!(loc("a\nb\nc", 5, 5), m(4, 5));
+    }
+
+    #[test]
+    fn line_iter() {
+        assert_eq!(lines("abc"), vec!["abc"]);
+
+        assert_eq!(lines("abc\n"), vec!["abc\n"]);
+        assert_eq!(lines("abc\nxyz"), vec!["abc\n", "xyz"]);
+        assert_eq!(lines("abc\nxyz\n"), vec!["abc\n", "xyz\n"]);
+
+        assert_eq!(lines("abc\n\n"), vec!["abc\n", "\n"]);
+        assert_eq!(lines("abc\n\n\n"), vec!["abc\n", "\n", "\n"]);
+        assert_eq!(lines("abc\n\nxyz"), vec!["abc\n", "\n", "xyz"]);
+        assert_eq!(lines("abc\n\nxyz\n"), vec!["abc\n", "\n", "xyz\n"]);
+        assert_eq!(lines("abc\nxyz\n\n"), vec!["abc\n", "xyz\n", "\n"]);
+
+        assert_eq!(lines("\n"), vec!["\n"]);
+        assert_eq!(lines(""), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn line_iter_empty() {
+        let mut it = LineStep::new(b'\n', 0, 0);
+        assert_eq!(it.next(b"abc"), None);
+    }
+
+    #[test]
+    fn preceding_lines_doc() {
+        // These are the examples mentions in the documentation of `preceding`.
+        let bytes = b"abc\nxyz\n";
+        assert_eq!(4, preceding_by_pos(bytes, 7, b'\n', 0));
+        assert_eq!(4, preceding_by_pos(bytes, 8, b'\n', 0));
+        assert_eq!(0, preceding_by_pos(bytes, 7, b'\n', 1));
+        assert_eq!(0, preceding_by_pos(bytes, 8, b'\n', 1));
+    }
+
+    #[test]
+    fn preceding_lines_sherlock() {
+        let t = SHERLOCK;
+        let lines = line_ranges(t);
+
+        // The following tests check the count == 0 case, i.e., finding the
+        // beginning of the line containing the given position.
+        assert_eq!(0, prev(t, 0, 0));
+        assert_eq!(0, prev(t, 1, 0));
+        // The line terminator is addressed by `end-1` and terminates the line
+        // it is part of.
+        assert_eq!(0, prev(t, lines[0].end - 1, 0));
+        assert_eq!(lines[0].start, prev(t, lines[0].end, 0));
+        // The end position of line addresses the byte immediately following a
+        // line terminator, which puts it on the following line.
+        assert_eq!(lines[1].start, prev(t, lines[0].end + 1, 0));
+
+        // Now tests for count > 0.
+        assert_eq!(0, prev(t, 0, 1));
+        assert_eq!(0, prev(t, 0, 2));
+        assert_eq!(0, prev(t, 1, 1));
+        assert_eq!(0, prev(t, 1, 2));
+        assert_eq!(0, prev(t, lines[0].end - 1, 1));
+        assert_eq!(0, prev(t, lines[0].end - 1, 2));
+        assert_eq!(0, prev(t, lines[0].end, 1));
+        assert_eq!(0, prev(t, lines[0].end, 2));
+        assert_eq!(lines[3].start, prev(t, lines[4].end - 1, 1));
+        assert_eq!(lines[3].start, prev(t, lines[4].end, 1));
+        assert_eq!(lines[4].start, prev(t, lines[4].end + 1, 1));
+
+        // The last line has no line terminator.
+        assert_eq!(lines[5].start, prev(t, lines[5].end, 0));
+        assert_eq!(lines[5].start, prev(t, lines[5].end - 1, 0));
+        assert_eq!(lines[4].start, prev(t, lines[5].end, 1));
+        assert_eq!(lines[0].start, prev(t, lines[5].end, 5));
+    }
+
+    #[test]
+    fn preceding_lines_short() {
+        let t = "a\nb\nc\nd\ne\nf\n";
+        let lines = line_ranges(t);
+        assert_eq!(12, t.len());
+
+        assert_eq!(lines[5].start, prev(t, lines[5].end, 0));
+        assert_eq!(lines[4].start, prev(t, lines[5].end, 1));
+        assert_eq!(lines[3].start, prev(t, lines[5].end, 2));
+        assert_eq!(lines[2].start, prev(t, lines[5].end, 3));
+        assert_eq!(lines[1].start, prev(t, lines[5].end, 4));
+        assert_eq!(lines[0].start, prev(t, lines[5].end, 5));
+        assert_eq!(lines[0].start, prev(t, lines[5].end, 6));
+
+        assert_eq!(lines[5].start, prev(t, lines[5].end - 1, 0));
+        assert_eq!(lines[4].start, prev(t, lines[5].end - 1, 1));
+        assert_eq!(lines[3].start, prev(t, lines[5].end - 1, 2));
+        assert_eq!(lines[2].start, prev(t, lines[5].end - 1, 3));
+        assert_eq!(lines[1].start, prev(t, lines[5].end - 1, 4));
+        assert_eq!(lines[0].start, prev(t, lines[5].end - 1, 5));
+        assert_eq!(lines[0].start, prev(t, lines[5].end - 1, 6));
+
+        assert_eq!(lines[4].start, prev(t, lines[5].start, 0));
+        assert_eq!(lines[3].start, prev(t, lines[5].start, 1));
+        assert_eq!(lines[2].start, prev(t, lines[5].start, 2));
+        assert_eq!(lines[1].start, prev(t, lines[5].start, 3));
+        assert_eq!(lines[0].start, prev(t, lines[5].start, 4));
+        assert_eq!(lines[0].start, prev(t, lines[5].start, 5));
+
+        assert_eq!(lines[3].start, prev(t, lines[4].end - 1, 1));
+        assert_eq!(lines[2].start, prev(t, lines[4].start, 1));
+
+        assert_eq!(lines[2].start, prev(t, lines[3].end - 1, 1));
+        assert_eq!(lines[1].start, prev(t, lines[3].start, 1));
+
+        assert_eq!(lines[1].start, prev(t, lines[2].end - 1, 1));
+        assert_eq!(lines[0].start, prev(t, lines[2].start, 1));
+
+        assert_eq!(lines[0].start, prev(t, lines[1].end - 1, 1));
+        assert_eq!(lines[0].start, prev(t, lines[1].start, 1));
+
+        assert_eq!(lines[0].start, prev(t, lines[0].end - 1, 1));
+        assert_eq!(lines[0].start, prev(t, lines[0].start, 1));
+    }
+
+    #[test]
+    fn preceding_lines_empty1() {
+        let t = "\n\n\nd\ne\nf\n";
+        let lines = line_ranges(t);
+        assert_eq!(9, t.len());
+
+        assert_eq!(lines[0].start, prev(t, lines[0].end, 0));
+        assert_eq!(lines[0].start, prev(t, lines[0].end, 1));
+        assert_eq!(lines[1].start, prev(t, lines[1].end, 0));
+        assert_eq!(lines[0].start, prev(t, lines[1].end, 1));
+
+        assert_eq!(lines[5].start, prev(t, lines[5].end, 0));
+        assert_eq!(lines[4].start, prev(t, lines[5].end, 1));
+        assert_eq!(lines[3].start, prev(t, lines[5].end, 2));
+        assert_eq!(lines[2].start, prev(t, lines[5].end, 3));
+        assert_eq!(lines[1].start, prev(t, lines[5].end, 4));
+        assert_eq!(lines[0].start, prev(t, lines[5].end, 5));
+        assert_eq!(lines[0].start, prev(t, lines[5].end, 6));
+    }
+
+    #[test]
+    fn preceding_lines_empty2() {
+        let t = "a\n\n\nd\ne\nf\n";
+        let lines = line_ranges(t);
+        assert_eq!(10, t.len());
+
+        assert_eq!(lines[0].start, prev(t, lines[0].end, 0));
+        assert_eq!(lines[0].start, prev(t, lines[0].end, 1));
+        assert_eq!(lines[1].start, prev(t, lines[1].end, 0));
+        assert_eq!(lines[0].start, prev(t, lines[1].end, 1));
+
+        assert_eq!(lines[5].start, prev(t, lines[5].end, 0));
+        assert_eq!(lines[4].start, prev(t, lines[5].end, 1));
+        assert_eq!(lines[3].start, prev(t, lines[5].end, 2));
+        assert_eq!(lines[2].start, prev(t, lines[5].end, 3));
+        assert_eq!(lines[1].start, prev(t, lines[5].end, 4));
+        assert_eq!(lines[0].start, prev(t, lines[5].end, 5));
+        assert_eq!(lines[0].start, prev(t, lines[5].end, 6));
+    }
+}

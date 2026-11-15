@@ -5539,4 +5539,29 @@ fn run_func_trap(
 	true
 }
 
+#[cfg(test)]
+mod tests {
+	use super::{BASH_TIMEFORMAT, POSIX_TIMEFORMAT, time_report};
 
+	// Golden: bash 5.3.20 `time -p` and the default format.
+	#[test]
+	fn time_p_is_posix_format() {
+		let t = [1_234_000_000, 5_000_000, 0];
+		assert_eq!(time_report(POSIX_TIMEFORMAT, t).unwrap(), b"real 1.23\nuser 0.01\nsys 0.00\n");
+		let t = [61_500_000_000, 0, 1_000_000];
+		assert_eq!(
+			time_report(BASH_TIMEFORMAT, t).unwrap(),
+			b"\nreal\t1m1.500s\nuser\t0m0.000s\nsys\t0m0.001s\n"
+		);
+	}
+
+	// bash `print_formatted_time`: precision 0 has no point, `%%` is a
+	// percent sign, `%P` the CPU share, an unknown letter is an error.
+	#[test]
+	fn timeformat_precision_percent_and_errors() {
+		let t = [2_000_000_000, 500_000_000, 500_000_000];
+		assert_eq!(time_report(b"%0R %%%P %1lU", t).unwrap(), b"2 %50.00 0m0.5s\n");
+		assert_eq!(time_report(b"%3x", t), Err(b'x'));
+		assert_eq!(time_report(b"", t).unwrap(), b"\n");
+	}
+}

@@ -1,6 +1,8 @@
 //! Raw and Pseudo share canonical syntax, source identities and runtime
 //! observations.
-
+#[cfg(test)]
+#[path = "semantic_tests.rs"]
+mod semantic_tests;
 use std::{
 	collections::{HashMap, HashSet, hash_map::Entry},
 	fmt::{NumBuffer, Write},

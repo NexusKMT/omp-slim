@@ -198,4 +198,23 @@ pub fn get_work_profile(last_seconds: f64) -> WorkProfile {
 	WorkProfile { folded, summary, svg, total_ms, sample_count: samples.len() as u32 }
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	/// Async tasks hold a guard across `.await`, so it can drop on another
+	/// worker thread; the sample must still count toward its region.
+	#[test]
+	fn guard_dropped_on_another_thread_records_its_region() {
+		let guard = profile_region("prof-test-moved");
+		std::thread::spawn(move || drop(guard)).join().unwrap();
+		let samples = PROFILE_BUFFER.lock().get_since(0);
+		let folded = generate_folded(&samples);
+		assert!(
+			folded
+				.lines()
+				.any(|line| line.starts_with("prof-test-moved ")),
+			"{folded}"
+		);
+	}
+}

@@ -778,6 +778,292 @@ fn await_pty_output_drain(
 	}
 }
 
+#[cfg(test)]
+mod reader_queue_tests {
+	use std::{
+		sync::{
+			Arc,
+			atomic::{AtomicBool, Ordering},
+		},
+		time::{Duration, Instant},
+	};
 
+	use super::{
+		BRIDGE_QUEUE_CHUNKS, POST_CANCEL_DRAIN_TIMEOUT, ReaderEvent, STUCK_SLAVE_IDLE,
+		await_pty_output_drain,
+	};
 
+	#[test]
+	fn drain_waits_for_slow_js_after_reader_eof() {
+		let (pump_tx, pump_rx) = flume::bounded(1);
+		let reader = std::thread::spawn(|| {});
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
+		let in_js = AtomicBool::new(false);
+		std::thread::spawn(move || {
+			std::thread::sleep(Duration::from_millis(2500));
+			let _ = pump_tx.send(());
+		});
+		let start = Instant::now();
+		await_pty_output_drain(pump_rx, reader, queued, &in_js, false, || {});
+		assert!(
+			start.elapsed() >= Duration::from_millis(2400),
+			"must not time out a slow callback after reader EOF",
+		);
+	}
 
+	#[test]
+	fn drain_drops_sender_clone_after_reader_eof_so_pump_unblocks() {
+		let (reader_tx, reader_rx) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
+		let queued = reader_tx.clone();
+		drop(reader_tx);
+		let (pump_tx, pump_rx) = flume::bounded(1);
+		std::thread::spawn(move || {
+			let _ = reader_rx.recv();
+			let _ = pump_tx.send(());
+		});
+		let reader = std::thread::spawn(|| {});
+		let deadline = Instant::now() + Duration::from_secs(1);
+		while !reader.is_finished() && Instant::now() < deadline {
+			std::thread::sleep(Duration::from_millis(1));
+		}
+		assert!(reader.is_finished(), "reader fixture must have exited");
+		let in_js = AtomicBool::new(false);
+		let start = Instant::now();
+		await_pty_output_drain(pump_rx, reader, queued, &in_js, false, || {});
+		assert!(
+			start.elapsed() < STUCK_SLAVE_IDLE,
+			"holding the sender clone after EOF parks the pump until idle timeout",
+		);
+	}
+
+	#[test]
+	fn drain_gives_up_only_on_open_slave_idle() {
+		let (_pump_tx, pump_rx) = flume::bounded::<()>(1);
+		let reader = std::thread::spawn(|| {
+			std::thread::park();
+		});
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
+		let in_js = AtomicBool::new(false);
+		let stopped = AtomicBool::new(false);
+		let start = Instant::now();
+		await_pty_output_drain(pump_rx, reader, queued, &in_js, false, || {
+			stopped.store(true, Ordering::Release);
+		});
+		let elapsed = start.elapsed();
+		assert!(elapsed >= STUCK_SLAVE_IDLE);
+		assert!(elapsed < STUCK_SLAVE_IDLE + Duration::from_secs(2));
+		assert!(stopped.load(Ordering::Acquire), "open slave must stop the pump");
+	}
+
+	#[test]
+	fn drain_does_not_treat_queued_backpressure_as_stuck_slave() {
+		let (pump_tx, pump_rx) = flume::bounded(1);
+		let reader = std::thread::spawn(std::thread::park);
+		let (queued, _rx) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
+		queued
+			.send(ReaderEvent::Chunk("x".into()))
+			.expect("queue accepts a chunk");
+		let in_js = AtomicBool::new(false);
+		std::thread::spawn(move || {
+			std::thread::sleep(Duration::from_millis(2500));
+			let _ = pump_tx.send(());
+		});
+		let start = Instant::now();
+		await_pty_output_drain(pump_rx, reader, queued, &in_js, false, || {});
+		assert!(
+			start.elapsed() >= Duration::from_millis(2400),
+			"queued output is backpressure, not a stuck slave",
+		);
+	}
+
+	#[test]
+	fn drain_does_not_treat_in_flight_callback_as_stuck_slave() {
+		let (pump_tx, pump_rx) = flume::bounded(1);
+		let reader = std::thread::spawn(std::thread::park);
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
+		let in_js = Arc::new(AtomicBool::new(true));
+		let in_js_flag = Arc::clone(&in_js);
+		std::thread::spawn(move || {
+			std::thread::sleep(Duration::from_millis(2500));
+			in_js_flag.store(false, Ordering::Release);
+			let _ = pump_tx.send(());
+		});
+		let start = Instant::now();
+		await_pty_output_drain(pump_rx, reader, queued, &in_js, false, || {});
+		assert!(
+			start.elapsed() >= Duration::from_millis(2400),
+			"an in-flight on_chunk is slow JS, not a stuck slave",
+		);
+	}
+
+	#[test]
+	fn drain_cancel_does_not_wait_for_slow_js() {
+		let (_pump_tx, pump_rx) = flume::bounded::<()>(1);
+		let reader = std::thread::spawn(std::thread::park);
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
+		let in_js = AtomicBool::new(true);
+		let stopped = AtomicBool::new(false);
+		let start = Instant::now();
+		await_pty_output_drain(pump_rx, reader, queued, &in_js, true, || {
+			stopped.store(true, Ordering::Release);
+		});
+		assert!(
+			start.elapsed() < Duration::from_secs(2),
+			"cancel must not pin the promise on a stalled callback",
+		);
+		assert!(start.elapsed() >= POST_CANCEL_DRAIN_TIMEOUT);
+		assert!(stopped.load(Ordering::Acquire), "cancel must stop the pump");
+	}
+
+	#[test]
+	fn drain_cancel_returns_once_pump_observes_stop() {
+		let (pump_tx, pump_rx) = flume::bounded::<()>(1);
+		let reader = std::thread::spawn(std::thread::park);
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
+		let in_js = AtomicBool::new(true);
+		let start = Instant::now();
+		await_pty_output_drain(pump_rx, reader, queued, &in_js, true, move || {
+			drop(pump_tx);
+		});
+		assert!(
+			start.elapsed() < POST_CANCEL_DRAIN_TIMEOUT,
+			"after stop disconnects the pump, cancel must not sit out the full drain timeout",
+		);
+	}
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod zombie_repro_tests {
+	//! Reproduces the leaked-zombie race fixed above: a PTY session cancelled
+	//! (timed out) shortly after spawn used to abandon its child unreaped, and
+	//! `std::process::Child` never waits on `Drop`, so the process stuck around
+	//! as a permanent zombie.
+	//!
+	//! `#[ignore]`d: it saturates every core to provoke the scheduler races, so
+	//! it must run alone. `cargo nextest run --run-ignored ignored-only
+	//! --test-threads=1 -E 'test(zombie_repro_tests)'`
+
+	use std::{
+		collections::HashSet,
+		sync::{
+			Arc,
+			atomic::{AtomicBool, Ordering},
+		},
+		thread,
+	};
+
+	use super::*;
+
+	const STORM_CHILD_COMM: &str = "sleep";
+
+	/// Zombie PIDs parented to this test process and spawned as
+	/// `STORM_CHILD_COMM`. The comm filter keeps a sibling test's
+	/// exited-before-wait child from counting as a leak here.
+	fn zombie_child_pids() -> HashSet<u32> {
+		let my_pid = std::process::id();
+		let mut pids = HashSet::new();
+		let Ok(entries) = std::fs::read_dir("/proc") else {
+			return pids;
+		};
+		for entry in entries.flatten() {
+			let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+				continue;
+			};
+			let Ok(pid) = name.parse::<u32>() else {
+				continue;
+			};
+			let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+				continue;
+			};
+			// `/proc/[pid]/stat` is `pid (comm) state ppid ...`; comm can itself
+			// contain spaces and parens, so bound it by the first `(` and last
+			// `)`.
+			let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) else {
+				continue;
+			};
+			if stat.get(open + 1..close) != Some(STORM_CHILD_COMM) {
+				continue;
+			}
+			let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
+			let (Some(state), Some(ppid)) = (fields.first(), fields.get(1)) else {
+				continue;
+			};
+			if *state == "Z" && ppid.parse::<u32>() == Ok(my_pid) {
+				pids.insert(pid);
+			}
+		}
+		pids
+	}
+
+	struct StormOutcome {
+		leaked:  usize,
+		spawned: usize,
+	}
+
+	/// Run `iterations` PTY sessions cancelled ~1ms after spawn while every core
+	/// is kept contended.
+	fn run_cancel_storm(iterations: usize) -> StormOutcome {
+		let before = zombie_child_pids();
+		// `run_pty_sync` spawns its pump and cancel forwarder on the ambient
+		// Tokio runtime (in production, the napi one it runs under).
+		let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+		let _runtime = runtime.enter();
+
+		let stop = Arc::new(AtomicBool::new(false));
+		let busy: Vec<_> = (0..thread::available_parallelism().map_or(8, |n| n.get()))
+			.map(|_| {
+				let stop = Arc::clone(&stop);
+				thread::spawn(move || {
+					while !stop.load(Ordering::Relaxed) {
+						std::hint::spin_loop();
+					}
+				})
+			})
+			.collect();
+
+		let mut spawned = 0;
+		for _ in 0..iterations {
+			let (tx, rx) = flume::unbounded();
+			let ct = task::CancelToken::new(Some(1), None);
+			let config = PtyRunConfig {
+				command: PtyCommand::Argv {
+					application: STORM_CHILD_COMM.to_string(),
+					args:        vec!["5".to_string()],
+				},
+				cwd:     None,
+				env:     None,
+				cols:    80,
+				rows:    24,
+			};
+			// Pre-spawn heartbeats bail with `Err`, so `Ok` means this iteration
+			// reached the post-spawn cancellation path.
+			if run_pty_sync(config, None, None, tx, rx, ct).is_ok() {
+				spawned += 1;
+			}
+		}
+
+		stop.store(true, Ordering::Relaxed);
+		for handle in busy {
+			let _ = handle.join();
+		}
+		// Let a slow reap land so only truly abandoned processes are counted.
+		thread::sleep(Duration::from_millis(200));
+		let leaked = zombie_child_pids().difference(&before).count();
+		StormOutcome { leaked, spawned }
+	}
+
+	#[test]
+	#[ignore]
+	fn cancelled_pty_sessions_do_not_leak_zombies() {
+		const ITERATIONS: usize = 60;
+		let StormOutcome { leaked, spawned } = run_cancel_storm(ITERATIONS);
+		assert_eq!(leaked, 0, "cancelled PTY sessions leaked {leaked} zombie process(es)");
+		// Checked second so a real leak reports as one: a clean run only proves
+		// something if children were actually spawned to begin with.
+		assert!(
+			spawned >= ITERATIONS / 3,
+			"only {spawned}/{ITERATIONS} iterations reached the post-spawn cancellation path; the \
+			 storm is not exercising the reap"
+		);
+	}
+}

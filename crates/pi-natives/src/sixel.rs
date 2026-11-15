@@ -302,4 +302,234 @@ fn decode_image_from_bytes(bytes: &[u8]) -> Result<DynamicImage> {
 		.map_err(|e| Error::from_reason(format!("Failed to decode image: {e}")))
 }
 
+#[cfg(test)]
+mod tests {
+	use image::{Rgba, RgbaImage};
 
+	use super::*;
+
+	/// PNG of 1px black/white columns, which any resample turns gray.
+	fn stripes_png(width: u32, height: u32) -> (RgbaImage, Vec<u8>) {
+		let image = RgbaImage::from_fn(width, height, |x, _| {
+			let v = if x % 2 == 0 { 255 } else { 0 };
+			image::Rgba([v, v, v, 255])
+		});
+		let mut png = Vec::new();
+		DynamicImage::ImageRgba8(image.clone())
+			.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+			.expect("PNG should encode");
+		(image, png)
+	}
+
+	fn round_trip(png: &[u8], width: u32, height: u32) -> RgbaImage {
+		let sixel = encode_image(png, width, height, 0x000000).expect("SIXEL should encode");
+		let decoded = decode_sixel(sixel.as_bytes()).expect("SIXEL should decode");
+		image::load_from_memory(&decoded)
+			.expect("decoded SIXEL should be PNG")
+			.to_rgba8()
+	}
+
+	#[test]
+	fn multicolor_and_transparency_survive_roundtrip() {
+		let colors = [
+			Rgba([238, 17, 31, 255]),
+			Rgba([24, 213, 71, 255]),
+			Rgba([43, 61, 229, 255]),
+			Rgba([173, 92, 48, 255]),
+			Rgba([255, 0, 255, 0]),
+		];
+		let source = RgbaImage::from_fn(10, 12, |x, y| colors[((x + y) % 5) as usize]);
+		let mut png = Vec::new();
+		DynamicImage::ImageRgba8(source.clone())
+			.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+			.unwrap();
+		let encoded = encode_image(&png, 10, 12, 0x000000).unwrap();
+		assert!(encoded.starts_with("\x1bP9;1;0q\"1;1;10;12#0;2;"));
+		assert!(encoded.ends_with("\x1b\\"));
+		let decoded_png = decode_sixel(encoded.as_bytes()).unwrap();
+		let decoded = image::load_from_memory(&decoded_png).unwrap().into_rgba8();
+		assert_eq!(decoded.dimensions(), source.dimensions());
+		for (actual, expected) in decoded.pixels().zip(source.pixels()) {
+			assert_eq!(actual[3], expected[3]);
+			if expected[3] != 0 {
+				for channel in 0..3 {
+					assert!(actual[channel].abs_diff(expected[channel]) <= 2);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn quantizes_more_than_256_colors_and_preserves_transparent_holes() {
+		let source = RgbaImage::from_fn(64, 12, |x, y| {
+			Rgba([
+				(x * 4) as u8,
+				(y * 23) as u8,
+				((x * 13 + y * 7) % 256) as u8,
+				if x == 0 { 0 } else { 255 },
+			])
+		});
+		let encoded = codec::encode(source.as_raw(), 64, 12);
+		assert_eq!(encoded.matches(";2;").count(), 256);
+		let decoded_png = decode_sixel(encoded.as_bytes()).unwrap();
+		let decoded = image::load_from_memory(&decoded_png).unwrap().into_rgba8();
+		assert_eq!(decoded.dimensions(), source.dimensions());
+		let mut squared_error = 0_u64;
+		let mut channels = 0;
+		for (actual, expected) in decoded.pixels().zip(source.pixels()) {
+			assert_eq!(actual[3], expected[3]);
+			if expected[3] != 0 {
+				for channel in 0..3 {
+					let error = i32::from(actual[channel]) - i32::from(expected[channel]);
+					squared_error += (error * error) as u64;
+					channels += 1;
+				}
+			}
+		}
+		assert!(squared_error / channels < 32 * 32, "palette error exceeded tolerance");
+	}
+
+	#[test]
+	fn decodes_c1_hls_palette_changes_repeats_and_transparency() {
+		let png = decode_sixel(b"\x90;1q\"1;1;4;6#3;1;120;50;100!3~?-$#3;2;0;100;0!4~\x9c").unwrap();
+		let decoded = image::load_from_memory(&png).unwrap().into_rgba8();
+		assert_eq!(decoded.dimensions(), (4, 12));
+		assert_eq!(decoded.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+		assert_eq!(decoded.get_pixel(3, 0), &Rgba([0, 0, 0, 0]));
+		assert_eq!(decoded.get_pixel(3, 11), &Rgba([0, 255, 0, 255]));
+	}
+
+	#[test]
+	fn crops_partial_band_without_resampling() {
+		// A raster padded to 9x11 cells of 10x20: 220 rows end in a partial band.
+		let (source, png) = stripes_png(90, 220);
+		let shown = round_trip(&png, 90, 220);
+		assert_eq!(shown.dimensions(), (90, 216));
+		for (x, y, pixel) in shown.enumerate_pixels() {
+			assert_eq!(pixel, source.get_pixel(x, y), "pixel ({x}, {y}) was resampled");
+		}
+	}
+
+	#[test]
+	fn resized_fractional_edges_keep_coverage_without_hidden_color_bleed() {
+		// A fractional-alpha source column next to transparency is the feathered
+		// edge a straight-alpha resize mishandles: it double-darkens the coverage
+		// and lets the hidden color bleed into it. Premultiplied Lanczos must
+		// land on the same coverage regardless of what the a=0 column hides.
+		// Keep foreground channels below 255: white could hide color bleed
+		// because the final min(foreground, alpha) clamp clips it back to the
+		// expected coverage. This colored edge must retain its channel ratios.
+		for hidden in [Rgba([0, 0, 0, 0]), Rgba([255, 0, 0, 0])] {
+			let source = RgbaImage::from_fn(3, 6, |x, _| match x {
+				0 => Rgba([64, 128, 192, 255]),
+				1 => Rgba([64, 128, 192, 128]),
+				_ => hidden,
+			});
+			let mut png = Vec::new();
+			DynamicImage::ImageRgba8(source)
+				.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+				.unwrap();
+
+			for (background, expected) in [(0x000000, [32_u8, 64, 96]), (0xffffff, [159, 191, 223])] {
+				let encoded = encode_image(&png, 1, 6, background).unwrap();
+				let decoded_png = decode_sixel(encoded.as_bytes()).unwrap();
+				let decoded = image::load_from_memory(&decoded_png).unwrap().into_rgba8();
+				assert_eq!(decoded.dimensions(), (1, 6));
+				for pixel in decoded.pixels() {
+					assert_eq!(pixel[3], 255, "fractional coverage must not become a hole");
+					for (channel, &want) in pixel.0[..3].iter().zip(expected.iter()) {
+						assert!(
+							channel.abs_diff(want) <= 2,
+							"hidden={hidden:?}, background={background:06x}, actual={pixel:?}, \
+							 expected={expected:?}"
+						);
+					}
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn keeps_an_image_shorter_than_one_band() {
+		let (_, png) = stripes_png(8, 4);
+		assert_eq!(round_trip(&png, 8, 4).height(), 6);
+	}
+
+	#[test]
+	fn resized_transparent_edges_keep_coverage_without_hidden_color_bleed() {
+		for hidden in [Rgba([0, 0, 0, 0]), Rgba([255, 0, 0, 0])] {
+			let source = RgbaImage::from_fn(2, 6, |x, _| {
+				if x == 0 {
+					Rgba([255, 255, 255, 255])
+				} else {
+					hidden
+				}
+			});
+			let mut png = Vec::new();
+			DynamicImage::ImageRgba8(source)
+				.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+				.unwrap();
+
+			for (background, expected) in [(0x000000, 128_u8), (0xffffff, 255_u8)] {
+				let encoded = encode_image(&png, 1, 6, background).unwrap();
+				let decoded_png = decode_sixel(encoded.as_bytes()).unwrap();
+				let decoded = image::load_from_memory(&decoded_png).unwrap().into_rgba8();
+				assert_eq!(decoded.dimensions(), (1, 6));
+				for pixel in decoded.pixels() {
+					assert_eq!(pixel[3], 255, "resized coverage must remain visible");
+					for channel in &pixel.0[..3] {
+						assert!(
+							channel.abs_diff(expected) <= 2,
+							"hidden={hidden:?}, background={background:06x}, actual={pixel:?}, \
+							 expected={expected}"
+						);
+					}
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn fractional_alpha_roundtrips_over_terminal_backgrounds() {
+		for source_alpha in [0, 1, 127, 128, 254, 255] {
+			let input = Rgba([231, 53, 129, source_alpha]);
+			// One visible color isolates composition from lossy palette merging.
+			let source = RgbaImage::from_pixel(6, 6, input);
+			let mut png = Vec::new();
+			DynamicImage::ImageRgba8(source)
+				.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+				.unwrap();
+
+			for background_rgb in [0x000000, 0x182c40, 0xffffff] {
+				for (width, height) in [(6, 6), (12, 6)] {
+					let encoded = encode_image(&png, width, height, background_rgb).unwrap();
+					let decoded_png = decode_sixel(encoded.as_bytes()).unwrap();
+					let decoded = image::load_from_memory(&decoded_png).unwrap().into_rgba8();
+					assert_eq!(decoded.dimensions(), (width, height));
+
+					for actual in decoded.pixels() {
+						if source_alpha == 0 {
+							assert_eq!(actual[3], 0, "fully transparent pixels must stay transparent");
+							continue;
+						}
+						assert_eq!(actual[3], 255, "fractional coverage must not become a hole");
+						for channel in 0..3 {
+							let background = (background_rgb >> (16 - channel * 8)) & 0xff;
+							let alpha = u32::from(source_alpha);
+							let expected =
+								((u32::from(input[channel]) * alpha + background * (255 - alpha) + 127)
+									/ 255) as u8;
+							// SIXEL palette channels use integer percentages, allowing
+							// up to two byte levels of roundtrip quantization error.
+							assert!(
+								actual[channel].abs_diff(expected) <= 2,
+								"background={background_rgb:06x}, size={width}x{height}, input={input:?}, \
+								 actual={actual:?}, channel={channel}, expected={expected}"
+							);
+						}
+					}
+				}
+			}
+		}
+	}
+}

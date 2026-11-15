@@ -519,4 +519,57 @@ impl ZshOpts {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use strum::IntoEnumIterator;
 
+	use super::*;
+
+	#[test]
+	fn count_and_bitset_cover_every_option() {
+		assert_eq!(ZshOpt::iter().count(), ZshOpt::COUNT);
+		assert_eq!(ZshOpt::iter().next_back().map(|o| o as usize), Some(ZshOpt::COUNT - 1));
+	}
+
+	#[test]
+	fn lookup_follows_optlookup() {
+		assert_eq!(ZshOpt::lookup(b"EXTENDED_GLOB"), Some((ZshOpt::Extendedglob, false)));
+		assert_eq!(ZshOpt::lookup(b"no_match"), Some((ZshOpt::Nomatch, false)));
+		assert_eq!(ZshOpt::lookup(b"nonomatch"), Some((ZshOpt::Nomatch, true)));
+		assert_eq!(ZshOpt::lookup(b"notify"), Some((ZshOpt::Notify, false)));
+		assert_eq!(ZshOpt::lookup(b"braceexpand"), Some((ZshOpt::Ignorebraces, true)));
+		assert_eq!(ZshOpt::lookup(b"nobraceexpand"), Some((ZshOpt::Ignorebraces, false)));
+		assert_eq!(ZshOpt::lookup(b"nosuchoption"), None);
+	}
+
+	#[test]
+	fn emulation_defaults_differ_where_zsh_says() {
+		assert!(ZshOpt::Nomatch.default_in(ModeId::Zsh));
+		assert!(!ZshOpt::Nomatch.default_in(ModeId::ZshSh));
+		assert!(ZshOpt::Shwordsplit.default_in(ModeId::ZshSh));
+		assert!(!ZshOpt::Shwordsplit.default_in(ModeId::Zsh));
+		assert!(ZshOpt::Ksharrays.default_in(ModeId::Ksh));
+		assert!(ZshOpt::Interactive.special());
+		assert!(!ZshOpt::Kshglob.special());
+	}
+
+	#[test]
+	fn letters_follow_the_emulation() {
+		assert_eq!(ZshOpt::letter(b'f', ModeId::Zsh), Some((ZshOpt::Rcs, true)));
+		assert_eq!(ZshOpt::letter(b'f', ModeId::ZshSh), Some((ZshOpt::Glob, true)));
+		assert_eq!(ZshOpt::letter(b'b', ModeId::Ksh), Some((ZshOpt::Notify, false)));
+		assert_eq!(ZshOpt::letter(b'b', ModeId::Zsh), None);
+	}
+
+	#[test]
+	fn opts_bits_round_trip() {
+		let mut s = ZshOpts::default();
+		for o in ZshOpt::iter() {
+			s.set(o, true);
+			assert!(s.get(o));
+		}
+		s.set(ZshOpt::Xtrace, false);
+		assert!(!s.get(ZshOpt::Xtrace));
+		assert!(s.get(ZshOpt::Zle));
+	}
+}

@@ -1733,7 +1733,21 @@ impl Filters {
 		}
 	}
 
-	
+	/// Every global rule as `PREFIX PATTERN` text (diagnostic/test view).
+	#[cfg(test)]
+	fn rule_texts(&self) -> Vec<Vec<u8>> {
+		self.global
+			.visible()
+			.map(|r| {
+				let mut t = rule_prefix(r.rflags, &r.pattern, None).unwrap_or_default();
+				t.extend_from_slice(&r.pattern);
+				if r.rflags & FILTRULE_DIRECTORY != 0 {
+					t.push(b'/');
+				}
+				t
+			})
+			.collect()
+	}
 }
 
 /// Encodes (or, with `out == None`, only vets) the rules of `list`, tagging each with
@@ -2274,4 +2288,811 @@ fn long_rule_end(s: &[u8], word: &[u8]) -> Option<usize> {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	/// `pwd -P` of the fixture's source directory when the reference outputs were taken.
+	const CURR: &str = "/private/tmp/flt/fx/src";
+
+	/// The fixture tree (directories end in `/`).
+	const TREE: &[&str] = &[
+		".cvsignore",
+		".rsync-filter",
+		"Abc",
+		"[lit]",
+		"a.o",
+		"b.c",
+		"bar/",
+		"bar/.rsync-filter",
+		"bar/baz.c",
+		"bar/deep/",
+		"bar/deep/.cvsignore",
+		"bar/deep/foo/",
+		"bar/deep/foo/x",
+		"bar/deep/y.o",
+		"bar/deep/z.c",
+		"bar/foo",
+		"bar/qux.c",
+		"core",
+		"dir1/",
+		"dir1/.rules",
+		"dir1/file",
+		"dir1/sub/",
+		"dir1/sub/.rules",
+		"dir1/sub/file",
+		"foo",
+		"foo.txt",
+		"x1",
+		"x_",
+	];
+
+	/// Rule files of the fixture (absolute paths).
+	const CONTENTS: &[(&str, &str)] = &[
+		("/private/tmp/flt/fx/src/.cvsignore", "Abc\n"),
+		("/private/tmp/flt/fx/src/.rsync-filter", "- *.txt\n"),
+		("/private/tmp/flt/fx/src/bar/.rsync-filter", "- /baz.c\n+ y.o\n"),
+		("/private/tmp/flt/fx/src/bar/deep/.cvsignore", "x\n"),
+		("/private/tmp/flt/fx/src/dir1/.rules", "- file\n"),
+		("/private/tmp/flt/fx/src/dir1/sub/.rules", "!\n+ file\n"),
+		("/private/tmp/flt/fx/.rsync-filter", "- x1\n- /core\n"),
+	];
+
+	/// Operator files named on the command line.
+	const OP_FILES: &[(&str, &[u8])] = &[
+		("/tmp/flt/xf", b"# comment\n; also comment\n\n*.o\r\n+ core\ncore\n- foo\n+ x1\n!\nx*\n"),
+		("/tmp/flt/if", b"bar/\nbar/deep/\n*.c\n"),
+		("/tmp/flt/xl", b"- foo\n# c\n+ x1\nx*\n"),
+		("/tmp/flt/x0", b"foo\0*.c\0# x\0"),
+		("/tmp/flt/xm", b"- foo\n+ x1\n"),
+		("f1", b"- a\n\nx bad\n"),
+		("f2", b"- a\n-z foo\n"),
+		("f3", b"!x\n"),
+		("f4", b"- \n"),
+		("f5", b". f2\n"),
+		("f8", b"- a\n. nonexist\n"),
+		("fw", b"- foo + bar\n"),
+		("fw2", b"-_foo +_bar\n-_*\n"),
+		("fcr", b"foo\r\nbar\rbaz\n"),
+	];
+
+	fn op_files(path: &Path) -> io::Result<Vec<u8>> {
+		let key = path.to_str().unwrap_or_default();
+		OP_FILES
+			.iter()
+			.find(|(name, _)| *name == key)
+			.map(|(_, data)| data.to_vec())
+			.ok_or_else(|| io::Error::from_raw_os_error(2))
+	}
+
+	fn tree_reader(path: &[u8]) -> io::Result<Option<Vec<u8>>> {
+		let path = String::from_utf8_lossy(path);
+		let key = if path.starts_with('/') { path.into_owned() } else { format!("{CURR}/{path}") };
+		Ok(CONTENTS.iter().find(|(name, _)| *name == key).map(|(_, data)| data.as_bytes().to_vec()))
+	}
+
+	fn apply(f: &mut Filters, arg: &str) -> Result<(), RsyncError> {
+		if let Some(rule) = arg.strip_prefix("-f") {
+			f.add(RuleArg::Filter(rule.as_bytes()), &op_files)
+		} else if let Some(p) = arg.strip_prefix("--exclude-from=") {
+			f.add(RuleArg::ExcludeFrom(Path::new(p)), &op_files)
+		} else if let Some(p) = arg.strip_prefix("--include-from=") {
+			f.add(RuleArg::IncludeFrom(Path::new(p)), &op_files)
+		} else if let Some(p) = arg.strip_prefix("--exclude=") {
+			f.add(RuleArg::Exclude(p.as_bytes()), &op_files)
+		} else if let Some(p) = arg.strip_prefix("--include=") {
+			f.add(RuleArg::Include(p.as_bytes()), &op_files)
+		} else if arg == "-F" {
+			// What options.rs turns the first -F into.
+			f.add(RuleArg::Filter(b": /.rsync-filter"), &op_files)
+		} else if arg == "-C" {
+			f.add(RuleArg::Cvs, &op_files)
+		} else if arg == "--delete-excluded" {
+			f.set_delete_excluded(true);
+			Ok(())
+		} else if arg == "--delete" {
+			Ok(())
+		} else {
+			panic!("unhandled test arg {arg}")
+		}
+	}
+
+	fn children(dir: &str) -> Vec<(&'static str, bool)> {
+		TREE.iter()
+			.copied()
+			.filter_map(|entry| {
+				let is_dir = entry.ends_with('/');
+				let path = entry.trim_end_matches('/');
+				let parent = path.rfind('/').map_or("", |i| &path[..i]);
+				(parent == dir).then_some((path, is_dir))
+			})
+			.collect()
+	}
+
+	/// Scans the fixture like the sender: check each entry, then descend.
+	fn walk(f: &mut Filters, dir: &str, out: &mut Vec<String>) {
+		let mark = f.enter_dir(dir.as_bytes(), &tree_reader).expect("enter_dir");
+		let mut subdirs = Vec::new();
+		for (path, is_dir) in children(dir) {
+			if f.check(path.as_bytes(), is_dir, Side::Sender) == Verdict::Exclude {
+				continue;
+			}
+			out.push(if is_dir { format!("{path}/") } else { path.to_owned() });
+			if is_dir {
+				subdirs.push(path);
+			}
+		}
+		for sub in subdirs {
+			walk(f, sub, out);
+		}
+		f.leave_dir(mark);
+	}
+
+	/// `rsync -nr --out-format=%n ARGS src/ dst/ | LC_ALL=C sort`.
+	fn local_list(args: &[&str]) -> Result<String, RsyncError> {
+		let cfg = FilterConfig {
+			local_server: true,
+			am_sender: true,
+			from0: args.contains(&"-0"),
+			..FilterConfig::default()
+		};
+		let mut f = Filters::new(cfg);
+		f.set_curr_dir(CURR.as_bytes());
+		for arg in args.iter().filter(|a| **a != "-0") {
+			if *arg == "-FF" {
+				apply(&mut f, "-F")?;
+				apply(&mut f, "-f- .rsync-filter")?;
+			} else {
+				apply(&mut f, arg)?;
+			}
+		}
+		f.send(&mut io::sink(), Proto::new(33, 0), false)?;
+		let mut out = vec!["./".to_owned()];
+		walk(&mut f, "", &mut out);
+		out.sort();
+		Ok(out.join(" "))
+	}
+
+	/// Expected lists come from rsync 3.5.1 over the same tree.
+	#[test]
+	fn sender_verdicts_match_reference() {
+		let all = "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c \
+			bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c \
+			bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules \
+			dir1/sub/file foo foo.txt x1 x_";
+		let cases: &[(&[&str], &str)] = &[
+			(&[], all),
+			(&["-f- foo"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/y.o bar/deep/z.c bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo.txt x1 x_"),
+			(&["-f- /foo"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo.txt x1 x_"),
+			(&["-f- foo/"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- bar/foo"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- **/foo"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/y.o bar/deep/z.c bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo.txt x1 x_"),
+			(&["-f- bar/**"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- bar/***"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- *.[oc]"], "./ .cvsignore .rsync-filter Abc [lit] bar/ bar/.rsync-filter bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/foo core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- [[:upper:]]*"], "./ .cvsignore .rsync-filter [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- x[!1]"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1"),
+			(&["-f- \\[lit\\]"], "./ .cvsignore .rsync-filter Abc a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- [lit]"], all),
+			(&["-f+ */", "-f+ *.c", "-f- *"], "./ b.c bar/ bar/baz.c bar/deep/ bar/deep/foo/ bar/deep/z.c bar/qux.c dir1/ dir1/sub/"),
+			(&["-f+ bar/", "-f+ bar/deep/***", "-f- *"], "./ bar/ bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c"),
+			(&["-f-! */"], "./ bar/ bar/deep/ bar/deep/foo/ dir1/ dir1/sub/"),
+			(&["-fexclude,! */"], "./ bar/ bar/deep/ bar/deep/foo/ dir1/ dir1/sub/"),
+			(&["-f-! *.c"], "./ b.c"),
+			(&["-F"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo x_"),
+			(&["-FF"], "./ .cvsignore Abc [lit] a.o b.c bar/ bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo x_"),
+			(&["-C"], "./ .cvsignore .rsync-filter [lit] b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/z.c bar/foo bar/qux.c dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-C", "-f+ core"], "./ .cvsignore .rsync-filter [lit] b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f: .rsync-filter", "-f- *.c"], "./ .cvsignore .rsync-filter Abc [lit] a.o bar/ bar/.rsync-filter bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/foo core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo x1 x_"),
+			(&["-f- *.c", "-f: .rsync-filter"], "./ .cvsignore .rsync-filter Abc [lit] a.o bar/ bar/.rsync-filter bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/foo core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo x1 x_"),
+			(&["-f:n .rsync-filter"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo x1 x_"),
+			(&["-f: .rules"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- foo", "-f!", "-f- *.o"], "./ .cvsignore .rsync-filter Abc [lit] b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- /bar/deep/"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- deep/*.o"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- **.c"], "./ .cvsignore .rsync-filter Abc [lit] a.o bar/ bar/.rsync-filter bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/foo core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- b?r/"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f-/ /private/tmp/flt/fx/src/bar/foo"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- deep/**/x"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- /bar/**/x"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- bar/*/x"], all),
+			(&["-f- ba*/f*"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f+ foo", "-f- f*"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/sub/ dir1/sub/.rules foo x1 x_"),
+			(&["-f:e .rsync-filter"], "./ .cvsignore Abc [lit] a.o b.c bar/ bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo x1 x_"),
+			(&["-f:- .cvsignore"], "./ .cvsignore .rsync-filter [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f:C"], "./ .cvsignore .rsync-filter [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f-C"], "./ .cvsignore .rsync-filter Abc [lit] b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/z.c bar/foo bar/qux.c dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- [a-c]*"], "./ .cvsignore .rsync-filter Abc [lit] dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- [^a-z]*"], "./ a.o b.c bar/ bar/baz.c bar/deep/ bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/file dir1/sub/ dir1/sub/file foo foo.txt x1 x_"),
+			(&["-f- *[[:digit:]]"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core foo foo.txt x_"),
+			(&["-f- [[:punct:]]*"], "./ Abc a.o b.c bar/ bar/baz.c bar/deep/ bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/file dir1/sub/ dir1/sub/file foo foo.txt x1 x_"),
+			(&["--delete-excluded", "-f- *.c"], "./ .cvsignore .rsync-filter Abc [lit] a.o bar/ bar/.rsync-filter bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/foo/x bar/deep/y.o bar/foo core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt x1 x_"),
+			(&["--exclude-from=/tmp/flt/xf"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt"),
+			(&["--include-from=/tmp/flt/if", "-f- *"], "./ b.c bar/ bar/baz.c bar/deep/ bar/deep/z.c bar/qux.c"),
+			(&["-f.- /tmp/flt/xl"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt"),
+			(&["-f.+ /tmp/flt/if", "-f- *"], "./ b.c bar/ bar/baz.c bar/deep/ bar/deep/z.c bar/qux.c"),
+			(&["-0", "--exclude-from=/tmp/flt/x0"], "./ .cvsignore .rsync-filter Abc [lit] a.o bar/ bar/.rsync-filter bar/deep/ bar/deep/.cvsignore bar/deep/y.o core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo.txt x1 x_"),
+			(&["--exclude=- foo", "--exclude=+ x1", "--exclude=x*"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/y.o bar/deep/z.c bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo.txt x1"),
+			(&["--include=+ bar", "--include=- x1", "--exclude=x*"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/foo/ bar/deep/y.o bar/deep/z.c bar/foo bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo foo.txt"),
+			(&["-f.C /tmp/flt/xl"], "./ .cvsignore .rsync-filter Abc [lit] a.o b.c bar/ bar/.rsync-filter bar/baz.c bar/deep/ bar/deep/.cvsignore bar/deep/y.o bar/deep/z.c bar/qux.c core dir1/ dir1/.rules dir1/file dir1/sub/ dir1/sub/.rules dir1/sub/file foo.txt"),
+		];
+		for (args, expected) in cases {
+			let expected = expected.split_whitespace().collect::<Vec<_>>().join(" ");
+			let got = local_list(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+			assert_eq!(got, expected, "rules {args:?}");
+		}
+	}
+
+	#[test]
+	fn rule_file_line_handling() {
+		// Outputs of rsync 3.5.1 over the fixture. fw2 is word-split into "-_foo",
+		// "+_bar", "-_*".
+		assert_eq!(local_list(&["-f.w fw2"]).unwrap(), "./ bar/");
+		// CR, LF, and CRLF all end a line.
+		let got = local_list(&["--exclude-from=fcr"]).unwrap();
+		assert_eq!(
+			got,
+			"./ .cvsignore .rsync-filter Abc [lit] a.o b.c core dir1/ dir1/.rules dir1/file \
+			 dir1/sub/ dir1/sub/.rules dir1/sub/file foo.txt x1 x_"
+		);
+		let mut f = Filters::new(FilterConfig::default());
+		f.add(RuleArg::ExcludeFrom(Path::new("fcr")), &op_files).unwrap();
+		assert_eq!(f.rule_texts(), vec![b"- foo".to_vec(), b"- bar".to_vec(), b"- baz".to_vec()]);
+	}
+
+	fn parse_err(rule: &str) -> RsyncError {
+		let mut f = Filters::new(FilterConfig::default());
+		apply(&mut f, rule).expect_err(rule)
+	}
+
+	fn assert_err(err: &RsyncError, code: i32, message: &str, site: (&str, u32)) {
+		assert_eq!(err.code, code, "{message}");
+		assert_eq!(err.message.as_deref(), Some(message));
+		assert_eq!(err.site.map(|(f, l)| (f.to_owned(), l)), Some((site.0.to_owned(), site.1)));
+	}
+
+	/// Messages and exit sites printed by rsync 3.5.1 for each malformed rule.
+	#[test]
+	fn malformed_rules_report_upstream_errors() {
+		let cases: &[(&str, &str, u32)] = &[
+			("x foo", "Unknown filter rule: x foo", 136),
+			("-z foo", "invalid modifier 'z' at position 1 in filter rule: -z foo", 1379),
+			("- ", "unexpected end of filter rule: - ", 136),
+			("-", "unexpected end of filter rule: -", 136),
+			("!x", "'!' rule has trailing characters: !x", 136),
+			("clear x", "'!' rule has trailing characters: clear x", 136),
+			("-e foo", "invalid modifier 'e' at position 1 in filter rule: -e foo", 1379),
+			("+n foo", "invalid modifier 'n' at position 1 in filter rule: +n foo", 1379),
+			(".! foo", "invalid modifier '!' at position 1 in filter rule: .! foo", 1379),
+			("Hs foo", "invalid modifier 's' at position 1 in filter rule: Hs foo", 1379),
+			("H", "unexpected end of filter rule: H", 136),
+			("P,r foo", "invalid modifier 'r' at position 2 in filter rule: P,r foo", 1379),
+			(":-C", "invalid modifier 'C' at position 2 in filter rule: :-C", 1379),
+			("excludefoo", "Unknown filter rule: excludefoo", 136),
+			("exclude", "unexpected end of filter rule: exclude", 136),
+			("exclude,foo", "invalid modifier 'f' at position 8 in filter rule: exclude,foo", 1379),
+			("dir-merge,w", "unexpected end of filter rule: dir-merge,w", 136),
+			("-x,foo", "invalid modifier ',' at position 2 in filter rule: -x,foo", 1379),
+		];
+		for (rule, message, line) in cases {
+			let err = parse_err(&format!("-f{rule}"));
+			assert_err(&err, RERR_SYNTAX, message, ("exclude.c", *line));
+		}
+		for ok in ["!", "clear", ":s foo", "-C", "+C", "-C foo", ":C", "-sr foo", "-,s foo"] {
+			let mut f = Filters::new(FilterConfig::default());
+			apply(&mut f, &format!("-f{ok}")).unwrap_or_else(|e| panic!("{ok}: {e}"));
+		}
+	}
+
+	/// 3.5.0+: a bad rule read from a file is reported by location, never by content.
+	#[test]
+	fn file_rule_errors_hide_contents() {
+		let cases: &[(&str, i32, &str, (&str, u32))] = &[
+			("-f. f1", RERR_SYNTAX, "Unknown filter rule: <rule from f1 line 3>", ("exclude.c", 136)),
+			("-f. f2", RERR_SYNTAX, "invalid modifier in filter rule: <rule from f2 line 2>", ("exclude.c", 1379)),
+			("-f. f3", RERR_SYNTAX, "'!' rule has trailing characters: <rule from f3 line 1>", ("exclude.c", 136)),
+			("-f. f4", RERR_SYNTAX, "unexpected end of filter rule: <rule from f4 line 1>", ("exclude.c", 136)),
+			(
+				"-f. f5",
+				RERR_SYNTAX,
+				"invalid modifier in filter rule: <rule from a file named at f5 line 1>",
+				("exclude.c", 1379),
+			),
+			("-f.w fw", RERR_SYNTAX, "unexpected end of filter rule: <rule from fw>", ("exclude.c", 136)),
+			("-f. f8", RERR_FILEIO, "failed to open exclude file <rule from f8 line 2>", ("exclude.c", 1719)),
+			(
+				"--exclude-from=/nonexist",
+				RERR_FILEIO,
+				"rsync: [client] failed to open exclude file /nonexist: No such file or directory (2)",
+				("exclude.c", 1719),
+			),
+			(
+				"--include-from=/nonexist",
+				RERR_FILEIO,
+				"rsync: [client] failed to open include file /nonexist: No such file or directory (2)",
+				("exclude.c", 1719),
+			),
+			(
+				"-f. /tmp/flt/xl",
+				RERR_SYNTAX,
+				"Unknown filter rule: <rule from /tmp/flt/xl line 4>",
+				("exclude.c", 136),
+			),
+		];
+		for (arg, code, message, site) in cases {
+			assert_err(&parse_err(arg), *code, message, *site);
+		}
+	}
+
+	#[test]
+	fn per_dir_file_errors_name_the_file() {
+		let read = |p: &[u8]| -> io::Result<Option<Vec<u8>>> {
+			Ok((p == b"f6").then(|| b"- a\n-z foo\n".to_vec()))
+		};
+		let mut f = Filters::new(FilterConfig { am_sender: true, ..FilterConfig::default() });
+		f.add(RuleArg::Filter(b": f6"), &op_files).unwrap();
+		f.set_curr_dir(b"/private/tmp/flt/src");
+		let err = f.enter_dir(b"", &read).expect_err("bad per-dir rule");
+		let msg = "invalid modifier in filter rule: <rule from /private/tmp/flt/src/f6 line 2>";
+		assert_err(&err, RERR_SYNTAX, msg, ("exclude.c", 1379));
+	}
+
+	#[test]
+	fn merge_depth_is_limited() {
+		let looping = |_: &Path| -> io::Result<Vec<u8>> { Ok(b". loop\n".to_vec()) };
+		let mut f = Filters::new(FilterConfig::default());
+		let err = f.add(RuleArg::Filter(b". loop"), &looping).expect_err("endless merge");
+		assert_eq!(err.code, RERR_FILEIO);
+		// rsync 3.5.1 with a file "loop" containing ". loop".
+		let expected = format!(
+			"[client] merge-file include depth limit (32) exceeded at <rule from {}loop line 1>",
+			"a file named at ".repeat(31)
+		);
+		assert_eq!(err.message.as_deref(), Some(expected.as_str()));
+		assert_eq!(err.site, Some(("exclude.c", 1626)));
+	}
+
+	#[test]
+	fn match_messages() {
+		let mut f = Filters::new(FilterConfig { am_sender: true, ..FilterConfig::default() });
+		f.add(RuleArg::Filter(b"- a.o"), &op_files).unwrap();
+		f.add(RuleArg::Filter(b"-! */"), &op_files).unwrap();
+		f.add(RuleArg::Filter(b": .rf"), &op_files).unwrap();
+		f.set_curr_dir(b"/private/tmp/flt/src");
+		let read = |p: &[u8]| -> io::Result<Option<Vec<u8>>> {
+			Ok((p == b".rf").then(|| b"- x\n- d/\n".to_vec()))
+		};
+		// Texts rsync 3.5.1 printed for these rules at --debug=FILTER.
+		let mark = f.enter_dir(b"", &read).unwrap();
+		let m = f.find_match(b"a.o", NameKind::File, Side::Sender, false).unwrap();
+		assert_eq!(
+			m.message(Role::Sender, b"a.o", NameKind::File),
+			b"[sender] hiding file a.o because of pattern a.o\n"
+		);
+		let m = f.find_match(b"b", NameKind::File, Side::Sender, false).unwrap();
+		assert_eq!(
+			m.message(Role::Sender, b"b", NameKind::File),
+			b"[sender] hiding file b because of pattern */\n"
+		);
+		let m = f.find_match(b"d", NameKind::Dir, Side::Sender, false).unwrap();
+		assert_eq!(
+			m.message(Role::Sender, b"d", NameKind::Dir),
+			b"[sender] hiding directory d because of pattern <rule from a file read earlier> [per-dir .rf]\n".to_vec()
+		);
+		f.leave_dir(mark);
+		assert_eq!(f.find_match(b"d", NameKind::Dir, Side::Sender, false), None);
+		let protect = FilterMatch { verdict: Verdict::Exclude, pattern: b"b".to_vec(), list_type: Vec::new() };
+		assert_eq!(
+			protect.message(Role::Generator, b"b", NameKind::File),
+			b"[generator] protecting file b because of pattern b\n"
+		);
+		let risk = FilterMatch { verdict: Verdict::Include, pattern: b"/s/".to_vec(), list_type: IMPLIED_TYPE.to_vec() };
+		assert_eq!(
+			risk.message(Role::Receiver, b"s", NameKind::Dir),
+			b"[receiver] showing directory s because of pattern /s/ [implied]\n"
+		);
+	}
+
+	#[test]
+	fn script_lines_match_reference_batch_script() {
+		// rsync 3.5.1 --write-batch: the here-doc of the generated .sh file.
+		let mut f = Filters::new(FilterConfig::default());
+		for rule in [
+			"-f- *.o",
+			"-f+ foo/",
+			"-fH bar",
+			"-fP baz",
+			"-f-/p! x*",
+			"-f:n- .ex",
+			"-fexclude,x user.foo",
+			"-C",
+		] {
+			apply(&mut f, rule).unwrap();
+		}
+		let lines: Vec<String> =
+			f.script_lines().iter().map(|l| String::from_utf8_lossy(l).into_owned()).collect();
+		assert_eq!(lines, ["- *.o", "+ foo/", "-s bar", "-r baz", "-/!p x*", ":n- .ex", "-x user.foo"]);
+	}
+
+	#[test]
+	fn sides_follow_the_exchange() {
+		let cfg = FilterConfig { delete_mode: true, ..FilterConfig::default() };
+		let mut f = Filters::new(cfg);
+		for rule in ["-fP keep", "-fH hide", "-f- both", "-fR risky", "-fS shown"] {
+			apply(&mut f, rule).unwrap();
+		}
+		f.send(&mut io::sink(), Proto::new(33, 0), false).unwrap();
+		assert_eq!(f.check(b"keep", false, Side::Sender), Verdict::NoMatch);
+		assert_eq!(f.check(b"keep", false, Side::Receiver), Verdict::Exclude);
+		assert_eq!(f.check(b"hide", false, Side::Sender), Verdict::Exclude);
+		assert_eq!(f.check(b"hide", false, Side::Receiver), Verdict::NoMatch);
+		assert_eq!(f.check(b"both", false, Side::Sender), Verdict::Exclude);
+		assert_eq!(f.check(b"both", false, Side::Receiver), Verdict::Exclude);
+		assert_eq!(f.check(b"risky", false, Side::Receiver), Verdict::Include);
+		assert_eq!(f.check(b"shown", false, Side::Sender), Verdict::Include);
+
+		// A receiving client: hide/show rules are for the remote sender only.
+		let mut f = Filters::new(FilterConfig { delete_mode: true, ..FilterConfig::default() });
+		for rule in ["-fP keep", "-fH hide", "--delete-excluded", "-f- gone"] {
+			apply(&mut f, rule).unwrap();
+		}
+		f.send(&mut io::sink(), Proto::new(33, 0), true).unwrap();
+		assert_eq!(f.check(b"keep", false, Side::Receiver), Verdict::Exclude);
+		assert_eq!(f.check(b"hide", false, Side::Receiver), Verdict::NoMatch);
+		assert_eq!(f.check(b"hide", false, Side::Sender), Verdict::Exclude);
+		// --delete-excluded: excluded files are not protected from deletion.
+		assert_eq!(f.check(b"gone", false, Side::Receiver), Verdict::NoMatch);
+		assert_eq!(f.check(b"gone", false, Side::Sender), Verdict::Exclude);
+	}
+
+	#[test]
+	fn perishable_rules_ignored_in_doomed_dirs() {
+		let mut f = Filters::new(FilterConfig { delete_mode: true, ..FilterConfig::default() });
+		apply(&mut f, "-f-p *.o").unwrap();
+		apply(&mut f, "-f- *.keep").unwrap();
+		f.send(&mut io::sink(), Proto::new(33, 0), true).unwrap();
+		assert_eq!(f.check_full(b"x.o", NameKind::File, Side::Receiver, false), Verdict::Exclude);
+		assert_eq!(f.check_full(b"x.o", NameKind::File, Side::Receiver, true), Verdict::NoMatch);
+		assert_eq!(f.check_full(b"x.keep", NameKind::File, Side::Receiver, true), Verdict::Exclude);
+
+		// -C defaults are perishable from protocol 30 on.
+		for (version, expected) in [(33, Verdict::NoMatch), (29, Verdict::Exclude)] {
+			let cfg = FilterConfig { cvs_exclude: true, local_server: true, ..FilterConfig::default() };
+			let mut f = Filters::new(cfg);
+			f.send(&mut io::sink(), Proto::new(version, 0), true).unwrap();
+			assert_eq!(f.check_full(b"a.o", NameKind::File, Side::Receiver, true), expected);
+			assert_eq!(f.check_full(b"a.o", NameKind::File, Side::Receiver, false), Verdict::Exclude);
+		}
+	}
+
+	#[test]
+	fn xattr_rules_only_match_xattr_names() {
+		let mut f = Filters::new(FilterConfig { am_sender: true, ..FilterConfig::default() });
+		apply(&mut f, "-f-x user.secret").unwrap();
+		assert!(f.has_xattr_rules());
+		assert!(f.xattr_excluded(b"user.secret"));
+		assert!(!f.xattr_excluded(b"user.other"));
+		assert_eq!(f.check(b"user.secret", false, Side::Sender), Verdict::NoMatch);
+	}
+
+	fn wire(rules: &[&str]) -> Vec<u8> {
+		let mut out = Vec::new();
+		for rule in rules {
+			out.extend_from_slice(&(rule.len() as i32).to_le_bytes());
+			out.extend_from_slice(rule.as_bytes());
+		}
+		out.extend_from_slice(&0i32.to_le_bytes());
+		out
+	}
+
+	fn send_bytes(cfg: FilterConfig, args: &[&str], version: u32, receiver_side: bool) -> Result<Vec<u8>, RsyncError> {
+		let mut f = Filters::new(cfg);
+		for arg in args {
+			apply(&mut f, arg)?;
+		}
+		let mut out = Vec::new();
+		f.send(&mut out, Proto::new(version, 0), receiver_side)?;
+		Ok(out)
+	}
+
+	fn cvs_defaults(prefix: &str) -> Vec<String> {
+		DEFAULT_CVSIGNORE
+			.split(|&b| b == b' ')
+			.map(|w| format!("{prefix}{}", String::from_utf8_lossy(w)))
+			.collect()
+	}
+
+	/// Byte streams captured from rsync 3.5.1 clients through an `-e` wrapper.
+	#[test]
+	fn send_matches_reference_bytes() {
+		let delete = FilterConfig { delete_mode: true, ..FilterConfig::default() };
+		let plain = FilterConfig::default();
+
+		// rsync -r -f'- *.o' -f'+ foo/' -f'H bar' -f'P baz' -f'-/p! x*' -f':n- .ex'
+		//   -f'exclude,x user.foo' --delete host:src/ dst/
+		let golden = b"\x05\x00\x00\x00- *.o\x06\x00\x00\x00+ foo/\x06\x00\x00\x00-s bar\
+			\x07\x00\x00\x00-/!p x*\x07\x00\x00\x00:n- .ex\x0b\x00\x00\x00-x user.foo\x00\x00\x00\x00";
+		let args = ["-f- *.o", "-f+ foo/", "-fH bar", "-fP baz", "-f-/p! x*", "-f:n- .ex", "-fexclude,x user.foo"];
+		assert_eq!(send_bytes(delete.clone(), &args, 33, true).unwrap(), golden.to_vec());
+
+		let mixed = ["-f- *.o", "-fH bar", "-fP baz", "-fR qq", "-fS ss"];
+		// Push without a delete mode: the receiver gets no rules at all.
+		assert_eq!(send_bytes(plain.clone(), &mixed, 33, false).unwrap(), b"");
+		// Push with --delete: receiver-relevant rules.
+		assert_eq!(
+			send_bytes(delete.clone(), &mixed, 33, false).unwrap(),
+			wire(&["- *.o", "-r baz", "+r qq"])
+		);
+		// --delete-excluded after the rules: unsided rules become sender-only at send time.
+		let mut late = mixed.to_vec();
+		late.push("--delete-excluded");
+		assert_eq!(send_bytes(delete.clone(), &late, 33, false).unwrap(), wire(&["-r baz", "+r qq"]));
+		// Pulling: the unsided rule parsed before --delete-excluded keeps no side.
+		assert_eq!(send_bytes(plain.clone(), &late, 33, true).unwrap(), wire(&["- *.o", "-s bar", "+s ss"]));
+		// --delete-excluded before the rules marks them sender-side as they are parsed.
+		let early = ["--delete-excluded", "-f- *.o", "-f:n- .ex", "-f: .rr"];
+		assert_eq!(send_bytes(plain.clone(), &early, 33, true).unwrap(), wire(&["-s *.o", ":n- .ex", ": .rr"]));
+
+		// -C on a pushing client: the .cvsignore dir-merge and the CVS list travel.
+		let mut expected = vec!["- *.o".to_owned(), ":C .cvsignore".to_owned()];
+		expected.extend(cvs_defaults("-p "));
+		let expected: Vec<&str> = expected.iter().map(String::as_str).collect();
+		assert_eq!(send_bytes(delete.clone(), &["-C", "-f- *.o"], 33, false).unwrap(), wire(&expected));
+		// -C on a pulling client: the server applies -C itself.
+		assert_eq!(send_bytes(plain.clone(), &["-C", "-f- *.o"], 33, true).unwrap(), wire(&["- *.o"]));
+		// Protocol 29: no perishable modifier.
+		assert_eq!(
+			send_bytes(plain.clone(), &["-C", "-f- *.o", "-f-p foo"], 29, true).unwrap(),
+			wire(&["- *.o", "- foo"])
+		);
+		let mut expected = vec![":C .cvsignore".to_owned()];
+		expected.extend(cvs_defaults("- "));
+		let expected: Vec<&str> = expected.iter().map(String::as_str).collect();
+		assert_eq!(send_bytes(delete.clone(), &["-C"], 29, false).unwrap(), wire(&expected));
+		assert_eq!(
+			send_bytes(delete.clone(), &["-f-p foo", "-f- bar/"], 30, false).unwrap(),
+			wire(&["-p foo", "- bar/"])
+		);
+		assert_eq!(
+			send_bytes(delete.clone(), &["-f-p foo", "-fH x", "-fS y"], 29, true).unwrap(),
+			wire(&["- foo", "-s x", "+s y"])
+		);
+		// Merge files are expanded; -C rules travel as text to a newer server.
+		let args = ["-f:e .rsync-filter", "-f. /tmp/flt/xm", "-f-C", "-f+/C", "-f-! a/", "-f+ b c"];
+		assert_eq!(
+			send_bytes(plain.clone(), &args, 33, true).unwrap(),
+			wire(&["- .rsync-filter", ": .rsync-filter", "- foo", "+ x1", "-C ", "+/C ", "-! a/", "+ b c"])
+		);
+		let args = ["-fmerge,-w /tmp/flt/xm", "-fdir-merge,+nw .x", "-f:s .y", "-f-x foo"];
+		assert_eq!(
+			send_bytes(plain.clone(), &args, 33, true).unwrap(),
+			wire(&["- -", "- foo", "- +", "- x1", ":nw+ .x", ":s .y", "-x foo"])
+		);
+		// Local transfers exchange nothing.
+		let local = FilterConfig { local_server: true, delete_mode: true, ..FilterConfig::default() };
+		assert_eq!(send_bytes(local, &mixed, 33, true).unwrap(), b"");
+	}
+
+	#[test]
+	fn send_rejects_rules_an_old_peer_cannot_express() {
+		let delete = FilterConfig { delete_mode: true, ..FilterConfig::default() };
+		let err = send_bytes(delete, &["-f-p foo"], 29, false).expect_err("too modern");
+		assert_err(&err, RERR_PROTOCOL, "filter rules are too modern for remote rsync.", ("exclude.c", 1926));
+	}
+
+	fn server(am_sender: bool, delete_mode: bool) -> Filters {
+		Filters::new(FilterConfig {
+			am_sender,
+			am_server: true,
+			delete_mode,
+			role: if am_sender { Role::Sender } else { Role::Receiver },
+			..FilterConfig::default()
+		})
+	}
+
+	#[test]
+	fn recv_round_trips_sent_rules() {
+		let rules = ["- *.o", "+ foo/", "-s bar", "-/!p x*", ":n- .ex", "-x user.foo"];
+		for version in 29..=33 {
+			let mut f = server(true, false);
+			f.recv(&mut &wire(&rules)[..], Proto::new(version, 0)).unwrap();
+			let texts: Vec<Vec<u8>> = rules.iter().map(|r| r.as_bytes().to_vec()).collect();
+			assert_eq!(f.rule_texts(), texts, "protocol {version}");
+			assert_eq!(f.check(b"a.o", false, Side::Sender), Verdict::Exclude);
+			assert_eq!(f.check(b"foo", true, Side::Sender), Verdict::Include);
+			assert_eq!(f.check(b"bar", false, Side::Sender), Verdict::Exclude);
+			// "-/!p x*" excludes every name that does not start with x.
+			assert_eq!(f.check(b"zzz", false, Side::Sender), Verdict::Exclude);
+			assert_eq!(f.check(b"xyz", false, Side::Sender), Verdict::NoMatch);
+			assert!(f.xattr_excluded(b"user.foo"));
+			assert!(f.saw_dir_merge());
+		}
+		// What a pushing client sends with -C reaches a receiver intact.
+		let mut sent = Filters::new(FilterConfig { delete_mode: true, ..FilterConfig::default() });
+		apply(&mut sent, "-C").unwrap();
+		let mut bytes = Vec::new();
+		sent.send(&mut bytes, Proto::new(33, 0), false).unwrap();
+		let mut f = server(false, true);
+		f.recv(&mut &bytes[..], Proto::new(33, 0)).unwrap();
+		assert_eq!(f.rule_texts().len(), 1 + DEFAULT_CVSIGNORE.split(|&b| b == b' ').count());
+		assert_eq!(f.check(b"x.o", false, Side::Receiver), Verdict::Exclude);
+	}
+
+	#[test]
+	fn recv_applies_cvs_exclude_and_skips_unused_lists() {
+		let mut f = server(true, false);
+		f.cfg.cvs_exclude = true;
+		f.recv(&mut &wire(&["- a"])[..], Proto::new(33, 0)).unwrap();
+		assert_eq!(f.rule_texts(), vec![b"- a".to_vec(), b":C .cvsignore".to_vec(), b"-C ".to_vec()]);
+		assert_eq!(f.check(b"core", false, Side::Sender), Verdict::Exclude);
+
+		// A receiver with no delete mode reads nothing.
+		let mut f = server(false, false);
+		let mut empty: &[u8] = b"";
+		f.recv(&mut empty, Proto::new(33, 0)).unwrap();
+		assert!(f.is_empty());
+	}
+
+	#[test]
+	fn recv_validates_peer_data() {
+		let mut f = server(true, false);
+		let err = f.recv(&mut &5120i32.to_le_bytes()[..], Proto::new(33, 0)).expect_err("overflow");
+		assert_err(
+			&err,
+			RERR_MALLOC,
+			"[sender] buffer overflow: recv_rules (file=exclude.c, line=1982)",
+			("util2.c", 129),
+		);
+		let mut f = server(true, false);
+		assert!(f.recv(&mut &(-1i32).to_le_bytes()[..], Proto::new(33, 0)).is_err());
+		let mut f = server(true, false);
+		assert!(f.recv(&mut &b"\x05\x00\x00\x00- a"[..], Proto::new(33, 0)).is_err());
+		let mut f = server(true, false);
+		let err = f.recv(&mut &wire(&["x foo"])[..], Proto::new(33, 0)).expect_err("bad rule");
+		assert_err(&err, RERR_SYNTAX, "Unknown filter rule: x foo", ("exclude.c", 136));
+		// Peer text is cut at an embedded NUL like a C string.
+		let mut f = server(true, false);
+		f.recv(&mut &wire(&["- a\0junk"])[..], Proto::new(33, 0)).unwrap();
+		assert_eq!(f.rule_texts(), vec![b"- a".to_vec()]);
+		// Below protocol 29 rules arrive in the old "+ "/"- " form.
+		let mut f = server(true, false);
+		f.recv(&mut &wire(&["+ keep", "keep*"])[..], Proto::new(28, 0)).unwrap();
+		assert_eq!(f.check(b"keep", false, Side::Sender), Verdict::Include);
+		assert_eq!(f.check(b"keeper", false, Side::Sender), Verdict::Exclude);
+	}
+
+	#[test]
+	fn parent_dirscan_and_anchoring() {
+		let mut f = Filters::new(FilterConfig { am_sender: true, ..FilterConfig::default() });
+		apply(&mut f, "-F").unwrap();
+		f.set_curr_dir(CURR.as_bytes());
+		let root = f.enter_dir(b"", &tree_reader).unwrap();
+		// From /private/tmp/flt/fx/.rsync-filter.
+		assert_eq!(f.check(b"x1", false, Side::Sender), Verdict::Exclude);
+		// "/core" there is anchored to fx/, not to the transfer root.
+		assert_eq!(f.check(b"core", false, Side::Sender), Verdict::NoMatch);
+		let bar = f.enter_dir(b"bar", &tree_reader).unwrap();
+		assert_eq!(f.check(b"bar/baz.c", false, Side::Sender), Verdict::Exclude);
+		assert_eq!(f.check(b"bar/deep/baz.c", false, Side::Sender), Verdict::NoMatch);
+		assert_eq!(f.check(b"bar/deep/y.o", false, Side::Sender), Verdict::Include);
+		f.leave_dir(bar);
+		assert_eq!(f.check(b"bar/deep/y.o", false, Side::Sender), Verdict::NoMatch);
+		assert_eq!(f.check(b"foo.txt", false, Side::Sender), Verdict::Exclude);
+		f.leave_dir(root);
+		assert_eq!(f.check(b"foo.txt", false, Side::Sender), Verdict::NoMatch);
+	}
+
+	#[test]
+	fn per_dir_rules_drop_the_other_side() {
+		let read = |p: &[u8]| -> io::Result<Option<Vec<u8>>> {
+			Ok((p == b".rf").then(|| b"P keep\nH hide\n- both\n".to_vec()))
+		};
+		for (am_sender, keep, hide) in
+			[(true, Verdict::NoMatch, Verdict::Exclude), (false, Verdict::Exclude, Verdict::NoMatch)]
+		{
+			let mut f = Filters::new(FilterConfig { am_sender, ..FilterConfig::default() });
+			apply(&mut f, "-f: .rf").unwrap();
+			let mark = f.enter_dir(b"", &read).unwrap();
+			let side = if am_sender { Side::Sender } else { Side::Receiver };
+			assert_eq!(f.check(b"keep", false, side), keep);
+			assert_eq!(f.check(b"hide", false, side), hide);
+			assert_eq!(f.check(b"both", false, side), Verdict::Exclude);
+			f.leave_dir(mark);
+		}
+	}
+
+	#[test]
+	fn nested_dir_merge_lives_with_its_directory() {
+		let read = |p: &[u8]| -> io::Result<Option<Vec<u8>>> {
+			Ok(match p {
+				b"d/.a" => Some(b": .b\n".to_vec()),
+				b"d/.b" | b"d/e/.b" => Some(b"- tmp\n".to_vec()),
+				b".b" => Some(b"- nope\n".to_vec()),
+				_ => None,
+			})
+		};
+		let mut f = Filters::new(FilterConfig { am_sender: true, ..FilterConfig::default() });
+		apply(&mut f, "-f: .a").unwrap();
+		let root = f.enter_dir(b"", &read).unwrap();
+		assert_eq!(f.check(b"nope", false, Side::Sender), Verdict::NoMatch);
+		let d = f.enter_dir(b"d", &read).unwrap();
+		assert_eq!(f.check(b"d/tmp", false, Side::Sender), Verdict::Exclude);
+		let e = f.enter_dir(b"d/e", &read).unwrap();
+		assert_eq!(f.check(b"d/e/tmp", false, Side::Sender), Verdict::Exclude);
+		f.leave_dir(e);
+		f.leave_dir(d);
+		assert_eq!(f.slots.len(), 1);
+		assert_eq!(f.check(b"tmp", false, Side::Sender), Verdict::NoMatch);
+		f.leave_dir(root);
+	}
+
+	#[test]
+	fn change_dir_tracks_depth() {
+		let read = |p: &[u8]| -> io::Result<Option<Vec<u8>>> {
+			Ok((p == b"a/.rf").then(|| b"- x\n".to_vec()))
+		};
+		let mut f = Filters::new(FilterConfig { am_sender: true, ..FilterConfig::default() });
+		apply(&mut f, "-f: .rf").unwrap();
+		f.change_dir(Some(b"a"), 1, &read).unwrap();
+		assert_eq!(f.check(b"a/x", false, Side::Sender), Verdict::Exclude);
+		f.change_dir(Some(b"b"), 1, &read).unwrap();
+		assert_eq!(f.check(b"b/x", false, Side::Sender), Verdict::NoMatch);
+		f.change_dir(None, 0, &read).unwrap();
+		assert!(f.depth_marks.is_empty());
+	}
+
+	#[test]
+	fn implied_includes_match_reference_patterns() {
+		fn patterns(f: &ImpliedFilters) -> Vec<String> {
+			f.rules.iter().map(|r| String::from_utf8_lossy(&r.pattern).into_owned()).collect()
+		}
+		// Patterns logged by rsync 3.5.1 at --debug=FILTER3 for each pulled argument.
+		let mut f = ImpliedFilters::new(false, true, true);
+		f.add(b"/tmp/flt/w/s/sub/deep/f", false);
+		assert_eq!(patterns(&f), ["/f", "/f/**"]);
+		assert_eq!(f.check(b"f", false), Verdict::Include);
+		assert_eq!(f.check(b"f/x/y", false), Verdict::Include);
+		assert_eq!(f.check(b"g", false), Verdict::NoMatch);
+
+		let mut f = ImpliedFilters::new(true, true, true);
+		f.add(b"/tmp/flt/w/./s/sub/deep/f", false);
+		assert_eq!(patterns(&f), ["/s/sub/deep/f", "/s/sub/deep", "/s/sub", "/s", "/s/sub/deep/f/**"]);
+		assert_eq!(f.check(b"s", true), Verdict::Include);
+		assert_eq!(f.check(b"s", false), Verdict::NoMatch);
+		assert_eq!(f.check(b"s/other", false), Verdict::NoMatch);
+		assert!(f.is_implied_parent_dir(b"s/sub"));
+		assert!(!f.is_implied_parent_dir(b"s/sub/deep/f"));
+		assert!(f.is_implied_parent_dir(b"."));
+
+		let mut f = ImpliedFilters::new(true, true, true);
+		f.add(b"/tmp/flt/w/./s//sub/./deep/", false);
+		assert_eq!(patterns(&f), ["/s/sub/deep", "/s/sub", "/s", "/s/sub/deep/**"]);
+
+		let mut f = ImpliedFilters::new(false, true, true);
+		f.add(b"/tmp/flt/w/s/", false);
+		assert_eq!(patterns(&f), ["/**"]);
+		assert!(!f.is_implied_parent_dir(b"."));
+		assert_eq!(f.check(b"sub/deep/f", false), Verdict::Include);
+
+		let mut f = ImpliedFilters::new(false, true, true);
+		f.add(b"/tmp/flt/w/x[ab]", false);
+		assert_eq!(patterns(&f), ["/x[ab]", "/x\\[ab]", "/x[ab]/**", "/x\\[ab]/**"]);
+		assert_eq!(f.check(b"x[ab]", true), Verdict::Include);
+		assert_eq!(f.check(b"xa", false), Verdict::Include);
+
+		let mut f = ImpliedFilters::new(false, false, true);
+		f.add(b"/tmp/flt/w/s/sub", false);
+		assert_eq!(patterns(&f), ["/sub", "/sub/*"]);
+		assert_eq!(f.check(b"sub/x/y", false), Verdict::NoMatch);
+
+		let mut f = ImpliedFilters::new(false, true, true);
+		f.add(b"/tmp/flt/w/a\\b", false);
+		assert_eq!(patterns(&f), ["/a\\b", "/a\\\\b/**"]);
+		assert_eq!(f.check(b"a\\b", false), Verdict::Include);
+		assert_eq!(f.check(b"a\\b/c", false), Verdict::Include);
+
+		let mut f = ImpliedFilters::new(false, true, true);
+		f.add(b"module/dir/file", true);
+		assert_eq!(patterns(&f), ["/file", "/file/**"]);
+	}
+}

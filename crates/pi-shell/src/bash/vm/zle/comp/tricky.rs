@@ -15,7 +15,8 @@
 mod compstring;
 mod expand;
 mod spell;
-
+#[cfg(test)]
+mod tests;
 
 use bstr::BString;
 

@@ -1184,7 +1184,14 @@ pub(crate) struct CleanOpts<'a> {
 }
 
 impl FileList {
-	
+	/// Receiver defaults of [`FileList::sort_and_clean_with`] (test fixtures).
+	#[cfg(test)]
+	pub(crate) fn sort_and_clean(&mut self, proto: Proto, strip_root: bool, logger: &Logger) {
+		self.sort_and_clean_with(
+			CleanOpts { proto, strip_root, am_sender: false, inc_recurse: false, prune_empty_dirs: None },
+			logger,
+		);
+	}
 
 	/// flist_sort_and_clean with every upstream variable spelled out.
 	pub(crate) fn sort_and_clean_with(&mut self, opts: CleanOpts<'_>, logger: &Logger) {
@@ -1539,4 +1546,868 @@ pub(crate) fn f_name_has_prefix(a: &FileEntry, b: &FileEntry, proto: Proto) -> b
 	compare_names(a, b, proto).1
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::rsync::consts::{
+		CF_INC_RECURSE, S_IFBLK, S_IFCHR, S_IFIFO, S_IFLNK, S_IFMT, S_IFSOCK,
+	};
+	use crate::rsync::log::{LogConfig, OutLevels};
+	use std::sync::Mutex;
 
+	#[derive(Clone, Default)]
+	struct Capture(Arc<Mutex<Vec<u8>>>);
+
+	impl io::Write for Capture {
+		fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+			self.0.lock().unwrap().extend_from_slice(buf);
+			Ok(buf.len())
+		}
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	fn logger_with(debug: &str) -> (Logger, Capture) {
+		let out = Capture::default();
+		let mut levels = OutLevels::default();
+		if !debug.is_empty() {
+			levels.apply_debug(debug).unwrap();
+		}
+		let cfg = LogConfig { levels, ..LogConfig::default() };
+		let logger = Logger::local(Box::new(out.clone()), Box::new(out.clone()), cfg);
+		(logger, out)
+	}
+
+	fn entry(name: &str, mode: u32) -> FileEntry {
+		let name = name.as_bytes();
+		let (dirname, basename) = paths::split_name(name);
+		FileEntry { dirname: dirname.into(), basename: basename.into(), mode, ..FileEntry::default() }
+	}
+
+	fn names(list: &FileList) -> Vec<String> {
+		list.entries.iter().map(|e| String::from_utf8_lossy_owned(e.name())).collect()
+	}
+
+	// ---- golden bytes captured from rsync 3.5.1 (`--server --sender`, -naH --numeric-ids) ----
+
+	enum Part {
+		Hex(&'static str),
+		Run(u8, usize),
+	}
+
+	fn bytes(parts: &[Part]) -> Vec<u8> {
+		let mut out = Vec::new();
+		for p in parts {
+			match p {
+				Part::Hex(h) => {
+					for i in (0..h.len()).step_by(2) {
+						out.push(u8::from_str_radix(&h[i..i + 2], 16).unwrap());
+					}
+				}
+				Part::Run(b, n) => out.extend(std::iter::repeat_n(*b, *n)),
+			}
+		}
+		out
+	}
+
+	const GOLDEN_33: &[Part] = &[
+		Part::Hex("01012e00c00165156f93ed41000081f5009298026832000200a4810000809a03626967c100f2052a"),
+		Part::Hex("8098c8"),
+		Part::Run(0x64, 200),
+		Part::Hex("006000ed410000809a016100600080b801022e62000500a4810000809a046e6e6e6e000100809803"),
+		Part::Hex("737562008000ed4100001803612d62000100f8f0f1ffffffffffffa481000018046c696e6b000300"),
+		Part::Hex("65156f93eda1000003612e62a01804736f636b0000006abd87e2f0aa396635edc100008218026831"),
+		Part::Hex("01a018046669666f0000006abd87e2f0de4b5733a4110000588191"),
+		Part::Run(0x64, 200),
+		Part::Hex("2f"),
+		Part::Run(0x65, 200),
+		Part::Hex("00010065156f93a4810000809a07612f696e6e6572000300829a067375622f68330180b804046465"),
+		Part::Hex("6570008000ed41000080b808022f66000400a481000080b8090372656c000900eda10000092e2e2f"),
+		Part::Hex("2e2e2f612e620000"),
+	];
+
+	const GOLDEN_29: &[Part] = &[
+		Part::Hex("01012ec0010000156f9365ed410000f5010000000000009c0202683202000000a481000014000001"),
+		Part::Hex("2f6304229a03626967ffffffff00f2052a0100000098c8"),
+		Part::Run(0x64, 200),
+		Part::Hex("60000000ed4100009a016160000000b801022e6205000000a48100009a046e6e6e6e010000009803"),
+		Part::Hex("73756280000000ed4100001803612d6201000000f0f1ffffa481000018046c696e6b03000000156f"),
+		Part::Hex("9365eda1000003000000612e621c0904736f636b00000000bd87e26aedc10000001c060268310200"),
+		Part::Hex("0000156f9365a48100002f6304221c09046669666f00000000bd87e26aa4110000005891010000"),
+		Part::Run(0x64, 200),
+		Part::Hex("2f"),
+		Part::Run(0x65, 200),
+		Part::Hex("01000000156f9365a48100009a07612f696e6e6572030000009e06067375622f6833020000002f63"),
+		Part::Hex("0422b804046465657080000000ed410000b808022f6604000000a4810000b8090372656c09000000"),
+		Part::Hex("eda10000090000002e2e2f2e2e2f612e620000000000"),
+	];
+
+	const GOLDEN_33_CSUM: &[Part] = &[
+		Part::Hex("01012e00c00165156f93ed41000081f5009298026832000200a481000002b2b0d8855edb10114269"),
+		Part::Hex("71a014d45e809a03626967c100f2052a61a872d27c97d180861569581f9428378098c8"),
+		Part::Run(0x64, 200),
+		Part::Hex("006000ed410000809a016100600080b801022e62000500a48100001838525eaacf79c77f3e1b07ad"),
+		Part::Hex("c1e9b5809a046e6e6e6e0001000a8bae24670faacb5a8783351bd211c3809803737562008000ed41"),
+		Part::Hex("00001803612d62000100f8f0f1ffffffffffffa481000011cdb280646cf0eaeeee22ecc001745c18"),
+		Part::Hex("046c696e6b00030065156f93eda1000003612e62a01804736f636b0000006abd87e2f0aa396635ed"),
+		Part::Hex("c10000821802683101a018046669666f0000006abd87e2f0de4b5733a4110000588191"),
+		Part::Run(0x64, 200),
+		Part::Hex("2f"),
+		Part::Run(0x65, 200),
+		Part::Hex("00010065156f93a481000096b3f0cf706638f2d7aaf5fd789e5a77809a07612f696e6e6572000300"),
+		Part::Hex("50392f89945faf7885613a73b65ab006829a067375622f68330180b8040464656570008000ed4100"),
+		Part::Hex("0080b808022f66000400a4810000a598144d177f962f0882594746f4570a80b8090372656c000900"),
+		Part::Hex("eda10000092e2e2f2e2e2f612e620000"),
+	];
+
+	const GOLDEN_33_INC: &[Part] = &[
+		Part::Hex("01012e00c00165156f93ed41000081f5009298026832000200a4810000809a03626967c100f2052a"),
+		Part::Hex("8098c8"),
+		Part::Run(0x64, 200),
+		Part::Hex("006000ed410000809a016100600080b801022e62000500a4810000809a046e6e6e6e000100809803"),
+		Part::Hex("737562008000ed4100001803612d62000100f8f0f1ffffffffffffa481000018046c696e6b000300"),
+		Part::Hex("65156f93eda1000003612e62a01804736f636b0000006abd87e2f0aa396635edc100008218026831"),
+		Part::Hex("02a018046669666f0000006abd87e2f0de4b5733a41100000000"),
+	];
+
+	/// The options of `rsync -naH --numeric-ids` (plus -c for the checksum capture).
+	fn archive_opts(inc: bool, checksum: bool) -> FlistOpts {
+		FlistOpts {
+			preserve_uid: true,
+			preserve_gid: true,
+			preserve_links: true,
+			preserve_devices: true,
+			preserve_specials: true,
+			preserve_hard_links: true,
+			numeric_ids: true,
+			inc_recurse: inc,
+			recurse: true,
+			always_checksum: checksum,
+			checksum_len: if checksum { 16 } else { 0 },
+			..FlistOpts::default()
+		}
+	}
+
+	/// Decodes a captured list, then re-encodes the entries and expects identical bytes.
+	fn golden_round_trip(parts: &[Part], p: Proto, opts: FlistOpts, ndx_start: i32) -> Vec<FileEntry> {
+		let wire = bytes(parts);
+		let mut dec = FlistDecoder::new(p, opts.clone());
+		dec.start_list(ndx_start);
+		let mut ids = IdLists::new(p, &opts);
+		let mut r = &wire[..];
+		let mut entries = Vec::new();
+		while let Some(e) = dec.recv_entry(&mut r, &mut ids).unwrap() {
+			entries.push(e);
+		}
+		if p.version < 30 {
+			assert_eq!(dec.recv_io_error_int(&mut r).unwrap(), 0);
+		}
+		assert!(r.is_empty(), "{} trailing bytes", r.len());
+		assert_eq!(dec.io_error(), 0);
+
+		let mut enc = FlistEncoder::new(p, opts.clone());
+		enc.start_list(ndx_start);
+		let mut tx_ids = IdLists::new(p, &opts);
+		let mut out = Vec::new();
+		for (i, e) in entries.iter().enumerate() {
+			enc.send_entry(&mut out, e, ndx_start + i as i32, &mut tx_ids).unwrap();
+		}
+		enc.send_end(&mut out, 0).unwrap();
+		if p.version < 30 {
+			enc.send_io_error_int(&mut out, 0).unwrap();
+		}
+		assert_eq!(out, wire);
+		entries
+	}
+
+	fn find<'a>(entries: &'a [FileEntry], name: &str) -> &'a FileEntry {
+		entries.iter().find(|e| e.name() == name.as_bytes()).unwrap()
+	}
+
+	#[test]
+	fn golden_protocol_33() {
+		let entries = golden_round_trip(GOLDEN_33, Proto::new(33, 0x1fe), archive_opts(false, false), 0);
+		assert_eq!(entries.len(), 19);
+		assert_eq!(&*entries[0].basename, b".");
+		assert!(entries[0].is_dir());
+		assert_eq!(entries[0].flags & FLAG_TOP_DIR, FLAG_TOP_DIR);
+		assert_eq!(entries[0].uid, 501);
+		let h2 = find(&entries, "h2");
+		assert_eq!(h2.hlink, Hlink::First(1));
+		assert_eq!(h2.flags & FLAG_HLINKED, FLAG_HLINKED);
+		let h1 = find(&entries, "h1");
+		assert_eq!(h1.hlink, Hlink::Follower(1));
+		assert_eq!((h1.size, h1.mode), (2, 0o100644));
+		let big = find(&entries, "big");
+		assert_eq!(big.size, 5_000_000_000);
+		assert_eq!(big.flags & FLAG_LENGTH64, FLAG_LENGTH64);
+		assert_eq!(find(&entries, "a-b").mtime, -3600);
+		assert_eq!(find(&entries, "link").link.as_deref(), Some(&b"a.b"[..]));
+		let fifo = find(&entries, "fifo");
+		assert_eq!(fifo.mode, S_IFIFO | 0o644);
+		assert_eq!(fifo.mtime_nsec, 861_359_070);
+		assert_eq!(fifo.rdev, None);
+		assert_eq!(find(&entries, "sock").mode & S_IFMT, S_IFSOCK);
+		let long = format!("{}/{}", "d".repeat(200), "e".repeat(200));
+		assert_eq!(find(&entries, &long).size, 1);
+		assert_eq!(&*find(&entries, "sub/deep/rel").dirname, b"sub/deep");
+	}
+
+	#[test]
+	fn golden_protocol_29() {
+		let entries = golden_round_trip(GOLDEN_29, Proto::new(29, 0), archive_opts(false, false), 0);
+		assert_eq!(entries.len(), 19);
+		let h2 = find(&entries, "h2");
+		let h3 = find(&entries, "sub/h3");
+		let Hlink::DevIno(dev, ino) = h2.hlink else { panic!("h2: {:?}", h2.hlink) };
+		assert_eq!(h3.hlink, Hlink::DevIno(dev, ino));
+		assert_eq!((dev, ino), (16_777_235, 570_712_879));
+		// Protocol 29 carries no nanoseconds and still sends rdev for specials.
+		assert_eq!(find(&entries, "fifo").mtime_nsec, 0);
+	}
+
+	#[test]
+	fn golden_checksums() {
+		let entries = golden_round_trip(GOLDEN_33_CSUM, Proto::new(33, 0x1fe), archive_opts(false, true), 0);
+		let f = find(&entries, "sub/deep/f");
+		assert_eq!(
+			f.sum.as_deref(),
+			Some(&[0xa5, 0x98, 0x14, 0x4d, 0x17, 0x7f, 0x96, 0x2f, 0x08, 0x82, 0x59, 0x47, 0x46, 0xf4, 0x57, 0x0a][..])
+		);
+		assert!(find(&entries, "a").sum.is_none());
+		// The abbreviated follower copies its leader's sum.
+		assert_eq!(find(&entries, "h1").sum, find(&entries, "h2").sum);
+	}
+
+	#[test]
+	fn golden_incremental_first_segment() {
+		let entries =
+			golden_round_trip(GOLDEN_33_INC, Proto::new(33, 0x1ff), archive_opts(true, false), 1);
+		assert_eq!(entries.len(), 13);
+		assert_eq!(find(&entries, "h2").hlink, Hlink::First(2));
+		assert_eq!(find(&entries, "h1").hlink, Hlink::Follower(2));
+		// Directories of the first segment are content dirs (expanded by later segments).
+		assert_eq!(find(&entries, "sub").flags & FLAG_CONTENT_DIR, FLAG_CONTENT_DIR);
+	}
+
+	// ---- encode/decode round trips across protocols ----
+
+	fn sample_entries(v: u32) -> Vec<FileEntry> {
+		let mut out = Vec::new();
+		let mut dir = entry(".", S_IFDIR | 0o755);
+		dir.flags = FLAG_TOP_DIR | FLAG_CONTENT_DIR;
+		dir.mtime = 1_700_000_000;
+		out.push(dir);
+		let mut f = entry("file", S_IFREG | 0o644);
+		f.size = 12345;
+		f.mtime = 1_700_000_001;
+		f.mtime_nsec = if v >= 31 { 123_456_789 } else { 0 };
+		f.atime = 1_700_000_100;
+		f.crtime = 1_600_000_000;
+		f.uid = 0;
+		f.gid = 0;
+		f.sum = Some(vec![7u8; 16].into_boxed_slice());
+		out.push(f);
+		// Before protocol 30 mtimes travel as unsigned 32-bit values.
+		let early = if v >= 30 { -5 } else { 5 };
+		let mut big = entry("sub/big", S_IFREG | 0o600);
+		big.size = 1 << 40;
+		big.mtime = early;
+		big.atime = -6;
+		big.crtime = early;
+		big.uid = 4_000_000_000;
+		big.gid = 77;
+		big.sum = Some(vec![9u8; 16].into_boxed_slice());
+		out.push(big);
+		let mut sub = entry("sub", S_IFDIR | 0o700);
+		sub.flags = FLAG_CONTENT_DIR;
+		sub.mtime = early;
+		sub.crtime = 3;
+		out.push(sub);
+		let mut implied = entry("sub/implied", S_IFDIR | 0o755);
+		implied.flags = FLAG_IMPLIED_DIR;
+		out.push(implied);
+		let mut link = entry("sub/link", S_IFLNK | 0o777);
+		link.link = Some(b"../file".to_vec().into_boxed_slice());
+		link.size = 7;
+		out.push(link);
+		let mut chr = entry("dev/null", S_IFCHR | 0o666);
+		chr.rdev = Some((3, 2));
+		out.push(chr);
+		let mut blk = entry("dev/disk", S_IFBLK | 0o660);
+		blk.rdev = Some((3, 70_000));
+		out.push(blk);
+		let mut blk2 = entry("dev/disk2", S_IFBLK | 0o660);
+		blk2.rdev = Some((8, 1));
+		out.push(blk2);
+		out.push(entry("dev/fifo", S_IFIFO | 0o644));
+		out.push(entry("dev/sock", S_IFSOCK | 0o755));
+		let long_name = format!("{}/{}", "x".repeat(150), "y".repeat(300));
+		let mut long = entry(&long_name, S_IFREG | 0o644);
+		long.size = 3;
+		long.sum = Some(vec![1u8; 16].into_boxed_slice());
+		out.push(long);
+		// Hard links: leader + follower in this list.
+		let mut h1 = entry("h1", S_IFREG | 0o644);
+		h1.size = 2;
+		h1.mtime = 42;
+		h1.sum = Some(vec![5u8; 16].into_boxed_slice());
+		let mut h2 = h1.clone();
+		h2.basename = b"h2".to_vec().into_boxed_slice();
+		if v >= 30 {
+			h1.hlink = Hlink::Leader;
+			h2.hlink = Hlink::Follower(-1); // patched below with the leader's index
+		} else {
+			h1.hlink = Hlink::DevIno(5, 99);
+			h2.hlink = Hlink::DevIno(5, 99);
+		}
+		h1.flags |= FLAG_HLINKED;
+		h2.flags |= FLAG_HLINKED;
+		out.push(h1);
+		out.push(h2);
+		let mut tail = entry("zzz", S_IFREG | 0o644);
+		tail.mtime = 42;
+		out.push(tail);
+		out
+	}
+
+	struct Combo {
+		inc: bool,
+		checksum: bool,
+		atimes: bool,
+		crtimes: bool,
+		ids: bool,
+	}
+
+	fn combo_opts(c: &Combo) -> FlistOpts {
+		FlistOpts {
+			preserve_uid: c.ids,
+			preserve_gid: c.ids,
+			preserve_links: true,
+			preserve_devices: true,
+			preserve_specials: true,
+			preserve_hard_links: true,
+			preserve_atimes: c.atimes,
+			preserve_crtimes: c.crtimes,
+			always_checksum: c.checksum,
+			checksum_len: 16,
+			numeric_ids: !c.ids,
+			inc_recurse: c.inc,
+			recurse: true,
+			..FlistOpts::default()
+		}
+	}
+
+	fn round_trip(p: Proto, c: &Combo) {
+		let opts = combo_opts(c);
+		let ndx_start = if c.inc { 1 } else { 0 };
+		let mut entries = sample_entries(p.version);
+		let leader = entries.iter().position(|e| &*e.basename == b"h1").unwrap() as i32 + ndx_start;
+		for e in &mut entries {
+			if e.hlink == Hlink::Follower(-1) {
+				e.hlink = Hlink::Follower(leader);
+			}
+		}
+		let mut enc = FlistEncoder::new(p, opts.clone());
+		enc.start_list(ndx_start);
+		let mut tx_ids = IdLists::new(p, &opts);
+		let mut wire = Vec::new();
+		for (i, e) in entries.iter().enumerate() {
+			enc.send_entry(&mut wire, e, ndx_start + i as i32, &mut tx_ids).unwrap();
+		}
+		enc.send_end(&mut wire, 0).unwrap();
+		if !c.inc {
+			tx_ids.send_lists(&mut wire, p, &opts).unwrap();
+		}
+		if p.version < 30 {
+			enc.send_io_error_int(&mut wire, 0).unwrap();
+		}
+
+		let mut dec = FlistDecoder::new(p, opts.clone());
+		dec.start_list(ndx_start);
+		let mut rx_ids = IdLists::new(p, &opts);
+		let mut r = &wire[..];
+		let mut got = Vec::new();
+		while let Some(e) = dec.recv_entry(&mut r, &mut rx_ids).unwrap() {
+			got.push(e);
+		}
+		if !c.inc {
+			rx_ids.recv_lists(&mut r, p, &opts).unwrap();
+		}
+		if p.version < 30 {
+			dec.recv_io_error_int(&mut r).unwrap();
+		}
+		assert!(r.is_empty(), "v{} trailing bytes", p.version);
+		assert_eq!(got.len(), entries.len());
+
+		let ctx = format!("v{} inc={} csum={} atimes={} crtimes={} ids={}", p.version, c.inc, c.checksum, c.atimes, c.crtimes, c.ids);
+		for (i, (want, have)) in entries.iter().zip(&got).enumerate() {
+			assert_eq!(want.name(), have.name(), "{ctx}");
+			assert_eq!(want.mode, have.mode, "{ctx} {i}");
+			let size = if mode_is_device(want.mode) || mode_is_special(want.mode) { 0 } else { want.size };
+			assert_eq!(size, have.size, "{ctx} {i}");
+			assert_eq!(want.mtime, have.mtime, "{ctx} {i}");
+			assert_eq!(want.mtime_nsec, have.mtime_nsec, "{ctx} {i}");
+			if c.atimes && !want.is_dir() {
+				assert_eq!(want.atime, have.atime, "{ctx} {i}");
+			}
+			if c.crtimes {
+				assert_eq!(want.crtime, have.crtime, "{ctx} {i}");
+			}
+			if c.ids {
+				assert_eq!((want.uid, want.gid), (have.uid, have.gid), "{ctx} {i}");
+			}
+			assert_eq!(want.rdev, have.rdev, "{ctx} {i}");
+			assert_eq!(want.link, have.link, "{ctx} {i}");
+			if c.checksum && want.is_reg() {
+				// Protocol ≥ 28 sends a sum for every regular file (and only those); one the
+				// sender has none for goes out as zeros.
+				let expect = want.sum.clone().unwrap_or_else(|| vec![0u8; 16].into_boxed_slice());
+				assert_eq!(Some(expect), have.sum, "{ctx} {i}");
+			} else {
+				assert!(have.sum.is_none(), "{ctx} {i}");
+			}
+			let wire_ndx = ndx_start + i as i32;
+			let expect_hlink = match want.hlink {
+				Hlink::Leader => Hlink::First(wire_ndx),
+				other => other,
+			};
+			assert_eq!(expect_hlink, have.hlink, "{ctx} {i}");
+			if want.is_dir() {
+				let mask = FLAG_TOP_DIR | FLAG_CONTENT_DIR | FLAG_IMPLIED_DIR;
+				let expect = if p.version >= 30 {
+					want.flags & mask
+				} else {
+					// Protocol 29 only carries the top-dir bit; content follows from -r.
+					if want.flags & FLAG_TOP_DIR != 0 { FLAG_TOP_DIR | FLAG_CONTENT_DIR } else { FLAG_CONTENT_DIR }
+				};
+				assert_eq!(have.flags & mask, expect, "{ctx} {i}");
+			}
+		}
+	}
+
+	#[test]
+	fn round_trips_every_protocol_and_option_mix() {
+		let mut protos = vec![Proto::new(29, 0), Proto::new(30, 0), Proto::new(30, CF_SAFE_FLIST)];
+		for v in [30, 31, 32, 33] {
+			protos.push(Proto::new(v, CF_VARINT_FLIST_FLAGS | CF_SAFE_FLIST));
+		}
+		protos.push(Proto::new(31, 0));
+		for p in protos {
+			for bits in 0..32u32 {
+				let c = Combo {
+					inc: bits & 1 != 0 && p.version >= 30,
+					checksum: bits & 2 != 0,
+					atimes: bits & 4 != 0,
+					crtimes: bits & 8 != 0 && varint_flags(p),
+					ids: bits & 16 != 0,
+				};
+				let mut p = p;
+				if c.inc {
+					p.compat |= CF_INC_RECURSE;
+				}
+				round_trip(p, &c);
+			}
+		}
+	}
+
+	#[test]
+	fn inline_names_follow_under_inc_recurse() {
+		let p = Proto::new(31, CF_VARINT_FLIST_FLAGS | CF_SAFE_FLIST | CF_INC_RECURSE);
+		let opts = combo_opts(&Combo { inc: true, checksum: false, atimes: false, crtimes: false, ids: true });
+		let mut e = entry("f", S_IFREG | 0o644);
+		e.uid = 0;
+		e.gid = 0;
+		let mut enc = FlistEncoder::new(p, opts.clone());
+		let mut wire = Vec::new();
+		let mut ids = IdLists::new(p, &opts);
+		enc.send_entry(&mut wire, &e, 1, &mut ids).unwrap();
+		let mut second = entry("g", S_IFREG | 0o644);
+		second.uid = 0;
+		second.gid = 0;
+		enc.send_entry(&mut wire, &second, 2, &mut ids).unwrap();
+		// The first entry carries uid 0's name inline (gid 0 may be "root" too on Linux).
+		let named = wire.windows(5).filter(|w| *w == b"\x04root").count();
+		if cfg!(unix) {
+			assert!(named >= 1);
+		} else {
+			assert_eq!(named, 0);
+		}
+		let mut dec = FlistDecoder::new(p, opts.clone());
+		let mut rx = IdLists::new(p, &opts);
+		let mut r = &wire[..];
+		let first = dec.recv_entry(&mut r, &mut rx).unwrap().unwrap();
+		let next = dec.recv_entry(&mut r, &mut rx).unwrap().unwrap();
+		assert!(r.is_empty());
+		assert_eq!((first.uid, next.uid), (0, 0));
+		assert_eq!(rx.match_uid(0), 0);
+	}
+
+	/// Entries that differ from their predecessor in every elided field and share no name
+	/// prefix would have flags 0, which reads as the end of the list.
+	fn all_new(name: &str, mode: u32, n: u32) -> FileEntry {
+		let mut e = entry(name, mode | n);
+		e.mtime = i64::from(n);
+		e.uid = n;
+		e.gid = n;
+		e.flags = FLAG_CONTENT_DIR;
+		e
+	}
+
+	#[test]
+	fn zero_flags_are_never_sent() {
+		let ids_opts = FlistOpts {
+			preserve_uid: true,
+			preserve_gid: true,
+			numeric_ids: true,
+			..FlistOpts::default()
+		};
+		let mut ids = IdLists::default();
+		let p = Proto::new(30, 0);
+		let mut enc = FlistEncoder::new(p, ids_opts.clone());
+		let mut wire = Vec::new();
+		enc.send_entry(&mut wire, &all_new("a", S_IFREG, 1), 0, &mut ids).unwrap();
+		let start = wire.len();
+		enc.send_entry(&mut wire, &all_new("b", S_IFREG, 2), 1, &mut ids).unwrap();
+		// Non-directory: XMIT_TOP_DIR (meaningless there) keeps the byte nonzero.
+		assert_eq!(wire[start], XMIT_TOP_DIR as u8);
+		let start = wire.len();
+		enc.send_entry(&mut wire, &all_new("c", S_IFDIR, 3), 2, &mut ids).unwrap();
+		// Directory: the two-byte form with only XMIT_EXTENDED_FLAGS.
+		assert_eq!(&wire[start..start + 2], &[XMIT_EXTENDED_FLAGS as u8, 0]);
+
+		let pv = Proto::new(31, CF_VARINT_FLIST_FLAGS);
+		let mut enc = FlistEncoder::new(pv, ids_opts.clone());
+		let mut wire = Vec::new();
+		enc.send_entry(&mut wire, &all_new("a", S_IFREG, 1), 0, &mut ids).unwrap();
+		let start = wire.len();
+		enc.send_entry(&mut wire, &all_new("b", S_IFDIR, 2), 1, &mut ids).unwrap();
+		assert_eq!(wire[start], XMIT_EXTENDED_FLAGS as u8);
+		enc.send_end(&mut wire, 0).unwrap();
+
+		let mut dec = FlistDecoder::new(pv, ids_opts);
+		let mut r = &wire[..];
+		let first = dec.recv_entry(&mut r, &mut ids).unwrap().unwrap();
+		let second = dec.recv_entry(&mut r, &mut ids).unwrap().unwrap();
+		assert_eq!((first.uid, second.uid, second.mtime), (1, 2, 2));
+		assert!(second.is_dir());
+		assert!(dec.recv_entry(&mut r, &mut ids).unwrap().is_none());
+	}
+
+	#[test]
+	fn end_markers_by_protocol() {
+		let mut out = Vec::new();
+		FlistEncoder::new(Proto::new(29, 0), FlistOpts::default()).send_end(&mut out, 1).unwrap();
+		assert_eq!(out, [0]);
+		let mut out = Vec::new();
+		FlistEncoder::new(Proto::new(31, 0), FlistOpts::default()).send_end(&mut out, 3).unwrap();
+		assert_eq!(out, [0x04, 0x10, 3]);
+		let mut out = Vec::new();
+		FlistEncoder::new(Proto::new(30, 0), FlistOpts::default()).send_end(&mut out, 3).unwrap();
+		assert_eq!(out, [0]);
+		let mut out = Vec::new();
+		FlistEncoder::new(Proto::new(32, CF_VARINT_FLIST_FLAGS), FlistOpts::default())
+			.send_end(&mut out, 2)
+			.unwrap();
+		assert_eq!(out, [0, 2]);
+
+		let mut ids = IdLists::default();
+		let mut dec = FlistDecoder::new(Proto::new(31, 0), FlistOpts::default());
+		assert!(dec.recv_entry(&mut &[0x04u8, 0x10, 0x0b][..], &mut ids).unwrap().is_none());
+		assert_eq!(dec.io_error(), 3);
+		let mut dec = FlistDecoder::new(Proto::new(30, 0), FlistOpts::default());
+		let err = dec.recv_entry(&mut &[0x04u8, 0x10, 1][..], &mut ids).unwrap_err();
+		assert_eq!(err.code, RERR_PROTOCOL);
+		assert_eq!(err.message.as_deref(), Some("Invalid flist flag: 1004"));
+	}
+
+	fn decode_err(p: Proto, opts: FlistOpts, wire: &[u8]) -> RsyncError {
+		let mut dec = FlistDecoder::new(p, opts.clone());
+		let mut ids = IdLists::new(p, &opts);
+		let mut r = wire;
+		loop {
+			match dec.recv_entry(&mut r, &mut ids) {
+				Ok(Some(_)) => {}
+				Ok(None) => panic!("unexpected end"),
+				Err(e) => return e,
+			}
+		}
+	}
+
+	#[test]
+	fn decoder_rejects_hostile_entries() {
+		let p = Proto::new(31, 0);
+		// Name longer than MAXPATHLEN.
+		let mut wire = vec![(XMIT_LONG_NAME | XMIT_EXTENDED_FLAGS) as u8, 0];
+		wire.write_varint30(p, MAXPATHLEN as i32).unwrap();
+		let e = decode_err(p, FlistOpts::default(), &wire);
+		assert_eq!(e.code, RERR_MALLOC);
+		assert_eq!(
+			e.message.as_deref(),
+			Some("[receiver] buffer overflow: recv_file_entry (file=flist.c, line=1048)")
+		);
+		// Absolute name without --relative.
+		let e = decode_err(p, FlistOpts::default(), &[XMIT_TOP_DIR as u8, 4, b'/', b'e', b't', b'c']);
+		assert_eq!(e.code, RERR_UNSUPPORTED);
+		assert_eq!(e.message.as_deref(), Some("ABORTING due to unsafe pathname from sender: /etc"));
+		// ".." escape.
+		let e = decode_err(p, FlistOpts::default(), &[XMIT_TOP_DIR as u8, 4, b'.', b'.', b'/', b'x']);
+		assert_eq!(e.message.as_deref(), Some("ABORTING due to unsafe pathname from sender: ../x"));
+		// Hard-link reference to an index not yet received.
+		let opts = FlistOpts { preserve_hard_links: true, ..FlistOpts::default() };
+		let mut wire = Vec::new();
+		wire.write_shortint((XMIT_EXTENDED_FLAGS | XMIT_HLINKED) as u16).unwrap();
+		wire.extend_from_slice(&[1, b'h', 5]);
+		let e = decode_err(p, opts, &wire);
+		assert_eq!(e.code, RERR_PROTOCOL);
+		assert_eq!(e.message.as_deref(), Some("hard-link reference out of range: 5 (0)"));
+		// Garbage mode type bits.
+		let mut wire = vec![(XMIT_SAME_UID | XMIT_SAME_GID) as u8, 1, b'f'];
+		wire.write_varlong30(p, 0, 3).unwrap();
+		wire.write_varlong(0, 4).unwrap();
+		wire.write_int(0o070644).unwrap();
+		let e = decode_err(p, FlistOpts::default(), &wire);
+		assert_eq!(e.message.as_deref(), Some("invalid file mode 070644 for f [receiver]"));
+		// Out-of-range nanoseconds.
+		let mut wire = Vec::new();
+		wire.write_shortint((XMIT_EXTENDED_FLAGS | XMIT_MOD_NSEC | XMIT_SAME_TIME) as u16).unwrap();
+		wire.extend_from_slice(&[1, b'f']);
+		wire.write_varlong30(p, 0, 3).unwrap();
+		wire.write_varint(1_000_000_000).unwrap();
+		let e = decode_err(p, FlistOpts::default(), &wire);
+		assert_eq!(
+			e.message.as_deref(),
+			Some("wire value modtime_nsec out of range: 1000000000 not in [0,999999999] [receiver]")
+		);
+		// "." that is not a directory.
+		let mut wire = vec![XMIT_SAME_TIME as u8, 1, b'.'];
+		wire.write_varlong30(p, 0, 3).unwrap();
+		wire.write_int((S_IFREG | 0o644) as i32).unwrap();
+		let e = decode_err(p, FlistOpts::default(), &wire);
+		assert_eq!(e.message.as_deref(), Some("ERROR: rejecting non-directory transfer-root entry: ."));
+		// Symlink target longer than MAXPATHLEN.
+		let opts = FlistOpts { preserve_links: true, ..FlistOpts::default() };
+		let mut wire = vec![XMIT_SAME_TIME as u8, 1, b'l'];
+		wire.write_varlong30(p, 0, 3).unwrap();
+		wire.write_int((S_IFLNK | 0o777) as i32).unwrap();
+		wire.write_varint30(p, MAXPATHLEN as i32).unwrap();
+		let e = decode_err(p, opts, &wire);
+		assert_eq!(e.code, RERR_MALLOC);
+		assert_eq!(
+			e.message.as_deref(),
+			Some("[receiver] buffer overflow: recv_file_entry (file=flist.c, line=1286)")
+		);
+		// Negative length.
+		let mut wire = vec![(XMIT_SAME_TIME | XMIT_SAME_MODE) as u8, 1, b'f'];
+		wire.write_varlong30(p, -1, 3).unwrap();
+		let e = decode_err(p, FlistOpts::default(), &wire);
+		assert_eq!(e.message.as_deref(), Some("Offset underflow: file-length is negative"));
+	}
+
+	#[test]
+	fn hlinked_without_dash_h_is_not_marked() {
+		// CVE-2026-70458: XMIT_HLINKED from the peer must not yield FLAG_HLINKED without -H.
+		let p = Proto::new(31, CF_VARINT_FLIST_FLAGS);
+		let sender = FlistOpts { preserve_hard_links: true, ..FlistOpts::default() };
+		let mut enc = FlistEncoder::new(p, sender);
+		let mut ids = IdLists::default();
+		let mut wire = Vec::new();
+		let mut a = entry("a", S_IFREG | 0o644);
+		a.hlink = Hlink::Leader;
+		let mut b = entry("b", S_IFREG | 0o644);
+		b.hlink = Hlink::Follower(0);
+		enc.send_entry(&mut wire, &a, 0, &mut ids).unwrap();
+		enc.send_entry(&mut wire, &b, 1, &mut ids).unwrap();
+		enc.send_end(&mut wire, 0).unwrap();
+		let mut dec = FlistDecoder::new(p, FlistOpts::default());
+		let mut r = &wire[..];
+		let mut got = Vec::new();
+		while let Some(e) = dec.recv_entry(&mut r, &mut ids).unwrap() {
+			got.push(e);
+		}
+		assert!(r.is_empty());
+		assert_eq!(got.len(), 2);
+		for e in &got {
+			assert_eq!(e.flags & FLAG_HLINKED, 0);
+			assert_eq!(e.hlink, Hlink::None);
+		}
+	}
+
+	#[test]
+	fn relative_names_keep_and_strip_the_root() {
+		let p = Proto::new(31, CF_VARINT_FLIST_FLAGS);
+		let opts = FlistOpts { relative_paths: true, ..FlistOpts::default() };
+		let mut enc = FlistEncoder::new(p, opts.clone());
+		let mut ids = IdLists::default();
+		let mut wire = Vec::new();
+		let mut top = entry("tmp", S_IFDIR | 0o755);
+		top.dirname = Arc::from(&b"/"[..]);
+		let inner = entry("/tmp/x", S_IFREG | 0o644);
+		let rel = entry("rel", S_IFREG | 0o644);
+		for (i, e) in [&inner, &rel, &top].into_iter().enumerate() {
+			enc.send_entry(&mut wire, e, i as i32, &mut ids).unwrap();
+		}
+		enc.send_end(&mut wire, 0).unwrap();
+		let mut dec = FlistDecoder::new(p, opts);
+		let mut r = &wire[..];
+		let mut list = FileList::default();
+		while let Some(e) = dec.recv_entry(&mut r, &mut ids).unwrap() {
+			list.entries.push(e);
+		}
+		assert_eq!(list.entries[2].name(), b"/tmp");
+		let (logger, _) = logger_with("");
+		list.sort_and_clean(p, true, &logger);
+		// "/tmp" has a (empty) dirname, so it sorts as a path after the top-level item
+		// "rel"; the root is stripped only after sorting.
+		assert_eq!(names(&list), ["rel", "tmp", "tmp/x"]);
+	}
+
+	// ---- ordering and cleaning ----
+
+	#[test]
+	fn sort_order_matches_reference() {
+		// Order printed by rsync 3.5.1 for the golden tree (files before dirs per level).
+		let p = Proto::new(33, 0);
+		let mut list = FileList::default();
+		for (n, m) in [
+			("sub/deep", S_IFDIR),
+			("a", S_IFDIR),
+			("nnnn", S_IFREG),
+			("a.b", S_IFREG),
+			("a/inner", S_IFREG),
+			("sock", S_IFSOCK),
+			(".", S_IFDIR),
+			("a-b", S_IFREG),
+			("sub", S_IFDIR),
+			("sub/h3", S_IFREG),
+			("big", S_IFREG),
+			("link", S_IFLNK),
+		] {
+			list.entries.push(entry(n, m | 0o644));
+		}
+		let (logger, _) = logger_with("");
+		list.sort_and_clean(p, false, &logger);
+		assert_eq!(
+			names(&list),
+			["." , "a-b", "a.b", "big", "link", "nnnn", "sock", "a", "a/inner", "sub", "sub/h3", "sub/deep"]
+		);
+	}
+
+	#[test]
+	fn directory_names_compare_with_trailing_slash() {
+		let p = Proto::new(30, 0);
+		let dir = entry("a", S_IFDIR);
+		let file = entry("a", S_IFREG);
+		let inner = entry("a/b", S_IFREG);
+		let dot_dir = entry("a.b", S_IFDIR);
+		let dash = entry("a-b", S_IFREG);
+		assert_eq!(f_name_cmp(&file, &dir, p), Ordering::Less);
+		assert_eq!(f_name_cmp(&dir, &inner, p), Ordering::Less);
+		// "a/" vs "a.b/": '/' > '.'
+		assert_eq!(f_name_cmp(&dir, &dot_dir, p), Ordering::Greater);
+		assert_eq!(f_name_cmp(&dash, &file, p), Ordering::Greater);
+		assert_eq!(f_name_cmp(&entry(".", S_IFDIR), &dash, p), Ordering::Less);
+		assert_eq!(f_name_cmp(&entry("x/.", S_IFDIR), &entry("x/a", S_IFREG), p), Ordering::Less);
+		assert_eq!(f_name_cmp(&dir, &dir.clone(), p), Ordering::Equal);
+		assert_eq!(f_name_cmp(&FileEntry::default(), &file, p), Ordering::Less);
+		assert!(f_name_has_prefix(&entry("p/foobar/baz", S_IFREG), &entry("p/foobar", S_IFDIR), p));
+		assert!(!f_name_has_prefix(&entry("p/foobar/baz", S_IFREG), &entry("p/foo", S_IFDIR), p));
+	}
+
+	#[test]
+	fn duplicates_are_removed_with_reference_message() {
+		// `rsync -rn --debug=dup src/a.b src/a.b src/a d2/` prints exactly this line.
+		let p = Proto::new(33, 0);
+		let mut list = FileList { ndx_start: 1, ..FileList::default() };
+		list.entries.push(entry("a.b", S_IFREG | 0o644));
+		list.entries.push(entry("a.b", S_IFREG | 0o644));
+		list.entries.push(entry("a", S_IFDIR | 0o755));
+		let (logger, out) = logger_with("dup");
+		list.sort_and_clean(p, false, &logger);
+		logger.flush();
+		assert_eq!(
+			String::from_utf8(out.0.lock().unwrap().clone()).unwrap(),
+			"removing duplicate name a.b from file list (2)\n"
+		);
+		assert_eq!(names(&list), ["a.b", "", "a"]);
+		assert_eq!(list.find(b"a.b"), Some(0));
+		assert_eq!(list.find(b"a"), Some(2));
+		assert_eq!(list.find_name(b"a", Some(false)), None);
+		assert_eq!(list.find(b"zz"), None);
+	}
+
+	#[test]
+	fn directory_wins_over_same_named_file() {
+		let p = Proto::new(31, 0);
+		let mut list = FileList::default();
+		list.entries.push(entry("x", S_IFREG | 0o644));
+		list.entries.push(entry("w", S_IFREG | 0o644));
+		let mut d = entry("x", S_IFDIR | 0o755);
+		d.flags = FLAG_CONTENT_DIR;
+		list.entries.push(d);
+		let (logger, _) = logger_with("");
+		list.sort_and_clean(p, false, &logger);
+		assert_eq!(names(&list), ["w", "", "x"]);
+		assert!(list.entries[2].is_dir());
+	}
+
+	#[test]
+	fn duplicate_dirs_merge_flags() {
+		let p = Proto::new(31, 0);
+		let mut list = FileList::default();
+		let mut implied = entry("d", S_IFDIR | 0o755);
+		implied.flags = FLAG_IMPLIED_DIR;
+		let mut content = entry("d", S_IFDIR | 0o755);
+		content.flags = FLAG_TOP_DIR | FLAG_CONTENT_DIR;
+		list.entries.push(implied);
+		list.entries.push(content);
+		let (logger, _) = logger_with("");
+		list.sort_and_clean(p, false, &logger);
+		assert_eq!(list.entries[0].flags, FLAG_TOP_DIR | FLAG_CONTENT_DIR);
+		assert!(!list.entries[1].is_active());
+
+		// The sender keeps both and marks the repeat.
+		let mut list = FileList::default();
+		list.entries.push(entry("d", S_IFDIR | 0o755));
+		list.entries.push(entry("d", S_IFDIR | 0o755));
+		list.sort_and_clean_with(
+			CleanOpts { proto: p, strip_root: false, am_sender: true, inc_recurse: true, prune_empty_dirs: None },
+			&logger,
+		);
+		assert!(list.entries.iter().all(FileEntry::is_active));
+		assert_eq!(list.entries[1].flags & FLAG_DUPLICATE, FLAG_DUPLICATE);
+	}
+
+	#[test]
+	fn prune_empty_dirs_keeps_dirs_with_files() {
+		let p = Proto::new(31, 0);
+		let mut list = FileList::default();
+		for (n, m) in [
+			(".", S_IFDIR),
+			("empty", S_IFDIR),
+			("empty/inner", S_IFDIR),
+			("full", S_IFDIR),
+			("full/f", S_IFREG),
+			("kept", S_IFDIR),
+		] {
+			list.entries.push(entry(n, m | 0o755));
+		}
+		let (logger, _) = logger_with("");
+		let mut excluded = |name: &[u8]| name == b"kept";
+		list.sort_and_clean_with(
+			CleanOpts {
+				proto: p,
+				strip_root: false,
+				am_sender: false,
+				inc_recurse: false,
+				prune_empty_dirs: Some(&mut excluded),
+			},
+			&logger,
+		);
+		let active: Vec<String> =
+			list.entries.iter().filter(|e| e.is_active()).map(|e| String::from_utf8_lossy_owned(e.name())).collect();
+		assert_eq!(active, [".", "full", "full/f", "kept"]);
+	}
+
+}

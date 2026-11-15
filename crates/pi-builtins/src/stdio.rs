@@ -779,5 +779,59 @@ mod descriptor {
 	}
 }
 
+#[cfg(all(test, unix))]
+mod tests {
+	use super::*;
 
+	/// Reading a pipe on a current-thread runtime waits for its writer
+	/// without holding the only thread.
+	#[tokio::test(flavor = "current_thread")]
+	async fn pipe_read_to_end_waits_for_a_later_writer() {
+		let (reader, mut writer) = std::io::pipe().unwrap();
+		let mut source = Source::inherited(&OpenFile::from(reader)).unwrap();
+		let mut bytes = Vec::new();
+		let read = source.read_to_end(&mut bytes, usize::MAX);
+		let write = async {
+			tokio::task::yield_now().await;
+			writer.write_all(b"late").unwrap();
+			drop(writer);
+		};
+		let (count, ()) = tokio::join!(read, write);
+		assert_eq!(count.unwrap(), 4);
+		assert_eq!(bytes, b"late");
+	}
+
+	/// Past the limit the read fails and keeps what fits.
+	#[tokio::test(flavor = "current_thread")]
+	async fn read_to_end_stops_at_the_limit() {
+		let (reader, mut writer) = std::io::pipe().unwrap();
+		writer.write_all(b"abcdef").unwrap();
+		drop(writer);
+		let mut source = Source::inherited(&OpenFile::from(reader)).unwrap();
+		let mut bytes = Vec::new();
+		let error = source.read_to_end(&mut bytes, 4).await.unwrap_err();
+		assert_eq!(error.kind(), io::ErrorKind::OutOfMemory);
+		assert_eq!(bytes, b"abcd");
+	}
+
+	/// A FIFO opens without a writer and reads what one sends later.
+	#[tokio::test(flavor = "current_thread")]
+	async fn fifo_opens_without_waiting_for_a_writer() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("fifo");
+		let fs = pi_vfs::Fs::native();
+		fs.make_node(&path, pi_vfs::NodeKind::Fifo, 0o600).await.unwrap();
+		let mut source = Source::open(&fs, &path).await.unwrap();
+		let mut bytes = Vec::new();
+		let read = source.read_to_end(&mut bytes, usize::MAX);
+		let write = async {
+			tokio::task::yield_now().await;
+			let mut writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+			writer.write_all(b"fifo").unwrap();
+		};
+		let (count, ()) = tokio::join!(read, write);
+		assert_eq!(count.unwrap(), 4);
+		assert_eq!(bytes, b"fifo");
+	}
+}
 

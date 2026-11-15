@@ -170,4 +170,151 @@ pub fn is_batch(path: &[u8]) -> bool {
 	ext.eq_ignore_ascii_case(b"bat") || ext.eq_ignore_ascii_case(b"cmd")
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn line(argv: &[&str]) -> String {
+		String::from_utf16(&command_line(argv).unwrap()).unwrap()
+	}
+
+	/// The post-2008 MSVCRT/UCRT rules (what `CommandLineToArgvW` and the C
+	/// runtime apply to everything after the program name).
+	fn parse_args(cmd: &str) -> Vec<String> {
+		let mut out = Vec::new();
+		let mut chars = cmd.chars().peekable();
+		loop {
+			while chars.next_if(|c| *c == ' ' || *c == '\t').is_some() {}
+			if chars.peek().is_none() {
+				return out;
+			}
+			let mut arg = String::new();
+			let mut quoted = false;
+			loop {
+				let mut backslashes = 0;
+				while chars.next_if_eq(&'\\').is_some() {
+					backslashes += 1;
+				}
+				match chars.peek() {
+					Some('"') => {
+						arg.extend(std::iter::repeat_n('\\', backslashes / 2));
+						if backslashes % 2 == 1 {
+							arg.push('"');
+						} else if quoted && chars.clone().nth(1) == Some('"') {
+							arg.push('"');
+							chars.next();
+						} else {
+							quoted = !quoted;
+						}
+						chars.next();
+					},
+					next => {
+						arg.extend(std::iter::repeat_n('\\', backslashes));
+						match next {
+							None => break,
+							Some(' ' | '\t') if !quoted => break,
+							Some(&c) => {
+								arg.push(c);
+								chars.next();
+							},
+						}
+					},
+				}
+			}
+			out.push(arg);
+		}
+	}
+
+	#[test]
+	fn quoting_table() {
+		let table: &[(&str, &str)] = &[
+			("plain", "plain"),
+			("", "\"\""),
+			("two words", "\"two words\""),
+			("tab\there", "\"tab\there\""),
+			("a\"b", "a\\\"b"),
+			("a\\b", "a\\b"),
+			("a\\\\b", "a\\\\b"),
+			("a\\\"b", "a\\\\\\\"b"),
+			("trail\\", "trail\\"),
+			("sp trail\\", "\"sp trail\\\\\""),
+			("sp trail\\\\", "\"sp trail\\\\\\\\\""),
+			("\"quoted\"", "\\\"quoted\\\""),
+			("say \"hi\"", "\"say \\\"hi\\\"\""),
+			("C:\\Program Files\\x\\", "\"C:\\Program Files\\x\\\\\""),
+			("ünï cødé", "\"ünï cødé\""),
+			("%PATH%", "%PATH%"),
+		];
+		for &(arg, want) in table {
+			let got = line(&["p", arg]);
+			assert_eq!(got, format!("\"p\" {want}"), "quoting {arg:?}");
+			assert_eq!(parse_args(&got[4..]), vec![arg.to_owned()], "round trip of {arg:?}");
+		}
+	}
+
+	#[test]
+	fn whole_vectors_round_trip() {
+		let argv = ["C:\\bin\\tool.exe", "", "a b", "\\\\server\\share\\", "x\"y\\\"z", " "];
+		let got = line(&argv);
+		assert!(got.starts_with("\"C:\\bin\\tool.exe\" "));
+		let rest = &got[argv[0].len() + 3..];
+		assert_eq!(
+			parse_args(rest),
+			argv[1..]
+				.iter()
+				.map(|s| (*s).to_owned())
+				.collect::<Vec<_>>()
+		);
+	}
+
+	#[test]
+	fn unrepresentable_arguments_are_refused() {
+		assert_eq!(command_line(&["p", "a\0b"]), Err(CmdlineError::Nul));
+		assert!(matches!(command_line(&["p\"q"]), Err(CmdlineError::QuoteInProgram { .. })));
+		assert!(matches!(
+			command_line(&[&b"p"[..], &b"\xff"[..]]),
+			Err(CmdlineError::NotUtf8 { .. })
+		));
+	}
+
+	#[test]
+	fn batch_lines_neutralize_cmd_metacharacters() {
+		let bat = |args: &[&str]| {
+			batch_command_line(b"C:\\s\\run.bat".as_bstr(), args)
+				.map(|l| String::from_utf16(&l).unwrap())
+		};
+		assert_eq!(
+			bat(&["plain"]).unwrap(),
+			"cmd.exe /e:ON /v:OFF /d /c \"\"C:\\s\\run.bat\" plain\""
+		);
+		assert_eq!(
+			bat(&["a&b"]).unwrap(),
+			"cmd.exe /e:ON /v:OFF /d /c \"\"C:\\s\\run.bat\" \"a&b\"\""
+		);
+		assert_eq!(
+			bat(&["%PATH%"]).unwrap(),
+			"cmd.exe /e:ON /v:OFF /d /c \"\"C:\\s\\run.bat\" \"%%cd:~,%PATH%%cd:~,%\"\""
+		);
+		assert_eq!(
+			bat(&["say \"x\""]).unwrap(),
+			"cmd.exe /e:ON /v:OFF /d /c \"\"C:\\s\\run.bat\" \"say \"\"x\"\"\"\""
+		);
+		assert_eq!(
+			bat(&["dir\\"]).unwrap(),
+			"cmd.exe /e:ON /v:OFF /d /c \"\"C:\\s\\run.bat\" \"dir\\\\\"\""
+		);
+		assert_eq!(bat(&["a\nb"]), Err(CmdlineError::BatchNewline));
+		assert!(matches!(
+			batch_command_line(b"C:\\s\\".as_bstr(), &[] as &[&str]),
+			Err(CmdlineError::BatchName { .. })
+		));
+	}
+
+	#[test]
+	fn batch_files_are_recognized_by_extension() {
+		assert!(is_batch(b"C:\\x\\RUN.BAT"));
+		assert!(is_batch(b"go.Cmd"));
+		assert!(!is_batch(b"tool.exe"));
+		assert!(!is_batch(b"bat"));
+	}
+}

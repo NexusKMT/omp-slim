@@ -585,4 +585,63 @@ pub fn putreplaceselection(zw: &mut Zw<'_, '_>) -> WResult {
 	WResult::Done(put_replace_selection(zw.zle, zw.ed))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	fn ed(s: &str, cs: usize) -> Editor {
+		let mut e = Editor::new(Context::LineStart, 0);
+		e.line = s.chars().collect();
+		e.cs = cs;
+		e.keymap = bstr::BString::from("vicmd");
+		e
+	}
+
+	fn line(e: &Editor) -> String {
+		e.line.iter().collect()
+	}
+
+	#[test]
+	fn join_lines() {
+		let mut zle = Zle::new(true);
+		let mut e = ed("one\n  two\nthree\n four", 0);
+		e.zmod.mult = 3;
+		assert_eq!(vi_join(&mut zle, &mut e), 0);
+		assert_eq!(line(&e), "one two three\n four");
+		assert_eq!(e.cs, 7);
+		let mut e = ed("one\ntwo", 0);
+		e.zmod.mult = 3;
+		assert_eq!(vi_join(&mut zle, &mut e), 0);
+		assert_eq!((line(&e), e.cs), ("one two".into(), 3));
+	}
+
+	#[test]
+	fn registers() {
+		let mut e = ed("", 0);
+		assert_eq!(set_buffer(&mut e, Some('B')), 0);
+		assert_eq!(e.zmod.vibuf, 1);
+		assert_ne!(e.zmod.flags & modflags::VIAPP, 0);
+		assert_eq!(set_buffer(&mut e, Some('3')), 0);
+		assert_eq!((e.zmod.vibuf, e.zmod.flags & modflags::VIAPP), (29, 0));
+		assert_eq!(set_buffer(&mut e, Some('_')), 0);
+		assert_ne!(e.zmod.flags & modflags::NULL, 0);
+		assert_eq!(set_buffer(&mut e, Some('%')), 1);
+	}
+
+	#[test]
+	fn delete_and_put() {
+		let mut zle = Zle::new(true);
+		let mut e = ed("abcdef", 1);
+		e.zmod.mult = 2;
+		assert_eq!(vi_delete_char(&mut zle, &mut e), 0);
+		assert_eq!(line(&e), "adef");
+		// "1 has the deletion; put it after the cursor.
+		e.zmod.mult = 1;
+		assert_eq!(vi_put(&mut zle, &mut e, 1), 0);
+		assert_eq!((line(&e), e.cs), ("adbcef".into(), 3));
+		e.cs = 0;
+		e.zmod.mult = 1;
+		assert_eq!(vi_backward_delete_char(&mut zle, &mut e), 1);
+	}
+}

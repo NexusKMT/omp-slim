@@ -649,4 +649,93 @@ fn draw_actor_box(
 	set_cell(canvas, roles, left + width - 1, bottom, br, CharRole::Border);
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn parses_declarations_messages_and_notes() {
+		let diagram = parser::parse_sequence_diagram(
+			"sequenceDiagram\nparticipant A as Alice<br>Admin\nactor B as Bob\nA->>+B: \
+			 sync\nB-->>-A: async\nA-)B: open\nB--xA: cross\nNote left of A: left\nNote right of B: \
+			 right\nNote over A,B: both",
+		);
+		assert_eq!(diagram.actors.len(), 2);
+		assert_eq!(diagram.actors[0].label, "Alice\nAdmin");
+		assert_eq!(diagram.actors[1].kind, ActorKind::Actor);
+		assert_eq!(diagram.messages.iter().map(|m| m.arrow).collect::<Vec<_>>(), vec![
+			MessageArrowKind::SolidFilled,
+			MessageArrowKind::DashedFilled,
+			MessageArrowKind::SolidOpen,
+			MessageArrowKind::DashedCross,
+		]);
+		assert!(diagram.messages[0].activate);
+		assert!(diagram.messages[1].deactivate);
+		assert_eq!(diagram.notes.iter().map(|n| n.position).collect::<Vec<_>>(), vec![
+			NotePosition::Left,
+			NotePosition::Right,
+			NotePosition::Over,
+		]);
+	}
+
+	#[test]
+	fn parses_every_arrow_operator() {
+		let source = "sequenceDiagram\nA->>B: a\nA-->>B: b\nA->B: c\nA-->B: d\nA-)B: e\nA--)B: \
+		              f\nA-xB: g\nA--xB: h";
+		let diagram = parser::parse_sequence_diagram(source);
+		assert_eq!(diagram.messages.iter().map(|m| m.arrow).collect::<Vec<_>>(), vec![
+			MessageArrowKind::SolidFilled,
+			MessageArrowKind::DashedFilled,
+			MessageArrowKind::SolidOpen,
+			MessageArrowKind::DashedOpen,
+			MessageArrowKind::SolidOpen,
+			MessageArrowKind::DashedOpen,
+			MessageArrowKind::SolidCross,
+			MessageArrowKind::DashedCross,
+		]);
+	}
+
+	#[test]
+	fn parses_every_block_and_divider_kind() {
+		use std::fmt::Write as _;
+		let mut source = String::from("sequenceDiagram\nparticipant A\nparticipant B\n");
+		for keyword in ["loop", "alt", "opt", "par", "critical", "break", "rect"] {
+			write!(source, "{keyword} label\nA->>B: inside\n").unwrap();
+			if keyword == "alt" {
+				source.push_str("else other\n");
+			}
+			if keyword == "par" {
+				source.push_str("and other\n");
+			}
+			source.push_str("end\n");
+		}
+		let diagram = parser::parse_sequence_diagram(&source);
+		assert_eq!(diagram.blocks.iter().map(|b| b.kind).collect::<Vec<_>>(), vec![
+			BlockKind::Loop,
+			BlockKind::Alt,
+			BlockKind::Opt,
+			BlockKind::Par,
+			BlockKind::Critical,
+			BlockKind::Break,
+			BlockKind::Rect,
+		]);
+		assert_eq!(
+			diagram
+				.blocks
+				.iter()
+				.map(|b| b.dividers.len())
+				.sum::<usize>(),
+			2
+		);
+	}
+
+	#[test]
+	fn skips_explicit_activation_commands() {
+		let diagram = parser::parse_sequence_diagram(
+			"sequenceDiagram\nparticipant A\nactivate A\nA->>+A: work\ndeactivate A",
+		);
+		assert_eq!(diagram.actors.len(), 1);
+		assert_eq!(diagram.messages.len(), 1);
+		assert!(diagram.messages[0].activate);
+	}
+}

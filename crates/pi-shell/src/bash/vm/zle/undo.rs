@@ -375,4 +375,110 @@ pub fn splitundo(ed: &mut Editor) -> i32 {
 	0
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	/// An editor without history: changes on another history line are
+	/// never made.
+	struct Host(Editor);
+
+	impl UndoHost for Host {
+		fn ed(&mut self) -> &mut Editor {
+			&mut self.0
+		}
+
+		fn zle_setline(&mut self, _hist: i64) -> bool {
+			false
+		}
+	}
+
+	fn host() -> Host {
+		let mut e = Editor::new(Context::LineStart, 0);
+		e.undo = Undo::new(&[], 0);
+		Host(e)
+	}
+
+	fn type_text(h: &mut Host, s: &str) {
+		for c in s.chars() {
+			let ed = &mut h.0;
+			spaceinline(ed, 1);
+			let cs = ed.cs;
+			ed.line[cs] = c;
+			ed.cs += 1;
+			handleundo(ed);
+		}
+	}
+
+	fn line(h: &Host) -> String {
+		h.0.line.iter().collect()
+	}
+
+	#[test]
+	fn undo_and_redo_one_key_at_a_time() {
+		let mut h = host();
+		type_text(&mut h, "ab");
+		assert_eq!(h.0.undo.changeno, 2);
+		assert_eq!(undo(&mut h, None), 0);
+		assert_eq!(line(&h), "a");
+		assert_eq!(h.0.cs, 1);
+		assert_eq!(undo(&mut h, None), 0);
+		assert_eq!(line(&h), "");
+		assert_eq!(undo(&mut h, None), 1);
+		assert_eq!(redo(&mut h), 0);
+		assert_eq!(line(&h), "a");
+		assert_eq!(redo(&mut h), 0);
+		assert_eq!(redo(&mut h), 1);
+		assert_eq!(line(&h), "ab");
+		// A new change drops what was undone.
+		undo(&mut h, None);
+		type_text(&mut h, "c");
+		assert_eq!(line(&h), "ac");
+		assert_eq!(redo(&mut h), 1);
+	}
+
+	#[test]
+	fn undo_to_a_change_number_and_limit() {
+		let mut h = host();
+		type_text(&mut h, "x");
+		let mark = current_change(&mut h.0);
+		type_text(&mut h, "yz");
+		assert_eq!(undo(&mut h, Some(format!("{mark}").as_bytes())), 0);
+		assert_eq!(line(&h), "x");
+		type_text(&mut h, "q");
+		h.0.undo.limitno = current_change(&mut h.0);
+		assert_eq!(undo(&mut h, None), 1);
+		assert_eq!(line(&h), "xq");
+	}
+
+	#[test]
+	fn joined_entries_undo_together() {
+		let mut h = host();
+		// Two edits before handleundo form one change of two entries.
+		let ed = &mut h.0;
+		ed.line = vec!['a'];
+		ed.cs = 1;
+		mkundoent(ed);
+		setlastline(ed);
+		ed.line = vec!['a', 'b', 'c'];
+		ed.cs = 3;
+		handleundo(ed);
+		assert_eq!(ed.undo.changes.len(), 3);
+		assert_eq!(undo(&mut h, None), 0);
+		assert_eq!(line(&h), "");
+		assert_eq!(redo(&mut h), 0);
+		assert_eq!(line(&h), "abc");
+	}
+
+	#[test]
+	fn split_undo_merges_vi_insertion() {
+		let mut h = host();
+		h.0.undo.vistartchange = 0;
+		type_text(&mut h, "abc");
+		assert_eq!(splitundo(&mut h.0), 0);
+		assert_eq!(h.0.undo.vistartchange, 3);
+		assert_eq!(undo(&mut h, None), 0);
+		assert_eq!(line(&h), "");
+	}
+}

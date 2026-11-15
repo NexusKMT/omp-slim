@@ -224,4 +224,187 @@ pub async fn run(invocation: Invocation) -> i32 {
 	127
 }
 
+#[cfg(test)]
+mod tests {
+	use std::{
+		io::{PipeReader, PipeWriter, Read as _, Write as _},
+		time::Duration,
+	};
 
+	use tokio_util::sync::CancellationToken;
+
+	use super::{ExtraKind, Fd, Invocation, extras, kind, run};
+
+	/// An invocation of `argv` with pipes on fds 0, 1, and 2 and no shell.
+	/// Returns it with the write end of stdin and the read ends of stdout
+	/// and stderr.
+	fn piped(argv: &[&str]) -> (Invocation, PipeWriter, PipeReader, PipeReader) {
+		let (stdin_reader, stdin_writer) = std::io::pipe().expect("stdin pipe");
+		let (stdout_reader, stdout_writer) = std::io::pipe().expect("stdout pipe");
+		let (stderr_reader, stderr_writer) = std::io::pipe().expect("stderr pipe");
+		let mut invocation = Invocation::new(
+			argv.iter().map(ToString::to_string).collect(),
+			std::env::current_dir().expect("current dir"),
+			pi_vfs::Fs::native(),
+		);
+		invocation.stdio = [Fd::from(stdin_reader), Fd::from(stdout_writer), Fd::from(stderr_writer)];
+		(invocation, stdin_writer, stdout_reader, stderr_reader)
+	}
+
+	fn read_all(mut reader: PipeReader) -> String {
+		let mut text = String::new();
+		reader.read_to_string(&mut text).expect("read pipe");
+		text
+	}
+
+	/// Runs `argv` with `input` on stdin, returning status, stdout, stderr.
+	async fn run_piped(argv: &[&str], input: &str) -> (i32, String, String) {
+		let (invocation, mut stdin, stdout, stderr) = piped(argv);
+		stdin.write_all(input.as_bytes()).expect("write stdin");
+		drop(stdin);
+		let code = run(invocation).await;
+		(code, read_all(stdout), read_all(stderr))
+	}
+
+	#[cfg(feature = "util.sort")]
+	#[tokio::test]
+	async fn sort_runs_from_stdin_pipe_to_stdout_pipe() {
+		let (code, out, err) = run_piped(&["sort"], "pear\napple\nfig\n").await;
+		assert_eq!((code, out.as_str(), err.as_str()), (0, "apple\nfig\npear\n", ""));
+	}
+
+	#[cfg(feature = "util.head")]
+	#[tokio::test]
+	async fn head_takes_its_arguments() {
+		let (code, out, _) = run_piped(&["head", "-n", "1"], "first\nsecond\n").await;
+		assert_eq!((code, out.as_str()), (0, "first\n"));
+	}
+
+	#[cfg(feature = "util.cat")]
+	#[tokio::test]
+	async fn cat_reports_a_missing_file_with_its_own_status() {
+		let (code, out, err) = run_piped(&["cat", "/definitely/not/here"], "").await;
+		assert_eq!((code, out.as_str()), (1, ""));
+		assert!(err.starts_with("cat: /definitely/not/here:"), "stderr: {err:?}");
+	}
+
+	#[cfg(feature = "util.cat")]
+	#[tokio::test]
+	async fn cancelling_a_blocked_read_returns_130() {
+		let (mut invocation, stdin, _stdout, _stderr) = piped(&["cat"]);
+		let cancel = CancellationToken::new();
+		invocation.cancel = Some(cancel.clone());
+		let running = tokio::spawn(run(invocation));
+		tokio::time::sleep(Duration::from_millis(100)).await;
+		assert!(!running.is_finished(), "cat must block on its open stdin pipe");
+		cancel.cancel();
+		let code = tokio::time::timeout(Duration::from_secs(10), running)
+			.await
+			.expect("cancelled cat should end promptly")
+			.expect("cat task");
+		assert_eq!(code, 130);
+		drop(stdin);
+	}
+
+	#[cfg(feature = "util.sleep")]
+	#[tokio::test]
+	async fn sleep_runs_as_a_process_builtin() {
+		let (code, out, err) = run_piped(&["sleep", "0"], "").await;
+		assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
+		let (code, _, err) = run_piped(&["sleep", "soon"], "").await;
+		assert_eq!((code, err.as_str()), (1, "sleep: invalid time interval 'soon'\n"));
+	}
+
+	#[cfg(feature = "util.sleep")]
+	#[tokio::test]
+	async fn cancelling_sleep_returns_130() {
+		let (mut invocation, _stdin, _stdout, _stderr) = piped(&["sleep", "100"]);
+		let cancel = CancellationToken::new();
+		invocation.cancel = Some(cancel.clone());
+		let running = tokio::spawn(run(invocation));
+		tokio::time::sleep(Duration::from_millis(50)).await;
+		cancel.cancel();
+		let code = tokio::time::timeout(Duration::from_secs(10), running)
+			.await
+			.expect("cancelled sleep should end promptly")
+			.expect("sleep task");
+		assert_eq!(code, 130);
+	}
+
+	#[cfg(feature = "util.env")]
+	#[tokio::test]
+	async fn command_running_utility_without_a_runner_says_so() {
+		let (code, _, err) = run_piped(&["env", "true"], "").await;
+		assert_eq!(code, 126);
+		assert!(err.contains("cannot run commands"), "stderr: {err:?}");
+	}
+
+	#[cfg(feature = "util.env")]
+	#[tokio::test]
+	async fn command_running_utility_uses_the_injected_runner() {
+		use std::ffi::OsString;
+
+		use futures::future::BoxFuture;
+		use parking_lot::Mutex;
+
+		use super::{CommandRunner, CommandStatus, EnvChange, ShellCommand};
+
+		type Seen = std::sync::Arc<Mutex<Vec<(Vec<OsString>, Vec<EnvChange>)>>>;
+		struct Recorder(Seen);
+		impl CommandRunner for Recorder {
+			fn start(&mut self, command: ShellCommand) -> BoxFuture<'static, std::io::Result<CommandStatus>> {
+				self.0.lock().push((command.args().to_vec(), command.env_changes().to_vec()));
+				Box::pin(async { Ok(CommandStatus::Exited(3)) })
+			}
+		}
+
+		let seen = Seen::default();
+		let (mut invocation, stdin, stdout, stderr) = piped(&["env", "A=1", "prog", "arg"]);
+		invocation.commands = Some(Box::new(Recorder(std::sync::Arc::clone(&seen))));
+		drop(stdin);
+		let code = run(invocation).await;
+		assert_eq!((code, read_all(stdout), read_all(stderr)), (3, String::new(), String::new()));
+		let seen = seen.lock();
+		assert_eq!(seen.len(), 1);
+		assert_eq!(seen[0].0, vec![OsString::from("prog"), OsString::from("arg")]);
+		assert!(seen[0].1.contains(&EnvChange::Set("A".into(), "1".into())), "env: {:?}", seen[0].1);
+	}
+
+	#[tokio::test]
+	async fn unknown_names_are_refused() {
+		let (code, _, err) = run_piped(&["no-such-extra"], "").await;
+		assert_eq!((code, err.as_str()), (127, "no-such-extra: not a pi extra\n"));
+	}
+
+	/// Contract: closed descriptors read as end of input and swallow output.
+	#[cfg(feature = "util.cat")]
+	#[tokio::test]
+	async fn closed_stdio_reads_empty_and_discards() {
+		let invocation = Invocation::new(
+			vec!["cat".into()],
+			std::env::current_dir().expect("current dir"),
+			pi_vfs::Fs::native(),
+		);
+		assert_eq!(run(invocation).await, 0);
+	}
+
+	#[test]
+	fn table_kinds() {
+		let names: Vec<_> = extras().map(|(name, _)| name).collect();
+		let mut unique = names.clone();
+		unique.sort_unstable();
+		unique.dedup();
+		assert_eq!(unique.len(), names.len(), "duplicate extra names");
+		assert_eq!(kind("no-such-extra"), None);
+
+		#[cfg(feature = "util.xargs")]
+		assert_eq!(kind("xargs"), Some(ExtraKind::Utility { runs_commands: true }));
+		#[cfg(feature = "util.cat")]
+		assert_eq!(kind("cat"), Some(ExtraKind::Utility { runs_commands: false }));
+		#[cfg(feature = "util.ps")]
+		assert_eq!(kind("ps"), Some(ExtraKind::Process));
+		for removed in ["kill", "timeout", "nohup", "echo", "cd"] {
+			assert_eq!(kind(removed), None, "{removed}");
+		}
+	}
+}

@@ -68,7 +68,43 @@ mod unix {
 		None
 	}
 
-	
+	#[cfg(all(test, target_os = "linux"))]
+	mod tests {
+		use super::*;
+
+		#[test]
+		fn proc_ignored_mask_maps_low_and_high_signals() {
+			let status = b"Name:\tobash\nSigIgn:\t8000000180001002\n";
+			let ignored = ignored_from_status(&status[..]).unwrap();
+			assert_eq!(
+				ignored,
+				SigSet::EMPTY
+					.with(Signal::Int)
+					.with(Signal::Pipe)
+					.with(Signal::Rtmax)
+			);
+		}
+
+		#[test]
+		fn proc_ignored_mask_after_long_groups_line() {
+			let mut status = b"Groups:\t".to_vec();
+			status.extend(std::iter::repeat_n(b'1', 16384));
+			status.extend_from_slice(b"\nSigIgn:\t0000000000000000\n");
+			let input = io::BufReader::with_capacity(128, &status[..]);
+			assert_eq!(ignored_from_status(input), Some(SigSet::EMPTY));
+		}
+
+		#[test]
+		fn proc_ignored_missing_or_invalid_mask_falls_back() {
+			for status in [
+				&b"Name:\tobash\n"[..],
+				&b"SigIgn:\tnot-hex\n"[..],
+				&b"SigIgn:\t10000000000000000\n"[..],
+			] {
+				assert_eq!(ignored_from_status(status), None);
+			}
+		}
+	}
 
 	impl Signals {
 		/// Signals ignored when the process started (inherited dispositions).
@@ -458,7 +494,29 @@ mod windows {
 		}
 	}
 
-	
+	#[cfg(test)]
+	mod tests {
+		use super::*;
+
+		/// Ctrl-C killed the shell at its prompt: a trapped event must be
+		/// claimed (TRUE) and become a pending `SIGINT`; an untrapped one
+		/// goes on to Windows' default (FALSE).
+		#[test]
+		fn trapped_ctrl_c_becomes_a_pending_sigint() {
+			let mut signals = Signals;
+			// SAFETY: the handler only touches atomics.
+			assert_eq!(unsafe { on_event(CTRL_C_EVENT) }, 0);
+			signals.set(Signal::Int, Some(BStr::new("x"))).unwrap();
+			// SAFETY: as above.
+			assert_eq!(unsafe { on_event(CTRL_C_EVENT) }, 1);
+			assert_eq!(PENDING.swap(0, Ordering::AcqRel), bit(Signal::Int));
+			signals.set(Signal::Int, Some(BStr::new(""))).unwrap();
+			// SAFETY: as above.
+			assert_eq!(unsafe { on_event(CTRL_C_EVENT) }, 1);
+			assert_eq!(PENDING.load(Ordering::Acquire), 0);
+			drop(signals);
+		}
+	}
 }
 
 #[cfg(windows)]

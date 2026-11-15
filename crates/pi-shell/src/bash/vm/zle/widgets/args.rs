@@ -187,4 +187,35 @@ pub fn argumentbase(zw: &mut Zw<'_, '_>) -> WResult {
 	WResult::Done(argument_base(zw.ed, args.first().map(|a| a.as_slice())))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::bash::vm::zle::Context;
 
+	#[test]
+	fn digits_and_bases() {
+		assert_eq!(parsedigit(10, i32::from(b'7')), 7);
+		assert_eq!(parsedigit(8, i32::from(b'9')), -1);
+		assert_eq!(parsedigit(16, i32::from(b'f')), 15);
+		assert_eq!(parsedigit(16, i32::from(b'G')), -1);
+		let mut e = Editor::new(Context::LineStart, 0);
+		assert_eq!(neg_argument(&mut e), 0);
+		e.zmod.mult = e.zmod.tmult;
+		e.lastchar = i32::from(b'3');
+		assert_eq!(digit_argument(&mut e), 0);
+		assert_eq!(e.zmod.tmult, -3);
+		e.zmod.mult = e.zmod.tmult;
+		e.lastchar = i32::from(b'2');
+		assert_eq!(digit_argument(&mut e), 0);
+		assert_eq!(e.zmod.tmult, -32);
+		assert_eq!(neg_argument(&mut e), 1);
+		assert_eq!(argument_base(&mut e, Some(b"0x10")), 0);
+		assert_eq!((e.zmod.base, e.zmod.mult, e.zmod.flags), (16, 1, 0));
+		assert_eq!(argument_base(&mut e, Some(b"37")), 1);
+		universal_argument_done(&mut e, 0, 0, 1);
+		assert_eq!(e.zmod.tmult, 4);
+		universal_argument_done(&mut e, 1, 0, -1);
+		assert_eq!(e.zmod.tmult, -1);
+		assert_eq!(atoi(b" -12x"), -12);
+	}
+}

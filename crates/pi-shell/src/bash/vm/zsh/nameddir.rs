@@ -443,4 +443,26 @@ fn dirname_call(
 	params::getaparam(ex, b"reply")
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	#[test]
+	fn table_round_trips_through_its_record() {
+		let mut t = NamedDirs::from_record(None);
+		t.add(b"dot", b"/home/u/.dotfiles", 0);
+		t.add(b"root", b"/var/root", ND_USERNAME);
+		let back = NamedDirs::from_record(t.to_record().as_ref());
+		let e = back.get(b"root").expect("root entry");
+		assert_eq!((e.flags, e.dir), (ND_USERNAME, &b"/var/root"[..]));
+		assert_eq!(back.sorted().iter().map(|e| e.name).collect::<Vec<_>>(), [&b"dot"[..], b"root"]);
+	}
+
+	#[test]
+	fn dircmp_matches_at_a_path_boundary() {
+		assert!(dircmp(b"/usr", b"/usr"));
+		assert!(dircmp(b"/usr", b"/usr/bin"));
+		assert!(!dircmp(b"/usr", b"/usrx"));
+		assert!(!dircmp(b"/", b"/usr"));
+	}
+}

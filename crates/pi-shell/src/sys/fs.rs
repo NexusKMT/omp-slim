@@ -1371,6 +1371,378 @@ fn lock_file(path: &BStr) -> io::Result<Box<dyn File>> {
 	Ok(Box::new(StdFile::new(file)))
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn ready<T>(p: FsPoll<T>) -> io::Result<T> {
+		match p {
+			FsPoll::Ready(r) => r,
+			FsPoll::Pending(_) => panic!("StdFs never pends"),
+		}
+	}
 
+	#[test]
+	fn stat_and_access_distinguish_files_dirs_and_missing_paths() {
+		let dir = std::env::temp_dir();
+		let mut fs = StdFs::default();
+		let dir_bytes = engine_path(&dir);
+		assert_eq!(ready(fs.stat(dir_bytes.as_bstr(), true)).unwrap().kind, StatKind::Dir);
+		let missing = ready(fs.stat(b"/definitely/not/here".as_bstr(), true)).unwrap_err();
+		assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+		assert!(ready(fs.chdir_check(dir_bytes.as_bstr())).is_ok());
+	}
 
+	#[cfg(unix)]
+	mod fifos {
+		use std::{
+			io::{Read, Write},
+			os::unix::fs::OpenOptionsExt,
+			sync::Arc,
+			task::{Wake, Waker},
+			thread,
+			time::{Duration, Instant},
+		};
+
+		use super::*;
+
+		struct Unpark(thread::Thread);
+
+		impl Wake for Unpark {
+			fn wake(self: Arc<Self>) {
+				self.0.unpark();
+			}
+		}
+
+		fn fifo() -> BString {
+			let node =
+				ready(StdFs::default().mkfifo_or_temp(TempPurpose::ProcSub { output: false })).unwrap();
+			assert!(node.fifo);
+			node.path
+		}
+
+		fn pending(p: FsPoll<Box<dyn File>>) -> Box<dyn crate::bash::FsPending<Box<dyn File>>> {
+			match p {
+				FsPoll::Pending(p) => p,
+				FsPoll::Ready(_) => panic!("a one-way FIFO open must not complete synchronously"),
+			}
+		}
+
+		fn finish(p: &mut Box<dyn crate::bash::FsPending<Box<dyn File>>>) -> Box<dyn File> {
+			let waker = Waker::from(Arc::new(Unpark(thread::current())));
+			let mut cx = Context::from_waker(&waker);
+			let deadline = Instant::now() + Duration::from_secs(10);
+			loop {
+				if let Poll::Ready(r) = p.poll(&mut cx) {
+					return r.unwrap();
+				}
+				assert!(Instant::now() < deadline, "open never completed");
+				thread::park_timeout(Duration::from_millis(100));
+			}
+		}
+
+		#[test]
+		fn reading_a_fifo_is_pending_until_a_writer_opens() {
+			let path = fifo();
+			let mut p = pending(StdFs::default().open(path.as_bstr(), OpenFlags::READ, 0));
+			let host = host_path(&path).unwrap().to_path_buf();
+			let writer = thread::spawn(move || {
+				thread::sleep(Duration::from_millis(50));
+				fs::OpenOptions::new()
+					.write(true)
+					.open(host)
+					.unwrap()
+					.write_all(b"x")
+					.unwrap();
+			});
+			let mut f = finish(&mut p);
+			writer.join().unwrap();
+			let waker = Waker::noop();
+			let mut buf = [0; 4];
+			let n = match f.poll_read(&mut Context::from_waker(waker), &mut buf) {
+				Poll::Ready(r) => r.unwrap(),
+				Poll::Pending => panic!("StdFile reads are ready"),
+			};
+			assert_eq!(&buf[..n], b"x");
+			fs::remove_file(host_path(&path).unwrap()).unwrap();
+		}
+
+		#[test]
+		fn writing_a_fifo_is_pending_until_a_reader_opens() {
+			let path = fifo();
+			let mut p = pending(StdFs::default().open(path.as_bstr(), OpenFlags::WRITE, 0));
+			let host = host_path(&path).unwrap().to_path_buf();
+			let reader = thread::spawn(move || {
+				let mut s = String::new();
+				fs::File::open(host)
+					.unwrap()
+					.read_to_string(&mut s)
+					.unwrap();
+				s
+			});
+			let mut f = finish(&mut p);
+			assert!(matches!(
+				f.poll_write(&mut Context::from_waker(Waker::noop()), b"hi"),
+				Poll::Ready(Ok(2))
+			));
+			drop(f);
+			assert_eq!(reader.join().unwrap(), "hi");
+			fs::remove_file(host_path(&path).unwrap()).unwrap();
+		}
+
+		/// `mkfifo f; echo x > f & . f` in one engine thread: both ends live
+		/// on this thread, so neither read nor write may wait in the kernel.
+		#[test]
+		fn both_ends_of_a_fifo_on_one_thread_never_block() {
+			let path = fifo();
+			let mut r = pending(StdFs::default().open(path.as_bstr(), OpenFlags::READ, 0));
+			let mut w = pending(StdFs::default().open(path.as_bstr(), OpenFlags::WRITE, 0));
+			let mut reader = finish(&mut r);
+			let mut writer = finish(&mut w);
+			assert_eq!(reader.kind(), FileKind::Pipe);
+			let flag = Arc::new(Flag::default());
+			let waker = Waker::from(Arc::clone(&flag));
+			let mut cx = Context::from_waker(&waker);
+			let mut buf = [0u8; 8192];
+			assert!(
+				reader.poll_read(&mut cx, &mut buf).is_pending(),
+				"no data yet: Pending, not a wait"
+			);
+			assert!(matches!(writer.poll_write(&mut cx, b"echo four - OK\n"), Poll::Ready(Ok(15))));
+			flag.wait("reader woken by the write");
+			let Poll::Ready(Ok(n)) = reader.poll_read(&mut cx, &mut buf) else {
+				panic!("readable after the write");
+			};
+			assert_eq!(&buf[..n], b"echo four - OK\n");
+
+			// Fill the pipe: the writer gets Pending instead of waiting.
+			let chunk = vec![b'z'; 1 << 16];
+			let mut written = 0usize;
+			loop {
+				match writer.poll_write(&mut cx, &chunk) {
+					Poll::Ready(Ok(n)) => written += n,
+					Poll::Ready(Err(e)) => panic!("{e}"),
+					Poll::Pending => break,
+				}
+				assert!(written < 64 << 20, "the pipe never filled");
+			}
+			let mut read = 0usize;
+			while read < written {
+				match reader.poll_read(&mut cx, &mut buf) {
+					Poll::Ready(Ok(n)) => read += n,
+					other => panic!("data is buffered: {other:?}"),
+				}
+			}
+			flag.wait("writer woken once space freed up");
+			drop(writer);
+			assert!(
+				matches!(reader.poll_read(&mut cx, &mut buf), Poll::Ready(Ok(0))),
+				"end of file after the writer closed"
+			);
+			fs::remove_file(host_path(&path).unwrap()).unwrap();
+		}
+
+		/// `exec 3</etc/passwd; echo foo >&3` (and the same on a pipe's read
+		/// end): writing in a direction the fd was not opened for fails at once
+		/// with EBADF, as in bash; readiness for it would never come.
+		#[test]
+		fn the_wrong_direction_fails_with_ebadf_instead_of_waiting() {
+			let (r, w) = io::pipe().unwrap();
+			let mut reader = StdFile::new(fs::File::from(std::os::fd::OwnedFd::from(r)));
+			let mut writer = StdFile::new(fs::File::from(std::os::fd::OwnedFd::from(w)));
+			assert_eq!(reader.kind(), FileKind::Pipe);
+			let mut cx = Context::from_waker(Waker::noop());
+			let ebadf = |p: Poll<io::Result<usize>>| match p {
+				Poll::Ready(Err(e)) => e.raw_os_error() == Some(libc::EBADF),
+				_ => false,
+			};
+			assert!(ebadf(reader.poll_write(&mut cx, b"foo\n")), "write to a read end");
+			assert!(ebadf(writer.poll_read(&mut cx, &mut [0; 4])), "read from a write end");
+			let file = fs::File::open("/etc/passwd").unwrap();
+			let mut regular = StdFile::new(file);
+			assert!(ebadf(regular.poll_write(&mut cx, b"foo\n")), "write to a read-only file");
+		}
+
+		/// `read -t 0.00001 var` with a terminal on stdin: the terminal read
+		/// must not wait in the kernel, or the `read -t` timer and every other
+		/// vproc stall.
+		#[test]
+		fn terminal_reads_are_pending_until_input_arrives() {
+			use std::{
+				ffi::CStr,
+				os::fd::{AsRawFd, FromRawFd},
+			};
+
+			// SAFETY: plain call; returns a new fd we own (checked below).
+			let master = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY) };
+			assert!(master >= 0, "posix_openpt: {}", io::Error::last_os_error());
+			// SAFETY: `master` is a valid fd we own from here on.
+			let mut master = unsafe { fs::File::from_raw_fd(master) };
+			let fd = master.as_raw_fd();
+			// SAFETY: plain calls on our master fd; `ptsname` returns a static
+			// buffer read at once (each nextest test is its own process).
+			let name = unsafe {
+				assert_eq!(libc::grantpt(fd), 0);
+				assert_eq!(libc::unlockpt(fd), 0);
+				CStr::from_ptr(libc::ptsname(fd))
+					.to_str()
+					.unwrap()
+					.to_owned()
+			};
+			let slave = fs::OpenOptions::new()
+				.read(true)
+				.write(true)
+				.custom_flags(libc::O_NOCTTY)
+				.open(&name)
+				.unwrap();
+			let mut tty = StdFile::new(slave);
+			assert_eq!(tty.kind(), FileKind::Tty);
+			let flag = Arc::new(Flag::default());
+			let waker = Waker::from(Arc::clone(&flag));
+			let mut cx = Context::from_waker(&waker);
+			let mut buf = [0u8; 64];
+			assert!(tty.poll_read(&mut cx, &mut buf).is_pending(), "no input: Pending, not a wait");
+			master.write_all(b"typed\n").unwrap();
+			flag.wait("terminal reader woken by input");
+			let Poll::Ready(Ok(n)) = tty.poll_read(&mut cx, &mut buf) else {
+				panic!("a line is available");
+			};
+			assert_eq!(&buf[..n], b"typed\n");
+			assert!(
+				matches!(tty.poll_write(&mut cx, b"out\n"), Poll::Ready(Ok(4))),
+				"terminal output fits"
+			);
+		}
+
+		/// A waker that records being woken.
+		#[derive(Default)]
+		struct Flag(std::sync::atomic::AtomicBool);
+
+		impl Wake for Flag {
+			fn wake(self: Arc<Self>) {
+				self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+			}
+		}
+
+		impl Flag {
+			fn wait(&self, what: &str) {
+				let deadline = Instant::now() + Duration::from_secs(10);
+				while !self.0.swap(false, std::sync::atomic::Ordering::SeqCst) {
+					assert!(Instant::now() < deadline, "not woken: {what}");
+					thread::sleep(Duration::from_millis(5));
+				}
+			}
+		}
+
+		#[test]
+		fn dropping_a_pending_fifo_open_releases_the_helper() {
+			let path = fifo();
+			let host = host_path(&path).unwrap().to_path_buf();
+			let p = pending(StdFs::default().open(path.as_bstr(), OpenFlags::READ, 0));
+			drop(p);
+			// Once the helper's read end is closed, no reader is left: a
+			// non-blocking write open fails with ENXIO.
+			let deadline = Instant::now() + Duration::from_secs(10);
+			loop {
+				let r = fs::OpenOptions::new()
+					.write(true)
+					.custom_flags(libc::O_NONBLOCK)
+					.open(&host);
+				if r.as_ref().err().and_then(io::Error::raw_os_error) == Some(libc::ENXIO) {
+					break;
+				}
+				assert!(Instant::now() < deadline, "helper still holds the FIFO");
+				thread::sleep(Duration::from_millis(10));
+			}
+			fs::remove_file(&host).unwrap();
+		}
+
+		#[test]
+		fn read_write_fifo_opens_and_regular_files_stay_ready() {
+			let path = fifo();
+			let both = OpenFlags::READ.with(OpenFlags::WRITE);
+			assert!(
+				ready(StdFs::default().open(path.as_bstr(), both, 0)).is_ok(),
+				"O_RDWR never blocks"
+			);
+			fs::remove_file(host_path(&path).unwrap()).unwrap();
+			let node = ready(StdFs::default().mkfifo_or_temp(TempPurpose::HereDoc)).unwrap();
+			assert!(ready(StdFs::default().open(node.path.as_bstr(), OpenFlags::READ, 0)).is_ok());
+			fs::remove_file(host_path(&node.path).unwrap()).unwrap();
+		}
+	}
+
+	#[test]
+	fn exclusive_open_refuses_an_existing_file() {
+		let mut fs = StdFs::default();
+		let node = ready(fs.mkfifo_or_temp(TempPurpose::HereDoc)).unwrap();
+		assert!(!node.fifo);
+		let flags = OpenFlags::WRITE
+			.with(OpenFlags::CREATE)
+			.with(OpenFlags::EXCL);
+		let err = ready(fs.open(node.path.as_bstr(), flags, 0o600))
+			.err()
+			.unwrap();
+		assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+		std::fs::remove_file(host_path(&node.path).unwrap()).unwrap();
+	}
+
+	/// A Windows pipe classified as a regular file made the line reader read
+	/// ahead and seek back, which a pipe cannot: `printf 'a\nb\n' | zsh` ran
+	/// only `a`.
+	#[cfg(windows)]
+	#[test]
+	fn windows_pipes_files_and_nul_get_their_own_kinds() {
+		use std::os::windows::io::OwnedHandle;
+		let (r, _w) = io::pipe().unwrap();
+		let pipe = StdFile::new(fs::File::from(OwnedHandle::from(r)));
+		assert_eq!(pipe.kind(), FileKind::Pipe);
+		let path = std::env::temp_dir().join(format!("pi-shell-classify-{}", std::process::id()));
+		let regular = StdFile::new(fs::File::create(&path).unwrap());
+		assert_eq!(regular.kind(), FileKind::Regular);
+		drop(regular);
+		fs::remove_file(&path).unwrap();
+		let nul = StdFile::new(fs::OpenOptions::new().write(true).open("NUL").unwrap());
+		assert_eq!(nul.kind(), FileKind::Device);
+	}
+}
+
+#[cfg(all(test, windows))]
+mod windows_devices {
+	use super::*;
+
+	/// `>/dev/null` failed with "The system cannot find the path
+	/// specified" (`\dev\null` on the current drive); `[[ -c /dev/null ]]`
+	/// and `-w` hold as on Unix.
+	#[test]
+	fn dev_null_is_the_null_device() {
+		let mut fs = StdFs::default();
+		let both = OpenFlags::READ.with(OpenFlags::WRITE);
+		let FsPoll::Ready(Ok(mut f)) = fs.open(b"/dev/null".as_bstr(), both, 0) else {
+			panic!("open /dev/null");
+		};
+		let mut cx = Context::from_waker(std::task::Waker::noop());
+		assert!(matches!(f.poll_write(&mut cx, b"x"), Poll::Ready(Ok(1))));
+		let FsPoll::Ready(stat) = fs.stat(b"/dev/null".as_bstr(), true) else {
+			unreachable!()
+		};
+		assert_eq!(stat.unwrap().kind, StatKind::CharDev);
+		let FsPoll::Ready(access) = fs.access(b"/dev/null".as_bstr(), Access::WRITE) else {
+			unreachable!()
+		};
+		access.unwrap();
+	}
+
+	/// `cd ..` left `$PWD` as `\\?\F:\…`: `realpath` must answer with the
+	/// drive path a user writes.
+	#[test]
+	fn realpath_has_no_verbatim_prefix() {
+		let dir = std::env::temp_dir();
+		let FsPoll::Ready(real) = StdFs::default().realpath(engine_path(&dir).as_bstr()) else {
+			unreachable!()
+		};
+		let real = real.unwrap();
+		assert!(!real.starts_with(br"\\?\"), "{real}");
+		assert!(real.get(1) == Some(&b':'), "{real}");
+	}
+}

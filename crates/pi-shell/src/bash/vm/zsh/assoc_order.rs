@@ -195,4 +195,70 @@ pub const fn insert_buckets(len: usize, attrs: Attrs) -> Option<usize> {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
+	fn order(keys: &[&str]) -> Vec<String> {
+		let mut h = ZHash::new();
+		for k in keys {
+			h.insert(BString::from(*k), BString::from("v"));
+		}
+		let (items, _) = h.into_stored(Attrs::NONE);
+		items.into_iter().map(|(k, _)| k.to_string()).collect()
+	}
+
+	#[test]
+	fn keys_iterate_in_zsh_bucket_order() {
+		// zsh -f -c 'typeset -A h; h=(a 1 b 2 c 3 d 4); print -r ${(k)h}'
+		assert_eq!(order(&["a", "b", "c", "d"]), ["a", "b", "c", "d"]);
+		// zsh -f -c 'typeset -A h; h=(one 1 two 2 three 3); print -r ${(k)h}'
+		// (buckets 0, 6, 7 of 17)
+		assert_eq!(order(&["one", "two", "three"]), ["one", "two", "three"]);
+		// zsh -f -c 'typeset -A h; h=(zz 1 y 2); print -r ${(k)h}'
+		// (buckets 0, 2 of 17: insertion order is irrelevant)
+		assert_eq!(order(&["y", "zz"]), ["zz", "y"]);
+	}
+
+	#[test]
+	fn rebuilding_from_the_stored_order_keeps_it() {
+		let keys: Vec<String> = (0..60).map(|i| format!("key{i}")).collect();
+		let mut h = ZHash::new();
+		for k in &keys {
+			h.insert(BString::from(k.as_str()), BString::from("x"));
+		}
+		let (items, attrs) = h.into_stored(Attrs::NONE);
+		assert_eq!(attrs.base(), 1, "60 entries grow 17 buckets once");
+		let mut again = ZHash::from_stored(&items, attrs);
+		again.insert(BString::from("key5"), BString::from("y"));
+		let (items2, _) = again.into_stored(attrs);
+		let k1: Vec<_> = items.iter().map(|e| &e.0).collect();
+		let k2: Vec<_> = items2.iter().map(|e| &e.0).collect();
+		assert_eq!(k1, k2, "replacing a value keeps the order");
+	}
+
+	/// Adding each new key at the front of its bucket in place
+	/// ([`insert_buckets`], `AssocArray::insert_front`; rebuilding only when
+	/// the table grows) keeps exactly the order zsh's table iterates in.
+	#[test]
+	fn front_inserts_follow_the_table() {
+		let mut items = crate::bash::store::AssocArray::default();
+		let mut attrs = Attrs::NONE;
+		let mut table = ZHash::new();
+		for i in 0..2000 {
+			let key = BString::from(format!("k{i}"));
+			table.insert(key.clone(), BString::from("v"));
+			if let Some(buckets) = insert_buckets(items.len(), attrs) {
+				items.insert_front(buckets, key, BString::from("v"));
+			} else {
+				let mut h = ZHash::from_stored(&items, attrs);
+				h.insert(key, BString::from("v"));
+				let (stored, grown) = h.into_stored(attrs);
+				(items, attrs) = (stored.into(), grown);
+			}
+		}
+		let (want, want_attrs) = table.into_stored(Attrs::NONE);
+		assert_eq!(&*items, want.as_slice());
+		assert_eq!(attrs.base(), want_attrs.base());
+	}
+}
