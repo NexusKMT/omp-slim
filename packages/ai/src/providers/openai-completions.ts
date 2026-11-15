@@ -251,6 +251,39 @@ function assignUsage(
 	cost.total = cost.input + cost.output + cost.cacheRead;
 }
 
+type OpenAICompletionsChoice = NonNullable<ChatCompletionChunk["choices"]>[number];
+type OpenAICompletionsRepetitionChoice = OpenAICompletionsChoice & { stop_reason?: unknown };
+
+/**
+ * Detect a server-declared repetition stop on a streamed choice.
+ *
+ * vLLM and other OpenAI-compatible servers report a generation that degenerated
+ * into repetition as a terminal signal rather than a content pattern OMP can
+ * see: `finish_reason: "repetition"`, and/or `stop_reason: "repetition_detected"`.
+ * The `stop_reason` form arrives alongside an ordinary `finish_reason: "stop"`,
+ * or with no `finish_reason` at all, so it has to be read independently of it —
+ * otherwise the signal is either masked by the clean finish or never seen.
+ *
+ * Returns the raw values for the diagnostic message, or `undefined` when the
+ * choice carries no repetition signal.
+ */
+function detectRepetitionStop(choice: OpenAICompletionsChoice): string | undefined {
+	const finishReason: string | null | undefined = choice.finish_reason;
+	const stopReason = (choice as OpenAICompletionsRepetitionChoice).stop_reason;
+	const namesRepetition = (value: string): boolean => {
+		const lower = value.toLowerCase();
+		return lower === "repetition" || lower === "repetition_detected";
+	};
+	const flagged =
+		(typeof finishReason === "string" && namesRepetition(finishReason)) ||
+		(typeof stopReason === "string" && namesRepetition(stopReason));
+	if (!flagged) return undefined;
+	const parts: string[] = [];
+	if (typeof finishReason === "string" && finishReason.length > 0) parts.push(`finish_reason=${finishReason}`);
+	if (typeof stopReason === "string" && stopReason.length > 0) parts.push(`stop_reason=${stopReason}`);
+	return parts.join(" ") || "repetition";
+}
+
 export function streamOpenAICompletions(
 	model: Model<"openai-completions">,
 	context: Context,
@@ -354,6 +387,8 @@ export function streamOpenAICompletions(
 			let finishedAtMs: number | undefined;
 			let sawUsage = false;
 			let cachePlaceholder = false;
+			/** Server-declared repetition stop; classified after the finalization sweep. */
+			let repetitionStop: string | undefined;
 			const idleTimeout = options.streamIdleTimeoutMs ?? getOpenAIStreamIdleTimeoutMs();
 			const timedEvents = iterateWithIdleTimeout(handle.events, {
 				firstItemTimeoutMs: firstTimeout,
@@ -392,6 +427,11 @@ export function streamOpenAICompletions(
 				if (finished && sawUsage && !cachePlaceholder) break;
 				const choice = chunk.choices?.find(value => value.index === 0 || value.index === undefined);
 				if (!choice) continue;
+				// A server-declared repetition stop completes the response, so it takes
+				// the same terminal bookkeeping a `finish_reason` chunk would. Latched:
+				// a trailing frame without the signal must not clear an earlier chunk's.
+				repetitionStop ??= detectRepetitionStop(choice);
+				if (repetitionStop) finishedAtMs ??= Date.now();
 				const delta = choice.delta ?? choice.message;
 				if (delta) {
 					// DeepSeek-class endpoints stream thinking under reasoning aliases.
@@ -485,6 +525,21 @@ export function streamOpenAICompletions(
 					provider: model.provider,
 				});
 			endBlocks();
+			// Checked before the remaining terminal-error throws so the flagged
+			// error is the one that reaches `AIError.finalize` — that call rebuilds
+			// `errorId` from the thrown error. The partial output is dropped rather
+			// than committed or replayed, because degenerate reasoning is replay
+			// garbage (#12525).
+			if (repetitionStop) {
+				output.content = [];
+				throw AIError.attach(
+					new AIError.ProviderResponseError(`Provider reported a repetition stop: ${repetitionStop}`, {
+						provider: model.provider,
+						kind: "runtime",
+					}),
+					AIError.create(AIError.Flag.ThinkingLoop),
+				);
+			}
 			for (const tool of tools.values())
 				if (!tool.block.id || !tool.block.name)
 					throw new AIError.ProviderResponseError("Chat Completions returned a tool call without an id or name", {
