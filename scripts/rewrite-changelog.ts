@@ -32,9 +32,18 @@
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 import { type } from "@oh-my-pi/omptype";
-import { type Api, completeSimple, Effort, type Model, type Tool, type ToolCall } from "@oh-my-pi/pi-ai";
-import { discoverAuthStorage } from "@oh-my-pi/pi-ai/auth-broker";
-import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import {
+	type Api,
+	AuthStorage,
+	completeSimple,
+	Effort,
+	type Model,
+	SqliteAuthCredentialStore,
+	type Tool,
+	type ToolCall,
+} from "@oh-my-pi/pi-ai";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { getAgentDbPath, getAgentDir } from "@oh-my-pi/pi-utils";
 import {
 	type ChangelogDocument,
 	changelogPaths,
@@ -100,23 +109,19 @@ async function openModel(modelSpec: string): Promise<RewriteModel> {
 	if (slash <= 0) throw new Error(`--model must be <provider>/<model-id>, got "${modelSpec}"`);
 	const provider = modelSpec.slice(0, slash);
 	const modelId = modelSpec.slice(slash + 1);
-	const model = getBundledModel(provider as GeneratedProvider, modelId);
-	if (!model) throw new Error(`unknown model "${modelSpec}" (not in bundled catalog)`);
-	const sourceLabel = "rewrite-changelog";
-	const storage = await discoverAuthStorage({ sourceLabel });
-	try {
-		const apiKey = await storage.keys.get(provider);
-		if (!apiKey) {
-			throw new Error(
-				`no credentials for provider "${provider}" via ${sourceLabel} (check broker or run \`omp login\`)`,
-			);
-		}
-		return { model, apiKey, spec: modelSpec };
-	} finally {
-		// Broker-backed storage runs a background SSE/long-poll loop that keeps
-		// the event loop alive; release it once the key is captured.
-		storage.close();
+	const store = await SqliteAuthCredentialStore.open(getAgentDbPath());
+	const storage = new AuthStorage(store);
+	await storage.credentials.reload();
+	const registry = new ModelRegistry(storage, path.join(getAgentDir(), "models.yml"));
+	const model = registry.find(provider, modelId);
+	if (!model) {
+		throw new Error(`unknown model "${modelSpec}" (not in ${path.join(getAgentDir(), "models.yml")})`);
 	}
+	const apiKey = await storage.keys.get(provider);
+	if (!apiKey) {
+		throw new Error(`no credentials for provider "${provider}" (omp login or env var required)`);
+	}
+	return { model, apiKey, spec: modelSpec };
 }
 
 // --------------------------------------------------------------------------

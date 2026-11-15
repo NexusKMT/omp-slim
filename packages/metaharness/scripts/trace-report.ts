@@ -28,9 +28,10 @@
  */
 
 import { parseArgs } from "node:util";
+import * as path from "node:path";
 import { type Api, AuthStorage, completeSimple, type Model, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { getAgentDbPath } from "@oh-my-pi/pi-utils";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { getAgentDbPath, getAgentDir } from "@oh-my-pi/pi-utils";
 
 const DEFAULT_TINY = "openrouter/inclusionai/ling-2.6-flash";
 const DEFAULT_SYNTH = "openrouter/openai/gpt-oss-120b";
@@ -121,8 +122,11 @@ async function openModel(modelSpec: string, storage: AuthStorage): Promise<Opene
 	if (slash <= 0) throw new Error(`model must be <provider>/<model-id>, got "${modelSpec}"`);
 	const provider = modelSpec.slice(0, slash);
 	const modelId = modelSpec.slice(slash + 1);
-	const model = getBundledModel(provider as GeneratedProvider, modelId);
-	if (!model) throw new Error(`unknown model "${modelSpec}" (not in bundled catalog)`);
+	const registry = new ModelRegistry(storage, path.join(getAgentDir(), "models.yml"));
+	const model = registry.find(provider, modelId);
+	if (!model) {
+		throw new Error(`unknown model "${modelSpec}" (not in ${path.join(getAgentDir(), "models.yml")})`);
+	}
 	const apiKey = await storage.keys.get(provider);
 	if (!apiKey) {
 		throw new Error(`no credentials for provider "${provider}" (run \`omp login\` or set the provider env var)`);
