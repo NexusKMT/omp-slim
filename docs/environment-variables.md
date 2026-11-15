@@ -321,10 +321,9 @@ OAuth host chain: `KIMI_CODE_OAUTH_HOST` → `KIMI_OAUTH_HOST` → `https://auth
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OPENAI_BASE_URL`                   | Base URL fallback for OpenAI-compatible requests when the model/provider supplies a default                                                                                                                                                   |
 | `MOONSHOT_BASE_URL`                 | Moonshot chat and model-discovery endpoint override                                                                                                                                                                                           |
-| `XAI_BASE_URL`                      | xAI endpoint override for `xai`/`xai-oauth` chat, image generation, and web search; applies only when the model uses the bundled `https://api.x.ai/v1` endpoint, so a models.yml `baseUrl` wins; never receives `xai-oauth` OAuth credentials |
+| `XAI_BASE_URL`                      | xAI endpoint override for `xai`/`xai-oauth` chat and image generation; applies only when the model uses the bundled `https://api.x.ai/v1` endpoint, so a models.yml `baseUrl` wins; never receives `xai-oauth` OAuth credentials |
 | `SAKANA_BASE_URL` / `FUGU_BASE_URL` | Sakana/Fugu endpoint override (`SAKANA_BASE_URL` wins)                                                                                                                                                                                        |
 | `PI_OPENROUTER_RESPONSES`           | Responses API is enabled unless set to `0`; `0` selects the OpenAI Completions route                                                                                                                                                          |
-| `UMANS_WEBSEARCH_PROVIDER`          | Default Umans Anthropic web-search provider selection when not supplied explicitly                                                                                                                                                            |
 
 ### Gemini CLI and Antigravity compatibility
 
@@ -398,54 +397,16 @@ therefore completes through the paste-code path.
 
 ### Search provider credentials
 
-| Variable                                            | Used by                                                                                                                                                        |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EXA_API_KEY`                                       | Exa search/MCP; alternatively use `/login exa`                                                                                                                 |
-| `TINYFISH_API_KEY`                                  | TinyFish search provider (required)                                                                                                                            |
-| `KEENABLE_API_KEY`                                  | Keenable search provider (optional; keyless public endpoint without it)                                                                                        |
-| `BRAVE_API_KEY`                                     | Brave search provider                                                                                                                                          |
-| `DEEPSEEK_API_KEY`                                  | DeepSeek search provider (same key as DeepSeek models)                                                                                                         |
-| `PERPLEXITY_API_KEY`                                | Perplexity search provider API-key mode                                                                                                                        |
-| `PERPLEXITY_COOKIES`                                | Perplexity cookie-auth search mode                                                                                                                             |
-| `PI_PERPLEXITY_RESPONSES`                           | `1` selects the Perplexity Responses endpoint instead of Chat Completions                                                                                      |
-| `PI_PERPLEXITY_MODEL`                               | Perplexity consumer-subscription model preference (default `experimental`)                                                                                     |
-| `PI_PERPLEXITY_API_MODEL`                           | Perplexity direct API model override (default `sonar-pro`)                                                                                                     |
-| `FIRECRAWL_API_KEY`                                 | Firecrawl search provider (keyless fallback when unset) and fetch reader backend (required)                                                                    |
-| `FIRECRAWL_BASE_URL`                                | Firecrawl API endpoint override (`FIRECRAWL_API_URL` is a fallback alias)                                                                                      |
-| `TAVILY_API_KEY`                                    | Tavily search provider                                                                                                                                         |
-| `ZAI_API_KEY`                                       | z.ai search provider (also checks stored OAuth in `agent.db`)                                                                                                  |
-| `OPENAI_API_KEY` / Codex OAuth in DB                | Codex search model availability/auth                                                                                                                           |
-| `MOONSHOT_SEARCH_API_KEY` / `KIMI_SEARCH_API_KEY`   | Kimi/Moonshot search provider env auth                                                                                                                         |
-| `MOONSHOT_SEARCH_BASE_URL` / `KIMI_SEARCH_BASE_URL` | Kimi/Moonshot search endpoint override                                                                                                                         |
-| `KAGI_API_KEY`                                      | Kagi search provider                                                                                                                                           |
-| `JINA_API_KEY`                                      | Jina search provider                                                                                                                                           |
-| `PARALLEL_API_KEY`                                  | Parallel search provider                                                                                                                                       |
-| `OLLAMA_CLOUD_API_KEY`                              | Ollama web search provider                                                                                                                                     |
-| `SEARXNG_ENDPOINT`, `SEARXNG_TOKEN`                 | SearXNG endpoint and optional bearer token; fallbacks for `searxng.endpoint` / `searxng.token`, used when the setting is unset, `null`, or blank               |
-| `SEARXNG_BASIC_USERNAME`, `SEARXNG_BASIC_PASSWORD`  | SearXNG HTTP Basic Auth credentials; fallbacks used only when the matching `searxng.basic*` setting is unset or `null` (an empty string is a valid credential) |
+`web_search` runs one HTTP engine, Parallel. Fetch readers share the same credential store.
 
-DuckDuckGo search is keyless — it queries the no-JS HTML frontend (`html.duckduckgo.com`) and needs no credentials; it also feeds the credential-free `public` aggregate (alongside startpage, google, ecosia, and mojeek).
+| Variable             | Used by                                                                                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PARALLEL_API_KEY`   | Parallel Search API (search) and the `parallel` fetch reader. Without it, search still runs through Parallel's keyless public MCP endpoint; the reader needs it.    |
+| `FIRECRAWL_API_KEY`  | `firecrawl` fetch reader (required).                                                                                                                               |
+| `FIRECRAWL_BASE_URL` | Firecrawl endpoint override for self-hosting (`FIRECRAWL_API_URL` is a fallback alias).                                                                            |
+| `EXA_API_KEY`        | Exa MCP server; alternatively use `/login exa`. Exa's tools arrive as MCP tools, not as `web_search` engines.                                                      |
 
-SearXNG also reads the equivalent `searxng.endpoint`, `searxng.token`, `searxng.basicUsername`, and `searxng.basicPassword` settings from `~/.omp/agent/config.yml`; environment variables are fallbacks.
-
-### Anthropic web search authentication
-
-For an Anthropic catalog model, `searchAnthropic()` uses credentials in this order:
-
-1. `ANTHROPIC_SEARCH_API_KEY`
-2. The model registry's credential resolver for the selected model/provider, including configured runtime credentials, stored OAuth or API-key login, and that provider's normal environment fallback
-
-`ANTHROPIC_SEARCH_API_KEY` is a search-only auth source: it does not change chat credentials. The selected catalog model supplies the model ID and endpoint, so there are no separate Anthropic search model or base-URL environment overrides.
-
-| Variable                   | Default / behavior                                                                                                                                                     |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_SEARCH_API_KEY` | API key used exclusively for an Anthropic web-search request. It is tried before the selected model's normal credential resolver and does not affect chat completions. |
-
-### Perplexity OAuth flow behavior flag
-
-| Variable            | Behavior                                                                        |
-| ------------------- | ------------------------------------------------------------------------------- |
-| `PI_AUTH_NO_BORROW` | If set, disables macOS native-app token borrowing path in Perplexity login flow |
+Search needs no credential at all. There is no second search engine, no hosted search adapter and therefore no search-only model key: `ANTHROPIC_SEARCH_API_KEY`, the Perplexity variables, and the other engine keys (`BRAVE_API_KEY`, `TAVILY_API_KEY`, `KAGI_API_KEY`, `JINA_API_KEY`, `ZAI_API_KEY`, `TINYFISH_API_KEY`, `KEENABLE_API_KEY`, `MOONSHOT_SEARCH_*`, `OLLAMA_CLOUD_API_KEY`, `SEARXNG_*`) are gone.
 
 ### TypeSafe judgments
 
@@ -691,7 +652,7 @@ Treat these as secrets; do not log or commit them:
 
 - Provider/API keys and OAuth/bearer credentials (all `*_API_KEY`, `*_TOKEN`, OAuth access/refresh tokens)
 - Cloud credentials (`AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS` path may expose service-account material)
-- Search/provider auth vars (`EXA_API_KEY`, `BRAVE_API_KEY`, `PERPLEXITY_API_KEY`, Anthropic search keys)
+- Search/fetch auth vars (`PARALLEL_API_KEY`, `FIRECRAWL_API_KEY`, `EXA_API_KEY`)
 - Foundry mTLS material (`CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`, `NODE_EXTRA_CA_CERTS` when it points to private CA bundles)
 - OTLP exporter headers (`OTEL_EXPORTER_OTLP_HEADERS` and the per-signal `..._{TRACES,LOGS,METRICS}_HEADERS` variants) — they carry ingest bearer tokens/project keys
 

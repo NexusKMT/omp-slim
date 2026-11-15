@@ -179,7 +179,7 @@ Effective precedence, highest first:
 5. Global settings: the first present file among `~/.omp/agent/config.yml` and `config.yaml`
 6. Definition default
 
-A definition may instead declare `env: { name, fallback: true }`: that variable only replaces the default, and any layer configuring a non-null value wins over it (used by `SEARXNG_BASIC_*`). `fallback: "blank"` also lets the variable win over a configured empty or whitespace string (used by `SEARXNG_ENDPOINT`, `SEARXNG_TOKEN`, and `MNEMOPI_EMBEDDING_MODEL`).
+A definition may instead declare `env: { name, fallback: true }`: that variable only replaces the default, and any layer configuring a non-null value wins over it. `fallback: "blank"` also lets the variable win over a configured empty or whitespace string. No setting in this build declares either form today; the mechanism is documented because the registry still supports it.
 
 Within the overlay list, later files override earlier files (`PI_CONFIG_FILES` entries load before `--config` files). Overlay paths are resolved relative to the active project directory (after `~` expansion).
 

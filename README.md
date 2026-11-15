@@ -204,7 +204,7 @@ _[Watch the capture ↗](https://omp.sh/clips/collab.mp4)_
 
 ### 08 · Read a pdf on arxiv, why not?
 
-web_search chains twenty-four ranked providers and hands whatever URLs it finds straight to read. Arxiv PDFs, GitHub pages, Stack Overflow threads come back as structured markdown with anchors intact — the same tool surface you use on local files. Cite, follow, quote, never lose where you came from.
+web_search runs Parallel's Search API and hands whatever URLs it finds straight to read. Arxiv PDFs, GitHub pages, Stack Overflow threads come back as structured markdown with anchors intact — the same tool surface you use on local files. Cite, follow, quote, never lose where you came from.
 
 ![omp TUI: web_search returns 10 ranked Perplexity sources for inference-time compute scaling, the agent picks an arxiv paper, calls read https://arxiv.org/pdf/2604.10739v1, and summarizes the paper's headline result with real numbers.](https://omp.sh/clips/web-poster.webp)
 
@@ -382,53 +382,29 @@ model: spark/minimax-m3
 
 Full provider & routing reference at [omp.sh/docs/providers](https://omp.sh/docs/providers).
 
-## Twenty-four backends. _One tool the agent already knows_.
+## One search backend. _One tool the agent already knows_.
 
-`web_search` is built in, not bolted on. `auto` walks a twenty-four-provider chain; pin one by name if you already pay for it. Behind every hit, site-aware extraction turns GitHub, registries, arXiv, Stack Overflow, and docs into structured markdown — anchors and link targets survive.
+`web_search` is built in, not bolted on. It calls Parallel's Search API, and falls back to Parallel's keyless public MCP endpoint when no credential is configured — there is no provider chain to walk and no engine to pin. Behind every hit, site-aware extraction turns GitHub, registries, arXiv, Stack Overflow, and docs into structured markdown — anchors and link targets survive.
 
-### Search providers
+### Search provider
 
-Twenty-four backends. Pin one, or let `auto` walk the chain in order.
+| provider   | auth                                                |
+| ---------- | --------------------------------------------------- |
+| `parallel` | `PARALLEL_API_KEY`, or the keyless public MCP fallback |
 
-| provider     | auth                                      |
-| ------------ | ----------------------------------------- |
-| `auto`       | chain                                     |
-| `perplexity` | `PERPLEXITY_API_KEY` (anonymous fallback) |
-| `gemini`     | oauth                                     |
-| `anthropic`  | oauth                                     |
-| `codex`      | oauth                                     |
-| `xai`        | oauth or `XAI_API_KEY`                    |
-| `zai`        | `ZAI_API_KEY`                             |
-| `exa`        | `EXA_API_KEY` (or mcp)                    |
-| `tinyfish`   | `TINYFISH_API_KEY`                        |
-| `keenable`   | `KEENABLE_API_KEY` (keyless fallback)     |
-| `jina`       | `JINA_API_KEY`                            |
-| `kagi`       | `KAGI_API_KEY`                            |
-| `tavily`     | `TAVILY_API_KEY`                          |
-| `firecrawl`  | `FIRECRAWL_API_KEY` (keyless fallback)    |
-| `brave`      | `BRAVE_API_KEY`                           |
-| `kimi`       | `/login kimi-code` or search key          |
-| `parallel`   | `PARALLEL_API_KEY`                        |
-| `synthetic`  | `SYNTHETIC_API_KEY`                       |
-| `searxng`    | self-hosted                               |
-| `duckduckgo` | no key                                    |
-| `startpage`  | no key                                    |
-| `google`     | no key (HTTP)                          |
-| `ecosia`     | no key (HTTP)                          |
-| `mojeek`     | no key (HTTP)                          |
-| `public`     | no key (all of the above, consolidated)   |
-
-Exa also accepts a stored API key through `/login exa`; explicit keyless selection uses the public MCP fallback.
+Exa is reachable as an MCP server (`EXA_API_KEY` or `/login exa`); its tools are not `web_search` engines.
 
 ### Specialised handlers
 
 The agent gets structured content, not stripped HTML.
 
 - **Code hosts** — github, gitlab
-- **Package registries** — npm, PyPI, crates.io, Hex, Hackage, NuGet, Maven, RubyGems, Packagist, pub.dev, Go packages
-- **Research sources** — arxiv, semantic scholar
-- **Forums** — stack overflow, reddit, hn
-- **Docs** — mdn, readthedocs, docs.rs
+- **Package registries** — npm, PyPI, crates.io, Docker Hub
+- **Research sources** — arxiv, crossref, PubMed
+- **Forums and social** — Stack Overflow, Reddit
+- **Docs and reference** — mdn, docs.rs, Wikipedia
+- **ML** — Hugging Face
+- **Video** — YouTube
 
 Pages convert to markdown with link structure intact. The agent can cite, follow, and quote without losing anchors.
 

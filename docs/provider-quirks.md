@@ -2669,22 +2669,6 @@ Provider-specific overrides in `packages/catalog/src/compat/rules/providers/zhip
 - **Authored seeds**: `@cf/cloudflare/clef`, `@cf/cloudflare/clef-flash`; bundle policy `always`. Limits, capabilities, and prices are authored alongside these rows.
 - Runtime manager: `cloudflareWorkersAiModelManagerOptions` in `packages/catalog/src/provider-models/special.ts`.
 
-## Web search engines (`web`)
-
-### Special casings
-
-- Uses `web-search`. `webModelManagerOptions` supplies authored web-search models in a dedicated cache namespace, not chat-completion discovery.
-
-### Auth & usage
-
-- No interactive login is declared for this route.
-
-### Catalog model handling
-
-- **Provider entry (`web`)**: `packages/catalog/src/compat/rules/providers/web.kdl` declares default model `public`. Model management permits unauthenticated access.
-- **Authored seeds**: `hosted`, `parallel`, `perplexity`, `zai`, `exa`, `tinyfish`, `jina`, `kagi`, `tavily`, `firecrawl`, `brave`, `kimi`, `synthetic`, `ollama`, `searxng`, `startpage`, `duckduckgo`, `ecosia`, `google`, `mojeek`, `public`; bundle policy `always`. Limits, capabilities, and prices are authored alongside these rows.
-- Runtime manager: `webModelManagerOptions` in `packages/catalog/src/provider-models/special.ts`.
-
 ## Yolo-Auto (`yolo-auto`)
 
 ### Special casings

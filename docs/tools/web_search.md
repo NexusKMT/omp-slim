@@ -1,48 +1,44 @@
 # Web search
 
-`web_search` retrieves current sources through HTTP search engines or the current session model's hosted search capability. It never selects a second chat model. The old `web` model role, per-call model overrides, cheaper `webSearchModel` substitutions, and automatic xAI injection for X queries have been removed.
+`web_search` retrieves current sources through a single HTTP search endpoint, Parallel. It never selects a chat model: the session's model supplies routing for its own conversation and plays no part in retrieval.
 
-The application uses the active model object as supplied by the session, including its provider, endpoint, and routing. The automatic chain first tries Parallel, then that exact model's hosted search when supported, followed by Exa, Firecrawl, SearXNG, and the existing public HTTP engine paths. Other HTTP engines remain available through explicit `--engine` selection. A failure advances only to HTTP search endpoints. It does not discover another chat model or replay the request against a model-role fallback chain.
+Retired surfaces: the `web` model role, per-call model overrides, hosted search adapters (Anthropic, Codex, Gemini, OpenAI, OpenRouter, xAI), the Perplexity adapter, and the other HTTP engines (Brave, DuckDuckGo, Ecosia, Google, Jina, Kagi, Kimi, Mojeek, Ollama, SearXNG, Startpage, Tavily, TinyFish, Z.AI, and the `public` fan-out). An engine id that no longer exists is rejected rather than silently mapped to another.
 
 ## Inputs
 
 | Field | Meaning |
 | --- | --- |
-| `query` | Required search text. Supports `site:`, excluded sites, date bounds, quoted phrases, and other common search directives. |
-| `recency` | Optional `day`, `week`, `month`, or `year` filter, when supported by the engine. |
-| `limit` | Maximum result count, bounded by each provider. |
-| `num_search_results` | Provider-specific search breadth or local result cap. |
-| `max_tokens` | Output budget for the current model's hosted search. |
-| `temperature` | Sampling parameter for hosted adapters that support it. |
+| `query` | Required search text. `site:`, `-site:`, `after:`/`before:`, `inurl:`, `intitle:`, `filetype:`, quoted phrases, `-exclusions`, and `OR` groups are parsed out before the request. |
+| `recency` | Optional `day`, `week`, `month`, or `year` freshness filter. |
+| `limit` | Maximum result count; the provider clamps the request to 40 results. |
+| `num_search_results` | Provider search breadth; takes precedence over `limit`. Defaults to 10. |
 
-Returned results include source titles, URLs, snippets, and any supplied citations. The pipeline applies query constraints after retrieval when an engine cannot express them itself. A constraint that would remove every result is relaxed with a visible note.
+There is no `max_tokens` or `temperature` input: no adapter samples a model.
 
-## HTTP engines and hosted search
+Returned results carry source titles, URLs, snippets, and any supplied citations or related questions. Snippets and cited excerpts are capped at 240 characters in the model-facing summary; full URLs are kept. Constraints the endpoint cannot express natively are enforced afterwards by `applyQueryConstraints`, and any constraint that would remove every result is relaxed with a visible `Note:` line instead of returning nothing.
 
-HTTP adapters include Brave, DeepSeek search, DuckDuckGo, Ecosia, Exa, Firecrawl search, Google, Jina search, Kagi, Keenable, Kimi search, Mojeek, Ollama web search, Parallel, SearXNG, Startpage, Synthetic search, Tavily, TinyFish search, and Z.AI search. These adapters call retrieval endpoints without selecting a chat model. The `public` adapter combines results from several public HTTP engines.
+## The Parallel engine
 
-Hosted adapters exist for Anthropic, Codex, Gemini, OpenAI, OpenRouter, and xAI. They are admitted only by the current session model's declared `webSearch` capability. Hosted answers without sources or citations are rejected so an ordinary model reply is not presented as a search result.
+`parallel` calls Parallel's Search API (`POST https://api.parallel.ai/v1beta/search`, header `parallel-beta: search-extract-2025-10-10`). It resolves credentials from the central store — `PARALLEL_API_KEY` or `omp /login parallel`. With no credential at all it falls back to Parallel's public MCP endpoint (`https://search.parallel.ai/mcp`), so the engine is always available; a credential that is configured but unresolvable is an error rather than a silent downgrade to anonymous search.
 
-The former Perplexity search adapter selected Sonar or another consumer model internally and has been removed from OMP's search product. Generic provider transports and historical message formats remain available to the underlying libraries.
-
-X operators are advertised only when the current model supports xAI search. Reading an X URL also uses only that current X-capable model; otherwise the read result explains that an external reader is needed. Credentials for an unrelated xAI account never cause OMP to switch models.
+`site:`/`-site:` and `after:` are mapped onto Parallel's `source_policy`; the remaining directives travel in the query text in the syntax that endpoint accepts.
 
 ## CLI
 
-`omp q` and `omp web-search` use HTTP engines. `--engine` selects a retrieval endpoint and cannot name a model:
+`omp q` and `omp web-search` drive the same engine. `--engine` selects an HTTP endpoint by id and cannot name a model:
 
 ```sh
-omp q --engine=duckduckgo "TypeScript release notes"
-omp q --engine=public --recency=week "latest TypeScript changes"
+omp q 'TypeScript release notes'
+omp q --engine=parallel --recency=week 'latest TypeScript changes'
 omp q 'transformer scaling site:arxiv.org after:2024 -site:reddit.com'
 ```
 
-Library callers can supply `SearchQueryParams.engine` for the same HTTP selection. The removed `model` parameter is rejected. Callers that already own a session may provide its current model in `runSearchQuery` options for hosted search.
+`--engine=<unknown>` fails with `Unknown HTTP search engine`. `--model` fails with `Web search model overrides are not supported; use --engine for an HTTP search engine.` Library callers passing `SearchQueryParams.engine` hit the same validation, and passing `model` throws.
 
 ## Cancellation, limits, and errors
 
-Each provider request uses `providers.webSearchTimeoutSeconds` (60 seconds by default, capped at 300). Engine-specific limits can be shorter. Cancellation stops the search rather than advancing to another engine. Ordinary HTTP failures can advance to another available HTTP engine; the output records which engines failed and which served the result.
+Each request uses `providers.webSearchTimeoutSeconds` (60 seconds by default, capped at 300). Cancellation aborts the search immediately instead of widening it to another endpoint. A failed attempt is recorded in `details.failures` (`provider`, `label`, `reason`, and the HTTP `status` when there is one) and the output names the endpoint that failed.
 
-Source snippets and citation excerpts are capped at 240 characters in the model-facing summary. Full source URLs remain available. Empty responses and unsupported current-model hosted searches surface as errors or recorded fallback failures.
+`web_search.enabled` controls whether the tool is offered at all.
 
-The implementation is in `packages/coding-agent/src/web/search/index.ts`, the transport registry in `provider.ts`, and provider adapters in `providers/`. `web_search.enabled` still controls tool availability.
+The implementation is `packages/coding-agent/src/web/search/index.ts`, with the engine registry in `provider.ts`, the adapter in `providers/parallel.ts`, and directive parsing in `query.ts`.

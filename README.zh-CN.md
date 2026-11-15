@@ -197,7 +197,7 @@ _[观看录屏 ↗](https://omp.sh/clips/collab.mp4)_
 
 ### 08 · 读一篇 arXiv 上的 PDF？有何不可。
 
-web_search 串联了二十四个按优先级排列的搜索提供商，并把找到的 URL 直接交给 read。arXiv PDF、GitHub 页面、Stack Overflow 帖子都会以结构化 Markdown 返回，锚点完整保留——与处理本地文件使用同一套工具。引用、跟进、摘录，永远不会丢失出处。
+web_search 调用 Parallel 的 Search API，并把找到的 URL 直接交给 read。arXiv PDF、GitHub 页面、Stack Overflow 帖子都会以结构化 Markdown 返回，锚点完整保留——与处理本地文件使用同一套工具。引用、跟进、摘录，永远不会丢失出处。
 
 ![omp TUI：web_search 针对推理时计算扩展返回 10 个按排名排列的 Perplexity 来源，智能体挑选了一篇 arXiv 论文，调用 read https://arxiv.org/pdf/2604.10739v1，并用真实数据总结论文的核心结论。](https://omp.sh/clips/web-poster.webp)
 
@@ -375,53 +375,29 @@ model: spark/minimax-m3
 
 完整的提供商与路由参考见 [omp.sh/docs/providers](https://omp.sh/docs/providers)。
 
-## 二十四个后端。_智能体早已用惯的一个工具_。
+## 一个搜索后端。_智能体早已用惯的一个工具_。
 
-`web_search` 是内置的，而不是外挂的。`auto` 会依次尝试二十四个提供商；如果你已经付费订阅了某一个，也可以按名称固定使用。每个搜索结果背后，站点感知的提取器会把 GitHub、包注册表、arXiv、Stack Overflow 和文档站点转换为结构化 Markdown——锚点和链接目标都会保留。
+`web_search` 是内置的，而不是外挂的。它调用 Parallel 的 Search API；没有配置凭据时回退到 Parallel 公共 MCP 端点——既没有提供商链要遍历，也没有引擎要固定。命中之后，站点感知的抽取会把 GitHub、包注册表、arXiv、Stack Overflow 和文档转成结构化 Markdown——锚点和链接目标都保留。
 
 ### 搜索提供商
 
-二十四个后端。固定使用其中之一，或让 `auto` 按顺序依次尝试。
+| 提供商     | 认证方式                                      |
+| ---------- | --------------------------------------------- |
+| `parallel` | `PARALLEL_API_KEY`，或公共 MCP 无密钥回退     |
 
-| 提供商       | 认证方式                                  |
-| ------------ | ----------------------------------------- |
-| `auto`       | 按顺序依次尝试                            |
-| `perplexity` | `PERPLEXITY_API_KEY`（可匿名回退）        |
-| `gemini`     | oauth                                     |
-| `anthropic`  | oauth                                     |
-| `codex`      | oauth                                     |
-| `xai`        | oauth 或 `XAI_API_KEY`                    |
-| `zai`        | `ZAI_API_KEY`                             |
-| `exa`        | `EXA_API_KEY`（或 mcp）                   |
-| `tinyfish`   | `TINYFISH_API_KEY`                        |
-| `keenable`   | `KEENABLE_API_KEY`（可无密钥回退）        |
-| `jina`       | `JINA_API_KEY`                            |
-| `kagi`       | `KAGI_API_KEY`                            |
-| `tavily`     | `TAVILY_API_KEY`                          |
-| `firecrawl`  | `FIRECRAWL_API_KEY`（可无密钥回退）       |
-| `brave`      | `BRAVE_API_KEY`                           |
-| `kimi`       | `/login kimi-code` 或搜索密钥             |
-| `parallel`   | `PARALLEL_API_KEY`                        |
-| `synthetic`  | `SYNTHETIC_API_KEY`                       |
-| `searxng`    | 自托管                                    |
-| `duckduckgo` | 无需密钥                                  |
-| `startpage`  | 无需密钥                                  |
-| `google`     | 无需密钥（浏览器）                        |
-| `ecosia`     | 无需密钥（浏览器）                        |
-| `mojeek`     | 无需密钥（浏览器）                        |
-| `public`     | 无需密钥（整合以上所有）                  |
-
-Exa 也可以通过 `/login exa` 存储 API 密钥；显式选择无密钥模式时使用公共 MCP 回退。
+Exa 以 MCP 服务器形式提供（`EXA_API_KEY` 或 `/login exa`），它的工具不是 `web_search` 引擎。
 
 ### 专用处理器
 
 智能体拿到的是结构化内容，而不是剥掉标签后的一堆 HTML 文本。
 
 - **代码托管** — github、gitlab
-- **包注册表** — npm、PyPI、crates.io、Hex、Hackage、NuGet、Maven、RubyGems、Packagist、pub.dev、Go packages
-- **学术来源** — arxiv、semantic scholar
-- **论坛** — stack overflow、reddit、hn
-- **文档** — mdn、readthedocs、docs.rs
+- **包注册表** — npm、PyPI、crates.io、Docker Hub
+- **学术来源** — arxiv、crossref、PubMed
+- **论坛与社区** — Stack Overflow、Reddit
+- **文档与参考** — mdn、docs.rs、Wikipedia
+- **机器学习** — Hugging Face
+- **视频** — YouTube
 
 页面会被转换为保留链接结构的 Markdown。智能体可以引用、跟进和摘录，而不会丢失锚点。
 
