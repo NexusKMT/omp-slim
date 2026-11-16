@@ -22,8 +22,6 @@ export interface SSHHost {
 	keyPath?: string;
 	/** Optional host description */
 	description?: string;
-	/** Optional compatibility mode flag */
-	compat?: boolean;
 	/** Source metadata (added by loader) */
 	_source: SourceMeta;
 }

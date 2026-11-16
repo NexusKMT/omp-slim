@@ -29,19 +29,12 @@ const REMOTE_FILE_TYPES = new Set<string>(Object.values(ShellFsFileType));
  * to the user's login shell, which on fish/csh/tcsh hosts can't parse our
  * `if [ … ]; then …` constructs (#3719).
  *
- * Windows hosts are refused up front — `ssh://` runs `head`/`cat`/`mv`/`test`
- * directly and cmd/powershell can't drive those. Everywhere else, we require
- * a non-empty `transferShell` (set by `probeHostInfo` after `sh -lc` /
+ * Requires a non-empty `transferShell` (set by `probeHostInfo` after `sh -lc` /
  * `bash -lc` / `zsh -lc` round-trips a marker against the remote).
  */
 async function ensurePosixRemote(target: SSHConnectionTarget): Promise<"sh" | "bash" | "zsh"> {
 	await ensureConnection(target);
 	const info = await ensureHostInfo(target);
-	if (info.os === "windows") {
-		throw new Error(
-			`ssh://: ${target.name} is a Windows host; ssh:// supports POSIX remotes only (head/cat/mv) — use \`bash\` with a remote SSH command for Windows hosts`,
-		);
-	}
 	if (!info.transferShell) {
 		throw new Error(
 			`ssh://: ${target.name} has no verified POSIX shell for ssh:// read/write — none of sh/bash/zsh round-tripped a capability probe (use \`bash\` with a remote SSH command for this host)`,

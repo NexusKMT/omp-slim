@@ -59,11 +59,16 @@ describe("ssh host shell classification", () => {
 			["/bin/sh", "sh"],
 			["/usr/bin/bash", "bash"],
 			["/usr/bin/zsh", "zsh"],
+			// Windows shells are no longer classified: a cache written before the
+			// removal degrades to "unknown" and re-probes instead of naming a shell
+			// ssh:// can't drive.
+			["/usr/bin/pwsh", "unknown"],
+			["C:\\Windows\\System32\\cmd.exe", "unknown"],
 		];
 		for (const [shellValue, expected] of cases) {
 			const name = `omp-shellclf-${crypto.randomUUID()}`;
 			const file = path.join(getRemoteHostDir(), `${sanitizeHostName(name)}.json`);
-			await Bun.write(file, JSON.stringify({ version: 3, os: "linux", shell: shellValue, compatEnabled: false }));
+			await Bun.write(file, JSON.stringify({ version: 3, os: "linux", shell: shellValue }));
 			try {
 				const info = await getHostInfo(name);
 				expect(info?.shell).toBe(expected);
@@ -138,10 +143,9 @@ describe("osFromUname (transfer-shell probe OS recovery)", () => {
 		expect(osFromUname("Darwin")).toBe("macos");
 	});
 
-	it("classifies Windows compat unames as windows so ssh:// still refuses them", () => {
-		expect(osFromUname("MINGW64_NT-10.0")).toBe("windows");
-		expect(osFromUname("MSYS_NT-10.0")).toBe("windows");
-		expect(osFromUname("CYGWIN_NT-10.0")).toBe("windows");
+	it("leaves Windows unames unclassified (ssh:// targets POSIX remotes only)", () => {
+		expect(osFromUname("MINGW64_NT-10.0")).toBeUndefined();
+		expect(osFromUname("CYGWIN_NT-10.0")).toBeUndefined();
 	});
 
 	it("returns undefined when uname is not recognized", () => {
@@ -159,7 +163,6 @@ describe("parseHostInfo transferShell handling", () => {
 			os: "linux",
 			shell: "unknown",
 			transferShell: "bash",
-			compatEnabled: false,
 		});
 		expect(parsed?.transferShell).toBe("bash");
 	});
@@ -172,7 +175,6 @@ describe("parseHostInfo transferShell handling", () => {
 			os: "linux",
 			shell: "sh",
 			transferShell: "fish",
-			compatEnabled: false,
 		});
 		expect(parsed?.transferShell).toBeUndefined();
 	});
@@ -180,7 +182,7 @@ describe("parseHostInfo transferShell handling", () => {
 	it("returns transferShell undefined when the field is missing", () => {
 		// A pre-v4 cache file lacks transferShell entirely; the parsed value
 		// must be undefined so shouldRefreshHostInfo treats it as stale.
-		const parsed = parseHostInfo({ version: 3, os: "linux", shell: "sh", compatEnabled: false });
+		const parsed = parseHostInfo({ version: 3, os: "linux", shell: "sh" });
 		expect(parsed?.transferShell).toBeUndefined();
 	});
 });

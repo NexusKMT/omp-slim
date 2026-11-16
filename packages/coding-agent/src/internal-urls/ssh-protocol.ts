@@ -237,7 +237,6 @@ async function resolveTarget(url: InternalUrl, cwd?: string): Promise<SSHConnect
 			username: match.username,
 			port: match.port,
 			keyPath: match.keyPath,
-			compat: match.compat,
 		};
 	}
 	// Opaque OpenSSH destination (plain ~/.ssh/config alias, or any resolvable host).

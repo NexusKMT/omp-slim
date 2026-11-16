@@ -13,7 +13,6 @@ export interface SSHHostConfig {
 	port?: number;
 	keyPath?: string;
 	description?: string;
-	compat?: boolean;
 }
 
 export interface SSHConfigFile {

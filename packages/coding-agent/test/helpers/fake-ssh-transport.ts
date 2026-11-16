@@ -13,7 +13,6 @@ export function fakeSshTransport(home: (target: SSHConnectionTarget) => string, 
 		os: "linux",
 		shell: "sh",
 		transferShell: "sh",
-		compatEnabled: false,
 	});
 	vi.spyOn(connectionManager, "buildRemoteCommand").mockImplementation(async (target, command) => {
 		commands.push({ target, command });

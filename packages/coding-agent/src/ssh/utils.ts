@@ -27,9 +27,8 @@ export function buildSshTarget(username: string | undefined, host: string): stri
  * Wrap a POSIX command in `<shell> -c '<command>'` so it runs under the
  * named shell rather than whatever `$SHELL` happens to be on the remote.
  *
- * Used by the `ssh://` transfer helpers and the Windows compat dispatch:
- * OpenSSH passes our snippets to `<login-shell> -c`, so a remote whose
- * login shell is fish/csh/tcsh (or cmd/powershell on Windows compat)
+ * Used by the `ssh://` transfer helpers: OpenSSH passes our snippets to
+ * `<login-shell> -c`, so a remote whose login shell is fish/csh/tcsh
  * can't parse `if [ … ]; then …`. Wrapping forces parsing under the
  * shell OMP actually verified can run the snippet.
  *
