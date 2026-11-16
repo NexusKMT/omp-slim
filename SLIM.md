@@ -33,6 +33,9 @@ An explicit `OMP_NATIVE_FEATURES=wasm-grammars` native build restores optional
 grammar loading. `slim-macos-intel.yml` accepts `compare_wasm=true` and a fixed
 `benchmark_cache_key` to compare both builds against the same restored cache;
 it records native/CLI/PTY timings, dependency graphs and addon sizes.
+The [2026-11-17 comparison](docs/slim-wasm-build-2026-11-17.md) passed both modes:
+the default addon shrank by 5.67 MB, but the first build from the old WASM cache
+was slower. The report separates compilation, cache restoration and tests.
 
 The baseline was built before removal. Browser, desktop, speech and memory were
 then removed in four isolated worktrees and integrated on `main`. At most five
