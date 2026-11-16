@@ -4,14 +4,9 @@ This document describes how `omp plugin` npm/git/link and marketplace operations
 
 ## Scope and architecture
 
-There are two plugin-management implementations in the codebase:
-
-1. **Active path used by CLI commands**: `PluginManager` (`src/extensibility/plugins/manager.ts`)
-2. **Legacy helper module**: installer functions (`src/extensibility/plugins/installer.ts`)
+Plugin state is managed by `PluginManager` (`src/extensibility/plugins/manager.ts`).
 
 `omp plugin` npm/git/link actions go through `PluginManager`; marketplace actions go through `MarketplaceManager`. `install` classifies each target (`classifyInstallTarget` in `cli/classify-install-target.ts`): local paths route to `PluginManager.link()`, and `name@marketplace` routes to the marketplace manager only when the marketplace is configured. Scoped npm specs, common npm dist-tags, and version-like suffixes remain npm targets. Git and npm specs go to `PluginManager.install()`.
-
-`installer.ts` still documents important safety checks and filesystem behavior, but it is not the path used by `src/commands/plugin.ts` + `src/cli/plugin-cli.ts`.
 
 ## Lifecycle: from CLI invocation to runtime availability
 
@@ -167,7 +162,7 @@ Behavior:
 6. Create a directory symlink (a junction on Windows).
 7. Add runtime lockfile entry enabled with default features (`null`).
 
-Caveat: `PluginManager.link` validates the package name but does not restrict the source to cwd as legacy `installer.ts` does. Relative paths resolve against manager cwd; tilde expansion is the shell/caller's responsibility.
+Caveat: `PluginManager.link` validates the package name but does not restrict the source to cwd. Relative paths resolve against manager cwd; tilde expansion is the shell/caller's responsibility.
 
 ## Runtime loading: from installed plugin to callable capabilities
 
@@ -249,10 +244,6 @@ This limits command-injection risk when invoking `bun install/uninstall`.
 - Manifest relative paths are joined against plugin package directory and only existence-checked.
 - The plugin package itself is trusted code once installed.
 
-## Legacy installer-only checks
-
-`installer.ts` restricts a linked source path to project cwd and applies its own package-name/path checks. `PluginManager.link` applies active package-name validation instead, but permits source paths outside cwd. The legacy cwd restriction is not on the CLI path.
-
 ## Failure, partial success, and rollback behavior
 
 The plugin manager is not transactional.
@@ -289,7 +280,6 @@ Operationally, `doctor --fix` can repair some drift (`bun install`, orphaned con
 - [`src/commands/plugin.ts`](../packages/coding-agent/src/commands/plugin.ts) — CLI command declaration and flag mapping
 - [`src/cli/plugin-cli.ts`](../packages/coding-agent/src/cli/plugin-cli.ts) — action dispatch, user-facing command handlers
 - [`src/extensibility/plugins/manager.ts`](../packages/coding-agent/src/extensibility/plugins/manager.ts) — active install/remove/list/link/state/doctor implementation
-- [`src/extensibility/plugins/installer.ts`](../packages/coding-agent/src/extensibility/plugins/installer.ts) — legacy installer helpers and additional link safety checks
 - [`src/extensibility/plugins/loader.ts`](../packages/coding-agent/src/extensibility/plugins/loader.ts) — enabled-plugin discovery and manifest tool/hook/command/extension path resolution
 - [`src/extensibility/plugins/parser.ts`](../packages/coding-agent/src/extensibility/plugins/parser.ts) — install spec and package-name parsing helpers
 - [`src/extensibility/plugins/types.ts`](../packages/coding-agent/src/extensibility/plugins/types.ts) — manifest/runtime/override type contracts

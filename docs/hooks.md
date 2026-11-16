@@ -1,6 +1,6 @@
 # Hooks
 
-This document describes the **current hook subsystem code** in `packages/coding-agent/src/extensibility/hooks/*`.
+This document describes how hook modules load and run today. Hook contracts (the `HookAPI`/`HookContext` types and event shapes) live in `packages/coding-agent/src/extensibility/hooks/types.ts`; discovery and execution go through the extension runtime in `packages/coding-agent/src/extensibility/extensions/*`.
 
 ## Current status in runtime
 
@@ -11,7 +11,7 @@ The default CLI runtime initializes the **extension runner** path. In current st
 - tools are wrapped by `ExtensionToolWrapper`, not `HookToolWrapper`
 - context transforms and lifecycle emissions go through `ExtensionRunner`
 
-So this file documents the legacy hook subsystem implementation itself (types/loader/runner/wrapper), plus the factory shape still accepted when a discovered hook path is loaded by the extension runner.
+The legacy hook loader, runner, and tool wrapper were removed; only the contract types survive as the factory shape still accepted when a discovered hook path is loaded by the extension runner.
 
 A discovered factory receives `ExtensionAPI`/`ExtensionContext` in normal
 sessions, not an instance of `HookAPI`/`HookContext`. Shared `pi.on(...)`
@@ -24,10 +24,7 @@ library path unless stated otherwise.
 ## Key files
 
 - `packages/coding-agent/src/extensibility/hooks/types.ts` — hook context, event types, and result contracts
-- `packages/coding-agent/src/extensibility/hooks/loader.ts` — module loading and hook discovery bridge
-- `packages/coding-agent/src/extensibility/hooks/runner.ts` — event dispatch, command lookup, error signaling
-- `packages/coding-agent/src/extensibility/hooks/tool-wrapper.ts` — pre/post tool interception wrapper
-- `packages/coding-agent/src/extensibility/hooks/index.ts` — exports/re-exports
+- `packages/coding-agent/src/capability/hook.ts` — hook discovery capability
 - `packages/coding-agent/src/extensibility/shared-events.ts` — shared event/result contracts
 - `packages/coding-agent/src/extensibility/extensions/loader.ts` — current runtime discovery
 - `packages/coding-agent/src/extensibility/extensions/wrapper.ts` — current tool wrapper and approval gate
@@ -37,7 +34,7 @@ library path unless stated otherwise.
 A hook module must default-export a factory:
 
 ```ts
-import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
+import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks/types";
 
 export default function hook(pi: HookAPI): void {
 	pi.on("tool_call", async (event, ctx) => {
@@ -322,7 +319,7 @@ The extension runner has separate handler-timeout and cancellation behavior.
 ### Block unsafe bash commands
 
 ```ts
-import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
+import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks/types";
 
 export default function (pi: HookAPI): void {
 	pi.on("tool_call", async (event, ctx) => {
@@ -340,7 +337,7 @@ export default function (pi: HookAPI): void {
 ### Redact tool output on post-execution
 
 ```ts
-import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
+import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks/types";
 
 export default function (pi: HookAPI): void {
 	pi.on("tool_result", async event => {
@@ -362,7 +359,7 @@ export default function (pi: HookAPI): void {
 ### Modify model context per LLM call
 
 ```ts
-import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
+import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks/types";
 
 export default function (pi: HookAPI): void {
 	pi.on("context", async event => {
@@ -375,7 +372,7 @@ export default function (pi: HookAPI): void {
 ### Register slash command with command-safe context methods
 
 ```ts
-import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
+import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks/types";
 
 export default function (pi: HookAPI): void {
 	pi.registerCommand("handoff", {
@@ -399,11 +396,6 @@ export default function (pi: HookAPI): void {
 
 ## Export surface
 
-`packages/coding-agent/src/extensibility/hooks/index.ts` and the package subpath `@oh-my-pi/pi-coding-agent/extensibility/hooks` export:
+`packages/coding-agent/src/extensibility/hooks/types.ts` and the package subpath `@oh-my-pi/pi-coding-agent/extensibility/hooks/types` export all hook types. Loading, dispatch, and tool interception are owned by the extension runtime, not by this directory.
 
-- loading APIs (`discoverAndLoadHooks`, `loadHooks`)
-- runner and wrapper (`HookRunner`, `HookToolWrapper`)
-- all hook types
-- `execCommand` re-export
-
-The package root (`@oh-my-pi/pi-coding-agent`) does not re-export `HookAPI`; import legacy hook types from the hooks subpath.
+The package root (`@oh-my-pi/pi-coding-agent`) does not re-export `HookAPI`; import hook types from the hooks subpath.
