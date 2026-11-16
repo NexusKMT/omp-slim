@@ -120,6 +120,7 @@
     "test:ts": "bun scripts/ci-test-ts.ts local-ts",
     "test:scripts": "bun test scripts",
     "test:rs": "bun scripts/run-rs-task.ts test:rs",
+    "test:rs:pty": "bun scripts/run-rs-task.ts test:rs:pty",
     "test:py": "uv run --with pytest pytest -x sdk/python/omp-rpc/tests",
     "ci:test:full": "bun run ci:test:ts && OMP_FORCE_RUST_TASKS=1 bun run test:rs",
     "ci:test:ts": "bun scripts/ci-test-ts.ts all",

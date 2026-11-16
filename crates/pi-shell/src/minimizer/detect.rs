@@ -657,19 +657,19 @@ mod tests {
 		assert_eq!(command.program, "gradlew");
 		assert_eq!(command.subcommand.as_deref(), Some("build"));
 
-		let command = detect("gradlew.bat assembleDebug").expect("gradlew.bat normalizes to gradlew");
-		assert_eq!(command.program, "gradlew");
+		let command = detect("gradlew.bat assembleDebug").expect("gradlew.bat command is detected");
+		assert_eq!(command.program, "gradlew.bat");
 		assert_eq!(command.subcommand.as_deref(), Some("assembledebug"));
 
-		let command = detect("mvnw.cmd package").expect("mvnw.cmd normalizes to mvnw");
-		assert_eq!(command.program, "mvnw");
+		let command = detect("mvnw.cmd package").expect("mvnw.cmd command is detected");
+		assert_eq!(command.program, "mvnw.cmd");
 		assert_eq!(command.subcommand.as_deref(), Some("package"));
 	}
 
 	#[test]
-	fn wrapper_allowlist_does_not_strip_unrelated_bat_or_cmd() {
-		// The allowlist is exact-match only; arbitrary `.bat`/`.cmd` scripts keep
-		// their full basename so unrelated tools are not silently re-dispatched.
+	fn keeps_bat_and_cmd_suffixes_verbatim() {
+		// Windows launchers are not supported; `.bat`/`.cmd` names keep their
+		// full basename so unrelated tools are not silently re-dispatched.
 		let command = detect("foo.bat run").expect("foo.bat command is detected");
 		assert_eq!(command.program, "foo.bat");
 		assert_eq!(command.subcommand.as_deref(), Some("run"));
