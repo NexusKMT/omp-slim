@@ -177,7 +177,7 @@ Canonical state is private and project-keyed under OMP's security state root. A 
 - `results.sarif`;
 - `provenance.json` — private metadata redacted.
 
-Directories are hardened to mode `0700` and files to `0600` on non-Windows platforms.
+Directories are hardened to mode `0700` and files to `0600`.
 
 ## Reading results
 

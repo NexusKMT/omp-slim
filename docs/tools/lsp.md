@@ -314,7 +314,7 @@ Uses the same location normalization and output shape as `definition`, but sends
    - `rename_file` always renames the source path on disk in apply mode.
    - Server-initiated `workspace/applyEdit` requests also mutate files through `applyWorkspaceEdit()`.
 - Network / IPC
-   - With `lsp.shared=true` (the default), SDK sessions try a local Unix socket or Windows named pipe to the broker-managed per-project LSP mux. If the mux cannot be reached or started, the client silently falls back to a private subprocess.
+   - With `lsp.shared=true` (the default), SDK sessions try a local Unix socket to the broker-managed per-project LSP mux. If the mux cannot be reached or started, the client silently falls back to a private subprocess.
    - Private and externally multiplexed servers communicate over local stdio JSON-RPC; the tool itself does not make remote network requests.
 - Subprocesses / native bindings
    - Private fallback spawns language servers with `ptree.spawn()`; shared mode asks the broker-managed project mux for a server, one per connection. A released server stays warm for up to 5 minutes (`SERVER_LINGER_MS` in `lsp/mux/server.ts`) while the mux runs; the mux is a non-persistent broker daemon, so it stops shortly after the project's last omp process exits. Before a released server is reused, the mux closes the departed session's documents and removes the workspace folders it added.

@@ -93,7 +93,7 @@ Behavior:
 | `astMatch(options)`                                           | `ast_match`                 | `task::blocking(...)` (in-memory `find_source`)                | `CancelToken::cancellation()` passed to `find_source`                                                                                |
 | `listWorkspace(options)`                                      | `list_workspace`            | `task::filesystem_future(env, "listWorkspace", ct, ...)`       | `CancelToken::new(options.timeoutMs, options.signal)`; work future dropped on abort                                                  |
 | `Shell#run(options, onChunk?)`                                | `Shell::run`                | `task::future(env, "shell.run", ...)`                          | JS `CancelToken` is converted into `pi_shell::cancel::CancelToken`; shell races it against command completion and descendant cleanup |
-| `executeShell(options, onChunk?)`                             | `execute_shell`             | `task::future(env, "shell.execute", ...)`                      | same cancellation race and 2s graceful window (5s on Windows)                                                                        |
+| `executeShell(options, onChunk?)`                             | `execute_shell`             | `task::future(env, "shell.execute", ...)`                      | same cancellation race and 2s graceful window                                                                        |
 | `Process#terminate(options?)`                                 | `Process::terminate`        | `task::future(env, "process.terminate", ...)`                  | optional signal cancels termination waits; grace and hard-kill timeouts are process policy rather than `CancelToken` deadlines       |
 | `Process#waitForExit(options?)`                               | `Process::wait_for_exit`    | `task::future(env, "process.wait_for_exit", ...)`              | optional signal is bridged through `CancelToken`; `timeoutMs` is the wait operation's typed `false` timeout                          |
 | `PtySession#start(...)` / `startArgv(...)`                    | PTY methods                 | `task::future(env, "pty.start", ...)` + inner `spawn_blocking` | heartbeat checks before PTY allocation/spawn reject; checks in the running loop produce cancellation flags                           |
@@ -132,7 +132,7 @@ Aborted
 - **Mid-execution**:
    - `blocking`: next `heartbeat()` returns `Err("Aborted: ...")`.
    - `future`: `ct.wait()` branch wins `select!`, then code cancels subordinate async machinery.
-   - shell: cancellation triggers a Tokio cancellation token and TERM/KILL waves over a per-run spawn registry, waits up to 2 seconds (5 on Windows) for the command task, then aborts the task if needed. Cleanup is scoped to that run, not a process-global descendant snapshot.
+   - shell: cancellation triggers a Tokio cancellation token and TERM/KILL waves over a per-run spawn registry, waits up to 2 seconds for the command task, then aborts the task if needed. Cleanup is scoped to that run, not a process-global descendant snapshot.
    - PTY: heartbeat failure or `kill()` terminates PTY child/process targets and drains output briefly.
 
 ## Cancellation expectations for long-running loops

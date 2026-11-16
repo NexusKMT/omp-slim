@@ -1046,7 +1046,7 @@ Herdr `pane run` types text into the destination's interactive shell, so the
 adapter writes the POSIX-quoted argv to a private, self-deleting `/bin/sh` script
 under the temp directory and types only its absolute path. Any interactive shell
 that runs a bare path (POSIX shells, fish, Nushell) launches the exact argv, so
-Herdr requests take no `shellGrammar`. Herdr launches are rejected on Windows.
+Herdr requests take no `shellGrammar`.
 
 CMUX `--command` and Orca `terminal split`/`terminal create`
 submit shell command text to the destination's interactive shell rather than
@@ -1058,7 +1058,7 @@ Once asserted, argv words are quoted with the shared POSIX shell-quoting helpers
 Orca split/create have no `--cwd` flag, so the adapter prepends
 `cd <quoted-cwd> &&` before the quoted command in `--command`; CMUX split also
 changes directory inside its shell before entering the command. These quotes are
-not claimed to work in Nushell, PowerShell, `cmd.exe`, or other shell grammars.
+not claimed to work in Nushell or other shell grammars.
 The Orca CLI is resolved in Orca's documented order: `ORCA_CLI_COMMAND` when set,
 `orca-dev` in an Orca development checkout (`ORCA_DEV_REPO_ROOT`), `orca-ide` on Linux
 outside an Orca terminal, and `orca` otherwise.

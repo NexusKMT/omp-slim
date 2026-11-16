@@ -33,7 +33,7 @@ Because every reuse is checked against the live stamp, the cache is correct with
 A directory listing is read from or written to the cache only when all of these hold:
 
 - the walk runs on the native filesystem (`Fs::Native`); providers (`Fs::Provider(pi_vfs::Fs)`, including `scheme://` roots and any host-injected `ShellFilesystem`) are never cached, even when they redirect to a host path;
-- the filesystem reports stable stamps: APFS on macOS; ext4, XFS, Btrfs, tmpfs, F2FS, ZFS, and bcachefs on Linux; NTFS and ReFS on Windows. Network, FUSE, overlay, and other mounts are always listed;
+- the filesystem reports stable stamps: APFS on macOS; ext4, XFS, Btrfs, tmpfs, F2FS, ZFS, and bcachefs on Linux. Network, FUSE, overlay, and other mounts are always listed;
 - the walk uses `Detail::Minimal` (file sizes and mtimes change without touching their directory's stamp, so `Detail::Full` walks are never cached);
 - the walk's `walk::Options::cache` is `true`.
 
@@ -51,7 +51,7 @@ The cache is split into 64 shards behind read/write locks. It retains at most ab
 
 ## Native fast paths
 
-Native walks open child directories with `openat` relative to the parent handle and read listings in bulk: `__getdirentries64` (with its EOF flag) on macOS, plus `getattrlistbulk` for `Detail::Full`; `getdents64` plus `statx` on Linux; `NtQueryDirectoryFile` on Windows. Native syscalls run inline in the async `fs::Session` methods; providers are read by awaiting the async `pi_vfs::Fs`.
+Native walks open child directories with `openat` relative to the parent handle and read listings in bulk: `__getdirentries64` (with its EOF flag) on macOS, plus `getattrlistbulk` for `Detail::Full`; `getdents64` plus `statx` on Linux. Native syscalls run inline in the async `fs::Session` methods; providers are read by awaiting the async `pi_vfs::Fs`.
 
 ## Adding a cache consumer
 

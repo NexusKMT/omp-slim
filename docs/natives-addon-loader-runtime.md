@@ -5,7 +5,7 @@ This page documents `packages/natives/native/loader-state.js`, the runtime betwe
 ## Entrypoints and eager/lazy loading
 
 - `native/index.js` calls `loadNative()` at module evaluation and exposes the generated root API.
-- `native/clipboard.js`, `native/path.js`, and `native/vcs.js` defer native loading. Path and VCS wrappers cache their selected class/bindings; clipboard calls `loadNative()` on each invocation. Path helpers return their input unchanged without loading on non-Windows platforms.
+- `native/clipboard.js`, `native/vcs.js`, and `native/sqlite-locks.js` defer native loading. The VCS and sqlite-locks wrappers cache their bindings; clipboard calls `loadNative()` on each invocation.
 - Pure loader helpers are exported for focused tests and do not perform detection or filesystem probing until `loadNative()` or `initLoaderContext()` is called.
 
 A successful call is not memoized by JS. Repeated calls rely on the runtime's `require(...)` module cache, while post-load setup is idempotent or best-effort.
@@ -19,10 +19,10 @@ A successful call is not memoized by JS. Repeated calls rely on the runtime's `r
 - package-local `nativeDir` and the directory of `process.execPath`;
 - `nativesDir`: `PI_NATIVES_DIR` first (trimmed, `~`-expanded, and normalized; empty or relative values are ignored), then `$XDG_DATA_HOME/omp/natives` only when `$XDG_DATA_HOME/omp` exists, otherwise `~/.omp/natives`;
 - `versionedDir`: `<nativesDir>/<packageVersion>`;
-- legacy compiled-binary directory: `%LOCALAPPDATA%/omp` (or `~/AppData/Local/omp`) on Windows, `~/.local/bin` elsewhere;
-- workspace/install/compiled mode, optional leaf directory, Windows staging policy, CPU variant, filenames, and ordered candidates.
+- legacy compiled-binary directory: `~/.local/bin`;
+- workspace/install/compiled mode, optional leaf directory, CPU variant, filenames, and ordered candidates.
 
-Compiled mode is true when a populated embedded manifest exists, `PI_COMPILED` is set, or `import.meta.url` contains a Bun embedded marker (`$bunfs`, `~BUN`, or `%7EBUN`). A non-compiled `nativeDir` outside a `node_modules` path is a workspace load. Windows path classification is case-insensitive; other platforms use case-sensitive path matching.
+Compiled mode is true when a populated embedded manifest exists, `PI_COMPILED` is set, or `import.meta.url` contains a Bun embedded marker (`$bunfs`, `~BUN`, or `%7EBUN`). A non-compiled `nativeDir` outside a `node_modules` path is a workspace load.
 
 ## Platforms and variants
 
@@ -32,8 +32,6 @@ Supported publish tags are:
 - `linux-arm64`
 - `darwin-x64`
 - `darwin-arm64`
-- `win32-x64`
-- `win32-arm64`
 
 An unsupported tag is reported only after probing candidates.
 
@@ -41,7 +39,6 @@ For x64, `PI_NATIVE_VARIANT=modern|baseline` wins. Invalid values are ignored. O
 
 - Linux reads `/proc/cpuinfo`.
 - macOS tries `/usr/sbin/sysctl` and then `sysctl`, querying `machdep.cpu.leaf7_features` and `machdep.cpu.features`.
-- Windows under Bun first calls `kernel32.dll!IsProcessorFeaturePresent(40)` through `bun:ffi`. If FFI is unavailable, it tries non-interactive `pwsh.exe`, then `powershell.exe`, for `System.Runtime.Intrinsics.X86.Avx2`; absent/failed probes select baseline.
 
 Detection uses `Bun.spawnSync` when available, then falls back to `node:child_process`. A detected result is written to the private cache environment entry so later workers/children inherit the same decision. Non-x64 does not use or populate a variant.
 
@@ -64,22 +61,12 @@ Detection uses `Bun.spawnSync` when available, then falls back to `node:child_pr
 
 The platform leaf wins over a stale core artifact. Workspace loads deliberately skip leaf resolution.
 
-### Windows `node_modules` staging
-
-When the platform is Windows, the runtime is non-compiled, and `nativeDir` contains a `node_modules` segment:
-
-1. Every selected filename in `versionedDir`.
-2. Leaf-package candidates.
-3. Package-local and executable candidates.
-
-Before probing, `maybeStageNodeModulesAddon()` copies each available filename from `leafPackageDir ?? nativeDir` to a missing cache target. Existing cache files are retained. This keeps the loaded DLL handle away from the package-manager copy that an update must replace. Directory/copy failures are recorded and normal probing continues.
-
 ### Compiled runtime
 
 1. For each filename, `versionedDir`, then the legacy user-data directory.
 2. For each filename, package-local `nativeDir`, then the executable directory.
 
-A successfully selected embedded candidate is prepended. Windows staging is disabled in compiled mode.
+A successfully selected embedded candidate is prepended.
 
 ## Embedded manifest and extraction
 
@@ -105,17 +92,16 @@ For each candidate:
 1. Emit a startup marker when enabled.
 2. `require(candidate)`.
 3. Unless this is workspace development, require `__piNativesBuildVersion()` to return the package version. The build pipeline writes that version into a fixed 64-byte slot (`PI_NATIVES_VERSION_STAMP:<version>` + NUL padding) after linking (`scripts/stamp-native-version.ts`, called from every `scripts/bazel-natives.ts` install, the local cargo build, and the Nix package build), so a release bump edits no Rust input. Addons published before the stamp expose a per-release `__piNativesV<version_with_underscores>` export instead; those are still read as their release for diagnosis.
-4. Call `__ompInstallTokioRuntime()` if the addon provides it.
-5. Best-effort remove valid semantic-version cache directories older than the current version.
-6. Return the bindings.
+4. Best-effort remove valid semantic-version cache directories older than the current version.
+5. Return the bindings.
 
 The version error distinguishes a previous addon still resident in the current process from a stale file on disk. If the loaded exports report an older release but the candidate bytes contain the current stamp (`PI_NATIVES_VERSION_STAMP:<packageVersion>\0`), the diagnostic says to restart. Otherwise it says to reinstall. The loader does not validate all public exports. As a compatibility exception, an addon with no release identity is accepted if it has `countTokens`, `executeShell`, and `visibleWidth`, and the candidate bytes do not carry the expected current stamp. An unstamped current addon that exposes the stamp reader is not eligible.
 
 Workspace development skips the version check entirely, so a checkout that pulled a newer release boots before its rebuild. That tolerance is not silent: `native/index.js` uses `missingNativeExport(symbol)` for missing ordinary function exports (release-identity functions remain raw passthroughs), which is `undefined` on a current addon and a throwing stub on a stale one naming the symbol, the addon path, the loaded and expected releases, and `bun run build:native`. `nativeAddonStatus()` reports the same identity (`path`, `version`, `packageVersion`, `stale`) for callers that surface it themselves.
 
-Rust module initialization installs crash diagnostics but does not spawn runtime threads under the dynamic-loader lock. The optional post-load hook installs bounded Windows Tokio and Rayon pools. It is best-effort; older addons or hook failures fall back to napi-rs behavior. Set `PI_DEBUG_STARTUP` to emit synchronous `[startup]` markers to stderr, including hook success/failure.
+Rust module initialization installs crash diagnostics but does not spawn runtime threads under the dynamic-loader lock; blocking work is dispatched lazily through `crates/pi-natives/src/task` on first use. Set `PI_DEBUG_STARTUP` to emit synchronous `[startup]` markers to stderr.
 
-Cache cleanup ignores read/delete failures and removes only directories named with an older `major.minor.patch` release and an mtime at least ten minutes old. `prepareNativeVersionDir()` refreshes the directory mtime before extraction or staging to protect concurrent starts. Cleanup preserves current/future versions, prerelease/non-version names, ordinary files, and recently active directories.
+Cache cleanup ignores read/delete failures and removes only directories named with an older `major.minor.patch` release and an mtime at least ten minutes old. `prepareNativeVersionDir()` refreshes the directory mtime before extraction to protect concurrent starts. Cleanup preserves current/future versions, prerelease/non-version names, ordinary files, and recently active directories.
 
 ## Failure diagnostics
 
@@ -132,7 +118,6 @@ Compiled help lists expected cache paths, suggests deleting the versioned direct
 entrypoint evaluates or lazy wrapper is invoked
   -> initialize loader context
   -> extract matching embedded addons, if any
-  -> otherwise stage Windows node_modules addon, if applicable
   -> require candidates in deterministic order
        -> validate release stamp outside workspace development
        -> install optional post-load runtime; record addon identity

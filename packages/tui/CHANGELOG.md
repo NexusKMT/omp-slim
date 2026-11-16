@@ -16,6 +16,7 @@
 - Removed composer `^model` completions and model assignment chips; historical model tags still render in saved conversations.
 - Removed plan-specific model switching and approval model tiers; planning, compaction and execution retain the current model and thinking level.
 - Removed model roles, model presets, per-agent model selection and predictive composer text; model menus now select one current chat model and its thinking level.
+- Removed Windows console support: `win32-input-mode` key decoding, AltGr translation, console codepage and VT-input FFI, Windows Terminal appearance polling, and Windows-only platform branches; macOS and Linux behaviour is unchanged.
 
 ### Removed
 

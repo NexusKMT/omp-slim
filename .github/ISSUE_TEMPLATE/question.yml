@@ -35,4 +35,4 @@ body:
       options:
         - macOS
         - Linux
-        - Windows
+        - WSL (Windows)

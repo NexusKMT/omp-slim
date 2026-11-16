@@ -84,11 +84,10 @@ Conversion behavior:
 
 ### Clipboard (`clipboard`)
 
-- `copyToClipboard(text)` is a synchronous native call using `arboard::Clipboard::set_text`. On Linux a single process-lifetime `Clipboard` instance is kept alive (X11/Wayland selection ownership); macOS/Windows use a transient instance per call.
+- `copyToClipboard(text)` is a synchronous native call using `arboard::Clipboard::set_text`. On Linux a single process-lifetime `Clipboard` instance is kept alive (X11/Wayland selection ownership); macOS uses a transient instance per call.
 - `readImageFromClipboard()` runs in `task::blocking("clipboard.read_image", (), ...)`.
 - Image read returns `null`/`undefined` when `arboard` reports `ContentNotAvailable`.
 - Successful image read converts clipboard RGBA data into PNG bytes and returns `{ data: Uint8Array, mimeType: "image/png" }`.
-- On Windows, an operational `arboard` image-read error triggers a raw `CF_DIB` decoding fallback for bitmap layouts such as those produced by Qt screenshot tools. If fallback fails, the original image-read error is retained.
 - Clipboard access or image encoding failures reject/throw as native errors.
 
 There is no current `packages/natives` TS wrapper that emits OSC52, handles Termux, or suppresses native clipboard failures. Any best-effort clipboard policy must live in consumers.
@@ -109,7 +108,7 @@ There is no current `packages/natives` TS wrapper that emits OSC52, handles Term
 
 - `detectMacOSAppearance()` returns `"dark"`, `"light"`, or `null` on non-macOS.
 - `MacAppearanceObserver.start(callback)` returns a handle with `stop()`; on macOS it reports the initial appearance, then changes via distributed notifications plus a 2-second polling fallback, deduplicating repeated values. On non-macOS it is a no-op observer.
-- `PowerAssertion.start(options?)` returns a handle with idempotent `stop()` and drop-time release. It uses IOKit on macOS, login1 inhibition on Linux (plus best-effort ScreenSaver inhibition for `display`), and thread-affine execution state on Windows. Unsupported platforms receive a no-op handle.
+- `PowerAssertion.start(options?)` returns a handle with idempotent `stop()` and drop-time release. It uses IOKit on macOS and login1 inhibition on Linux (plus best-effort ScreenSaver inhibition for `display`). Unsupported platforms receive a no-op handle.
 - Options are `{ reason?, idle?, system?, user?, display? }`; the default reason is `"omp agent session"`. If no boolean is true, idle-sleep prevention is enabled even when `idle: false` was supplied. `user` is macOS-only. Linux login1 failures reject, while display-inhibitor failures are soft.
 
 ### Work profiling (`prof`)
@@ -151,8 +150,8 @@ Failure transitions (the synchronous form throws; the asynchronous form rejects)
 
 ### Clipboard lifecycle
 
-- Text copy calls `set_text` synchronously; macOS/Windows construct a transient `arboard::Clipboard` per call, while Linux initializes one process-lifetime instance on first copy and reuses it.
-- Image read constructs an `arboard::Clipboard`, calls `get_image`, encodes PNG on success, maps `ContentNotAvailable` to `None`, and tries the Windows raw-DIB fallback before rejecting other image-read errors.
+- Text copy calls `set_text` synchronously; macOS constructs a transient `arboard::Clipboard` per call, while Linux initializes one process-lifetime instance on first copy and reuses it.
+- Image read constructs an `arboard::Clipboard`, calls `get_image`, encodes PNG on success, maps `ContentNotAvailable` to `None`, and rejects other image-read errors.
 
 ### Work profiling lifecycle
 
@@ -195,4 +194,3 @@ Failure transitions:
 
 - Clipboard access depends on OS/session support exposed through `arboard`.
 - macOS appearance and power helpers intentionally return no-op/null behavior on unsupported platforms.
-- ProjFS is not exposed by this media/system native utility surface. Isolation backend selection, including any ProjFS support, lives in the separate `iso` subsystem.

@@ -129,7 +129,7 @@ An MCP request id correlates a JSON-RPC response, its progress token correlates 
 - Initial: `connected=false`, `process=null`, pending map empty
 - `connect()`:
    - spawn subprocess with configured command/args/env/cwd (cwd defaults to `getProjectDir()`, env overlays `Bun.env`)
-   - derive platform spawn behavior: Linux/other non-macOS POSIX detach into a new session, macOS remains attached for TCC prompts, Windows remains attached and resolves npm shims/batch commands with platform-specific escaping
+   - derive platform spawn behavior: Linux/other non-macOS POSIX detach into a new session, macOS remains attached for TCC prompts
    - mark connected
    - start stdout read loop (`readJsonl`)
    - start stderr loop (read/discard; currently silent)

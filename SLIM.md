@@ -231,7 +231,7 @@ was switched to public while preserving its address and commits. The job
 requires `github.event.repository.private == false` to prevent private runs.
 According to [GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
 Intel macOS has 4 CPUs and 14 GB RAM for both public and private repositories;
-Linux/Windows standard runners increase from 2 CPUs / 8 GB privately to
+Linux standard runners increase from 2 CPUs / 8 GB privately to
 4 CPUs / 16 GB publicly. Standard public runners are free to use.
 
 The manual workflow is `.github/workflows/slim-macos-intel.yml`. Upstream

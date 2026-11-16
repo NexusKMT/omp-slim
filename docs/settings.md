@@ -98,7 +98,7 @@ Setting-specific normalization and validation still apply after parsing. For exa
 
 Saves are debounced and re-read the file under a lock. Disjoint external edits are preserved. If an external writer changed the same global setting or selected model after a local change was staged, the stale local change is skipped with a warning rather than overwriting the newer file value.
 
-Saves through a symlinked main config preserve the link and update its resolved target. Targets containing `.` or `..` follow the operating system's rules: Windows collapses those segments before following intermediate links, while POSIX traverses each component on disk. A target such as `alias/../config.yml` can therefore name different files on the two platforms.
+Saves through a symlinked main config preserve the link and update its resolved target. Targets containing `.` or `..` are traversed component by component on disk, so a target such as `alias/../config.yml` names whatever its intermediate links resolve to.
 
 ### Live file changes
 
@@ -148,7 +148,7 @@ Environment variables are never written back to `config.yml`. Variables declared
 | `PI_INTENT_TRACING`                                 | `tools.intentTracing`                             | Uses the boolean env parser.                                                                      |
 | `PI_AUTO_QA`                                        | `dev.autoqa`                                      | Enables/disables automated tool issue reporting, subject to saved consent.                        |
 | `PI_NO_THINKING_LOOP_GUARD`                         | `loopGuard.enabled`                         | Only `1` disables; other values do not override the setting.                                      |
-| `PI_CONFIG_FILES`                                   | CLI config overlays                               | Platform path-list (`:` on Unix, `;` on Windows); files load in order before `--config` overlays. |
+| `PI_CONFIG_FILES`                                   | CLI config overlays                               | Path-list (`:`-separated); files load in order before `--config` overlays. |
 
 Provider API keys are resolved separately (stored auth, OAuth, `models.yml`, environment, and `.env` files); see [Providers](./providers.md) and the full [Environment variables](./environment-variables.md) reference.
 
@@ -201,7 +201,7 @@ Enabling this setting can therefore allow a compound command that the default po
 
 The opt-in accepts only a flat `&&` chain with literal arguments, including quoted literal arguments. It rejects expansions, variable assignments, other control flow, redirections, globbing, newlines, malformed syntax, and shell-state-changing commands such as `cd`, `source`, and `eval`. Rejected forms keep the legacy approval behavior; enabling the setting never broadens which non-chain commands an `allow` pattern can approve. Explicit chain and segment restrictions resolve before the existing raw and canonical critical-command checks, which still inspect the whole command and every segment so a broad allow cannot hide a critical later segment.
 
-The opt-in requires a positively identified POSIX-quoting shell: `sh`, `bash`, `dash`, `ash`, `ksh`, or `zsh`, including their `.exe` names. The centralized classifier checks the executable basename across Windows and POSIX paths. Other shells, including cmd, PowerShell, fish, and unknown wrappers, retain legacy approval behavior. Their quoting can differ from the recognizer: fish treats `\'` inside single quotes as an escaped quote, while POSIX shells do not.
+The opt-in requires a positively identified POSIX-quoting shell: `sh`, `bash`, `dash`, `ash`, `ksh`, or `zsh`. The centralized classifier checks the executable basename of the shell path. Other shells, including fish and unknown wrappers, retain legacy approval behavior. Their quoting can differ from the recognizer: fish treats `\'` inside single quotes as an escaped quote, while POSIX shells do not.
 
 Valid rule approvals are `allow`, `prompt`, and `deny`. Regardless of the opt-in, `deny` and `prompt` rules can match the whole command or a tokenized segment of other compound forms (split on `&&`, `||`, `;`, `|`, a single `&`, subshells, and newlines), resolving each segment by its first matching restriction rule and combining restrictions across segments so any `deny` overrides a `prompt`. This lets `match: "rm -rf *"` deny `cd /tmp && rm -rf build`, `sleep 1 & rm -rf build`, and `curl http://example.com; rm -rf build` even when `curl *` is configured as `prompt` earlier in the list.
 
@@ -294,7 +294,7 @@ omp --config ./base.yml --config ./experiment.yml "try this model"
 
 `--config` is accepted by the default launch command, `acp`, `models`, and `dry-balance`. For `models` and `dry-balance`, put it after the command name (`omp dry-balance --config ./policy.yml`); placed before the command name, it is dropped.
 
-Wrappers may instead set `PI_CONFIG_FILES` to a platform-delimited path list (`:` on Unix, `;` on Windows). Environment overlays load in listed order before explicit `--config` overlays.
+Wrappers may instead set `PI_CONFIG_FILES` to a `:`-delimited path list. Environment overlays load in listed order before explicit `--config` overlays.
 
 Overlay paths are resolved relative to the process working directory (and `~` is expanded). Each overlay must parse as a YAML mapping; a missing file, invalid YAML, or a top-level array/scalar is a hard error — it does **not** silently fall back to lower-precedence settings.
 
@@ -773,7 +773,7 @@ tui:
 
 For a custom status line, set `statusLine.preset: custom` and configure `statusLine.leftSegments`, `statusLine.rightSegments`, and `statusLine.segmentOptions`. Include `status` in either segment list to render extension statuses registered through `ctx.ui.setStatus()`, ordered by key and joined inline. Set `statusLine.showHookStatus: false` to suppress the same statuses in the footer.
 
-The `path` segment abbreviates the home directory to `~`. On Windows, shared path formatting recognizes both the long home name and its existing 8.3 aliases (such as `ADMINI~1`), including in tool labels and error text. Only the home prefix is abbreviated; remaining path components keep their spelling, and formatting does not change the working directory or environment. Set `statusLine.segmentOptions.path.abbreviate: false` to keep the full path in the status line.
+The `path` segment abbreviates the home directory to `~`. Only the home prefix is abbreviated; remaining path components keep their spelling, and formatting does not change the working directory or environment. Set `statusLine.segmentOptions.path.abbreviate: false` to keep the full path in the status line.
 
 The `pi` segment tags the brand with the active named profile (`π-work`; see [Profiles](config-usage.md#profiles)). Set `statusLine.segmentOptions.pi.showProfile: false` to hide the tag.
 

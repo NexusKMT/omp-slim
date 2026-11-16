@@ -128,7 +128,7 @@ Across the three registries, roots are merged by precedence rather than sorted: 
 
 ## `agents` provider (`agents.ts`)
 
-Scans non-recursive `commands/*.md` under `.agent/` and `.agents/` from cwd up to the repository root (or home when there is no repository), then `~/.agent/commands` and `~/.agents/commands`. Home is not scanned again as a project root. Under WSL, Windows-host home candidates are appended when discoverable. Within this provider, the nearest project root is first; `.agent` precedes `.agents`; project entries precede user entries.
+Scans non-recursive `commands/*.md` under `.agent/` and `.agents/` from cwd up to the repository root (or home when there is no repository), then `~/.agent/commands` and `~/.agents/commands`. Home is not scanned again as a project root. Within this provider, the nearest project root is first; `.agent` precedes `.agents`; project entries precede user entries.
 
 ## 3) Materialization to runtime `FileSlashCommand`
 

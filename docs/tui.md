@@ -24,11 +24,8 @@ If your extension/tool can run headless, guard with `ctx.hasUI` / `pi.hasUI`. RP
 `.omp/tools/tui.ts` provides the repository's `tui` debug tool. `start` accepts
 either a TypeScript/JavaScript `file` (run with Bun; under the compiled `omp`
 binary, the `bun` on `PATH`) or an executable `bin` with separate `args`.
-Windows uses native ConPTY without requiring a POSIX shell; macOS/Linux use
-Bun's PTY.
-The debug connection uses a Windows named pipe or a POSIX Unix socket.
-On Windows, `start` and `resize` use the native `normalizePtyDimensions(cols, rows)`
-helper, which returns integer dimensions clamped to 20–400 columns and 5–200 rows.
+macOS/Linux use Bun's PTY.
+The debug connection uses a POSIX Unix socket.
 The PTY, emulated screen, and reported size use the same effective dimensions.
 
 `screen`, `send`, `resize`, and `stop` also work for programs without an
@@ -36,16 +33,14 @@ The PTY, emulated screen, and reported size use the same effective dimensions.
 require an omp/pi-tui host.
 
 `send` accepts literal text and `\e`, `\r`, `\n`, `\t`, and `\xNN` escapes.
-On Windows, each payload must contain complete, valid UTF-8; invalid or truncated
-sequences are rejected before any input is written. Arbitrary non-UTF-8 bytes
-(such as `\x9b` 8-bit CSI) are not supported by the Windows PTY string API.
-Use the UTF-8-compatible `\e[` CSI sequence instead. macOS/Linux preserve raw bytes.
+macOS/Linux preserve raw bytes, including non-UTF-8 sequences such as `\x9b`
+8-bit CSI.
 
 Install the tool's dependencies with `bun install --cwd .omp/tools`.
 Native PTY API changes require rebuilding the addon with
 `bun --cwd=packages/natives run build` before running the tool.
 Run its real-PTY regressions with `bun test ./.omp/tests/tui.test.ts`. CI runs
-them on Linux only; the Windows-specific cases run only on a local Windows host.
+them on Linux only.
 
 ## Core component contract (`@oh-my-pi/pi-tui`)
 

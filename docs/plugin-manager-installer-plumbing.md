@@ -159,7 +159,7 @@ Behavior:
 3. Ensure plugin dirs exist.
 4. For scoped names, create scope directory.
 5. Remove existing path at target link location.
-6. Create a directory symlink (a junction on Windows).
+6. Create a directory symlink.
 7. Add runtime lockfile entry enabled with default features (`null`).
 
 Caveat: `PluginManager.link` validates the package name but does not restrict the source to cwd. Relative paths resolve against manager cwd; tilde expansion is the shell/caller's responsibility.

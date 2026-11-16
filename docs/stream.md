@@ -63,7 +63,7 @@ The screen feed contains terminal rows and pane metadata (title and dimensions),
 3. **Redacts** the row (below).
 4. Diffs against the last sent viewport and sends row patches — never session entries, prompts, tool arguments, or file contents as data.
 
-Rows cross a private local Unix socket (`0600`, under the per-directory omp runtime dir; a named pipe on Windows) to the `omp stream` process, which multiplexes sessions into panes and forwards JSON screen frames to the server over WSS by default. Custom `http`/`ws` servers use unencrypted WS. The server keeps each pane's viewport and the last 2000 history rows in memory so late viewers get a snapshot; nothing is persisted.
+Rows cross a private local Unix socket (`0600`, under the per-directory omp runtime dir) to the `omp stream` process, which multiplexes sessions into panes and forwards JSON screen frames to the server over WSS by default. Custom `http`/`ws` servers use unencrypted WS. The server keeps each pane's viewport and the last 2000 history rows in memory so late viewers get a snapshot; nothing is persisted.
 
 ### Redaction
 

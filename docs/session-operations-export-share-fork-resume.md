@@ -541,8 +541,7 @@ actually exists on disk, so the subagents the teardown cut off mid-turn go on in
 the new process (see [CLI `--restore`](#cli---restore)); an in-memory or
 never-materialized session restarts fresh.
 
-POSIX uses process-image replacement when available. Windows or a failed exec
-falls back to spawning the replacement with inherited terminal streams.
+Process-image replacement is used when available; a failed exec falls back to spawning the replacement with inherited terminal streams.
 
 ## How session switching actually mutates runtime state
 

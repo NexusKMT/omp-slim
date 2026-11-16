@@ -47,7 +47,7 @@
 curl -fsSL https://omp.sh/install | sh
 ```
 
-如果没有可用的 bun（或指定了 `--binary`），安装脚本会从 `build.stencil.so` 下载预编译二进制，并在安装前校验其 SHA-256。可通过 `curl -fsSL https://omp.sh/install | sh -s -- --binary --ref v<version>` 固定某个版本（PowerShell：`-Binary -Ref v<version>`）。
+如果没有可用的 bun（或指定了 `--binary`），安装脚本会从 `build.stencil.so` 下载预编译二进制，并在安装前校验其 SHA-256。可通过 `curl -fsSL https://omp.sh/install | sh -s -- --binary --ref v<version>` 固定某个版本。
 
 > **Alpine / musl：** 预编译的 musl 二进制动态链接 `libstdc++`/`libgcc`，而原生 Alpine 并不自带。请先安装：`apk add libstdc++ libgcc`。
 
@@ -88,19 +88,13 @@ Flake 使用者可以使用 `packages.<system>.omp`、`overlays.default`、`nixo
 }
 ```
 
-**Windows（PowerShell）**
-
-```powershell
-irm https://omp.sh/install.ps1 | iex
-```
-
 **固定版本（mise）**
 
 ```sh
 mise use -g github:can1357/oh-my-pi
 ```
 
-macOS · Linux · Windows · bun ≥ 1.4.4
+macOS · Linux · bun ≥ 1.4.4
 
 ### Shell 补全
 
@@ -203,9 +197,9 @@ web_search 调用 Parallel 的 Search API，并把找到的 URL 直接交给 rea
 
 _[观看录屏 ↗](https://omp.sh/clips/web.mp4)_
 
-### 09 · 毫不妥协的原生实现，Windows 上也一样。
+### 09 · 毫不妥协的原生实现。
 
-其他智能体会调用外部的 rg、grep、find 和 bash。很多机器上根本没有这些程序；即便有，每次调用也要付出一次 fork-exec 的往返开销。omp 把真正的实现直接链接进进程：ripgrep、glob、find 全部在进程内运行。bash 是我们自己的 bash 5.3 引擎——会话可跨调用保持，58 个命令行工具（ls、sed、sort、xargs，甚至 jq）被移植进 builtins crate 并在进程内运行，零 fork/exec。同一个 omp 二进制可运行于 macOS、Linux 和 Windows——无需 WSL 桥接。
+其他智能体会调用外部的 rg、grep、find 和 bash。很多机器上根本没有这些程序；即便有，每次调用也要付出一次 fork-exec 的往返开销。omp 把真正的实现直接链接进进程：ripgrep、glob、find 全部在进程内运行。bash 是我们自己的 bash 5.3 引擎——会话可跨调用保持，58 个命令行工具（ls、sed、sort、xargs，甚至 jq）被移植进 builtins crate 并在进程内运行，零 fork/exec。同一个 omp 二进制可运行于 macOS 和 Linux。
 
 ### 10 · 带优先级和结论的代码评审
 
@@ -416,7 +410,7 @@ Exa 以 MCP 服务器形式提供（`EXA_API_KEY` 或 `/login exa`），它的�
 六个 crate，一个按平台打包的 N-API 插件。搜索、shell、AST、语法高亮、PTY、图像解码、BPE 计数——全部在 libuv 线程池中进程内完成。热路径上没有 fork/exec。shell 是我们自己的 bash 5.3 引擎，58 个命令行工具——coreutils、findutils、sed、jq、基于 ripgrep 的 grep、fd、diff、moreutils——被移植进 builtins crate，直接编译进 shell。
 
 - Crate：`pi-natives`、`pi-shell`、`pi-ast`、`pi-iso`、`pi-walker`
-- 平台：`linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`win32-x64`、`win32-arm64`——x64 同时提供 AVX2 和基线两种二进制
+- 平台：`linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`——x64 同时提供 AVX2 和基线两种二进制
 
 按 crate 统计（仅代码行）：
 
@@ -425,7 +419,7 @@ Exa 以 MCP 服务器形式提供（`EXA_API_KEY` 或 `/login exa`），它的�
 | pi-shell   | 内嵌 bash 引擎 · 持久会话 · 进程内 coreutils 调度 · 输出精简器               |  38,000 |
 | pi-natives | N-API 接口层——下表中的所有模块                                               |  25,000 |
 | pi-walker  | 并行遍历器 · 目录列表缓存 · glob · 为 natives 和 shell 的 rg/grep/fd 提供正则搜索 | 11,400 |
-| pi-iso     | 工作区隔离 · apfs · btrfs · zfs · reflink · overlayfs · projfs · rcopy        |   3,300 |
+| pi-iso     | 工作区隔离 · apfs · btrfs · zfs · reflink · overlayfs · rcopy        |   3,300 |
 | pi-ast     | tree-sitter + ast-grep 匹配、代码块解析、结构化摘要                          |   2,900 |
 
 `pi-natives` 内部的模块明细（省略胶水代码和测试）：
@@ -450,7 +444,7 @@ Exa 以 MCP 服务器形式提供（`EXA_API_KEY` 或 `/login exa`），它的�
 | power         | 用于阻止空闲/系统/显示器休眠的 macOS 电源断言 API                     | IOKit FFI                                 |     270 |
 | prof          | 环形缓冲区性能分析器，输出折叠栈和 SVG 火焰图                         | inferno                                   |     240 |
 | file_lock     | 跨进程建议性文件锁                                                    | 自研                                      |     210 |
-| ps            | 跨平台进程树终止与子孙进程列举                                        | libc · libproc · CreateToolhelp32Snapshot |     195 |
+| ps            | 跨平台进程树终止与子孙进程列举                                        | libc · libproc |     195 |
 | tokens        | O200k / Cl100k BPE token 计数 · 两张表均已内嵌                        | tiktoken-rs                               |      70 |
 | html          | HTML 转 Markdown，可选内容清理                                        | html-to-markdown-rs                       |      60 |
 | sixel         | 终端图像渲染 · 解码 PNG · JPEG · WebP · GIF · 缩放 · SIXEL 编码       | icy_sixel · image                         |      55 |
@@ -626,7 +620,7 @@ bun dev -- --version
 | **[pi-natives](crates/pi-natives)**        | `@oh-my-pi/pi-natives` 使用的核心 Rust 原生插件（N-API `cdylib`）；聚合下列各 crate      |
 | **[pi-shell](crates/pi-shell)**            | 内嵌的 bash 5.3 引擎（解析器、虚拟机、进程创建、会话）、PTY 和进程管理                   |
 | **[pi-ast](crates/pi-ast)**                | 基于 tree-sitter 的代码摘要器和 AST 工具（50+ 种语言语法）                               |
-| **[pi-iso](crates/pi-iso)**                | 任务隔离后端解析器：APFS 克隆、btrfs/zfs reflink、overlayfs、projfs、rcopy               |
+| **[pi-iso](crates/pi-iso)**                | 任务隔离后端解析器：APFS 克隆、btrfs/zfs reflink、overlayfs、rcopy               |
 | **[pi-walker](crates/pi-walker)**          | 为 natives 和 shell 提供并行的 ignore 感知遍历器、目录列表缓存、glob 和内容搜索          |
 | **[pi-edit](crates/pi-edit)**              | `edit` 工具背后的编辑引擎：基于行锚点的 patch/hashline 模式、流式预览、原子化应用        |
 | **[pi-builtins](crates/pi-builtins)**      | 67 个进程内命令行工具以及进程内建命令（ps、top、pgrep、pkill 等）                        |

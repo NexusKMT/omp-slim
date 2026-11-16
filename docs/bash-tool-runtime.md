@@ -39,7 +39,7 @@ The bash tool has the `exec` approval tier. `bash.patterns` rules can explicitly
 
 Restrictions are combined conservatively across the chain (and across tokenized segments of non-eligible compound commands): any explicit segment or whole-chain `deny` wins, otherwise any explicit `prompt` wins. A `deny` or `prompt` pattern matching the full chain but no individual segment remains a whole-chain restriction, while later broad restrictions do not override an earlier match for a segment. Operator `deny` rules from `Settings.grantAuthority()` also take precedence over project-layer `bash.patterns`. These restrictions resolve before the existing raw and canonical critical-command checks.
 
-Whole-chain restrictions are scanned with deny precedence, even when a matching prompt appears earlier. The centralized positive shell classifier permits compound recognition only for known POSIX-quoting shells (`sh`, `bash`, `dash`, `ash`, `ksh`, and `zsh`, including `.exe` names). Cmd, PowerShell, fish, and unknown shells retain legacy approval behavior; merely accepting `-c` for execution does not establish compatible quoting.
+Whole-chain restrictions are scanned with deny precedence, even when a matching prompt appears earlier. The centralized positive shell classifier permits compound recognition only for known POSIX-quoting shells (`sh`, `bash`, `dash`, `ash`, `ksh`, and `zsh`). Fish and unknown shells retain legacy approval behavior; merely accepting `-c` for execution does not establish compatible quoting.
 
 After those checks, the chain receives an explicit `write`-tier allow only when every segment explicitly resolves to `allow`. If any segment is unmatched, bash retains its standalone `exec` tier with no explicit policy, so the generic approval resolver applies `tools.approval.bash` and then the active mode. Unmatched segments therefore inherit existing policy rather than always prompting.
 
@@ -190,8 +190,7 @@ The per-command child environment is then built by `buildNonInteractiveEnv()` (`
 - editor prompts disabled (`GIT_EDITOR=true`, `GIT_SEQUENCE_EDITOR=true`, `EDITOR=true`, `VISUAL=true`),
 - terminal/credential prompts reduced (`TERM=dumb`, `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `SSH_ASKPASS` set to the resolved `false` executable or `"false"`, `NO_COLOR=1`, `CI=true` unless `PI_BASH_NO_CI`/`CLAUDE_BASH_NO_CI` is set),
 - package-manager/tooling automation flags for non-interactive behavior (npm/pnpm/yarn/pip/cargo/terraform/gh, …),
-- locale pinned to `LANG=C.UTF-8`/`LC_ALL=C.UTF-8` (byte-order collation, `C` numbers and messages, UTF-8 text) over any inherited locale, unless the caller or direnv env sets `LANG` or an `LC_*` variable; user `!` commands keep the inherited locale, with the UTF-8 default applied on Windows only when none is set,
-- on Windows, Python UTF-8 stdio defaults (`PYTHONIOENCODING`, `PYTHONUTF8`) are added when neither is inherited or passed.
+- locale pinned to `LANG=C.UTF-8`/`LC_ALL=C.UTF-8` (byte-order collation, `C` numbers and messages, UTF-8 text) over any inherited locale, unless the caller or direnv env sets `LANG` or an `LC_*` variable; user `!` commands keep the inherited locale,
 
 ## Streaming and cancellation
 
@@ -202,7 +201,7 @@ Cancellation:
 - aborted signal triggers `shellSession.abort(...)`,
 - timeout from native result is mapped to `cancelled: true` + annotation text,
 - explicit cancellation similarly returns `cancelled: true` + annotation.
-- on POSIX, cancelling a non-PTY run sends TERM to its owned process groups and descendants, allows up to one second for cleanup, then escalates to KILL; Windows terminates processes without a catchable TERM signal.
+- cancelling a non-PTY run sends TERM to its owned process groups and descendants, allows up to one second for cleanup, then escalates to KILL.
 
 No exception is thrown inside executor for timeout/cancel; it returns structured `BashResult` and lets caller map error semantics.
 

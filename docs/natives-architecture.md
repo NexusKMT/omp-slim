@@ -11,7 +11,6 @@
 - `packages/natives/native/index.js` and `index.d.ts`
 - `packages/natives/native/loader-state.js` and `loader-state.d.ts`
 - `packages/natives/native/clipboard.js` and `clipboard.d.ts`
-- `packages/natives/native/path.js` and `path.d.ts`
 - `packages/natives/native/vcs.js` and `vcs.d.ts`
 - `packages/natives/native/version-sentinel.js`
 - `packages/natives/native/embedded-addon.js`
@@ -24,14 +23,14 @@
 
 ## Package entrypoints
 
-The package exports five entrypoints:
+The package exports four entrypoints:
 
 | Import                           | Runtime               | Types                   | Load behavior                                                                           |
 | -------------------------------- | --------------------- | ----------------------- | --------------------------------------------------------------------------------------- |
 | `@oh-my-pi/pi-natives`           | `native/index.js`     | `native/index.d.ts`     | Loads the addon immediately, then binds every generated class/function and enum object. |
 | `@oh-my-pi/pi-natives/clipboard` | `native/clipboard.js` | `native/clipboard.d.ts` | Exposes lazy `copyToClipboard` and `readImageFromClipboard` wrappers.                   |
 
-The other lazy entrypoints are `@oh-my-pi/pi-natives/path` (`native/path.js` / `path.d.ts`) and `@oh-my-pi/pi-natives/vcs` (`native/vcs.js` / `vcs.d.ts`). The path wrapper loads only for Windows path operations and returns its input unchanged elsewhere. The VCS wrapper memoizes bindings on its first native-backed operation; its error predicates and watch helper can be imported without loading the addon.
+The other lazy entrypoints are `@oh-my-pi/pi-natives/vcs` (`native/vcs.js` / `vcs.d.ts`) and `@oh-my-pi/pi-natives/sqlite-locks`. The VCS wrapper memoizes bindings on its first native-backed operation; its error predicates and watch helper can be imported without loading the addon.
 
 There is no `packages/natives/src` wrapper layer. Root exports bind N-API values directly. The lazy subpaths defer loading until native functionality is needed.
 
@@ -51,10 +50,8 @@ Current root capabilities include:
 - `linux-arm64`
 - `darwin-x64`
 - `darwin-arm64`
-- `win32-x64`
-- `win32-arm64`
 
-x64 builds have `modern` (x86-64-v3/AVX2) and `baseline` (x86-64-v2) variants. `PI_NATIVE_VARIANT=modern|baseline` overrides automatic detection. Automatic detection reads `/proc/cpuinfo` on Linux, calls `sysctl` on macOS, or uses `IsProcessorFeaturePresent(40)` through Bun FFI on Windows, falling back to PowerShell when FFI is unavailable. Its result is inherited by subsequent workers and child processes through the private `__PI_NATIVE_VARIANT_CACHE` environment entry. Non-x64 builds use an unsuffixed filename.
+x64 builds have `modern` (x86-64-v3/AVX2) and `baseline` (x86-64-v2) variants. `PI_NATIVE_VARIANT=modern|baseline` overrides automatic detection. Automatic detection reads `/proc/cpuinfo` on Linux or calls `sysctl` on macOS. Its result is inherited by subsequent workers and child processes through the private `__PI_NATIVE_VARIANT_CACHE` environment entry. Non-x64 builds use an unsuffixed filename.
 
 Filename fallback is:
 
@@ -70,17 +67,17 @@ For a normal installed package, the platform leaf is probed before the core pack
 
 Compiled mode is detected by a populated embedded manifest, `PI_COMPILED`, or a Bun embedded marker in `import.meta.url`. It probes the versioned cache and legacy user-data directory before package/executable locations. `getNativesDir()` first honors `PI_NATIVES_DIR` (trimmed, `~`-expanded, and normalized; empty or relative values are ignored), then uses `$XDG_DATA_HOME/omp/natives` only when `$XDG_DATA_HOME/omp` already exists; otherwise it is `~/.omp/natives`.
 
-A populated manifest references one `<addon>.node.zst` zstd frame per embedded variant. Extraction accepts only basename manifest filenames, decompresses missing or wrong-sized files atomically into `<getNativesDir()>/<version>`, and validates their sizes. On Windows `node_modules` installs, the loader instead stages a leaf/core addon in that versioned directory so a running process does not lock the copy Bun must replace during an update.
+A populated manifest references one `<addon>.node.zst` zstd frame per embedded variant. Extraction accepts only basename manifest filenames, decompresses missing or wrong-sized files atomically into `<getNativesDir()>/<version>`, and validates their sizes.
 
-After an addon loads successfully, the loader best-effort removes cache directories named with an older `major.minor.patch` release whose modification time is at least ten minutes old. Preparation refreshes that timestamp to protect concurrent extraction/staging. Current, future, prerelease, non-version, and recently active directories remain.
+After an addon loads successfully, the loader best-effort removes cache directories named with an older `major.minor.patch` release whose modification time is at least ten minutes old. Preparation refreshes that timestamp to protect concurrent extraction. Current, future, prerelease, non-version, and recently active directories remain.
 
 ## Load validation and runtime initialization
 
 Install and compiled candidates normally must report `package.json#version` from `__piNativesBuildVersion()` or a legacy release sentinel. A pre-sentinel addon with no release identity can also pass a narrow compatibility check for token counting, shell execution, and text width, provided the disk file does not carry the expected current stamp. The version is not compiled in: `scripts/stamp-native-version.ts` writes it into a fixed placeholder slot after linking, during stamp-capable `scripts/bazel-natives.ts` installs, local Cargo binding builds, and Nix package builds (`nix/package.nix`), so a release bump does not recompile the addon crate. Workspace loads skip this check. The loader does not validate a complete symbol list.
 
-After `require(...)` and version validation, the loader calls `__ompInstallTokioRuntime()` when present. Rust deliberately avoids creating worker threads during `#[module_init]`, while the dynamic-loader lock is held. The post-load hook installs bounded Windows Tokio/Rayon pools; older addons without the hook use napi-rs defaults. Hook failure is best-effort and appears only in startup markers when enabled.
+Rust deliberately avoids creating worker threads during `#[module_init]`, while the dynamic-loader lock is held: `crates/pi-natives/src/task` spawns its Tokio and blocking pools lazily on first dispatch, so `require(...)` never waits on pool creation.
 
-Set `PI_DEBUG_STARTUP` to emit synchronous `[startup]` markers to stderr around addon loading, extraction, and runtime installation.
+Set `PI_DEBUG_STARTUP` to emit synchronous `[startup]` markers to stderr around addon loading and extraction.
 
 ## Rust module ownership
 
@@ -96,7 +93,7 @@ Rust `#[napi]` functions, classes, objects, and enums generate the declaration s
 
 ## Ownership boundaries
 
-- **Package/scripts** own binary selection, CPU variants, optional leaf resolution, embedded extraction, Windows staging, declarations, and explicit ESM exports.
+- **Package/scripts** own binary selection, CPU variants, optional leaf resolution, embedded extraction, declarations, and explicit ESM exports.
 - **`pi-natives` and supporting crates** own algorithms, native resources, platform behavior, cancellation, and N-API conversion.
 - **Consumers** own higher-level tool policy, rendering, artifacts, and user-facing fallbacks not encoded in a primitive.
 
@@ -106,7 +103,7 @@ For the supporting-crate map, see [`native-crates.md`](./native-crates.md). For 
 
 1. A consumer imports the eager root or a lazy subpath.
 2. `loadNative()` computes mode, platform, variant, filenames, and ordered candidates.
-3. Embedded extraction or Windows staging may prepend a cache candidate.
+3. Embedded extraction may prepend a cache candidate.
 4. Candidates are required in order and install/compiled loads are release-stamp-validated.
 5. The optional post-load runtime hook runs, then stale cache versions are cleaned up best-effort.
 6. The root binds generated named exports; lazy subpaths invoke selected bindings through wrappers.
