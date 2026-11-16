@@ -441,8 +441,8 @@ fn native_local_paths_answer_at_once() {
 	assert_eq!((stat.kind, stat.size), (StatKind::File, 3));
 	ready(fs.access(file_b.as_ref(), Access::READ)).unwrap();
 	ready(fs.chdir_check(dir_b.as_ref())).unwrap();
-	// The resolved path a user writes: `canonicalize` without Windows'
-	// verbatim `\\?\` prefix (`cd -P`, `pwd -P` and `$PWD` show it).
+	// The resolved path a user writes (`cd -P`, `pwd -P` and `$PWD` show
+	// it).
 	let real = host(&std::fs::canonicalize(dir.path()).unwrap());
 	let real = real
 		.strip_prefix(br"\\?\")

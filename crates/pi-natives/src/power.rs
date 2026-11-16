@@ -351,86 +351,13 @@ mod platform {
 	}
 }
 
-#[cfg(target_os = "windows")]
-mod platform {
-	use std::{
-		sync::mpsc::{self, Sender},
-		thread::{self, JoinHandle},
-	};
-
-	use napi::{Error, Result};
-	use windows_sys::Win32::System::Power::{
-		ES_CONTINUOUS, EXECUTION_STATE, SetThreadExecutionState,
-	};
-
-	pub struct AssertionInner {
-		release: Option<Sender<()>>,
-		worker:  Option<JoinHandle<()>>,
-	}
-
-	impl AssertionInner {
-		pub fn start(flags: EXECUTION_STATE) -> Result<Self> {
-			let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
-			let (release, release_receiver) = mpsc::channel();
-			// SetThreadExecutionState is thread-affine: acquire and release must
-			// happen on the same dedicated thread for the full lifetime of this
-			// handle.
-			let worker = thread::spawn(move || {
-				// SAFETY: `flags` contains only documented `EXECUTION_STATE` bits.
-				let result = unsafe { SetThreadExecutionState(flags) };
-				let acquired = result != 0;
-				let _ = ready_sender
-					.send(acquired.ok_or_else(|| std::io::Error::last_os_error().to_string()));
-				if !acquired {
-					return;
-				}
-				let _ = release_receiver.recv();
-				// SAFETY: this is the same dedicated thread that acquired the
-				// state.
-				unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
-			});
-			match ready_receiver.recv() {
-				Ok(Ok(())) => Ok(Self { release: Some(release), worker: Some(worker) }),
-				Ok(Err(error)) => {
-					let _ = worker.join();
-					Err(Error::from_reason(format!(
-						"Failed to acquire Windows power assertion: {error}"
-					)))
-				},
-				Err(error) => {
-					let _ = worker.join();
-					Err(Error::from_reason(format!(
-						"Windows power assertion worker exited before initialization: {error}"
-					)))
-				},
-			}
-		}
-
-		pub fn stop(&mut self) {
-			if let Some(release) = self.release.take() {
-				let _ = release.send(());
-			}
-			if let Some(worker) = self.worker.take() {
-				let _ = worker.join();
-			}
-		}
-	}
-
-	impl Drop for AssertionInner {
-		fn drop(&mut self) {
-			self.stop();
-		}
-	}
-}
-
 /// Long-lived cross-platform power assertion.
 ///
-/// macOS uses `IOKit`, Linux holds login1 and desktop `ScreenSaver` inhibitors,
-/// and Windows holds thread-affine execution state until the handle is stopped
-/// or dropped. Other platforms return a no-op handle.
+/// macOS uses `IOKit`, Linux holds login1 and desktop `ScreenSaver`
+/// inhibitors. Other platforms return a no-op handle.
 #[napi(js_name = "PowerAssertion")]
 pub struct PowerAssertion {
-	#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+	#[cfg(any(target_os = "macos", target_os = "linux"))]
 	inners: Vec<platform::AssertionInner>,
 }
 
@@ -486,28 +413,7 @@ impl PowerAssertion {
 			};
 			Ok(Self { inners: vec![platform::AssertionInner::start(what, display, reason)?] })
 		}
-		#[cfg(target_os = "windows")]
-		{
-			use windows_sys::Win32::System::Power::{
-				ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED,
-			};
-
-			// SetThreadExecutionState carries no diagnostic string, so `reason`
-			// has nowhere to go on Windows.
-			let _ = (user, reason);
-			// ES_CONTINUOUS makes the state persist until the handle clears it.
-			let mut flags = ES_CONTINUOUS;
-			// Windows has no separate system-sleep assertion: `ES_SYSTEM_REQUIRED`
-			// is the strongest available equivalent for both `idle` and `system`.
-			if effective_idle || system {
-				flags |= ES_SYSTEM_REQUIRED;
-			}
-			if display {
-				flags |= ES_DISPLAY_REQUIRED;
-			}
-			Ok(Self { inners: vec![platform::AssertionInner::start(flags)?] })
-		}
-		#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+		#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 		{
 			let _ = (reason, effective_idle, system, user, display);
 			Ok(Self {})
@@ -533,7 +439,7 @@ impl PowerAssertion {
 				return Err(err);
 			}
 		}
-		#[cfg(any(target_os = "linux", target_os = "windows"))]
+		#[cfg(target_os = "linux")]
 		for mut inner in self.inners.drain(..) {
 			inner.stop();
 		}

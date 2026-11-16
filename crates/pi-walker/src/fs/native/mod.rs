@@ -18,13 +18,9 @@ mod sys;
 mod sys;
 #[cfg(unix)]
 mod unix;
-#[cfg(windows)]
-mod windows;
 
 #[cfg(unix)]
 pub(super) use unix::*;
-#[cfg(windows)]
-pub(super) use windows::*;
 
 /// Views `buf` as at least `bytes` bytes of 8-aligned scratch, growing it on
 /// first use. Bulk listing syscalls need aligned buffers on some platforms.

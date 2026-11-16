@@ -13,12 +13,6 @@ mod count_fast {
 	
 	use super::WordCountable;
 	use super::{wc_simd_allowed, word_count::WordCount};
-	#[cfg(windows)]
-	use std::os::windows::fs::MetadataExt;
-	#[cfg(windows)]
-	const FILE_ATTRIBUTE_ARCHIVE: u32 = 32;
-	#[cfg(windows)]
-	const FILE_ATTRIBUTE_NORMAL: u32 = 128;
 	
 	#[cfg(any(target_os = "linux", target_os = "android"))]
 	use std::os::fd::AsFd;
@@ -75,8 +69,6 @@ mod count_fast {
 	///   1. On Unix,  we can simply `stat` the file if it is regular.
 	///   2. On Linux -- if the above did not work -- we can use splice to count the
 	///      number of bytes if the file is a FIFO.
-	///   3. On Windows we can use `std::os::windows::fs::MetadataExt` to get file
-	///      size for regular files
 	///   3. Otherwise, we just read normally, but without the overhead of counting
 	///      other things such as lines and words.
 	///
@@ -122,28 +114,6 @@ mod count_fast {
 			}
 		}
 	
-		#[cfg(windows)]
-		{
-			use std::io::{Seek as _, SeekFrom};
-
-			if let Some(mut file) = handle.native_file()
-				&& let Ok(metadata) = file.metadata()
-			{
-				let attributes = metadata.file_attributes();
-
-				if (attributes & FILE_ATTRIBUTE_ARCHIVE) != 0
-					|| (attributes & FILE_ATTRIBUTE_NORMAL) != 0
-				{
-					// Count from the current offset (`{ head -c2; wc -c; } < f`) and
-					// leave the handle at EOF, as reading it would, like the unix path.
-					if let Ok(current) = file.stream_position()
-						&& file.seek(SeekFrom::End(0)).is_ok()
-					{
-						return (metadata.file_size().saturating_sub(current) as usize, None);
-					}
-				}
-			}
-		}
 	
 		// Fall back on `read`, but without the overhead of counting words and lines.
 		loop {
@@ -241,8 +211,6 @@ mod countable {
 		#[cfg(unix)]
 		fn inner_fd(&self) -> Option<BorrowedFd<'_>>;
 		/// The native host file behind this input, when it has one.
-		#[cfg(windows)]
-		fn native_file(&self) -> Option<&std::fs::File>;
 		/// Whether the command was cancelled; for the descriptor shortcuts,
 		/// which bypass the reads that fail once it is.
 		// Only the Linux splice path polls it.
@@ -262,10 +230,6 @@ mod countable {
 			self.file().try_borrow_as_fd().ok()
 		}
 
-		#[cfg(windows)]
-		fn native_file(&self) -> Option<&std::fs::File> {
-			None
-		}
 
 		fn is_cancelled(&self) -> bool {
 			Stdin::is_cancelled(self)
@@ -284,10 +248,6 @@ mod countable {
 			self.native().map(|file| file.as_fd())
 		}
 
-		#[cfg(windows)]
-		fn native_file(&self) -> Option<&std::fs::File> {
-			self.native()
-		}
 
 		fn is_cancelled(&self) -> bool {
 			File::is_cancelled(self)
@@ -1341,20 +1301,8 @@ fn files0_iter(
 					Ok(Input::Stdin(StdinKind::Explicit))
 				},
 				Ok(path) => {
-					#[cfg(unix)]
-					{
-						use std::os::unix::ffi::OsStringExt;
-						Ok(Input::Path(PathBuf::from(OsString::from_vec(path))))
-					}
-					#[cfg(not(unix))]
-					{
-						String::from_utf8(path)
-							.map(|path| Input::Path(PathBuf::from(path)))
-							.map_err(|error| WcError::Io {
-								context: format!("{}: read error", escape_name_wrapper(&err_path)),
-								source: io::Error::other(error),
-							})
-					}
+					use std::os::unix::ffi::OsStringExt;
+					Ok(Input::Path(PathBuf::from(OsString::from_vec(path))))
 				},
 				Err(source) => Err(WcError::Io {
 					context: format!("{}: read error", escape_name_wrapper(&err_path)),

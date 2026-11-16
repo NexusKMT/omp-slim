@@ -468,15 +468,8 @@ fn files_from_host_specs() {
 	assert_eq!(o.filesfrom_host, Some("".into()));
 	assert_eq!(run(&["--files-from=dir/x:y", "a", "b"]).filesfrom_host, None);
 	assert_eq!(run(&["--files-from=-", "a", "b"]).filesfrom_fd, FilesFromFd::Stdin);
-	assert_eq!(files_from_hostspec(b"C:\\list", true), None);
-	assert_eq!(files_from_hostspec(b"\\\\srv\\share\\list", true), None);
-	assert!(files_from_hostspec(b"C:\\list", false).is_some());
-	assert_eq!(files_from_hostspec(b"h::list", true), Some((b"h".to_vec(), &b"list"[..])));
-	assert_eq!(files_from_hostspec(b"C:list", true), None);
-	assert!(is_absolute_operator_path(b"C:\\x", true));
-	assert!(is_absolute_operator_path(b"\\\\srv\\x", true));
-	assert!(!is_absolute_operator_path(b"C:x", true));
-	assert!(!is_absolute_operator_path(b"C:\\x", false));
+	assert!(files_from_hostspec(b"C:\\list").is_some());
+	assert_eq!(files_from_hostspec(b"h::list"), Some((b"h".to_vec(), &b"list"[..])));
 }
 
 #[test]

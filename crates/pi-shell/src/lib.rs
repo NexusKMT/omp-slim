@@ -48,23 +48,15 @@ pub mod cancel;
 mod child_session;
 pub mod minimizer;
 pub mod output_decode;
-mod paths;
 pub mod process;
 pub mod proctree;
 pub mod shell;
 pub mod taps;
 
-#[cfg(windows)]
-pub mod windows;
-
 pub use child_session::{ChildSessionAction, child_session_action};
-// Windows path spellings for host paths presented by the CLI.
-pub use paths::{expand_to_long_path, get_short_path};
 // Re-exported for `pi-natives`: the builtins live in `pi-builtins`,
 // but the native layer only ever depends on the shell.
-pub use pi_builtins::{
-	panic_scope_active, rayon_global_pool_available, set_rayon_global_pool_available,
-};
+pub use pi_builtins::panic_scope_active;
 pub use shell::{
 	MinimizerResult, Shell, ShellExecuteOptions, ShellExecuteResult, ShellOptions, ShellRunOptions,
 	ShellRunResult, StreamSinks, execute_shell, execute_shell_streams,

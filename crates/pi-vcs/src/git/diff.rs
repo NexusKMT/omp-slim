@@ -1462,27 +1462,14 @@ fn is_null_device(path: &Path) -> bool {
 	path == "/dev/null" || path.to_string_lossy().eq_ignore_ascii_case("NUL")
 }
 
-#[cfg(unix)]
 fn is_executable(metadata: &std::fs::Metadata) -> bool {
 	use std::os::unix::fs::PermissionsExt;
 	metadata.permissions().mode() & 0o111 != 0
 }
 
-#[cfg(not(unix))]
-#[allow(clippy::missing_const_for_fn, reason = "matches non-const unix signature")]
-fn is_executable(_metadata: &std::fs::Metadata) -> bool {
-	false
-}
-
-#[cfg(unix)]
 fn os_path_bytes(path: &Path) -> Vec<u8> {
 	use std::os::unix::ffi::OsStrExt;
 	path.as_os_str().as_bytes().to_vec()
-}
-
-#[cfg(not(unix))]
-fn os_path_bytes(path: &Path) -> Vec<u8> {
-	path.to_string_lossy().into_owned().into_bytes()
 }
 
 fn make_pathspec<'repo>(

@@ -1,10 +1,9 @@
 //! Decoding relays for external programs' output on its way into shell text.
 //!
-//! Builtins write the shell's own text (UTF-8). A native Windows program may
-//! write the ANSI code page to a pipe, and one program's output is one
-//! encoding, but a stream several commands write into is not. So the encoding
-//! is decided per program, here, rather than by whoever reads the mixed
-//! stream.
+//! Builtins write the shell's own text (UTF-8). An external program writes
+//! whatever its locale tells it to, and one program's output is one encoding,
+//! but a stream several commands write into is not. So the encoding is decided
+//! per program, here, rather than by whoever reads the mixed stream.
 //!
 //! A host that can decode such output installs an [`OutputDecoding`]. Every
 //! external whose stdout or stderr is a *text sink* — the run's capture pipe
@@ -75,11 +74,6 @@ fn writer_handle(writer: &fs::File) -> OsHandle {
 	{
 		use std::os::fd::AsRawFd;
 		OsHandle(writer.as_raw_fd() as u64)
-	}
-	#[cfg(windows)]
-	{
-		use std::os::windows::io::AsRawHandle;
-		OsHandle(writer.as_raw_handle().addr() as u64)
 	}
 }
 

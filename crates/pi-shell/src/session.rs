@@ -565,14 +565,9 @@ impl Drop for Session {
 	}
 }
 
-/// Whether `path` is absolute for the engine (a Windows drive path, or a
-/// `scheme://` URL path, too).
+/// Whether `path` is absolute for the engine (a `scheme://` URL path, too).
 fn is_absolute(path: &[u8]) -> bool {
-	path.first() == Some(&b'/')
-		|| (cfg!(windows)
-			&& path.get(1) == Some(&b':')
-			&& path.first().is_some_and(u8::is_ascii_alphabetic))
-		|| path.to_path().is_ok_and(pi_vfs::is_virtual_path)
+	path.first() == Some(&b'/') || path.to_path().is_ok_and(pi_vfs::is_virtual_path)
 }
 
 /// Cancellation requested for one run: none, `TERM` or `KILL`.

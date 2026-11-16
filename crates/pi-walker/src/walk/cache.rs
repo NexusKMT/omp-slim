@@ -43,7 +43,7 @@ const SHARDS: usize = 64;
 
 /// How old a stamp must be before its listing is trusted. It covers the
 /// coarsest timestamp clock among the allowed filesystems (Linux's
-/// tick-granular coarse clock, Windows' 15.6 ms timer).
+/// tick-granular coarse clock).
 const RACY_WINDOW_NS: i64 = 50_000_000;
 
 /// Fixed per-listing overhead charged against the budget.

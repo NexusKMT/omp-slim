@@ -27,16 +27,9 @@ use crate::rsync::log::{Debug as DebugFlag, LogCode, Logger};
 use crate::rsync::wildmatch::wildmatch;
 use crate::rsync::wire::{Proto, ReadExt, WriteExt};
 
-/// This process's effective uid; `None` on Windows, which has no POSIX owners.
+/// This process's effective uid.
 pub(crate) fn effective_uid() -> Option<u32> {
-	#[cfg(unix)]
-	{
-		Some(rustix::process::geteuid().as_raw())
-	}
-	#[cfg(not(unix))]
-	{
-		None
-	}
+	Some(rustix::process::geteuid().as_raw())
 }
 
 /// Which id space a list or map is about.
@@ -606,12 +599,6 @@ fn load_process_groups() -> Vec<u32> {
 	set
 }
 
-/// Windows has no POSIX groups: every local file reports gid 0, which is "ours".
-#[cfg(windows)]
-fn load_process_groups() -> Vec<u32> {
-	vec![0]
-}
-
 static PROCESS_GROUPS: LazyLock<Vec<u32>> = LazyLock::new(load_process_groups);
 static PROCESS_GROUPS_REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -713,30 +700,6 @@ fn uid_by_name(name: &[u8]) -> Option<u32> {
 #[cfg(unix)]
 fn gid_by_name(name: &[u8]) -> Option<u32> {
 	lookup_group(GrKey::Name(name)).map(|(_, id)| id)
-}
-
-/// Windows has no POSIX user database: no id has a name and no name resolves.
-#[cfg(windows)]
-fn user_by_uid(_uid: u32) -> Option<Vec<u8>> {
-	None
-}
-
-/// See the Windows [`user_by_uid`].
-#[cfg(windows)]
-fn group_by_gid(_gid: u32) -> Option<Vec<u8>> {
-	None
-}
-
-/// See the Windows [`user_by_uid`].
-#[cfg(windows)]
-fn uid_by_name(_name: &[u8]) -> Option<u32> {
-	None
-}
-
-/// See the Windows [`user_by_uid`].
-#[cfg(windows)]
-fn gid_by_name(_name: &[u8]) -> Option<u32> {
-	None
 }
 
 #[cfg(unix)]

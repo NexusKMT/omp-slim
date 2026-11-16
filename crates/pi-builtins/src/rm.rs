@@ -715,38 +715,9 @@ fn handle_error_with_force(host: &mut Host, e: io::Error, path: &Path, options: 
 
 /// Removes the empty directory `fs_path`.
 ///
-/// On Windows a directory carrying the read-only attribute refuses removal,
-/// although on Unix only the parent's permissions decide; the attribute is
-/// cleared for one more attempt and put back if that fails too.
+/// Only the parent's permissions decide whether an empty directory can go.
 fn remove_empty_dir(host: &mut Host, fs_path: &Path) -> io::Result<()> {
 	let result = host.fs().remove_dir(fs_path);
-	#[cfg(windows)]
-	if result
-		.as_ref()
-		.is_err_and(|e| e.kind() == io::ErrorKind::PermissionDenied)
-	{
-		// A step that finds the directory gone reports that, which `-f`
-		// ignores, rather than the stale `PermissionDenied`.
-		let gone = |e: io::Error| (e.kind() == io::ErrorKind::NotFound).then_some(e);
-		let metadata = match host.fs().symlink_metadata(fs_path) {
-			Ok(metadata) => metadata,
-			Err(e) => return Err(gone(e).unwrap_or_else(|| result.unwrap_err())),
-		};
-		// Not a symlink or junction: set_permissions would follow it.
-		if metadata.is_dir() && metadata.permissions().readonly() {
-			let mut writable = metadata.permissions();
-			writable.set_readonly(false);
-			if let Err(e) = host.fs().set_permissions(fs_path, writable) {
-				return Err(gone(e).unwrap_or_else(|| result.unwrap_err()));
-			}
-			let retry = host.fs().remove_dir(fs_path);
-			if retry.is_err() {
-				// Best effort: the retry's error is the one to report.
-				let _ = host.fs().set_permissions(fs_path, metadata.permissions());
-			}
-			return retry;
-		}
-	}
 	result
 }
 
@@ -1356,35 +1327,21 @@ fn is_dir_empty(host: &mut Host, path: &Path) -> bool {
 		.is_ok_and(|mut iter| iter.next().is_none())
 }
 
-#[cfg(unix)]
 fn is_readable_metadata(metadata: &Metadata) -> bool {
 	let mode = metadata.permissions().mode();
 	(mode & 0o400) > 0
 }
 
 /// Whether the given file or directory is readable.
-#[cfg(unix)]
 fn is_readable(host: &mut Host, path: &Path) -> bool {
 	host.fs()
 		.metadata(&host.resolve(path))
 		.is_ok_and(|metadata| is_readable_metadata(&metadata))
 }
 
-/// Whether the given file or directory is readable.
-#[cfg(not(unix))]
-fn is_readable(_host: &mut Host, _path: &Path) -> bool {
-	true
-}
-
-#[cfg(unix)]
 fn is_writable_metadata(metadata: &Metadata) -> bool {
 	let mode = metadata.permissions().mode();
 	(mode & 0o200) > 0
-}
-
-#[cfg(not(unix))]
-fn is_writable_metadata(_metadata: &Metadata) -> bool {
-	true
 }
 
 /// Recursively remove the directory tree rooted at the given path.
@@ -1453,21 +1410,6 @@ fn remove_dir_recursive_with_provider(
 ) -> bool {
 	let filesystem = host.fs().clone();
 	let fs_path = host.resolve(path);
-
-	// Very long Windows paths are removed in one call.
-	#[cfg(not(unix))]
-	if path.to_str().is_some_and(|s| s.len() > 1000) {
-		match filesystem.remove_dir_all(&fs_path) {
-			Ok(()) => return false,
-			// Something vanished under the call; the walk below removes
-			// whatever is left, and finds nothing if the tree is gone.
-			Err(e) if is_missing_under_force(&e, options) => {},
-			Err(e) => {
-				show_error!(host, "cannot remove {}: {e}", path.quote());
-				return true;
-			},
-		}
-	}
 
 	let entries = match filesystem.read_dir(&fs_path) {
 		Ok(entries) => entries,
@@ -1736,8 +1678,7 @@ fn prompt_file_permission_readonly(host: &mut Host, path: &Path, options: &Optio
 
 /// Checks if the path is referring to current or parent directory , if it is
 /// referring to current or any parent directory in the file tree e.g  '/../..'
-/// , '../..'. A Windows drive-relative operand counts by its remainder: `C:`
-/// alone names that drive's current directory, so it is refused like `.`.
+/// , '../..'.
 fn path_is_current_or_parent_directory(path: &Path) -> bool {
 	let mut components = path.components();
 	if let Some(Component::Prefix(prefix)) = components.next()
@@ -1765,7 +1706,6 @@ fn path_is_current_or_parent_directory(path: &Path) -> bool {
 // For directories finding if they are writable or not is a hassle. In Unix we
 // can use the built-in rust crate to check mode bits. But other os don't have
 // something similar afaik Most cases are covered by keep eye out for edge cases
-#[cfg(unix)]
 fn handle_writable_directory(host: &mut Host, path: &Path, options: &Options, metadata: &Metadata) -> bool {
 	let stdin_ok = options.__presume_input_tty.unwrap_or(false);
 	match (
@@ -1786,34 +1726,6 @@ fn handle_writable_directory(host: &mut Host, path: &Path, options: &Options, me
 		(_, true, false, _) => prompt_yes!(host, "remove write-protected directory {}?", path.quote()),
 		(_, _, _, InteractiveMode::Always) => prompt_yes!(host, "remove directory {}?", path.quote()),
 		(..) => true,
-	}
-}
-
-// For windows we can use windows metadata trait and file attributes to see if a
-// directory is readonly
-#[cfg(windows)]
-fn handle_writable_directory(host: &mut Host, path: &Path, options: &Options, metadata: &Metadata) -> bool {
-	// Native Windows permissions mirror FILE_ATTRIBUTE_READONLY.
-	let not_user_writable = metadata.permissions().readonly();
-	let stdin_ok = options.__presume_input_tty.unwrap_or(false);
-	match (stdin_ok, not_user_writable, options.interactive) {
-		(false, _, InteractiveMode::PromptProtected) => true,
-		(_, true, _) => prompt_yes!(host, "remove write-protected directory {}?", path.quote()),
-		(_, _, InteractiveMode::Always) => prompt_yes!(host, "remove directory {}?", path.quote()),
-		(..) => true,
-	}
-}
-
-// I have this here for completeness but it will always return "remove directory
-// {}" because metadata.permissions().readonly() only works for file not
-// directories
-#[cfg(not(windows))]
-#[cfg(not(unix))]
-fn handle_writable_directory(host: &mut Host, path: &Path, options: &Options, _metadata: &Metadata) -> bool {
-	if options.interactive == InteractiveMode::Always {
-		prompt_yes!(host, "remove directory {}?", path.quote())
-	} else {
-		true
 	}
 }
 
@@ -1844,13 +1756,7 @@ fn clean_trailing_slashes(path: &Path) -> &Path {
 					break;
 				}
 			}
-			#[cfg(unix)]
 			return Path::new(OsStr::from_bytes(&path_bytes[0..=idx]));
-
-			#[cfg(not(unix))]
-			// `os_bytes` returns `None` for non-UTF-8 strings off Unix, so this
-			// byte slice is valid UTF-8.
-			return Path::new(std::str::from_utf8(&path_bytes[0..=idx]).unwrap());
 		}
 	}
 	path
@@ -1860,15 +1766,10 @@ fn prompt_descend(host: &mut Host, path: &Path) -> bool {
 	prompt_yes!(host, "descend into directory {}?", path.quote())
 }
 
-#[cfg(not(windows))]
 fn is_symlink_dir(_metadata: &Metadata) -> bool {
 	false
 }
 
-#[cfg(windows)]
-fn is_symlink_dir(metadata: &Metadata) -> bool {
-	metadata.file_type().is_symlink_dir()
-}
 
 #[cfg(test)]
 mod tests {
@@ -1920,27 +1821,6 @@ mod tests {
 		assert!(process_file.path().exists());
 	}
 
-	#[cfg(windows)]
-	#[test]
-	fn drive_relative_operands_resolve_against_host_cwd() {
-		let cwd = tempdir().unwrap();
-		let sentinel = cwd.path().join("sentinel");
-		std::fs::write(&sentinel, b"keep me").unwrap();
-		std::fs::create_dir(cwd.path().join("child")).unwrap();
-		// `C:` for a cwd of `C:\...`.
-		let drive = cwd.path().components().next().unwrap().as_os_str().to_str().unwrap().to_owned();
-
-		let (code, capture) = run_util::<Rm>(&["-rf", drive.as_str()], "", cwd.path());
-		assert_eq!(code, 1);
-		assert!(capture.err().contains("refusing to remove '.' or '..' directory"), "{}", capture.err());
-		assert!(sentinel.is_file());
-
-		let child = format!("{drive}child");
-		let (code, capture) = run_util::<Rm>(&["-r", child.as_str()], "", cwd.path());
-		assert_eq!(code, 0, "{}", capture.err());
-		assert!(!cwd.path().join("child").exists());
-		assert!(sentinel.is_file());
-	}
 
 	#[test]
 	fn recursively_removes_directory_tree() {
@@ -2042,9 +1922,6 @@ mod tests {
 		assert!(tree.is_dir(), "rm ran to completion despite cancellation");
 	}
 
-	// Unix only: Windows reports a file another process is already deleting
-	// (delete pending) as access denied, not as gone, so the race still
-	// surfaces there.
 	#[cfg(unix)]
 	#[test]
 	fn concurrent_forced_removals_both_succeed() {
@@ -2243,27 +2120,4 @@ mod tests {
 		assert_eq!(run("-r"), Some((code, err)));
 	}
 
-	#[cfg(windows)]
-	#[test]
-	fn removes_directories_with_the_read_only_attribute() {
-		let set_read_only = |path: &Path| {
-			let mut permissions = std::fs::metadata(path).unwrap().permissions();
-			permissions.set_readonly(true);
-			std::fs::set_permissions(path, permissions).unwrap();
-		};
-		for flags in ["-rf", "-r", "-d"] {
-			let cwd = tempdir().unwrap();
-			let dir = cwd.path().join("dir");
-			std::fs::create_dir(&dir).unwrap();
-			if flags != "-d" {
-				std::fs::write(dir.join("file"), b"").unwrap();
-			}
-			set_read_only(&dir);
-
-			let (code, capture) = run_util::<Rm>(&[flags, "dir"], "", cwd.path());
-
-			assert_eq!(code, 0, "{flags}: {}", capture.err());
-			assert!(!dir.exists(), "{flags}");
-		}
-	}
 }

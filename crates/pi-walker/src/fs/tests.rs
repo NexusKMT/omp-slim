@@ -124,7 +124,7 @@ async fn native_full_listing_has_sizes_and_mtimes() {
 	assert_eq!(sub.size, None);
 	// NTFS refreshes a directory's entry in its parent's index lazily, so a
 	// listing can trail the directory's own mtime there.
-	if !cfg!(windows) {
+	{
 		assert_eq!(sub.mtime, Some(mtime_nanos(&tmp.0.join("sub"))));
 	}
 	if cfg!(target_os = "macos") {

@@ -10,71 +10,43 @@ use crate::bash::fs::{PwEntry, PwQuery};
 /// applies the process umask (`process_umask`, `None` when unknown), so
 /// the bits it may have cleared are set again with `chmod`.
 pub fn mkdir(path: &Path, mode: u32, process_umask: Option<u32>) -> io::Result<()> {
-	#[cfg(unix)]
-	{
-		use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-		std::fs::DirBuilder::new()
-			.mode(mode & 0o7777)
-			.create(path)?;
-		if process_umask.is_none_or(|mask| mode & 0o777 & mask != 0) {
-			let have = std::fs::symlink_metadata(path)?.permissions().mode();
-			let want = (have & !0o777) | (mode & 0o777);
-			if want != have {
-				std::fs::set_permissions(path, std::fs::Permissions::from_mode(want))?;
-			}
+	use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+	std::fs::DirBuilder::new()
+		.mode(mode & 0o7777)
+		.create(path)?;
+	if process_umask.is_none_or(|mask| mode & 0o777 & mask != 0) {
+		let have = std::fs::symlink_metadata(path)?.permissions().mode();
+		let want = (have & !0o777) | (mode & 0o777);
+		if want != have {
+			std::fs::set_permissions(path, std::fs::Permissions::from_mode(want))?;
 		}
-		Ok(())
 	}
-	#[cfg(not(unix))]
-	{
-		let _ = (mode, process_umask);
-		std::fs::create_dir(path)
-	}
+	Ok(())
 }
 
 /// `chmod(path, mode)`.
 pub fn chmod(path: &Path, mode: u32) -> io::Result<()> {
-	#[cfg(unix)]
-	{
-		use std::os::unix::fs::PermissionsExt;
-		std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & 0o7777))
-	}
-	#[cfg(not(unix))]
-	{
-		let mut perm = std::fs::metadata(path)?.permissions();
-		perm.set_readonly(mode & 0o222 == 0);
-		std::fs::set_permissions(path, perm)
-	}
+	use std::os::unix::fs::PermissionsExt;
+	std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & 0o7777))
 }
 
 /// `chown`/`lchown`.
 pub fn chown(path: &Path, uid: Option<u32>, gid: Option<u32>, follow: bool) -> io::Result<()> {
-	#[cfg(unix)]
-	{
-		if follow {
-			std::os::unix::fs::chown(path, uid, gid)
-		} else {
-			std::os::unix::fs::lchown(path, uid, gid)
-		}
-	}
-	#[cfg(not(unix))]
-	{
-		let _ = (path, uid, gid, follow);
-		Err(io::ErrorKind::Unsupported.into())
+	if follow {
+		std::os::unix::fs::chown(path, uid, gid)
+	} else {
+		std::os::unix::fs::lchown(path, uid, gid)
 	}
 }
 
 /// `sync(2)`.
-#[cfg_attr(not(unix), expect(clippy::missing_const_for_fn, reason = "the unix body calls sync(2)"))]
 pub fn sync() {
-	#[cfg(unix)]
 	// SAFETY: `sync` takes no arguments and cannot fail.
 	unsafe {
 		libc::sync();
 	}
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux", target_os = "android"))]
 mod xattr {
 	use std::{ffi::CString, io, os::unix::ffi::OsStrExt, path::Path};
 
@@ -223,38 +195,9 @@ mod xattr {
 	}
 }
 
-#[cfg(not(any(
-	target_os = "macos",
-	target_os = "ios",
-	target_os = "linux",
-	target_os = "android"
-)))]
-mod xattr {
-	use std::{io, path::Path};
-
-	use bstr::BString;
-
-	pub fn get(_: &Path, _: &[u8], _: bool) -> io::Result<BString> {
-		Err(io::ErrorKind::Unsupported.into())
-	}
-
-	pub fn list(_: &Path, _: bool) -> io::Result<Vec<BString>> {
-		Err(io::ErrorKind::Unsupported.into())
-	}
-
-	pub fn set(_: &Path, _: &[u8], _: &[u8], _: bool) -> io::Result<()> {
-		Err(io::ErrorKind::Unsupported.into())
-	}
-
-	pub fn remove(_: &Path, _: &[u8], _: bool) -> io::Result<()> {
-		Err(io::ErrorKind::Unsupported.into())
-	}
-}
-
 pub use xattr::{get as getxattr, list as listxattr, remove as removexattr, set as setxattr};
 
 /// The entries of the user/group database `query` asks for.
-#[cfg(unix)]
 pub fn user_db(query: &PwQuery) -> io::Result<Vec<PwEntry>> {
 	use std::ffi::{CStr, CString};
 
@@ -361,10 +304,4 @@ pub fn user_db(query: &PwQuery) -> io::Result<Vec<PwEntry>> {
 		},
 	};
 	Ok(one.into_iter().collect())
-}
-
-/// No user database off Unix.
-#[cfg(not(unix))]
-pub fn user_db(_query: &PwQuery) -> io::Result<Vec<PwEntry>> {
-	Err(io::ErrorKind::Unsupported.into())
 }

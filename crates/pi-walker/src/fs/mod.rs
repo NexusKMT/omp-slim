@@ -27,8 +27,6 @@
 mod native;
 mod provider;
 mod root;
-#[cfg(any(windows, test))]
-mod wtf8;
 
 use std::{
 	borrow::Cow,
@@ -40,7 +38,7 @@ use std::{
 pub use root::{absolute, canonical, resolve_dir};
 
 /// Kind of a listed entry. Special files (devices, FIFOs, sockets) are never
-/// reported by listings; on Windows every reparse point is a [`Self::Symlink`].
+/// reported by listings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FileType {
 	/// A regular file.
@@ -59,21 +57,21 @@ pub enum Detail {
 	#[default]
 	Minimal,
 	/// Also modification times for every entry and sizes for regular files.
-	/// macOS and Windows return these from the bulk listing; Linux and
-	/// providers pay one metadata call per entry.
+	/// macOS returns these from the bulk listing; Linux and providers pay one
+	/// metadata call per entry.
 	Full,
 }
 
 /// Identity of a file or directory, regardless of the path reaching it.
 ///
-/// Device and inode on Unix, volume serial and file index on Windows, and
-/// the provider's own ids otherwise. Provider and host ids live in separate
-/// namespaces (`native`), so they never compare equal.
+/// Device and inode on the host, and the provider's own ids otherwise.
+/// Provider and host ids live in separate namespaces (`native`), so they
+/// never compare equal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FileId {
-	/// Device (Unix) or volume serial number (Windows).
+	/// Device number, or the provider's first id component.
 	pub dev:    u64,
-	/// Inode (Unix) or file index (Windows).
+	/// Inode number, or the provider's second id component.
 	pub ino:    u64,
 	/// The id comes from the host, not a provider.
 	pub native: bool,
@@ -86,9 +84,9 @@ pub struct FileId {
 /// decide whether a listing is still current.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Stamp {
-	/// Device or volume serial number.
+	/// Device number, or the provider's first id component.
 	pub dev:   u64,
-	/// Inode or file index (Windows path queries: creation time).
+	/// Inode number, or the provider's second id component.
 	pub ino:   u64,
 	/// Modification time, Unix nanoseconds.
 	pub mtime: i64,
@@ -137,8 +135,8 @@ pub struct Record {
 }
 
 /// One directory's entries, without `.` and `..` and without special files.
-/// Names are raw bytes (`OsStr` encoded bytes: exact on Unix, WTF-8 on
-/// Windows and for provider names).
+/// Names are raw bytes (`OsStr` encoded bytes on the host; provider names are
+/// whatever byte sequence the provider reports).
 #[derive(Clone, Debug, Default)]
 pub struct Listing {
 	pub(crate) records: Vec<Record>,
@@ -292,27 +290,11 @@ impl Fs {
 	}
 }
 
-/// `bytes` (raw `OsStr` encoded bytes: exact on Unix, WTF-8 on Windows) as an
-/// [`OsStr`]. On Windows `/` becomes `\`.
+/// `bytes` (raw `OsStr` encoded bytes) as an [`OsStr`].
 #[cfg(unix)]
 pub(crate) fn os_name(bytes: &[u8]) -> Cow<'_, OsStr> {
 	use std::os::unix::ffi::OsStrExt;
 	Cow::Borrowed(OsStr::from_bytes(bytes))
-}
-
-/// `bytes` (raw `OsStr` encoded bytes: exact on Unix, WTF-8 on Windows) as an
-/// [`OsStr`]. On Windows `/` becomes `\`.
-#[cfg(windows)]
-pub(crate) fn os_name(bytes: &[u8]) -> Cow<'_, OsStr> {
-	use std::os::windows::ffi::OsStringExt;
-	if let Ok(name) = std::str::from_utf8(bytes)
-		&& !name.contains('/')
-	{
-		return Cow::Borrowed(OsStr::new(name));
-	}
-	let mut wide = Vec::with_capacity(bytes.len());
-	wtf8::push_wide(&mut wide, bytes);
-	Cow::Owned(std::ffi::OsString::from_wide(&wide))
 }
 
 /// An open directory. Native: a descriptor/handle closed on drop. Provider:
@@ -652,8 +634,7 @@ impl Session {
 	/// Whether every change to a directory on `dir`'s filesystem (whose stamp
 	/// is `stamp`) yields a different stamp: timestamps are fine-grained and
 	/// maintained locally (APFS; ext4, XFS, Btrfs, tmpfs, F2FS, ZFS,
-	/// bcachefs; NTFS, `ReFS`). Always false for providers. Listing caches rely
-	/// on it.
+	/// bcachefs). Always false for providers. Listing caches rely on it.
 	pub fn stable_stamps(&mut self, dir: &Dir, stamp: &Stamp) -> bool {
 		match (&self.imp, &dir.repr) {
 			(Imp::Native(_), DirRepr::Native(h)) => native::stable_stamps(h, stamp),

@@ -823,8 +823,8 @@ where
 
 		let mut digest = options.algo_kind.create_digest();
 
-		// Always compute the "binary" version of the digest, i.e. on Windows,
-		// never handle CRLFs specifically.
+		// Always compute the "binary" version of the digest, never handling
+		// CRLFs specifically.
 		let (digest_output, sz) = digest_reader(&mut digest, &mut file, ReadingMode::Binary)
 			.map_err(|error| failure(format!("failed to read input: {error}")))?;
 		drop(file);

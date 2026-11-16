@@ -308,17 +308,11 @@ fn read_utmp(host: &Host, name: &OsStr, check_pids: bool) -> UtmpSummary {
 }
 
 /// Whether `kill(pid, 0)` reports no such process (`READ_UTMP_CHECK_PIDS`).
-#[cfg(unix)]
 fn process_is_gone(pid: i32) -> bool {
 	// SAFETY: signal 0 only probes for the process; nothing is delivered.
 	pid > 0
 		&& unsafe { libc::kill(pid, 0) } < 0
 		&& std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-}
-
-#[cfg(not(unix))]
-fn process_is_gone(_pid: i32) -> bool {
-	false
 }
 
 /// macOS stores login records as 628-byte `utmpx32` entries behind a
@@ -462,20 +456,6 @@ fn system_boot_time(host: &Host) -> Option<i64> {
 	let uptime_ns = i128::from(uptime.tv_sec) * 1_000_000_000 + i128::from(uptime.tv_nsec);
 	let boot_ns = Timestamp::now().as_nanosecond() - uptime_ns;
 	i64::try_from(boot_ns.div_euclid(1_000_000_000)).ok()
-}
-
-/// Windows: now minus the milliseconds since boot.
-#[cfg(windows)]
-fn system_boot_time(_host: &Host) -> Option<i64> {
-	use windows_sys::Win32::System::SystemInformation::GetTickCount64;
-	// SAFETY: no preconditions.
-	let since_boot = unsafe { GetTickCount64() } / 1000;
-	Some(Timestamp::now().as_second() - i64::try_from(since_boot).ok()?)
-}
-
-#[cfg(not(any(target_vendor = "apple", target_os = "linux", windows)))]
-fn system_boot_time(_host: &Host) -> Option<i64> {
-	None
 }
 
 #[cfg(test)]
@@ -745,7 +725,7 @@ mod tests {
 		assert!(out.contains("0 users"), "{out}");
 	}
 
-	#[cfg(any(target_vendor = "apple", target_os = "linux", windows))]
+	#[cfg(any(target_vendor = "apple", target_os = "linux"))]
 	#[test]
 	fn live_system_report() {
 		let (code, out, err) = run(&[]);

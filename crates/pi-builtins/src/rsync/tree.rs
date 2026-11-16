@@ -24,11 +24,11 @@
 //! `--insecure-links` keeps the held root fd but lets the kernel resolve the
 //! whole relative path (legacy path semantics).
 //!
-//! **Path-based trees** (virtual `BlockingFs` providers everywhere, and every
-//! native tree on Windows, which has no `openat`) offer the same API: each
-//! element is checked with no-follow metadata (`symlink_metadata`; reparse
-//! points are symlinks) and in-tree directory symlinks are expanded with the
-//! same rules, then the operation is issued on the resulting path. Unlike the
+//! **Path-based trees** (virtual `BlockingFs` providers, and the fallback for
+//! host paths with no owning directory fd) offer the same API: each element is
+//! checked with no-follow metadata (`symlink_metadata`) and in-tree directory
+//! symlinks are expanded with the same rules, then the operation is issued on
+//! the resulting path. Unlike the
 //! fd walk this leaves a window between the check and the use in which a
 //! component can be swapped; that residual is inherent to path-based access.
 
@@ -92,7 +92,6 @@ const NAME_MAX: usize = 255;
 mod err {
 	use std::io;
 
-	#[cfg(unix)]
 	mod code {
 		pub(super) const INVAL: i32 = libc::EINVAL;
 		pub(super) const NOTDIR: i32 = libc::ENOTDIR;
@@ -101,16 +100,6 @@ mod err {
 		pub(super) const NAMETOOLONG: i32 = libc::ENAMETOOLONG;
 		pub(super) const NOMEM: i32 = libc::ENOMEM;
 		pub(super) const NOTSUP: i32 = libc::EOPNOTSUPP;
-	}
-
-	#[cfg(not(unix))]
-	mod code {
-		pub(super) const INVAL: i32 = 87; // ERROR_INVALID_PARAMETER
-		pub(super) const NOTDIR: i32 = 267; // ERROR_DIRECTORY
-		pub(super) const EXIST: i32 = 183; // ERROR_ALREADY_EXISTS
-		pub(super) const NAMETOOLONG: i32 = 206; // ERROR_FILENAME_EXCED_RANGE
-		pub(super) const NOMEM: i32 = 8; // ERROR_NOT_ENOUGH_MEMORY
-		pub(super) const NOTSUP: i32 = 50; // ERROR_NOT_SUPPORTED
 	}
 
 	pub(super) fn invalid() -> io::Error {
@@ -147,10 +136,7 @@ mod err {
 	}
 
 	pub(super) fn is_dir() -> io::Error {
-		#[cfg(unix)]
-		return io::Error::from_raw_os_error(libc::EISDIR);
-		#[cfg(not(unix))]
-		return io::Error::from(io::ErrorKind::IsADirectory);
+		io::Error::from_raw_os_error(libc::EISDIR)
 	}
 }
 
@@ -375,12 +361,6 @@ impl Tree {
 
 	fn insecure(&self) -> bool {
 		self.inner.opts.insecure_links
-	}
-
-	/// Host paths on Windows (where owner/xattr semantics differ).
-	#[cfg(windows)]
-	fn windows_native(&self) -> bool {
-		matches!(self.inner.backend, Backend::Paths { native: true })
 	}
 
 	/// Validated elements of a caller-supplied relative path.
@@ -810,18 +790,13 @@ impl Tree {
 		Ok(created)
 	}
 
-	/// Creates the symlink `rel` -> `target` (stored verbatim; on Windows `/`
-	/// becomes `\`).
+	/// Creates the symlink `rel` -> `target` (stored verbatim).
 	pub(crate) fn symlink(&self, target: &Path, rel: &Path) -> io::Result<()> {
 		#[cfg(unix)]
 		if let Some(root) = self.native_root() {
 			let at = self.locate(root, rel)?;
 			return sys::symlinkat(&sys::cstr(target.as_os_str().as_bytes())?, at.dir.some(), &at.name);
 		}
-		#[cfg(windows)]
-		let converted = PathBuf::from(target.to_str().ok_or_else(paths::bad_name)?.replace('/', "\\"));
-		#[cfg(windows)]
-		let target = converted.as_path();
 		self.inner.fs.symlink(target, self.path_of(rel)?)
 	}
 
@@ -955,7 +930,7 @@ impl Tree {
 	}
 
 	/// Changes owner and/or group (`None` keeps it); `follow` selects
-	/// `chown` over `lchown`. A silent no-op on Windows host paths.
+	/// `chown` over `lchown`.
 	pub(crate) fn chown(
 		&self,
 		rel: &Path,
@@ -967,10 +942,6 @@ impl Tree {
 		if let Some(root) = self.native_root() {
 			let at = self.locate(root, rel)?;
 			return sys::fchownat(at.dir.some(), &at.name, uid, gid, !follow);
-		}
-		#[cfg(windows)]
-		if self.windows_native() {
-			return Ok(());
 		}
 		self.inner.fs.chown(self.path_of(rel)?, uid, gid, follow)
 	}
@@ -994,8 +965,6 @@ impl Tree {
 	}
 
 	/// macOS creation time (-N); Unsupported elsewhere.
-	///
-	/// Also supported on Windows host paths (the file's creation time).
 	pub(crate) fn set_crtime(&self, rel: &Path, crtime: i64, follow: bool) -> io::Result<()> {
 		#[cfg(unix)]
 		if let Some(root) = self.native_root() {
@@ -1007,10 +976,6 @@ impl Tree {
 				let _ = (at, crtime, follow);
 				return Err(err::unsupported());
 			}
-		}
-		#[cfg(windows)]
-		if self.windows_native() {
-			return set_creation_time(&self.path_of(rel)?, crtime, follow);
 		}
 		let _ = (rel, crtime, follow);
 		Err(err::unsupported())
@@ -1093,22 +1058,11 @@ impl Tree {
 		}
 	}
 
-	/// Xattr access is unsupported on Windows host paths.
-	fn xattrs_unsupported(&self) -> bool {
-		#[cfg(windows)]
-		return self.windows_native();
-		#[cfg(not(windows))]
-		return false;
-	}
-
 	/// Names of `rel`'s extended attributes.
 	pub(crate) fn list_xattr(&self, rel: &Path, follow: bool) -> io::Result<Vec<OsString>> {
 		#[cfg(unix)]
 		if let Some(root) = self.native_root() {
 			return self.with_xattr_at(root, rel, follow, sys::xattr_list);
-		}
-		if self.xattrs_unsupported() {
-			return Err(err::unsupported());
 		}
 		self.inner.fs.list_xattr(self.path_of(rel)?, follow)
 	}
@@ -1124,9 +1078,6 @@ impl Tree {
 		if let Some(root) = self.native_root() {
 			let name = sys::cstr(name.as_bytes())?;
 			return self.with_xattr_at(root, rel, follow, |at| sys::xattr_get(at, &name));
-		}
-		if self.xattrs_unsupported() {
-			return Err(err::unsupported());
 		}
 		self.inner.fs.get_xattr(self.path_of(rel)?, name, follow)
 	}
@@ -1144,9 +1095,6 @@ impl Tree {
 			let name = sys::cstr(name.as_bytes())?;
 			return self.with_xattr_at(root, rel, follow, |at| sys::xattr_set(at, &name, value));
 		}
-		if self.xattrs_unsupported() {
-			return Err(err::unsupported());
-		}
 		self.inner.fs.set_xattr(self.path_of(rel)?, name, value, follow)
 	}
 
@@ -1156,9 +1104,6 @@ impl Tree {
 		if let Some(root) = self.native_root() {
 			let name = sys::cstr(name.as_bytes())?;
 			return self.with_xattr_at(root, rel, follow, |at| sys::xattr_remove(at, &name));
-		}
-		if self.xattrs_unsupported() {
-			return Err(err::unsupported());
 		}
 		self.inner.fs.remove_xattr(self.path_of(rel)?, name, follow)
 	}
@@ -1239,26 +1184,6 @@ fn chmod_nofollow(dir: BorrowedFd<'_>, name: &std::ffi::CStr, mode: u32) -> io::
 		}
 	}
 	sys::fchmodat(Some(dir), name, mode, true)
-}
-
-/// Sets a Windows file's creation time without following a final reparse
-/// point unless `follow`.
-#[cfg(windows)]
-fn set_creation_time(path: &Path, crtime: i64, follow: bool) -> io::Result<()> {
-	use std::os::windows::fs::{FileTimesExt, OpenOptionsExt};
-	const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
-	const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-	const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-	let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
-	if !follow {
-		flags |= FILE_FLAG_OPEN_REPARSE_POINT;
-	}
-	let file = std::fs::OpenOptions::new()
-		.access_mode(FILE_WRITE_ATTRIBUTES)
-		.custom_flags(flags)
-		.open(path)?;
-	let created = crate::rsync::time::system_time(crtime, 0).ok_or_else(err::invalid)?;
-	file.set_times(std::fs::FileTimes::new().set_created(created))
 }
 
 /// Upstream get_tmpname's basename for `name`: `.<name>.XXXXXX` (no leading
@@ -1376,8 +1301,8 @@ mod tests {
 	fn absolute_spellings() {
 		assert!(is_absolute_bytes(b"/x"));
 		assert!(!is_absolute_bytes(b"x/y"));
-		assert_eq!(is_absolute_bytes(b"C:\\x"), cfg!(windows));
-		assert_eq!(is_absolute_bytes(b"\\x"), cfg!(windows));
+		assert_eq!(is_absolute_bytes(b"C:\\x"), false);
+		assert_eq!(is_absolute_bytes(b"\\x"), false);
 		assert_eq!(elements(b"a//b/./c/"), vec![&b"a"[..], b"b", b".", b"c"]);
 	}
 

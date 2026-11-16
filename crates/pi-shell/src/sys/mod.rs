@@ -5,9 +5,7 @@
 //!   leads its own session or process group, or stays in the host's
 //!   ([`Sessions`]), via `posix_spawn` where possible; signals, `stop` and
 //!   `cont` go to the whole group (the pid alone in the host's); an abandoned
-//!   external gets TERM, then KILL after the grace. Windows: `CreateProcessW`
-//!   into a Job Object per job (pause via `NtSuspendProcess`, KILL via
-//!   `TerminateJobObject`, TERM via `CTRL_BREAK`). Leak checks list and kill
+//!   external gets TERM, then KILL after the grace. Leak checks list and kill
 //!   what survives a command.
 //! - [`StdFs`] and [`StdFile`]: the engine's [`Fs`](crate::bash::Fs) and
 //!   [`File`](crate::bash::File) over `std::fs`, always `Ready` (local
@@ -18,23 +16,15 @@
 //!   [`Exits::Park`].
 //! - `proc` (Unix): the process table, session and group membership,
 //!   identity-pinned signals.
-//! - [`pathext`]: Windows `PATHEXT` executable resolution.
 //! - [`shebang`]: `#!` parsing and the in-engine (`SelfShell`) mapping.
-//! - [`cmdline`]: Windows command-line quoting.
 //!
 //! Executors that sandbox or virtualize the filesystem wrap or replace these.
 
-pub mod cmdline;
-#[cfg(windows)]
-pub mod console;
 mod fs;
 mod fs_ops;
-#[cfg(any(windows, test))]
-mod job;
 pub mod langinfo;
 mod lifecycle;
 mod park;
-pub mod pathext;
 pub mod pcre;
 #[cfg(unix)]
 pub mod proc;
@@ -53,8 +43,6 @@ pub mod uname;
 pub mod user;
 pub mod utmp;
 
-#[cfg(windows)]
-pub(crate) use crate::sys::spawn::break_console_groups;
 pub use crate::sys::{
 	fs::{StdFile, StdFs, std_stream},
 	park::Parker,
@@ -63,12 +51,8 @@ pub use crate::sys::{
 };
 pub(crate) use crate::sys::{pump::End, relay::Relays};
 
-/// The C library's `PATH_MAX`, which zsh sizes path buffers by. Windows has
-/// no such limit for the engine's paths, so it takes Linux's.
-#[cfg(unix)]
+/// The C library's `PATH_MAX`, which zsh sizes path buffers by.
 pub const PATH_MAX: usize = libc::PATH_MAX as usize;
-#[cfg(not(unix))]
-pub const PATH_MAX: usize = 4096;
 
 #[cfg(test)]
 mod suites;

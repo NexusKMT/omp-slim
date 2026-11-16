@@ -3507,7 +3507,7 @@ use uucore::{
 };
 
 use crate::{
-	host::{Host, Utility, format_usage, rayon_global_pool_available},
+	host::{Host, Utility, format_usage},
 	locale::{collation_locale_failed, numeric_symbols, shell_collator, shell_locale},
 	sort::{
 		buffer_hint::automatic_buffer_size,
@@ -4985,7 +4985,6 @@ pub(crate) fn fd_soft_limit() -> Option<usize> {
 }
 
 #[cfg(any(
-	not(unix),
 	target_os = "redox",
 	target_os = "fuchsia",
 	target_os = "haiku",
@@ -5031,11 +5030,6 @@ pub(crate) fn current_open_fd_count() -> Option<usize> {
 		}
 	}
 	Some(count)
-}
-
-#[cfg(not(unix))]
-pub(crate) fn current_open_fd_count() -> Option<usize> {
-	None
 }
 
 const STDIN_FILE: &str = "-";
@@ -5263,14 +5257,7 @@ where
 }
 
 fn starts_with_plus(arg: &OsStr) -> bool {
-	#[cfg(unix)]
-	{
-		arg.as_bytes().first() == Some(&b'+')
-	}
-	#[cfg(not(unix))]
-	{
-		arg.to_string_lossy().starts_with('+')
-	}
+	arg.as_bytes().first() == Some(&b'+')
 }
 
 fn index_legacy_warnings(processed_args: &[OsString], legacy_warnings: &mut [LegacyKeyWarning]) {
@@ -6305,9 +6292,8 @@ fn sort_by<'a>(unsorted: &mut Vec<Line<'a>>, settings: &GlobalSettings, line_dat
 		compare_by(a, b, settings, line_data, line_data)
 	};
 	let stable = settings.stable || settings.unique;
-	// WASI has no threads (rayon's pool hits an unreachable trap there), and
-	// Windows leaves the global pool unavailable when pi-natives could not
-	// safely configure it under commit pressure; both sort sequentially.
+	// WASI has no threads (rayon's pool hits an unreachable trap there), so it
+	// sorts sequentially.
 	#[cfg(not(target_os = "wasi"))]
 	let sort_parallel = |unsorted: &mut Vec<Line<'a>>| {
 		if stable {
@@ -6320,7 +6306,7 @@ fn sort_by<'a>(unsorted: &mut Vec<Line<'a>>, settings: &GlobalSettings, line_dat
 		#[cfg(not(target_os = "wasi"))]
 		Parallelism::Pool(pool) => pool.install(|| sort_parallel(unsorted)),
 		#[cfg(not(target_os = "wasi"))]
-		Parallelism::Global if rayon_global_pool_available() => sort_parallel(unsorted),
+		Parallelism::Global => sort_parallel(unsorted),
 		_ if stable => unsorted.sort_by(cmp),
 		_ => unsorted.sort_unstable_by(cmp),
 	};
@@ -7207,15 +7193,8 @@ mod tests {
 
 	/// Whether the system can load `locale`; Unix sort falls back to the C
 	/// locale (as GNU does) for one that is not installed.
-	#[cfg(unix)]
 	fn locale_installed(locale: &str) -> bool {
 		locale_loadable(locale, nix::libc::LC_ALL_MASK)
-	}
-
-	/// Windows sort reads ICU's data for any locale name: nothing to install.
-	#[cfg(not(unix))]
-	fn locale_installed(_locale: &str) -> bool {
-		true
 	}
 
 	// Failure mode: collation used uucore's single collator, built from the

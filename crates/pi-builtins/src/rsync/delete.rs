@@ -564,7 +564,7 @@ impl Deleter {
 			}
 			let owned = match (st.uid(), self.our_uid) {
 				(Some(uid), Some(ours)) => uid == ours,
-				// No POSIX owners (Windows, some providers): everything is ours.
+				// No POSIX owners (some providers): everything is ours.
 				_ => true,
 			};
 			let entry = FileEntry {
@@ -804,14 +804,7 @@ fn is_not_empty(err: &io::Error) -> bool {
 	if err.kind() == io::ErrorKind::DirectoryNotEmpty {
 		return true;
 	}
-	#[cfg(unix)]
-	{
-		err.raw_os_error() == Some(libc::EEXIST)
-	}
-	#[cfg(not(unix))]
-	{
-		false
-	}
+	err.raw_os_error() == Some(libc::EEXIST)
 }
 
 /// upstream link_stat: lstat, or stat with `-L`; with `follow_dirlinks` a symlink to a

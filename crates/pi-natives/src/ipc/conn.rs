@@ -42,7 +42,7 @@ use tokio::sync::{
 use super::{
 	IpcError,
 	lines::{FrameTooLarge, LineBatch, LineReader, READ_CHUNK, Text},
-	platform::{self, Stream, WriteFinish},
+	platform::{self, Stream},
 };
 
 /// Queued-but-unwritten bytes above which `send` reports backpressure.
@@ -646,9 +646,7 @@ async fn drive(
 			let mut write = shared.write.lock();
 			if write.end_requested && !write.shut && write.frames.is_empty() {
 				write.shut = true;
-				if matches!(stream.finish_write(), Ok(WriteFinish::Closed)) {
-					return None;
-				}
+				let _ = stream.finish_write();
 			}
 			!write.shut && !write.frames.is_empty()
 		};

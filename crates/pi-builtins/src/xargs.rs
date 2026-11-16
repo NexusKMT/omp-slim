@@ -133,12 +133,6 @@ impl Clone for LimiterCollection {
 	}
 }
 
-#[cfg(windows)]
-fn count_osstr_chars_for_exec(s: &OsStr) -> usize {
-	use std::os::windows::ffi::OsStrExt;
-	// Include +1 for either the null terminator or trailing space.
-	s.encode_wide().count() + 1
-}
 
 #[cfg(unix)]
 fn count_osstr_chars_for_exec(s: &OsStr) -> usize {
@@ -159,12 +153,6 @@ impl MaxCharsCommandSizeLimiter {
 		Self { current_size: 0, max_chars, per_arg_overhead: 0 }
 	}
 
-	#[cfg(windows)]
-	fn new_system(_env: &HashMap<OsString, OsString>) -> MaxCharsCommandSizeLimiter {
-		// Taken from the CreateProcess docs.
-		const MAX_CMDLINE: usize = 32767;
-		MaxCharsCommandSizeLimiter::new(MAX_CMDLINE)
-	}
 
 	#[cfg(unix)]
 	fn new_system(env: &HashMap<OsString, OsString>) -> Self {

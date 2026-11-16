@@ -16,7 +16,7 @@
 //!
 //! `git worktree add` checks out every file of the target commit. pi-vcs
 //! instead copy-on-write clones the source checkout (APFS `clonefile`, Linux
-//! reflinks, Windows block cloning), registers the worktree metadata, and
+//! reflinks), registers the worktree metadata, and
 //! rewrites only the paths that differ from the target commit, so ignored build
 //! caches come along for free. Without a working clone backend it falls back to
 //! an in-process checkout.
@@ -59,20 +59,8 @@ pub const GIT_REPO_LOCATION_ENV_VARS: [&str; 6] = [
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
 ];
 
-/// Whether `key` is one of [`GIT_REPO_LOCATION_ENV_VARS`]. Windows
-/// environment lookups are case-insensitive, so `git_dir` binds there exactly
-/// like `GIT_DIR`; POSIX names are case-sensitive.
-#[cfg(windows)]
-pub fn is_git_repo_location_var(key: &str) -> bool {
-	GIT_REPO_LOCATION_ENV_VARS
-		.iter()
-		.any(|name| key.eq_ignore_ascii_case(name))
-}
-
-/// Whether `key` is one of [`GIT_REPO_LOCATION_ENV_VARS`]. Windows
-/// environment lookups are case-insensitive, so `git_dir` binds there exactly
-/// like `GIT_DIR`; POSIX names are case-sensitive.
-#[cfg(not(windows))]
+/// Whether `key` is one of [`GIT_REPO_LOCATION_ENV_VARS`]. Environment names
+/// are case-sensitive, so only the exact spellings bind.
 pub fn is_git_repo_location_var(key: &str) -> bool {
 	GIT_REPO_LOCATION_ENV_VARS.contains(&key)
 }
@@ -620,7 +608,6 @@ fn vacant(path: &Path) -> bool {
 /// The absolute, symlink-free spelling git records for a worktree: the
 /// deepest existing ancestor canonicalized, the missing tail appended.
 /// `None` when the missing tail climbs (`missing/../x`).
-#[cfg(not(windows))]
 fn physical_path(path: &Path) -> Option<PathBuf> {
 	let mut tail = Vec::new();
 	for ancestor in path.ancestors() {
@@ -633,13 +620,6 @@ fn physical_path(path: &Path) -> Option<PathBuf> {
 		}
 	}
 	None
-}
-
-/// Windows `canonicalize` yields verbatim (`\\?\`) paths git never writes;
-/// `absolute` resolves `.` and `..` the way git's own normalization does.
-#[cfg(windows)]
-fn physical_path(path: &Path) -> Option<PathBuf> {
-	std::path::absolute(path).ok()
 }
 
 #[cfg(test)]

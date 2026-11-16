@@ -475,7 +475,6 @@ impl<'a> StyleManager<'a> {
 		None
 	}
 
-	#[cfg(unix)]
 	fn indicator_for_file(&self, path: &PathData) -> Option<Indicator> {
 		if self.needs_file_metadata()
 			&& let Some(metadata) = path.metadata()
@@ -504,16 +503,6 @@ impl<'a> StyleManager<'a> {
 		}
 	}
 
-	#[cfg(not(unix))]
-	fn indicator_for_file(&self, _path: &PathData) -> Option<Indicator> {
-		if self.has_indicator_style(Indicator::RegularFile) {
-			Some(Indicator::RegularFile)
-		} else {
-			None
-		}
-	}
-
-	#[cfg(unix)]
 	fn indicator_for_directory(&self, path: &PathData) -> Option<Indicator> {
 		if self.needs_dir_metadata()
 			&& let Some(metadata) = path.metadata()
@@ -539,16 +528,6 @@ impl<'a> StyleManager<'a> {
 		}
 	}
 
-	#[cfg(not(unix))]
-	fn indicator_for_directory(&self, _path: &PathData) -> Option<Indicator> {
-		if self.has_indicator_style(Indicator::Directory) {
-			Some(Indicator::Directory)
-		} else {
-			None
-		}
-	}
-
-	#[cfg(unix)]
 	fn indicator_for_special_file(&self, file_type: FileType) -> Option<Indicator> {
 		if file_type.is_fifo() && self.has_indicator_style(Indicator::FIFO) {
 			return Some(Indicator::FIFO);
@@ -565,12 +544,6 @@ impl<'a> StyleManager<'a> {
 		None
 	}
 
-	#[cfg(not(unix))]
-	fn indicator_for_special_file(&self, _file_type: FileType) -> Option<Indicator> {
-		None
-	}
-
-	#[cfg(unix)]
 	fn needs_file_metadata(&self) -> bool {
 		self.has_indicator_style(Indicator::Setuid)
 			|| self.has_indicator_style(Indicator::Setgid)
@@ -578,7 +551,6 @@ impl<'a> StyleManager<'a> {
 			|| self.has_indicator_style(Indicator::MultipleHardLinks)
 	}
 
-	#[cfg(unix)]
 	fn needs_dir_metadata(&self) -> bool {
 		self.has_indicator_style(Indicator::StickyAndOtherWritable)
 			|| self.has_indicator_style(Indicator::OtherWritable)
@@ -693,7 +665,6 @@ pub(crate) fn style_for<'c, 'm>(
 	colors.style_for_indicator(indicator)
 }
 
-#[cfg(unix)]
 fn file_indicator<'m>(
 	colors: &LsColors,
 	metadata: impl FnOnce() -> Option<&'m Metadata>,
@@ -724,16 +695,6 @@ fn file_indicator<'m>(
 	Indicator::RegularFile
 }
 
-/// Without Unix mode bits or link counts only the plain file style applies.
-#[cfg(not(unix))]
-fn file_indicator<'m>(
-	_colors: &LsColors,
-	_metadata: impl FnOnce() -> Option<&'m Metadata>,
-) -> Indicator {
-	Indicator::RegularFile
-}
-
-#[cfg(unix)]
 fn dir_indicator<'m>(
 	colors: &LsColors,
 	metadata: impl FnOnce() -> Option<&'m Metadata>,
@@ -760,15 +721,6 @@ fn dir_indicator<'m>(
 	Indicator::Directory
 }
 
-#[cfg(not(unix))]
-fn dir_indicator<'m>(
-	_colors: &LsColors,
-	_metadata: impl FnOnce() -> Option<&'m Metadata>,
-) -> Indicator {
-	Indicator::Directory
-}
-
-#[cfg(unix)]
 fn special_indicator(file_type: FileType) -> Indicator {
 	if file_type.is_fifo() {
 		Indicator::FIFO
@@ -782,11 +734,6 @@ fn special_indicator(file_type: FileType) -> Indicator {
 		// Files of unknown type are treated as errors.
 		Indicator::MissingFile
 	}
-}
-
-#[cfg(not(unix))]
-fn special_indicator(_file_type: FileType) -> Indicator {
-	Indicator::MissingFile
 }
 
 #[derive(Debug)]
@@ -1229,7 +1176,7 @@ pub struct Config {
 	pub(crate) alloc_size: bool,
 	pub(crate) file_size_block_size: u64,
 	#[allow(dead_code)]
-	pub(crate) block_size: u64, // is never read on Windows
+	pub(crate) block_size: u64,
 	pub(crate) width: u16,
 	// Dir and vdir needs access to this field
 	pub quoting_style: QuotingStyle,
@@ -2867,10 +2814,7 @@ fn display_dir_entry_size(
 			},
 			SizeOrDeviceId::Size(size) => (size.len(), 0usize, 0usize),
 		};
-		#[cfg(unix)]
 		let nlink_len = md.nlink().map_or(1, digits);
-		#[cfg(not(unix))]
-		let nlink_len = display_symlink_count(md).len();
 		(
 			nlink_len,
 			display_uname(md, config, &mut state.uid_cache).len(),
@@ -2884,7 +2828,6 @@ fn display_dir_entry_size(
 	}
 }
 
-#[cfg(unix)]
 fn digits(num: u64) -> usize {
 	(num.checked_ilog10().unwrap_or(0) + 1) as usize
 }
@@ -2939,10 +2882,7 @@ pub fn display_items(
 		let padding_collection = calculate_padding_collection(items, config, state);
 
 		for item in items {
-			#[cfg(unix)]
 			let should_display_leading_info = config.inode || config.alloc_size;
-			#[cfg(not(unix))]
-			let should_display_leading_info = config.alloc_size;
 
 			if should_display_leading_info {
 				display_additional_leading_info(item, &padding_collection, config, &mut state.out)?;
@@ -2971,10 +2911,7 @@ pub fn display_items(
 
 		let mut names_vec = Vec::with_capacity(items.len());
 
-		#[cfg(unix)]
 		let should_display_leading_info = config.inode || config.alloc_size;
-		#[cfg(not(unix))]
-		let should_display_leading_info = config.alloc_size;
 
 		for i in items {
 			let more_info = if should_display_leading_info {
@@ -3159,7 +3096,6 @@ fn display_additional_leading_info(
 
 // Currently getpwuid is `linux` target only. If it's broken state.out into
 // a posix-compliant attribute this can be updated...
-#[cfg(unix)]
 fn display_uname<'a>(
 	metadata: &Metadata,
 	config: &Config,
@@ -3179,7 +3115,6 @@ fn display_uname<'a>(
 	})
 }
 
-#[cfg(unix)]
 fn display_group<'a>(
 	metadata: &Metadata,
 	config: &Config,
@@ -3195,16 +3130,6 @@ fn display_group<'a>(
 			entries::gid2grp(gid).unwrap_or_else(|_| gid.to_string())
 		}
 	})
-}
-
-#[cfg(not(unix))]
-fn display_uname(_metadata: &Metadata, _config: &Config, _uid_cache: &mut ()) -> &'static str {
-	"somebody"
-}
-
-#[cfg(not(unix))]
-fn display_group(_metadata: &Metadata, _config: &Config, _gid_cache: &mut ()) -> &'static str {
-	"somegroup"
 }
 
 fn display_date(
@@ -3516,7 +3441,7 @@ fn display_item_long(
 		state.display_buf.extend(b"  ");
 	}
 	if let Some(md) = item.metadata() {
-		#[cfg(any(not(unix), target_os = "android", target_os = "macos"))]
+		#[cfg(any(target_os = "android", target_os = "macos"))]
 		// TODO: See how Mac should work here
 		let is_acl_set = false;
 		#[cfg(all(unix, not(any(target_os = "android", target_os = "macos"))))]
@@ -3584,9 +3509,6 @@ fn display_item_long(
 				state.display_buf.push(b' ');
 				state.display_buf.extend_pad_left(
 					&major,
-					#[cfg(not(unix))]
-					0usize,
-					#[cfg(unix)]
 					padding.major.max(
 						padding
 							.size
@@ -3594,13 +3516,7 @@ fn display_item_long(
 					),
 				);
 				state.display_buf.extend(b", ");
-				state.display_buf.extend_pad_left(
-					&minor,
-					#[cfg(not(unix))]
-					0usize,
-					#[cfg(unix)]
-					padding.minor,
-				);
+				state.display_buf.extend_pad_left(&minor, padding.minor);
 			},
 		}
 
@@ -3641,7 +3557,6 @@ fn display_item_long(
 		write_os_str(&mut state.display_buf, &displayed_item)?;
 		state.display_buf.push(config.line_ending as u8);
 	} else {
-		#[cfg(unix)]
 		let leading_char = {
 			if let Some(ft) = item.file_type() {
 				if ft.is_char_device() {
@@ -3649,22 +3564,6 @@ fn display_item_long(
 				} else if ft.is_block_device() {
 					'b'
 				} else if ft.is_symlink() {
-					'l'
-				} else if ft.is_dir() {
-					'd'
-				} else {
-					'-'
-				}
-			} else if item.is_dangling_link() {
-				'l'
-			} else {
-				'-'
-			}
-		};
-		#[cfg(not(unix))]
-		let leading_char = {
-			if let Some(ft) = item.file_type() {
-				if ft.is_symlink() {
 					'l'
 				} else if ft.is_dir() {
 					'd'
@@ -3753,70 +3652,33 @@ fn classify_file(path: &PathData) -> Option<char> {
 		Some('/')
 	} else if file_type.is_symlink() {
 		Some('@')
+	} else if file_type.is_socket() {
+		Some('=')
+	} else if file_type.is_fifo() {
+		Some('|')
+		// Safe unwrapping if the file was removed between listing and
+		// display See https://github.com/uutils/coreutils/issues/5371
+	} else if path.is_executable_file() {
+		Some('*')
 	} else {
-		#[cfg(unix)]
-		{
-			if file_type.is_socket() {
-				Some('=')
-			} else if file_type.is_fifo() {
-				Some('|')
-				// Safe unwrapping if the file was removed between listing and
-				// display See https://github.com/uutils/coreutils/issues/5371
-			} else if path.is_executable_file() {
-				Some('*')
-			} else {
-				None
-			}
-		}
-		#[cfg(not(unix))]
 		None
 	}
 }
 
 fn create_hyperlink(name: &OsStr, path: &PathData) -> OsString {
 	static HOSTNAME: LazyLock<OsString> = LazyLock::new(|| {
-		#[cfg(unix)]
-		{
-			use std::os::unix::ffi::OsStringExt;
+		use std::os::unix::ffi::OsStringExt;
 
-			let limit = unsafe { uucore::libc::sysconf(uucore::libc::_SC_HOST_NAME_MAX) }.max(255);
-			let mut buffer = vec![0; limit as usize + 1];
-			if unsafe {
-				uucore::libc::gethostname(buffer.as_mut_ptr().cast(), limit as usize)
-			} != 0
-			{
-				return OsString::new();
-			}
-			buffer.truncate(buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len()));
-			OsString::from_vec(buffer)
-		}
-		#[cfg(windows)]
+		let limit = unsafe { uucore::libc::sysconf(uucore::libc::_SC_HOST_NAME_MAX) }.max(255);
+		let mut buffer = vec![0; limit as usize + 1];
+		if unsafe {
+			uucore::libc::gethostname(buffer.as_mut_ptr().cast(), limit as usize)
+		} != 0
 		{
-			use std::os::windows::ffi::OsStringExt;
-			use windows_sys::Win32::System::SystemInformation::{
-				ComputerNamePhysicalDnsHostname, GetComputerNameExW,
-			};
-
-			let mut size = 0;
-			unsafe {
-				GetComputerNameExW(ComputerNamePhysicalDnsHostname, std::ptr::null_mut(), &mut size);
-			}
-			if size == 0 {
-				return OsString::new();
-			}
-			let mut buffer = Vec::with_capacity(size as usize);
-			if unsafe {
-				GetComputerNameExW(ComputerNamePhysicalDnsHostname, buffer.as_mut_ptr(), &mut size)
-			} == 0
-			{
-				return OsString::new();
-			}
-			// Only the code units written by the API become initialized elements.
-			unsafe { buffer.set_len(size as usize) };
-			OsString::from_wide(&buffer)
+			return OsString::new();
 		}
-		#[cfg(not(any(unix, windows)))]
-		OsString::new()
+		buffer.truncate(buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len()));
+		OsString::from_vec(buffer)
 	});
 
 	// OSC 8 hyperlink format: \x1b]8;;URL\x1b\\TEXT\x1b]8;;\x1b\\
@@ -3846,11 +3708,8 @@ fn create_hyperlink(name: &OsStr, path: &PathData) -> OsString {
 	}
 
 	// a set of safe ASCII bytes that don't need encoding
-	#[cfg(not(target_os = "windows"))]
 	let unencoded =
 		|c: char| matches!(c, '_' | '-' | '.' | '~' | '/') || (is_virtual && c == ':');
-	#[cfg(target_os = "windows")]
-	let unencoded = |c| matches!(c, '_' | '-' | '.' | '~' | '/' | '\\' | ':');
 
 	for &b in absolute_path.as_os_str().as_encoded_bytes() {
 		if b.is_ascii_alphanumeric() || unencoded(b as char) {
@@ -3877,17 +3736,6 @@ fn has_acl(item: &PathData) -> bool {
 }
 
 fn is_hidden(file_path: &DirEntry) -> bool {
-	#[cfg(windows)]
-	{
-		// `FILE_ATTRIBUTE_HIDDEN`; entries without Windows attributes (virtual
-		// providers) follow the dotfile convention.
-		match file_path.metadata().map(|metadata| metadata.file_attributes()) {
-			Ok(Some(attributes)) => attributes & 0x2 != 0,
-			Ok(None) => file_path.file_name().as_encoded_bytes().starts_with(b"."),
-			Err(_) => false,
-		}
-	}
-	#[cfg(not(windows))]
 	{
 		file_path.file_name().as_encoded_bytes().starts_with(b".")
 	}
@@ -3903,7 +3751,6 @@ fn update_dired_for_item(
 	dired::calculate_and_update_positions(dired, output_display_len, dired_name_len, line_len);
 }
 
-#[cfg(unix)]
 fn display_symlink_count(metadata: &Metadata) -> String {
 	metadata
 		.nlink()
@@ -3917,7 +3764,6 @@ fn display_inode(metadata: &Metadata) -> impl Display {
 		.map_or_else(|| "?".to_string(), |ino| ino.to_string())
 }
 
-#[cfg(unix)]
 fn calculate_padding_collection(
 	items: &[PathData],
 	config: &Config,
@@ -3975,7 +3821,7 @@ fn calculate_padding_collection(
 			// correctly align columns when some files have capabilities/ACLs and others do
 			// not
 			{
-				#[cfg(any(not(unix), target_os = "android", target_os = "macos"))]
+				#[cfg(any(target_os = "android", target_os = "macos"))]
 				// TODO: See how Mac should work here
 				let is_acl_set = false;
 				#[cfg(all(unix, not(any(target_os = "android", target_os = "macos"))))]
@@ -3997,52 +3843,6 @@ fn calculate_padding_collection(
 					.max(padding_collections.major);
 			}
 		}
-	}
-
-	padding_collections
-}
-
-#[cfg(not(unix))]
-fn display_symlink_count(_metadata: &Metadata) -> String {
-	// Currently not sure of how to get this on Windows, so I'm punting.
-	// Git Bash looks like it may do the same thing.
-	String::from("1")
-}
-
-#[cfg(not(unix))]
-fn calculate_padding_collection(
-	items: &[PathData],
-	config: &Config,
-	state: &mut ListState,
-) -> PaddingCollection {
-	let mut padding_collections = PaddingCollection {
-		link_count: 1,
-		uname:      1,
-		group:      1,
-		file_flags: 1,
-		context:    1,
-		size:       1,
-		block_size: 1,
-	};
-
-	for item in items {
-		if config.alloc_size {
-			if let Some(size) = item.metadata().and_then(|md| get_block_size(md, config)) {
-				let block_size_len = display_size(size, config).len();
-				padding_collections.block_size = block_size_len.max(padding_collections.block_size);
-			}
-		}
-
-		let context_len = item.security_context(config).len();
-		let (link_count_len, uname_len, group_len, size_len, _major_len, _minor_len) =
-			display_dir_entry_size(item, config, state);
-		padding_collections.link_count = link_count_len.max(padding_collections.link_count);
-		padding_collections.uname = uname_len.max(padding_collections.uname);
-		padding_collections.group = group_len.max(padding_collections.group);
-		if config.context {
-			padding_collections.context = context_len.max(padding_collections.context);
-		}
-		padding_collections.size = size_len.max(padding_collections.size);
 	}
 
 	padding_collections
@@ -5106,7 +4906,6 @@ impl<'a> PathData<'a> {
 		self.must_dereference && self.file_type().is_none() && self.metadata().is_none()
 	}
 
-	#[cfg(unix)]
 	fn is_executable_file(&self) -> bool {
 		self.file_type().is_some_and(|ft| ft.is_file())
 			&& self.metadata().is_some_and(file_is_executable)
@@ -5141,7 +4940,6 @@ impl<'a> PathData<'a> {
 type DirData = (PathBuf, bool);
 
 // A struct to encapsulate state that is passed around from `list` functions.
-#[cfg_attr(not(unix), allow(dead_code))]
 struct ListState<'a> {
 	out:               StreamWriter,
 	style_manager:     Option<StyleManager<'a>>,
@@ -5150,14 +4948,8 @@ struct ListState<'a> {
 	// number of users/groups is very limited. It seems like nohash::IntMap
 	// performance was equivalent to BTreeMap.
 	// It's possible a simple vector linear(binary?) search implementation would be even faster.
-	#[cfg(unix)]
 	uid_cache:         FxHashMap<u32, String>,
-	#[cfg(unix)]
 	gid_cache:         FxHashMap<u32, String>,
-	#[cfg(not(unix))]
-	uid_cache:         (),
-	#[cfg(not(unix))]
-	gid_cache:         (),
 	recent_time_range: RangeInclusive<SystemTime>,
 	stack:             Vec<DirData>,
 	listed_ancestors:  FxHashSet<DirIdentity>,
@@ -5180,14 +4972,8 @@ pub fn list(locs: Vec<&Path>, config: &Config, out: StreamWriter) -> std::io::Re
 			.color
 			.as_ref()
 			.map(|colors| StyleManager::new(colors, config.ls_colors.as_deref())),
-		#[cfg(unix)]
 		uid_cache: FxHashMap::default(),
-		#[cfg(unix)]
 		gid_cache: FxHashMap::default(),
-		#[cfg(not(unix))]
-		uid_cache: (),
-		#[cfg(not(unix))]
-		gid_cache: (),
 		// Time range for which to use the "recent" format. Anything from 0.5 year in the past to now
 		// (files with modification time in the future use "old" format).
 		// According to GNU a Gregorian year has 365.2425 * 24 * 60 * 60 == 31556952 seconds on the
@@ -5604,33 +5390,23 @@ fn write_total<W: Write>(
 
 /// Allocated size shown by `-s` and `total`; `None` when the provider does
 /// not report block counts.
-#[allow(unused_variables)]
 fn get_block_size(md: &Metadata, config: &Config) -> Option<u64> {
 	/* GNU ls will display sizes in terms of block size
 		md.len() will differ from this value when the file has some holes
 	*/
-	#[cfg(unix)]
-	{
-		use uucore::format::human::SizeFormat;
+	use uucore::format::human::SizeFormat;
 
-		let raw_blocks = if md.file_type().is_char_device() || md.file_type().is_block_device() {
-			0u64
-		} else {
-			md.blocks()? * 512
-		};
-		Some(match config.size_format {
-			SizeFormat::Binary | SizeFormat::Decimal => raw_blocks,
-			SizeFormat::Bytes => raw_blocks / config.block_size,
-		})
-	}
-	#[cfg(not(unix))]
-	{
-		// no way to get block size for windows, fall-back to file size
-		Some(md.len())
-	}
+	let raw_blocks = if md.file_type().is_char_device() || md.file_type().is_block_device() {
+		0u64
+	} else {
+		md.blocks()? * 512
+	};
+	Some(match config.size_format {
+		SizeFormat::Binary | SizeFormat::Decimal => raw_blocks,
+		SizeFormat::Bytes => raw_blocks / config.block_size,
+	})
 }
 
-#[cfg(unix)]
 fn file_is_executable(md: &Metadata) -> bool {
 	// Mode always returns u32, but the flags might not be, based on the platform
 	// e.g. linux has u32, mac has u16.
@@ -5699,22 +5475,6 @@ mod integration_tests {
 		assert_eq!(capture.out(), "visible-name\n");
 	}
 
-	#[cfg(windows)]
-	#[test]
-	fn resolves_msys_drive_alias_operands() {
-		let dir = tempfile::tempdir().unwrap();
-		File::create(dir.path().join("visible-name")).unwrap();
-		let native = dir.path().to_string_lossy().replace('\\', "/");
-		let (drive, tail) = native
-			.split_once(":/")
-			.unwrap_or_else(|| panic!("expected drive-qualified temp path, got {native:?}"));
-		let alias = format!("/{}/{}", drive.to_ascii_lowercase(), tail);
-
-		let (code, capture) = run_util::<Ls>(&[&alias], "", dir.path());
-
-		assert_eq!(code, 0);
-		assert_eq!(capture.out(), "visible-name\n");
-	}
 
 	#[test]
 	fn reads_quoting_style_from_the_shell_environment() {

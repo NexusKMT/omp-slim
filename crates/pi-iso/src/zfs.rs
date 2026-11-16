@@ -9,8 +9,6 @@ use std::path::Path;
 
 use async_trait::async_trait;
 
-#[cfg(not(unix))]
-use crate::IsoError;
 use crate::{BackendKind, IsoResult, IsolationBackend, ProbeResult};
 
 pub struct ZfsBackend;
@@ -26,42 +24,18 @@ impl IsolationBackend for ZfsBackend {
 	}
 
 	fn probe(&self) -> ProbeResult {
-		#[cfg(unix)]
-		{
-			imp::probe()
-		}
-		#[cfg(not(unix))]
-		{
-			ProbeResult::unavailable("ZFS clone isolation is only available on Unix platforms")
-		}
+		imp::probe()
 	}
 
 	fn start(&self, lower: &Path, merged: &Path) -> IsoResult<()> {
-		#[cfg(unix)]
-		{
-			imp::start(lower, merged)
-		}
-		#[cfg(not(unix))]
-		{
-			let _ = (lower, merged);
-			Err(IsoError::unavailable("ZFS clone isolation is only available on Unix platforms"))
-		}
+		imp::start(lower, merged)
 	}
 
 	fn stop(&self, merged: &Path) -> IsoResult<()> {
-		#[cfg(unix)]
-		{
-			imp::stop(merged)
-		}
-		#[cfg(not(unix))]
-		{
-			let _ = merged;
-			Ok(())
-		}
+		imp::stop(merged)
 	}
 }
 
-#[cfg(unix)]
 mod imp {
 	use std::{
 		fs, io,

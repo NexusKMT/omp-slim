@@ -713,17 +713,9 @@ pub(crate) fn parse(argv: &[std::ffi::OsString], env: &dyn Fn(&str) -> Option<St
 	after_parse(parsed)
 }
 
-/// Upstream initializes `am_root` from the real uid before parsing. Windows has no
-/// POSIX root, so the process is never am_root there.
+/// Upstream initializes `am_root` from the real uid before parsing.
 fn process_am_root() -> i32 {
-	#[cfg(unix)]
-	{
-		i32::from(rustix::process::getuid().is_root())
-	}
-	#[cfg(not(unix))]
-	{
-		0
-	}
+	i32::from(rustix::process::getuid().is_root())
 }
 
 /// Server side of `-s`: parses the secluded argv (without its "rsync" arg0) on top
@@ -1507,7 +1499,7 @@ impl<'e> Parser<'e> {
 		if let Some(root) = self.o.confine_root.clone() {
 			if self.o.am_daemon {
 				self.o.confine_root = None;
-			} else if !is_absolute_operator_path(&os_bytes_lossy(&root), cfg!(windows)) {
+			} else if os_bytes_lossy(&root).first() != Some(&b'/') {
 				return Err(self.option_error("--confine-root must be an absolute path"));
 			} else if self.o.insecure_links {
 				return Err(self.option_error("--insecure-links cannot be combined with --confine-root"));
@@ -1696,7 +1688,7 @@ impl<'e> Parser<'e> {
 			if self.o.am_server {
 				self.o.filesfrom_host = Some(OsString::new());
 			}
-		} else if let Some((host, path)) = files_from_hostspec(name, cfg!(windows)) {
+		} else if let Some((host, path)) = files_from_hostspec(name) {
 			if self.o.am_server {
 				return Err(self.option_error("The --files-from sent to the server cannot specify a host."));
 			}
@@ -2135,28 +2127,8 @@ pub(crate) fn log_format_has(format: &[u8], esc: u8) -> bool {
 	false
 }
 
-/// A local Windows drive-letter or UNC path; `HOST::MODULE` remains remote.
-fn is_windows_local_path(p: &[u8]) -> bool {
-	(p.len() >= 2 && p[0].is_ascii_alphabetic() && p[1] == b':' && p.get(2) != Some(&b':')) || p.starts_with(b"\\\\")
-}
-
-/// `--confine-root` absoluteness: a leading '/'; on Windows also a leading '\',
-/// `C:\`/`C:/`, or a UNC path.
-fn is_absolute_operator_path(p: &[u8], windows: bool) -> bool {
-	if p.first() == Some(&b'/') {
-		return true;
-	}
-	windows
-		&& (p.first() == Some(&b'\\')
-			|| (p.len() >= 3 && p[0].is_ascii_alphabetic() && p[1] == b':' && matches!(p[2], b'/' | b'\\')))
-}
-
-/// The host part of a `--files-from` value, if it names one (Windows local
-/// drive/UNC paths never do).
-fn files_from_hostspec(name: &[u8], windows: bool) -> Option<(Vec<u8>, &[u8])> {
-	if windows && is_windows_local_path(name) {
-		return None;
-	}
+/// The host part of a `--files-from` value, if it names one.
+fn files_from_hostspec(name: &[u8]) -> Option<(Vec<u8>, &[u8])> {
 	check_for_hostspec(name)
 }
 

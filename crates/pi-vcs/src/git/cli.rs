@@ -195,14 +195,6 @@ pub(crate) fn detach_from_terminal(cmd: &mut std::process::Command) {
 	std::os::unix::process::CommandExt::setsid(cmd, true);
 }
 
-#[cfg(not(unix))]
-#[allow(
-	clippy::needless_pass_by_ref_mut,
-	reason = "no controlling terminal to detach from off unix; the signature matches the unix \
-	          variant"
-)]
-pub(crate) const fn detach_from_terminal(_cmd: &mut std::process::Command) {}
-
 /// Run `git` asynchronously with bounded capture and a deadline.
 /// Non-zero exits are returned in [`CliOutput`], not raised.
 pub(crate) async fn run(cwd: &Path, args: &[String], options: &RunOptions) -> Result<CliOutput> {

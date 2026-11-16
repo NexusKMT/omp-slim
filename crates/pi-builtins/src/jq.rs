@@ -564,9 +564,6 @@ def tonumber: tonumber_;
 		}
 		rel.set_extension(ext);
 
-		#[cfg(target_os = "windows")]
-		let home = "USERPROFILE";
-		#[cfg(not(target_os = "windows"))]
 		let home = "HOME";
 
 		let home = || std::env::var_os(home).map(PathBuf::from);

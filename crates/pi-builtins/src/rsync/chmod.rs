@@ -80,13 +80,10 @@ pub(crate) struct ChmodRules {
 
 impl ChmodRules {
 	/// Parses one `--chmod` argument and appends its clauses to `prior` (multiple
-	/// `--chmod` options accumulate). Who-less clauses honor the host process umask
-	/// (`0o022` on Windows). The error is upstream's message, without a trailing newline.
+	/// `--chmod` options accumulate). Who-less clauses honor the host process umask.
+	/// The error is upstream's message, without a trailing newline.
 	pub(crate) fn parse(spec: &str, prior: Option<Self>) -> Result<Self, String> {
-		#[cfg(unix)]
 		let umask = crate::host::process_umask();
-		#[cfg(not(unix))]
-		let umask = 0o022;
 		Self::parse_with_umask(spec, prior, umask)
 	}
 

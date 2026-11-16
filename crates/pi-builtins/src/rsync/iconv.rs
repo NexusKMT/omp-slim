@@ -10,9 +10,7 @@
 //! incomplete sequences fail the conversion (no lossy substitution), which
 //! callers report per file as `[%s] cannot convert filename: %s (%s)`.
 //!
-//! Unix uses the C library's `iconv(3)` (libiconv on macOS). Windows has no
-//! iconv: the type exists so the engine compiles, but [`Iconv::with_locale`] fails the
-//! way a build without ICONV_OPTION does (options already refuse `--iconv`).
+//! The conversion uses the C library's `iconv(3)` (libiconv on macOS).
 
 use std::io;
 
@@ -111,13 +109,6 @@ impl Iconv {
 		Ok(Self { charset, send, recv })
 	}
 
-	/// No iconv on this platform: upstream's refusal of an option a build lacks.
-	#[cfg(not(unix))]
-	fn open(charset: String) -> Result<Self, RsyncError> {
-		let _ = charset;
-		Err(RsyncError::new(RERR_UNSUPPORTED, "This rsync does not support --iconv".to_owned()))
-	}
-
 	/// The `--debug=ICONV1` line: `[%s] charset: %s` (`[LOCALE]` for iconv's default).
 	pub(crate) fn debug_line(&self, who: &str) -> String {
 		let shown = if self.charset.is_empty() { "[LOCALE]" } else { self.charset.as_str() };
@@ -127,24 +118,12 @@ impl Iconv {
 	/// Local charset → UTF-8 (`ic_send`); the error carries the errno (EILSEQ,
 	/// EINVAL for a truncated sequence).
 	pub(crate) fn to_wire_io(&self, name: &[u8]) -> io::Result<Vec<u8>> {
-		#[cfg(unix)]
-		return self.send.convert(name);
-		#[cfg(not(unix))]
-		{
-			let _ = name;
-			Err(io::ErrorKind::Unsupported.into())
-		}
+		self.send.convert(name)
 	}
 
 	/// UTF-8 → local charset (`ic_recv`).
 	pub(crate) fn from_wire_io(&self, name: &[u8]) -> io::Result<Vec<u8>> {
-		#[cfg(unix)]
-		return self.recv.convert(name);
-		#[cfg(not(unix))]
-		{
-			let _ = name;
-			Err(io::ErrorKind::Unsupported.into())
-		}
+		self.recv.convert(name)
 	}
 
 	/// [`Iconv::from_wire_io`] as an `RsyncError` whose message is

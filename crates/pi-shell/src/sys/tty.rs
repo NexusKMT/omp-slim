@@ -1,8 +1,7 @@
 //! Terminal system calls behind the engine's [`Terminal`] seam.
 //!
 //! - [`NativeTerminal`]: the process host's [`Terminal`] over the real
-//!   terminals of this process (Unix), or over its console (Windows,
-//!   [`crate::sys::console`]).
+//!   terminals of this process.
 //! - [`TermiosGuard`]: saves a terminal's modes and puts them back when dropped
 //!   (optionally switching it to raw mode first).
 //! - Free functions over raw descriptors (`attrs`, `set_attrs`, `window_size`,
@@ -641,11 +640,6 @@ pub struct NativeTerminal {
 	/// The device of the terminal [`Terminal::open_controlling`] opened.
 	#[cfg(unix)]
 	shtty:   Option<libc::dev_t>,
-	/// The console (whose modes always go back: it is shared with the
-	/// shell that started this one).
-	#[cfg(windows)]
-	console: crate::sys::console::WindowsConsole,
-	#[cfg_attr(not(unix), expect(dead_code, reason = "the console is always restored"))]
 	restore: bool,
 }
 
@@ -659,8 +653,6 @@ impl NativeTerminal {
 			guards: Vec::new(),
 			#[cfg(unix)]
 			shtty: None,
-			#[cfg(windows)]
-			console: crate::sys::console::WindowsConsole::new(),
 			restore,
 		}
 	}
@@ -770,60 +762,5 @@ impl Terminal for NativeTerminal {
 	fn open_pty(&mut self, size: Option<TtyInfo>) -> io::Result<Pty> {
 		let (master, slave, name) = open_pty(size)?;
 		Ok(Pty { master: file(master), slave: file(slave), name })
-	}
-}
-
-#[cfg(windows)]
-impl Terminal for NativeTerminal {
-	fn is_terminal(&self, h: OsHandle) -> bool {
-		self.console.is_terminal(h)
-	}
-
-	fn attrs(&self, h: OsHandle) -> io::Result<Termios> {
-		self.console.attrs(h)
-	}
-
-	fn set_attrs(&mut self, h: OsHandle, attrs: &Termios, when: SetWhen) -> io::Result<()> {
-		self.console.set_attrs(h, attrs, when)
-	}
-
-	fn size(&self, h: OsHandle) -> io::Result<TtyInfo> {
-		self.console.size(h)
-	}
-
-	fn set_size(&mut self, h: OsHandle, size: TtyInfo) -> io::Result<()> {
-		self.console.set_size(h, size)
-	}
-
-	fn foreground(&self, h: OsHandle) -> io::Result<i32> {
-		self.console.foreground(h)
-	}
-
-	fn set_foreground(&mut self, h: OsHandle, pgid: i32) -> io::Result<()> {
-		self.console.set_foreground(h, pgid)
-	}
-
-	fn session(&self, h: OsHandle) -> io::Result<i32> {
-		self.console.session(h)
-	}
-
-	fn name(&self, h: OsHandle) -> io::Result<BString> {
-		self.console.name(h)
-	}
-
-	fn process_group(&self) -> i32 {
-		self.console.process_group()
-	}
-
-	fn set_process_group(&mut self, pid: i32, pgid: i32) -> io::Result<()> {
-		self.console.set_process_group(pid, pgid)
-	}
-
-	fn open_controlling(&mut self) -> io::Result<Option<Shtty>> {
-		self.console.open_controlling()
-	}
-
-	fn open_pty(&mut self, size: Option<TtyInfo>) -> io::Result<Pty> {
-		self.console.open_pty(size)
 	}
 }

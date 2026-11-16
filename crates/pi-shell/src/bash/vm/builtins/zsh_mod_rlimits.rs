@@ -34,12 +34,8 @@ use crate::bash::{
 };
 
 /// The platform's `RLIM_INFINITY` as zsh compares values (`rlim_t`).
-#[cfg(unix)]
 #[allow(clippy::unnecessary_cast, reason = "rlim_t is u64 on 64-bit targets only")]
 const INF: u64 = libc::RLIM_INFINITY as u64;
-/// The platform's `RLIM_INFINITY` as zsh compares values (`rlim_t`).
-#[cfg(not(unix))]
-const INF: u64 = u64::MAX;
 
 /// zsh `enum zlimtype`.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -271,29 +267,18 @@ fn cant_read(ctx: &mut Ctx<'_, '_>, e: io::Error) {
 
 /// `getrlimit` of resource number `lim` past `RLIM_NLIMITS`: `EINVAL`.
 fn einval() -> io::Error {
-	#[cfg(unix)]
-	return io::Error::from_raw_os_error(libc::EINVAL);
-	#[cfg(not(unix))]
-	return io::ErrorKind::InvalidInput.into();
+	io::Error::from_raw_os_error(libc::EINVAL)
 }
 
 /// What `setrlimit(2)` says to `new` given the process's `cur`.
 fn setrlimit_check(new: Lim, cur: Lim, euid: u32) -> io::Result<()> {
-	#[cfg(unix)]
-	{
-		if new.cur > new.max {
-			return Err(io::Error::from_raw_os_error(libc::EINVAL));
-		}
-		if new.max > cur.max && euid != 0 {
-			return Err(io::Error::from_raw_os_error(libc::EPERM));
-		}
-		Ok(())
+	if new.cur > new.max {
+		return Err(io::Error::from_raw_os_error(libc::EINVAL));
 	}
-	#[cfg(not(unix))]
-	{
-		let _ = (new, cur, euid);
-		Err(io::ErrorKind::Unsupported.into())
+	if new.max > cur.max && euid != 0 {
+		return Err(io::Error::from_raw_os_error(libc::EPERM));
 	}
+	Ok(())
 }
 
 /// zsh `zstrtorlimt(s, &t, 10)`: the value and the unparsed rest.

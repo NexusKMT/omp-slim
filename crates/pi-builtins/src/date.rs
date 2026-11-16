@@ -2505,11 +2505,6 @@ mod tests {
 	}
 }
 
-#[cfg(not(any(unix, windows)))]
-fn get_clock_resolution() -> Timestamp {
-	unimplemented!("getting clock resolution not implemented (unsupported target)");
-}
-
 #[cfg(all(unix, not(target_os = "redox")))]
 /// Returns the resolution of the system’s realtime clock.
 ///
@@ -2526,7 +2521,7 @@ fn get_clock_resolution() -> Timestamp {
 	#[allow(clippy::unnecessary_cast, reason = "needed for 32 bit target")]
 	Timestamp::constant(timespec.tv_sec as _, timespec.tv_nsec as _)
 }
-#[cfg(unix)]
+
 fn set_system_datetime(date: Zoned) -> Result<(), DateError> {
 	use rustix::time::{ClockId, Timespec, clock_settime};
 
@@ -2540,14 +2535,6 @@ fn set_system_datetime(date: Zoned) -> Result<(), DateError> {
 		.map_err(|error| DateError::new(1, format!("cannot set date: {error}")))
 }
 
-#[cfg(not(unix))]
-fn set_system_datetime(_date: Zoned) -> Result<(), DateError> {
-	Err(DateError::new(
-		1,
-		"--set is not supported by the in-process builtin",
-	))
-}
-
 
 #[cfg(all(unix, target_os = "redox"))]
 fn get_clock_resolution() -> Timestamp {
@@ -2557,11 +2544,3 @@ fn get_clock_resolution() -> Timestamp {
 	Timestamp::constant(0, 1)
 }
 
-#[cfg(windows)]
-fn get_clock_resolution() -> Timestamp {
-	// Windows does not expose a system call for getting the resolution of the
-	// clock, however the FILETIME struct returned by GetSystemTimeAsFileTime,
-	// and GetSystemTimePreciseAsFileTime has a resolution of 100ns.
-	// https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-filetime
-	Timestamp::constant(0, 100)
-}

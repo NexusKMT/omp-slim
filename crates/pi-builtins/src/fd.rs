@@ -21,7 +21,7 @@ use pi_walker::{
 use pi_vfs::Metadata;
 use regex::{Regex, RegexBuilder};
 
-use crate::host::{AsyncUtility, Host, forward_slash_display};
+use crate::host::{AsyncUtility, Host};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -853,14 +853,8 @@ async fn contains_ignore_marker(fs: &pi_vfs::Fs, path: &Path, markers: &[OsStrin
 	false
 }
 
-#[cfg(unix)]
 fn is_executable(metadata: Option<&Metadata>) -> bool {
 	metadata.is_some_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(metadata: Option<&Metadata>) -> bool {
-	metadata.is_some_and(|meta| meta.is_file())
 }
 
 async fn is_empty_entry(
@@ -1302,11 +1296,7 @@ fn root_was_absolute(path: &Path, roots: &[PathBuf]) -> bool {
 }
 
 fn normalize_display_path(path: &Path) -> String {
-	forward_slash_display(path)
-		.as_deref()
-		.unwrap_or(path)
-		.to_string_lossy()
-		.into_owned()
+	path.to_string_lossy().into_owned()
 }
 
 fn normalize_os_str(value: &OsStr) -> String {

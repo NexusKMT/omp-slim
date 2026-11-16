@@ -130,14 +130,7 @@ fn is_eacces(err: &io::Error) -> bool {
 }
 
 fn eacces() -> io::Error {
-	#[cfg(unix)]
-	{
-		io::Error::from_raw_os_error(libc::EACCES)
-	}
-	#[cfg(not(unix))]
-	{
-		io::Error::from(io::ErrorKind::PermissionDenied)
-	}
+	io::Error::from_raw_os_error(libc::EACCES)
 }
 
 fn is_xdev(err: &io::Error) -> bool {
@@ -1181,10 +1174,7 @@ impl<'a, 'b> Receiver<'a, 'b> {
 		// legacy behavior.
 		if let Some(tmpdir) = opts.tmpdir.as_ref().filter(|_| !opts.insecure_links) {
 			let tmpdir = crate::host::os_bytes_lossy(tmpdir);
-			let mut path = [&tmpdir[..], b"/", &template].concat();
-			if cfg!(windows) {
-				path.iter_mut().filter(|b| **b == b'\\').for_each(|b| *b = b'/');
-			}
+			let path = [&tmpdir[..], b"/", &template].concat();
 			if path.starts_with(b"../") || memchr::memmem::find(&path, b"/../").is_some() {
 				let shown = self.trees.dest.root().join(bytes_os_lossy(&path));
 				let shown = [&b"\""[..], &crate::host::os_bytes_lossy(shown.as_os_str()), b"\""].concat();

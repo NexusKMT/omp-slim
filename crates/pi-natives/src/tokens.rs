@@ -24,7 +24,6 @@ use napi::{
 	bindgen_prelude::{Array, Either},
 };
 use napi_derive::napi;
-use pi_shell::rayon_global_pool_available;
 use rayon::prelude::*;
 
 use crate::{js, utok};
@@ -110,7 +109,7 @@ pub fn count_tokens(
 			// batch. Keep those batches on the N-API thread; large batches still
 			// amortize the pool handoff across enough independent strings.
 			const PARALLEL_BATCH_MIN: usize = 16;
-			Ok(if spans.len() >= PARALLEL_BATCH_MIN && rayon_global_pool_available() {
+			Ok(if spans.len() >= PARALLEL_BATCH_MIN {
 				spans
 					.par_iter()
 					.map(|span| enc.count(&units[span.clone()]))

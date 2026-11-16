@@ -2,8 +2,6 @@
 //! ([`crate::session::Session`]) over pi's filesystem, with pi's
 //! utilities, process builtins and `git` layers as engine commands.
 
-#[cfg(windows)]
-use std::collections::HashSet;
 use std::{
 	collections::HashMap,
 	fs,
@@ -21,8 +19,6 @@ use bstr::{BString, ByteSlice};
 use bytes::Bytes;
 use flume::Sender;
 use pi_vfs::Fs;
-#[cfg(not(unix))]
-use tokio::io::AsyncReadExt as _;
 use tokio::{sync::Mutex as TokioMutex, time};
 use tokio_util::sync::CancellationToken;
 
@@ -88,23 +84,12 @@ fn working_dir_matches(current: &[u8], requested: &str) -> bool {
 	if !path.is_absolute() {
 		return false;
 	}
-	// The stored dir is long-form on Windows (every `cd` stores what the
-	// request expanded to), so only the requested spelling needs expansion
-	// for a short-spelled host cwd to match its long spelling.
-	#[cfg(windows)]
-	{
-		current == path_bytes(&crate::windows::expand_to_long_path(path)).as_slice()
-	}
-	#[cfg(not(windows))]
-	{
-		current == requested.as_bytes()
-	}
+	current == requested.as_bytes()
 }
 
 /// The directory to move the shell to before a command: `None` when it is
 /// there already. Like `cd`, the target must be a directory the run's
-/// filesystem knows; a short-spelled Windows path is stored long-form, a URL
-/// path verbatim.
+/// filesystem knows.
 async fn requested_cwd(core: &ShellSessionCore, cwd: Option<&str>) -> Result<Option<BString>> {
 	let Some(cwd) = cwd else {
 		return Ok(None);
@@ -113,17 +98,8 @@ async fn requested_cwd(core: &ShellSessionCore, cwd: Option<&str>) -> Result<Opt
 		return Ok(None);
 	}
 	let path = Path::new(cwd);
-	let target = if pi_vfs::is_virtual_path(path) {
+	let target = if pi_vfs::is_virtual_path(path) || path.is_absolute() {
 		path.to_path_buf()
-	} else if path.is_absolute() {
-		#[cfg(windows)]
-		{
-			crate::windows::expand_to_long_path(path)
-		}
-		#[cfg(not(windows))]
-		{
-			path.to_path_buf()
-		}
 	} else {
 		return Err(Error::msg(format!("Failed to set cwd: {cwd} is not an absolute path")));
 	};
@@ -432,25 +408,19 @@ pub async fn execute_shell_streams(
 /// the command with `KILL`).
 ///
 /// The session's own cancel sends `TERM`, then `KILL` after its 1 s grace;
-/// a run that ends within these two seconds reports normally. Windows needs a
-/// wider budget: in-process pipeline producers stop on a poll between
-/// writes, so producer exit, pipe EOF, the consumer's final flush and the
-/// reader's last read each need a separate thread wakeup; under heavy load
+/// a run that ends within these two seconds reports normally. The budget is
+/// two seconds rather than one: in-process pipeline producers stop on a poll
+/// between writes, so producer exit, pipe EOF, the consumer's final flush and
+/// the reader's last read each need a separate thread wakeup; under heavy load
 /// that chain exceeded 2s (`yes x | tail -5` lost its 5 lines).
-#[cfg(windows)]
-const CANCEL_RUN_GRACE: Duration = Duration::from_secs(5);
-#[cfg(not(windows))]
 const CANCEL_RUN_GRACE: Duration = Duration::from_secs(2);
 
 /// Delay between cancellation and cancelling the output readers. Readers stay
 /// open so pipeline consumers can flush after their producers die, and so a
 /// TERM trap that writes output during the session's TERM grace does not hit
-/// EPIPE and die before finishing its cleanup. Windows needs a wider budget
-/// for the same reason as `CANCEL_RUN_GRACE`. The delayed fallback still
-/// releases readers whose writers never close.
-#[cfg(windows)]
-const CANCEL_READER_GRACE: Duration = Duration::from_millis(2000);
-#[cfg(not(windows))]
+/// EPIPE and die before finishing its cleanup. The wider budget has the same
+/// reason as `CANCEL_RUN_GRACE`. The delayed fallback still releases readers
+/// whose writers never close.
 const CANCEL_READER_GRACE: Duration = Duration::from_millis(1250);
 
 /// What a run reports when it ends normally.
@@ -617,7 +587,7 @@ async fn run_shell_oneshot_streams(
 
 /// The null device, for a stream a command must not see.
 fn null_file() -> Result<fs::File> {
-	let path = if cfg!(windows) { "NUL" } else { "/dev/null" };
+	let path = "/dev/null";
 	fs::OpenOptions::new()
 		.read(true)
 		.write(true)
@@ -632,118 +602,6 @@ fn null_stdio() -> Result<RunStdio> {
 		stdout: Some(null_file()?),
 		stderr: Some(null_file()?),
 	})
-}
-
-#[cfg(windows)]
-const fn normalize_env_key(key: &str) -> &str {
-	if key.eq_ignore_ascii_case("PATH") {
-		"PATH"
-	} else {
-		key
-	}
-}
-
-#[cfg(not(windows))]
-const fn normalize_env_key(key: &str) -> &str {
-	key
-}
-
-/// Canonical spelling for a key inherited from the host environment (the
-/// process env or the caller-forwarded session env). Windows env names are
-/// case-insensitive, so a host `Temp` must still surface as `$TEMP` in the
-/// case-sensitive shell. Per-command env keeps the narrower
-/// [`normalize_env_key`]: a lowercase `tmp` there is an ordinary variable.
-#[cfg(windows)]
-pub(crate) const fn normalize_inherited_env_key(key: &str) -> &str {
-	if key.eq_ignore_ascii_case("TEMP") {
-		"TEMP"
-	} else if key.eq_ignore_ascii_case("TMP") {
-		"TMP"
-	} else if key.eq_ignore_ascii_case("TMPDIR") {
-		"TMPDIR"
-	} else {
-		normalize_env_key(key)
-	}
-}
-
-#[cfg(not(windows))]
-pub(crate) const fn normalize_inherited_env_key(key: &str) -> &str {
-	key
-}
-
-/// Value exported for an inherited (already normalized) env key.
-///
-/// A host `TEMP`/`TMP`/`TMPDIR` may carry an 8.3 profile alias
-/// (`C:\Users\ADMINI~1\...`) while `cd` stores the long form in `PWD`, so
-/// `cd "$TEMP"` would leave the two spellings disagreeing. Absolute temp paths
-/// are expanded with the same `GetLongPathNameW` routine `cd` uses (symlinks
-/// and junctions kept); anything else, or a failed expansion, passes through.
-#[cfg(windows)]
-pub(crate) fn inherited_env_value<'a>(key: &str, value: &'a str) -> std::borrow::Cow<'a, str> {
-	let path = Path::new(value);
-	if !matches!(key, "TEMP" | "TMP" | "TMPDIR") || !path.is_absolute() {
-		return std::borrow::Cow::Borrowed(value);
-	}
-	match crate::windows::expand_to_long_path(path)
-		.into_os_string()
-		.into_string()
-	{
-		Ok(expanded) => std::borrow::Cow::Owned(expanded),
-		Err(_) => std::borrow::Cow::Borrowed(value),
-	}
-}
-
-#[cfg(not(windows))]
-pub(crate) const fn inherited_env_value<'a>(
-	_key: &str,
-	value: &'a str,
-) -> std::borrow::Cow<'a, str> {
-	std::borrow::Cow::Borrowed(value)
-}
-
-#[cfg(windows)]
-fn merge_path_values(existing: &str, incoming: &str) -> String {
-	let mut merged = Vec::new();
-	let mut seen = HashSet::new();
-	push_unique_paths(&mut merged, &mut seen, existing);
-	push_unique_paths(&mut merged, &mut seen, incoming);
-
-	std::env::join_paths(merged.iter())
-		.map_or_else(|_| merged.join(";"), |paths| paths.to_string_lossy().into_owned())
-}
-
-#[cfg(windows)]
-fn push_unique_paths(merged: &mut Vec<String>, seen: &mut HashSet<String>, value: &str) {
-	for segment in std::env::split_paths(value) {
-		let segment_str = segment.to_string_lossy().into_owned();
-		let normalized = normalize_path_segment(&segment_str);
-		if normalized.is_empty() {
-			continue;
-		}
-		if seen.insert(normalized) {
-			merged.push(segment_str);
-		}
-	}
-}
-
-#[cfg(windows)]
-fn normalize_path_segment(segment: &str) -> String {
-	let trimmed = segment.trim().trim_matches('"');
-	if trimmed.is_empty() {
-		return String::new();
-	}
-
-	let mut normalized = std::path::PathBuf::new();
-	for component in Path::new(trimmed).components() {
-		normalized.push(component.as_os_str());
-	}
-
-	normalized.to_string_lossy().to_ascii_lowercase()
-}
-
-#[cfg(not(windows))]
-fn merge_path_values(_existing: &str, incoming: &str) -> String {
-	incoming.to_string()
 }
 
 #[cfg(test)]
@@ -772,26 +630,14 @@ fn copy_env_into(
 		let (Some(key), Some(value)) = (key.to_str(), value.to_str()) else {
 			continue;
 		};
-		let normalized_key = normalize_inherited_env_key(key);
-		if should_skip_env_var(normalized_key) || is_git_repo_location_var(normalized_key) {
+		if should_skip_env_var(key) || is_git_repo_location_var(key) {
 			continue;
 		}
-		if normalized_key == "PATH" {
-			merged_path = Some(match merged_path {
-				Some(existing) => merge_path_values(&existing, value),
-				None => value.to_string(),
-			});
+		if key == "PATH" {
+			merged_path = Some(value.to_owned());
 			continue;
 		}
-		let value = inherited_env_value(normalized_key, value);
-		vars.insert(normalized_key.to_owned(), value.into_owned());
-	}
-
-	#[cfg(windows)]
-	if merged_path.is_none()
-		&& let Some(value) = std::env::var_os("Path").or_else(|| std::env::var_os("PATH"))
-	{
-		merged_path = Some(value.to_string_lossy().into_owned());
+		vars.insert(key.to_owned(), value.to_owned());
 	}
 
 	if let Some(path_value) = merged_path {
@@ -799,18 +645,13 @@ fn copy_env_into(
 	}
 }
 
-/// Apply the caller's session env over the inherited one, with the same skips
-/// and temp-path expansion.
+/// Apply the caller's session env over the inherited one, with the same skips.
 fn apply_session_env(vars: &mut HashMap<String, String>, session_env: &HashMap<String, String>) {
 	for (key, value) in session_env {
-		let normalized_key = normalize_inherited_env_key(key);
-		if should_skip_env_var(normalized_key) || is_git_repo_location_var(normalized_key) {
+		if should_skip_env_var(key) || is_git_repo_location_var(key) {
 			continue;
 		}
-		// The agent forwards its whole host env here, so temp paths need the
-		// same long-form expansion as the direct host copy.
-		let value = inherited_env_value(normalized_key, value);
-		vars.insert(normalized_key.to_owned(), value.into_owned());
+		vars.insert(key.to_owned(), value.to_owned());
 	}
 }
 
@@ -821,8 +662,6 @@ fn session_vars(config: &ShellConfig) -> HashMap<String, String> {
 	if let Some(env) = config.session_env.as_ref() {
 		apply_session_env(&mut vars, env);
 	}
-	#[cfg(windows)]
-	crate::windows::configure_windows_path(&mut vars);
 	vars
 }
 
@@ -832,11 +671,9 @@ fn initial_cwd() -> BString {
 	if let Ok(cwd) = std::env::current_dir()
 		&& cwd.is_dir()
 	{
-		#[cfg(windows)]
-		let cwd = crate::windows::expand_to_long_path(&cwd);
 		return path_bytes(&cwd);
 	}
-	let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+	let home = std::env::var_os("HOME")
 		.map(std::path::PathBuf::from)
 		.filter(|home| home.is_dir());
 	home.map_or_else(|| BString::from("/"), |home| path_bytes(&home))
@@ -994,10 +831,8 @@ fn should_skip_env_var(key: &str) -> bool {
 fn command_env(env: Option<&HashMap<String, String>>) -> Vec<(BString, BString)> {
 	env.into_iter()
 		.flatten()
-		.filter_map(|(key, value)| {
-			let key = normalize_env_key(key);
-			(!should_skip_env_var(key)).then(|| (BString::from(key), BString::from(value.as_str())))
-		})
+		.filter(|(key, _)| !should_skip_env_var(key))
+		.map(|(key, value)| (BString::from(key.as_str()), BString::from(value.as_str())))
 		.collect()
 }
 
@@ -1685,16 +1520,12 @@ async fn read_output_bytes(
 ) {
 	const BUF: usize = 65536;
 
-	#[cfg(unix)]
 	let Ok(reader) = register_nonblocking_pipe(reader) else {
 		return;
 	};
-	#[cfg(not(unix))]
-	let mut reader = tokio::fs::File::from_std(reader);
 
 	loop {
 		let mut buf = vec![0u8; BUF];
-		#[cfg(unix)]
 		let n = {
 			let Ok(mut readiness) = (tokio::select! {
 				ready = reader.readable() => ready,
@@ -1708,20 +1539,6 @@ async fn read_output_bytes(
 				Ok(Err(e)) if e.kind() == io::ErrorKind::Interrupted => continue,
 				Ok(Err(_)) => break,
 				Err(_would_block) => continue,
-			}
-		};
-		#[cfg(not(unix))]
-		let n = {
-			let read_future = reader.read(&mut buf);
-			tokio::pin!(read_future);
-			match tokio::select! {
-				res = &mut read_future => res,
-				() = cancel_token.cancelled() => break,
-			} {
-				Ok(0) => break,
-				Ok(n) => n,
-				Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-				Err(_) => break,
 			}
 		};
 		let _ = activity.try_send(());
@@ -1758,21 +1575,6 @@ struct BufferedOutput {
 	exceeded:    bool,
 }
 
-/// How long the capture reader waits for the rest of a held line before
-/// judging what it has (a prompt or progress text without a newline).
-#[cfg(not(unix))]
-const CAPTURE_LINE_IDLE: Duration = Duration::from_millis(50);
-
-/// Completes after [`CAPTURE_LINE_IDLE`] when `holds_line`, never otherwise.
-#[cfg(not(unix))]
-async fn capture_line_idle(holds_line: bool) {
-	if holds_line {
-		time::sleep(CAPTURE_LINE_IDLE).await;
-	} else {
-		std::future::pending::<()>().await;
-	}
-}
-
 async fn read_output(
 	reader: fs::File,
 	on_chunk: Option<Sender<String>>,
@@ -1783,17 +1585,11 @@ async fn read_output(
 	let mut buf = vec![0u8; BUF];
 	let mut decoder = CaptureDecoder::new();
 
-	#[cfg(unix)]
 	let Ok(reader) = register_nonblocking_pipe(reader) else {
 		return;
 	};
-	#[cfg(not(unix))]
-	let reader = tokio::fs::File::from_std(reader);
-	#[cfg(not(unix))]
-	tokio::pin!(reader);
 
 	loop {
-		#[cfg(unix)]
 		let n = {
 			let Ok(mut readiness) = (tokio::select! {
 				ready = reader.readable() => ready,
@@ -1807,29 +1603,6 @@ async fn read_output(
 				Ok(Err(e)) if e.kind() == io::ErrorKind::Interrupted => continue,
 				Ok(Err(_)) => break,
 				Err(_would_block) => continue,
-			}
-		};
-		#[cfg(not(unix))]
-		let n = {
-			let read_future = reader.read(&mut buf);
-			tokio::pin!(read_future);
-			let res = loop {
-				tokio::select! {
-					res = &mut read_future => break Some(res),
-					() = cancel_token.cancelled() => break None,
-					() = capture_line_idle(decoder.holds_line()) => {
-						emit_chunk(decoder.flush_line(), on_chunk.as_ref()).await;
-					}
-				}
-			};
-			let Some(res) = res else {
-				break;
-			};
-			match res {
-				Ok(0) => break, // EOF
-				Ok(n) => n,
-				Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-				Err(_) => break,
 			}
 		};
 		if n > 0 {
@@ -1864,17 +1637,11 @@ async fn read_output_buffered(
 	let mut exceeded = false;
 	let mut decoder = CaptureDecoder::new();
 
-	#[cfg(unix)]
 	let Ok(reader) = register_nonblocking_pipe(reader) else {
 		return BufferedOutput { text: String::new(), input_bytes: 0, exceeded: true };
 	};
-	#[cfg(not(unix))]
-	let reader = tokio::fs::File::from_std(reader);
-	#[cfg(not(unix))]
-	tokio::pin!(reader);
 
 	loop {
-		#[cfg(unix)]
 		let n = {
 			let Ok(mut readiness) = (tokio::select! {
 				ready = reader.readable() => ready,
@@ -1888,33 +1655,6 @@ async fn read_output_buffered(
 				Ok(Err(e)) if e.kind() == io::ErrorKind::Interrupted => continue,
 				Ok(Err(_)) => break,
 				Err(_would_block) => continue,
-			}
-		};
-		#[cfg(not(unix))]
-		let n = {
-			let read_future = reader.read(&mut buf);
-			tokio::pin!(read_future);
-			let res = loop {
-				tokio::select! {
-					res = &mut read_future => break Some(res),
-					() = cancel_token.cancelled() => break None,
-					() = capture_line_idle(decoder.holds_line()) => {
-						let text = decoder.flush_line();
-						if !exceeded {
-							captured.push_str(&text);
-						}
-						emit_chunk(text, on_chunk.as_ref()).await;
-					}
-				}
-			};
-			let Some(res) = res else {
-				break;
-			};
-			match res {
-				Ok(0) => break,
-				Ok(n) => n,
-				Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-				Err(_) => break,
 			}
 		};
 		if n > 0 {
@@ -2007,8 +1747,6 @@ fn pipe_to_files(label: &str) -> Result<(fs::File, fs::File)> {
 
 	#[cfg(unix)]
 	use std::os::fd::OwnedFd as Owned;
-	#[cfg(windows)]
-	use std::os::windows::io::OwnedHandle as Owned;
 
 	Ok((fs::File::from(Owned::from(r)), fs::File::from(Owned::from(w))))
 }

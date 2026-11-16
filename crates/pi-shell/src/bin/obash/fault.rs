@@ -134,9 +134,6 @@ pub enum FaultError {
 	/// `--fault-resume` does not hold a continuation obash wrote.
 	#[error("--fault-resume: invalid continuation `{0}'")]
 	Resume(String),
-	/// `exec` mode needs `exec(2)`.
-	#[error("fault mode `exec' re-executes the running binary, which needs Unix")]
-	ExecUnsupported,
 	/// A pause did not stop the shell at the next safepoint.
 	#[error("a pause did not stop the shell at the next safepoint (got {step})")]
 	NotPaused {
@@ -157,7 +154,6 @@ pub enum FaultError {
 	Io(#[from] io::Error),
 	/// `exec(2)` of the running binary failed.
 	#[error("could not re-execute obash")]
-	#[cfg_attr(not(unix), expect(dead_code, reason = "only Unix re-executes"))]
 	Exec(#[source] io::Error),
 }
 
@@ -460,28 +456,14 @@ impl Injector {
 	/// The plan from `args` (taking precedence) and `env`; `depth` is the
 	/// nesting depth (from `env`, or the first process's after a re-exec);
 	/// `own_args` are the options an `exec`-mode successor gets again.
-	///
-	/// # Errors
-	///
-	/// [`FaultError::ExecUnsupported`] for `exec` mode off Unix.
-	pub fn new(
-		args: &FaultArgs,
-		env: Env,
-		depth: u64,
-		own_args: Vec<OsString>,
-	) -> Result<Self, FaultError> {
+	pub fn new(args: &FaultArgs, env: Env, depth: u64, own_args: Vec<OsString>) -> Self {
 		let plan = args.fault.or(env.fault).map(|(seed, k)| Plan {
 			seed,
 			k,
 			mode: args.fault_mode.or(env.mode).unwrap_or_default(),
 			lost: env.lost,
 		});
-		if cfg!(not(unix)) && plan.is_some_and(|p| p.mode == Mode::Exec) {
-			return Err(FaultError::ExecUnsupported);
-		}
-		#[cfg(not(unix))]
-		let _ = own_args;
-		Ok(Self {
+		Self {
 			coin: Rng::new(plan.map_or(0, |p| p.seed.wrapping_add(depth))),
 			plan,
 			#[cfg(unix)]
@@ -495,7 +477,7 @@ impl Injector {
 			held: None,
 			pending: false,
 			parker: Parker::new(),
-		})
+		}
 	}
 
 	/// Restore the shell an `exec`-mode predecessor externalized: the image
@@ -507,23 +489,13 @@ impl Injector {
 	///
 	/// [`FaultError::Io`] when the fd cannot be read,
 	/// [`FaultError::Store`]/[`FaultError::Restore`] for a bad image,
-	/// [`FaultError::ExecUnsupported`] off Unix.
-	#[cfg_attr(
-		not(unix),
-		expect(clippy::missing_const_for_fn, reason = "the Unix version reads the image fd")
-	)]
 	pub fn take_image(&mut self, resume: &Resume) -> Result<MemStore, FaultError> {
 		self.stats = resume.stats;
-		#[cfg(unix)]
-		{
-			let bytes = os::read_image(resume.image_fd)?;
-			// What the predecessor ignored by `trap ''` is still ignored after
-			// `exec`; only what was ignored on entry must look inherited.
-			os::reset_ignored(resume.ignored)?;
-			Ok(MemStore::from_bytes(&bytes)?)
-		}
-		#[cfg(not(unix))]
-		Err(FaultError::ExecUnsupported)
+		let bytes = os::read_image(resume.image_fd)?;
+		// What the predecessor ignored by `trap ''` is still ignored after
+		// `exec`; only what was ignored on entry must look inherited.
+		os::reset_ignored(resume.ignored)?;
+		Ok(MemStore::from_bytes(&bytes)?)
 	}
 
 	/// Finish a resume once [`Shell::restore`] succeeded: count it, log what
@@ -532,17 +504,10 @@ impl Injector {
 	/// # Errors
 	///
 	/// [`FaultError::Io`] when the signal mask cannot be set.
-	#[cfg_attr(
-		not(unix),
-		expect(clippy::unnecessary_wraps, reason = "the Unix version restores the signal mask")
-	)]
 	pub fn resumed(&mut self, resume: &Resume, lost: &[Lost]) -> Result<(), FaultError> {
 		self.stats.restored += 1;
 		self.log_lost(lost);
-		#[cfg(unix)]
 		os::set_signal_mask(resume.sigmask)?;
-		#[cfg(not(unix))]
-		let _ = resume;
 		Ok(())
 	}
 
@@ -625,22 +590,17 @@ impl Injector {
 							shell.set_event_mask(mask);
 						},
 						Mode::Exec => {
-							#[cfg(unix)]
+							let ext = match self
+								.block_and_suspend(&mut shell, &mut host, &mut store, root, run, budget)?
 							{
-								let ext = match self.block_and_suspend(
-									&mut shell, &mut host, &mut store, root, run, budget,
-								)? {
-									Suspended::Ready(ext) => ext,
-									Suspended::Finished(status) => break status,
-								};
-								if !self.accept(plan, &ext.lost) {
-									self.unblock()?;
-									continue;
-								}
-								return Err(self.relaunch(plan, &mut host, &store, run, mask));
+								Suspended::Ready(ext) => ext,
+								Suspended::Finished(status) => break status,
+							};
+							if !self.accept(plan, &ext.lost) {
+								self.unblock()?;
+								continue;
 							}
-							#[cfg(not(unix))]
-							return Err(FaultError::ExecUnsupported);
+							return Err(self.relaunch(plan, &mut host, &store, run, mask));
 						},
 					}
 				},

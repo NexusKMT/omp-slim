@@ -221,8 +221,8 @@ pub trait Host {
 	/// The host's current soft and hard limit for `res` (`None`: unlimited),
 	/// the base of `ulimit`. The engine keeps per-vproc changes itself and
 	/// hands them to externals in [`SpawnSpec::rlimits`]; it never changes
-	/// the host process's limits. Hosts without resource limits (Windows)
-	/// return `Unsupported`.
+	/// the host process's limits. A host that cannot set limits returns
+	/// `Unsupported`.
 	fn rlimit(&self, _res: Rlimit) -> io::Result<(Option<u64>, Option<u64>)> {
 		Err(io::ErrorKind::Unsupported.into())
 	}
@@ -354,9 +354,8 @@ pub struct SpawnSpec<'a> {
 	pub cwd:         &'a BStr,
 	/// fds 0, 1, 2.
 	pub stdio:       [StdioSpec; 3],
-	/// Further fds. Windows inherits none: one a `/dev/fd/N` argument names
-	/// (a process substitution's) reaches the child as a named pipe, others
-	/// stay with the shell.
+	/// Further fds. A `/dev/fd/N` argument (a process substitution's) reaches
+	/// the child as an inherited fd; others stay with the shell.
 	pub extra_fds:   Vec<(i32, StdioSpec)>,
 	/// Process group placement.
 	pub pgroup:      PgroupSpec,
@@ -618,7 +617,7 @@ pub trait ExtProc: Send {
 	fn pgid(&self) -> Option<u32> {
 		None
 	}
-	/// Signal the process group (Unix) or Job Object (Windows).
+	/// Signal the process group.
 	fn signal(&mut self, sig: Signal) -> io::Result<()>;
 	/// Stop the process group (job pause).
 	fn stop(&mut self) -> io::Result<()>;
@@ -762,9 +761,8 @@ impl StdFd {
 	}
 }
 
-/// Raw OS handle (a Unix fd or a Windows `HANDLE`), as an integer so it can
-/// cross the seam and be serialized; only the host that produced it may
-/// interpret it.
+/// Raw OS handle (an fd), as an integer so it can cross the seam and be
+/// serialized; only the host that produced it may interpret it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OsHandle(pub u64);
 

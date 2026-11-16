@@ -591,7 +591,7 @@ fn bang_opts(k: &mut Kernel, cx: &mut Cx<'_>, vp: &Vproc) -> Result<BangOpts, St
 		cwd:          vp.cwd.clone(),
 		path:         var(&k.root, cx.store, vp, b"PATH")?
 			.unwrap_or_default()
-			.split(|&c| c == crate::bash::vm::probe::path_separator(k.engine.config().platform))
+			.split(|&c| c == b':')
 			.map(BString::from)
 			.collect(),
 		bash:         false,

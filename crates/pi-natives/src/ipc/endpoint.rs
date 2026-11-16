@@ -1,10 +1,8 @@
 //! Deterministic endpoint naming shared by every process that dials or binds.
 //!
 //! The helpers here are pure so the naming rules (stem sanitizing, `sun_path`
-//! relocation, Windows pipe shape) are testable on any host OS.
+//! relocation) are testable on any host OS.
 
-#[cfg(windows)]
-use std::path::{self, Path};
 #[cfg(unix)]
 use std::{
 	env,
@@ -33,7 +31,6 @@ pub fn hash16(bytes: &[u8]) -> String {
 }
 
 /// Private per-user directory that hosts relocated Unix sockets.
-#[cfg_attr(windows, allow(dead_code, reason = "pure helper unit-tested on every host"))]
 pub fn relocation_dir(euid: u32) -> String {
 	format!("/tmp/omp-{euid}")
 }
@@ -43,7 +40,6 @@ pub fn relocation_dir(euid: u32) -> String {
 /// `sun_path_max` is the size of `sockaddr_un::sun_path` including the NUL
 /// terminator; a path that does not fit is relocated under
 /// [`relocation_dir`] with a hashed basename.
-#[cfg_attr(windows, allow(dead_code, reason = "pure helper unit-tested on every host"))]
 pub fn unix_endpoint(dir: &str, name: &str, euid: u32, sun_path_max: usize) -> String {
 	let stem = sanitize_stem(name);
 	let direct = if dir.ends_with('/') {
@@ -59,12 +55,6 @@ pub fn unix_endpoint(dir: &str, name: &str, euid: u32, sun_path_max: usize) -> S
 	key.push(0);
 	key.extend_from_slice(name.as_bytes());
 	format!("{}/{}.sock", relocation_dir(euid), hash16(&key))
-}
-
-/// Windows named-pipe path for `name` in the already-resolved `dir`.
-#[cfg_attr(not(windows), allow(dead_code, reason = "pure helper unit-tested on every host"))]
-pub fn windows_pipe_name(dir: &str, name: &str) -> String {
-	format!(r"\\.\pipe\omp-{}-{}", sanitize_stem(name), hash16(dir.to_lowercase().as_bytes()))
 }
 
 /// Size of `sockaddr_un::sun_path` on this platform, including the NUL.
@@ -99,26 +89,6 @@ pub fn resolve_dir(dir: &str) -> String {
 	resolved
 		.into_string()
 		.unwrap_or_else(|raw| raw.to_string_lossy().into_owned())
-}
-
-/// Lexically absolute, normalized form of `dir` (like Node's `path.resolve`).
-#[cfg(windows)]
-pub fn resolve_dir(dir: &str) -> String {
-	let target = if dir.is_empty() {
-		Path::new(".")
-	} else {
-		Path::new(dir)
-	};
-	let resolved = path::absolute(target).unwrap_or_else(|_| target.to_path_buf());
-	let mut text = resolved
-		.into_string()
-		.unwrap_or_else(|raw| raw.to_string_lossy().into_owned());
-	// `GetFullPathNameW` keeps a trailing separator; `path.resolve` drops it
-	// except on a drive root such as `C:\`.
-	while text.len() > 3 && text.ends_with(['\\', '/']) {
-		text.pop();
-	}
-	text
 }
 
 #[cfg(test)]
@@ -175,13 +145,6 @@ mod tests {
 	fn relocation_hash_separates_dir_and_name() {
 		let dir = format!("/{}", "x".repeat(200));
 		assert_ne!(unix_endpoint(&dir, "ab", 0, 104), unix_endpoint(&format!("{dir}a"), "b", 0, 104));
-	}
-
-	#[test]
-	fn windows_pipe_name_shape() {
-		let name = windows_pipe_name(r"C:\Users\Me\Proj", "my sock");
-		assert_eq!(name, format!(r"\\.\pipe\omp-my_sock-{}", hash16(br"c:\users\me\proj")));
-		assert_eq!(name, windows_pipe_name(r"c:\users\me\PROJ", "my sock"));
 	}
 
 	#[cfg(unix)]

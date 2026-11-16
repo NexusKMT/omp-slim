@@ -365,10 +365,6 @@ mod args {
 		let polling_help = "Disable 'inotify' support and use polling instead";
 		#[cfg(all(unix, not(target_os = "linux")))]
 		let polling_help = "Disable 'kqueue' support and use polling instead";
-		#[cfg(target_os = "windows")]
-		let polling_help = "Disable 'ReadDirectoryChanges' support and use polling instead";
-		#[cfg(not(any(unix, target_os = "windows")))]
-		let polling_help = "Disable 'kqueue' support and use polling instead";
 	
 		Command::new("tail")
 			.version("0.8.0")
@@ -1770,7 +1766,6 @@ mod follow {
 				is also provided that should work on any platform.
 				Linux / Android: inotify
 				macOS: FSEvents / kqueue
-				Windows: ReadDirectoryChangesWatcher
 				FreeBSD / NetBSD / OpenBSD / DragonflyBSD: kqueue
 				Fallback: polling every n seconds
 		
@@ -2660,21 +2655,9 @@ mod paths {
 		Stdin,
 	}
 	
-	#[cfg(unix)]
 	impl From<&OsStr> for InputKind {
 		fn from(value: &OsStr) -> Self {
 			if value == OsStr::new("-") {
-				Self::Stdin
-			} else {
-				Self::File(PathBuf::from(value))
-			}
-		}
-	}
-	
-	#[cfg(not(unix))]
-	impl From<&OsStr> for InputKind {
-		fn from(value: &OsStr) -> Self {
-			if value == OsStr::new(text::DASH) {
 				Self::Stdin
 			} else {
 				Self::File(PathBuf::from(value))
@@ -2850,8 +2833,6 @@ mod platform {
 		//stdin_is_bad_fd, stdin_is_pipe_or_fifo, supports_pid_checks, Pid, ProcessChecker,
 		supports_pid_checks,
 	};
-	#[cfg(windows)]
-	pub use self::windows::{Pid, ProcessChecker, supports_pid_checks};
 	
 	// WASI has no process management; provide stubs so tail compiles.
 	#[cfg(target_os = "wasi")]
@@ -2911,62 +2892,6 @@ mod platform {
 		//}
 	}
 	
-	#[cfg(windows)]
-	mod windows {
-		// This file is part of the uutils coreutils package.
-		//
-		// For the full copyright and license information, please view the LICENSE
-		// file that was distributed with this source code.
-		
-		use std::cell::Cell;
-		
-		use windows_sys::{
-			Win32::{
-				Foundation::{CloseHandle, HANDLE, WAIT_FAILED, WAIT_OBJECT_0},
-				System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
-			},
-			core::BOOL,
-		};
-		
-		pub type Pid = u32;
-		
-		pub struct ProcessChecker {
-			dead:   Cell<bool>,
-			handle: HANDLE,
-		}
-		
-		impl ProcessChecker {
-			pub fn new(process_id: Pid) -> Self {
-				#[allow(non_snake_case, reason = "matches the Windows API constant name")]
-				let FALSE: BOOL = 0;
-				let h = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, FALSE, process_id) };
-				Self { dead: Cell::new(h.is_null()), handle: h }
-			}
-		
-			pub fn is_dead(&self) -> bool {
-				if !self.dead.get() {
-					self.dead.set(unsafe {
-						let status = WaitForSingleObject(self.handle, 0);
-						status == WAIT_OBJECT_0 || status == WAIT_FAILED
-					});
-				}
-		
-				self.dead.get()
-			}
-		}
-		
-		impl Drop for ProcessChecker {
-			fn drop(&mut self) {
-				unsafe {
-					CloseHandle(self.handle);
-				}
-			}
-		}
-		
-		pub fn supports_pid_checks(_pid: Pid) -> bool {
-			true
-		}
-	}
 }
 
 mod text {
@@ -2984,10 +2909,6 @@ mod text {
 	pub const BACKEND: &str = "inotify";
 	#[cfg(all(unix, not(target_os = "linux")))]
 	pub const BACKEND: &str = "kqueue";
-	#[cfg(target_os = "windows")]
-	pub const BACKEND: &str = "ReadDirectoryChanges";
-	#[cfg(not(any(unix, target_os = "windows")))]
-	pub const BACKEND: &str = "polling";
 }
 
 use std::{
@@ -3449,14 +3370,11 @@ fn tail_file(
 		}
 		observer.add_bad_path(path, input.display_name.as_str(), false)?;
 	} else {
-		#[cfg(unix)]
 		let open_result = open_file(
 			&fs,
 			path,
 			settings.pid != 0 && md.as_ref().is_ok_and(|m| m.file_type().is_fifo()),
 		);
-		#[cfg(not(unix))]
-		let open_result = fs.open(path);
 
 		match open_result {
 			Ok(mut file) => {

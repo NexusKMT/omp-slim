@@ -102,7 +102,6 @@ fn app() -> Command {
 		)
 }
 
-#[cfg(unix)]
 fn num_cpus_all() -> usize {
 	// In some situations, /proc and /sys are not mounted, and sysconf returns 1.
 	// However, we want to guarantee that `nproc --all` >= `nproc`.
@@ -111,11 +110,6 @@ fn num_cpus_all() -> usize {
 		.ok()
 		.filter(|&n: &isize| n > 1)
 		.map_or_else(available_parallelism, |n| n as usize)
-}
-
-#[cfg(not(unix))]
-fn num_cpus_all() -> usize {
-	available_parallelism()
 }
 
 /// Returns the available parallelism, falling back to one like GNU `nproc`.

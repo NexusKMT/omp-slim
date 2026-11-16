@@ -220,7 +220,7 @@ fn args_of(args: &[String]) -> Vec<BString> {
 fn git_path(call: &ToolCall) -> Option<BString> {
 	let path = call.env.get(b"PATH")?;
 	let cwd = call.cwd.to_path_lossy();
-	let separator = if cfg!(windows) { ";" } else { ":" };
+	let separator = ":";
 	path.split_str(separator).find_map(|dir| {
 		let dir = dir.to_path_lossy();
 		let dir: PathBuf = if dir.as_os_str().is_empty() {
@@ -233,13 +233,7 @@ fn git_path(call: &ToolCall) -> Option<BString> {
 	})
 }
 
-#[cfg(unix)]
 fn executable(path: &Path) -> bool {
 	use std::os::unix::fs::PermissionsExt as _;
 	std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn executable(path: &Path) -> bool {
-	path.with_extension("exe").is_file()
 }

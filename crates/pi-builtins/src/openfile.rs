@@ -77,14 +77,14 @@ impl From<pi_vfs::File> for Fd {
 	}
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 impl From<std::io::PipeReader> for Fd {
 	fn from(reader: std::io::PipeReader) -> Self {
 		Self::File(pipe_file(reader))
 	}
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 impl From<std::io::PipeWriter> for Fd {
 	fn from(writer: std::io::PipeWriter) -> Self {
 		Self::File(pipe_file(writer))
@@ -98,10 +98,6 @@ fn pipe_file(end: impl Into<std::os::fd::OwnedFd>) -> std::fs::File {
 }
 
 /// A pipe end as the `std::fs::File` owning its handle.
-#[cfg(windows)]
-fn pipe_file(end: impl Into<std::os::windows::io::OwnedHandle>) -> std::fs::File {
-	std::fs::File::from(end.into())
-}
 
 /// An in-process stream an [`OpenFile`] can carry: the wrappers the host puts
 /// around a descriptor (emulated SIGPIPE) and the in-memory streams of tests.
@@ -234,10 +230,7 @@ impl OpenFile {
 		match self {
 			Self::File(file) => file.is_terminal(),
 			Self::Vfs(_) => false,
-			#[cfg(unix)]
 			Self::Stream(_) => self.try_borrow_as_fd().is_ok_and(|fd| fd.is_terminal()),
-			#[cfg(not(unix))]
-			Self::Stream(_) => false,
 		}
 	}
 }
@@ -258,14 +251,14 @@ impl From<pi_vfs::File> for OpenFile {
 	}
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 impl From<std::io::PipeReader> for OpenFile {
 	fn from(reader: std::io::PipeReader) -> Self {
 		pipe_file(reader).into()
 	}
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 impl From<std::io::PipeWriter> for OpenFile {
 	fn from(writer: std::io::PipeWriter) -> Self {
 		pipe_file(writer).into()
@@ -301,7 +294,6 @@ impl Write for OpenFile {
 }
 
 /// [`OpenFile::reader_gone`] for a native handle.
-#[cfg(unix)]
 fn native_reader_gone(file: &std::fs::File) -> bool {
 	use std::os::fd::AsFd as _;
 
@@ -322,12 +314,6 @@ fn native_reader_gone(file: &std::fs::File) -> bool {
 	matches!(poll(&mut fds, PollTimeout::ZERO), Ok(n) if n > 0) && widowed(fds[0].revents())
 }
 
-/// [`OpenFile::reader_gone`] for a native handle: unknown off Unix.
-#[cfg(not(unix))]
-const fn native_reader_gone(_file: &std::fs::File) -> bool {
-	false
-}
-
 /// Whether `poll` revents on a pipe's write end report that no reader is
 /// left. Linux sets POLLERR; Darwin and most other Unices set POLLHUP
 /// instead, so accept any of POLLERR | POLLHUP | POLLNVAL like GNU
@@ -346,7 +332,7 @@ fn widowed(revents: Option<nix::poll::PollFlags>) -> bool {
 ///
 /// The open error.
 pub(crate) fn null() -> io::Result<OpenFile> {
-	let path = if cfg!(windows) { "NUL" } else { "/dev/null" };
+	let path = "/dev/null";
 	let file = std::fs::File::options().read(true).write(true).open(path)?;
 	Ok(file.into())
 }
@@ -361,7 +347,6 @@ pub(crate) fn is_piped_input(file: &OpenFile) -> bool {
 	}
 }
 
-#[cfg(unix)]
 fn is_pipe(file: &std::fs::File) -> bool {
 	use std::os::unix::fs::FileTypeExt as _;
 
@@ -369,21 +354,6 @@ fn is_pipe(file: &std::fs::File) -> bool {
 		let kind = metadata.file_type();
 		kind.is_fifo() || kind.is_socket()
 	})
-}
-
-#[cfg(windows)]
-fn is_pipe(file: &std::fs::File) -> bool {
-	use std::os::windows::io::AsRawHandle as _;
-
-	use windows_sys::Win32::Storage::FileSystem::{FILE_TYPE_PIPE, GetFileType};
-
-	// SAFETY: the handle is owned by `file`, which outlives the call.
-	unsafe { GetFileType(file.as_raw_handle()) == FILE_TYPE_PIPE }
-}
-
-#[cfg(not(any(unix, windows)))]
-const fn is_pipe(_file: &std::fs::File) -> bool {
-	false
 }
 
 /// What a `/dev` or `/proc` path names when it stands for one of this

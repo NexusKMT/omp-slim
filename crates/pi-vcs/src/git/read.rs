@@ -250,15 +250,15 @@ impl GitRepo {
 	///
 	/// Prefers the git CLI: whole-worktree status is the one read whose peak
 	/// memory scales with worktree pathology. Tens of thousands of untracked
-	/// files drove gitoxide's parallel walk into the Windows commit limit
-	/// (os error 1455, `ERROR_COMMITMENT_LIMIT`), which panics in gix's
-	/// worker-thread spawn (`.expect("valid name")`) and pins gigabytes of
-	/// committed memory until process exit. A subprocess bounds that blast
-	/// radius: its memory returns to the OS when it exits and failure is an
-	/// exit code, not a panic. Hosts without a git binary — and checkouts git
-	/// refuses under its `safe.directory` ownership check, which gitoxide opens
-	/// with `Trust::Full` regardless — fall back to the in-process walk (never
-	/// for reftable repos, which are unreadable in-process).
+	/// files drove gitoxide's parallel walk into a per-process limit, which
+	/// panics in gix's worker-thread spawn (`.expect("valid name")`) and pins
+	/// gigabytes of committed memory until process exit. A subprocess bounds
+	/// that blast radius: its memory returns to the OS when it exits and
+	/// failure is an exit code, not a panic. Hosts without a git binary — and
+	/// checkouts git refuses under its `safe.directory` ownership check, which
+	/// gitoxide opens with `Trust::Full` regardless — fall back to the
+	/// in-process walk (never for reftable repos, which are unreadable
+	/// in-process).
 	pub fn status_porcelain(&self, options: &StatusOptions) -> Result<String> {
 		self.status_porcelain_capped(options, super::cli::OUTPUT_LIMIT_BYTES)
 	}
@@ -1771,8 +1771,8 @@ mod tests {
 		let worktrees = repo.worktrees()?;
 		assert_eq!(worktrees.len(), 2);
 		assert_eq!(worktrees[0].path, dir.path());
-		// git records the real path, with `/` separators on Windows; compare
-		// resolved locations rather than spellings.
+		// git records the real path; compare resolved locations rather than
+		// spellings.
 		assert_eq!(worktrees[1].path.canonicalize()?, linked.canonicalize()?);
 		assert_eq!(worktrees[1].branch.as_deref(), Some("refs/heads/linked-branch"));
 		Ok(())

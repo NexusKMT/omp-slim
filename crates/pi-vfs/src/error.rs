@@ -8,7 +8,6 @@ use std::{io, path::Path};
 
 use crate::path::url_scheme;
 
-#[cfg(unix)]
 fn os(code: i32) -> io::Error {
 	io::Error::from_raw_os_error(code)
 }
@@ -32,146 +31,52 @@ pub fn no_provider(path: &Path) -> io::Error {
 /// Deliberately not [`io::ErrorKind::Interrupted`]: std I/O loops retry that
 /// kind, which would spin forever on a cancelled handle.
 pub fn cancelled() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::ECANCELED)
-	}
-	#[cfg(windows)]
-	{
-		io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_CANCELLED as i32)
-	}
-	#[cfg(not(any(unix, windows)))]
-	{
-		io::Error::other("Operation canceled")
-	}
+	os(libc::ECANCELED)
 }
 
 /// Whether `err` is the cancellation error produced by [`cancelled`].
 pub fn is_cancelled(err: &io::Error) -> bool {
-	#[cfg(unix)]
-	{
-		err.raw_os_error() == Some(libc::ECANCELED)
-	}
-	#[cfg(windows)]
-	{
-		err.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_CANCELLED as i32)
-	}
-	#[cfg(not(any(unix, windows)))]
-	{
-		err.kind() == io::ErrorKind::Other && err.to_string() == "Operation canceled"
-	}
+	err.raw_os_error() == Some(libc::ECANCELED)
 }
 
 /// `EXDEV`: the operation would cross filesystem backends or devices.
 pub fn crosses_devices() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::EXDEV)
-	}
-	#[cfg(windows)]
-	{
-		io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_NOT_SAME_DEVICE as i32)
-	}
-	#[cfg(not(any(unix, windows)))]
-	{
-		io::Error::new(io::ErrorKind::CrossesDevices, "Invalid cross-device link")
-	}
+	os(libc::EXDEV)
 }
 
 /// `EROFS`: the filesystem is mounted read-only.
 pub fn read_only_filesystem() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::EROFS)
-	}
-	#[cfg(not(unix))]
-	{
-		io::Error::new(io::ErrorKind::ReadOnlyFilesystem, "Read-only file system")
-	}
+	os(libc::EROFS)
 }
 
 /// `ENOTDIR`: a path component is not a directory.
 pub fn not_a_directory() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::ENOTDIR)
-	}
-	#[cfg(windows)]
-	{
-		io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_DIRECTORY as i32)
-	}
-	#[cfg(not(any(unix, windows)))]
-	{
-		io::Error::new(io::ErrorKind::NotADirectory, "Not a directory")
-	}
+	os(libc::ENOTDIR)
 }
 
 /// `EISDIR`: the operation needs a non-directory.
 pub fn is_a_directory() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::EISDIR)
-	}
-	#[cfg(not(unix))]
-	{
-		io::Error::new(io::ErrorKind::IsADirectory, "Is a directory")
-	}
+	os(libc::EISDIR)
 }
 
 /// `EINVAL`: e.g. `read_link` on something that is not a symbolic link.
 pub fn invalid_argument() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::EINVAL)
-	}
-	#[cfg(not(unix))]
-	{
-		io::Error::new(io::ErrorKind::InvalidInput, "Invalid argument")
-	}
+	os(libc::EINVAL)
 }
 
 /// `EACCES`: permission denied.
 pub fn permission_denied() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::EACCES)
-	}
-	#[cfg(windows)]
-	{
-		io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED as i32)
-	}
-	#[cfg(not(any(unix, windows)))]
-	{
-		io::Error::new(io::ErrorKind::PermissionDenied, "Permission denied")
-	}
+	os(libc::EACCES)
 }
 
 /// `EPERM`: the path names a descriptor overlay that cannot be modified.
 pub(crate) fn not_permitted() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::EPERM)
-	}
-	#[cfg(not(unix))]
-	{
-		io::Error::new(io::ErrorKind::PermissionDenied, "Operation not permitted")
-	}
+	os(libc::EPERM)
 }
 
 /// `EEXIST`.
 pub(crate) fn already_exists() -> io::Error {
-	#[cfg(unix)]
-	{
-		os(libc::EEXIST)
-	}
-	#[cfg(windows)]
-	{
-		io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS as i32)
-	}
-	#[cfg(not(any(unix, windows)))]
-	{
-		io::Error::new(io::ErrorKind::AlreadyExists, "File exists")
-	}
+	os(libc::EEXIST)
 }
 
 /// uucore's canonicalize loop error, kept textually identical.
@@ -180,7 +85,6 @@ pub(crate) fn symlink_loop() -> io::Error {
 }
 
 /// `NUL` byte inside a host path.
-#[cfg(unix)]
 pub(crate) fn nul_in_path() -> io::Error {
 	io::Error::new(io::ErrorKind::InvalidInput, "file name contained an unexpected NUL byte")
 }

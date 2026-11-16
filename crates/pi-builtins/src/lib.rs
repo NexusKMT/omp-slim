@@ -182,7 +182,7 @@ mod rg;
 mod rm;
 #[cfg(feature = "util.rmdir")]
 mod rmdir;
-#[cfg(all(feature = "util.rsync", any(unix, windows)))]
+#[cfg(all(feature = "util.rsync", unix))]
 mod rsync;
 #[cfg(feature = "util.sd")]
 mod sd;
@@ -228,7 +228,7 @@ mod xargs;
 mod yes;
 
 pub use duration::parse_duration;
-pub use host::{panic_scope_active, rayon_global_pool_available, set_rayon_global_pool_available};
+pub use host::panic_scope_active;
 /// The process table the process builtins read, and the liveness state of an
 /// entry in it. Public so an embedding shell can inspect processes through the
 /// same snapshot its `ps`/`pgrep` builtins use.
@@ -237,8 +237,5 @@ pub use proc_snapshot::{ProcInfo, ProcessStatus};
 /// The OS process primitives under those snapshots. `pi-shell` builds its
 /// identity-pinned process references on them, so each platform query has one
 /// implementation.
-#[cfg(all(
-	feature = "util.procs",
-	any(target_os = "linux", target_os = "macos", target_os = "windows")
-))]
+#[cfg(all(feature = "util.procs", any(target_os = "linux", target_os = "macos")))]
 pub use proc_snapshot::sys as proc_sys;

@@ -1403,9 +1403,9 @@ fn tree_map(repo: &gix::Repository, tree: gix::ObjectId) -> Result<BTreeMap<Stri
 /// The worktree content, in blob form, of the paths `patches` read: each
 /// patch's source, or its target when it creates one. Applying needs nothing
 /// else, so the rest of the worktree is never read or hashed. Tracked paths
-/// take their index mode (there is no executable bit on Windows), others the
-/// mode the patch records. A directory at a source path is a gitlink, as git
-/// reads it, whether or not the submodule is initialized.
+/// take their index mode, others the mode the patch records. A directory at a
+/// source path is a gitlink, as git reads it, whether or not the submodule is
+/// initialized.
 fn patch_worktree_map(
 	repo: &GitRepo,
 	gix_repo: &gix::Repository,
@@ -1558,13 +1558,10 @@ fn read_worktree_entry(
 	};
 	if metadata.file_type().is_symlink() {
 		let target = fs::read_link(path)?;
-		#[cfg(unix)]
 		let bytes = {
 			use std::os::unix::ffi::OsStrExt;
 			target.as_os_str().as_bytes().to_vec()
 		};
-		#[cfg(not(unix))]
-		let bytes = target.to_string_lossy().as_bytes().to_vec();
 		return Ok(Some((bytes, Mode::SYMLINK)));
 	}
 	if !metadata.is_file() {
@@ -1574,7 +1571,6 @@ fn read_worktree_entry(
 	Ok(Some((filter.worktree_to_git(rela_path, fs::read(path)?)?, mode)))
 }
 
-#[cfg(unix)]
 fn worktree_file_mode(metadata: &fs::Metadata, _index_mode: Mode) -> Mode {
 	use std::os::unix::fs::PermissionsExt;
 	if metadata.permissions().mode() & 0o111 != 0 {
@@ -1582,12 +1578,6 @@ fn worktree_file_mode(metadata: &fs::Metadata, _index_mode: Mode) -> Mode {
 	} else {
 		Mode::FILE
 	}
-}
-
-#[cfg(not(unix))]
-#[allow(clippy::missing_const_for_fn, reason = "matches non-const unix signature")]
-fn worktree_file_mode(_metadata: &fs::Metadata, index_mode: Mode) -> Mode {
-	index_mode
 }
 
 fn write_index_map(repo: &gix::Repository, map: &BTreeMap<String, FileEntry>) -> Result<()> {
@@ -1888,13 +1878,8 @@ fn write_worktree_entry(
 	let bytes = blob_bytes(gix_repo, entry.id)?;
 	if entry.mode == Mode::SYMLINK {
 		let _ = fs::remove_file(&absolute);
-		#[cfg(unix)]
-		{
-			use std::os::unix::{ffi::OsStrExt, fs::symlink};
-			symlink(std::ffi::OsStr::from_bytes(&bytes), &absolute)?;
-		}
-		#[cfg(not(unix))]
-		fs::write(&absolute, bytes)?;
+		use std::os::unix::{ffi::OsStrExt, fs::symlink};
+		symlink(std::ffi::OsStr::from_bytes(&bytes), &absolute)?;
 		return Ok(());
 	}
 	fs::write(&absolute, filter.git_to_worktree(path, bytes)?)?;
@@ -1998,9 +1983,9 @@ mod tests {
 		git(temp.path(), &["init", "-q"]);
 		git(temp.path(), &["config", "user.name", "Patch Test"]);
 		git(temp.path(), &["config", "user.email", "patch@example.com"]);
-		// Assertions compare exact worktree bytes and stat-sensitive status;
-		// Git for Windows' system `core.autocrlf=true` would rewrite them as
-		// CRLF. `patch_apply_under_autocrlf_matches_git` covers conversion.
+		// Assertions compare exact worktree bytes and stat-sensitive status; a
+		// global `core.autocrlf=true` would rewrite them as CRLF.
+		// `patch_apply_under_autocrlf_matches_git` covers conversion.
 		git(temp.path(), &["config", "core.autocrlf", "false"]);
 		for (path, bytes) in files {
 			let absolute = temp.path().join(path);
@@ -2349,8 +2334,8 @@ mod tests {
 	#[test]
 	fn patch_apply_under_autocrlf_matches_git() {
 		// Regression: worktree files were patched as raw bytes, so an LF patch
-		// never matched a CRLF checkout under `core.autocrlf=true` (the Git for
-		// Windows default) and clean CRLF files read as stashable edits.
+		// never matched a CRLF checkout under `core.autocrlf=true` and clean
+		// CRLF files read as stashable edits.
 		// `crlf.txt` keeps CRLF in its blob, so its patch carries CRLF context
 		// that git matches against the unconverted file.
 		let files: Vec<(&str, &[u8])> =

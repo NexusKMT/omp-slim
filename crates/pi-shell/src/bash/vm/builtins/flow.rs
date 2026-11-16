@@ -78,7 +78,7 @@ pub fn source(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 		};
 		if let Some(search) = search {
 			let cwd = ctx.vp.cwd.clone();
-			for cand in candidates(&search, file, &cwd, ctx.k.engine.config().platform, &[]) {
+			for cand in candidates(&search, file, &cwd) {
 				if let ProbeResult::Stat(Some(st)) =
 					ctx.probe(Probe::Stat { path: cand.clone(), follow: true })?
 					&& st.kind == StatKind::File
@@ -187,8 +187,7 @@ pub fn zsh_source(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 		}
 	} else if path.is_none() {
 		let search = ctx.scalar(b"PATH")?.unwrap_or_default();
-		let separator = crate::bash::vm::probe::path_separator(ctx.k.engine.config().platform);
-		for dir in search.split(|&c| c == separator) {
+		for dir in search.split(|&c| c == b':') {
 			let cand = if dir.is_empty() || dir == b"." {
 				absolute(&cwd, file)
 			} else {

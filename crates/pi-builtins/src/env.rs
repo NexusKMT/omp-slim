@@ -1245,7 +1245,6 @@ impl Signals {
 
 /// Signal names and numbers from `uucore::signals`, and what a command
 /// started by the shell inherits.
-#[cfg(unix)]
 mod sig {
 	use std::io;
 
@@ -1323,41 +1322,6 @@ mod sig {
 			return Some("Invalid argument".to_owned());
 		}
 		(ignored != ignore).then(|| "Operation not supported".to_owned())
-	}
-}
-
-/// Without POSIX signals no `SIG` names a signal: every signal operand is
-/// invalid, and the all-signals forms change nothing.
-#[cfg(not(unix))]
-mod sig {
-	use std::io;
-
-	pub(super) const fn bound() -> usize {
-		0
-	}
-
-	pub(super) const fn is_internal(_: usize) -> bool {
-		false
-	}
-
-	pub(super) fn name(signum: usize) -> String {
-		format!("SIG{signum}")
-	}
-
-	pub(super) const fn operand2sig(_: &[u8]) -> Option<usize> {
-		None
-	}
-
-	pub(super) const fn is_unblockable(_: usize) -> bool {
-		false
-	}
-
-	pub(super) const fn inherited_ignore(_: usize) -> io::Result<bool> {
-		Ok(false)
-	}
-
-	pub(super) const fn change_error(_: usize, _: bool, _: bool) -> Option<String> {
-		None
 	}
 }
 
@@ -1523,8 +1487,8 @@ mod tests {
 		assert_eq!(err, "");
 		assert_eq!(code, 0);
 		assert_eq!(out, format!("{}\n", target.display()));
-		// As `chdir` does, -C leaves PWD as it was. Literal style: a Windows
-		// path's backslashes would otherwise print shell-quoted.
+		// As `chdir` does, -C leaves PWD as it was. Literal style prints the
+		// path as written rather than shell-quoted.
 		let pwd = dir.path().display().to_string();
 		let vars = [("QUOTING_STYLE", "literal"), ("PWD", pwd.as_str())];
 		let (code, out, _) = env_in(dir.path(), &["-C", "sub", "env"], &vars).await;

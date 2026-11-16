@@ -240,23 +240,6 @@ fn raw_names_round_trip_through_url_segments() {
 	assert!(is_virtual_path(p("git+ssh://h/r")));
 }
 
-#[cfg(windows)]
-#[test]
-fn drive_relative_paths_resolve_against_the_shell_cwd_not_the_process_cwd() {
-	let p = Path::new;
-	let cwd = p(r"C:\Temp\probe");
-	// Same drive: the remainder joins onto the shell cwd; `C:` is the cwd
-	// itself.
-	assert_eq!(absolute_path(cwd, p("C:")), cwd);
-	assert_eq!(absolute_path(cwd, p("c:sub")), p(r"C:\Temp\probe\sub"));
-	assert_eq!(join_path(p(r"\\?\C:\Temp\probe"), p("C:a")), p(r"\\?\C:\Temp\probe\a"));
-	// Another drive (or a URL cwd) has no shell cwd: the drive root stands in.
-	assert_eq!(absolute_path(cwd, p("D:sub")), p(r"D:\sub"));
-	assert_eq!(absolute_path(p("local://d"), p("C:a")), p(r"C:\a"));
-	// Rooted operands are unchanged.
-	assert_eq!(absolute_path(cwd, p(r"D:\x")), p(r"D:\x"));
-}
-
 #[test]
 fn native_backend_never_resolves_urls_against_the_process_cwd() {
 	let fs = BlockingFs::native();
@@ -380,32 +363,6 @@ impl TempDir {
 impl Drop for TempDir {
 	fn drop(&mut self) {
 		let _ = std::fs::remove_dir_all(&self.0);
-	}
-}
-
-#[cfg(windows)]
-#[test]
-fn native_path_metadata_matches_the_open_file_identity() {
-	let dir = TempDir::new("identity");
-	let path = dir.0.join("file");
-	std::fs::write(&path, "content").unwrap();
-	let fs = BlockingFs::native();
-	let path_meta = fs.metadata(&path).unwrap();
-	let file_meta = fs.open(&path).unwrap().metadata().unwrap();
-	assert!(path_meta.same_file(&file_meta));
-	assert_eq!(path_meta.len(), file_meta.len());
-	let missing_identity =
-		Metadata::native_with_handle(std::fs::metadata(&path).unwrap(), crate::native::HandleInfo {
-			volume_serial: 1,
-			file_index:    0,
-			nlink:         1,
-		});
-	assert!(missing_identity.file_id().is_none());
-	assert!(!missing_identity.same_file(&path_meta));
-	let link = dir.0.join("link");
-	if std::os::windows::fs::symlink_file("file", &link).is_ok() {
-		assert!(fs.symlink_metadata(&link).unwrap().is_symlink());
-		assert!(fs.metadata(&link).unwrap().same_file(&path_meta));
 	}
 }
 

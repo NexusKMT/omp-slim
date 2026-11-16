@@ -76,8 +76,6 @@ rust_binary(
     }) + select({
         "//bazel/triples:x86_64-unknown-linux-musl": ["-Ctarget-feature=-crt-static"],
         "//bazel/triples:aarch64-unknown-linux-musl": ["-Ctarget-feature=-crt-static"],
-        "//bazel/triples:x86_64-pc-windows-msvc": ["-Ctarget-feature=+crt-static"],
-        "//bazel/triples:aarch64-pc-windows-msvc": ["-Ctarget-feature=+crt-static"],
         "//conditions:default": [],
     }),
 )
@@ -129,8 +127,7 @@ rust_shared_library(
         # napi_build::setup() equivalents (build.rs is not wired into Bazel):
         # napi addons resolve Node symbols at load time on macOS; DF_1_NODELETE
         # keeps the addon resident across Worker teardown on linux-gnu (napi
-        # emits it for gnu; harmless under musl's loader). windows-msvc needs
-        # nothing — napi-sys v3 imports node.exe via raw-dylib.
+        # emits it for gnu; harmless under musl's loader).
         # -adhoc_codesign: linkers sign arm64 ad hoc by default but not
         # x86_64; every shipped darwin addon carries a signature.
         "@platforms//os:macos": [
@@ -144,14 +141,6 @@ rust_shared_library(
         # cdylib at all; napi musl addons have always linked the dynamic CRT.
         "//bazel/triples:x86_64-unknown-linux-musl": ["-Ctarget-feature=-crt-static"],
         "//bazel/triples:aarch64-unknown-linux-musl": ["-Ctarget-feature=-crt-static"],
-        # Statically link the MSVC CRT so the shipped .node does not import
-        # VCRUNTIME140.dll from the Visual C++ Redistributable, which is absent
-        # on a clean Windows install and makes the loader's dlopen fail with
-        # "The specified module could not be found" (error 126). The C deps are
-        # switched to /MT in lock-step via the static_link_msvcrt cc feature in
-        # the native_addon transition (bazel/defs.bzl).
-        "//bazel/triples:x86_64-pc-windows-msvc": ["-Ctarget-feature=+crt-static"],
-        "//bazel/triples:aarch64-pc-windows-msvc": ["-Ctarget-feature=+crt-static"],
         "//conditions:default": [],
     }),
     version = "17.1.5",

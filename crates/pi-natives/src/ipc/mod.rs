@@ -1,5 +1,4 @@
-//! Native local IPC: Unix domain sockets and Windows named pipes behind one
-//! N-API surface.
+//! Native local IPC: Unix domain sockets behind one N-API surface.
 //!
 //! The native layer owns transport, peer security, single-instance bind,
 //! stale-endpoint takeover and line framing; lifecycle policy (spawn, auth,
@@ -25,20 +24,11 @@ mod conn;
 mod cork;
 mod endpoint;
 mod lines;
-#[cfg(unix)]
 mod unix;
-#[cfg(windows)]
-mod windows;
 
-#[cfg(unix)]
 use unix as platform;
-#[cfg(windows)]
-use windows as platform;
 
 use self::conn::{FrameCallback, Framing, Shared};
-
-#[cfg(not(any(unix, windows)))]
-compile_error!("pi-natives IPC requires Unix or Windows");
 
 /// Default `maxFrameBytes` for `lines` framing.
 const DEFAULT_MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
@@ -143,20 +133,12 @@ pub struct IpcConnectOptions {
 ///
 /// Unix: `<dir>/<stem>.sock`; when that path does not fit `sun_path` (104 bytes
 /// on macOS/BSD, 108 on Linux, including NUL), `/tmp/omp-<euid>/<hash16>.sock`.
-/// Windows: `\\.\pipe\omp-<stem>-<hash16(lowercase(resolve(dir)))>`.
 /// `stem` is `name` with every char outside `[A-Za-z0-9._-]` replaced by "_".
 /// Pure and deterministic: every process computes the same endpoint.
 #[napi(js_name = "ipcEndpoint")]
 pub fn ipc_endpoint(dir: String, name: String) -> String {
 	let resolved = endpoint::resolve_dir(&dir);
-	#[cfg(unix)]
-	{
-		endpoint::unix_endpoint(&resolved, &name, platform::euid(), endpoint::SUN_PATH_MAX)
-	}
-	#[cfg(windows)]
-	{
-		endpoint::windows_pipe_name(&resolved, &name)
-	}
+	endpoint::unix_endpoint(&resolved, &name, platform::euid(), endpoint::SUN_PATH_MAX)
 }
 
 type ConnectionCallback =
@@ -184,8 +166,7 @@ impl IpcServer {
 	/// Unix: creates the parent dir (0700) if missing; under an exclusive flock
 	/// on `<path>.bind.lock`, rejects EADDRINUSE when a live server answers,
 	/// otherwise replaces the stale socket file; the socket is chmod 0600 before
-	/// `listen()`. Windows: first pipe instance (exists → EADDRINUSE), remote
-	/// clients rejected, DACL granting only the current user.
+	/// `listen()`.
 	/// `onConnection` receives each accepted, peer-verified connection (not yet
 	/// started).
 	#[napi(
@@ -446,8 +427,8 @@ impl IpcConnection {
 		})
 	}
 
-	/// Graceful: write everything queued, then shut the write half (Unix) /
-	/// close the pipe (Windows); onClose follows when the read side ends.
+	/// Graceful: write everything queued, then shut the write half; onClose
+	/// follows when the read side ends.
 	#[napi]
 	pub fn end(&self) {
 		self.shared.end();

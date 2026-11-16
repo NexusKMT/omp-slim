@@ -627,21 +627,12 @@ impl crate::bash::Host for PiHost {
 		if signal.is_some() {
 			check_signal_target(pid)?;
 		}
-		#[cfg(unix)]
-		{
-			let number =
-				signal.map_or(0, |sig| i32::from(sig.number(crate::bash::Platform::current())));
-			// SAFETY: kill accepts integer process and signal numbers.
-			if unsafe { libc::kill(pid, number) } == 0 {
-				Ok(())
-			} else {
-				Err(io::Error::last_os_error())
-			}
-		}
-		#[cfg(not(unix))]
-		{
-			let _ = signal;
-			Err(io::ErrorKind::Unsupported.into())
+		let number = signal.map_or(0, |sig| i32::from(sig.number(crate::bash::Platform::current())));
+		// SAFETY: kill accepts integer process and signal numbers.
+		if unsafe { libc::kill(pid, number) } == 0 {
+			Ok(())
+		} else {
+			Err(io::Error::last_os_error())
 		}
 	}
 
@@ -701,13 +692,8 @@ impl crate::bash::Host for PiHost {
 	}
 
 	fn ppid(&self) -> u32 {
-		#[cfg(unix)]
-		{
-			// SAFETY: getppid has no preconditions.
-			u32::try_from(unsafe { libc::getppid() }).unwrap_or(0)
-		}
-		#[cfg(not(unix))]
-		0
+		// SAFETY: getppid has no preconditions.
+		u32::try_from(unsafe { libc::getppid() }).unwrap_or(0)
 	}
 
 	fn user(&self) -> UserInfo {
@@ -821,7 +807,6 @@ pub fn check_signal_target(pid: i32) -> io::Result<()> {
 /// This process and its ancestors with their process groups, nearest first.
 /// A recorded parent is followed only while it started no later than its
 /// child: a younger process holding the number is a recycled pid.
-#[cfg(unix)]
 fn protected_processes() -> Vec<(i32, i32)> {
 	let Ok(me) = i32::try_from(std::process::id()) else {
 		return Vec::new();
@@ -847,12 +832,6 @@ fn protected_processes() -> Vec<(i32, i32)> {
 		cur = parent;
 	}
 	chain
-}
-
-/// Only this process off Unix.
-#[cfg(not(unix))]
-fn protected_processes() -> Vec<(i32, i32)> {
-	i32::try_from(std::process::id()).map_or_else(|_| Vec::new(), |me| vec![(me, me)])
 }
 
 /// An external reported to a [`SpawnObserver`].

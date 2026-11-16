@@ -16,8 +16,6 @@
 //! - Regular files, never-blocking devices and in-process streams are read and
 //!   written inline: no readiness exists for them and they never wait for
 //!   another process.
-//! - Off unix, where anonymous pipes have no readiness API, Windows pipes run
-//!   their reads and writes on the blocking pool behind the same async API.
 
 // The module is API consumed by the feature-gated utility modules; a build with
 // no utility features enabled legitimately uses none of it.
@@ -88,37 +86,22 @@ enum Native {
 	/// A descriptor written once the reactor reports it writable.
 	#[cfg(unix)]
 	Descriptor(descriptor::Descriptor),
-	/// A pipe written on the blocking pool.
-	#[cfg(windows)]
-	Blocking(OpenFile),
 }
 
 impl Native {
 	/// Classifies `handle`: inline for a regular file, a device that never
-	/// blocks or an in-process stream; otherwise a reactor-driven descriptor
-	/// (a blocking-pool pipe on Windows). Needs a runtime to register with.
+	/// blocks or an in-process stream; otherwise a reactor-driven descriptor.
+	/// Needs a runtime to register with.
 	fn open(handle: &OpenFile, regular_file: bool) -> Self {
-		#[cfg(unix)]
+		if !regular_file
+			&& let Ok(fd) = handle.try_borrow_as_fd()
+			&& pi_vfs::fd_reads_can_block(fd)
+			&& let Ok(owned) = fd.try_clone_to_owned()
+			&& let Ok(descriptor) = descriptor::Descriptor::gated(owned)
 		{
-			if !regular_file
-				&& let Ok(fd) = handle.try_borrow_as_fd()
-				&& pi_vfs::fd_reads_can_block(fd)
-				&& let Ok(owned) = fd.try_clone_to_owned()
-				&& let Ok(descriptor) = descriptor::Descriptor::gated(owned)
-			{
-				return Self::Descriptor(descriptor);
-			}
-			Self::Inline(handle.clone())
+			return Self::Descriptor(descriptor);
 		}
-		#[cfg(windows)]
-		{
-			if regular_file { Self::Inline(handle.clone()) } else { Self::Blocking(handle.clone()) }
-		}
-		#[cfg(not(any(unix, windows)))]
-		{
-			let _ = regular_file;
-			Self::Inline(handle.clone())
-		}
+		Self::Inline(handle.clone())
 	}
 
 	/// Writes all of `bytes`; hands them back for reuse.
@@ -133,19 +116,6 @@ impl Native {
 			Self::Descriptor(descriptor) => {
 				let result = descriptor.write_all(&bytes).await;
 				(bytes, result)
-			},
-			#[cfg(windows)]
-			Self::Blocking(file) => {
-				let mut file = file.clone();
-				match tokio::task::spawn_blocking(move || {
-					let result = file.write_all(&bytes).and_then(|()| file.flush());
-					(bytes, result)
-				})
-				.await
-				{
-					Ok(done) => done,
-					Err(error) => (Vec::new(), Err(io::Error::other(error))),
-				}
 			},
 		}
 	}
@@ -312,9 +282,6 @@ enum Repr {
 	/// A descriptor read once the reactor reports it readable.
 	#[cfg(unix)]
 	Descriptor(descriptor::Descriptor),
-	/// A pipe read on the blocking pool.
-	#[cfg(windows)]
-	Blocking(Blocking),
 }
 
 impl Source {
@@ -351,53 +318,34 @@ impl Source {
 		fifo: bool,
 		metadata: Option<pi_vfs::Metadata>,
 	) -> io::Result<Self> {
-		#[cfg(unix)]
-		{
-			// A FIFO opened `O_NONBLOCK` does not wait for a writer. Where the
-			// path is an alias of a descriptor the shell passed, opening it
-			// duplicates that descriptor instead of making a new description,
-			// and `O_NONBLOCK` would leak to the shell.
-			let owned_description = fifo && !aliases_descriptor(path);
-			let file = if owned_description {
-				let mut options = pi_vfs::OpenOptions::new();
-				options.read(true).custom_flags(libc::O_NONBLOCK);
-				fs.open_with(path, &options).await?
-			} else {
-				fs.open(path).await?
-			};
-			let file = file
-				.into_native()
-				.map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
-			let fd = OwnedFd::from(file);
-			let descriptor = if owned_description {
-				descriptor::Descriptor::nonblocking(fd)
-			} else if pi_vfs::fd_reads_can_block(fd.as_fd()) {
-				descriptor::Descriptor::gated(fd)
-			} else {
-				Err(fd)
-			};
-			let repr = match descriptor {
-				Ok(descriptor) => Repr::Descriptor(descriptor),
-				Err(fd) => Repr::Inline(OpenFile::from(std::fs::File::from(fd))),
-			};
-			Ok(Self::new(repr, metadata))
-		}
-		#[cfg(not(unix))]
-		{
-			let _ = fifo;
-			let file = fs.open(path).await?;
-			#[cfg(windows)]
-			{
-				let native = file
-					.into_native()
-					.map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
-				return Ok(Self::new(Repr::Blocking(Blocking::new(OpenFile::from(native))), metadata));
-			}
-			#[cfg(not(windows))]
-			{
-				Ok(Self::new(Repr::File(file), metadata))
-			}
-		}
+		// A FIFO opened `O_NONBLOCK` does not wait for a writer. Where the
+		// path is an alias of a descriptor the shell passed, opening it
+		// duplicates that descriptor instead of making a new description,
+		// and `O_NONBLOCK` would leak to the shell.
+		let owned_description = fifo && !aliases_descriptor(path);
+		let file = if owned_description {
+			let mut options = pi_vfs::OpenOptions::new();
+			options.read(true).custom_flags(libc::O_NONBLOCK);
+			fs.open_with(path, &options).await?
+		} else {
+			fs.open(path).await?
+		};
+		let file = file
+			.into_native()
+			.map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
+		let fd = OwnedFd::from(file);
+		let descriptor = if owned_description {
+			descriptor::Descriptor::nonblocking(fd)
+		} else if pi_vfs::fd_reads_can_block(fd.as_fd()) {
+			descriptor::Descriptor::gated(fd)
+		} else {
+			Err(fd)
+		};
+		let repr = match descriptor {
+			Ok(descriptor) => Repr::Descriptor(descriptor),
+			Err(fd) => Repr::Inline(OpenFile::from(std::fs::File::from(fd))),
+		};
+		Ok(Self::new(repr, metadata))
 	}
 
 	/// Reads a descriptor handed in by the shell (stdin): a provider file
@@ -419,12 +367,6 @@ impl Source {
 			&& let Ok(descriptor) = descriptor::Descriptor::gated(fd.try_clone_to_owned()?)
 		{
 			return Ok(Self::new(Repr::Descriptor(descriptor), None));
-		}
-		#[cfg(windows)]
-		if !matches!(file, OpenFile::Stream(_))
-			&& !matches!(file, OpenFile::File(native) if native.metadata().is_ok_and(|meta| meta.is_file()))
-		{
-			return Ok(Self::new(Repr::Blocking(Blocking::new(file.try_clone()?)), None));
 		}
 		Ok(Self::new(Repr::Inline(file.try_clone()?), None))
 	}
@@ -451,8 +393,6 @@ impl Source {
 			},
 			#[cfg(unix)]
 			Repr::Descriptor(descriptor) => descriptor.read(buf).await,
-			#[cfg(windows)]
-			Repr::Blocking(pipe) => pipe.read(buf).await,
 		}
 	}
 
@@ -507,37 +447,7 @@ fn aliases_descriptor(path: &Path) -> bool {
 }
 
 /// A pipe read on the blocking pool, where the platform has no readiness API.
-#[cfg(windows)]
-struct Blocking {
-	file:    Option<OpenFile>,
-	scratch: Vec<u8>,
-}
 
-#[cfg(windows)]
-impl Blocking {
-	fn new(file: OpenFile) -> Self {
-		Self { file: Some(file), scratch: Vec::new() }
-	}
-
-	async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-		let Some(mut file) = self.file.take() else {
-			return Err(io::Error::other("input lost to an abandoned read"));
-		};
-		let mut scratch = std::mem::take(&mut self.scratch);
-		scratch.resize(buf.len().min(READ_CHUNK), 0);
-		let (file, scratch, result) = tokio::task::spawn_blocking(move || {
-			let result = file.read(&mut scratch);
-			(file, scratch, result)
-		})
-		.await
-		.map_err(io::Error::other)?;
-		self.file = Some(file);
-		let count = result?;
-		buf[..count].copy_from_slice(&scratch[..count]);
-		self.scratch = scratch;
-		Ok(count)
-	}
-}
 
 #[cfg(unix)]
 mod descriptor {

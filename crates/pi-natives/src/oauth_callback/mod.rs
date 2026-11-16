@@ -5,12 +5,10 @@ mod context;
 mod darwin;
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "windows")]
-mod windows;
 // The relay binary owns publication; tests reuse it to publish callbacks the
 // way the relay does.
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 mod unsupported {
 	use anyhow::bail;
 	use serde::{Deserialize, Serialize};
@@ -55,10 +53,8 @@ use napi_derive::napi;
 use notify::{RecursiveMode, Watcher as _};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 use unsupported as platform;
-#[cfg(target_os = "windows")]
-use windows as platform;
 
 use crate::{
 	file_lock::FileLock,
@@ -340,10 +336,10 @@ fn start_blocking(core: &Core, cancel: CancelToken) -> AnyResult<StartOutcome> {
 	if !session_supported(&core.env) {
 		return Ok(StartOutcome::Unsupported);
 	}
-	#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+	#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 	return Ok(StartOutcome::Unsupported);
 
-	#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+	#[cfg(any(target_os = "linux", target_os = "macos"))]
 	{
 		let home = fs::canonicalize(&core.home)
 			.with_context(|| format!("failed to resolve user home {}", core.home.display()))?;
@@ -616,10 +612,6 @@ fn extract_helper(context: &Context) -> AnyResult<()> {
 		}
 		return Ok(());
 	}
-	#[cfg(target_os = "windows")]
-	if context.helper_path.exists() {
-		fs::remove_file(&context.helper_path)?;
-	}
 	atomic_write(&context.helper_path, HELPER_BYTES, 0o700)
 }
 
@@ -757,7 +749,6 @@ fn transaction_id() -> AnyResult<String> {
 	Ok(id)
 }
 
-#[cfg(unix)]
 fn fill_random(bytes: &mut [u8; 16]) -> AnyResult<()> {
 	use std::io::Read as _;
 
@@ -767,35 +758,7 @@ fn fill_random(bytes: &mut [u8; 16]) -> AnyResult<()> {
 		.context("failed to generate OAuth ownership nonce")
 }
 
-#[cfg(target_os = "windows")]
-fn fill_random(bytes: &mut [u8; 16]) -> AnyResult<()> {
-	let mut guid = windows_sys::core::GUID::default();
-	// SAFETY: `guid` is a live writable GUID for the duration of the call.
-	let result = unsafe { windows_sys::Win32::System::Com::CoCreateGuid(&raw mut guid) };
-	if result < 0 {
-		bail!("failed to generate OAuth ownership nonce (HRESULT {result:#010x})");
-	}
-	// SAFETY: a GUID and the destination are both exactly 16 bytes and do not
-	// overlap.
-	unsafe {
-		std::ptr::copy_nonoverlapping(
-			std::ptr::from_ref(&guid).cast::<u8>(),
-			bytes.as_mut_ptr(),
-			bytes.len(),
-		);
-	}
-	Ok(())
-}
-
-#[cfg(not(any(unix, target_os = "windows")))]
-fn fill_random(_bytes: &mut [u8; 16]) -> AnyResult<()> {
-	bail!("native OAuth callbacks are unsupported on this platform")
-}
-
 fn environment_home(env: &BTreeMap<String, String>) -> Option<PathBuf> {
-	#[cfg(target_os = "windows")]
-	let home = env.get("USERPROFILE").or_else(|| env.get("HOME"));
-	#[cfg(not(target_os = "windows"))]
 	let home = env.get("HOME").or_else(|| env.get("USERPROFILE"));
 	home
 		.map(PathBuf::from)
@@ -816,8 +779,6 @@ const fn platform_name() -> &'static str {
 		"darwin"
 	} else if cfg!(target_os = "linux") {
 		"linux"
-	} else if cfg!(target_os = "windows") {
-		"windows"
 	} else {
 		"unsupported"
 	}
@@ -844,11 +805,6 @@ fn session_supported(env: &BTreeMap<String, String>) -> bool {
 		&& ["DISPLAY", "WAYLAND_DISPLAY"]
 			.iter()
 			.any(|name| env.get(*name).is_some_and(|value| !value.is_empty()));
-	#[cfg(target_os = "windows")]
-	let supported = supported
-		&& !env
-			.get("SESSIONNAME")
-			.is_some_and(|value| value.eq_ignore_ascii_case("services"));
 	supported
 }
 

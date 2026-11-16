@@ -5078,8 +5078,6 @@ pub mod fast_io {
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-#[cfg(not(unix))]
-use std::marker::PhantomData;
 use std::{
 	cell::Cell,
 	io::{self, BufRead, BufReader, BufWriter, Read, Write},
@@ -5333,24 +5331,13 @@ enum IOChunkContent<'a> {
 	Owned {
 		content:     String, // Line content without newline
 		has_newline: bool,   // True if \n-terminated
-		#[cfg(not(unix))]
-		_phantom:    PhantomData<&'a ()>, // Silence E0392 warning
 	},
 }
 
 impl IOChunkContent<'_> {
 	/// Construct a new Owned chunk.
 	pub fn new_owned(content: String, has_newline: bool) -> Self {
-		#[cfg(unix)]
-		return IOChunkContent::Owned { content, has_newline };
-
-		#[cfg(not(unix))]
-		return IOChunkContent::Owned {
-			content,
-			has_newline,
-			// Avoid E0063 missing _phantom initialization errors
-			_phantom: std::marker::PhantomData,
-		};
+		IOChunkContent::Owned { content, has_newline }
 	}
 
 	#[cfg(unix)]
@@ -5387,8 +5374,6 @@ pub enum LineReader<'a> {
 		cursor: SliceLineCursor<'a>,
 	},
 	ReadInput(ReadLineCursor),
-	#[cfg(not(unix))]
-	_Phantom(std::marker::PhantomData<&'a ()>),
 }
 
 /// Return a LineReader that uses the ReadInput method fot the specified file.
@@ -5472,9 +5457,6 @@ impl<'a> LineReader<'a> {
 					Ok(None)
 				}
 			},
-
-			#[cfg(not(unix))]
-			LineReader::_Phantom(_) => unreachable!("_Phantom should never be constructed"),
 		}
 	}
 
@@ -5485,9 +5467,6 @@ impl<'a> LineReader<'a> {
 			LineReader::SliceInput { cursor, .. } => cursor.last_line(),
 
 			LineReader::ReadInput(cursor) => cursor.last_line(),
-
-			#[cfg(not(unix))]
-			LineReader::_Phantom(_) => unreachable!("_Phantom should never be constructed"),
 		}
 	}
 }
@@ -5538,18 +5517,6 @@ const MIN_DIRECT_WRITE: usize = 4 * 1024;
 const MAX_PENDING_WRITE_NON_FILE: usize = 64 * 1024;
 
 impl OutputBuffer {
-	#[cfg(not(unix))]
-	pub fn new(w: Box<dyn OutputWrite + 'static>, line_buffered: bool) -> Self {
-		Self {
-			out: BufWriter::new(w),
-			line_buffered,
-			pending_newline: false,
-			#[cfg(test)]
-			low_level_flushes: 0,
-		}
-	}
-
-	#[cfg(unix)]
 	pub fn new(w: Box<dyn OutputWrite + 'static>, line_buffered: bool) -> Self {
 		Self {
 			out: BufWriter::new(w),
@@ -5750,51 +5717,6 @@ impl OutputBuffer {
 	/// Flush everything: pending snapshot and buffered data.
 	pub fn flush(&mut self) -> io::Result<()> {
 		self.flush_slice(WriteRange::Complete)?; // flush snapshot if any
-		self.out.flush() // then flush buffered data
-	}
-}
-
-#[cfg(not(unix))]
-impl OutputBuffer {
-	/// Schedule the specified output chunk for eventual output
-	pub fn write_chunk(&mut self, chunk: &IOChunk) -> io::Result<()> {
-		if chunk.is_empty() && !chunk.is_newline_terminated() {
-			return Ok(());
-		}
-
-		if self.pending_newline {
-			self.out.write_all(b"\n")?;
-			self.pending_newline = false;
-			self.flush_completed_line()?;
-		}
-
-		match &chunk.content {
-			IOChunkContent::Owned { content, has_newline, .. } => {
-				self.out.write_all(content.as_bytes())?;
-				if *has_newline {
-					self.out.write_all(b"\n")?;
-				}
-				self.pending_newline = !has_newline;
-				if *has_newline {
-					self.flush_completed_line()?;
-				}
-				Ok(())
-			},
-		}
-	}
-
-	/// Write a deferred newline if the last output didn't end with one.
-	pub fn flush_pending_newline(&mut self) -> io::Result<()> {
-		if self.pending_newline {
-			self.out.write_all(b"\n")?;
-			self.pending_newline = false;
-			self.flush_completed_line()?;
-		}
-		Ok(())
-	}
-
-	/// Flush everything: pending snapshot and buffered data.
-	pub fn flush(&mut self) -> io::Result<()> {
 		self.out.flush() // then flush buffered data
 	}
 }
@@ -6189,8 +6111,7 @@ mod tests {
 	}
 
 	/// Truncating an input file after sed opened it must not fault the host
-	/// process; the reader keeps serving the bytes captured at open. Unix only:
-	/// the snapshot is the `SliceInput` path; Windows always streams.
+	/// process; the reader keeps serving the bytes captured at open.
 	#[test]
 	#[cfg(unix)]
 	fn test_file_truncated_after_open() -> io::Result<()> {
@@ -6415,12 +6336,7 @@ mod tests {
 	fn make_owned_chunk(s: &str, has_nl: bool) -> IOChunk<'_> {
 		IOChunk {
 			utf8_verified: Cell::new(true),
-			content:       IOChunkContent::Owned {
-				content:                    s.to_string(),
-				has_newline:                has_nl,
-				#[cfg(not(unix))]
-				_phantom:                   std::marker::PhantomData,
-			},
+			content:       IOChunkContent::Owned { content: s.to_string(), has_newline: has_nl },
 		}
 	}
 
@@ -7325,8 +7241,8 @@ impl Drop for TempFile {
 		if self.persisted {
 			return;
 		}
-		// Close before removing: an open handle can block removal (Windows),
-		// and dropping a virtual handle would close it asynchronously.
+		// Close before removing: dropping a virtual handle would close it
+		// asynchronously.
 		// Cleanup after an already reported failure; nothing to add.
 		let _ = self.close();
 		// Same provider without cancellation: an aborted edit must still
@@ -7458,21 +7374,11 @@ impl InPlace {
 			backup_name.push(suffix);
 			let backup_path = pi_vfs::with_file_name(&orig, backup_name);
 
-			#[cfg(windows)]
-			// Try to remove to ensure the rename won't fail on Windows.
-			let _ = self.fs.remove_file(&backup_path);
 
 			self.fs.rename(&orig, &backup_path).map_err_context(|| {
 				format!("error backing up {} to {}", orig.quote(), backup_path.quote())
 			})?;
 		} else {
-			#[cfg(windows)]
-			// On Windows delete the original file for temp.persist to work
-			if self.fs.exists(&orig) {
-				self.fs.remove_file(&orig).map_err_context(|| {
-					format!("error removing original input file {}", orig.quote())
-				})?;
-			}
 		}
 
 		// Atomically replace the original
@@ -7992,7 +7898,6 @@ fn re_or_saved_re<'a>(
 	}
 }
 
-#[cfg(unix)]
 fn shell_command(cmd: &str, host: &Host) -> io::Result<ProcessCommand> {
 	let mut c = ProcessCommand::new("sh");
 	c.arg("-c").arg(cmd);
@@ -8000,21 +7905,6 @@ fn shell_command(cmd: &str, host: &Host) -> io::Result<ProcessCommand> {
 	c.current_dir(host.native_cwd()?);
 	c.env_clear().envs(host.env());
 	Ok(c)
-}
-
-#[cfg(windows)]
-fn shell_command(cmd: &str, host: &Host) -> io::Result<ProcessCommand> {
-	let mut c = ProcessCommand::new("cmd.exe");
-	c.arg("/C").arg(cmd);
-	c.current_dir(host.native_cwd()?);
-	c.env_clear().envs(host.env());
-	Ok(c)
-}
-
-// Fallback if the target OS is neither Windows nor UNIX-like
-#[cfg(not(any(unix, windows)))]
-fn shell_command(_cmd: &str, _host: &Host) -> io::Result<ProcessCommand> {
-	Err(pi_vfs::unsupported("the 'e' substitute flag requires a platform shell"))
 }
 
 /// Perform the specified RE replacement in the provided pattern space.
@@ -8998,29 +8888,6 @@ mod tests {
 		assert_eq!(lines, vec!["file line 1", "file line 2"]);
 	}
 
-	#[cfg(windows)]
-	#[test]
-	fn test_file_source_resolves_msys_drive_alias() {
-		let mut temp_file = NamedTempFile::new().unwrap();
-		writeln!(temp_file, "aliased line 1").unwrap();
-		writeln!(temp_file, "aliased line 2").unwrap();
-
-		let native = temp_file.path().to_string_lossy().replace('\\', "/");
-		let (drive, tail) = native
-			.split_once(":/")
-			.unwrap_or_else(|| panic!("expected drive-qualified temp path, got {native:?}"));
-		let alias = format!("/{}/{}", drive.to_ascii_lowercase(), tail);
-
-		let input = vec![ScriptValue::PathVal(PathBuf::from(alias))];
-		let mut provider = ScriptLineProvider::new(input);
-
-		let mut lines = Vec::new();
-		while let Some(line) = provider.next_line().unwrap() {
-			lines.push(line.trim_end().to_string());
-		}
-
-		assert_eq!(lines, vec!["aliased line 1", "aliased line 2"]);
-	}
 
 	#[test]
 	fn test_mixed_source() {

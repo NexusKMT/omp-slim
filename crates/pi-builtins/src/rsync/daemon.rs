@@ -493,8 +493,6 @@ fn read_password_file(
 				));
 			}
 		}
-		#[cfg(not(unix))]
-		let _ = meta;
 		let mut buf = vec![0u8; PASSWORD_MAX];
 		let mut len = 0;
 		while len < buf.len() {

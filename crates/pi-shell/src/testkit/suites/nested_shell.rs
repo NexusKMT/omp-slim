@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// The OS's "exec format error".
-const ENOEXEC: i32 = if cfg!(windows) { 193 } else { 8 };
+const ENOEXEC: i32 = 8;
 
 fn run(src: &str) -> (String, String, i32) {
 	let out = run_script(FakeHost::new(), src.as_bytes(), &[], Fault::None);

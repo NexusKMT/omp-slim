@@ -40,7 +40,7 @@ use crate::grep::{
 	MAX_LINE_BYTES, RecordFormat, SEARCH_HEAP_LIMIT, bound_terminator, check_run,
 	describe_search_error, exit_status, for_each_nonempty_match,
 };
-use crate::host::{AsyncUtility, Host, StdoutFile, StreamWriter, forward_slash_display};
+use crate::host::{AsyncUtility, Host, StdoutFile, StreamWriter};
 use crate::stdio;
 
 use ignore::{
@@ -1280,19 +1280,18 @@ async fn collect_files(
 }
 
 /// Display spelling of a walked `path` under the `operand` it was found from
-/// (resolved to `root`), with `/` separators on Windows like the shell's other
+/// (resolved to `root`), with `/` separators like the shell's other
 /// path-printing utilities.
 fn display_path(operand: &OsStr, root: &Path, path: &Path) -> PathBuf {
 	let rel = path.strip_prefix(root).unwrap_or(path);
 	if rel.is_empty() {
 		return PathBuf::from(operand);
 	}
-	let display = if operand == OsStr::new(".") {
+	if operand == OsStr::new(".") {
 		rel.to_path_buf()
 	} else {
 		Path::new(operand).join(rel)
-	};
-	forward_slash_display(&display).unwrap_or(display)
+	}
 }
 
 /// Bytes read per search step.
@@ -2569,10 +2568,9 @@ mod tests {
 		assert_eq!(code, 2);
 		assert!(capture.err().contains("exactly one byte"));
 		// An explicit operand is printed as spelled (`-H`: a lone file operand
-		// prints no path otherwise); on Windows its native `\` separators are
-		// rewritten too, so displayed paths stay uniform.
+		// prints no path otherwise).
 		let (code, capture) = run_async_util::<Rg>(
-			&["--path-separator", "|", "-H", "hit", if cfg!(windows) { "sub\\a.txt" } else { "sub/a.txt" }],
+			&["--path-separator", "|", "-H", "hit", { "sub/a.txt" }],
 			"",
 			tree.path(),
 		).await;

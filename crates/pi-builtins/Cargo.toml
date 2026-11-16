@@ -91,6 +91,18 @@ tokio-util = "0.7"
 xutf.workspace = true
 libc = "0.2.172"
 uutils_term_grid = "0.8"
+# `cp`'s copy-on-write clones (`pi_iso::cow`).
+pi-iso.workspace = true
+# `rsync`: strong checksums, daemon auth digests, token compression.
+base64.workspace = true
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+lz4_flex = "0.14"
+md-5 = "0.10"
+md4 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+xxhash-rust = { workspace = true, features = ["xxh3", "xxh64"] }
+zstd.workspace = true
 
 [dependencies.uucore]
 version = "0.8.0"
@@ -128,21 +140,7 @@ features = [
   "update-control",
 ]
 
-[target."cfg(any(unix, windows))".dependencies]
-# `cp`'s copy-on-write clones (`pi_iso::cow`).
-pi-iso.workspace = true
-# `rsync`: strong checksums, daemon auth digests, token compression.
-base64.workspace = true
-flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
-lz4_flex = "0.14"
-md-5 = "0.10"
-md4 = "0.10"
-sha1 = "0.10"
-sha2 = "0.10"
-xxhash-rust = { workspace = true, features = ["xxh3", "xxh64"] }
-zstd.workspace = true
-
-[target."cfg(any(unix, windows))".dependencies.tokio]
+[dependencies.tokio]
 version = "1.50.0"
 features = ["io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync"]
 
@@ -158,20 +156,6 @@ nix = { version = "0.31.3", features = ["fs", "poll", "process", "resource", "si
 notify = { version = "=8.2.0", features = ["macos_kqueue"] }
 rustix = { version = "1.1.4", features = ["fs", "process", "system", "time"] }
 uucore = { version = "0.8.0", features = ["fsxattr", "safe-traversal"] }
-
-[target."cfg(windows)".dependencies]
-notify = "=8.2.0"
-rustix = { version = "1.1.4", features = ["fs", "process", "time"] }
-windows-sys = { version = "0.61", features = [
-  "Wdk_System_SystemServices",
-  "Win32_Foundation",
-  "Win32_Networking_WinSock",
-  "Win32_Storage_FileSystem",
-  "Win32_System_IO",
-  "Win32_System_SystemInformation",
-  "Win32_System_SystemServices",
-  "Win32_System_WindowsProgramming",
-] }
 
 [dev-dependencies]
 anyhow = "1.0.102"
@@ -245,7 +229,7 @@ default = ["utils"]
 "util.rg" = ["util.grep"]
 "util.rm" = []
 "util.rmdir" = []
-# Needs processes and sockets: unix and windows targets.
+# Needs processes and sockets.
 "util.rsync" = []
 "util.sd" = []
 "util.sed" = ["util.bre"]

@@ -273,7 +273,7 @@ fn script(mut command: ShellCommand, program: &Program, env_names: &[BString]) -
 /// caller's fd 0.
 fn child_stdin(stdin: Option<Fd>) -> RunStdio {
 	let file = match stdin {
-		None => std::fs::File::open(if cfg!(windows) { "NUL" } else { "/dev/null" }),
+		None => std::fs::File::open("/dev/null"),
 		Some(Fd::File(file)) => Ok(file),
 		Some(Fd::Vfs(_)) => return RunStdio::Inherit,
 		Some(Fd::Closed) => return RunStdio::Closed,
@@ -410,23 +410,17 @@ impl Lookup {
 
 fn has_separator(name: &OsStr) -> bool {
 	let bytes = name.as_encoded_bytes();
-	bytes.contains(&b'/') || (cfg!(windows) && bytes.contains(&b'\\'))
+	bytes.contains(&b'/')
 }
 
 /// `Some(true)` for an executable file at `path`, `Some(false)` for a file
 /// that is not executable, `None` for nothing (or a directory).
-#[cfg(unix)]
 fn executable(path: &Path) -> Option<bool> {
 	use std::os::unix::fs::PermissionsExt as _;
 	let meta = std::fs::metadata(path)
 		.ok()
 		.filter(std::fs::Metadata::is_file)?;
 	Some(meta.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn executable(path: &Path) -> Option<bool> {
-	(path.is_file() || path.with_extension("exe").is_file()).then_some(true)
 }
 
 #[cfg(test)]

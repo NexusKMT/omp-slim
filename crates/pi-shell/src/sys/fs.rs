@@ -11,14 +11,7 @@
 //! the scheduler (`read -t` timers, other vprocs). [`StdFile`] checks
 //! readiness first and returns `Pending` with the waker registered on the
 //! shared readiness thread (`ready`); the descriptor's flags stay untouched,
-//! since externals inherit them. Windows pipes and consoles keep blocking
-//! I/O (anonymous pipes cannot be polled).
-//!
-//! Windows specifics: `test -x` holds for directories, files with a
-//! `PATHEXT` extension and files starting with `#!`; process substitution
-//! uses a named pipe `\\.\pipe\obash-<pid>-<n>` (a regular temp file when
-//! the engine asks for [`TempPurpose::HereDoc`], e.g. for a consumer that
-//! must seek).
+//! since externals inherit them.
 
 use std::{
 	cell::RefCell,
@@ -168,14 +161,9 @@ impl StdFile {
 		}
 	}
 
-	#[cfg_attr(
-		not(unix),
-		expect(clippy::missing_const_for_fn, reason = "reads the access mode with fcntl on Unix")
-	)]
 	fn with_kind(file: fs::File, kind: FileKind, null: bool) -> Self {
 		// Only a descriptor that waits for readiness consults its access
 		// mode ([`Self::gated`]); a regular file or device skips the `fcntl`.
-		#[cfg(unix)]
 		let access = waits(kind)
 			.then(|| {
 				use std::os::fd::AsRawFd;
@@ -283,7 +271,6 @@ const fn waits(kind: FileKind) -> bool {
 /// The file's kind, and whether it is the null device. Only a character
 /// device (or a handle `fstat` cannot read) can be a terminal, so a regular
 /// file, pipe or socket costs one `fstat` and no terminal probe.
-#[cfg(unix)]
 fn classify(file: &fs::File) -> (FileKind, bool) {
 	use std::{
 		os::unix::fs::{FileTypeExt, MetadataExt},
@@ -318,103 +305,15 @@ fn classify(file: &fs::File) -> (FileKind, bool) {
 	(FileKind::Device, false)
 }
 
-/// The file's kind (the null device is not told apart). The handle's type
-/// decides, not its metadata: `GetFileInformationByHandle` can succeed on
-/// a pipe and report a plain file, which made the line reader read ahead
-/// on a pipe and lose what it could not seek back over.
-#[cfg(windows)]
-fn classify(file: &fs::File) -> (FileKind, bool) {
-	use std::os::windows::io::AsRawHandle;
-
-	use windows_sys::Win32::Storage::FileSystem::{
-		FILE_TYPE_CHAR, FILE_TYPE_DISK, FILE_TYPE_PIPE, GetFileType,
-	};
-	// SAFETY: `GetFileType` only inspects the handle `file` owns.
-	let kind = match unsafe { GetFileType(file.as_raw_handle()) } {
-		FILE_TYPE_DISK => FileKind::Regular,
-		FILE_TYPE_PIPE => FileKind::Pipe,
-		// A console; `NUL` and serial ports are character devices too.
-		FILE_TYPE_CHAR if file.is_terminal() => FileKind::Tty,
-		_ => FileKind::Device,
-	};
-	(kind, false)
-}
-
-/// How long a console read that ended with nothing read waits for the
-/// console's control handler (it runs on a thread of its own) to report a
-/// Ctrl-C before the read counts as end of input.
-#[cfg(windows)]
-const CTRL_C_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
-
-/// A read of a console in line mode. Ctrl-C ends it with nothing read,
-/// which is no end of input: as a terminal read interrupted by `SIGINT`
-/// (`EINTR`), the shell takes the signal (its trap runs, or it ends) and
-/// reads on. The console reports it as `ERROR_OPERATION_ABORTED`, a
-/// pseudoconsole not at all, so a Ctrl-C the shell's handler claimed
-/// ([`console::ctrl_c_since`](crate::sys::console::ctrl_c_since)) counts
-/// too. `ReadFile` itself: the standard library reads through
-/// `NtReadFile`, which sets no last error.
-#[cfg(windows)]
-fn console_read(
-	file: &fs::File,
-	cx: &std::task::Context<'_>,
-	buf: &mut [u8],
-) -> Poll<io::Result<usize>> {
-	use std::os::windows::io::AsRawHandle;
-
-	use windows_sys::Win32::{
-		Foundation::{ERROR_BROKEN_PIPE, ERROR_OPERATION_ABORTED, GetLastError, SetLastError},
-		Storage::FileSystem::ReadFile,
-	};
-
-	use crate::sys::console;
-	let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
-	let mut got = 0u32;
-	let before = console::ctrl_c_count();
-	// SAFETY: `buf` holds at least `len` bytes; a synchronous read of the
-	// handle `file` owns; the last-error value is the calling thread's.
-	let (ok, err) = unsafe {
-		SetLastError(0);
-		let ok =
-			ReadFile(file.as_raw_handle(), buf.as_mut_ptr(), len, &raw mut got, std::ptr::null_mut());
-		(ok != 0, GetLastError())
-	};
-	if got != 0 {
-		return Poll::Ready(Ok(got as usize));
-	}
-	let claimed = console::ctrl_c_since(before, CTRL_C_GRACE);
-	if !claimed && err != ERROR_OPERATION_ABORTED {
-		return Poll::Ready(if ok || err == ERROR_BROKEN_PIPE {
-			Ok(0)
-		} else {
-			Err(io::Error::from_raw_os_error(err as i32))
-		});
-	}
-	// The handler has posted the signal: the shell takes it before it
-	// polls this read again.
-	cx.waker().wake_by_ref();
-	Poll::Pending
-}
-
 /// The process's own standard stream `fd` (a duplicate of it), `None` when
 /// it is closed.
 pub fn std_stream(fd: StdFd) -> Option<Box<dyn File>> {
-	#[cfg(unix)]
 	let owned = {
 		use std::os::fd::AsFd;
 		match fd {
 			StdFd::Stdin => io::stdin().as_fd().try_clone_to_owned(),
 			StdFd::Stdout => io::stdout().as_fd().try_clone_to_owned(),
 			StdFd::Stderr => io::stderr().as_fd().try_clone_to_owned(),
-		}
-	};
-	#[cfg(windows)]
-	let owned = {
-		use std::os::windows::io::AsHandle;
-		match fd {
-			StdFd::Stdin => io::stdin().as_handle().try_clone_to_owned(),
-			StdFd::Stdout => io::stdout().as_handle().try_clone_to_owned(),
-			StdFd::Stderr => io::stderr().as_handle().try_clone_to_owned(),
 		}
 	};
 	owned
@@ -427,7 +326,6 @@ impl File for StdFile {
 		if let Some(ahead) = self.ahead.get_mut() {
 			return Poll::Ready(ahead.read(&mut self.file, buf));
 		}
-		#[cfg(unix)]
 		if self.gated(false) {
 			if let Err(e) = std::task::ready!(self.ready(cx, crate::sys::ready::READ)) {
 				return Poll::Ready(Err(e));
@@ -435,12 +333,6 @@ impl File for StdFile {
 			// Readable (or hung up): this read returns without waiting.
 			return Poll::Ready(self.file.read(buf));
 		}
-		#[cfg(windows)]
-		if self.kind == FileKind::Tty && !buf.is_empty() {
-			return console_read(&self.file, cx, buf);
-		}
-		#[cfg(not(unix))]
-		let _ = cx;
 		Poll::Ready(self.file.read(buf))
 	}
 
@@ -448,15 +340,12 @@ impl File for StdFile {
 		if self.null {
 			return Poll::Ready(Ok(buf.len()));
 		}
-		#[cfg(unix)]
 		if self.gated(true) && !buf.is_empty() {
 			if let Err(e) = std::task::ready!(self.ready(cx, crate::sys::ready::WRITE)) {
 				return Poll::Ready(Err(e));
 			}
 			return Poll::Ready(self.write_ready(buf));
 		}
-		#[cfg(not(unix))]
-		let _ = cx;
 		Poll::Ready(self.file.write(buf))
 	}
 
@@ -477,16 +366,8 @@ impl File for StdFile {
 
 	fn os_handle(&self) -> Option<OsHandle> {
 		self.hand_out();
-		#[cfg(unix)]
-		{
-			use std::os::fd::AsRawFd;
-			u64::try_from(self.file.as_raw_fd()).ok().map(OsHandle)
-		}
-		#[cfg(windows)]
-		{
-			use std::os::windows::io::AsRawHandle;
-			Some(OsHandle(self.file.as_raw_handle().addr() as u64))
-		}
+		use std::os::fd::AsRawFd;
+		u64::try_from(self.file.as_raw_fd()).ok().map(OsHandle)
 	}
 
 	fn stat(&self) -> io::Result<Stat> {
@@ -499,17 +380,12 @@ impl File for StdFile {
 	}
 }
 
-/// Engine path → host path (UTF-8 required on Windows). A URL path
+/// Engine path → host path. A URL path
 /// ([`crate::bash::fs::url_root_len`]) names no host file: `NotFound`, rather
-/// than a lookup relative to the process's working directory. On Windows,
-/// `/dev/null` is the null device `NUL` (else `\dev\null` on the current
-/// drive, which does not exist).
+/// than a lookup relative to the process's working directory.
 pub fn host_path(p: &[u8]) -> io::Result<&Path> {
 	if crate::bash::fs::url_root_len(p).is_some() {
 		return Err(io::Error::from(io::ErrorKind::NotFound));
-	}
-	if cfg!(windows) && p == b"/dev/null" {
-		return Ok(Path::new("NUL"));
 	}
 	p.to_path()
 		.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))
@@ -555,62 +431,29 @@ fn stat_of(meta: &fs::Metadata) -> Stat {
 	};
 	let mtime_ns = since_epoch(meta.modified());
 	let atime_ns = since_epoch(meta.accessed());
-	#[cfg(unix)]
-	{
-		use std::os::unix::fs::MetadataExt;
-		Stat {
-			kind,
-			mode: meta.mode() & 0o7777,
-			size: meta.size(),
-			uid: meta.uid(),
-			gid: meta.gid(),
-			dev: meta.dev(),
-			ino: meta.ino(),
-			nlink: meta.nlink(),
-			mtime_ns,
-			atime_ns,
-			ctime_ns: meta
-				.ctime()
-				.saturating_mul(1_000_000_000)
-				.saturating_add(meta.ctime_nsec()),
-			blocks: meta.blocks(),
-			rdev: meta.rdev(),
-			blksize: meta.blksize(),
-		}
-	}
-	#[cfg(windows)]
-	{
-		let mode = match (kind, meta.permissions().readonly()) {
-			(StatKind::Dir, _) => 0o755,
-			(_, true) => 0o444,
-			(_, false) => 0o644,
-		};
-		let (uid, gid) = crate::sys::user::owner();
-		Stat {
-			kind,
-			mode,
-			size: meta.len(),
-			uid,
-			gid,
-			dev: 0,
-			ino: 0,
-			nlink: 1,
-			mtime_ns,
-			atime_ns,
-			// Windows has no status-change time: the creation time stands in.
-			ctime_ns: since_epoch(meta.created()),
-			blocks: meta.len().div_ceil(512),
-			rdev: 0,
-			blksize: 4096,
-		}
+	use std::os::unix::fs::MetadataExt;
+	Stat {
+		kind,
+		mode: meta.mode() & 0o7777,
+		size: meta.size(),
+		uid: meta.uid(),
+		gid: meta.gid(),
+		dev: meta.dev(),
+		ino: meta.ino(),
+		nlink: meta.nlink(),
+		mtime_ns,
+		atime_ns,
+		ctime_ns: meta
+			.ctime()
+			.saturating_mul(1_000_000_000)
+			.saturating_add(meta.ctime_nsec()),
+		blocks: meta.blocks(),
+		rdev: meta.rdev(),
+		blksize: meta.blksize(),
 	}
 }
 
 fn open(path: &BStr, flags: OpenFlags, mode: u32, umask: Option<u32>) -> io::Result<Box<dyn File>> {
-	#[cfg(windows)]
-	if let Some(server) = pipe::take(path, flags) {
-		return server;
-	}
 	let path = host_path(path)?;
 	Ok(Box::new(StdFile::opened(create_with_mode(path, flags, mode, umask, false)?, flags)))
 }
@@ -660,21 +503,14 @@ fn create_with_mode(
 	nonblock: bool,
 ) -> io::Result<fs::File> {
 	let options = || {
-		#[cfg_attr(not(unix), expect(unused_mut, reason = "custom flags are Unix's"))]
 		let mut o = options(flags, mode);
-		#[cfg(unix)]
 		if nonblock {
 			use std::os::unix::fs::OpenOptionsExt;
 			// `custom_flags` replaces the earlier ones.
 			o.custom_flags(libc::O_NONBLOCK | custom_flags(flags));
 		}
-		#[cfg(not(unix))]
-		let _ = nonblock;
 		o
 	};
-	#[cfg(not(unix))]
-	let _ = process_umask;
-	#[cfg(unix)]
 	if flags.contains(OpenFlags::CREATE) && process_umask.is_none_or(|mask| mode & mask != 0) {
 		use std::os::unix::fs::PermissionsExt as _;
 		let mut exclusive = options();
@@ -718,8 +554,6 @@ fn options(flags: OpenFlags, mode: u32) -> OpenOptions {
 			o.custom_flags(custom);
 		}
 	}
-	#[cfg(windows)]
-	let _ = mode;
 	o
 }
 
@@ -868,54 +702,26 @@ mod fifo {
 }
 
 fn access(path: &BStr, mode: Access) -> io::Result<()> {
-	#[cfg(unix)]
-	{
-		let c = std::ffi::CString::new(path.as_bytes())
-			.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-		let mut m = libc::F_OK;
-		if mode.contains(Access::READ) {
-			m |= libc::R_OK;
-		}
-		if mode.contains(Access::WRITE) {
-			m |= libc::W_OK;
-		}
-		if mode.contains(Access::EXEC) {
-			m |= libc::X_OK;
-		}
-		// SAFETY: `c` is a valid NUL-terminated string for the duration of the
-		// call.
-		if unsafe { libc::access(c.as_ptr(), m) } == 0 {
-			Ok(())
-		} else {
-			Err(io::Error::last_os_error())
-		}
+	let c = std::ffi::CString::new(path.as_bytes())
+		.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+	let mut m = libc::F_OK;
+	if mode.contains(Access::READ) {
+		m |= libc::R_OK;
 	}
-	#[cfg(windows)]
-	{
-		if path.as_bytes() == b"/dev/null" {
-			// The null device takes reads and writes; it runs nothing.
-			return if mode.contains(Access::EXEC) {
-				Err(io::ErrorKind::PermissionDenied.into())
-			} else {
-				Ok(())
-			};
-		}
-		let p = host_path(path)?;
-		let meta = fs::metadata(p)?;
-		if mode.contains(Access::WRITE) && meta.permissions().readonly() {
-			return Err(io::ErrorKind::PermissionDenied.into());
-		}
-		if mode.contains(Access::EXEC)
-			&& !meta.is_dir()
-			&& !crate::sys::pathext::Pathext::from_env().has_executable_extension(p)
-			&& !crate::sys::shebang::has_shebang(p)
-		{
-			return Err(io::ErrorKind::PermissionDenied.into());
-		}
+	if mode.contains(Access::WRITE) {
+		m |= libc::W_OK;
+	}
+	if mode.contains(Access::EXEC) {
+		m |= libc::X_OK;
+	}
+	// SAFETY: `c` is a valid NUL-terminated string for the duration of the
+	// call.
+	if unsafe { libc::access(c.as_ptr(), m) } == 0 {
 		Ok(())
+	} else {
+		Err(io::Error::last_os_error())
 	}
 }
-
 /// Directory listing collected up front (a local readdir).
 struct StdDir(std::vec::IntoIter<io::Result<DirEntry>>);
 
@@ -942,10 +748,6 @@ static TEMP_SEQ: AtomicU32 = AtomicU32::new(0);
 
 fn temp(purpose: TempPurpose) -> io::Result<TempNode> {
 	let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-	#[cfg(windows)]
-	if let TempPurpose::ProcSub { output } = purpose {
-		return pipe::create(output, seq);
-	}
 	let path = std::env::temp_dir().join(format!("obash-{}-{seq}", std::process::id()));
 	let fifo = matches!(purpose, TempPurpose::ProcSub { .. }) && cfg!(unix);
 	if fifo {
@@ -972,170 +774,8 @@ fn chdir_check(path: &BStr) -> io::Result<()> {
 	access(path, Access::EXEC)
 }
 
-/// Named pipes for process substitution on Windows.
-///
-/// [`pipe::create`] makes the server end and parks it; the producer side of
-/// the substitution takes it with [`Fs::open`] in its direction (write for
-/// `<( )`, read for `>( )`), the consumer opens the path as a client. The
-/// server end is overlapped ([`OsPipe::server`](crate::sys::pump::os::OsPipe)):
-/// it connects on first I/O, which stays `Pending` until the consumer has
-/// opened the path, and its reads and writes never wait either. It reports
-/// no OS handle, so an external producer is fed through a pump.
-#[cfg(windows)]
-mod pipe {
-	use std::{
-		collections::HashMap,
-		io,
-		os::windows::io::{FromRawHandle, OwnedHandle},
-		ptr,
-		sync::{Arc, LazyLock},
-		task::{Context, Poll},
-	};
-
-	use bstr::{BStr, BString};
-	use parking_lot::Mutex;
-	use windows_sys::Win32::{
-		Storage::FileSystem::{
-			FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_INBOUND,
-			PIPE_ACCESS_OUTBOUND,
-		},
-		System::Pipes::{
-			CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
-			PIPE_WAIT,
-		},
-	};
-
-	use crate::{
-		bash::{File, FileKind, OpenFlags, OsHandle, fs::TempNode},
-		sys::pump::os::OsPipe,
-	};
-
-	/// Server ends not yet taken, by path; `true` when the server writes.
-	static PENDING: LazyLock<Mutex<HashMap<BString, (OwnedHandle, bool)>>> =
-		LazyLock::new(|| Mutex::new(HashMap::new()));
-
-	const BUF: u32 = 64 << 10;
-
-	/// Create the pipe for a `<( )` (`output == false`: we write, the
-	/// consumer reads) or `>( )` substitution.
-	pub fn create(output: bool, seq: u32) -> io::Result<TempNode> {
-		let name = format!(r"\\.\pipe\obash-{}-{seq}", std::process::id());
-		let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
-		let access = if output {
-			PIPE_ACCESS_INBOUND
-		} else {
-			PIPE_ACCESS_OUTBOUND
-		};
-		// SAFETY: `wide` is NUL-terminated; null security attributes.
-		let h = unsafe {
-			CreateNamedPipeW(
-				wide.as_ptr(),
-				access | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
-				PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-				1,
-				BUF,
-				BUF,
-				0,
-				ptr::null(),
-			)
-		};
-		if h.is_null() || h as isize == -1 {
-			return Err(io::Error::last_os_error());
-		}
-		// SAFETY: a fresh handle we own.
-		let h = unsafe { OwnedHandle::from_raw_handle(h.cast()) };
-		let path = BString::from(name);
-		PENDING.lock().insert(path.clone(), (h, !output));
-		Ok(TempNode { path, fifo: true })
-	}
-
-	/// The parked server end of `path`, when `flags` open it in the server's
-	/// direction; `None` leaves the open to the client path.
-	pub fn take(path: &BStr, flags: OpenFlags) -> Option<io::Result<Box<dyn File>>> {
-		let mut pending = PENDING.lock();
-		let &(_, writes) = pending.get(path)?;
-		if flags.contains(OpenFlags::WRITE) != writes {
-			return None;
-		}
-		let (h, _) = pending.remove(path)?;
-		Some(OsPipe::server(h).map(|pipe| {
-			Box::new(Server(Arc::new(Mutex::new(ServerEnd { pipe, connected: false }))))
-				as Box<dyn File>
-		}))
-	}
-
-	/// Server end of a substitution pipe. Duplicates share it, as the
-	/// duplicates of one open file do.
-	struct Server(Arc<Mutex<ServerEnd>>);
-
-	struct ServerEnd {
-		pipe:      OsPipe,
-		connected: bool,
-	}
-
-	impl ServerEnd {
-		/// Ready once the consumer has connected (`Pending` until it opens
-		/// the path, like opening a FIFO, without waiting).
-		fn poll_connected(&mut self, cx: &Context<'_>) -> Poll<io::Result<()>> {
-			if !self.connected {
-				std::task::ready!(self.pipe.poll_connect(cx))?;
-				self.connected = true;
-			}
-			Poll::Ready(Ok(()))
-		}
-	}
-
-	impl File for Server {
-		fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
-			let mut end = self.0.lock();
-			if let Err(e) = std::task::ready!(end.poll_connected(cx)) {
-				return Poll::Ready(Err(e));
-			}
-			end.pipe.poll_read(cx, buf)
-		}
-
-		fn poll_write(&mut self, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
-			let mut end = self.0.lock();
-			if let Err(e) = std::task::ready!(end.poll_connected(cx)) {
-				return Poll::Ready(Err(e));
-			}
-			end.pipe.poll_write(cx, buf)
-		}
-
-		fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-			let mut end = self.0.lock();
-			if !end.connected {
-				return Poll::Ready(Ok(()));
-			}
-			end.pipe.poll_flush(cx)
-		}
-
-		fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
-			Err(io::ErrorKind::NotSeekable.into())
-		}
-
-		fn kind(&self) -> FileKind {
-			FileKind::Pipe
-		}
-
-		fn os_handle(&self) -> Option<OsHandle> {
-			// Externals would write before the consumer connects: pump instead.
-			None
-		}
-
-		fn dup(&self) -> io::Result<Box<dyn File>> {
-			Ok(Box::new(Self(Arc::clone(&self.0))))
-		}
-	}
-}
-
 impl Fs for StdFs {
 	fn open(&mut self, path: &BStr, flags: OpenFlags, mode: u32) -> FsPoll<Box<dyn File>> {
-		// The console, as `/dev/tty` is the controlling terminal on Unix.
-		#[cfg(windows)]
-		if path.as_bytes() == b"/dev/tty" {
-			return FsPoll::Ready(crate::sys::console::open_tty());
-		}
 		#[cfg(unix)]
 		if flags.contains(OpenFlags::WRITE) && !flags.contains(OpenFlags::READ) {
 			match open_for_writing(path, flags, mode, self.umask) {
@@ -1152,28 +792,6 @@ impl Fs for StdFs {
 	}
 
 	fn stat(&mut self, path: &BStr, follow: bool) -> FsPoll<Stat> {
-		// `NUL` has no metadata on Windows (`GetFileAttributesEx` fails):
-		// answer as Unix does for `/dev/null`, a world-writable character
-		// device.
-		#[cfg(windows)]
-		if path.as_bytes() == b"/dev/null" {
-			return FsPoll::Ready(Ok(Stat {
-				kind:     StatKind::CharDev,
-				mode:     0o666,
-				size:     0,
-				uid:      0,
-				gid:      0,
-				dev:      0,
-				ino:      0,
-				nlink:    1,
-				mtime_ns: 0,
-				atime_ns: 0,
-				ctime_ns: 0,
-				blocks:   0,
-				rdev:     0,
-				blksize:  4096,
-			}));
-		}
 		FsPoll::Ready(
 			host_path(path)
 				.and_then(|p| {
@@ -1204,15 +822,11 @@ impl Fs for StdFs {
 	}
 
 	fn realpath(&mut self, path: &BStr) -> FsPoll<BString> {
-		FsPoll::Ready(host_path(path).and_then(fs::canonicalize).map(|p| {
-			// `C:\x`, not `\\?\C:\x`, where both name the file.
-			let p = engine_path(&p);
-			if cfg!(windows) {
-				BString::from(crate::bash::fs::plain_windows_path(&p).into_owned())
-			} else {
-				p
-			}
-		}))
+		FsPoll::Ready(
+			host_path(path)
+				.and_then(fs::canonicalize)
+				.map(|p| engine_path(&p)),
+		)
 	}
 
 	fn mkfifo_or_temp(&mut self, purpose: TempPurpose) -> FsPoll<TempNode> {
@@ -1232,13 +846,7 @@ impl Fs for StdFs {
 	}
 
 	fn symlink(&mut self, target: &BStr, path: &BStr) -> FsPoll<()> {
-		#[cfg(unix)]
 		let res = host_path(path).and_then(|p| std::os::unix::fs::symlink(host_path(target)?, p));
-		#[cfg(not(unix))]
-		let res = {
-			let _ = (target, path);
-			Err(io::ErrorKind::Unsupported.into())
-		};
 		FsPoll::Ready(res)
 	}
 
@@ -1307,7 +915,6 @@ impl Fs for StdFs {
 
 /// `fcntl(F_SETLK)` of a whole-file lock on descriptor `file`
 /// ([`Fs::lock_fd`]): `WouldBlock` on contention.
-#[cfg(unix)]
 fn lock_fd(file: OsHandle, lock: crate::bash::fs::FdLock) -> io::Result<()> {
 	use crate::bash::fs::FdLock;
 	let fd = libc::c_int::try_from(file.0).map_err(|_| io::Error::from_raw_os_error(libc::EBADF))?;
@@ -1334,12 +941,6 @@ fn lock_fd(file: OsHandle, lock: crate::bash::fs::FdLock) -> io::Result<()> {
 	}
 }
 
-/// Record locks on descriptors need `fcntl` ([`Fs::lock_fd`]).
-#[cfg(not(unix))]
-fn lock_fd(_file: OsHandle, _lock: crate::bash::fs::FdLock) -> io::Result<()> {
-	Err(io::ErrorKind::Unsupported.into())
-}
-
 /// [`Fs::lock`]: open `path` read-write and take a non-waiting `F_WRLCK`
 /// record lock on the whole file.
 fn lock_file(path: &BStr) -> io::Result<Box<dyn File>> {
@@ -1347,7 +948,6 @@ fn lock_file(path: &BStr) -> io::Result<Box<dyn File>> {
 		.read(true)
 		.write(true)
 		.open(host_path(path)?)?;
-	#[cfg(unix)]
 	{
 		use std::os::fd::AsRawFd;
 		// SAFETY: `flock` is plain data; all-zero is a valid value.
@@ -1363,11 +963,6 @@ fn lock_file(path: &BStr) -> io::Result<Box<dyn File>> {
 			});
 		}
 	}
-	#[cfg(not(unix))]
-	file.try_lock().map_err(|e| match e {
-		fs::TryLockError::WouldBlock => io::Error::from(io::ErrorKind::WouldBlock),
-		fs::TryLockError::Error(e) => e,
-	})?;
 	Ok(Box::new(StdFile::new(file)))
 }
 
@@ -1685,64 +1280,5 @@ mod tests {
 			.unwrap();
 		assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
 		std::fs::remove_file(host_path(&node.path).unwrap()).unwrap();
-	}
-
-	/// A Windows pipe classified as a regular file made the line reader read
-	/// ahead and seek back, which a pipe cannot: `printf 'a\nb\n' | zsh` ran
-	/// only `a`.
-	#[cfg(windows)]
-	#[test]
-	fn windows_pipes_files_and_nul_get_their_own_kinds() {
-		use std::os::windows::io::OwnedHandle;
-		let (r, _w) = io::pipe().unwrap();
-		let pipe = StdFile::new(fs::File::from(OwnedHandle::from(r)));
-		assert_eq!(pipe.kind(), FileKind::Pipe);
-		let path = std::env::temp_dir().join(format!("pi-shell-classify-{}", std::process::id()));
-		let regular = StdFile::new(fs::File::create(&path).unwrap());
-		assert_eq!(regular.kind(), FileKind::Regular);
-		drop(regular);
-		fs::remove_file(&path).unwrap();
-		let nul = StdFile::new(fs::OpenOptions::new().write(true).open("NUL").unwrap());
-		assert_eq!(nul.kind(), FileKind::Device);
-	}
-}
-
-#[cfg(all(test, windows))]
-mod windows_devices {
-	use super::*;
-
-	/// `>/dev/null` failed with "The system cannot find the path
-	/// specified" (`\dev\null` on the current drive); `[[ -c /dev/null ]]`
-	/// and `-w` hold as on Unix.
-	#[test]
-	fn dev_null_is_the_null_device() {
-		let mut fs = StdFs::default();
-		let both = OpenFlags::READ.with(OpenFlags::WRITE);
-		let FsPoll::Ready(Ok(mut f)) = fs.open(b"/dev/null".as_bstr(), both, 0) else {
-			panic!("open /dev/null");
-		};
-		let mut cx = Context::from_waker(std::task::Waker::noop());
-		assert!(matches!(f.poll_write(&mut cx, b"x"), Poll::Ready(Ok(1))));
-		let FsPoll::Ready(stat) = fs.stat(b"/dev/null".as_bstr(), true) else {
-			unreachable!()
-		};
-		assert_eq!(stat.unwrap().kind, StatKind::CharDev);
-		let FsPoll::Ready(access) = fs.access(b"/dev/null".as_bstr(), Access::WRITE) else {
-			unreachable!()
-		};
-		access.unwrap();
-	}
-
-	/// `cd ..` left `$PWD` as `\\?\F:\…`: `realpath` must answer with the
-	/// drive path a user writes.
-	#[test]
-	fn realpath_has_no_verbatim_prefix() {
-		let dir = std::env::temp_dir();
-		let FsPoll::Ready(real) = StdFs::default().realpath(engine_path(&dir).as_bstr()) else {
-			unreachable!()
-		};
-		let real = real.unwrap();
-		assert!(!real.starts_with(br"\\?\"), "{real}");
-		assert!(real.get(1) == Some(&b':'), "{real}");
 	}
 }

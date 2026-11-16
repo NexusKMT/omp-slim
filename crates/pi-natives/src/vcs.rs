@@ -438,12 +438,11 @@ impl TryFrom<VcsHunkSelection> for core::HunkSelection {
 /// Convert a panic escaping a VCS operation into a typed [`pi_vcs::Error`].
 ///
 /// gitoxide `.expect(...)`s on fallible OS work in places — e.g. worker-thread
-/// spawn inside its parallel status walk fails under memory pressure (Windows
-/// `ERROR_COMMITMENT_LIMIT`, os error 1455) and the panic resumes on the
-/// joining thread. The task-level guard in [`task`] keeps the process alive
-/// either way, but its rejection bypasses [`rich_error`]; catching here
-/// preserves the structured `VcsError` contract (name/code/stderr) for every
-/// failure mode.
+/// spawn inside its parallel status walk fails under memory pressure and the
+/// panic resumes on the joining thread. The task-level guard in [`task`] keeps
+/// the process alive either way, but its rejection bypasses [`rich_error`];
+/// catching here preserves the structured `VcsError` contract
+/// (name/code/stderr) for every failure mode.
 fn catch_panic<T>(tag: &'static str, f: impl FnOnce() -> pi_vcs::Result<T>) -> pi_vcs::Result<T> {
 	// AssertUnwindSafe: the captured repo handles are read-mostly caches; an
 	// abandoned operation cannot leave them logically corrupt.

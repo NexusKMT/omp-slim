@@ -193,13 +193,6 @@ impl Signal {
 		};
 		match platform {
 			Platform::Linux => linux,
-			Platform::Windows => {
-				if (self as u8) >= Self::Rtmin as u8 {
-					0
-				} else {
-					linux
-				}
-			},
 			Platform::MacOs => match self {
 				Self::Bus => 10,
 				Self::Usr1 => 30,
@@ -313,8 +306,8 @@ impl Signal {
 		}
 	}
 
-	/// The C library's `strsignal` text on `platform` (glibc on Linux and
-	/// Windows, Darwin libc on macOS, which appends `: N`). The job builtins
+	/// The C library's `strsignal` text on `platform` (glibc on Linux, Darwin
+	/// libc on macOS, which appends `: N`). The job builtins
 	/// print it for a job that a signal stopped or killed (`jobs -l`, death
 	/// notices), as bash's `j_strsignal` does.
 	pub fn description(self, platform: Platform) -> String {

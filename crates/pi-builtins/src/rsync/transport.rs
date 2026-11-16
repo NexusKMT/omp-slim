@@ -68,10 +68,6 @@ fn measure_socketpair() -> usize {
 	if total == 0 { FALLBACK } else { total }
 }
 
-#[cfg(not(unix))]
-fn measure_socketpair() -> usize {
-	8192
-}
 /// Upstream's argv limit (`MAX_ARGS`) and the room it keeps for server options.
 const MAX_ARGS: usize = 1000;
 const MAX_SERVER_ARGS: usize = 20 * 2 + 100;
@@ -374,24 +370,6 @@ impl Sock {
 		}
 	}
 
-	#[cfg(windows)]
-	fn ready(&self, write: bool, timeout: Duration) -> io::Result<bool> {
-		use std::os::windows::io::AsRawSocket;
-
-		use windows_sys::Win32::Networking::WinSock::{
-			POLLRDNORM, POLLWRNORM, SOCKET_ERROR, WSAPOLLFD, WSAPoll,
-		};
-		let Self::Tcp(sock) = self;
-		let mut fd = WSAPOLLFD {
-			fd:      sock.as_raw_socket() as usize,
-			events:  if write { POLLWRNORM } else { POLLRDNORM },
-			revents: 0,
-		};
-		let ms = i32::try_from(timeout.as_millis()).unwrap_or(i32::MAX);
-		// SAFETY: `fd` is one initialised WSAPOLLFD that outlives the call.
-		let n = unsafe { WSAPoll(&mut fd, 1, ms) };
-		if n == SOCKET_ERROR { Err(io::Error::last_os_error()) } else { Ok(n > 0) }
-	}
 
 	fn read_now(&self, buf: &mut [u8]) -> io::Result<usize> {
 		match self {
@@ -414,11 +392,6 @@ impl Sock {
 		if n < 0 { Err(io::Error::last_os_error()) } else { Ok(n.unsigned_abs()) }
 	}
 
-	#[cfg(windows)]
-	fn write_now(&self, buf: &[u8]) -> io::Result<usize> {
-		let Self::Tcp(s) = self;
-		(&mut &*s).write(buf)
-	}
 }
 
 /// Platforms where SIGPIPE is suppressed per socket rather than per send.
@@ -717,100 +690,6 @@ pub(crate) fn local_pair(cancel: Arc<AtomicBool>) -> (Connection, Connection) {
 	(client, server)
 }
 
-/// Reader over a child's stdout pipe on Windows, where anonymous pipes cannot
-/// be polled: a pump thread blocks in `read` and hands chunks over a channel
-/// the caller waits on in slices.
-#[cfg(windows)]
-struct PumpReader {
-	rx:      flume::Receiver<io::Result<Vec<u8>>>,
-	pending: Vec<u8>,
-	pos:     usize,
-	cancel:  Arc<AtomicBool>,
-	ctl:     ConnCtl,
-}
-
-#[cfg(windows)]
-impl PumpReader {
-	fn new<R: Read + Send + 'static>(mut src: R, cancel: Arc<AtomicBool>, ctl: ConnCtl) -> Self {
-		let (tx, rx) = flume::bounded::<io::Result<Vec<u8>>>(4);
-		let _ = std::thread::Builder::new().name("rsync-pipe-pump".into()).spawn(move || {
-			let mut buf = vec![0u8; 64 * 1024];
-			loop {
-				match src.read(&mut buf) {
-					Ok(0) => return,
-					Ok(n) => {
-						if tx.send(Ok(buf[..n].to_vec())).is_err() {
-							return;
-						}
-					}
-					Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
-					Err(err) => {
-						let _ = tx.send(Err(err));
-						return;
-					}
-				}
-			}
-		});
-		Self { rx, pending: Vec::new(), pos: 0, cancel, ctl }
-	}
-}
-
-#[cfg(windows)]
-impl Read for PumpReader {
-	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-		if buf.is_empty() {
-			return Ok(0);
-		}
-		let started = Instant::now();
-		while self.pos == self.pending.len() {
-			let wait = self.ctl.slice(&self.cancel, started, true)?;
-			match self.rx.recv_timeout(wait) {
-				Ok(Ok(chunk)) => {
-					self.pending = chunk;
-					self.pos = 0;
-				}
-				Ok(Err(err)) => return Err(err),
-				Err(flume::RecvTimeoutError::Timeout) => {}
-				Err(flume::RecvTimeoutError::Disconnected) => {
-					return if self.cancel.load(Ordering::Relaxed) {
-						Err(RsyncError::cancelled_io())
-					} else {
-						Ok(0)
-					};
-				}
-			}
-		}
-		let n = buf.len().min(self.pending.len() - self.pos);
-		buf[..n].copy_from_slice(&self.pending[self.pos..self.pos + n]);
-		self.pos += n;
-		Ok(n)
-	}
-}
-
-/// Writer over a child's stdin pipe on Windows; cancellation kills the child
-/// (watchdog), which breaks a blocked write.
-#[cfg(windows)]
-struct ChildWriter {
-	pipe:   std::process::ChildStdin,
-	cancel: Arc<AtomicBool>,
-}
-
-#[cfg(windows)]
-impl Write for ChildWriter {
-	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-		if self.cancel.load(Ordering::Relaxed) {
-			return Err(RsyncError::cancelled_io());
-		}
-		self.pipe.write(buf).map_err(|err| {
-			if self.cancel.load(Ordering::Relaxed) { RsyncError::cancelled_io() } else { err }
-		})
-	}
-
-	fn flush(&mut self) -> io::Result<()> {
-		self.pipe.flush()
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Remote shell.
 
@@ -1047,17 +926,7 @@ fn shell_argv(cfg: &ShellConfig<'_>) -> Result<ShellArgv, RsyncError> {
 /// The command name upstream compares against `ssh`/`rsh`/`remsh`.
 fn shell_basename(word: &str) -> &str {
 	let base = word.rsplit('/').next().unwrap_or(word);
-	if cfg!(windows) {
-		let base = base.rsplit('\\').next().unwrap_or(base);
-		let len = base.len();
-		if len > 4
-			&& let Some((stem, ext)) = base.split_at_checked(len - 4)
-			&& ext.eq_ignore_ascii_case(".exe")
-		{
-			return stem;
-		}
-		return base;
-	}
+	
 	base
 }
 
@@ -1165,7 +1034,7 @@ pub(crate) fn spawn_shell(
 }
 
 /// Spawns `cmd` with its stdin/stdout connected to us: Unix-domain socket
-/// pairs on unix (like upstream's `fd_pair`), pipes on Windows.
+/// pairs (like upstream's `fd_pair`).
 fn spawn_piped(
 	env: &ChildEnv,
 	mut cmd: std::process::Command,
@@ -1200,30 +1069,6 @@ fn spawn_piped(
 			probe: Some(probe),
 			child: Some(ChildGuard::new(env, child, Arc::clone(cancel), report, role)),
 			ctl: ctl.clone(),
-		})
-	}
-	#[cfg(windows)]
-	{
-		let _ = blocking;
-		cmd.stdin(std::process::Stdio::piped());
-		cmd.stdout(std::process::Stdio::piped());
-		let mut child = cmd.spawn()?;
-		drop(cmd);
-		let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-			let _ = child.kill();
-			let _ = child.wait();
-			return Err(io::Error::other("child pipes missing"));
-		};
-		let reader = PumpReader::new(stdout, Arc::clone(cancel), ctl.clone());
-		let pumped = reader.rx.clone();
-		let probe: ReadProbe = Arc::new(move || !pumped.is_empty() || pumped.is_disconnected());
-		let writer = ChildWriter { pipe: stdin, cancel: Arc::clone(cancel) };
-		Ok(Connection {
-			reader: Box::new(reader),
-			writer: Box::new(writer),
-			probe:  Some(probe),
-			child:  Some(ChildGuard::new(env, child, Arc::clone(cancel), report, role)),
-			ctl:    ctl.clone(),
 		})
 	}
 }
@@ -1414,9 +1259,7 @@ mod tests {
 	fn shell_basename_strips_directories() {
 		assert_eq!(shell_basename("/usr/bin/ssh"), "ssh");
 		assert_eq!(shell_basename("rsh"), "rsh");
-		if cfg!(windows) {
-			assert_eq!(shell_basename("C:\\Tools\\SSH.EXE"), "SSH");
-		}
+		
 	}
 
 	#[cfg(unix)]

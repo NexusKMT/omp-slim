@@ -275,8 +275,7 @@ fn timeval(ns: u64) -> String {
 }
 
 /// `times`: user and system CPU time of the shell, then of its children.
-/// A host that cannot measure them (Windows, sandboxed hosts) makes it
-/// fail.
+/// A host that cannot measure them (sandboxed hosts) makes it fail.
 pub fn times(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 	if let Err(st) = no_options(ctx, args, b"times: usage: times\n") {
 		return done(st);

@@ -47,41 +47,18 @@ pub fn is_virtual_path(path: &Path) -> bool {
 /// Callers only split at ASCII `/` boundaries or at a URL root, both of which
 /// are valid split points for the platform's encoded bytes.
 fn subpath(path: &Path, end: usize) -> &Path {
+	use std::os::unix::ffi::OsStrExt;
 	let bytes = &path.as_os_str().as_encoded_bytes()[..end];
-	#[cfg(unix)]
-	{
-		use std::os::unix::ffi::OsStrExt;
-		Path::new(OsStr::from_bytes(bytes))
-	}
-	#[cfg(not(unix))]
-	{
-		// SAFETY: `bytes` is a prefix of `path`'s encoded bytes that ends either
-		// at the end of the string or immediately before an ASCII '/' (or
-		// right after the ASCII `scheme://` root), which the
-		// `from_encoded_bytes_unchecked` contract permits as a split point.
-		Path::new(unsafe { OsStr::from_encoded_bytes_unchecked(bytes) })
-	}
+	Path::new(OsStr::from_bytes(bytes))
 }
 
 fn url_segments(path: &Path, root: usize) -> impl Iterator<Item = &OsStr> {
+	use std::os::unix::ffi::OsStrExt;
 	let bytes = &path.as_os_str().as_encoded_bytes()[root..];
 	bytes
 		.split(|&b| b == b'/')
 		.filter(|seg| !seg.is_empty())
-		.map(|seg| {
-			#[cfg(unix)]
-			{
-				use std::os::unix::ffi::OsStrExt;
-				OsStr::from_bytes(seg)
-			}
-			#[cfg(not(unix))]
-			{
-				// SAFETY: `seg` is delimited by ASCII '/' bytes (or the string
-				// ends) inside `path`'s encoded bytes, a permitted
-				// split point.
-				unsafe { OsStr::from_encoded_bytes_unchecked(seg) }
-			}
-		})
+		.map(OsStr::from_bytes)
 }
 
 /// Resolves `path` against the shell working directory `cwd` lexically.
@@ -134,30 +111,14 @@ const fn hex_value(byte: u8) -> Option<u8> {
 /// `name[start..end]` where both bounds are string ends or sit next to ASCII
 /// bytes.
 fn subslice(name: &OsStr, start: usize, end: usize) -> &OsStr {
+	use std::os::unix::ffi::OsStrExt;
 	let bytes = &name.as_encoded_bytes()[start..end];
-	#[cfg(unix)]
-	{
-		use std::os::unix::ffi::OsStrExt;
-		OsStr::from_bytes(bytes)
-	}
-	#[cfg(not(unix))]
-	{
-		// SAFETY: `start`/`end` are string bounds or positions adjacent to ASCII
-		// bytes, which are permitted split points of the platform encoding.
-		unsafe { OsStr::from_encoded_bytes_unchecked(bytes) }
-	}
+	OsStr::from_bytes(bytes)
 }
 
 fn os_from_bytes(bytes: Vec<u8>) -> OsString {
-	#[cfg(unix)]
-	{
-		use std::os::unix::ffi::OsStringExt;
-		OsString::from_vec(bytes)
-	}
-	#[cfg(not(unix))]
-	{
-		String::from_utf8_lossy_owned(bytes).into()
-	}
+	use std::os::unix::ffi::OsStringExt;
+	OsString::from_vec(bytes)
 }
 
 /// Percent-encodes a raw name for use as one URL path segment (see
@@ -224,9 +185,7 @@ fn push_url(base: &Path, spelled: &OsStr) -> PathBuf {
 
 fn ends_with_separator(path: &Path) -> bool {
 	let bytes = path.as_os_str().as_encoded_bytes();
-	bytes
-		.last()
-		.is_some_and(|&last| last == b'/' || (cfg!(windows) && last == b'\\'))
+	bytes.last().is_some_and(|&last| last == b'/')
 }
 
 /// URL-aware [`Path::join`].

@@ -7,15 +7,15 @@ use crate::rsync::consts::{PROTOCOL_VERSION, SUBPROTOCOL_VERSION};
 
 /// Program version reported everywhere.
 pub(crate) const RSYNC_VERSION: &str = "3.5.1";
-/// `--crtimes`/`-N` support (creation times can be set on macOS and Windows).
-pub(crate) const SUPPORT_CRTIMES: bool = cfg!(any(target_os = "macos", windows));
-/// `-A` support (no local ACLs on Windows).
+/// `--crtimes`/`-N` support (creation times can be set on macOS).
+pub(crate) const SUPPORT_CRTIMES: bool = cfg!(target_os = "macos");
+/// `-A` support.
 pub(crate) const SUPPORT_ACLS: bool = cfg!(unix);
-/// `-X` / `--fake-super` support (no local xattrs on Windows).
+/// `-X` / `--fake-super` support.
 pub(crate) const SUPPORT_XATTRS: bool = cfg!(unix);
-/// `--iconv` support (upstream ICONV_OPTION; no iconv on Windows).
+/// `--iconv` support (upstream ICONV_OPTION).
 pub(crate) const SUPPORT_ICONV: bool = cfg!(unix);
-/// Device and special files exist (not on Windows).
+/// Device and special files exist.
 const SUPPORT_SPECIALS: bool = cfg!(unix);
 /// `--preallocate` support (the receiver never preallocates).
 pub(crate) const SUPPORT_PREALLOCATION: bool = false;

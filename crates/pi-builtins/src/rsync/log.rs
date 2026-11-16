@@ -838,15 +838,11 @@ fn syslog(text: &[u8], info: bool) {
 	unsafe { libc::syslog(priority, c"%s".as_ptr(), message.as_ptr()) };
 }
 
-#[cfg(windows)]
-fn syslog(_text: &[u8], _info: bool) {
-	// Windows has no syslog; upstream builds without one drop these records.
-}
 
 /// The errno upstream would print for `err`. OS errors keep their own errno on unix (an
 /// untrusted-symlink refusal is `ELOOP`, see [`crate::rsync::paths::os_errno`]); errno-less
-/// (virtual filesystem) and Windows errors map their kind to the errno it stands for, `EIO`
-/// when none does.
+/// (virtual filesystem) map their kind to the errno it stands for, `EIO` when
+/// none does.
 pub(crate) fn errno_of(err: &io::Error) -> i32 {
 	#[cfg(unix)]
 	if let Some(code) = crate::rsync::paths::os_errno(err) {
@@ -855,8 +851,8 @@ pub(crate) fn errno_of(err: &io::Error) -> i32 {
 	kind_errno(err.kind()).unwrap_or(libc::EIO)
 }
 
-/// The `strerror` text of [`errno_of`]`(err)` on unix; an error without an errno
-/// equivalent (and every Windows error) keeps its own text.
+/// The `strerror` text of [`errno_of`]`(err)`; an error without an errno
+/// equivalent keeps its own text.
 pub(crate) fn strerror(err: &io::Error) -> String {
 	#[cfg(unix)]
 	if let Some(code) =

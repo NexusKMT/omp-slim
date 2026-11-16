@@ -43,7 +43,6 @@ mod tool_profile;
 mod trace;
 mod trap;
 mod vars;
-mod windows_platform;
 mod zsh_builtins;
 mod zsh_compctl;
 mod zsh_cond;

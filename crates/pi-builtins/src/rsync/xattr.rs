@@ -7,9 +7,9 @@
 //! the peer's namespace while encoding, and the receiver translates incoming
 //! names into its own namespace while decoding.
 //!
-//! Local access goes through the [`Tree`] xattr operations on every platform; where
-//! the filesystem has no xattrs (Windows host paths) a read yields an empty set and a
-//! write fails, as an upstream build sees `ENOTSUP`.
+//! Local access goes through the [`Tree`] xattr operations; where the filesystem
+//! has no xattrs a read yields an empty set and a write fails, as an upstream
+//! build sees `ENOTSUP`.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -63,19 +63,15 @@ pub(crate) fn rsync_internal_name(suffix: &[u8]) -> Vec<u8> {
 /// "No such attribute" (ENODATA on Linux, ENOATTR on the BSDs/macOS).
 fn no_attr() -> io::Error {
 	#[cfg(any(target_os = "linux", target_os = "android"))]
-	return io::Error::from_raw_os_error(libc::ENODATA);
+	let errno = libc::ENODATA;
 	#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
-	return io::Error::from_raw_os_error(libc::ENOATTR);
-	#[cfg(not(unix))]
-	return io::Error::from(io::ErrorKind::NotFound);
+	let errno = libc::ENOATTR;
+	io::Error::from_raw_os_error(errno)
 }
 
-/// ENOTSUP, or its portable kind where there is no errno.
+/// ENOTSUP.
 fn not_supported() -> io::Error {
-	#[cfg(unix)]
-	return io::Error::from_raw_os_error(libc::ENOTSUP);
-	#[cfg(not(unix))]
-	return io::Error::from(io::ErrorKind::Unsupported);
+	io::Error::from_raw_os_error(libc::ENOTSUP)
 }
 
 /// Listed attribute names as bytes (names the platform cannot express as bytes are skipped).
@@ -356,14 +352,7 @@ fn is_unsupported(err: &io::Error) -> bool {
 	if err.kind() == io::ErrorKind::Unsupported {
 		return true;
 	}
-	#[cfg(unix)]
-	{
-		matches!(err.raw_os_error(), Some(e) if e == libc::ENOTSUP || e == libc::EOPNOTSUPP)
-	}
-	#[cfg(not(unix))]
-	{
-		false
-	}
+	matches!(err.raw_os_error(), Some(e) if e == libc::ENOTSUP || e == libc::EOPNOTSUPP)
 }
 
 /// File types that carry xattrs under the current options.
@@ -546,7 +535,6 @@ fn lacks_owner_write(tree: &Tree, rel: &Path, follow: bool, mode: u32) -> bool {
 		return false;
 	}
 	let meta = if follow { tree.stat(rel) } else { tree.lstat(rel) };
-	// Windows has no POSIX owners (no effective uid): there is no write bit to borrow.
 	meta.ok().and_then(|meta| meta.uid()).is_some_and(|uid| Some(uid) == effective_uid())
 }
 

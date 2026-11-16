@@ -160,20 +160,13 @@ const STUCK_SLAVE_IDLE: Duration = Duration::from_secs(2);
 /// Gap between the polite termination wave (TERM to the group/tree, HUP to the
 /// child) and SIGKILL, so a child with a TERM/HUP handler can clean up. Same
 /// grace portable-pty's `Child::kill` used to spend blocking the control loop.
-/// Windows has no polite signal: `TerminateProcess` is immediate.
-#[cfg(not(windows))]
 const KILL_GRACE: Duration = Duration::from_millis(200);
-#[cfg(windows)]
-const KILL_GRACE: Duration = Duration::ZERO;
 /// How long a terminated run keeps waiting for the child's exit status after
 /// SIGKILL before resolving without one. SIGKILL does not guarantee a prompt
 /// exit — a child wedged in uninterruptible I/O never dies, and a failed kill
 /// leaves it running — so the promise must not wait on it indefinitely. The
 /// waiter thread still reaps it whenever it does exit.
-#[cfg(not(windows))]
 const CANCEL_EXIT_WAIT: Duration = Duration::from_millis(800);
-#[cfg(windows)]
-const CANCEL_EXIT_WAIT: Duration = POST_CANCEL_DRAIN_TIMEOUT;
 
 struct PtySessionCore {
 	control_tx: flume::Sender<ControlMessage>,
@@ -327,31 +320,7 @@ fn run_pty_sync(
 	ct.heartbeat()
 		.map_err(|err| Error::from_reason(format!("PTY setup cancelled before openpty: {err}")))?;
 
-	const PTY_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
-	let pair = if cfg!(windows) {
-		// Windows ConPTY openpty() can hang indefinitely when the console
-		// subsystem isn't properly initialized. Use a short startup timeout
-		// so the Promise rejects instead of hanging forever.
-		let (tx, rx) = flume::unbounded();
-		std::thread::spawn(move || {
-			let result = pty_system.openpty(PtySize {
-				rows:         config.rows,
-				cols:         config.cols,
-				pixel_width:  0,
-				pixel_height: 0,
-			});
-			let _ = tx.send(result);
-		});
-		match rx.recv_timeout(PTY_STARTUP_TIMEOUT) {
-			Ok(Ok(pair)) => pair,
-			Ok(Err(e)) => return Err(Error::from_reason(format!("Failed to open PTY: {e}"))),
-			Err(_) => {
-				return Err(Error::from_reason(
-					"PTY creation timed out (5s). ConPTY may be unavailable on this system.",
-				));
-			},
-		}
-	} else {
+	let pair = {
 		pty_system
 			.openpty(PtySize {
 				rows:         config.rows,
@@ -432,14 +401,6 @@ fn run_pty_sync(
 	let mut writer = master
 		.take_writer()
 		.map_err(|err| Error::from_reason(format!("Failed to create PTY writer: {err}")))?;
-	// ConPTY sends ESC[6n (cursor position query) and blocks until we reply.
-	// Reply with cursor at 1,1 so it unblocks the child spawn.
-	// Only needed on Windows; on Unix/macOS this would corrupt stdin.
-	#[cfg(windows)]
-	{
-		let _ = writer.write_all(b"\x1b[1;1R");
-		let _ = writer.flush();
-	}
 	let mut reader = master
 		.try_clone_reader()
 		.map_err(|err| Error::from_reason(format!("Failed to create PTY reader: {err}")))?;
@@ -593,7 +554,7 @@ fn run_pty_sync(
 		if terminate && give_up_at.is_none() {
 			targets.signal(ps::TERM_SIGNAL);
 			// The hangup a closing terminal delivers: interactive shells ignore
-			// SIGTERM but exit on SIGHUP. On Windows TERM already terminated it.
+			// SIGTERM but exit on SIGHUP.
 			#[cfg(unix)]
 			if let Some(process) = &pinned_child {
 				let _ = process.signal(libc::SIGHUP);
@@ -656,16 +617,6 @@ fn run_pty_sync(
 	// reached `on_chunk` (#7421). A reader parked on backpressure is not
 	// aborted. A descendant holding the slave open is the existing no-join
 	// case and is the only path that may skip an unbounded wait.
-	#[cfg(windows)]
-	{
-		let (drop_tx, drop_rx) = flume::unbounded::<()>();
-		std::thread::spawn(move || {
-			drop(master);
-			let _ = drop_tx.send(());
-		});
-		let _ = drop_rx.recv_timeout(Duration::from_secs(2));
-	}
-	#[cfg(not(windows))]
 	{
 		drop(master);
 	}

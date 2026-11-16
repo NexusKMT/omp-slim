@@ -38,7 +38,6 @@ fn realtime_names_numbers_and_sets_are_platform_specific() {
 	assert_eq!(Signal::parse_spec(b"RTMIN+31", Platform::Linux), None);
 	assert_eq!(Signal::parse_spec(b"RTMAX-31", Platform::Linux), None);
 	assert_eq!(Signal::parse_spec(b"RTMAX", Platform::MacOs), None);
-	assert_eq!(Signal::parse_spec(b"RTMIN", Platform::Windows), None);
 	let set = SigSet::EMPTY.with(Signal::Rtmin).with(Signal::Rtmax);
 	assert!(set.contains(Signal::Rtmin));
 	assert!(set.contains(Signal::Rtmax));

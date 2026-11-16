@@ -1105,9 +1105,7 @@ fn expand(
 		}
 		// bash's `sv_path` runs for a temporary `PATH` too.
 		if !assign_only
-			&& (name.as_slice() == b"PATH"
-				|| (k.engine.config().platform == crate::bash::ids::Platform::Windows
-					&& name.as_slice() == b"PATHEXT"))
+			&& name.as_slice() == b"PATH"
 			&& let Err(err) = builtins::flush_hash(&mut k.root, cx.store, vp)
 		{
 			k.fail(err);
@@ -1843,9 +1841,7 @@ fn lookup(k: &mut Kernel, vp: &mut Vproc, cx: &mut Cx<'_>, op: Op, typeset: bool
 			// Borrowed (the resolution only reads `vp`): no copy of the
 			// name per command.
 			let name = &current_argv(vp)[0];
-			let has_slash = name.contains(&b'/')
-				|| (k.engine.config().platform == crate::bash::ids::Platform::Windows
-					&& name.contains(&b'\\'));
+			let has_slash = name.contains(&b'/');
 			// zsh's reserved `typeset`, `local`, …: their builtin even when
 			// disabled, before any function of the name (`execcmd_exec`
 			// with `WC_TYPESET`).
@@ -1973,13 +1969,8 @@ fn lookup(k: &mut Kernel, vp: &mut Vproc, cx: &mut Cx<'_>, op: Op, typeset: bool
 		// File-system probes: `CmdExpanded` reads the clock after them.
 		k.clock_stale();
 		// bash's `search_for_command`: a `PATH` in the command's temporary
-		// environment bypasses the hash table (lookup and insertion); on
-		// Windows `PATHEXT` changes the same answer.
-		let windows = k.engine.config().platform == crate::bash::ids::Platform::Windows;
-		let temp_path = st(vp)
-			.assigns
-			.iter()
-			.any(|(n, _)| n.as_slice() == b"PATH" || (windows && n.as_slice() == b"PATHEXT"));
+		// environment bypasses the hash table (lookup and insertion).
+		let temp_path = st(vp).assigns.iter().any(|(n, _)| n.as_slice() == b"PATH");
 		let mut sc = exec::take_scratch(vp);
 		let name = sc.exec.as_ref().map_or_default(|e| e.argv[0].clone());
 		if sc.io.as_ref().is_none_or(|io| io.search.is_none()) {
@@ -2027,14 +2018,7 @@ fn lookup(k: &mut Kernel, vp: &mut Vproc, cx: &mut Cx<'_>, op: Op, typeset: bool
 								.then(|| absolute(&vp.cwd, &name)),
 						)
 						.collect();
-					let extensions = probe::executable_extensions(k, cx, vp);
-					cands.extend(candidates(
-						&path,
-						&name,
-						&vp.cwd,
-						k.engine.config().platform,
-						&extensions,
-					));
+					cands.extend(candidates(&path, &name, &vp.cwd));
 					sc.io().search =
 						Some(PathSearch { cands, idx: 0, checking_exec: false, nonexec: None });
 				},
@@ -2829,7 +2813,7 @@ fn autoload(
 	let fpath = state::lookup(&k.root, cx.store, vp, b"FPATH")
 		.ok()
 		.flatten();
-	let fpath = fpath_dirs(fpath.as_ref().and_then(|v| v.as_scalar()), k.engine.config().platform);
+	let fpath = fpath_dirs(fpath.as_ref().and_then(|v| v.as_scalar()));
 	let cwd = vp.cwd.clone();
 	let found = {
 		let mut ask = |p: Probe| command_probe(k, cx, vp, &p);
@@ -3032,11 +3016,10 @@ fn parse_autoload(
 /// The directories of `$fpath` (its `FPATH` text, joined with `platform`'s
 /// separator, as the tie keeps it): none when empty; an empty element is
 /// the working directory.
-pub fn fpath_dirs(fpath: Option<&[u8]>, platform: crate::bash::ids::Platform) -> Vec<BString> {
-	let sep = probe::path_separator(platform);
+pub fn fpath_dirs(fpath: Option<&[u8]>) -> Vec<BString> {
 	match fpath {
 		None | Some([]) => Vec::new(),
-		Some(f) => f.split(|&c| c == sep).map(BString::from).collect(),
+		Some(f) => f.split(|&c| c == b':').map(BString::from).collect(),
 	}
 }
 
@@ -4777,11 +4760,9 @@ fn lost(k: &mut Kernel, vp: &mut Vproc, cx: &mut Cx<'_>, op: Op, line: u32, what
 	137
 }
 
-/// The OS refused to execute a file without `#!` (`ENOEXEC`; Windows
-/// `ERROR_BAD_EXE_FORMAT`).
+/// The OS refused to execute a file without `#!` (`ENOEXEC`).
 fn is_enoexec(err: &std::io::Error) -> bool {
-	let code = if cfg!(windows) { 193 } else { 8 };
-	err.raw_os_error() == Some(code)
+	err.raw_os_error() == Some(libc::ENOEXEC)
 }
 
 /// bash `check_binary_file`: a NUL before the first newline in the first
@@ -5240,15 +5221,11 @@ fn build_env(k: &Kernel, cx: &mut Cx<'_>, vp: &Vproc) -> Result<EnvView, StoreEr
 #[cfg(test)]
 mod tests {
 	use super::{fpath_dirs, looks_binary};
-	use crate::bash::ids::Platform;
 
-	/// `$fpath` joins Windows directories with `;`; the autoload search
-	/// split `FPATH` on `:` and looked in `C` and `/fn`, never finding the
-	/// function.
+	/// `$fpath` splits on `:`.
 	#[test]
-	fn fpath_dirs_split_on_the_platform_separator() {
-		assert_eq!(fpath_dirs(Some(b"C:/a/fn;D:/b"), Platform::Windows), ["C:/a/fn", "D:/b"]);
-		assert_eq!(fpath_dirs(Some(b"/a:/b"), Platform::Linux), ["/a", "/b"]);
+	fn fpath_dirs_split_on_the_separator() {
+		assert_eq!(fpath_dirs(Some(b"/a:/b")), ["/a", "/b"]);
 	}
 
 	// bash `check_binary_file`: only a NUL on the first line (within 80

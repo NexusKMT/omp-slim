@@ -24,9 +24,6 @@ use crate::{
 #[cfg(unix)]
 #[path = "tcp/sock_unix.rs"]
 mod sock;
-#[cfg(windows)]
-#[path = "tcp/sock_windows.rs"]
-mod sock;
 
 /// Upstream's proxy line/request buffer size (`PROXY_BUF_SIZE`).
 const PROXY_BUF_SIZE: usize = 1024;
@@ -493,8 +490,7 @@ fn proxy_status_ok(status: &[u8]) -> bool {
 	rest.get(code_at) == Some(&b'2')
 }
 
-/// A host that would not stay a single literal word through a (nested)
-/// shell. On Windows' `cmd.exe`, `%` expands variables, so it is refused too.
+/// A host that would not stay a single literal word through a (nested) shell.
 fn connect_host_unsafe(host: &str, posix_shell: bool) -> bool {
 	let Some(first) = host.bytes().next() else { return true };
 	if b"-+~%".contains(&first) {
@@ -531,8 +527,8 @@ fn expand_connect_prog(prog: &str, host: &str) -> String {
 }
 
 /// Runs `prog` through the shell with its stdin/stdout on our connection: a
-/// loopback TCP socket pair on unix (so a `rsync --daemon` helper sees a real
-/// TCP peer, as with upstream), pipes on Windows.
+/// loopback TCP socket pair (so a `rsync --daemon` helper sees a real TCP peer,
+/// as with upstream).
 fn sock_exec(
 	prog: &str,
 	shell: Option<&str>,
@@ -584,26 +580,14 @@ fn sock_exec(
 		let (reader, writer, probe) = sock_halves(Sock::Tcp(ours), &cancel, &ctl);
 		Ok(Connection { reader, writer, probe: Some(probe), child, ctl })
 	}
-	#[cfg(windows)]
-	{
-		let ctl = ConnCtl::default();
-		super::spawn_piped(env, cmd, true, &cancel, &ctl, false, role).map_err(|err| fork_error(&err))
-	}
 }
 
-/// `system(prog)`: `/bin/sh -c` on unix, `cmd.exe /C` on Windows.
+/// `system(prog)`: `/bin/sh -c`.
 fn system_command(env: &ChildEnv, prog: &str) -> io::Result<std::process::Command> {
 	#[cfg(unix)]
 	{
 		let mut cmd = env.command("/bin/sh")?;
 		cmd.arg("-c").arg(prog);
-		Ok(cmd)
-	}
-	#[cfg(windows)]
-	{
-		use std::os::windows::process::CommandExt;
-		let mut cmd = env.command("cmd.exe")?;
-		cmd.raw_arg("/C").raw_arg(prog);
 		Ok(cmd)
 	}
 }

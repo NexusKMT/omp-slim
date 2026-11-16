@@ -145,9 +145,7 @@ fn temp_dir_options(options: &TempOptions) -> DirOptions {
 	DirOptions::new().mode(options.get_mode().unwrap_or(0o700))
 }
 
-/// The facade's creation mask where it applies: Unix host creations. Windows
-/// creation modes merely toggle the read-only attribute, which a umask must
-/// never reach.
+/// The facade's creation mask where it applies: Unix host creations.
 fn host_mask(scope: &Scope) -> Option<u32> {
 	scope.creation_mask.filter(|_| cfg!(unix))
 }
@@ -206,9 +204,7 @@ enum ScopedOpen {
 /// or when the `stat` fails, the open is [`ScopedOpen::Plain`]. If the path
 /// changes between the `stat` and the open, the file is opened as the `stat`
 /// described it.
-#[cfg_attr(not(unix), allow(clippy::missing_const_for_fn, reason = "const only off Unix"))]
 fn plan_scoped_open(scope: &Scope, path: &Path, options: &OpenOptions) -> ScopedOpen {
-	#[cfg(unix)]
 	if let Some(token) = &scope.cancel
 		&& !options.is_create_new()
 	{
@@ -227,8 +223,6 @@ fn plan_scoped_open(scope: &Scope, path: &Path, options: &OpenOptions) -> Scoped
 		}
 		return ScopedOpen::Typed { token: token.clone(), poll: crate::reads_can_block(&meta) };
 	}
-	#[cfg(not(unix))]
-	let _ = (scope, path, options);
 	ScopedOpen::Plain
 }
 
@@ -1168,8 +1162,7 @@ impl Fs {
 		}
 	}
 
-	/// Creates `link` pointing at `target` (stored verbatim). Windows picks a
-	/// file or directory link from the target.
+	/// Creates `link` pointing at `target` (stored verbatim).
 	pub async fn symlink(&self, target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
 		self.symlink_with(target, link, SymlinkKind::Auto).await
 	}

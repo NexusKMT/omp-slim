@@ -60,7 +60,6 @@ pub(crate) fn parse_terminal_list(
 
 /// Device number of terminal `value`: an absolute or virtual path, a name
 /// under `/dev`, or a `/dev/tty` suffix (`pts/0`, `S0`).
-#[cfg(unix)]
 fn resolve_terminal(value: &str, paths: &ShellPaths) -> Option<u64> {
 	use std::path::{Path, PathBuf};
 	let virtual_path = pi_vfs::is_virtual_path(Path::new(value));
@@ -76,9 +75,4 @@ fn resolve_terminal(value: &str, paths: &ShellPaths) -> Option<u64> {
 		metadata.or_else(|_| paths.fs().metadata(Path::new("/dev").join(format!("tty{value}"))))
 	};
 	metadata.ok().and_then(|metadata| metadata.rdev())
-}
-
-#[cfg(not(unix))]
-fn resolve_terminal(_value: &str, _paths: &ShellPaths) -> Option<u64> {
-	None
 }

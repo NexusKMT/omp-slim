@@ -220,8 +220,9 @@ fn output_handle(file: &OpenFile) -> Option<OpenFile> {
 
 fn output_metadata(file: &OpenFile) -> Option<Metadata> {
 	match file {
-		// `Metadata::from_file` keeps the handle identity a Windows path stat
-		// drops; without it `path_is_stdout` can never match on Windows.
+		// `Metadata::from_file` stats the open descriptor, so `path_is_stdout`
+		// compares against the file this process holds, not a later replacement
+		// at the same path.
 		OpenFile::File(file) => Metadata::from_file(file).ok(),
 		OpenFile::Vfs(file) => file.metadata().ok(),
 		OpenFile::Stream(_) => None,
@@ -505,11 +506,7 @@ impl ShellPaths {
 			Some(token) => filesystem.with_cancellation(token),
 			None => filesystem,
 		};
-		#[cfg(unix)]
 		let descriptors: Arc<[(i32, OpenFile)]> = descriptors.into_iter().collect();
-		#[cfg(not(unix))]
-		drop(descriptors);
-		#[cfg(unix)]
 		let filesystem = descriptors.iter().fold(filesystem, |filesystem, (fd, file)| {
 			match file.as_vfs().and_then(|file| file.try_clone().ok()) {
 				Some(file) => filesystem.mount_file(virtual_descriptor_path(*fd), file),
@@ -543,8 +540,7 @@ impl ShellPaths {
 
 	/// Resolves `path` to what the shell would open.
 	///
-	/// Relative paths join [`ShellPaths::cwd`]. Windows aliases (`/c/...`,
-	/// `/tmp`) become native paths via [`normalize_shell_path`].
+	/// Relative paths join [`ShellPaths::cwd`].
 	/// A descriptor path becomes `/dev/fd/<host fd>` for the shell's
 	/// descriptor, or a path that cannot be opened when the shell has none.
 	pub fn resolve(&self, path: impl AsRef<Path>) -> PathBuf {
@@ -580,8 +576,7 @@ impl ShellPaths {
 		if pi_vfs::is_virtual_path(path) {
 			return path.to_path_buf();
 		}
-		let normalized_path = normalize_shell_path(path);
-		absolute_path(&self.cwd, normalized_path.as_ref())
+		absolute_path(&self.cwd, path)
 	}
 
 	#[cfg(unix)]
@@ -623,119 +618,6 @@ impl ShellPaths {
 #[cfg(unix)]
 fn virtual_descriptor_path(fd: i32) -> PathBuf {
 	PathBuf::from(format!("omp-descriptor://{fd}"))
-}
-
-/// The native path for a POSIX-style alias the shell accepts on Windows: an
-/// MSYS drive path (`/c/x`, `/mnt/c/x`) becomes `C:\\x`, the `/tmp` tree
-/// lands in the system temporary directory, and `/dev/null` is the null
-/// device `NUL`. Elsewhere every path is native.
-#[allow(clippy::missing_const_for_fn, reason = "Windows implementation allocates")]
-pub(crate) fn normalize_shell_path(path: &Path) -> std::borrow::Cow<'_, Path> {
-	#[cfg(windows)]
-	{
-		match msys::native(path, &std::env::temp_dir) {
-			Some(native) => std::borrow::Cow::Owned(native),
-			None => std::borrow::Cow::Borrowed(path),
-		}
-	}
-	#[cfg(not(windows))]
-	{
-		std::borrow::Cow::Borrowed(path)
-	}
-}
-
-/// MSYS path aliases on Windows; see [`normalize_shell_path`].
-#[cfg(any(windows, test))]
-mod msys {
-	use std::path::PathBuf;
-
-	/// The native spelling of `path`, or `None` when it is no alias.
-	/// `temp_dir` supplies the directory `/tmp` stands for.
-	pub(super) fn native(path: &std::path::Path, temp_dir: &dyn Fn() -> PathBuf) -> Option<PathBuf> {
-		let text = path.to_str()?;
-		if text == "/dev/null" {
-			return Some(PathBuf::from("NUL"));
-		}
-		let rest = text.strip_prefix('/')?;
-		if let Some(native) = drive(rest) {
-			return Some(native);
-		}
-		tmp(rest, temp_dir)
-	}
-
-	/// `c/x/y` or `mnt/c/x/y` (after the leading `/`) as `C:\\x\\y`.
-	fn drive(rest: &str) -> Option<PathBuf> {
-		let rest = match rest.get(..4) {
-			Some(prefix) if prefix.eq_ignore_ascii_case("mnt/") => &rest[4..],
-			_ => rest,
-		};
-		let mut chars = rest.chars();
-		let letter = chars.next().filter(char::is_ascii_alphabetic)?;
-		let tail = chars.as_str();
-		if !(tail.is_empty() || tail.starts_with('/')) {
-			return None;
-		}
-		let mut native = format!("{}:\\", letter.to_ascii_uppercase());
-		native.extend(tail.trim_start_matches('/').chars().map(|ch| if ch == '/' { '\\' } else { ch }));
-		Some(PathBuf::from(native))
-	}
-
-	/// `tmp/...` (after the leading `/`) under `temp_dir()`, after resolving
-	/// `.` and `..` as POSIX would; `None` when the result leaves `/tmp`.
-	fn tmp(rest: &str, temp_dir: &dyn Fn() -> PathBuf) -> Option<PathBuf> {
-		let mut stack: Vec<&str> = Vec::new();
-		for name in rest.split(['/', '\\']) {
-			match name {
-				"" | "." => {},
-				".." => {
-					stack.pop();
-				},
-				name if name.contains(':') => return None,
-				name => stack.push(name),
-			}
-		}
-		let (first, inner) = stack.split_first()?;
-		if *first != "tmp" {
-			return None;
-		}
-		let mut native = temp_dir();
-		native.extend(inner);
-		Some(native)
-	}
-
-	#[cfg(test)]
-	mod tests {
-		use std::path::{Path, PathBuf};
-
-		use super::native;
-
-		fn translate(path: &str) -> Option<PathBuf> {
-			native(Path::new(path), &|| PathBuf::from("T"))
-		}
-
-		#[test]
-		fn drive_aliases_become_drive_paths() {
-			assert_eq!(translate("/c/Users/x"), Some(PathBuf::from(r"C:\Users\x")));
-			assert_eq!(translate("/mnt/d/a/b"), Some(PathBuf::from(r"D:\a\b")));
-			assert_eq!(translate("/c"), Some(PathBuf::from(r"C:\")));
-			assert_eq!(translate("/cc/x"), None);
-			assert_eq!(translate("relative/c"), None);
-		}
-
-		#[test]
-		fn tmp_maps_under_the_temp_dir() {
-			assert_eq!(translate("/tmp/f"), Some(PathBuf::from("T").join("f")));
-			assert_eq!(translate("/tmp/../tmp/f"), Some(PathBuf::from("T").join("f")));
-			assert_eq!(translate("/tmp/../etc"), None);
-			assert_eq!(translate("/var/tmp"), None);
-		}
-
-		#[test]
-		fn dev_null_is_the_null_device() {
-			assert_eq!(translate("/dev/null"), Some(PathBuf::from("NUL")));
-			assert_eq!(translate("/dev/nullx"), None);
-		}
-	}
 }
 
 /// Read the calling process's file-creation mask without changing it.
@@ -850,16 +732,7 @@ impl Host {
 	/// was set, else the host process's. `0` where there is no umask. Read
 	/// once per invocation.
 	pub fn umask(&self) -> u32 {
-		*self.umask.get_or_init(|| {
-			#[cfg(unix)]
-			{
-				self.fs().creation_mask().unwrap_or_else(process_umask)
-			}
-			#[cfg(not(unix))]
-			{
-				0
-			}
-		})
+		*self.umask.get_or_init(|| self.fs().creation_mask().unwrap_or_else(process_umask))
 	}
 
 	/// Whether `path` identifies the regular file currently backing stdout.
@@ -1628,47 +1501,29 @@ struct Destination {
 	/// socket), which has no offset, so equal ids mean one object (`2>&1`).
 	/// Regular files never carry one: `cmd >f 2>f` opens two descriptions
 	/// with independent offsets, and one writer would change where bytes land.
-	#[cfg(unix)]
 	id:           Option<(u64, u64)>,
 }
 
 impl Destination {
 	fn of(file: &OpenFile) -> Self {
-		#[cfg(unix)]
-		{
-			let Some(stat) = file
-				.try_borrow_as_fd()
-				.ok()
-				.and_then(|fd| rustix::fs::fstat(fd).ok())
-			else {
-				return Self { regular_file: false, id: None };
-			};
-			let regular_file =
-				rustix::fs::FileType::from_raw_mode(stat.st_mode) == rustix::fs::FileType::RegularFile;
-			#[allow(clippy::unnecessary_cast, reason = "dev_t and ino_t widths vary by target")]
-			let id = (!regular_file).then_some((stat.st_dev as u64, stat.st_ino as u64));
-			Self { regular_file, id }
-		}
-		#[cfg(not(unix))]
-		{
-			Self {
-				regular_file: matches!(file, OpenFile::File(f) if f.metadata().is_ok_and(|m| m.is_file())),
-			}
-		}
+		let Some(stat) = file
+			.try_borrow_as_fd()
+			.ok()
+			.and_then(|fd| rustix::fs::fstat(fd).ok())
+		else {
+			return Self { regular_file: false, id: None };
+		};
+		let regular_file =
+			rustix::fs::FileType::from_raw_mode(stat.st_mode) == rustix::fs::FileType::RegularFile;
+		#[allow(clippy::unnecessary_cast, reason = "dev_t and ino_t widths vary by target")]
+		let id = (!regular_file).then_some((stat.st_dev as u64, stat.st_ino as u64));
+		Self { regular_file, id }
 	}
 
 	/// Whether `self` and `other` are the same non-seekable object (`2>&1`,
 	/// and the harness default, where one capture pipe backs both fds).
 	fn shares_with(&self, other: &Self) -> bool {
-		#[cfg(unix)]
-		{
-			self.id.is_some() && self.id == other.id
-		}
-		#[cfg(not(unix))]
-		{
-			let _ = other;
-			false
-		}
+		self.id.is_some() && self.id == other.id
 	}
 }
 
@@ -1754,7 +1609,6 @@ impl ChildEnv {
 /// moved on from, and what it says about the error is dropped.
 pub(crate) struct Stdin {
 	file:   OpenFile,
-	#[cfg_attr(not(unix), allow(dead_code, reason = "readiness polling is unix-only"))]
 	fd:     Option<i32>,
 	/// The command's cancellation. A provider-backed fd 0 (`< virtual://f`) has
 	/// no descriptor to poll, and the facade that opened it is usually the
@@ -1793,22 +1647,14 @@ impl Stdin {
 }
 
 /// The raw descriptor [`Stdin`] polls for readiness, so a blocked read
-/// observes cancellation; `None` off unix, for in-process streams, and for a
+/// observes cancellation; `None` for in-process streams, and for a
 /// descriptor whose reads never block (see [`pi_vfs::reads_can_block`]).
 fn pollable_fd(file: &OpenFile) -> Option<i32> {
-	#[cfg(unix)]
-	{
-		use std::os::fd::AsRawFd;
-		file.try_borrow_as_fd()
-			.ok()
-			.filter(|fd| pi_vfs::fd_reads_can_block(*fd))
-			.map(|fd| fd.as_raw_fd())
-	}
-	#[cfg(not(unix))]
-	{
-		let _ = file;
-		None
-	}
+	use std::os::fd::AsRawFd;
+	file.try_borrow_as_fd()
+		.ok()
+		.filter(|fd| pi_vfs::fd_reads_can_block(*fd))
+		.map(|fd| fd.as_raw_fd())
 }
 
 impl Read for Stdin {
@@ -1876,20 +1722,6 @@ pub fn panic_scope_active() -> bool {
 	PANIC_SCOPE_DEPTH.with(|depth| depth.get() > 0)
 }
 
-static RAYON_GLOBAL_POOL_AVAILABLE: AtomicBool = AtomicBool::new(!cfg!(target_os = "windows"));
-
-/// Records whether utility builtins may use Rayon's process-global worker pool
-/// without risking lazy initialization under Windows commit pressure.
-pub fn set_rayon_global_pool_available(available: bool) {
-	RAYON_GLOBAL_POOL_AVAILABLE.store(available, Ordering::SeqCst);
-}
-
-/// Whether utility builtins may enter Rayon's process-global worker pool.
-#[must_use]
-pub fn rayon_global_pool_available() -> bool {
-	RAYON_GLOBAL_POOL_AVAILABLE.load(Ordering::SeqCst)
-}
-
 /// Indents all but the first line of a usage string by 7 spaces, aligning
 /// continuation lines under clap's `Usage: ` prefix.
 pub(crate) fn format_usage(usage: &str) -> String {
@@ -1902,9 +1734,7 @@ pub(crate) fn format_usage(usage: &str) -> String {
 
 /// Renders an I/O error the way GNU utilities print `strerror(errno)`: without
 /// Rust's ` (os error N)` suffix, and with POSIX wording for OS errors whose
-/// kind maps to a single errno. Windows reports `ERROR_FILE_NOT_FOUND` as
-/// "The system cannot find the file specified.", which a GNU-emulating
-/// diagnostic must spell "No such file or directory" like everywhere else.
+/// kind maps to a single errno.
 pub(crate) fn strip_errno(error: &io::Error) -> String {
 	if error.raw_os_error().is_some()
 		&& let Some(text) = posix_strerror(error.kind())
@@ -1929,47 +1759,16 @@ fn posix_strerror(kind: io::ErrorKind) -> Option<&'static str> {
 		ErrorKind::NotADirectory => "Not a directory",
 		ErrorKind::IsADirectory => "Is a directory",
 		ErrorKind::DirectoryNotEmpty => "Directory not empty",
-		#[cfg(not(unix))]
-		ErrorKind::PermissionDenied => "Permission denied",
 		_ => return None,
 	})
 }
 
-/// Forward-slash spelling of a Windows display path, or `None` when the path
-/// already displays as-is (non-Windows, no backslashes, verbatim prefix, or
-/// non-Unicode names that must stay native).
-///
-/// Utilities that print paths they built themselves (`find`, `rg`, `diff -r`)
-/// render them the way the bash they emulate does, with `/` separators, so
-/// output does not change spelling with the host platform.
-pub(crate) fn forward_slash_display(path: &Path) -> Option<PathBuf> {
-	if !cfg!(windows) {
-		return None;
-	}
-	let text = path.to_str()?;
-	let literal = matches!(
-		path.components().next(),
-		Some(std::path::Component::Prefix(prefix))
-			if prefix.kind().is_verbatim() || matches!(prefix.kind(), std::path::Prefix::DeviceNS(_))
-	);
-	(text.contains('\\') && !literal).then(|| PathBuf::from(text.replace('\\', "/")))
-}
-
 /// Borrows an `OsStr` as raw bytes.
 ///
-/// Unix strings are arbitrary byte sequences, so this is free there. On Windows
-/// only well-formed UTF-16 has a UTF-8 byte view, so an ill-formed value yields
-/// `None`; callers report that as an invalid argument.
+/// Unix strings are arbitrary byte sequences, so this is free there.
 pub(crate) fn os_bytes(value: &std::ffi::OsStr) -> Option<&[u8]> {
-	#[cfg(unix)]
-	{
-		use std::os::unix::ffi::OsStrExt;
-		Some(value.as_bytes())
-	}
-	#[cfg(not(unix))]
-	{
-		value.to_str().map(str::as_bytes)
-	}
+	use std::os::unix::ffi::OsStrExt;
+	Some(value.as_bytes())
 }
 
 /// Borrows an `OsStr` as raw bytes, substituting replacement characters for
@@ -2440,8 +2239,8 @@ fn build_host(invocation: Opened, spec: Spec) -> Result<Host, i32> {
 
 	let stdout_handle = if checks_stdout_path { output_handle(&stdout) } else { None };
 	// Classified before the SIGPIPE guard wraps them: the guard is an opaque
-	// stream, so a file behind it can no longer be told from a pipe on
-	// Windows, and one sample per stream serves every writer below.
+	// stream, so a file behind it can no longer be told from a pipe. One
+	// sample per stream serves every writer below.
 	let stdout_destination = Destination::of(&stdout);
 	let stderr_destination = Destination::of(&stderr_file);
 	let sigpipe = Arc::new(Sigpipe::default());
@@ -3065,14 +2864,6 @@ mod testing {
 		assert!(super::pollable_fd(&OpenFile::from(reader)).is_some());
 	}
 
-	#[cfg(windows)]
-	#[test]
-	fn resolves_msys_and_tmp_aliases_to_native_locations() {
-		let (host, _) = Host::for_test("test", "", r"C:\workspace");
-
-		assert_eq!(host.resolve("/c/Users/Adam/file.txt"), PathBuf::from(r"C:\Users\Adam\file.txt"));
-		assert_eq!(host.resolve("/tmp/probe"), std::env::temp_dir().join("probe"));
-	}
 
 	/// Parses `argv` and runs `U` against an in-memory host, mirroring what the
 	/// registered builtin does: `argv[0]` is the command name, clap failures are
@@ -3221,7 +3012,7 @@ mod testing {
 			std::env::current_dir().expect("current dir"),
 			pi_vfs::Fs::native(),
 		);
-		let null = std::fs::File::open(if cfg!(windows) { "NUL" } else { "/dev/null" }).expect("null device");
+		let null = std::fs::File::open("/dev/null").expect("null device");
 		invocation.stdio = [
 			crate::extras::Fd::File(null),
 			crate::extras::Fd::File(output.try_clone().expect("stdout")),
@@ -3396,7 +3187,7 @@ mod testing {
 		if name.is_empty() {
 			return Err(not_found());
 		}
-		if name.contains('/') || (cfg!(windows) && name.contains('\\')) {
+		if name.contains('/') {
 			let path = runner.cwd.join(name);
 			return match std::fs::metadata(&path) {
 				Ok(metadata) if metadata.is_dir() => Err(io::ErrorKind::PermissionDenied.into()),
@@ -3404,7 +3195,7 @@ mod testing {
 				Err(error) => Err(error),
 			};
 		}
-		let default = if cfg!(windows) { "" } else { "/usr/bin:/bin" };
+		let default = "/usr/bin:/bin";
 		let path = runner.env.get("PATH").map_or(default, String::as_str);
 		std::env::split_paths(path)
 			.map(|dir| runner.cwd.join(dir).join(name))

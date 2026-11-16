@@ -175,7 +175,6 @@ pub mod matchers {
 		use tokio::sync::OnceCell;
 
 		use super::Follow;
-		use crate::host::forward_slash_display;
 
 		/// File types.
 		#[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -269,11 +268,7 @@ pub mod matchers {
 
 			/// Check for ErrorKind::FilesystemLoop.
 			pub fn is_loop(&self) -> bool {
-				#[cfg(unix)]
-				return self.raw == Some(uucore::libc::ELOOP);
-
-				#[cfg(not(unix))]
-				return false;
+				self.raw == Some(uucore::libc::ELOOP)
 			}
 		}
 
@@ -360,15 +355,12 @@ pub mod matchers {
 				follow: Follow,
 			) -> Self {
 				let path = path.into();
-				let display = forward_slash_display(&path);
-				Self { fs, path, depth, follow, meta: OnceCell::new(), known_type: None, display }
+				Self { fs, path, depth, follow, meta: OnceCell::new(), known_type: None, display: None }
 			}
 
 			/// Record the type the directory listing reported, so `-type`,
 			/// `-prune` and the like answer without a stat. Only regular files
-			/// and directories seen without following links qualify: Windows
-			/// listings report every reparse point as a symlink, which needs the
-			/// stat to tell.
+			/// and directories seen without following links qualify.
 			#[must_use]
 			pub fn with_listed_type(mut self, file_type: pi_walker::FileType) -> Self {
 				if !self.follow() {
@@ -410,7 +402,7 @@ pub mod matchers {
 					Ok(rel) => pi_vfs::join_path(operand, rel),
 					Err(_) => return,
 				};
-				self.display = Some(forward_slash_display(&display).unwrap_or(display));
+				self.display = Some(display);
 			}
 
 			/// [`Self::set_display_root`] for an entry a walk of `resolved_root`
@@ -823,7 +815,6 @@ pub mod matchers {
 		/// The latest native mapping from dev_id to fs_type, used for saving mount
 		/// info reads.
 		#[derive(Default)]
-		#[cfg_attr(not(unix), allow(dead_code))]
 		pub struct Cache(Mutex<Option<(String, String)>>);
 
 		/// Get the filesystem type name of `path`, whose metadata (per the caller's
@@ -842,19 +833,15 @@ pub mod matchers {
 			meta: &Metadata,
 			cache: &Cache,
 		) -> io::Result<String> {
-			#[cfg(unix)]
 			if fs.is_native_local(path) {
 				return native_file_system_type(meta, cache);
 			}
-			#[cfg(not(unix))]
-			let _ = (meta, cache);
 			fs.stat_fs(path)
 				.await?
 				.fs_type_name
 				.ok_or_else(|| pi_vfs::unsupported("filesystem type name"))
 		}
 
-		#[cfg(unix)]
 		fn native_file_system_type(meta: &Metadata, cache: &Cache) -> io::Result<String> {
 			let dev_id = meta
 				.dev()
@@ -1186,10 +1173,6 @@ pub mod matchers {
 				Self { gid }
 			}
 
-			#[cfg(windows)]
-			pub fn from_group_name(_group: &str) -> Option<Self> {
-				None
-			}
 
 			fn check(&self, metadata: Option<&Metadata>) -> bool {
 				metadata
@@ -1240,10 +1223,6 @@ pub mod matchers {
 				false
 			}
 
-			#[cfg(windows)]
-			async fn matches(&self, _file_info: &WalkEntry, _: &mut MatcherIO) -> bool {
-				false
-			}
 		}
 	}
 	mod lname {
@@ -1743,38 +1722,8 @@ pub mod matchers {
 			text
 		}
 
-		#[cfg(windows)]
-		fn format_attributes(file_attributes: u32) -> String {
-			let mut attributes = Vec::new();
-
-			// https://learn.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants
-			if file_attributes & 0x0001 != 0 {
-				attributes.push("read-only");
-			}
-			if file_attributes & 0x0002 != 0 {
-				attributes.push("hidden");
-			}
-			if file_attributes & 0x0004 != 0 {
-				attributes.push("system");
-			}
-			if file_attributes & 0x0020 != 0 {
-				attributes.push("archive");
-			}
-			if file_attributes & 0x0040 != 0 {
-				attributes.push("compressed");
-			}
-			if file_attributes & 0x0080 != 0 {
-				attributes.push("offline");
-			}
-
-			attributes.join(", ")
-		}
 
 		fn permission_text(metadata: &Metadata) -> String {
-			#[cfg(windows)]
-			if let Some(attributes) = metadata.file_attributes() {
-				return format_attributes(attributes);
-			}
 			format_permissions(metadata.mode())
 		}
 
@@ -1783,7 +1732,6 @@ pub mod matchers {
 			value.map_or_else(|| "?".to_string(), |value| value.to_string())
 		}
 
-		#[cfg(unix)]
 		fn user_name(uid: u32) -> String {
 			use nix::unistd::{Uid, User};
 			User::from_uid(Uid::from_raw(uid))
@@ -1792,23 +1740,12 @@ pub mod matchers {
 				.map_or_else(|| uid.to_string(), |user| user.name)
 		}
 
-		#[cfg(not(unix))]
-		fn user_name(uid: u32) -> String {
-			uid.to_string()
-		}
-
-		#[cfg(unix)]
 		fn group_name(gid: u32) -> String {
 			use nix::unistd::{Gid, Group};
 			Group::from_gid(Gid::from_raw(gid))
 				.ok()
 				.flatten()
 				.map_or_else(|| gid.to_string(), |group| group.name)
-		}
-
-		#[cfg(not(unix))]
-		fn group_name(gid: u32) -> String {
-			gid.to_string()
 		}
 
 		pub struct Ls {
@@ -1947,8 +1884,6 @@ pub mod matchers {
 					self.pattern.matches(&name)
 				}
 
-				#[cfg(windows)]
-				self.pattern.matches(&name)
 			}
 		}
 	}
@@ -2063,7 +1998,6 @@ pub mod matchers {
 			}
 		}
 
-		#[cfg(unix)]
 		#[derive(Debug)]
 		pub struct PermMatcher {
 			comparison_type: ComparisonType,
@@ -2071,11 +2005,7 @@ pub mod matchers {
 			dir_pattern:     u32,
 		}
 
-		#[cfg(not(unix))]
-		pub struct PermMatcher {}
-
 		impl PermMatcher {
-			#[cfg(unix)]
 			fn check(&self, metadata: &pi_vfs::Metadata) -> bool {
 				let pattern = if metadata.is_dir() {
 					self.dir_pattern
@@ -2087,28 +2017,20 @@ pub mod matchers {
 					.mode_bits_match(pattern, metadata.permissions().mode())
 			}
 
-			#[cfg(unix)]
 			pub fn new(pattern: &str) -> Result<Self, Box<dyn Error>> {
 				let (comparison_type, pattern) = parsing::split_comparison_type(pattern);
 				let file_pattern = parsing::parse_mode(pattern, false)?;
 				let dir_pattern = parsing::parse_mode(pattern, true)?;
 				Ok(Self { comparison_type, file_pattern, dir_pattern })
 			}
-
-			#[cfg(not(unix))]
-			pub fn new(_dummy_pattern: &str) -> Result<PermMatcher, Box<dyn Error>> {
-				Err(From::from("Permission matching is not available on this platform"))
-			}
 		}
 
 		#[async_trait::async_trait]
 		impl Matcher for PermMatcher {
-			#[cfg(unix)]
 			fn eval_pure(&self, file_info: &WalkEntry, _: &mut MatcherIO) -> Option<bool> {
 				file_info.cached_metadata().map(|metadata| self.check(metadata))
 			}
 
-			#[cfg(unix)]
 			async fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
 				match file_info.metadata().await {
 					Ok(metadata) => self.check(metadata),
@@ -2122,12 +2044,6 @@ pub mod matchers {
 						false
 					},
 				}
-			}
-
-			#[cfg(not(unix))]
-			async fn matches(&self, _dummy_file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
-				let _ = writeln!(&mut matcher_io.host().stderr, "Permission matching not available on this platform!");
-				return false;
 			}
 		}
 	}
@@ -2662,14 +2578,11 @@ pub mod matchers {
 
 				FormatDirective::Group { as_name } => {
 					let gid = meta()?.gid().ok_or_else(|| pi_vfs::unsupported("group id"))?;
-					#[cfg(unix)]
 					if *as_name {
 						return Ok(uucore::entries::gid2grp(gid)
 							.unwrap_or_else(|_| gid.to_string())
 							.into());
 					}
-					#[cfg(not(unix))]
-					let _ = as_name;
 					gid.to_string().into()
 				},
 
@@ -2778,14 +2691,11 @@ pub mod matchers {
 
 				FormatDirective::User { as_name } => {
 					let uid = meta()?.uid().ok_or_else(|| pi_vfs::unsupported("user id"))?;
-					#[cfg(unix)]
 					if *as_name {
 						return Ok(uucore::entries::uid2usr(uid)
 							.unwrap_or_else(|_| uid.to_string())
 							.into());
 					}
-					#[cfg(not(unix))]
-					let _ = as_name;
 					uid.to_string().into()
 				},
 			};
@@ -3833,10 +3743,6 @@ pub mod matchers {
 					.is_some_and(|uid| self.uid.matches(uid.into()))
 			}
 
-			#[cfg(windows)]
-			pub fn from_user_name(_user: &str) -> Option<Self> {
-				None
-			}
 		}
 
 		#[async_trait::async_trait]
@@ -3881,10 +3787,6 @@ pub mod matchers {
 				false
 			}
 
-			#[cfg(windows)]
-			async fn matches(&self, _file_info: &WalkEntry, _: &mut MatcherIO) -> bool {
-				false
-			}
 		}
 	}
 
@@ -4619,7 +4521,6 @@ pub mod matchers {
 						_ => unreachable!("Encountered unexpected value {}", args[arg_index]),
 					}
 				},
-				#[cfg(unix)]
 				"-inum" => {
 					if i >= args.len() - 1 {
 						return Err(From::from(format!("missing argument to {}", args[i])));
@@ -4628,11 +4529,6 @@ pub mod matchers {
 					i += 1;
 					Some(InodeMatcher::new(inum).into_box())
 				},
-				#[cfg(not(unix))]
-				"-inum" => {
-					return Err(From::from("Inode numbers are not available on this platform"));
-				},
-				#[cfg(unix)]
 				"-links" => {
 					if i >= args.len() - 1 {
 						return Err(From::from(format!("missing argument to {}", args[i])));
@@ -4640,10 +4536,6 @@ pub mod matchers {
 					let inum = convert_arg_to_comparable_value(args[i], args[i + 1])?;
 					i += 1;
 					Some(LinksMatcher::new(inum).into_box())
-				},
-				#[cfg(not(unix))]
-				"-links" => {
-					return Err(From::from("Link counts are not available on this platform"));
 				},
 				"-samefile" => {
 					if i >= args.len() - 1 {
@@ -5511,10 +5403,7 @@ mod tests {
 	async fn walks_a_directory_chain_deeper_than_the_stack() {
 		let (_dir, root) = fixture();
 		// Stay under the host's PATH_MAX: every level adds "/d".
-		#[cfg(unix)]
 		let path_max = usize::try_from(libc::PATH_MAX).expect("PATH_MAX is positive");
-		#[cfg(not(unix))]
-		let path_max = 4096;
 		let depth = (path_max - 96 - root.join("deep/f").as_os_str().len()) / 2;
 		let mut chain = PathBuf::from("deep");
 		for _ in 0..depth {
@@ -5537,7 +5426,7 @@ mod tests {
 				(code, capture.out(), capture.err())
 			})
 		};
-		// find joins operand and names with '/', not the OS separator (Windows `display()` uses '\').
+		// find joins operand and names with '/'.
 		let leaf = format!("deep{}/f", "/d".repeat(depth));
 
 		let (code, out, err) = find(&["deep", "-name", "f"]).await.unwrap();
@@ -5824,8 +5713,7 @@ mod tests {
 				"-regextype".into(),
 				"posix-extended".into(),
 				"-regex".into(),
-				// The fixture root is native (`\\?\C:\…` on Windows), so match either separator.
-				r".*[/\\]c|.*[/\\]c\.rs".into(),
+				r".*/c|.*/c\.rs".into(),
 			],
 		)
 		.await;

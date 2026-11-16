@@ -22,7 +22,6 @@ use crate::bash::{
 	fd::FdRef,
 	fs::{Access, FileKind, FsOp, FsPoll, OpenFlags, Stat, StatKind},
 	host::Deadline,
-	ids::Platform,
 };
 
 /// The cached answer to `p`.
@@ -197,27 +196,14 @@ pub fn perform(
 		Probe::Path { name, path } => {
 			let io = sc.io();
 			if io.search.is_none() {
-				let extensions = executable_extensions(k, cx, vp);
 				io.search = Some(PathSearch {
-					cands:         candidates(
-						path,
-						name,
-						&vp.cwd,
-						k.engine.config().platform,
-						&extensions,
-					),
+					cands:         candidates(path, name, &vp.cwd),
 					idx:           0,
 					checking_exec: false,
 					nonexec:       None,
 				});
 			}
 			match path_search(&mut tcx, cx, sc) {
-				// Windows reports the probed path: `shown_candidate` splits PATH
-				// on `:` and its `idx` stops addressing one entry once every
-				// entry expands to a name plus its PATHEXT candidates.
-				Search::Found(found) if k.engine.config().platform == Platform::Windows => {
-					ProbeResult::Path(Some(found))
-				},
 				// bash shows `dir/name` as built (`./e` for an empty entry).
 				Search::Found(_) => {
 					let idx = sc
@@ -344,12 +330,6 @@ pub fn perform(
 		Probe::Input { fd, delim, lines, nchars, timeout_ns, .. } => {
 			let handle = input_handle(k, vp, *fd);
 			let seekable = handle.kind() == Some(FileKind::Regular);
-			// A Windows console in line mode ends a line with `\r\n`; a Unix
-			// terminal maps the `\r` to `\n` itself (ICRNL). Pipes and files
-			// keep their `\r`, as zsh does.
-			let console_lines = delim == &Some(b'\n')
-				&& handle.kind() == Some(FileKind::Tty)
-				&& k.engine.config().platform == Platform::Windows;
 			// The bytes so far, beside `sc.live` (the timer).
 			let input = &mut sc.io.get_or_insert_with(Box::default).input;
 			let lines = (*lines).max(1) as usize;
@@ -361,7 +341,7 @@ pub fn perform(
 				let done_delim = delim.is_some() && seen >= lines;
 				if done_len || done_delim {
 					break ProbeResult::Input {
-						data:      line_input(std::mem::take(input), console_lines),
+						data:      std::mem::take(input).into(),
 						eof:       false,
 						timed_out: false,
 					};
@@ -386,7 +366,7 @@ pub fn perform(
 				match polled {
 					Poll::Ready(Ok(0) | Err(_)) => {
 						break ProbeResult::Input {
-							data:      line_input(std::mem::take(input), console_lines),
+							data:      std::mem::take(input).into(),
 							eof:       true,
 							timed_out: false,
 						};
@@ -445,22 +425,6 @@ fn input_handle(k: &Kernel, vp: &Vproc, fd: i32) -> FdRef {
 }
 
 /// Input read, with each `\r\n` turned into `\n` for a `console`'s lines.
-fn line_input(mut data: Vec<u8>, console: bool) -> BString {
-	if !console {
-		return data.into();
-	}
-	let mut w = 0;
-	for r in 0..data.len() {
-		if data[r] == b'\r' && data.get(r + 1) == Some(&b'\n') {
-			continue;
-		}
-		data[w] = data[r];
-		w += 1;
-	}
-	data.truncate(w);
-	BString::from(data)
-}
-
 /// [`perform`] for a builtin's probe ([`Need::Probe`](super::builtins::Need)):
 /// the fd-level probes ([`Probe::Fd`]) may install descriptors in `vp`'s
 /// fd table ([`super::fdprobe`]); everything else is [`perform`].
@@ -559,72 +523,25 @@ pub const fn standard_path(platform: crate::bash::ids::Platform) -> &'static str
 	match platform {
 		crate::bash::ids::Platform::MacOs => "/usr/bin:/bin:/usr/sbin:/sbin",
 		crate::bash::ids::Platform::Linux => "/bin:/usr/bin",
-		crate::bash::ids::Platform::Windows => "/bin;/usr/bin",
 	}
 }
 
-/// The `$PATH` list separator on `platform`.
-pub const fn path_separator(platform: Platform) -> u8 {
-	if matches!(platform, Platform::Windows) {
-		b';'
-	} else {
-		b':'
-	}
-}
-
-/// `dir/name` for every `$PATH` entry; on Windows each is followed by the
-/// `extensions` (`PATHEXT`) spellings unless `name` already ends in one.
-pub fn candidates(
-	path: &[u8],
-	name: &[u8],
-	cwd: &[u8],
-	platform: Platform,
-	extensions: &[String],
-) -> Vec<BString> {
-	let has_extension = extensions.iter().any(|ext| {
-		name.len() >= ext.len() && name[name.len() - ext.len()..].eq_ignore_ascii_case(ext.as_bytes())
-	});
-	let suffixes = if has_extension { &[] } else { extensions };
-	let windows = platform == Platform::Windows;
+/// `dir/name` for every `$PATH` entry.
+pub fn candidates(path: &[u8], name: &[u8], cwd: &[u8]) -> Vec<BString> {
 	let mut out = Vec::new();
-	for dir in path.split(|&c| c == path_separator(platform)) {
+	for dir in path.split(|&c| c == b':') {
 		let mut base = if dir.is_empty() {
 			BString::from(cwd)
 		} else {
-			absolute_on(cwd, dir, platform)
+			absolute(cwd, dir)
 		};
-		if !(base.ends_with(b"/") || windows && base.ends_with(b"\\")) {
+		if !base.ends_with(b"/") {
 			base.push(b'/');
 		}
 		base.extend_from_slice(name);
-		// The bare name first, then its PATHEXT spellings.
-		let at = out.len();
 		out.push(base);
-		for ext in suffixes {
-			let base = &out[at];
-			let mut p = BString::from(Vec::with_capacity(base.len() + ext.len()));
-			p.extend_from_slice(base);
-			p.extend_from_slice(ext.as_bytes());
-			out.push(p);
-		}
 	}
 	out
-}
-
-/// The shell's `PATHEXT` suffixes, normalized as the exec check reads them
-/// ([`Pathext`](crate::sys::pathext::Pathext)); empty off Windows.
-pub fn executable_extensions(k: &Kernel, cx: &mut Cx<'_>, vp: &Vproc) -> Vec<String> {
-	if k.engine.config().platform != Platform::Windows {
-		return Vec::new();
-	}
-	let var = super::state::lookup(&k.root, cx.store, vp, b"PATHEXT")
-		.ok()
-		.flatten();
-	let raw = var
-		.as_ref()
-		.and_then(|v| v.as_scalar())
-		.map(String::from_utf8_lossy);
-	crate::sys::pathext::Pathext::parse(raw.as_deref().map(std::ffi::OsStr::new)).into_extensions()
 }
 
 /// The `idx`th `$PATH` candidate as bash prints it (`type -p`,
@@ -644,24 +561,7 @@ pub use crate::bash::fs::url_root_len;
 /// `name` made absolute against `cwd`: a name starting with `/` or a URL
 /// path ([`url_root_len`]) is already absolute.
 pub fn absolute(cwd: &[u8], name: &[u8]) -> BString {
-	absolute_on(
-		cwd,
-		name,
-		if cfg!(windows) {
-			Platform::Windows
-		} else {
-			Platform::Linux
-		},
-	)
-}
-
-/// [`absolute`] for the configured shell platform: the Windows drive and UNC
-/// rule stays testable on any host instead of compiling only on Windows.
-pub fn absolute_on(cwd: &[u8], name: &[u8], platform: Platform) -> BString {
 	if name.first() == Some(&b'/') || url_root_len(name).is_some() {
-		return name.into();
-	}
-	if platform == Platform::Windows && is_windows_absolute(name) {
 		return name.into();
 	}
 	let mut p = BString::from(cwd);
@@ -670,12 +570,6 @@ pub fn absolute_on(cwd: &[u8], name: &[u8], platform: Platform) -> BString {
 	}
 	p.extend_from_slice(name);
 	p
-}
-
-/// A Windows drive (`C:\x`, `C:/x`) or UNC (`\\srv\share`) path.
-pub const fn is_windows_absolute(name: &[u8]) -> bool {
-	matches!(name, [b'\\' | b'/', b'\\' | b'/', ..])
-		|| matches!(name, [drive, b':', b'\\' | b'/', ..] if drive.is_ascii_alphabetic())
 }
 
 pub enum Search {
@@ -767,54 +661,12 @@ mod tests {
 
 	#[test]
 	fn path_candidates_resolve_empty_and_relative_entries_against_cwd() {
-		let c = candidates(b"/bin::rel", b"ls", b"/home/u", Platform::Linux, &[]);
+		let c = candidates(b"/bin::rel", b"ls", b"/home/u");
 		assert_eq!(c, vec![
 			BString::from("/bin/ls"),
 			BString::from("/home/u/ls"),
 			BString::from("/home/u/rel/ls")
 		]);
-	}
-
-	#[test]
-	fn windows_path_search_tries_the_bare_name_then_pathext_spellings() {
-		let exts = [".exe".to_owned(), ".cmd".to_owned()];
-		let win = |path: &[u8], name: &[u8]| -> Vec<String> {
-			candidates(path, name, br"C:\project", Platform::Windows, &exts)
-				.into_iter()
-				.map(|p| String::from_utf8_lossy(&p).into_owned())
-				.collect()
-		};
-		assert_eq!(win(br"C:\Tools;;rel", b"tool"), [
-			r"C:\Tools/tool",
-			r"C:\Tools/tool.exe",
-			r"C:\Tools/tool.cmd",
-			r"C:\project/tool",
-			r"C:\project/tool.exe",
-			r"C:\project/tool.cmd",
-			r"C:\project/rel/tool",
-			r"C:\project/rel/tool.exe",
-			r"C:\project/rel/tool.cmd",
-		]);
-		// A name already carrying a PATHEXT suffix is not re-suffixed; any other
-		// dot is.
-		assert_eq!(win(b"", b"tool.EXE"), [r"C:\project/tool.EXE"]);
-		assert_eq!(win(b"", b"my.tool"), [
-			r"C:\project/my.tool",
-			r"C:\project/my.tool.exe",
-			r"C:\project/my.tool.cmd"
-		]);
-	}
-
-	#[test]
-	fn windows_absolute_paths_are_not_prefixed_with_the_shell_cwd() {
-		assert_eq!(
-			absolute_on(br"C:\project", br"D:\Tools\app.exe", Platform::Windows),
-			br"D:\Tools\app.exe".as_slice()
-		);
-		assert_eq!(
-			absolute_on(br"C:\project", br"\\server\share\app.exe", Platform::Windows),
-			br"\\server\share\app.exe".as_slice()
-		);
 	}
 
 	#[test]
@@ -845,16 +697,6 @@ mod tests {
 		assert_eq!(absolute(b"virtual://d", b"a.txt"), "virtual://d/a.txt");
 		assert_eq!(absolute(b"virtual://", b"a"), "virtual://a");
 		assert_eq!(absolute(b"virtual://d", b"/etc"), "/etc");
-	}
-
-	/// A cooked Windows console ends a typed line with `\r\n`; kept, the
-	/// `\r` ended up in the command name (`ls^M: command not found`). A lone
-	/// `\r` is the user's own byte and stays.
-	#[test]
-	fn console_line_ends_drop_the_cr_of_crlf_only() {
-		assert_eq!(line_input(b"ls\r\n".to_vec(), true), "ls\n");
-		assert_eq!(line_input(b"a\rb\r\n\r\n".to_vec(), true), "a\rb\n\n");
-		assert_eq!(line_input(b"partial\r".to_vec(), true), "partial\r");
 	}
 
 	#[test]

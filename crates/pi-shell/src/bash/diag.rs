@@ -506,15 +506,8 @@ pub fn strerror(err: &io::Error) -> Cow<'static, str> {
 		return Cow::Owned(inner.to_string());
 	}
 	// An OS error: the platform's own `strerror` text, as bash prints it
-	// (Rust's message is that text plus " (os error N)"). Windows' texts
-	// ("The system cannot find the file specified.") are no shell's: an
-	// error with a POSIX counterpart takes its text, as MSYS2's shells do.
+	// (Rust's message is that text plus " (os error N)").
 	if let Some(code) = err.raw_os_error() {
-		if cfg!(windows)
-			&& let Some(text) = posix_text(err.kind())
-		{
-			return Cow::Borrowed(text);
-		}
 		let text = err.to_string();
 		let suffix = format!(" (os error {code})");
 		return Cow::Owned(text.strip_suffix(&suffix).unwrap_or(&text).to_owned());

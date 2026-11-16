@@ -297,10 +297,7 @@ pub fn perform(
 				};
 				let Some(handle) = handle else {
 					// An engine object (a pipe, a document) is no socket.
-					#[cfg(unix)]
 					return Ok(err(&io::Error::from_raw_os_error(libc::ENOTSOCK)));
-					#[cfg(not(unix))]
-					return Ok(err(&unsupported()));
 				};
 				match cx.host.sockets() {
 					None => Poll::Ready(Err(unsupported())),

@@ -379,8 +379,7 @@ fn cur_add_func(
 	let noaliases = attrs.contains(Attrs::ZSH_UNALIASED);
 	// zsh `getfpfunc`.
 	let fpath = ctx.scalar(b"FPATH")?.unwrap_or_default();
-	let sep = crate::bash::vm::probe::path_separator(ctx.k.engine.config().platform);
-	for dir in fpath.split(|&c| c == sep).filter(|d| !d.is_empty()) {
+	for dir in fpath.split(|&c| c == b':').filter(|d| !d.is_empty()) {
 		let mut file = BString::from(dir);
 		file.push(b'/');
 		file.extend_from_slice(name);

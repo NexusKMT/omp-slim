@@ -56,11 +56,7 @@ impl Context {
 		cancel: CancelToken,
 	) -> Self {
 		let callback_path = directory.join("callback.url");
-		let helper_name = if cfg!(target_os = "windows") {
-			"callback-helper.exe"
-		} else {
-			"callback-helper"
-		};
+		let helper_name = { "callback-helper" };
 		let helper_path = directory.join(helper_name);
 		Self { id, scheme, directory, callback_path, helper_path, home, env, cancel }
 	}
@@ -236,14 +232,10 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
 	let temp = parent.join(format!(".oauth-write-{}-{sequence}", std::process::id()));
 	let mut options = OpenOptions::new();
 	options.write(true).create_new(true);
-	#[cfg(unix)]
 	{
 		use std::os::unix::fs::OpenOptionsExt;
 		options.mode(mode);
 	}
-	// Windows has no per-file mode bits; the file inherits its parent's ACL.
-	#[cfg(not(unix))]
-	let _ = mode;
 	let write_result = (|| -> Result<()> {
 		let mut file = options
 			.open(&temp)

@@ -1,10 +1,9 @@
 //! `#!` lines: parse them and decide how a script runs.
 //!
-//! Windows has no kernel `#!` support, so the host parses the line itself; on
-//! every platform a script whose interpreter is a shell the engine
-//! implements (`sh`, `bash`, `zsh`, directly or through `/usr/bin/env`) runs
-//! in-engine as [`Resolved::SelfShell`](crate::bash::Resolved::SelfShell)
-//!, which keeps nested shells visible and on the VFS.
+//! The host parses the line itself; a script whose interpreter is a shell the
+//! engine implements (`sh`, `bash`, `zsh`, directly or through `/usr/bin/env`)
+//! runs in-engine as [`Resolved::SelfShell`](crate::bash::Resolved::SelfShell),
+//! which keeps nested shells visible and on the VFS.
 //!
 //! Parsing follows Linux `binfmt_script`: at most [`HEAD_LEN`] bytes are
 //! read, the interpreter is the first word after `#!`, and the rest of the
@@ -43,8 +42,7 @@ pub enum Launch<'a> {
 		/// Options from the `#!` line.
 		args: Vec<&'a BStr>,
 	},
-	/// Search `name` on `PATH` (`#!/usr/bin/env name …`, or any interpreter
-	/// on Windows, see [`Launch::for_windows`]).
+	/// Search `name` on `PATH` (`#!/usr/bin/env name …`).
 	Search {
 		/// Program name.
 		name: &'a BStr,
@@ -80,9 +78,9 @@ pub fn parse(head: &[u8]) -> Option<Shebang<'_>> {
 	})
 }
 
-/// Last path component (either separator, so Windows paths work too).
+/// Last path component.
 fn basename(path: &[u8]) -> &[u8] {
-	path.rfind_byteset(b"/\\").map_or(path, |i| &path[i + 1..])
+	path.rfind_byte(b'/').map_or(path, |i| &path[i + 1..])
 }
 
 fn is_self_shell(name: &[u8]) -> bool {
@@ -121,18 +119,6 @@ impl<'a> Shebang<'a> {
 }
 
 impl Launch<'_> {
-	/// Windows has no `/usr/bin/python3`: an absolute POSIX interpreter path
-	/// becomes a `PATH` search for its basename (`python3`, resolved with
-	/// `PATHEXT`). Other launches are unchanged.
-	pub fn for_windows(self) -> Self {
-		match self {
-			Self::Path { path, args } if path.starts_with(b"/") => {
-				Self::Search { name: basename(path).as_bstr(), args }
-			},
-			other => other,
-		}
-	}
-
 	/// The argument vector that runs `script` with `script_args`: the
 	/// interpreter (or shell, or program name), the `#!` arguments, the script
 	/// path, then the script's own arguments.
@@ -161,7 +147,7 @@ pub fn read(path: &Path) -> io::Result<Option<OwnedShebang>> {
 	}))
 }
 
-/// Whether the file at `path` starts with `#!` (Windows `test -x`).
+/// Whether the file at `path` starts with `#!`.
 pub fn has_shebang(path: &Path) -> bool {
 	let mut head = [0u8; 2];
 	read_head(path, &mut head).is_ok_and(|n| n == 2 && head == *b"#!")
@@ -269,19 +255,6 @@ mod tests {
 			launch("#!/bin/bashful\n"),
 			Some(Launch::Path { path: b("/bin/bashful"), args: vec![] })
 		);
-	}
-
-	#[test]
-	fn windows_searches_posix_interpreter_paths_by_basename() {
-		let l = launch("#!/usr/bin/python3 -u\n").unwrap().for_windows();
-		assert_eq!(l, Launch::Search { name: b("python3"), args: vec![b("-u")] });
-		let l = launch("#!C:\\Python\\python.exe\n").unwrap().for_windows();
-		assert_eq!(l, Launch::Path { path: b("C:\\Python\\python.exe"), args: vec![] });
-		assert_eq!(l.argv(b("s.py"), &[BString::from("a")]), vec![
-			BString::from("C:\\Python\\python.exe"),
-			BString::from("s.py"),
-			BString::from("a")
-		]);
 	}
 
 	#[test]

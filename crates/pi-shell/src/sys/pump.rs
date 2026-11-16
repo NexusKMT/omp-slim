@@ -5,9 +5,9 @@
 //! `ExtProc` of the external it serves (its `poll_wait` polls the
 //! [`Pumps`] before the [`Tracker`]) with the polling task's waker. Neither
 //! side ever waits: the engine side through its pollable I/O, the OS side
-//! through our private, non-blocking (Unix) or overlapped (Windows) pipe end
-//! ([`os::OsPipe`]). One poll moves a bounded burst and then yields, waking
-//! itself, so an endless stream cannot hold the engine.
+//! through our private, non-blocking pipe end ([`os::OsPipe`]). One poll moves
+//! a bounded burst and then yields, waking itself, so an endless stream cannot
+//! hold the engine.
 //!
 //! - **Output** (child → engine) runs until end of file, i.e. until every
 //!   holder of the pipe's write end (the child and anything it forked) has

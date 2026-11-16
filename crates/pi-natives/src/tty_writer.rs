@@ -184,37 +184,29 @@ pub struct TtyWriter {
 
 #[napi]
 impl TtyWriter {
-	/// Start a pump thread for `fd` (typically 1). Fails on non-Unix hosts and
-	/// when the descriptor cannot be duplicated.
+	/// Start a pump thread for `fd` (typically 1). Fails when the descriptor
+	/// cannot be duplicated.
 	#[napi(constructor)]
 	pub fn new(fd: i32) -> Result<Self> {
-		#[cfg(unix)]
-		{
-			// SAFETY: the caller's fd stays open for this call; the borrow only
-			// lives long enough to duplicate it.
-			let owned = unsafe { BorrowedFd::borrow_raw(fd) }
-				.try_clone_to_owned()
-				.map_err(|err| Error::from_reason(format!("duplicating fd {fd} failed: {err}")))?
-				.into_raw_fd();
-			let inner = Arc::new(Inner {
-				back:    Mutex::new(Vec::new()),
-				pending: AtomicUsize::new(0),
-				cv:      Condvar::new(),
-				stop:    AtomicBool::new(false),
-				dead:    AtomicBool::new(false),
-			});
-			let thread_inner = Arc::clone(&inner);
-			let thread = std::thread::Builder::new()
-				.name("tty-writer".into())
-				.spawn(move || pump_loop(owned, &thread_inner))
-				.map_err(|err| Error::from_reason(format!("tty writer thread spawn failed: {err}")))?;
-			Ok(Self { inner, thread: Some(thread), fd: owned })
-		}
-		#[cfg(not(unix))]
-		{
-			let _ = fd;
-			Err(Error::from_reason("TtyWriter is unix-only"))
-		}
+		// SAFETY: the caller's fd stays open for this call; the borrow only
+		// lives long enough to duplicate it.
+		let owned = unsafe { BorrowedFd::borrow_raw(fd) }
+			.try_clone_to_owned()
+			.map_err(|err| Error::from_reason(format!("duplicating fd {fd} failed: {err}")))?
+			.into_raw_fd();
+		let inner = Arc::new(Inner {
+			back:    Mutex::new(Vec::new()),
+			pending: AtomicUsize::new(0),
+			cv:      Condvar::new(),
+			stop:    AtomicBool::new(false),
+			dead:    AtomicBool::new(false),
+		});
+		let thread_inner = Arc::clone(&inner);
+		let thread = std::thread::Builder::new()
+			.name("tty-writer".into())
+			.spawn(move || pump_loop(owned, &thread_inner))
+			.map_err(|err| Error::from_reason(format!("tty writer thread spawn failed: {err}")))?;
+		Ok(Self { inner, thread: Some(thread), fd: owned })
 	}
 
 	/// Enqueue terminal output; never blocks. Returns the total bytes now

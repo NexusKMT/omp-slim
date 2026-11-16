@@ -380,10 +380,7 @@ fn short_file_reads_as_zeros_and_reports_enodata() {
 	let mut src: &[u8] = &basis[..9000];
 	let stats = match_file(&ctx, &sums, &mut src, 10000, &mut enc, &mut out, &mut digest).unwrap();
 	let err = stats.read_error.expect("short read must be reported");
-	#[cfg(unix)]
 	assert_eq!(err.raw_os_error(), Some(libc::ENODATA));
-	#[cfg(not(unix))]
-	let _ = err;
 	let mut padded = basis[..9000].to_vec();
 	padded.resize(10000, 0);
 	let ints = decode(&out, &padded, &sums);

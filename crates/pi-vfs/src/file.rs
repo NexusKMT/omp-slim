@@ -99,19 +99,14 @@ struct HostCancel {
 	/// Reads of the file can block for as long as no data arrives (see
 	/// [`reads_can_block`]): such a read first waits for readiness in short
 	/// slices, checking the token.
-	#[cfg(unix)]
 	poll:  bool,
 }
 
 impl HostCancel {
-	#[cfg_attr(not(unix), allow(clippy::missing_const_for_fn, reason = "const only off Unix"))]
 	fn for_file(token: CancellationToken, file: &std::fs::File) -> Self {
-		#[cfg(not(unix))]
-		let _ = file;
 		Self {
 			token,
 			// A failed `fstat` leaves reads as they were: unpolled.
-			#[cfg(unix)]
 			poll: file.metadata().is_ok_and(|meta| reads_can_block(&meta)),
 		}
 	}

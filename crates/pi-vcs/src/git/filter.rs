@@ -3,8 +3,8 @@
 //! Git never compares or patches raw worktree bytes against objects: content
 //! passes through the clean/smudge pipeline (`core.autocrlf`, `eol`/`text`
 //! attributes, `ident`, filter drivers) first. Skipping it makes every CRLF
-//! checkout under `core.autocrlf=true` — the Git for Windows default — read as
-//! modified and makes LF patches fail to apply.
+//! checkout under `core.autocrlf=true` read as modified and makes LF patches
+//! fail to apply.
 
 use std::{collections::BTreeSet, io::Read, path::Path};
 

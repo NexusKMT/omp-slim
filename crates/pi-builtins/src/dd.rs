@@ -97,7 +97,7 @@ const fn platform(supported: bool, flag: u32) -> u32 {
 
 const FLAGS: &[(&str, u32)] = &[
 	("append", O_APPEND),
-	("binary", platform(cfg!(windows), O_BINARY)),
+	("binary", platform(false, O_BINARY)),
 	("cio", 0),
 	(
 		"direct",
@@ -121,7 +121,7 @@ const FLAGS: &[(&str, u32)] = &[
 	("nolinks", 0),
 	("nonblock", platform(cfg!(unix), O_NONBLOCK)),
 	("sync", platform(cfg!(unix), O_SYNC)),
-	("text", platform(cfg!(windows), O_TEXT)),
+	("text", platform(false, O_TEXT)),
 	("fullblock", O_FULLBLOCK),
 	("count_bytes", O_COUNT_BYTES),
 	("skip_bytes", O_SKIP_BYTES),
@@ -577,25 +577,11 @@ fn parse_operands(host: &mut Host, operands: &[OsString]) -> Result<Settings, i3
 // Descriptor helpers for the command's own streams.
 
 fn eoverflow() -> io::Error {
-	#[cfg(unix)]
-	{
-		io::Error::from_raw_os_error(libc::EOVERFLOW)
-	}
-	#[cfg(not(unix))]
-	{
-		io::Error::new(io::ErrorKind::FileTooLarge, "Value too large for defined data type")
-	}
+	io::Error::from_raw_os_error(libc::EOVERFLOW)
 }
 
 fn espipe() -> io::Error {
-	#[cfg(unix)]
-	{
-		io::Error::from_raw_os_error(libc::ESPIPE)
-	}
-	#[cfg(not(unix))]
-	{
-		io::Error::new(io::ErrorKind::NotSeekable, "Illegal seek")
-	}
+	io::Error::from_raw_os_error(libc::ESPIPE)
 }
 
 fn is_espipe(error: &io::Error) -> bool {
@@ -624,26 +610,15 @@ fn seek_stream(file: &OpenFile, pos: SeekFrom) -> io::Result<u64> {
 	if let Some(mut file) = file.as_vfs() {
 		return file.seek(pos);
 	}
-	#[cfg(unix)]
-	{
-		let Ok(fd) = file.try_borrow_as_fd() else {
-			return Err(espipe());
-		};
-		let pos = match pos {
-			SeekFrom::Start(offset) => rustix::fs::SeekFrom::Start(offset),
-			SeekFrom::End(offset) => rustix::fs::SeekFrom::End(offset),
-			SeekFrom::Current(offset) => rustix::fs::SeekFrom::Current(offset),
-		};
-		Ok(rustix::fs::seek(fd, pos)?)
-	}
-	#[cfg(not(unix))]
-	match file {
-		OpenFile::File(file) => {
-			let mut file: &std::fs::File = file;
-			file.seek(pos)
-		},
-		_ => Err(espipe()),
-	}
+	let Ok(fd) = file.try_borrow_as_fd() else {
+		return Err(espipe());
+	};
+	let pos = match pos {
+		SeekFrom::Start(offset) => rustix::fs::SeekFrom::Start(offset),
+		SeekFrom::End(offset) => rustix::fs::SeekFrom::End(offset),
+		SeekFrom::Current(offset) => rustix::fs::SeekFrom::Current(offset),
+	};
+	Ok(rustix::fs::seek(fd, pos)?)
 }
 
 /// `fstat` on one of the command's standard streams.
@@ -651,27 +626,16 @@ fn stat_stream(file: &OpenFile) -> io::Result<FileStat> {
 	if let Some(file) = file.as_vfs() {
 		return file.metadata().map(|metadata| FileStat::of_vfs(&metadata));
 	}
-	#[cfg(unix)]
-	{
-		let Ok(fd) = file.try_borrow_as_fd() else {
-			return Ok(FileStat::STREAM);
-		};
-		let stat = rustix::fs::fstat(fd)?;
-		let kind = rustix::fs::FileType::from_raw_mode(stat.st_mode as _);
-		Ok(FileStat {
-			regular:   kind == rustix::fs::FileType::RegularFile,
-			directory: kind == rustix::fs::FileType::Directory,
-			size:      stat.st_size as u64,
-		})
-	}
-	#[cfg(not(unix))]
-	match file {
-		OpenFile::File(file) => {
-			let metadata = file.metadata()?;
-			Ok(FileStat { regular: metadata.is_file(), directory: metadata.is_dir(), size: metadata.len() })
-		},
-		_ => Ok(FileStat::STREAM),
-	}
+	let Ok(fd) = file.try_borrow_as_fd() else {
+		return Ok(FileStat::STREAM);
+	};
+	let stat = rustix::fs::fstat(fd)?;
+	let kind = rustix::fs::FileType::from_raw_mode(stat.st_mode as _);
+	Ok(FileStat {
+		regular:   kind == rustix::fs::FileType::RegularFile,
+		directory: kind == rustix::fs::FileType::Directory,
+		size:      stat.st_size as u64,
+	})
 }
 
 /// `fsync`/`fdatasync` on one of the command's standard streams.
@@ -679,28 +643,14 @@ fn sync_stream(file: &OpenFile, data_only: bool) -> io::Result<()> {
 	if let Some(file) = file.as_vfs() {
 		return if data_only { file.sync_data() } else { file.sync_all() };
 	}
-	#[cfg(unix)]
-	{
-		let Ok(fd) = file.try_borrow_as_fd() else {
-			return Ok(());
-		};
-		#[cfg(not(target_vendor = "apple"))]
-		if data_only {
-			return Ok(rustix::fs::fdatasync(fd)?);
-		}
-		Ok(rustix::fs::fsync(fd)?)
+	let Ok(fd) = file.try_borrow_as_fd() else {
+		return Ok(());
+	};
+	#[cfg(not(target_vendor = "apple"))]
+	if data_only {
+		return Ok(rustix::fs::fdatasync(fd)?);
 	}
-	#[cfg(not(unix))]
-	match file {
-		OpenFile::File(file) => {
-			if data_only {
-				file.sync_data()
-			} else {
-				file.sync_all()
-			}
-		},
-		_ => Ok(()),
-	}
+	Ok(rustix::fs::fsync(fd)?)
 }
 
 /// `ftruncate` on one of the command's standard streams.
@@ -708,58 +658,34 @@ fn truncate_stream(file: &OpenFile, len: u64) -> io::Result<()> {
 	if let Some(file) = file.as_vfs() {
 		return file.set_len(len);
 	}
-	#[cfg(unix)]
-	{
-		let fd = file.try_borrow_as_fd().map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-		Ok(rustix::fs::ftruncate(fd, len)?)
-	}
-	#[cfg(not(unix))]
-	match file {
-		OpenFile::File(file) => file.set_len(len),
-		_ => Err(io::Error::from(io::ErrorKind::InvalidInput)),
-	}
+	let fd = file.try_borrow_as_fd().map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+	Ok(rustix::fs::ftruncate(fd, len)?)
 }
 
 /// The `open` flags a `dd` flag set adds, for natively opened files.
 fn open_flags(flags: u32, input: bool) -> i32 {
-	#[cfg(unix)]
-	{
-		let mut open = 0;
-		let mut add = |flag: u32, value: i32| {
-			if flags & flag != 0 {
-				open |= value;
-			}
-		};
-		add(O_DIRECTORY, libc::O_DIRECTORY);
-		add(O_NOCTTY, libc::O_NOCTTY);
-		add(O_NOFOLLOW, libc::O_NOFOLLOW);
-		add(O_NONBLOCK, libc::O_NONBLOCK);
-		add(O_SYNC, libc::O_SYNC);
-		#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
-		add(O_DSYNC, libc::O_DSYNC);
-		#[cfg(any(target_os = "linux", target_os = "android"))]
-		{
-			add(O_NOATIME, libc::O_NOATIME);
-			if input && flags & (O_SYNC | O_DSYNC) != 0 {
-				open |= libc::O_RSYNC;
-			}
+	let mut open = 0;
+	let mut add = |flag: u32, value: i32| {
+		if flags & flag != 0 {
+			open |= value;
 		}
-		let _ = input;
-		open
-	}
-	// POSIX opens a directory for reading and fails the first read (EISDIR);
-	// Win32 refuses to open one at all unless asked for backup semantics.
-	#[cfg(windows)]
+	};
+	add(O_DIRECTORY, libc::O_DIRECTORY);
+	add(O_NOCTTY, libc::O_NOCTTY);
+	add(O_NOFOLLOW, libc::O_NOFOLLOW);
+	add(O_NONBLOCK, libc::O_NONBLOCK);
+	add(O_SYNC, libc::O_SYNC);
+	#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+	add(O_DSYNC, libc::O_DSYNC);
+	#[cfg(any(target_os = "linux", target_os = "android"))]
 	{
-		use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
-		let _ = flags;
-		if input { FILE_FLAG_BACKUP_SEMANTICS as i32 } else { 0 }
+		add(O_NOATIME, libc::O_NOATIME);
+		if input && flags & (O_SYNC | O_DSYNC) != 0 {
+			open |= libc::O_RSYNC;
+		}
 	}
-	#[cfg(not(any(unix, windows)))]
-	{
-		let _ = (flags, input);
-		0
-	}
+	let _ = input;
+	open
 }
 
 /// Allocates a zeroed buffer, reporting failure instead of aborting. The
@@ -1072,16 +998,7 @@ impl<'h> Copier<'h> {
 		let stream = if output { &self.host.stdout } else { self.host.stdin.file() };
 		let error = match stat_stream(stream) {
 			Ok(stat) if stat.directory => return Ok(()),
-			Ok(_) => {
-				#[cfg(unix)]
-				{
-					io::Error::from_raw_os_error(libc::ENOTDIR)
-				}
-				#[cfg(not(unix))]
-				{
-					io::Error::from(io::ErrorKind::NotADirectory)
-				}
-			},
+			Ok(_) => io::Error::from_raw_os_error(libc::ENOTDIR),
 			Err(error) => error,
 		};
 		let name = if output { &self.output_name } else { &self.input_name };
@@ -1096,14 +1013,6 @@ impl<'h> Copier<'h> {
 				let result = file.read(buf);
 				// Reading a directory handle fails with ERROR_INVALID_FUNCTION
 				// ("Incorrect function"); POSIX reports EISDIR.
-				#[cfg(windows)]
-				if let Err(error) = &result
-					&& error.raw_os_error()
-						== Some(windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION as i32)
-					&& file.metadata().is_ok_and(|meta| meta.is_dir())
-				{
-					return Err(pi_vfs::is_a_directory());
-				}
 				result
 			},
 			None => self.host.stdin.read(buf),
@@ -1222,13 +1131,7 @@ impl<'h> Copier<'h> {
 				None => self.host.stdout.write(&buf[total..]),
 			};
 			match result {
-				Ok(0) => {
-					#[cfg(unix)]
-					let error = io::Error::from_raw_os_error(libc::ENOSPC);
-					#[cfg(not(unix))]
-					let error = io::Error::from(io::ErrorKind::StorageFull);
-					return (total, Some(error));
-				},
+				Ok(0) => return (total, Some(io::Error::from_raw_os_error(libc::ENOSPC))),
 				Ok(n) => total += n,
 				Err(error) if error.kind() == io::ErrorKind::Interrupted => {},
 				Err(error) => return (total, Some(error)),
@@ -1959,14 +1862,7 @@ impl Copier<'_> {
 
 /// `fdatasync` errors GNU tolerates (falling back to `fsync`).
 fn sync_unsupported(error: &io::Error) -> bool {
-	#[cfg(unix)]
-	{
-		matches!(error.raw_os_error(), Some(libc::ENOSYS | libc::EINVAL))
-	}
-	#[cfg(not(unix))]
-	{
-		matches!(error.kind(), io::ErrorKind::Unsupported | io::ErrorKind::InvalidInput)
-	}
+	matches!(error.raw_os_error(), Some(libc::ENOSYS | libc::EINVAL))
 }
 
 #[cfg(test)]

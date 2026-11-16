@@ -13,9 +13,6 @@
 //! - A `/` before the first `:` makes the operand local (`./host:file`).
 //! - `SCHEME://…` (scheme other than `rsync`) that the shell's filesystem routes
 //!   to a virtual provider is a local path.
-//! - On Windows, drive-letter (`C:\x`, `C:/x`, `C:x`) and UNC (`\\srv\share`)
-//!   operands are local, and `\` before the first `:` makes an operand local
-//!   like `/` does.
 //!
 //! With a remote source, further sources may repeat the host (`host:a host:b`)
 //! or leave it empty (`host:a :b`); a final operand starting with `:` is a
@@ -411,23 +408,7 @@ fn hostspec<'a>(
 	if is_virtual_scheme(bytes) && is_local_vfs(arg) {
 		return None;
 	}
-	if cfg!(windows) && is_windows_local(bytes) {
-		return None;
-	}
 	check_for_hostspec(bytes, port)
-}
-
-/// Windows operands that name local paths even though they contain a `:`:
-/// drive-letter and UNC paths, and anything with a `\` before its first `:`.
-fn is_windows_local(arg: &[u8]) -> bool {
-	if arg.len() >= 2 && arg[0].is_ascii_alphabetic() && arg[1] == b':' && arg.get(2) != Some(&b':') {
-		return true;
-	}
-	if arg.starts_with(b"\\\\") {
-		return true;
-	}
-	let colon = arg.iter().position(|&b| b == b':').unwrap_or(arg.len());
-	arg[..colon].contains(&b'\\')
 }
 
 /// `SCHEME://` with a scheme other than `rsync`.
@@ -977,29 +958,6 @@ mod tests {
 		assert_eq!(e.site, Some(("clientserver.c", 165)));
 	}
 
-	#[test]
-	fn windows_drive_and_unc_operands_are_local() {
-		assert!(is_windows_local(b"C:\\x"));
-		assert!(is_windows_local(b"C:/x"));
-		assert!(is_windows_local(b"c:x"));
-		assert!(is_windows_local(b"\\\\server\\share\\x"));
-		assert!(is_windows_local(b"dir\\sub:file"));
-		assert!(!is_windows_local(b"host:path"));
-		assert!(!is_windows_local(b"ab:c\\d"));
-		assert!(!is_windows_local(b"h::module/path"));
-	}
-
-	#[cfg(windows)]
-	#[test]
-	fn windows_operands_parse_as_local_paths() {
-		let got = ok(&["C:\\src", "D:dest"]);
-		assert_eq!(got.remote, None);
-		assert_eq!(strs(&got.sources), ["C:\\src"]);
-		let got = ok(&["\\\\srv\\share\\x", "host:y"]);
-		assert_eq!(got.remote, shell(None, "host"));
-		let got = ok(&["h::module/path", "dest"]);
-		assert_eq!(got.remote, daemon(None, "h", None));
-	}
 
 	#[test]
 	fn remote_args_follow_the_direction() {

@@ -96,10 +96,7 @@ pub struct Listener(UnixListener);
 
 impl Listener {
 	/// Next connection whose peer runs as our effective uid.
-	#[allow(
-		clippy::needless_pass_by_ref_mut,
-		reason = "shared shape: Windows swaps in its next pending pipe instance"
-	)]
+	#[allow(clippy::needless_pass_by_ref_mut, reason = "keeps the platform listener shape")]
 	pub async fn accept(&mut self) -> io::Result<Stream> {
 		let euid = euid();
 		loop {
@@ -315,15 +312,6 @@ pub async fn connect(endpoint: &str, _timeout: Duration) -> Result<Stream, IpcEr
 	Ok(Stream(stream))
 }
 
-/// How [`Stream::finish_write`] left the stream.
-pub enum WriteFinish {
-	/// Write side shut; reading continues until EOF.
-	HalfClosed,
-	/// The whole stream must be dropped now.
-	#[allow(dead_code, reason = "Windows-only outcome kept in the shared shape")]
-	Closed,
-}
-
 /// Connected socket.
 pub struct Stream(UnixStream);
 
@@ -346,11 +334,11 @@ impl Stream {
 	}
 
 	/// Shut the write half; the peer reads EOF after the queued bytes.
-	pub fn finish_write(&self) -> io::Result<WriteFinish> {
+	pub fn finish_write(&self) -> io::Result<()> {
 		// SAFETY: the descriptor is owned by `self.0` and live for this call.
 		if unsafe { libc::shutdown(self.0.as_raw_fd(), libc::SHUT_WR) } != 0 {
 			return Err(io::Error::last_os_error());
 		}
-		Ok(WriteFinish::HalfClosed)
+		Ok(())
 	}
 }

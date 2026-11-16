@@ -7,9 +7,9 @@
 //!   names arriving in the file list ([`check_received_name`]).
 //! - Conversions between name bytes and local names ([`os_bytes`],
 //!   [`bytes_os`], [`bytes_path`], [`rel_path`], [`path_bytes`], …). Names are
-//!   bytes on the wire and UTF-8 on Windows: a local name that is ill-formed
-//!   UTF-16 or a name that is not UTF-8 is a per-file [`bad_name`] error; the
-//!   `_lossy` variants replace instead, for values that cannot fail.
+//!   bytes on the wire; a name that has no byte spelling on the host is a
+//!   per-file [`bad_name`] error, and the `_lossy` variants replace instead,
+//!   for values that cannot fail.
 //! - The 3.5 "trusted-owner" walk for files the operator names on the command
 //!   line (filter/merge files, `--files-from`, `--password-file`,
 //!   `--log-file`, batch files): every component is resolved with
@@ -22,11 +22,10 @@
 //! components are inspected with `symlink_metadata`, and the final open goes
 //! through `BlockingFs`, so there is no race-freedom guarantee there.
 //!
-//! Windows has neither `openat` nor POSIX owners: operator files are opened by
-//! path after a no-follow metadata check of every component (reparse points
-//! are symlinks, and are followed as the operator's own), and
-//! `--confine-root` is judged on the canonicalized target. Like the virtual
-//! case this leaves a check-to-open window.
+//! That best-effort path is what a native host path with no owning directory
+//! fd falls back to as well, and `--confine-root` is then judged on the
+//! canonicalized target. Like the virtual case this leaves a check-to-open
+//! window.
 
 #[cfg(unix)]
 use std::os::{
@@ -433,48 +432,34 @@ fn is_exact_fd_pin(p: &[u8]) -> bool {
 	}
 }
 
-/// The error for a name with no byte or no local spelling (only on Windows: ill-formed
-/// UTF-16 or invalid UTF-8).
+/// The error for a name with no byte spelling on the host.
 pub(crate) fn bad_name() -> io::Error {
 	io::Error::new(io::ErrorKind::InvalidData, "file name is not valid UTF-8")
 }
 
-/// The bytes of a local name; ill-formed UTF-16 on Windows is [`bad_name`].
+/// The bytes of a local name; a name the host cannot spell is [`bad_name`].
 pub(crate) fn os_bytes(value: &OsStr) -> io::Result<&[u8]> {
 	crate::host::os_bytes(value).ok_or_else(bad_name)
 }
 
-/// Name bytes as a local name; invalid UTF-8 on Windows is [`bad_name`].
+/// Name bytes as a local name.
 pub(crate) fn bytes_os(bytes: &[u8]) -> io::Result<&OsStr> {
-	#[cfg(unix)]
-	return Ok(OsStr::from_bytes(bytes));
-	#[cfg(not(unix))]
-	return std::str::from_utf8(bytes).map(OsStr::new).map_err(|_| bad_name());
+	Ok(OsStr::from_bytes(bytes))
 }
 
-/// A whole name as a path, spelled as given (absolute stays absolute); invalid UTF-8 on
-/// Windows is [`bad_name`].
+/// A whole name as a path, spelled as given (absolute stays absolute).
 pub(crate) fn bytes_path(bytes: &[u8]) -> io::Result<&Path> {
 	bytes_os(bytes).map(Path::new)
 }
 
-/// Name bytes as a local name, replacing invalid UTF-8 on Windows.
+/// Name bytes as a local name.
 pub(crate) fn bytes_os_lossy(bytes: &[u8]) -> Cow<'_, OsStr> {
-	#[cfg(unix)]
-	return Cow::Borrowed(OsStr::from_bytes(bytes));
-	#[cfg(not(unix))]
-	return match String::from_utf8_lossy(bytes) {
-		Cow::Borrowed(text) => Cow::Borrowed(OsStr::new(text)),
-		Cow::Owned(text) => Cow::Owned(OsString::from(text)),
-	};
+	Cow::Borrowed(OsStr::from_bytes(bytes))
 }
 
 /// [`bytes_os_lossy`] taking ownership of the bytes.
 pub(crate) fn vec_os_lossy(bytes: Vec<u8>) -> OsString {
-	#[cfg(unix)]
-	return OsString::from_vec(bytes);
-	#[cfg(not(unix))]
-	return OsString::from(String::from_utf8_lossy_owned(bytes));
+	OsString::from_vec(bytes)
 }
 
 /// The elements of a `/`-separated name, without empty and `.` elements.
@@ -482,8 +467,7 @@ fn name_elements(name: &[u8]) -> impl Iterator<Item = &[u8]> {
 	name.split(|&b| b == b'/').filter(|el| !el.is_empty() && *el != b".")
 }
 
-/// Appends the elements of a `/`-separated name to `path` one by one (`Path::push`);
-/// invalid UTF-8 on Windows is [`bad_name`].
+/// Appends the elements of a `/`-separated name to `path` one by one (`Path::push`).
 pub(crate) fn push_rel(path: &mut PathBuf, name: &[u8]) -> io::Result<()> {
 	for el in name_elements(name) {
 		path.push(bytes_os(el)?);
@@ -492,7 +476,7 @@ pub(crate) fn push_rel(path: &mut PathBuf, name: &[u8]) -> io::Result<()> {
 }
 
 /// A received name as a relative local path (`.` for the root), built element by
-/// element; invalid UTF-8 on Windows is [`bad_name`].
+/// element.
 pub(crate) fn rel_path(name: &[u8]) -> io::Result<PathBuf> {
 	let mut path = PathBuf::new();
 	push_rel(&mut path, name)?;
@@ -503,7 +487,7 @@ pub(crate) fn rel_path(name: &[u8]) -> io::Result<PathBuf> {
 }
 
 /// A received name as a relative local path (empty for the root), built element by
-/// element and replacing invalid UTF-8 on Windows.
+/// element and replacing bytes the host cannot spell.
 pub(crate) fn rel_path_lossy(name: &[u8]) -> PathBuf {
 	let mut path = PathBuf::new();
 	for el in name_elements(name) {
@@ -512,38 +496,20 @@ pub(crate) fn rel_path_lossy(name: &[u8]) -> PathBuf {
 	path
 }
 
-/// The bytes of a local path with `/` separators (`\` also separates on
-/// Windows); ill-formed UTF-16 is replaced, which can only make a
-/// confinement check fail.
+/// The bytes of a local path; ill-formed encoding is replaced, which can only
+/// make a confinement check fail.
 pub(crate) fn path_bytes(path: &Path) -> Cow<'_, [u8]> {
-	let mut bytes = crate::host::os_bytes_lossy(path.as_os_str());
-	if cfg!(windows) && bytes.contains(&b'\\') {
-		forward_slashes(bytes.to_mut());
-	}
-	bytes
+	crate::host::os_bytes_lossy(path.as_os_str())
 }
 
-/// Rewrites the `\` separators of a local Windows name to `/` (a no-op elsewhere).
-pub(crate) fn forward_slashes(bytes: &mut [u8]) {
-	if cfg!(windows) {
-		for b in bytes.iter_mut().filter(|b| **b == b'\\') {
-			*b = b'/';
-		}
-	}
-}
-
-/// Whether `b` separates local path elements (`/`; on Windows also `\`).
+/// Whether `b` separates local path elements.
 pub(crate) fn is_separator(b: u8) -> bool {
-	b == b'/' || (cfg!(windows) && b == b'\\')
+	b == b'/'
 }
 
-/// A path spelled absolutely (`/x`; on Windows also `\x` and `C:…`).
+/// A path spelled absolutely.
 pub(crate) fn is_absolute_bytes(bytes: &[u8]) -> bool {
-	match bytes {
-		[first, ..] if is_separator(*first) => true,
-		[drive, b':', ..] if cfg!(windows) && drive.is_ascii_alphabetic() => true,
-		_ => false,
-	}
+	bytes.first() == Some(&b'/')
 }
 
 /// Upstream `full_fname`: `name` quoted the way diagnostics show it, a relative name
@@ -563,13 +529,10 @@ pub(crate) fn full_fname(dir: &Path, name: &[u8]) -> Vec<u8> {
 	out
 }
 
-/// The errno-equivalent of "a symlink was refused" (`ELOOP`; on Windows
-/// `ERROR_CANT_RESOLVE_FILENAME`, its closest analogue).
+/// The errno-equivalent of "a symlink was refused" (`ELOOP`).
 #[cfg(unix)]
 pub(crate) const LOOP_ERRNO: i32 = libc::ELOOP;
 /// See the unix definition.
-#[cfg(windows)]
-pub(crate) const LOOP_ERRNO: i32 = 1921;
 
 /// A raw "refused symlink" error.
 pub(crate) fn loop_error() -> io::Error {
@@ -615,17 +578,9 @@ fn outside_confinement(abspath: &[u8], root: &[u8], final_target: bool) -> bool 
 	true
 }
 
-/// The target of an fd-pin magic link.
-#[cfg(unix)]
 fn read_pin(pin: &[u8]) -> Option<Vec<u8>> {
 	let target = std::fs::read_link(Path::new(OsStr::from_bytes(pin))).ok()?;
 	Some(target.into_os_string().into_vec())
-}
-
-/// No fd pins outside unix.
-#[cfg(not(unix))]
-fn read_pin(_pin: &[u8]) -> Option<Vec<u8>> {
-	None
 }
 
 /// --confine-root check for an operator/peer-supplied path.
@@ -633,7 +588,7 @@ fn read_pin(_pin: &[u8]) -> Option<Vec<u8>> {
 /// `path` must be absolute (relative paths are judged as spelled). True when
 /// it equals `confine` or lies below it; a root of `/` confines nothing. An fd
 /// pin (`/dev/fd/N`, `/proc/self/fd/N`) is judged by the target it points at.
-/// On Windows `\` and `/` are equivalent and comparison is byte-exact.
+/// Comparison is byte-exact.
 pub(crate) fn within_confine(path: &Path, confine: &Path) -> bool {
 	!outside_confinement(&path_bytes(path), &path_bytes(confine), true)
 }
@@ -690,15 +645,8 @@ pub(crate) struct OwnerWalk<'a> {
 }
 
 /// The default trust rule: uid 0 or the effective uid.
-#[cfg(unix)]
 pub(crate) fn trusted_owner(uid: u32) -> bool {
 	uid == 0 || effective_uid() == Some(uid)
-}
-
-/// Windows has no POSIX owners: reparse points are the operator's own.
-#[cfg(not(unix))]
-pub(crate) fn trusted_owner(_uid: u32) -> bool {
-	true
 }
 
 /// Advances the tracked absolute path by one resolved element.
@@ -1004,8 +952,8 @@ fn operator_open(
 		let fd = owner_walk_open(path.as_os_str().as_bytes(), flags, mode, &walk)?;
 		return Ok(pi_vfs::File::from(std::fs::File::from(fd)));
 	}
-	// Path-based: provider paths everywhere, and native paths on Windows.
-	// Mounted descriptors (`omp-descriptor://N`) are neither and open as-is.
+	// Path-based: provider paths everywhere. Mounted descriptors
+	// (`omp-descriptor://N`) are neither and open as-is.
 	if fs.is_native_local(path) || pi_vfs::is_virtual_path(path) {
 		virtual_owner_walk(fs, path, &trusted_owner)?;
 		if let Some(confine) = opts.confine {
@@ -1032,8 +980,7 @@ fn check_confined(fs: &BlockingFs, path: &Path, confine: &Path, create: bool) ->
 }
 
 /// Best-effort walk for path-based opens: every existing prefix of `path`
-/// that is a symlink (a reparse point on Windows) must have a trusted (or
-/// unknown) owner. The final open resolves the path again, so this cannot
+/// that is a symlink must have a trusted (or unknown) owner. The final open resolves the path again, so this cannot
 /// exclude races.
 pub(crate) fn virtual_owner_walk(fs: &BlockingFs, path: &Path, trusted: &dyn Fn(u32) -> bool) -> io::Result<()> {
 	let mut prefixes: Vec<PathBuf> = Vec::new();
@@ -1240,16 +1187,6 @@ mod tests {
 		assert!(!is_exact_fd_pin(b"/dev/fd/"));
 	}
 
-	#[cfg(windows)]
-	#[test]
-	fn confinement_accepts_either_separator_on_windows() {
-		let root = Path::new(r"C:\data\jail");
-		assert!(within_confine(Path::new(r"C:\data\jail\x\y"), root));
-		assert!(within_confine(Path::new("C:/data/jail/x"), root));
-		assert!(!within_confine(Path::new(r"C:\data\jailbreak"), root));
-		assert!(!within_confine(Path::new(r"C:\data"), root));
-		assert_eq!(&*path_bytes(Path::new(r"a\b/c")), b"a/b/c");
-	}
 
 	#[cfg(unix)]
 	mod walk {

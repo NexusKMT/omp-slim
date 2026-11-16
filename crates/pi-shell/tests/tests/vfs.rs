@@ -373,12 +373,6 @@ async fn external_commands_receive_host_paths_for_backed_url_arguments() {
 	fs::write(directory.path().join("docs/a.txt"), b"alpha\n").expect("document");
 	#[cfg(unix)]
 	let script = r#"/bin/sh -c 'printf "%s\n" "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"' virtual://docs/a.txt --data-dir=virtual://docs https://example.com/a.txt 'https://example.com/?next=virtual://docs' virtual:// --root=virtual:// 'virtual:// external command' '--search=virtual:// words'"#;
-	#[cfg(windows)]
-	let script = "cmd.exe /c echo virtual://docs/a.txt && cmd.exe /c echo \
-	              --data-dir=virtual://docs && cmd.exe /c echo https://example.com/a.txt && \
-	              cmd.exe /c echo 'https://example.com/?next=virtual://docs' && cmd.exe /c \
-	              echo virtual:// && cmd.exe /c echo --root=virtual:// && cmd.exe /c echo \
-	              'virtual:// external command' && cmd.exe /c echo '--search=virtual:// words'";
 	let run = run_virtual(directory.path(), script).await;
 	let stdout = run.stdout;
 	assert_eq!(run.status, Some(0), "{}", run.stderr);
@@ -421,8 +415,6 @@ async fn external_commands_refuse_url_arguments_the_provider_rejects() {
 	let directory = tempfile::tempdir().expect("isolated provider filesystem");
 	#[cfg(unix)]
 	let script = "/bin/sh -c 'printf ran' virtual://../escape";
-	#[cfg(windows)]
-	let script = "cmd.exe /c echo ran virtual://../escape";
 	let run = run_virtual(directory.path(), script).await;
 	assert_ne!(run.status, Some(0), "a rejected url reached the child");
 	assert!(!run.stdout.contains("ran"), "the child ran: {}", run.stdout);
@@ -443,8 +435,6 @@ async fn external_commands_start_in_backed_working_directories_only() {
 	// re-derive `PWD` from `getcwd()` and hide a wrong value.
 	#[cfg(unix)]
 	let script = "cd virtual://docs && /bin/sh -c 'printf %s \"$PWD\"' && /usr/bin/printenv PWD";
-	#[cfg(windows)]
-	let script = "cd virtual://docs && cmd.exe /c cd && cmd.exe /c echo %PWD%";
 	let run = run_virtual(directory.path(), script).await;
 	assert_eq!(run.status, Some(0), "{}", run.stderr);
 	let docs = directory.path().join("docs").display().to_string();
@@ -456,8 +446,6 @@ async fn external_commands_start_in_backed_working_directories_only() {
 
 	#[cfg(unix)]
 	let unbacked = "cd virtual://rendered && /bin/sh -c 'exit 0'";
-	#[cfg(windows)]
-	let unbacked = "cd virtual://rendered && cmd.exe /c exit 0";
 	let run = run_virtual(directory.path(), unbacked).await;
 	assert_ne!(run.status, Some(0), "an unbacked directory hosted a child process");
 	assert!(run.stderr.contains("virtual working directory"), "unexpected failure: {}", run.stderr);
@@ -466,8 +454,6 @@ async fn external_commands_start_in_backed_working_directories_only() {
 	// the shell refuses to mutate is no working directory for one either.
 	#[cfg(unix)]
 	let frozen = "cd virtual://frozen && /bin/sh -c 'exit 0'";
-	#[cfg(windows)]
-	let frozen = "cd virtual://frozen && cmd.exe /c exit 0";
 	let run = run_virtual(directory.path(), frozen).await;
 	assert_ne!(run.status, Some(0), "a read-only directory hosted a child process");
 	assert!(
@@ -495,15 +481,6 @@ async fn an_executable_url_runs_as_the_file_it_aliases() {
 
 /// The same contract on Windows, where an executable is recognized by its
 /// extension rather than by its mode bits.
-#[cfg(windows)]
-#[tokio::test]
-async fn an_executable_url_runs_as_the_file_it_aliases() {
-	let directory = tempfile::tempdir().expect("isolated provider filesystem");
-	fs::write(directory.path().join("tool.cmd"), b"@echo tool-ran\r\n").expect("provider script");
-	let run = run_virtual(directory.path(), "virtual://tool.cmd").await;
-	assert_eq!(run.status, Some(0), "{}", run.stderr);
-	assert!(run.stdout.contains("tool-ran"), "{}", run.stdout);
-}
 
 /// Appends streamed stdout `chunks` to `output` until it ends with `suffix`.
 async fn wait_for_output(
@@ -683,7 +660,7 @@ async fn cmp_compares_nonseekable_files_and_discards_requested_prefixes() {
 
 /// Runs `script` from the host directory `cwd` with `virtual://` backed by
 /// `provider_root`, returning the exit status and stderr.
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 async fn run_from_host_dir(provider_root: &Path, cwd: &Path, script: &str) -> (i32, String) {
 	let run = run_script(provider(provider_root, true), Some(cwd), script).await;
 	(run.status.expect("exit status"), run.stderr)
@@ -712,23 +689,6 @@ async fn forced_rm_of_a_directory_gone_while_refused_succeeds() {
 /// On Windows `rm` clears a directory's read-only attribute to remove it;
 /// if another process deleted it meanwhile, `-f` counts it as removed
 /// instead of reporting the first attempt's `Permission denied`.
-#[cfg(windows)]
-#[tokio::test]
-async fn forced_rm_of_a_read_only_directory_gone_mid_retry_succeeds() {
-	let provider = tempfile::tempdir().expect("isolated provider filesystem");
-	let host = tempfile::tempdir().expect("host working directory");
-	let dir = provider.path().join("unsettable");
-	fs::create_dir(&dir).expect("read-only directory");
-	let mut permissions = fs::metadata(&dir).expect("metadata").permissions();
-	permissions.set_readonly(true);
-	fs::set_permissions(&dir, permissions).expect("read-only attribute");
-
-	assert_eq!(
-		run_from_host_dir(provider.path(), host.path(), "rm -rf virtual://unsettable").await,
-		(0, String::new())
-	);
-	assert!(!dir.exists());
-}
 
 /// A rename from the host into a provider is `EXDEV`, so `mv` copies and
 /// removes: the copy must keep modes and modification times, and names of

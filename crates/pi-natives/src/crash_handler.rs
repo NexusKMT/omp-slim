@@ -6,13 +6,12 @@
 //! process exits.
 //!
 //! Without these hooks, Bun receives only the bare
-//! `memory allocation of N bytes failed` line and aborts with no stack —
-//! see issue #2211 ("Windows crash: Rust allocator failure after tasklist.exe
-//! popup"). The cdylib builds with `panic = "unwind"`, so a panic in vendored
-//! uutils code unwinds to the shell boundary and is recovered as a failed
-//! command, and a panic in a `task::blocking` worker is caught at the napi
-//! boundary and surfaces as a rejected JS Promise; such recoverable panics are
-//! logged to disk only, while fatal crashes (allocation failure, or panics
+//! `memory allocation of N bytes failed` line and aborts with no stack — see
+//! issue #2211. The cdylib builds with `panic = "unwind"`, so a panic in
+//! vendored uutils code unwinds to the shell boundary and is recovered as a
+//! failed command, and a panic in a `task::blocking` worker is caught at the
+//! napi boundary and surfaces as a rejected JS Promise; such recoverable panics
+//! are logged to disk only, while fatal crashes (allocation failure, or panics
 //! with no active recovery scope) still get the stderr dump + process exit.
 //! Either way the record stays diagnosable.
 //!
@@ -258,14 +257,10 @@ fn crash_log_path(kind: CrashKind) -> Option<PathBuf> {
 }
 
 /// Crash-report directory of the unit-test build. On Unix the uid suffix keeps
-/// users of a shared `/tmp` from owning each other's directory; Windows' temp
-/// dir is already per-user.
+/// users of a shared `/tmp` from owning each other's directory.
 fn test_logs_dir() -> PathBuf {
-	#[cfg(unix)]
 	// SAFETY: getuid takes no arguments and cannot fail.
 	let name = format!("pi-natives-test-logs-{}", unsafe { libc::getuid() });
-	#[cfg(not(unix))]
-	let name = String::from("pi-natives-test-logs");
 	std::env::temp_dir().join(name)
 }
 
@@ -374,17 +369,6 @@ fn home_dir() -> Option<PathBuf> {
 	#[cfg(unix)]
 	{
 		std::env::var_os("HOME").map(PathBuf::from)
-	}
-	#[cfg(windows)]
-	{
-		if let Some(profile) = std::env::var_os("USERPROFILE") {
-			return Some(PathBuf::from(profile));
-		}
-		let drive = std::env::var_os("HOMEDRIVE")?;
-		let path = std::env::var_os("HOMEPATH")?;
-		let mut combined = drive;
-		combined.push(path);
-		Some(PathBuf::from(combined))
 	}
 }
 

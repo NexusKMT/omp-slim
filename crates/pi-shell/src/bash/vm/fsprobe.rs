@@ -138,7 +138,6 @@ fn errno_of(err: &io::Error, text: &[u8]) -> i32 {
 	if let Some(code) = err.raw_os_error() {
 		return code;
 	}
-	#[cfg(unix)]
 	{
 		use io::ErrorKind as K;
 		match err.kind() {
@@ -162,11 +161,6 @@ fn errno_of(err: &io::Error, text: &[u8]) -> i32 {
 			_ if text == b"Bad file descriptor" => libc::EBADF,
 			_ => 0,
 		}
-	}
-	#[cfg(not(unix))]
-	{
-		let _ = text;
-		0
 	}
 }
 

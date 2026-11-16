@@ -18,31 +18,6 @@ static OPT_FQDN: &str = "fqdn";
 static OPT_SHORT: &str = "short";
 static OPT_HOST: &str = "host";
 
-#[cfg(windows)]
-mod wsa {
-	use std::io;
-
-	use windows_sys::Win32::Networking::WinSock::{WSACleanup, WSADATA, WSAStartup};
-
-	pub(super) struct WsaHandle(());
-
-	pub(super) fn start() -> io::Result<WsaHandle> {
-		let mut data = std::mem::MaybeUninit::<WSADATA>::uninit();
-		let err = unsafe { WSAStartup(0x0202, data.as_mut_ptr()) };
-		if err == 0 {
-			Ok(WsaHandle(()))
-		} else {
-			Err(io::Error::from_raw_os_error(err))
-		}
-	}
-
-	impl Drop for WsaHandle {
-		fn drop(&mut self) {
-			// This possibly returns an error but we can't handle it.
-			let _ = unsafe { WSACleanup() };
-		}
-	}
-}
 
 /// Parsed `hostname` invocation.
 pub(crate) struct Hostname {
@@ -55,14 +30,6 @@ impl Utility for Hostname {
 	const NAME: &'static str = "hostname";
 
 	fn run(self, host: &mut Host) -> i32 {
-		#[cfg(windows)]
-		let _handle = match wsa::start() {
-			Ok(handle) => handle,
-			Err(err) => {
-				host.error(format!("failed to start Winsock: {err}"), 1);
-				return 1;
-			},
-		};
 
 		if self.matches.get_one::<OsString>(OPT_HOST).is_some() {
 			// Changing the process host's name is not supported by this builtin.
@@ -126,7 +93,6 @@ fn app() -> Command {
 		)
 }
 
-#[cfg(unix)]
 fn get_hostname() -> std::io::Result<OsString> {
 	use std::os::unix::ffi::OsStringExt;
 
@@ -140,40 +106,6 @@ fn get_hostname() -> std::io::Result<OsString> {
 	}
 	buffer.truncate(buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len()));
 	Ok(OsString::from_vec(buffer))
-}
-
-#[cfg(windows)]
-fn get_hostname() -> std::io::Result<OsString> {
-	use std::os::windows::ffi::OsStringExt;
-	use windows_sys::Win32::System::SystemInformation::{
-		ComputerNamePhysicalDnsHostname, GetComputerNameExW,
-	};
-
-	let mut size = 0;
-	unsafe {
-		GetComputerNameExW(ComputerNamePhysicalDnsHostname, std::ptr::null_mut(), &mut size);
-	}
-	if size == 0 {
-		return Err(std::io::Error::last_os_error());
-	}
-	let mut buffer = Vec::with_capacity(size as usize);
-	if unsafe {
-		GetComputerNameExW(ComputerNamePhysicalDnsHostname, buffer.as_mut_ptr(), &mut size)
-	} == 0
-	{
-		return Err(std::io::Error::last_os_error());
-	}
-	// The API initializes exactly `size` UTF-16 code units, excluding the terminator.
-	unsafe { buffer.set_len(size as usize) };
-	Ok(OsString::from_wide(&buffer))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn get_hostname() -> std::io::Result<OsString> {
-	Err(std::io::Error::new(
-		std::io::ErrorKind::Unsupported,
-		"hostname lookup is not supported on this platform",
-	))
 }
 
 fn display_hostname(matches: &ArgMatches, host: &mut Host) -> Result<(), String> {

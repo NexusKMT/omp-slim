@@ -17,7 +17,7 @@ use std::{
 use clap::{ArgAction, Parser};
 use pi_diff::{Run, diff_line_tokens};
 
-use crate::host::{Host, Utility, forward_slash_display, strip_errno};
+use crate::host::{Host, Utility, strip_errno};
 
 /// Parsed `diff` invocation.
 #[derive(Parser)]
@@ -943,11 +943,10 @@ fn is_binary(bytes: &[u8]) -> bool {
 	bytes.iter().take(8192).any(|&byte| byte == 0)
 }
 
-/// Display path of entry `name` inside the operand directory `dir`. GNU diff
-/// joins with `/`; `Path::join` alone would print `a\sub` on Windows.
+/// Display path of entry `name` inside the operand directory `dir`, joined the
+/// way GNU diff prints it.
 fn child_display(dir: &Path, name: &OsStr) -> PathBuf {
-	let joined = pi_vfs::join_path(dir, Path::new(name));
-	forward_slash_display(&joined).unwrap_or(joined)
+	pi_vfs::join_path(dir, Path::new(name))
 }
 
 #[cfg(test)]

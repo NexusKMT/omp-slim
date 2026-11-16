@@ -283,18 +283,12 @@ fn perms_differ(entry: &FileEntry, local_mode: u32, opts: &MetaOpts) -> bool {
 	if opts.perms {
 		return stored_perms_differ(local_mode, entry.mode);
 	}
-	// Windows stores no execute bits, so `-E` has nothing to compare there.
-	cfg!(unix) && opts.executability && ((local_mode & 0o111 != 0) != (entry.mode & 0o111 != 0))
+	opts.executability && ((local_mode & 0o111 != 0) != (entry.mode & 0o111 != 0))
 }
 
-/// Whether two modes differ in the permission bits the platform stores: all of
-/// them on unix, only the read-only attribute (no write bit) on Windows.
+/// Whether two modes differ in the permission bits the platform stores.
 fn stored_perms_differ(a: u32, b: u32) -> bool {
-	if cfg!(unix) {
-		(a ^ b) & CHMOD_BITS != 0
-	} else {
-		(a & 0o222 == 0) != (b & 0o222 == 0)
-	}
+	(a ^ b) & CHMOD_BITS != 0
 }
 
 fn uid_differs(entry: &FileEntry, cur: &Snap, opts: &MetaOpts) -> bool {
@@ -822,20 +816,13 @@ fn is_no_xattr(err: &io::Error) -> bool {
 	if err.kind() == io::ErrorKind::Unsupported {
 		return true;
 	}
-	#[cfg(unix)]
-	{
-		#[cfg(any(target_os = "linux", target_os = "android"))]
-		let missing = libc::ENODATA;
-		#[cfg(not(any(target_os = "linux", target_os = "android")))]
-		let missing = libc::ENOATTR;
-		err.raw_os_error().is_some_and(|code| {
-			code == missing || code == libc::ENOTSUP || code == libc::EOPNOTSUPP
-		})
-	}
-	#[cfg(not(unix))]
-	{
-		false
-	}
+	#[cfg(any(target_os = "linux", target_os = "android"))]
+	let missing = libc::ENODATA;
+	#[cfg(not(any(target_os = "linux", target_os = "android")))]
+	let missing = libc::ENOATTR;
+	err.raw_os_error().is_some_and(|code| {
+		code == missing || code == libc::ENOTSUP || code == libc::EOPNOTSUPP
+	})
 }
 
 /// The operation cannot be done on this kind of entry (lchmod/lutimes missing).
@@ -843,29 +830,14 @@ fn is_unsupported(err: &io::Error) -> bool {
 	if err.kind() == io::ErrorKind::Unsupported {
 		return true;
 	}
-	#[cfg(unix)]
-	{
-		err.raw_os_error().is_some_and(|code| {
-			code == libc::ENOTSUP || code == libc::EOPNOTSUPP || code == libc::ENOSYS
-		})
-	}
-	#[cfg(not(unix))]
-	{
-		false
-	}
+	err.raw_os_error().is_some_and(|code| {
+		code == libc::ENOTSUP || code == libc::EOPNOTSUPP || code == libc::ENOSYS
+	})
 }
 
-/// `EPERM` (Windows reports access problems as `PermissionDenied` only).
+/// `EPERM`.
 fn is_eperm(err: &io::Error) -> bool {
-	#[cfg(unix)]
-	{
-		err.raw_os_error() == Some(libc::EPERM)
-	}
-	#[cfg(not(unix))]
-	{
-		let _ = err;
-		false
-	}
+	err.raw_os_error() == Some(libc::EPERM)
 }
 
 /// Errors upstream reports with an errno of its own making.
@@ -876,20 +848,10 @@ enum Errno {
 }
 
 fn errno_error(errno: Errno) -> io::Error {
-	#[cfg(unix)]
-	{
-		io::Error::from_raw_os_error(match errno {
-			Errno::Range => libc::ERANGE,
-			Errno::Inval => libc::EINVAL,
-		})
-	}
-	#[cfg(not(unix))]
-	{
-		match errno {
-			Errno::Range => io::Error::new(io::ErrorKind::InvalidData, "Result too large"),
-			Errno::Inval => io::Error::from(io::ErrorKind::InvalidInput),
-		}
-	}
+	io::Error::from_raw_os_error(match errno {
+		Errno::Range => libc::ERANGE,
+		Errno::Inval => libc::EINVAL,
+	})
 }
 
 /// `st_rdev` → (major, minor) in the local encoding.
@@ -904,18 +866,6 @@ fn dev_split(rdev: u64) -> (u32, u32) {
 #[allow(clippy::unnecessary_cast, clippy::useless_conversion, reason = "dev_t differs per OS")]
 pub(crate) fn dev_join(major: u32, minor: u32) -> u64 {
 	libc::makedev(major as _, minor as _) as u64
-}
-
-/// Windows has no device nodes; keep the pair recoverable.
-#[cfg(not(unix))]
-fn dev_split(rdev: u64) -> (u32, u32) {
-	((rdev >> 32) as u32, rdev as u32)
-}
-
-/// (major, minor) → a recoverable `st_rdev` (Windows has no device nodes).
-#[cfg(not(unix))]
-pub(crate) fn dev_join(major: u32, minor: u32) -> u64 {
-	(u64::from(major) << 32) | u64::from(minor)
 }
 
 /// `(secs, nsec)` → a `FileTime` to set (`None` leaves the time alone).
@@ -1123,8 +1073,7 @@ mod tests {
 		assert!(same_mtime(&e, &local(T0 - 1, 0), &window(1)));
 		assert!(!same_mtime(&e, &local(T0 + 2, 500), &window(1)));
 		assert!(!same_mtime(&e, &local(T0 - 2, 500), &window(1)));
-		// Negative: seconds and nanoseconds must both match (100 ns apart: Windows
-		// file times have 100 ns resolution).
+		// Negative: seconds and nanoseconds must both match (100 ns apart).
 		assert!(!same_mtime(&e, &local(T0, 600), &window(-1)));
 		assert!(same_mtime(&e, &local(T0, 500), &window(-1)));
 		// Accurate comparisons ignore the window.
@@ -1146,8 +1095,7 @@ mod tests {
 		assert_eq!(attr_changes(&e, &same, &base), 0);
 		assert!(attrs_unchanged(&e, &same, &base, None));
 
-		// Size (regular files only), time, and perms (a write-bit change, the one
-		// permission Windows stores).
+		// Size (regular files only), time, and perms (a write-bit change).
 		let other = with_mtime(vmeta(0o100444, 7), T0 + 1, 0).with_owner(10, 20);
 		assert_eq!(
 			attr_changes(&e, &other, &base),

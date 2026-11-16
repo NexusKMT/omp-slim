@@ -738,14 +738,7 @@ impl<'d> Window<'d> {
 
 /// The status a file shorter than its stat size leaves (upstream ENODATA).
 fn enodata() -> io::Error {
-	#[cfg(unix)]
-	{
-		io::Error::from_raw_os_error(libc::ENODATA)
-	}
-	#[cfg(not(unix))]
-	{
-		io::Error::new(io::ErrorKind::UnexpectedEof, "No data available")
-	}
+	io::Error::from_raw_os_error(libc::ENODATA)
 }
 
 #[cfg(test)]

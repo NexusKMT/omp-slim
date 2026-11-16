@@ -278,8 +278,6 @@ pub enum Platform {
 	Linux,
 	/// macOS.
 	MacOs,
-	/// Windows.
-	Windows,
 }
 
 impl Platform {
@@ -287,8 +285,6 @@ impl Platform {
 	pub const fn current() -> Self {
 		if cfg!(target_os = "macos") {
 			Self::MacOs
-		} else if cfg!(windows) {
-			Self::Windows
 		} else {
 			Self::Linux
 		}

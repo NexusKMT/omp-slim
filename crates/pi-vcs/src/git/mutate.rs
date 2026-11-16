@@ -978,16 +978,6 @@ fn run_commit_hook(repository: &GitRepo, name: &str, args: &[&OsStr]) -> Result<
 	let Some(hook) = repository.hook_path(name)? else {
 		return Ok(());
 	};
-	// Windows CreateProcess cannot execute a shebang script directly. Let Git
-	// invoke the hook through its own shell, as `git commit` does.
-	#[cfg(windows)]
-	let mut command = {
-		let _ = hook;
-		let mut command = Command::new("git");
-		command.args(["hook", "run", "--ignore-missing", name, "--"]);
-		command
-	};
-	#[cfg(not(windows))]
 	let mut command = Command::new(&hook);
 	super::cli::detach_from_terminal(&mut command);
 	let output = command
@@ -1074,15 +1064,8 @@ fn hook_is_executable(path: &Path) -> bool {
 	let Ok(metadata) = fs::metadata(path) else {
 		return false;
 	};
-	#[cfg(unix)]
-	{
-		use std::os::unix::fs::PermissionsExt;
-		metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
-	}
-	#[cfg(not(unix))]
-	{
-		metadata.is_file()
-	}
+	use std::os::unix::fs::PermissionsExt;
+	metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
 }
 
 fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
@@ -1395,16 +1378,9 @@ fn precomposed(path: &str) -> std::borrow::Cow<'_, str> {
 	gix_utils::str::precompose(std::borrow::Cow::Borrowed(path))
 }
 
-#[cfg(unix)]
 fn same_worktree_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 	use std::os::unix::fs::MetadataExt;
 	left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-#[allow(clippy::missing_const_for_fn, reason = "matches non-const unix signature")]
-fn same_worktree_file(_: &fs::Metadata, _: &fs::Metadata) -> bool {
-	false
 }
 
 /// The new index entry for a staged path.
@@ -1904,12 +1880,7 @@ fn copy_worktree_path(source: &Path, target: &Path, relative: &gix::bstr::BStr) 
 }
 
 fn git_metadata_path(path: &Path) -> Cow<'_, str> {
-	let display = path.to_string_lossy();
-	if cfg!(windows) {
-		Cow::Owned(display.replace('\\', "/"))
-	} else {
-		display
-	}
+	path.to_string_lossy()
 }
 
 fn register_worktree(path: &Path, common: &Path, head: &str) -> Result<PathBuf> {
@@ -1943,14 +1914,10 @@ fn remove_existing(path: &Path) -> Result<()> {
 	Ok(())
 }
 
-/// Recreate the symlink at `src` as `dst` (a plain file holding the link
-/// target on platforms without symlinks, matching git's `core.symlinks=false`).
+/// Recreate the symlink at `src` as `dst`.
 fn copy_symlink(src: &Path, dst: &Path) -> Result<()> {
 	let target = fs::read_link(src)?;
-	#[cfg(unix)]
 	std::os::unix::fs::symlink(&target, dst)?;
-	#[cfg(not(unix))]
-	fs::write(dst, target.to_string_lossy().as_bytes())?;
 	Ok(())
 }
 
@@ -2128,7 +2095,7 @@ mod tests {
 		// gix reads the developer's `~/.gitconfig`, where a global
 		// `core.hooksPath` would redirect hook lookup away from this fixture.
 		git(temp.path(), &["config", "core.hooksPath", ".git/hooks"]);
-		// Assertions compare exact worktree bytes; Git for Windows' system
+		// Assertions compare exact worktree bytes; a global
 		// `core.autocrlf=true` would check them out as CRLF. Tests covering
 		// line-ending conversion opt back in explicitly.
 		git(temp.path(), &["config", "core.autocrlf", "false"]);
@@ -2488,11 +2455,6 @@ mod tests {
 		fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
 	}
 
-	#[cfg(windows)]
-	fn write_hook(path: &Path, body: &str, _executable: bool) {
-		fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-	}
-
 	#[test]
 	fn stage_commit_survives_unadvanced_index_mtime() {
 		// Regression: a commit right after staging on the same cached handle used
@@ -2608,9 +2570,9 @@ mod tests {
 	#[test]
 	fn checkout_restore_and_worktree_remove_honor_autocrlf() {
 		// Regression: conflict and dirty checks hashed raw worktree bytes, so a
-		// CRLF checkout under `core.autocrlf=true` (the Git for Windows default)
-		// read as modified and blocked the next checkout or a non-forced
-		// worktree removal, and restore wrote LF where git writes CRLF.
+		// CRLF checkout under `core.autocrlf=true` read as modified and blocked
+		// the next checkout or a non-forced worktree removal, and restore wrote
+		// LF where git writes CRLF.
 		let (temp, repo) = fixture();
 		git(temp.path(), &["config", "core.autocrlf", "true"]);
 		repo.create_branch("other", "HEAD", false).unwrap();

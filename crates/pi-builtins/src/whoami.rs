@@ -11,8 +11,6 @@ use crate::host::{Host, Utility, matches_parser, os_bytes};
 mod platform {
 	#[cfg(unix)]
 	pub use self::unix::get_username;
-	#[cfg(windows)]
-	pub use self::windows::get_username;
 
 	#[cfg(unix)]
 	mod unix {
@@ -26,26 +24,6 @@ mod platform {
 		}
 	}
 
-	#[cfg(windows)]
-	mod windows {
-		use std::{ffi::OsString, io, os::windows::ffi::OsStringExt};
-
-		use windows_sys::Win32::System::WindowsProgramming::GetUserNameW;
-
-		pub fn get_username() -> io::Result<OsString> {
-			// `UNLEN` is 256 by the Windows API contract. Spelling the buffer size
-			// here avoids requiring the unrelated NetworkManagement feature solely
-			// for that constant.
-			const BUF_LEN: u32 = 257;
-			let mut buffer = [0_u16; BUF_LEN as usize];
-			let mut len = BUF_LEN;
-			// SAFETY: buffer.len() == len.
-			if unsafe { GetUserNameW(buffer.as_mut_ptr(), &raw mut len) } == 0 {
-				return Err(io::Error::last_os_error());
-			}
-			Ok(OsString::from_wide(&buffer[..len as usize - 1]))
-		}
-	}
 }
 
 /// Parsed `whoami` invocation.

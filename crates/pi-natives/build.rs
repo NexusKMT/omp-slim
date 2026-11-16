@@ -148,15 +148,12 @@ fn build_oauth_callback_helper() {
 	if target_os == "macos" {
 		build_darwin_oauth_callback_helper();
 	} else {
-		build_oauth_callback_relay(&target_os);
+		build_oauth_callback_relay();
 	}
 }
 
-fn build_oauth_callback_relay(target_os: &str) {
-	let mut name = String::from("omp-oauth-callback-relay");
-	if target_os == "windows" {
-		name.push_str(".exe");
-	}
+fn build_oauth_callback_relay() {
+	let name = String::from("omp-oauth-callback-relay");
 	build_rust_helper(
 		"src/oauth_callback/relay.rs",
 		&["src/oauth_callback/publication.rs"],
@@ -221,9 +218,6 @@ fn build_rust_helper(
 		let mut linker_argument = OsString::from("linker=");
 		linker_argument.push(linker);
 		command.arg("-C").arg(linker_argument);
-	}
-	if target_os == "windows" {
-		command.arg("-Ctarget-feature=+crt-static");
 	}
 	if target_os == "macos" {
 		// Linkers sign arm64 ad hoc by default but not x86_64.

@@ -108,10 +108,8 @@ impl Process {
 
 	/// Send `signal` to this process and its descendants, children first.
 	///
-	/// On Linux and macOS the signal is forwarded as-is. On Windows there is no
-	/// signal abstraction, so the `signal` argument is ignored and the entire
-	/// tree is hard-killed via `TerminateProcess`. Defaults to the POSIX
-	/// hard-kill signal.
+	/// The signal is forwarded as-is; `signal` defaults to the POSIX hard-kill
+	/// signal.
 	#[napi]
 	pub fn kill_tree(&self, signal: Option<i32>) -> u32 {
 		self.inner.kill_tree(signal)
@@ -205,32 +203,23 @@ impl Process {
 /// # Errors
 /// Returns an error, leaving the process untouched, when `argv` is empty, an
 /// argument contains an interior NUL byte, or the exec itself fails (e.g.
-/// executable not found). Windows has no exec-replace semantics, so this
-/// always errors there; callers fall back to spawn-and-wait.
+/// executable not found).
 #[napi]
 pub fn exec_replace(argv: Vec<String>) -> Result<()> {
-	#[cfg(unix)]
-	{
-		use std::ffi::CString;
+	use std::ffi::CString;
 
-		if argv.is_empty() {
-			return Err(napi::Error::from_reason("exec_replace: argv must not be empty"));
-		}
-		let args = argv
-			.into_iter()
-			.map(CString::new)
-			.collect::<std::result::Result<Vec<_>, _>>()
-			.map_err(|err| napi::Error::from_reason(format!("exec_replace: {err}")))?;
-		let mut ptrs: Vec<*const libc::c_char> = args.iter().map(|arg| arg.as_ptr()).collect();
-		ptrs.push(std::ptr::null());
-		// SAFETY: `ptrs` is a NUL-terminated array of pointers into `args`, which
-		// outlives the call; execvp only returns on failure.
-		unsafe { libc::execvp(ptrs[0], ptrs.as_ptr()) };
-		Err(napi::Error::from_reason(format!("execvp failed: {}", std::io::Error::last_os_error())))
+	if argv.is_empty() {
+		return Err(napi::Error::from_reason("exec_replace: argv must not be empty"));
 	}
-	#[cfg(not(unix))]
-	{
-		let _ = argv;
-		Err(napi::Error::from_reason("exec_replace is unsupported on this platform"))
-	}
+	let args = argv
+		.into_iter()
+		.map(CString::new)
+		.collect::<std::result::Result<Vec<_>, _>>()
+		.map_err(|err| napi::Error::from_reason(format!("exec_replace: {err}")))?;
+	let mut ptrs: Vec<*const libc::c_char> = args.iter().map(|arg| arg.as_ptr()).collect();
+	ptrs.push(std::ptr::null());
+	// SAFETY: `ptrs` is a NUL-terminated array of pointers into `args`, which
+	// outlives the call; execvp only returns on failure.
+	unsafe { libc::execvp(ptrs[0], ptrs.as_ptr()) };
+	Err(napi::Error::from_reason(format!("execvp failed: {}", std::io::Error::last_os_error())))
 }

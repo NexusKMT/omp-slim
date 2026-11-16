@@ -37,9 +37,6 @@ enum TouchError {
 	InvalidFiletime(SystemTime),
 	#[error("failed to get attributes of {}: {}", .0.quote(), io_error(.1))]
 	ReferenceFileInaccessible(PathBuf, std::io::Error),
-	#[cfg(windows)]
-	#[error("GetFinalPathNameByHandleW failed with code {0}")]
-	WindowsStdoutPathError(String),
 	#[error("{0}")]
 	Message(String),
 }
@@ -169,7 +166,7 @@ fn unix_time(secs: i64) -> SystemTime {
 }
 
 /// `{seconds}.{nanos:09}s`, seconds floored and counted from the platform's
-/// file-time epoch (1601 on Windows, 1970 elsewhere).
+/// file-time epoch (1970).
 fn display_file_time(time: &SystemTime) -> String {
 	let (secs, nanos) = match time.duration_since(UNIX_EPOCH) {
 		Ok(d) => (d.as_secs() as i64, d.subsec_nanos()),
@@ -181,7 +178,7 @@ fn display_file_time(time: &SystemTime) -> String {
 			}
 		},
 	};
-	let secs = secs + if cfg!(windows) { 11_644_473_600 } else { 0 };
+	let secs = secs + { 0 };
 	format!("{secs}.{nanos:09}s")
 }
 
@@ -858,76 +855,9 @@ fn parse_timestamp(s: &str, time_zone: &TimeZone) -> Result<SystemTime, TouchErr
 
 // TODO: this may be a good candidate to put in fsext.rs
 /// Returns a [`PathBuf`] to stdout.
-///
-/// On Windows, uses `GetFinalPathNameByHandleW` to attempt to get the path
-/// from the stdout handle.
-#[cfg_attr(not(windows), expect(clippy::unnecessary_wraps))]
+#[expect(clippy::unnecessary_wraps)]
 fn pathbuf_from_stdout() -> Result<PathBuf, TouchError> {
-	#[cfg(all(unix, not(target_os = "android")))]
-	{
-		Ok(PathBuf::from("/dev/stdout"))
-	}
-	#[cfg(target_os = "android")]
-	{
-		Ok(PathBuf::from("/proc/self/fd/1"))
-	}
-	#[cfg(windows)]
-	{
-		use std::os::windows::prelude::AsRawHandle;
-
-		use windows_sys::Win32::{
-			Foundation::{
-				ERROR_INVALID_PARAMETER, ERROR_NOT_ENOUGH_MEMORY, ERROR_PATH_NOT_FOUND, GetLastError,
-				HANDLE, MAX_PATH,
-			},
-			Storage::FileSystem::{FILE_NAME_OPENED, GetFinalPathNameByHandleW},
-		};
-
-		let handle = std::io::stdout().lock().as_raw_handle() as HANDLE;
-		let mut file_path_buffer: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
-
-		// https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlea#examples
-		// SAFETY: We transmute the handle to be able to cast *mut c_void into a
-		// HANDLE (i32) so rustc will let us call GetFinalPathNameByHandleW. The
-		// reference example code for GetFinalPathNameByHandleW implies that
-		// it is safe for us to leave lpszfilepath uninitialized, so long as
-		// the buffer size is correct. We know the buffer size (MAX_PATH) at
-		// compile time. MAX_PATH is a small number (260) so we can cast it
-		// to a u32.
-		let ret = unsafe {
-			GetFinalPathNameByHandleW(
-				handle,
-				file_path_buffer.as_mut_ptr(),
-				file_path_buffer.len() as u32,
-				FILE_NAME_OPENED,
-			)
-		};
-
-		// The variant's display supplies the error prefix; only the code is
-		// stored here.
-		let buffer_size = match ret {
-			ERROR_PATH_NOT_FOUND | ERROR_NOT_ENOUGH_MEMORY | ERROR_INVALID_PARAMETER => {
-				return Err(TouchError::WindowsStdoutPathError(ret.to_string()));
-			},
-			0 => {
-				return Err(TouchError::WindowsStdoutPathError(format!(
-					"{}",
-					// SAFETY: GetLastError is thread-safe and has no documented memory unsafety.
-					unsafe { GetLastError() }
-				)));
-			},
-			e => e as usize,
-		};
-
-		// Don't include the null terminator
-		Ok(String::from_utf16(&file_path_buffer[0..buffer_size])
-			.map_err(|e| TouchError::WindowsStdoutPathError(e.to_string()))?
-			.into())
-	}
-	#[cfg(target_os = "wasi")]
-	{
-		Ok(PathBuf::from("/dev/stdout"))
-	}
+	Ok(PathBuf::from("/dev/stdout"))
 }
 
 #[cfg(test)]

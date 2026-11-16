@@ -125,13 +125,7 @@ fn normalize_program(program: &str) -> Option<String> {
 		return None;
 	}
 	let lowered = name.to_lowercase();
-	// Exact-match allowlist for Windows launcher scripts whose `.bat`/`.cmd`
-	// twin should dispatch identically to the bare wrapper. Kept explicit on
-	// purpose: a generic `.bat`/`.cmd` strip would over-match unrelated scripts
-	// (e.g. `foo.bat`, `deploy.cmd`).
 	Some(match lowered.as_str() {
-		"gradlew.bat" => "gradlew".to_string(),
-		"mvnw.cmd" => "mvnw".to_string(),
 		"docker-compose" => "docker".to_string(),
 		_ => lowered,
 	})

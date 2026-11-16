@@ -393,11 +393,7 @@ async fn full_detail_reports_sizes_and_mtimes() {
 			.duration_since(std::time::UNIX_EPOCH)
 			.expect("after epoch")
 			.as_nanos();
-		// NTFS refreshes a directory's entry in its parent's index lazily, so a
-		// listing can trail the directory's own mtime there.
-		if !(cfg!(windows) && meta.is_dir()) {
-			assert_eq!(entry.mtime, Some(i64::try_from(nanos).expect("fits")), "{}", lossy(&entry));
-		}
+		assert_eq!(entry.mtime, Some(i64::try_from(nanos).expect("fits")), "{}", lossy(&entry));
 	}
 }
 
@@ -939,8 +935,6 @@ async fn tree_walks_trees_deeper_than_the_thread_stack() {
 	std::fs::write(deepest.join("leaf.txt"), "ok").expect("leaf");
 	let leaf = format!("{}leaf.txt", "d/".repeat(DEPTH));
 	for contents_first in [false, true] {
-		// Deep Windows paths exceed MAX_PATH without the verbatim prefix, which
-		// the canonical temp dir already carries there.
 		let root = tmp.path().to_path_buf();
 		let seen = on_small_stack(async move {
 			let opts = TreeOptions { contents_first, ..Default::default() };
@@ -1061,7 +1055,6 @@ async fn tree_a_file_root_is_reported_alone() {
 	assert_eq!(seen, [(Vec::new(), FileType::File, Some(3), 0)]);
 }
 
-#[cfg(not(windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn tree_detail_max_depth_limits_full_listings() {
 	let tmp = make_tree("tree-detail", &["top=12345", "d/deep=1234"]);

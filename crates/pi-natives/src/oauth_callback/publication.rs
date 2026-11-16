@@ -76,24 +76,14 @@ fn create_temporary(parent: &Path, file_name: &std::ffi::OsStr) -> io::Result<(P
 	))
 }
 
-#[cfg(unix)]
 fn configure_private_mode(options: &mut OpenOptions) {
 	use std::os::unix::fs::OpenOptionsExt as _;
 	options.mode(0o600);
 }
 
-#[cfg(not(unix))]
-fn configure_private_mode(_options: &mut OpenOptions) {}
-
-#[cfg(unix)]
 fn set_private_permissions(file: &File) -> io::Result<()> {
 	use std::os::unix::fs::PermissionsExt as _;
 	file.set_permissions(fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn set_private_permissions(_file: &File) -> io::Result<()> {
-	Ok(())
 }
 
 #[cfg(test)]

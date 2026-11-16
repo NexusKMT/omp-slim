@@ -376,13 +376,6 @@ fn link_files_in_dir(
 				{
 					show_error(host, format_args!("Could not update {}: {e}", target_dir.quote()));
 				}
-				#[cfg(windows)]
-				if filesystem.is_dir(&target_dir_fs) {
-					// On Windows a directory symlink can be considered a directory.
-					if let Err(e) = filesystem.remove_dir(&target_dir_fs) {
-						show_error(host, format_args!("Could not update {}: {e}", target_dir.quote()));
-					}
-				}
 			};
 			match settings.overwrite {
 				OverwriteMode::NoClobber => {},
@@ -608,17 +601,6 @@ fn link(host: &mut Host, src: &Path, dst: &Path, settings: &Settings) -> LnResul
 /// Creates the symbolic link `link` holding the literal text `text`, which
 /// names `target` (the same path before `-r` made it relative).
 fn make_symlink(host: &Host, text: &Path, target: &Path, link: &Path) -> io::Result<()> {
-	// Windows needs the link kind up front; it follows the target as named
-	// from the shell working directory, never the `-r` text, which is
-	// relative to the link's directory.
-	#[cfg(windows)]
-	let kind = if host.fs().is_dir(host.resolve(target)) {
-		SymlinkKind::Dir
-	} else {
-		SymlinkKind::File
-	};
-	// Other platforms pick the kind when the link is followed.
-	#[cfg(not(windows))]
 	let (kind, _) = (SymlinkKind::Auto, target);
 	host.fs().symlink_with(text, link, kind)
 }
@@ -654,25 +636,6 @@ mod tests {
 		let (code, stdout, stderr) = run_in(root.clone(), &["-s", "../a", "b"]);
 		assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, "", ""));
 		assert_eq!(fs::read_link(root.join("b")).unwrap(), PathBuf::from("../a"));
-	}
-
-	/// `-r` text is relative to the link's directory; the Windows link kind
-	/// must come from the target itself, or a directory gets a file link.
-	#[cfg(windows)]
-	#[test]
-	fn relative_symlink_to_directory_from_another_directory_is_a_directory_link() {
-		let (_dir, root) = canonical_tempdir();
-		fs::create_dir_all(root.join("dir")).unwrap();
-		fs::write(root.join("dir/file"), b"payload").unwrap();
-		fs::create_dir(root.join("sub")).unwrap();
-		if let Err(err) = std::os::windows::fs::symlink_dir("dir", root.join("probe")) {
-			// Creating symlinks needs Developer Mode or the symlink privilege.
-			eprintln!("skipping: cannot create directory symlink: {err}");
-			return;
-		}
-		let (code, stdout, stderr) = run_in(root.clone(), &["-sr", "dir", "sub/link"]);
-		assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, "", ""));
-		assert_eq!(fs::read(root.join("sub/link/file")).unwrap(), b"payload");
 	}
 
 	#[cfg(unix)]

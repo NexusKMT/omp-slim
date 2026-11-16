@@ -162,13 +162,6 @@ impl Rules {
 			.unwrap_or(path)
 			.as_os_str()
 			.as_encoded_bytes();
-		if cfg!(windows) && rel.contains(&b'\\') {
-			let slashed: Vec<u8> = rel
-				.iter()
-				.map(|&byte| if byte == b'\\' { b'/' } else { byte })
-				.collect();
-			return self.matched(&slashed, is_dir);
-		}
 		self.matched(rel, is_dir)
 	}
 
@@ -549,7 +542,7 @@ impl Ignorer {
 }
 
 /// Spelling of an absolute path as gitignore matching sees it: URL segments
-/// percent-decoded to raw names, Windows separators as `/`.
+/// percent-decoded to raw names.
 fn match_spelling(path: &Path) -> Cow<'_, [u8]> {
 	let bytes = path.as_os_str().as_encoded_bytes();
 	if let Some(scheme) = pi_vfs::url_scheme(path) {
@@ -569,14 +562,6 @@ fn match_spelling(path: &Path) -> Cow<'_, [u8]> {
 			out.extend_from_slice(pi_vfs::decode_segment(segment).as_encoded_bytes());
 		}
 		return Cow::Owned(out);
-	}
-	if cfg!(windows) && bytes.contains(&b'\\') {
-		return Cow::Owned(
-			bytes
-				.iter()
-				.map(|&b| if b == b'\\' { b'/' } else { b })
-				.collect(),
-		);
 	}
 	Cow::Borrowed(bytes)
 }

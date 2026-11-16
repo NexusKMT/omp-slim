@@ -962,10 +962,7 @@ fn render_ps_table(rows: &[PsProcessRow], columns: &[PsColumn], no_headers: bool
 		let uids = rows.iter().flat_map(|row| [row.user, row.ruid]).flatten();
 		for uid in uids {
 			user_names.entry(uid).or_insert_with(|| {
-				#[cfg(unix)]
 				let name = uucore::entries::uid2usr(uid).ok();
-				#[cfg(not(unix))]
-				let name: Option<String> = None;
 				name.unwrap_or_else(|| uid.to_string())
 			});
 		}
@@ -975,10 +972,7 @@ fn render_ps_table(rows: &[PsProcessRow], columns: &[PsColumn], no_headers: bool
 		let gids = rows.iter().flat_map(|row| [row.rgid, row.egid]).flatten();
 		for gid in gids {
 			group_names.entry(gid).or_insert_with(|| {
-				#[cfg(unix)]
 				let name = uucore::entries::gid2grp(gid).ok();
-				#[cfg(not(unix))]
-				let name: Option<String> = None;
 				name.unwrap_or_else(|| gid.to_string())
 			});
 		}
@@ -1305,13 +1299,8 @@ fn ps_total_memory_bytes() -> Option<u64> {
 	(status == 0 && size == std::mem::size_of::<u64>()).then_some(value)
 }
 
-#[cfg(target_os = "windows")]
-fn ps_total_memory_bytes() -> Option<u64> {
-	None
-}
 
 /// System memory page size in bytes, used for the SZ (pages) column.
-#[cfg(unix)]
 fn ps_page_size() -> Option<u64> {
 	// SAFETY: sysconf reads a process-global constant.
 	u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) })
@@ -1319,12 +1308,6 @@ fn ps_page_size() -> Option<u64> {
 		.filter(|value| *value > 0)
 }
 
-#[cfg(not(unix))]
-fn ps_page_size() -> Option<u64> {
-	None
-}
-
-#[cfg(unix)]
 fn ps_terminal_names(rows: &[PsProcessRow]) -> HashMap<u64, String> {
 	use std::os::unix::fs::MetadataExt;
 	let wanted: HashSet<u64> = rows.iter().filter_map(|row| row.terminal).collect();
@@ -1352,11 +1335,6 @@ fn ps_terminal_names(rows: &[PsProcessRow]) -> HashMap<u64, String> {
 		}
 	}
 	names
-}
-
-#[cfg(not(unix))]
-fn ps_terminal_names(_rows: &[PsProcessRow]) -> HashMap<u64, String> {
-	HashMap::new()
 }
 
 fn write_ps_help(mut output: impl Write) -> io::Result<()> {

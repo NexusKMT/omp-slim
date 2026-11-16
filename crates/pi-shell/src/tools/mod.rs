@@ -168,7 +168,6 @@ impl SpawnLog {
 }
 
 /// Whether `pid` runs (exited but unreaped counts as gone).
-#[cfg(unix)]
 fn running(pid: u32) -> bool {
 	i32::try_from(pid)
 		.ok()
@@ -176,16 +175,8 @@ fn running(pid: u32) -> bool {
 		.is_some_and(|p| p.state != crate::sys::proc::ProcState::Zombie)
 }
 
-/// Externals off Unix are not watched: their process tree is the Job
-/// Object's, which the spawner ends with the subshell.
-#[cfg(not(unix))]
-const fn running(_pid: u32) -> bool {
-	false
-}
-
 /// Send `signal` to `pid`'s process group (each external leads its own),
 /// or to `pid` alone.
-#[cfg(unix)]
 fn signal_os(pid: u32, signal: crate::bash::Signal, group: bool) {
 	let Ok(pid) = i32::try_from(pid) else {
 		return;
@@ -195,9 +186,6 @@ fn signal_os(pid: u32, signal: crate::bash::Signal, group: bool) {
 	// SAFETY: plain syscall without pointer arguments.
 	unsafe { libc::kill(target, number) };
 }
-
-#[cfg(not(unix))]
-const fn signal_os(_pid: u32, _signal: crate::bash::Signal, _group: bool) {}
 
 /// Lineage labels handed out to tool subshells, and which label each was
 /// started under (a `timeout` inside another one's command).

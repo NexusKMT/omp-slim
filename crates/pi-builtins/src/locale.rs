@@ -103,23 +103,14 @@ pub(crate) fn shell_collator(host: &Host) -> Option<Arc<CollatorBorrowed<'static
 
 /// Whether the shell names an `LC_COLLATE` locale the system cannot load:
 /// GNU's "failed to set locale", after which text compares by bytes.
-#[cfg(unix)]
 pub(crate) fn collation_locale_failed(host: &Host) -> bool {
 	shell_locale(host, "LC_COLLATE")
 		.is_some_and(|locale| !locale_loadable(locale, libc::LC_COLLATE_MASK))
 }
 
-/// Windows has no system locale to load; `LC_ALL=missing` stands in for an
-/// unloadable one.
-#[cfg(not(unix))]
-pub(crate) fn collation_locale_failed(host: &Host) -> bool {
-	host.var("LC_ALL") == Some("missing")
-}
-
 /// Whether the system can load `locale` for the categories in `mask`, probed
 /// with `newlocale` rather than `setlocale`, which would change the C locale
 /// of the whole host process.
-#[cfg(unix)]
 pub(crate) fn locale_loadable(locale: &str, mask: libc::c_int) -> bool {
 	let Ok(locale) = std::ffi::CString::new(locale) else {
 		return false;
@@ -152,9 +143,8 @@ impl NumericSymbols {
 
 /// Decimal point and thousands separator for the shell's `LC_NUMERIC`, from
 /// ICU's CLDR data for that locale (the data uucore reads for the process
-/// locale). C rules apply when it names C, or on Unix a locale the system
-/// cannot load (GNU's fallback); Windows has no system locale to probe, so any
-/// locale ICU parses uses its CLDR rules.
+/// locale). C rules apply when it names C, or a locale the system cannot load
+/// (GNU's fallback); every locale ICU parses uses its CLDR rules.
 pub(crate) fn numeric_symbols(host: &Host) -> NumericSymbols {
 	let Some(name) = shell_locale(host, "LC_NUMERIC") else {
 		return NumericSymbols::C;

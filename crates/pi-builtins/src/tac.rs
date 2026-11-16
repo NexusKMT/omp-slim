@@ -341,8 +341,7 @@ fn tac(
 			break;
 		}
 		// Never map the input: a concurrent truncation would SIGBUS the whole
-		// host process through the mapping (and on Windows the mapping makes the
-		// writer's SetEndOfFile fail).
+		// host process through the mapping.
 		let mut data = Vec::new();
 		if filename == "-" {
 			if let Err(error) = host.stdin.read_to_end(&mut data) {

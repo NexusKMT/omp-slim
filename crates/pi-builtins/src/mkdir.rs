@@ -14,7 +14,6 @@ use clap::{Arg, ArgAction, ArgMatches, Command, builder::ValueParser, parser::Va
 use pi_vfs::BlockingFs;
 use pi_vfs::{DirOptions, is_virtual_path, parent_path};
 use uucore::{display::Quotable, fs};
-#[cfg(not(windows))]
 use uucore::mode;
 
 use crate::host::{Host, Utility, format_usage, matches_parser};
@@ -36,12 +35,7 @@ struct Config {
 	verbose:   bool,
 }
 
-#[cfg(windows)]
-fn get_mode(_matches: &ArgMatches, _umask: u32) -> Result<u32, String> {
-	Ok(DEFAULT_PERM)
-}
 
-#[cfg(not(windows))]
 fn get_mode(matches: &ArgMatches, umask: u32) -> Result<u32, String> {
 	if let Some(mode_arg) = matches.get_one::<String>(options::MODE) {
 		mode::parse_chmod(DEFAULT_PERM, mode_arg, true, umask)
@@ -297,8 +291,7 @@ fn create_dir(
 	}
 
 	// A `..` component names a directory only once the one before it exists,
-	// and Windows folds it away before looking, so such a path is created
-	// ancestor by ancestor, as GNU does.
+	// so such a path is created ancestor by ancestor, as GNU does.
 	let has_parent_dir = path
 		.components()
 		.any(|component| matches!(component, std::path::Component::ParentDir));
@@ -344,15 +337,12 @@ fn create_single_dir(
 	let filesystem = host.fs().clone();
 	let fs_path = host.resolve(path);
 
-	#[cfg(unix)]
 	let create_mode = if is_parent {
 		// Parents made by `-p` use the umask-derived mode with `u+wx` restored.
 		(!host.umask() & 0o777) | 0o300
 	} else {
 		config.mode
 	};
-	#[cfg(not(unix))]
-	let create_mode = config.mode;
 
 	match filesystem.create_dir_with(&fs_path, &DirOptions::new().mode(create_mode)) {
 		Ok(()) => {

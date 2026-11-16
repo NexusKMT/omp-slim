@@ -453,16 +453,10 @@ fn no_such_attribute() -> io::Error {
 	return io::Error::from_raw_os_error(libc::ENOATTR);
 	#[cfg(all(unix, not(any(target_os = "macos", target_os = "ios"))))]
 	return io::Error::from_raw_os_error(libc::ENODATA);
-	#[cfg(not(unix))]
-	return io::ErrorKind::NotFound.into();
 }
 
 /// `err`, with the open-file limit named when it is `EMFILE` (see the module
 /// docs); any other error unchanged.
-#[cfg_attr(
-	not(unix),
-	expect(clippy::missing_const_for_fn, reason = "the unix body queries RLIMIT_NOFILE")
-)]
 fn name_the_limit(err: io::Error) -> io::Error {
 	#[cfg(unix)]
 	if err.raw_os_error() == Some(libc::EMFILE)
@@ -484,21 +478,11 @@ struct DescriptorLimit {
 	limit: u64,
 }
 
-/// Engine path → host path, byte for byte on Unix.
-#[cfg(unix)]
-#[allow(clippy::unnecessary_wraps, reason = "only Windows rejects a path")]
+/// Engine path → host path, byte for byte.
+#[allow(clippy::unnecessary_wraps, reason = "callers use it as a fallible mapping")]
 fn host_path(path: &BStr) -> io::Result<&Path> {
 	use std::os::unix::ffi::OsStrExt;
 	Ok(Path::new(std::ffi::OsStr::from_bytes(path)))
-}
-
-/// Engine path → host path (UTF-8 required).
-#[cfg(not(unix))]
-fn host_path(path: &BStr) -> io::Result<&Path> {
-	use bstr::ByteSlice;
-	path
-		.to_path()
-		.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))
 }
 
 /// Host path or name → engine bytes.

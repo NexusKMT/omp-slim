@@ -121,89 +121,6 @@ async fn default_session() -> ShellSessionCore {
 	create_session(&config).await.expect("create_session")
 }
 
-/// 8.3 short spelling of `path` (`GetShortPathNameW`).
-#[cfg(windows)]
-fn short_name_of(path: &std::path::Path) -> std::path::PathBuf {
-	use std::os::windows::ffi::{OsStrExt, OsStringExt};
-	let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-	// SAFETY: `wide` is NUL-terminated; a null buffer with length 0 asks
-	// only for the required size.
-	let needed = unsafe {
-		windows_sys::Win32::Storage::FileSystem::GetShortPathNameW(
-			wide.as_ptr(),
-			std::ptr::null_mut(),
-			0,
-		)
-	};
-	assert!(needed > 0, "GetShortPathNameW failed for {}", path.display());
-	let mut buf = vec![0u16; needed as usize];
-	// SAFETY: `wide` is NUL-terminated and `buf` is writable for
-	// `buf.len()` u16s.
-	let written = unsafe {
-		windows_sys::Win32::Storage::FileSystem::GetShortPathNameW(
-			wide.as_ptr(),
-			buf.as_mut_ptr(),
-			buf.len() as u32,
-		)
-	};
-	assert!(written > 0, "GetShortPathNameW fill failed for {}", path.display());
-	buf.truncate(written as usize);
-	std::path::PathBuf::from(std::ffi::OsString::from_wide(&buf))
-}
-
-#[cfg(windows)]
-const LONG_DIR_NAME: &str = "pi-shell-long-name-probe";
-
-/// A fresh directory whose long name has a distinct 8.3 alias, as
-/// `(guard, long, short)`. `None` when the volume does not generate short
-/// names, since no spelling split can exist there.
-#[cfg(windows)]
-fn short_alias_fixture() -> Option<(tempfile::TempDir, std::path::PathBuf, std::path::PathBuf)> {
-	let root = tempfile::tempdir().expect("tempdir");
-	let long = root.path().join(LONG_DIR_NAME);
-	std::fs::create_dir(&long).expect("create long-named dir");
-	let short = short_name_of(&long);
-	(short.file_name() != long.file_name()).then_some((root, long, short))
-}
-
-/// A temp directory reachable through an 8.3 alias, as
-/// `(short, long, guard)`. Existing profile aliases survive after new 8.3
-/// creation is disabled, so the host TEMP is preferred; otherwise a fresh
-/// alias is made when the volume still creates them.
-#[cfg(windows)]
-fn short_temp_fixture()
--> Option<(std::path::PathBuf, std::path::PathBuf, Option<tempfile::TempDir>)> {
-	let host_temp = std::env::temp_dir();
-	let expanded_host_temp = crate::windows::expand_to_long_path(&host_temp);
-	if host_temp != expanded_host_temp {
-		return Some((host_temp, expanded_host_temp, None));
-	}
-	let (root, long, short) = short_alias_fixture()?;
-	Some((short, crate::windows::expand_to_long_path(&long), Some(root)))
-}
-
-/// Runs `cd "$TEMP"` and asserts the shell cwd, `PWD`, and every temp var
-/// share the long spelling `expected`.
-#[cfg(windows)]
-async fn assert_cd_temp_matches_pwd(shell: &mut ShellSessionCore, expected: &std::path::Path) {
-	let expected_str = expected.to_string_lossy().into_owned();
-	let result = shell
-		.run_test("cd \"$TEMP\"", &TestStdio::null())
-		.await
-		.expect("cd inherited TEMP");
-	assert_eq!(exit_code(&result), 0);
-	assert_eq!(shell.working_dir(), expected);
-	for key in ["TEMP", "TMP", "TMPDIR", "PWD"] {
-		let output = tempfile::tempfile().expect("variable capture");
-		let result = shell
-			.run_test(format!("printf '%s' \"${key}\""), &TestStdio::null().stdout(&output))
-			.await
-			.expect("read shell variable");
-		assert_eq!(exit_code(&result), 0, "{key}");
-		assert_eq!(read_capture(&output), expected_str, "{key}");
-	}
-}
-
 #[cfg(unix)]
 async fn kill_test_context() -> (ShellSessionCore, TestStdio) {
 	(default_session().await, TestStdio::null())
@@ -377,12 +294,9 @@ async fn run_isolated_kill_test(test_name: &str, marker: &str, own_process_group
 	let mut command =
 		tokio::process::Command::new(std::env::current_exe().expect("current test executable"));
 	command.args(["--exact", test_name]).env(marker, "1");
-	#[cfg(unix)]
 	if own_process_group {
 		command.process_group(0);
 	}
-	#[cfg(not(unix))]
-	let _ = own_process_group;
 	let status = command.status().await.expect("isolated test process");
 	assert!(status.success(), "isolated kill test failed: {status}");
 }

@@ -118,28 +118,10 @@ impl FileType {
 	pub fn is_block_device(&self) -> bool {
 		self.kind == FileKind::BlockDevice
 	}
-
-	/// Windows directory symlink (or junction); `false` for provider types.
-	#[cfg(windows)]
-	pub fn is_symlink_dir(&self) -> bool {
-		use std::os::windows::fs::FileTypeExt;
-		self.native.is_some_and(|native| native.is_symlink_dir())
-	}
-
-	/// Windows file symlink; provider symlinks count as file symlinks.
-	#[cfg(windows)]
-	pub fn is_symlink_file(&self) -> bool {
-		use std::os::windows::fs::FileTypeExt;
-		match self.native {
-			Some(native) => native.is_symlink_file(),
-			None => self.is_symlink(),
-		}
-	}
 }
 
 impl From<std::fs::FileType> for FileType {
 	fn from(native: std::fs::FileType) -> Self {
-		#[cfg(unix)]
 		let kind = {
 			use std::os::unix::fs::FileTypeExt;
 			if native.is_file() {
@@ -159,16 +141,6 @@ impl From<std::fs::FileType> for FileType {
 			} else {
 				FileKind::Unknown
 			}
-		};
-		#[cfg(not(unix))]
-		let kind = if native.is_symlink() {
-			FileKind::Symlink
-		} else if native.is_dir() {
-			FileKind::Dir
-		} else if native.is_file() {
-			FileKind::File
-		} else {
-			FileKind::Unknown
 		};
 		Self { kind, native: Some(native) }
 	}
@@ -231,21 +203,12 @@ impl Permissions {
 
 impl From<std::fs::Permissions> for Permissions {
 	fn from(native: std::fs::Permissions) -> Self {
-		#[cfg(unix)]
-		{
-			use std::os::unix::fs::PermissionsExt;
-			Self::from_mode(native.mode())
-		}
-		#[cfg(not(unix))]
-		{
-			// Windows exposes only the read-only attribute; this matches uucore's
-			// rendering of host permissions there.
-			Self::from_mode(if native.readonly() { 0o555 } else { 0o777 })
-		}
+		use std::os::unix::fs::PermissionsExt;
+		Self::from_mode(native.mode())
 	}
 }
 
-/// File identity: device + inode (Windows: volume serial + file index).
+/// File identity: device + inode.
 ///
 /// Host identities and provider identities live in separate namespaces so an
 /// arbitrary provider inode can never alias a host file; providers that report
@@ -314,8 +277,7 @@ pub struct StatFs {
 	pub fs_type_name:     Option<String>,
 	/// `f_bsize`.
 	pub block_size:       u64,
-	/// Optimal transfer size: Linux `f_frsize`, Apple `f_iosize`, Windows
-	/// cluster size.
+	/// Optimal transfer size: Linux `f_frsize`, Apple `f_iosize`.
 	pub io_size:          u64,
 	pub blocks:           u64,
 	pub blocks_free:      u64,
@@ -336,8 +298,8 @@ pub enum NodeKind {
 	BlockDevice(u64),
 }
 
-/// Symbolic link flavour; only Windows distinguishes file and directory
-/// links. `Auto` inspects the target (resolved relative to the link).
+/// Symbolic link flavour. `Auto` inspects the target (resolved relative to the
+/// link).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SymlinkKind {
 	#[default]

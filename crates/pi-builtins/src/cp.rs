@@ -361,15 +361,10 @@ mod options {
 	pub const VERBOSE: &str = "verbose";
 }
 
-#[cfg(unix)]
 static PRESERVABLE_ATTRIBUTES: &[&str] =
 	&["mode", "ownership", "timestamps", "context", "links", "xattr", "all"];
 
-#[cfg(not(unix))]
-static PRESERVABLE_ATTRIBUTES: &[&str] = &["mode", "timestamps", "context", "links", "xattr", "all"];
-
-const PRESERVE_DEFAULT_VALUES: &str =
-	if cfg!(unix) { "mode,ownership,timestamp" } else { "mode,timestamp" };
+const PRESERVE_DEFAULT_VALUES: &str = "mode,ownership,timestamp";
 
 /// Chunk size of streamed copies.
 const COPY_BUFFER: usize = 128 * 1024;
@@ -1141,7 +1136,7 @@ struct CopyState {
 	progress_bar:        Option<ProgressBar>,
 	/// Source devices whose filesystem refused to clone: later files from
 	/// them skip straight to copying the data.
-	#[cfg(any(target_os = "linux", target_os = "android", windows))]
+	#[cfg(any(target_os = "linux", target_os = "android"))]
 	clone_unsupported:   FxHashSet<u64>,
 }
 
@@ -1306,14 +1301,7 @@ fn is_enotsup_error(error: &CpError) -> bool {
 			if e.kind() == io::ErrorKind::Unsupported {
 				return true;
 			}
-			#[cfg(unix)]
-			{
-				matches!(e.raw_os_error(), Some(code) if code == libc::EOPNOTSUPP || code == libc::ENOTSUP)
-			}
-			#[cfg(not(unix))]
-			{
-				false
-			}
+			matches!(e.raw_os_error(), Some(code) if code == libc::EOPNOTSUPP || code == libc::ENOTSUP)
 		},
 		_ => false,
 	}
@@ -1558,25 +1546,20 @@ fn read_yes(host: &mut Host) -> bool {
 /// The `-i` question for `path`, naming the mode of an unwritable file as
 /// GNU does.
 fn interactive_prompt(host: &Host, path: &Path, clobber: ClobberMode) -> String {
-	#[cfg(unix)]
+	let filesystem = host.fs();
+	let resolved = host.resolve(path);
+	if !filesystem.is_symlink(&resolved)
+		&& filesystem.access(&resolved, false, true, false).is_err()
+		&& let Ok(metadata) = filesystem.metadata(&resolved)
 	{
-		let filesystem = host.fs();
-		let resolved = host.resolve(path);
-		if !filesystem.is_symlink(&resolved)
-			&& filesystem.access(&resolved, false, true, false).is_err()
-			&& let Ok(metadata) = filesystem.metadata(&resolved)
-		{
-			let mode = metadata.mode() & 0o7777;
-			let permissions = uucore::fs::display_permissions_unix(mode, false);
-			return if clobber == ClobberMode::Standard {
-				format!("unwritable {} (mode {mode:04o}, {permissions}); try anyway?", path.quote())
-			} else {
-				format!("replace {}, overriding mode {mode:04o} ({permissions})?", path.quote())
-			};
-		}
+		let mode = metadata.mode() & 0o7777;
+		let permissions = uucore::fs::display_permissions_unix(mode, false);
+		return if clobber == ClobberMode::Standard {
+			format!("unwritable {} (mode {mode:04o}, {permissions}); try anyway?", path.quote())
+		} else {
+			format!("replace {}, overriding mode {mode:04o} ({permissions})?", path.quote())
+		};
 	}
-	#[cfg(not(unix))]
-	let _ = (host, clobber);
 	format!("overwrite {}?", path.quote())
 }
 
@@ -2075,15 +2058,6 @@ fn delete_dest_if_needed_and_allowed(
 fn delete_path(host: &mut Host, state: &CopyState, path: &Path, options: &Options) -> CopyResult<()> {
 	let filesystem = host.fs().clone();
 	let path_fs = host.resolve(path);
-	// Windows requires clearing readonly attribute before deletion when using
-	// --force
-	#[cfg(windows)]
-	if options.force()
-		&& let Ok(mut permissions) = filesystem.metadata(&path_fs).map(|m| m.permissions())
-	{
-		permissions.set_readonly(false);
-		let _ = filesystem.set_permissions(&path_fs, permissions);
-	}
 
 	match filesystem.remove_file(&path_fs) {
 		Ok(()) => {
@@ -2755,20 +2729,7 @@ fn copy_link(
 	let link = host.fs().read_link(host.resolve(source)).map_err(|e| {
 		CpError::IoErrContext(e, format!("cannot read symbolic link {}", source.quote()))
 	})?;
-	// Windows tells file from directory symlinks, even dangling ones; keep the
-	// kind the source link has.
-	#[cfg(windows)]
-	let kind = {
-		let file_type = source_metadata.file_type();
-		if file_type.is_symlink_dir() {
-			SymlinkKind::Dir
-		} else if file_type.is_symlink_file() {
-			SymlinkKind::File
-		} else {
-			SymlinkKind::Auto
-		}
-	};
-	#[cfg(not(windows))]
+	// Keep the kind the source link has.
 	let kind = SymlinkKind::Auto;
 	symlink_file(host, state, &link, dest, kind)?;
 	copy_attributes(
@@ -2935,7 +2896,7 @@ fn copy_data(
 	// on its descriptors, and copies the data wherever the files cannot
 	// share extents (another filesystem, ext4, NTFS, ...). A source
 	// filesystem that refused once is not asked again.
-	#[cfg(any(target_os = "linux", target_os = "android", windows))]
+	#[cfg(any(target_os = "linux", target_os = "android"))]
 	let cloned = match (source_file.native(), dest_file.native()) {
 		(Some(source_native), Some(dest_native))
 			if native && !source_is_stream && options.reflink_mode == ReflinkMode::Auto =>
@@ -2959,7 +2920,7 @@ fn copy_data(
 		},
 		_ => false,
 	};
-	#[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
+	#[cfg(not(any(target_os = "linux", target_os = "android")))]
 	let cloned = false;
 
 	let copy_debug = if cloned {

@@ -61,7 +61,7 @@ use crate::rsync::meta;
 use crate::rsync::mux::MuxWriter;
 use crate::rsync::paths::{
 	self, CFN_COLLAPSE_DOT_DOT_DIRS, CFN_DROP_TRAILING_DOT_DIR, CFN_KEEP_TRAILING_SLASH,
-	bytes_path, forward_slashes, full_fname, is_absolute_bytes, os_bytes, path_bytes,
+	bytes_path, full_fname, is_absolute_bytes, os_bytes, path_bytes,
 	push_rel,
 };
 use crate::rsync::session::Ctx;
@@ -97,15 +97,9 @@ fn join_name(base: &Path, name: &[u8]) -> io::Result<PathBuf> {
 }
 
 /// `st_rdev` → (major, minor).
-#[cfg(unix)]
 fn dev_split(rdev: u64) -> (u32, u32) {
 	let dev = rdev as libc::dev_t;
 	(libc::major(dev) as u32, libc::minor(dev) as u32)
-}
-
-#[cfg(not(unix))]
-fn dev_split(rdev: u64) -> (u32, u32) {
-	((rdev >> 32) as u32, rdev as u32)
 }
 
 /// What a stat produced (upstream `STRUCT_STAT` subset); all zero = a missing operand.
@@ -428,8 +422,7 @@ impl Scanner {
 		let o = &ctx.opts;
 		let mut srcs = Vec::with_capacity(sources.len());
 		for s in sources {
-			let mut b = os_bytes(s).map_err(|e| RsyncError::new(RERR_SYNTAX, format!("{e}")))?.to_vec();
-			forward_slashes(&mut b);
+			let b = os_bytes(s).map_err(|e| RsyncError::new(RERR_SYNTAX, format!("{e}")))?.to_vec();
 			srcs.push(b);
 		}
 		let follow = o.copy_links || o.copy_unsafe_links || o.copy_dirlinks || o.insecure_links;
@@ -768,9 +761,7 @@ impl Scanner {
 				}
 			},
 		};
-		let mut bytes = os_bytes(target.as_os_str())?.to_vec();
-		forward_slashes(&mut bytes);
-		Ok(bytes)
+		Ok(os_bytes(target.as_os_str())?.to_vec())
 	}
 
 	/// Plain lstat (x_lstat), whatever the link options say.
@@ -2318,10 +2309,7 @@ fn overflow() -> RsyncError {
 }
 
 fn invalid_errno() -> i32 {
-	#[cfg(unix)]
-	return libc::EINVAL;
-	#[cfg(not(unix))]
-	return 22;
+	libc::EINVAL
 }
 
 /// Upstream read_line for files-from: one name per line (`\n` or `\r`, or NUL with

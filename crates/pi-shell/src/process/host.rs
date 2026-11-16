@@ -50,7 +50,6 @@ pub struct NativeHost {
 	/// external this host spawns hands them over when its exit is observed.
 	bridge:    Option<(ControlHandle, Vpid)>,
 	/// The process's terminals ([`crate::bash::Host::terminal`]).
-	#[cfg(any(unix, windows))]
 	terminal:  crate::sys::tty::NativeTerminal,
 	/// The OS's stream sockets ([`crate::bash::Host::sockets`]).
 	#[cfg(unix)]
@@ -60,9 +59,8 @@ pub struct NativeHost {
 	extras:    Option<Extras>,
 }
 
-/// The utilities a process shell offers where `PATH` has none (`ls`,
-/// `cat`, `head`, … on Windows) and the runtime they run on, started on
-/// first use.
+/// The utilities a process shell offers where `PATH` has none (`ls`, `cat`,
+/// `head`, …) and the runtime they run on, started on first use.
 struct Extras {
 	tools:   crate::tools::ToolConfig,
 	runtime: Option<tokio::runtime::Runtime>,
@@ -110,13 +108,6 @@ impl NativeHost {
 	/// reads the umask without changing it, a waiter thread per external
 	/// observes its exit (as [`crate::host::PiHost`] does inside Bun), and
 	/// the terminals' modes are put back when the host is dropped.
-	#[cfg_attr(
-		not(unix),
-		expect(
-			clippy::default_constructed_unit_structs,
-			reason = "`Signals` (and the spawner) are unit structs off Unix and stateful on Unix"
-		)
-	)]
 	pub fn new(
 		events: Option<Box<dyn Write>>,
 		pending_fs: bool,
@@ -128,7 +119,6 @@ impl NativeHost {
 		// Unlike an embedded host, this standalone process is still
 		// single-threaded here, and nothing in it changes the mask later:
 		// read and restore it directly rather than forking a helper.
-		#[cfg(unix)]
 		// SAFETY: umask has no preconditions; nothing can create files
 		// concurrently before this host starts its workers.
 		let umask = (!embedded).then(|| unsafe {
@@ -136,8 +126,6 @@ impl NativeHost {
 			libc::umask(mask);
 			mask as u32
 		});
-		#[cfg(not(unix))]
-		let umask = None;
 		let std_fs = StdFs { umask };
 		let fs: Box<dyn Fs> = if pending_fs {
 			Box::new(PendingFs(std_fs))
@@ -170,7 +158,6 @@ impl NativeHost {
 			ignored,
 			user: std::cell::OnceCell::new(),
 			bridge: None,
-			#[cfg(any(unix, windows))]
 			terminal: crate::sys::tty::NativeTerminal::new(embedded),
 			#[cfg(unix)]
 			sockets: crate::sys::socket::NativeSockets,
@@ -286,21 +273,12 @@ impl crate::bash::Host for NativeHost {
 	}
 
 	fn signal_process(&mut self, pid: i32, signal: Option<crate::bash::Signal>) -> io::Result<()> {
-		#[cfg(unix)]
-		{
-			let number =
-				signal.map_or(0, |sig| i32::from(sig.number(crate::bash::Platform::current())));
-			// SAFETY: kill accepts integer process and signal numbers.
-			if unsafe { libc::kill(pid, number) } == 0 {
-				Ok(())
-			} else {
-				Err(io::Error::last_os_error())
-			}
-		}
-		#[cfg(not(unix))]
-		{
-			let _ = (pid, signal);
-			Err(io::ErrorKind::Unsupported.into())
+		let number = signal.map_or(0, |sig| i32::from(sig.number(crate::bash::Platform::current())));
+		// SAFETY: kill accepts integer process and signal numbers.
+		if unsafe { libc::kill(pid, number) } == 0 {
+			Ok(())
+		} else {
+			Err(io::Error::last_os_error())
 		}
 	}
 
@@ -353,13 +331,8 @@ impl crate::bash::Host for NativeHost {
 	}
 
 	fn ppid(&self) -> u32 {
-		#[cfg(unix)]
-		{
-			// SAFETY: getppid has no preconditions.
-			unsafe { libc::getppid() as u32 }
-		}
-		#[cfg(not(unix))]
-		0
+		// SAFETY: getppid has no preconditions.
+		unsafe { libc::getppid() as u32 }
 	}
 
 	fn user(&self) -> UserInfo {
@@ -420,7 +393,6 @@ impl crate::bash::Host for NativeHost {
 		Some(TtyInfo { rows: 24, cols: 80 })
 	}
 
-	#[cfg(any(unix, windows))]
 	fn terminal(&mut self) -> Option<&mut dyn crate::bash::Terminal> {
 		Some(&mut self.terminal)
 	}
@@ -548,10 +520,6 @@ impl ExtProc for SignalsOnExit {
 
 /// The signals this process ignores now: call at startup, before any trap,
 /// for the set [`NativeHost::new`] reports as ignored on entry.
-#[cfg_attr(
-	not(unix),
-	expect(clippy::missing_const_for_fn, reason = "the Unix version queries sigaction")
-)]
 pub fn ignored_on_entry() -> crate::bash::SigSet {
 	Signals::ignored()
 }
@@ -572,7 +540,6 @@ pub fn ignored_on_entry() -> crate::bash::SigSet {
 /// duplicated instead (close-on-exec, at 10 or above) and the original is
 /// left alone; descriptors that are not files, pipes, sockets or devices
 /// (a runtime's kqueue or eventfd) are skipped.
-#[cfg(unix)]
 pub fn inherited_fds(embedded: bool) -> Vec<(i32, Box<dyn File>)> {
 	use std::os::fd::FromRawFd;
 
@@ -708,26 +675,14 @@ fn user_fd(fd: i32) -> bool {
 	)
 }
 
-/// No inherited fds are taken over off Unix.
-#[cfg(not(unix))]
-pub fn inherited_fds(_embedded: bool) -> Vec<(i32, Box<dyn File>)> {
-	Vec::new()
-}
-
 fn read_login_shell() -> Option<BString> {
-	#[cfg(unix)]
-	{
-		// SAFETY: getuid has no preconditions.
-		login_shell(unsafe { libc::getuid() })
-			.or_else(|| std::env::var_os("SHELL").map(|v| BString::from(v.as_encoded_bytes())))
-	}
-	#[cfg(not(unix))]
-	std::env::var_os("SHELL").map(|v| BString::from(v.as_encoded_bytes()))
+	// SAFETY: getuid has no preconditions.
+	login_shell(unsafe { libc::getuid() })
+		.or_else(|| std::env::var_os("SHELL").map(|v| BString::from(v.as_encoded_bytes())))
 }
 
 /// The login shell of `uid` from the password database (bash sets `SHELL`
 /// from it when the environment has none).
-#[cfg(unix)]
 fn login_shell(uid: libc::uid_t) -> Option<BString> {
 	let mut buf = vec![0u8; 4096];
 	let mut pw = std::mem::MaybeUninit::<libc::passwd>::zeroed();

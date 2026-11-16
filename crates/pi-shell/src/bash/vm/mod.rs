@@ -1216,7 +1216,7 @@ fn startup_vars(k: &mut Kernel, cx: &mut Cx<'_>, init: &ShellInit) -> Result<(),
 	let values = if init.mode.dialect() == crate::bash::ids::Dialect::Zsh {
 		zsh_startup_values(cx, k.engine.config().platform)
 	} else {
-		startup_values(cx, &init.argv0, ppid, k.engine.config().platform, StartupVars {
+		startup_values(cx, &init.argv0, ppid, StartupVars {
 			lookup_shell: need_shell && !deferred_shell,
 			interactive:  init.interactive,
 		})
@@ -1257,8 +1257,7 @@ fn startup_vars(k: &mut Kernel, cx: &mut Cx<'_>, init: &ShellInit) -> Result<(),
 		&& let Some(dirs) = &init.zsh_fpath
 		&& !init.env.iter().any(|(n, _)| n == "FPATH")
 	{
-		let sep = crate::bash::vm::probe::path_separator(k.engine.config().platform);
-		let joined = bstr::join([sep], dirs);
+		let joined = bstr::join([b':'], dirs);
 		k.root
 			.set_var(cx.store, b"FPATH", Some(Var::scalar(BString::from(joined), Attrs::NONE)));
 	}
@@ -1304,22 +1303,11 @@ pub fn zsh_startup_values(
 		(b"PSVAR", b""),
 		(b"FIGNORE", b""),
 	];
-	// `MODULE_PATH` is never imported (`PM_DONTIMPORT`). The directory
-	// lists take the platform's separator, as their ties split them.
-	let sep = crate::bash::vm::probe::path_separator(platform);
+	// `MODULE_PATH` is never imported (`PM_DONTIMPORT`).
 	let mut out: Vec<(&'static [u8], Var, bool)> = defaults
 		.into_iter()
 		.map(|(name, value)| {
-			let value: BString = if matches!(name, b"PATH" | b"FPATH") {
-				value
-					.iter()
-					.map(|&c| if c == b':' { sep } else { c })
-					.collect::<Vec<u8>>()
-					.into()
-			} else {
-				value.into()
-			};
-			(name, Var::scalar(value, Attrs::NONE), name == b"MODULE_PATH")
+			(name, Var::scalar(BString::from(value), Attrs::NONE), name == b"MODULE_PATH")
 		})
 		.collect();
 	// `setiparam`: integers.
@@ -1330,18 +1318,12 @@ pub fn zsh_startup_values(
 	}
 	// zsh exports `HOME` and `LOGNAME` (`addenv` when not imported).
 	if !user.home.is_empty() {
-		let home = if platform == crate::bash::ids::Platform::Windows {
-			builtins::zsh_dir::windows_spelling(&user.home, &user.home)
-		} else {
-			user.home.clone()
-		};
-		out.push((&b"HOME"[..], Var::scalar(home, Attrs::EXPORT), false));
+		out.push((&b"HOME"[..], Var::scalar(user.home.clone(), Attrs::EXPORT), false));
 	}
 	out.push((&b"LOGNAME"[..], Var::scalar(user.name, Attrs::EXPORT), false));
 	let (_, release, machine) = cx.host.uname().unwrap_or_default();
 	// The host's build only shapes these when the engine emulates that host
-	// (`cfg!(target_os = "macos")` is the host's, not the engine's, OS): a
-	// Windows engine on a macOS host must not report Apple's `OSTYPE`.
+	// (`cfg!(target_os = "macos")` is the host's, not the engine's, OS).
 	let macos = platform == crate::bash::ids::Platform::MacOs && cfg!(target_os = "macos");
 	// The configure-time `MACHTYPE`, `VENDOR` and `OSTYPE` of the system's
 	// zsh (Apple's build reports `x86_64` on every Mac).
@@ -1368,9 +1350,6 @@ pub fn zsh_startup_values(
 			o.extend_from_slice(b".0");
 		}
 		o
-	} else if platform == crate::bash::ids::Platform::Windows {
-		// MSYS2's zsh, the zsh Windows users and plugins know.
-		BString::from("msys")
 	} else {
 		BString::from("linux-gnu")
 	};
@@ -1440,7 +1419,6 @@ pub fn startup_values(
 	cx: &Cx<'_>,
 	argv0: &[u8],
 	ppid: u32,
-	platform: crate::bash::ids::Platform,
 	options: StartupVars,
 ) -> Vec<(&'static [u8], Var, bool)> {
 	let user = cx.host.user();
@@ -1467,7 +1445,7 @@ pub fn startup_values(
 		(b"SHELL", shell),
 		(b"TERM", BString::from("dumb")),
 		// bash's `DEFAULT_PATH_VALUE` when the environment has no PATH.
-		(b"PATH", BString::from(crate::bash::invocation::default_path(platform))),
+		(b"PATH", BString::from(crate::bash::invocation::DEFAULT_PATH)),
 	];
 	let mut out = Vec::with_capacity(defaults.len() + 2 + usize::from(options.interactive));
 	if options.interactive {
@@ -1549,15 +1527,7 @@ impl Shell {
 			.set_misc(cx.store, MiscKey::StartNs, k.start_ns.to_string());
 		k.startup.clone_from(&init.startup);
 		let mut foreign: Vec<BString> = Vec::new();
-		// zsh on Windows keeps directories spelled with `/` (`cd` does), so
-		// `$PWD`, `$HOME` and `~` agree from the start.
-		let zsh_on_windows = init.mode.dialect() == crate::bash::ids::Dialect::Zsh
-			&& engine.config().platform == crate::bash::ids::Platform::Windows;
-		let cwd = if zsh_on_windows {
-			builtins::zsh_dir::windows_spelling(&init.cwd, &init.cwd)
-		} else {
-			init.cwd.clone()
-		};
+		let cwd = init.cwd.clone();
 		for (name, value) in &init.env {
 			if let Some(func) = name
 				.strip_prefix(b"BASH_FUNC_")
@@ -1565,11 +1535,7 @@ impl Shell {
 			{
 				import_function(&mut k, cx.store, func, value);
 			} else if is_ident(name) {
-				let value = if zsh_on_windows && name == "HOME" {
-					builtins::zsh_dir::windows_spelling(value, value)
-				} else {
-					value.clone()
-				};
+				let value = value.clone();
 				k.root
 					.set_var(cx.store, name, Some(Var::scalar(value, Attrs::EXPORT)));
 			} else {

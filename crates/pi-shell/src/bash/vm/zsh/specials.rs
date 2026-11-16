@@ -33,7 +33,6 @@ use super::{
 };
 use crate::bash::{
 	diag::Diag,
-	ids::Platform,
 	store::{Attrs, Key, KeyBuf, MiscKey, Record, Table, VarValue},
 	syntax::zsh::tok::span,
 	vm::{
@@ -113,21 +112,6 @@ impl Tie {
 			Self::Fignore => "FIGNORE",
 			Self::ZshEvalContext => "ZSH_EVAL_CONTEXT",
 			Self::Watch => "WATCH",
-		}
-	}
-
-	/// The separator joining the array into the scalar: `;` for the
-	/// directory lists on Windows, whose paths hold `:` (`C:\…`) and whose
-	/// `PATH` other programs read with `;`.
-	pub const fn separator(self, platform: Platform) -> u8 {
-		if matches!(platform, Platform::Windows)
-			&& matches!(
-				self,
-				Self::Path | Self::Fpath | Self::Cdpath | Self::Manpath | Self::ModulePath
-			) {
-			b';'
-		} else {
-			b':'
 		}
 	}
 }
@@ -700,17 +684,17 @@ impl Special {
 	/// or bash's own `$_`) is no bash value zsh code loses: zsh ignores it.
 	pub const fn is_backed_by(self, _name: &[u8]) -> bool {
 		// An imported `HISTSIZE`/`SAVEHIST` is the special's initial value;
-		// `USERNAME` (always in a Windows environment, kept for the programs
-		// the shell runs) names the user the special does.
+		// `USERNAME` (kept for the programs the shell runs) names the user the
+		// special does.
 		self.is_plain()
 			|| matches!(self, Self::Underscore | Self::Histsize | Self::Savehist | Self::Username)
 	}
 
 	/// The built-in tie partner and separator.
-	pub const fn tie_partner(self, platform: Platform) -> Option<(&'static str, u8)> {
+	pub const fn tie_partner(self) -> Option<(&'static str, u8)> {
 		match self {
-			Self::TiedScalar(t) => Some((t.array(), t.separator(platform))),
-			Self::TiedArray(t) => Some((t.scalar(), t.separator(platform))),
+			Self::TiedScalar(t) => Some((t.array(), b':')),
+			Self::TiedArray(t) => Some((t.scalar(), b':')),
 			_ => None,
 		}
 	}
@@ -760,7 +744,7 @@ pub fn param(ex: &mut Expander<'_, '_>, sp: Special, name: &[u8]) -> X<Param> {
 			_ => PValue::Scalar(BString::default()),
 		}
 	});
-	let mut p = Param::special(name, flags, value, sp, ex.k.engine.config().platform);
+	let mut p = Param::special(name, flags, value, sp);
 	p.base = base;
 	if let Special::Comp(cp) = sp {
 		// zsh/complete's are locals of the completion function
@@ -1109,9 +1093,8 @@ pub fn get(ex: &mut Expander<'_, '_>, sp: Special) -> X<Option<PValue>> {
 			let Some(v) = state::lookup(&ex.k.root, ex.cx.store, ex.vp, t.scalar().as_bytes())? else {
 				return Ok(None);
 			};
-			let sep = t.separator(ex.k.engine.config().platform);
 			Ok(Some(PValue::Array(match v.as_scalar() {
-				Some(s) if !s.is_empty() => s.split(|&c| c == sep).map(BString::from).collect(),
+				Some(s) if !s.is_empty() => s.split(|&c| c == b':').map(BString::from).collect(),
 				_ => Vec::new(),
 			})))
 		},
@@ -1452,21 +1435,13 @@ pub fn fill_cmdnamtab(ex: &mut Expander<'_, '_>) -> X<()> {
 		}
 		Err(Stop::Probe(probe))
 	};
-	let platform = ex.k.engine.config().platform;
-	let windows = platform == Platform::Windows;
 	// Every directory's listing is asked first, and the table is built only
 	// once all are answered: each answer re-runs the expansion, which
 	// otherwise rebuilt the names of every directory listed before it.
 	let mut lists: Vec<(&[u8], usize)> = Vec::new();
-	for dir in path.split(|&c| c == crate::bash::vm::probe::path_separator(platform)) {
+	for dir in path.split(|&c| c == b':') {
 		// zsh `isrelative`: not absolute, or with a `.` or `..` component.
-		let absolute = dir.first() == Some(&b'/')
-			|| (windows && crate::bash::vm::probe::is_windows_absolute(dir));
-		if !absolute
-			|| dir
-				.split(|&c| c == b'/' || (windows && c == b'\\'))
-				.any(|c| c == b"." || c == b"..")
-		{
+		if dir.first() != Some(&b'/') || dir.split(|&c| c == b'/').any(|c| c == b"." || c == b"..") {
 			continue;
 		}
 		if ex.log.get(ex.cursor).is_none() {
@@ -1725,8 +1700,7 @@ pub fn set(ex: &mut Expander<'_, '_>, sp: Special, name: &[u8], value: PValue) -
 			crate::bash::vm::builtins::zsh_mod_example::param_set(ex, p, value)?;
 		},
 		Special::TiedArray(t) => {
-			let sep = t.separator(ex.k.engine.config().platform);
-			let joined = BString::from(as_array(value).join(&[sep][..]));
+			let joined = BString::from(as_array(value).join(&b":"[..]));
 			let attrs = state::lookup_declared(&ex.k.root, ex.cx.store, ex.vp, t.scalar().as_bytes())?
 				.map_or(crate::bash::store::Attrs::NONE, |v| v.attrs)
 				.without(crate::bash::store::Attrs::INVISIBLE);

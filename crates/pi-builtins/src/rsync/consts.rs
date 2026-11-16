@@ -43,11 +43,7 @@ pub(crate) const SUM_LENGTH: usize = 16;
 pub(crate) const SHORT_SUM_LENGTH: usize = 2;
 
 /// The platform's `MAXPATHLEN`, upstream's buffer size for every path.
-#[cfg(unix)]
 pub(crate) const MAXPATHLEN: usize = libc::PATH_MAX as usize;
-/// Upstream `MAXPATHLEN` (its Cygwin build uses 4096).
-#[cfg(not(unix))]
-pub(crate) const MAXPATHLEN: usize = 4096;
 /// Roomy line/message buffer size (also the bound on received log messages).
 pub(crate) const BIGPATHBUFLEN: usize = if MAXPATHLEN < 4096 { 4096 + 1024 } else { MAXPATHLEN + 1024 };
 

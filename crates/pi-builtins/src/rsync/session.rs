@@ -367,10 +367,7 @@ impl HostIo {
 			Err(_) => Box::new(io::empty()),
 		};
 		let stdout_raw: Box<dyn Write + Send> = Box::new(host.stdout_clone());
-		#[cfg(unix)]
 		let umask = host.umask();
-		#[cfg(not(unix))]
-		let umask = 0o022;
 		let cancel = host.cancel_flag();
 		Self {
 			out: SharedWrite::new(out, &cancel),
@@ -1035,7 +1032,6 @@ fn become_copy_as_user(opts: &Options, logger: &Logger) -> Result<(), RsyncError
 	switch_identity(uid, gid, logger)
 }
 
-#[cfg(unix)]
 fn primary_gid(uid: u32) -> io::Result<u32> {
 	match nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid)) {
 		Ok(Some(user)) => Ok(user.gid.as_raw()),
@@ -1044,12 +1040,6 @@ fn primary_gid(uid: u32) -> io::Result<u32> {
 	}
 }
 
-#[cfg(not(unix))]
-fn primary_gid(_uid: u32) -> io::Result<u32> {
-	Err(io::ErrorKind::NotFound.into())
-}
-
-#[cfg(unix)]
 fn switch_identity(uid: u32, gid: u32, logger: &Logger) -> Result<(), RsyncError> {
 	let eperm = io::Error::from_raw_os_error(libc::EPERM);
 	let fail = |what: &str, line: u32| {
@@ -1071,11 +1061,6 @@ fn switch_identity(uid: u32, gid: u32, logger: &Logger) -> Result<(), RsyncError
 		"rsync: --copy-as cannot change the identity of the shell process running this builtin",
 	)
 	.at("main.c", 289))
-}
-
-#[cfg(not(unix))]
-fn switch_identity(_uid: u32, _gid: u32, _logger: &Logger) -> Result<(), RsyncError> {
-	Ok(())
 }
 
 // ---------------------------------------------------------------------------

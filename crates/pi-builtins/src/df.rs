@@ -502,7 +502,6 @@ fn read_mounts() -> Result<Vec<Mount>, Option<String>> {
 	Ok(list
 		.into_iter()
 		.map(|info| {
-			// Windows volumes report their path as the mount root.
 			let (mountdir, mntroot) = if info.mount_dir.is_empty() {
 				(info.mount_root.clone(), None)
 			} else {
@@ -513,7 +512,6 @@ fn read_mounts() -> Result<Vec<Mount>, Option<String>> {
 			let devname = unescape_octal(&info.dev_name);
 			#[cfg(not(any(target_os = "linux", target_os = "android")))]
 			let devname = info.dev_name.clone();
-			#[cfg(unix)]
 			let (dummy, remote) = {
 				// Only static mtab entries carry a usable "bind" option.
 				let bind =
@@ -524,8 +522,6 @@ fn read_mounts() -> Result<Vec<Mount>, Option<String>> {
 					devname.contains(':') || devname == "-hosts" || REMOTE_TYPES.contains(&fstype),
 				)
 			};
-			#[cfg(not(unix))]
-			let (dummy, remote) = (info.dummy, info.remote);
 			Mount {
 				devname,
 				mountdir,
@@ -582,14 +578,8 @@ fn is_errno(error: &io::Error, kind: io::ErrorKind, errno: i32) -> bool {
 	}
 }
 
-#[cfg(unix)]
 const EACCES: i32 = libc::EACCES;
-#[cfg(not(unix))]
-const EACCES: i32 = 0;
-#[cfg(unix)]
 const ENOENT: i32 = libc::ENOENT;
-#[cfg(not(unix))]
-const ENOENT: i32 = 0;
 
 /// Usage of the file system holding `path`, as gnulib `get_fs_usage`.
 fn fs_usage(host: &Host, path: &Path) -> io::Result<FsUsage> {
@@ -646,7 +636,7 @@ fn is_absolute(path: &OsStr) -> bool {
 }
 
 fn is_separator(byte: u8) -> bool {
-	byte == b'/' || (cfg!(windows) && byte == b'\\')
+	byte == b'/'
 }
 
 /// GNU `has_uuid_suffix`.
@@ -1031,7 +1021,6 @@ impl DfState {
 				Ok(stat) => Dev::Known(stat.dev),
 				Err(error) => {
 					// Only I/O errors: others are typically shadowed mounts.
-					#[cfg(unix)]
 					if report_eio && error.raw_os_error() == Some(libc::EIO) {
 						host.error(
 							format!(
@@ -1042,8 +1031,6 @@ impl DfState {
 							1,
 						);
 					}
-					#[cfg(not(unix))]
-					let _ = (report_eio, error);
 					Dev::Failed
 				},
 			};
@@ -1708,10 +1695,7 @@ fn run_df(host: &mut Host, matches: &ArgMatches) -> Result<(), Early> {
 /// rejected rather than reported against an unrelated host file system.
 fn stat_operand(host: &Host, name: &OsStr) -> io::Result<(PathBuf, Stat)> {
 	if name.is_empty() {
-		#[cfg(unix)]
 		return Err(io::Error::from_raw_os_error(libc::ENOENT));
-		#[cfg(not(unix))]
-		return Err(io::Error::new(io::ErrorKind::NotFound, "No such file or directory"));
 	}
 	let resolved = host.resolve(name);
 	let stat = stat_path(host, &resolved)?;
@@ -1752,8 +1736,7 @@ mod tests {
 		format!("df: {message}\nTry 'df --help' for more information.\n")
 	}
 
-	/// Mount point printed for the `/` operand: the root, or on Windows the
-	/// drive root holding the crate directory.
+	/// Mount point printed for the `/` operand: the root.
 	fn root_target() -> String {
 		let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
 		crate_dir.ancestors().last().unwrap_or(crate_dir).to_string_lossy().into_owned()

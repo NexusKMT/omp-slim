@@ -73,24 +73,16 @@ const fn from_raw(v: libc::rlim_t) -> Option<u64> {
 ///
 /// # Errors
 ///
-/// `Unsupported` for a resource the platform lacks (and on Windows), else
-/// the OS error of `getrlimit`.
+/// `Unsupported` for a resource the platform lacks, else the OS error of
+/// `getrlimit`.
 pub fn get(r: Rlimit) -> io::Result<(Option<u64>, Option<u64>)> {
-	#[cfg(unix)]
-	{
-		let res = resource(r).ok_or(io::ErrorKind::Unsupported)?;
-		let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-		// SAFETY: `lim` is writable for the call.
-		if unsafe { libc::getrlimit(res, &raw mut lim) } != 0 {
-			return Err(io::Error::last_os_error());
-		}
-		Ok((from_raw(lim.rlim_cur), from_raw(lim.rlim_max)))
+	let res = resource(r).ok_or(io::ErrorKind::Unsupported)?;
+	let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+	// SAFETY: `lim` is writable for the call.
+	if unsafe { libc::getrlimit(res, &raw mut lim) } != 0 {
+		return Err(io::Error::last_os_error());
 	}
-	#[cfg(not(unix))]
-	{
-		let _ = r;
-		Err(io::ErrorKind::Unsupported.into())
-	}
+	Ok((from_raw(lim.rlim_cur), from_raw(lim.rlim_max)))
 }
 
 #[cfg(all(test, unix))]

@@ -690,7 +690,6 @@ impl Walker<'_> {
 	/// local mount point (a bind mount, which GNU does not warn about).
 	fn mount_point_in_cycle(&mut self, id: FileId, cycle: usize) -> bool {
 		if self.mounts.is_none() {
-			#[cfg_attr(not(unix), allow(unused_mut))]
 			let mut mounts = HashSet::new();
 			#[cfg(unix)]
 			if let Ok(list) = uucore::fsext::read_fs_list() {
@@ -749,11 +748,8 @@ fn entry_time(meta: &Metadata, cfg: &Config) -> Option<(i64, i64)> {
 	match kind {
 		TimeKind::Modification => Some((meta.mtime()?, meta.mtime_nsec()?)),
 		TimeKind::Access => Some((meta.atime()?, meta.atime_nsec()?)),
-		// Windows has no POSIX status-change time; like `stat`, fall back to
-		// the last write time, as Cygwin does.
 		TimeKind::Change => match (meta.ctime(), meta.ctime_nsec()) {
 			(Some(secs), Some(nsec)) => Some((secs, nsec)),
-			_ if cfg!(windows) => Some((meta.mtime()?, meta.mtime_nsec()?)),
 			_ => None,
 		},
 	}
@@ -1149,16 +1145,9 @@ mod tests {
 		fs::write(root.join("a/b/x.log"), "log\n").unwrap();
 		fs::write(root.join("d/y.log"), "log2\n").unwrap();
 		fs::hard_link(root.join("a/f1.txt"), root.join("d/hard")).unwrap();
-		#[cfg(unix)]
-		{
-			std::os::unix::fs::symlink("../a", root.join("e/linkdir")).unwrap();
-			std::os::unix::fs::symlink("nowhere", root.join("e/dangling")).unwrap();
-			std::os::unix::fs::symlink("f1.txt", root.join("a/flink")).unwrap();
-		}
-		// Creating symlinks needs a privilege on Windows; a 6-byte file keeps
-		// the inode and apparent-size totals the tests expect from `a/flink`.
-		#[cfg(not(unix))]
-		fs::write(root.join("a/flink"), "f1.txt").unwrap();
+		std::os::unix::fs::symlink("../a", root.join("e/linkdir")).unwrap();
+		std::os::unix::fs::symlink("nowhere", root.join("e/dangling")).unwrap();
+		std::os::unix::fs::symlink("f1.txt", root.join("a/flink")).unwrap();
 		(dir, root)
 	}
 
@@ -1456,12 +1445,6 @@ mod tests {
 		let set = |path: &str, secs: u64| {
 			let mut options = fs::File::options();
 			options.write(true);
-			// Windows opens a directory handle only with backup semantics.
-			#[cfg(windows)]
-			std::os::windows::fs::OpenOptionsExt::custom_flags(
-				&mut options,
-				windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS,
-			);
 			options
 				.open(root.join(path))
 				.or_else(|_| fs::File::open(root.join(path)))
@@ -1492,10 +1475,7 @@ mod tests {
 		let dir = tempfile::tempdir().expect("tempdir");
 		let root = dir.path().canonicalize().expect("canonical");
 		// Stay under the host's PATH_MAX: every level adds "/d".
-		#[cfg(unix)]
 		let path_max = usize::try_from(libc::PATH_MAX).expect("PATH_MAX is positive");
-		#[cfg(not(unix))]
-		let path_max = 4096;
 		let depth = (path_max - 96 - root.join("deep").as_os_str().len()) / 2;
 		let mut chain = root.join("deep");
 		for _ in 0..depth {

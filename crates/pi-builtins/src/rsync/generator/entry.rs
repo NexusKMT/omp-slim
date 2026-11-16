@@ -1276,14 +1276,7 @@ fn is_unsupported(err: &io::Error) -> bool {
 	if err.kind() == io::ErrorKind::Unsupported {
 		return true;
 	}
-	#[cfg(unix)]
-	{
-		matches!(err.raw_os_error(), Some(e) if e == libc::EOPNOTSUPP || e == libc::ENOSYS)
-	}
-	#[cfg(not(unix))]
-	{
-		false
-	}
+	matches!(err.raw_os_error(), Some(e) if e == libc::EOPNOTSUPP || e == libc::ENOSYS)
 }
 
 fn node_kind(mode: u32, rdev: u64) -> NodeKind {

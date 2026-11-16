@@ -236,7 +236,6 @@ fn open_fd(fd: &FdRef, output: bool) -> Fd {
 }
 
 /// A duplicate of the OS handle of an engine fd object, close-on-exec.
-#[cfg(unix)]
 fn duplicate(handle: OsHandle) -> io::Result<std::fs::File> {
 	use std::os::fd::{BorrowedFd, RawFd};
 	let raw = RawFd::try_from(handle.0).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
@@ -244,23 +243,6 @@ fn duplicate(handle: OsHandle) -> io::Result<std::fs::File> {
 	// `FdRef`) for the duration of the borrow, which only duplicates it.
 	let fd = unsafe { BorrowedFd::borrow_raw(raw) };
 	Ok(std::fs::File::from(fd.try_clone_to_owned()?))
-}
-
-#[cfg(windows)]
-fn duplicate(handle: OsHandle) -> io::Result<std::fs::File> {
-	use std::os::windows::io::BorrowedHandle;
-	let addr =
-		usize::try_from(handle.0).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-	let raw = std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(addr);
-	// SAFETY: the engine object owning the handle is alive (the caller holds
-	// its `FdRef`) for the duration of the borrow, which only duplicates it.
-	let borrowed = unsafe { BorrowedHandle::borrow_raw(raw) };
-	Ok(std::fs::File::from(borrowed.try_clone_to_owned()?))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn duplicate(_handle: OsHandle) -> io::Result<std::fs::File> {
-	Err(io::ErrorKind::Unsupported.into())
 }
 
 /// An engine fd object as a `pi_vfs` provider file: every operation polls

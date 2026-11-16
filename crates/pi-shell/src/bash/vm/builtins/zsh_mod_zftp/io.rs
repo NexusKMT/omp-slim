@@ -304,23 +304,12 @@ fn unsupported() -> io::Error {
 	io::ErrorKind::Unsupported.into()
 }
 
-// `EBADF` and `EIO`. Windows OS error numbers are not C's, so there the
-// error carries the `strerror` text, which `FsErr` reports.
-#[cfg(unix)]
+// `EBADF` and `EIO`.
 fn ebadf() -> io::Error {
 	io::Error::from_raw_os_error(libc::EBADF)
 }
-#[cfg(not(unix))]
-fn ebadf() -> io::Error {
-	io::Error::other("Bad file descriptor")
-}
-#[cfg(unix)]
 fn eio() -> io::Error {
 	io::Error::from_raw_os_error(libc::EIO)
-}
-#[cfg(not(unix))]
-fn eio() -> io::Error {
-	io::Error::other("Input/output error")
 }
 
 const fn inet(a: &SockAddr) -> Option<SocketAddr> {

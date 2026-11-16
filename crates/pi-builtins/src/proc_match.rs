@@ -265,7 +265,6 @@ pub(crate) fn signal_number(operand: &str) -> Option<i32> {
 }
 
 /// Signal names (without `SIG`) and numbers on this platform.
-#[cfg(unix)]
 const SIGNALS: &[(&str, i32)] = &[
 	("HUP", libc::SIGHUP),
 	("INT", libc::SIGINT),
@@ -321,24 +320,6 @@ const SIGNALS: &[(&str, i32)] = &[
 	("INFO", libc::SIGINFO),
 ];
 
-/// The signals every POSIX platform numbers alike, which Windows scripts can
-/// still name.
-#[cfg(not(unix))]
-const SIGNALS: &[(&str, i32)] = &[
-	("HUP", 1),
-	("INT", 2),
-	("QUIT", 3),
-	("ILL", 4),
-	("TRAP", 5),
-	("ABRT", 6),
-	("FPE", 8),
-	("KILL", 9),
-	("SEGV", 11),
-	("PIPE", 13),
-	("ALRM", 14),
-	("TERM", 15),
-];
-
 /// Whether `number` is a real-time signal (Linux), which has no name here.
 #[cfg(target_os = "linux")]
 fn is_realtime(number: i32) -> bool {
@@ -354,7 +335,7 @@ const fn is_realtime(_number: i32) -> bool {
 /// Resolves once every process in `processes` has exited.
 ///
 /// Processes are awaited on kernel exit notifications where the platform has
-/// them (pidfds on Linux, process handles on Windows); only the ones that
+/// them (pidfds on Linux); only the ones that
 /// cannot be watched that way fall back to a 50 ms status poll.
 async fn wait_for_exits(processes: &[proc_snapshot::ProcInfo]) {
 	let polled = wait_for_watchable_exits(processes).await;
@@ -403,23 +384,9 @@ async fn wait_for_watchable_exits(
 
 /// Waits on each process's snapshot handle and returns the processes whose
 /// wait could not be registered, which need polling.
-#[cfg(windows)]
-async fn wait_for_watchable_exits(
-	processes: &[proc_snapshot::ProcInfo],
-) -> Vec<&proc_snapshot::ProcInfo> {
-	let mut polled = Vec::new();
-	// A process handle stays signalled once its process has exited, so
-	// awaiting them one after another is the same as awaiting all.
-	for process in processes {
-		if process.exited().await.is_err() {
-			polled.push(process);
-		}
-	}
-	polled
-}
 
 /// No exit notification primitive is wired up here; every process is polled.
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(target_os = "linux"))]
 async fn wait_for_watchable_exits(
 	processes: &[proc_snapshot::ProcInfo],
 ) -> Vec<&proc_snapshot::ProcInfo> {
@@ -751,16 +718,6 @@ fn parse_proc_match_args(
 		index += 1;
 	}
 
-	#[cfg(target_os = "windows")]
-	if !options.groups.is_empty()
-		|| !options.sessions.is_empty()
-		|| !options.effective_users.is_empty()
-		|| !options.real_users.is_empty()
-		|| !options.real_groups.is_empty()
-		|| !options.terminals.is_empty()
-	{
-		return Err((2, "selected process metadata is unavailable on Windows".to_string()));
-	}
 
 	if options.explicit_pid && !options.pid_files.is_empty() {
 		return Err((2, "-F and -p cannot be combined".to_string()));
@@ -1011,13 +968,10 @@ fn write_proc_match_help(
 		output,
 		"  -f full command  -x exact  -i ignore case  -v invert  -n newest  -o oldest"
 	)?;
-	#[cfg(not(target_os = "windows"))]
 	writeln!(
 		output,
 		"  -P ppid  -g pgrp  -s sid  -u euid  -U uid  -G gid  -t tty  -p pid  -F pidfile"
 	)?;
-	#[cfg(target_os = "windows")]
-	writeln!(output, "  -P ppid  -p pid  -F pidfile  -O seconds  -r states")?;
 	if mode == ProcMatchMode::Kill {
 		writeln!(output, "  -SIGNAL, --signal SIGNAL  choose signal (default TERM)")?;
 	}
@@ -1031,17 +985,3 @@ fn write_proc_match_help(
 	Ok(())
 }
 
-#[cfg(all(test, windows))]
-mod tests {
-	use std::path::PathBuf;
-
-	use super::*;
-
-	#[test]
-	fn resolves_msys_drive_alias_pidfiles() {
-		assert_eq!(
-			ShellPaths::with_cwd(r"C:\workspace").resolve("/c/Users/Adam/app.pid"),
-			PathBuf::from(r"C:\Users\Adam\app.pid"),
-		);
-	}
-}

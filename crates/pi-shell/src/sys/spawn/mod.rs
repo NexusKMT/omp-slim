@@ -1,8 +1,8 @@
-//! The reference spawner: every external runs in its own process group
-//! (Unix) or Job Object (Windows), so a cancel or a job pause reaches the
-//! whole tree, and nothing it started outlives a cancel unnoticed. The
-//! exception is [`Sessions::Inherit`] (standalone shells): externals share
-//! the host's group, and group-wide operations narrow to the external's pid.
+//! The reference spawner: every external runs in its own process group, so
+//! a cancel or a job pause reaches the whole tree, and nothing it started
+//! outlives a cancel unnoticed. The exception is [`Sessions::Inherit`]
+//! (standalone shells): externals share the host's group, and group-wide
+//! operations narrow to the external's pid.
 //!
 //! **Lifecycle of an [`ExtProc`] it returns.**
 //! - A waiter observes the exit without reaping it (Unix `waitid(WNOWAIT)`): an
@@ -35,8 +35,6 @@
 
 #[cfg(unix)]
 mod unix;
-#[cfg(windows)]
-mod windows;
 use std::{
 	fmt, fs, io,
 	sync::{Arc, Weak},
@@ -46,13 +44,9 @@ use std::{
 
 use bstr::BString;
 use parking_lot::Mutex;
-#[cfg(windows)]
-pub(crate) use windows::{break_console_groups, has_console_groups};
 
 #[cfg(unix)]
 use self::unix as imp;
-#[cfg(windows)]
-use self::windows as imp;
 use crate::{
 	bash::{ExtProc, SpawnSpec, StdioSpec},
 	sys::pump::{End, Feed, Pump, os},
@@ -65,10 +59,6 @@ use crate::{
 /// changes a disposition while spawners may run calls it (the shell's trap
 /// table, an embedding runtime's reset); a change it misses leaves a newly
 /// ignored signal ignored in later children.
-#[cfg_attr(
-	not(unix),
-	expect(clippy::missing_const_for_fn, reason = "the unix body re-reads signal dispositions")
-)]
 pub fn dispositions_changed() {
 	#[cfg(unix)]
 	imp::dispositions_changed();
@@ -84,13 +74,9 @@ pub struct NativeSpawner {
 /// Configuration of a [`NativeSpawner`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpawnConfig {
-	/// Time between TERM and KILL when a running external is abandoned, and
-	/// on Windows after any TERM (console control events are often ignored).
-	/// On Windows TERM hangs up an owned external's console, and the system
-	/// ends what still runs on it 5 s later, whatever a longer grace says.
+	/// Time between TERM and KILL when a running external is abandoned.
 	pub grace:    Duration,
-	/// Session layout of externals (Unix; on Windows, whether they get a
-	/// private console).
+	/// Session layout of externals.
 	pub sessions: Sessions,
 	/// Who observes the exits of externals (Linux).
 	pub exits:    Exits,
@@ -148,10 +134,7 @@ pub enum Sessions {
 	/// terminal never stops it with `SIGTTIN`/`SIGTTOU`, and it cannot grab
 	/// the host's foreground. `PgroupSpec::Join` stages lead their own
 	/// sessions too: a process can never `setpgid`-join a leader in another
-	/// session (`EPERM`, the pi-shell lesson). On Windows no external shares
-	/// the host's console: an owned job gets a pseudoconsole the spawner holds
-	/// while its processes run, a released (`nohup`) one a hidden console of
-	/// its own. The default, for agent hosts.
+	/// session (`EPERM`, the pi-shell lesson). The default, for agent hosts.
 	#[default]
 	Detach,
 	/// Bash job-control layout: `PgroupSpec::New` leads a process group in the
@@ -181,11 +164,10 @@ pub enum Sessions {
 pub struct Leftover {
 	/// OS process id.
 	pub pid:   u32,
-	/// The group it was found in: process group or session id (Unix; the
-	/// pid itself under [`Sessions::Inherit`]), the job's leader pid
-	/// (Windows).
+	/// The group it was found in: process group or session id (the pid itself
+	/// under [`Sessions::Inherit`]).
 	pub group: u32,
-	/// Command name (Unix `comm`, Windows image path).
+	/// Command name (`comm`).
 	pub name:  BString,
 }
 
@@ -255,8 +237,6 @@ impl NativeSpawner {
 				config,
 				#[cfg(unix)]
 				state: imp::State::new(config.umask),
-				#[cfg(windows)]
-				state: imp::State::new(),
 				feeds: Mutex::new(Vec::new()),
 			}),
 		}
@@ -271,17 +251,8 @@ impl NativeSpawner {
 	/// elsewhere or when it could not be read). A host gives its shells
 	/// this mask: externals spawned with it take the `posix_spawn` path,
 	/// which cannot set another.
-	#[cfg_attr(
-		not(unix),
-		expect(clippy::missing_const_for_fn, reason = "the Unix version reads the spawner's state")
-	)]
 	pub fn umask(&self) -> Option<u32> {
-		#[cfg(unix)]
-		{
-			self.shared.state.umask()
-		}
-		#[cfg(not(unix))]
-		None
+		self.shared.state.umask()
 	}
 
 	/// Advance the output work of externals whose `ExtProc` is gone: output
@@ -300,16 +271,13 @@ impl NativeSpawner {
 	/// # Errors
 	///
 	/// The OS error of the spawn (`NotFound`, `PermissionDenied`, …), or
-	/// `InvalidInput` for arguments the OS cannot represent (interior NUL;
-	/// non-UTF-8 on Windows). On Windows an extra fd reaches the child only
-	/// as the named pipe its `/dev/fd/N` argument becomes.
+	/// `InvalidInput` for arguments the OS cannot represent (an interior NUL).
 	pub fn spawn(&self, spec: SpawnSpec<'_>) -> io::Result<Box<dyn ExtProc>> {
 		imp::spawn(&self.shared, spec)
 	}
 
-	/// Processes still alive in the groups, sessions (Unix) or jobs
-	/// (Windows) this spawner created, excluding zombies and the calling
-	/// process. Empty after a clean case.
+	/// Processes still alive in the groups and sessions this spawner created,
+	/// excluding zombies and the calling process. Empty after a clean case.
 	pub fn leftovers(&self) -> io::Result<Vec<Leftover>> {
 		imp::leftovers(&self.shared)
 	}

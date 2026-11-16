@@ -47,8 +47,6 @@ mod tests {
 	async fn already_exited_pid_returns_promptly() -> anyhow::Result<()> {
 		#[cfg(unix)]
 		let mut child = ProcessCommand::new("sh").args(["-c", "exit 0"]).spawn()?;
-		#[cfg(windows)]
-		let mut child = ProcessCommand::new("cmd").args(["/C", "exit 0"]).spawn()?;
 		let pid = child.id();
 
 		// Leave the child unreaped so it remains visible in the process snapshot,
@@ -63,8 +61,8 @@ mod tests {
 	}
 
 	/// A waiting `pidwait` must not hold a blocking-pool thread: hosts cap that
-	/// pool (eight threads in pi-natives on Windows) and run every utility
-	/// builtin on it, so a few long waits would stall unrelated commands.
+	/// pool (eight threads in pi-natives) and run every utility builtin on it,
+	/// so a few long waits would stall unrelated commands.
 	#[test]
 	fn waiting_holds_no_blocking_pool_thread() -> anyhow::Result<()> {
 		let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -74,11 +72,6 @@ mod tests {
 		runtime.block_on(async {
 			#[cfg(unix)]
 			let mut child = ProcessCommand::new("sleep").arg("30").spawn()?;
-			#[cfg(windows)]
-			let mut child = ProcessCommand::new("ping")
-				.args(["-n", "30", "127.0.0.1"])
-				.stdout(std::process::Stdio::null())
-				.spawn()?;
 			let pid = child.id().to_string();
 			let probe = async {
 				// Give pidwait time to select the process and start waiting.

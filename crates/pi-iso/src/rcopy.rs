@@ -183,15 +183,14 @@ struct Limits {
 
 /// Limits for every rcopy `git` call.
 ///
-/// `exit` is generous because a Windows checkout of a very large repository
+/// `exit` is generous because a checkout of a very large repository
 /// legitimately takes minutes; it exists so a `git` that never exits fails the
 /// isolation instead of parking a blocking thread, and the task that awaits
 /// it, forever (#17901). `drain` covers pipes that outlive the child: every
 /// process holding an inherited write end keeps them open, whether a lingering
-/// git grandchild or, on Windows, where handle inheritance is process-wide, an
-/// unrelated child the host spawned while the pipes were inheritable. The
-/// child's output is complete once it exits, so EOF is not awaited past
-/// `drain`.
+/// git grandchild or an unrelated child the host spawned while the pipes were
+/// inheritable. The child's output is complete once it exits, so EOF is not
+/// awaited past `drain`.
 const GIT_LIMITS: Limits = Limits { exit: Duration::from_mins(10), drain: Duration::from_secs(5) };
 
 /// Exit-status poll interval while waiting under [`Limits::exit`].
@@ -214,8 +213,8 @@ fn run_git(
 /// - [`IsoError::Unavailable`] when `program` is not on `PATH`.
 /// - [`IsoError::Other`] when the child cannot be spawned or waited on, its
 ///   pipe threads cannot start, it is still running after `limits.exit` (it is
-///   killed; on Windows its descendants may survive), or it exits 0 without
-///   consuming all of `stdin`.
+///   killed, its descendants may survive), or it exits 0 without consuming all
+///   of `stdin`.
 fn run_program(
 	program: &Path,
 	cwd: &Path,
@@ -292,8 +291,8 @@ fn run_program(
 	Ok(Output { status, stdout, stderr })
 }
 
-/// Kill `child` and reap it. Only the direct child: on Windows a killed `git`
-/// launcher leaves its descendants running.
+/// Kill `child` and reap it. Only the direct child: a killed `git` launcher
+/// leaves its descendants running.
 fn reap(child: &mut Child) {
 	let _ = child.kill();
 	let _ = child.wait();
@@ -438,24 +437,11 @@ fn copy_mtime(src: &Path, dst: &Path) {
 /// open and a close per copied entry. `dst` is never a symlink here, but not
 /// following keeps a swapped-in link from redirecting the write. Pre-epoch
 /// times are not mirrored.
-#[cfg(unix)]
 fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> std::io::Result<()> {
 	mtime
 		.duration_since(std::time::UNIX_EPOCH)
 		.map_err(std::io::Error::other)?;
 	std::fs::set_times_nofollow(path, std::fs::FileTimes::new().set_modified(mtime))
-}
-
-/// `fs::set_times` opens `path` with just write-attributes access and backup
-/// semantics, so it works on readonly files and directories.
-#[cfg(windows)]
-fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> std::io::Result<()> {
-	std::fs::set_times(path, std::fs::FileTimes::new().set_modified(mtime))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> std::io::Result<()> {
-	std::fs::File::open(path)?.set_modified(mtime)
 }
 
 #[cfg(test)]
@@ -504,33 +490,7 @@ mod tests {
 		assert_eq!(mtime(&merged.join("sub")), dir_mtime);
 	}
 
-	/// A directory symlink must be recreated as a directory link; Windows
-	/// cannot traverse a file link that points at a directory.
-	#[cfg(windows)]
-	#[test]
-	fn rcopy_recreates_directory_symlink_as_directory_link() {
-		use std::os::windows::fs::FileTypeExt as _;
-
-		let root = TempDirGuard::new();
-		let lower = root.path().join("lower");
-		fs::create_dir_all(lower.join("target")).expect("create lower/target");
-		fs::write(lower.join("target/inner.txt"), b"inner").expect("write inner file");
-		if let Err(err) = std::os::windows::fs::symlink_dir("target", lower.join("link")) {
-			// Creating symlinks needs Developer Mode or the symlink privilege.
-			eprintln!("skipping: cannot create directory symlink: {err}");
-			return;
-		}
-
-		let merged = root.path().join("merged");
-		RcopyBackend.start(&lower, &merged).expect("rcopy start");
-
-		let link = merged.join("link");
-		let file_type = fs::symlink_metadata(&link)
-			.expect("link metadata")
-			.file_type();
-		assert!(file_type.is_symlink_dir(), "expected a directory link, got {file_type:?}");
-		assert_eq!(fs::read(link.join("inner.txt")).expect("read through link"), b"inner");
-	}
+	/// A directory symlink must be recreated as a directory link.
 
 	struct TempDirGuard(PathBuf);
 

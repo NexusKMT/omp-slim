@@ -102,17 +102,6 @@ fn args_into_buffer<'a>(
 		}
 	}
 
-	// On Windows, we must hop through a String.
-	#[cfg(not(any(unix, target_os = "wasi")))]
-	{
-		for part in itertools::intersperse(strings.map(|argument| argument.to_str()), Some(" ")) {
-			let Some(part) = part else {
-				return Err("arguments contain invalid UTF-8");
-			};
-			buffer.extend_from_slice(part.as_bytes());
-		}
-	}
-
 	buffer.push(b'\n');
 	Ok(())
 }

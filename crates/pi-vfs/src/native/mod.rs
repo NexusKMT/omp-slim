@@ -3,8 +3,6 @@
 
 #[cfg(unix)]
 mod unix;
-#[cfg(windows)]
-mod windows;
 
 use std::{
 	fs,
@@ -18,13 +16,6 @@ pub(crate) use self::unix::{
 	access, allocated_size, chown, close, file_id, file_id_of, file_is_locked, file_metadata,
 	file_set_permissions, file_set_times, fstat_fs, get_xattr, link_count, list_xattr, make_node,
 	remove_xattr, set_dir_mode, set_permissions, set_times, set_xattr, stat_fs, symlink,
-};
-#[cfg(windows)]
-pub(crate) use self::windows::{
-	HandleInfo, access, allocated_size, chown, close, file_id, file_id_of, file_is_locked,
-	file_metadata, file_set_permissions, file_set_times, fstat_fs, get_xattr, link_count,
-	list_xattr, make_node, remove_xattr, set_dir_mode, set_permissions, set_times, set_xattr,
-	stat_fs, symlink,
 };
 use crate::{
 	canonicalize::{Resolver, canonicalize},
@@ -40,25 +31,10 @@ pub(crate) fn open(path: &Path, options: &OpenOptions) -> io::Result<File> {
 	options.to_std().open(path).map(File::from)
 }
 
-// Windows path stats carry handle identity when the object can be opened for
-// attribute queries, so identity comparisons (`same_file`, rotation detection)
-// work the way the unix dev/ino pair does.
-#[cfg(windows)]
-pub(crate) fn metadata(path: &Path) -> io::Result<Metadata> {
-	windows::path_metadata(path, true)
-}
-
-#[cfg(windows)]
-pub(crate) fn symlink_metadata(path: &Path) -> io::Result<Metadata> {
-	windows::path_metadata(path, false)
-}
-
-#[cfg(not(windows))]
 pub(crate) fn metadata(path: &Path) -> io::Result<Metadata> {
 	fs::metadata(path).map(Metadata::from)
 }
 
-#[cfg(not(windows))]
 pub(crate) fn symlink_metadata(path: &Path) -> io::Result<Metadata> {
 	fs::symlink_metadata(path).map(Metadata::from)
 }

@@ -290,8 +290,7 @@ mod platform {
 			// `proc_listchildpids(getpid(), …)`, while `ps -P` and `pgrep -P`
 			// still see the same children. Walk the whole pid table via
 			// `proc_listallpids` and filter on `pbi_ppid` instead; this is the
-			// same approach we already use for `find_by_path` and that the
-			// Windows implementation uses via Toolhelp snapshots.
+			// same approach we already use for `find_by_path`.
 			let tree = build_process_tree();
 			Self::children_from_tree(self.pid, &tree)
 		}
@@ -332,8 +331,7 @@ mod platform {
 		pub fn descendants(&self) -> Vec<Self> {
 			// One process-table snapshot per walk — building it inside the
 			// recursion would re-scan every pid for every visited node,
-			// producing an `O(N · D)` kernel call pattern. Mirrors the Windows
-			// implementation.
+			// producing an `O(N · D)` kernel call pattern.
 			let tree = build_process_tree();
 			let mut out = Vec::new();
 			let mut visited = HashSet::new();
@@ -473,177 +471,6 @@ mod platform {
 			.collect()
 	}
 }
-#[cfg(target_os = "windows")]
-mod platform {
-	use std::{
-		collections::{HashMap, HashSet},
-		ffi::OsStr,
-		os::windows::{ffi::OsStrExt, io::OwnedHandle},
-		sync::Arc,
-	};
-
-	use pi_builtins::proc_sys as sys;
-	use smallvec::SmallVec;
-
-	use super::ProcessStatus;
-
-	const PROCESS_REFERENCE_ACCESS: u32 =
-		sys::PROCESS_TERMINATE | sys::PROCESS_QUERY_LIMITED_INFORMATION | sys::SYNCHRONIZE;
-
-	#[derive(Clone)]
-	/// Stable Windows process reference backed by an owned process handle plus
-	/// the kernel-reported creation time, which pins identity even if the PID is
-	/// recycled while we hold the handle.
-	pub struct Process {
-		pid:           i32,
-		handle:        Arc<OwnedHandle>,
-		creation_time: u64,
-	}
-
-	impl Process {
-		pub fn from_pid(pid: i32) -> Option<Self> {
-			if pid <= 0 {
-				return None;
-			}
-			let handle =
-				Arc::new(sys::open_process(u32::try_from(pid).ok()?, PROCESS_REFERENCE_ACCESS)?);
-			let creation_time = sys::process_times(&handle)?.0;
-			Some(Self { pid, handle, creation_time })
-		}
-
-		pub const fn pid(&self) -> i32 {
-			self.pid
-		}
-
-		pub fn parent_pid(&self) -> Option<i32> {
-			sys::parent_pid(&self.handle)
-		}
-
-		/// Read through the pinned handle, so it is always this process's
-		/// command line even after the pid is reused.
-		pub fn args(&self) -> Vec<String> {
-			sys::command_line(&self.handle)
-				.map_or_default(|command_line| sys::split_command_line(&command_line))
-		}
-
-		pub fn children(&self) -> Vec<Self> {
-			let tree = build_process_tree();
-			self.children_from_tree(&tree)
-		}
-
-		/// Walk the entire descendant tree using a single Toolhelp snapshot.
-		///
-		/// `children()` recursing per-node would re-snapshot the whole process
-		/// table for every visited descendant, making tree termination
-		/// `O(N · D)` snapshots. One snapshot per termination wave is enough.
-		pub fn descendants(&self) -> Vec<Self> {
-			let tree = build_process_tree();
-			let Ok(root) = u32::try_from(self.pid) else {
-				return Vec::new();
-			};
-			let mut visited: HashSet<u32> = HashSet::new();
-			visited.insert(root);
-			let mut out = Vec::new();
-			self.collect_descendants_from_tree(&tree, &mut visited, &mut out);
-			out
-		}
-
-		/// The running process `child_pid`, when it really is a child of
-		/// `self`. Windows never rewrites the parent id recorded for a process
-		/// whose parent exited, so such an orphan is listed as a child of
-		/// whichever process reuses that pid. A real child cannot have been
-		/// created before its parent; an orphan older than `self` can.
-		fn child(&self, child_pid: u32) -> Option<Self> {
-			let child = Self::from_pid(i32::try_from(child_pid).ok()?)?;
-			(child.creation_time >= self.creation_time && child.status() == ProcessStatus::Running)
-				.then_some(child)
-		}
-
-		pub(super) fn children_from_tree(
-			&self,
-			tree: &HashMap<u32, SmallVec<[u32; 4]>>,
-		) -> Vec<Self> {
-			let Ok(pid_u32) = u32::try_from(self.pid) else {
-				return Vec::new();
-			};
-			tree
-				.get(&pid_u32)
-				.into_iter()
-				.flatten()
-				.filter_map(|&child_pid| self.child(child_pid))
-				.collect()
-		}
-
-		fn collect_descendants_from_tree(
-			&self,
-			tree: &HashMap<u32, SmallVec<[u32; 4]>>,
-			visited: &mut HashSet<u32>,
-			out: &mut Vec<Self>,
-		) {
-			let Some(children) = u32::try_from(self.pid).ok().and_then(|pid| tree.get(&pid)) else {
-				return;
-			};
-			for &child_pid in children {
-				if !visited.insert(child_pid) {
-					continue;
-				}
-				let Some(child) = self.child(child_pid) else {
-					continue;
-				};
-				// Post-order: collect grandchildren first so leaves are signalled
-				// before their parents during tree termination.
-				child.collect_descendants_from_tree(tree, visited, out);
-				out.push(child);
-			}
-		}
-
-		/// The handle pins the original kernel process object even after the
-		/// pid is recycled, so this cannot hit a different process.
-		pub fn kill(&self, _signal: i32) -> bool {
-			sys::terminate(&self.handle)
-		}
-
-		pub const fn group_id() -> Option<i32> {
-			None
-		}
-
-		pub fn status(&self) -> ProcessStatus {
-			if sys::has_exited(&self.handle) {
-				ProcessStatus::Exited
-			} else {
-				ProcessStatus::Running
-			}
-		}
-
-		/// Resolves once the process exits, through a thread-pool wait on the
-		/// process handle, so no thread is parked per waiter.
-		pub async fn exited(&self) -> std::io::Result<()> {
-			sys::exited(Arc::clone(&self.handle)).await
-		}
-	}
-
-	/// Build a map of `parent_pid` -> [`child_pids`] for all processes.
-	fn build_process_tree() -> HashMap<u32, SmallVec<[u32; 4]>> {
-		let mut tree: HashMap<u32, SmallVec<[u32; 4]>> = HashMap::new();
-		for entry in sys::processes() {
-			tree.entry(entry.ppid).or_default().push(entry.pid);
-		}
-		tree
-	}
-
-	/// Find processes whose `QueryFullProcessImageNameW` result equals `target`.
-	pub fn find_by_path(target: &str) -> Vec<Process> {
-		let target: Vec<u16> = OsStr::new(target).encode_wide().collect();
-		let mut path = vec![0u16; 32_768];
-		sys::processes()
-			.filter(|entry| {
-				sys::open_process(entry.pid, sys::PROCESS_QUERY_LIMITED_INFORMATION)
-					.is_some_and(|handle| sys::image_path(&handle, &mut path) == Some(&target[..]))
-			})
-			.filter_map(|entry| Process::from_pid(i32::try_from(entry.pid).ok()?))
-			.collect()
-	}
-}
 
 /// Stable process reference.
 #[derive(Clone)]
@@ -685,16 +512,13 @@ impl Process {
 
 	/// Send `signal` to this process only, through its pinned identity, so it
 	/// never reaches a process that reused the pid after this one was reaped.
-	/// On Windows the process is terminated whatever `signal` is.
 	pub fn signal(&self, signal: i32) -> bool {
 		self.inner.kill(signal)
 	}
 
 	/// Send `signal` to this process and its descendants, children first.
 	///
-	/// On Linux and macOS the signal is forwarded as-is. On Windows there is no
-	/// signal abstraction, so the `signal` argument is ignored and the entire
-	/// tree is hard-killed via `TerminateProcess`. Defaults to the POSIX
+	/// On Linux and macOS the signal is forwarded as-is. Defaults to the POSIX
 	/// hard-kill signal.
 	#[must_use]
 	pub fn kill_tree(&self, signal: Option<i32>) -> u32 {
@@ -702,13 +526,6 @@ impl Process {
 	}
 
 	/// Process group id for this process, when supported by the platform.
-	#[cfg(target_os = "windows")]
-	#[must_use]
-	pub const fn group_id(&self) -> Option<i32> {
-		platform::Process::group_id()
-	}
-
-	#[cfg(not(target_os = "windows"))]
 	#[must_use]
 	pub fn group_id(&self) -> Option<i32> {
 		self.inner.group_id()
@@ -780,12 +597,11 @@ impl Process {
 	/// any pid in `protected`.
 	///
 	/// `protected` shields the harness itself: a run-cancellation sweep must
-	/// never hard-kill the host. On Windows the
-	/// descendant tree is derived from raw `th32ParentProcessID` values that
-	/// outlive their recorded parent, so a freshly spawned child whose recycled
-	/// pid matches the harness's stale parent pid makes the harness enumerate
-	/// as a false descendant; `TerminateProcess`-ing it drops the whole session
-	/// with no cleanup and no `session_exit` record (#7452, related #4605).
+	/// never hard-kill the host. The descendant walk is identity-pinned, so the
+	/// harness cannot normally enumerate as a false descendant; the check is
+	/// defense in depth for a walk that follows a stale parent chain, which
+	/// would otherwise drop the whole session with no cleanup and no
+	/// `session_exit` record (#7452, related #4605).
 	fn signal_tree_excluding(&self, signal: i32, protected: &HashSet<i32>) -> u32 {
 		let descendants = self.signalable_descendants(protected);
 		let mut signaled = 0u32;
@@ -812,9 +628,9 @@ impl Process {
 	/// protected pids.
 	///
 	/// The flattened descendant list can contain a protected node (the harness,
-	/// on a Windows PID-reuse false-descendant) *together with* that node's real
-	/// children, which were collected by recursing through it. Skipping only the
-	/// exact protected pid would still terminate those unrelated worker/tool
+	/// on a stale parent chain) *together with* that node's real children,
+	/// which were collected by recursing through it. Skipping only the exact
+	/// protected pid would still terminate those unrelated worker/tool
 	/// subprocesses, so drop every node whose recorded parent chain — within the
 	/// enumerated set — passes through a protected pid (#7452 review).
 	fn signalable_descendants(&self, protected: &HashSet<i32>) -> Vec<Self> {
@@ -892,19 +708,15 @@ impl Process {
 /// The harness pid — the one process a run-cancellation sweep must never
 /// signal.
 ///
-/// On Unix the descendant walk is identity-pinned (pidfd / start-time), so the
-/// host can never appear as a false descendant and this set is a harmless
-/// no-op safety net. On Windows the descendant tree is derived from raw
-/// `th32ParentProcessID` values that survive their recorded parent's death: a
-/// freshly spawned child whose recycled pid matches the harness's stale parent
-/// pid makes the harness enumerate as a false descendant, so cancelling a
-/// timed-out bash run would `TerminateProcess` the host with no cleanup and no
-/// `session_exit` record (#7452, related #4605).
+/// The descendant walk is identity-pinned (pidfd / start-time), so the host
+/// cannot appear as a false descendant and this set is a harmless no-op safety
+/// net. It stays as defense in depth: a sweep that signalled the harness would
+/// drop the whole session with no cleanup and no `session_exit` record (#7452,
+/// related #4605).
 ///
-/// Do not walk the host's numeric parent chain here. On Windows the host's
-/// recorded parent pid can itself have been recycled onto the cancellation
-/// target; treating that raw pid as protected would spare the hung command and
-/// prune all of its descendants from cleanup.
+/// Do not walk the host's numeric parent chain here. A recycled pid could be
+/// the cancellation target; treating that raw pid as protected would spare the
+/// hung command and prune all of its descendants from cleanup.
 fn host_protected_pids() -> HashSet<i32> {
 	i32::try_from(std::process::id()).into_iter().collect()
 }
@@ -1021,20 +833,12 @@ pub fn kill_process_group(pgid: i32, signal: i32) -> bool {
 	platform_kill_process_group(pgid, signal)
 }
 
-#[cfg(unix)]
 fn platform_kill_process_group(pgid: i32, signal: i32) -> bool {
 	// SAFETY: `kill` takes integer identifiers by value and does not access
 	// caller-owned memory. A negative PID is the POSIX process-group form.
 	unsafe { libc::kill(-pgid, signal) == 0 }
 }
 
-/// Process groups are not exposed on Windows.
-#[cfg(not(unix))]
-const fn platform_kill_process_group(_pgid: i32, _signal: i32) -> bool {
-	false
-}
-
-#[cfg(unix)]
 fn is_self_process_group(pgid: i32) -> bool {
 	// SAFETY: `getpgid(0)` queries the calling process's pgid and does not
 	// access caller-owned memory. A return value <= 0 is treated as "unknown",
@@ -1043,15 +847,10 @@ fn is_self_process_group(pgid: i32) -> bool {
 	self_pgid > 0 && self_pgid == pgid
 }
 
-#[cfg(not(unix))]
-const fn is_self_process_group(_pgid: i32) -> bool {
-	false
-}
-
-/// POSIX `SIGTERM` / Windows polite termination sentinel.
+/// POSIX `SIGTERM` sentinel.
 pub const TERM_SIGNAL: i32 = 15;
 
-/// POSIX `SIGKILL` / Windows hard-termination sentinel.
+/// POSIX `SIGKILL` sentinel.
 pub const KILL_SIGNAL: i32 = 9;
 
 /// A collection of process groups and process trees scheduled for
@@ -1133,9 +932,9 @@ mod tests {
 	use super::*;
 
 	/// The harness pid must be the only protected pid. Including its recorded
-	/// parent would be unsafe on Windows: that stale numeric pid can have been
-	/// recycled onto the timed-out command, causing cancellation to spare the
-	/// hung target and its whole subtree.
+	/// parent would be unsafe: that stale numeric pid can have been recycled
+	/// onto the timed-out command, causing cancellation to spare the hung
+	/// target and its whole subtree.
 	#[test]
 	fn host_protected_pids_includes_self() {
 		let self_pid = i32::try_from(std::process::id()).expect("self pid fits in i32");
@@ -1147,12 +946,11 @@ mod tests {
 	}
 
 	/// Regression test for #7452: a cancellation sweep must never signal the
-	/// protected host pid, even when it is enumerated as the sweep root. On
-	/// Windows a recycled pid can make the harness surface as
-	/// a false descendant of a just-spawned child; `TerminateProcess`-ing it
-	/// killed the whole session with no `session_exit` record. The observable
-	/// defense — provable cross-platform — is that `signal_tree_excluding`
-	/// leaves a protected pid untouched.
+	/// protected host pid, even when it is enumerated as the sweep root. A
+	/// stale parent chain can make the harness surface as a false descendant of
+	/// a just-spawned child; hard-killing it killed the whole session with no
+	/// `session_exit` record. The observable defense — provable on every host —
+	/// is that `signal_tree_excluding` leaves a protected pid untouched.
 	#[cfg(unix)]
 	#[test]
 	fn signal_tree_spares_protected_pids() {
@@ -1187,7 +985,7 @@ mod tests {
 	}
 
 	/// Regression test for the #7453 review: pruning a protected node must drop
-	/// its whole subtree, not just the exact protected pid. A Windows PID-reuse
+	/// its whole subtree, not just the exact protected pid. A PID-reuse
 	/// false-descendant collects the harness together with the harness's real
 	/// children (LSP servers, worker/tool subprocesses); skipping only the host
 	/// pid would still terminate those. `pid_in_protected_subtree` walks the
@@ -1214,55 +1012,6 @@ mod tests {
 			!pid_in_protected_subtree(1, &protected, &parents),
 			"the sweep root must not be pruned",
 		);
-	}
-
-	/// Windows keeps the parent pid an orphan recorded, so after its parent
-	/// exits the orphan is listed under whichever later process reuses that
-	/// pid. The walk must not adopt it: an older process cannot be the child of
-	/// a newer one, and a cancellation sweep would otherwise terminate an
-	/// unrelated program.
-	#[cfg(windows)]
-	#[test]
-	fn descendant_walk_skips_processes_older_than_their_listed_parent() {
-		use std::{process::Command, thread, time::Duration};
-
-		let spawn = || {
-			Command::new("ping")
-				.args(["-n", "30", "127.0.0.1"])
-				.stdout(std::process::Stdio::null())
-				.spawn()
-				.expect("spawn sleeper")
-		};
-		let mut older = spawn();
-		// Creation times have coarse granularity; keep the two apart.
-		thread::sleep(Duration::from_millis(50));
-		let mut newer = spawn();
-		let (older_pid, newer_pid) = (older.id(), newer.id());
-		let pin = |pid: u32| platform::Process::from_pid(i32::try_from(pid).unwrap()).unwrap();
-
-		// A snapshot in which the older process names the newer one as its
-		// parent, as it would after its own parent exited and the pid was reused.
-		let tree = HashMap::from([(newer_pid, smallvec::SmallVec::from_slice(&[older_pid]))]);
-		assert!(
-			pin(newer_pid).children_from_tree(&tree).is_empty(),
-			"an older process is not a child"
-		);
-
-		// The same entry is accepted when the listed child is newer.
-		let tree = HashMap::from([(older_pid, smallvec::SmallVec::from_slice(&[newer_pid]))]);
-		let children = pin(older_pid).children_from_tree(&tree);
-		assert_eq!(
-			children
-				.iter()
-				.map(platform::Process::pid)
-				.collect::<Vec<_>>(),
-			[i32::try_from(newer_pid).unwrap()]
-		);
-
-		let _ = older.kill();
-		let _ = newer.kill();
-		let _ = older.wait();
-		let _ = newer.wait();
 	}
 
 	/// `kill_process_group` is the last line of defense: even if a future
@@ -1365,12 +1114,6 @@ mod tests {
 			.arg("30")
 			.spawn()
 			.expect("spawn sleep");
-		#[cfg(windows)]
-		let mut child = Command::new("ping")
-			.args(["-n", "30", "127.0.0.1"])
-			.stdout(std::process::Stdio::null())
-			.spawn()
-			.expect("spawn sleeper");
 		let process = Process::from_pid(i32::try_from(child.id()).unwrap()).expect("pin child");
 
 		let waited = process

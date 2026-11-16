@@ -119,16 +119,6 @@ impl OpenOptions {
 			}
 			options.custom_flags(self.custom_flags);
 		}
-		#[cfg(windows)]
-		{
-			use std::os::windows::fs::OpenOptionsExt;
-			options.custom_flags(self.custom_flags as u32);
-			// POSIX creation mode without any write bit: the new file is
-			// read-only.
-			if self.mode.is_some_and(|mode| mode & 0o222 == 0) {
-				options.attributes(windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY);
-			}
-		}
 		options
 	}
 }
@@ -151,7 +141,7 @@ impl DirOptions {
 		self
 	}
 
-	/// Creation mode (before umask); default `0o777`. Ignored on Windows.
+	/// Creation mode (before umask); default `0o777`.
 	pub const fn mode(mut self, mode: u32) -> Self {
 		self.mode = Some(mode);
 		self

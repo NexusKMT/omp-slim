@@ -187,8 +187,7 @@ pub struct Entry<'a> {
 	pub file_type: FileType,
 	/// 1 for the root's children.
 	pub depth:     usize,
-	/// Regular-file size, when known ([`Detail::Full`], Windows listings, or
-	/// a followed link).
+	/// Regular-file size, when known ([`Detail::Full`] or a followed link).
 	pub size:      Option<u64>,
 	/// Modification time in Unix nanoseconds, when known.
 	pub mtime:     Option<i64>,
@@ -486,11 +485,11 @@ pub(crate) fn rel_path(bytes: &[u8]) -> &Path {
 }
 
 pub(crate) const fn is_separator(byte: u8) -> bool {
-	byte == b'/' || (cfg!(windows) && byte == b'\\')
+	byte == b'/'
 }
 
 /// The host path separator.
-const SEP: u8 = if cfg!(windows) { b'\\' } else { b'/' };
+const SEP: u8 = b'/';
 
 /// Absolute root spelling a walk joins entry paths to: native relative roots
 /// are made absolute against the working directory; provider roots stay as
@@ -517,15 +516,7 @@ pub(crate) fn join_into(fs: &Fs, root: &Path, rel: &[u8], out: &mut PathBuf) {
 		if !bytes.last().is_some_and(|&byte| is_separator(byte)) {
 			bytes.push(SEP);
 		}
-		let start = bytes.len();
 		bytes.extend_from_slice(rel);
-		if cfg!(windows) {
-			for byte in &mut bytes[start..] {
-				if *byte == b'/' {
-					*byte = b'\\';
-				}
-			}
-		}
 	}
 	// SAFETY: `bytes` concatenates an encoded `OsStr`, ASCII separators, and
 	// raw names that came from encoded `OsStr` listings.

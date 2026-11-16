@@ -499,17 +499,7 @@ fn hashed(ctx: &mut Ctx<'_, '_>) -> Result<Vec<(BString, BString)>, Need> {
 		.collect())
 }
 
-/// zsh's `DEFAULT_PATH` (`command -p`), joined for `platform`.
-fn default_path(platform: crate::bash::ids::Platform) -> BString {
-	let separator = crate::bash::vm::probe::path_separator(platform);
-	let bytes: Vec<u8> = DEFAULT_PATH
-		.iter()
-		.map(|&byte| if byte == b':' { separator } else { byte })
-		.collect();
-	BString::from(bytes)
-}
-
-/// zsh's `DEFAULT_PATH` (`command -p`) on a POSIX host.
+/// zsh's `DEFAULT_PATH` (`command -p`).
 const DEFAULT_PATH: &[u8] = b"/bin:/usr/bin:/usr/ucb:/usr/local/bin";
 
 /// `$PATH` search for `name` (zsh `findcmd`); `defpath`: search zsh's
@@ -521,7 +511,7 @@ fn findcmd(ctx: &mut Ctx<'_, '_>, name: &[u8], defpath: bool) -> Result<Option<B
 			.then(|| name.into()));
 	}
 	let path = if defpath {
-		default_path(ctx.k.engine.config().platform)
+		BString::from(DEFAULT_PATH)
 	} else {
 		ctx.scalar(b"PATH")?.unwrap_or_default()
 	};
@@ -1173,10 +1163,7 @@ fn check_autoload(ctx: &mut Ctx<'_, '_>, ops: &Ops, name: &[u8]) -> Result<i32, 
 		return Ok(0);
 	}
 	let fpath = ctx.scalar(b"FPATH")?;
-	let fpath = crate::bash::vm::command::fpath_dirs(
-		fpath.as_ref().map(|s| s.as_slice()),
-		ctx.k.engine.config().platform,
-	);
+	let fpath = crate::bash::vm::command::fpath_dirs(fpath.as_ref().map(|s| s.as_slice()));
 	let cwd = ctx.vp.cwd.clone();
 	let not_found = |ctx: &mut Ctx<'_, '_>| {
 		ctx.diag(Diag::Usage {
@@ -1250,10 +1237,7 @@ fn load_stub(
 		},
 	};
 	let fpath = ctx.scalar(b"FPATH")?;
-	let fpath = crate::bash::vm::command::fpath_dirs(
-		fpath.as_ref().map(|s| s.as_slice()),
-		ctx.k.engine.config().platform,
-	);
+	let fpath = crate::bash::vm::command::fpath_dirs(fpath.as_ref().map(|s| s.as_slice()));
 	let cwd = ctx.vp.cwd.clone();
 	let found = {
 		let mut ask = |p: Probe| ctx.probe(p);
@@ -1629,8 +1613,7 @@ fn whence_one(
 	let mut found: Vec<BString> = Vec::new();
 	if all && name.first() != Some(&b'/') {
 		let path = ctx.scalar(b"PATH")?.unwrap_or_default();
-		let separator = crate::bash::vm::probe::path_separator(ctx.k.engine.config().platform);
-		for dir in path.split(|&c| c == separator) {
+		for dir in path.split(|&c| c == b':') {
 			let full: BString = if dir.is_empty() {
 				name.into()
 			} else {

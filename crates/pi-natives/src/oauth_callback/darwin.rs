@@ -241,17 +241,11 @@ fn assemble_application(context: &Context, app_path: &Path) -> Result<()> {
 	Ok(())
 }
 
-#[cfg(unix)]
 fn set_directory_mode(path: &Path) -> Result<()> {
 	use std::os::unix::fs::PermissionsExt;
 
 	fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 		.with_context(|| format!("failed to secure {}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn set_directory_mode(_path: &Path) -> Result<()> {
-	Ok(())
 }
 
 fn path_exists(path: &Path) -> Result<bool> {
@@ -481,18 +475,12 @@ fn read_legacy_recovery(context: &Context) -> Result<Option<LegacyRecoveryRecord
 	Ok(Some(record))
 }
 
-#[cfg(unix)]
 fn process_is_alive(pid: i32) -> bool {
 	// A zero signal only probes process ownership/existence and does not alter
 	// it. SAFETY: `kill` accepts every integer PID and a zero signal has no
 	// side effect.
 	let result = unsafe { libc::kill(pid, 0) };
 	result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(not(unix))]
-fn process_is_alive(_pid: i32) -> bool {
-	false
 }
 
 fn remove_path_if_present(path: &Path) -> Result<()> {

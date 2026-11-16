@@ -149,9 +149,9 @@ fn command_v_succeeds_when_any_name_is_found() {
 }
 
 /// A command `PATH` lacks runs the host's stand-in (`Host::fallback`, as
-/// `omp zsh` offers pi's utilities where Windows has no `ls`); `exec` of
-/// it is still not found (a process image cannot be a native), `type`
-/// still answers from `PATH`, and a defined not-found handler (Ubuntu's
+/// `omp zsh` offers pi's utilities where the machine has no `ls`); `exec` of
+/// it is still not found (a process image cannot be a native), `type` still
+/// answers from `PATH`, and a defined not-found handler (Ubuntu's
 /// `command-not-found`) handles the name instead.
 #[test]
 fn path_misses_run_the_hosts_fallback() {

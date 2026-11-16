@@ -28,11 +28,7 @@ enum Repr {
 
 #[derive(Clone, Debug)]
 struct NativeMeta {
-	meta:   std::fs::Metadata,
-	/// Identity/link count read through an open handle; std does not expose
-	/// them from a Windows path stat.
-	#[cfg(windows)]
-	handle: Option<crate::native::HandleInfo>,
+	meta: std::fs::Metadata,
 }
 
 #[derive(Clone, Debug)]
@@ -55,20 +51,13 @@ struct VirtualMeta {
 
 impl From<std::fs::Metadata> for Metadata {
 	fn from(meta: std::fs::Metadata) -> Self {
-		Self {
-			repr: Repr::Native(NativeMeta {
-				meta,
-				#[cfg(windows)]
-				handle: None,
-			}),
-		}
+		Self { repr: Repr::Native(NativeMeta { meta }) }
 	}
 }
 
 impl Metadata {
-	/// Metadata of an open host file, keeping the handle identity that a
-	/// Windows path stat cannot provide, so [`Metadata::same_file`] can
-	/// compare it against path-side metadata.
+	/// Metadata of an open host file, keeping the handle identity so
+	/// [`Metadata::same_file`] can compare it against path-side metadata.
 	pub fn from_file(file: &std::fs::File) -> io::Result<Self> {
 		crate::native::file_metadata(file)
 	}
@@ -131,14 +120,6 @@ impl Metadata {
 				blksize: None,
 			}),
 		}
-	}
-
-	#[cfg(windows)]
-	pub(crate) const fn native_with_handle(
-		meta: std::fs::Metadata,
-		handle: crate::native::HandleInfo,
-	) -> Self {
-		Self { repr: Repr::Native(NativeMeta { meta, handle: Some(handle) }) }
 	}
 
 	const fn virtual_mut(&mut self) -> Option<&mut VirtualMeta> {
@@ -259,17 +240,10 @@ impl Metadata {
 		}
 	}
 
-	/// `st_mode`: type bits plus permission bits. Windows host objects report
-	/// `0o555`/`0o777` from the read-only attribute.
+	/// `st_mode`: type bits plus permission bits.
 	pub fn mode(&self) -> u32 {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => std::os::unix::fs::MetadataExt::mode(&native.meta),
-			#[cfg(not(unix))]
-			Repr::Native(native) => {
-				let kind = FileType::from(native.meta.file_type()).mode_bits();
-				kind | Permissions::from(native.meta.permissions()).mode()
-			},
 			Repr::Virtual(meta) => meta.file_type.mode_bits() | meta.permissions.mode(),
 		}
 	}
@@ -298,13 +272,10 @@ impl Metadata {
 	/// Status change time (`ctime`).
 	pub fn changed(&self) -> io::Result<SystemTime> {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => {
 				use std::os::unix::fs::MetadataExt;
 				Ok(unix_time(native.meta.ctime(), native.meta.ctime_nsec()))
 			},
-			#[cfg(not(unix))]
-			Repr::Native(_) => Err(missing("status change time")),
 			Repr::Virtual(meta) => meta.changed.ok_or_else(|| missing("status change time")),
 		}
 	}
@@ -312,18 +283,10 @@ impl Metadata {
 	/// Identity, when known.
 	pub fn file_id(&self) -> Option<FileId> {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => {
 				use std::os::unix::fs::MetadataExt;
 				Some(FileId::native(native.meta.dev(), native.meta.ino()))
 			},
-			#[cfg(windows)]
-			Repr::Native(native) => native
-				.handle
-				.filter(|handle| handle.file_index != 0)
-				.map(|handle| FileId::native(handle.volume_serial, handle.file_index)),
-			#[cfg(not(any(unix, windows)))]
-			Repr::Native(_) => None,
 			Repr::Virtual(meta) => meta.id,
 		}
 	}
@@ -343,69 +306,44 @@ impl Metadata {
 
 	pub fn nlink(&self) -> Option<u64> {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => Some(std::os::unix::fs::MetadataExt::nlink(&native.meta)),
-			#[cfg(windows)]
-			Repr::Native(native) => native.handle.map(|handle| handle.nlink),
-			#[cfg(not(any(unix, windows)))]
-			Repr::Native(_) => None,
 			Repr::Virtual(meta) => meta.nlink,
 		}
 	}
 
-	#[cfg_attr(not(unix), allow(clippy::missing_const_for_fn, reason = "const only off Unix"))]
 	pub fn uid(&self) -> Option<u32> {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => Some(std::os::unix::fs::MetadataExt::uid(&native.meta)),
-			#[cfg(not(unix))]
-			Repr::Native(_) => None,
 			Repr::Virtual(meta) => meta.uid,
 		}
 	}
 
-	#[cfg_attr(not(unix), allow(clippy::missing_const_for_fn, reason = "const only off Unix"))]
 	pub fn gid(&self) -> Option<u32> {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => Some(std::os::unix::fs::MetadataExt::gid(&native.meta)),
-			#[cfg(not(unix))]
-			Repr::Native(_) => None,
 			Repr::Virtual(meta) => meta.gid,
 		}
 	}
 
-	#[cfg_attr(not(unix), allow(clippy::missing_const_for_fn, reason = "const only off Unix"))]
 	pub fn rdev(&self) -> Option<u64> {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => Some(std::os::unix::fs::MetadataExt::rdev(&native.meta)),
-			#[cfg(not(unix))]
-			Repr::Native(_) => None,
 			Repr::Virtual(meta) => meta.rdev,
 		}
 	}
 
 	/// Preferred I/O block size (`st_blksize`).
-	#[cfg_attr(not(unix), allow(clippy::missing_const_for_fn, reason = "const only off Unix"))]
 	pub fn blksize(&self) -> Option<u64> {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => Some(std::os::unix::fs::MetadataExt::blksize(&native.meta)),
-			#[cfg(not(unix))]
-			Repr::Native(_) => None,
 			Repr::Virtual(meta) => meta.blksize,
 		}
 	}
 
 	/// Allocated 512-byte blocks (`st_blocks`).
-	#[cfg_attr(not(unix), allow(clippy::missing_const_for_fn, reason = "const only off Unix"))]
 	pub fn blocks(&self) -> Option<u64> {
 		match &self.repr {
-			#[cfg(unix)]
 			Repr::Native(native) => Some(std::os::unix::fs::MetadataExt::blocks(&native.meta)),
-			#[cfg(not(unix))]
-			Repr::Native(_) => None,
 			Repr::Virtual(meta) => meta.blocks,
 		}
 	}
@@ -413,7 +351,6 @@ impl Metadata {
 	/// `(seconds, nanoseconds)` of a timestamp; host Unix values come straight
 	/// from `stat`, everything else is derived from the `SystemTime`.
 	fn time_parts(&self, field: TimeField) -> Option<(i64, i64)> {
-		#[cfg(unix)]
 		if let Repr::Native(native) = &self.repr {
 			use std::os::unix::fs::MetadataExt;
 			let m = &native.meta;
@@ -459,12 +396,5 @@ impl Metadata {
 	/// `st_ctime` nanoseconds.
 	pub fn ctime_nsec(&self) -> Option<i64> {
 		self.time_parts(TimeField::Changed).map(|(_, nsec)| nsec)
-	}
-
-	/// Windows `FILE_ATTRIBUTE_*` bits of a host object.
-	#[cfg(windows)]
-	pub fn file_attributes(&self) -> Option<u32> {
-		use std::os::windows::fs::MetadataExt;
-		self.native().map(MetadataExt::file_attributes)
 	}
 }

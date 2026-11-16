@@ -116,8 +116,8 @@ impl PathPolicy {
 	/// How an already-unwrapped display path is addressed. URI-shaped
 	/// targets (`scheme:/…`, optionally behind one `@`) are URLs only for
 	/// registered schemes — the single-slash spelling only for alias schemes;
-	/// Windows drives (`C:/…`) and `file://` stay filesystem paths; anything
-	/// else is refused with `write`'s wording.
+	/// drive-letter spellings (`C:/…`) and `file://` stay filesystem paths;
+	/// anything else is refused with `write`'s wording.
 	fn address<'a>(&self, display: &'a str) -> Address<'a> {
 		let url = display.strip_prefix('@').unwrap_or(display);
 		let Some((scheme, rest)) = url.split_once(':') else {
@@ -764,6 +764,7 @@ mod tests {
 	#[test]
 	fn plain_prefix_rebuilds_only_disk_and_unc_verbatim_prefixes() {
 		use std::ffi::OsStr;
+
 		assert_eq!(plain_prefix(Prefix::VerbatimDisk(b'C'), true), Some("C:".into()));
 		assert_eq!(
 			plain_prefix(Prefix::VerbatimUNC(OsStr::new("server"), OsStr::new("share")), true),
@@ -1035,18 +1036,6 @@ mod tests {
 
 	// POSIX paths have no prefix component, so `\\?\C:\…` is an ordinary
 	// relative path there and the strip is correctly a no-op.
-	#[cfg(windows)]
-	#[test]
-	fn strips_verbatim_prefix_from_windows_paths() {
-		assert_eq!(
-			strip_windows_verbatim_path(PathBuf::from(r"\\?\C:\proj\a.ts")),
-			PathBuf::from(r"C:\proj\a.ts")
-		);
-		assert_eq!(
-			strip_windows_verbatim_path(PathBuf::from(r"C:\proj\a.ts")),
-			PathBuf::from(r"C:\proj\a.ts")
-		);
-	}
 
 	#[test]
 	fn allows_recovery_when_cwd_is_verbatim_and_store_key_is_cleaned() {

@@ -1534,30 +1534,18 @@ fn stat_fs_from_wire(wire: ShellFsStatFs) -> io::Result<StatFs> {
 }
 
 /// Map a provider errno name to the matching `io::Error`. Unix keeps the real
-/// errno so kinds, messages, and `raw_os_error` checks match native failures;
-/// elsewhere the kind carries the provider message.
+/// errno so kinds, messages, and `raw_os_error` checks match native failures.
 fn error_from_wire(error: ShellFsError) -> io::Error {
-	#[cfg(unix)]
 	if let Some(errno) = errno_for_code(&error.code) {
 		return io::Error::from_raw_os_error(errno);
 	}
-	#[cfg(not(unix))]
-	if error.code == "ECANCELED" {
-		return pi_vfs::cancelled();
-	}
-	#[cfg(not(unix))]
-	let kind = kind_for_code(&error.code);
 	let message = match error.message {
 		Some(message) if !message.is_empty() => format!("{}: {message}", error.code),
 		_ => error.code,
 	};
-	#[cfg(unix)]
-	return io::Error::other(message);
-	#[cfg(not(unix))]
-	io::Error::new(kind, message)
+	io::Error::other(message)
 }
 
-#[cfg(unix)]
 fn errno_for_code(code: &str) -> Option<i32> {
 	Some(match code {
 		"ENOENT" => libc::ENOENT,
@@ -1602,35 +1590,4 @@ fn errno_for_code(code: &str) -> Option<i32> {
 		"ERANGE" => libc::ERANGE,
 		_ => return None,
 	})
-}
-
-#[cfg(not(unix))]
-fn kind_for_code(code: &str) -> io::ErrorKind {
-	use io::ErrorKind;
-	match code {
-		"ENOENT" => ErrorKind::NotFound,
-		"EACCES" | "EPERM" => ErrorKind::PermissionDenied,
-		"EEXIST" => ErrorKind::AlreadyExists,
-		"EROFS" => ErrorKind::ReadOnlyFilesystem,
-		"EISDIR" => ErrorKind::IsADirectory,
-		"ENOTDIR" => ErrorKind::NotADirectory,
-		"ENOTEMPTY" => ErrorKind::DirectoryNotEmpty,
-		"EXDEV" => ErrorKind::CrossesDevices,
-		"EINVAL" => ErrorKind::InvalidInput,
-		"ENOTSUP" | "EOPNOTSUPP" | "ENOSYS" => ErrorKind::Unsupported,
-		"ENAMETOOLONG" => ErrorKind::InvalidFilename,
-		"ENOSPC" => ErrorKind::StorageFull,
-		"EBUSY" => ErrorKind::ResourceBusy,
-		"EFBIG" => ErrorKind::FileTooLarge,
-		"ESPIPE" => ErrorKind::NotSeekable,
-		"ETXTBSY" => ErrorKind::ExecutableFileBusy,
-		"EAGAIN" => ErrorKind::WouldBlock,
-		"ETIMEDOUT" => ErrorKind::TimedOut,
-		"E2BIG" => ErrorKind::ArgumentListTooLong,
-		"EMLINK" => ErrorKind::TooManyLinks,
-		"ESTALE" => ErrorKind::StaleNetworkFileHandle,
-		"EDQUOT" => ErrorKind::QuotaExceeded,
-		"EPIPE" => ErrorKind::BrokenPipe,
-		_ => ErrorKind::Other,
-	}
 }

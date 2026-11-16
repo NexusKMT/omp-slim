@@ -859,14 +859,9 @@ fn rename_with_fallback(
 	let Err(err) = filesystem.rename(&from_fs, &to_fs) else {
 		return Ok(());
 	};
-	// We will only copy if:
-	// 1. Files are on different devices or filesystem providers (EXDEV error)
-	// 2. On Windows, if the target file exists and source file is opened by another
-	//    process (MoveFileExW fails with "Access Denied" even if the source file
-	//    has FILE_SHARE_DELETE permission)
-	let should_fallback =
-		crosses_devices(&err) || (filesystem.is_file(&from_fs) && can_delete_file(host, &from_fs));
-	if !should_fallback {
+	// Copy only across devices or filesystem providers (EXDEV): any other
+	// failure cannot succeed even with a copy+delete (e.g. permission errors).
+	if !crosses_devices(&err) {
 		return Err(err);
 	}
 	// Get metadata without following symlinks
@@ -925,7 +920,6 @@ fn is_empty_dir(host: &Host, path: &Path) -> bool {
 }
 
 /// Check if file is writable, returning the mode for potential reuse.
-#[cfg(unix)]
 fn is_writable(host: &Host, path: &Path) -> (bool, Option<u32>) {
 	if let Ok(metadata) = host.fs().metadata(host.resolve(path)) {
 		let mode = metadata.permissions().mode();
@@ -936,17 +930,6 @@ fn is_writable(host: &Host, path: &Path) -> (bool, Option<u32>) {
 	}
 }
 
-/// Check if file is writable.
-#[cfg(not(unix))]
-fn is_writable(host: &Host, path: &Path) -> (bool, Option<u32>) {
-	if let Ok(metadata) = host.fs().metadata(host.resolve(path)) {
-		(!metadata.permissions().readonly(), None)
-	} else {
-		(false, None) // If we can't get metadata, prompt user to be safe
-	}
-}
-
-#[cfg(unix)]
 fn get_interactive_prompt(host: &Host, to: &Path, cached_mode: Option<u32>) -> String {
 	// Use cached mode if available, otherwise fetch it
 	let mode = cached_mode.or_else(|| {
@@ -964,11 +947,6 @@ fn get_interactive_prompt(host: &Host, to: &Path, cached_mode: Option<u32>) -> S
 			return format!("replace {}, overriding mode {mode_info}?", to.quote());
 		}
 	}
-	format!("overwrite {}?", to.quote())
-}
-
-#[cfg(not(unix))]
-fn get_interactive_prompt(_host: &Host, to: &Path, _cached_mode: Option<u32>) -> String {
 	format!("overwrite {}?", to.quote())
 }
 
@@ -1016,64 +994,6 @@ fn prompt_overwrite(host: &mut Host, to: &Path, cached_mode: Option<u32>) -> io:
 		return Err(io::Error::other(""));
 	}
 	Ok(())
-}
-
-/// Checks if a file can be deleted by attempting to open it with delete
-/// permissions.
-#[cfg(windows)]
-fn can_delete_file(host: &Host, path: &Path) -> bool {
-	use std::{
-		os::windows::ffi::OsStrExt as _,
-		ptr::{null, null_mut},
-	};
-
-	use windows_sys::Win32::{
-		Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
-		Storage::FileSystem::{
-			CreateFileW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ,
-			FILE_SHARE_WRITE, OPEN_EXISTING,
-		},
-	};
-
-	let resolved = host.resolve(path);
-	// Only native host files have a Win32 handle to probe.
-	if !host.fs().is_native_local(&resolved) {
-		return false;
-	}
-	let wide_path = resolved
-		.as_os_str()
-		.encode_wide()
-		.chain([0])
-		.collect::<Vec<u16>>();
-
-	let handle = unsafe {
-		CreateFileW(
-			wide_path.as_ptr(),
-			DELETE,
-			FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
-			null(),
-			OPEN_EXISTING,
-			FILE_ATTRIBUTE_NORMAL,
-			null_mut(),
-		)
-	};
-
-	if handle == INVALID_HANDLE_VALUE {
-		return false;
-	}
-
-	unsafe { CloseHandle(handle) };
-
-	true
-}
-
-#[cfg(not(windows))]
-fn can_delete_file(_host: &Host, _: &Path) -> bool {
-	// On non-Windows platforms, always return false to indicate that we don't need
-	// to try the copy+delete fallback. This is because on Unix-like systems,
-	// rename failing with errors other than EXDEV means the operation cannot
-	// succeed even with a copy+delete approach (e.g. permission errors).
-	false
 }
 
 #[cfg(test)]

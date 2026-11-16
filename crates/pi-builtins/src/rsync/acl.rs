@@ -9,8 +9,8 @@
 //!   ([`Tree::with_fd`]), with upstream's bit packing of allow/deny, flags, and
 //!   permissions into one access word per named entry;
 //! - `--fake-super`: the `%aacl` / `%dacl` attributes rsync defines;
-//! - other systems (the BSDs, Windows) behave like a filesystem without ACL
-//!   support: reads report the mode-derived ACL and writes fail.
+//! - other systems (the BSDs) behave like a filesystem without ACL support:
+//!   reads report the mode-derived ACL and writes fail.
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
@@ -825,17 +825,10 @@ fn no_acl_syscall_error(err: &io::Error) -> bool {
 	if err.kind() == io::ErrorKind::Unsupported {
 		return true;
 	}
-	#[cfg(unix)]
-	{
-		match err.raw_os_error() {
-			Some(libc::ENOENT) => FLAVOR == Flavor::Osx,
-			Some(e) => e == libc::ENOSYS || e == libc::ENOTSUP || e == libc::EOPNOTSUPP || e == libc::EINVAL,
-			None => false,
-		}
-	}
-	#[cfg(not(unix))]
-	{
-		false
+	match err.raw_os_error() {
+		Some(libc::ENOENT) => FLAVOR == Flavor::Osx,
+		Some(e) => e == libc::ENOSYS || e == libc::ENOTSUP || e == libc::EOPNOTSUPP || e == libc::EINVAL,
+		None => false,
 	}
 }
 
@@ -1326,10 +1319,7 @@ mod sys {
 
 		/// ENOTSUP (its portable kind where there is no errno): no ACL support here.
 		fn unsupported() -> io::Error {
-			#[cfg(unix)]
-			return io::Error::from_raw_os_error(libc::ENOTSUP);
-			#[cfg(not(unix))]
-			return io::Error::from(io::ErrorKind::Unsupported);
+			io::Error::from_raw_os_error(libc::ENOTSUP)
 		}
 
 		pub(in super::super) fn read(_tree: &Tree, _rel: &Path, _kind: AclKind) -> Result<Option<RsyncAcl>, ReadError> {

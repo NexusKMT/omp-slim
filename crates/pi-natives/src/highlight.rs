@@ -13,7 +13,6 @@ use std::{
 
 use napi::{JsString, Result};
 use napi_derive::napi;
-use pi_shell::rayon_global_pool_available;
 use rayon::prelude::*;
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 
@@ -624,11 +623,7 @@ pub fn warm_highlighter() -> task::Promise<()> {
 				}
 			}
 		};
-		if rayon_global_pool_available() {
-			WARM_SNIPPETS.par_iter().for_each(warm);
-		} else {
-			WARM_SNIPPETS.iter().for_each(warm);
-		}
+		WARM_SNIPPETS.par_iter().for_each(warm);
 		Ok(())
 	})
 }

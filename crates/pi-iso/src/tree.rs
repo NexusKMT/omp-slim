@@ -1,5 +1,5 @@
 //! Helpers shared by the backends that materialize `merged` as a real
-//! directory tree (rcopy, Linux reflink, Windows block clone) and by the
+//! directory tree (rcopy, Linux reflink) and by the
 //! backends that validate a `lower` source directory.
 
 use std::{
@@ -61,26 +61,13 @@ pub fn remove_existing(path: &Path) -> io::Result<()> {
 }
 
 /// Recreates the symlink `src` at `dst` with the same target. `file_type` is
-/// `src`'s own (unfollowed) type; Windows needs it to pick a directory or
-/// file link.
+/// `src`'s own (unfollowed) type.
 pub fn copy_symlink(src: &Path, dst: &Path, file_type: FileType) -> IsoResult<()> {
 	let target = fs::read_link(src)
 		.map_err(|err| IsoError::other(format!("read_link {}: {err}", src.display())))?;
-	#[cfg(unix)]
 	let res = {
 		let _ = file_type;
 		std::os::unix::fs::symlink(target, dst)
-	};
-	#[cfg(windows)]
-	let res = if std::os::windows::fs::FileTypeExt::is_symlink_dir(&file_type) {
-		std::os::windows::fs::symlink_dir(target, dst)
-	} else {
-		std::os::windows::fs::symlink_file(target, dst)
-	};
-	#[cfg(not(any(unix, windows)))]
-	let res: io::Result<()> = {
-		let _ = (target, file_type);
-		Err(io::Error::new(io::ErrorKind::Unsupported, "symlink copy unsupported on this platform"))
 	};
 	res.map_err(|err| IsoError::other(format!("symlink {}: {err}", dst.display())))
 }

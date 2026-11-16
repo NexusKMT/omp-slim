@@ -234,11 +234,6 @@ impl Process for TopCommand {
 				writeln!(context.stderr(), "top: row count must be greater than zero")?;
 				return Ok(1);
 			}
-			#[cfg(target_os = "windows")]
-			if user.is_some() {
-				writeln!(context.stderr(), "top: user filtering is unavailable on Windows")?;
-				return Ok(2);
-			}
 
 			let delay = Duration::from_secs_f64(delay);
 			let pid_filter: HashSet<i32> = pids.into_iter().collect();

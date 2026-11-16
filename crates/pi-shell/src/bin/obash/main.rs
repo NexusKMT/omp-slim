@@ -203,13 +203,8 @@ extern "C" fn main(
 ) -> std::ffi::c_int {
 	let status = std::panic::catch_unwind(obash).unwrap_or(101);
 	let _ = io::stdout().flush();
-	#[cfg(unix)]
 	// SAFETY: `_exit` has no preconditions.
-	unsafe {
-		libc::_exit(status)
-	}
-	#[cfg(not(unix))]
-	status
+	unsafe { libc::_exit(status) }
 }
 
 /// obash: the command line to an exit status. Without obash's own options
@@ -295,7 +290,7 @@ fn run(cli: &Cli, launch: Launch, modes: EnvModes) -> Result<i32, Box<dyn std::e
 		.map(fault::Resume::decode)
 		.transpose()?;
 	let depth = resume.map_or(modes.fault.depth, |r| r.depth());
-	let mut injector = fault::Injector::new(&cli.fault, modes.fault, depth, own_args(cli))?;
+	let mut injector = fault::Injector::new(&cli.fault, modes.fault, depth, own_args(cli));
 	// Before the process opens any fd of its own. A resumed process takes
 	// none over: those of its first process are lost in the image.
 	let inherited = if resume.is_some() {
