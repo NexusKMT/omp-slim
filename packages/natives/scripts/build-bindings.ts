@@ -1,15 +1,12 @@
 /**
- * Local napi build: regenerates the TypeScript bindings (native/index.d.ts)
- * and the runtime enum exports, then installs the host addon. This is the
- * default backend for the `host` target (`bun run build` →
- * scripts/bazel-natives.ts); release addons build through Bazel with explicit
- * //:natives-* targets. Host target only — no cross-compilation.
+ * Host napi build (`bun run build`): regenerates the TypeScript bindings
+ * (native/index.d.ts) and the runtime enum exports, installs the host addon,
+ * then load-probes it. Host only — no cross-compilation.
  *
  * `OMP_NATIVE_CARGO_PROFILE` selects the cargo profile (default `local`:
  * incremental, unstripped). Image builds set `ci` for a stripped addon.
  *
- * `OMP_NATIVE_FEATURES` passes extra cargo features to `napi build --features`
- * on the Cargo path only; Bazel builds ignore it.
+ * `OMP_NATIVE_FEATURES` passes extra cargo features to `napi build --features`.
  */
 
 import * as fs from "node:fs/promises";
@@ -19,6 +16,7 @@ import { $ } from "bun";
 import { detectHostAvx2Support, resolveLocalHostAddon } from "../../../scripts/host-detect";
 import { stampNativeVersion } from "../../../scripts/stamp-native-version";
 import { generateEnumExports } from "./gen-enums";
+import { verifyHostAddonLoads } from "./verify-addon";
 
 // pcre2-sys prefers a system libpcre2 when pkg-config finds one. Keep the
 // static build so the local addon never retains host Homebrew paths.
@@ -221,6 +219,8 @@ try {
 	await installGeneratedBindings(buildOutputDir);
 
 	await generateEnumExports();
+
+	await verifyHostAddonLoads(canonicalAddonPath, undefined, version);
 
 	console.log("Bindings build complete.");
 } finally {

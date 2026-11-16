@@ -763,8 +763,7 @@ function buildHelpMessage(ctx) {
 	}
 	return (
 		"If installed via npm/bun, try reinstalling: bun install @oh-my-pi/pi-natives\n" +
-		"If developing locally, build with: bun --cwd=packages/natives run build\n" +
-		"Explicit targets: bun scripts/bazel-natives.ts <target> --dest packages/natives/native"
+		"If developing locally, build with: bun --cwd=packages/natives run build"
 	);
 }
 

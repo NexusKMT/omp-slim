@@ -16,9 +16,9 @@ const RUST_AFFECTING_FILE_NAMES = [
 ] as const satisfies readonly string[];
 // Remote-tracking trunks the branch is diffed against (a local `main` can carry the commits being checked).
 const TRUNKS = ["upstream/main", "origin/main"] as const satisfies readonly string[];
-// Vendored path-patched crates are workspace members for Bazel hermeticity
-// (path-patch rendering is machine-local), but cargo dev tasks keep their
-// historical scope: the forks are not held to workspace format/lint/test gates.
+// Vendored path-patched crates are workspace members so cargo sees their
+// manifests and lock state, but cargo dev tasks keep their historical scope:
+// the forks are not held to workspace format/lint/test gates.
 //
 // pi-builtins is NOT excluded. It is first-party, and although it opts out of
 // the workspace's pedantic/nursery lints in its own manifest (most of it is

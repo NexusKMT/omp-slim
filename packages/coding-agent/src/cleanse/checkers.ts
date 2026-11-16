@@ -306,7 +306,7 @@ function normalizeFiles(files: string[]): string[] {
 }
 function hasIgnoredDirectory(file: string): boolean {
 	for (const segment of file.split("/")) {
-		if (IGNORED_DIRECTORIES[segment] || segment.startsWith("bazel-")) return true;
+		if (IGNORED_DIRECTORIES[segment]) return true;
 	}
 	return false;
 }

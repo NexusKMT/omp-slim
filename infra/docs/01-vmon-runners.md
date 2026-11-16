@@ -24,24 +24,21 @@ Options:
 
 ## 2. Which jobs run where
 
-`.github/workflows/ci.yml`:
+Upstream's CI workflow:
 
 | Job | Pull request | push `main` / dispatch / release |
 | --- | --- | --- |
 | `release_metadata` | `ubuntu-22.04` | `ubuntu-22.04` |
 | `check` | `ubuntu-22.04` | `vmon-large/from=omp-ci` |
-| `bazel_lock` | `ubuntu-22.04` | `ubuntu-22.04` |
 | `rust_validate` | skipped | `vmon-large/from=omp-ci` |
-| `native_addons` | `ubuntu-22.04` (restores main's addons, builds nothing) | `vmon-large/from=omp-ci` |
-| `native_addons_cross` | skipped | `vmon-large/from=omp-ci` |
 | `test_coding_agent_native` (3 shards on PRs, 1 on main) | `ubuntu-22.04` | `vmon-large/from=omp-ci` |
 | `test_workspace`, `test_coding_agent_singleton`, `test_ts_native`, `test_coding_agent_ui`, `test_coding_agent_runtime`, `test_smoke`, `install_methods` | `ubuntu-22.04` | `vmon-large/from=omp-ci` |
 | `release_gate`, `release_binary`, `release_native_leaves`, `release_github`, `release_build`, `release_npm`, `release_brew` | — | `ubuntu-22.04` |
 | `release_smoke` | — | per-platform GitHub-hosted (`ubuntu-22.04`, `ubuntu-24.04-arm`, `macos-15-intel`, `macos-15`) |
 
-`bun-cache-warm.yml` stays GitHub-hosted. Release jobs stay hosted because they build nothing Bazel-heavy and publish with OIDC; the `release_metadata` probe stays hosted so the release chain never waits on sandbox capacity.
+`bun-cache-warm.yml` stays GitHub-hosted. Release jobs stay hosted because they publish with OIDC and need no warm vmon toolchain; the `release_metadata` probe stays hosted so the release chain never waits on sandbox capacity.
 
-Workflows detect a vmon runner by **`VMON_CI=1`** (set in the runner's `.env` by the `ci` template). `.github/actions/bun-install` and `.github/actions/bazel-cache` key their cache choices off it.
+Workflows detect a vmon runner by **`VMON_CI=1`** (set in the runner's `.env` by the `ci` template). `.github/actions/bun-install` keys its cache choice off it.
 
 ## 3. One-time vmon setup for this repo
 
@@ -60,23 +57,23 @@ Done by a vmon cluster admin (dashboard `/ci` pages, or `vmon admin ci …`):
    A run is accepted only when both the run's `actor` and its `triggering_actor` are listed.
 5. **Team limits** (vmon team settings of the CI team):
    - concurrent sandboxes / vCPU / memory: a main push peaks at about 11 concurrent jobs (4 build/check jobs, then 8 test jobs while the long builds finish), i.e. ~88 vCPU / 176 GiB; overlapping release runs can double it. Lower limits only make jobs wait (`waiting` state);
-   - `max_disk_mb` ≥ 65536: a template build's disk is the team's `max_disk_mb` at build time, and Bazel jobs need tens of GiB on top of the baked caches;
+   - `max_disk_mb` ≥ 65536: a template build's disk is the team's `max_disk_mb` at build time;
    - maximum sandbox length ≥ 6 h 10 min (vmon's CI sandbox timeout).
 6. **Template.** Build `omp-ci` with the CI team's API key ([02-omp-ci-template.md](02-omp-ci-template.md)).
 
-CI needs no repository secrets for caching: the vmon node serves both the Actions cache and the Bazel cache ([03-caching.md](03-caching.md)).
+CI needs no repository secrets for caching: the vmon node serves the Actions cache ([03-caching.md](03-caching.md)).
 
 ## 4. Trust split
 
 PR code must never reach vmon or write shared caches:
 
-- In `ci.yml` every job that can run on a PR resolves `runs-on` to `ubuntu-22.04` for `pull_request` events, and the Bazel jobs that need vmon are skipped on PRs. PR jobs build nothing with Bazel.
+- In upstream's CI every job that can run on a PR resolves `runs-on` to `ubuntu-22.04` for `pull_request` events, and jobs that need vmon are skipped on PRs.
 - That expression is not a security boundary by itself: for `pull_request` events GitHub runs the workflow file **from the PR's merge commit**, so a PR can rewrite `runs-on`. The boundaries are:
   1. vmon's public-repo allow-list (§3.4): a PR author outside the list cannot get a sandbox, even when a maintainer re-runs the job (both `actor` and `triggering_actor` must be listed);
-  2. the vmon node's caches take writes only from jobs saving to a branch or tag: a pull request job, even on a vmon runner, can read the Bazel cache but not write it, and saves Actions cache entries only to its own pull request scope;
+  2. the vmon node's cache takes writes only from jobs saving to a branch or tag: a pull request job, even on a vmon runner, saves Actions cache entries only to its own pull request scope;
   3. **Settings → Actions → General → Fork pull request workflows: require approval for all outside collaborators**, so fork workflows do not start unattended.
-- The cache poisoning surface is therefore the set of trusted branch and tag runs: pushes, dispatches and releases ([03-caching.md](03-caching.md#3-poisoning-boundary)).
-- Sandboxes get no vmon credentials and no environment from vmon besides the runner's `.env` (and `VMON_CACHE_URL`); jobs see only what GitHub gives them.
+- The cache poisoning surface is therefore the set of trusted branch and tag runs: pushes, dispatches and releases ([03-caching.md](03-caching.md#2-poisoning-boundary)).
+- Sandboxes get no vmon credentials and no environment from vmon besides the runner's `.env`; jobs see only what GitHub gives them.
 - Sandbox egress follows vmon's default policy: public internet only, with private, link-local and tailnet ranges always denied.
 
 ## 5. Operations

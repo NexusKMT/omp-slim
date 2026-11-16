@@ -157,16 +157,9 @@ fn diff_excerpt(expected: &str, actual: &str) -> String {
 	excerpt.trim_end().to_string()
 }
 
-/// Absolute path to the fixtures tree. Under cargo the compile-time manifest
-/// dir exists at runtime; under Bazel the compile-time sandbox path is gone,
-/// so fall back to the runfiles-relative layout (test cwd is the workspace
-/// runfiles root and the fixtures ride along as `data`).
+/// Absolute path to the fixtures tree.
 fn fixtures_root() -> std::path::PathBuf {
-	let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/minimizer");
-	if manifest.is_dir() {
-		return manifest;
-	}
-	Path::new("crates/pi-shell/tests/fixtures/minimizer").to_path_buf()
+	Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/minimizer")
 }
 
 /// Walk `<root>/<family>/<case>.cmd` and assemble each fixture with its

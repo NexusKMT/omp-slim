@@ -31,11 +31,11 @@ Bun 为 `1.4.4`，Rust 为仓库锁定的 `nightly-2026-11-08`
 构建链从项目文档及实现确认：
 
 1. `bash scripts/slim/bootstrap.sh`：安装系统工具、Bun、完整的锁定 Rust 工具链，运行 `bun install --frozen-lockfile`。
-2. `bun run build:native`：经 `scripts/bazel-natives.ts host` 调用 Cargo/N-API，构建并加载探测原生扩展，生成绑定。
+2. `bun run build:native`：调用 `packages/natives/scripts/build-bindings.ts` 的 Cargo/N-API 宿主构建，构建并加载探测原生扩展，生成绑定。
 3. `bun --cwd=packages/coding-agent run build`：生成内嵌资源并用 Bun 编译 CLI。
 4. 对实际生成的二进制运行 `--version`、`--help`、`--smoke-test`，打包并生成 SHA-256。
 
-以上步骤已封装在 `scripts/slim/build.sh`。跨平台原生扩展使用 Bazel 的独立目标，不能把 Linux 构建当作 macOS 交付。
+以上步骤已封装在 `scripts/slim/build.sh`。原生扩展按目标平台宿机构建，不能把 Linux 构建当作 macOS 交付。
 本次构建使用主机的 `linux-x64-modern` 原生扩展，需要 AVX2。
 
 参考：`packages/coding-agent/DEVELOPMENT.md`、`docs/natives-build-release-debugging.md`、

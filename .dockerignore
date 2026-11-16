@@ -10,7 +10,6 @@
 
 # Heavy build outputs.
 **/target/
-bazel-*
 **/node_modules
 **/dist/
 runs/

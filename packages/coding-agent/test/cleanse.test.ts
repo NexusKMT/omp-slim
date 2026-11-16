@@ -92,23 +92,6 @@ describe("cleanse diagnostics", () => {
 			await fs.rm(root, { recursive: true, force: true });
 		}
 	});
-
-	test("excludes generated Bazel trees from checker discovery", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cleanse-ignore-"));
-		try {
-			await Bun.write(path.join(root, "src", "index.ts"), "export const value = 1;\n");
-			await Bun.write(
-				path.join(root, "bazel-output", "fixture", "package.json"),
-				JSON.stringify({ scripts: { test: `bun -e "process.exit(3)"` } }),
-			);
-
-			const suite = await cleanseCheckers.discoverCleanseDiagnosticSuite(root, { includeTests: true });
-
-			expect(suite.checkers).toHaveLength(0);
-		} finally {
-			await fs.rm(root, { recursive: true, force: true });
-		}
-	});
 });
 
 describe("cleanse progress", () => {

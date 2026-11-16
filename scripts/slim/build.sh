@@ -26,7 +26,6 @@ trap 'omp_exit=$?; printf "%s\n" "$omp_exit" > "$omp_build_dir/exit-code"; exit 
 # stay inside the checkout for artifact recovery.
 export CARGO_TARGET_DIR="${OMP_SLIM_CARGO_TARGET_DIR:-/tmp/omp-slim-cargo-$UID}"
 export CARGO_BUILD_JOBS="${OMP_SLIM_BUILD_JOBS:-2}"
-export OMP_NATIVE_BUILD_BACKEND=cargo
 export OMP_NATIVE_CARGO_PROFILE=ci
 export PI_CODING_AGENT_DIR="$omp_build_dir/agent"
 export OMP_BUILD_LABEL="omp-slim/$omp_build_id"

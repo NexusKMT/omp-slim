@@ -1,30 +1,22 @@
 /**
  * Regression for a native build that installs an addon the host loader cannot
- * load. `scripts/bazel-natives.ts` copied whatever the backend produced into
- * `packages/natives/native/` and reported `installed …` with no check that the
- * bytes are loadable, so a backend that emits a Mach-O/ELF the host rejects
- * still exits 0. The failure then surfaced far away — the first consumer to
- * import the runtime died with a bare `Failed to load pi_natives native addon`
- * naming the loader, not the build.
+ * load. A backend that emits a Mach-O/ELF the host rejects can still exit 0,
+ * so the failure surfaces far away — the first consumer to import the runtime
+ * dies with a bare `Failed to load pi_natives native addon` naming the loader,
+ * not the build.
  *
- * Observed on macOS 26 → 27 (darwin-arm64): the addon from one backend stopped
- * loading with `mis-aligned LINKEDIT string pool` while the other backend's
- * addon of the same size and symbol count loaded, and nothing in the build
- * distinguished them. `verifyHostAddonLoads` turns that into an immediate,
- * attributable build failure.
+ * Observed on macOS 26 → 27 (darwin-arm64): an addon stopped loading with
+ * `mis-aligned LINKEDIT string pool` while another build of the same size and
+ * symbol count loaded, and nothing in the build distinguished them.
+ * `verifyHostAddonLoads` turns that into an immediate, attributable build
+ * failure.
  */
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-	ADDON_LOAD_FAILURE_EXPLANATION,
-	type HostInfo,
-	hostProbeFilename,
-	resolveTargetMembers,
-	verifyHostAddonLoads,
-} from "../../../scripts/bazel-natives";
+import { ADDON_LOAD_FAILURE_EXPLANATION, verifyHostAddonLoads } from "../scripts/verify-addon";
 import { detectHostAvx2Support, resolveLocalHostAddon } from "../../../scripts/host-detect";
 import { hasVersionStampSlot, stampNativeVersion } from "../../../scripts/stamp-native-version";
 
@@ -112,43 +104,5 @@ describe("verifyHostAddonLoads", () => {
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
-	});
-});
-
-describe("hostProbeFilename", () => {
-	const glibcArm64: HostInfo = { platform: "linux", arch: "arm64", avx2: false, musl: false };
-	const glibcX64Baseline: HostInfo = { platform: "linux", arch: "x64", avx2: false, musl: false };
-	const muslArm64: HostInfo = { platform: "linux", arch: "arm64", avx2: false, musl: true };
-	const muslX64Avx2: HostInfo = { platform: "linux", arch: "x64", avx2: true, musl: true };
-
-	test("never probes a musl addon on a glibc host, though both spell the filename the same", () => {
-		// The release matrix installs //:natives-linux-musl-arm64 on a glibc
-		// runner, and its output is named pi_natives.linux-arm64.node — the very
-		// name the host's own target uses. Probing it dlopens a musl image on
-		// glibc, which fails on the loader ("libc.so: cannot open shared object
-		// file") and would turn a valid artifact into a failed release build.
-		expect(hostProbeFilename(["linux-musl-arm64"], glibcArm64)).toBeNull();
-		expect(hostProbeFilename(["linux-musl-x64-baseline"], glibcX64Baseline)).toBeNull();
-	});
-
-	test("a musl host builds and probes the musl addon, never the gnu one of the same name", () => {
-		// A musl Bun cannot load a gnu addon ("linked against glibc"), so `host`
-		// must build the musl target; there is no modern musl addon.
-		expect(resolveTargetMembers(["host"], muslX64Avx2)).toEqual(["linux-musl-x64-baseline"]);
-		expect(resolveTargetMembers(["host"], muslArm64)).toEqual(["linux-musl-arm64"]);
-		expect(hostProbeFilename(["linux-musl-arm64"], muslArm64)).toBe("pi_natives.linux-arm64.node");
-		expect(hostProbeFilename(["linux-arm64"], muslArm64)).toBeNull();
-	});
-
-	test("probes the host's own target, however it was requested", () => {
-		expect(hostProbeFilename(["linux-arm64"], glibcArm64)).toBe("pi_natives.linux-arm64.node");
-		expect(hostProbeFilename(["host"], glibcArm64)).toBe("pi_natives.linux-arm64.node");
-		expect(hostProbeFilename(["linux-x64-baseline"], glibcX64Baseline)).toBe("pi_natives.linux-x64-baseline.node");
-	});
-
-	test("skips cross-compiled targets and an ISA the host cannot run", () => {
-		expect(hostProbeFilename(["darwin-x64-baseline", "darwin-arm64"], glibcArm64)).toBeNull();
-		// A baseline-only host never claims the modern x64 addon as its own.
-		expect(hostProbeFilename(["linux-x64-modern"], glibcX64Baseline)).toBeNull();
 	});
 });

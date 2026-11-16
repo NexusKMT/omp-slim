@@ -31,11 +31,10 @@ FROM rust:1.86-slim-bookworm AS natives-builder
 
 ARG BUN_VERSION
 
-# The addon is built with the default cargo/napi-rs host backend, not Bazel:
-# the image is one fixed host target, so Bazel's hermetic cross toolchains
-# and crate_universe splice buy nothing while costing a bazelisk download
-# plus a full analysis phase on every build. `ci` profile = release codegen,
-# thin LTO, stripped.
+# The addon is built with the host cargo/napi-rs backend: the image is one
+# fixed host target, so a cross-build system buys nothing while costing a full
+# toolchain download and analysis phase on every build. `ci` profile = release
+# codegen, thin LTO, stripped.
 ENV BUN_INSTALL=/opt/bun \
     PATH=/opt/bun/bin:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin \
     CARGO_TERM_COLOR=never \

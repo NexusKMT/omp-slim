@@ -42,8 +42,8 @@ dependency here through `[patch.crates-io]`. MIT licensed; see `LICENSE`.
 - `Cargo.toml`: `publish = false` and a `[lints.clippy]` block that keeps the
   workspace's lint config off upstream code. `CHANGELOG.md`: the vendor
   import entries under `[Unreleased]`. The crates.io `Cargo.lock`,
-  `Cargo.toml.orig`, `README.md` and VCS metadata are dropped; `BUILD.bazel`
-  and `rustfmt.toml` are workspace wiring.
+  `Cargo.toml.orig`, `README.md` and VCS metadata are dropped; `rustfmt.toml`
+  is workspace formatting config.
 
 Everything else is byte-identical to the 3.14.2 release.
 
@@ -55,6 +55,4 @@ over this directory, then from here run
 `patch -p1 < patches/0002-external-release-hook.patch` (drop a patch if
 upstream covers it) and regenerate them against the new release.
 Restore the `Cargo.toml` and `CHANGELOG.md` edits above, bump `version` in
-`BUILD.bazel` and sync its `crate_features` with
-`cargo tree -p pi-natives -i napi -e normal -f '{p} [{f}]'`, then run
-`cargo update -p napi -p napi-derive` and `bun scripts/gen-bazel-lock.ts`.
+`Cargo.toml`, then run `cargo update -p napi -p napi-derive`.

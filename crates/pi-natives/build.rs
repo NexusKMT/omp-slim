@@ -49,8 +49,8 @@ fn build_syntax_set() {
 }
 
 /// Builds the Apple Foundation Models bridge dylib through
-/// `src/applefm/build-bridge.sh` (shared with Bazel) and exposes it to the
-/// crate as `OMP_APPLEFM_BRIDGE` for embedding: `bridge.swift` when a Swift
+/// `src/applefm/build-bridge.sh` and exposes it to the crate as
+/// `OMP_APPLEFM_BRIDGE` for embedding: `bridge.swift` when a Swift
 /// 6.4+ / macOS 27 SDK toolchain exists and the target is Apple silicon,
 /// otherwise an empty file (bridge not built).
 ///

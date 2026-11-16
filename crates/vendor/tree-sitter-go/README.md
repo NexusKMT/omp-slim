@@ -15,7 +15,7 @@ the registry dependency here through `[patch.crates-io]`. MIT licensed; see
   `new(T)`, and accept type arguments when shadowed by a generic function.
 - `src/grammar.json`, `src/parser.c`: regenerated from that `grammar.js`.
 - `Cargo.toml`: `publish = false`. The crates.io `Cargo.lock` and VCS metadata
-  are dropped; `BUILD.bazel` and `rustfmt.toml` are workspace wiring.
+  are dropped; `rustfmt.toml` is workspace formatting config.
 
 Everything else is byte-identical to the 0.25.0 release.
 

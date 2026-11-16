@@ -34,8 +34,7 @@ can be fed bytes as they come.
 - `src/searcher/mod.rs`, `src/lib.rs`: the `push` module and the `PushSearch`
   re-export.
 - `Cargo.toml`: `publish = false`. The crates.io `Cargo.toml.orig`, `Cargo.lock`
-  and VCS metadata are dropped; `BUILD.bazel` and `rustfmt.toml` are workspace
-  wiring.
+  and VCS metadata are dropped; `rustfmt.toml` is workspace formatting config.
 
 Everything else is byte-identical to the 0.1.17 release.
 

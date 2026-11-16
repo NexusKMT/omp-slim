@@ -7,10 +7,9 @@ them eligible for Gatekeeper acceptance when the notarization ticket is
 available. The repository also maintains a Homebrew tap; formula installs
 have different quarantine behavior from browser downloads (see below).
 
-Like every other release build, the macOS binaries are built and signed on
-Linux: the Darwin legs of the `release_binary` matrix
-(`.github/workflows/ci.yml`) cross-compile them with bun and sign them with
-`scripts/ci-macos-sign.sh`, which drives
+Like every other release build, the macOS binaries are built and signed by
+the `release_binary` matrix: the Darwin legs cross-compile the JS bundle with
+bun and sign it with `scripts/ci-macos-sign.sh`, which drives
 [rcodesign](https://github.com/indygreg/apple-platform-rs) (the open-source
 implementation of `codesign` and `notarytool`, pinned and sha256-checked by the
 script). With all five `APPLE_*` repository secrets below configured, the

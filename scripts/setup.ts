@@ -2,23 +2,10 @@
 /**
  * `bun setup` entrypoint. Chains the four setup steps (install → native
  * addon build → coding-agent link → omp link). The native host build uses
- * the local Cargo/N-API backend by default; set
- * `OMP_NATIVE_BUILD_BACKEND=bazel` to opt into bazel. Flags after `--` are
- * appended to the native build invocation.
+ * Cargo/N-API via `packages/natives/scripts/build-bindings.ts`.
  */
 import * as path from "node:path";
 const repoRoot = path.join(import.meta.dir, "..");
-
-const argv = process.argv.slice(2);
-const passthrough: string[] = [];
-for (let i = 0; i < argv.length; i++) {
-	const arg = argv[i];
-	if (arg === "--") {
-		passthrough.push(...argv.slice(i + 1));
-		break;
-	}
-	passthrough.push(arg);
-}
 
 interface Step {
 	label: string;
@@ -28,7 +15,7 @@ interface Step {
 
 const steps: Step[] = [
 	{ label: "bun install", cmd: ["bun", "install"] },
-	{ label: "build:native", cmd: ["bun", "run", "build:native", ...passthrough] },
+	{ label: "build:native", cmd: ["bun", "run", "build:native"] },
 	{ label: "coding-agent link", cmd: ["bun", "--cwd=packages/coding-agent", "link"] },
 	{ label: "link omp", cmd: ["sh", "scripts/link-omp.sh"] },
 ];

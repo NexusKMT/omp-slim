@@ -24,7 +24,7 @@ been removed from the product. Track the actual state below.
 | Repeatable Codespace bootstrap/build/artifact procedure | Baseline built; binary and archive recovered and SHA-256 verified |
 | Sharpshooter memory backend removal | Committed as `88a81dd819`; `bun check`, 238 focused tests and compiled-binary worker smoke passed |
 | Other memory backends, browser, desktop and speech removal | Removed from source, registration, workers, UI, dedicated tests/docs and native backends; rebuilt addon export checks, full Rust checks and all 219 Mac TS groups passed |
-| Dependency cleanup | Cargo packages 979 → 799, Bun packages 462 → 396, Bazel repositories 962 → 783; no new package versions; two dedicated workspaces removed |
+| Dependency cleanup | Cargo packages 979 → 799, Bun packages 462 → 396; no new package versions; two dedicated workspaces removed |
 | Single main model | Implemented and built at `d55687e514`; local binary/config/RPC verification passed. Cloud suite: 212/213 groups; the sole DAP fixture race was fixed in `34b93cb6a7`, and its full 10-file group passed locally (200 tests). Roles and automatic alternate-model routing removed. See [the single-model report](docs/slim-single-model.md). |
 | Chat Completions as sole transport | Merged as `dc7858ea37` with catalog cleanup `d7dfe88353`; vendor catalog, provider auth flows and protocol routing retired. `packages/coding-agent` typechecks clean; the retained core suites (`snapcompact*`, `mcp*`, `rpc*`, `interactive-mode*`) pass; the shrunken RPC wire schema was regenerated via `gen:rpc`. TS-only change, build verified by reusing Intel addon `42807753137` in `slim-macos-tests.yml`. See [the removal report](docs/slim-removal-2026-11-10.md) |
 | Chat Completions test-suite reconciliation | Removed-provider/protocol tests deleted (9 whole suites: provider-options parity, context-fit model selection, prompt-variant editing, `task`/`vibe` prompt-cache suites, RPC schema validation, registry mirror fixture; 127 more tests inside kept suites, incl. the cache-warming half of `rpc-auto-maintenance-scope`, whose retained #11431 scoping tests were re-authored). Retained-feature tests re-authored with explicit fixtures: `snapcompact*` frame caps and text-only/wire-stripped models pinned to the retained 3 MB frame byte budget, model-availability and custom-model auth harnesses re-keyed, and registries bound to `Settings.isolated()` so a settings-less registry can't inherit the developer's real disabled-provider config from the global singleton. Verification: 2,196 tests across 182 files, 0 fail; `bun check` clean in 3,688 files. |
@@ -90,7 +90,7 @@ logs/artifacts, SHA-256 verification, and confirming shutdown.
 ## Build procedure
 
 Reference implementations: `packages/coding-agent/DEVELOPMENT.md`,
-`docs/natives-build-release-debugging.md`, `scripts/bazel-natives.ts`,
+`docs/natives-build-release-debugging.md`, `packages/natives/scripts/verify-addon.ts`,
 `packages/natives/scripts/build-bindings.ts`, and
 `packages/coding-agent/scripts/build-binary.ts`.
 
@@ -98,8 +98,8 @@ The Codespace uses `mcr.microsoft.com/devcontainers/base:ubuntu-24.04` with
 the `vscode` user and the official `sshd` devcontainer feature. The bootstrap
 installs Bun 1.4.4 and the toolchain pinned by
 `rust-toolchain.toml`, plus Linux native build tools and frozen JS dependencies.
-The host native build uses Cargo/N-API. Cross-platform release addons use Bazel;
-a Linux host binary is not a macOS deliverable.
+The host native build uses Cargo/N-API. Release addons are built on each target
+platform; a Linux host binary is not a macOS deliverable.
 
 ```sh
 bash scripts/slim/bootstrap.sh

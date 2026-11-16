@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds the Apple Foundation Models bridge dylib that pi-natives embeds.
-# Shared by build.rs and the Bazel `applefm_bridge` genrule/repository rule.
+# Invoked by build.rs.
 #
 #   build-bridge.sh detect
 #       Prints "<swiftc>\t<sdk>\t<fingerprint>" for the first toolchain able to
@@ -13,11 +13,10 @@
 #
 #   build-bridge.sh build <out.dylib> <arch> [<swiftc> <sdk> [<swiftc arg>...]]
 #       Compiles bridge.swift into a standalone <out.dylib> with the given
-#       toolchain; trailing arguments go to swiftc (the linux cross toolchain's
-#       resource dir, shims path and linker, see bazel/toolchains/swift). Without
-#       a toolchain, or for a non-arm64 <arch> (Foundation Models needs Apple
-#       silicon), writes an empty <out.dylib>, which the addon reports as not
-#       built.
+#       toolchain; trailing arguments go to swiftc (resource dir, shims path
+#       and linker for cross builds). Without a toolchain, or for a non-arm64
+#       <arch> (Foundation Models needs Apple silicon), writes an empty
+#       <out.dylib>, which the addon reports as not built.
 #
 # The bridge is never linked into the addon: the addon embeds these bytes and
 # dlopens them only on macOS 27+, so the Swift runtime and FoundationModels

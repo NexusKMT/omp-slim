@@ -25,9 +25,9 @@ ties; Git-safe automation uses `repo` instead.
 Two commands serve different purposes:
 
 - `bun --cwd=packages/natives run build:bindings` runs napi-rs for the host, installs a local variant addon and generated declarations, and regenerates explicit ESM/enum exports. Use this when the Rust public type surface changes.
-- `bun --cwd=packages/natives run build` invokes `scripts/bazel-natives.ts host --dest native`. The host target builds through the local cargo/napi-rs backend by default and therefore also regenerates declarations and exports; `OMP_NATIVE_BUILD_BACKEND=bazel` opts into Bazel, which leaves those committed files unchanged.
+- `bun --cwd=packages/natives run build` runs the same host Cargo/napi-rs build (`packages/natives/scripts/build-bindings.ts`), so it also regenerates declarations and exports and load-probes the addon.
 
-Release builds use Bazel targets and publish `.node` files in platform leaf packages. The core publish rewrite removes addons and injects lockstep optional dependencies generated from `LEAF_TARGETS` in `gen-npm-packages.ts`.
+Release packaging publishes the host-built `.node` in platform leaf packages; build it on each target platform. The core publish rewrite removes addons and injects lockstep optional dependencies generated from `LEAF_TARGETS` in `gen-npm-packages.ts`.
 
 ## Design the N-API boundary
 
@@ -129,7 +129,7 @@ Remove only the stale local artifacts/cache identified by loader diagnostics, th
 
 ### Declarations changed but shipping addon did not
 
-`build:bindings` and the default Cargo-backed `build` regenerate host declarations and exports. A Bazel-backed `build` and explicit CI/release targets produce artifacts without regenerating those files. Verify both generated source-control outputs and the actual binary used by the scenario.
+`build:bindings` and `build` both run the host Cargo/napi-rs build and regenerate declarations and exports. Verify both generated source-control outputs and the actual binary used by the scenario.
 
 ### Same-version incomplete addon
 

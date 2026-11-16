@@ -2,17 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
-/// The testkit fixture directory `sub` (`events`, `skeleton`): under the
-/// crate root for Cargo, the workspace-relative runfile for Bazel, whose
-/// tests do not run from the sources the compile-time path names.
+/// The testkit fixture directory `sub` (`events`, `skeleton`), relative to the
+/// crate root.
 fn fixtures(sub: &str) -> PathBuf {
-	let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+	Path::new(env!("CARGO_MANIFEST_DIR"))
 		.join("src/testkit/fixtures")
-		.join(sub);
-	if manifest.is_dir() {
-		return manifest;
-	}
-	Path::new("crates/pi-shell/src/testkit/fixtures").join(sub)
+		.join(sub)
 }
 
 mod bang_pid;

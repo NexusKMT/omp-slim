@@ -76,10 +76,10 @@ runs:
       # Off-infra (GitHub-hosted): actions/cache for the bun store, split into
       # restore + save. actions/cache entries are scoped per ref but count
       # against the shared 10 GB repo quota — letting every PR branch save its
-      # own copy of the ~500 MB store duplicated it 19x, evicting the far more
-      # valuable bazel disk-cache archives (which is why release darwin builds
-      # kept going cold). Only main saves: a tag or branch copy is readable by
-      # that ref alone, so it wastes quota; every other ref restores main's.
+      # own copy of the ~500 MB store duplicated it 19x and evicted the more
+      # valuable release-build caches. Only main saves: a tag or branch copy is
+      # readable by that ref alone, so it wastes quota; every other ref
+      # restores main's.
       - name: Restore bun store (GitHub cache)
         id: bun-cache
         if: steps.env.outputs.cache == 'gha'

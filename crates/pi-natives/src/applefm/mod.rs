@@ -1,13 +1,13 @@
 //! In-process bridge to Apple's on-device Foundation Models (macOS 27+).
 //!
 //! `bridge.swift` is compiled into a standalone dylib by `build-bridge.sh`
-//! (from `build.rs` and the Bazel `applefm_bridge` genrule) and embedded in the
-//! addon as bytes. It is never linked: on first use, and only on macOS 27+,
-//! the bytes are written to `$TMPDIR` and `dlopen`ed, so older systems never
-//! load the Swift runtime or `FoundationModels` (linking them crashed the addon
-//! on load there). It exposes a small C ABI; this module wraps it for
-//! JavaScript. Hosts without a suitable Swift toolchain embed an empty file,
-//! which reports the bridge as not built.
+//! (from `build.rs`) and embedded in the addon as bytes. It is never linked: on
+//! first use, and only on macOS 27+, the bytes are written to `$TMPDIR` and
+//! `dlopen`ed, so older systems never load the Swift runtime or
+//! `FoundationModels` (linking them crashed the addon on load there). It
+//! exposes a small C ABI; this module wraps it for JavaScript. Hosts without a
+//! suitable Swift toolchain embed an empty file, which reports the bridge as
+//! not built.
 //!
 //! Requests and events are JSON documents whose schema is owned by
 //! `bridge.swift` and mirrored by `packages/ai/src/providers/apple-fm.ts`.

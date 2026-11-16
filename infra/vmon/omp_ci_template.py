@@ -13,22 +13,19 @@ what CI would otherwise fetch on every job:
 
 - apt: clang/lld/llvm, the canvas/cairo stack, fd/ripgrep/imagemagick (+ `fd`
   and `magick` shims);
-- sccache, zig, cmake, ninja, bazelisk (also as `bazel`), all in /usr/local/bin;
+- sccache, zig, cmake, ninja, all in /usr/local/bin;
 - bun, system-wide at the floor of the repo pin (package.json `packageManager`);
 - rustup + the rust-toolchain.toml toolchain (components and targets) as the
   default, plus aarch64-unknown-linux-gnu and cargo-nextest/zigbuild;
   every ~/.cargo/bin entry is linked into /usr/local/bin;
 - warm caches from the pinned checkout, all owned by `user`:
-  bun store (~/.bun/install/cache), Cargo registry (~/.cargo/registry),
-  bazelisk's Bazel download (~/.cache/bazelisk), Bazel's install base and an
-  output base fetched for //:natives-all + //crates/... (~/.cache/bazel), and
-  the Bazel repository cache (/opt/bazel-repo-cache, the paths
-  .github/actions/bazel-cache passes). The checkout itself is removed.
+  bun store (~/.bun/install/cache) and Cargo registry (~/.cargo/registry).
+  The checkout itself is removed.
 
 Toolchain pins are read from the pinned checkout, so one `--ref` decides
 what the template carries. Rebuild after bumping rust-toolchain.toml,
-.bazelversion, the bun pin, or MODULE.bazel(.lock)/Cargo.lock/bun.lock
-(caches only go stale: jobs fetch the difference, slower but correct):
+the bun pin, or Cargo.lock/bun.lock (caches only go stale: jobs fetch the
+difference, slower but correct):
 
     E2B_API_URL=<vmon API URL> E2B_API_KEY=<CI team API key> \\
         uv run infra/vmon/omp_ci_template.py [--ref main|<sha>] [--skip-cache]
@@ -57,13 +54,9 @@ SCCACHE_VERSION = "0.18.0"
 ZIG_VERSION = "0.16.0"
 CMAKE_VERSION = "4.4.3"
 NINJA_VERSION = "1.13.2"
-BAZELISK_VERSION = "1.29.0"
 
-# actions/checkout's workspace for this repo. Warming Bazel here makes the
-# output base (keyed by the workspace path) the one CI jobs reuse.
+# actions/checkout's workspace for this repo; warm caches are populated here.
 WORKSPACE = "/home/user/actions-runner/_work/oh-my-pi/oh-my-pi"
-# Read by .github/actions/bazel-cache; keep the two in sync.
-REPO_CACHE = "/opt/bazel-repo-cache"
 
 APT_PACKAGES = [
     "clang",
@@ -95,16 +88,8 @@ ln -sf "/opt/cmake-{CMAKE_VERSION}-linux-x86_64/bin/ctest" /usr/local/bin/ctest
 curl -fsSL -o "$tmp/ninja.zip" "https://github.com/ninja-build/ninja/releases/download/v{NINJA_VERSION}/ninja-linux.zip"
 unzip -o "$tmp/ninja.zip" -d /usr/local/bin
 chmod 0755 /usr/local/bin/ninja
-curl -fsSL -o /usr/local/bin/bazelisk "https://github.com/bazelbuild/bazelisk/releases/download/v{BAZELISK_VERSION}/bazelisk-linux-amd64"
-chmod 0755 /usr/local/bin/bazelisk
-ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
 rm -rf "$tmp"
-install -d -o user -g user -m 0755 {REPO_CACHE}
 """
-
-# Retries a flaky download (the Microsoft CDN cuts bodies short now and then).
-RETRY = 'retry() { for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; return 1; }'
-
 
 INSTALL_RUSTUP = """set -eux
 curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
@@ -154,22 +139,14 @@ for bin in /home/user/.cargo/bin/*; do ln -sf "$bin" /usr/local/bin/; done
 """
 
 # User: warm every per-job download from the pinned checkout, then drop it.
-# The Bazel flags mirror .github/actions/bazel-cache so the fetched repos
-# (and their repo-contents-cache keys) match what jobs ask for.
 WARM_CACHES = f"""set -eux
-{RETRY}
 cd {WORKSPACE}
 bun install --frozen-lockfile
 bun install --cwd .omp/tools --frozen-lockfile
 cargo fetch --locked
-bazelisk version
-retry bazelisk build --nobuild --config=ci \\
-  --repository_cache={REPO_CACHE} \\
-  //:natives-all //crates/...
-bazelisk shutdown
 cd /home/user
 rm -rf /home/user/actions-runner/_work/oh-my-pi "$HOME/.cargo/registry/src"
-du -sh "$HOME/.bun/install/cache" "$HOME/.cargo/registry" "$HOME/.cache/bazel" {REPO_CACHE} || true
+du -sh "$HOME/.bun/install/cache" "$HOME/.cargo/registry" || true
 """
 
 # The runner exports `.env` into every job; rustup proxies on PATH (linked

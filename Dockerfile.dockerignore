@@ -5,9 +5,7 @@
 # depth-agnostic (`**/`) to match .gitignore semantics: dockerignore anchors
 # bare `target/`/`dist/` at the context root only, which leaked
 # packages/*/dist (~600 MB) and go-port/*/target (~1.4 GB) into every build.
-# `bazel-*` symlinks point at the bazel output base.
 **/target/
-bazel-*
 **/node_modules
 **/dist/
 runs/
