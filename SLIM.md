@@ -37,6 +37,19 @@ The [2026-11-17 comparison](docs/slim-wasm-build-2026-11-17.md) passed both mode
 the default addon shrank by 5.67 MB, but the first build from the old WASM cache
 was slower. The report separates compilation, cache restoration and tests.
 
+The macOS PTY regression command now builds `pi-pty`, the small output-drain
+crate also used by the native addon, and matches napi's explicit Cargo target.
+The workflow additionally tests `PtySession` through the freshly built addon.
+`compare_optimization=true` compares O3 ThinLTO, O3 without LTO, and workspace
+O2 without LTO against a fixed cache. It measures both the first native build
+and a second addon build with its dependencies already compiled, so a change
+of Cargo profile is not confused with the cost of an ordinary addon edit.
+The `ci` profile now retains O3 and disables LTO: addon-only compilation fell
+from 10m 03s to 2m 46s, while the isolated PTY command takes 8s. The first build
+after changing profiles must populate the new dependency cache. See the
+[build-performance report](docs/slim-build-performance-2026-11-17.md) for all
+three configurations, validation results and measurement limits.
+
 The baseline was built before removal. Browser, desktop, speech and memory were
 then removed in four isolated worktrees and integrated on `main`. At most five
 agents may run concurrently, including the coordinator; workers must not spawn

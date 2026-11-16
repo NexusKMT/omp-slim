@@ -119,8 +119,11 @@ async function installGeneratedBindings(outputDir: string): Promise<void> {
 
 const canonicalAddonFilename = localAddon.filename;
 const canonicalAddonPath = path.join(nativeDir, canonicalAddonFilename);
+// Profiles live in the root Cargo.toml; `local` trades size for iteration
+// speed, `ci` strips and drops incremental state.
+const cargoProfile = Bun.env.OMP_NATIVE_CARGO_PROFILE?.trim() || "local";
 
-console.log(`Building pi-natives bindings for ${process.platform}-${process.arch}${variantSuffix} (local)…`);
+console.log(`Building pi-natives bindings for ${process.platform}-${process.arch}${variantSuffix} (${cargoProfile})…`);
 
 await fs.mkdir(nativeDir, { recursive: true });
 await cleanupStaleTemps(nativeDir);
@@ -149,10 +152,6 @@ if (!napiBinEntry) {
 	throw new Error(`@napi-rs/cli manifest at ${napiManifestPath} declares no string \`bin.napi\` entry`);
 }
 const napiBin = path.join(path.dirname(napiManifestPath), napiBinEntry);
-
-// Profiles live in the root Cargo.toml; `local` trades size for iteration
-// speed, `ci` strips and drops incremental state.
-const cargoProfile = Bun.env.OMP_NATIVE_CARGO_PROFILE?.trim() || "local";
 
 const napiArgs = [
 	"build",

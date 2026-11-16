@@ -95,7 +95,7 @@ jobs:
               omp_pty_started=$SECONDS
               bun run test:rs:pty 2>&1 | tee dist/validation/macos-intel/pty-rust-tests.log
               printf '%s\n' "$((SECONDS - omp_pty_started))" > dist/validation/macos-intel/pty-seconds.txt
-              bun test packages/natives/test/native.test.ts --test-name-pattern 'pty' --timeout 40000 2>&1 | tee dist/validation/macos-intel/pty-bindings-tests.log
+              bun test packages/natives/test/native.test.ts --test-name-pattern '\bpty\b' --timeout 40000 2>&1 | tee dist/validation/macos-intel/pty-bindings-tests.log
 
          - name: Preserve build cache even if validation fails
            if: ${{ !cancelled() && steps.toolchains.outcome == 'success' && steps.build-cache.outputs.cache-hit != 'true' && steps.build-cache.outputs.cache-primary-key != '' }}
@@ -307,7 +307,7 @@ jobs:
               omp_pty_started=$SECONDS
               bun run test:rs:pty 2>&1 | tee dist/validation/native-benchmark/pty-tests.log
               printf '%s\n' "$((SECONDS - omp_pty_started))" > dist/validation/native-benchmark/pty-seconds
-              bun test packages/natives/test/native.test.ts --test-name-pattern 'pty' --timeout 40000 2>&1 | tee dist/validation/native-benchmark/pty-bindings-tests.log
+              bun test packages/natives/test/native.test.ts --test-name-pattern '\bpty\b' --timeout 40000 2>&1 | tee dist/validation/native-benchmark/pty-bindings-tests.log
 
          - name: Record comparison metrics
            if: always()

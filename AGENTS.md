@@ -284,7 +284,7 @@ Profiles live in the root `Cargo.toml`; `.cargo/config.toml` carries the setting
 |`release`|Shipping build: fat LTO, 1 codegen unit, stripped.|
 |`local`|Fast local release iteration: thin LTO, 16 codegen units, incremental.|
 |`profiling`|`release` codegen with symbols kept, for `perf`/`samply`/Instruments.|
-|`ci`|Thin LTO, no debuginfo, stripped.|
+|`ci`|O3 without LTO, no debuginfo, stripped.|
 
 **Never set `split-debuginfo = "off"` on a profile that has debuginfo.** On Mach-O the linker never merges DWARF into the executable — it writes a debug map (`N_OSO`) pointing at the `.o` files, and `"unpacked"` is what keeps those files. With `"off"` every backtrace frame in our own crates silently loses `file:line`; the `panicked at foo.rs:3` header still prints (that is `#[track_caller]`, not debuginfo), which makes the loss easy to miss. `ci` may use `"off"` only because it sets `debug = false`.
 

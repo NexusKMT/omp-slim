@@ -77,7 +77,9 @@ codegen-units = 1
 
 [profile.ci]
 inherits = "release"
-lto = "thin"
+# O3 without LTO keeps addon rebuilds short; see docs/slim-build-performance-2026-11-17.md.
+# Use "off", not false: false still permits local ThinLTO within each crate.
+lto = "off"
 codegen-units = 16
 debug = false
 strip = "symbols"
