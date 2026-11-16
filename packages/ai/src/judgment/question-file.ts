@@ -13,7 +13,7 @@
  *
  * @example
  * ```ts ignore
- * import graph from "./auto-graph.json" with { type: "json" };
+ * import table from "./chart-table.json" with { type: "json" };
  * const QUESTIONS = judgeQuestions(graph);
  * QUESTIONS.shading; // ChoiceQuestion<"shared" | "series" | "row">
  * renderQuestion(QUESTIONS.order, { column: "latency" });
