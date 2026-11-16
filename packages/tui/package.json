@@ -53,10 +53,6 @@
       "types": "./src/render/index.ts",
       "import": "./src/render/index.ts"
     },
-    "./chrome": {
-      "types": "./src/chrome/index.ts",
-      "import": "./src/chrome/index.ts"
-    },
     "./tools": {
       "types": "./src/tools/index.ts",
       "import": "./src/tools/index.ts"

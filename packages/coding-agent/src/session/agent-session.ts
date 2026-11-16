@@ -161,7 +161,6 @@ import { normalizeToolEventInput, resolveToolEventInput } from "../extensibility
 import { GoalRuntime } from "../goals/runtime";
 import type { GoalModeState, GoalTokenUsage } from "../goals/state";
 import { InternalUrlRouter, type LocalProtocolOptions } from "../internal-urls";
-import { type ChainJudge, journalJudgmentUsage, resolveJudge } from "../judgment";
 import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import type { JobWidgetEntry } from "@oh-my-pi/pi-tui/tools/job-widget";
 import type { DaemonCompletionNotification } from "../launch/protocol";
@@ -3140,24 +3139,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	/** Automatic judgment is retired; pattern-based rules remain active. */
 	ruleJudge(): Judge | undefined {
 		return undefined;
-	}
-
-	/**
-	 * Judge that picks the chart of a multi-series assistant table under
-	 * `tui.autoGraph: smart`. Rebuilt per call so model, credential, and session
-	 * switches apply.
-	 */
-	tableChartJudge(): ChainJudge {
-		return resolveJudge({
-			settings: this.settings,
-			registry: this.#modelRegistry,
-			sessionModel: this.model,
-			sessionId: this.sessionId,
-			metadataResolver: provider => this.agent.metadataForProvider(provider),
-			purpose: "auto-graph",
-			onUsage: journalJudgmentUsage(this.sessionManager),
-			telemetry: this.agent.telemetry,
-		});
 	}
 
 	/**
