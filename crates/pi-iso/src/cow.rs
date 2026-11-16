@@ -95,8 +95,7 @@ pub fn is_unsupported(err: &io::Error) -> bool {
 /// copy the data into it instead.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub fn clone_open(src: &fs::File, dst: &fs::File) -> io::Result<()> {
-	let cloned = imp::clone_into(src, dst);
-	cloned
+	imp::clone_into(src, dst)
 }
 
 /// Whether an [`is_unsupported`] [`clone_open`] error is cross-device.

@@ -183,14 +183,6 @@
       "types": "./src/edit/*.ts",
       "import": "./src/edit/*.ts"
     },
-    "./exa": {
-      "types": "./src/exa/index.ts",
-      "import": "./src/exa/index.ts"
-    },
-    "./exa/*": {
-      "types": "./src/exa/*.ts",
-      "import": "./src/exa/*.ts"
-    },
     "./exec/*": {
       "types": "./src/exec/*.ts",
       "import": "./src/exec/*.ts"
@@ -310,10 +302,6 @@
     "./mcp/*": {
       "types": "./src/mcp/*.ts",
       "import": "./src/mcp/*.ts"
-    },
-    "./mcp/transports": {
-      "types": "./src/mcp/transports/index.ts",
-      "import": "./src/mcp/transports/index.ts"
     },
     "./mcp/transports/*": {
       "types": "./src/mcp/transports/*.ts",
