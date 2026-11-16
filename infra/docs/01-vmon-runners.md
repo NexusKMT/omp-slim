@@ -37,7 +37,7 @@ Options:
 | `test_coding_agent_native` (3 shards on PRs, 1 on main) | `ubuntu-22.04` | `vmon-large/from=omp-ci` |
 | `test_workspace`, `test_coding_agent_singleton`, `test_ts_native`, `test_coding_agent_ui`, `test_coding_agent_runtime`, `test_smoke`, `install_methods` | `ubuntu-22.04` | `vmon-large/from=omp-ci` |
 | `release_gate`, `release_binary`, `release_native_leaves`, `release_github`, `release_build`, `release_npm`, `release_brew` | — | `ubuntu-22.04` |
-| `release_smoke` | — | per-platform GitHub-hosted (`ubuntu-22.04`, `ubuntu-24.04-arm`, `macos-15-intel`, `macos-15`, `windows-2025`, `windows-11-arm`) |
+| `release_smoke` | — | per-platform GitHub-hosted (`ubuntu-22.04`, `ubuntu-24.04-arm`, `macos-15-intel`, `macos-15`) |
 
 `bun-cache-warm.yml` and `nix.yml` stay GitHub-hosted. Release jobs stay hosted because they build nothing Bazel-heavy and publish with OIDC; the `release_metadata` probe stays hosted so the release chain never waits on sandbox capacity.
 

@@ -89,19 +89,3 @@ config_setting(
         "@platforms//cpu:arm64",
     ],
 )
-
-config_setting(
-    name = "aarch64-pc-windows-msvc",
-    constraint_values = [
-        "@platforms//os:windows",
-        "@platforms//cpu:aarch64",
-    ],
-)
-
-config_setting(
-    name = "x86_64-pc-windows-msvc",
-    constraint_values = [
-        "@platforms//os:windows",
-        "@platforms//cpu:x86_64",
-    ],
-)

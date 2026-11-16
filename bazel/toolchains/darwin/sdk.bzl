@@ -4,8 +4,8 @@ Downloads the newest-SDK package of the Command Line Tools for Xcode 27.0
 (`CLTools_macOSNMOS_SDK.pkg`) from Apple's software update CDN — the
 unauthenticated catalog `softwareupdate` installs the Command Line Tools from —
 and unpacks its MacOSX27.0.sdk with extract_pkg.py, so linux exec hosts get
-the SDK straight from Apple, the way @xwin_sysroot gets the MSVC CRT from
-Microsoft. Requires python3 on the exec host (standard library only).
+the SDK straight from Apple. Requires python3 on the exec host (standard
+library only).
 
     MacOSX27.0.sdk/   the SDK, minus its man pages, Mac Catalyst support
                       (System/iOSSupport) and Perl modules

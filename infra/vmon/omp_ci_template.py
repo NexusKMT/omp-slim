@@ -16,13 +16,13 @@ what CI would otherwise fetch on every job:
 - sccache, zig, cmake, ninja, bazelisk (also as `bazel`), all in /usr/local/bin;
 - bun, system-wide at the floor of the repo pin (package.json `packageManager`);
 - rustup + the rust-toolchain.toml toolchain (components and targets) as the
-  default, plus aarch64-unknown-linux-gnu and cargo-nextest/zigbuild/xwin;
+  default, plus aarch64-unknown-linux-gnu and cargo-nextest/zigbuild;
   every ~/.cargo/bin entry is linked into /usr/local/bin;
 - warm caches from the pinned checkout, all owned by `user`:
   bun store (~/.bun/install/cache), Cargo registry (~/.cargo/registry),
   bazelisk's Bazel download (~/.cache/bazelisk), Bazel's install base and an
   output base fetched for //:natives-all + //crates/... (~/.cache/bazel), and
-  the Bazel repository cache + xwin splat (/opt/bazel-repo-cache, the paths
+  the Bazel repository cache (/opt/bazel-repo-cache, the paths
   .github/actions/bazel-cache passes). The checkout itself is removed.
 
 Toolchain pins are read from the pinned checkout, so one `--ref` decides
@@ -43,14 +43,11 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 import time
-import urllib.request
 
 REPO_URL = "https://github.com/can1357/oh-my-pi"
-RAW_URL = "https://raw.githubusercontent.com/can1357/oh-my-pi"
 NAME = "omp-ci"
 CPU_COUNT = 8
 MEMORY_MB = 16384
@@ -109,60 +106,6 @@ install -d -o user -g user -m 0755 {REPO_CACHE}
 RETRY = 'retry() { for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; return 1; }'
 
 
-def xwin_download(sha: str) -> str:
-    """User: fill `OMP_XWIN_CACHE_DIR` with the MSVC CRT + Windows SDK payloads
-    (~1 GiB from the Microsoft CDN) that the pinned commit's xwin sysroot
-    repositories splat, before the checkout. The script only names the xwin
-    pins, so vmon's step cache keeps this layer across template rebuilds
-    until bazel/toolchains/msvc/sysroot.bzl or MODULE.bazel change them; the
-    Bazel warm-up below then splats from the cache without the CDN."""
-    bzl = fetch(f"{RAW_URL}/{sha}/bazel/toolchains/msvc/sysroot.bzl")
-    module = fetch(f"{RAW_URL}/{sha}/MODULE.bazel")
-    version = pin(r'_XWIN_VERSION = "([^"]+)"', bzl)
-    manifest = pin(r'_XWIN_MANIFEST_VERSION = "([^"]+)"', bzl)
-    triple = "x86_64-unknown-linux-musl"
-    digest = pin(rf'"linux-x64": \("{triple}", "([0-9a-f]{{64}})"\)', bzl)
-    downloads = []
-    for call in re.findall(r"\bxwin_sysroot\((.*?)\)", module, re.S):
-        arch = re.search(r'arch = "([^"]+)"', call)
-        sdk = re.search(r'sdk_version = "([^"]+)"', call)
-        downloads.append(
-            f"retry xwin --accept-license --arch {arch[1] if arch else 'x86_64'}"
-            f" --variant desktop --manifest-version {manifest}"
-            + (f" --sdk-version {sdk[1]}" if sdk else "")
-            + f" --cache-dir {REPO_CACHE}/xwin download"
-        )
-    if not downloads:
-        sys.exit("omp_ci_template.py: no xwin_sysroot repositories in MODULE.bazel")
-    lines = "\n".join(downloads)
-    return f"""set -eux
-{RETRY}
-tmp="$(mktemp -d)"
-retry curl -fsSL -o "$tmp/xwin.tar.gz" "https://github.com/Jake-Shadle/xwin/releases/download/{version}/xwin-{version}-{triple}.tar.gz"
-echo "{digest}  $tmp/xwin.tar.gz" | sha256sum -c -
-tar -xzf "$tmp/xwin.tar.gz" -C "$tmp"
-PATH="$tmp/xwin-{version}-{triple}:$PATH"
-mkdir -p {REPO_CACHE}/xwin
-{lines}
-rm -rf "$tmp"
-du -sh {REPO_CACHE}/xwin
-"""
-
-
-def fetch(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=30) as response:
-        return response.read().decode()
-
-
-def pin(pattern: str, text: str) -> str:
-    found = re.search(pattern, text)
-    if not found:
-        sys.exit(
-            f"omp_ci_template.py: xwin pin {pattern!r} not found in the pinned commit"
-        )
-    return found[1]
-
-
 INSTALL_RUSTUP = """set -eux
 curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
 """
@@ -203,7 +146,6 @@ rustup default "$channel"
 rustup target add --toolchain "$channel" aarch64-unknown-linux-gnu
 cd "$HOME"
 # cargo-nextest and cargo-zigbuild come with the `ci` image.
-cargo install --locked cargo-xwin
 rm -rf "$HOME/.cargo/registry/src"
 """
 
@@ -223,7 +165,6 @@ cargo fetch --locked
 bazelisk version
 retry bazelisk build --nobuild --config=ci \\
   --repository_cache={REPO_CACHE} \\
-  --repo_env=OMP_XWIN_CACHE_DIR={REPO_CACHE}/xwin \\
   //:natives-all //crates/...
 bazelisk shutdown
 cd /home/user
@@ -249,7 +190,6 @@ def make_template(sha: str):
         .apt_install(APT_PACKAGES)
         .run_cmd(INSTALL_TOOLS, user="root")
         .run_cmd(INSTALL_RUSTUP, user="user")
-        .run_cmd(xwin_download(sha), user="user")
         .run_cmd(checkout(sha), user="user")
         .run_cmd(INSTALL_BUN, user="root")
         .run_cmd(INSTALL_RUST, user="user")

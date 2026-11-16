@@ -4733,7 +4733,6 @@ dependencies = [
  "tokio-util",
  "uucore",
  "uutils_term_grid",
- "windows-sys 0.61.2",
  "xutf",
  "xxhash-rust",
  "zstd",
@@ -4771,7 +4770,6 @@ dependencies = [
  "parking_lot",
  "pi-diff",
  "tokio",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4783,13 +4781,11 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bitflags 2.13.2",
- "clipboard-win",
  "crc32fast",
  "data-encoding",
  "either",
  "fancy-regex 0.17.0",
  "fastrand",
- "find-msvc-tools",
  "flate2",
  "flume",
  "foldhash 0.2.0",
@@ -4839,8 +4835,6 @@ dependencies = [
  "tinyvec",
  "tokio",
  "tokio-util",
- "windows-sys 0.61.2",
- "winreg 0.56.0",
  "xkeysym",
  "xutf",
  "xxhash-rust",
@@ -4894,8 +4888,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
- "windows-sys 0.61.2",
- "winreg 0.56.0",
  "xxhash-rust",
 ]
 
@@ -4924,7 +4916,6 @@ dependencies = [
  "parking_lot",
  "tokio",
  "tokio-util",
- "windows-sys 0.61.2",
  "xattr",
 ]
 
@@ -4947,7 +4938,6 @@ dependencies = [
  "pi-vfs",
  "regex",
  "tokio",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -118,7 +118,7 @@ debug = "line-tables-only"
 # "off" silently strips file:line from backtrace frames in our own crates,
 # because ld64 never merges DWARF into the binary. The `panicked at foo.rs:3`
 # header survives via #[track_caller] and hides the loss. Linux: split DWARF
-# (.dwo) rather than debuginfo packed into every rlib. Windows: no-op (PDB).
+# (.dwo) rather than debuginfo packed into every rlib.
 split-debuginfo = "unpacked"
 
 # Deps compile optimized once and cache; your own crates stay fast.
@@ -332,31 +332,6 @@ xxhash-rust = { version = "0.8", features = ["xxh64", "xxh32"] }
 # System & Platform
 # ──────────────────────────────────────────────────────────────────────────────
 libc = "0.2.191"
-windows-sys = { version = "0.61", features = [
-   "Win32_Foundation",
-   "Win32_Globalization",
-   "Win32_Security",
-   "Win32_Storage_FileSystem",
-   "Win32_Storage_ProjectedFileSystem",
-   "Win32_System_Com",
-   "Win32_System_Console",
-   "Win32_System_LibraryLoader",
-   "Win32_System_IO",
-   "Win32_System_Ioctl",
-   "Win32_System_JobObjects",
-   "Win32_System_Pipes",
-   "Win32_System_SystemInformation",
-   "Win32_System_Threading",
-] }
-# Transitive-only pin (wired through crates/pi-natives' `cfg(false)` target
-# deps so the constraint participates in resolution without tripping the
-# unused-dependency lint): cc 1.2.x passes
-# FILE_ATTRIBUTE_TEMPORARY to OpenOptionsExt::custom_flags as u32, but
-# find-msvc-tools 0.1.13 retyped that constant to i32, breaking every Windows
-# build. tree-sitter-sequel caps cc at ~1.2.1 so the fixed cc 1.4.x line is
-# out of reach; hold 0.1.12 until upstream ships a compatible release.
-find-msvc-tools = "=0.1.12"
-winreg = "0.56"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Node.js Bindings (NAPI)
@@ -369,7 +344,6 @@ napi-derive = "3"
 # Terminal & PTY
 # ──────────────────────────────────────────────────────────────────────────────
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
-clipboard-win = "5.4"
 portable-pty = "0.9"
 shlex = "2"
 

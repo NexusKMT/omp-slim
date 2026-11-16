@@ -5,9 +5,6 @@ fetches the repo and prunes it to the `bin/` entries its toolchain wraps plus
 the clang builtin headers (lib/clang/<major>/include — immintrin.h & co). The
 pruned trees are a few hundred MiB instead of ~10 GiB.
 
-    llvm_msvc_tools_repository    LLVM 20.1.7, clang-cl / lld-link / llvm-lib /
-                                  llvm-rc for //bazel/toolchains/msvc (linux
-                                  and mac exec hosts)
     llvm_darwin_tools_repository  LLVM 23.1.3, clang / ld64.lld / llvm-ar /
                                   llvm-libtool-darwin for
                                   //bazel/toolchains/darwin (linux exec hosts).
@@ -130,28 +127,6 @@ def _llvm_tools_repository(consumer, version, dists, bins):
             "version": attr.string(default = version),
         },
     )
-
-llvm_msvc_tools_repository = _llvm_tools_repository(
-    consumer = "msvc",
-    version = "20.1.7",
-    dists = {
-        "linux-arm64": ["Linux-ARM64", "832f2802a29457dc758f56e26e98558c6cd0e45fcd07186f540cb6e7f4e59385"],
-        "linux-x64": ["Linux-X64", "8494c98a774051a40bfe1187a2d6442f4bc107598998bbe1673d9bb1572cfd6f"],
-        "macos-arm64": ["macOS-ARM64", "6aa75de00575ad0663183b00f00f39992ded611b5136e57649ace1e6a53c0d16"],
-        "macos-x64": ["macOS-X64", "ccf82ffe7e136ee49659cb57157856a7963d0950fac3d05aabba0db75bfba26f"],
-    },
-    bins = [
-        "clang",
-        "clang-cl",
-        "lld",
-        "lld-link",
-        "llvm-ar",
-        "llvm-lib",
-        "llvm-ml",
-        "llvm-mt",
-        "llvm-rc",
-    ],
-)
 
 llvm_darwin_tools_repository = _llvm_tools_repository(
     consumer = "darwin",

@@ -30,7 +30,7 @@ flowchart LR
 Key properties:
 
 - **One job = one VM.** Each job forks a clean snapshot of `omp-ci`; nothing survives into the next job. A failed job keeps its sandbox for 30 min only when its label carries `/debug`.
-- **Warm from the first second.** Toolchains (Rust nightly, bun, bazelisk + Bazel, zig, cmake, ninja, sccache), the bun store, the Cargo registry, Bazel's install base, a fetched output base and the Bazel repository cache (with the xwin splat) are baked into the template from a pinned checkout ([02-omp-ci-template.md](02-omp-ci-template.md)).
+- **Warm from the first second.** Toolchains (Rust nightly, bun, bazelisk + Bazel, zig, cmake, ninja, sccache), the bun store, the Cargo registry, Bazel's install base, a fetched output base and the Bazel repository cache are baked into the template from a pinned checkout ([02-omp-ci-template.md](02-omp-ci-template.md)).
 - **Node-served caches.** The vmon node serves the GitHub Actions cache (`actions/cache` and friends, unchanged) and a per-repository Bazel HTTP cache; branch and tag jobs write, pull request jobs only read ([03-caching.md](03-caching.md)).
 - **Capacity is vmon's.** There is no fixed runner pool: each job holds a `vmon-large` sandbox against the CI team's vmon limits, and jobs over the limit wait in vmon's queue (state `waiting`).
 

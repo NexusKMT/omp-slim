@@ -1,7 +1,7 @@
 """Repository rule generating the hermetic clang + ld64.lld macOS cc toolchain.
 
 Linux exec hosts cross-compile the darwin addons with this toolchain; mac hosts
-keep the host Xcode toolchain. Like @msvc_cc, the repo holds only cheap
+keep the host Xcode toolchain. Like the other cross toolchains, the repo holds only cheap
 generated files — wrapper scripts and the cc_toolchain BUILD — so iterating on
 flags never invalidates the big @llvm_darwin_tools / @macos_sdk downloads.
 
