@@ -804,7 +804,6 @@ fn rename(
 
 	// "to" may no longer exist if it was backed up
 	if filesystem.exists(&to_fs) && filesystem.is_dir(&to_fs) && !filesystem.is_symlink(&to_fs) {
-		// normalize behavior between *nix and windows
 		if filesystem.is_dir(&from_fs) {
 			if is_empty_dir(host, to) {
 				filesystem.remove_dir(&to_fs)?;

@@ -479,9 +479,6 @@ async fn an_executable_url_runs_as_the_file_it_aliases() {
 	assert_eq!(run.stdout, "tool-ran");
 }
 
-/// The same contract on Windows, where an executable is recognized by its
-/// extension rather than by its mode bits.
-
 /// Appends streamed stdout `chunks` to `output` until it ends with `suffix`.
 async fn wait_for_output(
 	chunks: &flume::Receiver<Bytes>,
@@ -685,10 +682,6 @@ async fn forced_rm_of_a_directory_gone_while_refused_succeeds() {
 	assert_eq!(code, 1);
 	assert!(error.contains("Permission denied"), "{error}");
 }
-
-/// On Windows `rm` clears a directory's read-only attribute to remove it;
-/// if another process deleted it meanwhile, `-f` counts it as removed
-/// instead of reporting the first attempt's `Permission denied`.
 
 /// A rename from the host into a provider is `EXDEV`, so `mv` copies and
 /// removes: the copy must keep modes and modification times, and names of

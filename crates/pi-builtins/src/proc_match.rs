@@ -382,9 +382,6 @@ async fn wait_for_watchable_exits(
 	polled
 }
 
-/// Waits on each process's snapshot handle and returns the processes whose
-/// wait could not be registered, which need polling.
-
 /// No exit notification primitive is wired up here; every process is polled.
 #[cfg(not(target_os = "linux"))]
 async fn wait_for_watchable_exits(

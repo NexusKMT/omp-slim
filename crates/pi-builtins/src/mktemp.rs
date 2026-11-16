@@ -406,10 +406,9 @@ fn app() -> Command {
 			Arg::new(OPT_TMPDIR)
 				.long(OPT_TMPDIR)
 				.help(
-					"interpret TEMPLATE relative to DIR; if DIR is not specified, use $TMPDIR ($TMP or \
-					 $TEMP on windows) if set, else /tmp. With this option, TEMPLATE must not be an absolute \
-					 name; unlike with -t, TEMPLATE may contain slashes, but mktemp creates only the \
-					 final component",
+					"interpret TEMPLATE relative to DIR; if DIR is not specified, use $TMPDIR if set, \
+					 else /tmp. With this option, TEMPLATE must not be an absolute name; unlike with -t, \
+					 TEMPLATE may contain slashes, but mktemp creates only the final component",
 				)
 				.value_name("DIR")
 				.num_args(0..=1)
@@ -422,8 +421,8 @@ fn app() -> Command {
 			Arg::new(OPT_T)
 				.short('t')
 				.help(
-					"Generate a template (using the supplied prefix and TMPDIR (TMP or TEMP on windows) \
-					 if set) to create a filename template [deprecated]",
+					"Generate a template (using the supplied prefix and TMPDIR if set) to create a \
+					 filename template [deprecated]",
 				)
 				.action(ArgAction::SetTrue),
 		)

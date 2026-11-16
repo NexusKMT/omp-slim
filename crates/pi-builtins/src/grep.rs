@@ -1910,7 +1910,7 @@ mod tests {
 	use crate::host::tree_with_sparse_file;
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn path_separator_rewrites_the_native_separator_on_windows() {
+	async fn path_separator_replaces_slash() {
 		// Defends: --path-separator must rewrite the path separator.
 		let mut out = Vec::new();
 		RecordFormat {

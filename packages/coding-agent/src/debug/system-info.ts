@@ -48,7 +48,7 @@ export async function collectSystemInfo(): Promise<SystemInfo> {
 	}
 
 	// Try to get shell from environment
-	const shell = Bun.env.SHELL ?? Bun.env.ComSpec ?? "unknown";
+	const shell = Bun.env.SHELL ?? "unknown";
 	const terminal = Bun.env.TERM_PROGRAM ?? Bun.env.TERM ?? undefined;
 
 	let osStr = `${os.type()} ${os.release()} (${os.platform()})`;

@@ -8032,7 +8032,7 @@ fn substitute(
 			})?;
 			let mut shell_out = String::from_utf8_lossy_owned(output_bytes.stdout);
 			if shell_out.ends_with("\r\n") {
-				// On windows, both return carriage and newline characters are used
+				// A command that emits CRLF: strip both, as `$(...)` does.
 				shell_out.truncate(shell_out.len() - 2);
 			} else if shell_out.ends_with('\n') {
 				// Strip the trailing newline, as GNU sed does

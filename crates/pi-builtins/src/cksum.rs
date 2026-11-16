@@ -573,8 +573,8 @@ fn run_cksum(host: &mut Host, matches: ArgMatches) -> ExecResult<()> {
 const READ_BUFFER_SIZE: usize = 32 * 1024;
 
 /// Necessary options when computing a checksum. Historically, these options
-/// included a `binary` field to differentiate `--binary` and `--text` modes on
-/// windows. Since the support for this feature is approximate in GNU, and it's
+/// included a `binary` field to differentiate `--binary` and `--text` modes.
+/// Since the support for this feature is approximate in GNU, and it's
 /// deprecated anyway, it was decided in #9168 to ignore the difference when
 /// computing the checksum.
 struct ChecksumComputeOptions {

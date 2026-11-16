@@ -97,8 +97,6 @@ fn pipe_file(end: impl Into<std::os::fd::OwnedFd>) -> std::fs::File {
 	std::fs::File::from(end.into())
 }
 
-/// A pipe end as the `std::fs::File` owning its handle.
-
 /// An in-process stream an [`OpenFile`] can carry: the wrappers the host puts
 /// around a descriptor (emulated SIGPIPE) and the in-memory streams of tests.
 pub(crate) trait Stream: Read + Write + Send {

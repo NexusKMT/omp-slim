@@ -268,8 +268,8 @@ pub enum Dialect {
 	Zsh,
 }
 
-/// Target platform semantics (signal numbers, PATHEXT, …); overridable in
-/// tests through `EngineConfig::platform`.
+/// Target platform semantics (signal numbers, default search paths, …);
+/// overridable in tests through `EngineConfig::platform`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 #[serde(rename_all = "lowercase")]

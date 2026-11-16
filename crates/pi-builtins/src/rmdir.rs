@@ -137,19 +137,6 @@ fn rmdir(host: &Host, dir: &OsStr) -> io::Result<()> {
 	host.fs().remove_dir(resolved)
 }
 
-/// Win32 strips trailing dots and spaces from a component, so `rmdir e.` can
-/// remove `e` or a child reached through a trimmed component. Refuse an operand
-/// whose own spelling would trim, and a resolved path Win32 would still
-/// normalize; a verbatim path is accessed literally, so its components are not
-/// re-checked.
-
-/// Whether a component of `path` would lose a trailing dot or space to Win32
-/// normalization (`.` and `..` name their own directories).
-
-/// POSIX `rmdir(2)` refuses a final `.` (EINVAL) or `..` (ENOTEMPTY) once the
-/// directory holding it resolves. Win32 folds those components away instead,
-/// so `rmdir e/.` would remove `e` and `rmdir x/..` the working directory.
-
 fn remove_operand(host: &mut Host, dir: &OsStr, opts: &Opts) {
 	if opts.verbose {
 		verbose(host, dir);

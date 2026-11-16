@@ -255,8 +255,6 @@ mod args {
 			if let Some(pid_str) = matches.get_one::<String>(options::PID) {
 				match pid_str.parse() {
 					Ok(pid) => {
-						// NOTE: on unix platform::Pid is i32, on windows platform::Pid is u32
-						#[cfg(unix)]
 						if pid < 0 {
 							// NOTE: tail only accepts an unsigned pid
 							return Err(TailError::message(format!("invalid PID: {}", pid_str.quote())));

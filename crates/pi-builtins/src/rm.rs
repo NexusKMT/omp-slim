@@ -1556,7 +1556,7 @@ fn remove_dir(host: &mut Host, path: &Path, options: &Options, progress_bar: Opt
 		return false;
 	}
 
-	// Called to remove a symlink_dir (windows) without "-r"/"-R" or "-d".
+	// A directory without "-r"/"-R" or "-d".
 	if !options.dir && !options.recursive {
 		show_error!(host, "{}", RmError::CannotRemoveIsDirectory(path.as_os_str().to_os_string()));
 		return true;

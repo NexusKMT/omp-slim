@@ -1,11 +1,9 @@
-//! Host filesystem through direct syscalls, one implementation per platform:
+//! Host filesystem through direct syscalls:
 //!
-//! - `unix.rs`: descriptors, relative `openat` opens, file reads, and stamp
-//!   bookkeeping shared by every Unix; the listing and stat syscalls come from
-//!   `sys`, which is `darwin.rs` on macOS, `linux.rs` on Linux, and the
-//!   portable `other.rs` elsewhere.
-//! - `windows.rs`: NT handles, relative `NtCreateFile` opens, and
-//!   `NtQueryDirectoryFile` listings.
+//! `unix.rs` holds descriptors, relative `openat` opens, file reads, and stamp
+//! bookkeeping shared by every Unix; the listing and stat syscalls come from
+//! `sys`, which is `darwin.rs` on macOS, `linux.rs` on Linux, and the portable
+//! `other.rs` elsewhere.
 
 #[cfg(target_os = "macos")]
 #[path = "darwin.rs"]

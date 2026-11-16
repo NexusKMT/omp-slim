@@ -336,9 +336,7 @@ fn run_pty_sync(
 			let shell = shell.as_deref().unwrap_or("sh");
 			let mut cmd = CommandBuilder::new(shell);
 			let lower = shell.to_lowercase();
-			if lower.ends_with("cmd.exe") || lower.ends_with("cmd") {
-				cmd.arg("/c");
-			} else if lower.contains("powershell") || lower.contains("pwsh") {
+			if lower.contains("powershell") || lower.contains("pwsh") {
 				cmd.arg("-Command");
 			} else {
 				cmd.arg("-lc");
@@ -605,11 +603,9 @@ fn run_pty_sync(
 	}
 	cancel_task.abort();
 
-	// Step 1: Close the ConPTY input pipe first.
-	// Per Microsoft docs, close the input handle before calling
-	// ClosePseudoConsole. This signals to ConPTY that no more input will
-	// arrive, allowing its internal I/O threads to finish processing and
-	// eventually close the output pipe.
+	// Step 1: Close the input side first, so the child reads EOF while the
+	// master is still open; the reader thread then observes the slave's last
+	// write instead of a master-side hangup.
 	drop(writer);
 
 	// Step 2: Drop master so the reader sees EOF if the slave is gone, then

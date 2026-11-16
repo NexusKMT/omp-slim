@@ -1257,7 +1257,7 @@ fn startup_vars(k: &mut Kernel, cx: &mut Cx<'_>, init: &ShellInit) -> Result<(),
 		&& let Some(dirs) = &init.zsh_fpath
 		&& !init.env.iter().any(|(n, _)| n == "FPATH")
 	{
-		let joined = bstr::join([b':'], dirs);
+		let joined = bstr::join(b":", dirs);
 		k.root
 			.set_var(cx.store, b"FPATH", Some(Var::scalar(BString::from(joined), Attrs::NONE)));
 	}

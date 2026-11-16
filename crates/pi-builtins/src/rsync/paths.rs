@@ -530,9 +530,7 @@ pub(crate) fn full_fname(dir: &Path, name: &[u8]) -> Vec<u8> {
 }
 
 /// The errno-equivalent of "a symlink was refused" (`ELOOP`).
-#[cfg(unix)]
 pub(crate) const LOOP_ERRNO: i32 = libc::ELOOP;
-/// See the unix definition.
 
 /// A raw "refused symlink" error.
 pub(crate) fn loop_error() -> io::Error {

@@ -154,7 +154,7 @@ fn app() -> Command {
 			Arg::new(options::MODE)
 				.short('m')
 				.long(options::MODE)
-				.help("set file mode (not implemented on windows)")
+				.help("set file mode")
 				.allow_hyphen_values(true)
 				.num_args(1),
 		)
