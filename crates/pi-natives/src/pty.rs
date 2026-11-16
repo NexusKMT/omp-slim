@@ -7,10 +7,7 @@
 use std::{
 	collections::HashMap,
 	io::{Read, Write},
-	sync::{
-		Arc,
-		atomic::{AtomicBool, Ordering},
-	},
+	sync::{Arc, atomic::AtomicBool},
 	time::{Duration, Instant},
 };
 
@@ -612,7 +609,7 @@ fn run_pty_sync(
 		drop(master);
 	}
 	await_output_drain(pump_done_rx, reader_thread, queued, &in_js, cancelled || timed_out, || {
-		abort_pump.abort()
+		abort_pump.abort();
 	});
 	drop(pump_task);
 	Ok(PtyRunResult { exit_code, cancelled, timed_out })
