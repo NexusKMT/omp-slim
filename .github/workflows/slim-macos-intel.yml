@@ -7,6 +7,10 @@ on:
             description: Compare native-only and WASM-enabled builds with the same cache
             type: boolean
             default: false
+         compare_optimization:
+            description: Compare O3 ThinLTO, O3 without LTO, and workspace O2 without LTO
+            type: boolean
+            default: false
          benchmark_cache_key:
             description: Exact existing macOS build cache key for the comparison
             type: string
@@ -22,7 +26,7 @@ concurrency:
 jobs:
    build:
       name: macOS 15 Intel build and smoke test
-      if: ${{ github.event.repository.private == false && !inputs.compare_wasm }}
+      if: ${{ github.event.repository.private == false && !inputs.compare_wasm && !inputs.compare_optimization }}
       runs-on: macos-15-intel
       timeout-minutes: 120
       env:
@@ -87,7 +91,11 @@ jobs:
               OMP_FORCE_RUST_TASKS: "1"
               NEXTEST_PROFILE: ci
               NEXTEST_TEST_THREADS: "4"
-           run: bun run test:rs:pty 2>&1 | tee dist/validation/macos-intel/pty-rust-tests.log
+           run: |
+              omp_pty_started=$SECONDS
+              bun run test:rs:pty 2>&1 | tee dist/validation/macos-intel/pty-rust-tests.log
+              printf '%s\n' "$((SECONDS - omp_pty_started))" > dist/validation/macos-intel/pty-seconds.txt
+              bun test packages/natives/test/native.test.ts --test-name-pattern 'pty' --timeout 40000 2>&1 | tee dist/validation/macos-intel/pty-bindings-tests.log
 
          - name: Preserve build cache even if validation fails
            if: ${{ !cancelled() && steps.toolchains.outcome == 'success' && steps.build-cache.outputs.cache-hit != 'true' && steps.build-cache.outputs.cache-primary-key != '' }}
@@ -152,6 +160,7 @@ jobs:
                  dist/builds/**/*-seconds
                  dist/builds/**/*.txt
                  dist/validation/macos-intel/*.log
+                 dist/validation/macos-intel/*.txt
 
          - name: Preserve unverified compiled files after a failure
            if: ${{ failure() && steps.native-build.outcome == 'failure' }}
@@ -189,15 +198,15 @@ jobs:
                  packages/natives/native/index.js
                  packages/natives/native/index.d.ts
 
-   wasm-benchmark:
-      name: AST WASM ${{ matrix.mode }} comparison
-      if: ${{ github.event.repository.private == false && inputs.compare_wasm }}
+   native-benchmark:
+      name: Native ${{ matrix.mode }} comparison
+      if: ${{ github.event.repository.private == false && (inputs.compare_wasm || inputs.compare_optimization) }}
       runs-on: macos-15-intel
       timeout-minutes: 120
       strategy:
          fail-fast: false
          matrix:
-            mode: [disabled, enabled]
+            include: ${{ fromJSON(inputs.compare_optimization && '[{"mode":"o3-thin","features":"","lto":"thin","opt":"3"},{"mode":"o3-no-lto","features":"","lto":"off","opt":"3"},{"mode":"o2-no-lto","features":"","lto":"off","opt":"2"}]' || '[{"mode":"wasm-disabled","features":"","lto":"thin","opt":"3"},{"mode":"wasm-enabled","features":"wasm-grammars","lto":"thin","opt":"3"}]') }}
       env:
          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
          MACOSX_DEPLOYMENT_TARGET: "15.0"
@@ -206,9 +215,11 @@ jobs:
          RUSTFLAGS: "-C target-cpu=x86-64-v3"
          HOMEBREW_NO_AUTO_UPDATE: "1"
          OMP_NATIVE_TIMINGS: "1"
-         OMP_NATIVE_FEATURES: ${{ matrix.mode == 'enabled' && 'wasm-grammars' || '' }}
-         OMP_WASM_BENCHMARK_MODE: ${{ matrix.mode }}
-         OMP_WASM_BENCHMARK_CACHE_KEY: ${{ inputs.benchmark_cache_key }}
+         OMP_NATIVE_FEATURES: ${{ matrix.features }}
+         CARGO_PROFILE_CI_LTO: ${{ matrix.lto }}
+         CARGO_PROFILE_CI_OPT_LEVEL: ${{ matrix.opt }}
+         OMP_NATIVE_BENCHMARK_MODE: ${{ matrix.mode }}
+         OMP_NATIVE_BENCHMARK_CACHE_KEY: ${{ inputs.benchmark_cache_key }}
       steps:
          - name: Check out comparison source
            uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -219,16 +230,16 @@ jobs:
            shell: bash
            run: |
               test "$(uname -m)" = x86_64
-              test -n "$OMP_WASM_BENCHMARK_CACHE_KEY"
+              test -n "$OMP_NATIVE_BENCHMARK_CACHE_KEY"
               test -d "$DEVELOPER_DIR"
               printf 'SDKROOT=%s\n' "$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
               printf 'OMP_SLIM_CARGO_TARGET_DIR=%s/omp-slim-cargo\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
               printf 'CARGO_TARGET_DIR=%s/omp-slim-cargo\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
               printf '%s\n' "$HOME/.bun/bin" "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-              mkdir -p dist/validation/wasm
-              sysctl machdep.cpu.brand_string hw.physicalcpu hw.logicalcpu hw.memsize > dist/validation/wasm/host.txt
+              mkdir -p dist/validation/native-benchmark
+              sysctl machdep.cpu.brand_string hw.physicalcpu hw.logicalcpu hw.memsize > dist/validation/native-benchmark/host.txt
 
-         - name: Restore the exact same cache for both modes
+         - name: Restore the exact same cache for all modes
            id: benchmark-cache
            uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
            with:
@@ -242,33 +253,44 @@ jobs:
 
          - name: Install pinned toolchains and dependencies
            shell: bash
-           run: bash scripts/slim/bootstrap.sh 2>&1 | tee dist/validation/wasm/bootstrap.log
+           run: bash scripts/slim/bootstrap.sh 2>&1 | tee dist/validation/native-benchmark/bootstrap.log
 
          - name: Verify the selected dependency graph
            shell: bash
            run: |
               omp_feature_args=()
               if [[ -n "$OMP_NATIVE_FEATURES" ]]; then omp_feature_args=(--features "$OMP_NATIVE_FEATURES"); fi
-              cargo tree --locked -p pi-natives --target x86_64-apple-darwin --edges normal,build --prefix none --format '{p}' "${omp_feature_args[@]}" > dist/validation/wasm/dependencies.txt
+              cargo tree --locked -p pi-natives --target x86_64-apple-darwin --edges normal,build --prefix none --format '{p}' "${omp_feature_args[@]}" > dist/validation/native-benchmark/dependencies.txt
               python3 - <<'PY'
               import os
               from pathlib import Path
-              packages = {line.split()[0] for line in Path('dist/validation/wasm/dependencies.txt').read_text().splitlines()}
+              packages = {line.split()[0] for line in Path('dist/validation/native-benchmark/dependencies.txt').read_text().splitlines()}
               engines = sorted(name for name in packages if name.startswith(('wasmtime', 'cranelift')))
-              enabled = os.environ['OMP_WASM_BENCHMARK_MODE'] == 'enabled'
+              enabled = os.environ['OMP_NATIVE_FEATURES'] == 'wasm-grammars'
               assert bool(engines) == enabled, engines
               print(f'{len(packages)} dependency packages; WASM engine packages: {engines}')
               PY
 
          - name: Time native addon and CLI builds and run worker smoke
            shell: bash
-           run: bash scripts/slim/build.sh "wasm-$OMP_WASM_BENCHMARK_MODE"
+           run: bash scripts/slim/build.sh "$OMP_NATIVE_BENCHMARK_MODE"
+
+         - name: Time addon rebuild with dependencies already compiled
+           if: ${{ inputs.compare_optimization }}
+           shell: bash
+           env:
+              OMP_NATIVE_CARGO_PROFILE: ci
+           run: |
+              touch crates/pi-natives/src/pty.rs
+              omp_rebuild_started=$SECONDS
+              bun run build:native 2>&1 | tee dist/validation/native-benchmark/addon-rebuild.log
+              printf '%s\n' "$((SECONDS - omp_rebuild_started))" > dist/validation/native-benchmark/addon-rebuild-seconds
 
          - name: Verify grammar behavior in the fresh addon
            shell: bash
            run: |
-              bun -e 'import { wasmGrammarFor } from "@oh-my-pi/pi-natives"; const info = wasmGrammarFor({lang: "ini"}); if (info?.enabled !== (process.env.OMP_WASM_BENCHMARK_MODE === "enabled")) throw new Error("Wrong grammar build mode"); console.log(info);'
-              bun test packages/natives/test/parse-status.test.ts packages/coding-agent/test/utils/grammars.test.ts 2>&1 | tee dist/validation/wasm/grammar-tests.log
+              bun -e 'import { wasmGrammarFor } from "@oh-my-pi/pi-natives"; const info = wasmGrammarFor({lang: "ini"}); if (info?.enabled !== (process.env.OMP_NATIVE_FEATURES === "wasm-grammars")) throw new Error("Wrong grammar build mode"); console.log(info);'
+              bun test packages/natives/test/parse-status.test.ts packages/coding-agent/test/utils/grammars.test.ts 2>&1 | tee dist/validation/native-benchmark/grammar-tests.log
 
          - name: Install nextest for PTY comparison
            uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
@@ -283,8 +305,9 @@ jobs:
               NEXTEST_TEST_THREADS: "4"
            run: |
               omp_pty_started=$SECONDS
-              bun run test:rs:pty 2>&1 | tee dist/validation/wasm/pty-tests.log
-              printf '%s\n' "$((SECONDS - omp_pty_started))" > dist/validation/wasm/pty-seconds
+              bun run test:rs:pty 2>&1 | tee dist/validation/native-benchmark/pty-tests.log
+              printf '%s\n' "$((SECONDS - omp_pty_started))" > dist/validation/native-benchmark/pty-seconds
+              bun test packages/natives/test/native.test.ts --test-name-pattern 'pty' --timeout 40000 2>&1 | tee dist/validation/native-benchmark/pty-bindings-tests.log
 
          - name: Record comparison metrics
            if: always()
@@ -293,17 +316,18 @@ jobs:
               python3 - <<'PY'
               import json, os
               from pathlib import Path
-              root = Path('dist/validation/wasm')
+              root = Path('dist/validation/native-benchmark')
               root.mkdir(parents=True, exist_ok=True)
-              data = dict(source=os.environ['GITHUB_SHA'], mode=os.environ['OMP_WASM_BENCHMARK_MODE'], cache_key=os.environ['OMP_WASM_BENCHMARK_CACHE_KEY'])
+              data = dict(source=os.environ['GITHUB_SHA'], mode=os.environ['OMP_NATIVE_BENCHMARK_MODE'], cache_key=os.environ['OMP_NATIVE_BENCHMARK_CACHE_KEY'], lto=os.environ['CARGO_PROFILE_CI_LTO'], workspace_opt_level=os.environ['CARGO_PROFILE_CI_OPT_LEVEL'])
               latest = Path('dist/builds/latest')
               if latest.exists():
                   build = Path('dist/builds') / latest.read_text().strip()
                   for name in ['native-build-seconds', 'cli-build-seconds', 'exit-code']:
                       file = build / name
                       if file.exists(): data[name] = int(file.read_text())
-              pty = root / 'pty-seconds'
-              if pty.exists(): data['pty-seconds'] = int(pty.read_text())
+              for name in ['pty-seconds', 'addon-rebuild-seconds']:
+                  file = root / name
+                  if file.exists(): data[name] = int(file.read_text())
               data['addons'] = {p.name: p.stat().st_size for p in Path('packages/natives/native').glob('pi_natives.darwin-x64*.node')}
               cli = Path('packages/coding-agent/dist/omp')
               if cli.exists(): data['cli-bytes'] = cli.stat().st_size
@@ -317,11 +341,11 @@ jobs:
            if: always()
            uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
            with:
-              name: omp-slim-wasm-${{ matrix.mode }}-${{ github.sha }}
+              name: omp-slim-build-comparison-${{ matrix.mode }}-${{ github.sha }}
               retention-days: 7
               compression-level: 0
               path: |
-                 dist/validation/wasm/
+                 dist/validation/native-benchmark/
                  dist/builds/**/*.tar.gz
                  dist/builds/**/ARCHIVE-SHA256SUMS
                  dist/builds/**/build.log

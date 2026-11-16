@@ -1,0 +1,15 @@
+[package]
+name = "pi-pty"
+description = "PTY output draining and cancellation shared with the native addon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+flume.workspace = true

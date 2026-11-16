@@ -4814,6 +4814,7 @@ dependencies = [
  "pi-edit",
  "pi-iso",
  "pi-predict",
+ "pi-pty",
  "pi-shell",
  "pi-vcs",
  "pi-vfs",
@@ -4853,6 +4854,13 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+]
+
+[[package]]
+name = "pi-pty"
+version = "18.18.3"
+dependencies = [
+ "flume",
 ]
 
 [[package]]

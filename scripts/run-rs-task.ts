@@ -81,19 +81,18 @@ const TASK_COMMANDS = {
 		// (napi-rs's) has to be in VENDORED_FORK_EXCLUDES.
 		["cargo", "test", "--doc", "--workspace", ...VENDORED_FORK_EXCLUDES],
 	],
-	// macOS PTY regressions need the host's kernel and reuse the native build's
-	// ci profile. pi-natives is a cdylib and has no runnable doctests.
+	// Queue regressions compile the same implementation used by pi-natives,
+	// without rebuilding the full addon as a test executable. Real PTY behavior
+	// is covered by the native binding tests against the already-built addon.
 	"test:rs:pty": [
 		[
 			"cargo",
 			"nextest",
 			"run",
 			"-p",
-			"pi-natives",
+			"pi-pty",
 			"--cargo-profile",
 			"ci",
-			"-E",
-			"test(pty::reader_queue_tests)",
 			"--status-level=fail",
 			"--final-status-level=fail",
 		],
@@ -262,8 +261,17 @@ async function runCommand(command: readonly string[]): Promise<number> {
 	const [head, ...rest] = command;
 	const isCargo = head === "cargo";
 	const argv = isCargo ? [cargoBinary, ...rest] : [head, ...rest];
-	if (taskName === "test:rs:pty" && process.env.OMP_NATIVE_FEATURES?.trim()) {
-		argv.push("--features", process.env.OMP_NATIVE_FEATURES.trim());
+	if (taskName === "test:rs:pty") {
+		// napi always passes an explicit --target, including host builds. Match
+		// it so Cargo can reuse dependencies under <target>/<triple>/ci.
+		let target = process.env.CARGO_BUILD_TARGET?.trim();
+		if (!target) {
+			const rustc = path.isAbsolute(cargoBinary) ? path.join(path.dirname(cargoBinary), "rustc") : "rustc";
+			const info = await $`${rustc} -vV`.cwd(repoRoot).quiet();
+			target = /^host:\s*(\S+)/m.exec(info.text())?.[1];
+			if (!target) throw new Error("Cannot determine the Rust host target for PTY tests");
+		}
+		argv.push("--target", target);
 	}
 	const env: Record<string, string> = { ...(process.env as Record<string, string>) };
 	if (isCargo) {
