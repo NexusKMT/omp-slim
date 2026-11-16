@@ -40,7 +40,7 @@ Current root capabilities include:
 - shell, PTY, process, file-lock, isolation, and work-profile primitives;
 - clipboard, device-check, SIXEL, and snapcompact rendering;
 - PDF inspection/Markdown conversion, SVG rasterization, Mermaid terminal rendering, macOS spelling services, word prediction, and in-process Git/Jujutsu operations;
-- streaming edit sessions and shared edit state, native OAuth callback registration, and an Apple Foundation Models bridge.
+- streaming edit sessions and shared edit state, and native OAuth callback registration.
 
 ## Loader and distribution
 
@@ -84,7 +84,7 @@ Set `PI_DEBUG_STARTUP` to emit synchronous `[startup]` markers to stderr around 
 `crates/pi-natives/src/lib.rs` registers the current modules:
 
 - platform/runtime: `appearance`, `clipboard`, `crash_handler`, `devicecheck`, `file_lock`, `oauth_callback`, `power`, `prof`, `ps`, `pty`, `shell`, `spelling`, `tty_writer`, `vcs`;
-- media/model: `applefm`, `predict`, `sixel`, `snapcompact`, `svg`;
+- media/model: `sixel`, `snapcompact`, `svg`;
 - code/data: `ast`, `block`, `diff`, `edit`, `fd`, `glob`, `grep`, `highlight`, `html`, `keys`, `mermaid`, `pdf`, `summary`, `text`, `tokens`, `utok`, `workspace`;
 - isolation/task support: `iso`, `task`, plus N-API boundary/conversion helpers (`js`, crate-private `utils`, test-only `testing`);
 - language metadata re-exported from `pi_ast::language`.

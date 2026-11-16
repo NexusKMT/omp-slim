@@ -2,12 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- OMP Slim uses built-in AST grammars by default; optional WASM grammars require a build with `wasm-grammars`, and cached modules remain unsupported when that feature is disabled.
+
 ### Fixed
 
+- Native caches now replace stale addons even when the release version and file size match, and reject content that differs from the binary’s embedded SHA-256.
 - macOS PTY sessions preserve unread output when a child exits before the reader catches up, while keeping cancellation and output backpressure active.
 
 ### Removed
 
+- Restricted build and runtime targets to macOS and Linux x64.
+- Removed the unused Apple Foundation Models bridge and update-only binary patch bindings.
 - Removed the Bazel build system, hermetic cross toolchains, and Bazel CI caching. Native addons now build only through the host Cargo/napi-rs path in `build-bindings.ts`, which stamps, installs, regenerates bindings, and load-probes the addon.
 - Removed the Windows addon staging path, the `@oh-my-pi/pi-natives/path` entrypoint, and the `expandWindowsLongPath` / `getWindowsShortPath` bindings.
 - OMP Slim removes the Mnemopi-only cosine similarity, vector index, and MMR ranking kernels and bindings.

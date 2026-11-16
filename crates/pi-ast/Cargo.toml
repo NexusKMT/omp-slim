@@ -11,10 +11,10 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["wasm"]
+default = []
 # Grammars outside the linked set load as WebAssembly (src/language/grammar.rs).
 # Pulls wasmtime + cranelift (and cmake at build time); off, such grammars report
-# `GrammarError::Invalid` and the 17 linked grammars work unchanged.
+# `GrammarError::NotInstalled` and the 17 linked grammars work unchanged.
 wasm = ["tree-sitter/wasm", "dep:semver"]
 
 [dependencies]

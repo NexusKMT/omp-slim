@@ -9,7 +9,6 @@ import {
 	setupWizardAllowed,
 } from "@oh-my-pi/pi-tui/setup/wizard";
 import type { Settings } from "../config/settings";
-import { canSelfUpdate } from "../cli/update-cli";
 import { createModelBrowserSource } from "./model-browser-source";
 import type { InteractiveModeContext } from "./types";
 
@@ -20,7 +19,6 @@ import {
 	cfgSymbolPreset,
 	cfgThemeDark,
 	cfgThemeLight,
-	cfgUpdateAuto,
 } from "./settings";
 import { cfgModelStorage } from "../config/model-settings";
 
@@ -44,10 +42,6 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 		},
 		get colorBlindMode() {
 			return cfgColorBlindMode.get(ctx.settings);
-		},
-
-		get autoUpdate() {
-			return cfgUpdateAuto.get(ctx.settings);
 		},
 
 		modelSource,
@@ -77,11 +71,6 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 		},
 		saveTheme: (mode, name) => {
 			(mode === "dark" ? cfgThemeDark : cfgThemeLight).set(ctx.settings, name);
-		},
-		canAutoUpdate: () => canSelfUpdate(),
-		saveAutoUpdate: async enabled => {
-			cfgUpdateAuto.set(ctx.settings, enabled);
-			await ctx.settings.flush();
 		},
 
 		markComplete: version => markSetupWizardComplete(ctx.settings, version),

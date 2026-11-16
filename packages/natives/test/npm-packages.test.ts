@@ -25,27 +25,9 @@ describe("generated native npm leaf packages", () => {
 		expect(manifest.license).toBe("MIT");
 		expect(manifest.repository).toEqual({
 			type: "git",
-			url: "git+https://github.com/can1357/oh-my-pi.git",
+			url: "git+https://github.com/NexusKMT/omp-slim.git",
 			directory: "packages/natives",
 		});
-		expect("exports" in manifest).toBe(false);
-	});
-
-	it("uses the default addon as the main entry for non-x64 leaves", () => {
-		const addonFiles = ["pi_natives.darwin-arm64.node"];
-		const manifest = buildLeafManifest({
-			tag: "darwin-arm64",
-			os: "darwin",
-			cpu: "arm64",
-			files: addonFiles,
-			version: "15.5.15",
-		});
-
-		expect(manifest.name).toBe("@oh-my-pi/pi-natives-darwin-arm64");
-		expect(manifest.os).toEqual(["darwin"]);
-		expect(manifest.cpu).toEqual(["arm64"]);
-		expect(manifest.main).toBe("./pi_natives.darwin-arm64.node");
-		expect(addonFiles).toContain(manifest.main.slice("./".length));
 		expect("exports" in manifest).toBe(false);
 	});
 
@@ -61,16 +43,14 @@ describe("generated native npm leaf packages", () => {
 			const addonFiles = [
 				"pi_natives.linux-x64-baseline.node",
 				"pi_natives.linux-x64-modern.node",
-				"pi_natives.linux-arm64.node",
 				"pi_natives.darwin-x64-baseline.node",
-				"pi_natives.darwin-arm64.node",
 			];
 			for (const file of addonFiles) {
 				await Bun.write(path.join(packageDir, "native", file), file);
 			}
 
 			const leaves = await generateNpmPackages({ packageDir });
-			expect(leaves.map(leaf => leaf.tag)).toEqual(["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"]);
+			expect(leaves.map(leaf => leaf.tag)).toEqual(["linux-x64", "darwin-x64"]);
 			const linuxX64 = leaves.find(leaf => leaf.tag === "linux-x64");
 			expect(linuxX64?.files).toEqual(["pi_natives.linux-x64-baseline.node", "pi_natives.linux-x64-modern.node"]);
 			expect(await Bun.file(path.join(packageDir, "npm/linux-x64/pi_natives.linux-x64-modern.node")).text()).toBe(
@@ -96,13 +76,13 @@ describe("generated native npm leaf packages", () => {
 			await fs.mkdir(path.join(packageDir, "native"), { recursive: true });
 			await Promise.all([
 				Bun.write(path.join(packageDir, "package.json"), JSON.stringify({ version: "15.5.15" })),
-				Bun.write(path.join(packageDir, "native/pi_natives.darwin-arm64.node"), "darwin"),
+				Bun.write(path.join(packageDir, "native/pi_natives.darwin-x64-baseline.node"), "darwin"),
 				Bun.write(path.join(packageDir, "LICENSE"), "MIT payload\n"),
 				Bun.write(path.join(root, "THIRD-PARTY-NOTICES.txt"), "Repository notice\n"),
 			]);
 
-			await expect(generateNpmPackages({ packageDir, tags: ["darwin-arm64"] })).rejects.toThrow(
-				"Missing legal payload THIRD-PARTY-NOTICES.txt for generated native leaf darwin-arm64",
+			await expect(generateNpmPackages({ packageDir, tags: ["darwin-x64"] })).rejects.toThrow(
+				"Missing legal payload THIRD-PARTY-NOTICES.txt for generated native leaf darwin-x64",
 			);
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
@@ -115,15 +95,11 @@ describe("generated native npm leaf packages", () => {
 		try {
 			await fs.mkdir(path.join(packageDir, "native"));
 			await Bun.write(path.join(packageDir, "package.json"), JSON.stringify({ version: "15.5.15" }));
-			await Bun.write(path.join(packageDir, "native/pi_natives.darwin-arm64.node"), "darwin");
+			await Bun.write(path.join(packageDir, "native/pi_natives.darwin-x64-baseline.node"), "darwin");
 
 			const leaves = await generateNpmPackages({ packageDir, dryRun: true });
-			expect(leaves.filter(leaf => leaf.missing).map(leaf => leaf.tag)).toEqual([
-				"linux-x64",
-				"linux-arm64",
-				"darwin-x64",
-			]);
-			expect(await Bun.file(path.join(packageDir, "npm/darwin-arm64/package.json")).exists()).toBe(false);
+			expect(leaves.filter(leaf => leaf.missing).map(leaf => leaf.tag)).toEqual(["linux-x64"]);
+			expect(await Bun.file(path.join(packageDir, "npm/darwin-x64/package.json")).exists()).toBe(false);
 		} finally {
 			logSpy.mockRestore();
 			await fs.rm(packageDir, { recursive: true, force: true });

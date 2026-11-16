@@ -115,9 +115,7 @@ describe("stale workspace addon notice", () => {
 		expect(notice.endsWith("\n")).toBe(true);
 	});
 
-	// `loadNative()` is not a startup-only call: `native/clipboard.js` and the
-	// other lazy entrypoints call it on every invocation, so an unlatched
-	// notice would repaint under a running TUI on every clipboard copy.
+	// Repeated diagnostic calls must not repaint under a running TUI.
 	it("emits at most once against a given latch", () => {
 		const written: string[] = [];
 		const state = { reported: false };
@@ -128,9 +126,7 @@ describe("stale workspace addon notice", () => {
 		expect(written[0]).toContain(addonPath);
 	});
 
-	// `validateLoadedBindings` also returns successfully for a pre-sentinel
-	// addon on an installed load; that addon reports no release, so it is
-	// `stale`, and telling its user to run a repository build would be wrong.
+	// Installed loads reject release mismatches; only workspace loads emit this notice.
 	it("stays silent outside a workspace load", () => {
 		const written: string[] = [];
 		const deps = { write: (text: string) => written.push(text), state: { reported: false } };

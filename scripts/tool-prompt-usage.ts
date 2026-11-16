@@ -10,7 +10,7 @@
  *
  * The renderer uses representative default settings for conditional templates.
  * Dynamic runtime payloads (background job output, late diagnostics, task result
- * previews, MCP server lists, SSH hosts, custom agents) are sample-sized unless
+ * previews, MCP server lists, custom agents) are sample-sized unless
  * they are bundled static data.
  */
 

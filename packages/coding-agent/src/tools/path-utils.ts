@@ -835,7 +835,7 @@ function parseUrlSearchPath(input: string): ParsedSearchPath | undefined {
 	if (!router.isGlob(url)) return { basePath: url };
 	const rootLength = url.indexOf("://") + 3;
 	const segments = url.slice(rootLength).split("/");
-	// A host authority (`ssh://[::1]/…`) is never a glob segment.
+	// An IPv6 host authority (`scheme://[::1]/…`) is never a glob segment.
 	const hostAuthority = router.spec(url.slice(0, rootLength - 3))?.portAuthority === true;
 	const firstGlobIndex = firstGlobSegment(segments, hostAuthority ? 1 : 0);
 	if (firstGlobIndex === -1) return { basePath: url };

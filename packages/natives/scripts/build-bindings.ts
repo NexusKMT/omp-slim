@@ -33,13 +33,9 @@ const localAddon = resolveLocalHostAddon({
 	avx2: detectHostAvx2Support(),
 });
 const effectiveVariant = localAddon.x64Variant;
-const variantSuffix = effectiveVariant ? `-${effectiveVariant}` : "";
+const variantSuffix = `-${effectiveVariant}`;
 
-// Pin Rust target-cpu so x64 baseline/modern variants get a reproducible ISA floor
-// instead of inheriting the host CPU when RUSTFLAGS is unset. Non-x64 builds keep
-// the target's default CPU features: `-C target-cpu=native` would bake the build
-// host's CPU features into the addon and trips ring 0.17's aarch64-apple
-// const assertion (CAPS_STATIC == MIN_STATIC_FEATURES).
+// Pin the x64 ISA floor instead of inheriting the build host CPU features.
 if (!Bun.env.RUSTFLAGS) {
 	const rustFlags: string[] = [];
 	if (effectiveVariant === "modern") {
@@ -81,7 +77,7 @@ async function installBinary(src: string, dest: string): Promise<void> {
 
 async function resolveBuiltAddonPath(outputDir: string, canonicalFilename: string): Promise<string> {
 	// napi-rs 3.x emits `${binaryName}.${platformArchABI}.node` where
-	// platformArchABI is e.g. `darwin-x64`, `linux-x64-gnu`, `darwin-arm64`.
+	// platformArchABI is e.g. `darwin-x64` or `linux-x64-gnu`.
 	// Build into an isolated output dir so only this invocation's outputs are
 	// considered fresh candidates.
 	const entries = await fs.readdir(outputDir);
@@ -178,6 +174,10 @@ const napiArgs = [
 const extraFeatures = Bun.env.OMP_NATIVE_FEATURES?.trim();
 if (extraFeatures) {
 	napiArgs.push("--features", extraFeatures);
+}
+
+if (Bun.env.OMP_NATIVE_TIMINGS === "1") {
+	napiArgs.push("--", "--timings");
 }
 
 // napi-rs / cargo route much failure detail to stdout (e.g. `cargo metadata`

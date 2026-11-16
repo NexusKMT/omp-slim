@@ -12,6 +12,28 @@ control, speech/live audio, and automatic long-term memory, followed by independ
 resume/history, context compaction, file editing, shell execution, subagents,
 ordinary HTTP search, MCP and manually maintained instructions remain core.
 
+Current product targets are **macOS Intel and Linux x64**. Built-in SSH host
+management and `ssh://` file transport, upstream self-update, Apple Foundation
+Models, update-only binary patching, metaharness and Snapcompact research code
+are removed. The Snapcompact runtime, local stats and RPC SDKs remain.
+Native caches are checked against embedded SHA-256 digests, including same-version
+builds with equal file sizes. `bun run check:ts` also checks root build scripts.
+Go and Python SDK contracts have a manual public workflow, `slim-sdk-checks.yml`.
+This cleanup changes native inputs and requires a fresh full build; older
+validation records below apply only to the source revisions they name.
+See the [2026-11-17 cleanup report](docs/slim-cleanup-2026-11-17.md) for the
+implemented removals, local regression results and remaining remote checks.
+
+AST WASM grammars are disabled by default. Structural operations retain Bash,
+C/C++, CSS, Diff, Go, HTML, Java, JavaScript, JSON, Markdown, Python, Regex,
+Rust, TOML, TSX/TypeScript and YAML. Other registered languages are skipped by
+structural operations without downloading modules, including when an older
+build left cached grammars. Ordinary text operations remain available.
+An explicit `OMP_NATIVE_FEATURES=wasm-grammars` native build restores optional
+grammar loading. `slim-macos-intel.yml` accepts `compare_wasm=true` and a fixed
+`benchmark_cache_key` to compare both builds against the same restored cache;
+it records native/CLI/PTY timings, dependency graphs and addon sizes.
+
 The baseline was built before removal. Browser, desktop, speech and memory were
 then removed in four isolated worktrees and integrated on `main`. At most five
 agents may run concurrently, including the coordinator; workers must not spawn
@@ -305,11 +327,11 @@ expired. The test workflow records both the current source and native source.
 It also rebuilds and verifies the current standalone CLI, then uploads a separate archive with both application and native source provenance. Only the generated standalone Rust RPC SDK is excluded from native-input matching; native crate sources and dependencies remain guarded.
 
 Update this downstream through the pinned repository and its build artifacts.
-The retained `omp update` command and update check still target upstream's
-build service; they do not distribute this fork. Keep `update.auto` false
-(its default), and set `startup.checkUpdate` false for this downstream profile
-to suppress upstream update notices. These are application settings, separate
-from plugin marketplace updates. No local user settings were changed here.
+The `omp update` command, startup version check, background updater and update
+setup scene have been removed. Old `update.*` and `startup.checkUpdate` settings
+are ignored on load; no user files are deleted. Plugin marketplace updates remain
+independent. Upstream installers and package-manager channels do not distribute
+this fork.
 
 Use the resulting `omp-darwin-x64.tar.gz`, verify `ARCHIVE-SHA256SUMS`, extract it,
 then verify `SHA256SUMS` with `shasum -a 256 -c`. Test the extracted binary from

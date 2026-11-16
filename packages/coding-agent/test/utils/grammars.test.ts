@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { WasmGrammarInfo } from "@oh-my-pi/pi-natives";
-import { installGrammar } from "@oh-my-pi/pi-coding-agent/utils/grammars";
+import * as natives from "@oh-my-pi/pi-natives";
+import { ensureGrammar, installGrammar, rerunWithGrammars } from "@oh-my-pi/pi-coding-agent/utils/grammars";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 const RELEASE = "grammars-test";
@@ -20,18 +21,28 @@ const WASM = new Uint8Array([
 const WASM_SHA256 = new Bun.CryptoHasher("sha256").update(WASM).digest("hex");
 
 function grammarInfo(file: string, sha256: string): WasmGrammarInfo {
-	return { language: "testlang", release: RELEASE, file, sha256, size: WASM.byteLength, installed: false };
+	return {
+		language: "testlang",
+		release: RELEASE,
+		file,
+		sha256,
+		size: WASM.byteLength,
+		enabled: true,
+		installed: false,
+	};
 }
 
 describe("wasm grammar install", () => {
 	let server: Bun.Server<undefined>;
 	let previousUrl: string | undefined;
+	let requests = 0;
 
 	beforeAll(() => {
 		const compressed = Bun.zstdCompressSync(WASM);
 		server = Bun.serve({
 			port: 0,
 			fetch(request) {
+				requests++;
 				const { pathname } = new URL(request.url);
 				if (pathname.startsWith(`/${RELEASE}/`) && pathname.endsWith(".wasm.zst")) return new Response(compressed);
 				return new Response("not found", { status: 404 });
@@ -70,5 +81,26 @@ describe("wasm grammar install", () => {
 		expect(fs.existsSync(dest)).toBe(false);
 		expect(fs.existsSync(`${dest}.part`)).toBe(false);
 		expect(fs.existsSync(`${dest}.zst.part`)).toBe(false);
+	});
+
+	it("does not download or retry AST calls when this build disables the grammar", async () => {
+		using tempDir = TempDir.createSync("@omp-grammar-disabled-");
+		const info = { ...grammarInfo("disabled.wasm", WASM_SHA256), enabled: false, installed: true };
+		const lookup = spyOn(natives, "wasmGrammarFor").mockReturnValue(info);
+		const requestsBefore = requests;
+		let calls = 0;
+		try {
+			expect(await ensureGrammar({ lang: info.language })).toBe(false);
+			expect(await installGrammar(info, tempDir.path())).toBe(false);
+			await rerunWithGrammars(async () => {
+				calls++;
+				return { missingGrammars: [info.language] };
+			});
+			expect(calls).toBe(1);
+			expect(requests).toBe(requestsBefore);
+			expect(await Bun.file(path.join(tempDir.path(), info.file)).exists()).toBe(false);
+		} finally {
+			lookup.mockRestore();
+		}
 	});
 });

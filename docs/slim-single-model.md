@@ -35,9 +35,15 @@ vision model.
 
 The independent tiny/MLX/ONNX inference installers and workers, predictive
 composer runtime, automatic judge routing, Spotlight ranking/output rewriting
-and the image-generation product tool are removed. Generic provider protocols,
-catalog metadata and historical data formats are retained for compatibility. Native prediction crate removal is
-outside this application-level pass; no native addon input has changed.
+and the image-generation product tool are removed. Later trims also removed
+native prediction, Apple Foundation Models, the bundled catalog, provider
+authentication integrations and all transports except Chat Completions.
+
+## Historical validation of the single-model pass
+
+The records below describe the source revisions named in each paragraph.
+Current target scope and build requirements are tracked in [SLIM.md](../SLIM.md);
+the later native cleanup requires a fresh build rather than reusing these addons.
 
 The standalone CLI is rebuilt through `slim-macos-tests.yml` on
 `macos-15-intel`. That workflow verifies and reuses the native addon from

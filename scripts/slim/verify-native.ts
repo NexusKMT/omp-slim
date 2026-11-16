@@ -14,7 +14,7 @@ const addons = [
 if (addons.length === 0) throw new Error(`No compiled addon for ${process.platform}-${process.arch}`);
 
 const retired =
-	/^(?:AudioCapture|AudioPlayback|LiveWebRtcPeer|Desktop.*|MacOSFrontApp|cosineSimilarityPairs|mmrRerankIndices|vectorIndexTopK)$/;
+	/^(?:AudioCapture|AudioPlayback|LiveWebRtcPeer|Desktop.*|MacOSFrontApp|appleFm.*|applyBinaryPatch|cosineSimilarityPairs|mmrRerankIndices|vectorIndexTopK)$/;
 const retained = [
 	"executeShell",
 	"copyToClipboard",
@@ -30,5 +30,7 @@ for (const addon of addons) {
 	for (const name of retained) {
 		if (typeof bindings[name] !== "function") throw new Error(`${path.basename(addon)} is missing ${name}`);
 	}
-	console.log(`${path.basename(addon)}: retired desktop/audio/vector exports absent; core exports present`);
+	console.log(
+		`${path.basename(addon)}: retired desktop/audio/model/update/vector exports absent; core exports present`,
+	);
 }

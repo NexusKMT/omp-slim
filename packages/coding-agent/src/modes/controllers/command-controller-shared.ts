@@ -1,8 +1,8 @@
 /**
- * Shared helpers for /mcp and /ssh command controllers.
+ * Helpers for the /mcp command controller.
  *
  * Captures argument parsing, source grouping, and chat-message rendering that
- * was duplicated between mcp-command-controller and ssh-command-controller.
+ * is used by the MCP command controller.
  * Intentionally kept narrow: subcommand routing, help text, success/error
  * wording, and add-flow logic stay in the per-controller files because they
  * diverge in workflow.

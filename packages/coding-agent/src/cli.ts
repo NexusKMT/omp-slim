@@ -32,7 +32,6 @@ import { installSqliteLockShim } from "@oh-my-pi/pi-natives/sqlite-locks";
 import { isNativeShell, runNativeShell } from "./cli/native-shell";
 import { extractProfileFlags } from "./cli/profile-bootstrap";
 import {
-	AUTO_UPDATE_WORKER_ARG,
 	DAEMON_BROKER_WORKER_ARG,
 	LSP_MUX_WORKER_ARG,
 	PARENT_WATCHDOG_WORKER_ARG,
@@ -249,14 +248,6 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === LSP_MUX_WORKER_ARG) {
 		const { startLspMuxFromEnvironment } = await import("./lsp/mux/server");
 		await startLspMuxFromEnvironment();
-		return true;
-	}
-	if (arg === AUTO_UPDATE_WORKER_ARG) {
-		// Selector boundary keeps the updater graph out of ordinary startup. The worker
-		// downloads releases, so it needs the PI_PROXY handling ordinary commands get.
-		await installNetworkBootstrap();
-		const { runAutoUpdateWorker } = await import("./cli/auto-update");
-		await runAutoUpdateWorker();
 		return true;
 	}
 	return false;

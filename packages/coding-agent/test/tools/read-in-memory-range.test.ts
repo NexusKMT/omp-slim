@@ -13,7 +13,7 @@ import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 const files: Record<string, string> = {};
 
-// Remote-backed like ssh://: the read renders the handler's text in memory, with no backing file.
+// Remote resources render the handler's text in memory, with no backing file.
 const remoteHandler: ProtocolHandler = {
 	scheme: "remote",
 	spec: {

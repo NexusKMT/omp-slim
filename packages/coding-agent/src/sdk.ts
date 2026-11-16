@@ -203,7 +203,6 @@ import { createSettingsAwareStreamFn } from "./session/settings-stream-fn";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
 import { createSpeculativeToolExecutionConfig } from "./speculation/host";
-import { closeAllConnections } from "./ssh/connection-manager";
 import {
 	type BuildSystemPromptResult,
 	buildSystemPrompt as buildSystemPromptInternal,
@@ -1180,22 +1179,6 @@ const MAX_MCP_INSTRUCTIONS_LENGTH = 4000;
 /** Built-ins `createTools` force-includes into explicit tool lists; the active set mirrors them. */
 const SESSION_MANAGED_BUILTIN_TOOL_NAMES = ["context_notes", "new_context"];
 
-let sshCleanupRegistered = false;
-
-async function cleanupSshResources(): Promise<void> {
-	try {
-		await closeAllConnections();
-	} catch (error) {
-		logger.warn("SSH cleanup failed", { error: String(error) });
-	}
-}
-
-function registerSshCleanup(): void {
-	if (sshCleanupRegistered) return;
-	sshCleanupRegistered = true;
-	postmortem.register("ssh-cleanup", cleanupSshResources);
-}
-
 let evalCleanupRegistered = false;
 
 function registerEvalCleanup(): void {
@@ -1434,7 +1417,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	const eventBus = options.eventBus ?? new EventBus();
 	const subagentEventBus = options.subagentEventBus ?? new EventBus();
 
-	registerSshCleanup();
 	registerEvalCleanup();
 
 	const settings = await (options.settings ?? logger.time("settings", Settings.init, { cwd, agentDir }));

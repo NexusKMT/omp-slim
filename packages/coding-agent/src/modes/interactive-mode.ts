@@ -265,7 +265,6 @@ import { ChatBlock, type ChatBlockHost } from "@oh-my-pi/pi-tui/chrome/chat-bloc
 import { type ComposerNativeState, CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
 import { DynamicBorder } from "@oh-my-pi/pi-tui/chrome/dynamic-border";
 import { EditorTopGap } from "@oh-my-pi/pi-tui/prompt/editor-top-gap";
-import type { VersionUpdate } from "@oh-my-pi/pi-tui/prompt/welcome";
 import { ErrorBannerComponent } from "@oh-my-pi/pi-tui/overlays/error-banner";
 import type { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
 import type { HookEditorComponent } from "@oh-my-pi/pi-tui/overlays/hook-editor";
@@ -299,7 +298,6 @@ import { MCPCommandController } from "./controllers/mcp-command-controller";
 import { OmfgController } from "./controllers/omfg-controller";
 import { SelectorController } from "./controllers/selector-controller";
 import { SessionFocusController } from "./controllers/session-focus-controller";
-import { SSHCommandController } from "./controllers/ssh-command-controller";
 import { TanCommandController } from "./controllers/tan-command-controller";
 import { TodoCommandController } from "./controllers/todo-command-controller";
 import { imageReferenceHyperlink, setImageBlobWriter } from "@oh-my-pi/pi-tui/prompt/image-references";
@@ -3060,7 +3058,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			if (isSettingsInitialized()) {
 				await settings.reloadForCwd(newCwd);
 			}
-			// Re-warm plugin roots, capabilities, slash commands, and the ssh tool so
+			// Re-warm plugin roots, capabilities, and slash commands so
 			// the next prompt sees everything scoped to the new project directory.
 			clearClaudePluginRootsCache();
 			await this.refreshTitleSystemPrompt(newCwd);
@@ -8354,15 +8352,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.setWorkingMessage(message);
 	}
 
-	showNewVersionNotification(newVersion: string): void {
-		this.#uiHelpers.showNewVersionNotification(newVersion);
-	}
-
-	/** Show (or with `null`, clear) background auto-update progress after the welcome banner's version. */
-	showVersionUpdate(update: VersionUpdate | null): void {
-		this.composer.updateWelcome({ versionUpdate: update });
-	}
-
 	/**
 	 * Add this launch's release notes below the welcome header. Startup calls it
 	 * after the first session-bound frame; quiet startup and hidden mode show nothing.
@@ -8710,11 +8699,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	async handleMCPCommand(text: string): Promise<void> {
 		const controller = new MCPCommandController(this);
-		await controller.handle(text);
-	}
-
-	async handleSSHCommand(text: string): Promise<void> {
-		const controller = new SSHCommandController(this);
 		await controller.handle(text);
 	}
 

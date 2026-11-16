@@ -363,10 +363,6 @@
       "types": "./src/slash-commands/*.ts",
       "import": "./src/slash-commands/*.ts"
     },
-    "./ssh/*": {
-      "types": "./src/ssh/*.ts",
-      "import": "./src/ssh/*.ts"
-    },
     "./task": {
       "types": "./src/task/index.ts",
       "import": "./src/task/index.ts"

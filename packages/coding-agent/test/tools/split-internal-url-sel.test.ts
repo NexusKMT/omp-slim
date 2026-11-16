@@ -1,5 +1,14 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
+import { execUrlProtocol } from "../helpers/exec-url-protocol";
+
+beforeEach(() => {
+	InternalUrlRouter.instance().register(execUrlProtocol);
+});
+
+afterEach(() => {
+	InternalUrlRouter.instance().unregister(execUrlProtocol.scheme);
+});
 
 const split = (input: string) => InternalUrlRouter.instance().split(input);
 const peelWriteSelector = (input: string) => InternalUrlRouter.instance().peelWriteSelector(input, "write");
@@ -8,7 +17,7 @@ describe("InternalUrlRouter.split", () => {
 	it("returns the input unchanged when there is no selector tail", () => {
 		expect(split("artifact://3")).toEqual({ path: "artifact://3" });
 		expect(split("agent://reviewer_0")).toEqual({ path: "agent://reviewer_0" });
-		expect(split("memory://root")).toEqual({ path: "memory://root" });
+		expect(split("cfg://")).toEqual({ path: "cfg://" });
 	});
 
 	it("peels a single line-range selector", () => {
@@ -85,13 +94,13 @@ describe("InternalUrlRouter.split", () => {
 		});
 	});
 
-	it("keeps a `portAuthority` port (`ssh://host:port`) out of selector peeling", () => {
-		expect(split("ssh://host:2222")).toEqual({ path: "ssh://host:2222" });
+	it("keeps a `portAuthority` port (`execfs://host:port`) out of selector peeling", () => {
+		expect(split("execfs://host:2222")).toEqual({ path: "execfs://host:2222" });
 	});
 
-	it("peels a read selector after an `ssh://host:port/path`", () => {
-		expect(split("ssh://host:2222/etc/hosts:1-5")).toEqual({
-			path: "ssh://host:2222/etc/hosts",
+	it("peels a read selector after an `execfs://host:port/path`", () => {
+		expect(split("execfs://host:2222/etc/hosts:1-5")).toEqual({
+			path: "execfs://host:2222/etc/hosts",
 			sel: "1-5",
 		});
 	});
@@ -103,17 +112,17 @@ describe("InternalUrlRouter.split", () => {
 
 describe("InternalUrlRouter.peelWriteSelector (mutating-tool/read selector parity)", () => {
 	it("peels whole-file display selectors so write targets the same file read does", () => {
-		expect(peelWriteSelector("ssh://h/f:raw")).toBe("ssh://h/f");
-		expect(peelWriteSelector("ssh://h/f:conflicts")).toBe("ssh://h/f");
+		expect(peelWriteSelector("execfs://h/f:raw")).toBe("execfs://h/f");
+		expect(peelWriteSelector("execfs://h/f:conflicts")).toBe("execfs://h/f");
 	});
 
 	it("matches read's case-insensitive selector grammar", () => {
-		expect(peelWriteSelector("ssh://h/f:RAW")).toBe("ssh://h/f");
-		expect(peelWriteSelector("ssh://h/f:Conflicts")).toBe("ssh://h/f");
+		expect(peelWriteSelector("execfs://h/f:RAW")).toBe("execfs://h/f");
+		expect(peelWriteSelector("execfs://h/f:Conflicts")).toBe("execfs://h/f");
 	});
 
 	it("passes through paths with no peelable selector", () => {
-		expect(peelWriteSelector("ssh://h/f")).toBe("ssh://h/f");
+		expect(peelWriteSelector("execfs://h/f")).toBe("execfs://h/f");
 		expect(peelWriteSelector("vault://note")).toBe("vault://note");
 		// A real filesystem path with a colon is not a scheme:// URL, so it is never peeled.
 		expect(peelWriteSelector("/tmp/local:1-20")).toBe("/tmp/local:1-20");
@@ -129,9 +138,9 @@ describe("InternalUrlRouter.peelWriteSelector (mutating-tool/read selector parit
 	});
 
 	it("rejects line-range and malformed selectors instead of silently stripping them", () => {
-		expect(() => peelWriteSelector("ssh://h/f:1-20")).toThrow(/whole file/);
-		expect(() => peelWriteSelector("ssh://h/f:-10")).toThrow(/whole file/);
-		expect(() => peelWriteSelector("ssh://h/f:raw:1-20")).toThrow(/whole file/);
-		expect(() => peelWriteSelector("ssh://h/f:conflicts:1-20")).toThrow(/whole file/);
+		expect(() => peelWriteSelector("execfs://h/f:1-20")).toThrow(/whole file/);
+		expect(() => peelWriteSelector("execfs://h/f:-10")).toThrow(/whole file/);
+		expect(() => peelWriteSelector("execfs://h/f:raw:1-20")).toThrow(/whole file/);
+		expect(() => peelWriteSelector("execfs://h/f:conflicts:1-20")).toThrow(/whole file/);
 	});
 });

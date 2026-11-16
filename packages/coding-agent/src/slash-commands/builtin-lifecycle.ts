@@ -22,7 +22,6 @@ import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
 import { resolveToCwd } from "../tools/path-utils";
 import { commandConsumed, errorMessage, usage } from "./helpers/parse";
-import { handleSshAcp } from "./helpers/ssh";
 import type {
 	ParsedSlashCommand,
 	SlashCommandResult,
@@ -147,29 +146,6 @@ async function resolvePinTarget(
 }
 
 export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
-	{
-		name: "ssh",
-		icon: "host",
-		description: "Manage SSH hosts (add, list, remove)",
-		acpDescription: "Manage SSH connections",
-		inlineHint: "<subcommand>",
-		subcommands: [
-			{
-				name: "add",
-				description: "Add an SSH host",
-				usage: "<name> --host <host> [--user <user>] [--port <port>] [--key <keyPath>] [--scope project|user]",
-			},
-			{ name: "list", description: "List all configured SSH hosts" },
-			{ name: "remove", description: "Remove an SSH host", usage: "<name> [--scope project|user]" },
-			{ name: "help", description: "Show help message" },
-		],
-		allowArgs: true,
-		handle: handleSshAcp,
-		handleTui: async (command, runtime) => {
-			clearSubmittedText(runtime);
-			await runtime.ctx.handleSSHCommand(command.text);
-		},
-	},
 	{
 		name: "new",
 		icon: "plus",

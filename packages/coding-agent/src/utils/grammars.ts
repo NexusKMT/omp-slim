@@ -96,6 +96,7 @@ async function installLocked(info: WasmGrammarInfo, dir: string, dest: string): 
  * resolved info directly (test seam).
  */
 export function installGrammar(info: WasmGrammarInfo, dir: string = getNativeGrammarsDir()): Promise<boolean> {
+	if (info.enabled === false) return Promise.resolve(false);
 	const dest = path.join(dir, info.file);
 	const pending = inflight.get(dest);
 	if (pending) return pending;
@@ -111,10 +112,12 @@ export function installGrammar(info: WasmGrammarInfo, dir: string = getNativeGra
  * installed, downloading it on first use. Returns `true` without network
  * access for built-in, unknown, or already installed languages; otherwise
  * whether the install succeeded. Offline or integrity failures log and return
- * `false`; native AST APIs then treat the language as unsupported.
+ * `false`; native AST APIs then treat the language as unsupported. Builds
+ * without WASM support return `false` without downloading or using old caches.
  */
 export async function ensureGrammar(query: WasmGrammarQuery): Promise<boolean> {
 	const info = wasmGrammarFor(query);
+	if (info?.enabled === false) return false;
 	if (!info || info.installed) return true;
 	return installGrammar(info);
 }
@@ -128,7 +131,7 @@ export async function ensureGrammars(languages: readonly string[]): Promise<bool
 	const installed = await Promise.all(
 		languages.map(lang => {
 			const info = wasmGrammarFor({ lang });
-			if (!info) return false;
+			if (!info || info.enabled === false) return false;
 			return info.installed || installGrammar(info);
 		}),
 	);
@@ -149,5 +152,13 @@ export async function rerunWithGrammars<T extends { missingGrammars?: string[] }
 
 /** Tool-output note for languages whose files were skipped because their grammar could not be installed. */
 export function missingGrammarsNote(languages: readonly string[]): string {
-	return `Skipped ${languages.join(", ")} files: grammar could not be downloaded (offline?); results exclude them.`;
+	const disabled = languages.filter(lang => wasmGrammarFor({ lang })?.enabled === false);
+	const unavailable = languages.filter(lang => !disabled.includes(lang));
+	return [
+		disabled.length > 0 && `Skipped ${disabled.join(", ")} files: structural parsing is not supported by this build.`,
+		unavailable.length > 0 &&
+			`Skipped ${unavailable.join(", ")} files: grammar could not be downloaded (offline?); results exclude them.`,
+	]
+		.filter(Boolean)
+		.join(" ");
 }

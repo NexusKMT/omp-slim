@@ -64,31 +64,52 @@ describe("resolveCliArgv routes subcommands hidden behind leading global flags",
 });
 
 describe("resolveCliArgv strips launch-global flags before non-launch subcommands (#8891)", () => {
-	test("`--cwd <dir> update` drops the inapplicable launch flag instead of forwarding it", () => {
-		// Forwarding `--cwd` into update's strict parser crashed with
+	test("`--cwd <dir> stats` drops the inapplicable launch flag instead of forwarding it", () => {
+		// Forwarding `--cwd` into stats's strict parser crashed with
 		// `Unknown option '--cwd'`; the launch-only flag is now dropped.
-		expect(resolveCliArgv(["--cwd", "/tmp", "update"])).toEqual({ argv: ["update"] });
+		expect(resolveCliArgv(["--cwd", "/tmp", "stats"])).toEqual({ argv: ["stats"] });
 	});
 
 	test("`--cwd=<dir>` inline form is stripped too", () => {
-		expect(resolveCliArgv(["--cwd=/tmp", "update"])).toEqual({ argv: ["update"] });
+		expect(resolveCliArgv(["--cwd=/tmp", "stats"])).toEqual({ argv: ["stats"] });
 	});
 
 	test("a trailing subcommand flag survives while the leading launch flag is stripped", () => {
-		expect(resolveCliArgv(["--cwd", "/tmp", "update", "--force"])).toEqual({
-			argv: ["update", "--force"],
+		expect(resolveCliArgv(["--cwd", "/tmp", "stats", "--port=8080"])).toEqual({
+			argv: ["stats", "--port=8080"],
 		});
 	});
 
 	test("multiple leading launch flags are all stripped before a non-launch subcommand", () => {
-		expect(resolveCliArgv(["--model", "gpt", "--cwd", "/x", "update"])).toEqual({ argv: ["update"] });
+		expect(resolveCliArgv(["--model", "gpt", "--cwd", "/x", "stats"])).toEqual({ argv: ["stats"] });
 	});
 
 	test("a subcommand's own flag placed before it is kept, not treated as launch-global", () => {
-		expect(resolveCliArgv(["-c", "update"])).toEqual({ argv: ["update", "-c"] });
+		expect(resolveCliArgv(["-j", "stats"])).toEqual({ argv: ["stats", "-j"] });
 	});
 
 	test("launch-shaped `acp` still receives forwarded launch-global flags", () => {
 		expect(resolveCliArgv(["--cwd", "/x", "acp"])).toEqual({ argv: ["acp", "--cwd", "/x"] });
+	});
+});
+
+// Retired management commands must never become provider prompts, even behind launch flags.
+describe("retired slim commands", () => {
+	test("rejects self-update and SSH invocations before launch", () => {
+		for (const argv of [
+			["update", "--force"],
+			["--cwd", "/tmp", "ssh", "list"],
+		]) {
+			expect(resolveCliArgv(argv)).toMatchObject({ error: expect.any(String) });
+		}
+	});
+
+	test("explicit launch and end-of-options keep those words as prompt text", () => {
+		expect(resolveCliArgv(["launch", "update", "the", "tests"])).toEqual({
+			argv: ["launch", "update", "the", "tests"],
+		});
+		expect(resolveCliArgv(["--", "ssh", "configuration"])).toEqual({
+			argv: ["launch", "--", "ssh", "configuration"],
+		});
 	});
 });

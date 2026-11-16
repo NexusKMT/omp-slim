@@ -32,7 +32,9 @@ pub struct WasmGrammarInfo {
 	pub sha256:    String,
 	/// Byte size of the decompressed `.wasm`.
 	pub size:      u32,
-	/// Whether the grammar is downloaded (or already loaded).
+	/// Whether this build supports loading this grammar.
+	pub enabled:   bool,
+	/// Whether the grammar can be used without a download.
 	pub installed: bool,
 }
 
@@ -64,6 +66,7 @@ pub fn wasm_grammar_for(query: WasmGrammarQuery) -> Option<WasmGrammarInfo> {
 		file:      grammar.file.to_owned(),
 		sha256:    grammar.sha256.to_owned(),
 		size:      u32::try_from(grammar.size).unwrap_or(u32::MAX),
+		enabled:   grammar.is_enabled(),
 		installed: grammar.is_installed(),
 	})
 }

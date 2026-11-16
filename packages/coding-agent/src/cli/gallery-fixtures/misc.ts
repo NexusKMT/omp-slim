@@ -1,4 +1,4 @@
-/** Gallery fixtures for the ask, ssh, and github tools. */
+/** Gallery fixtures for the ask and github tools. */
 import type { GalleryFixture } from "./types";
 
 export const miscFixtures: Record<string, GalleryFixture> = {

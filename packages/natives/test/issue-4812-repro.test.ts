@@ -92,6 +92,13 @@ describe("issue 4812: pi-natives release process-stale diagnosis", () => {
 		});
 	});
 
+	it("rejects an installed addon with only the old core ABI and no release identity", async () => {
+		await withCandidate("legacy native addon", candidate => {
+			const bindings = { countTokens: () => 0, executeShell: () => {}, visibleWidth: () => 0 };
+			expect(() => validateLoadedBindings(ctxFor("18.18.3"), bindings, candidate)).toThrow("no release version");
+		});
+	});
+
 	it("skips validation entirely in workspace dev", () => {
 		const ctx = { ...ctxFor("16.3.11"), isWorkspaceLoad: true };
 		expect(() => validateLoadedBindings(ctx, { grep: () => {} }, unusedCandidate)).not.toThrow();

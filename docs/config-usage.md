@@ -230,7 +230,7 @@ Providers are sorted by numeric priority (higher first). Full set:
 - GitHub Copilot: `30`
 - VS Code: `20`
 - agents-md (`AGENTS.md` files) / claude-md (standalone `CLAUDE.md` files): `10`
-- mcp-json / ssh-json / managed-skills: `5`
+- mcp-json / managed-skills: `5`
 - Built-in default rules (`builtin-defaults`): `1`
 
 ```text
@@ -249,7 +249,7 @@ cline                   priority  40
 github                  priority  30
 vscode                  priority  20
 agents-md / claude-md   priority  10
-mcp-json / ssh-json /
+mcp-json /
   managed-skills        priority   5
 builtin-defaults        priority   1
 ```

@@ -106,7 +106,7 @@ export interface SchemeWritePolicy {
 export interface SchemeSpec {
 	backing: SchemeBacking;
 	selectors: SchemeSelectors;
-	/** A trailing `:N` with no path after the authority is a port, not a selector (ssh://host:2222). */
+	/** A trailing `:N` with no path after the authority is a port, not a selector (scheme://host:2222). */
 	portAuthority?: boolean;
 	/** The authority is the first path segment under one root (local://a/b), so a glob may start there; other schemes' authority is an id. */
 	pathAuthority?: true;
@@ -114,7 +114,7 @@ export interface SchemeSpec {
 	immutable: boolean;
 	/** Resources are session artifact storage (artifact://); located read pages skip the artifact spill. */
 	artifactStore?: true;
-	/** Approval tier for reading/searching this scheme. Default `read`; ssh:// is `exec`. */
+	/** Approval tier for reading/searching this scheme. Default `read`; handlers may require `exec`. */
 	readTier?: ToolTier;
 	/** Read output bypasses result truncation limits (skill:// instructions). */
 	unbounded?: boolean;
@@ -395,7 +395,7 @@ export interface ProtocolHandler {
 	 * list; `query` is provided only so handlers can scope expensive enumeration.
 	 * `context.cwd`/`context.localProtocolOptions` carry the caller's working dir
 	 * and session, for handlers whose candidates are project- or session-scoped
-	 * (e.g. ssh:// hosts from a project `ssh.json`, local:// roots per session).
+	 * (e.g. local:// roots per session).
 	 */
 	complete?(query?: string, context?: ResolveContext): Promise<UrlCompletion[]>;
 	/**

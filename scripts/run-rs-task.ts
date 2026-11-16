@@ -262,6 +262,9 @@ async function runCommand(command: readonly string[]): Promise<number> {
 	const [head, ...rest] = command;
 	const isCargo = head === "cargo";
 	const argv = isCargo ? [cargoBinary, ...rest] : [head, ...rest];
+	if (taskName === "test:rs:pty" && process.env.OMP_NATIVE_FEATURES?.trim()) {
+		argv.push("--features", process.env.OMP_NATIVE_FEATURES.trim());
+	}
 	const env: Record<string, string> = { ...(process.env as Record<string, string>) };
 	if (isCargo) {
 		// Cargo subprocesses (notably `rustc -vV` from `cargo metadata`) resolve

@@ -125,7 +125,6 @@ The tool returns a single text block in `content[0].text` plus structured `detai
 5. **Internal URL paths**
    - Native grep walks and reads them through the URL filesystem (`skill://<name>` searches the skill directory; `omp://` walks every embedded documentation file, so it works as a docs search root). Hits are named by full URL.
    - URL globs split into base URL + glob (`local://notes/**/*.md`, `local://*.md`).
-   - Remote `ssh://` directories expose structured entries through the URL filesystem, so directory and glob scopes search real remote file contents and retain `ssh://` identities. Listing responses above 1 MiB are refused rather than silently truncated; the existing 1 MiB UTF-8 per-file limit still applies.
    - Sources from immutable schemes suppress editable hashline anchors; `local://` hits keep them.
 
 ## Side Effects
@@ -161,7 +160,7 @@ The tool returns a single text block in `content[0].text` plus structured `detai
 - `Pattern must not be empty` when trimmed `pattern` is empty.
 - `Skip must be a non-negative number` for negative or non-finite `skip`.
 - `Search scope entries must be non-empty paths or globs` when any normalized `path` entry is empty.
-- `Cannot search <url>: <reason>` when an internal URL (or a URL glob's base) cannot be stat'ed through the URL filesystem: the handler's diagnosis (`Artifact 9 not found. Available: …`, `skill:// URL requires a skill name` for `skill://*/SKILL.md`) or the tier refusal (`ssh:// access needs exec approval; …`).
+- `Cannot search <url>: <reason>` when an internal URL (or a URL glob's base) cannot be stat'ed through the URL filesystem: the handler's diagnosis (`Artifact 9 not found. Available: …`, `skill:// URL requires a skill name` for `skill://*/SKILL.md`) or an approval-tier refusal.
 - `… lists only through the read tool` (from native grep) for a directory resource with neither structured entries nor a local path.
 - `Cannot search external URL: ... Use \`read\` to fetch web content, then search the returned text.` for non-fetchable external URL schemes (`ftp`/`ws`/`wss`) or declined fetches.
 - Line-range selector errors include `Line-range selector requires a single file, not a glob: ...`, `Line-range selector requires a single file: ... is a directory`, and `Path not found for line-range selector: ...`.
@@ -177,7 +176,7 @@ The tool returns a single text block in `content[0].text` plus structured `detai
 - Native `build_matcher()` auto-escapes braces that cannot be valid quantifiers. Valid quantifiers such as `a{2,4}` remain regex syntax.
 - If Rust regex and PCRE2 both reject group syntax, native compilation retries after escaping unescaped parentheses, then finally treats the original pattern literally.
 - Internal URLs never become host paths in the tool: native grep resolves them through the URL filesystem, and hits keep their URL spelling.
-- Approval is the router's `readTier` over the raw `path` text (substring scan, so a delimited list cannot hide an exec-tier scheme such as `ssh://`); the URL filesystem refuses any scheme whose read tier exceeds it.
+- Approval is the router's `readTier` over the raw `path` text (substring scan, so a delimited list cannot hide an exec-tier scheme advertised by a custom handler); the URL filesystem refuses any scheme whose read tier exceeds it.
 - A bare glob such as `*.ts` matches at any depth. `dir/*.ts` matches only direct children; use `dir/**/*.ts` to recurse. Literal existing paths containing glob characters take precedence over host-path glob parsing.
 - `hidden:true` is hard-coded in `grep.ts`; there is no model-facing flag to exclude dotfiles.
 - `gitignore:false` only affects native directory traversal. It does not disable the tool's own path normalization or explicit-file handling.

@@ -1,11 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import packageJson from "../package.json" with { type: "json" };
-import {
-	containsLegacyVersionSentinel,
-	containsVersionStamp,
-	VERSION_STAMP_MAGIC,
-} from "../native/version-sentinel.js";
+import { containsVersionStamp, VERSION_STAMP_MAGIC } from "../native/version-sentinel.js";
 
 const defaultNativeDir = path.join(import.meta.dir, "../native");
 
@@ -35,15 +31,14 @@ export interface EmbedOptions extends NativeEmbedTarget {
  * addons into a standalone binary: one `<addon>.node.zst` zstd frame per addon
  * variant and a replacement for the checked-in null `native/embedded-addon.js`
  * manifest that points at them. Output is a pure function of the addon bytes
- * (no timestamps, no container), which keeps release-to-release binary patches
- * small.
+ * (no timestamps or container metadata).
  *
  * Nothing is written to disk. Bun.build shares the runtime's directory cache
  * and never re-reads it on a miss, so a process that imported pi-natives before
  * writing the frames cannot resolve them; in-memory files bypass that lookup.
  *
  * @throws when no addon exists for the target, or when an addon lacks the
- * `@oh-my-pi/pi-natives@<version>` version stamp and legacy sentinel.
+ * `@oh-my-pi/pi-natives@<version>` version stamp.
  */
 export async function embeddedAddonFiles({
 	platform,
@@ -51,14 +46,14 @@ export async function embeddedAddonFiles({
 	nativeDir = defaultNativeDir,
 	version = packageJson.version,
 }: EmbedOptions): Promise<Record<string, string | Uint8Array>> {
+	if (arch !== "x64" || (platform !== "linux" && platform !== "darwin")) {
+		throw new Error(`Unsupported native target: ${platform}-${arch}. OMP Slim supports macOS and Linux x64.`);
+	}
 	const platformTag = `${platform}-${arch}`;
-	const candidates =
-		arch === "x64"
-			? [
-					{ variant: "modern", filename: `pi_natives.${platformTag}-modern.node` },
-					{ variant: "baseline", filename: `pi_natives.${platformTag}-baseline.node` },
-				]
-			: [{ variant: "default", filename: `pi_natives.${platformTag}.node` }];
+	const candidates = [
+		{ variant: "modern", filename: `pi_natives.${platformTag}-modern.node` },
+		{ variant: "baseline", filename: `pi_natives.${platformTag}-baseline.node` },
+	];
 
 	// Override keys must equal the bundler's symlink-resolved module paths.
 	const dir = await fs.realpath(nativeDir);
@@ -73,14 +68,11 @@ export async function embeddedAddonFiles({
 		throw new Error(`No native addons found for ${platformTag}. Expected one of:\n${expected}`);
 	}
 	for (const { filename, bytes } of available) {
-		// Pre-stamp addons (npm releases and main builds before the stamp slot)
-		// identify their release by the legacy export, which the loader accepts.
-		if (!containsVersionStamp(bytes, version) && !containsLegacyVersionSentinel(bytes, version)) {
+		if (!containsVersionStamp(bytes, version)) {
 			const addonPath = path.join(dir, filename);
 			throw new Error(
 				`Native addon ${addonPath} does not carry the @oh-my-pi/pi-natives@${version} version stamp ` +
-					`\`${VERSION_STAMP_MAGIC}${version}\`. Rebuild it (installs stamp automatically), run ` +
-					`\`bun scripts/stamp-native-version.ts ${addonPath}\`, or fetch @oh-my-pi/pi-natives-${platformTag}@${version} before embedding.`,
+					`\`${VERSION_STAMP_MAGIC}${version}\`. Rebuild the addon from the same OMP Slim checkout before embedding.`,
 			);
 		}
 	}
@@ -95,7 +87,7 @@ export async function embeddedAddonFiles({
 	);
 	const files = available.map(
 		({ variant, filename, bytes }, index) =>
-			`{ variant: ${JSON.stringify(variant)}, filename: ${JSON.stringify(filename)}, size: ${bytes.length}, zstdPath: zstdPath${index} }`,
+			`{ variant: ${JSON.stringify(variant)}, filename: ${JSON.stringify(filename)}, size: ${bytes.length}, sha256: ${JSON.stringify(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"))}, zstdPath: zstdPath${index} }`,
 	);
 	const manifest = `${imports.join("\n")}
 

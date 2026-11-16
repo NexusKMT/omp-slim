@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as capability from "@oh-my-pi/pi-coding-agent/capability";
-import type { CapabilityResult } from "@oh-my-pi/pi-coding-agent/capability/types";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resetActiveSkillsForTests, setActiveSkills } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import {
@@ -15,7 +13,6 @@ import {
 } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import * as sshFileTransfer from "@oh-my-pi/pi-coding-agent/ssh/file-transfer";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { formatOutputNotice } from "@oh-my-pi/pi-tui/tools/output-meta";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
@@ -767,7 +764,7 @@ describe("GrepTool internal URL resolution", () => {
 	});
 
 	it("refuses to search a directory listing that has no backing local path", async () => {
-		// A directory resource with no sourcePath (e.g. a remote ssh:// listing) must
+		// A directory resource with no sourcePath (e.g. a virtual directory listing) must
 		// not be grepped — its listing text is not the directory's contents.
 		InternalUrlRouter.instance().register({
 			scheme: "dirstub",
@@ -781,41 +778,5 @@ describe("GrepTool internal URL resolution", () => {
 		await expect(tool.execute("dir-search", { pattern: "x", path: "dirstub://host/dir" })).rejects.toThrow(
 			/dirstub:\/\/host\/dir(: Operation not supported| lists only through the read tool)/,
 		);
-	});
-
-	it("rejects an ssh:// directory in search without draining a remote listing", async () => {
-		vi.spyOn(capability, "loadCapability").mockResolvedValue({
-			items: [],
-			all: [],
-			warnings: [],
-			providers: [],
-		} as CapabilityResult<unknown>);
-		vi.spyOn(sshFileTransfer, "readRemoteFile").mockRejectedValue(new Error("Is a directory"));
-		vi.spyOn(sshFileTransfer, "statRemotePath").mockResolvedValue("directory");
-		// Unreadable directories still fail; their rendered listing text must
-		// never become a successful searchable document.
-		const listSpy = vi.spyOn(sshFileTransfer, "listRemoteDir").mockRejectedValue(new Error("Permission denied"));
-		const tool = new GrepTool(createSession());
-		await expect(tool.execute("ssh-dir-search", { pattern: "x", path: "ssh://h/etc" })).rejects.toThrow(
-			/Permission denied|Input\/output error/i,
-		);
-		expect(listSpy).toHaveBeenCalledTimes(1);
-	});
-
-	it("searches an IPv6 ssh:// file instead of rejecting the brackets as a glob", async () => {
-		vi.spyOn(capability, "loadCapability").mockResolvedValue({
-			items: [],
-			all: [],
-			warnings: [],
-			providers: [],
-		} as CapabilityResult<unknown>);
-		vi.spyOn(sshFileTransfer, "statRemotePath").mockResolvedValue("file");
-		vi.spyOn(sshFileTransfer, "readRemoteFile").mockResolvedValue({
-			bytes: new TextEncoder().encode("needle here\n"),
-			truncated: false,
-		});
-		const tool = new GrepTool(createSession());
-		const result = await tool.execute("ssh-ipv6", { pattern: "needle", path: "ssh://[::1]/etc/hosts" });
-		expect(getResultText(result)).toContain("needle");
 	});
 });

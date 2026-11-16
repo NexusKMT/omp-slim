@@ -3114,11 +3114,14 @@ export class Settings {
 			if (retiredMemorySettings.some(prefix => key === prefix || key.startsWith(`${prefix}.`))) delete raw[key];
 		}
 
-		// Sharing transports are retired; existing captures and replicas remain on disk.
-		const retiredSharingSettings = ["collab", "stream", "share"];
+		// Sharing and self-update transports are retired; existing data remains on disk.
+		const retiredServiceSettings = ["collab", "stream", "share", "update"];
 		for (const key of Object.keys(raw)) {
-			if (retiredSharingSettings.some(prefix => key === prefix || key.startsWith(`${prefix}.`))) delete raw[key];
+			if (retiredServiceSettings.some(prefix => key === prefix || key.startsWith(`${prefix}.`))) delete raw[key];
 		}
+
+		delete raw["startup.checkUpdate"];
+		if (isRecord(raw.startup)) delete raw.startup.checkUpdate;
 
 		// power.preventIdleSleep / power.preventSystemSleep / power.declareUserActive
 		// / power.preventDisplaySleep (four booleans) → power.sleepPrevention enum.

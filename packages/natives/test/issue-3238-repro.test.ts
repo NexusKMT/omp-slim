@@ -119,23 +119,22 @@ describe("issue 3238: variant resolution across worker contexts", () => {
 		expect(result.source).toBe("detect");
 	});
 
-	it("returns variant=null for non-x64 architectures and never emits a cache entry", () => {
-		for (const arch of ["arm64", "ia32", "ppc64"]) {
-			const result = selectCpuVariant({
-				arch,
+	it("rejects unsupported architectures before CPU detection", () => {
+		expect(() =>
+			selectCpuVariant({
+				arch: "arm64",
 				override: null,
 				env: {},
-				detectAvx2: () => true,
-			});
-			expect(result.variant).toBeNull();
-			expect(result.source).toBe("non-x64");
-			expect(result.cacheEnvKey).toBeUndefined();
-		}
+				detectAvx2: () => {
+					throw new Error("CPU detection must not run");
+				},
+			}),
+		).toThrow("Unsupported native architecture: arm64");
 	});
 
 	it("places modern ahead of baseline when the resolved verdict is modern (issue #3238 root file-search list)", () => {
 		// The bug surfaced because the worker resolved variant=baseline and
-		// then searched only [baseline, default]. With the cache populated by
+		// then searched only [baseline]. With the cache populated by
 		// the main thread, the worker resolves modern and the candidate list
 		// regains the modern filename — the same on-disk artifact the build
 		// just produced.
