@@ -15,7 +15,7 @@
  *
  * Usage: bun scripts/stamp-native-version.ts <addon.node>... [--version <v>] [--no-sign]
  * (default version: packages/natives/package.json#version; `--no-sign` leaves
- * Mach-O re-signing to the caller, e.g. Nix's `signIfRequired`).
+ * Mach-O re-signing to the caller, e.g. a packaging step that signs afterwards).
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -170,7 +170,7 @@ export function stampNativeBytes(bytes: Buffer, version: string): boolean {
  *
  * A signed Mach-O gets its ad-hoc signature refreshed in the same write
  * ({@link refreshAdhocSignature}); `sign: false` skips that for callers that
- * sign the result themselves (the Nix build signs through its own hook).
+ * sign the result themselves in a later packaging step.
  */
 export async function stampNativeVersion(
 	filePath: string,

@@ -63,31 +63,6 @@ brew install can1357/tap/omp
 bun install -g @oh-my-pi/pi-coding-agent
 ```
 
-**Nix**
-
-```sh
-# Run without installing
-nix run github:can1357/oh-my-pi
-
-# Or install into the active profile (Nix < 2.30: `nix profile install`)
-nix profile add github:can1357/oh-my-pi
-```
-
-Flake 使用者可以使用 `packages.<system>.omp`、`overlays.default`、`nixosModules.default` 或 `homeManagerModules.default`。Home Manager 配置可以安装 OMP 并以声明式方式管理其设置：
-
-```nix
-{
-  inputs.omp.url = "github:can1357/oh-my-pi";
-
-  # In your Home Manager module:
-  imports = [ inputs.omp.homeManagerModules.default ];
-  programs.omp = {
-    enable = true;
-    settings.startup.quiet = true;
-  };
-}
-```
-
 **固定版本（mise）**
 
 ```sh
@@ -564,22 +539,6 @@ bun dev
 ```
 
 `bun setup` 会安装 Bun 工作区依赖并构建 `@oh-my-pi/pi-natives`。修改 Rust crate 或 `packages/natives` 后，请重新运行 `bun run build:native`。
-
-Nix 用户可以获得固定版本的 Bun 和 Rust 工具链以及所有原生构建依赖：
-
-```sh
-nix develop
-bun setup
-bun dev
-```
-
-使用 `nix build .#omp` 构建并冒烟测试可分发的 Nix 包。发布构建使用 fat LTO 链接 `pi-natives`；`omp.override { withFatLto = false; }` 改用 thin LTO，本地重新构建会快得多。Rust 依赖和原生插件在不同的 derivation 中构建，因此修改 Rust 代码会复用已编译的依赖，修改 TypeScript 会复用已构建的插件。`nix/bun.nix` 只在 `bun.lock` 变化时生成；发布时会自动重新生成。依赖变更后，请运行：
-
-```sh
-bun run gen:nix
-```
-
-该命令会优先使用 `nix develop` 中的 `bun2nix`；若不可用，则通过 Nix 进入开发 shell，最后回退到固定版本的 `bunx bun2nix@2.1.2`。请勿手动编辑 `nix/bun.nix`。
 
 非交互式冒烟检查：
 

@@ -208,8 +208,8 @@ export function workerEnvFromParent(overlay?: Record<string, string>): Record<st
  * are `process.dlopen`'d and need `libstdc++.so.6` / `libgcc_s.so.1`; because
  * each addon carries its own `DT_RUNPATH`, an RPATH on our executable cannot
  * satisfy them, so the path has to come from the environment. On distros where
- * those libraries are outside the loader's default search path (NixOS) the
- * packaged build exports `OMP_NATIVE_LIBRARY_PATH` (see `nix/package.nix`).
+ * those libraries are outside the loader's default search path (for example on
+ * NixOS) the packaged build exports `OMP_NATIVE_LIBRARY_PATH`.
  * Appended last so an inherited `LD_LIBRARY_PATH` keeps precedence.
  * Pure for testability; see {@link inferenceWorkerEnv} for the spawn-time glue.
  */

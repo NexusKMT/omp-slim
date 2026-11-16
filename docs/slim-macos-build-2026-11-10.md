@@ -27,7 +27,7 @@ macOS 14 runner 已退役。参考 [GitHub runner images](https://github.com/act
 构建分钟费用，Intel Mac runner 的硬件规格没有随之提高。
 
 工作流要求 `github.event.repository.private == false`，仓库重新变为私有时
-会跳过构建。上游发布、Nix 和缓存预热工作流已移入
+会跳过构建。上游发布和缓存预热工作流已移入
 `.github/upstream-workflows/`；本仓库仅启用这条手动 Mac 工作流。
 
 ## 构建配置

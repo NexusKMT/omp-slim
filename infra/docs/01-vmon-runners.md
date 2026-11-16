@@ -39,7 +39,7 @@ Options:
 | `release_gate`, `release_binary`, `release_native_leaves`, `release_github`, `release_build`, `release_npm`, `release_brew` | — | `ubuntu-22.04` |
 | `release_smoke` | — | per-platform GitHub-hosted (`ubuntu-22.04`, `ubuntu-24.04-arm`, `macos-15-intel`, `macos-15`) |
 
-`bun-cache-warm.yml` and `nix.yml` stay GitHub-hosted. Release jobs stay hosted because they build nothing Bazel-heavy and publish with OIDC; the `release_metadata` probe stays hosted so the release chain never waits on sandbox capacity.
+`bun-cache-warm.yml` stays GitHub-hosted. Release jobs stay hosted because they build nothing Bazel-heavy and publish with OIDC; the `release_metadata` probe stays hosted so the release chain never waits on sandbox capacity.
 
 Workflows detect a vmon runner by **`VMON_CI=1`** (set in the runner's `.env` by the `ci` template). `.github/actions/bun-install` and `.github/actions/bazel-cache` key their cache choices off it.
 

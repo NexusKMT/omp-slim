@@ -15,7 +15,6 @@
 import { $, Glob } from "bun";
 import { compareVersions } from "../packages/utils/src/version.ts";
 import { runChangelogFixer } from "./fix-changelogs";
-import { generateNixBunDeps, resolveNixBunDepsGenerator } from "./gen-nix-bun";
 
 const changelogGlob = new Glob("packages/*/CHANGELOG.md");
 const packageJsonGlob = new Glob("packages/*/package.json");
@@ -249,7 +248,6 @@ async function cmdDeps(): Promise<void> {
 	await $`rm -f bun.lock`;
 	await $`bun install`;
 	await $`cargo generate-lockfile`;
-	await generateNixBunDeps(resolveNixBunDepsGenerator());
 	await $`bun scripts/gen-clippy-bazelrc.ts`;
 	// Cargo.lock changed, so the crate_universe entry in MODULE.bazel.lock is
 	// stale; without a refresh every fresh CI bazel server re-splices (~4 min).
@@ -300,9 +298,6 @@ async function cmdRelease(versionOrBump: string): Promise<void> {
 	console.log("  Working directory clean");
 
 	await checkUpToDate();
-
-	const nixBunDepsGenerator = resolveNixBunDepsGenerator();
-	console.log(`  Nix dependency generator: ${nixBunDepsGenerator.kind}`);
 
 	// Step 4 refreshes MODULE.bazel.lock through bazel; fail before touching
 	// any file rather than half-way through the version rewrite.
@@ -394,7 +389,6 @@ async function cmdRelease(versionOrBump: string): Promise<void> {
 	// separately via `bun scripts/release.ts deps` so they get CI before release.
 	await $`bun install`;
 	await $`cargo update --workspace`;
-	await generateNixBunDeps(nixBunDepsGenerator);
 	// bazel/clippy.bazelrc mirrors [workspace.lints] in Cargo.toml; regenerate
 	// it here (like the lockfiles) so the bazel clippy policy can never drift.
 	// The release_gate CI job runs the matching `--check`.

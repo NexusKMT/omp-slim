@@ -237,7 +237,7 @@ Linux standard runners increase from 2 CPUs / 8 GB privately to
 The manual workflow is `.github/workflows/slim-macos-intel.yml`. Upstream
 workflows are archived in `.github/upstream-workflows/`, outside GitHub's
 workflow discovery directory. Repository Actions can be enabled for this build
-without activating upstream release, Nix or cache-warming jobs.
+without activating upstream release or cache-warming jobs.
 
 As verified on 2026-11-10, GitHub still provides Intel macOS runners through
 `macos-15-intel` and `macos-26-intel`. `macos-latest` is arm64, and macOS 14
