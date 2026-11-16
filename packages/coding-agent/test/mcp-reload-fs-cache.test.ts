@@ -44,7 +44,7 @@ function createController(discoveredCommands: string[]) {
 					}
 				}
 			}
-			return { errors: new Map<string, string>(), connectedServers: [], tools: [], exaApiKeys: [] };
+			return { errors: new Map<string, string>(), connectedServers: [], tools: [] };
 		}),
 	});
 	const controller = new MCPCommandController(

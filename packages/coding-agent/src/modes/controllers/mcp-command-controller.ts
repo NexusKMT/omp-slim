@@ -1859,7 +1859,6 @@ export class MCPCommandController {
 		// Rediscover and connect, mirroring startup's discovery filters.
 		const result = await this.ctx.mcpManager.discoverAndConnect({
 			enableProjectConfig: cfgMcpEnableProjectConfig.get(this.ctx.settings),
-			filterExa: true,
 			extensionRoots: this.ctx.session.effectiveExtensionRoots,
 		});
 		await this.ctx.session.refreshMCPTools(this.ctx.mcpManager.getTools());

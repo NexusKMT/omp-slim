@@ -104,7 +104,6 @@ function fakeServers() {
 				tools,
 				errors: new Map(),
 				connectedServers: tools.length > 0 ? ["probe"] : [],
-				exaApiKeys: [],
 			});
 		},
 		/** A server that missed the startup window registers its tools. */

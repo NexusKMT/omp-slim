@@ -134,7 +134,6 @@ describe("MCP incremental connectServers", () => {
 			loadConfigs: async () => ({
 				configs: { [SERVER_B]: fixtureConfig(400) },
 				sources: {},
-				exaApiKeys: [],
 			}),
 		});
 

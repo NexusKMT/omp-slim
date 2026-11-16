@@ -65,13 +65,13 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 	});
 
 	test("keeps the user server when project config is disabled", async () => {
-		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: false, filterExa: false });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: false });
 		expect(Object.keys(result.configs)).toEqual(["usercontext"]);
 		expect(result.sources.usercontext?.level).toBe("user");
 	});
 
 	test("collapses the equivalent alias to the higher-priority project name when enabled", async () => {
-		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true, filterExa: false });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true });
 		expect(Object.keys(result.configs)).toEqual(["projcontext"]);
 		expect(result.sources.projcontext?.level).toBe("project");
 	});
@@ -80,7 +80,7 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 		// Higher-priority project server disabled via `enabled: false`; a differently
 		// named but connection-equivalent user server stays enabled and must survive.
 		await writeMcpJson(path.join(projectDir, ".omp"), { projcontext: { ...CONNECTION, enabled: false } });
-		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true, filterExa: false });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true });
 		expect(Object.keys(result.configs)).toEqual(["usercontext"]);
 		expect(result.sources.usercontext?.level).toBe("user");
 	});
@@ -92,7 +92,7 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 		// starved by the disabled owner and still survives.
 		await writeMcpJson(path.join(projectDir, ".omp"), { shared: { ...CONNECTION, enabled: false } });
 		await writeMcpJson(userAgentDir, { shared: CONNECTION, usercontext: CONNECTION });
-		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true, filterExa: false });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true });
 		expect(Object.keys(result.configs)).toEqual(["usercontext"]);
 		expect(result.sources.usercontext?.level).toBe("user");
 	});
@@ -102,7 +102,7 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 		// entry, it must not claim the key and shadow the user server.
 		await writeMcpJson(path.join(projectDir, ".omp"), { shared: { ...CONNECTION, enabled: false } });
 		await writeMcpJson(userAgentDir, { shared: CONNECTION });
-		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: false, filterExa: false });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: false });
 		expect(Object.keys(result.configs)).toEqual(["shared"]);
 		expect(result.sources.shared?.level).toBe("user");
 	});
@@ -113,7 +113,7 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 		// and the other sources keep loading.
 		clearFsCache();
 		await fs.writeFile(path.join(userAgentDir, "mcp.json"), "{ not valid json");
-		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true, filterExa: false });
+		const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true });
 		expect(Object.keys(result.configs)).toEqual(["projcontext"]);
 		expect(result.sources.projcontext?.level).toBe("project");
 	});
@@ -124,7 +124,7 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 		for (const content of ["null", "42", '"mcp"', "[]"]) {
 			clearFsCache();
 			await fs.writeFile(path.join(userAgentDir, "mcp.json"), content);
-			const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true, filterExa: false });
+			const result = await loadAllMCPConfigs(projectDir, { enableProjectConfig: true });
 			expect(Object.keys(result.configs)).toEqual(["projcontext"]);
 			expect(result.sources.projcontext?.level).toBe("project");
 		}
@@ -139,12 +139,11 @@ describe("MCP scope filtering precedes connection-equivalence deduplication", ()
 			);
 
 			const withEffectiveRoots = await loadAllMCPConfigs(projectDir, {
-				filterExa: false,
 				extensionRoots: { explicit: [extensionDir], mode: "merge", configured: [], configuredLevel: "user" },
 			});
 			expect(withEffectiveRoots.configs.extensionserver).toMatchObject({ command: "extension-mcp" });
 
-			const diskOnly = await loadAllMCPConfigs(projectDir, { filterExa: false });
+			const diskOnly = await loadAllMCPConfigs(projectDir, {});
 			expect(diskOnly.configs.extensionserver).toBeUndefined();
 		} finally {
 			await removeWithRetries(extensionDir);

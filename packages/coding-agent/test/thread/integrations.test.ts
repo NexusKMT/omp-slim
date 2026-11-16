@@ -61,7 +61,7 @@ describe("integrations thread service", () => {
 		frameLog = path.join(dir, "frames.log");
 		authStorage = createInMemoryAuthStorage();
 		registry = new ModelRegistry(authStorage, path.join(dir, "models.yml"));
-		manager = new MCPManager(dir, null, async () => ({ configs: {}, sources: {}, exaApiKeys: [] }));
+		manager = new MCPManager(dir, null, async () => ({ configs: {}, sources: {} }));
 		const configs: Record<string, MCPStdioServerConfig> = {
 			progress: { type: "stdio", command: process.execPath, args: [path.join(FIXTURES, "progress-mcp.ts")] },
 			cancel: {

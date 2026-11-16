@@ -209,8 +209,6 @@ export interface MCPLoadResult {
 	errors: Map<string, string>;
 	/** Connected server names */
 	connectedServers: string[];
-	/** Extracted Exa API keys from filtered MCP servers */
-	exaApiKeys: string[];
 }
 
 /** Readiness of configured MCP servers after the initial tool handshake. */
@@ -227,8 +225,6 @@ export interface MCPStartupStatus {
 export interface MCPDiscoverOptions {
 	/** Whether to load project-level config (default: true) */
 	enableProjectConfig?: boolean;
-	/** Whether to filter out Exa MCP servers (default: true) */
-	filterExa?: boolean;
 	/** Session-local extension roots for post-startup rediscovery (explicit + mode + configured). */
 	extensionRoots?: EffectiveExtensionRoots;
 	/** Called when MCP server connection state changes. */
@@ -754,7 +750,6 @@ export class MCPManager implements MCPManagerApi {
 		try {
 			loadedConfigs = await this.loadConfigs(this.cwd, {
 				enableProjectConfig: options?.enableProjectConfig,
-				filterExa: options?.filterExa,
 				extensionRoots: options?.extensionRoots,
 			});
 		} catch (error) {
@@ -764,9 +759,8 @@ export class MCPManager implements MCPManagerApi {
 			this.#emitConnectionStatus({ type: "failed", serverName: ".mcp.json", error: message });
 			throw error;
 		}
-		const { configs, exaApiKeys, sources } = loadedConfigs;
+		const { configs, sources } = loadedConfigs;
 		const result = await this.connectServers(configs, sources, options?.onStatus, options?.startupTimeoutMs);
-		result.exaApiKeys = exaApiKeys;
 		return result;
 	}
 
@@ -789,7 +783,6 @@ export class MCPManager implements MCPManagerApi {
 		this.#discoverOptions = { ...options, enableProjectConfig: enabled };
 		const loaded = await this.loadConfigs(this.cwd, {
 			enableProjectConfig: enabled,
-			filterExa: options.filterExa,
 			extensionRoots: options.extensionRoots,
 		});
 		// Every server whose resolution depends on the flag: project-level ones
@@ -1112,7 +1105,6 @@ export class MCPManager implements MCPManagerApi {
 			tools: this.getTools(),
 			errors,
 			connectedServers: Array.from(connectedServers),
-			exaApiKeys: [], // Will be populated by discoverAndConnect
 		};
 	}
 

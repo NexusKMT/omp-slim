@@ -21,8 +21,6 @@ export interface MCPToolsLoadResult {
 	errors: Array<{ path: string; error: string }>;
 	/** Connected server names */
 	connectedServers: string[];
-	/** Extracted Exa API keys from filtered MCP servers */
-	exaApiKeys: string[];
 }
 
 /** Options for loading MCP tools */
@@ -33,8 +31,6 @@ export interface MCPToolsLoadOptions {
 	startupTimeoutMs?: number;
 	/** Whether to load project-level config (default: true) */
 	enableProjectConfig?: boolean;
-	/** Whether to filter out Exa MCP servers (default: true) */
-	filterExa?: boolean;
 	/** SQLite storage for MCP tool cache (null disables cache) */
 	cacheStorage?: AgentStorageApi | null;
 	/** Auth storage used to resolve OAuth credentials before initial MCP connect */
@@ -72,7 +68,6 @@ export async function discoverAndLoadMCPTools(cwd: string, options?: MCPToolsLoa
 			onStatus: options?.onStatus,
 			startupTimeoutMs: options?.startupTimeoutMs,
 			enableProjectConfig: options?.enableProjectConfig,
-			filterExa: options?.filterExa,
 		});
 	} catch (error) {
 		// If discovery fails entirely, return empty result
@@ -82,7 +77,6 @@ export async function discoverAndLoadMCPTools(cwd: string, options?: MCPToolsLoa
 			tools: [],
 			errors: [{ path: ".mcp.json", error: message }],
 			connectedServers: [],
-			exaApiKeys: [],
 		};
 	}
 
@@ -120,6 +114,5 @@ export async function discoverAndLoadMCPTools(cwd: string, options?: MCPToolsLoa
 		tools: loadedTools,
 		errors,
 		connectedServers: result.connectedServers,
-		exaApiKeys: result.exaApiKeys,
 	};
 }

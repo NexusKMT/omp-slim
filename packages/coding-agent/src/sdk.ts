@@ -28,7 +28,6 @@ import { withCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-mes
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 
 import type { Component } from "@oh-my-pi/pi-tui";
-import { $env } from "@oh-my-pi/pi-utils/env";
 import { getAgentDir, getProjectDir } from "@oh-my-pi/pi-utils/dirs";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
@@ -492,12 +491,6 @@ function collectPendingMCPToolNames(explicitToolNames: readonly string[] | undef
 function logMCPLoadErrors(errors: MCPLoadResult["errors"]): void {
 	for (const [serverName, error] of errors) {
 		logger.error("MCP tool load failed", { path: `mcp:${serverName}`, error });
-	}
-}
-
-function applyMCPEnvironment(result: { exaApiKeys: string[] }): void {
-	if (result.exaApiKeys.length > 0 && !$env.EXA_API_KEY) {
-		Bun.env.EXA_API_KEY = result.exaApiKeys[0];
 	}
 }
 
@@ -2228,8 +2221,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			onStatus: onMCPStatus,
 			startupTimeoutMs: cfgMcpStartupTimeoutMs.get(settings),
 			enableProjectConfig: cfgMcpEnableProjectConfig.get(settings),
-			// Always filter Exa - we have native integration
-			filterExa: true,
 			extensionRoots: buildSessionExtensionRoots(),
 		};
 		if (enableMCP && !mcpManager && isMainThread()) {
@@ -2260,7 +2251,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 								await deferredMCPManager.disconnectAll();
 								return;
 							}
-							applyMCPEnvironment(mcpResult);
 							logMCPLoadErrors(mcpResult.errors);
 							// Connected MCP tools (and cached routes of servers still connecting) are
 							// enabled and mounted under xd:// devices right away, so a turn whose
@@ -2295,7 +2285,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				if (cfgMcpNotifications.get(settings)) {
 					discoveredMCPManager.setNotificationsEnabled(true);
 				}
-				applyMCPEnvironment(mcpResult);
 
 				// Log MCP errors
 				for (const { path, error } of mcpResult.errors) {

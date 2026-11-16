@@ -240,7 +240,6 @@ describe("interactive /mcp test", () => {
 						tools: [],
 						errors: new Map<string, string>(),
 						connectedServers: [],
-						exaApiKeys: [],
 					};
 				}),
 			},

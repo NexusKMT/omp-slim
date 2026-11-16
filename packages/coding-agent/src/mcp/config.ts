@@ -16,8 +16,6 @@ import type { MCPConfigFile, MCPServerConfig } from "./types";
 export interface LoadMCPConfigsOptions {
 	/** Whether to load project-level config (default: true) */
 	enableProjectConfig?: boolean;
-	/** Whether to filter out Exa MCP servers (default: true) */
-	filterExa?: boolean;
 	/** Session-local extension roots for post-startup rediscovery (explicit + mode + configured). */
 	extensionRoots?: EffectiveExtensionRoots;
 }
@@ -26,8 +24,6 @@ export interface LoadMCPConfigsOptions {
 export interface LoadMCPConfigsResult {
 	/** Loaded server configs */
 	configs: Record<string, MCPServerConfig>;
-	/** Extracted Exa API keys (if any were filtered) */
-	exaApiKeys: string[];
 	/** Source metadata for each server */
 	sources: Record<string, SourceMeta>;
 }
@@ -100,7 +96,6 @@ function convertToLegacyConfig(server: MCPServer): MCPServerConfig {
  */
 export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOptions): Promise<LoadMCPConfigsResult> {
 	const enableProjectConfig = options?.enableProjectConfig ?? true;
-	const filterExa = options?.filterExa ?? true;
 
 	// Load user-level disable/force-enable lists. The denylist always wins; the
 	// allowlist overrides a non-writable source config's `enabled: false`.
@@ -154,174 +149,14 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 	for (const warning of result.warnings) logger.warn(warning);
 
 	// Convert to legacy format and preserve source metadata.
-	let configs: Record<string, MCPServerConfig> = {};
-	let sources: Record<string, SourceMeta> = {};
+	const configs: Record<string, MCPServerConfig> = {};
+	const sources: Record<string, SourceMeta> = {};
 	for (const server of result.items) {
 		configs[server.name] = convertToLegacyConfig(server);
 		sources[server.name] = server._source;
 	}
 
-	let exaApiKeys: string[] = [];
-
-	if (filterExa) {
-		const exaResult = filterExaMCPServers(configs, sources);
-		configs = exaResult.configs;
-		sources = exaResult.sources;
-		exaApiKeys = exaResult.exaApiKeys;
-	}
-
-	return { configs, exaApiKeys, sources };
-}
-
-/** Pattern to match Exa MCP servers */
-const EXA_MCP_URL_PATTERN = /mcp\.exa\.ai/i;
-const EXA_API_KEY_PATTERN = /exaApiKey=([^&\s]+)/i;
-
-/**
- * Check if a server config is an Exa MCP server.
- */
-export function isExaMCPServer(name: string, config: MCPServerConfig): boolean {
-	// Check by server name
-	if (name.toLowerCase() === "exa") {
-		return true;
-	}
-
-	// Check by URL for HTTP/SSE servers
-	if (config.type === "http" || config.type === "sse") {
-		const httpConfig = config as { url?: string };
-		if (httpConfig.url && EXA_MCP_URL_PATTERN.test(httpConfig.url)) {
-			return true;
-		}
-	}
-
-	// Check by args for stdio servers (e.g., mcp-remote to exa)
-	if (!config.type || config.type === "stdio") {
-		const stdioConfig = config as { args?: string[] };
-		if (stdioConfig.args?.some(arg => EXA_MCP_URL_PATTERN.test(arg))) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-/**
- * Extract Exa API key from an MCP server config.
- */
-export function extractExaApiKey(config: MCPServerConfig): string | undefined {
-	// Check URL for HTTP/SSE servers
-	if (config.type === "http" || config.type === "sse") {
-		const httpConfig = config as { url?: string };
-		if (httpConfig.url) {
-			const match = EXA_API_KEY_PATTERN.exec(httpConfig.url);
-			if (match) return match[1];
-		}
-	}
-
-	// Check args for stdio servers
-	if (!config.type || config.type === "stdio") {
-		const stdioConfig = config as { args?: string[] };
-		if (stdioConfig.args) {
-			for (const arg of stdioConfig.args) {
-				const match = EXA_API_KEY_PATTERN.exec(arg);
-				if (match) return match[1];
-			}
-		}
-	}
-
-	// Check env vars
-	if ("env" in config && config.env) {
-		const envConfig = config as { env: Record<string, string> };
-		if (envConfig.env.EXA_API_KEY) {
-			return envConfig.env.EXA_API_KEY;
-		}
-	}
-
-	return undefined;
-}
-
-/** Exa MCP tools already covered by the native Exa integration. */
-const NATIVE_EXA_MCP_TOOLS: Record<string, true> = { web_search_exa: true };
-
-/**
- * Parse the comma-separated `tools` restriction from an Exa MCP config.
- * Returns `null` when the config does not restrict its tool set.
- */
-function getRequestedExaMcpTools(config: MCPServerConfig): string[] | null {
-	const raw = (() => {
-		if (config.type === "http" || config.type === "sse") {
-			const httpConfig = config as { url?: string };
-			if (!httpConfig.url) return undefined;
-			try {
-				return new URL(httpConfig.url).searchParams.get("tools") ?? undefined;
-			} catch {
-				return undefined;
-			}
-		}
-		if (!config.type || config.type === "stdio") {
-			const stdioConfig = config as { args?: string[] };
-			const args = stdioConfig.args ?? [];
-			for (let i = 0; i < args.length; i++) {
-				if (/^--?tools$/i.test(args[i])) return args[i + 1];
-				const match = args[i].match(/(?:^|[\s?&])tools=([^&\s]+)/i) ?? args[i].match(/--?tools[=\s]([^\s]+)/i);
-				if (match) return match[1];
-			}
-		}
-		return undefined;
-	})();
-	if (!raw) return null;
-	const tools = raw
-		.split(",")
-		.map(tool => tool.trim())
-		.filter(tool => tool.length > 0);
-	return tools.length > 0 ? tools : null;
-}
-
-/** Result of filtering Exa MCP servers */
-export interface ExaFilterResult {
-	/** Configs with Exa servers removed */
-	configs: Record<string, MCPServerConfig>;
-	/** Extracted Exa API keys (if any) */
-	exaApiKeys: string[];
-	/** Source metadata for remaining servers */
-	sources: Record<string, SourceMeta>;
-}
-
-/**
- * Filter out Exa MCP servers and extract their API keys.
- * Since we have native Exa integration, we don't need the MCP server —
- * unless the config explicitly requests Exa tools the native integration
- * does not provide (e.g. `web_fetch_exa`, `web_search_advanced_exa`).
- */
-export function filterExaMCPServers(
-	configs: Record<string, MCPServerConfig>,
-	sources: Record<string, SourceMeta>,
-): ExaFilterResult {
-	const filtered: Record<string, MCPServerConfig> = {};
-	const filteredSources: Record<string, SourceMeta> = {};
-	const exaApiKeys: string[] = [];
-
-	for (const [name, config] of Object.entries(configs)) {
-		if (isExaMCPServer(name, config)) {
-			// Extract API key for the native Exa integration even when the MCP
-			// server is kept below for its extra tools.
-			const apiKey = extractExaApiKey(config);
-			if (apiKey) {
-				exaApiKeys.push(apiKey);
-			}
-			const requested = getRequestedExaMcpTools(config);
-			const hasExtraTools = requested?.some(tool => !NATIVE_EXA_MCP_TOOLS[tool.toLowerCase()]) ?? false;
-			if (!hasExtraTools) {
-				continue;
-			}
-		}
-		filtered[name] = config;
-		if (sources[name]) {
-			filteredSources[name] = sources[name];
-		}
-	}
-
-	return { configs: filtered, exaApiKeys, sources: filteredSources };
+	return { configs, sources };
 }
 
 /**

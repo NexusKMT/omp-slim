@@ -80,7 +80,6 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 		MCPManager.setDeferredInstance(async () => {
 			const result = await discoverAndLoadMCPTools(cwd, {
 				enableProjectConfig: cfgMcpEnableProjectConfig.get(settings),
-				filterExa: true,
 				cacheStorage: settings.getStorage(),
 				oauthStorage: await discoverMcpOAuthStorage(),
 			});

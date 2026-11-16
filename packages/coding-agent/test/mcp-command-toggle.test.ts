@@ -39,7 +39,6 @@ function createController() {
 			errors: new Map<string, string>(),
 			connectedServers: [],
 			tools: [],
-			exaApiKeys: [],
 		}),
 	);
 	const mcpManager = createMcpManagerStub({ connectServers });

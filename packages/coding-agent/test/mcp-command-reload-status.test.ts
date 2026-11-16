@@ -24,7 +24,6 @@ describe("/mcp reload status", () => {
 		const manager = new MCPManager(process.cwd(), null, async () => ({
 			configs: { delayed: config },
 			sources: {},
-			exaApiKeys: [],
 		}));
 		const ctx = createInteractiveModeContext({ mcpManager: manager });
 		const controller = new MCPCommandController(ctx);

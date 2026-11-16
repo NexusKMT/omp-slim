@@ -153,7 +153,7 @@ const STUB_CONNECTION = {
 /** Inert `MCPManager` covering the members `MCPCommandController` reads. */
 export function createMcpManagerStub(overrides?: McpManagerOverrides): MCPManager {
 	if (overrides !== undefined && !isPlainObject(overrides)) return overrides as MCPManager;
-	const emptyLoad = () => ({ tools: [], errors: new Map<string, string>(), connectedServers: [], exaApiKeys: [] });
+	const emptyLoad = () => ({ tools: [], errors: new Map<string, string>(), connectedServers: [] });
 	const stub = {
 		prepareConfig: vi.fn(async config => config),
 		discoverAndConnect: vi.fn(async () => emptyLoad()),
