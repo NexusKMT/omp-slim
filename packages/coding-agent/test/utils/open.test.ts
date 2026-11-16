@@ -140,79 +140,8 @@ describe("openPath", () => {
 		expect(spawnCalls.map(call => call.cmd)).toEqual([["xdg-open", existingLinuxPath]]);
 	});
 
-	it("resolves PowerShell through %SystemRoot% so a broken machine PATH cannot silence the opener", () => {
-		setPlatform("win32");
-		const originalSystemRoot = process.env.SystemRoot;
-		process.env.SystemRoot = "D:\\CustomWindows";
-		const powershellPath = "D:\\CustomWindows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-		vi.spyOn(fs, "existsSync").mockImplementation(candidate => candidate === powershellPath);
-		try {
-			const spawnCalls: SpawnCall[] = [];
-			spySpawn(spawnCalls);
-
-			const url = "https://mcp.linear.app/authorize?state=xyz&code_challenge_method=S256";
-			openPath(url);
-
-			expect(spawnCalls).toHaveLength(1);
-			const [call] = spawnCalls;
-			// Absolute PowerShell path — bare executable names were the whole bug
-			// on Windows boxes where the machine PATH no longer references
-			// System32.
-			expect(call?.cmd[0]).toBe(powershellPath);
-			expect(call?.cmd.slice(1, -1)).toEqual(["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
-			expect(call?.options.windowsHide).toBe(true);
-			// The target rides inside the UTF-16LE payload: no cmd/PowerShell
-			// metacharacter parsing ever sees the `&` in the query string, and the
-			// terminating error preference makes Start-Process failures exit 1 so
-			// openPath's non-zero-exit telemetry observes them (rundll32 always
-			// exited 0).
-			const decoded = Buffer.from(String(call?.cmd.at(-1)), "base64").toString("utf16le");
-			expect(decoded).toBe(`$ErrorActionPreference='Stop';Start-Process '${url}'`);
-		} finally {
-			if (originalSystemRoot === undefined) delete process.env.SystemRoot;
-			else process.env.SystemRoot = originalSystemRoot;
-		}
-	});
-
-	it("doubles embedded single quotes so the target stays one PowerShell literal", () => {
-		setPlatform("win32");
-		vi.spyOn(fs, "existsSync").mockReturnValue(true);
-		const spawnCalls: SpawnCall[] = [];
-		spySpawn(spawnCalls);
-
-		openPath("C:\\Users\\o'brien\\report.html");
-
-		const decoded = Buffer.from(String(spawnCalls[0]?.cmd.at(-1)), "base64").toString("utf16le");
-		expect(decoded).toBe("$ErrorActionPreference='Stop';Start-Process 'C:\\Users\\o''brien\\report.html'");
-	});
-
-	it("falls back to C:\\Windows for PowerShell when SystemRoot is unset, and to the bare name when absent", () => {
-		setPlatform("win32");
-		const originalSystemRoot = process.env.SystemRoot;
-		const originalSystemRootLower = process.env.SYSTEMROOT;
-		delete process.env.SystemRoot;
-		delete process.env.SYSTEMROOT;
-		try {
-			const defaultPath = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-			const existsSpy = vi.spyOn(fs, "existsSync").mockImplementation(candidate => candidate === defaultPath);
-			const spawnCalls: SpawnCall[] = [];
-			spySpawn(spawnCalls);
-
-			openPath("https://example.com");
-			expect(spawnCalls[0]?.cmd[0]).toBe(defaultPath);
-
-			// Exotic layout: resolved path missing → bare name via PATH.
-			existsSpy.mockReturnValue(false);
-			openPath("https://example.com");
-			expect(spawnCalls[1]?.cmd[0]).toBe("powershell.exe");
-		} finally {
-			if (originalSystemRoot !== undefined) process.env.SystemRoot = originalSystemRoot;
-			if (originalSystemRootLower !== undefined) process.env.SYSTEMROOT = originalSystemRootLower;
-		}
-	});
-
-	it("logs when the opener exits non-zero so Start-Process failures are diagnosable", async () => {
-		setPlatform("win32");
+	it("logs when the opener exits non-zero so delayed failures are diagnosable", async () => {
+		setPlatform("linux");
 		vi.spyOn(fs, "existsSync").mockReturnValue(true);
 		const warnSpy = vi.spyOn(piUtils.logger, "warn").mockImplementation((() => {}) as never);
 		const failing = {

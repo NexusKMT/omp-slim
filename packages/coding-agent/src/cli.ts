@@ -51,20 +51,12 @@ if (Bun.semver.order(Bun.version, MIN_BUN_VERSION) < 0) {
 	process.exit(1);
 }
 
-// On Windows `process.title` is the shared console title, not a process name
-// (see `setProcessName`): every omp child would retitle the pane's tab.
-if (process.platform !== "win32") {
-	try {
-		process.title = APP_NAME;
-	} catch {}
-}
+try {
+	process.title = APP_NAME;
+} catch {}
 
-// `Bun.build`-API compiled Windows executables report `import.meta.main ===
-// false`: the standalone loader keys the entry module with native backslashes
-// (`B:\~BUN\root\cli.js`) but registers the main path with forward slashes
-// (`B:/~BUN/root/cli.js`), so Bun's internal match fails. `bun build --compile`
-// CLI builds are unaffected. A compiled binary's entry module is by definition
-// the process entry, so the define-folded PI_COMPILED marker stands in.
+// A compiled binary's entry module is by definition the process entry, so the
+// define-folded PI_COMPILED marker stands in for `import.meta.main`.
 const isProcessEntry = import.meta.main || process.env.PI_COMPILED === "true";
 
 /**
@@ -341,9 +333,7 @@ async function runIpcSubprocessWorker<In, Out>(
 		},
 	});
 	const initialParentPid = process.ppid;
-	if (process.platform === "win32" && initialParentPid <= 0) {
-		shutdown();
-	} else if (initialParentPid > 0) {
+	if (initialParentPid > 0) {
 		startParentWatchdog(initialParentPid);
 	}
 	const keepalive = setInterval(() => {}, 2 ** 30);

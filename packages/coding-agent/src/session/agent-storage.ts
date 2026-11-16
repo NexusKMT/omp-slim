@@ -949,10 +949,9 @@ ON CONFLICT(model_key) DO UPDATE SET
 
 	/**
 	 * Restricts the agent dir to 0700 and the db to 0600, touching each only when
-	 * its mode differs. POSIX modes are meaningless on Windows, so it is a no-op there.
+	 * its mode differs.
 	 */
 	#hardenPermissions(dbPath: string): void {
-		if (process.platform === "win32") return;
 		const dir = path.dirname(dbPath);
 		AgentStorage.#chmodIfNeeded(dir, 0o700, "AgentStorage failed to chmod agent dir");
 		AgentStorage.#chmodIfNeeded(dbPath, 0o600, "AgentStorage failed to chmod db file");

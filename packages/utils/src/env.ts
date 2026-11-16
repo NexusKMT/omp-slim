@@ -22,10 +22,7 @@ export function isValidEnvName(name: string): boolean {
 /**
  * The only names that are genuinely unsafe to forward to a native `execve`
  * spawn: empty, containing `=` (would corrupt the `KEY=VALUE` framing) or
- * NUL (terminates the C string mid-entry). Windows ships standard variables
- * whose names contain parentheses (e.g. `ProgramFiles(x86)`, `CommonProgramFiles(x86)`)
- * — those MUST survive the scrub so downstream resolvers (Git Bash discovery
- * in `procmgr.ts`, etc.) can still read them.
+ * NUL (terminates the C string mid-entry). Anything else survives the scrub.
  */
 export function isSafeEnvName(name: string): boolean {
 	return name.length > 0 && !name.includes("=") && !name.includes("\0");
@@ -45,7 +42,7 @@ export function isMacosMallocStackLoggingEnvName(name: string): boolean {
  * WSL reports `linux` for `process.platform`, so the only reliable signal is
  * the `WSL_DISTRO_NAME`/`WSL_INTEROP` variables the interop layer injects.
  * Callers use this to translate Windows drive paths to their `/mnt/<drive>`
- * mounts and to route clipboard access through `powershell.exe`.
+ * mounts.
  */
 export function isWsl(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): boolean {
 	return platform === "linux" && Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP);
@@ -87,25 +84,12 @@ const GIT_REPO_LOCATION_ENV_NAMES = [
 /**
  * Removes {@link GIT_REPO_LOCATION_ENV_NAMES} from a copied child env in place.
  *
- * Windows environment lookups are case-insensitive, so a block that spells a
- * variable `git_dir` is just as binding there; match case-insensitively on
- * win32 and exactly elsewhere (POSIX env names are case-sensitive).
+ * POSIX environment names are case-sensitive, so only the exact spellings are
+ * binding and only they are removed.
  */
-export function stripGitRepoLocationEnv(
-	env: Record<string, string>,
-	platform: NodeJS.Platform = process.platform,
-): void {
-	if (platform !== "win32") {
-		for (const name of GIT_REPO_LOCATION_ENV_NAMES) {
-			delete env[name];
-		}
-		return;
-	}
-	const folded = new Set<string>(GIT_REPO_LOCATION_ENV_NAMES.map(name => name.toLowerCase()));
-	for (const key of Object.keys(env)) {
-		if (folded.has(key.toLowerCase())) {
-			delete env[key];
-		}
+export function stripGitRepoLocationEnv(env: Record<string, string>): void {
+	for (const name of GIT_REPO_LOCATION_ENV_NAMES) {
+		delete env[name];
 	}
 }
 
@@ -307,19 +291,10 @@ for (const key of Object.keys(Bun.env)) {
  * inherits them. Read through {@link $otelEnv}; {@link withOmpOtelEnv} exposes
  * them to the OpenTelemetry SDK for the synchronous span of its construction.
  *
- * Keys are folded with {@link foldOtelEnvName}.
+ * Keys are the exact names from those files: POSIX environment names are
+ * case-sensitive, so `otel_exporter_otlp_headers` is not `OTEL_EXPORTER_OTLP_HEADERS`.
  */
 const ompOtelEnvFileValues = new Map<string, string>();
-
-/**
- * Environment names compare case-insensitively on Windows, so a file that spells
- * `otel_exporter_otlp_headers` configures the same variable as the upper-case
- * name; match and key them folded there, exactly on POSIX (names are
- * case-sensitive).
- */
-function foldOtelEnvName(name: string, platform: NodeJS.Platform): string {
-	return platform === "win32" ? name.toUpperCase() : name;
-}
 
 /**
  * @internal Loader seam, exported for tests only. Claims an `OTEL_*` entry from one of OMP's own dotenv files: the value is
@@ -329,17 +304,10 @@ function foldOtelEnvName(name: string, platform: NodeJS.Platform): string {
  * Precedence matches the process-environment loader: a non-empty live value
  * (shell export, project `.env`) wins, and an earlier non-empty file value wins
  * over a later file.
- *
- * @param platform - Name-folding semantics; injectable for tests.
  */
-export function claimOmpOtelEnvFileEntry(
-	name: string,
-	value: string,
-	platform: NodeJS.Platform = process.platform,
-): boolean {
-	const key = foldOtelEnvName(name, platform);
-	if (!key.startsWith("OTEL_")) return false;
-	if (!Bun.env[name] && !ompOtelEnvFileValues.get(key)) ompOtelEnvFileValues.set(key, value);
+export function claimOmpOtelEnvFileEntry(name: string, value: string): boolean {
+	if (!name.startsWith("OTEL_")) return false;
+	if (!Bun.env[name] && !ompOtelEnvFileValues.get(name)) ompOtelEnvFileValues.set(name, value);
 	return true;
 }
 
@@ -351,7 +319,7 @@ export function claimOmpOtelEnvFileEntry(
 export function $otelEnv(name: string): string | undefined {
 	const live = Bun.env[name];
 	if (live) return live;
-	return ompOtelEnvFileValues.get(foldOtelEnvName(name, process.platform)) ?? live;
+	return ompOtelEnvFileValues.get(name) ?? live;
 }
 
 /**
@@ -425,30 +393,17 @@ export function $pickenv(...keys: string[]): string | undefined {
 /**
  * Read an environment variable by its EXACT, case-sensitive name.
  *
- * `process.env` / `Bun.env` lookups are case-insensitive on Windows (Node backs
- * them with `uv_os_getenv`, Bun with a `CaseInsensitiveASCIIStringArrayHashMap`),
- * so a lowercase literal like `public` silently resolves to a differently-cased
- * system variable — Windows ships `PUBLIC=C:\Users\Public`. Enumerated keys are
- * the only signal that preserves the real casing, so this trusts the lookup only
- * when a key with identical casing is actually present. On POSIX (case-sensitive
- * env) it is equivalent to a direct lookup.
- *
- * Use this instead of `process.env[name] ?? literal` wherever `name` may be a
- * user-supplied literal (e.g. a stored API key) rather than a genuine env-var
- * reference — otherwise the literal gets hijacked by a same-named system var.
+ * POSIX environment lookups are already case-sensitive, so this is a direct
+ * read. Use it instead of `process.env[name] ?? literal` wherever `name` may be
+ * a user-supplied literal (e.g. a stored API key) rather than a genuine env-var
+ * reference: it documents that the value came from the environment and not
+ * from the literal fallback.
  *
  * @param name - Environment variable name to look up.
  * @param env - Environment source; defaults to `process.env`.
  */
 export function $envExact(name: string, env: Record<string, string | undefined> = process.env): string | undefined {
-	const value = env[name];
-	if (value === undefined) return undefined;
-	// Enumeration preserves real key casing on Windows, unlike the getter; the
-	// value is trusted only when an exact-case entry actually exists.
-	for (const key in env) {
-		if (key === name) return value;
-	}
-	return undefined;
+	return env[name];
 }
 
 /**

@@ -173,15 +173,14 @@ function resolverRegistry(): ResolverRegistration[] {
 const canonicalPaths = new Map<string, string>();
 
 /**
- * Canonical form of `target` for path comparison: symlinks and Windows
- * junctions resolved, drive/segment casing folded on Windows. Non-existent
- * paths fall back to `path.resolve`, which still normalizes separators.
+ * Canonical form of `target` for path comparison: symlinks and macOS
+ * `/private` aliases resolved. Non-existent paths fall back to `path.resolve`,
+ * which still normalizes separators.
  *
  * Comparisons must canonicalize because the two sides come from different
  * worlds: the stock resolver hands back realpath-resolved filenames, while a
- * registered runtime root is whatever the caller configured (a cache under a
- * junctioned `F:\Programs\…`, a home directory symlinked onto another volume,
- * macOS `/tmp` → `/private/tmp`).
+ * registered runtime root is whatever the caller configured (a home directory
+ * symlinked onto another volume, macOS `/tmp` → `/private/tmp`).
  */
 function canonicalPath(target: string): string {
 	const cached = canonicalPaths.get(target);
@@ -192,7 +191,6 @@ function canonicalPath(target: string): string {
 	} catch {
 		canonical = path.resolve(target);
 	}
-	if (process.platform === "win32") canonical = canonical.toLowerCase();
 	canonicalPaths.set(target, canonical);
 	return canonical;
 }

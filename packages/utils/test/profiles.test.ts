@@ -141,8 +141,6 @@ describe("profile directories", () => {
 	});
 
 	it("keeps XDG-backed named profile state under profile-specific roots", async () => {
-		if (process.platform === "win32") return;
-
 		process.env.XDG_DATA_HOME = path.join(tempRoot, "data");
 		process.env.XDG_STATE_HOME = path.join(tempRoot, "state");
 		process.env.XDG_CACHE_HOME = path.join(tempRoot, "cache");
@@ -162,8 +160,6 @@ describe("profile directories", () => {
 	});
 
 	it("does not silently switch a named profile to XDG once the base app dir appears", async () => {
-		if (process.platform === "win32") return;
-
 		process.env.XDG_DATA_HOME = path.join(tempRoot, "data");
 		process.env.XDG_STATE_HOME = path.join(tempRoot, "state");
 		process.env.XDG_CACHE_HOME = path.join(tempRoot, "cache");
@@ -267,7 +263,7 @@ describe("profile env + name validation", () => {
 	});
 
 	it("rejects uppercase profile names so isolation is filesystem-independent", () => {
-		// `work` and `WORK` would collide on case-insensitive macOS/Windows but
+		// `work` and `WORK` would collide on a case-insensitive filesystem but
 		// differ on Linux; reject uppercase to keep profile identity stable.
 		expect(() => normalizeProfileName("WORK")).toThrow("Invalid OMP profile");
 		expect(() => normalizeProfileName("Work")).toThrow("Invalid OMP profile");
@@ -416,7 +412,6 @@ describe("dirs module import behavior", () => {
 	});
 
 	it("honors XDG dir keys from a profile .env applied after the resolver froze", async () => {
-		if (process.platform === "win32") return;
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "pi-utils-profile-env-xdg-"));
 		const homeDir = path.join(root, "home");
 		const xdgStateRoot = path.join(root, "xdg-state");

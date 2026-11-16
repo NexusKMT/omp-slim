@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { procmgr } from "@oh-my-pi/pi-utils";
 import type { JobWidgetView } from "@oh-my-pi/pi-tui/tools/job-widget";
 import { AsyncJobManager } from "../../src/async/job-manager";
 import { snapshotJobs } from "../../src/async/job-control";
@@ -8,7 +7,7 @@ import { type JobWidgetAuthorRequest, JobWidgets } from "../../src/job-widgets";
 import type { ToolSession } from "../../src/tools";
 import { BashTool } from "../../src/tools/bash";
 
-const SHELL = process.platform === "win32" ? procmgr.resolveWindowsShell() : "/bin/sh";
+const SHELL = "/bin/sh";
 
 function toolSession(manager: AsyncJobManager): ToolSession {
 	return {

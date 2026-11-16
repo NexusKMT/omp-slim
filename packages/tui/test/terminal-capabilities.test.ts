@@ -312,12 +312,12 @@ console.log(JSON.stringify({ id: TERMINAL_ID, notifyProtocol: TERMINAL.notifyPro
 		);
 	}
 
-	it.skipIf(process.platform === "win32")("uses the attached client's terminal profile", async () => {
+	it("uses the attached client's terminal profile", async () => {
 		const stdout = await resolveInsideFakeTmux("WezTerm 20260905-175422-0f4b5596\ttmux-256color");
 		expect(JSON.parse(stdout)).toMatchObject({ id: "wezterm", notifyProtocol: "\u001b]9;" });
 	});
 
-	it.skipIf(process.platform === "win32")("keeps the client profile when the probe is slower than 500ms", async () => {
+	it("keeps the client profile when the probe is slower than 500ms", async () => {
 		// A loaded machine can push one `tmux display-message` round trip past
 		// 500ms (fork/exec of the tmux client alone can exceed it on a saturated
 		// box), and a lost race is indistinguishable from "not tmux": the session
@@ -330,15 +330,12 @@ console.log(JSON.stringify({ id: TERMINAL_ID, notifyProtocol: TERMINAL.notifyPro
 	// tmux. Its terminal-type reply can name something else entirely (a nested
 	// tmux answers `tmux 3.4`, and tmux < 3.4 records nothing); the client's
 	// TERM still identifies the emulator. Report captured from tmux 3.4.
-	it.skipIf(process.platform === "win32")(
-		"falls back to the client's TERM when the terminal type is unknown",
-		async () => {
-			const stdout = await resolveInsideFakeTmux("tmux 3.4\txterm-kitty");
-			expect(JSON.parse(stdout)).toMatchObject({ id: "kitty", imageProtocol: ImageProtocol.Kitty });
-		},
-	);
+	it("falls back to the client's TERM when the terminal type is unknown", async () => {
+		const stdout = await resolveInsideFakeTmux("tmux 3.4\txterm-kitty");
+		expect(JSON.parse(stdout)).toMatchObject({ id: "kitty", imageProtocol: ImageProtocol.Kitty });
+	});
 
-	it.skipIf(process.platform === "win32")("recognizes a Rex client from tmux client_termname", async () => {
+	it("recognizes a Rex client from tmux client_termname", async () => {
 		const stdout = await resolveInsideFakeTmux("tmux 3.4\txterm-rex");
 		expect(JSON.parse(stdout)).toMatchObject({ id: "rex", imageProtocol: ImageProtocol.Kitty });
 	});
@@ -497,34 +494,28 @@ console.log(JSON.stringify({ id: TERMINAL_ID, imageProtocol: TERMINAL.imageProto
 		expect(exitCode).toBe(0);
 		const resolved = JSON.parse(stdout) as { id: string; imageProtocol: string | null; expected: string };
 		expect(resolved.id).toBe("warp");
-		// Warp for Windows lacks Kitty graphics support.
-		expect(resolved.imageProtocol).toBe(process.platform === "win32" ? null : resolved.expected);
+		expect(resolved.imageProtocol).toBe(resolved.expected);
 	});
 
 	it("is Kitty-capable with true color but no OSC 8 hyperlinks", () => {
 		const warp = getTerminalInfo("warp");
-		// Warp lacks Kitty graphics on Windows hosts, including WSL.
-		const windowsHost =
-			process.platform === "win32" ||
-			(process.platform === "linux" && Boolean(Bun.env.WSL_DISTRO_NAME || Bun.env.WSL_INTEROP));
-		expect(warp.imageProtocol).toBe(windowsHost ? null : ImageProtocol.Kitty);
+		// Warp lacks Kitty graphics on a WSL host.
+		const wslHost = process.platform === "linux" && Boolean(Bun.env.WSL_DISTRO_NAME || Bun.env.WSL_INTEROP);
+		expect(warp.imageProtocol).toBe(wslHost ? null : ImageProtocol.Kitty);
 		expect(warp.trueColor).toBe(true);
 		expect(warp.hyperlinks).toBe(false);
 		expect(warp.notifyProtocol).toBe(NotifyProtocol.Osc9);
 		expect(warp.supportsTextSizing).toBe(false);
 	});
 
-	it("uses Kitty images on macOS/Linux and disables them on Windows", () => {
+	it("uses Kitty images on macOS/Linux and disables them under WSL", () => {
 		const mac = getTerminalInfo("warp", "darwin", {});
 		const linux = getTerminalInfo("warp", "linux", {});
-		const windows = getTerminalInfo("warp", "win32", {});
 
 		expect(resolveWarpImageProtocol("darwin", {})).toBe(ImageProtocol.Kitty);
 		expect(resolveWarpImageProtocol("linux", {})).toBe(ImageProtocol.Kitty);
-		expect(resolveWarpImageProtocol("win32", {})).toBeNull();
 		expect(mac.imageProtocol).toBe(ImageProtocol.Kitty);
 		expect(linux.imageProtocol).toBe(ImageProtocol.Kitty);
-		expect(windows.imageProtocol).toBeNull();
 		expect(linux.trueColor).toBe(true);
 		expect(linux.hyperlinks).toBe(false);
 		expect(linux.deccara).toBe(false);
@@ -660,7 +651,7 @@ describe("tmux image protocol selection", () => {
 		["drops a known Kitty client when tmux blocks passthrough", "5102", "off", null],
 		["keeps a known Kitty client on tmux without the passthrough option", "5103", "", ImageProtocol.Kitty],
 	] as const) {
-		it.skipIf(process.platform === "win32")(name, async () => {
+		it(name, async () => {
 			const replies = { "show-options -Apqv -t %7 allow-passthrough": passthrough };
 			await withFakeTmux(replies, async binDir => {
 				const env = {

@@ -1624,7 +1624,7 @@ export class CustomEditor extends Editor {
 	/**
 	 * Bracketed-paste assembly. Some terminals fragment the start marker,
 	 * the payload, and the end marker across separate stdin chunks
-	 * (Windows Terminal under heavy load, certain SSH muxes, …); the
+	 * (a terminal under heavy load, certain SSH muxes, …); the
 	 * inherited handler then sees a zero-length payload and silently
 	 * drops it through the normal text-insert path. Running our own
 	 * `BracketedPasteHandler` ahead of `super.handleInput` lets us route

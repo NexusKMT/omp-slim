@@ -91,9 +91,7 @@ test("synchronous recovery preserves malformed schema pages and yields a persist
 	expect(backups).toHaveLength(1);
 	const backupPath = path.join(dir.path(), backups[0]!);
 	expect(await fs.promises.readFile(backupPath)).toEqual(damaged);
-	if (process.platform !== "win32") {
-		expect((await fs.promises.stat(backupPath)).mode & 0o777).toBe(0o600);
-	}
+	expect((await fs.promises.stat(backupPath)).mode & 0o777).toBe(0o600);
 
 	const rows = openSqliteDatabaseSync(dbPath, db => {
 		try {
@@ -138,9 +136,7 @@ test("recovery preserves sidecars present at corruption detection under one priv
 	const backupPath = path.join(dir.path(), mainBackups[0]!);
 	for (const [suffix, bytes] of contents) {
 		expect(await fs.promises.readFile(`${backupPath}${suffix}`)).toEqual(bytes);
-		if (process.platform !== "win32") {
-			expect((await fs.promises.stat(`${backupPath}${suffix}`)).mode & 0o777).toBe(0o600);
-		}
+		expect((await fs.promises.stat(`${backupPath}${suffix}`)).mode & 0o777).toBe(0o600);
 	}
 });
 

@@ -49,9 +49,9 @@ export const SEARCH_HARD_TIMEOUT_MS = DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS * 1_000
  * outbound `fetch()` is guaranteed to settle within `ms` even when the
  * runtime fails to propagate cancellation to the underlying transport.
  *
- * Bun's WinHTTP backend on Windows is known to ignore `AbortSignal` once a
- * TCP/TLS connection stalls (oven-sh/bun#15275, oven-sh/bun#18536); without
- * this safety net a stalled web-search request freezes the entire session
+ * Bun's HTTP backends are known to ignore `AbortSignal` once a TCP/TLS
+ * connection stalls (oven-sh/bun#15275, oven-sh/bun#18536); without this
+ * safety net a stalled web-search request freezes the entire session
  * because the user's Esc is never delivered to the native layer.
  *
  * @param signal - Caller cancellation signal, if any.

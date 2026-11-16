@@ -254,18 +254,8 @@ const LOCAL_BIN_PATHS: Array<{ markers: string[]; binDir: string }> = [
 	{ markers: ["go.mod", "go.sum", "go.work"], binDir: "bin" },
 ];
 
-const WINDOWS_LOCAL_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat"] as const;
-
 function resolveLocalCommand(basePath: string): string | null {
 	if (fs.existsSync(basePath)) return basePath;
-	if (process.platform !== "win32") return null;
-
-	// Package managers write Windows launchers with executable suffixes in node_modules/.bin.
-	for (const extension of WINDOWS_LOCAL_EXECUTABLE_EXTENSIONS) {
-		const candidate = `${basePath}${extension}`;
-		if (fs.existsSync(candidate)) return candidate;
-	}
-
 	return null;
 }
 
@@ -324,9 +314,9 @@ function typescriptPackageDir(tscPath: string): string | null {
 	const candidates = [
 		// <pkg>/bin/tsc: symlinked node_modules/.bin and global installs
 		...(path.basename(path.dirname(realPath)) === "bin" ? [path.dirname(path.dirname(realPath))] : []),
-		// node_modules/.bin/tsc.cmd on Windows
+		// <bin>/../typescript: the package root behind a `.bin` symlink
 		path.join(binDir, "..", "typescript"),
-		// npm global prefix on Windows
+		// <bin>/node_modules/typescript: a globally installed prefix
 		path.join(binDir, "node_modules", "typescript"),
 	];
 	for (const dir of candidates) {

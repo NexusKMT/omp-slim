@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { getEditorCommand, getEditorName, openInEditor, resolveEditorSpawnCommand } from "../src/utils/external-editor";
+import { getEditorCommand, getEditorName, openInEditor } from "../src/utils/external-editor";
 
 interface MutableProcess {
 	platform: NodeJS.Platform;
@@ -25,10 +25,9 @@ describe("getEditorCommand", () => {
 		else Bun.env.EDITOR = originalEditor;
 	});
 
-	it("prefers $VISUAL over $EDITOR and the platform default", () => {
+	it("prefers $VISUAL over $EDITOR", () => {
 		Bun.env.VISUAL = "nvim";
 		Bun.env.EDITOR = "nano";
-		setPlatform("win32");
 		expect(getEditorCommand()).toBe("nvim");
 	});
 
@@ -50,14 +49,7 @@ describe("getEditorCommand", () => {
 		expect(getEditorCommand()).toBe("vim");
 	});
 
-	it("defaults to notepad on Windows when neither variable is set", () => {
-		delete Bun.env.VISUAL;
-		delete Bun.env.EDITOR;
-		setPlatform("win32");
-		expect(getEditorCommand()).toBe("notepad");
-	});
-
-	it("returns undefined on POSIX when neither variable is set", () => {
+	it("returns undefined when neither variable is set", () => {
 		delete Bun.env.VISUAL;
 		delete Bun.env.EDITOR;
 		setPlatform("linux");
@@ -66,15 +58,9 @@ describe("getEditorCommand", () => {
 });
 
 describe("getEditorName", () => {
-	it("names Windows' default editor Notepad", () => {
-		expect(getEditorName("notepad")).toBe("Notepad");
-		expect(getEditorName("C:\\Windows\\System32\\notepad.exe")).toBe("Notepad");
-	});
-
-	it("names the program, without its directory, quotes, arguments or extension", () => {
+	it("names the program, without its directory, quotes or arguments", () => {
 		expect(getEditorName("nvim")).toBe("nvim");
 		expect(getEditorName("code --wait")).toBe("code");
-		expect(getEditorName('"C:\\Program Files\\Microsoft VS Code\\bin\\code.cmd" --wait')).toBe("code");
 		expect(getEditorName("'/opt/My Editors/subl' -w")).toBe("subl");
 	});
 
@@ -105,22 +91,7 @@ describe("openInEditor", () => {
 		}
 	});
 
-	it("passes the cmd.exe command line verbatim on Windows", () => {
-		const tmpFile = String.raw`C:\Users\Example User\AppData\Local\Temp\omp-editor-123.omp.md`;
-
-		expect(resolveEditorSpawnCommand('"C:\\Program Files\\Code.exe" --wait', tmpFile, "win32")).toEqual({
-			cmd: [
-				"cmd.exe",
-				"/d",
-				"/s",
-				"/c",
-				String.raw`""C:\Program Files\Code.exe" --wait "C:\Users\Example User\AppData\Local\Temp\omp-editor-123.omp.md""`,
-			],
-			windowsVerbatimArguments: true,
-		});
-	});
-
-	it.skipIf(process.platform === "win32")("supports quoted editor paths containing spaces", async () => {
+	it("supports quoted editor paths containing spaces", async () => {
 		const tempDir = TempDir.createSync("@external-editor-");
 		try {
 			const editorPath = path.join(tempDir.path(), "My Editor", "edit");

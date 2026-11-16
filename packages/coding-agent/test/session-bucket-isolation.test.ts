@@ -13,7 +13,7 @@ import {
 const SESSION_ID = "0198aaaa-0000-7000-8000-000000000001";
 const SESSION_NAME = `2026-10-15T00-00-00-000Z_${SESSION_ID}.jsonl`;
 
-const modeBitsUnavailable = process.platform === "win32" || process.getuid?.() === 0;
+const modeBitsUnavailable = process.getuid?.() === 0;
 
 describe("cross-project session bucket isolation", () => {
 	let sessionsRoot = "";

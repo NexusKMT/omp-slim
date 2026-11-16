@@ -104,7 +104,7 @@ describe("stderr guard", () => {
 		}
 	});
 
-	it.skipIf(process.platform === "win32")("suppresses same-terminal fd-2 writes by default", async () => {
+	it("suppresses same-terminal fd-2 writes by default", async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stderr-guard-"));
 		tempDirs.push(dir);
 		const redirectPath = path.join(dir, "redirect.log");

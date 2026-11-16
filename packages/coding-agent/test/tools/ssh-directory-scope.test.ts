@@ -21,7 +21,7 @@ function textOf(result: { content: Array<{ type: string; text?: string }> }): st
 }
 
 // The fake remote is the local filesystem behind a POSIX shell.
-describe.skipIf(process.platform === "win32")("grep ssh:// directory scopes", () => {
+describe("grep ssh:// directory scopes", () => {
 	let fixture: string;
 	let root: string;
 	let tool: GrepTool;

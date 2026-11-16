@@ -14,7 +14,7 @@ async function runHost(source: string): Promise<{ exitCode: number; stdout: stri
 }
 
 describe("SDK import process ownership", () => {
-	it.skipIf(process.platform === "win32")("lets the embedding host finish its SIGTERM shutdown", async () => {
+	it("lets the embedding host finish its SIGTERM shutdown", async () => {
 		// Real signal delivery and an asynchronous stop must overlap the installed handler's exit.
 		const result = await runHost(`
 			process.on("SIGTERM", async () => {

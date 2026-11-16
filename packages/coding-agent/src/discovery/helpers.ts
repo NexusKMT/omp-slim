@@ -677,26 +677,17 @@ export function calculateDepth(cwd: string, targetDir: string, separator: string
 // =============================================================================
 
 /**
- * Compare paths while tolerating Windows drive casing.
+ * Compare paths as resolved absolute strings.
  */
 function samePath(left: string, right: string): boolean {
-	const normalizedLeft = path.resolve(left);
-	const normalizedRight = path.resolve(right);
-	return process.platform === "win32"
-		? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
-		: normalizedLeft === normalizedRight;
+	return path.resolve(left) === path.resolve(right);
 }
 
 /**
  * Return whether `child` is at or below `parent`.
  */
 function isWithin(parent: string, child: string): boolean {
-	const normalizedParent = path.resolve(parent);
-	const normalizedChild = path.resolve(child);
-	const relative = path.relative(
-		process.platform === "win32" ? normalizedParent.toLowerCase() : normalizedParent,
-		process.platform === "win32" ? normalizedChild.toLowerCase() : normalizedChild,
-	);
+	const relative = path.relative(path.resolve(parent), path.resolve(child));
 	return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
@@ -1031,10 +1022,8 @@ export function getProjectDiscoveryCeilings(): ReadonlySet<string> {
 	const ceilings = new Set<string>();
 	ceilings.add(normalizePathForComparison(os.homedir()));
 	ceilings.add(normalizePathForComparison(os.tmpdir()));
-	if (process.platform !== "win32") {
-		ceilings.add(normalizePathForComparison("/tmp"));
-		ceilings.add(normalizePathForComparison("/var/tmp"));
-	}
+	ceilings.add(normalizePathForComparison("/tmp"));
+	ceilings.add(normalizePathForComparison("/var/tmp"));
 	return ceilings;
 }
 

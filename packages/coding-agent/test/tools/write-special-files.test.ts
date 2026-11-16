@@ -64,7 +64,7 @@ function releaseFifoReader(fifo: string): void {
 	}
 }
 
-describe.skipIf(process.platform === "win32")("write on non-regular files", () => {
+describe("write on non-regular files", () => {
 	let testDir: string;
 	let fifo: string;
 

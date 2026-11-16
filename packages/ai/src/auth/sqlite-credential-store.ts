@@ -34,7 +34,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 					try {
 						await fs.chmod(dbPath, 0o600);
 					} catch {
-						// Permissions are unavailable on some platforms (e.g. Windows).
+						// chmod is best-effort: some filesystems reject it.
 					}
 				}
 				return new SqliteAuthCredentialStore(db);

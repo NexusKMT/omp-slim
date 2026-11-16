@@ -3619,7 +3619,7 @@ export class TUI extends Container {
 
 	/**
 	 * Erase `row` and everything below it, absolute-addressed, without ever
-	 * issuing a full-screen clear. tmux and Windows conhost (#9597) archive a
+	 * issuing a full-screen clear. tmux and conhost (#9597) archive a
 	 * screen-wide erase into pane history instead of discarding it, so an erase
 	 * anchored on the first row would preserve the unfinished frame it exists to
 	 * remove (#9780). Below existing history a plain ED0 cannot span the screen;
@@ -3644,7 +3644,7 @@ export class TUI extends Container {
 	 * where a plain `\r\x1b[J` left it.
 	 *
 	 * The erase must never run from the first cell, which is what makes tmux and
-	 * Windows conhost (#9597) archive the screen instead of discarding it
+	 * conhost (#9597) archive the screen instead of discarding it
 	 * (#9780), and a clamped CUU can put the cursor on the first row without
 	 * naming it. Stepping one column right is enough and needs no row movement,
 	 * but at one column CUF cannot leave the first cell, so step one row down

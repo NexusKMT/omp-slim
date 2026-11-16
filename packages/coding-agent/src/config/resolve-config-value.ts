@@ -1,4 +1,3 @@
-import { executeShell } from "@oh-my-pi/pi-natives";
 import { $envExact, directoryIsEnterable, getProjectDir, logger, ptree, untilAborted } from "@oh-my-pi/pi-utils";
 
 const COMMAND_FAILURE_RETRY_MS = 30_000;
@@ -109,9 +108,8 @@ export async function resolveConfigValue(valueConfig: string): Promise<string | 
 
 /**
  * Run one command-backed value with isolated stdio and a bounded process tree.
- * POSIX uses an absolute shell, a detached process group, and Linux subreaper
- * supervision so descendants cannot survive timeout. Windows runs the command
- * in the embedded bash engine with native process-tree cancellation.
+ * Uses an absolute shell, a detached process group, and Linux subreaper
+ * supervision so descendants cannot survive timeout.
  */
 export async function runShellCommand(
 	command: string,
@@ -119,16 +117,6 @@ export async function runShellCommand(
 	cwd: string = getProjectDir(),
 ): Promise<string | undefined> {
 	try {
-		if (process.platform === "win32") {
-			let output = "";
-			const result = await executeShell({ command, cwd, timeoutMs }, (err, chunk) => {
-				if (!err) output += chunk;
-			});
-			if (result.timedOut || result.exitCode !== 0) return undefined;
-			const trimmed = output.trim();
-			return trimmed.length > 0 ? trimmed : undefined;
-		}
-
 		const result = await ptree.exec(["/bin/sh", "-c", command], {
 			cwd,
 			timeout: timeoutMs,

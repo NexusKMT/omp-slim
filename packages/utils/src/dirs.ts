@@ -14,7 +14,6 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { expandWindowsLongPath } from "@oh-my-pi/pi-natives/path";
 import { engines, version } from "../package.json" with { type: "json" };
 import { isEnoent, isEnotdir } from "./fs-error";
 import { isBunTestRuntime } from "./test-runtime";
@@ -44,9 +43,9 @@ const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const PROFILE_ENV_KEYS = ["OMP_PROFILE", "PI_PROFILE"] as const;
 
 /**
- * Names Windows treats as reserved device aliases. Matches the basename
- * itself as well as any `BASENAME.<anything>` form, because Windows reserves
- * `CON.foo`/`PRN.txt`/etc. too — using them as a profile name would let
+ * Names some filesystems treat as reserved device aliases. Matches the
+ * basename itself as well as any `BASENAME.<anything>` form, because `CON.foo`
+ * and `PRN.txt` are reserved too — using them as a profile name would let
  * `setProfile` accept the input only for directory creation to fail later
  * with a confusing `ENOENT`/`EINVAL`. Case-insensitive: NTFS treats `CON`
  * and `con` identically.
@@ -156,11 +155,6 @@ function standardizeMacOSPath(p: string): string {
 	return p;
 }
 
-/** Keep the current directory's spelling while expanding Windows 8.3 aliases. */
-function standardizeProjectPath(p: string): string {
-	return process.platform === "win32" ? expandWindowsLongPath(p) : standardizeMacOSPath(p);
-}
-
 export interface EquivalentPathOptions {
 	/**
 	 * Resolve a path that does not exist yet through its deepest existing ancestor, keeping the
@@ -191,13 +185,8 @@ export function resolveEquivalentPath(inputPath: string, options?: EquivalentPat
 	}
 }
 
-function comparablePath(inputPath: string, options?: EquivalentPathOptions): string {
-	const resolvedPath = resolveEquivalentPath(inputPath, options);
-	return process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
-}
-
 export function normalizePathForComparison(inputPath: string): string {
-	return comparablePath(inputPath);
+	return resolveEquivalentPath(inputPath);
 }
 
 /**
@@ -218,7 +207,7 @@ export function relativePathWithinNormalizedRoot(normalizedRoot: string, normali
 /** `options` apply to `candidate` only. */
 export function pathIsWithin(root: string, candidate: string, options?: EquivalentPathOptions): boolean {
 	const normalizedRoot = normalizePathForComparison(root);
-	const normalizedCandidate = comparablePath(candidate, options);
+	const normalizedCandidate = resolveEquivalentPath(candidate, options);
 	return relativePathWithinNormalizedRoot(normalizedRoot, normalizedCandidate) !== null;
 }
 
@@ -252,14 +241,14 @@ export function getProjectDir(): string {
 		}
 		// Normalize outside the fallback: a native-addon failure is not an inaccessible cwd,
 		// and must surface as itself instead of relocating the process.
-		projectDir = standardizeProjectPath(cwd);
+		projectDir = standardizeMacOSPath(cwd);
 	}
 	return projectDir;
 }
 
 /** Set the project directory. */
 export function setProjectDir(dir: string): void {
-	const resolved = standardizeProjectPath(path.resolve(dir));
+	const resolved = standardizeMacOSPath(path.resolve(dir));
 	process.chdir(resolved);
 	projectDir = resolved;
 }

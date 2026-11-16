@@ -107,7 +107,7 @@ describe("read tool directory listings honor line selectors (regression: was sil
 		expect(expanded).not.toContain("more");
 	});
 
-	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+	it.skipIf(process.getuid?.() === 0)(
 		"reports an unreadable root instead of claiming its files are absent",
 		async () => {
 			fs.chmodSync(testDir, 0o000);
@@ -121,7 +121,7 @@ describe("read tool directory listings honor line selectors (regression: was sil
 		},
 	);
 
-	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+	it.skipIf(process.getuid?.() === 0)(
 		"marks an unreadable child and keeps listing its readable siblings",
 		async () => {
 			const child = path.join(testDir, "blocked");

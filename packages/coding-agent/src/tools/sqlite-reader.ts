@@ -45,7 +45,7 @@ function configureSqliteReadConnection(db: Database): Database {
  *
  * Helpers here run statements through `db.query()`: `close()` finalizes that cache, while an
  * unfinalized `db.prepare()` statement leaves the connection a zombie that keeps the file open
- * (Windows then refuses to delete it).
+ * (so it can no longer be deleted).
  */
 export async function openSqliteReadConnection(filePath: string): Promise<Database> {
 	if (await requiresWalSidecarInitialization(filePath)) {

@@ -158,13 +158,12 @@ const BASH_PATTERN_APPROVAL_VALUES = new Set(["allow", "deny", "prompt"]);
  * containing a space, pipe, `&&`, redirect, or `$(...)`.
  *
  * The wrap reuses the same shell binary + args the local `bash-executor` would
- * pick via `settings.getShellConfig()` — Git Bash / `bash.exe` on Windows
- * (`cmd.exe /c` as the last-resort fallback when no bash exists on the host),
- * `$SHELL` (bash/zsh) with the `sh` fallback on POSIX — so the ACP path
- * preserves `bash` tool semantics (`$VAR`, `$(...)`, `source`, POSIX quoting,
- * `-l`) wherever a POSIX shell is available. The agent host's shell path is
- * used as a proxy for the client's, matching the near-universal ACP
- * deployment shape of an editor spawning omp as a co-hosted subprocess.
+ * pick via `settings.getShellConfig()` — `$SHELL` (bash/zsh) with the `sh`
+ * fallback — so the ACP path preserves `bash` tool semantics (`$VAR`,
+ * `$(...)`, `source`, POSIX quoting, `-l`) wherever a POSIX shell is
+ * available. The agent host's shell path is used as a proxy for the client's,
+ * matching the near-universal ACP deployment shape of an editor spawning omp
+ * as a co-hosted subprocess.
  */
 export function wrapShellLineForClientTerminal(
 	line: string,
@@ -707,7 +706,6 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			hasLaunch: this.#launchEnabled,
 			hasEval: isToolActive("eval", evalBackends.python || evalBackends.js),
 			hasShellBuiltins: !shellBuiltinsDisabled(this.session.settings),
-			isWindows: process.platform === "win32",
 		});
 	}
 	/** Schema variant for the live `async.enabled` and `launch.enabled` settings. */

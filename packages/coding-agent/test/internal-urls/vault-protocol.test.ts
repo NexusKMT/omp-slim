@@ -122,8 +122,6 @@ describe("VaultProtocolHandler", () => {
 				handler.locate(resourceUrl("vault://Work//absolute.md"), undefined, { create: true }),
 			).rejects.toThrow("Absolute paths are not allowed in vault:// URLs");
 
-			if (process.platform === "win32") return;
-
 			const outside = path.join(tempDir, "outside");
 			await fs.mkdir(outside, { recursive: true });
 			await Bun.write(path.join(outside, "secret.md"), "secret");

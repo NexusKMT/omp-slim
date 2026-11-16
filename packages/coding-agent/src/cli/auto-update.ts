@@ -19,10 +19,10 @@
  * notice.
  *
  * Running sessions keep their files: a binary install renames the running
- * `omp.exe` aside (Windows permits that for a mapped image, not an overwrite)
- * and leaves the backup to a later sweep, and the natives loader runs each
- * release's `.node` from a per-version copy under `~/.omp/natives/`, so bun and
- * npm can replace the `node_modules` copy an old session would otherwise lock.
+ * binary aside and leaves the backup to a later sweep, and the natives loader
+ * runs each release's `.node` from a per-version copy under `~/.omp/natives/`,
+ * so bun and npm can replace the `node_modules` copy an old session would
+ * otherwise lock.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -144,7 +144,7 @@ function parseState(text: string): AutoUpdateState | undefined {
 /** The status file; undefined when absent, or unreadable while the worker rewrites it. */
 async function readState(file: string): Promise<AutoUpdateState | undefined> {
 	try {
-		// node:fs rather than Bun.file: on Windows a rejected Bun.file read holds no loop handle (#13470).
+		// node:fs rather than Bun.file: a rejected Bun.file read holds no loop handle (#13470).
 		return parseState(await fs.readFile(file, "utf8"));
 	} catch (err) {
 		if (!isEnoent(err)) logger.debug("auto-update: status file unreadable", { file, error: String(err) });

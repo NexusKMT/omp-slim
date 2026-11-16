@@ -10,7 +10,6 @@ import { removeWithRetries } from "@oh-my-pi/pi-utils";
 import { GrepTool } from "../../src/tools/grep";
 
 const testSettings = Settings.isolated();
-const isWindows = process.platform === "win32";
 const filesystem = new InternalUrlFilesystem({ context: {}, tier: "read" });
 
 function createTestSession(cwd: string, overrides: Partial<ToolSession> = {}): ToolSession {
@@ -31,7 +30,7 @@ function getText(result: { content: Array<{ type: string; text?: string }> }): s
 		.join("\n");
 }
 
-describe.skipIf(isWindows)("resolveExplicitSearchPaths cross-tree degeneracy", () => {
+describe("resolveExplicitSearchPaths cross-tree degeneracy", () => {
 	it("returns per-path targets when commonBasePath collapses to filesystem root", async () => {
 		// Two real top-level directories that exist on every Unix host. Their only
 		// shared ancestor is `/`. A naive shared-base scan would walk the entire
@@ -49,7 +48,7 @@ describe.skipIf(isWindows)("resolveExplicitSearchPaths cross-tree degeneracy", (
 	});
 });
 
-describe.skipIf(isWindows)("search with omitted paths", () => {
+describe("search with omitted paths", () => {
 	let cwd: string;
 
 	beforeEach(async () => {
@@ -87,7 +86,7 @@ describe.skipIf(isWindows)("search with omitted paths", () => {
 	});
 });
 
-describe.skipIf(isWindows)("search across unrelated filesystem trees", () => {
+describe("search across unrelated filesystem trees", () => {
 	let dirA: string;
 	let dirB: string;
 	let cwd: string;
@@ -131,7 +130,7 @@ describe.skipIf(isWindows)("search across unrelated filesystem trees", () => {
 	});
 });
 
-describe.skipIf(isWindows)("resolveExplicitSearchPaths shared non-root ancestor", () => {
+describe("resolveExplicitSearchPaths shared non-root ancestor", () => {
 	let parent: string;
 	let repo: string;
 	let cousinFile: string;
@@ -176,9 +175,8 @@ describe.skipIf(isWindows)("resolveExplicitSearchPaths shared non-root ancestor"
 	it("collapses the walk when the requested ancestor is a non-canonical absolute path", async () => {
 		// Regression for #11584: resolveToCwd returned absolute inputs verbatim
 		// while findCommonBasePath canonicalizes via path.resolve, so the
-		// commonIsRequestedScope identity check never held for an absolute
-		// ancestor — on Windows for every absolute spelling (`/` vs `\`), on
-		// POSIX for a non-canonical one (trailing separator or embedded `..`).
+		// commonIsRequestedScope identity check never held for a non-canonical
+		// absolute spelling (trailing separator or embedded `..`).
 		// The false fan-out made ast_edit double-apply the rewrite to the nested
 		// file. A trailing separator and an embedded `..` are distinct shapes a
 		// partial fix could normalize inconsistently, so both must collapse.
@@ -200,29 +198,7 @@ describe.skipIf(isWindows)("resolveExplicitSearchPaths shared non-root ancestor"
 	});
 });
 
-describe.skipIf(!isWindows)("resolveExplicitSearchPaths Windows casing", () => {
-	it("collapses overlapping scopes whose drive letters differ in case", async () => {
-		const repo = await fs.mkdtemp(path.join(os.tmpdir(), "pi-search-case-"));
-		try {
-			await fs.mkdir(path.join(repo, "src"), { recursive: true });
-			await Bun.write(path.join(repo, "src", "a.ts"), "alpha\n");
-			const driveLetter = repo[0]!;
-			const differentlyCasedDrive =
-				driveLetter === driveLetter.toLowerCase() ? driveLetter.toUpperCase() : driveLetter.toLowerCase();
-			const absoluteAncestor = `${differentlyCasedDrive}${repo.slice(1)}`;
-
-			const resolved = await resolveExplicitSearchPaths([absoluteAncestor, "src/a.ts"], repo, filesystem);
-			expect(resolved).toBeDefined();
-			if (!resolved) throw new Error("expected resolveExplicitSearchPaths to resolve");
-			expect(resolved.targets).toBeUndefined();
-			expect(resolved.basePath.toLowerCase()).toBe(repo.toLowerCase());
-		} finally {
-			await removeWithRetries(repo);
-		}
-	});
-});
-
-describe.skipIf(isWindows)("search with explicit walker-pruned file targets", () => {
+describe("search with explicit walker-pruned file targets", () => {
 	let repo: string;
 
 	beforeEach(async () => {

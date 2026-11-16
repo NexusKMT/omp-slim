@@ -12,10 +12,7 @@ function setEnv(key: string, value: string): void {
 }
 
 function delayedValueCommand(value: string): string {
-	if (process.platform !== "win32") return `!sleep 0.15; printf %s ${JSON.stringify(value)}`;
-	return `!${JSON.stringify(process.execPath)} -e ${JSON.stringify(
-		`setTimeout(() => process.stdout.write(${JSON.stringify(value)}), 150)`,
-	)}`;
+	return `!sleep 0.15; printf %s ${JSON.stringify(value)}`;
 }
 
 afterEach(() => {

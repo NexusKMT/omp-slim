@@ -1076,7 +1076,7 @@ describe("InteractiveMode plan review rendering", () => {
 	});
 
 	it("opens the annotation external editor from the real plan review overlay", async () => {
-		// A Bun script instead of a `#!/bin/sh` file: Windows launches $EDITOR through cmd.exe, which cannot run sh scripts.
+		// A Bun script rather than a `#!/bin/sh` file, so the editor works without a shell.
 		const editorScriptPath = path.join(tempDir.path(), "annotation-editor.ts");
 		await Bun.write(
 			editorScriptPath,

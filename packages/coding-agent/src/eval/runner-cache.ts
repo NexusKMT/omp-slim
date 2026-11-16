@@ -75,7 +75,7 @@ function isReusableStagedPath(target: string): boolean {
 
 async function resolveStagingDir(dirName: string): Promise<string> {
 	const uid = process.getuid?.();
-	// No uid (Windows): the temp dir is already per-user, and O_NOFOLLOW is unavailable.
+	// No uid: the temp dir is already per-user, and O_NOFOLLOW is unavailable.
 	if (uid === undefined) {
 		const dir = path.join(os.tmpdir(), dirName);
 		await fs.promises.mkdir(dir, { recursive: true });

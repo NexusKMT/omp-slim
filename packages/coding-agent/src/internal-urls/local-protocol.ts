@@ -30,19 +30,10 @@ export interface LocalProtocolOptions {
 	getSessionId?: () => string | null;
 }
 
-const WINDOWS_LOCAL_ROOT_MAX_CHARS = 180;
-
 function safeSessionId(options: LocalProtocolOptions): string {
 	const raw = options.getSessionId?.() ?? "session";
 	const safe = raw.replace(/[^a-zA-Z0-9_.-]/g, "_");
 	return safe && safe !== "." && safe !== ".." ? safe : "session";
-}
-
-function shortLocalRoot(options: LocalProtocolOptions): string {
-	// Derive the short root from the stable session id, never the artifact path,
-	// so `SessionManager.moveTo()` and the resume-after-move flow keep finding
-	// the same `local://` directory the session wrote pre-move.
-	return path.join(os.tmpdir(), "omp-local", safeSessionId(options));
 }
 
 const LOCAL_TEXT_SNIFF_BYTES = 8 * 1024;
@@ -236,17 +227,10 @@ function extractRelativePath(url: InternalUrl): string {
 	return decoded;
 }
 
-/** Resolve the session-scoped local:// root, shortening long Windows artifact paths before writes hit MAX_PATH. */
-export function resolveLocalRoot(options: LocalProtocolOptions, platform: NodeJS.Platform = process.platform): string {
+/** Resolve the session-scoped local:// root. */
+export function resolveLocalRoot(options: LocalProtocolOptions): string {
 	const artifactsDir = options.getArtifactsDir?.();
-	if (artifactsDir) {
-		const candidate = path.resolve(artifactsDir, "local");
-		if (platform === "win32" && candidate.length >= WINDOWS_LOCAL_ROOT_MAX_CHARS) {
-			return shortLocalRoot(options);
-		}
-		return candidate;
-	}
-
+	if (artifactsDir) return path.resolve(artifactsDir, "local");
 	return path.join(os.tmpdir(), "omp-local", safeSessionId(options));
 }
 
@@ -335,13 +319,9 @@ async function copyLocalArtifactEntries(sourceDir: string, destinationDir: strin
 }
 
 /** Resolve a local:// URL to an on-disk path under the active session's local root. */
-export function resolveLocalUrlToPath(
-	input: string | InternalUrl,
-	options: LocalProtocolOptions,
-	platform: NodeJS.Platform = process.platform,
-): string {
+export function resolveLocalUrlToPath(input: string | InternalUrl, options: LocalProtocolOptions): string {
 	const url = typeof input === "string" ? parseInternalUrl(input) : input;
-	const localRoot = path.resolve(resolveLocalRoot(options, platform));
+	const localRoot = path.resolve(resolveLocalRoot(options));
 	const relativePath = extractRelativePath(url);
 
 	if (!relativePath) {

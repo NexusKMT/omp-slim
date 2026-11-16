@@ -49,9 +49,7 @@ describe("ConfigFile JSON → YAML migration", () => {
 
 		expect(result.status).toBe("ok");
 		expect(fs.existsSync(ymlPath)).toBe(true);
-		if (process.platform !== "win32") {
-			expect(fs.statSync(ymlPath).mode & 0o777).toBe(0o600);
-		}
+		expect(fs.statSync(ymlPath).mode & 0o777).toBe(0o600);
 		expect(fs.readFileSync(ymlPath, "utf-8")).toContain(API_KEY);
 	});
 

@@ -24,34 +24,22 @@ import {
 	parseKey as parseKeyNative,
 	parseKittySequence as parseKittySequenceNative,
 } from "@oh-my-pi/pi-natives";
-import { isInsideTerminalMultiplexer, isSshSession } from "./terminal-capabilities";
 
 // =============================================================================
-// Platform Detection
+// Legacy Backspace Matching
 // =============================================================================
-
-/** Whether the local process is running directly under Windows Terminal. */
-export function isWindowsTerminalSession(): boolean {
-	return Boolean(process.env.WT_SESSION) && !isSshSession();
-}
 
 /**
  * Match ambiguous legacy Backspace bytes against an expected modifier mask.
  *
- * Windows Terminal encodes Ctrl+Backspace as raw `0x08` (BS) and plain
- * Backspace as `0x7f` (DEL). Remote/container sessions lose terminal identity,
- * and multiplexers (tmux/screen/Zellij) inherit `WT_SESSION` while emitting
- * raw `0x08` for plain Backspace themselves, so the automatic heuristic is
- * limited to direct Windows Terminal sessions. `PI_TUI_RAW_BACKSPACE_IS_CTRL=1`
- * explicitly opts into the mapping everywhere.
+ * Legacy terminals encode Ctrl+Backspace as raw `0x08` (BS, the byte Ctrl+H
+ * produces) and plain Backspace as `0x7f` (DEL), so the expected modifier
+ * decides which of the two bytes counts.
  */
 export function matchesRawBackspace(data: string, expectedModifier: number): boolean {
 	if (data === "\x7f") return expectedModifier === 0;
 	if (data !== "\x08") return false;
-	const rawBackspaceIsCtrl =
-		process.env.PI_TUI_RAW_BACKSPACE_IS_CTRL === "1" ||
-		(isWindowsTerminalSession() && !isInsideTerminalMultiplexer(process.env));
-	return rawBackspaceIsCtrl ? expectedModifier === 4 : expectedModifier === 0;
+	return expectedModifier === 4;
 }
 
 // =============================================================================

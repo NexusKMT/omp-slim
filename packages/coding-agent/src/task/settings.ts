@@ -38,7 +38,7 @@ export const cfgIsolationBackend = register({
 	id: "isolation.backend",
 	protocolDefault: ["rpc", "acp"],
 	type: "enum",
-	values: ["auto", "apfs", "btrfs", "zfs", "reflink", "overlayfs", "projfs", "block-clone", "rcopy"] as const,
+	values: ["auto", "apfs", "btrfs", "zfs", "reflink", "overlayfs", "rcopy"] as const,
 	default: "auto",
 	ui: {
 		tab: "tasks",
@@ -60,12 +60,6 @@ export const cfgIsolationBackend = register({
 				value: "overlayfs",
 				label: "Overlayfs",
 				description: "Linux kernel overlay (or fuse-overlayfs fallback)",
-			},
-			{ value: "projfs", label: "ProjFS", description: "Windows Projected File System" },
-			{
-				value: "block-clone",
-				label: "Block clone",
-				description: "Windows FSCTL_DUPLICATE_EXTENTS_TO_FILE (NTFS/ReFS)",
 			},
 			{
 				value: "rcopy",

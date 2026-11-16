@@ -88,28 +88,25 @@ describe("omp setup python", () => {
 		projectDir = undefined;
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"probes the project-configured interpreter instead of the PATH interpreter",
-		async () => {
-			projectDir = TempDir.createSync("@omp-setup-python-");
-			const cwd = projectDir.path();
-			const interpreter = path.join(cwd, "configured-python");
-			await Bun.write(interpreter, "#!/bin/sh\nexit 0\n");
-			await fs.chmod(interpreter, 0o755);
-			await Bun.write(path.join(cwd, ".omp", "config.yml"), `python:\n  interpreter: ${interpreter}\n`);
+	it("probes the project-configured interpreter instead of the PATH interpreter", async () => {
+		projectDir = TempDir.createSync("@omp-setup-python-");
+		const cwd = projectDir.path();
+		const interpreter = path.join(cwd, "configured-python");
+		await Bun.write(interpreter, "#!/bin/sh\nexit 0\n");
+		await fs.chmod(interpreter, 0o755);
+		await Bun.write(path.join(cwd, ".omp", "config.yml"), `python:\n  interpreter: ${interpreter}\n`);
 
-			const result = await runSetupPython(cwd);
+		const result = await runSetupPython(cwd);
 
-			expect(result.error).toBe("");
-			expect(result.exitCode).toBe(0);
-			expect(JSON.parse(result.output)).toMatchObject({
-				available: true,
-				pythonPath: interpreter,
-				usingManagedEnv: false,
-			});
-		},
-	);
-	it.skipIf(process.platform === "win32")("prefers the project venv over the PATH interpreter", async () => {
+		expect(result.error).toBe("");
+		expect(result.exitCode).toBe(0);
+		expect(JSON.parse(result.output)).toMatchObject({
+			available: true,
+			pythonPath: interpreter,
+			usingManagedEnv: false,
+		});
+	});
+	it("prefers the project venv over the PATH interpreter", async () => {
 		projectDir = TempDir.createSync("@omp-setup-python-");
 		const cwd = projectDir.path();
 		const interpreter = path.join(cwd, ".venv", "bin", "python");
@@ -129,7 +126,7 @@ describe("omp setup python", () => {
 			restoreEnv();
 		}
 	});
-	it.skipIf(process.platform === "win32")("does not let the global probe bypass skip setup validation", async () => {
+	it("does not let the global probe bypass skip setup validation", async () => {
 		projectDir = TempDir.createSync("@omp-setup-python-");
 		const cwd = projectDir.path();
 		const interpreter = path.join(cwd, "configured-python");

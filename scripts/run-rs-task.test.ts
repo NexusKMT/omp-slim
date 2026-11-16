@@ -98,7 +98,7 @@ async function runCheckRs(fixture: Fixture, cwd: string, env: Record<string, str
 	return { exitCode, output, cargoRan: output.includes("cargo-stub clippy") };
 }
 
-describe.skipIf(process.platform === "win32")("run-rs-task.ts check:rs", () => {
+describe("run-rs-task.ts check:rs", () => {
 	// Failure mode: a contributor commits a Rust change, runs `bun check` on the
 	// clean tree, and gets a green gate that never looked at their Rust.
 	test(

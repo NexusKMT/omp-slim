@@ -63,12 +63,6 @@ export async function getRepoRoot(cwd: string): Promise<string> {
 	throw new Error("Git repository not found for isolated task execution.");
 }
 
-const GIT_NO_INDEX_NULL_PATH = process.platform === "win32" ? "NUL" : "/dev/null";
-
-export function getGitNoIndexNullPath(): string {
-	return GIT_NO_INDEX_NULL_PATH;
-}
-
 /** Real path of the git common dir owning `dir`, or `undefined` outside any repo. */
 async function realCommonDir(dir: string): Promise<string | undefined> {
 	const commonDir = vcs.gitInfo(dir)?.commonDir;
@@ -201,12 +195,11 @@ async function captureUntrackedPatch(
 	repo: VcsGitRepo = vcs.requireGit(repoRoot),
 ): Promise<string> {
 	if (untracked.length === 0) return "";
-	const nullPath = getGitNoIndexNullPath();
 	// Bound concurrent native encodes so large untracked sets do not hold every
 	// file and binary patch in memory at once.
 	const { results: untrackedDiffs } = await mapWithConcurrencyLimit([...untracked], 8, async entry => {
 		try {
-			return await repo.diffNoIndex(nullPath, entry, true);
+			return await repo.diffNoIndex("/dev/null", entry, true);
 		} catch (error) {
 			if (vcs.isVcsError(error)) return "";
 			throw error;
@@ -548,10 +541,6 @@ export function parseIsolationBackend(backend: IsolationBackendSetting): IsoBack
 			return IsoBackendKind.LinuxReflink;
 		case "overlayfs":
 			return IsoBackendKind.Overlayfs;
-		case "projfs":
-			return IsoBackendKind.Projfs;
-		case "block-clone":
-			return IsoBackendKind.WindowsBlockClone;
 		case "rcopy":
 			return IsoBackendKind.Rcopy;
 	}
@@ -570,10 +559,6 @@ export function formatIsolationBackend(backend: IsoBackendKind): Exclude<Isolati
 			return "reflink";
 		case IsoBackendKind.Overlayfs:
 			return "overlayfs";
-		case IsoBackendKind.Projfs:
-			return "projfs";
-		case IsoBackendKind.WindowsBlockClone:
-			return "block-clone";
 		case IsoBackendKind.Rcopy:
 			return "rcopy";
 	}

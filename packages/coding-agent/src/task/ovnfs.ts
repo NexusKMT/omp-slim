@@ -138,10 +138,9 @@ export async function releaseOvnfsCheckout(dir: string): Promise<boolean> {
 	return true;
 }
 
-/** Whether paths `a` and `b` name the same folder (case-insensitively on Windows). */
+/** Whether paths `a` and `b` name the same folder. */
 function sameFolder(a: string, b: string): boolean {
-	const [x, y] = [path.resolve(a), path.resolve(b)];
-	return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+	return path.resolve(a) === path.resolve(b);
 }
 
 /** An open ovnfs checkout and the isolation dir recording it. */

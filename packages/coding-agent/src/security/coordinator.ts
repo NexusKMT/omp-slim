@@ -337,7 +337,7 @@ async function prepareSecurityExecutionTarget(
 	if (!headRevision || !baseRevision) throw new Error("ref_diff security plan is missing resolved revisions");
 	const targetsRoot = path.join(store.projectDirectory, "targets");
 	await fs.mkdir(targetsRoot, { recursive: true, mode: 0o700 });
-	if (process.platform !== "win32") await fs.chmod(targetsRoot, 0o700);
+	await fs.chmod(targetsRoot, 0o700);
 	const cwd = path.join(targetsRoot, scanId);
 	const repo = vcs.requireGit(plan.repositoryRoot);
 	let added = false;
@@ -426,7 +426,7 @@ export class SecurityCoordinator {
 		const store = await this.#openStore(this.#host.cwd);
 		const workRoot = path.join(store.projectDirectory, "work");
 		await fs.mkdir(workRoot, { recursive: true, mode: 0o700 });
-		if (process.platform !== "win32") await fs.chmod(workRoot, 0o700);
+		await fs.chmod(workRoot, 0o700);
 		const modelRef: SecurityModelRef = { provider: model.provider, modelId: model.id };
 		if (input.thinkingLevel !== undefined) modelRef.thinkingLevel = input.thinkingLevel;
 		const plan = await createSecurityScanPlan(

@@ -15,7 +15,7 @@ if (!parentPort) throw new Error("parent-watchdog-worker: missing parentPort");
 
 function die(): never {
 	// SIGKILL mirrors the parent's hard-kill: skip every JS/native finalizer
-	// (onnxruntime's crashes Bun on Windows, issue #1606).
+	// (onnxruntime's NAPI finalizer crashes Bun, issue #1606).
 	process.kill(process.pid, "SIGKILL");
 	throw new Error("parent-watchdog-worker: SIGKILL did not terminate the process");
 }

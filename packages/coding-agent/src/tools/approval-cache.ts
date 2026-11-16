@@ -154,11 +154,10 @@ function withTrailingSeparator(dir: string): string {
 
 /**
  * Cache key for a filesystem target: absolute, symlinks resolved (through the deepest existing
- * ancestor for a path that does not exist yet), case-folded on Windows.
+ * ancestor for a path that does not exist yet).
  */
 export function approvalCacheKeyForPath(target: string): string {
-	const resolved = resolveEquivalentPath(target, { throughMissing: true });
-	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+	return resolveEquivalentPath(target, { throughMissing: true });
 }
 
 /** Cache key for a directory grant: {@link approvalCacheKeyForPath} plus a trailing separator. */
@@ -166,10 +165,9 @@ export function approvalDirectoryKey(directory: string): string {
 	return withTrailingSeparator(approvalCacheKeyForPath(directory));
 }
 
-/** Path-resolved agent directory, case-folded on Windows: one store per directory. */
+/** Path-resolved agent directory: one store per directory. */
 function agentDirKey(agentDir: string): string {
-	const resolved = path.resolve(agentDir);
-	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+	return path.resolve(agentDir);
 }
 
 const cachesByDir = new Map<string, ApprovalCache>();

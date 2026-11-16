@@ -1,4 +1,3 @@
-import * as fs from "node:fs";
 import type { AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { formatBytes, materializeString, sanitizeText } from "@oh-my-pi/pi-utils";
 import { sanitizeWithOptionalSixelPassthrough } from "../render/sixel";
@@ -1423,10 +1422,6 @@ export class OutputSink {
 	async #createFileSink(): Promise<void> {
 		if (!this.#artifactPath || this.#fileReady || this.#artifactError) return;
 		try {
-			// Bun's Windows FileSink defers the open: an unopenable target (e.g. a
-			// directory) only fails on the first write, misreported as a write
-			// failure. Probe the open eagerly so it stays classified — and terminal.
-			if (process.platform === "win32") fs.closeSync(fs.openSync(this.#artifactPath, "w"));
 			const sink = Bun.file(this.#artifactPath).writer();
 			this.#file = { path: this.#artifactPath, artifactId: this.#artifactId, sink };
 			this.#fileReady = true;

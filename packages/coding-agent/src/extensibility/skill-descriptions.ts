@@ -278,7 +278,7 @@ export class SkillDescriptionStore {
 			db.run("PRAGMA journal_mode=WAL");
 			db.run("PRAGMA synchronous=NORMAL");
 			db.run("CREATE TABLE IF NOT EXISTS skill_descriptions (key TEXT PRIMARY KEY, description TEXT NOT NULL)");
-			if (process.platform !== "win32") fs.chmodSync(dbPath, 0o600);
+			fs.chmodSync(dbPath, 0o600);
 			return new SkillDescriptionStore(dbPath, db);
 		} catch (error) {
 			db.close();
@@ -333,7 +333,7 @@ export class SkillDescriptionStore {
 
 	#closeDatabase(): void {
 		this.#closed = true;
-		// Unfinalized statements keep the file handle open on Windows.
+		// Unfinalized statements keep the file handle open (and thus the file undeletable).
 		this.#select.finalize();
 		this.#upsert.finalize();
 		this.#db.close();

@@ -222,9 +222,6 @@ class _RunnerState:
         self.executing_tasks: dict[str, asyncio.Task | None] = {}
         self.interrupt_ids: set[str] = set()
         self.interrupted_tasks: set[asyncio.Task] = set()
-        # POSIX reads interrupt requests while cells run, so a SIGINT acts only
-        # on the cells they name. Windows runs one cell at a time.
-        self.targeted_interrupts: bool = False
         # Best-effort attribution target for captured fd-1 bytes (child
         # processes inheriting stdout). With overlapping requests the most
         # recently started one wins — strictly better than dropping the bytes.
@@ -1395,16 +1392,6 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
     # builds run backends and compilers), so killing `proc` alone is not enough.
     # The tree stays in the kernel's process group so kernel shutdown still
     # reaches it.
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        proc.kill()
-        proc.wait()
-        return
     # Stop each process before listing its children, so nothing can spawn
     # behind the walk; then kill every stopped process.
     stopped: list[int] = []
@@ -1683,40 +1670,12 @@ def _magic_run(args: str) -> None:
         _STATE.user_ns[name] = value
 
 
-def _resolve_bash() -> str:
-    if os.name != "nt":
-        return "/bin/bash"
-    # Prefer Git Bash over WSL's System32 bash.exe, which runs inside a
-    # separate Linux environment and does not share the Windows filesystem
-    # layout or PATH.
-    for env_var, suffix in (
-        ("ProgramFiles", r"Git\bin\bash.exe"),
-        ("ProgramFiles(x86)", r"Git\bin\bash.exe"),
-        ("LOCALAPPDATA", r"Programs\Git\bin\bash.exe"),
-    ):
-        root = os.environ.get(env_var)
-        if root:
-            candidate = os.path.join(root, suffix)
-            if os.path.isfile(candidate):
-                return candidate
-    found = shutil.which("bash")
-    if found and "system32" not in found.lower():
-        return found
-    # WSL's System32 bash.exe runs in a separate Linux environment, so
-    # silently falling back to it would execute the cell somewhere the user
-    # did not intend; fail loudly instead.
-    raise RuntimeError(
-        "%%bash requires a POSIX bash, but none was found. "
-        "Install Git for Windows or add a non-WSL bash to PATH."
-    )
-
-
 @cell_magic("bash")
 def _magic_cell_bash(args: str, body: str) -> None:
     # Like IPython's %%bash the cell has no value: a returned status would be
     # displayed as the cell's result, a stray `0` after every run. A failure
     # is still reported, since a command can fail without printing anything.
-    code = _run_shell_body(body, shell_arg=_resolve_bash())
+    code = _run_shell_body(body, shell_arg="/bin/bash")
     if code != 0:
         sys.stderr.write(f"%%bash: exit status {code}\n")
 
@@ -1761,8 +1720,8 @@ def _magic_cell_writefile(args: str, body: str) -> str:
 def _run_shell_body(body: str, *, shell_arg: str) -> int:
     # stdin=DEVNULL: children must never read the host's NDJSON control
     # channel (a reading child would steal frames, and inheriting the pipe
-    # deadlocks nested interpreters on Windows). fd 0 already points at
-    # os.devnull; this stays explicit for when that redirect failed.
+    # deadlocks nested interpreters). fd 0 already points at os.devnull; this
+    # stays explicit for when that redirect failed.
     proc = subprocess.Popen(
         [shell_arg, "-c", body],
         stdin=subprocess.DEVNULL,
@@ -2627,14 +2586,14 @@ def _install_idle_sigint() -> None:
     try:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
     except (OSError, ValueError):
-        # Some platforms (Windows in non-console mode) reject this; fine.
+        # A non-main thread cannot install a handler; fine.
         pass
 
 
 def _exec_sigint_handler(signum: int, frame: Any) -> None:
-    """Raise into the sync cell the host named (on Windows, the running cell);
-    cancel named cells parked on an ``await`` instead, since raising in the idle
-    event loop would unwind it and end the kernel."""
+    """Raise into the sync cell the host named; cancel named cells parked on an
+    ``await`` instead, since raising in the idle event loop would unwind it and
+    end the kernel."""
     loop = _STATE.loop
     if loop is None:
         raise KeyboardInterrupt
@@ -2644,7 +2603,7 @@ def _exec_sigint_handler(signum: int, frame: Any) -> None:
         if current is not None
         else None
     )
-    if running is not None and (not _STATE.targeted_interrupts or running in _STATE.interrupt_ids):
+    if running is not None and running in _STATE.interrupt_ids:
         _STATE.interrupt_ids.discard(running)
         raise KeyboardInterrupt
     _cancel_parked_cells()
@@ -2654,7 +2613,7 @@ def _cancel_parked_cells() -> None:
     for rid, task in list(_STATE.executing_tasks.items()):
         if task is None:
             continue
-        if _STATE.targeted_interrupts and rid not in _STATE.interrupt_ids:
+        if rid not in _STATE.interrupt_ids:
             continue
         _STATE.interrupt_ids.discard(rid)
         _STATE.interrupted_tasks.add(task)
@@ -2736,11 +2695,8 @@ def _start_parent_watchdog() -> None:
     SIGKILL mid-execution (or any way that skips graceful shutdown) the
     runner would otherwise outlive its parent and keep holding kernel
     state. Poll ``os.getppid()`` instead and ``os._exit`` the moment we get
-    reparented \u2014 covers POSIX hosts. Windows has no reliable ppid
-    equivalent; there we still bail out on the next stdin read.
+    reparented.
     """
-    if os.name != "posix":
-        return
     original_ppid = os.getppid()
     if original_ppid <= 1:
         return
@@ -2982,14 +2938,7 @@ async def _handle_request_async(req: dict) -> None:
         finally:
             _STATE.executing_tasks.pop(rid, None)
             _STATE.interrupt_ids.discard(rid)
-            if task in _STATE.interrupted_tasks:
-                _STATE.interrupted_tasks.discard(task)
-                # On Windows cells run on the long-lived serve task; clear the
-                # cancel requests it absorbed (Python 3.11+).
-                uncancel = getattr(task, "uncancel", None)
-                if uncancel is not None:
-                    while uncancel():
-                        pass
+            _STATE.interrupted_tasks.discard(task)
             _end_exec_sigint()
             try:
                 _flush_matplotlib_figures()
@@ -3107,8 +3056,8 @@ def _parse_request(line: str) -> dict | None:
 def _read_stdin(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue, stdin) -> None:
     """Feed control-channel requests to the event loop from a reader thread.
 
-    POSIX only -- see ``_serve_windows`` for why Windows cannot run a
-    perpetually blocked stdin reader.
+    The thread stays blocked in a control-channel read for the kernel's whole
+    life; requests are handed to the loop thread-safely.
     """
     for raw_line in stdin:
         line = raw_line.strip()
@@ -3132,19 +3081,17 @@ def _read_stdin(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue, stdin) ->
     loop.call_soon_threadsafe(queue.put_nowait, {"type": "exit"})
 
 
-async def _serve_posix(loop: asyncio.AbstractEventLoop, stdin) -> None:
+async def _serve(loop: asyncio.AbstractEventLoop, stdin) -> None:
     """Dispatch requests concurrently, one asyncio task per request.
 
     A background thread reads stdin and enqueues requests so a cell parked on
     a top-level ``await`` (an ``await agent(...)`` bridge call, say) does not
     block sibling requests: auto-backgrounded cells, user Python shortcuts, and
     kernel-defined tool calls from subagents can all be in flight on one kernel
-    at once. The reader thread stays blocked in a
-    control-channel read for its whole life, which is safe on POSIX but wedges
-    native-extension imports on Windows (see ``_serve_windows``).
+    at once. The reader thread stays blocked in a control-channel read for its
+    whole life.
     """
     queue: asyncio.Queue = asyncio.Queue()
-    _STATE.targeted_interrupts = True
     reader = threading.Thread(
         target=_read_stdin,
         args=(loop, queue, stdin),
@@ -3189,56 +3136,6 @@ async def _serve_posix(loop: asyncio.AbstractEventLoop, stdin) -> None:
         _STATE.interrupt_ids.clear()
 
 
-async def _serve_windows(loop: asyncio.AbstractEventLoop, stdin) -> None:
-    """Dispatch requests serially, serving tool requests between cells.
-
-    A thread perpetually parked in a blocking control-channel read deadlocks
-    native-extension imports (NumPy in particular) under a pipe-backed
-    subprocess on Windows: the native DLL load and the concurrent stdin read
-    wedge each other (numpy#24290, issue #7985). Reading each line via
-    ``run_in_executor`` confines the stdin read to the gap *between* requests
-    -- once a line arrives the reader returns, so no thread is reading stdin
-    while a cell (and its imports) run. The trade-off is that requests are
-    handled one at a time instead of interleaved; on Windows that is strictly
-    better than the alternative, since any concurrent reader deadlocks the
-    import outright.
-    """
-    while True:
-        raw_line = await loop.run_in_executor(None, stdin.readline)
-        if not raw_line:
-            break  # EOF: the host closed the control channel.
-        line = raw_line.strip()
-        if not line:
-            continue
-        req = _parse_request(line)
-        if req is None:
-            continue
-        if req.get("type") == "exit":
-            break
-        if req.get("type") == "shadow_snapshot":
-            _emit_shadow_snapshot(req)
-            continue
-        if req.get("type") == "shadow_plan":
-            _emit_shadow_plan(req)
-            continue
-        if req.get("type") == "tool":
-            _start_tool_request(req)
-            continue
-        if req.get("type") == "tool_cancel":
-            _cancel_tool_request(str(req.get("id")))
-            continue
-        if req.get("type") == "interrupt":
-            continue  # read only between cells, after the cell it named settled
-        if not _admit_shadow_run(req):
-            continue
-        try:
-            await _handle_request_async(req)
-        except asyncio.CancelledError:
-            raise  # task cancellation must propagate; never swallow it and spin
-        except BaseException as exc:  # noqa: BLE001 - one bad request must not wedge the loop
-            _emit_error(str(req.get("id", "")), exc)
-
-
 async def _main_async() -> None:
     sys.stdout = _StreamProxy("stdout")
     sys.stderr = _StreamProxy("stderr")
@@ -3253,10 +3150,7 @@ async def _main_async() -> None:
     loop = asyncio.get_running_loop()
     _STATE.loop = loop
 
-    if os.name == "nt":
-        await _serve_windows(loop, stdin)
-    else:
-        await _serve_posix(loop, stdin)
+    await _serve(loop, stdin)
 
 
 def main() -> None:

@@ -119,15 +119,11 @@ describe("GrepTool external URL selectors", () => {
 		expect(getResultText(raw)).toBe(getResultText(bare));
 	});
 
-	// `:` is not allowed in Windows file names.
-	it.skipIf(process.platform === "win32")(
-		"searches a literal file named like a host with a selector rather than fetching the host",
-		async () => {
-			await Bun.write(path.join(tmpDir, "www.example.com:conflicts"), "local needle\n");
-			const tool = new GrepTool(createSession());
+	it("searches a literal file named like a host with a selector rather than fetching the host", async () => {
+		await Bun.write(path.join(tmpDir, "www.example.com:conflicts"), "local needle\n");
+		const tool = new GrepTool(createSession());
 
-			const result = await tool.execute("literal", { pattern: "needle", path: "www.example.com:conflicts" });
-			expect(getResultText(result)).toContain("local needle");
-		},
-	);
+		const result = await tool.execute("literal", { pattern: "needle", path: "www.example.com:conflicts" });
+		expect(getResultText(result)).toContain("local needle");
+	});
 });

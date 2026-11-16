@@ -25,8 +25,8 @@ test("FileLock binds release to one native owner", async () => {
 		third.release();
 		expect(successor.acquired).toBe(true);
 
-		const usesInMemoryName = process.platform === "linux" || process.platform === "win32";
-		expect(await Bun.file(lockPath).exists()).toBe(!usesInMemoryName);
+		// Linux names the lock in a private namespace, so no file shows up on disk.
+		expect(await Bun.file(lockPath).exists()).toBe(process.platform !== "linux");
 
 		successor.release();
 		const finalOwner = FileLock.tryAcquire(lockPath);

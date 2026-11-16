@@ -14,7 +14,6 @@ import {
 	isCompiledBinary,
 	isRecord,
 	logger,
-	stripWindowsExtendedLengthPathPrefix,
 } from "@oh-my-pi/pi-utils";
 import { registerPluginCacheInvalidator } from "../../discovery/helpers";
 
@@ -628,7 +627,7 @@ export function __isExtensionParseCacheAvailableForTests(): boolean {
  * Test seam: close the process-wide extension parse cache connection so the
  * next analysis reopens it at the then-current cache path. Tests that
  * relocate the home/cache root must call this before deleting that root:
- * Windows refuses to remove a directory holding an open SQLite db/WAL set.
+ * a directory holding an open SQLite db/WAL set cannot be removed.
  */
 export function __closeExtensionParseCacheForTests(): void {
 	extensionParseCacheDb?.close();
@@ -1124,7 +1123,7 @@ function toImportSpecifier(resolvedPath: string): string {
 	if (isBundledVirtualSpecifier(resolvedPath)) {
 		return resolvedPath;
 	}
-	return url.pathToFileURL(stripWindowsExtendedLengthPathPrefix(resolvedPath)).href;
+	return url.pathToFileURL(resolvedPath).href;
 }
 
 /**
@@ -1209,7 +1208,7 @@ export async function __rewriteLegacyExtensionSourceForTests(
 /**
  * Build the import specifier for a graph-resolved absolute path. Emits a bare
  * filesystem path with an optional `?mtime=<tag>` (Bun keys query strings for
- * bare-path specifiers on POSIX and Windows alike), so same-process extension
+ * bare-path specifiers on either separator style), so same-process extension
  * reloads pick up edits to package-alias (`#foo/*`) and extension-local bare
  * deps. Untagged paths keep the `file://` form; bundled virtual specifiers
  * pass through unchanged. Bun ignores queries on `file://` URLs, so a tagged
@@ -1220,9 +1219,9 @@ function toGraphImportSpecifier(resolvedPath: string, mtimeTag: string | null): 
 		return resolvedPath;
 	}
 	if (!mtimeTag) {
-		return url.pathToFileURL(stripWindowsExtendedLengthPathPrefix(resolvedPath)).href;
+		return url.pathToFileURL(resolvedPath).href;
 	}
-	return `${stripWindowsExtendedLengthPathPrefix(resolvedPath)}?mtime=${mtimeTag}`;
+	return `${resolvedPath}?mtime=${mtimeTag}`;
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -2001,7 +2000,7 @@ async function collectExtensionSpecifierReplacements(
 			}
 		}
 		if (!resolved) continue;
-		const replacement = stripWindowsExtendedLengthPathPrefix(resolved).replaceAll("\\", "/");
+		const replacement = resolved.replaceAll("\\", "/");
 		resolvedSpecifierTargets.set(`${reference.kind}\0${reference.specifier}`, replacement);
 		replacements.push({ ...reference, replacement });
 	}
@@ -2743,11 +2742,11 @@ export async function loadLegacyPiModule(resolvedPath: string, options: { reload
 	try {
 		// Dynamic import is required: legacy extension entry paths are user/plugin supplied at runtime.
 		// Use the raw filesystem path so Bun keys the `?mtime` suffix as part of
-		// the module identity (on Windows too); Bun ignores query strings on
+		// the module identity; Bun ignores query strings on
 		// `file://` specifiers, which would serve stale edited source.
 		const entrySpecifier = isBundledVirtualSpecifier(entryRealPath)
 			? toImportSpecifier(entryRealPath)
-			: stripWindowsExtendedLengthPathPrefix(entryRealPath);
+			: entryRealPath;
 		if (options.reload === false) return await import(entrySpecifier);
 		return await import(`${entrySpecifier}?mtime=${nextLegacyPiLoadTag()}`);
 	} finally {

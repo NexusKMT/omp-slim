@@ -57,12 +57,12 @@ describe("InteractiveMode restart", () => {
 		process.argv = [originalArgv[0], originalArgv[1], ...argv];
 		// Stop only at the process replacement boundary; teardown and argv production run for real.
 		const exec = vi.spyOn(natives, "execReplace").mockImplementation(() => undefined as never);
-		const spawn = vi.spyOn(Bun, "spawn").mockReturnValue({ exited: Promise.resolve(0) } as never);
+		vi.spyOn(Bun, "spawn").mockReturnValue({ exited: Promise.resolve(0) } as never);
 		vi.spyOn(postmortem, "cleanup").mockResolvedValue();
 		vi.spyOn(postmortem, "drainStdout").mockResolvedValue();
 		vi.spyOn(postmortem, "quit").mockResolvedValue();
 		await mode.restart();
-		const command = process.platform === "win32" ? spawn.mock.calls[0]?.[0] : exec.mock.calls[0]?.[0];
+		const command = exec.mock.calls[0]?.[0];
 		if (!Array.isArray(command)) throw new Error("expected replacement command");
 		return command;
 	}

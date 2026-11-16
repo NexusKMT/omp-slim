@@ -418,8 +418,8 @@ export class HookEditorComponent extends OverlayPanel implements Focusable {
 	 * Prompt-style: raw Enter submits; Editor owns newline-producing sequences.
 	 * The follow-up chord (`app.message.followUp` → Ctrl+Q / Ctrl+Enter) also
 	 * submits, so muscle memory from the main editor / hook-style surface works
-	 * here and Windows Terminal — which can't deliver a distinct Ctrl+Enter
-	 * event (#1903) — still has a working chord via Ctrl+Q (#3353).
+	 * here and a terminal that can't deliver a distinct Ctrl+Enter event (#1903)
+	 * still has a working chord via Ctrl+Q (#3353).
 	 */
 	#handlePromptStyleInput(keyData: string): void {
 		// Submit on the follow-up chord first so it wins over Editor's own
@@ -454,8 +454,8 @@ export class HookEditorComponent extends OverlayPanel implements Focusable {
 	/** Hook-style: Enter=newline, app.message.followUp chord (Ctrl+Q/Ctrl+Enter) submits. */
 	#handleHookStyleInput(keyData: string): void {
 		// Submit on the follow-up chord. Uses the shared keybinding so Ctrl+Q works
-		// on Windows Terminal (#1903) and any user remap of `app.message.followUp`
-		// applies here too.
+		// where Ctrl+Enter is undeliverable (#1903) and any user remap of
+		// `app.message.followUp` applies here too.
 		if (matchesAppFollowUp(keyData)) {
 			this.#submitCurrentText();
 			return;

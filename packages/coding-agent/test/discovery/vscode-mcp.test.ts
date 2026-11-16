@@ -51,20 +51,17 @@ describe("VS Code MCP discovery", () => {
 		expect(result.warnings[0]).toContain(`Failed to read ${filePath}`);
 	});
 
-	// Root reads through mode 000, and Windows ignores it.
-	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-		"an unreadable .vscode/mcp.json still warns",
-		async () => {
-			const filePath = path.join(tempCwd, ".vscode", "mcp.json");
-			await fs.mkdir(path.dirname(filePath), { recursive: true });
-			await fs.writeFile(filePath, JSON.stringify({ mcp: { servers: {} } }));
-			await fs.chmod(filePath, 0o000);
+	// Root reads through mode 000.
+	test.skipIf(process.getuid?.() === 0)("an unreadable .vscode/mcp.json still warns", async () => {
+		const filePath = path.join(tempCwd, ".vscode", "mcp.json");
+		await fs.mkdir(path.dirname(filePath), { recursive: true });
+		await fs.writeFile(filePath, JSON.stringify({ mcp: { servers: {} } }));
+		await fs.chmod(filePath, 0o000);
 
-			const result = await loadVscodeMcp(tempCwd);
+		const result = await loadVscodeMcp(tempCwd);
 
-			expect(result.items).toEqual([]);
-			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0]).toContain(`Failed to read ${filePath}`);
-		},
-	);
+		expect(result.items).toEqual([]);
+		expect(result.warnings).toHaveLength(1);
+		expect(result.warnings[0]).toContain(`Failed to read ${filePath}`);
+	});
 });

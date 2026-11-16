@@ -11,10 +11,7 @@
  * libc-FFI pattern in `ttyid.ts` / `stderr-guard.ts`.
  *
  * macOS has no clean userspace equivalent for the shebang-run path, so there
- * we only set `process.title`. Windows derives the name from the exec'd file,
- * and there Bun's `process.title` setter is libuv's `SetConsoleTitleW`: every
- * omp child attached to a pane's console (workers, servers)
- * would overwrite that pane's tab title, so Windows skips it entirely.
+ * we only set `process.title`.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import * as os from "node:os";
@@ -23,15 +20,13 @@ import * as os from "node:os";
 const PR_SET_NAME = 15;
 
 /**
- * Set the JS `process.title` (except on Windows, see above) and — on Linux —
- * the kernel `comm` name.
+ * Set the JS `process.title` and — on Linux — the kernel `comm` name.
  *
  * Never throws: `bun:ffi` unavailability or a failed syscall degrades silently
  * to the `process.title`-only behavior, so it is safe to call at startup.
  */
 export function setProcessName(name: string): void {
 	const platform = os.platform();
-	if (platform === "win32") return;
 	try {
 		process.title = name;
 	} catch {}

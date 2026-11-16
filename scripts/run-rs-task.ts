@@ -268,9 +268,8 @@ async function runCommand(command: readonly string[]): Promise<number> {
 		// via PATH; ensure the active toolchain bin dir wins over Homebrew's
 		// rustup-init shadow on macOS runners.
 		const toolchainBin = path.dirname(cargoBinary);
-		const pathSep = process.platform === "win32" ? ";" : ":";
-		const currentPath = env.PATH ?? env.Path ?? "";
-		env.PATH = currentPath === "" ? toolchainBin : `${toolchainBin}${pathSep}${currentPath}`;
+		const currentPath = env.PATH ?? "";
+		env.PATH = currentPath === "" ? toolchainBin : `${toolchainBin}:${currentPath}`;
 	}
 	const proc = Bun.spawn(argv, {
 		cwd: repoRoot,

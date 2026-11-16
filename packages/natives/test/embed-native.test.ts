@@ -15,10 +15,10 @@ describe("native addon embedding", () => {
 		it(`rejects ${label}`, async () => {
 			const nativeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-natives-embed-"));
 			try {
-				await Bun.write(path.join(nativeDir, "pi_natives.win32-arm64.node"), contents);
+				await Bun.write(path.join(nativeDir, "pi_natives.darwin-arm64.node"), contents);
 
 				await expect(
-					embeddedAddonFiles({ platform: "win32", arch: "arm64", nativeDir, version: "18.1.1" }),
+					embeddedAddonFiles({ platform: "darwin", arch: "arm64", nativeDir, version: "18.1.1" }),
 				).rejects.toThrow("does not carry the @oh-my-pi/pi-natives@18.1.1 version stamp");
 			} finally {
 				await fs.rm(nativeDir, { recursive: true, force: true });
@@ -56,9 +56,9 @@ describe("native addon embedding", () => {
 		// A pre-stamp addon whose legacy sentinel matches the version (the loader accepts it).
 		const addon = "binary__piNativesV18_1_1\0";
 		try {
-			await Bun.write(path.join(nativeDir, "pi_natives.win32-arm64.node"), addon);
+			await Bun.write(path.join(nativeDir, "pi_natives.darwin-arm64.node"), addon);
 			await fs.mkdir(cacheDir);
-			const files = await embeddedAddonFiles({ platform: "win32", arch: "arm64", nativeDir, version: "18.1.1" });
+			const files = await embeddedAddonFiles({ platform: "darwin", arch: "arm64", nativeDir, version: "18.1.1" });
 			for (const filePath in files) {
 				await Bun.write(path.join(outDir, path.basename(filePath)), files[filePath]);
 			}
@@ -67,20 +67,20 @@ describe("native addon embedding", () => {
 			const { embeddedAddon }: { embeddedAddon: EmbeddedAddon } = await import(
 				path.join(outDir, "embedded-addon.js")
 			);
-			expect(embeddedAddon.platformTag).toBe("win32-arm64");
+			expect(embeddedAddon.platformTag).toBe("darwin-arm64");
 			expect(embeddedAddon.version).toBe("18.1.1");
 			expect(embeddedAddon.files).toEqual([
 				{
 					variant: "default",
-					filename: "pi_natives.win32-arm64.node",
+					filename: "pi_natives.darwin-arm64.node",
 					size: addon.length,
-					zstdPath: path.join(await fs.realpath(outDir), "pi_natives.win32-arm64.node.zst"),
+					zstdPath: path.join(await fs.realpath(outDir), "pi_natives.darwin-arm64.node.zst"),
 				},
 			]);
 			expect(extractEmbeddedAddons({ files: embeddedAddon.files, targetDir: cacheDir })).toEqual([
-				path.join(cacheDir, "pi_natives.win32-arm64.node"),
+				path.join(cacheDir, "pi_natives.darwin-arm64.node"),
 			]);
-			expect(await Bun.file(path.join(cacheDir, "pi_natives.win32-arm64.node")).text()).toBe(addon);
+			expect(await Bun.file(path.join(cacheDir, "pi_natives.darwin-arm64.node")).text()).toBe(addon);
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
 		}
@@ -112,7 +112,7 @@ describe("native addon embedding", () => {
 				entry,
 				`import { loadNative } from ${JSON.stringify(path.join(manifestDir, "loader-state.js"))};\ntry { loadNative(); } catch {}\n`,
 			);
-			const binary = path.join(root, process.platform === "win32" ? "probe.exe" : "probe");
+			const binary = path.join(root, "probe");
 			const build = await Bun.build({
 				entrypoints: [entry],
 				root: path.resolve(import.meta.dir, "../../.."),

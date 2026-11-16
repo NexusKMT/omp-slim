@@ -123,7 +123,6 @@ export async function runForgeCli(
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",
-			windowsHide: true,
 			signal: combinedSignal,
 		});
 		if (!(child.stdout instanceof ReadableStream) || !(child.stderr instanceof ReadableStream)) {

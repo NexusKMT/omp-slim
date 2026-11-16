@@ -59,16 +59,13 @@ async function report(command: string, verb: "start" | "status", signal?: AbortS
 	timer?.unref?.();
 	try {
 		controller.signal.throwIfAborted();
-		const detached = verb === "status" && process.platform !== "win32";
+		const detached = verb === "status";
 		let child: Bun.Subprocess<"ignore", "pipe", "pipe">;
 		try {
-			// windowsHide: a console-less omp host (background, IDE) would otherwise
-			// flash a fresh conhost window for every `status` recheck.
 			child = Bun.spawn([command, "--json", verb], {
 				stdin: "ignore",
 				stdout: "pipe",
 				stderr: "pipe",
-				windowsHide: true,
 				detached,
 			});
 		} catch (err) {

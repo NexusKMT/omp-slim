@@ -6,7 +6,6 @@ import { __resetDirsFromEnvForTests, getAgentDir, getNativesDir } from "@oh-my-p
 
 const ENV_KEYS = [
 	"HOME",
-	"USERPROFILE",
 	"OMP_PROFILE",
 	"PI_PROFILE",
 	"PI_CONFIG_DIR",
@@ -33,7 +32,6 @@ describe("native directory override", () => {
 		home = path.join(tempRoot, "home");
 		await fs.mkdir(home);
 		process.env.HOME = home;
-		process.env.USERPROFILE = home;
 		vi.spyOn(os, "homedir").mockReturnValue(home);
 		__resetDirsFromEnvForTests();
 	});

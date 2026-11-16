@@ -130,9 +130,8 @@ async function readBunLockResolution(name: string): Promise<string | undefined> 
 /**
  * Pre-install state of `node_modules/<name>`, restored by rollback. A linked
  * package (`omp plugin link`) is kept as its link target: copying the link
- * would recreate an ordinary symlink, which EPERMs on Windows outside
- * developer mode, while `bun install` replaces the link without writing
- * through it.
+ * would recreate an ordinary symlink, which can EPERM, while `bun install`
+ * replaces the link without writing through it.
  */
 type PluginPackageSnapshot =
 	| { readonly kind: "link"; readonly actualName: string; readonly packagePath: string; readonly target: string }

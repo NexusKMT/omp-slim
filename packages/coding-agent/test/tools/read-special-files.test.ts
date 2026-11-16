@@ -48,7 +48,7 @@ async function expectFifoRejection(tool: ReadTool, readPath: string, fifo: strin
 
 // Regression: reading `/dev/stdin` blocked a thread no abort can cancel and swallowed the TUI's
 // keystrokes. A FIFO with no writer blocks the same way.
-describe.skipIf(process.platform === "win32")("read on non-regular files", () => {
+describe("read on non-regular files", () => {
 	let testDir: string;
 	let tool: ReadTool;
 	let fifo: string;

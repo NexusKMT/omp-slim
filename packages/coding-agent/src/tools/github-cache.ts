@@ -117,7 +117,7 @@ export function openDb(): Database | null {
 		// the current schema. The cache is regenerable, so we drop rows rather
 		// than running an in-place ALTER dance.
 		// Statements go through the query cache that close() finalizes; an unfinalized
-		// prepare() keeps the closed connection alive and the file locked on Windows.
+		// prepare() keeps the closed connection alive and the file locked.
 		const userVersion = (db.query("PRAGMA user_version").get() as { user_version?: number } | undefined)
 			?.user_version;
 		if (userVersion !== undefined && userVersion < 4) {
@@ -221,9 +221,6 @@ export function getGlabConfigPath(): string {
 		candidates.push(path.join(xdg, "glab-cli", "config.yml"));
 	} else if (process.platform === "darwin") {
 		candidates.push(path.join(home, "Library", "Application Support", "glab-cli", "config.yml"));
-	} else if (process.platform === "win32") {
-		const localAppData = process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
-		candidates.push(path.join(localAppData, "glab-cli", "config.yml"));
 	}
 	for (const candidate of candidates) {
 		try {

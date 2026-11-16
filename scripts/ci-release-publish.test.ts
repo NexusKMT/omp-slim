@@ -184,8 +184,6 @@ describe("published legal payloads", () => {
 				"native/version-sentinel.d.ts",
 				"native/loader-state.js",
 				"native/loader-state.d.ts",
-				"native/path.js",
-				"native/path.d.ts",
 				"native/sqlite-locks.js",
 				"native/sqlite-locks.d.ts",
 				"native/vcs.js",

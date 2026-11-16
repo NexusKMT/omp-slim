@@ -39,8 +39,8 @@ export async function loadPinnedSessionIds(agentDir: string = getAgentDir()): Pr
  * writer: two omp instances changing pins concurrently can no longer lose
  * each other's update (load-load-write-write), and a crash mid-write leaves
  * the previous pins file intact instead of a truncated one that degrades to
- * an empty set. The replace preserves the destination across Windows
- * EPERM/EEXIST rename failures (`replaceFileAtomically`).
+ * an empty set. The replace preserves the destination across EPERM/EEXIST
+ * rename failures (`replaceFileAtomically`).
  */
 async function updateSessionPin(
 	sessionId: string,

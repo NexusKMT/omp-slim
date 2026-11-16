@@ -24,7 +24,7 @@ import { cfgLaunchEnabled } from "./settings";
 
 const waitSchema = type({});
 /**
- * Windows (ms) a blocking wait gives its first wake before it returns with
+ * Window (ms) a blocking wait gives its first wake before it returns with
  * nothing new. Each back-to-back idle wait climbs one rung, so the agent gets
  * its turn back early while work warms up, and a wait loop backs off.
  */

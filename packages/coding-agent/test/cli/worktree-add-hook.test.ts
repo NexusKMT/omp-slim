@@ -6,7 +6,7 @@ import * as path from "node:path";
 
 const cli = path.resolve(import.meta.dir, "../../src/cli.ts");
 
-describe.skipIf(process.platform === "win32")("worktree add checkout hooks", () => {
+describe("worktree add checkout hooks", () => {
 	let root: string;
 	let repo: string;
 	let hooks: string;

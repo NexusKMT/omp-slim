@@ -2,63 +2,14 @@ import { describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils/temp";
 import { $ } from "bun";
-import { resolveCrossBuild } from "../packages/coding-agent/scripts/build-binary";
 import { compileCodingAgent } from "../packages/coding-agent/scripts/compile-binary";
 
 const repoRoot = path.join(import.meta.dir, "..");
 
-describe("Windows release binary target", () => {
-	it("builds both Windows architecture release assets with their native runtimes", async () => {
-		const result = await $`bun scripts/ci-release-build-binaries.ts --dry-run --targets win32-x64,win32-arm64`
-			.cwd(repoRoot)
-			.quiet()
-			.nothrow();
-		expect(result.exitCode).toBe(0);
-		const output = result.text();
-		expect(output).toContain("Building packages/coding-agent/binaries/omp-windows-x64.exe...");
-		expect(output).toContain(
-			"DRY RUN Bun.build target=bun-windows-x64-baseline outfile=packages/coding-agent/binaries/omp-windows-x64.exe",
-		);
-		expect(output).toContain("Building packages/coding-agent/binaries/omp-windows-arm64.exe...");
-		expect(output).toContain(
-			"DRY RUN Bun.build target=bun-windows-arm64 outfile=packages/coding-agent/binaries/omp-windows-arm64.exe",
-		);
-		expect(output).toContain("external=@huggingface/transformers,fastembed,onnxruntime-node");
-		expect(output).not.toContain("bun-windows-x64-modern");
-	});
-
-	it("resolves local Windows cross-build aliases for both architectures", () => {
-		expect(resolveCrossBuild("win32-x64")).toEqual({
-			id: "win32-x64",
-			platform: "win32",
-			arch: "x64",
-			target: "bun-windows-x64-baseline",
-		});
-		expect(resolveCrossBuild("windows-x64")).toEqual({
-			id: "windows-x64",
-			platform: "win32",
-			arch: "x64",
-			target: "bun-windows-x64-baseline",
-		});
-		expect(resolveCrossBuild("win32-arm64")).toEqual({
-			id: "win32-arm64",
-			platform: "win32",
-			arch: "arm64",
-			target: "bun-windows-arm64",
-		});
-		expect(resolveCrossBuild("windows-arm64")).toEqual({
-			id: "windows-arm64",
-			platform: "win32",
-			arch: "arm64",
-			target: "bun-windows-arm64",
-		});
-	});
-});
-
 it("runs compiled bytecode containing dependency import.meta.resolve calls", async () => {
 	using temp = TempDir.createSync("@omp-bytecode-");
 	const entrypoint = temp.join("entry.ts");
-	const outfile = temp.join(process.platform === "win32" ? "probe.exe" : "probe");
+	const outfile = temp.join("probe");
 	await Bun.write(entrypoint, 'console.log(import.meta.resolve("node:fs"));\n');
 	await compileCodingAgent({
 		repoRoot: temp.path(),
@@ -74,7 +25,7 @@ it("runs compiled bytecode containing dependency import.meta.resolve calls", asy
 it("runs code behind a lazy import() from a split chunk of the compiled binary", async () => {
 	using temp = TempDir.createSync("@omp-split-chunk-");
 	const entrypoint = temp.join("entry.ts");
-	const outfile = temp.join(process.platform === "win32" ? "probe.exe" : "probe");
+	const outfile = temp.join("probe");
 	// The probe's dynamic import() is the chunk boundary under test: with
 	// `splitting`, lazy.ts compiles into a separate embedded chunk.
 	await Bun.write(temp.join("lazy.ts"), 'export const value = ["lazy", "chunk"].join(" ");\n');

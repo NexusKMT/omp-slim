@@ -48,46 +48,42 @@ describe("bash leading cd filesystem root", () => {
 		workspace = "";
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"runs a leading cd / in the filesystem root from a non-root workspace",
-		async () => {
-			workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "bash-cd-root-")));
-			expect(workspace).not.toBe(FILESYSTEM_ROOT);
-			await Bun.write(path.join(workspace, MARKER), "only-in-workspace\n");
-			const tool = new BashTool(sessionFor(workspace));
-			const rest = `pwd; if test -e ${MARKER}; then echo where:workspace; else echo where:root; fi`;
-			const cases = [
-				{ command: `cd /; ${rest}`, separator: ";" as const },
-				{ command: `cd / && ${rest}`, separator: undefined },
-				{ command: `cd ///; ${rest}`, separator: ";" as const },
-			];
+	it("runs a leading cd / in the filesystem root from a non-root workspace", async () => {
+		workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "bash-cd-root-")));
+		expect(workspace).not.toBe(FILESYSTEM_ROOT);
+		await Bun.write(path.join(workspace, MARKER), "only-in-workspace\n");
+		const tool = new BashTool(sessionFor(workspace));
+		const rest = `pwd; if test -e ${MARKER}; then echo where:workspace; else echo where:root; fi`;
+		const cases = [
+			{ command: `cd /; ${rest}`, separator: ";" as const },
+			{ command: `cd / && ${rest}`, separator: undefined },
+			{ command: `cd ///; ${rest}`, separator: ";" as const },
+		];
 
-			for (const { command, separator } of cases) {
-				const result = await tool.execute(`cd-root-${command}`, { command });
-				const lines = linesOf(textOf(result));
+		for (const { command, separator } of cases) {
+			const result = await tool.execute(`cd-root-${command}`, { command });
+			const lines = linesOf(textOf(result));
 
-				expect(result.isError).toBeUndefined();
-				expect(path.resolve(result.details?.cwd ?? "")).toBe(FILESYSTEM_ROOT);
-				const printedRoot = lines.find(line => /^\/+$/.test(line));
-				expect(path.resolve(printedRoot ?? "")).toBe(FILESYSTEM_ROOT);
-				expect(lines).toContain("where:root");
-				expect(lines).not.toContain(workspace);
-				expect(lines).not.toContain("where:workspace");
-				expect(result.details?.cdSeparator).toBe(separator);
-			}
+			expect(result.isError).toBeUndefined();
+			expect(path.resolve(result.details?.cwd ?? "")).toBe(FILESYSTEM_ROOT);
+			const printedRoot = lines.find(line => /^\/+$/.test(line));
+			expect(path.resolve(printedRoot ?? "")).toBe(FILESYSTEM_ROOT);
+			expect(lines).toContain("where:root");
+			expect(lines).not.toContain(workspace);
+			expect(lines).not.toContain("where:workspace");
+			expect(result.details?.cdSeparator).toBe(separator);
+		}
 
-			const aliased = await tool.execute("explicit-slash-cwd", { command: rest, cwd: "/" });
-			const aliasedLines = linesOf(textOf(aliased));
-			expect(aliased.isError).toBeUndefined();
-			expect(aliased.details?.cwd).toBe(workspace);
-			expect(aliasedLines).toContain(workspace);
-			expect(aliasedLines).toContain("where:workspace");
-			expect(aliasedLines).not.toContain("where:root");
-		},
-		30_000,
-	);
+		const aliased = await tool.execute("explicit-slash-cwd", { command: rest, cwd: "/" });
+		const aliasedLines = linesOf(textOf(aliased));
+		expect(aliased.isError).toBeUndefined();
+		expect(aliased.details?.cwd).toBe(workspace);
+		expect(aliasedLines).toContain(workspace);
+		expect(aliasedLines).toContain("where:workspace");
+		expect(aliasedLines).not.toContain("where:root");
+	}, 30_000);
 
-	it.skipIf(process.platform === "win32")("starts a service from a leading cd / in the filesystem root", async () => {
+	it("starts a service from a leading cd / in the filesystem root", async () => {
 		workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "bash-cd-root-svc-")));
 		const started: DaemonOperation[] = [];
 		const snapshot: DaemonSnapshot = {

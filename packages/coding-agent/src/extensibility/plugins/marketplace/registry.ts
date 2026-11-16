@@ -10,8 +10,8 @@
  * Read/write functions accept explicit file paths so callers control the
  * location. Path helpers compute the default paths from the dir singleton.
  *
- * Both use atomic write (tmp + rename). On Windows, rename over existing file
- * can fail with EPERM — fallback: unlink target then rename.
+ * Both use atomic write (tmp + rename). A rename over an existing file can
+ * fail with EPERM — fallback: unlink target then rename.
  */
 
 import * as fs from "node:fs/promises";
@@ -52,7 +52,7 @@ async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
 	try {
 		await fs.rename(tmpPath, filePath);
 	} catch (err) {
-		// Windows EPERM fallback: unlink target, then rename
+		// EPERM fallback: unlink target, then rename
 		if ((err as NodeJS.ErrnoException).code === "EPERM") {
 			try {
 				await fs.unlink(filePath);

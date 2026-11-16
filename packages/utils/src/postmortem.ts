@@ -473,9 +473,9 @@ export function registerStdioDisconnectHandling(): () => void {
  * that state; explicit exits (`process.exit`, {@link quit},
  * {@link exitProcess}, the signal handlers) never emit it.
  *
- * `beforeExit` alone is not the verdict: on Windows Bun emits it while I/O is
- * still in flight and then keeps running the loop, so a command that goes on
- * to complete must keep its own exit code (#13470). The verdict is taken at
+ * `beforeExit` alone is not the verdict: Bun can emit it while I/O is still
+ * in flight and then keep running the loop, so a command that goes on to
+ * complete must keep its own exit code. The verdict is taken at
  * `exit` instead, and only when the last `beforeExit` was final: an unref'd
  * timer armed there runs only if the loop turns again, clearing the mark
  * before a later explicit exit. Any later drain emits `beforeExit` again and
@@ -503,9 +503,9 @@ export function reportUnsettledEntry(work: Promise<unknown>, describe?: () => st
 	process.once("exit", code => {
 		if (!pending || !drained) return;
 		// A non-zero code is already a failure verdict — an explicit
-		// `process.exit(n)` (possibly on the same loop turn as a Windows
-		// mid-I/O `beforeExit`, before the clearing timer runs) or an
-		// `exitCode` the command set. Overwriting it with 1 and a second
+		// `process.exit(n)` (possibly on the same loop turn as a mid-I/O
+		// `beforeExit`, before the clearing timer runs) or an `exitCode` the
+		// command set. Overwriting it with 1 and a second
 		// "ended before completing" line only obscures the real error.
 		if (code !== 0) return;
 		const command = describe?.();

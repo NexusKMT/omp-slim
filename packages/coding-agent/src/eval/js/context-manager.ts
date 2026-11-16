@@ -20,7 +20,6 @@ import {
 	formatKernelRestartNotice,
 	type SessionOwners,
 } from "../executor-base";
-import { shouldDetachKernel } from "../py/spawn-options";
 import { updateEvalState } from "../state";
 import type { EvalShadowCellSession } from "../speculation/cell-session";
 import { getActiveEvalShadowCell } from "../speculation/runtime-context";
@@ -1031,7 +1030,7 @@ function spawnJsProcess(): JsEvalWorkerHandle {
 		spawnCommand: resolveWorkerSpawnCmd(JS_EVAL_PROCESS_ARG),
 		env: workerEnvFromParent(),
 		exitLabel: "JS eval worker",
-		detached: shouldDetachKernel(process.platform),
+		detached: true,
 		reportCleanExit: true,
 		unref: false,
 	});

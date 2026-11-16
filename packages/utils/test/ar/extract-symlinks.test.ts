@@ -1,17 +1,9 @@
-import { afterEach, describe, expect, test, vi } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import * as fsSync from "node:fs";
-import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { arFixture } from "./fixtures";
 import { extractArchive } from "../../src/ar/open";
-
-const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-
-afterEach(() => {
-	vi.restoreAllMocks();
-	if (platformDescriptor) Object.defineProperty(process, "platform", platformDescriptor);
-});
 
 // ── Minimal ZIP writer (STORE, Unix host) so tests can ship symlinks ──────────
 
@@ -110,52 +102,7 @@ function symlinkedZip(): Uint8Array {
 // ── extractArchive symlink handling ──────────────────────────────────────────
 
 describe("extractArchive symlink handling", () => {
-	test("refuses to overwrite an occupied symlink-copy destination", async () => {
-		if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
-		Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
-		const dest = await fsPromises.mkdtemp(path.join(os.tmpdir(), "omp-ar-copy-collision-"));
-		const occupied = path.join(dest, "current");
-		try {
-			await Bun.write(occupied, "existing user content");
-			vi.spyOn(fsPromises, "symlink").mockRejectedValueOnce(
-				Object.assign(new Error("Symlink privilege denied"), { code: "EPERM" }),
-			);
-			await expect(
-				extractArchive({ bytes: await arFixture("zip-symlink-mode.zip"), format: "zip" }, dest),
-			).rejects.toMatchObject({ code: "EEXIST" });
-			expect(await Bun.file(occupied).text()).toBe("existing user content");
-			expect(await Bun.file(path.join(dest, "bin/run.sh")).text()).toContain("zip mode");
-		} finally {
-			await fsPromises.rm(dest, { recursive: true, force: true });
-		}
-	});
-
-	test.skipIf(process.platform === "win32")("refuses to follow an occupied symlink-copy destination", async () => {
-		const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), "omp-ar-copy-link-collision-"));
-		const dest = path.join(root, "extract");
-		const target = path.join(root, "outside.txt");
-		const occupied = path.join(dest, "current");
-		try {
-			await fsPromises.mkdir(dest);
-			await Bun.write(target, "existing outside content");
-			await fsPromises.symlink(target, occupied);
-			if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
-			Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
-			vi.spyOn(fsPromises, "symlink").mockRejectedValueOnce(
-				Object.assign(new Error("Symlink privilege denied"), { code: "EPERM" }),
-			);
-			await expect(
-				extractArchive({ bytes: await arFixture("zip-symlink-mode.zip"), format: "zip" }, dest),
-			).rejects.toMatchObject({ code: "EEXIST" });
-			expect((await fsPromises.lstat(occupied)).isSymbolicLink()).toBe(true);
-			expect(await fsPromises.readlink(occupied)).toBe(target);
-			expect(await Bun.file(target).text()).toBe("existing outside content");
-		} finally {
-			await fsPromises.rm(root, { recursive: true, force: true });
-		}
-	});
-
-	test.skipIf(process.platform === "win32")("materializes zip symlinks as real symlinks", async () => {
+	test("materializes zip symlinks as real symlinks", async () => {
 		const dest = fsSync.mkdtempSync(path.join(os.tmpdir(), "omp-ar-link-"));
 		const count = await extractArchive({ bytes: symlinkedZip(), format: "zip" }, dest);
 
@@ -164,30 +111,7 @@ describe("extractArchive symlink handling", () => {
 		expect(fsSync.readFileSync(path.join(dest, "link.txt"), "utf8")).toBe("hello through a link\n");
 	});
 
-	test("extracts directory aliases and skips dangling links on Windows EPERM", async () => {
-		if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
-		Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
-		const realSymlink = fsPromises.symlink;
-		vi.spyOn(fsPromises, "symlink").mockImplementation(async (target, outputPath, type) => {
-			if (type === "junction") return realSymlink(target, outputPath, "junction");
-			const error = new Error("operation not permitted") as NodeJS.ErrnoException;
-			error.code = "EPERM";
-			throw error;
-		});
-
-		const dest = fsSync.mkdtempSync(path.join(os.tmpdir(), "omp-ar-dangling-"));
-		const count = await extractArchive({ bytes: await arFixture("tar-links.tar"), format: "tar" }, dest);
-
-		// Real members still land; the directory alias survives as a junction
-		// and the dangling file link is skipped instead of aborting the run.
-		// 3 directories + 4 files + the junction; the skipped link is not counted.
-		expect(count).toBe(8);
-		expect(fsSync.readFileSync(path.join(dest, "pkg/hard.txt"), "utf8")).toBe("shared content\n");
-		expect(fsSync.statSync(path.join(dest, "pkg/current")).isDirectory()).toBe(true);
-		expect(fsSync.existsSync(path.join(dest, "pkg/dangling"))).toBe(false);
-	});
-
-	test.skipIf(process.platform === "win32")("materializes tar directory aliases as real symlinks", async () => {
+	test("materializes tar directory aliases as real symlinks", async () => {
 		// The link-before-isDirectory reorder: entries that are BOTH directory
 		// and a link used to be dropped from the link queue entirely, so
 		// directory aliases silently never appeared on extraction.
@@ -196,30 +120,5 @@ describe("extractArchive symlink handling", () => {
 		expect(count).toBeGreaterThan(0);
 		expect(fsSync.statSync(path.join(dest, "pkg/current")).isDirectory()).toBe(true);
 		expect(fsSync.lstatSync(path.join(dest, "pkg/current")).isSymbolicLink()).toBe(true);
-	});
-
-	test("degrades directory symlinks to junctions and file symlinks to copies on Windows EPERM", async () => {
-		// Failure mode: Windows denies fs.symlink with EPERM unless the caller
-		// holds the symlink privilege (developer mode or admin), and one
-		// refused link failed the whole extraction.
-		if (!platformDescriptor) throw new Error("process.platform descriptor is unavailable");
-		Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
-		const realSymlink = fsPromises.symlink;
-		const symlink = vi.spyOn(fsPromises, "symlink").mockImplementation(async (target, outputPath, type) => {
-			if (type === "junction") return realSymlink(target, outputPath, "junction");
-			const error = new Error("operation not permitted") as NodeJS.ErrnoException;
-			error.code = "EPERM";
-			throw error;
-		});
-
-		const dest = fsSync.mkdtempSync(path.join(os.tmpdir(), "omp-ar-eprem-"));
-		const count = await extractArchive({ bytes: symlinkedZip(), format: "zip" }, dest);
-
-		// The directory alias survives as a junction; the file link as a copy.
-		expect(count).toBe(4);
-		expect(symlink).toHaveBeenCalledWith(expect.any(String), path.join(dest, "alias"), "junction");
-		expect(fsSync.statSync(path.join(dest, "alias")).isDirectory()).toBe(true);
-		expect(fsSync.readFileSync(path.join(dest, "link.txt"), "utf8")).toBe("hello through a link\n");
-		expect(fsSync.lstatSync(path.join(dest, "link.txt")).isSymbolicLink()).toBe(false);
 	});
 });

@@ -332,8 +332,8 @@ async function mergeDirectoryInto(
  * the old path — subagents adopt the parent's `ArtifactManager`, eval
  * subprocesses inherit `PI_ARTIFACTS_DIR` — kept writing after the move away.
  * Renaming onto an existing directory fails with a platform-specific code
- * (ENOTEMPTY, EEXIST, EPERM on Windows), so the fallback is decided by what is
- * there, not by the code: an existing directory is merged into.
+ * (ENOTEMPTY, EEXIST, EPERM), so the fallback is decided by what is there, not
+ * by the code: an existing directory is merged into.
  *
  * A name or artifact id taken on both sides is left at the source rather than
  * resolved: artifact ids resolve by `<id>.` prefix against one directory, so
@@ -1927,7 +1927,7 @@ export class SessionManager {
 
 	#appendToCurrentSessionFile(entry: SessionEntry): void {
 		// Atomic replacement / move window: do not open a fresh append writer that
-		// a Windows EPERM replace could detach from the current JSONL path.
+		// an EPERM replace could detach from the current JSONL path.
 		// - moveTo: write a full body to the live relocation path (source pre-
 		//   rename, destination post-rename) so completed entries are durable
 		//   without recreating a vacated source.

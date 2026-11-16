@@ -1682,17 +1682,6 @@ export class InputController {
 	}
 
 	handleCtrlZ(): void {
-		// Job-control suspend is POSIX-only: on Windows `process.kill(_, "SIGSTOP")`
-		// throws `TypeError: Unknown signal: SIGSTOP` and takes the whole agent down
-		// via an uncaught exception (issue #2036, originally for SIGTSTP — same
-		// shape for SIGSTOP). No-op on platforms that cannot suspend.
-		if (process.platform === "win32") {
-			this.ctx.showStatus(
-				`Suspend (${appKey(this.ctx.keybindings, "app.suspend")}) is not supported on this platform`,
-			);
-			return;
-		}
-
 		// TUI teardown pauses stdin, which leaves Bun with no referenced handles
 		// while the editor waits on an unresolved Promise. Keep the event loop
 		// alive across SIGSTOP so it can deliver SIGCONT; without this handle Bun
@@ -2443,12 +2432,11 @@ export class InputController {
 	}
 
 	/**
-	 * Win+Shift+S on Windows 11 leaves the screenshot bitmap on the clipboard
-	 * while the terminal pastes a transient packaged-app TempState path
-	 * (…\MicrosoftWindows.Client.Core_*\TempState\…) that is already gone — or
-	 * never materialized — by the time we read it. Whenever a pasted image path
-	 * can't be turned into an image locally, those clipboard bytes are the real
-	 * payload, so prefer them before degrading to a text paste.
+	 * A screenshot tool can leave the bitmap on the clipboard while the terminal
+	 * pastes a transient temp path that is already gone — or never materialized
+	 * — by the time we read it. Whenever a pasted image path can't be turned
+	 * into an image locally, those clipboard bytes are the real payload, so
+	 * prefer them before degrading to a text paste.
 	 *
 	 * Skipped over SSH: the clipboard read would hit the remote host, not the
 	 * terminal that holds the screenshot. Returns true when the clipboard owned

@@ -89,9 +89,6 @@ const TOOLS: Record<string, ToolConfig> = {
 			} else if (plat === "linux") {
 				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
 				return `sd-v${version}-${archStr}-unknown-linux-musl.tar.gz`;
-			} else if (plat === "win32") {
-				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
-				return `sd-v${version}-${archStr}-pc-windows-msvc.zip`;
 			}
 			return null;
 		},
@@ -108,9 +105,6 @@ const TOOLS: Record<string, ToolConfig> = {
 			} else if (plat === "linux") {
 				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
 				return `ast-grep-${archStr}-unknown-linux-gnu.zip`;
-			} else if (plat === "win32") {
-				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
-				return `ast-grep-${archStr}-pc-windows-msvc.zip`;
 			}
 			return null;
 		},
@@ -126,8 +120,6 @@ const TOOLS: Record<string, ToolConfig> = {
 				return "yt-dlp_macos"; // Universal binary
 			} else if (plat === "linux") {
 				return architecture === "arm64" ? "yt-dlp_linux_aarch64" : "yt-dlp_linux";
-			} else if (plat === "win32") {
-				return architecture === "arm64" ? "yt-dlp_arm64.exe" : "yt-dlp.exe";
 			}
 			return null;
 		},
@@ -163,7 +155,7 @@ export function getToolPath(tool: ToolName): string | null {
 	if (!config) return null;
 
 	// Check our tools directory first
-	const localPath = path.join(TOOLS_DIR, config.binaryName + (os.platform() === "win32" ? ".exe" : ""));
+	const localPath = path.join(TOOLS_DIR, config.binaryName);
 	if (fs.existsSync(localPath)) {
 		return localPath;
 	}
@@ -271,16 +263,13 @@ async function downloadTool(
 	await fs.promises.mkdir(TOOLS_DIR, { recursive: true });
 
 	const downloadUrl = `https://github.com/${config.repo}/releases/download/${config.tagPrefix}${version}/${assetName}`;
-	const binaryExt = plat === "win32" ? ".exe" : "";
-	const binaryPath = path.join(TOOLS_DIR, config.binaryName + binaryExt);
+	const binaryPath = path.join(TOOLS_DIR, config.binaryName);
 
 	// Handle direct binary downloads (no archive extraction needed)
 	const onProgress = (loaded: number, total: number | undefined): void => tracker.update({ loaded, total });
 	if (config.isDirectBinary) {
 		await downloadFile(downloadUrl, binaryPath, { signal, onProgress });
-		if (plat !== "win32") {
-			await fs.promises.chmod(binaryPath, 0o755);
-		}
+		await fs.promises.chmod(binaryPath, 0o755);
 		return binaryPath;
 	}
 
@@ -307,10 +296,10 @@ async function downloadTool(
 		// ast-grep releases the binary directly in the zip, not in a subdirectory
 		let extractedBinary: string;
 		if (tool === "sg") {
-			extractedBinary = path.join(tmp.path(), config.binaryName + binaryExt);
+			extractedBinary = path.join(tmp.path(), config.binaryName);
 		} else {
 			const extractedDir = path.join(tmp.path(), assetName.replace(/\.(tar\.gz|zip)$/, ""));
-			extractedBinary = path.join(extractedDir, config.binaryName + binaryExt);
+			extractedBinary = path.join(extractedDir, config.binaryName);
 		}
 
 		if (fs.existsSync(extractedBinary)) {
@@ -320,9 +309,7 @@ async function downloadTool(
 		}
 
 		// Make executable (Unix only)
-		if (plat !== "win32") {
-			await fs.promises.chmod(binaryPath, 0o755);
-		}
+		await fs.promises.chmod(binaryPath, 0o755);
 	} finally {
 		// Cleanup
 		await tmp.remove();

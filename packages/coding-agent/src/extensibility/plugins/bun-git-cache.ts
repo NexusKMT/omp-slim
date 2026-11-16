@@ -17,7 +17,6 @@ async function runCommand(command: string[], cwd: string): Promise<CommandResult
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
-		windowsHide: true,
 	});
 	const [exitCode, stdout, stderr] = await Promise.all([
 		proc.exited,

@@ -23,7 +23,7 @@ function mockHosts(): void {
 }
 
 // The fake remote is the local filesystem behind a POSIX shell.
-describe.skipIf(process.platform === "win32")("ssh:// remote-account HOME paths", () => {
+describe("ssh:// remote-account HOME paths", () => {
 	let fixture: string;
 	let home: string;
 	let host: string;

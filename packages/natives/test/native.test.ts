@@ -111,7 +111,7 @@ async function cleanupFixtures() {
 }
 
 function canCreateFifo() {
-	return process.platform !== "win32" && Boolean(Bun.which("mkfifo"));
+	return Boolean(Bun.which("mkfifo"));
 }
 
 async function createFifo(fifoPath: string) {
@@ -920,10 +920,6 @@ try {
 		it.skipIf(process.env.GITHUB_EVENT_NAME === "pull_request")(
 			"keeps a fast PTY child blocked while onChunk is stalled and still delivers every byte",
 			async () => {
-				if (process.platform === "win32") {
-					return;
-				}
-
 				const blockBytes = 64 * 1024;
 				const blocks = 80;
 				const scriptPath = path.join(testDir, "pty-slow-consumer.ts");
@@ -978,7 +974,7 @@ try {
 		);
 
 		it("should time out detached background workloads without hanging", async () => {
-			if (process.platform === "win32" || !Bun.which("bash")) {
+			if (!Bun.which("bash")) {
 				return;
 			}
 
@@ -1018,10 +1014,6 @@ try {
 
 	describe("shell", () => {
 		it("should time out background workloads without leaving delayed writers behind", async () => {
-			if (process.platform === "win32") {
-				return;
-			}
-
 			const markerPath = path.join(testDir, "shell-timeout-marker.txt");
 			const markerEscaped = markerPath.replace(/'/g, "'\\''");
 			await fs.rm(markerPath, { force: true });
@@ -1039,10 +1031,6 @@ try {
 		});
 
 		it("should SIGKILL workloads that ignore SIGTERM on timeout", async () => {
-			if (process.platform === "win32") {
-				return;
-			}
-
 			const markerPath = path.join(testDir, "shell-timeout-sigkill-marker.txt");
 			const markerEscaped = markerPath.replace(/'/g, "'\\''");
 			await fs.rm(markerPath, { force: true });

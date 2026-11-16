@@ -58,7 +58,7 @@ async function plantRoot(prefix: string): Promise<{ home: string; cwd: string; m
 //
 // The readable half is not gated: it is what keeps the skip from hiding a
 // working plugin set, and it holds wherever the suite runs. Only the denial
-// needs mode bits to be enforced, which excludes root and Windows.
+// needs mode bits to be enforced, which excludes root.
 test("a readable plugins root still loads its declared plugin", async () => {
 	const readable = await plantRoot("omp-plugin-readable-");
 	expect((await getEnabledPlugins(readable.cwd, { home: readable.home })).map(plugin => plugin.name)).toEqual([
@@ -66,7 +66,7 @@ test("a readable plugins root still loads its declared plugin", async () => {
 	]);
 });
 
-test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+test.skipIf(process.getuid?.() === 0)(
 	"an unreadable plugins root is skipped instead of failing plugin collection",
 	async () => {
 		const denied = await plantRoot("omp-plugin-denied-");
@@ -76,7 +76,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
 	},
 );
 
-test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+test.skipIf(process.getuid?.() === 0)(
 	"an unreadable installed plugin is skipped while its siblings still load",
 	async () => {
 		// The root's own manifest and lockfile are readable here, so the guards

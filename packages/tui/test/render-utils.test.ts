@@ -2,7 +2,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import * as os from "node:os";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import * as natives from "@oh-my-pi/pi-natives/path";
 import { KeybindingsManager, setKeyHintPlatform } from "@oh-my-pi/pi-tui/app-keybindings";
 import { getThemeByName, initTheme, type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import {
@@ -75,9 +74,6 @@ describe("embedded home path normalization", () => {
 		]) {
 			expect(shortenEmbeddedPaths(text, home)).toBe(text);
 		}
-		expect(shortenEmbeddedPaths(String.raw`type C:\Users\B_old\cfg.json`, String.raw`C:\Users\B`)).toBe(
-			String.raw`type C:\Users\B_old\cfg.json`,
-		);
 		expect(shortenEmbeddedPaths("**/home/alice/x**", home)).toBe("**~/x**");
 		expect(shortenEmbeddedPaths("_/home/alice/x_", home)).toBe("_~/x_");
 		expect(shortenEmbeddedPaths("See **/home/alice**, then _/home/alice_.", home)).toBe("See **~**, then _~_.");
@@ -96,21 +92,6 @@ describe("embedded home path normalization", () => {
 		);
 		expect(shortenEmbeddedPaths("Working in /home/alice.", "/home/alice")).toBe("Working in ~.");
 		expect(shortenEmbeddedPaths("cd /home/alice.backup", "/home/alice")).toBe("cd /home/alice.backup");
-	});
-
-	it("recognizes mixed Windows separators without rewriting unrelated prefixes", () => {
-		const home = String.raw`C:\Users\Alice`;
-		expect(shortenEmbeddedPaths("type C:/Users/Alice/private.txt", home)).toBe("type ~/private.txt");
-		expect(shortenEmbeddedPaths(String.raw`type c:\users\ALICE/private.txt`, home)).toBe("type ~/private.txt");
-		expect(shortenEmbeddedPaths("type D:/backup/C:/Users/Alice/private.txt", home)).toBe(
-			"type D:/backup/C:/Users/Alice/private.txt",
-		);
-	});
-
-	it("recognizes slash-form UNC home paths", () => {
-		expect(shortenEmbeddedPaths("type //server/share/alice/private.txt", String.raw`\\SERVER\share\Alice`)).toBe(
-			"type ~/private.txt",
-		);
 	});
 });
 
@@ -249,76 +230,18 @@ describe("parse error formatting", () => {
 });
 
 describe("shortenPath", () => {
-	it("uses forward slashes after a shortened Windows home", () => {
-		const home = String.raw`C:\Users\me`;
-		expect(shortenPath(String.raw`C:\Users\me\projects\demo`, home)).toBe("~/projects/demo");
-	});
-
-	it("shortens Windows home paths case-insensitively", () => {
-		const home = String.raw`C:\Users\Alice`;
-		expect(shortenPath(String.raw`c:\users\alice\projects\demo`, home)).toBe("~/projects/demo");
+	it("replaces the home prefix with a tilde", () => {
+		expect(shortenPath("/Users/me/projects/demo", "/Users/me")).toBe("~/projects/demo");
 	});
 
 	it("does not shorten paths outside the home boundary", () => {
-		const home = String.raw`C:\Users\me`;
-		const sibling = String.raw`C:\Users\me2\projects\demo`;
-		expect(shortenPath(sibling, home)).toBe(sibling);
+		const sibling = "/Users/me2/projects/demo";
+		expect(shortenPath(sibling, "/Users/me")).toBe(sibling);
 	});
 
 	it("shortens under a home given with a trailing separator", () => {
-		expect(shortenPath(String.raw`C:\Users\me\projects\demo`, "C:\\Users\\me\\")).toBe("~/projects/demo");
 		expect(shortenPath("/home/me/projects/demo", "/home/me/")).toBe("~/projects/demo");
 		expect(shortenPath("/home/me2/demo", "/home/me/")).toBe("/home/me2/demo");
-	});
-});
-
-describe("Windows home aliases", () => {
-	afterEach(() => {
-		vi.restoreAllMocks();
-	});
-
-	it("shortens mixed long and 8.3 home components without rewriting nonexistent descendants", () => {
-		const home = String.raw`C:\User Profiles\Render Alias Home`;
-		const shortHome = String.raw`C:\USERPR~1\RENDER~1`;
-		vi.spyOn(natives, "expandWindowsLongPath").mockReturnValue(home);
-		vi.spyOn(natives, "getWindowsShortPath").mockReturnValue(shortHome);
-
-		expect(shortenPath(String.raw`c:/USERPR~1/Render Alias Home/not-created/FILE~1.txt`, home)).toBe(
-			"~/not-created/FILE~1.txt",
-		);
-		expect(shortenPath(shortHome, home)).toBe("~");
-	});
-
-	it("recognizes a long path when the supplied home uses its short spelling", () => {
-		const home = String.raw`C:\Users\Reverse Alias Home`;
-		const shortHome = String.raw`C:\Users\REVERS~1`;
-		vi.spyOn(natives, "expandWindowsLongPath").mockReturnValue(home);
-		vi.spyOn(natives, "getWindowsShortPath").mockReturnValue(shortHome);
-
-		expect(shortenPath(`${home}\\not-created\\new.txt`, shortHome)).toBe("~/not-created/new.txt");
-	});
-
-	it("preserves short-home prefix siblings and URL paths", () => {
-		const home = String.raw`C:\Users\Boundary Alias Home`;
-		const shortHome = String.raw`C:\Users\BOUNDA~1`;
-		vi.spyOn(natives, "expandWindowsLongPath").mockReturnValue(home);
-		vi.spyOn(natives, "getWindowsShortPath").mockReturnValue(shortHome);
-		const sibling = `${shortHome}-other\\file.txt`;
-		const url = `https://example.com/${shortHome.replaceAll("\\", "/")}/file.txt`;
-
-		expect(shortenPath(sibling, home)).toBe(sibling);
-		expect(shortenEmbeddedPaths(`"${sibling}" ${url}`, home)).toBe(`"${sibling}" ${url}`);
-	});
-
-	it("shortens home aliases in errors while respecting native separator preservation", () => {
-		const home = String.raw`C:\Users\Embedded Alias Home`;
-		const shortHome = String.raw`C:\Users\EMBEDD~1`;
-		vi.spyOn(natives, "expandWindowsLongPath").mockReturnValue(home);
-		vi.spyOn(natives, "getWindowsShortPath").mockReturnValue(shortHome);
-		const error = `Cannot write "${shortHome}\\not-created\\FILE~1.txt"`;
-
-		expect(shortenEmbeddedPaths(error, home)).toBe('Cannot write "~/not-created/FILE~1.txt"');
-		expect(shortenEmbeddedPaths(error, home, true)).toBe(String.raw`Cannot write "~\not-created\FILE~1.txt"`);
 	});
 });
 
@@ -623,33 +546,15 @@ describe("shortenEmbeddedPaths", () => {
 		const sibling = "/Users/Jane2/.omp/WATCHDOG.yml: failed";
 		expect(shortenEmbeddedPaths(sibling, home)).toBe(sibling);
 	});
-
-	it("normalizes shortened Windows paths", () => {
-		const home = String.raw`C:\Users\Jane`;
-		const filePath = String.raw`C:\Users\Jane\projects\demo: failed`;
-		expect(shortenEmbeddedPaths(filePath, home)).toBe("~/projects/demo: failed");
-	});
 });
 
 describe("shortenToolArgumentPaths", () => {
-	it("normalizes and shortens Windows drive file URLs", () => {
-		const home = String.raw`C:\Users\Alice`;
-
-		expect(shortenToolArgumentPaths("file:///C:/Users/Alice/private.txt", "url", home)).toBe("~/private.txt");
-	});
-
 	it("normalizes and shortens POSIX file URLs", () => {
 		const home = "/home/alice";
 
 		expect(shortenToolArgumentPaths("file:///home/alice/private/encoded%20space.txt", "url", home)).toBe(
 			"~/private/encoded space.txt",
 		);
-	});
-
-	it("preserves UNC authority while shortening file URLs", () => {
-		const home = String.raw`\\server\share\Alice`;
-
-		expect(shortenToolArgumentPaths("file://server/share/Alice/private.txt", "url", home)).toBe("~/private.txt");
 	});
 
 	it("leaves network URLs unchanged", () => {

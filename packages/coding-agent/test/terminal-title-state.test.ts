@@ -14,7 +14,6 @@ import {
 	setTerminalTitleState,
 } from "@oh-my-pi/pi-coding-agent/utils/title-generator";
 import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
-import { mockWindowsConsoleTitle, type WindowsConsoleTitleMock } from "./terminal-title-test-utils";
 
 const LABEL = "my-project";
 // The brand the title runtime prefixes every composed title with. Plain π —
@@ -30,7 +29,7 @@ describe("buildTerminalTitleWithState", () => {
 		expect(buildTerminalTitleWithState(LABEL, "attention", 0, true)).toBe(`${BRAND} ! ${LABEL}`);
 	});
 
-	it("animates spinner frames in the separator slot while working outside Windows", () => {
+	it("animates spinner frames in the separator slot while working", () => {
 		const frame0 = buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "braille", {});
 		const frame1 = buildTerminalTitleWithState(LABEL, "working", 1, true, "linux", "braille", {});
 		// The brand stays a bare `π`; only the separator between brand and label
@@ -44,12 +43,6 @@ describe("buildTerminalTitleWithState", () => {
 		expect(wrapped.startsWith(`${BRAND} `)).toBe(true);
 		expect(wrapped.endsWith(` ${LABEL}`)).toBe(true);
 		expect(wrapped).not.toContain("undefined");
-	});
-
-	it("animates spinner frames in the separator slot while working on Windows", () => {
-		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "win32")).toBe(`${BRAND} ⠋ ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 1, true, "win32")).toBe(`${BRAND} ⠙ ${LABEL}`);
-		expect(buildTerminalTitleWithState(undefined, "working", 1, true, "win32")).toBe(`${BRAND} ⠙`);
 	});
 
 	it("keeps the state visible as a trailing separator when there is no label", () => {
@@ -76,12 +69,6 @@ describe("buildTerminalTitleWithState", () => {
 		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "pulse", {})).toBe(`${BRAND} ○ ${LABEL}`);
 		expect(buildTerminalTitleWithState(LABEL, "working", 4, true, "linux", "pulse", {})).toBe(`${BRAND} ● ${LABEL}`);
 		expect(buildTerminalTitleWithState(LABEL, "working", 8, true, "linux", "pulse", {})).toBe(`${BRAND} ○ ${LABEL}`);
-	});
-
-	it("cycles the selected style on Windows too", () => {
-		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "win32", "dots")).toBe(`${BRAND} ⠁ ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "win32", "pulse")).toBe(`${BRAND} ○ ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "win32", "line")).toBe(`${BRAND} - ${LABEL}`);
 	});
 
 	it("keeps a static colon under WSL regardless of style", () => {
@@ -115,17 +102,15 @@ describe("buildTerminalTitleWithState", () => {
 // `vi.useFakeTimers()` makes the real 80ms interval advanceable without a
 // wall-clock wait, so the test is fully deterministic.
 
-/** Titles observed through either sink (OSC writes plus the native title mock). */
-function observedTitles(writes: string[], windowsTitleMock: WindowsConsoleTitleMock | undefined): string[] {
-	const osc = writes
+/** Titles observed through the OSC-0 writes on stdout. */
+function observedTitles(writes: string[]): string[] {
+	return writes
 		.map(payload => /\x1b\]0;([\s\S]*?)\x07/.exec(payload)?.[1])
 		.filter((t): t is string => t !== undefined);
-	return [...osc, ...(windowsTitleMock?.titles ?? [])];
 }
 
-function resetObserved(writes: string[], windowsTitleMock: WindowsConsoleTitleMock | undefined): void {
+function resetObserved(writes: string[]): void {
 	writes.length = 0;
-	if (windowsTitleMock) windowsTitleMock.titles.length = 0;
 }
 
 describe("disposeTerminalTitleState", () => {
@@ -133,7 +118,6 @@ describe("disposeTerminalTitleState", () => {
 	let stdoutSpy: { mockRestore(): void } | undefined;
 	let prevHeadless = false;
 	let ttyDescriptor: PropertyDescriptor | undefined;
-	let windowsTitleMock: WindowsConsoleTitleMock | undefined;
 	// Under WSL the working title is a static `:` by design; hide the host's WSL markers so the spinner ticks.
 	const wslEnvKeys = ["WSL_DISTRO_NAME", "WSL_INTEROP"] as const;
 	let savedWslEnv: Record<string, string | undefined> = {};
@@ -147,8 +131,6 @@ describe("disposeTerminalTitleState", () => {
 		ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
 		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 
-		windowsTitleMock = mockWindowsConsoleTitle();
-		windowsTitleMock.succeeds = true;
 		writes = [];
 		stdoutSpy = spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
 			writes.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk as Uint8Array));
@@ -163,15 +145,13 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleSpinnerInterval(DEFAULT_SPINNER_INTERVAL_MS);
 		setSessionTerminalTitle("my-project");
 		setTerminalTitleState("idle");
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 	});
 
 	afterEach(() => {
 		// A started interval must never leak between tests.
 		disposeTerminalTitleState();
 		stdoutSpy?.mockRestore();
-		windowsTitleMock?.restore();
-		windowsTitleMock = undefined;
 		stdoutSpy = undefined;
 		if (ttyDescriptor) Object.defineProperty(process.stdout, "isTTY", ttyDescriptor);
 		else Reflect.deleteProperty(process.stdout, "isTTY");
@@ -195,22 +175,22 @@ describe("disposeTerminalTitleState", () => {
 		// several tick periods DOES emit further OSC-title writes (proves the
 		// timer was actually running, so the post-dispose silence is meaningful and
 		// not a headless/TTY misconfiguration masking all writes).
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		vi.advanceTimersByTime(400);
-		const ticksWhileLive = observedTitles(writes, windowsTitleMock).length;
+		const ticksWhileLive = observedTitles(writes).length;
 		expect(ticksWhileLive).toBeGreaterThan(0);
 
 		// The fix under test.
 		disposeTerminalTitleState();
 
 		// After dispose: advance far past many tick periods. No tick may fire.
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		vi.advanceTimersByTime(4000);
-		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
+		expect(observedTitles(writes)).toEqual([]);
 	});
 
 	it("latches: a direct setTerminalTitle after dispose cannot write the shell's tab", () => {
-		// `setTerminalTitle` is EXPORTED and writes OSC/Win32 straight out, so it
+		// `setTerminalTitle` is EXPORTED and writes OSC straight out, so it
 		// bypasses the composed-state path entirely. A direct importer firing from
 		// a delayed callback after teardown — the same window the spinner latch
 		// covers — would otherwise land in the parent shell's tab, whose title
@@ -218,21 +198,21 @@ describe("disposeTerminalTitleState", () => {
 
 		// Control: before dispose the sink really does write, so the silence below
 		// is the latch and not a headless/TTY misconfiguration.
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		setTerminalTitle("live write");
-		expect(observedTitles(writes, windowsTitleMock).length).toBeGreaterThan(0);
+		expect(observedTitles(writes).length).toBeGreaterThan(0);
 
 		disposeTerminalTitleState();
 
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		setTerminalTitle("after teardown");
-		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
+		expect(observedTitles(writes)).toEqual([]);
 
 		// And the latch releases only on the explicit ownership path.
 		initTerminalTitleState();
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		setTerminalTitle("owned again");
-		expect(observedTitles(writes, windowsTitleMock).length).toBeGreaterThan(0);
+		expect(observedTitles(writes).length).toBeGreaterThan(0);
 	});
 
 	it("latches: a run-state change after dispose cannot re-arm the spinner", () => {
@@ -245,7 +225,7 @@ describe("disposeTerminalTitleState", () => {
 		// comment in `shutdown()` claims to prevent.
 		disposeTerminalTitleState();
 
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		setTerminalTitleState("working");
 
 		// Assert on the TIMER, not only the writes: the `emitTerminalTitle` latch
@@ -256,7 +236,7 @@ describe("disposeTerminalTitleState", () => {
 		expect(vi.getTimerCount()).toBe(0);
 
 		vi.advanceTimersByTime(4000);
-		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
+		expect(observedTitles(writes)).toEqual([]);
 	});
 
 	it("keeps a routine session title update from releasing the latch", () => {
@@ -271,10 +251,10 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleState("working");
 		disposeTerminalTitleState();
 
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		setSessionTerminalTitle("late-async-session");
 
-		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
+		expect(observedTitles(writes)).toEqual([]);
 		// And nothing re-armed behind the silence: a live interval past shutdown
 		// is a leak no later dispose reaches.
 		expect(vi.getTimerCount()).toBe(0);
@@ -290,21 +270,21 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleState("idle");
 		disposeTerminalTitleState();
 
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		initTerminalTitleState();
 		setSessionTerminalTitle("same-session");
 
-		expect(observedTitles(writes, windowsTitleMock).some(title => title.includes("same-session"))).toBe(true);
+		expect(observedTitles(writes).some(title => title.includes("same-session"))).toBe(true);
 	});
 
 	it("emits the selected glyph set on the next spinner tick", () => {
 		setTerminalTitleSpinnerStyle("line");
 		setTerminalTitleState("working");
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 
 		vi.advanceTimersByTime(400);
 
-		const titles = observedTitles(writes, windowsTitleMock);
+		const titles = observedTitles(writes);
 		expect(titles.length).toBeGreaterThan(0);
 		for (const title of titles) {
 			expect(title).toContain("my-project");
@@ -317,11 +297,11 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleSpinnerStyle("line");
 		setTerminalTitleSpinnerStyle("nope");
 		setTerminalTitleState("working");
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 
 		vi.advanceTimersByTime(DEFAULT_SPINNER_INTERVAL_MS * 2);
 
-		const titles = observedTitles(writes, windowsTitleMock);
+		const titles = observedTitles(writes);
 		expect(titles.length).toBeGreaterThan(0);
 		expect(titles.some(title => title?.includes("⠋") || title?.includes("⠙"))).toBe(true);
 	});
@@ -329,11 +309,11 @@ describe("disposeTerminalTitleState", () => {
 	it("emits pulse frames on live ticks", () => {
 		setTerminalTitleSpinnerStyle("pulse");
 		setTerminalTitleState("working");
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 
 		vi.advanceTimersByTime(400);
 
-		const titles = observedTitles(writes, windowsTitleMock);
+		const titles = observedTitles(writes);
 		expect(titles.length).toBeGreaterThan(0);
 		for (const title of titles) {
 			expect(title).toContain("my-project");
@@ -349,47 +329,47 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleState("working");
 		disposeTerminalTitleState();
 
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		initTerminalTitleState();
 		setSessionTerminalTitle("next-session");
 
 		// The new session's title emitted...
-		expect(observedTitles(writes, windowsTitleMock).some(title => title.includes("next-session"))).toBe(true);
+		expect(observedTitles(writes).some(title => title.includes("next-session"))).toBe(true);
 
 		// ...and the spinner is genuinely ticking again, not frozen on one frame.
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		vi.advanceTimersByTime(400);
-		expect(observedTitles(writes, windowsTitleMock).length).toBeGreaterThan(0);
+		expect(observedTitles(writes).length).toBeGreaterThan(0);
 	});
 
 	it("ticks at the configured interval, re-arming a live spinner on change", () => {
 		setTerminalTitleState("working");
 		setTerminalTitleSpinnerInterval(1000);
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 
 		// Nothing before the new period elapses, even though the default period has passed several times.
 		vi.advanceTimersByTime(999);
-		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
+		expect(observedTitles(writes)).toEqual([]);
 		vi.advanceTimersByTime(1);
-		expect(observedTitles(writes, windowsTitleMock)).toHaveLength(1);
+		expect(observedTitles(writes)).toHaveLength(1);
 		vi.advanceTimersByTime(1000);
-		expect(observedTitles(writes, windowsTitleMock)).toHaveLength(2);
+		expect(observedTitles(writes)).toHaveLength(2);
 	});
 
 	it("pins a static ':' working separator and schedules no timer at interval 0", () => {
 		setTerminalTitleSpinnerInterval(0);
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		setTerminalTitleState("working");
 
-		expect(observedTitles(writes, windowsTitleMock)).toEqual(["π : my-project"]);
+		expect(observedTitles(writes)).toEqual(["π : my-project"]);
 		expect(vi.getTimerCount()).toBe(0);
-		resetObserved(writes, windowsTitleMock);
+		resetObserved(writes);
 		vi.advanceTimersByTime(DEFAULT_SPINNER_INTERVAL_MS * 10);
-		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
+		expect(observedTitles(writes)).toEqual([]);
 
 		// Other states are unaffected by the static spinner.
 		setTerminalTitleState("idle");
-		expect(observedTitles(writes, windowsTitleMock)).toEqual(["π > my-project"]);
+		expect(observedTitles(writes)).toEqual(["π > my-project"]);
 	});
 
 	it("clears the title before popping the saved one on shutdown", () => {
@@ -399,32 +379,6 @@ describe("disposeTerminalTitleState", () => {
 		disposeTerminalTitleState();
 		popTerminalTitle();
 		expect(writes).toEqual(["\x1b]0;\x07\x1b[23;2t"]);
-	});
-
-	it("restores the initial Windows console title on teardown and does not overwrite it on pop", () => {
-		const originalPlatform = process.platform;
-		const native = windowsTitleMock;
-		if (!native) throw new Error("Windows console title mock not initialized");
-		try {
-			Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-			native.current = "original-shell-title";
-
-			initTerminalTitleState();
-			setSessionTerminalTitle("running-session");
-			expect(native.titles).toContain("π > running-session");
-
-			resetObserved(writes, native);
-			// The `InteractiveMode.shutdown()` order: dispose, then pop.
-			disposeTerminalTitleState();
-			expect(native.titles.at(-1)).toBe("original-shell-title");
-
-			// ConPTY applies OSC 0 as a console-title set: the clear would blank the restore.
-			popTerminalTitle();
-			expect(writes).toEqual([]);
-			expect(native.titles.at(-1)).toBe("original-shell-title");
-		} finally {
-			Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
-		}
 	});
 });
 
@@ -462,7 +416,7 @@ describe("reporting the session to Tern", () => {
 		setTerminalHeadless(prevHeadless);
 	});
 
-	it.skipIf(process.platform === "win32")("reports the directory with OSC 7 when it changes", () => {
+	it("reports the directory with OSC 7 when it changes", () => {
 		let cwd = "/work/my project";
 		setTerminalSessionSource({ file: () => undefined, cwd: () => cwd });
 		// Retitling in the same directory says nothing new.

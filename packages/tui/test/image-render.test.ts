@@ -6,7 +6,6 @@ import {
 	type CellDimensions,
 	getCellDimensions,
 	ImageProtocol,
-	isWindowsTerminalPreviewSixelSupported,
 	renderImage,
 	setCellDimensions,
 	setTerminalBackgroundColor,
@@ -364,32 +363,6 @@ describe("terminal image rendering", () => {
 		expect(imageLine).not.toContain("\x1b[0A");
 		expect(imageLine).not.toContain("\x1b[0B");
 		expect(imageLine).not.toMatch(/\x1b\[\d+[AB]/);
-	});
-});
-
-describe("Windows Terminal Preview SIXEL detection", () => {
-	it("requires Windows platform, WT session, and known version 1.22+", () => {
-		expect(
-			isWindowsTerminalPreviewSixelSupported(
-				{ WT_SESSION: "1", TERM_PROGRAM: "Windows_Terminal", TERM_PROGRAM_VERSION: "1.22.2362.0" },
-				"win32",
-			),
-		).toBe(true);
-		expect(
-			isWindowsTerminalPreviewSixelSupported(
-				{ WT_SESSION: "1", TERM_PROGRAM: "Windows_Terminal", TERM_PROGRAM_VERSION: "1.21.0.0" },
-				"win32",
-			),
-		).toBe(false);
-		expect(
-			isWindowsTerminalPreviewSixelSupported({ WT_SESSION: "1", TERM_PROGRAM: "Windows_Terminal" }, "win32"),
-		).toBe(false);
-		expect(
-			isWindowsTerminalPreviewSixelSupported(
-				{ WT_SESSION: "1", TERM_PROGRAM: "Windows_Terminal", TERM_PROGRAM_VERSION: "1.22.2362.0" },
-				"linux",
-			),
-		).toBe(false);
 	});
 });
 

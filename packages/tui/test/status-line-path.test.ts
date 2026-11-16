@@ -5,14 +5,7 @@ import * as path from "node:path";
 import type { SegmentContext } from "../src/status-line/segments";
 import { renderSegment } from "../src/status-line/segments";
 import { initTheme, theme } from "../src/theme";
-import { getWindowsShortPath } from "@oh-my-pi/pi-natives/path";
-import {
-	__resetProjectDirCacheForTests,
-	getProjectDir,
-	pathIsWithin,
-	removeSyncWithRetries,
-	setProjectDir,
-} from "@oh-my-pi/pi-utils";
+import { getProjectDir, pathIsWithin, removeSyncWithRetries, setProjectDir } from "@oh-my-pi/pi-utils";
 
 const originalProjectDir = getProjectDir();
 const SCRATCH_ROOT_PREFIXES: readonly string[] = [
@@ -87,10 +80,6 @@ afterEach(() => {
 });
 
 function expectContentToContainPath(content: string, expected: string): void {
-	if (process.platform === "win32") {
-		expect(content.toLowerCase()).toContain(expected.toLowerCase());
-		return;
-	}
 	expect(content).toContain(expected);
 }
 
@@ -116,72 +105,7 @@ function createFakeHome(): { home: string; projectsRoot: string } {
 }
 
 describe("status line path segment", () => {
-	it.skipIf(process.platform !== "win32")("renders the long cwd when launched through an existing 8.3 alias", () => {
-		const home = os.homedir();
-		const shortHome = getWindowsShortPath(home);
-		// Some Windows volumes have no short names, including for the profile.
-		if (!shortHome || shortHome.toLowerCase() === home.toLowerCase()) return;
-
-		process.chdir(shortHome);
-		__resetProjectDirCacheForTests();
-		expect(process.cwd().toLowerCase()).toBe(shortHome.toLowerCase());
-
-		const ctx = createPathContext();
-		ctx.options.path = { abbreviate: false, maxLength: 1000, stripWorkPrefix: false };
-		const label = Bun.stripANSI(renderSegment("path", ctx).content).toLowerCase();
-		expect(label).toContain(home.toLowerCase());
-		expect(label).not.toContain(shortHome.toLowerCase());
-
-		setProjectDir(shortHome);
-		expect(getProjectDir().toLowerCase()).toBe(home.toLowerCase());
-	});
-
-	it.skipIf(process.platform !== "win32")("abbreviates a raw 8.3 repository path only when enabled", () => {
-		const home = os.homedir();
-		const shortHome = getWindowsShortPath(home);
-		if (!shortHome || shortHome.toLowerCase() === home.toLowerCase()) return;
-
-		const ctx = createPathContext();
-		ctx.options.path = { abbreviate: true, maxLength: 1000, stripWorkPrefix: false };
-		ctx.activeRepo = {
-			cwd: shortHome,
-			repoRoot: shortHome,
-			relativeRepoRoot: ".",
-			source: "single-direct-child-repo",
-		};
-		const label = Bun.stripANSI(renderSegment("path", ctx).content);
-		expect(label).toContain("~");
-		expect(label.toLowerCase()).not.toContain(shortHome.toLowerCase());
-		expect(ctx.activeRepo.cwd).toBe(shortHome);
-
-		ctx.options.path.abbreviate = false;
-		expectContentToContainPath(Bun.stripANSI(renderSegment("path", ctx).content), shortHome);
-	});
-
-	it.skipIf(process.platform !== "win32")("keeps junction spelling in the displayed cwd", () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-cwd-junction-"));
-		const target = path.join(root, "target");
-		const alias = path.join(root, "alias");
-		try {
-			fs.mkdirSync(target);
-			fs.symlinkSync(target, alias, "junction");
-			setProjectDir(alias);
-
-			const ctx = createPathContext();
-			ctx.options.path = { abbreviate: false, maxLength: 1000, stripWorkPrefix: false };
-			const label = Bun.stripANSI(renderSegment("path", ctx).content);
-			expect(path.basename(getProjectDir())).toBe("alias");
-			expect(label).toContain("alias");
-			expect(label).not.toContain(`${path.sep}target`);
-		} finally {
-			setProjectDir(originalProjectDir);
-			fs.rmSync(root, { recursive: true, force: true });
-		}
-	});
-
 	it.skipIf(CHECKOUT_IS_SCRATCH)("strips the Projects root for symlink-equivalent aliases", () => {
-		if (process.platform === "win32") return;
-
 		const { home, projectsRoot } = createFakeHome();
 
 		const realProjectDir = fs.mkdtempSync(path.join(projectsRoot, "omp-status-line-"));
@@ -236,7 +160,7 @@ describe("status line path segment", () => {
 		const alias = path.join(home, "alias");
 		try {
 			fs.mkdirSync(projectDir);
-			fs.symlinkSync(projectDir, alias, process.platform === "win32" ? "junction" : "dir");
+			fs.symlinkSync(projectDir, alias, "dir");
 			const ctx = createPathContext();
 			ctx.activeRepo = {
 				cwd: alias,
@@ -249,7 +173,7 @@ describe("status line path segment", () => {
 			ctx.activeRepo.cwd = scratchDir;
 			renderSegment("path", ctx);
 			fs.unlinkSync(alias);
-			fs.symlinkSync(scratchDir, alias, process.platform === "win32" ? "junction" : "dir");
+			fs.symlinkSync(scratchDir, alias, "dir");
 			ctx.activeRepo.cwd = alias;
 
 			const rendered = Bun.stripANSI(renderSegment("path", ctx).content);

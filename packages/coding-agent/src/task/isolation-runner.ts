@@ -379,7 +379,7 @@ export async function retainIsolationWorkspace(
  */
 export async function vacateIsolationSlot(baseDir: string): Promise<string | undefined> {
 	const retainedBase = `${baseDir}.retained-${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 32).toString(16)}`;
-	// A valid move can still fail transiently (Windows AV/indexer locks);
+	// A valid move can still fail transiently (AV scans, indexer locks);
 	// retry briefly before conceding the deterministic slot.
 	for (let attempt = 0; attempt < 3; attempt++) {
 		try {

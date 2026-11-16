@@ -45,7 +45,6 @@ export const VcsJjWorkspace = nativeBindings.VcsJjWorkspace ?? missingNativeClas
 export const VcsRepo = nativeBindings.VcsRepo ?? missingNativeClass("VcsRepo");
 
 // functions
-export const __ompInstallTokioRuntime = nativeBindings.__ompInstallTokioRuntime ?? missingNativeExport("__ompInstallTokioRuntime");
 export const __ompSetGrammarDir = nativeBindings.__ompSetGrammarDir ?? missingNativeExport("__ompSetGrammarDir");
 export const __piNativesBuildVersion = nativeBindings.__piNativesBuildVersion;
 export const appleFmAvailability = nativeBindings.appleFmAvailability ?? missingNativeExport("appleFmAvailability");
@@ -76,12 +75,10 @@ export const encodeSixel = nativeBindings.encodeSixel ?? missingNativeExport("en
 export const encodeSixelAsync = nativeBindings.encodeSixelAsync ?? missingNativeExport("encodeSixelAsync");
 export const execReplace = nativeBindings.execReplace ?? missingNativeExport("execReplace");
 export const executeShell = nativeBindings.executeShell ?? missingNativeExport("executeShell");
-export const expandWindowsLongPath = nativeBindings.expandWindowsLongPath ?? missingNativeExport("expandWindowsLongPath");
 export const extractInlineSloppyRegions = nativeBindings.extractInlineSloppyRegions ?? missingNativeExport("extractInlineSloppyRegions");
 export const extractSegments = nativeBindings.extractSegments ?? missingNativeExport("extractSegments");
 export const fuzzyFind = nativeBindings.fuzzyFind ?? missingNativeExport("fuzzyFind");
 export const getSupportedLanguages = nativeBindings.getSupportedLanguages ?? missingNativeExport("getSupportedLanguages");
-export const getWindowsShortPath = nativeBindings.getWindowsShortPath ?? missingNativeExport("getWindowsShortPath");
 export const getWorkProfile = nativeBindings.getWorkProfile ?? missingNativeExport("getWorkProfile");
 export const glob = nativeBindings.glob ?? missingNativeExport("glob");
 export const grep = nativeBindings.grep ?? missingNativeExport("grep");
@@ -202,9 +199,7 @@ export const IsoBackendKind = {
 	Zfs: 2,
 	LinuxReflink: 3,
 	Overlayfs: 4,
-	WindowsBlockClone: 5,
-	Projfs: 6,
-	Rcopy: 7,
+	Rcopy: 5,
 };
 export const IsoChangeKind = {
 	Added: 0,

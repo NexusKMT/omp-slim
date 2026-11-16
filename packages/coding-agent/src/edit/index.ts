@@ -10,7 +10,7 @@ import type {
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
 } from "@oh-my-pi/pi-agent-core";
-import type { Model, ToolExample } from "@oh-my-pi/pi-ai";
+import type { ToolExample } from "@oh-my-pi/pi-ai";
 import {
 	EditSession,
 	editDescription,
@@ -302,11 +302,10 @@ async function mkdirAllowingFallback(directory: string): Promise<void> {
 
 /**
  * Permission bits a move carries to its destination, or undefined where they cannot be read:
- * Windows has no POSIX mode, and a source the process may not stat is moved by the
- * privileged fallback writer, which keeps the destination's own mode.
+ * a source the process may not stat is moved by the privileged fallback writer, which keeps
+ * the destination's own mode.
  */
 async function movedFileMode(filePath: string): Promise<number | undefined> {
-	if (process.platform === "win32") return undefined;
 	try {
 		return (await fs.stat(filePath)).mode & 0o7777;
 	} catch (error) {

@@ -23,7 +23,6 @@ export async function runBunCli(args: readonly string[], cwd: string): Promise<B
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
-		windowsHide: true,
 	});
 	// Drain both pipes concurrently with exit: awaiting `exited` first deadlocks
 	// once a chatty install fills the OS pipe buffer.

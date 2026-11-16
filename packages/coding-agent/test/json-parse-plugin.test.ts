@@ -24,7 +24,7 @@ describe("large JSON build assets", () => {
 				].join("\n"),
 			);
 			const buildDir = dir.join("build");
-			const executable = process.platform === "win32" ? "app.exe" : "app";
+			const executable = "app";
 			const result = await Bun.build({
 				entrypoints: [`${source}/entry.ts`],
 				target: "bun",

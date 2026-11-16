@@ -139,8 +139,8 @@ describe("Settings layer refresh", () => {
 		}
 	});
 
-	// Root ignores directory permissions and Windows ignores POSIX modes, so the save could not fail.
-	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+	// Root ignores directory permissions, so the save could not fail.
+	it.skipIf(process.getuid?.() === 0)(
 		"reloads over a save that fails, keeping the unsaved change live until a later save lands",
 		async () => {
 			// config.yml is a symlink into a read-only directory (e.g. a Nix store file).

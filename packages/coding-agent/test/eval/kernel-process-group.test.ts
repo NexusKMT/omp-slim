@@ -14,8 +14,6 @@ class TestKernel extends BaseKernel {
 	}
 }
 
-const POSIX = process.platform !== "win32";
-
 /** Ground truth for "does a process group with this leader exist right now?" via the null signal. */
 function processGroupExists(pid: number): boolean {
 	try {
@@ -178,7 +176,7 @@ describe("killProcessGroup", () => {
 		expect(killProcessGroup(0x7fffffff, "SIGKILL")).toBe(false);
 	});
 
-	test.skipIf(!POSIX)("kills a live detached process group", async () => {
+	test("kills a live detached process group", async () => {
 		const proc = Bun.spawn(["sleep", "30"], {
 			detached: true,
 			stdin: "ignore",
@@ -197,7 +195,7 @@ describe("killProcessGroup", () => {
 });
 
 describe("BaseKernel shutdown", () => {
-	test.skipIf(!POSIX)("confirms a graceful zero-code exit on shutdown and repeated cleanup", async () => {
+	test("confirms a graceful zero-code exit on shutdown and repeated cleanup", async () => {
 		const proc = Bun.spawn(["sh", "-c", 'read request; [ "$request" = exit ]'], {
 			detached: true,
 			stdin: "pipe",
@@ -218,7 +216,7 @@ describe("BaseKernel shutdown", () => {
 		}
 	});
 
-	test.skipIf(!POSIX).each(["graceful", "timeout"] as const)(
+	test.each(["graceful", "timeout"] as const)(
 		"kills TERM-resistant descendants after a %s leader exit",
 		async exitMode => {
 			const pidFile = `/tmp/omp-kernel-process-group-${process.pid}-${Date.now()}`;

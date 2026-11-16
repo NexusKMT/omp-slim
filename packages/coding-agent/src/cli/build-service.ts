@@ -12,7 +12,7 @@
  *
  * omp is a public product, so no token is sent. The origin is `PI_BUILD_URL`
  * ({@link DEFAULT_BUILD_URL} when unset). `{target}` is
- * `{macos|linux|linux-musl|windows}-{arm64|x86_64}` ({@link resolveBuildHost}).
+ * `{macos|linux|linux-musl}-{arm64|x86_64}` ({@link resolveBuildHost}).
  * Requests carry `User-Agent: omp/<version>`, which the service counts in its
  * update-check statistics.
  *
@@ -75,10 +75,6 @@ export function resolveBuildHost(platform: NodeJS.Platform, arch: string, musl: 
 			targetOs = musl ? "linux-musl" : "linux";
 			fileOs = targetOs;
 			break;
-		case "win32":
-			targetOs = "windows";
-			fileOs = "windows";
-			break;
 		default:
 			throw new Error(`Unsupported platform: ${platform}`);
 	}
@@ -95,7 +91,7 @@ export function resolveBuildHost(platform: NodeJS.Platform, arch: string, musl: 
 	}
 	return {
 		target: `${targetOs}-${targetArch}`,
-		fileName: `${APP_NAME}-${fileOs}-${arch}${platform === "win32" ? ".exe" : ""}`,
+		fileName: `${APP_NAME}-${fileOs}-${arch}`,
 	};
 }
 

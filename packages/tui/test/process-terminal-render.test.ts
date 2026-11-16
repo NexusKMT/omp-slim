@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { postmortem } from "@oh-my-pi/pi-utils";
 import {
 	createProcessTerminalRenderHarness,
 	type ProcessTerminalRenderHarness,
@@ -95,7 +94,6 @@ describe("ProcessTerminal geometry reflow through the renderer", () => {
 	});
 
 	it("stops rendering and raises SIGHUP when terminal input ends", async () => {
-		// SIGHUP is the POSIX exit path; Windows quits directly (covered below).
 		Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 		harness = createProcessTerminalRenderHarness(100, 30);
 		await harness.settle();
@@ -108,17 +106,6 @@ describe("ProcessTerminal geometry reflow through the renderer", () => {
 
 		expect(harness.probe.widths).toHaveLength(rendersBeforeDisconnect);
 		expect(harness.signals.slice(signalsBeforeDisconnect)).toContainEqual({ pid: process.pid, signal: "SIGHUP" });
-	});
-
-	it("does not wait for terminal output to drain after input ends on Windows", async () => {
-		Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-		const quit = vi.spyOn(postmortem, "quit").mockResolvedValue(undefined);
-		harness = createProcessTerminalRenderHarness(100, 30);
-
-		await harness.endInput();
-
-		expect(quit).toHaveBeenCalledWith(129, { drainStdout: false });
-		expect(harness.signals).toHaveLength(0);
 	});
 
 	it("stops rendering and raises SIGHUP when terminal output fails", async () => {

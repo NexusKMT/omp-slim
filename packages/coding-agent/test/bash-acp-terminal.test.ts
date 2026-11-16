@@ -9,11 +9,11 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
 import { encodeTerminalImage } from "@oh-my-pi/pi-coding-agent/utils/terminal-graphics";
 
-// `getShellConfig()` validates that `shellPath` exists, and `/bin/bash` does not
-// on Windows. The ACP route only forwards the path to the stubbed client
-// terminal, so an empty `bash` file stands in for the resolved shell everywhere.
+// `getShellConfig()` validates that `shellPath` exists. The ACP route only
+// forwards the path to the stubbed client terminal, so an empty `bash` file
+// stands in for the resolved shell everywhere.
 const stubShellDir = TempDir.createSync("@omp-acp-shell-");
-const STUB_BASH = stubShellDir.join(process.platform === "win32" ? "bash.exe" : "bash");
+const STUB_BASH = stubShellDir.join("bash");
 fs.writeFileSync(STUB_BASH, "");
 afterAll(() => stubShellDir.removeSync());
 
@@ -23,10 +23,9 @@ function makeSession(bridge: ClientBridge): ToolSession {
 		hasUI: false,
 		skills: [],
 		getSessionFile: () => null,
-		// Fixed bash shell keeps the wrap assertions cross-platform: the fix
-		// must reuse the resolved shell (Git Bash on Windows, `$SHELL` on
-		// POSIX) instead of collapsing to `cmd.exe` — that's the contract
-		// this test defends.
+		// Fixed bash shell keeps the wrap assertions deterministic: the fix must
+		// reuse the resolved shell (`$SHELL`) instead of collapsing to a generic
+		// system shell — that's the contract this test defends.
 		settings: Settings.isolated({
 			"async.enabled": false,
 			"bash.autoBackground.enabled": false,
@@ -93,8 +92,8 @@ describe("BashTool ACP terminal routing", () => {
 
 		// createTerminal must send the resolved bash shell + `-l -c <line>` so
 		// spec-conformant ACP clients that spawn `command` directly (no implicit
-		// shell) still get bash semantics — never `cmd.exe`, which would break
-		// `$VAR`, `$(...)`, `source`, and POSIX quoting on Windows.
+		// shell) still get bash semantics — never a generic shell, which would
+		// break `$VAR`, `$(...)`, `source`, and POSIX quoting.
 		expect(createSpy).toHaveBeenCalledTimes(1);
 		const params = createSpy.mock.calls[0]![0];
 		expect(params.command).toBe(STUB_BASH);

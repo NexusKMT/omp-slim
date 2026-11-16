@@ -12,7 +12,6 @@
  * on the Cargo path only; Bazel builds ignore it.
  */
 
-import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import * as path from "node:path";
@@ -24,35 +23,6 @@ import { generateEnumExports } from "./gen-enums";
 // pcre2-sys prefers a system libpcre2 when pkg-config finds one. Keep the
 // static build so the local addon never retains host Homebrew paths.
 process.env.PCRE2_SYS_STATIC ??= "1";
-
-// Windows: wasmtime installs the C API headers used by tree-sitter with CMake.
-// VS Build Tools ships CMake without exposing it outside a vcvars prompt.
-// Resolve the VS install via vswhere and append its CMake directory, keeping
-// any user-provided tools ahead.
-if (process.platform === "win32" && !Bun.which("cmake")) {
-	const vcToolsComponent =
-		process.arch === "arm64"
-			? "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
-			: "Microsoft.VisualStudio.Component.VC.Tools.x86.x64";
-	const vswhere = path.join(
-		process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
-		"Microsoft Visual Studio",
-		"Installer",
-		"vswhere.exe",
-	);
-	const probe = Bun.spawnSync(
-		[vswhere, "-latest", "-products", "*", "-requires", vcToolsComponent, "-property", "installationPath"],
-		{ stdout: "pipe", stderr: "pipe" },
-	);
-	const vsRoot = probe.exitCode === 0 ? probe.stdout.toString("utf-8").trim() : "";
-	if (vsRoot) {
-		const cmakeExt = path.join(vsRoot, "Common7", "IDE", "CommonExtensions", "Microsoft", "CMake");
-		const extraDirs = [path.join(cmakeExt, "CMake", "bin")].filter(dir => fsSync.existsSync(dir));
-		if (extraDirs.length > 0) {
-			process.env.PATH = [process.env.PATH ?? "", ...extraDirs].filter(Boolean).join(path.delimiter);
-		}
-	}
-}
 
 const repoRoot = path.join(import.meta.dir, "../../..");
 const rustDir = path.join(repoRoot, "crates/pi-natives");
@@ -71,13 +41,9 @@ const variantSuffix = effectiveVariant ? `-${effectiveVariant}` : "";
 // instead of inheriting the host CPU when RUSTFLAGS is unset. Non-x64 builds keep
 // the target's default CPU features: `-C target-cpu=native` would bake the build
 // host's CPU features into the addon and trips ring 0.17's aarch64-apple
-// const assertion (CAPS_STATIC == MIN_STATIC_FEATURES). Shipping Windows addons
-// also link the MSVC CRT statically so clean systems need no VC++ Redistributable.
+// const assertion (CAPS_STATIC == MIN_STATIC_FEATURES).
 if (!Bun.env.RUSTFLAGS) {
 	const rustFlags: string[] = [];
-	if (process.platform === "win32") {
-		rustFlags.push("-C", "target-feature=+crt-static");
-	}
 	if (effectiveVariant === "modern") {
 		rustFlags.push("-C", "target-cpu=x86-64-v3");
 	} else if (effectiveVariant === "baseline") {
@@ -107,36 +73,19 @@ async function installBinary(src: string, dest: string): Promise<void> {
 	await fs.copyFile(src, tempPath);
 
 	try {
-		// Atomic rename - works even if dest is loaded on Linux/macOS (old inode stays valid)
+		// Atomic rename: readers holding the previous file keep its inode alive.
 		await fs.rename(tempPath, dest);
-	} catch {
-		// On Windows, loaded DLLs cannot be overwritten via rename
-		// Try delete-then-rename as fallback
-		try {
-			await fs.unlink(dest);
-		} catch (unlinkErr) {
-			if ((unlinkErr as NodeJS.ErrnoException).code !== "ENOENT") {
-				await fs.unlink(tempPath).catch(() => {});
-				const isWindows = process.platform === "win32";
-				throw new Error(
-					`Cannot replace ${path.basename(dest)}${isWindows ? " (file may be in use - close any running processes)" : ""}: ${(unlinkErr as Error).message}`,
-				);
-			}
-		}
-		try {
-			await fs.rename(tempPath, dest);
-		} catch (finalErr) {
-			await fs.unlink(tempPath).catch(() => {});
-			throw new Error(`Failed to install ${path.basename(dest)}: ${(finalErr as Error).message}`);
-		}
+	} catch (error) {
+		await fs.unlink(tempPath).catch(() => {});
+		throw new Error(`Failed to install ${path.basename(dest)}: ${(error as Error).message}`);
 	}
 }
 
 async function resolveBuiltAddonPath(outputDir: string, canonicalFilename: string): Promise<string> {
 	// napi-rs 3.x emits `${binaryName}.${platformArchABI}.node` where
-	// platformArchABI is e.g. `darwin-x64`, `linux-x64-gnu`, `win32-x64-msvc`,
-	// `darwin-arm64`. Build into an isolated output dir so only this invocation's
-	// outputs are considered fresh candidates.
+	// platformArchABI is e.g. `darwin-x64`, `linux-x64-gnu`, `darwin-arm64`.
+	// Build into an isolated output dir so only this invocation's outputs are
+	// considered fresh candidates.
 	const entries = await fs.readdir(outputDir);
 
 	if (entries.includes(canonicalFilename)) {
@@ -188,9 +137,7 @@ const buildOutputDir = await fs.mkdtemp(
 
 // Resolve the CLI's JS entry from the package manifest rather than the
 // `node_modules/.bin` shim: `bunx @napi-rs/cli` can pick up the wrong bin on
-// systems where `cli` exists on PATH (e.g. Mono's /usr/bin/cli on Ubuntu), and
-// on Windows the shim is a `napi.exe` launcher that Bun would try to parse as
-// JavaScript.
+// systems where `cli` exists on PATH (e.g. Mono's /usr/bin/cli on Ubuntu).
 const require_ = createRequire(import.meta.url);
 const napiManifestPath = require_.resolve("@napi-rs/cli/package.json");
 const napiManifest: unknown = require_(napiManifestPath);

@@ -100,10 +100,6 @@ describe("formatKeyHint with keycap glyphs", () => {
 });
 
 describe("getDefaultPasteImageKeys", () => {
-	it("keeps Ctrl+V registered for image paste on Windows alongside the terminal-safe fallback", () => {
-		expect(getDefaultPasteImageKeys("win32")).toEqual(["ctrl+v", "alt+v"]);
-	});
-
 	it("adds the macOS Command key event to Ctrl+V for image paste", () => {
 		expect(getDefaultPasteImageKeys("linux")).toEqual(["ctrl+v"]);
 		expect(getDefaultPasteImageKeys("darwin")).toEqual(["ctrl+v", "super+v"]);

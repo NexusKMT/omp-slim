@@ -137,9 +137,7 @@ describe("security importers and store", () => {
 		const stateRoot = path.join(temporaryRoot, "state");
 		const store = await SecurityStore.open(repositoryRoot, { stateRoot });
 		expect(store.projectDirectory.startsWith(repositoryRoot)).toBeFalse();
-		if (process.platform !== "win32") {
-			const mode = (await fs.stat(store.projectDirectory)).mode & 0o777;
-			expect(mode).toBe(0o700);
-		}
+		const mode = (await fs.stat(store.projectDirectory)).mode & 0o777;
+		expect(mode).toBe(0o700);
 	});
 });

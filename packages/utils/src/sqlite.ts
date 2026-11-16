@@ -1,7 +1,6 @@
 /** Shared SQLite opening, error attribution, and result-code classification for persistent stores. */
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import { installSqliteLockShim } from "@oh-my-pi/pi-natives/sqlite-locks";
 import { getDbBusyTimeoutMs } from "./env";
 import { withFileLockSync } from "./file-lock";
@@ -44,55 +43,6 @@ export function ensureSqliteLockShim(): boolean {
  * file, or `undefined` when the stat itself failed and no conclusion is safe.
  */
 export type SqliteFileIdentity = string | null | undefined;
-
-/**
- * Corrupt handles held open by in-process openers awaiting recovery, keyed by
- * resolved store path. Windows refuses to unlink a file any handle still holds,
- * so the opener that quarantines the store closes its peers' dead handles too.
- */
-const pendingCorruptHandles = new Map<string, Set<Database>>();
-
-function corruptHandleKey(dbPath: string): string {
-	const resolved = path.resolve(dbPath);
-	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-}
-
-function registerCorruptHandle(dbPath: string, db: Database | undefined): void {
-	if (!db) return;
-	const key = corruptHandleKey(dbPath);
-	let handles = pendingCorruptHandles.get(key);
-	if (!handles) {
-		handles = new Set();
-		pendingCorruptHandles.set(key, handles);
-	}
-	handles.add(db);
-}
-
-function unregisterCorruptHandle(dbPath: string, db: Database | undefined): void {
-	if (!db) return;
-	const key = corruptHandleKey(dbPath);
-	const handles = pendingCorruptHandles.get(key);
-	if (!handles) return;
-	handles.delete(db);
-	if (handles.size === 0) pendingCorruptHandles.delete(key);
-}
-
-/** Closes peers' failed handles on the store; each peer still closes (idempotently) and adopts on its own path. */
-function closePeerCorruptHandles(dbPath: string, own: Database | undefined): void {
-	const handles = pendingCorruptHandles.get(corruptHandleKey(dbPath));
-	if (!handles) return;
-	for (const peer of handles) {
-		if (peer === own) continue;
-		try {
-			peer.close();
-		} catch (error) {
-			logger.warn("Failed to close a peer's corrupt SQLite handle before quarantine", {
-				path: dbPath,
-				error: String(error),
-			});
-		}
-	}
-}
 
 class SqliteAttemptFailure extends Error {
 	readonly original: unknown;
@@ -188,7 +138,6 @@ async function openWithBusyRetries<T>(
 		} catch (caught) {
 			const error = options.recoverCorruption ? revealHiddenCorruption(db, caught) : caught;
 			if (options.recoverCorruption && isSqliteCorruptionError(error)) {
-				registerCorruptHandle(dbPath, db);
 				throw new SqliteAttemptFailure(error, identity, { db });
 			}
 			closeFailedDatabase(db, error, identity);
@@ -211,7 +160,6 @@ function openOnce<T>(dbPath: string, initialize: (db: Database) => T, options: S
 	} catch (caught) {
 		const error = options.recoverCorruption ? revealHiddenCorruption(db, caught) : caught;
 		if (options.recoverCorruption && isSqliteCorruptionError(error)) {
-			registerCorruptHandle(dbPath, db);
 			throw new SqliteAttemptFailure(error, identity, { db });
 		}
 		closeFailedDatabase(db, error, identity);
@@ -235,10 +183,6 @@ function quarantineCorruptSqliteStore(dbPath: string, db: Database | undefined):
 		}
 	}
 	db?.close();
-	// Only Windows refuses to unlink a file another handle still holds. Elsewhere
-	// each peer must keep its own handle until it closes it after adopting the
-	// replacement; closing it here races the peer's recovery on POSIX.
-	if (process.platform === "win32") closePeerCorruptHandles(dbPath, db);
 
 	const removed: string[] = [];
 	try {
@@ -295,7 +239,6 @@ function recoverCorruptDatabase(dbPath: string, error: unknown, options: SqliteO
 				return quarantineCorruptSqliteStore(dbPath, failure.db);
 			});
 		} finally {
-			unregisterCorruptHandle(dbPath, failure.db);
 			closeFailedDatabase(failure.db, failure.original, failure.identity);
 		}
 	} catch (preservationError) {

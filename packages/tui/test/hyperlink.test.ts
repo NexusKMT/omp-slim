@@ -202,22 +202,6 @@ describe("fileHyperlink", () => {
 		expect(() => fileHyperlink(filePath, "odd.ts")).not.toThrow();
 	});
 
-	it.skipIf(process.platform !== "win32")(
-		"renders a path Node cannot encode as plain text instead of throwing",
-		() => {
-			setHyperlinkMode("always");
-			// A UNC path escaped twice by its author, as a resumed session can still
-			// hold it: Node rejects it with ERR_INVALID_ARG_VALUE ("Empty UNC servername").
-			const malformed = String.raw`\\\wsl.localhost\Ubuntu-24.04\opt\build-armv7\crypto\evp.h`;
-			expect(fileUriForTerminal(malformed, undefined, "kitty")).toBeUndefined();
-			expect(fileHyperlink(malformed, "evp.h")).toBe("evp.h");
-			expect(fileLinkSpan(malformed, "evp.h")).toEqual({ t: "evp.h", s: "path" });
-			// Native heads and image props share the same converter.
-			expect(fileHref(malformed)).toBeUndefined();
-			expect(openableImageProps(malformed)).toEqual({});
-		},
-	);
-
 	it("defaults host to os.hostname() when only PI_LINK_SCHEME is set", () => {
 		applyFileLinkSetting({ scheme: "ompfile" });
 		const filePath = path.resolve("/Users/foo/bar.ts");

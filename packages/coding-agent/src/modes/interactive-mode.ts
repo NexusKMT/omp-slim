@@ -7742,8 +7742,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * On POSIX the relaunch is a true `execvp(3)` image replacement: same PID,
 	 * same terminal, no lingering parent. Postmortem cleanups and stdout are
 	 * flushed first because nothing in this process runs after a successful
-	 * exec. On Windows (no exec semantics) or on exec failure, falls back to
-	 * spawning the replacement and lingering only to forward its exit code.
+	 * exec. On exec failure, falls back to spawning the replacement and
+	 * lingering only to forward its exit code.
 	 */
 	async restart(): Promise<void> {
 		if (this.#isShuttingDown) return;
@@ -7769,12 +7769,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (activeProfile) cmd.push("--profile", activeProfile);
 		await postmortem.cleanup();
 		await postmortem.drainStdout();
-		if (process.platform !== "win32") {
-			try {
-				execReplace(cmd); // never returns on success
-			} catch (err) {
-				process.stderr.write(`${chalk.red(`Restart exec failed: ${err instanceof Error ? err.message : err}`)}\n`);
-			}
+		try {
+			execReplace(cmd); // never returns on success
+		} catch (err) {
+			process.stderr.write(`${chalk.red(`Restart exec failed: ${err instanceof Error ? err.message : err}`)}\n`);
 		}
 		try {
 			const child = Bun.spawn(cmd, {

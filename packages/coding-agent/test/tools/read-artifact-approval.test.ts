@@ -116,19 +116,16 @@ describe("artifact reads through session approval", () => {
 		).toMatchObject({ policy: "prompt", tier: "exec" });
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"keeps literal colon filenames separate from a base file's grant",
-		async () => {
-			await Bun.write(path.join(root, "notes.txt"), "base content");
-			await Bun.write(path.join(root, "notes.txt:1"), "literal content");
-			const read = readTool();
-			const grants = new SessionApprovals();
-			grants.record(approvalGrantKey("read", approvalTargetKey(root, "notes.txt")!));
+	it("keeps literal colon filenames separate from a base file's grant", async () => {
+		await Bun.write(path.join(root, "notes.txt"), "base content");
+		await Bun.write(path.join(root, "notes.txt:1"), "literal content");
+		const read = readTool();
+		const grants = new SessionApprovals();
+		grants.record(approvalGrantKey("read", approvalTargetKey(root, "notes.txt")!));
 
-			expect(resolveApproval(read, { path: "notes.txt:1" }, "always-ask-cached", {}, grants).policy).toBe("prompt");
-			grants.record(approvalGrantKey("read", approvalTargetKey(root, "notes.txt:1")!));
-			expect(resolveApproval(read, { path: "notes.txt:1" }, "always-ask-cached", {}, grants).policy).toBe("allow");
-			expect(textOf(await read.execute("literal", { path: "notes.txt:1" }))).toContain("literal content");
-		},
-	);
+		expect(resolveApproval(read, { path: "notes.txt:1" }, "always-ask-cached", {}, grants).policy).toBe("prompt");
+		grants.record(approvalGrantKey("read", approvalTargetKey(root, "notes.txt:1")!));
+		expect(resolveApproval(read, { path: "notes.txt:1" }, "always-ask-cached", {}, grants).policy).toBe("allow");
+		expect(textOf(await read.execute("literal", { path: "notes.txt:1" }))).toContain("literal content");
+	});
 });

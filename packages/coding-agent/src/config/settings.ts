@@ -585,43 +585,22 @@ const MAX_SYMLINK_HOPS = 40;
 
 /**
  * Split a dangling symlink target into the physical path segments the flush
- * walk should follow. Three platform-correctness rules that a naive
- * `target.split(/[\\/]+/)` gets wrong:
+ * walk should follow. Two POSIX-correctness rules that a naive
+ * `target.split("/")` gets wrong:
  *
  *  1. Root double-count. An ABSOLUTE target seeds the accumulator at
- *     `parse(target).root` — `C:\` on Windows, the `\\server\share\` prefix of
- *     a UNC path, `/` on POSIX. The root must therefore be STRIPPED from the
- *     string before splitting; otherwise it is re-emitted as a leading segment
- *     and `C:\managed\final.yml` resolves to `C:\` + `C:` + `managed` + … =
- *     `C:\C:\managed\final.yml`, so the flush fails against a dangling absolute
- *     link on Windows. (POSIX escaped this by luck: the leading `/` splits to an
- *     empty leading segment that the walk already skips.) A RELATIVE target
- *     seeds at the link's real parent dir and keeps every segment unchanged.
- *  2. Separator set. `\` is a separator only on Windows. On POSIX it is a valid
- *     filename character, so a target literally named `managed\config.yml` must
- *     stay ONE segment, not two. Split on the platform separator set: `/` only
- *     on POSIX, `/` or `\` on Windows. Keyed off `pathApi.sep` so the rule is
- *     driven by the platform, not a hardcoded cross-platform class.
- *  3. Dot segments. POSIX follows each component physically, so `..` stays a
- *     raw segment and the walk pops the REAL parent of whatever `alias`
- *     resolved to. Windows collapses `.` and `..` inside a symlink target
- *     lexically before following any component: `alias\..\final.yml` names the
- *     link directory's `final.yml` even when `alias` is a directory link, and
- *     `missing\..\final.yml` never consults `missing`. Only a leading `..` of a
- *     relative target still pops the link's real parent, and a trailing
- *     separator survives to demand a directory. Walking raw `..` segments there
- *     writes a file the link never reads — possibly an unrelated one — so the
- *     Windows target is normalized first.
- *
- * `pathApi` is injectable so the platform-specific behavior is testable off the
- * host OS (drive with `path.win32` / `path.posix`); it defaults to the host.
+ *     `parse(target).root` (`/`), so the root must be STRIPPED from the string
+ *     before splitting; otherwise it is re-emitted as a leading segment. (The
+ *     walk also skips an empty leading segment, but stripping keeps the segment
+ *     list the accumulator expects.) A RELATIVE target seeds at the link's real
+ *     parent dir and keeps every segment unchanged.
+ *  2. Dot segments. The kernel follows each component physically, so `..` stays
+ *     a raw segment and the walk pops the REAL parent of whatever `alias`
+ *     resolved to. A backslash is a valid filename character and never a separator.
  */
-function physicalTargetSegments(target: string, pathApi: typeof path = path): string[] {
-	const windows = pathApi.sep === "\\";
-	const separator = windows ? /[\\/]+/ : /\/+/;
-	const spelled = windows ? pathApi.normalize(target) : target;
-	const body = pathApi.isAbsolute(spelled) ? spelled.slice(pathApi.parse(spelled).root.length) : spelled;
-	return body.split(separator);
+function physicalTargetSegments(target: string): string[] {
+	const body = path.isAbsolute(target) ? target.slice(path.parse(target).root.length) : target;
+	return body.split(/\/+/);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2241,11 +2220,9 @@ export class Settings {
 					// to the anchor, but a POSIX kernel follows `alias` first and then
 					// pops its real parent, so the two disagree whenever an alias
 					// precedes a `..` — the lexical result can escape to an unrelated
-					// sibling and let the write clobber a foreign file. Windows does
-					// collapse them lexically; physicalTargetSegments() applies the
-					// host's rule. An absolute target seeds the accumulator at its
-					// filesystem anchor; a relative one seeds at the link's REAL
-					// parent dir.
+					// sibling and let the write clobber a foreign file. An absolute
+					// target seeds the accumulator at its filesystem anchor; a
+					// relative one seeds at the link's REAL parent dir.
 					let acc: string;
 					if (path.isAbsolute(target)) {
 						acc = path.parse(target).root;
@@ -2928,7 +2905,6 @@ export class Settings {
 		const legacyIsolationBackends: Record<string, string> = {
 			worktree: "rcopy",
 			"fuse-overlay": "overlayfs",
-			"fuse-projfs": "projfs",
 		};
 		const legacyIsolationModePath = ["task", "isolation", "mode"].join(".");
 		const legacyIsolationMode =
@@ -3972,15 +3948,6 @@ export function resetSettingsForTest(): void {
 	// Effect-owned process state (theme, redaction, request limits, …) returns to its defaults.
 	resetRegistryForTest(Settings.isolated());
 }
-
-/**
- * Exposes the dangling-symlink target segment splitter for platform-specific
- * tests: the root-double-count and POSIX-backslash bugs only reproduce with an
- * explicit `path.win32` / `path.posix` engine, which cannot be forced from the
- * host OS otherwise.
- * @internal
- */
-export const __physicalTargetSegmentsForTesting = physicalTargetSegments;
 
 /**
  * The global settings singleton.

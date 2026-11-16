@@ -142,7 +142,6 @@ describe("security preflight", () => {
 	});
 
 	test("symlink target mutation makes a plan stale", async () => {
-		if (process.platform === "win32") return;
 		const linkedPath = path.join(repositoryRoot, "src", "a.ts");
 		await fs.rm(linkedPath);
 		await fs.symlink("first-target.ts", linkedPath);
@@ -224,7 +223,6 @@ describe("security preflight", () => {
 	});
 
 	test("symlink output is rejected", async () => {
-		if (process.platform === "win32") return;
 		const target = path.join(temporaryRoot, "real-output");
 		await fs.mkdir(target);
 		await fs.symlink(target, stateRoot);

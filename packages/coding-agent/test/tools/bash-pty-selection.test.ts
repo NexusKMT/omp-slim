@@ -38,14 +38,7 @@ describe("bash PTY selection", () => {
 		setNoPty(originalNoPty);
 	});
 
-	it("allows interactive PTY on Windows when requested with UI", () => {
-		setPlatform("win32");
-		setNoPty(undefined);
-
-		expect(canUseInteractiveBashPty(true, interactiveContext())).toBe(true);
-	});
-
-	it("allows interactive PTY on non-Windows when requested with UI and not disabled", () => {
+	it("allows interactive PTY when requested with UI and not disabled", () => {
 		setPlatform("linux");
 		setNoPty(undefined);
 

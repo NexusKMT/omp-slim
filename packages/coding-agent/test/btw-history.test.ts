@@ -530,9 +530,7 @@ describe("BtwHistoryStore", () => {
 			"entry-first.json",
 			"entry-second.json",
 		]);
-		if (process.platform !== "win32") {
-			expect((await fs.stat(historyDir)).mode & 0o777).toBe(0o700);
-			expect((await fs.stat(path.join(historyDir, "entry-first.json"))).mode & 0o777).toBe(0o600);
-		}
+		expect((await fs.stat(historyDir)).mode & 0o777).toBe(0o700);
+		expect((await fs.stat(path.join(historyDir, "entry-first.json"))).mode & 0o777).toBe(0o600);
 	});
 });

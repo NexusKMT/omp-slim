@@ -88,10 +88,7 @@ describe("build service targets", () => {
 			target: "linux-arm64",
 			fileName: "omp-linux-arm64",
 		});
-		expect(resolveBuildHost("win32", "x64", false)).toEqual({
-			target: "windows-x86_64",
-			fileName: "omp-windows-x64.exe",
-		});
+		expect(() => resolveBuildHost("freebsd", "x64", false)).toThrow("Unsupported platform");
 	});
 
 	it("does not mistake an installed musl loader for a glibc host", () => {

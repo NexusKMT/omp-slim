@@ -1,92 +1,14 @@
 import * as fs from "node:fs";
 import * as fsAsync from "node:fs/promises";
-import { hasFsCode, isEexist, isEnoent, logger, toError } from "@oh-my-pi/pi-utils";
-
-const RENAME_RETRY_BUDGET_MS = 2_000;
-const RENAME_RETRY_INITIAL_MS = 5;
-const RENAME_RETRY_MAX_MS = 100;
+import { isEnoent, logger, toError } from "@oh-my-pi/pi-utils";
 
 /**
- * Publish a staged sibling without moving the old destination aside, so readers
- * never observe a missing file while transient Windows replacement denials clear.
- */
-export async function replaceFileWithRetry(tempPath: string, targetPath: string): Promise<void> {
-	const deadline = Date.now() + RENAME_RETRY_BUDGET_MS;
-	for (let failures = 0; ; failures++) {
-		try {
-			await fsAsync.rename(tempPath, targetPath);
-			return;
-		} catch (error) {
-			if (
-				process.platform !== "win32" ||
-				(!hasFsCode(error, "EPERM") && !hasFsCode(error, "EACCES") && !isEexist(error))
-			) {
-				throw error;
-			}
-			const remaining = deadline - Date.now();
-			if (remaining <= 0) throw error;
-			await Bun.sleep(Math.min(remaining, RENAME_RETRY_MAX_MS, RENAME_RETRY_INITIAL_MS * 2 ** failures));
-		}
-	}
-}
-
-/**
- * Publish a staged sibling file atomically, preserving an existing destination
- * across Windows `EPERM`/`EEXIST` replacement failures.
+ * Publish a staged sibling file atomically with a single rename, so a reader
+ * never observes a missing file and a failed rename leaves the destination
+ * untouched.
  */
 export async function replaceFileAtomically(tempPath: string, targetPath: string): Promise<void> {
-	try {
-		await fs.promises.rename(tempPath, targetPath);
-		return;
-	} catch (error) {
-		if (!hasFsCode(error, "EPERM") && !isEexist(error)) throw error;
-		await replaceAfterWindowsRenameFailure(tempPath, targetPath, error);
-	}
-}
-
-async function replaceAfterWindowsRenameFailure(
-	tempPath: string,
-	targetPath: string,
-	renameError: unknown,
-): Promise<void> {
-	const backupPath = `${targetPath}.${process.pid}.${crypto.randomUUID()}.bak`;
-	try {
-		await fs.promises.rename(targetPath, backupPath);
-	} catch (error) {
-		if (isEnoent(error)) {
-			await fs.promises.rename(tempPath, targetPath);
-			return;
-		}
-		throw renameError;
-	}
-
-	try {
-		await fs.promises.rename(tempPath, targetPath);
-	} catch (replaceError) {
-		try {
-			await fs.promises.rename(backupPath, targetPath);
-		} catch (rollbackError) {
-			throw new Error(
-				`Failed to replace file after ${toError(renameError).message} (retry: ${
-					toError(replaceError).message
-				}; rollback: ${toError(rollbackError).message})`,
-				{ cause: toError(renameError) },
-			);
-		}
-		throw replaceError;
-	}
-
-	try {
-		await fs.promises.rm(backupPath);
-	} catch (error) {
-		if (!isEnoent(error)) {
-			logger.warn("Failed to remove atomic replacement backup", {
-				path: targetPath,
-				backupPath,
-				error: toError(error).message,
-			});
-		}
-	}
+	await fsAsync.rename(tempPath, targetPath);
 }
 
 /**

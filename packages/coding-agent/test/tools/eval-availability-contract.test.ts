@@ -142,7 +142,7 @@ describe("eval Python availability contract", () => {
 		expect(languages(tool)).toEqual(["js"]);
 		const previousPath = Bun.env.PATH;
 		try {
-			Bun.env.PATH = `${dir.path()}${process.platform === "win32" ? ";" : ":"}${previousPath ?? ""}`;
+			Bun.env.PATH = `${dir.path()}:${previousPath ?? ""}`;
 			expect(languages(tool)).toEqual(["py", "js"]);
 		} finally {
 			restoreEnvValue("PATH", previousPath);

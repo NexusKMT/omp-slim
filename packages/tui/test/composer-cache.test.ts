@@ -127,8 +127,6 @@ describe("composer startup cache", () => {
 	});
 
 	it("loads XDG_CACHE_HOME from the home .env before the first cache access", async () => {
-		if (process.platform === "win32") return;
-
 		const home = path.join(root, "home");
 		const xdgCache = path.join(root, "xdg-cache");
 		const project = path.join(root, "project");

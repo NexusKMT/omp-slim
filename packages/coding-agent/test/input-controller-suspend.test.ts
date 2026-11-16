@@ -52,26 +52,6 @@ afterEach(() => {
 });
 
 describe("InputController.handleCtrlZ", () => {
-	it("no-ops on Windows so the unsupported SIGSTOP signal can't crash the process (#2036)", () => {
-		setPlatform("win32");
-		const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
-			throw new Error("process.kill must not be called on win32");
-		});
-		const onceSpy = spyOnProcessOnce();
-		const { ctx, ui, showStatus, showError } = createCtx();
-
-		const controller = new InputController(ctx);
-		expect(() => controller.handleCtrlZ()).not.toThrow();
-
-		expect(killSpy).not.toHaveBeenCalled();
-		expect(onceSpy).not.toHaveBeenCalledWith("SIGCONT", expect.anything());
-		expect(ui.stop).not.toHaveBeenCalled();
-		expect(ui.start).not.toHaveBeenCalled();
-		expect(showStatus).toHaveBeenCalledTimes(1);
-		expect(showStatus.mock.calls[0]?.[0]).toMatch(/not supported/i);
-		expect(showError).not.toHaveBeenCalled();
-	});
-
 	it("SIGSTOPs the foreground process group and registers a SIGCONT resume hook on POSIX (#3461)", () => {
 		setPlatform("linux");
 		const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);

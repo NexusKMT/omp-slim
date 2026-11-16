@@ -10,7 +10,7 @@ import { fakeSshTransport } from "../helpers/fake-ssh-transport";
 const target = { name: "directory-fixture", host: "fixture" };
 
 // The fake remote is the local filesystem behind a POSIX shell.
-describe.skipIf(process.platform === "win32")("SSH structured directory transport", () => {
+describe("SSH structured directory transport", () => {
 	let fixture: string;
 	let onSpawn: (() => void) | undefined;
 

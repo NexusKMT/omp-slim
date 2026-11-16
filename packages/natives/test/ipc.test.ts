@@ -10,7 +10,6 @@ import {
 	ipcEndpoint,
 } from "../native/index.js";
 
-const isWindows = process.platform === "win32";
 const cleanups: (() => Promise<void> | void)[] = [];
 
 afterEach(async () => {
@@ -198,7 +197,7 @@ describe("native IPC", () => {
 		expect(error.code).toBe("EADDRINUSE");
 	});
 
-	test.skipIf(isWindows)("a stale socket file is taken over", async () => {
+	test("a stale socket file is taken over", async () => {
 		const endpoint = await endpointIn();
 		await staleSocket(endpoint);
 		const { accepted } = await acceptingServer(endpoint, { framing: "lines" });
@@ -212,14 +211,14 @@ describe("native IPC", () => {
 		expect(error.code).toBe("ENOENT");
 	});
 
-	test.skipIf(isWindows)("connect to a stale socket file rejects ECONNREFUSED", async () => {
+	test("connect to a stale socket file rejects ECONNREFUSED", async () => {
 		const endpoint = await endpointIn();
 		await staleSocket(endpoint);
 		const error = await rejection(IpcConnection.connect(endpoint, { framing: "lines" }));
 		expect(error.code).toBe("ECONNREFUSED");
 	});
 
-	test.skipIf(isWindows)("ipcEndpoint relocates an over-long dir", async () => {
+	test("ipcEndpoint relocates an over-long dir", async () => {
 		const dir = path.join(await tempDir(), "d".repeat(120));
 		const name = `long-${process.pid}`;
 		const endpoint = ipcEndpoint(dir, name);
@@ -310,7 +309,7 @@ describe("native IPC", () => {
 		expect(seen.reason).toStartWith("EMSGSIZE");
 	});
 
-	test.skipIf(isWindows)("server.close() unlinks the socket file", async () => {
+	test("server.close() unlinks the socket file", async () => {
 		const endpoint = await endpointIn();
 		const server = await IpcServer.listen(endpoint, { framing: "lines" }, () => {});
 		expect(server.endpoint).toBe(endpoint);

@@ -250,7 +250,6 @@ export function spawnDetached(
 			stdin: "ignore",
 			stdout: log,
 			stderr: log,
-			windowsHide: true,
 		});
 		proc.unref();
 		return { proc, logPath };

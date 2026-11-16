@@ -14,7 +14,6 @@ import {
 	isEnotdir,
 	isRecord,
 	isWsl,
-	stripWindowsExtendedLengthPathPrefix,
 	windowsPathToWslMount,
 } from "@oh-my-pi/pi-utils";
 import { InternalUrlRouter } from "../internal-urls";
@@ -24,9 +23,9 @@ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
-/** POSIX absolute, Windows drive, or UNC (`\\server\share` / `//server/share`). */
+/** POSIX absolute path. */
 export function isFilesystemSourcePath(value: string): boolean {
-	return path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
+	return path.posix.isAbsolute(value);
 }
 const NARROW_NO_BREAK_SPACE = "\u202F";
 
@@ -83,8 +82,6 @@ function normalizeAtPrefix(filePath: string): string {
 		withoutAt.startsWith("/") ||
 		withoutAt === "~" ||
 		withoutAt.startsWith("~/") ||
-		// Windows absolute paths (drive letters / UNC / root-relative)
-		path.win32.isAbsolute(withoutAt) ||
 		// Internal URL shorthands
 		InternalUrlRouter.instance().canHandle(withoutAt)
 	) {
@@ -116,53 +113,22 @@ export function expandPath(filePath: string): string {
 	// lookahead admits POSIX (`/`, `~`, `./`, `../`) and Windows (`\`, `.\`,
 	// `..\`, drive-letter `C:`) path shapes.
 	const deColoned = /^:(?=[/\\~]|\.\.?[/\\]|[A-Za-z]:)/.test(filePath) ? filePath.slice(1) : filePath;
-	const normalized = stripWindowsExtendedLengthPathPrefix(
-		stripFileUrl(normalizeUnicodeSpaces(normalizeAtPrefix(deColoned))),
-	);
+	const normalized = stripFileUrl(normalizeUnicodeSpaces(normalizeAtPrefix(deColoned)));
 	return expandTilde(normalized);
-}
-
-function isAsciiDriveLetter(value: string): boolean {
-	if (value.length !== 1) return false;
-	const code = value.charCodeAt(0);
-	return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
-}
-
-function windowsDriveAliasPath(filePath: string): string | undefined {
-	if (!filePath.startsWith("/")) return undefined;
-	const parts = filePath.split("/");
-	if (parts[0] !== "") return undefined;
-
-	let drive: string | undefined;
-	let tailStart = 2;
-	if (parts.length >= 2 && isAsciiDriveLetter(parts[1] ?? "")) {
-		drive = parts[1]!.toUpperCase();
-	} else if (parts.length >= 3 && (parts[1] ?? "").toLowerCase() === "mnt" && isAsciiDriveLetter(parts[2] ?? "")) {
-		drive = parts[2]!.toUpperCase();
-		tailStart = 3;
-	}
-	if (!drive) return undefined;
-
-	const tail = parts.slice(tailStart).filter(Boolean).join("\\");
-	return tail ? `${drive}:\\${tail}` : `${drive}:\\`;
 }
 
 /**
  * Reconcile a drive-alias path with the current host so filesystem reads land
- * on the same bytes the user meant, in either translation direction:
- *
- * - On native Windows (`win32`), MSYS/WSL mount roots (`/c/...`, `/mnt/c/...`)
- *   map to native drive paths (`C:\...`).
- * - Under WSL, pasted Windows drive paths (`C:\...`, `C:/...`) map to their
- *   `/mnt/<drive>/...` mount so the file resolves on the Linux side instead of
- *   being `path.resolve`d into a nonexistent path under cwd (issue #10426).
+ * on the same bytes the user meant: under WSL, pasted Windows drive paths
+ * (`C:\...`, `C:/...`) map to their `/mnt/<drive>/...` mount so the file
+ * resolves on the Linux side instead of being `path.resolve`d into a
+ * nonexistent path under cwd (issue #10426).
  */
 export function normalizeWindowsDriveAliasPath(
 	filePath: string,
 	platform: NodeJS.Platform = process.platform,
 	env: NodeJS.ProcessEnv = process.env,
 ): string {
-	if (platform === "win32") return windowsDriveAliasPath(filePath) ?? filePath;
 	if (isWsl(platform, env)) return windowsPathToWslMount(filePath) ?? filePath;
 	return filePath;
 }
@@ -203,11 +169,6 @@ export function specialFileKind(stat: fs.Stats): string | undefined {
 	return "special file";
 }
 
-/** Windows path naming an NTFS stream: a colon after the root (`C:\`, `\\?\C:\`, UNC). */
-function needsWindowsStreamExistenceCheck(resolved: string): boolean {
-	return process.platform === "win32" && resolved.slice(path.win32.parse(resolved).root.length).includes(":");
-}
-
 /**
  * Three-way probe for whether the exact filesystem entry named by `filePath`
  * exists. `stat` (used earlier) failed for reasons other than "no such file"
@@ -223,19 +184,11 @@ function needsWindowsStreamExistenceCheck(resolved: string): boolean {
  * Without this, a semicolon-joined `path` list long enough to trip the limit
  * (bare filenames past `NAME_MAX`, or a total past `PATH_MAX`) was read as one
  * literal path and the delimited split was suppressed (issue #7597).
- *
- * On Windows a colon after the root names an NTFS alternate data stream, and
- * `lstat` of a nonexistent stream such as `file.md:1-40` can intermittently
- * succeed with the base file's metadata while `open` fails with `ENOENT`. That
- * false positive made the literal-preferring splitters drop a valid selector and
- * `read` open `file.md:1-40` verbatim. Such paths are confirmed with an `F_OK`
- * access check, which rejects missing streams and accepts real ones.
  */
 export async function probeLiteralPathExists(filePath: string, cwd: string): Promise<"exists" | "missing" | "unknown"> {
 	const resolved = resolveReadPath(filePath, cwd);
 	try {
 		await fs.promises.lstat(resolved);
-		if (needsWindowsStreamExistenceCheck(resolved)) await fs.promises.access(resolved, fs.constants.F_OK);
 		return "exists";
 	} catch (err) {
 		if (isEnoent(err) || isEnotdir(err) || hasFsCode(err, "ENAMETOOLONG")) return "missing";
@@ -246,10 +199,8 @@ export async function probeLiteralPathExists(filePath: string, cwd: string): Pro
 /**
  * Async sibling of {@link splitPathAndSel} that prefers a literal filesystem
  * path over selector interpretation. Selector-shaped tails may be POSIX
- * filenames or NTFS alternate data streams, so a confirmed `lstat` always
- * preserves the literal path. Ambiguous probe errors preserve the literal on
- * POSIX, where colon filenames are valid, but fall back to the strict split on
- * Windows, where only a confirmed alternate data stream can be literal. A list
+ * filenames, so a confirmed `lstat` always preserves the literal path, and an
+ * ambiguous probe error does too: colon filenames are valid on POSIX. A list
  * repeating its colon (`a:1-30,:-30`) folds into one selector unless the path
  * before the last colon (`a:1-30,`) names an existing file.
  */
@@ -260,7 +211,7 @@ export async function splitPathAndSelPreferringLiteral(
 	const strict = splitPathAndSel(rawPath);
 	if (strict.sel === undefined) return strict;
 	const probe = await probeLiteralPathExists(rawPath, cwd);
-	if (probe === "exists" || (probe === "unknown" && process.platform !== "win32")) return { path: rawPath };
+	if (probe !== "missing") return { path: rawPath };
 	const unfolded = splitPathAndSel(rawPath, { foldListColons: false });
 	if (unfolded.path !== strict.path && (await probeLiteralPathExists(unfolded.path, cwd)) === "exists")
 		return unfolded;
@@ -277,7 +228,6 @@ export function probeLiteralPathExistsSync(filePath: string, cwd: string): "exis
 	const resolved = resolveReadPath(filePath, cwd);
 	try {
 		fs.lstatSync(resolved);
-		if (needsWindowsStreamExistenceCheck(resolved)) fs.accessSync(resolved, fs.constants.F_OK);
 		return "exists";
 	} catch (err) {
 		if (isEnoent(err) || isEnotdir(err) || hasFsCode(err, "ENAMETOOLONG")) return "missing";
@@ -287,13 +237,13 @@ export function probeLiteralPathExistsSync(filePath: string, cwd: string): "exis
 
 /**
  * Synchronous sibling of {@link splitPathAndSelPreferringLiteral}. It applies
- * the same platform-specific handling for inconclusive literal-path probes.
+ * the same handling for inconclusive literal-path probes.
  */
 export function splitPathAndSelPreferringLiteralSync(rawPath: string, cwd: string): { path: string; sel?: string } {
 	const strict = splitPathAndSel(rawPath);
 	if (strict.sel === undefined) return strict;
 	const probe = probeLiteralPathExistsSync(rawPath, cwd);
-	if (probe === "exists" || (probe === "unknown" && process.platform !== "win32")) return { path: rawPath };
+	if (probe !== "missing") return { path: rawPath };
 	const unfolded = splitPathAndSel(rawPath, { foldListColons: false });
 	if (unfolded.path !== strict.path && probeLiteralPathExistsSync(unfolded.path, cwd) === "exists") return unfolded;
 	return strict;
@@ -1006,15 +956,6 @@ function buildBraceUnion(patterns: string[]): string | undefined {
 	return `{${uniquePatterns.join(",")}}`;
 }
 
-// Comparison key for deciding whether two absolute paths denote the same search
-// scope. A Windows drive letter is case-insensitive by OS guarantee, so `c:` and
-// `C:` unify; every other component is compared exactly. Blanket-lowercasing
-// would conflate distinct entries under a per-directory case-sensitive dir
-// (FILE_CASE_SENSITIVE_DIR / WSL), collapsing `C:\repo\src` with `C:\repo\Src`.
-function pathComparisonKey(component: string): string {
-	return process.platform === "win32" ? component.replace(/^[a-zA-Z]:/, drive => drive.toLowerCase()) : component;
-}
-
 function findCommonBasePath(paths: string[]): string {
 	if (paths.length === 0) return ".";
 	let commonParts = path.resolve(paths[0]).split(path.sep);
@@ -1022,10 +963,7 @@ function findCommonBasePath(paths: string[]): string {
 		const candidateParts = path.resolve(candidatePath).split(path.sep);
 		let sharedCount = 0;
 		const maxShared = Math.min(commonParts.length, candidateParts.length);
-		while (
-			sharedCount < maxShared &&
-			pathComparisonKey(commonParts[sharedCount]!) === pathComparisonKey(candidateParts[sharedCount]!)
-		) {
+		while (sharedCount < maxShared && commonParts[sharedCount] === candidateParts[sharedCount]) {
 			sharedCount += 1;
 		}
 		commonParts = commonParts.slice(0, sharedCount);
@@ -1100,10 +1038,8 @@ async function resolveSearchPathItems(
 	// findCommonBasePath and path.relative compare lexically via path.resolve. To
 	// decide overlap on the same footing, canonicalize both sides here — this key
 	// never reaches the filesystem, so lexical `..`/separator collapse is safe.
-	// pathComparisonKey folds only the Windows drive letter, so a differently
-	// cased drive cannot force a fan-out while distinct components stay distinct.
 	const commonIsRequestedScope = hostItems.some(
-		item => pathComparisonKey(path.resolve(item.absoluteBasePath)) === pathComparisonKey(commonBasePath),
+		item => path.resolve(item.absoluteBasePath) === path.resolve(commonBasePath),
 	);
 	// Walkers prune `.git` unconditionally and honor gitignore, so a plain-file
 	// item folded into a directory walk's glob union (`.` + `.git/config`) can

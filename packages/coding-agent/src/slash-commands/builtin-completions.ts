@@ -305,10 +305,10 @@ export function buildModelSelectorCompletions(
 	};
 }
 
-/** Trailing path separator: `/` everywhere, `\` too on Windows. */
-const TRAILING_SEPARATOR = process.platform === "win32" ? /[\\/]$/ : /\/$/;
+/** Trailing path separator. */
+const TRAILING_SEPARATOR = /\/$/;
 /** A path whose last segment is `.` or `..` (or a bare `~`) names a directory without listing it. */
-const UNTERMINATED_DIRECTORY = process.platform === "win32" ? /(?:^|[\\/])\.{1,2}$|^~$/ : /(?:^|\/)\.{1,2}$|^~$/;
+const UNTERMINATED_DIRECTORY = /(?:^|\/)\.{1,2}$|^~$/;
 
 /**
  * Build getArgumentCompletions that suggests directories relative to the

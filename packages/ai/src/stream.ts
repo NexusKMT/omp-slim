@@ -3,7 +3,7 @@ import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
-import { getProviderInFlightRoot, isEnoent, isPidAlive, logger, untilAborted } from "@oh-my-pi/pi-utils";
+import { getProviderInFlightRoot, isEnoent, isPidAlive, logger } from "@oh-my-pi/pi-utils";
 import { createAuthRetryKeyState, isApiKeyResolver, resolvedApiKeyBearer, resolveNextAuthRetryKey } from "./auth-retry";
 import * as AIError from "./error";
 import { streamOpenAICompletions } from "./providers/openai-completions";
@@ -38,9 +38,6 @@ const PROVIDER_INFLIGHT_HEARTBEAT_MS = 5_000;
 const PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS = 250;
 const PROVIDER_INFLIGHT_HEARTBEAT_FLUSH_TIMEOUT_MS = 1_000;
 const PROVIDER_INFLIGHT_RELEASE_TIMEOUT_MS = 5_000;
-const PROVIDER_INFLIGHT_LOCK_RETRY_INITIAL_MS = 25;
-const PROVIDER_INFLIGHT_LOCK_RETRY_MAX_MS = 250;
-const PROVIDER_INFLIGHT_LOCK_RETRY_BUDGET_MS = 3_000;
 
 let configuredProviderMaxInFlightRequests: Record<string, number> = {};
 let providerInFlightRootOverride: string | undefined;
@@ -53,9 +50,6 @@ let providerInFlightLeaseRemoverOverride: ((leasePath: string) => Promise<void>)
 let providerInFlightWaitObserverOverride: ((provider: string) => void) | undefined;
 let providerInFlightLockCreatedObserverOverride: ((lockDir: string) => Promise<void>) | undefined;
 let providerInFlightLockIdentifiedObserverOverride: ((lockDir: string) => Promise<void>) | undefined;
-let providerInFlightLockMkdirOverride: ((lockDir: string) => Promise<void>) | undefined;
-let providerInFlightLockPlatformOverride: NodeJS.Platform | undefined;
-let providerInFlightLockRetryTimings: { budgetMs?: number; initialDelayMs?: number; maxDelayMs?: number } | undefined;
 
 export function configureProviderMaxInFlightRequests(limits: Record<string, number> | undefined): void {
 	configuredProviderMaxInFlightRequests = limits ?? {};
@@ -208,42 +202,6 @@ async function releaseProviderInFlightLockDirIfSame(
 	} catch {}
 }
 
-// On Windows, mkdir on a lock directory another process is concurrently deleting
-// (delete-pending while a watcher, antivirus, or indexer still holds it) fails
-// with ERROR_ACCESS_DENIED — mapped to EPERM/EACCES — instead of EEXIST, so
-// ordinary contention looks like a permission error. On win32 only, back off and
-// retry briefly; if the failure persists past the budget, rethrow the original
-// error so a real permission problem still surfaces. Every other outcome
-// (success, EEXIST, any other code) exits immediately, keeping non-win32 and
-// non-transient behavior unchanged.
-function isTransientProviderInFlightLockMkdirError(error: NodeJS.ErrnoException): boolean {
-	if ((providerInFlightLockPlatformOverride ?? process.platform) !== "win32") return false;
-	return error.code === "EPERM" || error.code === "EACCES";
-}
-
-async function mkdirProviderInFlightLockDir(lockDir: string, signal?: AbortSignal): Promise<void> {
-	const mkdir = providerInFlightLockMkdirOverride ?? ((dir: string) => fs.mkdir(dir));
-	let failures = 0;
-	let since = Date.now();
-	while (true) {
-		try {
-			await mkdir(lockDir);
-			return;
-		} catch (error) {
-			if (!isTransientProviderInFlightLockMkdirError(error as NodeJS.ErrnoException)) throw error;
-			const now = Date.now();
-			if (failures === 0) since = now;
-			const budgetMs = providerInFlightLockRetryTimings?.budgetMs ?? PROVIDER_INFLIGHT_LOCK_RETRY_BUDGET_MS;
-			if (now - since >= budgetMs) throw error;
-			const initialMs = providerInFlightLockRetryTimings?.initialDelayMs ?? PROVIDER_INFLIGHT_LOCK_RETRY_INITIAL_MS;
-			const maxMs = providerInFlightLockRetryTimings?.maxDelayMs ?? PROVIDER_INFLIGHT_LOCK_RETRY_MAX_MS;
-			const delayMs = Math.min(maxMs, initialMs * 2 ** failures);
-			failures++;
-			await untilAborted(signal, Bun.sleep(delayMs));
-		}
-	}
-}
-
 async function acquireProviderInFlightLock(provider: string, signal?: AbortSignal): Promise<() => Promise<void>> {
 	const lockDir = providerInFlightLockDir(provider);
 	await fs.mkdir(path.dirname(lockDir), { recursive: true });
@@ -251,7 +209,7 @@ async function acquireProviderInFlightLock(provider: string, signal?: AbortSigna
 	while (true) {
 		if (signal?.aborted) throw signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
 		try {
-			await mkdirProviderInFlightLockDir(lockDir, signal);
+			await fs.mkdir(lockDir);
 			await providerInFlightLockCreatedObserverOverride?.(lockDir);
 			let lockIdentity: ProviderInFlightLockIdentity;
 			try {
@@ -525,15 +483,6 @@ export const __providerInFlightForTesting = {
 	setLockIdentifiedObserver(observer: ((lockDir: string) => Promise<void>) | undefined): void {
 		providerInFlightLockIdentifiedObserverOverride = observer;
 	},
-	setLockMkdirOverride(mkdir: ((lockDir: string) => Promise<void>) | undefined): void {
-		providerInFlightLockMkdirOverride = mkdir;
-	},
-	setLockPlatformOverride(platform: NodeJS.Platform | undefined): void {
-		providerInFlightLockPlatformOverride = platform;
-	},
-	setLockRetryTimings(timings: { budgetMs?: number; initialDelayMs?: number; maxDelayMs?: number } | undefined): void {
-		providerInFlightLockRetryTimings = timings;
-	},
 	providerDir(provider: string): string {
 		return providerInFlightDir(provider);
 	},
@@ -622,7 +571,7 @@ function withProviderInFlightLimit<
 			const result = await inner.result();
 			// Releasing the permit is part of request completion. Publishing the
 			// result first lets an immediate follow-up turn contend with its own
-			// still-live lease, which is particularly costly on Windows.
+			// still-live lease.
 			await releaseBestEffort();
 			if (!outer.done) {
 				if (terminalEvent) outer.push(terminalEvent);

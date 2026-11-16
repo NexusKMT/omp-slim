@@ -9,7 +9,7 @@ function terminalLines(terminal: VirtualTerminal): (string | undefined)[] {
 	return Array.from({ length: buffer.length }, (_, row) => buffer.getLine(row)?.translateToString(true).trimEnd());
 }
 
-describe.skipIf(process.platform === "win32")("fatal stderr terminal handoff", () => {
+describe("fatal stderr terminal handoff", () => {
 	it("keeps the composer boundary intact in a real PTY", async () => {
 		const screen = new VirtualTerminal({ cols: COLUMNS, rows: ROWS, scrollback: 100 });
 		const closed = Promise.withResolvers<void>();

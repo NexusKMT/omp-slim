@@ -108,7 +108,7 @@ function isOneEditAway(typo: string, word: string): boolean {
 
 function assertWriteTargetAddressable(target: string, router: InternalUrlRouter): void {
 	const trimmed = target.trim();
-	if (path.win32.isAbsolute(trimmed) || router.canHandle(trimmed)) return;
+	if (router.canHandle(trimmed)) return;
 
 	// Tool-device transports get typo recovery: a bare `<device>/x` or a near-miss
 	// scheme is a mistyped dispatch, never an intended filesystem path.
@@ -399,10 +399,10 @@ function emitWriteProgress(
  * If `content` begins with an interpreter shebang (not a Rust inner attribute), ensure the file is executable.
  *
  * Mirrors `chmod a+x` (adds user/group/other execute bits to existing mode).
- * Errors are swallowed: chmod failure (e.g. Windows ACL, read-only mount)
- * MUST NOT fail an otherwise successful write. Returns whether the mode
- * actually changed so the caller can surface a note — re-read after the chmod,
- * since Windows (and some mounts) accept it while keeping no execute bits.
+ * Errors are swallowed: chmod failure (e.g. a read-only mount) MUST NOT fail
+ * an otherwise successful write. Returns whether the mode actually changed so
+ * the caller can surface a note — re-read after the chmod, since some mounts
+ * accept it while keeping no execute bits.
  */
 async function maybeMarkExecutableForShebang(absolutePath: string, content: string): Promise<boolean> {
 	if (!content.startsWith("#!") || content.startsWith("#![")) return false;

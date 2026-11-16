@@ -266,8 +266,8 @@ export function $which(command: string, options?: WhichOptions): string | null {
  * Locate every match for `command` on PATH, in PATH order, uncached.
  *
  * Callers that probe candidates (e.g. the Python eval backend) use this so a broken
- * first hit — a version-manager shim with no version selected, a Windows Store alias —
- * does not hide a working binary further down PATH. On macOS the Xcode/CLT toolchain
+ * first hit — a version-manager shim with no version selected — does not hide a
+ * working binary further down PATH. On macOS the Xcode/CLT toolchain
  * match is appended last, mirroring {@link $which}'s fallback.
  *
  * @param command - Binary name to resolve

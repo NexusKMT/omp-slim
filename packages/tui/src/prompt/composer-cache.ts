@@ -242,7 +242,7 @@ export class ComposerCache {
 	}
 
 	close(): void {
-		// Unfinalized statements keep the file handle open on Windows.
+		// Unfinalized statements keep the file handle open.
 		this.#select.finalize();
 		this.#upsert.finalize();
 		this.#db.close();

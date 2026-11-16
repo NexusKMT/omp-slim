@@ -44,9 +44,4 @@ describe("/move directory autocomplete", () => {
 		expect(await values(`${absolute}sib`)).toEqual([`${absolute}sibling/`]);
 		expect(await values(absolute)).toEqual([`${absolute}project/`, `${absolute}sibling/`]);
 	});
-
-	test.if(process.platform === "win32")("a trailing backslash lists children on Windows", async () => {
-		const absolute = root.replaceAll("\\", "/");
-		expect(await values(`${root}\\`)).toEqual([`${absolute}/project/`, `${absolute}/sibling/`]);
-	});
 });

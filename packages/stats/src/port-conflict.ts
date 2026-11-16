@@ -171,51 +171,9 @@ async function findMacPortHolder(port: number): Promise<PortHolder | null> {
 	return { pid, image, commandLine: processInfo.exitCode === 0 ? processInfo.text().trim() : "" };
 }
 
-async function findWindowsPortHolder(port: number): Promise<PortHolder | null> {
-	const netstat = $which("netstat");
-	if (!netstat) return null;
-
-	const result = await $`${netstat} -ano -p TCP`.quiet().nothrow();
-	if (result.exitCode !== 0) return null;
-
-	let pid: number | null = null;
-	for (const line of result.text().split("\n")) {
-		const fields = line.trim().split(/\s+/);
-		if (fields[0]?.toUpperCase() !== "TCP" || fields[3]?.toUpperCase() !== "LISTENING") continue;
-		const localAddress = fields[1];
-		if (!localAddress || Number.parseInt(localAddress.slice(localAddress.lastIndexOf(":") + 1), 10) !== port) {
-			continue;
-		}
-		const parsed = Number.parseInt(fields[4] ?? "", 10);
-		if (Number.isSafeInteger(parsed)) {
-			pid = parsed;
-			break;
-		}
-	}
-	if (pid === null) return null;
-
-	let image = "unknown";
-	const tasklist = $which("tasklist");
-	if (tasklist) {
-		const filter = `PID eq ${pid}`;
-		const task = await $`${tasklist} /FI ${filter} /FO CSV /NH`.quiet().nothrow();
-		if (task.exitCode === 0) {
-			const imageMatch = /^"((?:[^"]|"")*)"/.exec(task.text().trim());
-			image = imageMatch?.[1]?.replaceAll('""', '"') || "unknown";
-		}
-	}
-
-	const powershell = $which("powershell") ?? $which("pwsh");
-	if (!powershell) return { pid, image, commandLine: "" };
-	const command = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`;
-	const processInfo = await $`${powershell} -NoProfile -NonInteractive -Command ${command}`.quiet().nothrow();
-	return { pid, image, commandLine: processInfo.exitCode === 0 ? processInfo.text().trim() : "" };
-}
-
 async function findPortHolder(port: number): Promise<PortHolder | null> {
 	if (process.platform === "linux") return findLinuxPortHolder(port);
 	if (process.platform === "darwin") return findMacPortHolder(port);
-	if (process.platform === "win32") return findWindowsPortHolder(port);
 	return null;
 }
 
@@ -258,17 +216,14 @@ async function reclaimStatsPort(port: number, probe: "replaceable" | "occupied")
 		return "fallback";
 	}
 
-	const normalizedImage = holder.image
-		.toLowerCase()
-		.replace(/\.exe$/, "")
-		.replace(/ \(deleted\)$/, "");
-	const normalizedCommand = holder.commandLine.toLowerCase().replaceAll("\\", "/");
+	const normalizedImage = holder.image.toLowerCase().replace(/ \(deleted\)$/, "");
+	const normalizedCommand = holder.commandLine.toLowerCase();
 	const hasStatsIdentity =
 		normalizedImage === "omp-stats" ||
-		/(?:^|[/"'\s])omp-stats(?:\.exe)?(?:["'\s]|$)/.test(normalizedCommand) ||
+		/(?:^|[/"'\s])omp-stats(?:["'\s]|$)/.test(normalizedCommand) ||
 		/\/packages\/stats\/src\/index\.ts(?:["'\s]|$)/.test(normalizedCommand) ||
 		(normalizedImage === "omp" && /(?:^|\s)stats(?:\s|$)/.test(normalizedCommand)) ||
-		/(?:^|\/)omp(?:\.exe)?["'\s]+stats(?:["'\s]|$)/.test(normalizedCommand);
+		/(?:^|\/)omp["'\s]+stats(?:["'\s]|$)/.test(normalizedCommand);
 	const hasDashboardIdentity = probe === "replaceable";
 	if (!STATS_RUNTIME_IMAGES[normalizedImage] || (!hasStatsIdentity && !hasDashboardIdentity)) {
 		logger.debug("Stats dashboard port held by an unidentified process", { port, holder });

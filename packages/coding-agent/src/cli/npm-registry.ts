@@ -251,9 +251,9 @@ function envLookup(env: Env, name: string): string | undefined {
 
 /**
  * Read a config file that usually does not exist. Uses `node:fs/promises` rather
- * than `Bun.file().text()`: on Windows, Bun's rejected read of a missing file
- * holds no loop handle, so the loop drains mid-await and `omp update` trips
- * the unsettled-entry guard (exit 1) before the release lookup completes.
+ * than `Bun.file().text()`: Bun's rejected read of a missing file holds no loop
+ * handle, so the loop drains mid-await and `omp update` trips the
+ * unsettled-entry guard (exit 1) before the release lookup completes.
  */
 async function readOptional(file: string): Promise<string | undefined> {
 	try {

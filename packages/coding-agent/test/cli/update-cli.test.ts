@@ -91,37 +91,34 @@ describe("runUpdateCommand version source", () => {
 		for (const request of requests) expect(request.signal).toBeInstanceOf(AbortSignal);
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"updates a standalone binary from the build service without asking npm",
-		async () => {
-			const dir = await isolatePath();
-			const ompPath = path.join(dir, "omp");
-			await Bun.write(ompPath, "#!/bin/sh\necho omp/1.0.0\n");
-			await fs.chmod(ompPath, 0o755);
-			const next = "#!/bin/sh\necho omp/999.0.0\n";
-			const { target, fileName } = await currentBuildHost();
-			process.env.PI_BUILD_URL = "https://build.test";
-			const check = `https://build.test/api/products/omp/latest/${target}?channel=stable&from_version=${VERSION}`;
-			const { logs } = quiet();
-			const requests = stubFetch(url => {
-				if (url === check) {
-					return Response.json({
-						build: { version: "999.0.0" },
-						file: { name: fileName, size: Buffer.byteLength(next), sha256: Bun.SHA256.hash(next, "hex") },
-						download: "https://r2.test/omp",
-					});
-				}
-				if (url === "https://r2.test/omp") return new Response(next);
-				return new Response(null, { status: 404 });
-			});
+	it("updates a standalone binary from the build service without asking npm", async () => {
+		const dir = await isolatePath();
+		const ompPath = path.join(dir, "omp");
+		await Bun.write(ompPath, "#!/bin/sh\necho omp/1.0.0\n");
+		await fs.chmod(ompPath, 0o755);
+		const next = "#!/bin/sh\necho omp/999.0.0\n";
+		const { target, fileName } = await currentBuildHost();
+		process.env.PI_BUILD_URL = "https://build.test";
+		const check = `https://build.test/api/products/omp/latest/${target}?channel=stable&from_version=${VERSION}`;
+		const { logs } = quiet();
+		const requests = stubFetch(url => {
+			if (url === check) {
+				return Response.json({
+					build: { version: "999.0.0" },
+					file: { name: fileName, size: Buffer.byteLength(next), sha256: Bun.SHA256.hash(next, "hex") },
+					download: "https://r2.test/omp",
+				});
+			}
+			if (url === "https://r2.test/omp") return new Response(next);
+			return new Response(null, { status: 404 });
+		});
 
-			await runUpdateCommand({ force: false, check: false });
+		await runUpdateCommand({ force: false, check: false });
 
-			expect(requests.map(request => request.url)).toEqual([check, "https://r2.test/omp"]);
-			expect(await Bun.file(ompPath).text()).toBe(next);
-			expect(logs.some(line => line.includes("Updated to 999.0.0"))).toBe(true);
-		},
-	);
+		expect(requests.map(request => request.url)).toEqual([check, "https://r2.test/omp"]);
+		expect(await Bun.file(ompPath).text()).toBe(next);
+		expect(logs.some(line => line.includes("Updated to 999.0.0"))).toBe(true);
+	});
 });
 
 describe("getLatestRelease rename pointers", () => {

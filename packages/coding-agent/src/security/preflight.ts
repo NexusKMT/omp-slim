@@ -269,7 +269,7 @@ async function normalizeOutput(
 		await fs.mkdir(canonicalCandidate, { recursive: false, mode: 0o700 });
 		existingState = "empty";
 	}
-	if (process.platform !== "win32") await fs.chmod(canonicalCandidate, 0o700);
+	await fs.chmod(canonicalCandidate, 0o700);
 	return { root: canonicalCandidate, archiveExisting, existingState };
 }
 
@@ -299,7 +299,7 @@ export async function prepareSecurityOutputDirectory(
 		await fs.rename(root, archivedTo);
 		await fs.mkdir(root, { mode: 0o700 });
 	}
-	if (process.platform !== "win32") await fs.chmod(root, 0o700);
+	await fs.chmod(root, 0o700);
 	return { root, archivedTo };
 }
 

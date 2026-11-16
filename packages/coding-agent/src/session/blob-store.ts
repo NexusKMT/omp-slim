@@ -105,8 +105,8 @@ async function touchReusedBlob(blobPath: string, mtimeMs: number): Promise<boole
 
 /**
  * Publish `data` at `target` via temp file + rename. When the rename fails
- * because a racing writer already published the same content (Windows refuses
- * to replace a file a reader holds open), the existing complete file wins.
+ * because a racing writer already published the same content (a reader holding
+ * the target open can refuse the replace), the existing complete file wins.
  */
 function writeFileAtomicSync(target: string, data: Buffer): void {
 	const tempPath = blobStagingPath(target);

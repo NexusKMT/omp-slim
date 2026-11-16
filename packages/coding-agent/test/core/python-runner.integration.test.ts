@@ -210,7 +210,7 @@ describe.skipIf(!SHOULD_RUN)("python runner subprocess", () => {
 		}
 	});
 
-	it.skipIf(process.platform === "win32")("runs in its own POSIX session", async () => {
+	it("runs in its own POSIX session", async () => {
 		using tempDir = TempDir.createSync("@python-runner-session-isolation-");
 		const kernel = await PythonKernel.start({ cwd: tempDir.path() });
 		try {
@@ -355,7 +355,7 @@ describe.skipIf(!SHOULD_RUN)("python runner subprocess", () => {
 		}
 	});
 
-	it.skipIf(process.platform === "win32" || !HAS_ENSUREPIP)(
+	it.skipIf(!HAS_ENSUREPIP)(
 		"%pip bootstraps pip with ensurepip when the venv has no pip",
 		async () => {
 			using tempDir = TempDir.createSync("@python-runner-pip-ensurepip-");
@@ -375,79 +375,67 @@ describe.skipIf(!SHOULD_RUN)("python runner subprocess", () => {
 		120_000,
 	);
 
-	it.skipIf(process.platform === "win32")(
-		"%pip has uv install pip into the kernel's interpreter when ensurepip fails, then runs pip with the cell's arguments",
-		async () => {
-			using tempDir = TempDir.createSync("@python-runner-pip-uv-");
-			const uvLog = path.join(tempDir.path(), "uv.log");
-			const { kernel, python, sitePackages } = await startPiplessKernel(tempDir.path(), {
-				ensurepipMain: DISABLED_ENSUREPIP,
-				// Stands in for `uv pip install pip`: a pip that echoes its arguments.
-				uvScript: [
-					`printf '%s\\n' "$*" "$UV_PYTHON" > '${uvLog}'`,
-					'SITE="$("$UV_PYTHON" -c "import sysconfig; print(sysconfig.get_paths()[\'purelib\'])")"',
-					'mkdir -p "$SITE/pip"',
-					': > "$SITE/pip/__init__.py"',
-					`printf '%s\\n' 'import sys' 'print("pip-args:", *sys.argv[1:])' 'print("Successfully installed six-1.17.0")' > "$SITE/pip/__main__.py"`,
-				].join("\n"),
+	it("%pip has uv install pip into the kernel's interpreter when ensurepip fails, then runs pip with the cell's arguments", async () => {
+		using tempDir = TempDir.createSync("@python-runner-pip-uv-");
+		const uvLog = path.join(tempDir.path(), "uv.log");
+		const { kernel, python, sitePackages } = await startPiplessKernel(tempDir.path(), {
+			ensurepipMain: DISABLED_ENSUREPIP,
+			// Stands in for `uv pip install pip`: a pip that echoes its arguments.
+			uvScript: [
+				`printf '%s\\n' "$*" "$UV_PYTHON" > '${uvLog}'`,
+				'SITE="$("$UV_PYTHON" -c "import sysconfig; print(sysconfig.get_paths()[\'purelib\'])")"',
+				'mkdir -p "$SITE/pip"',
+				': > "$SITE/pip/__init__.py"',
+				`printf '%s\\n' 'import sys' 'print("pip-args:", *sys.argv[1:])' 'print("Successfully installed six-1.17.0")' > "$SITE/pip/__main__.py"`,
+			].join("\n"),
+		});
+		try {
+			const result = await executePythonWithKernel(kernel, "%pip install --disable-pip-version-check six");
+			expect(result.output).toContain("ensurepip is disabled");
+			const [uvArgs, uvPython] = (await Bun.file(uvLog).text()).trimEnd().split("\n");
+			expect(uvArgs).toBe("pip install pip");
+			expect(await fs.realpath(uvPython)).toBe(await fs.realpath(python));
+			expect(await Bun.file(path.join(sitePackages, "pip", "__main__.py")).exists()).toBe(true);
+			expect(result.output).toContain("pip-args: install --disable-pip-version-check six");
+			expect(result.displayOutputs).toContainEqual({
+				type: "status",
+				event: {
+					op: "pip",
+					args: "install --disable-pip-version-check six",
+					installed: ["six"],
+					exit_code: 0,
+				},
 			});
-			try {
-				const result = await executePythonWithKernel(kernel, "%pip install --disable-pip-version-check six");
-				expect(result.output).toContain("ensurepip is disabled");
-				const [uvArgs, uvPython] = (await Bun.file(uvLog).text()).trimEnd().split("\n");
-				expect(uvArgs).toBe("pip install pip");
-				expect(await fs.realpath(uvPython)).toBe(await fs.realpath(python));
-				expect(await Bun.file(path.join(sitePackages, "pip", "__main__.py")).exists()).toBe(true);
-				expect(result.output).toContain("pip-args: install --disable-pip-version-check six");
-				expect(result.displayOutputs).toContainEqual({
-					type: "status",
-					event: {
-						op: "pip",
-						args: "install --disable-pip-version-check six",
-						installed: ["six"],
-						exit_code: 0,
-					},
-				});
-			} finally {
-				await kernel.shutdown();
-			}
-		},
-		60_000,
-	);
+		} finally {
+			await kernel.shutdown();
+		}
+	}, 60_000);
 
-	it.skipIf(process.platform === "win32")(
-		"%pip reports the bootstrap failure when ensurepip fails and uv is not on PATH",
-		async () => {
-			using tempDir = TempDir.createSync("@python-runner-pip-no-bootstrap-");
-			const { kernel } = await startPiplessKernel(tempDir.path(), { ensurepipMain: DISABLED_ENSUREPIP });
-			try {
-				const result = await executePythonWithKernel(kernel, "%pip install six");
-				expect(result.output).toContain("ensurepip is disabled");
-				expect(result.displayOutputs).toContainEqual({
-					type: "status",
-					event: { op: "pip", args: "install six", installed: [], exit_code: 1 },
-				});
-			} finally {
-				await kernel.shutdown();
-			}
-		},
-		30_000,
-	);
+	it("%pip reports the bootstrap failure when ensurepip fails and uv is not on PATH", async () => {
+		using tempDir = TempDir.createSync("@python-runner-pip-no-bootstrap-");
+		const { kernel } = await startPiplessKernel(tempDir.path(), { ensurepipMain: DISABLED_ENSUREPIP });
+		try {
+			const result = await executePythonWithKernel(kernel, "%pip install six");
+			expect(result.output).toContain("ensurepip is disabled");
+			expect(result.displayOutputs).toContainEqual({
+				type: "status",
+				event: { op: "pip", args: "install six", installed: [], exit_code: 1 },
+			});
+		} finally {
+			await kernel.shutdown();
+		}
+	}, 30_000);
 
-	it.skipIf(process.platform === "win32")(
-		"cancelling %pip during the ensurepip bootstrap stops ensurepip and the pip it spawned",
-		async () => {
-			using tempDir = TempDir.createSync("@python-runner-pip-cancel-ensurepip-");
-			const { kernel } = await startPiplessKernel(tempDir.path(), { ensurepipMain: CHILD_SPAWNING_ENSUREPIP });
-			try {
-				const pids = await cancelInstall(kernel, "%pip install six");
-				expect(pids.filter(isRunning)).toEqual([]);
-			} finally {
-				await kernel.shutdown();
-			}
-		},
-		30_000,
-	);
+	it("cancelling %pip during the ensurepip bootstrap stops ensurepip and the pip it spawned", async () => {
+		using tempDir = TempDir.createSync("@python-runner-pip-cancel-ensurepip-");
+		const { kernel } = await startPiplessKernel(tempDir.path(), { ensurepipMain: CHILD_SPAWNING_ENSUREPIP });
+		try {
+			const pids = await cancelInstall(kernel, "%pip install six");
+			expect(pids.filter(isRunning)).toEqual([]);
+		} finally {
+			await kernel.shutdown();
+		}
+	}, 30_000);
 
 	// A procfs inherited from a parent PID namespace: every pid and parent pid it reports is the outer one.
 	const outerNamespaceStat = [
@@ -653,23 +641,19 @@ describe.skipIf(!SHOULD_RUN)("python runner subprocess", () => {
 		);
 	}
 
-	it.skipIf(process.platform === "win32")(
-		"cancelling %pip while uv installs pip stops uv and what it spawned",
-		async () => {
-			using tempDir = TempDir.createSync("@python-runner-pip-cancel-uv-");
-			const { kernel } = await startPiplessKernel(tempDir.path(), {
-				ensurepipMain: DISABLED_ENSUREPIP,
-				uvScript: 'sleep 30 &\necho "installer-pids:$$,$!"\nwait',
-			});
-			try {
-				const pids = await cancelInstall(kernel, "%pip install six");
-				expect(pids.filter(isRunning)).toEqual([]);
-			} finally {
-				await kernel.shutdown();
-			}
-		},
-		30_000,
-	);
+	it("cancelling %pip while uv installs pip stops uv and what it spawned", async () => {
+		using tempDir = TempDir.createSync("@python-runner-pip-cancel-uv-");
+		const { kernel } = await startPiplessKernel(tempDir.path(), {
+			ensurepipMain: DISABLED_ENSUREPIP,
+			uvScript: 'sleep 30 &\necho "installer-pids:$$,$!"\nwait',
+		});
+		try {
+			const pids = await cancelInstall(kernel, "%pip install six");
+			expect(pids.filter(isRunning)).toEqual([]);
+		} finally {
+			await kernel.shutdown();
+		}
+	}, 30_000);
 
 	it("loads quoted scripts without source echo, retaining namespace, filename and async execution", async () => {
 		using tempDir = TempDir.createSync("@python-runner-load-");

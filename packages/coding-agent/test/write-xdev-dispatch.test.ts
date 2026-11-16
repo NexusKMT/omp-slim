@@ -485,8 +485,8 @@ describe("read and write route xd:// device URLs", () => {
 		// Inferred (like the neighboring device fixtures): `mergeCallAndResult` and
 		// the render hooks live on the coding-agent `Tool`, not on `AgentTool`.
 		const topLevelDevice = {
-			name: "pwsh",
-			label: "PowerShell 7",
+			name: "deploy",
+			label: "Deploy runner",
 			description: "fixture",
 			parameters: type({ command: "string" }),
 			mergeCallAndResult: true,
@@ -500,10 +500,10 @@ describe("read and write route xd:// device URLs", () => {
 		const xdev = createTestXdevState([topLevelDevice], [], name => name === topLevelDevice.name);
 		xdev.mountedNames.clear();
 		const write = new WriteTool(xdevSession(process.cwd(), { xdev }));
-		const content = JSON.stringify({ command: "Write-Output 42" });
-		const result = await write.execute("write-xdev-top-level", { path: "xd://pwsh", content });
+		const content = JSON.stringify({ command: "run 42" });
+		const result = await write.execute("write-xdev-top-level", { path: "xd://deploy", content });
 		expect(result.isError ?? false).toBe(false);
-		expect(result.details?.xdev).toMatchObject({ tool: "pwsh", mode: "execute" });
+		expect(result.details?.xdev).toMatchObject({ tool: "deploy", mode: "execute" });
 
 		const component = writeToolRenderer.renderResult(
 			result,
@@ -513,13 +513,13 @@ describe("read and write route xd:// device URLs", () => {
 				renderContext: mountedRenderContext(xdev),
 			},
 			uiTheme,
-			{ path: "xd://pwsh", content },
+			{ path: "xd://deploy", content },
 		);
 		const rendered = Bun.stripANSI(component.render(80).join("\n"));
 
 		expect(rendered).toContain("TOP-LEVEL-RESULT");
 		// The generic device card would have inlined the args instead.
-		expect(rendered).not.toContain('command="Write-Output 42"');
+		expect(rendered).not.toContain('command="run 42"');
 	});
 
 	// Dynamic device summaries are third-party text inlined into the system

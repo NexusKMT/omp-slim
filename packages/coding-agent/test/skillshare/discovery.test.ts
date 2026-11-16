@@ -195,7 +195,6 @@ describe("skillshare discovery provider", () => {
 	});
 
 	it("keeps skills readable through skill:// when the store sits behind a symlink", async () => {
-		if (process.platform === "win32") return;
 		const realStore = path.join(tempHome, "dotfiles", "skillshare");
 		await fs.mkdir(realStore, { recursive: true });
 		await fs.mkdir(path.dirname(getSkillshareStoreDir()), { recursive: true });

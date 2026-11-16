@@ -89,9 +89,9 @@ describe("worktree clear task-isolation ownership", () => {
 		expect(await exists(orphan)).toBe(false);
 		expect(await exists(corrupt)).toBe(false);
 		expect(await exists(pending)).toBe(true);
-		// Windows reports neither /proc start times nor `ps`, so pid-only liveness
-		// cannot spot the recycled pid and the sandbox is conservatively kept.
-		expect(await exists(recycled)).toBe(process.platform === "win32");
+		// A pid-only liveness probe cannot spot a recycled pid on its own; the
+		// sandbox is only reclaimed once the owner file says the process is gone.
+		expect(await exists(recycled)).toBe(false);
 	});
 
 	it("unmounts retained mounting-backend workspaces before removal", async () => {

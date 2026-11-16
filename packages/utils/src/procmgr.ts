@@ -56,39 +56,17 @@ function buildSpawnEnv(shell: string): Record<string, string> {
 
 /**
  * Get shell args for the resolved shell.
- * cmd.exe takes `/c`; PowerShell (powershell.exe / pwsh) takes
- * `-NoLogo -Command`, with `-NoProfile` when PI_BASH_NO_LOGIN /
- * CLAUDE_BASH_NO_LOGIN is set (profile scripts are PowerShell's login-shell
- * analog); POSIX shells take `-c`, with `-l` unless the same env is set.
+ * POSIX shells take `-c`, with `-l` unless PI_BASH_NO_LOGIN /
+ * CLAUDE_BASH_NO_LOGIN is set.
  *
  * Exported for tests; `env` overrides the process env gate.
  */
-export function getShellArgs(shell: string, env: Record<string, string | undefined> = $env): string[] {
-	if (isCmdShell(shell)) return ["/c"];
+export function getShellArgs(env: Record<string, string | undefined> = $env): string[] {
 	const noLogin = env.PI_BASH_NO_LOGIN || env.CLAUDE_BASH_NO_LOGIN;
-	if (isPowerShell(shell)) {
-		return noLogin ? ["-NoLogo", "-NoProfile", "-Command"] : ["-NoLogo", "-Command"];
-	}
 	return noLogin ? ["-c"] : ["-l", "-c"];
 }
 
-/** Whether the shell is Windows cmd.exe (spawn paths must use `/c`, not `-c`). */
-export function isCmdShell(shell: string): boolean {
-	const basename = shell.replace(/\\/g, "/").split("/").pop()?.toLowerCase();
-	return basename === "cmd.exe" || basename === "cmd";
-}
-
-/**
- * Whether the shell is Windows PowerShell or PowerShell Core (pwsh). Spawn
- * paths must use `-Command`: passing the POSIX `-l -c` pair makes PowerShell
- * parse `-l` as the command and fail with `The term '-l' is not recognized`.
- */
-export function isPowerShell(shell: string): boolean {
-	const basename = shell.replace(/\\/g, "/").split("/").pop()?.toLowerCase();
-	return basename === "powershell.exe" || basename === "powershell" || basename === "pwsh.exe" || basename === "pwsh";
-}
-
-const POSIX_SHELL_PATTERN = /(?:^|[\\/])(?:sh|bash|dash|ash|ksh|zsh)(?:\.exe)?$/i;
+const POSIX_SHELL_PATTERN = /(?:^|\/)(?:sh|bash|dash|ash|ksh|zsh)$/i;
 
 /** Whether the executable is a known shell whose command language uses POSIX quoting. */
 export function isPosixShell(shell: string): boolean {
@@ -108,7 +86,7 @@ function getShellPrefix(): string | undefined {
 function buildConfig(shell: string): ShellConfig {
 	return {
 		shell,
-		args: getShellArgs(shell),
+		args: getShellArgs(),
 		env: buildSpawnEnv(shell),
 		prefix: getShellPrefix(),
 	};
@@ -118,20 +96,16 @@ function buildConfig(shell: string): ShellConfig {
  * Resolve a basic shell (bash or sh) as fallback.
  */
 export function resolveBasicShell(): string | undefined {
-	for (const name of ["bash", "bash.exe", "sh", "sh.exe"]) {
+	for (const name of ["bash", "sh"]) {
 		const resolved = $which(name);
 		if (resolved) return resolved;
 	}
 
-	if (process.platform !== "win32") {
-		const searchPaths = ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"];
-		const candidates = ["bash", "sh"];
-
-		for (const name of candidates) {
-			for (const dir of searchPaths) {
-				const fullPath = path.join(dir, name);
-				if (fs.existsSync(fullPath)) return fullPath;
-			}
+	const searchPaths = ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"];
+	for (const name of ["bash", "sh"]) {
+		for (const dir of searchPaths) {
+			const fullPath = path.join(dir, name);
+			if (fs.existsSync(fullPath)) return fullPath;
 		}
 	}
 
@@ -139,60 +113,11 @@ export function resolveBasicShell(): string | undefined {
 }
 
 /**
- * Resolve the external shell to advertise on Windows.
- *
- * A host bash is OPTIONAL: bash tool commands always execute in the embedded
- * bash engine (pi-shell). The resolved binary only serves the spawn-a-shell paths
- * (interactive PTY sessions, ACP client terminals, SHELL env), so this
- * prefers a real Git Bash when one exists and otherwise falls back to
- * cmd.exe — it never fails.
- *
- * Search order:
- * 1. Git for Windows install roots (machine + per-user installers)
- * 2. scoop installs — scoop's git manifest sets GIT_INSTALL_ROOT and shims
- *    sh.exe/git.exe but never bash.exe, so PATH lookup alone misses it
- * 3. bash.exe on PATH (Cygwin, MSYS2, ...)
- * 4. sh.exe on PATH (Git for Windows' sh.exe is bash; prefer a sibling
- *    bash.exe when present)
- * 5. cmd.exe from ComSpec
- *
- * Exported for tests; `env` overrides Bun.env-based discovery.
- */
-export function resolveWindowsShell(env: Record<string, string | undefined> = Bun.env): string {
-	const gitRoots = [
-		env.ProgramFiles && path.join(env.ProgramFiles, "Git"),
-		env["ProgramFiles(x86)"] && path.join(env["ProgramFiles(x86)"], "Git"),
-		env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, "Programs", "Git"),
-		env.GIT_INSTALL_ROOT,
-		env.SCOOP && path.join(env.SCOOP, "apps", "git", "current"),
-		env.USERPROFILE && path.join(env.USERPROFILE, "scoop", "apps", "git", "current"),
-	];
-	for (const root of gitRoots) {
-		if (!root) continue;
-		const candidate = path.join(root, "bin", "bash.exe");
-		if (fs.existsSync(candidate)) return candidate;
-	}
-
-	const bashOnPath = $which("bash.exe");
-	if (bashOnPath) return bashOnPath;
-
-	const shOnPath = $which("sh.exe");
-	if (shOnPath) {
-		const siblingBash = path.join(path.dirname(shOnPath), "bash.exe");
-		return fs.existsSync(siblingBash) ? siblingBash : shOnPath;
-	}
-
-	return env.ComSpec || env.COMSPEC || "C:\\Windows\\System32\\cmd.exe";
-}
-
-/**
  * Get shell configuration based on platform.
  * Resolution order:
  * 1. User-specified shellPath from the active settings source
- * 2. On Windows: Git Bash / bash / sh discovery, then cmd.exe (see
- *    {@link resolveWindowsShell}) — never fails
- * 3. On Unix: $SHELL if bash/zsh, then fallback paths
- * 4. Fallback: sh
+ * 2. $SHELL if bash/zsh, then fallback paths
+ * 3. Fallback: sh
  *
  * Custom and auto-resolved configs are cached separately, so clearing
  * `shellPath` mid-process immediately falls back to the platform default.
@@ -241,20 +166,16 @@ export function __resetShellConfigCacheForTests(): void {
 	cachedCustomShellConfig = null;
 }
 
-/** Platform shell discovery used when no custom `shellPath` is configured. */
+/** Shell discovery used when no custom `shellPath` is configured. */
 function resolveDefaultShell(): string {
-	if (process.platform === "win32") {
-		return resolveWindowsShell();
-	}
-
-	// Unix: prefer user's shell from $SHELL if it's bash/zsh and executable
+	// Prefer user's shell from $SHELL if it's bash/zsh and executable
 	const userShell = Bun.env.SHELL;
 	const isValidShell = userShell && (userShell.includes("bash") || userShell.includes("zsh"));
 	if (isValidShell && isExecutable(userShell)) {
 		return userShell;
 	}
 
-	// 4. Fallback: use basic shell
+	// Fallback: use basic shell
 	return resolveBasicShell() ?? "sh";
 }
 

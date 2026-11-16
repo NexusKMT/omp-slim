@@ -42,7 +42,6 @@ describe("profile alias installer", () => {
 		expect(command.display).toBe(`/bin/bun ${expectedPosixPath}`);
 		expect(command.posix).toBe(`'/bin/bun' '${expectedPosixPath}'`);
 		expect(command.fish).toBe(`'/bin/bun' '${expectedPosixPath}'`);
-		expect(command.powerShell).toBe(`'/bin/bun' '${expectedScriptPath}'`);
 	});
 
 	it("uses the installed command for a compiled standalone invocation", () => {
@@ -55,13 +54,12 @@ describe("profile alias installer", () => {
 			display: "omp",
 			posix: "omp",
 			fish: "omp",
-			powerShell: "omp",
 		});
 	});
 
 	it("normalizes a backslash runtime path for POSIX shell command fields", () => {
-		// On Windows argv[0] is typically a native path like C:\Users\me\.bun\bin\bun.exe;
-		// bash/zsh/fish fields must use forward slashes while PowerShell keeps the native path.
+		// A native argv[0] can arrive as a Windows-shaped path like C:\Users\me\.bun\bin\bun.exe;
+		// bash/zsh/fish fields must use forward slashes while the native display keeps it.
 		const runtime = "C:\\Users\\me\\.bun\\bin\\bun.exe";
 		const command = resolveProfileAliasCommandFromProcess({
 			argv: [runtime, "src/cli.ts"],
@@ -75,7 +73,6 @@ describe("profile alias installer", () => {
 		expect(command.display).toBe(`${posixRuntime} ${expectedPosixPath}`);
 		expect(command.posix).toBe(`'${posixRuntime}' '${expectedPosixPath}'`);
 		expect(command.fish).toBe(`'${posixRuntime}' '${expectedPosixPath}'`);
-		expect(command.powerShell).toBe(`'${runtime}' '${expectedScriptPath}'`);
 	});
 
 	it("can target the current source invocation instead of the installed omp binary", async () => {
@@ -92,7 +89,6 @@ describe("profile alias installer", () => {
 				display: "bun /repo/packages/coding-agent/src/cli.ts",
 				posix: "bun '/repo/packages/coding-agent/src/cli.ts'",
 				fish: "bun /repo/packages/coding-agent/src/cli.ts",
-				powerShell: "bun '/repo/packages/coding-agent/src/cli.ts'",
 			},
 			readFile: async filePath => files.get(filePath) ?? "",
 			writeFile: async (filePath, content) => {
@@ -166,99 +162,6 @@ describe("profile alias installer", () => {
 
 		expect(result.configPath).toBe("/home/me/.dotfiles/config/fish/conf.d/omp-profiles.fish");
 		expect(files.get(result.configPath)).toContain("function omp-work --wraps omp");
-	});
-
-	it("writes a PowerShell function because aliases cannot carry arguments", async () => {
-		const files = new Map<string, string>();
-
-		await installProfileAlias({
-			profile: "work",
-			aliasName: "omp-work",
-			shellPath: "pwsh.exe",
-			platform: "win32",
-			homeDir: "C:\\Users\\me",
-			readFile: async filePath => files.get(filePath) ?? "",
-			writeFile: async (filePath, content) => {
-				files.set(filePath, content);
-			},
-		});
-
-		const psConfigPath = path.join("C:\\Users\\me", "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1");
-		const content = files.get(psConfigPath) ?? "";
-		expect(content).toContain("function omp-work");
-		expect(content).toContain("& omp --profile=work @args");
-	});
-
-	it("detects pwsh from PSModulePath when SHELL is unset on Windows", async () => {
-		const files = new Map<string, string>();
-
-		const result = await installProfileAlias({
-			profile: "work",
-			aliasName: "omp-work",
-			platform: "win32",
-			homeDir: "C:\\Users\\me",
-			env: {
-				PSModulePath:
-					"C:\\Users\\me\\Documents\\PowerShell\\Modules;C:\\Program Files\\PowerShell\\7\\Modules;C:\\Users\\me\\Documents\\WindowsPowerShell\\Modules",
-			},
-			readFile: async filePath => files.get(filePath) ?? "",
-			writeFile: async (filePath, content) => {
-				files.set(filePath, content);
-			},
-		});
-
-		expect(result.shell).toBe("pwsh");
-		const psConfigPath = path.join("C:\\Users\\me", "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1");
-		expect(result.configPath).toBe(psConfigPath);
-		expect(files.get(result.configPath)).toContain("& omp --profile=work @args");
-	});
-
-	it("selects Windows PowerShell when only WindowsPowerShell modules are present", async () => {
-		const files = new Map<string, string>();
-
-		const result = await installProfileAlias({
-			profile: "work",
-			aliasName: "omp-work",
-			platform: "win32",
-			homeDir: "C:\\Users\\me",
-			env: {
-				PSModulePath:
-					"C:\\Users\\me\\Documents\\WindowsPowerShell\\Modules;C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\Modules",
-			},
-			readFile: async filePath => files.get(filePath) ?? "",
-			writeFile: async (filePath, content) => {
-				files.set(filePath, content);
-			},
-		});
-
-		expect(result.shell).toBe("powershell");
-		const psConfigPath = path.join(
-			"C:\\Users\\me",
-			"Documents",
-			"WindowsPowerShell",
-			"Microsoft.PowerShell_profile.ps1",
-		);
-		expect(result.configPath).toBe(psConfigPath);
-	});
-
-	it("treats POWERSHELL_DISTRIBUTION_CHANNEL as a pwsh hint when no module paths disambiguate", async () => {
-		const files = new Map<string, string>();
-
-		const result = await installProfileAlias({
-			profile: "work",
-			aliasName: "omp-work",
-			platform: "win32",
-			homeDir: "C:\\Users\\me",
-			env: { POWERSHELL_DISTRIBUTION_CHANNEL: "MSI:Windows 10 Pro" },
-			readFile: async filePath => files.get(filePath) ?? "",
-			writeFile: async (filePath, content) => {
-				files.set(filePath, content);
-			},
-		});
-
-		expect(result.shell).toBe("pwsh");
-		const psConfigPath = path.join("C:\\Users\\me", "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1");
-		expect(result.configPath).toBe(psConfigPath);
 	});
 
 	it("replaces a previous block for the same alias", async () => {
@@ -341,14 +244,13 @@ describe("profile alias installer", () => {
 		for (const { aliasName, shellPath } of [
 			{ aliasName: "if", shellPath: "/bin/bash" },
 			{ aliasName: "end", shellPath: "/opt/homebrew/bin/fish" },
-			{ aliasName: "foreach", shellPath: "pwsh.exe" },
 		]) {
 			await expect(
 				installProfileAlias({
 					profile: "work",
 					aliasName,
 					shellPath,
-					platform: shellPath === "pwsh.exe" ? "win32" : "linux",
+					platform: "linux",
 					homeDir: "/home/me",
 				}),
 			).rejects.toThrow("reserved word");
@@ -400,14 +302,14 @@ describe("profile alias installer", () => {
 		expect(files.size).toBe(0);
 	});
 
-	it("normalizes backslashes in Windows homeDir for POSIX shell config paths", async () => {
+	it("normalizes backslashes in a Windows-shaped homeDir for POSIX shell config paths", async () => {
 		const files = new Map<string, string>();
 
 		const result = await installProfileAlias({
 			profile: "work",
 			aliasName: "omp-work",
 			shellPath: "/bin/bash",
-			platform: "win32",
+			platform: "linux",
 			homeDir: "C:\\Users\\me",
 			readFile: async filePath => files.get(filePath) ?? "",
 			writeFile: async (filePath, content) => {
@@ -421,14 +323,14 @@ describe("profile alias installer", () => {
 		expect(result.reloadedWith).toBe(". 'C:/Users/me/.bashrc'");
 	});
 
-	it("normalizes backslashes in ZDOTDIR for zsh config paths on Windows", async () => {
+	it("normalizes backslashes in a Windows-shaped ZDOTDIR for zsh config paths", async () => {
 		const files = new Map<string, string>();
 
 		const result = await installProfileAlias({
 			profile: "work",
 			aliasName: "omp-work",
 			shellPath: "/bin/zsh",
-			platform: "win32",
+			platform: "linux",
 			homeDir: "C:\\Users\\me",
 			env: { ZDOTDIR: "D:\\zdotdir" },
 			readFile: async filePath => files.get(filePath) ?? "",
@@ -441,14 +343,14 @@ describe("profile alias installer", () => {
 		expect(result.reloadedWith).toBe(". 'D:/zdotdir/.zshrc'");
 	});
 
-	it("normalizes backslashes in XDG_CONFIG_HOME for fish config paths on Windows", async () => {
+	it("normalizes backslashes in a Windows-shaped XDG_CONFIG_HOME for fish config paths", async () => {
 		const files = new Map<string, string>();
 
 		const result = await installProfileAlias({
 			profile: "work",
 			aliasName: "omp-work",
 			shellPath: "/bin/fish",
-			platform: "win32",
+			platform: "linux",
 			homeDir: "C:\\Users\\me",
 			env: { XDG_CONFIG_HOME: "D:\\xdg" },
 			readFile: async filePath => files.get(filePath) ?? "",
@@ -468,7 +370,7 @@ describe("profile alias installer", () => {
 			profile: "work",
 			aliasName: "omp-work",
 			shellPath: "/bin/bash",
-			platform: "win32",
+			platform: "linux",
 			homeDir: "\\\\server\\share\\me",
 			readFile: async filePath => files.get(filePath) ?? "",
 			writeFile: async (filePath, content) => {

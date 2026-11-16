@@ -4,8 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 // install.sh binary mode against a fake build service. The host is faked as
-// musl Linux x64 by shadowing uname/ldd via PATH; MSYS sh on Windows prepends
-// /usr/bin, so the stubs never win there.
+// musl Linux x64 by shadowing uname/ldd via PATH.
 
 const repoRoot = path.join(import.meta.dir, "..");
 const BINARY = '#!/bin/sh\necho "omp/1.0.0"\n';
@@ -135,7 +134,7 @@ async function runInstall(
 // install.sh shells out to ~a dozen subprocesses (sed/tr/grep/curl/shasum plus
 // a smoke-test exec); on slow-spawning hosts each install can exceed the 5s
 // default test timeout, so the suite pins an explicit budget here.
-describe.skipIf(process.platform === "win32")("install.sh binary mode", () => {
+describe("install.sh binary mode", () => {
 	test("installs the host target's build, verified against the answer's file sha256", async () => {
 		const service = startService(sha256(BINARY));
 		const result = await runInstall(service.url, ["--binary"]);

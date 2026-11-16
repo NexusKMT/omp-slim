@@ -11,7 +11,7 @@ describe("ptree kill without a usable native process handle", () => {
 		vi.restoreAllMocks();
 	});
 
-	it.skipIf(process.platform === "win32").each([
+	it.each([
 		[
 			"the handle lookup throws",
 			() => {

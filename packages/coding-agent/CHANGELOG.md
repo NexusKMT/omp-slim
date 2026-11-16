@@ -4,6 +4,8 @@
 
 ### Removed
 
+- Removed Windows support: platform branches for PowerShell clipboard bridges, console-title FFI, `cmd.exe`/PATHEXT resolution, Windows path-utils/UNC/NTFS-stream handling, launcher shim takeover, Windows file locking in self-update, the Windows Python cell server, and the `install.ps1` installer; macOS, Linux and WSL behaviour is unchanged.
+
 - Removed provider login, account pools, quota dashboards, auth brokers/gateways, dry-balance, slow mode and cache warming. CLI and worker sessions use explicit endpoint models and generic API keys; retired settings are removed during migration.
 
 - Removed session sharing, collaboration hosting and joining, live broadcast, screen recording and replay, and HTML session export. Local history, resume, transcript diagnostics and the stats dashboard remain available.

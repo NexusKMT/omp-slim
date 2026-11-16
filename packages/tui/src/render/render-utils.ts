@@ -9,7 +9,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Ellipsis } from "@oh-my-pi/pi-natives";
-import { expandWindowsLongPath, getWindowsShortPath } from "@oh-my-pi/pi-natives/path";
 import { pluralize, sanitizeText } from "@oh-my-pi/pi-utils";
 import { formatKeyHint, type KeyId } from "../app-keybindings";
 import { getKeybindings } from "../keybindings";
@@ -395,7 +394,7 @@ function sanitizeErrorText(message: string | undefined): string {
  * Split multi-line tool text into TUI-safe display lines.
  * Splits CRLF/LF, collapses stray `\r` progress overwrites to the final
  * segment (mirroring terminal rendering), and expands tabs — so raw
- * subprocess or fetched output (e.g. Windows ssh emitting CRLF, tab-indented
+ * subprocess or fetched output (e.g. ssh emitting CRLF, tab-indented
  * web content) can't corrupt the framed block layout with cursor-moving
  * control characters or tab-stop width mismatches.
  */
@@ -922,47 +921,27 @@ interface HomePattern {
 }
 
 const homePatternCache = new Map<string, HomePattern>();
-function homePatternFor(homeDir: string, windowsStyle: boolean): HomePattern {
-	const key = `${windowsStyle ? 1 : 0} ${homeDir}`;
-	let pattern = homePatternCache.get(key);
+function homePatternFor(homeDir: string): HomePattern {
+	let pattern = homePatternCache.get(homeDir);
 	if (pattern === undefined) {
-		// A trailing separator (`C:\Users\me\`, `/home/me/`) must still match `<home>/child`;
-		// roots such as `/` and `C:\` keep theirs.
-		const home = homeDir.replace(/(?<=[^\\/:])[\\/]+$/, "");
-		let escapedHome = RegExp.escape(home);
-		if (windowsStyle) {
-			// Query only home, once per cached pattern: descendants need not exist,
-			// and rendering must neither resolve junctions nor probe output paths.
-			const parts = home.replaceAll("/", "\\").split("\\");
-			const longHome = expandWindowsLongPath(home);
-			const aliases = [longHome, getWindowsShortPath(longHome)]
-				.map(alias => alias.replaceAll("/", "\\").split("\\"))
-				.filter(alias => alias.length === parts.length);
-			escapedHome = parts
-				.map((part, index) => {
-					// Each component may independently use its long or short spelling.
-					const names = [...new Set([part, ...aliases.map(alias => alias[index]!)])].map(name =>
-						RegExp.escape(name),
-					);
-					return names.length === 1 ? names[0]! : `(?:${names.join("|")})`;
-				})
-				.join("[\\\\/]");
-		}
+		// A trailing separator must still match `<home>/child`; the root `/` keeps it.
+		const home = homeDir.replace(/(?<=[^/:])[/]+$/, "");
+		const escapedHome = RegExp.escape(home);
 		// `*` and `_` are also identifier and glob characters (`/home/me_old`, `src/**/home/me/**`), so they
 		// bound the home directory only as Markdown emphasis: opened at start or after whitespace, and
 		// closed before end, whitespace, or punctuation.
 		const end = `[\\\\/\\s"'\\x60)\\]},;:<>&|]`;
 		pattern = {
-			leading: new RegExp(`^${escapedHome}(?=$|[\\\\/])`, windowsStyle ? "i" : ""),
+			leading: new RegExp(`^${escapedHome}(?=$|[\\\\/])`),
 			embedded: new RegExp(
 				`[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s"'<>]+` +
 					`|(^|[\\s"'\\x60([{=,:<>&|])(${escapedHome})(?=$|${end})` +
 					`|((?:^|\\s)[*_]{1,3})(${escapedHome})(?=$|${end}|[*_]{1,3}(?=$|[\\s.,;:!?)\\]}"'\\x60]))`,
-				windowsStyle ? "gi" : "g",
+				"g",
 			),
 		};
 		if (homePatternCache.size >= 16) homePatternCache.clear();
-		homePatternCache.set(key, pattern);
+		homePatternCache.set(homeDir, pattern);
 	}
 	return pattern;
 }
@@ -974,21 +953,18 @@ export function shortenPath(filePath: unknown, homeDir?: string): string {
 	}
 	const home = homeDir ?? defaultHomeDir();
 	if (!home) return filePath;
-	const windowsStyle = /^[A-Za-z]:[\\/]/.test(home) || home.startsWith("\\\\");
-	const match = homePatternFor(home, windowsStyle).leading.exec(filePath);
+	const match = homePatternFor(home).leading.exec(filePath);
 	if (match) {
-		const suffix = filePath.slice(match[0].length);
-		return `~${suffix.replaceAll(path.win32.sep, path.posix.sep)}`;
+		return `~${filePath.slice(match[0].length)}`;
 	}
 	return filePath;
 }
 
-/** Shorten embedded home paths; normalize Windows separators unless the caller preserves native error text. */
-export function shortenEmbeddedPaths(text: string, homeDir?: string, preserveSeparators = false): string {
+/** Shorten embedded home paths. */
+export function shortenEmbeddedPaths(text: string, homeDir?: string): string {
 	const resolvedHome = homeDir ?? defaultHomeDir();
 	if (!resolvedHome || resolvedHome.length <= 1) return text;
-	const windowsStyle = /^[A-Za-z]:[\\/]/.test(resolvedHome) || resolvedHome.startsWith("\\\\");
-	const homePattern = homePatternFor(resolvedHome, windowsStyle);
+	const homePattern = homePatternFor(resolvedHome);
 	const textWithShortenedHome = text.replace(
 		homePattern.embedded,
 		(
@@ -999,7 +975,6 @@ export function shortenEmbeddedPaths(text: string, homeDir?: string, preserveSep
 			emphasized: string | undefined,
 		) => (candidate !== undefined ? `${boundary}~` : emphasized !== undefined ? `${emphasis}~` : match),
 	);
-	if (preserveSeparators) return textWithShortenedHome;
 	return textWithShortenedHome
 		.split(" ")
 		.map(segment => {
@@ -1008,10 +983,7 @@ export function shortenEmbeddedPaths(text: string, homeDir?: string, preserveSep
 			const end = segment.length - trailing.length;
 			if (leading.length >= end) return segment;
 			const shortened = shortenPath(segment.slice(leading.length, end), resolvedHome);
-			const normalized = shortened.startsWith("~")
-				? shortened.replaceAll(path.win32.sep, path.posix.sep)
-				: shortened;
-			return `${leading}${normalized}${trailing}`;
+			return `${leading}${shortened}${trailing}`;
 		})
 		.join(" ");
 }
@@ -1031,12 +1003,7 @@ export function shortenToolArgumentPaths(text: string, key: string | undefined, 
 				} catch {
 					/* Retain malformed percent escapes as literal path bytes. */
 				}
-				const filePath = url.hostname
-					? `//${url.hostname}${decodedPath}`
-					: /^[A-Za-z]:$/.test(decodedPath.slice(1, 3))
-						? decodedPath.slice(1)
-						: decodedPath;
-				return shortenEmbeddedPaths(filePath, homeDir);
+				return shortenEmbeddedPaths(decodedPath, homeDir);
 			}
 		} catch {
 			// Preserve malformed and non-file URL arguments verbatim.
@@ -1081,12 +1048,7 @@ export function formatToolWorkingDirectory(workdir: string | undefined, projectD
 		return undefined;
 	}
 	const relativePath = path.relative(resolvedProjectDir, resolvedWorkdir);
-	// On Windows, `path.relative` across drives returns the absolute target, which is not inside the project.
-	const isWithinProject =
-		relativePath.length > 0 &&
-		!path.isAbsolute(relativePath) &&
-		!relativePath.startsWith("..") &&
-		!relativePath.startsWith(`..${path.sep}`);
+	const isWithinProject = relativePath.length > 0 && !path.isAbsolute(relativePath) && !relativePath.startsWith("..");
 	const displayWorkdir = isWithinProject ? relativePath : shortenPath(resolvedWorkdir);
 	return replaceTabs(displayWorkdir);
 }

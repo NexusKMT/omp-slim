@@ -188,7 +188,6 @@ describe("daemon metadata writes", () => {
 		const client = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const broker = startBroker(projectDir, runtimeDir);
 		const rename = fs.rename;
-		const platform = Object.getOwnPropertyDescriptor(process, "platform");
 		let denials = 0;
 		const renameSpy = spyOn(fs, "rename").mockImplementation(async (source, target) => {
 			if (
@@ -196,8 +195,7 @@ describe("daemon metadata writes", () => {
 				target === metadataPath &&
 				(await fs.readFile(source, "utf8")).includes('"state":"exited"')
 			) {
-				// Simulate Windows replacement semantics for this broker's final write.
-				Object.defineProperty(process, "platform", { value: "win32" });
+				// A reader holding the destination denies the broker's final write.
 				const code = denials++ === 0 ? "EEXIST" : "EPERM";
 				throw Object.assign(new Error("rename denied by reader"), { code });
 			}
@@ -228,7 +226,6 @@ describe("daemon metadata writes", () => {
 				client.close();
 				await broker.finished;
 			} finally {
-				if (platform) Object.defineProperty(process, "platform", platform);
 				renameSpy.mockRestore();
 			}
 		}

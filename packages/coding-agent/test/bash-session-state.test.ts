@@ -67,89 +67,77 @@ it.each([
 	expect(result.content.find(block => block.type === "text")?.text).toContain("plain output");
 });
 
-it.skipIf(process.platform === "win32")("keeps a variable set by one call for the next call", async () => {
+it("keeps a variable set by one call for the next call", async () => {
 	const tool = bashTool();
 	await run(tool, "PI_STATE_VAR=kept");
 	expect((await run(tool, 'printf "%s" "$PI_STATE_VAR"')).text).toBe("kept");
 });
 
-it.skipIf(process.platform === "win32")("keeps a function defined by one call callable in the next call", async () => {
+it("keeps a function defined by one call callable in the next call", async () => {
 	const tool = bashTool();
 	await run(tool, "pi_state_fn() { printf 'called %s' \"$1\"; }");
 	expect((await run(tool, "pi_state_fn twice")).text).toBe("called twice");
 });
 
-it.skipIf(process.platform === "win32")(
-	"keeps state set by a call that moved to the background once it finishes",
-	async () => {
-		const tool = bashTool({ "bash.autoBackground.thresholdMs": 100 });
-		const started = await run(tool, "PI_STATE_VAR=from-bg; pi_bg_fn() { printf fn; }; sleep 1");
-		expect(started.async?.state).toBe("running");
-		await manager.waitForAll();
-		expect((await run(tool, 'printf "%s:" "$PI_STATE_VAR"; pi_bg_fn')).text).toBe("from-bg:fn");
-	},
-	10_000,
-);
+it("keeps state set by a call that moved to the background once it finishes", async () => {
+	const tool = bashTool({ "bash.autoBackground.thresholdMs": 100 });
+	const started = await run(tool, "PI_STATE_VAR=from-bg; pi_bg_fn() { printf fn; }; sleep 1");
+	expect(started.async?.state).toBe("running");
+	await manager.waitForAll();
+	expect((await run(tool, 'printf "%s:" "$PI_STATE_VAR"; pi_bg_fn')).text).toBe("from-bg:fn");
+}, 10_000);
 
-it.skipIf(process.platform === "win32")("keeps state and options after a call that exits non-zero", async () => {
+it("keeps state and options after a call that exits non-zero", async () => {
 	const tool = bashTool();
 	await run(tool, "set -uo pipefail; PI_STATE_VAR=kept");
 	expect((await run(tool, "false")).text).toContain("Command exited with code 1");
 	expect((await run(tool, 'printf "%s %s" "$PI_STATE_VAR" "$-"')).text).toMatch(/^kept \S*u\S*$/);
 });
 
-it.skipIf(process.platform === "win32")(
-	"runs calls that overlap a backgrounded one in a copy of the session shell and leaves it intact",
-	async () => {
-		const tool = bashTool({ "bash.autoBackground.thresholdMs": 100 });
-		await run(tool, "PI_STATE_VAR=kept");
-		expect((await run(tool, "sleep 2")).async?.state).toBe("running");
+it("runs calls that overlap a backgrounded one in a copy of the session shell and leaves it intact", async () => {
+	const tool = bashTool({ "bash.autoBackground.thresholdMs": 100 });
+	await run(tool, "PI_STATE_VAR=kept");
+	expect((await run(tool, "sleep 2")).async?.state).toBe("running");
 
-		const overlapping = await run(tool, 'printf "[%s]" "$PI_STATE_VAR"; PI_STATE_VAR=lost');
-		expect(overlapping.text).toStartWith("Ran in a copy of the busy session shell");
-		// An overlapping call that itself moves to the background says so in its start result.
-		const promoted = await run(tool, "sleep 0.5");
-		expect(promoted.async?.state).toBe("running");
-		expect(promoted.text).toContain("Ran in a copy of the busy session shell");
+	const overlapping = await run(tool, 'printf "[%s]" "$PI_STATE_VAR"; PI_STATE_VAR=lost');
+	expect(overlapping.text).toStartWith("Ran in a copy of the busy session shell");
+	// An overlapping call that itself moves to the background says so in its start result.
+	const promoted = await run(tool, "sleep 0.5");
+	expect(promoted.async?.state).toBe("running");
+	expect(promoted.text).toContain("Ran in a copy of the busy session shell");
 
+	await manager.waitForAll();
+	expect((await run(tool, 'printf "%s" "$PI_STATE_VAR"')).text).toBe("kept");
+}, 10_000);
+
+it("runs a call in the shell of the session it started in when the session changes first", async () => {
+	const [first, second] = [`${cwd}:first`, `${cwd}:second`];
+	let sessionId = first;
+	const heldAllocation = Promise.withResolvers<{ id?: string; path?: string }>();
+	let allocations = 0;
+	const tool = bashTool(
+		// A fresh session shell is cold to create (the native addon takes well
+		// over 100ms on first spawn), so the post-switch probes below would
+		// otherwise auto-background instead of returning their `[]` inline.
+		{ "bash.autoBackground.thresholdMs": 2_000 },
+		{
+			getSessionId: () => sessionId,
+			// Holds the first call before its shell starts, so the session changes underneath it.
+			allocateOutputArtifact: async () => (allocations++ === 0 ? heldAllocation.promise : {}),
+		},
+	);
+	try {
+		expect((await run(tool, "PI_STATE_VAR=from-first")).async?.state).toBe("running");
+		sessionId = second;
+		heldAllocation.resolve({});
 		await manager.waitForAll();
-		expect((await run(tool, 'printf "%s" "$PI_STATE_VAR"')).text).toBe("kept");
-	},
-	10_000,
-);
 
-it.skipIf(process.platform === "win32")(
-	"runs a call in the shell of the session it started in when the session changes first",
-	async () => {
-		const [first, second] = [`${cwd}:first`, `${cwd}:second`];
-		let sessionId = first;
-		const heldAllocation = Promise.withResolvers<{ id?: string; path?: string }>();
-		let allocations = 0;
-		const tool = bashTool(
-			// A fresh session shell is cold to create (the native addon takes well
-			// over 100ms on first spawn), so the post-switch probes below would
-			// otherwise auto-background instead of returning their `[]` inline.
-			{ "bash.autoBackground.thresholdMs": 2_000 },
-			{
-				getSessionId: () => sessionId,
-				// Holds the first call before its shell starts, so the session changes underneath it.
-				allocateOutputArtifact: async () => (allocations++ === 0 ? heldAllocation.promise : {}),
-			},
-		);
-		try {
-			expect((await run(tool, "PI_STATE_VAR=from-first")).async?.state).toBe("running");
-			sessionId = second;
-			heldAllocation.resolve({});
-			await manager.waitForAll();
-
-			expect((await run(tool, 'printf "[%s]" "$PI_STATE_VAR"')).text).toBe("[]");
-			// The left session's shell was dropped when that call finished.
-			sessionId = first;
-			expect((await run(tool, 'printf "[%s]" "$PI_STATE_VAR"')).text).toBe("[]");
-		} finally {
-			releaseShellSessions(first);
-			releaseShellSessions(second);
-		}
-	},
-	10_000,
-);
+		expect((await run(tool, 'printf "[%s]" "$PI_STATE_VAR"')).text).toBe("[]");
+		// The left session's shell was dropped when that call finished.
+		sessionId = first;
+		expect((await run(tool, 'printf "[%s]" "$PI_STATE_VAR"')).text).toBe("[]");
+	} finally {
+		releaseShellSessions(first);
+		releaseShellSessions(second);
+	}
+}, 10_000);

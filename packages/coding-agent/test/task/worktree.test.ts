@@ -71,8 +71,6 @@ describe("worktree isolation helpers", () => {
 		expect(parseIsolationBackend("zfs")).toBe(natives.IsoBackendKind.Zfs);
 		expect(parseIsolationBackend("reflink")).toBe(natives.IsoBackendKind.LinuxReflink);
 		expect(parseIsolationBackend("overlayfs")).toBe(natives.IsoBackendKind.Overlayfs);
-		expect(parseIsolationBackend("projfs")).toBe(natives.IsoBackendKind.Projfs);
-		expect(parseIsolationBackend("block-clone")).toBe(natives.IsoBackendKind.WindowsBlockClone);
 		expect(parseIsolationBackend("rcopy")).toBe(natives.IsoBackendKind.Rcopy);
 	});
 
@@ -189,7 +187,6 @@ describe("worktree isolation helpers", () => {
 	});
 
 	it("sizes an untracked symlink itself rather than its target", async () => {
-		if (process.platform === "win32") return;
 		const repo = await createGitRepo();
 		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-worktree-symlink-target-"));
 		tempDirs.push(targetDir);
@@ -668,30 +665,27 @@ describe("detachGitDir", () => {
 		expect(await runGit(wt, ["rev-parse", "omp-fetched"])).toBe(taskCommit);
 	});
 
-	// chmod(0) cannot revoke read access on Windows (it only sets the
-	// read-only attribute), so an unreadable index is POSIX-only.
-	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-		"keeps shared git metadata intact when the index cannot be read",
-		async () => {
-			const { wt, commonDir } = await makeLinkedWorktree();
-			const iso = await copyTree(wt);
-			const gitEntry = path.join(iso, ".git");
-			const pointerBefore = await fs.readFile(gitEntry, "utf8");
-			const indexPath = await runGit(iso, ["rev-parse", "--path-format=absolute", "--git-path", "index"]);
-			const indexMode = (await fs.stat(indexPath)).mode;
-			await fs.chmod(indexPath, 0);
-			try {
-				await expect(vcs.detachGitDir(iso, commonDir)).rejects.toMatchObject({
-					code: "Io",
-					stderr: expect.stringContaining("Permission denied"),
-				});
-			} finally {
-				await fs.chmod(indexPath, indexMode);
-			}
-			expect(await fs.readFile(gitEntry, "utf8")).toBe(pointerBefore);
-			expect(await runGit(iso, ["status", "--porcelain=v1"])).toBe("");
-		},
-	);
+	// chmod(0) cannot revoke read access as root, so an unreadable index is gated
+	// on an unprivileged POSIX account.
+	it.skipIf(process.getuid?.() === 0)("keeps shared git metadata intact when the index cannot be read", async () => {
+		const { wt, commonDir } = await makeLinkedWorktree();
+		const iso = await copyTree(wt);
+		const gitEntry = path.join(iso, ".git");
+		const pointerBefore = await fs.readFile(gitEntry, "utf8");
+		const indexPath = await runGit(iso, ["rev-parse", "--path-format=absolute", "--git-path", "index"]);
+		const indexMode = (await fs.stat(indexPath)).mode;
+		await fs.chmod(indexPath, 0);
+		try {
+			await expect(vcs.detachGitDir(iso, commonDir)).rejects.toMatchObject({
+				code: "Io",
+				stderr: expect.stringContaining("Permission denied"),
+			});
+		} finally {
+			await fs.chmod(indexPath, indexMode);
+		}
+		expect(await fs.readFile(gitEntry, "utf8")).toBe(pointerBefore);
+		expect(await runGit(iso, ["status", "--porcelain=v1"])).toBe("");
+	});
 
 	it("leaves an already-independent full-copy checkout untouched", async () => {
 		const src = await fs.mkdtemp(path.join(os.tmpdir(), "omp-detach-src-"));

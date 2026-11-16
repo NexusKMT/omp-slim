@@ -78,7 +78,6 @@ declare module "./keybindings" {
  * Resolve default image-paste shortcuts for the current terminal platform.
  */
 export function getDefaultPasteImageKeys(platform: NodeJS.Platform = process.platform): KeyId[] {
-	if (platform === "win32") return ["ctrl+v", "alt+v"];
 	if (platform === "darwin") return ["ctrl+v", "super+v"];
 	return ["ctrl+v"];
 }
@@ -138,7 +137,7 @@ export const KEYBINDINGS = {
 	},
 	"app.approval.approve": {
 		// A chord, not Enter: an Enter typed for the composer as the prompt appears must not approve.
-		// Ctrl+Q backs up Ctrl+Enter, which Windows Terminal cannot deliver (#1903).
+		// Ctrl+Q backs up Ctrl+Enter, which some terminals cannot deliver (#1903).
 		defaultKeys: ["ctrl+enter", "ctrl+q"],
 		description: "Approve a pending tool call",
 	},
@@ -152,8 +151,8 @@ export const KEYBINDINGS = {
 	},
 	"app.message.followUp": {
 		// Ctrl+Enter is preserved for terminals that deliver it (Kitty/iTerm2/WezTerm/Ghostty),
-		// but Windows Terminal does not emit a distinct event for Ctrl+Enter — Ctrl+Q is listed
-		// first so the default binding works there without remapping (#1903).
+		// but others emit no distinct event for Ctrl+Enter — Ctrl+Q is listed first so the
+		// default binding works there without remapping (#1903).
 		defaultKeys: ["ctrl+q", "ctrl+enter"],
 		description: "Send follow-up message",
 	},

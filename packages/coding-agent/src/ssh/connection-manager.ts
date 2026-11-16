@@ -17,10 +17,6 @@ export type SSHHostOs = "windows" | "linux" | "macos" | "unknown";
 export type SSHHostShell = "cmd" | "powershell" | "bash" | "zsh" | "sh" | "unknown";
 export type SshPlatform = typeof process.platform;
 
-export function supportsSshControlMaster(platform: SshPlatform = process.platform): boolean {
-	return platform !== "win32";
-}
-
 export interface SSHHostInfo {
 	version: number;
 	os: SSHHostOs;
@@ -105,7 +101,7 @@ export function resolveSshControlDir(opts: {
 	tmpBase?: string;
 }): ControlDirChoice {
 	const { canonicalDir, platform, uid, tmpBase } = opts;
-	if (!supportsSshControlMaster(platform) || uid === undefined) return { dir: canonicalDir, shared: false };
+	if (uid === undefined) return { dir: canonicalDir, shared: false };
 	if (controlPathFitsBudget(canonicalDir, platform)) return { dir: canonicalDir, shared: false };
 	return { dir: sshControlFallbackDir(canonicalDir, uid, tmpBase), shared: true };
 }
@@ -124,7 +120,6 @@ const pendingConnections = new Map<string, Promise<void>>();
 const hostInfoCache = new Map<string, SSHHostInfo>();
 
 interface SSHArgsOptions {
-	platform?: SshPlatform;
 	/** When true, omit `-n` so the remote command can read from our piped stdin. */
 	allowStdin?: boolean;
 }
@@ -163,7 +158,7 @@ async function deleteHostInfoFromDisk(hostName: string): Promise<void> {
 	}
 }
 
-async function validateKeyPermissions(keyPath?: string, platform: SshPlatform = process.platform): Promise<void> {
+async function validateKeyPermissions(keyPath?: string): Promise<void> {
 	if (!keyPath) return;
 	let stats: fs.Stats;
 	try {
@@ -177,7 +172,6 @@ async function validateKeyPermissions(keyPath?: string, platform: SshPlatform = 
 	if (!stats.isFile()) {
 		throw new Error(`SSH key is not a file: ${keyPath}`);
 	}
-	if (platform === "win32") return;
 	const mode = stats.mode & 0o777;
 	if ((mode & 0o077) !== 0) {
 		throw new Error(`SSH key permissions must be 600 or stricter: ${keyPath}`);
@@ -193,11 +187,9 @@ type ControlPathOwner = "omp" | "config";
 function buildCommonArgs(host: SSHConnectionTarget, owner: ControlPathOwner, options?: SSHArgsOptions): string[] {
 	const args = options?.allowStdin ? [] : ["-n"];
 
-	if (supportsSshControlMaster(options?.platform)) {
-		args.push("-o", "ControlMaster=auto");
-		// A config-owned socket keeps the user's ControlPath and ControlPersist.
-		if (owner === "omp") args.push("-o", `ControlPath=${CONTROL_PATH}`, "-o", "ControlPersist=3600");
-	}
+	args.push("-o", "ControlMaster=auto");
+	// A config-owned socket keeps the user's ControlPath and ControlPersist.
+	if (owner === "omp") args.push("-o", `ControlPath=${CONTROL_PATH}`, "-o", "ControlPersist=3600");
 
 	args.push("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new");
 
@@ -279,8 +271,7 @@ const controlPathOwners = new Map<string, Promise<ControlPathOwner>>();
  *
  * Throws when the username or host would be parsed as an ssh option.
  */
-function resolveControlPathOwner(host: SSHConnectionTarget, platform?: SshPlatform): Promise<ControlPathOwner> {
-	if (!supportsSshControlMaster(platform)) return Promise.resolve("omp");
+function resolveControlPathOwner(host: SSHConnectionTarget): Promise<ControlPathOwner> {
 	const target = buildSshTarget(host.username, host.host);
 	const key = `${target}:${host.port ?? ""}`;
 	let owner = controlPathOwners.get(key);
@@ -702,9 +693,9 @@ export async function buildRemoteCommand(
 	command: string,
 	options?: SSHArgsOptions,
 ): Promise<string[]> {
-	await validateKeyPermissions(host.keyPath, options?.platform);
+	await validateKeyPermissions(host.keyPath);
 	const target = buildSshTarget(host.username, host.host);
-	const owner = await resolveControlPathOwner(host, options?.platform);
+	const owner = await resolveControlPathOwner(host);
 	return [...buildCommonArgs(host, owner, options), target, command];
 }
 
@@ -757,13 +748,6 @@ export async function ensureConnection(host: SSHConnectionTarget): Promise<void>
 		}
 
 		const target = buildSshTarget(host.username, host.host);
-		if (!supportsSshControlMaster()) {
-			activeHosts.set(key, host);
-			if (!hostInfoCache.has(key) && !(await loadHostInfoFromDisk(host))) {
-				await probeHostInfo(host);
-			}
-			return;
-		}
 
 		const owner = await resolveControlPathOwner(host);
 		const commonArgs = buildCommonArgs(host, owner);
@@ -818,7 +802,6 @@ export async function invalidateHostMetadata(hostNames: Iterable<string>): Promi
 }
 
 async function closeConnectionInternal(host: SSHConnectionTarget): Promise<void> {
-	if (!supportsSshControlMaster()) return;
 	const target = buildSshTarget(host.username, host.host);
 	const owner = await resolveControlPathOwner(host);
 	// Configured sockets may have been replaced by a user's master since the

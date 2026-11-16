@@ -270,9 +270,10 @@ const writerRegistry = new FinalizationRegistry<number>(fd => {
 
 /**
  * Identity of the file `filePath` currently names, read through a descriptor.
- * Handle and by-name stat can disagree for the same file (Windows FSLogix
- * profile disks report different dev/ino), so identity checks compare
- * descriptor to descriptor. Returns undefined when the path is missing.
+ * Opening the path and stat'ing the handle keeps the check free of the race
+ * where the path is replaced between the stat and the use, so a mismatch with
+ * a held descriptor means the path was replaced. Returns undefined when the
+ * path is missing.
  */
 function statPathByHandle(filePath: string): fs.BigIntStats | undefined {
 	let fd: number;
@@ -402,28 +403,11 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 			try {
 				fs.ftruncateSync(this.#fd, originalSize);
 			} catch (rollbackError) {
-				// Windows refuses ftruncate on an O_APPEND handle. Reopen without
-				// O_APPEND and verify its identity before rolling back: the path may
-				// now name a different session file after an external replacement.
-				try {
-					const rollbackFd = fs.openSync(this.#fpath, "r+");
-					try {
-						const original = fs.fstatSync(this.#fd);
-						const current = fs.fstatSync(rollbackFd);
-						if (original.dev !== current.dev || original.ino !== current.ino) {
-							throw new Error("Session file was replaced before append rollback");
-						}
-						fs.ftruncateSync(rollbackFd, originalSize);
-					} finally {
-						fs.closeSync(rollbackFd);
-					}
-				} catch (pathRollbackError) {
-					// Keep the write failure visible in the message.
-					throw new AggregateError(
-						[toError(writeError), toError(rollbackError), toError(pathRollbackError)],
-						`Session append failed and its partial bytes could not be rolled back: ${toError(writeError).message}`,
-					);
-				}
+				// Keep the write failure visible in the message.
+				throw new AggregateError(
+					[toError(writeError), toError(rollbackError)],
+					`Session append failed and its partial bytes could not be rolled back: ${toError(writeError).message}`,
+				);
 			}
 			throw writeError;
 		}
@@ -610,11 +594,11 @@ function sessionLeasePath(sessionId: string, createDir: boolean): string {
 		? sessionId
 		: `h-${Bun.hash.wyhash(sessionId).toString(16).padStart(16, "0")}`;
 	const dir = sessionOwnersDir();
-	// Linux (abstract socket) and Windows (named mutex) locks never touch the
-	// filesystem; elsewhere the lock is a `flock` sidecar in that directory. The
-	// sidecars are empty and never removed: unlinking a flock file can split one
-	// lease between a holder of the old inode and a creator of a new one.
-	if (process.platform !== "linux" && process.platform !== "win32") {
+	// Linux (abstract socket) locks never touch the filesystem; elsewhere the lock
+	// is a `flock` sidecar in that directory. The sidecars are empty and never
+	// removed: unlinking a flock file can split one lease between a holder of the
+	// old inode and a creator of a new one.
+	if (process.platform !== "linux") {
 		if (createDir) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 		// The test-run dir sits in the shared OS temp dir, where another local
 		// user could pre-create it or plant a symlink: refuse anything but a
@@ -904,11 +888,11 @@ export class FileSessionStorage implements SessionStorage {
 		// on the unlinked inode), in which case we hold nothing. Retry instead
 		// of entering the region unexclusively (hV-oE). The path still naming
 		// our inode proves the record is there (holders only ever create and
-		// unlink lock files). Both identities are read through descriptors:
-		// by-name stat can report a different dev/ino than the handle for the
-		// same file (Windows FSLogix profile disks). Our descriptor stays open
-		// until after the comparison so the inode cannot be freed and its number
-		// reused by a successor's file; bigint keeps 64-bit Windows file IDs exact.
+		// unlink lock files). Both identities are read through descriptors so
+		// the comparison is a real identity check rather than two by-name stats
+		// that could observe different files. Our descriptor stays open until
+		// after the comparison so the inode cannot be freed and its number
+		// reused by a successor's file; bigint keeps 64-bit file IDs exact.
 		try {
 			const held = fs.fstatSync(fd, { bigint: true });
 			const named = statPathByHandle(lockPath);
@@ -1186,8 +1170,8 @@ export class FileSessionStorage implements SessionStorage {
 
 	/**
 	 * Sync rename hook. Split from `rename` so `writeTextAtomic` can perform its
-	 * guard-then-publish step without a yield, and so tests can inject
-	 * Windows-style EPERM at the sync layer used by the atomic path.
+	 * guard-then-publish step without a yield, and so tests can inject a failed
+	 * rename at the sync layer used by the atomic path.
 	 */
 	renameSync(source: string, target: string): void {
 		fs.renameSync(source, target);
@@ -1207,6 +1191,12 @@ export class FileSessionStorage implements SessionStorage {
 		}
 	}
 
+	/**
+	 * Recover from a rename the filesystem refused (EPERM: immutable target,
+	 * sticky-bit directory): move the current file aside, rename the staged
+	 * body in, then drop the backup. Only reached from the publish lock, so no
+	 * cooperating writer interleaves with the move-aside window.
+	 */
 	#replaceSessionFileAfterEpermSync(
 		tempPath: string,
 		targetPath: string,
@@ -1436,8 +1426,9 @@ function matchesPattern(name: string, pattern: string): boolean {
 /**
  * Name of `key` when it sits directly inside `resolvedDir` (a `path.resolve`d
  * directory), else `undefined`. Key-indexed storages keep whatever spelling
- * callers wrote, so both sides are resolved: on Windows `/sessions/x` and the
- * `path.join`-built `\sessions\x\…` keys must list as the same directory.
+ * callers wrote — including keys written by another host — so both sides are
+ * resolved, and a name carrying a separator (`/` or `\`) is never a direct
+ * child of the directory it is resolved against.
  */
 export function directChildKeyName(resolvedDir: string, key: string): string | undefined {
 	const name = path.basename(key);

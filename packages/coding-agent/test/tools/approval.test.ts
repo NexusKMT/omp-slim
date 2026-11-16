@@ -805,42 +805,6 @@ describe("tool-owned dynamic approval declarations", () => {
 		).toEqual({ tier: "write", policy: "allow" });
 	});
 
-	it("uses legacy compound approval when the resolved shell is cmd.exe", () => {
-		const settingsOverrides = {
-			"bash.allowCompoundCommands": true,
-			"bash.patterns": [{ match: "echo *", approval: "allow" }],
-		};
-		const args = { command: "echo 'x && del victim && echo y' && echo done" };
-
-		for (const resolvedShell of ["cmd.exe", "cmd", String.raw`C:\Windows\System32\CmD.ExE`]) {
-			const bash = createBashTool(settingsOverrides, resolvedShell);
-			expect(resolveApproval(bash, args, "write")).toMatchObject({
-				policy: "prompt",
-				source: "mode",
-			});
-			expect(requiresApproval(bash, args, "write").required).toBe(true);
-		}
-	});
-
-	it("uses legacy compound approval for PowerShell quoting", () => {
-		const settingsOverrides = {
-			"bash.allowCompoundCommands": true,
-			"bash.patterns": [{ match: "Write-Output *", approval: "allow" }],
-		};
-		const args = {
-			command: String.raw`Write-Output "safe\" && Remove-Item victim && Write-Output \"done" && Write-Output final`,
-		};
-
-		for (const resolvedShell of ["pwsh", String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.EXE`]) {
-			const bash = createBashTool(settingsOverrides, resolvedShell);
-			expect(resolveApproval(bash, args, "write")).toMatchObject({
-				policy: "prompt",
-				source: "mode",
-			});
-			expect(requiresApproval(bash, args, "write").required).toBe(true);
-		}
-	});
-
 	it("does not apply POSIX compound approval to fish or unknown shells", () => {
 		const settingsOverrides = {
 			"bash.allowCompoundCommands": true,
@@ -853,14 +817,12 @@ describe("tool-owned dynamic approval declarations", () => {
 			command: String.raw`echo 'safe\' filler' && rm -f victim && echo \' && echo final`,
 		};
 
-		for (const resolvedShell of ["/bin/BaSh", String.raw`C:\Program Files\Git\bin\ZSH.ExE`]) {
-			const bash = createBashTool(settingsOverrides, resolvedShell);
-			expect(resolveApproval(bash, args, "write")).toMatchObject({
-				policy: "allow",
-				source: "tool",
-			});
-			expect(requiresApproval(bash, args, "write").required).toBe(false);
-		}
+		const bash = createBashTool(settingsOverrides, "/bin/BaSh");
+		expect(resolveApproval(bash, args, "write")).toMatchObject({
+			policy: "allow",
+			source: "tool",
+		});
+		expect(requiresApproval(bash, args, "write").required).toBe(false);
 
 		for (const resolvedShell of ["/usr/bin/fish", "/usr/local/bin/custom-shell"]) {
 			const bash = createBashTool(settingsOverrides, resolvedShell);
@@ -871,21 +833,19 @@ describe("tool-owned dynamic approval declarations", () => {
 		}
 	});
 
-	it("retains compound opt-in for POSIX and Git Bash shells", () => {
+	it("retains compound opt-in for POSIX shells", () => {
 		const settingsOverrides = {
 			"bash.allowCompoundCommands": true,
 			"bash.patterns": [{ match: "echo *", approval: "allow" }],
 		};
 		const args = { command: "echo 'x && del victim && echo y' && echo done" };
 
-		for (const resolvedShell of ["/bin/bash", String.raw`C:\Program Files\Git\bin\bash.exe`]) {
-			const bash = createBashTool(settingsOverrides, resolvedShell);
-			expect(resolveApproval(bash, args, "always-ask")).toMatchObject({
-				policy: "allow",
-				source: "tool",
-			});
-			expect(requiresApproval(bash, args, "always-ask").required).toBe(false);
-		}
+		const bash = createBashTool(settingsOverrides, "/bin/bash");
+		expect(resolveApproval(bash, args, "always-ask")).toMatchObject({
+			policy: "allow",
+			source: "tool",
+		});
+		expect(requiresApproval(bash, args, "always-ask").required).toBe(false);
 	});
 
 	it("inherits standalone approval fallback when any literal && segment is unmatched", () => {

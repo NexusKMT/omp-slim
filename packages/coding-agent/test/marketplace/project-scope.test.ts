@@ -143,7 +143,7 @@ describe("resolveActiveProjectRegistryPath", () => {
 		expect(await resolveOrDefaultProjectRegistryPath(tempRoot)).toBeUndefined();
 	});
 
-	it.skipIf(process.platform === "win32").each(["/tmp", "/var/tmp"])(
+	it.each(["/tmp", "/var/tmp"])(
 		"does not create a project registry at the shared %s root even with another tmpdir",
 		async root => {
 			vi.spyOn(os, "tmpdir").mockReturnValue(tmpDir);

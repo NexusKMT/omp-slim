@@ -148,10 +148,9 @@ describe("TUI SIXEL capability probe", () => {
 	});
 
 	it("enables SIXEL under WSL + Windows Terminal (process.platform is linux)", () => {
-		// Regression for #6009: inside WSL, process.platform reports "linux" even
-		// though the host is Windows Terminal, so a probe gated on
-		// process.platform === "win32" never negotiated SIXEL there. The probe no
-		// longer gates on the host at all; WSL is one covered environment of many.
+		// Regression for #6009: inside WSL the host is a Windows terminal while
+		// process.platform reports "linux". The probe no longer gates on the host
+		// at all; WSL is one covered environment of many.
 		if (process.platform !== "linux") return;
 		Bun.env.WT_SESSION = "test-wt-session";
 		Bun.env.WSL_DISTRO_NAME = "Ubuntu";
@@ -203,8 +202,8 @@ describe("ProcessTerminal DA1 SIXEL detection", () => {
 		previousEnv.clear();
 	});
 
-	it("enables SIXEL from native Windows Terminal DA1 without a graphics reply", () => {
-		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true, nativeWindowsConsole: false });
+	it("enables SIXEL from a DA1 advertisement without a graphics reply", () => {
+		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true });
 		const received: string[] = [];
 		harness.tui.addInputListener(data => {
 			received.push(data);
@@ -276,7 +275,7 @@ describe("ProcessTerminal DA1 SIXEL detection", () => {
 			ImageProtocol.Sixel,
 		],
 	] as const) {
-		it.skipIf(process.platform === "win32")(name, async () => {
+		it(name, async () => {
 			const replies = {
 				"display-message -p #{client_name}": "/dev/pts/3",
 				"show-messages -T -t /dev/pts/3": `Terminal 0: st-256color for /dev/pts/3, flags=0x0:\n${capability}`,
@@ -307,7 +306,7 @@ describe("ProcessTerminal DA1 SIXEL detection", () => {
 	}
 
 	it("reassembles a DA1 advertisement split beyond the stdin flush deadline", () => {
-		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true, nativeWindowsConsole: false });
+		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true });
 		const received: string[] = [];
 		harness.tui.addInputListener(data => {
 			received.push(data);
@@ -323,7 +322,7 @@ describe("ProcessTerminal DA1 SIXEL detection", () => {
 	});
 
 	it("accepts a late unowned DA1 advertisement after the graphics timeout", () => {
-		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true, nativeWindowsConsole: false });
+		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true });
 		const sentinelCount = harness.writes.reduce((count, write) => count + (write.match(/\x1b\[c/g)?.length ?? 0), 0);
 		process.stdin.emit("data", "\x1b[?61;6;22c".repeat(sentinelCount));
 		vi.advanceTimersByTime(251);
@@ -335,7 +334,7 @@ describe("ProcessTerminal DA1 SIXEL detection", () => {
 	});
 
 	it("does not mistake the conformance level or other attributes for SIXEL", () => {
-		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true, nativeWindowsConsole: false });
+		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true });
 
 		process.stdin.emit("data", "\x1b[?4;14;24;42c");
 		expect(TERMINAL.imageProtocol).toBeNull();
@@ -347,7 +346,7 @@ describe("ProcessTerminal DA1 SIXEL detection", () => {
 	for (const override of ["off", "none"]) {
 		it(`keeps graphics disabled by an explicit ${override} override`, () => {
 			Bun.env.PI_FORCE_IMAGE_PROTOCOL = override;
-			harness = createProcessTerminalRenderHarness(80, 24, { conpty: true, nativeWindowsConsole: false });
+			harness = createProcessTerminalRenderHarness(80, 24, { conpty: true });
 
 			process.stdin.emit("data", "\x1b[?61;4;6;22c");
 
@@ -358,7 +357,7 @@ describe("ProcessTerminal DA1 SIXEL detection", () => {
 	for (const protocol of [ImageProtocol.Kitty, ImageProtocol.Iterm2]) {
 		it(`does not replace the already selected ${protocol} graphics protocol`, () => {
 			setTerminalImageProtocol(protocol);
-			harness = createProcessTerminalRenderHarness(80, 24, { conpty: true, nativeWindowsConsole: false });
+			harness = createProcessTerminalRenderHarness(80, 24, { conpty: true });
 
 			process.stdin.emit("data", "\x1b[?61;4;6;22c");
 
@@ -367,7 +366,7 @@ describe("ProcessTerminal DA1 SIXEL detection", () => {
 	}
 
 	it("replays a DA1 advertisement to a subscriber attached after detection", () => {
-		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true, nativeWindowsConsole: false });
+		harness = createProcessTerminalRenderHarness(80, 24, { conpty: true });
 		process.stdin.emit("data", "\x1b[?61;4;6;22c");
 		const reports: boolean[] = [];
 

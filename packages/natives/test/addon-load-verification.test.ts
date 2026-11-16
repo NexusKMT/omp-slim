@@ -98,24 +98,21 @@ describe("verifyHostAddonLoads", () => {
 	);
 
 	// A FIFO with no writer blocks the loader's open() forever: a stand-in for
-	// an addon whose init hangs. Windows has no FIFOs.
-	test.skipIf(process.platform === "win32")(
-		"fails a load that never finishes instead of hanging the build",
-		async () => {
-			const directory = await mkdtemp(path.join(tmpdir(), "omp-addon-load-"));
-			const addon = path.join(directory, "pi_natives.hang.node");
-			expect(Bun.spawnSync(["mkfifo", addon]).exitCode).toBe(0);
+	// an addon whose init hangs.
+	test("fails a load that never finishes instead of hanging the build", async () => {
+		const directory = await mkdtemp(path.join(tmpdir(), "omp-addon-load-"));
+		const addon = path.join(directory, "pi_natives.hang.node");
+		expect(Bun.spawnSync(["mkfifo", addon]).exitCode).toBe(0);
 
-			try {
-				const failure = await failureOf(verifyHostAddonLoads(addon, 500));
+		try {
+			const failure = await failureOf(verifyHostAddonLoads(addon, 500));
 
-				expect(failure).toBeInstanceOf(Error);
-				expect(failure instanceof Error ? failure.message : "").toContain("did not finish within 0.5s");
-			} finally {
-				await rm(directory, { recursive: true, force: true });
-			}
-		},
-	);
+			expect(failure).toBeInstanceOf(Error);
+			expect(failure instanceof Error ? failure.message : "").toContain("did not finish within 0.5s");
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("hostProbeFilename", () => {
@@ -143,13 +140,6 @@ describe("hostProbeFilename", () => {
 		expect(hostProbeFilename(["linux-arm64"], muslArm64)).toBeNull();
 	});
 
-	test("a Windows ARM64 host resolves `host` to the win32-arm64 addon and probes it", () => {
-		const windowsArm64: HostInfo = { platform: "win32", arch: "arm64", avx2: false, musl: false };
-		expect(resolveTargetMembers(["host"], windowsArm64)).toEqual(["win32-arm64"]);
-		expect(hostProbeFilename(["win32-arm64"], windowsArm64)).toBe("pi_natives.win32-arm64.node");
-		expect(hostProbeFilename(["win32-x64-baseline"], windowsArm64)).toBeNull();
-	});
-
 	test("probes the host's own target, however it was requested", () => {
 		expect(hostProbeFilename(["linux-arm64"], glibcArm64)).toBe("pi_natives.linux-arm64.node");
 		expect(hostProbeFilename(["host"], glibcArm64)).toBe("pi_natives.linux-arm64.node");
@@ -157,7 +147,7 @@ describe("hostProbeFilename", () => {
 	});
 
 	test("skips cross-compiled targets and an ISA the host cannot run", () => {
-		expect(hostProbeFilename(["win32-x64-baseline", "darwin-arm64"], glibcArm64)).toBeNull();
+		expect(hostProbeFilename(["darwin-x64-baseline", "darwin-arm64"], glibcArm64)).toBeNull();
 		// A baseline-only host never claims the modern x64 addon as its own.
 		expect(hostProbeFilename(["linux-x64-modern"], glibcX64Baseline)).toBeNull();
 	});

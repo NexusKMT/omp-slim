@@ -3,17 +3,12 @@ import * as path from "node:path";
 import { normalizeProfileName } from "@oh-my-pi/pi-utils/dirs";
 import { quotePosixArgument } from "../utils/shell-quote";
 
-export type ProfileAliasShell = "bash" | "zsh" | "fish" | "powershell" | "pwsh";
-
-function quoteForPowerShell(pathValue: string): string {
-	return `'${pathValue.replace(/'/g, `''`)}'`;
-}
+export type ProfileAliasShell = "bash" | "zsh" | "fish";
 
 export interface ProfileAliasCommand {
 	display: string;
 	posix: string;
 	fish: string;
-	powerShell: string;
 }
 
 /** Process inputs used to select the installed command or preserve a source invocation. */
@@ -27,7 +22,6 @@ const DEFAULT_ALIAS_COMMAND: ProfileAliasCommand = {
 	display: "omp",
 	posix: "omp",
 	fish: "omp",
-	powerShell: "omp",
 };
 
 export interface ProfileAliasInstallOptions {
@@ -91,41 +85,6 @@ const FISH_RESERVED_ALIAS_NAMES: ReadonlySet<string> = new Set([
 	"switch",
 	"while",
 ]);
-const POWERSHELL_RESERVED_ALIAS_NAMES: ReadonlySet<string> = new Set([
-	"begin",
-	"break",
-	"catch",
-	"class",
-	"continue",
-	"data",
-	"do",
-	"dynamicparam",
-	"else",
-	"elseif",
-	"end",
-	"enum",
-	"exit",
-	"filter",
-	"finally",
-	"for",
-	"foreach",
-	"from",
-	"function",
-	"if",
-	"in",
-	"param",
-	"process",
-	"return",
-	"switch",
-	"throw",
-	"trap",
-	"try",
-	"until",
-	"using",
-	"var",
-	"while",
-	"workflow",
-]);
 
 // Keep local: importing the pi-utils root here would eagerly load env before
 // cli.ts has applied --profile, regressing profile-specific .env loading.
@@ -140,9 +99,6 @@ function getReservedAliasNames(shell: ProfileAliasShell): ReadonlySet<string> {
 			return POSIX_RESERVED_ALIAS_NAMES;
 		case "fish":
 			return FISH_RESERVED_ALIAS_NAMES;
-		case "powershell":
-		case "pwsh":
-			return POWERSHELL_RESERVED_ALIAS_NAMES;
 	}
 }
 
@@ -160,37 +116,12 @@ function validateAliasName(aliasName: string, shell: ProfileAliasShell): string 
 	return normalized;
 }
 
-// On Windows the launching shell is rarely exported through $SHELL, so when it
-// is missing we infer the PowerShell edition from the inherited environment.
-// PowerShell 7 (pwsh) always seeds PSModulePath with separator-delimited
-// ".../PowerShell/..." module directories (plus the Windows PowerShell ones for
-// back-compat), whereas Windows PowerShell 5.1 only ever lists
-// ".../WindowsPowerShell/...". The separator anchors keep "WindowsPowerShell"
-// from matching. POWERSHELL_DISTRIBUTION_CHANNEL is set only by some pwsh
-// distributions, so it stays a secondary hint rather than the primary signal.
-function detectWindowsPowerShell(env: NodeJS.ProcessEnv): ProfileAliasShell {
-	const modulePath = env.PSModulePath ?? env.PSMODULEPATH ?? env.psmodulepath ?? "";
-	if (/[\\/]PowerShell[\\/]/i.test(modulePath)) return "pwsh";
-	if (env.POWERSHELL_DISTRIBUTION_CHANNEL) return "pwsh";
-	return "powershell";
-}
-
-function normalizeShellName(
-	shellPath: string | undefined,
-	platform: NodeJS.Platform,
-	env: NodeJS.ProcessEnv,
-): ProfileAliasShell {
-	const shell = path
-		.basename(shellPath ?? "")
-		.toLowerCase()
-		.replace(/\.exe$/, "");
+function normalizeShellName(shellPath: string | undefined): ProfileAliasShell {
+	const shell = path.basename(shellPath ?? "").toLowerCase();
 	if (shell === "zsh") return "zsh";
 	if (shell === "bash") return "bash";
 	if (shell === "fish") return "fish";
-	if (shell === "pwsh") return "pwsh";
-	if (shell === "powershell") return "powershell";
-	if (platform === "win32") return detectWindowsPowerShell(env);
-	throw new Error(`Unsupported shell${shell ? ` "${shell}"` : ""}. Supported shells: bash, zsh, fish, PowerShell.`);
+	throw new Error(`Unsupported shell${shell ? ` "${shell}"` : ""}. Supported shells: bash, zsh, fish.`);
 }
 
 /** Resolve the command a generated profile alias should invoke. */
@@ -207,7 +138,7 @@ export function resolveProfileAliasCommandFromProcess({
 
 	const scriptPath = path.resolve(cwd, script);
 	// Normalize to forward slashes for POSIX shell fields — bash/zsh/fish
-	// can't resolve backslash-separated paths, even on Windows (Git Bash, WSL).
+	// can't resolve backslash-separated paths.
 	const posixScriptPath = scriptPath.replace(/\\/g, "/");
 	const posixRuntime = runtime.replace(/\\/g, "/");
 	const posix = `${quotePosixArgument(posixRuntime)} ${quotePosixArgument(posixScriptPath)}`;
@@ -215,7 +146,6 @@ export function resolveProfileAliasCommandFromProcess({
 		display: `${posixRuntime} ${posixScriptPath}`,
 		posix,
 		fish: posix,
-		powerShell: `${quoteForPowerShell(runtime)} ${quoteForPowerShell(scriptPath)}`,
 	};
 }
 
@@ -246,11 +176,9 @@ function resolveShellConfigPath(
 	platform: NodeJS.Platform,
 	env: NodeJS.ProcessEnv,
 ): string {
-	// POSIX shells (bash/zsh/fish) always need forward-slash config paths,
-	// even on Windows. path.posix.join adds / separators but preserves existing
-	// backslashes in input segments, so we normalize each component with toPosix.
-	// PowerShell profiles use the platform-native path.join (backslashes on
-	// Windows, forward slashes elsewhere).
+	// POSIX shells always need forward-slash config paths. path.posix.join adds
+	// / separators but preserves existing backslashes in input segments, so we
+	// normalize each component with toPosix.
 	const posixHome = toPosix(homeDir);
 	switch (shell) {
 		case "zsh":
@@ -264,12 +192,6 @@ function resolveShellConfigPath(
 			const configHome = env.XDG_CONFIG_HOME ? toPosix(env.XDG_CONFIG_HOME) : posixJoinUnc(posixHome, ".config");
 			return posixJoinUnc(configHome, "fish", "conf.d", "omp-profiles.fish");
 		}
-		case "pwsh":
-			return platform === "win32"
-				? path.join(homeDir, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
-				: posixJoinUnc(posixHome, ".config", "powershell", "Microsoft.PowerShell_profile.ps1");
-		case "powershell":
-			return path.join(homeDir, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1");
 	}
 }
 
@@ -290,10 +212,6 @@ function renderAliasBlock(
 				`    command ${command.fish} --profile=${profile} $argv`,
 				"end",
 			].join("\n");
-			break;
-		case "powershell":
-		case "pwsh":
-			body = [`function ${aliasName} {`, `    & ${command.powerShell} --profile=${profile} @args`, "}"].join("\n");
 			break;
 		default:
 			body = [`${aliasName}() {`, `    command ${command.posix} --profile=${profile} "$@"`, "}"].join("\n");
@@ -347,7 +265,7 @@ export async function installProfileAlias(options: ProfileAliasInstallOptions): 
 	const platform = options.platform ?? process.platform;
 	const homeDir = options.homeDir ?? os.homedir();
 	const env = options.env ?? process.env;
-	const shell = normalizeShellName(options.shellPath ?? env.SHELL, platform, env);
+	const shell = normalizeShellName(options.shellPath ?? env.SHELL);
 	const aliasName = validateAliasName(options.aliasName, shell);
 	const configPath = resolveShellConfigPath(shell, homeDir, platform, env);
 	const { block, command } = renderAliasBlock(shell, aliasName, profile, options.command ?? DEFAULT_ALIAS_COMMAND);
@@ -368,10 +286,6 @@ export async function installProfileAlias(options: ProfileAliasInstallOptions): 
 		profile,
 		command,
 		reloadedWith:
-			shell === "fish"
-				? `source ${quotePosixArgument(configPath)}`
-				: shell === "powershell" || shell === "pwsh"
-					? `. ${quoteForPowerShell(configPath)}`
-					: `. ${quotePosixArgument(configPath)}`,
+			shell === "fish" ? `source ${quotePosixArgument(configPath)}` : `. ${quotePosixArgument(configPath)}`,
 	};
 }

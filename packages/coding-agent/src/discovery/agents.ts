@@ -75,17 +75,12 @@ function resolveWithWslPath(windowsPath: string): string | undefined {
 	return runHostProbe(["wslpath", "-u", windowsPath]);
 }
 
-function resolveWindowsUserProfile(): string | undefined {
-	const resolved = runHostProbe(["cmd.exe", "/d", "/c", "echo", "%USERPROFILE%"]);
-	return resolved && resolved !== "%USERPROFILE%" ? resolved : undefined;
-}
-
 /** Resolve the Windows host profile home exposed to WSL, if available. */
 export function getWslWindowsHomeCandidate(options: UserPathCandidateOptions = {}): string | undefined {
 	const platform = options.platform ?? process.platform;
 	const env = options.env ?? process.env;
 	if (!isWsl(platform, env)) return undefined;
-	const userProfile = env.USERPROFILE ?? (options.windowsUserProfile ?? resolveWindowsUserProfile)();
+	const userProfile = env.USERPROFILE ?? options.windowsUserProfile?.();
 	if (!userProfile) return undefined;
 	const interopPath = (options.wslPath ?? resolveWithWslPath)(userProfile);
 	if (interopPath !== undefined) return interopPath;
@@ -97,8 +92,8 @@ export function getWslWindowsHomeCandidate(options: UserPathCandidateOptions = {
  * Memo for the default-probe WSL home resolution, keyed by the inputs that
  * decide it (platform + WSL markers + `USERPROFILE`). Discovery calls
  * {@link getUserPathCandidates} from every loader (skills, rules, prompts,
- * commands, AGENTS.md, SYSTEM.md); the host-home probe spawns `cmd.exe` over
- * the WSL interop pipe, so without the memo a wedged pipe costs one
+ * commands, AGENTS.md, SYSTEM.md); resolving the host home spawns `wslpath`
+ * over the WSL interop pipe, so without the memo a wedged pipe costs one
  * {@link HOST_PROBE_TIMEOUT_MS} stall per loader. Keying by inputs keeps
  * test/SDK environment changes visible instead of pinning the first answer
  * for the process lifetime.

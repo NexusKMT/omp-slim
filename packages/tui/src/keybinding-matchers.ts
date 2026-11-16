@@ -92,8 +92,8 @@ function matchesEffectiveKeys(data: string, keys: readonly KeyId[]): boolean {
  * Used by forms where plain Enter inserts a newline and a modified-Enter chord
  * submits — the main editor's follow-up handler, the agent dashboard's new-agent
  * description, and the hook editor's hook-style mode. The keybinding defaults to
- * `["ctrl+q", "ctrl+enter"]` so Windows Terminal (which can't deliver a distinct
- * Ctrl+Enter event; #1903) still has a working chord without user remapping.
+ * `["ctrl+q", "ctrl+enter"]` so a terminal that can't deliver a distinct
+ * Ctrl+Enter event (#1903) still has a working chord without user remapping.
  *
  * Also recognizes modifier-tagged LF as Ctrl+Enter only when Ctrl+Enter is an
  * effective follow-up binding.

@@ -63,14 +63,14 @@ describe("EditTool details", () => {
 		const destination = path.join(tempDir, "moved.sh");
 		const before = "\uFEFF#!/bin/sh\r\nprintf 'alpha\\n'\r\n";
 		await Bun.write(source, before);
-		if (process.platform !== "win32") await fs.chmod(source, 0o750);
+		await fs.chmod(source, 0o750);
 		const result = await new EditTool(makeSession(tempDir), "apply_patch").execute("move-only", {
 			input: "*** Begin Patch\n*** Update File: source.sh\n*** Move to: moved.sh\n*** End Patch",
 		});
 		expect(result.isError).not.toBe(true);
 		expect(await Bun.file(source).exists()).toBe(false);
 		expect(await fs.readFile(destination)).toEqual(Buffer.from(before));
-		if (process.platform !== "win32") expect((await fs.stat(destination)).mode & 0o777).toBe(0o750);
+		expect((await fs.stat(destination)).mode & 0o777).toBe(0o750);
 	});
 
 	test("apply_patch deletes an import line including its newline", async () => {
@@ -250,7 +250,7 @@ describe("EditTool details", () => {
 	});
 });
 
-describe.skipIf(process.platform === "win32")("EditTool move permissions", () => {
+describe("EditTool move permissions", () => {
 	test.each(["hashline", "patch", "apply_patch"] as const)(
 		"%s keeps an edited script executable after moving it",
 		async mode => {

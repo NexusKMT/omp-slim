@@ -112,8 +112,8 @@ export declare class FileLock {
    * Whether any handle, in any process including this one, holds `path`.
    *
    * Observes without locking or opening the lock: a `connect(2)` probe on
-   * Linux, an `F_GETLK` query on other Unix platforms, a `\BaseNamedObjects`
-   * directory listing on Windows. A concurrent `tryAcquire()` never meets it.
+   * Linux, an `F_GETLK` query on other Unix platforms. A concurrent
+   * `tryAcquire()` never meets it.
    */
   static isHeld(path: string): boolean
   /** Whether this handle owns the requested lock. */
@@ -175,8 +175,8 @@ export declare class IpcConnection {
   /** Resolves when the write queue is empty, or the connection closed. */
   drained(): Promise<void>
   /**
-   * Graceful: write everything queued, then shut the write half (Unix) /
-   * close the pipe (Windows); onClose follows when the read side ends.
+   * Graceful: write everything queued, then shut the write half; onClose
+   * follows when the read side ends.
    */
   end(): void
   /**
@@ -200,8 +200,7 @@ export declare class IpcServer {
    * Unix: creates the parent dir (0700) if missing; under an exclusive flock
    * on `<path>.bind.lock`, rejects EADDRINUSE when a live server answers,
    * otherwise replaces the stale socket file; the socket is chmod 0600 before
-   * `listen()`. Windows: first pipe instance (exists → EADDRINUSE), remote
-   * clients rejected, DACL granting only the current user.
+   * `listen()`.
    * `onConnection` receives each accepted, peer-verified connection (not yet
    * started).
    */
@@ -301,9 +300,8 @@ export declare class PipeStreams {
 /**
  * Long-lived cross-platform power assertion.
  *
- * macOS uses `IOKit`, Linux holds login1 and desktop `ScreenSaver` inhibitors,
- * and Windows holds thread-affine execution state until the handle is stopped
- * or dropped. Other platforms return a no-op handle.
+ * macOS uses `IOKit`, Linux holds login1 and desktop `ScreenSaver`
+ * inhibitors. Other platforms return a no-op handle.
  */
 export declare class PowerAssertion {
   /**
@@ -333,10 +331,8 @@ export declare class Process {
   /**
    * Send `signal` to this process and its descendants, children first.
    *
-   * On Linux and macOS the signal is forwarded as-is. On Windows there is no
-   * signal abstraction, so the `signal` argument is ignored and the entire
-   * tree is hard-killed via `TerminateProcess`. Defaults to the POSIX
-   * hard-kill signal.
+   * The signal is forwarded as-is; `signal` defaults to the POSIX hard-kill
+   * signal.
    */
   killTree(signal?: number | undefined | null): number
   /**
@@ -725,32 +721,6 @@ export declare class VcsRepo {
   lsFiles(others: boolean, excludeStandard: boolean, signal?: unknown | undefined | null): Promise<Array<string>>
 }
 
-/**
- * Install the bounded Tokio runtime napi-rs adopts for async exports and the
- * bounded Rayon global pool used by native parallel iterators.
- *
- * The JS loader calls this exactly once, synchronously, right *after* `dlopen`
- * returns and *before* any async native or parallel iterator runs — never from
- * `#[module_init]`. Building a multi-thread runtime eagerly spawns worker
- * threads, and doing that during module init (while the dynamic-loader lock is
- * held) deadlocks on some hosts: a fresh worker blocks acquiring the loader
- * lock that the init thread still owns. napi-rs only materializes its runtime
- * on the first async call (`RT` is a `LazyLock`) and
- * `create_custom_tokio_runtime` merely records the runtime in a `OnceLock`, so
- * installing it post-load is still honored.
- *
- * Without the Tokio override napi builds its own default (one worker per CPU,
- * spawned eagerly), which aborts the process (`os error 1455`) on a
- * memory-constrained Windows host before any JS error can surface;
- * [`create_windows_napi_tokio_runtime`] pre-flights the spawn instead. Rayon
- * has the same one-thread-per-core lazy default, so [`configure_rayon_pool`]
- * installs a probed global pool before `count_tokens` or vendored `sort` can
- * trigger it across a N-API nounwind boundary. If no worker thread is
- * spawnable, patched Rayon callsites stay sequential rather than registering a
- * current-thread-only global pool that cannot steal work from later native
- * calls. Idempotent.
- */
-export declare function __ompInstallTokioRuntime(): void
 
 /**
  * Points the addon at the directory holding downloaded wasm grammars
@@ -1552,8 +1522,7 @@ export declare enum Encoding {
  * # Errors
  * Returns an error, leaving the process untouched, when `argv` is empty, an
  * argument contains an interior NUL byte, or the exec itself fails (e.g.
- * executable not found). Windows has no exec-replace semantics, so this
- * always errors there; callers fall back to spawn-and-wait.
+ * executable not found).
  */
 export declare function execReplace(argv: Array<string>): void
 
@@ -1565,9 +1534,6 @@ export declare function execReplace(argv: Array<string>): void
  * completes, or flags when cancelled or timed out.
  */
 export declare function executeShell(options: ShellExecuteOptions, onChunk?: ((error: Error | null, chunk: string) => void) | undefined | null): Promise<ShellRunResult>
-
-/** Expand Windows 8.3 components without resolving symlinks or junctions. */
-export declare function expandWindowsLongPath(path: string): string
 
 /** Locate `*** Edit File: path` payloads the model emitted as plain text. */
 export declare function extractInlineSloppyRegions(text: string): Array<InlineSloppyRegion>
@@ -1645,9 +1611,6 @@ export interface FuzzyFindResult {
 
 /** Get list of supported languages. */
 export declare function getSupportedLanguages(): Array<string>
-
-/** Get the existing Windows 8.3 spelling; preserve the input when unavailable. */
-export declare function getWindowsShortPath(path: string): string
 
 /**
  * Get work profile data from the last N seconds.
@@ -2033,7 +1996,6 @@ export interface IpcConnectOptions {
  *
  * Unix: `<dir>/<stem>.sock`; when that path does not fit `sun_path` (104 bytes
  * on macOS/BSD, 108 on Linux, including NUL), `/tmp/omp-<euid>/<hash16>.sock`.
- * Windows: `\\.\pipe\omp-<stem>-<hash16(lowercase(resolve(dir)))>`.
  * `stem` is `name` with every char outside `[A-Za-z0-9._-]` replaced by "_".
  * Pure and deterministic: every process computes the same endpoint.
  */
@@ -2066,9 +2028,7 @@ export declare enum IsoBackendKind {
   Zfs = 2,
   LinuxReflink = 3,
   Overlayfs = 4,
-  WindowsBlockClone = 5,
-  Projfs = 6,
-  Rcopy = 7
+  Rcopy = 5
 }
 
 /** How a single file changed between `lower` and `merged`. */

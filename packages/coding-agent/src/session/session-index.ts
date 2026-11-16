@@ -274,7 +274,7 @@ export function listSessionRecaps(query: SessionRecapQuery = {}): SessionRecap[]
 	}
 }
 
-/** Closes the cached connection; the next call reopens it. History recovery closes it so Windows can replace history.db. */
+/** Closes the cached connection; the next call reopens it. History recovery closes it so history.db can be replaced. */
 export function closeSessionIndex(): void {
 	closeHandle();
 	failedPath = undefined;

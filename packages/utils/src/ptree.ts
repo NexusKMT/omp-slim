@@ -3,7 +3,7 @@
  *
  * - Track managed child processes for cleanup on shutdown (postmortem).
  * - Drain stdout/stderr to avoid subprocess pipe deadlocks.
- * - Cross-platform tree kill for process groups (Windows taskkill, Unix -pid).
+ * - Tree kill for POSIX process groups (`-pid`).
  * - Convenience helpers: captureText / execText, AbortSignal, timeouts.
  */
 
@@ -65,7 +65,6 @@ const child = Bun.spawn(command, {
 	stdin: "inherit",
 	stdout: "pipe",
 	stderr: "pipe",
-	windowsHide: true,
 	env: Bun.env,
 });
 
@@ -202,9 +201,6 @@ export class ChildProcess<In extends InMask = InMask> {
 	#subreaperStop?: { escalate: () => void };
 	#terminateGroup: boolean;
 	#hardKillTree: boolean;
-	// Windows has no process groups. Retaining the root's native handle pins
-	// its PID after exit so killTree() can still enumerate its original children.
-	#windowsRootProcess?: Process;
 	constructor(
 		readonly proc: PipedSubprocess<In>,
 		readonly exposeStderr: boolean,
@@ -214,7 +210,6 @@ export class ChildProcess<In extends InMask = InMask> {
 	) {
 		this.#terminateGroup = terminateGroup;
 		this.#hardKillTree = hardKillTree;
-		this.#windowsRootProcess = process.platform === "win32" ? (Process.fromPid(proc.pid) ?? undefined) : undefined;
 		if (retainFullStderr) this.#stderrChunks = [];
 		// Eagerly drain stderr into a truncated tail, retaining raw chunks only for explicit full capture.
 		const dec = new TextDecoder();
@@ -374,25 +369,13 @@ export class ChildProcess<In extends InMask = InMask> {
 				return;
 			}
 		}
-		if (
-			this.proc.exitCode !== null &&
-			this.#terminateGroup &&
-			this.#openPipeReaders > 0 &&
-			process.platform !== "win32"
-		) {
+		if (this.proc.exitCode !== null && this.#terminateGroup && this.#openPipeReaders > 0) {
 			// Bun detached children are POSIX session/process-group leaders. If
 			// the leader has exited, the native Process handle cannot rediscover
 			// its PGID, but a pipe-holding descendant keeps that exact group alive.
 			try {
 				process.kill(-this.proc.pid, "SIGKILL");
 			} catch {}
-			this.#terminating = Promise.resolve();
-			return;
-		}
-		if (this.proc.exitCode !== null && this.#windowsRootProcess && this.#openPipeReaders > 0) {
-			// The retained handle keeps the dead root PID reserved, making the
-			// Windows Toolhelp descendant walk identity-safe after root exit.
-			this.#windowsRootProcess.killTree();
 			this.#terminating = Promise.resolve();
 			return;
 		}
@@ -416,7 +399,7 @@ export class ChildProcess<In extends InMask = InMask> {
 	#terminateTree(options: ProcessTerminateOptions | undefined): Promise<boolean | void> {
 		const gracefulMs = options?.gracefulMs ?? 1000;
 		try {
-			const root = this.#windowsRootProcess ?? Process.fromPid(this.proc.pid);
+			const root = Process.fromPid(this.proc.pid);
 			if (root) return root.terminate(options).catch(() => this.#signalChild(gracefulMs));
 		} catch {}
 		return this.#signalChild(gracefulMs);
@@ -426,7 +409,7 @@ export class ChildProcess<In extends InMask = InMask> {
 	async #signalChild(gracefulMs: number): Promise<void> {
 		const signal = (name: NodeJS.Signals) => {
 			try {
-				if (this.#terminateGroup && process.platform !== "win32") process.kill(-this.proc.pid, name);
+				if (this.#terminateGroup) process.kill(-this.proc.pid, name);
 				else this.proc.kill(name);
 			} catch {}
 		};
@@ -720,10 +703,7 @@ export class ChildProcess<In extends InMask = InMask> {
 			// A detached group can remain alive after its leader exits. Only use
 			// the dead-leader fallback while an inherited pipe proves that exact
 			// group still has a live member; this avoids stale-PGID reuse.
-			if (
-				this.proc.exitCode === null ||
-				(this.#openPipeReaders > 0 && (this.#terminateGroup || this.#windowsRootProcess))
-			) {
+			if (this.proc.exitCode === null || (this.#openPipeReaders > 0 && this.#terminateGroup)) {
 				this.kill(new TimeoutError(ms, this.#stderrTail), -1);
 			}
 			this.#cutoffOutput();
@@ -770,7 +750,6 @@ function spawnInternal<In extends InMask = InMask>(
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
-		windowsHide: true,
 		detached,
 		...rest,
 		env: useSubreaper

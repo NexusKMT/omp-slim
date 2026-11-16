@@ -198,7 +198,7 @@ export class BtwHistoryStore {
 			if (retry) this.#writeError = undefined;
 			if (this.#writeError) throw this.#writeError;
 			await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-			if (process.platform !== "win32") await fs.chmod(directory, 0o700);
+			await fs.chmod(directory, 0o700);
 			const filePath = path.join(directory, recordFileName(snapshot.id));
 			let lease = this.#leases.get(snapshot.id);
 			if (!lease) {

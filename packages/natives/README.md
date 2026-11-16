@@ -7,8 +7,8 @@ Native Rust functionality via N-API.
 - **Grep**: Regex-based search powered by ripgrep's engine with native file walking and matching
 - **Find**: Native glob-based file/directory discovery with gitignore support
 - **SIXEL**: Terminal image encoding for SIXEL-capable terminals (decode, resize, encode in one pass)
-- **File locking**: Process-owned cross-process locks with in-memory kernel names on Linux/Windows and `flock(2)` sidecars on other Unix platforms
-- **Local IPC**: `IpcServer`/`IpcConnection` over Unix sockets and Windows named pipes — owner-only access, single-instance binding with stale-endpoint takeover, newline or raw framing; `ipcEndpoint(dir, name)` names endpoints per platform
+- **File locking**: Process-owned cross-process locks with in-memory kernel names on Linux and `flock(2)` sidecars on other Unix platforms
+- **Local IPC**: `IpcServer`/`IpcConnection` over Unix sockets — owner-only access, single-instance binding with stale-endpoint takeover, newline or raw framing; `ipcEndpoint(dir, name)` names endpoints per platform
 - **PDF**: In-memory PDF-to-Markdown extraction with OCR-page classification via `pdf-inspector`
 - **Binary patches**: `applyBinaryPatch(oldPath, patchPath, outPath)` applies an HDiffPatch single-stream patch (HDIFFSF20, zstd or uncompressed), streaming from files; callers verify digests
 
@@ -62,14 +62,6 @@ values truncated toward zero and dimensions clamped to 20–400 columns and
 5–200 rows. It shares the native bounds used by `PtySession.start`,
 `startArgv`, and `resize`. Use the returned dimensions when sizing a screen
 emulator so its viewport matches the native PTY.
-
-### Lazy Windows path helpers
-
-Import `expandWindowsLongPath` and `getWindowsShortPath` from
-`@oh-my-pi/pi-natives/path` when importing a module must not load the native addon.
-The addon loads only when a helper is called on Windows; other platforms preserve
-the input path without loading it. These helpers change long/8.3 spellings without
-resolving symlinks or junctions.
 
 ## Building
 

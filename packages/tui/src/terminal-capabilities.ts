@@ -244,27 +244,6 @@ function parseMajorMinorVersion(versionRaw?: string): { major: number; minor: nu
 }
 
 /**
- * Returns true when running in Windows Terminal with known SIXEL support.
- *
- * Windows Terminal introduced SIXEL support in preview 1.22.
- */
-export function isWindowsTerminalPreviewSixelSupported(
-	env: NodeJS.ProcessEnv = Bun.env,
-	platform: NodeJS.Platform = process.platform,
-): boolean {
-	if (
-		platform !== "win32" ||
-		!env.WT_SESSION ||
-		(env.TERM_PROGRAM && env.TERM_PROGRAM.toLowerCase() !== "windows_terminal")
-	) {
-		return false;
-	}
-	const version = parseMajorMinorVersion(env.TERM_PROGRAM_VERSION);
-	if (!version) return false;
-	return version.major > 1 || (version.major === 1 && version.minor >= 22);
-}
-
-/**
  * Resolve an explicit user override for DEC 2026 synchronized output. Returns
  * `false` for an opt-out, `true` for a force-on, or `null` when the user has
  * expressed no preference. Shared by the static default and the runtime DECRQM
@@ -293,8 +272,7 @@ function advertisesSynchronizedOutput(termFeatures: string | undefined): boolean
  *   1. Explicit user override (`PI_NO_SYNC_OUTPUT`/`PI_TUI_SYNC_OUTPUT=0` off,
  *      `PI_FORCE_SYNC_OUTPUT=1`/`PI_TUI_SYNC_OUTPUT=1` on).
  *   2. Positive `TERM_FEATURES` advertisement (`Sy`) — survives SSH/mux wrapping.
- *   3. Windows Terminal (1.24+) via `WT_SESSION`, on native win32 and the
- *      WSL/SSH-fronted host alike.
+ *   3. Windows Terminal (1.24+) via `WT_SESSION`, on the WSL/SSH-fronted host.
  *   4. A multiplexer session whose pane VTE honors DEC 2026 regardless of its
  *      DECRQM reply (Herdr's libghostty pane). Such a multiplexer still owns
  *      the grid, so leaked kitty/ghostty identities cannot enable placeholder
@@ -501,17 +479,15 @@ function getFallbackImageProtocol(
 	return null;
 }
 /**
- * Warp implements the Kitty graphics protocol only on macOS/Linux; its Windows
- * build (including Warp-hosted WSL shells) renders the same APC sequences as
- * visible garbage. Keep platform/env injectable so the carve-out is testable
- * without mutating `process.platform`.
+ * Warp implements the Kitty graphics protocol only on macOS/Linux; Warp-hosted
+ * WSL shells render the same APC sequences as visible garbage. Keep platform/env
+ * injectable so the carve-out is testable without mutating `process.platform`.
  */
 export function resolveWarpImageProtocol(
 	platform: NodeJS.Platform = process.platform,
 	env: NodeJS.ProcessEnv = Bun.env,
 ): ImageProtocol | null {
-	const windowsHost = platform === "win32" || isWsl(platform, env);
-	return windowsHost ? null : ImageProtocol.Kitty;
+	return isWsl(platform, env) ? null : ImageProtocol.Kitty;
 }
 
 /**
@@ -540,7 +516,7 @@ export function resolveImageProtocol(
 ): ImageProtocol | null {
 	let imageProtocol: ImageProtocol | null;
 	if (terminalId === "warp") {
-		// Warp advertises Kitty graphics on macOS/Linux only; drop it on win32.
+		// Warp advertises Kitty graphics on macOS/Linux only; drop it under WSL.
 		imageProtocol = resolveWarpImageProtocol(process.platform, env);
 	} else {
 		imageProtocol = getTerminalInfo(terminalId).imageProtocol;
@@ -620,10 +596,8 @@ const KNOWN_TERMINALS = Object.freeze({
 	// URL in the browser, and an OSC 52 clipboard query round-tripped. Kitty
 	// graphics direct placement plus U=1 Unicode placeholders verified by the
 	// reporter (#12205). Notifications stay on BEL: rio parses OSC 9/777 into
-	// its own notifier, but its Windows path raises an unpackaged WinRT toast
-	// with AppId "Rio" that Windows silently drops without a registered AUMID
-	// shortcut — observed as a no-op live — so flipping it would only remove
-	// the D-Bus fallback for Linux rio users. DECCARA, screen-to-scrollback,
+	// its own notifier, so flipping it would only remove the D-Bus fallback for
+	// Linux rio users. DECCARA, screen-to-scrollback,
 	// OSC 99, and OSC 66 text sizing are outside rio's supported set and keep
 	// the conservative defaults.
 	rio: new TerminalInfo("rio", ImageProtocol.Kitty, true, true),

@@ -12,7 +12,7 @@ export const DEFAULT_TAB_WIDTH = 3;
 
 /**
  * Per-component path length cap on common filesystems (`NAME_MAX = 255` on
- * Linux ext4 / macOS APFS / Windows NTFS). Paths with components longer than
+ * Linux ext4 / macOS APFS). Paths with components longer than
  * this cannot be opened at all, so editorconfig discovery short-circuits to
  * the default instead of running into `ENAMETOOLONG` from `readFileSync`.
  */

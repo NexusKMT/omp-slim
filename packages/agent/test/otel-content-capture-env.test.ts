@@ -65,23 +65,15 @@ async function probeContentCapture(agentEnv: string, shellEnv: Record<string, st
 }
 
 describe("content capture from OMP's own .env", () => {
-	it.skipIf(process.platform === "win32")(
-		"applies an agent .env value without placing it in process.env",
-		async () => {
-			const result = await probeContentCapture("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=full\n");
-			expect(result).toEqual({ contentCapture: "full", processEnv: null });
-		},
-		30_000,
-	);
+	it("applies an agent .env value without placing it in process.env", async () => {
+		const result = await probeContentCapture("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=full\n");
+		expect(result).toEqual({ contentCapture: "full", processEnv: null });
+	}, 30_000);
 
-	it.skipIf(process.platform === "win32")(
-		"lets a shell-exported value win over the agent .env",
-		async () => {
-			const result = await probeContentCapture("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=full\n", {
-				OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "summary",
-			});
-			expect(result).toEqual({ contentCapture: "summary", processEnv: "summary" });
-		},
-		30_000,
-	);
+	it("lets a shell-exported value win over the agent .env", async () => {
+		const result = await probeContentCapture("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=full\n", {
+			OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "summary",
+		});
+		expect(result).toEqual({ contentCapture: "summary", processEnv: "summary" });
+	}, 30_000);
 });

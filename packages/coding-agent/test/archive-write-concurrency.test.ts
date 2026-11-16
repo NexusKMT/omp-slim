@@ -94,7 +94,7 @@ describe("concurrent archive member writes", () => {
 		await assertBothMembers(archive);
 	});
 
-	it.skipIf(process.platform === "win32")("shares the lock through a directory symlink", async () => {
+	it("shares the lock through a directory symlink", async () => {
 		const archive = path.join(root, "bundle.tar");
 		const alias = path.join(root, "alias");
 		await writeArchive(archive, "tar", [

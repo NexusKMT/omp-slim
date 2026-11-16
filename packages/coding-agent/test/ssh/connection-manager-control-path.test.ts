@@ -81,7 +81,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe.skipIf(process.platform === "win32")("ssh_config ControlPath (#15974)", () => {
+describe("ssh_config ControlPath (#15974)", () => {
 	it("reuses the master at the configured ControlPath and leaves it running on close", async () => {
 		const host = { name: "omp-test-15974-cfg-host", host: "cfg-host" };
 		await ensureConnection(host);
@@ -113,7 +113,7 @@ describe.skipIf(process.platform === "win32")("ssh_config ControlPath (#15974)",
 
 	it("keeps omp's socket when ssh_config sets no ControlPath or `none`", async () => {
 		for (const name of ["plain-host", "none-host"]) {
-			const args = await buildRemoteCommand({ name, host: name }, "true", { platform: "linux" });
+			const args = await buildRemoteCommand({ name, host: name }, "true");
 			expect(args).toContain(`ControlPath=${getControlPathTemplate()}`);
 			expect(args).toContain("ControlPersist=3600");
 		}

@@ -169,7 +169,6 @@ describe("enforcePlanModeWrite accepts absolute local-sandbox paths", () => {
 	});
 
 	it("rejects sandbox paths that a symlinked ancestor routes into the working tree", async () => {
-		if (process.platform === "win32") return;
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "plan-guard-link-"));
 		try {
 			const artifactsDir = path.join(tempDir, "artifacts");

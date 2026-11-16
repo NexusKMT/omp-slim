@@ -67,7 +67,7 @@ export class RotatingFileSink {
 	#closed = false;
 	// Held append fd: one descriptor per active file instead of
 	// open+write+close per line. It is reopened on rotation and closed on
-	// close()/rotation (required for Windows delete-on-prune semantics).
+	// close()/rotation.
 	#fd: number | undefined;
 	/** Records for the active file not yet written, each ending in EOL. */
 	#pending = "";
@@ -180,8 +180,7 @@ export class RotatingFileSink {
 		if (!dayChanged && this.#activeBytes <= this.#maxBytes) return;
 		// The buffered records belong to the current file: write them there, then
 		// close its descriptor BEFORE the next file is registered, because
-		// registration prunes beyond maxFiles — on Windows the pruned
-		// predecessor cannot be deleted while still open, which would leak it.
+		// registration prunes beyond maxFiles.
 		this.flush();
 		this.#closeFd();
 		if (dayChanged) {

@@ -6,8 +6,7 @@ import * as path from "node:path";
 import { FileLock, IpcConnection, IpcServer, Process, type PtyRunResult, PtySession } from "@oh-my-pi/pi-natives";
 import { isEnoent, isRecord, logger, postmortem, procmgr, sanitizeText, setProcessName } from "@oh-my-pi/pi-utils";
 import { TerminalQueryResponder } from "@oh-my-pi/pi-utils/vterm";
-import { hostHasInheritableConsole } from "../eval/py/spawn-options";
-import { replaceFileWithRetry } from "../utils/atomic-file";
+import { replaceFileAtomically } from "../utils/atomic-file";
 import {
 	truncateHead,
 	truncateHeadBytes,
@@ -40,7 +39,6 @@ import {
 	parseDaemonWireMessage,
 	parseDaemonWireRequest,
 } from "./protocol";
-import { resolveDaemonSpawnOptions } from "./spawn-options";
 import { renderTerminalOutput } from "./terminal-output";
 import { quotePosixArgv } from "../utils/shell-quote";
 
@@ -74,10 +72,8 @@ const LEASE_HANDOFF_GRACE_MS = 500;
 const LEASE_PROBE_TIMEOUT_MS = 250;
 const LOG_FILE = "output.log";
 const PREVIOUS_LOG_FILE = "output.previous.log";
-const DAEMON_SPAWN_OPTIONS = resolveDaemonSpawnOptions({
-	platform: process.platform,
-	hostHasInheritableConsole: hostHasInheritableConsole(),
-});
+/** Daemons outlive the broker's process group, so they get their own session. */
+const DAEMON_SPAWN_OPTIONS = { detached: true } as const;
 
 const SIGNAL_NUMBER: Record<DaemonSignal, number> = {
 	SIGINT: os.constants.signals.SIGINT,
@@ -193,11 +189,11 @@ function syncReadyPending(record: ManagedDaemon): void {
 	record.snapshot.readyPending = pending.length > 0 ? pending : undefined;
 }
 
-/** Replace via a pid-scoped temp file; Windows may briefly deny replacement while a reader holds the target. */
+/** Replace via a pid-scoped temp file so a concurrent reader never sees a partial write. */
 async function writeFileAtomic(filePath: string, content: string): Promise<void> {
 	const tempPath = `${filePath}.${process.pid}.tmp`;
 	await Bun.write(tempPath, content);
-	await replaceFileWithRetry(tempPath, filePath);
+	await replaceFileAtomically(tempPath, filePath);
 }
 
 async function fileTextSlice(filePath: string, head: boolean): Promise<string> {
@@ -479,7 +475,7 @@ class DaemonBroker {
 			{ framing: "lines", maxFrameBytes: MAX_REQUEST_BYTES },
 			socket => this.#accept(socket),
 		);
-		if (process.platform !== "win32") this.#watchEndpoint();
+		this.#watchEndpoint();
 		this.#scheduleIdleShutdown();
 		onListening?.();
 		await this.#finished.promise;
@@ -697,13 +693,6 @@ class DaemonBroker {
 		if (spec.detached && spec.pty) {
 			throw new Error("A detached daemon cannot allocate a PTY");
 		}
-		if (
-			spec.pty &&
-			process.platform === "win32" &&
-			[".bat", ".cmd"].includes(path.extname(spec.application).toLowerCase())
-		) {
-			throw new Error('Windows batch files require application "cmd.exe" with the batch path after "/c"');
-		}
 		if (this.#startingNames.has(spec.name)) {
 			throw new Error(`Daemon ${spec.name} is already starting`);
 		}
@@ -832,19 +821,7 @@ class DaemonBroker {
 		// Nothing plays terminal for a supervised PTY, so a program probing for
 		// cursor position or device attributes would block on the reply. Answer
 		// the queries from the output stream and write the replies to its stdin.
-		//
-		// On Windows ConPTY sits in between and forwards a program's probes
-		// rather than answering them (current conhost leaves replies to the
-		// terminal; older builds answer from the console buffer and never put
-		// the probe on this stream). ConPTY also sends queries of its own and
-		// consumes their replies: device attributes at session start and cursor
-		// resyncs later, all answered here. The one exception is its
-		// INHERIT_CURSOR handshake, the first `CSI 6 n` on the stream, which the
-		// PTY layer answers before the child owns stdin
-		// (crates/pi-natives/src/pty.rs). ConPTY consumes one report for it;
-		// replying again would put a second report on the program's stdin,
-		// where the console decodes it as a keypress.
-		const responder = new TerminalQueryResponder({ hostCursorHandshake: process.platform === "win32" });
+		const responder = new TerminalQueryResponder();
 		const onChunk = (error: Error | null, chunk: string): void => {
 			if (generation !== record.generation) return;
 			if (error) record.log?.append(`PTY output error: ${error.message}\n`);
@@ -868,23 +845,10 @@ class DaemonBroker {
 			}
 			started.resolve(Number.isSafeInteger(pid) && pid > 0 ? pid : undefined);
 		};
-		let run: Promise<PtyRunResult>;
-		if (process.platform === "win32") {
-			run = session.startArgv(
-				{
-					application: record.spec.application,
-					args: record.spec.args,
-					...options,
-				},
-				onChunk,
-				onStart,
-			);
-		} else {
-			const argv = [record.spec.application, ...record.spec.args];
-			const command = `exec ${quotePosixArgv(argv)}`;
-			const shell = procmgr.getShellConfig().shell;
-			run = session.start({ command, shell, ...options }, onChunk, onStart);
-		}
+		const argv = [record.spec.application, ...record.spec.args];
+		const command = `exec ${quotePosixArgv(argv)}`;
+		const shell = procmgr.getShellConfig().shell;
+		const run: Promise<PtyRunResult> = session.start({ command, shell, ...options }, onChunk, onStart);
 		void run.then(
 			async result => {
 				await this.#onPtyExit(record, generation, result);
@@ -1268,14 +1232,9 @@ class DaemonBroker {
 			} else throw new Error(`Daemon ${operation.name} stdin is unavailable`);
 		}
 		if (operation.signal) {
-			if (process.platform === "win32" && record.pty) {
-				if (operation.signal === "SIGINT") record.pty.write("\u0003");
-				else record.pty.kill();
-			} else {
-				const processRef = record.snapshot.pid === undefined ? null : Process.fromPid(record.snapshot.pid);
-				if (!processRef) throw new Error(`Daemon ${operation.name} process is unavailable`);
-				processRef.killTree(SIGNAL_NUMBER[operation.signal]);
-			}
+			const processRef = record.snapshot.pid === undefined ? null : Process.fromPid(record.snapshot.pid);
+			if (!processRef) throw new Error(`Daemon ${operation.name} process is unavailable`);
+			processRef.killTree(SIGNAL_NUMBER[operation.signal]);
 		}
 		return { op: "send", daemon: record.snapshot };
 	}

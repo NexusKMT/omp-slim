@@ -23,12 +23,9 @@ const CONNECT_RETRY_MS = 50;
 const TOKEN_FILE = "broker.token";
 /**
  * The broker must outlive whichever omp process happened to spawn it: other
- * clients (and persistent daemons) still hold its lease. Bun on Windows puts
- * every non-detached child in a kill-on-close job object owned by the parent,
- * so an undetached broker died with its spawner and took the scope's daemons
- * with it. Detached, it has no console; its daemons then spawn hidden.
+ * clients (and persistent daemons) still hold its lease.
  */
-const BROKER_SPAWN_OPTIONS = { detached: true, windowsHide: true } as const;
+const BROKER_SPAWN_OPTIONS = { detached: true } as const;
 
 interface PendingRequest {
 	operation: DaemonOperation;
@@ -71,10 +68,6 @@ async function readOrCreateToken(runtimeDir: string): Promise<string> {
 	const tokenPath = path.join(runtimeDir, TOKEN_FILE);
 	for (let attempt = 0; attempt < 100; attempt++) {
 		try {
-			// node:fs, not Bun.file().text(): on Windows (Bun 1.4.2) a Bun.file
-			// read that rejects with ENOENT holds no event-loop ref, so the loop
-			// drains mid-await — `omp --smoke-test` exited 1 via the unsettled-entry
-			// guard, and a bare script silently stops at that await.
 			const token = (await fs.readFile(tokenPath, "utf8")).trim();
 			if (token.length > 0) return token;
 		} catch (error) {
@@ -473,7 +466,7 @@ export async function daemonClientForProject(projectDir: string): Promise<Daemon
 export async function daemonClientForGlobal(service: string): Promise<DaemonBrokerClient> {
 	const runtimeDir = getGlobalDaemonRuntimeDir(service);
 	// Canonicalize only after creation so the first caller and later callers
-	// derive the same Windows pipe key even when an ancestor is a symlink.
+	// derive the same endpoint key even when an ancestor is a symlink.
 	await fs.mkdir(runtimeDir, { recursive: true, mode: 0o700 });
 	const canonical = await fs.realpath(runtimeDir);
 	return sharedDaemonClient(`global:${canonical}`, () =>

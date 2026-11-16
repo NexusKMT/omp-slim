@@ -53,9 +53,6 @@ async function runScenario(
 			env: {
 				...process.env,
 				HOME: primaryDir,
-				// os.homedir() on Windows reads USERPROFILE, not HOME: without
-				// this the default-file scenario logs into the real profile.
-				USERPROFILE: primaryDir,
 				PI_CONFIG_DIR: ".omp",
 				OMP_PROFILE: "",
 				PI_PROFILE: "",
@@ -65,10 +62,8 @@ async function runScenario(
 				// Empty XDG_CACHE_HOME makes Bun's transpiler cache path relative,
 				// spewing bun/@t@/*.pile into the repo root (the child's cwd) — disable it.
 				BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
-				// os.tmpdir() reads TMPDIR on POSIX and TMP/TEMP on Windows.
+				// os.tmpdir() reads TMPDIR.
 				TMPDIR: tmpDir,
-				TMP: tmpDir,
-				TEMP: tmpDir,
 				PI_TEST_RUNTIME: options.testRuntime ? "1" : "",
 				OMP_LOGGER_TEST_NOW: fixedNow,
 				OMP_LOG_LEVEL: options.logLevel ?? "",

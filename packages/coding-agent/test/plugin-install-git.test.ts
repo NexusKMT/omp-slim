@@ -836,60 +836,56 @@ describe("PluginManager.install with git sources", () => {
 
 	// Runs the real CLI because Bun.spawn resolves bare names against the
 	// PATH the process started with, so only a fresh process sees a bun-less PATH.
-	test.skipIf(process.platform === "win32")(
-		"`omp install`/`uninstall` work without a bun executable on PATH (#15480)",
-		async () => {
-			const remote = await serveLocalGitPackage(tmpRoot);
-			// The standalone binary targets machines without Bun: PATH offers git
-			// (needed for the clone) and nothing else.
-			const home = path.join(tmpRoot, "home");
-			const gitOnlyBin = path.join(tmpRoot, "git-only-bin");
-			const git = Bun.which("git");
-			if (!git) throw new Error("git is required for this test");
-			await fs.mkdir(gitOnlyBin, { recursive: true });
-			await fs.mkdir(home, { recursive: true });
-			await fs.symlink(git, path.join(gitOnlyBin, "git"));
-			const omp = async (...args: string[]) => {
-				const proc = Bun.spawn([process.execPath, cliEntry, ...args], {
-					cwd: home,
-					env: { HOME: home, PATH: gitOnlyBin, NO_COLOR: "1" },
-					stdin: "ignore",
-					stdout: "pipe",
-					stderr: "pipe",
-				});
-				const [exitCode, stdout, stderr] = await Promise.all([
-					proc.exited,
-					new Response(proc.stdout).text(),
-					new Response(proc.stderr).text(),
-				]);
-				expect({ exitCode, output: stdout + stderr }).toMatchObject({ exitCode: 0 });
-			};
-			const installedManifest = path.join(
-				home,
-				".omp",
-				"plugins",
-				"node_modules",
-				"@test",
-				"pi-package",
-				"package.json",
-			);
-			try {
-				await omp("install", remote.spec);
-				expect((await Bun.file(installedManifest).json()).version).toBe("1.0.0");
+	test("`omp install`/`uninstall` work without a bun executable on PATH (#15480)", async () => {
+		const remote = await serveLocalGitPackage(tmpRoot);
+		// The standalone binary targets machines without Bun: PATH offers git
+		// (needed for the clone) and nothing else.
+		const home = path.join(tmpRoot, "home");
+		const gitOnlyBin = path.join(tmpRoot, "git-only-bin");
+		const git = Bun.which("git");
+		if (!git) throw new Error("git is required for this test");
+		await fs.mkdir(gitOnlyBin, { recursive: true });
+		await fs.mkdir(home, { recursive: true });
+		await fs.symlink(git, path.join(gitOnlyBin, "git"));
+		const omp = async (...args: string[]) => {
+			const proc = Bun.spawn([process.execPath, cliEntry, ...args], {
+				cwd: home,
+				env: { HOME: home, PATH: gitOnlyBin, NO_COLOR: "1" },
+				stdin: "ignore",
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [exitCode, stdout, stderr] = await Promise.all([
+				proc.exited,
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+			]);
+			expect({ exitCode, output: stdout + stderr }).toMatchObject({ exitCode: 0 });
+		};
+		const installedManifest = path.join(
+			home,
+			".omp",
+			"plugins",
+			"node_modules",
+			"@test",
+			"pi-package",
+			"package.json",
+		);
+		try {
+			await omp("install", remote.spec);
+			expect((await Bun.file(installedManifest).json()).version).toBe("1.0.0");
 
-				// Re-install of an existing git plugin goes through `bun pm cache` + `bun update`.
-				await remote.publish("2.0.0");
-				await omp("install", remote.spec);
-				expect((await Bun.file(installedManifest).json()).version).toBe("2.0.0");
+			// Re-install of an existing git plugin goes through `bun pm cache` + `bun update`.
+			await remote.publish("2.0.0");
+			await omp("install", remote.spec);
+			expect((await Bun.file(installedManifest).json()).version).toBe("2.0.0");
 
-				await omp("plugin", "uninstall", "@test/pi-package");
-				expect(await Bun.file(installedManifest).exists()).toBe(false);
-			} finally {
-				await remote.stop();
-			}
-		},
-		60_000,
-	);
+			await omp("plugin", "uninstall", "@test/pi-package");
+			expect(await Bun.file(installedManifest).exists()).toBe(false);
+		} finally {
+			await remote.stop();
+		}
+	}, 60_000);
 
 	test("rejects git specs containing shell metacharacters", async () => {
 		const mgr = new PluginManager(tmpRoot);

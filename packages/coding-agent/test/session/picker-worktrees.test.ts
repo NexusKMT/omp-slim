@@ -27,7 +27,7 @@ const TEST_ENV_KEYS = [
  * (and the reverse), without widening a subfolder's scope to the repo root,
  * and a session whose worktree was removed must resume from the checkout.
  */
-describe.skipIf(process.platform === "win32")("resume picker across git worktrees", () => {
+describe("resume picker across git worktrees", () => {
 	const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 	const originalEnv = Object.fromEntries(TEST_ENV_KEYS.map(key => [key, process.env[key]]));
 	let root: string;

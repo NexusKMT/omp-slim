@@ -125,7 +125,6 @@ describe("/security", () => {
 	});
 
 	test("export preserves permissions on an existing destination directory", async () => {
-		if (process.platform === "win32") return;
 		await fs.chmod(repositoryRoot, 0o755);
 		await command(`import ${JSON.stringify(SARIF_FIXTURE)}`);
 		const [scan] = await (await SecurityStore.open(repositoryRoot)).listScans();

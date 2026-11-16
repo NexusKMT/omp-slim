@@ -78,11 +78,8 @@ async function launchInNewSurface(
 
 const launchHerdr: TerminalLaunchBackend<"herdr", typeof capabilities> = async (
 	request,
-	{ environment: env, platform, runCli },
+	{ environment: env, runCli },
 ) => {
-	if (platform === "win32") {
-		throw launchError(request, "capability", "Herdr launches are not supported on Windows.");
-	}
 	if (!hasTerminalMultiplexerSession("herdr", env)) {
 		throw launchError(request, "capability", "Herdr launch requires an active Herdr pane or workspace.");
 	}

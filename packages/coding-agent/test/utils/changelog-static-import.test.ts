@@ -56,11 +56,8 @@ function changelogUtilsStubPlugin(): BunPlugin {
 describe("bundled changelog asset path resolution", () => {
 	const moduleUrl = new URL("file:///opt/omp/dist/cli.js");
 
-	test.each([
-		["Windows drive-letter", String.raw`C:\omp\dist\CHANGELOG.md`],
-		["Windows UNC", String.raw`\\server\share\omp\CHANGELOG.md`],
-		["POSIX", "/opt/omp/dist/CHANGELOG.md"],
-	])("preserves an absolute %s path", (_kind, nativePath) => {
+	test("preserves an absolute path", () => {
+		const nativePath = "/opt/omp/dist/CHANGELOG.md";
 		expect(resolveBundledChangelogPath(nativePath, moduleUrl)).toBe(nativePath);
 	});
 
@@ -124,10 +121,7 @@ describe("changelog static import resources", () => {
 	test("reads the emitted changelog asset from a compiled binary", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-changelog-compiled-"));
 		try {
-			const binaryPath = path.join(
-				tempDir,
-				process.platform === "win32" ? "changelog-probe.exe" : "changelog-probe",
-			);
+			const binaryPath = path.join(tempDir, "changelog-probe");
 			const unrelatedCwd = path.join(tempDir, "cwd");
 			const missingPackageChangelogPath = path.join(tempDir, "missing-package", "CHANGELOG.md");
 			await fs.mkdir(unrelatedCwd);

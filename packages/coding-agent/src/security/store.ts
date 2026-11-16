@@ -71,7 +71,7 @@ export interface SecurityStoreOptions {
 
 async function ensurePrivateDirectory(directory: string): Promise<void> {
 	await fs.mkdir(directory, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-	if (process.platform !== "win32") await fs.chmod(directory, PRIVATE_DIRECTORY_MODE);
+	await fs.chmod(directory, PRIVATE_DIRECTORY_MODE);
 }
 
 export interface SecurityFileWriteOptions {
@@ -92,15 +92,8 @@ export async function writeSecurityFileAtomic(
 	try {
 		// Bun.write cannot create exclusively; `wx` keeps concurrent atomic writers from sharing a temp file.
 		await fs.writeFile(temporaryPath, content, { encoding: "utf-8", mode: PRIVATE_FILE_MODE, flag: "wx" });
-		if (process.platform !== "win32") await fs.chmod(temporaryPath, PRIVATE_FILE_MODE);
-		try {
-			await fs.rename(temporaryPath, filePath);
-		} catch (error) {
-			const code = error instanceof Error && "code" in error ? String(error.code) : "";
-			if (process.platform !== "win32" || (code !== "EEXIST" && code !== "EPERM")) throw error;
-			await fs.rm(filePath, { force: true });
-			await fs.rename(temporaryPath, filePath);
-		}
+		await fs.chmod(temporaryPath, PRIVATE_FILE_MODE);
+		await fs.rename(temporaryPath, filePath);
 	} finally {
 		await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
 	}

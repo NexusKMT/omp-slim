@@ -69,7 +69,7 @@ async function runConfigSet(tempDir: TempDir, settingsInit: SettingsInitMode): P
 		preloadArgs.push("--preload", preloadPath);
 	}
 	// The child must resolve its agent dir from the isolated home, not an inherited override or profile.
-	const env: Record<string, string | undefined> = { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: "1" };
+	const env: Record<string, string | undefined> = { ...process.env, HOME: home, NO_COLOR: "1" };
 	delete env.PI_CODING_AGENT_DIR;
 	delete env.PI_CONFIG_DIR;
 	delete env.OMP_PROFILE;

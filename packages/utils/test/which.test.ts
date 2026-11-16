@@ -16,7 +16,7 @@ describe("$which", () => {
 		}
 	});
 
-	it.skipIf(process.platform === "win32")("uses the current process PATH for each cached lookup", () => {
+	it("uses the current process PATH for each cached lookup", () => {
 		const firstDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-which-first-"));
 		const secondDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-which-second-"));
 		tempDirs.push(firstDir, secondDir);
@@ -41,21 +41,18 @@ describe("$which", () => {
 		expect($which("some-command", { requireAbsolutePaths: true })).toBeNull();
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"resolves absolute PATH entries while ignoring relative ones when requireAbsolutePaths is true",
-		() => {
-			const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-which-abs-"));
-			tempDirs.push(testDir);
+	it("resolves absolute PATH entries while ignoring relative ones when requireAbsolutePaths is true", () => {
+		const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-which-abs-"));
+		tempDirs.push(testDir);
 
-			const command = `omp-test-cmd-${process.pid}`;
-			const executable = path.join(testDir, command);
-			fs.writeFileSync(executable, "#!/bin/sh\n");
-			fs.chmodSync(executable, 0o755);
+		const command = `omp-test-cmd-${process.pid}`;
+		const executable = path.join(testDir, command);
+		fs.writeFileSync(executable, "#!/bin/sh\n");
+		fs.chmodSync(executable, 0o755);
 
-			process.env.PATH = [".", "./bin", "", testDir].join(path.delimiter);
-			expect($which(command, { requireAbsolutePaths: true })).toBe(executable);
-		},
-	);
+		process.env.PATH = [".", "./bin", "", testDir].join(path.delimiter);
+		expect($which(command, { requireAbsolutePaths: true })).toBe(executable);
+	});
 	// Tests stub `Bun.which` per test to keep PATH lookups hermetic. If `$which`
 	// captured the original function at import, such a stub would be bypassed and
 	// host binaries would leak into the result.
@@ -92,7 +89,7 @@ describe("$whichAll", () => {
 		}
 	});
 
-	it.skipIf(process.platform === "win32")("returns every PATH match in PATH order, skipping misses", () => {
+	it("returns every PATH match in PATH order, skipping misses", () => {
 		const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-which-all-shim-"));
 		const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-which-all-empty-"));
 		const realDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-which-all-real-"));

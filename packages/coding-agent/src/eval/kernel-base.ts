@@ -171,17 +171,13 @@ export function isSignalableProcessGroup(pid: number | undefined): pid is number
  * Signal the whole process group led by `pid`, returning true when a signal was
  * actually delivered.
  *
- * Kernels are spawned with `detached: true` on POSIX (see `shouldDetachKernel`),
- * so each runner calls `setsid()` and becomes the leader of its own session and
+ * Kernels are spawned with `detached: true` (see the kernel spawn sites), so
+ * each runner calls `setsid()` and becomes the leader of its own session and
  * process group. Signalling only the direct PID therefore leaves anything the
  * runner itself spawned behind, and those orphans keep the kernel's pipes open
  * for the remainder of the omp process lifetime (#7714).
- *
- * Windows has no process groups, so this is a no-op there and callers keep
- * relying on the direct-PID kill.
  */
 export function killProcessGroup(pid: number | undefined, signal: NodeJS.Signals): boolean {
-	if (process.platform === "win32") return false;
 	if (!isSignalableProcessGroup(pid)) return false;
 	try {
 		process.kill(-pid, signal);

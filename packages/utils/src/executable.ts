@@ -7,9 +7,7 @@ export function isExecutable(filePath: string): boolean {
 	try {
 		const stat = fs.statSync(filePath);
 		if (!stat.isFile()) return false;
-		if (process.platform !== "win32") {
-			fs.accessSync(filePath, fs.constants.X_OK);
-		}
+		fs.accessSync(filePath, fs.constants.X_OK);
 		return true;
 	} catch {
 		return false;

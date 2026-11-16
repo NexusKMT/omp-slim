@@ -48,11 +48,8 @@ describe("InternalUrlFilesystem local://", () => {
 	});
 
 	it("addresses entry names that need percent-encoding, as the first segment and below", async () => {
-		// `?` and `:` are illegal in Windows file names; the rest still needs encoding.
-		const [name, encoded] =
-			process.platform === "win32"
-				? ["we ird #%41 a@b", "we%20ird%20%23%2541%20a@b"]
-				: ["we?ird #%41 a@b:1", "we%3Fird%20%23%2541%20a@b:1"];
+		// `?` and `:` need percent-encoding in URL path segments.
+		const [name, encoded] = ["we?ird #%41 a@b:1", "we%3Fird%20%23%2541%20a@b:1"];
 		await fs.mkdir(path.join(localRoot, name), { recursive: true });
 		await fs.writeFile(path.join(localRoot, name, name), "x");
 

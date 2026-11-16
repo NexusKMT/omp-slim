@@ -87,7 +87,7 @@ describe("JSON modifier-only selectors", () => {
 		);
 	});
 
-	it.skipIf(process.platform === "win32")("prefers literal filenames containing modifier-like queries", async () => {
+	it("prefers literal filenames containing modifier-like queries", async () => {
 		await Bun.write(path.join(dir, "array.json?limit=2"), "literal limit file\n");
 		expect(textOf(await tool.execute("literal-modifier", { path: "array.json?limit=2" }))).toContain(
 			"literal limit file",

@@ -17,7 +17,7 @@ import {
 import { isShellTrace, type ShellTrace } from "@oh-my-pi/pi-wire";
 import { logger } from "@oh-my-pi/pi-utils";
 import { $env } from "@oh-my-pi/pi-utils/env";
-import { isCmdShell, isExecutable, type ShellConfig } from "@oh-my-pi/pi-utils/procmgr";
+import { isExecutable, type ShellConfig } from "@oh-my-pi/pi-utils/procmgr";
 import { Settings } from "../config/settings";
 import type { MinimizedMeta } from "@oh-my-pi/pi-tui/tools/output-meta";
 import { OutputSink, type OutputSummary } from "@oh-my-pi/pi-tui/tools/streaming-output";
@@ -497,7 +497,7 @@ function buildUserShellCommand(shell: string, args: string[], command: string): 
 function resolveUserShellConfig(settings: Settings, baseConfig: ShellConfig): ShellConfig {
 	const customShellPath = cfgShellPath.get(settings);
 	const envShell = Bun.env.SHELL;
-	if (customShellPath || process.platform === "win32" || !envShell || envShell === baseConfig.shell) {
+	if (customShellPath || !envShell || envShell === baseConfig.shell) {
 		return baseConfig;
 	}
 	if (!supportsAutoUserShell(envShell) || !isExecutable(envShell)) {
@@ -652,10 +652,10 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 	]);
 	const commandEnv = buildNonInteractiveEnv(preflight.env, { inheritLocale: options?.useUserShell === true });
 	const runCdInPersistentShell = options?.useUserShell === true && !prefix && isPersistentShellCdCommand(command);
-	// Never wrap in cmd.exe: it is only the Windows no-bash fallback for spawn
-	// paths, and the embedded shell runs the POSIX line better directly.
+	// The embedded shell runs the POSIX line directly; a user shell (zsh/fish)
+	// is wrapped in the configured shell's argv instead.
 	const finalCommand =
-		options?.useUserShell === true && !bashShell && !isCmdShell(shell) && !runCdInPersistentShell
+		options?.useUserShell === true && !bashShell && !runCdInPersistentShell
 			? buildUserShellCommand(shell, args, preflight.command)
 			: preflight.command;
 

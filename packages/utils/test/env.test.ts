@@ -182,10 +182,9 @@ describe("filterProcessEnv", () => {
 		});
 	});
 
-	it("preserves Windows-style variable names containing parentheses", () => {
-		// `ProgramFiles(x86)` and friends are standard on Windows and must
-		// survive the scrub so Git Bash discovery in procmgr.ts can resolve
-		// 32-bit Program Files installations.
+	it("preserves variable names containing parentheses", () => {
+		// The scrub only rejects empty names, `=` and NUL, so shell-variable
+		// spellings with parentheses survive untouched.
 		expect(
 			filterProcessEnv({
 				"ProgramFiles(x86)": "C:\\Program Files (x86)",
@@ -304,49 +303,42 @@ describe("filterChildShellEnv", () => {
 		});
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"keeps filtering after the process working directory is deleted",
-		async () => {
-			const cwd = path.dirname(writeTempEnv(""));
-			const envModulePath = path.join(import.meta.dir, "..", "src", "env.ts");
-			const dirsModulePath = path.join(import.meta.dir, "..", "src", "dirs.ts");
-			const script = [
-				'import * as fs from "node:fs";',
-				`import { filterChildShellEnv } from ${JSON.stringify(envModulePath)};`,
-				`import { getProjectDir } from ${JSON.stringify(dirsModulePath)};`,
-				"getProjectDir();",
-				"fs.rmSync(process.cwd(), { recursive: true });",
-				'const child = filterChildShellEnv({ UNCHANGED: "parent-value" });',
-				"process.stdout.write(JSON.stringify(child));",
-			].join("\n");
-			const proc = Bun.spawn([process.execPath, "--no-install", "--eval", script], {
-				cwd,
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const [stdout, stderr, exitCode] = await Promise.all([
-				new Response(proc.stdout).text(),
-				new Response(proc.stderr).text(),
-				proc.exited,
-			]);
+	it("keeps filtering after the process working directory is deleted", async () => {
+		const cwd = path.dirname(writeTempEnv(""));
+		const envModulePath = path.join(import.meta.dir, "..", "src", "env.ts");
+		const dirsModulePath = path.join(import.meta.dir, "..", "src", "dirs.ts");
+		const script = [
+			'import * as fs from "node:fs";',
+			`import { filterChildShellEnv } from ${JSON.stringify(envModulePath)};`,
+			`import { getProjectDir } from ${JSON.stringify(dirsModulePath)};`,
+			"getProjectDir();",
+			"fs.rmSync(process.cwd(), { recursive: true });",
+			'const child = filterChildShellEnv({ UNCHANGED: "parent-value" });',
+			"process.stdout.write(JSON.stringify(child));",
+		].join("\n");
+		const proc = Bun.spawn([process.execPath, "--no-install", "--eval", script], {
+			cwd,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [stdout, stderr, exitCode] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+			proc.exited,
+		]);
 
-			expect(exitCode, stderr).toBe(0);
-			expect(JSON.parse(stdout)).toEqual({ UNCHANGED: "parent-value" });
-		},
-	);
+		expect(exitCode, stderr).toBe(0);
+		expect(JSON.parse(stdout)).toEqual({ UNCHANGED: "parent-value" });
+	});
 });
 
 describe("stripGitRepoLocationEnv", () => {
-	it("matches case-insensitively on win32 and exactly on POSIX", () => {
-		// Windows env lookups are case-insensitive, so a `git_dir` block binds
-		// there; POSIX names are case-sensitive and must not be over-stripped.
-		const win32Env: Record<string, string> = { GIT_DIR: "a", git_dir: "b", GIT_WORK_TREE: "c", KEEP: "d" };
-		stripGitRepoLocationEnv(win32Env, "win32");
-		expect(win32Env).toEqual({ KEEP: "d" });
-
-		const posixEnv: Record<string, string> = { GIT_DIR: "a", git_dir: "b", KEEP: "d" };
-		stripGitRepoLocationEnv(posixEnv, "linux");
-		expect(posixEnv).toEqual({ git_dir: "b", KEEP: "d" });
+	it("removes exactly the documented names", () => {
+		// POSIX names are case-sensitive, so a `git_dir` block binds nothing and
+		// must not be over-stripped.
+		const env: Record<string, string> = { GIT_DIR: "a", git_dir: "b", GIT_WORK_TREE: "c", KEEP: "d" };
+		stripGitRepoLocationEnv(env);
+		expect(env).toEqual({ git_dir: "b", KEEP: "d" });
 	});
 });
 
@@ -377,41 +369,9 @@ describe("isBunTestRuntime", () => {
 	});
 });
 
-/**
- * Faithful model of Windows `process.env`: case-insensitive reads, but
- * enumeration (`ownKeys`) preserves the real key casing — exactly Node
- * (`uv_os_getenv` + `uv_os_environ`) and Bun (`CaseInsensitiveASCIIStringArrayHashMap`).
- */
-function windowsLikeEnv(backing: Record<string, string>): Record<string, string | undefined> {
-	return new Proxy(backing, {
-		get(target, prop) {
-			if (typeof prop !== "string") return Reflect.get(target, prop);
-			for (const key in target) {
-				if (key.toLowerCase() === prop.toLowerCase()) return target[key];
-			}
-			return undefined;
-		},
-		has(target, prop) {
-			if (typeof prop !== "string") return Reflect.has(target, prop);
-			for (const key in target) {
-				if (key.toLowerCase() === prop.toLowerCase()) return true;
-			}
-			return false;
-		},
-	}) as Record<string, string | undefined>;
-}
-
 describe("$envExact", () => {
-	it("does not hijack a literal via a case-differing Windows system var", () => {
-		// Windows ships PUBLIC=C:\Users\Public and reads are case-insensitive, so
-		// a bare `env["public"]` returns it — the /login #7361 401 root cause.
-		const env = windowsLikeEnv({ PUBLIC: "C:\\Users\\Public" });
-		expect(env.public).toBe("C:\\Users\\Public");
-		expect($envExact("public", env)).toBeUndefined();
-	});
-
-	it("still resolves a genuine exact-case reference on a case-insensitive env", () => {
-		const env = windowsLikeEnv({ MY_KEY: "secret" });
+	it("reads the exact key and ignores a differently-cased one", () => {
+		const env: Record<string, string> = { MY_KEY: "secret" };
 		expect($envExact("MY_KEY", env)).toBe("secret");
 		expect($envExact("my_key", env)).toBeUndefined();
 	});
@@ -490,7 +450,6 @@ describe("OTEL_* from omp's own .env files", () => {
 			env: {
 				...process.env,
 				HOME: home,
-				USERPROFILE: home,
 				PI_CODING_AGENT_DIR: agentDir,
 				...DIR_RESOLUTION_ENV_RESET,
 				OTEL_PROBE_CONFIG: undefined,
@@ -514,75 +473,67 @@ describe("OTEL_* from omp's own .env files", () => {
 		return JSON.parse(stdout);
 	}
 
-	it.skipIf(process.platform === "win32")(
-		"keeps agent/home .env OTEL_* out of Bun.env and any child, but readable through $otelEnv",
-		async () => {
-			const result = await runProbe({});
-			// Neither the agent nor the home file reaches the process environment;
-			// the project .env keeps its existing behavior (loaded into Bun.env), and
-			// non-OTEL names from the agent file are untouched.
-			expect(result.bunEnv).toEqual({
-				OTEL_PROBE_AGENT: null,
-				OTEL_PROBE_HOME: null,
-				OTEL_PROBE_SHELL: null,
-				OTEL_PROBE_BOTH: "project",
-				OTEL_PROBE_PROJECT: "project",
-				OTEL_PROBE_CONFIG: null,
-				PLAIN_PROBE_AGENT: "plain",
-			});
-			// agent beats home; config root beats home; project beats agent.
-			expect(result.otelEnv).toEqual({
-				OTEL_PROBE_AGENT: "agent",
-				OTEL_PROBE_HOME: "home",
-				OTEL_PROBE_SHELL: "agent-file",
-				OTEL_PROBE_BOTH: "project",
-				OTEL_PROBE_PROJECT: "project",
-				OTEL_PROBE_CONFIG: "config-root",
-				PLAIN_PROBE_AGENT: "plain",
-			});
-			// The SDK-facing window exposes the file values, then removes them.
-			expect(result.insideWindow).toMatchObject({
-				OTEL_PROBE_AGENT: "agent",
-				OTEL_PROBE_HOME: "home",
-				OTEL_PROBE_SHELL: "agent-file",
-				OTEL_PROBE_BOTH: "project",
-			});
-			expect(result.afterWindow).toEqual(result.bunEnv);
-			// A bash child handed the live environment sees none of the file-owned values.
-			expect(result.bashChildEnv).toEqual({
-				OTEL_PROBE_BOTH: "project",
-				OTEL_PROBE_PROJECT: "project",
-				PLAIN_PROBE_AGENT: "plain",
-			});
-		},
-		20_000,
-	);
+	it("keeps agent/home .env OTEL_* out of Bun.env and any child, but readable through $otelEnv", async () => {
+		const result = await runProbe({});
+		// Neither the agent nor the home file reaches the process environment;
+		// the project .env keeps its existing behavior (loaded into Bun.env), and
+		// non-OTEL names from the agent file are untouched.
+		expect(result.bunEnv).toEqual({
+			OTEL_PROBE_AGENT: null,
+			OTEL_PROBE_HOME: null,
+			OTEL_PROBE_SHELL: null,
+			OTEL_PROBE_BOTH: "project",
+			OTEL_PROBE_PROJECT: "project",
+			OTEL_PROBE_CONFIG: null,
+			PLAIN_PROBE_AGENT: "plain",
+		});
+		// agent beats home; config root beats home; project beats agent.
+		expect(result.otelEnv).toEqual({
+			OTEL_PROBE_AGENT: "agent",
+			OTEL_PROBE_HOME: "home",
+			OTEL_PROBE_SHELL: "agent-file",
+			OTEL_PROBE_BOTH: "project",
+			OTEL_PROBE_PROJECT: "project",
+			OTEL_PROBE_CONFIG: "config-root",
+			PLAIN_PROBE_AGENT: "plain",
+		});
+		// The SDK-facing window exposes the file values, then removes them.
+		expect(result.insideWindow).toMatchObject({
+			OTEL_PROBE_AGENT: "agent",
+			OTEL_PROBE_HOME: "home",
+			OTEL_PROBE_SHELL: "agent-file",
+			OTEL_PROBE_BOTH: "project",
+		});
+		expect(result.afterWindow).toEqual(result.bunEnv);
+		// A bash child handed the live environment sees none of the file-owned values.
+		expect(result.bashChildEnv).toEqual({
+			OTEL_PROBE_BOTH: "project",
+			OTEL_PROBE_PROJECT: "project",
+			PLAIN_PROBE_AGENT: "plain",
+		});
+	}, 20_000);
 
-	it.skipIf(process.platform === "win32")(
-		"lets a shell-exported OTEL_* win in Bun.env and $otelEnv",
-		async () => {
-			const result = await runProbe({ OTEL_PROBE_SHELL: "from-shell" });
-			expect(result.bunEnv.OTEL_PROBE_SHELL).toBe("from-shell");
-			expect(result.otelEnv.OTEL_PROBE_SHELL).toBe("from-shell");
-			expect(result.insideWindow.OTEL_PROBE_SHELL).toBe("from-shell");
-			expect(result.afterWindow.OTEL_PROBE_SHELL).toBe("from-shell");
-			// Still visible to children, as any exported variable is.
-			expect(result.bashChildEnv.OTEL_PROBE_SHELL).toBe("from-shell");
-			// The agent-file-only names stay private.
-			expect(result.bashChildEnv.OTEL_PROBE_AGENT).toBeUndefined();
-		},
-		20_000,
-	);
+	it("lets a shell-exported OTEL_* win in Bun.env and $otelEnv", async () => {
+		const result = await runProbe({ OTEL_PROBE_SHELL: "from-shell" });
+		expect(result.bunEnv.OTEL_PROBE_SHELL).toBe("from-shell");
+		expect(result.otelEnv.OTEL_PROBE_SHELL).toBe("from-shell");
+		expect(result.insideWindow.OTEL_PROBE_SHELL).toBe("from-shell");
+		expect(result.afterWindow.OTEL_PROBE_SHELL).toBe("from-shell");
+		// Still visible to children, as any exported variable is.
+		expect(result.bashChildEnv.OTEL_PROBE_SHELL).toBe("from-shell");
+		// The agent-file-only names stay private.
+		expect(result.bashChildEnv.OTEL_PROBE_AGENT).toBeUndefined();
+	}, 20_000);
 
 	describe("claimOmpOtelEnvFileEntry", () => {
 		it("claims only OTEL_* names and applies the live value first", () => {
-			expect(claimOmpOtelEnvFileEntry("PLAIN_CLAIM_PROBE", "x", "linux")).toBe(false);
-			expect(claimOmpOtelEnvFileEntry("otel_lower_claim_probe", "x", "linux")).toBe(false);
+			expect(claimOmpOtelEnvFileEntry("PLAIN_CLAIM_PROBE", "x")).toBe(false);
+			expect(claimOmpOtelEnvFileEntry("otel_lower_claim_probe", "x")).toBe(false);
 			expect($otelEnv("PLAIN_CLAIM_PROBE")).toBeUndefined();
 
 			process.env.OTEL_CLAIM_LIVE_PROBE = "live";
 			try {
-				expect(claimOmpOtelEnvFileEntry("OTEL_CLAIM_LIVE_PROBE", "file", "linux")).toBe(true);
+				expect(claimOmpOtelEnvFileEntry("OTEL_CLAIM_LIVE_PROBE", "file")).toBe(true);
 				expect($otelEnv("OTEL_CLAIM_LIVE_PROBE")).toBe("live");
 			} finally {
 				delete process.env.OTEL_CLAIM_LIVE_PROBE;
@@ -592,25 +543,15 @@ describe("OTEL_* from omp's own .env files", () => {
 		});
 
 		it("keeps the first non-empty value across files", () => {
-			claimOmpOtelEnvFileEntry("OTEL_CLAIM_ORDER_PROBE", "first", "linux");
-			claimOmpOtelEnvFileEntry("OTEL_CLAIM_ORDER_PROBE", "second", "linux");
+			claimOmpOtelEnvFileEntry("OTEL_CLAIM_ORDER_PROBE", "first");
+			claimOmpOtelEnvFileEntry("OTEL_CLAIM_ORDER_PROBE", "second");
 			expect($otelEnv("OTEL_CLAIM_ORDER_PROBE")).toBe("first");
-		});
-
-		it("folds a lowercase name to its upper-case form on win32 only", () => {
-			expect(claimOmpOtelEnvFileEntry("otel_claim_win_probe", "win", "win32")).toBe(true);
-			expect(Bun.env.otel_claim_win_probe).toBeUndefined();
-			expect(Bun.env.OTEL_CLAIM_WIN_PROBE).toBeUndefined();
-			withOmpOtelEnv(() => {
-				expect(process.env.OTEL_CLAIM_WIN_PROBE).toBe("win");
-			});
-			expect(process.env.OTEL_CLAIM_WIN_PROBE).toBeUndefined();
 		});
 	});
 
 	describe("withOmpOtelEnv", () => {
 		it("exposes file values only inside the callback and returns its result", () => {
-			claimOmpOtelEnvFileEntry("OTEL_WINDOW_PROBE_A", "a", "linux");
+			claimOmpOtelEnvFileEntry("OTEL_WINDOW_PROBE_A", "a");
 			expect(process.env.OTEL_WINDOW_PROBE_A).toBeUndefined();
 			const result = withOmpOtelEnv(() => {
 				expect(process.env.OTEL_WINDOW_PROBE_A).toBe("a");
@@ -621,7 +562,7 @@ describe("OTEL_* from omp's own .env files", () => {
 		});
 
 		it("removes the values when the callback throws", () => {
-			claimOmpOtelEnvFileEntry("OTEL_WINDOW_PROBE_THROW", "t", "linux");
+			claimOmpOtelEnvFileEntry("OTEL_WINDOW_PROBE_THROW", "t");
 			expect(() =>
 				withOmpOtelEnv(() => {
 					expect(process.env.OTEL_WINDOW_PROBE_THROW).toBe("t");
@@ -632,7 +573,7 @@ describe("OTEL_* from omp's own .env files", () => {
 		});
 
 		it("restores a name that was set to the empty string instead of deleting it", () => {
-			claimOmpOtelEnvFileEntry("OTEL_WINDOW_PROBE_EMPTY", "file", "linux");
+			claimOmpOtelEnvFileEntry("OTEL_WINDOW_PROBE_EMPTY", "file");
 			process.env.OTEL_WINDOW_PROBE_EMPTY = "";
 			try {
 				withOmpOtelEnv(() => {
@@ -645,7 +586,7 @@ describe("OTEL_* from omp's own .env files", () => {
 		});
 
 		it("never overwrites or deletes a name that is already set", () => {
-			claimOmpOtelEnvFileEntry("OTEL_WINDOW_PROBE_SET", "file", "linux");
+			claimOmpOtelEnvFileEntry("OTEL_WINDOW_PROBE_SET", "file");
 			process.env.OTEL_WINDOW_PROBE_SET = "live";
 			try {
 				withOmpOtelEnv(() => {

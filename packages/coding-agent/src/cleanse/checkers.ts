@@ -353,8 +353,8 @@ function resolveBinary(projectCwd: string, root: string, names: readonly string[
 	while (true) {
 		searchDirectories.push(
 			path.join(current, "node_modules", ".bin"),
-			path.join(current, ".venv", process.platform === "win32" ? "Scripts" : "bin"),
-			path.join(current, "venv", process.platform === "win32" ? "Scripts" : "bin"),
+			path.join(current, ".venv", "bin"),
+			path.join(current, "venv", "bin"),
 			path.join(current, "vendor", "bin"),
 		);
 		if (current === projectCwd) break;

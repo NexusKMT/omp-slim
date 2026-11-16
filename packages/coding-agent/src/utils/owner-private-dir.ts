@@ -35,7 +35,6 @@ export function ownerPrivateDirError(stat: OwnerPrivateDirStat, expectedUid: num
  * replace the entry with a symlink between two `stat`s and slip a victim-owned
  * 0700 target past the checks (#9070). Rejects a symlink, a non-directory, a
  * foreign owner, or lingering group/other access via {@link ownerPrivateDirError}.
- * POSIX only: Windows lacks `O_NOFOLLOW`/`O_DIRECTORY`.
  *
  * @param label Human-readable directory role prefixed to the thrown message.
  */

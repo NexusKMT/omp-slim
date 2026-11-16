@@ -24,7 +24,7 @@ export const DAEMON_SPEC_FILE = "spec.json";
 
 /**
  * Canonicalize a project directory the same way every broker client does, so
- * hash-keyed runtime dirs and Windows pipe names agree across processes.
+ * hash-keyed runtime dirs agree across processes.
  * Missing paths and permission-denied lookups (EPERM/EACCES on protected
  * parent directories) resolve without realpath instead of failing.
  */
@@ -82,7 +82,7 @@ export async function readStoredDaemonRecord(dir: string): Promise<StoredDaemonR
 	return { meta, spec, legacyLayout: false };
 }
 
-/** Resolve the Unix socket or Windows named pipe used by one daemon broker scope. */
+/** Resolve the IPC endpoint used by one daemon broker scope. */
 export function daemonBrokerEndpoint(runtimeDir: string): string {
 	return ipcEndpoint(runtimeDir, "broker");
 }

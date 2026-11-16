@@ -10,7 +10,7 @@ const FULL_CAPTURE_ERROR = "Full stderr capture must be requested when spawning 
 
 function stderrFixture(size: number, exitCode = 0, stdout = ""): string[] {
 	const fillLength = size - STDERR_HEAD.length - STDERR_TAIL.length;
-	// Writing "" to a piped stdout throws EINVAL on Windows Bun; skip the write.
+	// Skip the write entirely when there is no stdout payload to emit.
 	const stdoutLine = stdout.length > 0 ? `await Bun.stdout.write(${JSON.stringify(stdout)});` : null;
 	const script = [
 		stdoutLine,

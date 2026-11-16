@@ -30,7 +30,6 @@ import {
 	resolveExplicitPythonRuntime,
 	resolvePythonRuntime,
 } from "./runtime";
-import { hostHasInheritableConsole, shouldDetachKernel, shouldHideKernelWindow } from "./spawn-options";
 import type { PythonToolRequest } from "./executor";
 
 export type {
@@ -344,15 +343,11 @@ export class PythonKernel extends BaseKernel<PythonKernelExecuteOptions> {
 
 		const proc = Bun.spawn([runtime.pythonPath, "-u", scriptPath], {
 			cwd: options.cwd,
-			detached: shouldDetachKernel(process.platform),
+			detached: true,
 			env: spawnEnv,
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",
-			windowsHide: shouldHideKernelWindow({
-				platform: process.platform,
-				hostHasInheritableConsole: hostHasInheritableConsole(),
-			}),
 		});
 
 		kernel.setProcess(proc);

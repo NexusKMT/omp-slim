@@ -479,11 +479,9 @@ describe("terminal launch dispatcher", () => {
 		// CMUX new-split restores CMUX_WORKSPACE_ID from its environment even with --surface.
 		expect(calls[0]!.env?.CMUX_WORKSPACE_ID).toBeUndefined();
 		expect(calls[0]!.env?.CMUX_SURFACE_ID).toBe("surface:ambient");
-		if (process.platform !== "win32") {
-			const commandProbe = await processCli(["/bin/sh", "-c", calls[0]!.argv[commandIndex + 1]!], process.cwd());
-			expect(commandProbe.exitCode).toBe(0);
-			expect(commandProbe.stdout).toBe("explicit CMUX command");
-		}
+		const commandProbe = await processCli(["/bin/sh", "-c", calls[0]!.argv[commandIndex + 1]!], process.cwd());
+		expect(commandProbe.exitCode).toBe(0);
+		expect(commandProbe.stdout).toBe("explicit CMUX command");
 		expect(result).toEqual({ multiplexer: "cmux", placement: "pane", id: "pane-9" });
 	});
 
@@ -635,134 +633,99 @@ describe("terminal launch dispatcher", () => {
 		expect(result).toEqual({ multiplexer: "zellij", placement: "window", id: "7" });
 	});
 
-	// Herdr is POSIX-only and the launch script lives under the real temp dir, whose
-	// Windows path (drive letter, backslashes) is not a shell-neutral word.
-	it.skipIf(process.platform === "win32")(
-		"types only /bin/sh and a shell-neutral script path into a new Herdr pane and preserves exact argv",
-		async () => {
-			const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "herdr-argv-"));
-			try {
-				const recorder = path.join(tempRoot, "recorder.js");
-				await Bun.write(recorder, 'process.stdout.write(JSON.stringify(process.argv.slice(2)) + "\\n");\n');
-				const args = [
-					"Ω 雪",
-					"",
-					"it's 'quoted'",
-					"; printf injected",
-					"$(printf injected) * $HOME",
-					"line\nbreak",
-				];
-				const { calls, launch } = createHarness({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" }, [
-					{ stdout: '{"result":{"pane":{"pane_id":"w1:p2"}}}', exitCode: 0 },
-					{ stdout: "", exitCode: 0 },
-				]);
-				const result = await launch({
-					multiplexer: "herdr",
-					placement: "pane",
-					command: [process.execPath, recorder, ...args],
-					cwd: "/repo with space",
-					direction: "down",
-					focus: false,
-				});
-
-				expect(result).toEqual({ multiplexer: "herdr", placement: "pane", id: "w1:p2" });
-				expect(calls[0]).toEqual({
-					argv: [
-						"herdr",
-						"pane",
-						"split",
-						"w1:p1",
-						"--direction",
-						"down",
-						"--cwd",
-						"/repo with space",
-						"--no-focus",
-					],
-					cwd: "/repo with space",
-				});
-				const typed = calls[1]!.argv[4]!;
-				expect(calls[1]!.argv).toEqual(["herdr", "pane", "run", "w1:p2", typed]);
-				expect(typed).toMatch(/^\/bin\/sh \/[A-Za-z0-9_./-]+$/);
-				const script = typed.slice("/bin/sh ".length);
-				const executed = await processCli(["/bin/sh", "-c", typed], tempRoot);
-				expect(executed.exitCode).toBe(0);
-				expect(JSON.parse(executed.stdout)).toEqual(args);
-				expect(await Bun.file(script).exists()).toBe(false);
-			} finally {
-				await fs.rm(tempRoot, { recursive: true, force: true });
-			}
-		},
-	);
-
-	it.skipIf(process.platform === "win32")(
-		"creates a Herdr tab in the explicit workspace and removes its launch script when pane run fails",
-		async () => {
-			const { calls, launch } = createHarness({ HERDR_ENV: "1", HERDR_WORKSPACE_ID: "w1" }, [
-				{
-					stdout: '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p3"}}}',
-					exitCode: 0,
-				},
-				{ stdout: "", exitCode: 1 },
+	// Herdr is POSIX-only and the launch script lives under the real temp dir.
+	it("types only /bin/sh and a shell-neutral script path into a new Herdr pane and preserves exact argv", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "herdr-argv-"));
+		try {
+			const recorder = path.join(tempRoot, "recorder.js");
+			await Bun.write(recorder, 'process.stdout.write(JSON.stringify(process.argv.slice(2)) + "\\n");\n');
+			const args = ["Ω 雪", "", "it's 'quoted'", "; printf injected", "$(printf injected) * $HOME", "line\nbreak"];
+			const { calls, launch } = createHarness({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" }, [
+				{ stdout: '{"result":{"pane":{"pane_id":"w1:p2"}}}', exitCode: 0 },
+				{ stdout: "", exitCode: 0 },
 			]);
-			await expect(
-				launch({
-					multiplexer: "herdr",
-					placement: "window",
-					command: ["omp", "--resume"],
-					cwd: "/repo",
-					target: "w1",
-					label: "agent",
-					focus: true,
-				}),
-			).rejects.toThrow("pane run failed");
+			const result = await launch({
+				multiplexer: "herdr",
+				placement: "pane",
+				command: [process.execPath, recorder, ...args],
+				cwd: "/repo with space",
+				direction: "down",
+				focus: false,
+			});
 
-			expect(calls[0]!.argv).toEqual([
-				"herdr",
-				"tab",
-				"create",
-				"--workspace",
-				"w1",
-				"--cwd",
-				"/repo",
-				"--label",
-				"agent",
-				"--focus",
-			]);
-			expect(calls[1]!.argv.slice(0, 4)).toEqual(["herdr", "pane", "run", "w1:p3"]);
-			await expect(fs.stat(path.dirname(calls[1]!.argv[4]!.slice("/bin/sh ".length)))).rejects.toThrow("ENOENT");
-		},
-	);
+			expect(result).toEqual({ multiplexer: "herdr", placement: "pane", id: "w1:p2" });
+			expect(calls[0]).toEqual({
+				argv: ["herdr", "pane", "split", "w1:p1", "--direction", "down", "--cwd", "/repo with space", "--no-focus"],
+				cwd: "/repo with space",
+			});
+			const typed = calls[1]!.argv[4]!;
+			expect(calls[1]!.argv).toEqual(["herdr", "pane", "run", "w1:p2", typed]);
+			expect(typed).toMatch(/^\/bin\/sh \/[A-Za-z0-9_./-]+$/);
+			const script = typed.slice("/bin/sh ".length);
+			const executed = await processCli(["/bin/sh", "-c", typed], tempRoot);
+			expect(executed.exitCode).toBe(0);
+			expect(JSON.parse(executed.stdout)).toEqual(args);
+			expect(await Bun.file(script).exists()).toBe(false);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("creates a Herdr tab in the explicit workspace and removes its launch script when pane run fails", async () => {
+		const { calls, launch } = createHarness({ HERDR_ENV: "1", HERDR_WORKSPACE_ID: "w1" }, [
+			{
+				stdout: '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p3"}}}',
+				exitCode: 0,
+			},
+			{ stdout: "", exitCode: 1 },
+		]);
+		await expect(
+			launch({
+				multiplexer: "herdr",
+				placement: "window",
+				command: ["omp", "--resume"],
+				cwd: "/repo",
+				target: "w1",
+				label: "agent",
+				focus: true,
+			}),
+		).rejects.toThrow("pane run failed");
+
+		expect(calls[0]!.argv).toEqual([
+			"herdr",
+			"tab",
+			"create",
+			"--workspace",
+			"w1",
+			"--cwd",
+			"/repo",
+			"--label",
+			"agent",
+			"--focus",
+		]);
+		expect(calls[1]!.argv.slice(0, 4)).toEqual(["herdr", "pane", "run", "w1:p3"]);
+		await expect(fs.stat(path.dirname(calls[1]!.argv[4]!.slice("/bin/sh ".length)))).rejects.toThrow("ENOENT");
+	});
 
 	describe("Herdr launch script setup", () => {
 		afterEach(() => {
 			vi.restoreAllMocks();
 		});
 
-		it.skipIf(process.platform === "win32")(
-			"creates no Herdr surface when the launch script cannot be prepared",
-			async () => {
-				const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "herdr tmp "));
-				vi.spyOn(os, "tmpdir").mockReturnValue(tempRoot);
-				try {
-					const { calls, launch } = createHarness({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" }, []);
-					await expect(
-						launch({ multiplexer: "herdr", placement: "pane", command: ["omp"], cwd: "/repo" }),
-					).rejects.toThrow("temporary directory path");
-					expect(calls).toEqual([]);
-					expect(await fs.readdir(tempRoot)).toEqual([]);
-				} finally {
-					await fs.rm(tempRoot, { recursive: true, force: true });
-				}
-			},
-		);
-	});
-
-	it("rejects Herdr launches on Windows before creating a surface", async () => {
-		const { calls, launch } = createHarness({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" }, [], "win32");
-		await expect(launch({ multiplexer: "herdr", placement: "pane", command: ["omp"], cwd: "/repo" })).rejects.toThrow(
-			"not supported on Windows",
-		);
-		expect(calls).toEqual([]);
+		it("creates no Herdr surface when the launch script cannot be prepared", async () => {
+			const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "herdr tmp "));
+			vi.spyOn(os, "tmpdir").mockReturnValue(tempRoot);
+			try {
+				const { calls, launch } = createHarness({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" }, []);
+				await expect(
+					launch({ multiplexer: "herdr", placement: "pane", command: ["omp"], cwd: "/repo" }),
+				).rejects.toThrow("temporary directory path");
+				expect(calls).toEqual([]);
+				expect(await fs.readdir(tempRoot)).toEqual([]);
+			} finally {
+				await fs.rm(tempRoot, { recursive: true, force: true });
+			}
+		});
 	});
 
 	it("preserves Unicode argv and pane cwd through ASCII-only CMUX shell input", async () => {
@@ -805,16 +768,14 @@ describe("terminal launch dispatcher", () => {
 			expect(windowPayload).toMatch(/^[\x00-\x7f]*$/u);
 			expect(calls[0]!.cwd).toBe(cwd);
 			expect(calls[1]!.argv[calls[1]!.argv.indexOf("--cwd") + 1]).toBe(cwd);
-			if (process.platform !== "win32") {
-				const paneResult = await processCli(["/bin/sh", "-c", `${panePayload}; pwd`], process.cwd());
-				expect(paneResult.exitCode).toBe(0);
-				const [recordedChild, shellCwd] = paneResult.stdout.trimEnd().split("\n");
-				expect(JSON.parse(recordedChild!)).toEqual({ cwd, argv: args });
-				expect(shellCwd).toBe(cwd);
-				const windowResult = await processCli(["/bin/sh", "-c", windowPayload], cwd);
-				expect(windowResult.exitCode).toBe(0);
-				expect(JSON.parse(windowResult.stdout)).toEqual({ cwd, argv: args });
-			}
+			const paneResult = await processCli(["/bin/sh", "-c", `${panePayload}; pwd`], process.cwd());
+			expect(paneResult.exitCode).toBe(0);
+			const [recordedChild, shellCwd] = paneResult.stdout.trimEnd().split("\n");
+			expect(JSON.parse(recordedChild!)).toEqual({ cwd, argv: args });
+			expect(shellCwd).toBe(cwd);
+			const windowResult = await processCli(["/bin/sh", "-c", windowPayload], cwd);
+			expect(windowResult.exitCode).toBe(0);
+			expect(JSON.parse(windowResult.stdout)).toEqual({ cwd, argv: args });
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -901,14 +862,11 @@ describe("terminal launch dispatcher", () => {
 			tmux.launch({ multiplexer: "tmux", placement: "pane", command: ["omp"], cwd: "/repo" }),
 		).rejects.toThrow("invalid ID");
 
-		// Herdr writes its launch script under the real temp dir before creating a pane;
-		// a Windows temp path is never a shell-neutral word.
-		if (process.platform !== "win32") {
-			const herdr = createHarness({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" }, [{ stdout: "not-json", exitCode: 0 }]);
-			await expect(
-				herdr.launch({ multiplexer: "herdr", placement: "pane", command: ["omp"], cwd: "/repo" }),
-			).rejects.toThrow("invalid JSON");
-		}
+		// Herdr writes its launch script under the real temp dir before creating a pane.
+		const herdr = createHarness({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" }, [{ stdout: "not-json", exitCode: 0 }]);
+		await expect(
+			herdr.launch({ multiplexer: "herdr", placement: "pane", command: ["omp"], cwd: "/repo" }),
+		).rejects.toThrow("invalid JSON");
 
 		const zellij = createHarness({ ZELLIJ: "1" }, [{ stdout: "terminal_not-a-number", exitCode: 0 }]);
 		await expect(
@@ -1045,11 +1003,9 @@ describe("terminal launch dispatcher", () => {
 		]);
 		expect(result).toEqual({ multiplexer: "orca", placement: "pane", id: "term-split" });
 
-		if (process.platform !== "win32") {
-			const executed = Bun.spawnSync(["/bin/sh", "-c", shellCommand], { stdout: "pipe", stderr: "pipe" });
-			expect(executed.exitCode).toBe(0);
-			expect(executed.stdout.toString()).toBe(argument);
-		}
+		const executed = Bun.spawnSync(["/bin/sh", "-c", shellCommand], { stdout: "pipe", stderr: "pipe" });
+		expect(executed.exitCode).toBe(0);
+		expect(executed.stdout.toString()).toBe(argument);
 	});
 
 	it("resolves the calling Orca pane beyond the default terminal-list limit", async () => {

@@ -26,12 +26,6 @@
  * explicit //:natives-* targets and aggregates always build through bazel.
  * Release CI builds every addon through that path on Linux.
  *
- * Windows hosts: the msvc cc toolchain in bazel/toolchains/msvc only supports
- * linux/mac exec hosts (its clang-cl+xwin wrappers replace the MSVC a Windows
- * box already has), so a win32 host cannot run any bazel addon build. `host`
- * always uses the local napi build there (against installed VS Build Tools);
- * every other target on a win32 host fails fast with guidance.
- *
  * Note: musl addons intentionally reuse the plain linux-<arch> filenames, so an
  * `all` copy overwrites the gnu addon with the musl one (and vice versa);
  * CI jobs that ship files always request an explicit disjoint target set.
@@ -58,8 +52,6 @@ export const ADDON_OUTPUTS: Record<string, string> = {
 	"linux-musl-arm64": "pi_natives.linux-arm64.node",
 	"darwin-x64-baseline": "pi_natives.darwin-x64-baseline.node",
 	"darwin-arm64": "pi_natives.darwin-arm64.node",
-	"win32-x64-baseline": "pi_natives.win32-x64-baseline.node",
-	"win32-arm64": "pi_natives.win32-arm64.node",
 };
 
 /** Aggregate filegroups → their member addon targets (mirrors BUILD.bazel). */
@@ -72,8 +64,6 @@ export const AGGREGATE_TARGETS: Record<string, string[]> = {
 		"linux-musl-x64-baseline",
 		"linux-x64-baseline",
 		"linux-x64-modern",
-		"win32-arm64",
-		"win32-x64-baseline",
 	],
 	"darwin-all": ["darwin-arm64", "darwin-x64-baseline"],
 };
@@ -102,10 +92,6 @@ export function hostTargetName(host: HostInfo): string {
 			if (host.musl) return "linux-musl-x64-baseline";
 			return host.avx2 ? "linux-x64-modern" : "linux-x64-baseline";
 		}
-	}
-	if (host.platform === "win32") {
-		if (host.arch === "x64") return "win32-x64-baseline";
-		if (host.arch === "arm64") return "win32-arm64";
 	}
 	throw new Error(`No pi_natives addon target for host ${host.platform}-${host.arch}`);
 }
@@ -385,21 +371,10 @@ async function main(): Promise<void> {
 	// Backend selection: the host build defaults to the local Cargo/N-API
 	// path; bazel is opt-in for host via OMP_NATIVE_BUILD_BACKEND=bazel or
 	// extra bazel args after `--`. Explicit //:natives-* targets always go
-	// through bazel. win32 hosts can only build `host`, locally (see the msvc
-	// toolchain note in the header).
-	const cargoBackend =
-		backend === "cargo" ||
-		host.platform === "win32" ||
-		(backend !== "bazel" && hostOnly && options.bazelArgs.length === 0);
+	// through bazel.
+	const cargoBackend = backend === "cargo" || (backend !== "bazel" && hostOnly && options.bazelArgs.length === 0);
 	if (cargoBackend && !options.source) {
 		if (!hostOnly) {
-			if (host.platform === "win32") {
-				throw new Error(
-					`Cannot bazel-build [${options.targets.join(", ")}] on a Windows host: the msvc cross ` +
-						"toolchain (bazel/toolchains/msvc) only runs on linux/mac exec hosts. Use `host` here " +
-						"(local napi build via VS Build Tools), or run this script from WSL/linux for cross targets.",
-				);
-			}
 			throw new Error("OMP_NATIVE_BUILD_BACKEND=cargo supports only the host target");
 		}
 		await buildLocalHostAddon(host, destDir);

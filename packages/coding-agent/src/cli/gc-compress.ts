@@ -7,14 +7,11 @@
  * - APFS (macOS): `ditto --hfsCompression` writes compressed copies that are
  *   verified and renamed over the originals. A later write stores the file
  *   uncompressed again.
- * - NTFS (Windows): `compact /c` sets LZNT1 compression on each file in place,
- *   keeping its inode and timestamps; later appends are stored compressed too.
  */
 import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { $ } from "bun";
-import { dlopen, FFIType, ptr } from "bun:ffi";
 import { COMPRESS_SCRATCH_PREFIX } from "@oh-my-pi/omp-stats/parser";
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import { FileSessionStorage } from "../session/session-storage";
@@ -40,17 +37,13 @@ const INCOMPRESSIBLE_EXTENSIONS: Record<string, true> = {
 	".gif": true,
 };
 
-/** Bounded argv per tool spawn; Windows caps a command line at 32K characters. */
+/** Bounded argv per tool spawn. */
 const DITTO_BATCH = 256;
-const COMPACT_BATCH = 64;
 /** Files hashed at once, well below common open-file limits. */
 const HASH_CONCURRENCY = 8;
 
-/** `GetVolumeInformationW` flag: the volume supports per-file compression. */
-const FILE_FILE_COMPRESSION = 0x10;
-
 /** How this machine compresses files in place: the filesystem the sessions live on. */
-export type CompressMethod = "apfs" | "ntfs";
+export type CompressMethod = "apfs";
 
 export interface CompressCandidate {
 	path: string;
@@ -81,7 +74,6 @@ export async function compressMethod(
 ): Promise<CompressMethod | undefined> {
 	try {
 		if (platform === "darwin") return (await isApfsVolume(dir)) ? "apfs" : undefined;
-		if (platform === "win32") return isCompressingNtfsVolume(dir) ? "ntfs" : undefined;
 	} catch {
 		// An unreadable dir or mount table means no supported volume.
 	}
@@ -106,32 +98,6 @@ async function isApfsVolume(dir: string): Promise<boolean> {
 		}
 	}
 	return false;
-}
-
-/** Whether `dir` sits on an NTFS volume that supports per-file compression. */
-function isCompressingNtfsVolume(dir: string): boolean {
-	const kernel32 = dlopen("kernel32.dll", {
-		GetVolumePathNameW: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
-		GetVolumeInformationW: {
-			args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u32],
-			returns: FFIType.i32,
-		},
-	});
-	try {
-		const chars = 261;
-		const root = Buffer.alloc(chars * 2);
-		const target = Buffer.from(`${path.resolve(dir)}\0`, "utf16le");
-		if (!kernel32.symbols.GetVolumePathNameW(ptr(target), ptr(root), chars)) return false;
-		const flags = new Uint32Array(1);
-		const name = Buffer.alloc(chars * 2);
-		if (!kernel32.symbols.GetVolumeInformationW(ptr(root), null, 0, null, null, ptr(flags), ptr(name), chars)) {
-			return false;
-		}
-		const fsName = name.toString("utf16le").split("\0")[0];
-		return fsName === "NTFS" && (flags[0] & FILE_FILE_COMPRESSION) !== 0;
-	} finally {
-		kernel32.close();
-	}
 }
 
 /**
@@ -202,7 +168,7 @@ export async function sweepCompressScratch(roots: string[], apply: boolean, erro
  * directory beside them, and a copy replaces its original only when its size
  * and SHA-256 match and the original is unchanged since it was selected.
  * Paths in `transcripts` (files with a session header) swap under the session
- * publish lock. NTFS: the filesystem compresses each file in place.
+ * publish lock.
  */
 export async function compressFilesInPlace(
 	candidates: CompressCandidate[],
@@ -210,12 +176,6 @@ export async function compressFilesInPlace(
 	transcripts: ReadonlySet<string>,
 ): Promise<CompressBatchResult> {
 	const result: CompressBatchResult = { compressed: 0, allocatedAfter: 0, errors: [] };
-	if (method === "ntfs") {
-		for (let start = 0; start < candidates.length; start += COMPACT_BATCH) {
-			await compactBatch(candidates.slice(start, start + COMPACT_BATCH), result);
-		}
-		return result;
-	}
 	const byDir = new Map<string, CompressCandidate[]>();
 	for (const candidate of candidates) {
 		const dir = path.dirname(candidate.path);
@@ -234,11 +194,10 @@ export async function compressFilesInPlace(
 /**
  * Whether `method` actually stores a compressible file compressed under `dir`.
  * The volume type alone does not prove it: on macOS 27 `ditto --hfsCompression`
- * exits 0 but writes plain copies (#16244), and policy can disable NTFS
- * compression. Runs one throwaway file through {@link compressFilesInPlace}
- * inside a scratch directory the sweep reclaims if this process dies. Throws
- * when the compression tool itself fails, so a broken run is not mistaken for
- * a volume that stores files uncompressed.
+ * exits 0 but writes plain copies (#16244). Runs one throwaway file through
+ * {@link compressFilesInPlace} inside a scratch directory the sweep reclaims if
+ * this process dies. Throws when the compression tool itself fails, so a broken
+ * run is not mistaken for a volume that stores files uncompressed.
  */
 export async function compressionWorks(dir: string, method: CompressMethod): Promise<boolean> {
 	const scratch = await fs.mkdtemp(path.join(dir, COMPRESS_SCRATCH_PREFIX));
@@ -253,30 +212,6 @@ export async function compressionWorks(dir: string, method: CompressMethod): Pro
 		return batch.compressed === 1;
 	} finally {
 		await fs.rm(scratch, { recursive: true, force: true });
-	}
-}
-
-async function compactBatch(batch: CompressCandidate[], result: CompressBatchResult): Promise<void> {
-	for (const candidate of batch) result.allocatedAfter += candidate.allocated;
-	// LZNT1 rather than `/exe` (WOF) compression: WOF inflates the whole file on
-	// its next write, so a resumed session would lose all its savings. LZNT1
-	// compresses in place, so a concurrent appender cannot lose data. `/i` keeps
-	// going past a file that fails (one held open) instead of stopping the batch;
-	// `/a` because compact documents Hidden and System files as excluded by default.
-	const run = await $`compact /c /i /a /q ${batch.map(candidate => candidate.path)}`.quiet().nothrow();
-	if (run.exitCode !== 0) {
-		const output = `${run.stdout.toString()}${run.stderr.toString()}`.trim().split("\n").slice(-3).join(" ");
-		result.errors.push(`compact exited ${run.exitCode}: ${output}`);
-	}
-	for (const candidate of batch) {
-		try {
-			const allocated = (await fs.lstat(candidate.path)).blocks * 512;
-			if (allocated >= candidate.allocated) continue;
-			result.compressed += 1;
-			result.allocatedAfter += allocated - candidate.allocated;
-		} catch (error) {
-			result.errors.push(`${candidate.path}: ${errorMessage(error)}`);
-		}
 	}
 }
 

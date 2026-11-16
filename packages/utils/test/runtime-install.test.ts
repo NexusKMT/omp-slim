@@ -184,8 +184,8 @@ describe("installRuntimeModuleResolver", () => {
 	});
 
 	test("corrects a stock hit and a runtime-parent miss when the cache is reached through a symlink", async () => {
-		// Reaching the fastembed runtime cache through a link (Windows junction,
-		// a home directory redirected onto another volume) used to skip the
+		// Reaching the fastembed runtime cache through a link (a home directory
+		// redirected onto another volume) used to skip the
 		// stock-hit correction, so a compiled binary loaded `@huggingface/hub`'s
 		// root `index.ts` instead of its `dist` entry and died on that TS
 		// source's transitive `@huggingface/xetchunk-wasm` import (#13034).

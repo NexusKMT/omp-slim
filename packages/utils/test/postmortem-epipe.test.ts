@@ -177,33 +177,30 @@ if (!CHILD_FLAGS.some(flag => process.argv.includes(flag))) {
 		// Exercises a real failed stdout write (not a synthetic thrown error): a
 		// registered owner whose stdout consumer closes early runs cleanup and exits
 		// 0. `| true` closes the read end immediately; PIPESTATUS[0] is the child's
-		// exit code. Unix pipe semantics + bash PIPESTATUS => skip on Windows.
-		it.skipIf(process.platform === "win32")(
-			"runs cleanup and exits 0 when a registered stdout consumer closes early",
-			async () => {
-				const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-postmortem-stdout-"));
-				const marker = path.join(tmpDir, "cleanup");
-				const errPath = path.join(tmpDir, "child.err");
-				try {
-					const script = `"${process.execPath}" run "${import.meta.path}" "${stdoutDisconnectChildFlag}" "${marker}" 2>"${errPath}" | true; echo "\${PIPESTATUS[0]}"`;
-					const proc = Bun.spawn(["bash", "-c", script], {
-						stdout: "pipe",
-						stderr: "pipe",
-						stdin: "ignore",
-					});
-					const [, pipestatusText] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-					const childExit = Number(pipestatusText.trim());
-					const childStderr = await fs.readFile(errPath, "utf8").catch(() => "");
+		// exit code. Unix pipe semantics + bash PIPESTATUS.
+		it("runs cleanup and exits 0 when a registered stdout consumer closes early", async () => {
+			const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-postmortem-stdout-"));
+			const marker = path.join(tmpDir, "cleanup");
+			const errPath = path.join(tmpDir, "child.err");
+			try {
+				const script = `"${process.execPath}" run "${import.meta.path}" "${stdoutDisconnectChildFlag}" "${marker}" 2>"${errPath}" | true; echo "\${PIPESTATUS[0]}"`;
+				const proc = Bun.spawn(["bash", "-c", script], {
+					stdout: "pipe",
+					stderr: "pipe",
+					stdin: "ignore",
+				});
+				const [, pipestatusText] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+				const childExit = Number(pipestatusText.trim());
+				const childStderr = await fs.readFile(errPath, "utf8").catch(() => "");
 
-					expect(childStderr).not.toContain("Uncaught Exception");
-					expect(childStderr).not.toContain("Unhandled Rejection");
-					expect(childExit).toBe(0);
-					expect(await fs.readFile(marker, "utf8")).toBe("cleanup complete");
-				} finally {
-					await fs.rm(tmpDir, { recursive: true, force: true });
-				}
-			},
-		);
+				expect(childStderr).not.toContain("Uncaught Exception");
+				expect(childStderr).not.toContain("Unhandled Rejection");
+				expect(childExit).toBe(0);
+				expect(await fs.readFile(marker, "utf8")).toBe("cleanup complete");
+			} finally {
+				await fs.rm(tmpDir, { recursive: true, force: true });
+			}
+		});
 
 		function makeSocketClosedErr(stack: string): Error {
 			const err = new Error("Socket is closed");

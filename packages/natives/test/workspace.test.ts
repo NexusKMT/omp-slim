@@ -59,7 +59,7 @@ it("caps directory rules lexically without counting duplicate discoveries as tru
 	}
 });
 
-it.skipIf(process.platform === "win32")("finds file symlink rules without traversing directory symlinks", async () => {
+it("finds file symlink rules without traversing directory symlinks", async () => {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "workspace-symlinks-"));
 	try {
 		await Bun.write(path.join(root, "source/rules.txt"), "rules");
@@ -79,7 +79,7 @@ it.skipIf(process.platform === "win32")("finds file symlink rules without traver
 	}
 });
 
-it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+it.skipIf(process.getuid?.() === 0)(
 	"rejects an unreadable root at depth zero when reporting directory errors",
 	async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "workspace-denied-root-"));

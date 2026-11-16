@@ -34,7 +34,7 @@ export const cfgSessionWorktreeScope = register({
 	},
 });
 
-// Power assertions: macOS IOKit, Linux login1/ScreenSaver, Windows execution state.
+// Power assertions: macOS IOKit, Linux login1/ScreenSaver.
 export const cfgPowerSleepPrevention = register({
 	id: "power.sleepPrevention",
 	type: "enum",

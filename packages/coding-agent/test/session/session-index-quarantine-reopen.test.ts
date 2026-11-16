@@ -14,7 +14,7 @@ import { getHistoryDbPath, openSqliteDatabaseSync, removeSyncWithRetries, setAge
  * alone it stays attached to the unlinked inode, and a title written after
  * the peer's recovery lands nowhere a later reader can see.
  */
-describe.skipIf(process.platform === "win32")("session index across a peer's store quarantine", () => {
+describe("session index across a peer's store quarantine", () => {
 	let testAgentDir: string;
 	const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 

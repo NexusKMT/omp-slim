@@ -459,29 +459,6 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		terminal.stop();
 	});
 
-	it("periodically re-queries OSC 11 under native Windows Terminal when Mode 2031 is unavailable (#5091)", () => {
-		vi.useFakeTimers();
-		Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-		Bun.env.WT_SESSION = "test-wt-session";
-		Bun.env.TERM_PROGRAM = "Windows_Terminal";
-		const { terminal, queryCount } = setupTerminal();
-
-		process.stdin.emit("data", "\x1b]11;rgb:0000/0000/0000\x07");
-		process.stdin.emit("data", "\x1b[?2031;0$y");
-		// Drain startup sentinels in send order: keyboard, OSC 11, DEC 2026,
-		// DEC 2048, DEC 2031, DEC 2004, and xterm ?1010/?1011.
-		for (let i = 0; i < 8; i++) {
-			process.stdin.emit("data", "\x1b[?1;2c");
-		}
-		const afterStartup = queryCount();
-
-		vi.advanceTimersByTime(30_000);
-
-		expect(queryCount()).toBe(afterStartup + 1);
-
-		terminal.stop();
-	});
-
 	it("refreshAppearance() issues exactly one OSC 11 re-query per call (#5352)", () => {
 		const { terminal, queryCount } = setupTerminal();
 
@@ -850,17 +827,17 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		terminal.stop();
 	});
 
-	it("routes resize by the injected ConPTY override, not the ambient platform", () => {
+	it("routes resize by the injected ConPTY override, not the ambient WSL env", () => {
 		// The override must gate every ConPTY-dependent path uniformly. Reading
 		// isConPTYHosted() here instead made a { conpty: false } terminal report
-		// non-ConPTY writes and kitty flags but ConPTY resize routing on Windows
-		// and WSL, so no test could model the opposite host.
-		Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+		// non-ConPTY writes and kitty flags but ConPTY resize routing under WSL,
+		// so no test could model the opposite host.
+		Bun.env.WSL_DISTRO_NAME = "Ubuntu";
+		Bun.env.WSL_INTEROP = "/run/WSL/123_interop";
 		const posix = setupTerminal({ conpty: false });
 		expect(posix.terminal.hostOwnsGridOnResize).toBe(false);
 		posix.terminal.stop();
 
-		Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 		const conpty = setupTerminal({ conpty: true });
 		expect(conpty.terminal.hostOwnsGridOnResize).toBe(true);
 		conpty.terminal.stop();

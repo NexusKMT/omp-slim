@@ -266,24 +266,21 @@ ${createLinuxSubreaperScript()}
 		expect(elapsedMs).toBeLessThan(5_000);
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"keeps reading inherited stdout until the configured command deadline",
-		async () => {
-			// Real subprocess timing: fake timers cannot advance the child clock.
-			// The root exits immediately, but its child writes after the legacy
-			// 100 ms drain grace and before the 1 s command deadline.
-			const result = await exec(["/bin/sh", "-c", "(sleep .2; printf token) &"], {
-				timeout: 1_000,
-				allowNonZero: true,
-				allowAbort: true,
-			});
+	it("keeps reading inherited stdout until the configured command deadline", async () => {
+		// Real subprocess timing: fake timers cannot advance the child clock.
+		// The root exits immediately, but its child writes after the legacy
+		// 100 ms drain grace and before the 1 s command deadline.
+		const result = await exec(["/bin/sh", "-c", "(sleep .2; printf token) &"], {
+			timeout: 1_000,
+			allowNonZero: true,
+			allowAbort: true,
+		});
 
-			expect(result.ok).toBe(true);
-			expect(result.stdout).toBe("token");
-		},
-	);
+		expect(result.ok).toBe(true);
+		expect(result.stdout).toBe("token");
+	});
 
-	it.skipIf(process.platform === "win32")("rejects text when the deadline fires after the root exits", async () => {
+	it("rejects text when the deadline fires after the root exits", async () => {
 		using child = spawn(["/bin/sh", "-c", "sleep 30 & echo token"], {
 			detached: true,
 			timeout: 250,
@@ -299,26 +296,23 @@ ${createLinuxSubreaperScript()}
 	});
 
 	for (const outputMethod of ["blob", "json", "arrayBuffer", "bytes"] as const) {
-		it.skipIf(process.platform === "win32")(
-			`rejects ${outputMethod} when the deadline fires after the root exits`,
-			async () => {
-				using child = spawn(["/bin/sh", "-c", `sleep 30 2>/dev/null & printf '"token"'`], {
-					detached: true,
-					timeout: 250,
-				});
-				let threw: unknown;
-				try {
-					await child[outputMethod]();
-				} catch (error) {
-					threw = error;
-				}
+		it(`rejects ${outputMethod} when the deadline fires after the root exits`, async () => {
+			using child = spawn(["/bin/sh", "-c", `sleep 30 2>/dev/null & printf '"token"'`], {
+				detached: true,
+				timeout: 250,
+			});
+			let threw: unknown;
+			try {
+				await child[outputMethod]();
+			} catch (error) {
+				threw = error;
+			}
 
-				expect(threw).toBeInstanceOf(TimeoutError);
-			},
-		);
+			expect(threw).toBeInstanceOf(TimeoutError);
+		});
 	}
 
-	it.skipIf(process.platform === "win32")("keeps reading inherited stdout until EOF without a timeout", async () => {
+	it("keeps reading inherited stdout until EOF without a timeout", async () => {
 		const result = await exec(["/bin/sh", "-c", "(sleep .2; printf token) &"], {
 			allowNonZero: true,
 			allowAbort: true,
@@ -328,84 +322,48 @@ ${createLinuxSubreaperScript()}
 		expect(result.stdout).toBe("token");
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"terminates a detached group that holds stdout past the command deadline",
-		async () => {
-			// The root exits after printing its child's pid. The child keeps the
-			// group and stdout alive past the deadline, so timeout must terminate
-			// the group even though its original leader is already gone.
-			let orphanPid: number | undefined;
-			try {
-				const result = await exec(["/bin/sh", "-c", "sleep 30 & echo $!"], {
-					detached: true,
-					timeout: 250,
-					allowNonZero: true,
-					allowAbort: true,
-				});
-				orphanPid = Number.parseInt(result.stdout.trim(), 10);
+	it("terminates a detached group that holds stdout past the command deadline", async () => {
+		// The root exits after printing its child's pid. The child keeps the
+		// group and stdout alive past the deadline, so timeout must terminate
+		// the group even though its original leader is already gone.
+		let orphanPid: number | undefined;
+		try {
+			const result = await exec(["/bin/sh", "-c", "sleep 30 & echo $!"], {
+				detached: true,
+				timeout: 250,
+				allowNonZero: true,
+				allowAbort: true,
+			});
+			orphanPid = Number.parseInt(result.stdout.trim(), 10);
 
-				expect(result.exitError).toBeInstanceOf(TimeoutError);
-				// Real process state: SIGKILL delivery is synchronous, but pidfd
-				// exit observation may settle on the next scheduler turn.
-				const deadline = Date.now() + 500;
-				let status = Process.fromPid(orphanPid)?.status();
-				while (status === ProcessStatus.Running && Date.now() < deadline) {
-					await Bun.sleep(10);
-					status = Process.fromPid(orphanPid)?.status();
-				}
-				expect(status).not.toBe(ProcessStatus.Running);
-			} finally {
-				if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
+			expect(result.exitError).toBeInstanceOf(TimeoutError);
+			// Real process state: SIGKILL delivery is synchronous, but pidfd
+			// exit observation may settle on the next scheduler turn.
+			const deadline = Date.now() + 500;
+			let status = Process.fromPid(orphanPid)?.status();
+			while (status === ProcessStatus.Running && Date.now() < deadline) {
+				await Bun.sleep(10);
+				status = Process.fromPid(orphanPid)?.status();
 			}
-		},
-	);
+			expect(status).not.toBe(ProcessStatus.Running);
+		} finally {
+			if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
+		}
+	});
 
-	it.skipIf(process.platform !== "win32")(
-		"terminates a pipe-holding descendant after the Windows root exits",
-		async () => {
-			// Windows has no process groups. The probe exits after starting a
-			// child that inherits stdout, so the retained root handle must anchor
-			// the Toolhelp tree walk when the command deadline expires.
-			const probe = `${import.meta.dir}/fixtures/ptree-dead-root-probe.ts`;
-			let descendantPid: number | undefined;
-			try {
-				const result = await exec([process.execPath, probe], {
-					timeout: 250,
-					allowNonZero: true,
-					allowAbort: true,
-				});
-				descendantPid = Number.parseInt(result.stdout.trim(), 10);
+	it("throws NonZeroExitError by default when the child exits nonzero", async () => {
+		// wait()'s default contract: without allowNonZero, a nonzero exit rejects
+		// instead of returning an unsuccessful result.
+		let threw: unknown;
+		try {
+			await exec(["sh", "-c", "exit 3"]);
+		} catch (err) {
+			threw = err;
+		}
+		expect(threw).toBeInstanceOf(NonZeroExitError);
+	});
 
-				expect(result.exitError).toBeInstanceOf(TimeoutError);
-				const deadline = Date.now() + 500;
-				let status = Process.fromPid(descendantPid)?.status();
-				while (status === ProcessStatus.Running && Date.now() < deadline) {
-					await Bun.sleep(10);
-					status = Process.fromPid(descendantPid)?.status();
-				}
-				expect(status).not.toBe(ProcessStatus.Running);
-			} finally {
-				if (descendantPid) Process.fromPid(descendantPid)?.killTree(9);
-			}
-		},
-	);
-
-	it.skipIf(process.platform === "win32")(
-		"throws NonZeroExitError by default when the child exits nonzero",
-		async () => {
-			// wait()'s default contract: without allowNonZero, a nonzero exit rejects
-			// instead of returning an unsuccessful result.
-			let threw: unknown;
-			try {
-				await exec(["sh", "-c", "exit 3"]);
-			} catch (err) {
-				threw = err;
-			}
-			expect(threw).toBeInstanceOf(NonZeroExitError);
-		},
-	);
-
-	it.skipIf(process.platform === "win32")("completes when an orphan holds stdout past the root's exit", async () => {
+	it("completes when an orphan holds stdout past the root's exit", async () => {
 		// `sleep 30 & echo token $!`: the root exits at once but the background
 		// sleep inherits the pipe, so an EOF-based read would stall for the
 		// orphan's lifetime, far past the timeout budget. The orphan's pid is
@@ -429,35 +387,32 @@ ${createLinuxSubreaperScript()}
 		}
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"applies the deadline when the root exited before the timeout was attached",
-		async () => {
-			// Under load Bun can reap the root before spawn() returns, so
-			// attachTimeout() sees `proc.killed`; the orphan still holds stdout and
-			// only the deadline's cutoff ends the read. Real subprocess timing: the
-			// cutoff races a live pipe, which fake timers cannot drive.
-			const proc = Bun.spawn(["sh", "-c", "sleep 30 & echo token $!"], {
-				stdin: "ignore",
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			await proc.exited;
-			expect(proc.killed).toBe(true);
-			let orphanPid: number | undefined;
-			try {
-				const child = new ChildProcess(proc, false);
-				child.attachTimeout(250);
-				const text = await child.nothrow().text();
-				const match = /^token (\d+)$/.exec(text.trim());
-				orphanPid = match ? Number.parseInt(match[1], 10) : undefined;
-				expect(match, `stdout was: ${text}`).not.toBeNull();
-			} finally {
-				if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
-			}
-		},
-	);
+	it("applies the deadline when the root exited before the timeout was attached", async () => {
+		// Under load Bun can reap the root before spawn() returns, so
+		// attachTimeout() sees `proc.killed`; the orphan still holds stdout and
+		// only the deadline's cutoff ends the read. Real subprocess timing: the
+		// cutoff races a live pipe, which fake timers cannot drive.
+		const proc = Bun.spawn(["sh", "-c", "sleep 30 & echo token $!"], {
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		await proc.exited;
+		expect(proc.killed).toBe(true);
+		let orphanPid: number | undefined;
+		try {
+			const child = new ChildProcess(proc, false);
+			child.attachTimeout(250);
+			const text = await child.nothrow().text();
+			const match = /^token (\d+)$/.exec(text.trim());
+			orphanPid = match ? Number.parseInt(match[1], 10) : undefined;
+			expect(match, `stdout was: ${text}`).not.toBeNull();
+		} finally {
+			if (orphanPid) Process.fromPid(orphanPid)?.killTree(9);
+		}
+	});
 
-	it.skipIf(process.platform === "win32")("completes when an orphan holds stderr past the root's exit", async () => {
+	it("completes when an orphan holds stderr past the root's exit", async () => {
 		let orphanPid: number | undefined;
 		try {
 			const start = performance.now();
@@ -477,7 +432,7 @@ ${createLinuxSubreaperScript()}
 		}
 	});
 
-	it.skipIf(process.platform === "win32")("completes when a nonzero exit races an orphan holding stderr", async () => {
+	it("completes when a nonzero exit races an orphan holding stderr", async () => {
 		// `sleep 30 >&2 & exit 1`: the nonzero-exit normalization awaits the
 		// stderr drain, so a grace keyed on the normalized exit promise would
 		// deadlock until the orphan closes stderr. The grace must key on the
@@ -500,26 +455,23 @@ ${createLinuxSubreaperScript()}
 		}
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"preserves the timeout reason when nonzero normalization waits for stderr",
-		async () => {
-			// The root exits nonzero while its child holds stderr open. The
-			// deadline kills the detached group while exit normalization awaits
-			// the drain, and that timeout must outrank the earlier exit code.
-			let threw: unknown;
-			try {
-				await exec(["/bin/sh", "-c", "sleep 30 >&2 & exit 7"], {
-					detached: true,
-					timeout: 250,
-					allowNonZero: true,
-				});
-			} catch (err) {
-				threw = err;
-			}
+	it("preserves the timeout reason when nonzero normalization waits for stderr", async () => {
+		// The root exits nonzero while its child holds stderr open. The
+		// deadline kills the detached group while exit normalization awaits
+		// the drain, and that timeout must outrank the earlier exit code.
+		let threw: unknown;
+		try {
+			await exec(["/bin/sh", "-c", "sleep 30 >&2 & exit 7"], {
+				detached: true,
+				timeout: 250,
+				allowNonZero: true,
+			});
+		} catch (err) {
+			threw = err;
+		}
 
-			expect(threw).toBeInstanceOf(TimeoutError);
-		},
-	);
+		expect(threw).toBeInstanceOf(TimeoutError);
+	});
 });
 
 describe.skipIf(process.platform !== "linux")("ptree subreaper stop", () => {

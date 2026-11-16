@@ -1105,8 +1105,8 @@ function sqliteNumber(value: number | bigint | null | undefined): number {
 }
 
 // Every statement below is scoped with `using`: an unfinalized statement keeps the SQLite
-// connection (and its db/-wal/-shm files) open after close() until GC, and Windows refuses
-// to delete or replace a file that is still open.
+// connection (and its db/-wal/-shm files) open after close() until GC, and a still-open file
+// cannot be deleted or replaced.
 function tableExists(db: Database, table: string): boolean {
 	using stmt = db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type IN ('table','view') AND name = ?");
 	const row = stmt.get(table) as { present?: number } | null;
@@ -2016,15 +2016,9 @@ async function runCompressGc(options: ResolvedGcOptions, archiveRoot: string): P
 	};
 	if (method === undefined) return result;
 
-	if (method === "apfs") {
-		// Only the APFS copy-and-swap uses scratch directories. Archiving can carry a
-		// leftover inside an artifact tree into the archive root.
-		result.leftoverScratchDirs = await sweepCompressScratch(
-			[sessionsRoot, archiveRoot],
-			options.apply,
-			result.errors,
-		);
-	}
+	// Only the APFS copy-and-swap uses scratch directories. Archiving can carry a
+	// leftover inside an artifact tree into the archive root.
+	result.leftoverScratchDirs = await sweepCompressScratch([sessionsRoot, archiveRoot], options.apply, result.errors);
 	if (options.apply) {
 		// Without it, a volume that ignores the request would still copy and verify every candidate.
 		try {
@@ -2470,7 +2464,7 @@ function renderText(result: GcResult): string {
 	if (result.compress) {
 		const compress = result.compress;
 		if (!compress.supported) {
-			lines.push("compress: unsupported on this filesystem (APFS or NTFS only)");
+			lines.push("compress: unsupported on this filesystem (APFS only)");
 		} else {
 			if (compress.probeFailure !== undefined) {
 				lines.push(`compress skipped: ${compress.probeFailure}`);

@@ -60,20 +60,6 @@ const targets: BinaryTarget[] = [
 		target: "bun-linux-arm64-musl",
 		outfile: "packages/coding-agent/binaries/omp-linux-musl-arm64",
 	},
-	{
-		id: "win32-x64",
-		platform: "win32",
-		arch: "x64",
-		target: "bun-windows-x64-baseline",
-		outfile: "packages/coding-agent/binaries/omp-windows-x64.exe",
-	},
-	{
-		id: "win32-arm64",
-		platform: "win32",
-		arch: "arm64",
-		target: "bun-windows-arm64",
-		outfile: "packages/coding-agent/binaries/omp-windows-arm64.exe",
-	},
 ];
 
 function parseRequestedTargets(): Set<string> | null {

@@ -8,7 +8,7 @@ const { IsoBackendKind } = natives;
 // routes through native `isoStop` instead of plain recursive `rm`.
 describe("retained workspace teardown set", () => {
 	it("routes mounts and subvolumes through native teardown, nothing else", () => {
-		for (const kind of [IsoBackendKind.Overlayfs, IsoBackendKind.Projfs, IsoBackendKind.Btrfs]) {
+		for (const kind of [IsoBackendKind.Overlayfs, IsoBackendKind.Btrfs]) {
 			expect(needsNativeTeardown(kind)).toBe(true);
 		}
 		for (const kind of [
@@ -18,7 +18,6 @@ describe("retained workspace teardown set", () => {
 			// matches after the retain rename — pi-iso mount-table support first.
 			IsoBackendKind.Zfs,
 			IsoBackendKind.LinuxReflink,
-			IsoBackendKind.WindowsBlockClone,
 			IsoBackendKind.Rcopy,
 		]) {
 			expect(needsNativeTeardown(kind)).toBe(false);

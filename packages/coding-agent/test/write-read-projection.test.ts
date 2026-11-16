@@ -291,47 +291,44 @@ describe("write tool read projection guard", () => {
 		expect(resourceContent).toContain("resource 60");
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"writes a bounded projection to a new ssh:// file and still guards existing ones",
-		async () => {
-			vi.spyOn(capability, "loadCapability").mockResolvedValue({ items: [], all: [], warnings: [], providers: [] });
-			fakeSshTransport(() => tmpDir);
-			const session = createSession(tmpDir);
-			cfgReadDefaultLimit.set(session.settings, 20);
-			const sourcePath = path.join(tmpDir, "source.txt");
-			const original = `${Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n")}\n`;
-			await Bun.write(sourcePath, original);
-			const projection = resultText(
-				await wrapToolWithMetaNotice(new ReadTool(session)).execute("read-src", { path: sourcePath }),
-			);
-			expect(projection).toContain("[Showing lines 1-20 of 60. Use :21 to continue]");
+	it("writes a bounded projection to a new ssh:// file and still guards existing ones", async () => {
+		vi.spyOn(capability, "loadCapability").mockResolvedValue({ items: [], all: [], warnings: [], providers: [] });
+		fakeSshTransport(() => tmpDir);
+		const session = createSession(tmpDir);
+		cfgReadDefaultLimit.set(session.settings, 20);
+		const sourcePath = path.join(tmpDir, "source.txt");
+		const original = `${Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n")}\n`;
+		await Bun.write(sourcePath, original);
+		const projection = resultText(
+			await wrapToolWithMetaNotice(new ReadTool(session)).execute("read-src", { path: sourcePath }),
+		);
+		expect(projection).toContain("[Showing lines 1-20 of 60. Use :21 to continue]");
 
-			// No remote file yet: nothing to discard, so the write lands as it does for a new disk file.
-			const newPath = path.join(tmpDir, "new.txt");
-			await new WriteTool(session).execute("write-new", { path: `ssh://fixture${newPath}`, content: projection });
-			expect(await Bun.file(newPath).text()).toBe(projection);
+		// No remote file yet: nothing to discard, so the write lands as it does for a new disk file.
+		const newPath = path.join(tmpDir, "new.txt");
+		await new WriteTool(session).execute("write-new", { path: `ssh://fixture${newPath}`, content: projection });
+		expect(await Bun.file(newPath).text()).toBe(projection);
 
-			const longer = await rejectionOf(
-				new WriteTool(session).execute("write-existing", {
-					path: `ssh://fixture${sourcePath}`,
-					content: projection,
-				}),
-			);
-			expect(longer).toMatchObject({ message: expect.stringContaining("incomplete read projection") });
-			expect(await Bun.file(sourcePath).text()).toBe(original);
+		const longer = await rejectionOf(
+			new WriteTool(session).execute("write-existing", {
+				path: `ssh://fixture${sourcePath}`,
+				content: projection,
+			}),
+		);
+		expect(longer).toMatchObject({ message: expect.stringContaining("incomplete read projection") });
+		expect(await Bun.file(sourcePath).text()).toBe(original);
 
-			// An existing file the read cannot open is not "missing": its read error still fails the write.
-			const lockedPath = path.join(tmpDir, "locked.txt");
-			await Bun.write(lockedPath, original);
-			await fs.chmod(lockedPath, 0o200);
-			const locked = await rejectionOf(
-				new WriteTool(session).execute("write-locked", { path: `ssh://fixture${lockedPath}`, content: projection }),
-			);
-			expect(locked).toMatchObject({ message: expect.stringContaining("Permission denied") });
-			await fs.chmod(lockedPath, 0o600);
-			expect(await Bun.file(lockedPath).text()).toBe(original);
-		},
-	);
+		// An existing file the read cannot open is not "missing": its read error still fails the write.
+		const lockedPath = path.join(tmpDir, "locked.txt");
+		await Bun.write(lockedPath, original);
+		await fs.chmod(lockedPath, 0o200);
+		const locked = await rejectionOf(
+			new WriteTool(session).execute("write-locked", { path: `ssh://fixture${lockedPath}`, content: projection }),
+		);
+		expect(locked).toMatchObject({ message: expect.stringContaining("Permission denied") });
+		await fs.chmod(lockedPath, 0o600);
+		expect(await Bun.file(lockedPath).text()).toBe(original);
+	});
 
 	it("rejects write-back of a summarized read of a large local:// code file", async () => {
 		const localRoot = path.join(tmpDir, "artifacts", "local");

@@ -72,14 +72,6 @@ describe("resolveSshControlDir", () => {
 		expect(controlPathFitsBudget(choice.dir, "darwin")).toBe(true);
 	});
 
-	it("never relocates on Windows (ControlMaster unused) even for a long path", () => {
-		const canonicalDir = "/Users/arthur/.omp/profiles/upstream/ssh-control";
-		expect(resolveSshControlDir({ canonicalDir, platform: "win32", uid: 501 })).toEqual({
-			dir: canonicalDir,
-			shared: false,
-		});
-	});
-
 	it("keeps the canonical dir when there is no uid to key the fallback", () => {
 		const canonicalDir = "/Users/arthur/.omp/profiles/upstream/ssh-control";
 		expect(resolveSshControlDir({ canonicalDir, platform: "darwin", uid: undefined })).toEqual({
@@ -120,10 +112,7 @@ describe("assertOwnerPrivateDir", () => {
 		return scratch;
 	};
 
-	// POSIX mode bits and O_NOFOLLOW: Windows has neither (modes read back 0666).
-	const posixIt = it.skipIf(process.platform === "win32");
-
-	posixIt("accepts a real owner-private directory and normalizes loose perms in place", () => {
+	it("accepts a real owner-private directory and normalizes loose perms in place", () => {
 		const dir = path.join(mkScratch(), "ctl");
 		fs.mkdirSync(dir, { mode: 0o755 });
 		fs.chmodSync(dir, 0o755);
@@ -131,7 +120,7 @@ describe("assertOwnerPrivateDir", () => {
 		expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
 	});
 
-	posixIt("refuses a symlinked final component without following it (TOCTOU swap guard)", () => {
+	it("refuses a symlinked final component without following it (TOCTOU swap guard)", () => {
 		const root = mkScratch();
 		const victim = path.join(root, "victim");
 		fs.mkdirSync(victim, { mode: 0o700 });

@@ -1216,7 +1216,6 @@ describe("github tool", () => {
 	});
 
 	it("pins gh messages while preserving UTF-8 character locale", async () => {
-		if (process.platform === "win32") return;
 		const fakeBin = await fs.mkdtemp(path.join(os.tmpdir(), "omp-fake-gh-locale-"));
 		const fakeGh = path.join(fakeBin, "gh");
 		await fs.writeFile(

@@ -10,7 +10,6 @@ import {
 	isFullyQualifiedPath,
 	logger,
 	postmortem,
-	stripWindowsExtendedLengthPathPrefix,
 	WhichCachePolicy,
 	workerHostEntry,
 } from "@oh-my-pi/pi-utils";
@@ -124,9 +123,9 @@ export const SMOKE_TEST_TIMEOUT_MS = 30_000;
  * upgrade, leaving `process.execPath` pointing at a missing path).
  */
 export function resolveExecutablePath(): string {
-	const executable = stripWindowsExtendedLengthPathPrefix(process.execPath);
+	const executable = process.execPath;
 	if (isCompiledBinary() && !isExecutable(executable)) {
-		const argv0 = stripWindowsExtendedLengthPathPrefix(process.argv0);
+		const argv0 = process.argv0;
 		const isPath = argv0.includes("/") || argv0.includes("\\") || argv0.includes(":");
 		const candidates = [
 			// Prefer the original launcher when invoked with an absolute path
@@ -284,7 +283,6 @@ export function createWorkerSubprocess<Outbound>(options: {
 		stdout: "ignore",
 		stderr: stderrCapture.target,
 		serialization: "advanced",
-		windowsHide: true,
 		ipc(message) {
 			for (const handler of inbound) handler(message as Outbound);
 		},
@@ -465,8 +463,8 @@ async function drainStderrCapture(capture: StderrCapture, exitLabel: string, tai
  * strategy is injected so each client keeps its exact IPC-send behaviour (e.g.
  * `safeSend` vs an inline guarded `proc.send`). `terminate()` SIGKILLs: the
  * point of subprocess isolation is that the parent never runs
- * `onnxruntime-node`'s NAPI finalizer (it crashes Bun on Windows), so the OS
- * reclaims the model memory instead. The intentional-exit flag is flipped
+ * `onnxruntime-node`'s NAPI finalizer (it crashes Bun), so the OS reclaims the
+ * model memory instead. The intentional-exit flag is flipped
  * *before* the kill so `onExit` can tell it apart from a native crash.
  */
 export function createWorkerHandle<Inbound, Outbound>(

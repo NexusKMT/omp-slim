@@ -80,73 +80,8 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-// 1x1 red PNG; round-tripped through PowerShell as base64 in the real flow.
-const RED_1X1_PNG_BASE64 =
-	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
-
-describe("readImageFromClipboard on WSL", () => {
-	it("decodes the PowerShell base64 payload without touching the native bridge", async () => {
-		setPlatform("linux");
-		process.env.WSL_DISTRO_NAME = "Ubuntu-24.04";
-		process.env.WAYLAND_DISPLAY = "wayland-0";
-
-		const calls: SpawnCall[] = [];
-		spySpawn(calls, RED_1X1_PNG_BASE64);
-		const nativeSpy = vi.spyOn(native, "readImageFromClipboard");
-
-		const image = await readImageFromClipboard();
-
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.cmd[0]).toBe("powershell.exe");
-		expect(calls[0]?.cmd).toContain("-NoProfile");
-		expect(image).not.toBeNull();
-		expect(image?.mimeType).toBe("image/png");
-		// PNG magic bytes — proves we actually base64-decoded the payload.
-		expect(Array.from(image!.data.subarray(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-		expect(nativeSpy).not.toHaveBeenCalled();
-	});
-
-	it("falls back to the native bridge when PowerShell returns no payload and a display is present", async () => {
-		setPlatform("linux");
-		process.env.WSL_INTEROP = "/run/WSL/1_interop";
-		process.env.WAYLAND_DISPLAY = "wayland-0";
-
-		spySpawn([], "");
-		const nativeSpy = vi.spyOn(native, "readImageFromClipboard").mockResolvedValue(null);
-
-		const image = await readImageFromClipboard();
-
-		expect(image).toBeNull();
-		expect(nativeSpy).toHaveBeenCalledTimes(1);
-	});
-
-	it("falls back to the native bridge when PowerShell exits non-zero (with display)", async () => {
-		setPlatform("linux");
-		process.env.WSL_DISTRO_NAME = "Ubuntu";
-		process.env.DISPLAY = ":0";
-
-		spySpawn([], "noise", 1);
-		const nativeSpy = vi.spyOn(native, "readImageFromClipboard").mockResolvedValue(null);
-
-		await readImageFromClipboard();
-		expect(nativeSpy).toHaveBeenCalledTimes(1);
-	});
-
-	it("returns null without invoking arboard on headless WSL when PowerShell yields nothing", async () => {
-		setPlatform("linux");
-		process.env.WSL_DISTRO_NAME = "Ubuntu";
-		// No DISPLAY / WAYLAND_DISPLAY — arboard would reject, so we must short-circuit.
-
-		spySpawn([], "");
-		const nativeSpy = vi.spyOn(native, "readImageFromClipboard");
-
-		expect(await readImageFromClipboard()).toBeNull();
-		expect(nativeSpy).not.toHaveBeenCalled();
-	});
-});
-
 describe("readImageFromClipboard dispatch", () => {
-	it("returns null on linux without a display server and never spawns PowerShell", async () => {
+	it("returns null on linux without a display server and never spawns a clipboard helper", async () => {
 		setPlatform("linux");
 		const spawnSpy = vi.spyOn(Bun, "spawn");
 		const nativeSpy = vi.spyOn(native, "readImageFromClipboard");
@@ -154,34 +89,6 @@ describe("readImageFromClipboard dispatch", () => {
 		expect(await readImageFromClipboard()).toBeNull();
 		expect(spawnSpy).not.toHaveBeenCalled();
 		expect(nativeSpy).not.toHaveBeenCalled();
-	});
-
-	it("trusts the native no-image answer on Windows without spawning PowerShell", async () => {
-		// Regression: a text-only clipboard used to wait ~1s on a cold
-		// powershell.exe GetImage() before Ctrl+V could paste the text.
-		setPlatform("win32");
-		const spawnSpy = vi.spyOn(Bun, "spawn");
-		vi.spyOn(native, "readImageFromClipboard").mockResolvedValue(null);
-
-		expect(await readImageFromClipboard()).toBeNull();
-		expect(spawnSpy).not.toHaveBeenCalled();
-	});
-
-	it("falls back to PowerShell when native Windows image conversion fails", async () => {
-		setPlatform("win32");
-		const calls: SpawnCall[] = [];
-		spySpawn(calls, RED_1X1_PNG_BASE64);
-		vi.spyOn(native, "readImageFromClipboard").mockRejectedValue(
-			new Error("The clipboard image could not be converted to the appropriate format."),
-		);
-
-		const image = await readImageFromClipboard();
-
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.cmd[0]).toBe("powershell.exe");
-		expect(calls[0]?.cmd).toContain("-Sta");
-		expect(image?.mimeType).toBe("image/png");
-		expect(Array.from(image!.data.subarray(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 	});
 
 	it("delegates straight to the native bridge on non-WSL linux with a display", async () => {
@@ -375,35 +282,6 @@ describe("readTextFromClipboard", () => {
 		// fires the expired interval at least once — even under heavy parallel
 		// test load, where wall-clock tick counts are unreliable.
 		expect(ticks).toBeGreaterThanOrEqual(1);
-	});
-
-	it("reads Windows text natively with LF newlines and no PowerShell spawn", async () => {
-		setPlatform("win32");
-		const spawnSpy = vi.spyOn(Bun, "spawn");
-		vi.spyOn(native, "readTextFromClipboard").mockResolvedValue("line one\r\nline two");
-
-		expect(await readTextFromClipboard()).toBe("line one\nline two");
-		expect(spawnSpy).not.toHaveBeenCalled();
-	});
-
-	it("returns an empty string when the Windows clipboard holds no text", async () => {
-		setPlatform("win32");
-		const spawnSpy = vi.spyOn(Bun, "spawn");
-		vi.spyOn(native, "readTextFromClipboard").mockResolvedValue(null);
-
-		expect(await readTextFromClipboard()).toBe("");
-		expect(spawnSpy).not.toHaveBeenCalled();
-	});
-
-	it("falls back to PowerShell when the native Windows text read fails", async () => {
-		setPlatform("win32");
-		const calls: SpawnCall[] = [];
-		spySpawn(calls, "from powershell\r\n");
-		vi.spyOn(native, "readTextFromClipboard").mockRejectedValue(new Error("Failed to access clipboard"));
-
-		expect(await readTextFromClipboard()).toBe("from powershell\n");
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.cmd[0]).toBe("powershell.exe");
 	});
 });
 

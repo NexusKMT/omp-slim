@@ -7,38 +7,30 @@ import * as path from "node:path";
 import { $env, $which, Snowflake } from "@oh-my-pi/pi-utils";
 
 /**
- * Returns the user's preferred editor command, or a platform default.
+ * Returns the user's preferred editor command.
  *
  * Resolution order:
  *   1. `$VISUAL`
  *   2. `$EDITOR`
- *   3. `notepad` on Windows (always present in `%SystemRoot%\System32`)
  *
- * POSIX returns `undefined` when neither variable is set so the caller can
- * surface a warning that nudges the user to configure one.
+ * Returns `undefined` when neither variable is set so the caller can surface a
+ * warning that nudges the user to configure one.
  */
 export function getEditorCommand(): string | undefined {
-	const configured = $env.VISUAL?.trim() || $env.EDITOR?.trim();
-	if (configured) return configured;
-	if (process.platform === "win32") return "notepad";
-	return undefined;
+	return $env.VISUAL?.trim() || $env.EDITOR?.trim() || undefined;
 }
 
 /**
  * Names the editor {@link getEditorCommand} launches for UI labels ("Edit in
- * Notepad", "Edit in nvim"): the command's program without its directory,
- * quotes or Windows executable extension. `undefined` when none is resolved.
+ * nvim"): the command's program without its directory or quotes. `undefined`
+ * when none is resolved.
  */
 export function getEditorName(command = getEditorCommand()): string | undefined {
 	if (!command) return undefined;
 	const quote = command[0] === '"' || command[0] === "'" ? command[0] : undefined;
 	const program = quote ? command.slice(1).split(quote)[0] : command.split(/\s+/)[0];
-	const name = path.win32
-		.basename(program ?? "")
-		.replace(/\.(exe|cmd|bat|com)$/i, "")
-		.trim();
-	if (!name) return undefined;
-	return name.toLowerCase() === "notepad" ? "Notepad" : name;
+	const name = path.basename(program ?? "").trim();
+	return name || undefined;
 }
 
 export interface OpenInEditorOptions {
@@ -48,25 +40,14 @@ export interface OpenInEditorOptions {
 	trimTrailingNewline?: boolean;
 }
 
-/** Subprocess argv and Windows quoting mode used to launch an external editor. */
+/** Subprocess argv used to launch an external editor. */
 export interface EditorSpawnCommand {
 	cmd: string[];
-	windowsVerbatimArguments: boolean;
 }
 
 /** Resolves shell argv without letting the host runtime re-quote the editor command. */
-export function resolveEditorSpawnCommand(
-	editorCmd: string,
-	tmpFile: string,
-	platform: NodeJS.Platform = process.platform,
-): EditorSpawnCommand {
-	const windows = platform === "win32";
-	// cmd.exe strips the outer /s /c quote pair; Bun must pass the embedded
-	// editor/path quotes verbatim instead of applying argv escaping to them.
-	const cmd = windows
-		? ["cmd.exe", "/d", "/s", "/c", `"${editorCmd} "${tmpFile}""`]
-		: [$which("sh") ?? "sh", "-c", `${editorCmd} "$1"`, "sh", tmpFile];
-	return { cmd, windowsVerbatimArguments: windows };
+export function resolveEditorSpawnCommand(editorCmd: string, tmpFile: string): EditorSpawnCommand {
+	return { cmd: [$which("sh") ?? "sh", "-c", `${editorCmd} "$1"`, "sh", tmpFile] };
 }
 
 /**
@@ -118,7 +99,6 @@ export async function openEditorOnPath(editorCmd: string, filePath: string): Pro
 		stdin: "inherit",
 		stdout: "inherit",
 		stderr: "inherit",
-		windowsVerbatimArguments: spawnCommand.windowsVerbatimArguments,
 	});
 	return child.exited;
 }

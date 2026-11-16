@@ -87,7 +87,6 @@ describe("grep `!glob` exclusions", () => {
 	});
 
 	it("reports a dangling `!` symlink as a path instead of searching cwd", async () => {
-		if (process.platform === "win32") return;
 		await fs.symlink(path.join(cwd, "missing-target"), path.join(cwd, "!link"));
 		await expect(tool.execute("dangling", { pattern: "needle", path: "!link" })).rejects.toThrow("!link");
 	});

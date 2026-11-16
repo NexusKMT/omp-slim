@@ -109,8 +109,8 @@ export async function* getProjectAncestorDirs(ctx: LoadContext): AsyncGenerator<
 
 /**
  * Nearest `.omp/` between cwd and the repo root. The home directory is never a
- * project: `~/.omp` is the user config root, so a cwd under home (temp dirs on
- * Windows, scratch folders) must not load its SYSTEM.md/RULES.md/AGENTS.md as
+ * project: `~/.omp` is the user config root, so a cwd under home (temp dirs,
+ * scratch folders) must not load its SYSTEM.md/RULES.md/AGENTS.md as
  * project config — that also bypasses an overridden agent dir or profile.
  */
 async function findNearestProjectConfigDir(ctx: LoadContext): Promise<{ dir: string; depth: number } | null> {

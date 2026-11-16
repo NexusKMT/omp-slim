@@ -62,45 +62,11 @@ export const NON_INTERACTIVE_ENV: Readonly<Record<string, string>> = {
  */
 const AGENT_LOCALE = "C.UTF-8";
 
-/** Python stdio defaults for Windows, where the console code page is not UTF-8. */
-const WINDOWS_PYTHON_UTF8_ENV: Readonly<Record<string, string>> = {
-	PYTHONIOENCODING: "utf-8",
-	PYTHONUTF8: "1",
-};
-
-function hasEnvValue(
-	env: Record<string, string | undefined> | undefined,
-	key: string,
-	platform: NodeJS.Platform,
-): boolean {
-	if (!env) return false;
-	if (platform !== "win32") return env[key] !== undefined;
-
-	for (const [existingKey, value] of Object.entries(env)) {
-		if (value !== undefined && existingKey.toLowerCase() === key.toLowerCase()) {
-			return true;
-		}
-	}
-	return false;
-}
-
-function hasEnvGroupValue(
-	env: Record<string, string | undefined> | undefined,
-	group: Readonly<Record<string, string>>,
-	platform: NodeJS.Platform,
-): boolean {
-	for (const key in group) {
-		if (hasEnvValue(env, key, platform)) return true;
-	}
-	return false;
-}
-
-function hasLocaleEnvValue(env: Record<string, string | undefined> | undefined, platform: NodeJS.Platform): boolean {
+function hasLocaleEnvValue(env: Record<string, string | undefined> | undefined): boolean {
 	if (!env) return false;
 	for (const [key, value] of Object.entries(env)) {
 		if (value === undefined) continue;
-		const normalizedKey = platform === "win32" ? key.toUpperCase() : key;
-		if (normalizedKey === "LANG" || normalizedKey.startsWith("LC_")) return true;
+		if (key === "LANG" || key.startsWith("LC_")) return true;
 	}
 	return false;
 }
@@ -115,7 +81,6 @@ function withoutCI(env: Readonly<Record<string, string>>): Record<string, string
 export interface NonInteractiveEnvOptions {
 	/** Env the child inherits from the launcher. */
 	baseEnv?: Record<string, string | undefined>;
-	platform?: NodeJS.Platform;
 	/** Keep the inherited locale instead of pinning {@link AGENT_LOCALE}: user-typed `!` commands. */
 	inheritLocale?: boolean;
 }
@@ -123,7 +88,7 @@ export interface NonInteractiveEnvOptions {
 /** Builds the per-command environment for non-interactive child processes. */
 export function buildNonInteractiveEnv(
 	overrides?: Record<string, string>,
-	{ baseEnv = Bun.env, platform = process.platform, inheritLocale = false }: NonInteractiveEnvOptions = {},
+	{ baseEnv = Bun.env, inheritLocale = false }: NonInteractiveEnvOptions = {},
 ): Record<string, string> {
 	// `PI_BASH_NO_CI` (and its legacy alias) opts out of the automatic `CI=true`
 	// injection. Mirrors the session-env gate in `procmgr.ts` so the opt-out
@@ -133,20 +98,11 @@ export function buildNonInteractiveEnv(
 
 	// Agent commands pin the locale whatever the launcher inherited, so sort
 	// order, number formats, and messages do not vary by machine; a locale in
-	// the command's own env opts out. Inherited-locale commands still get UTF-8
-	// on Windows when nothing names a locale.
-	const pinLocale = !inheritLocale || (platform === "win32" && !hasLocaleEnvValue(baseEnv, platform));
-	if (pinLocale && !hasLocaleEnvValue(overrides, platform)) {
+	// the command's own env opts out.
+	const pinLocale = !inheritLocale;
+	if (pinLocale && !hasLocaleEnvValue(overrides)) {
 		env.LANG = AGENT_LOCALE;
 		env.LC_ALL = AGENT_LOCALE;
-	}
-
-	if (
-		platform === "win32" &&
-		!hasEnvGroupValue(baseEnv, WINDOWS_PYTHON_UTF8_ENV, platform) &&
-		!hasEnvGroupValue(overrides, WINDOWS_PYTHON_UTF8_ENV, platform)
-	) {
-		Object.assign(env, WINDOWS_PYTHON_UTF8_ENV);
 	}
 	return overrides ? { ...env, ...overrides } : env;
 }

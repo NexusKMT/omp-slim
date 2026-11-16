@@ -571,43 +571,35 @@ describe("lsp regressions", () => {
 		}
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"rejects a FIFO before an LSP document open can block",
-		async () => {
-			const tempDir = TempDir.createSync("@omp-lsp-special-file-");
-			const fifo = path.join(tempDir.path(), "input.ts");
-			try {
-				expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
-				installHandshakeLsp();
-				const config: ServerConfig = { command: "fake-lsp", fileTypes: [".ts"], rootMarkers: [] };
-				const client = await lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
-				const outcome = await raceFifoRead(lspClient.ensureFileOpen(client, fifo), fifo);
-				expect(outcome).toBeInstanceOf(Error);
-				expect(outcome).toHaveProperty("message", fifoRefusal(fifo));
-			} finally {
-				await lspClient.shutdownAll();
-				tempDir.removeSync();
-			}
-		},
-		10_000,
-	);
+	it("rejects a FIFO before an LSP document open can block", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-special-file-");
+		const fifo = path.join(tempDir.path(), "input.ts");
+		try {
+			expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
+			installHandshakeLsp();
+			const config: ServerConfig = { command: "fake-lsp", fileTypes: [".ts"], rootMarkers: [] };
+			const client = await lspClient.getOrCreateClient(config, tempDir.path(), 1_000);
+			const outcome = await raceFifoRead(lspClient.ensureFileOpen(client, fifo), fifo);
+			expect(outcome).toBeInstanceOf(Error);
+			expect(outcome).toHaveProperty("message", fifoRefusal(fifo));
+		} finally {
+			await lspClient.shutdownAll();
+			tempDir.removeSync();
+		}
+	}, 10_000);
 
-	it.skipIf(process.platform === "win32")(
-		"rejects a FIFO during LSP symbol resolution",
-		async () => {
-			const tempDir = TempDir.createSync("@omp-lsp-special-read-");
-			const fifo = path.join(tempDir.path(), "input.ts");
-			try {
-				expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
-				const outcome = await raceFifoRead(resolveSymbolColumn(fifo, 1), fifo);
-				expect(outcome).toBeInstanceOf(Error);
-				expect(outcome).toHaveProperty("message", fifoRefusal(fifo));
-			} finally {
-				tempDir.removeSync();
-			}
-		},
-		10_000,
-	);
+	it("rejects a FIFO during LSP symbol resolution", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-special-read-");
+		const fifo = path.join(tempDir.path(), "input.ts");
+		try {
+			expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
+			const outcome = await raceFifoRead(resolveSymbolColumn(fifo, 1), fifo);
+			expect(outcome).toBeInstanceOf(Error);
+			expect(outcome).toHaveProperty("message", fifoRefusal(fifo));
+		} finally {
+			tempDir.removeSync();
+		}
+	}, 10_000);
 
 	it("reads location context from a CRLF file without the carriage returns", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-crlf-context-");
@@ -624,44 +616,32 @@ describe("lsp regressions", () => {
 		}
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"keeps a FIFO location as a header without reading its context",
-		async () => {
-			const tempDir = TempDir.createSync("@omp-lsp-special-context-");
-			const fifo = path.join(tempDir.path(), "input.ts");
-			try {
-				expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
-				expect(await raceFifoRead(readLocationContext(fifo, 1), fifo)).toEqual([]);
-			} finally {
-				tempDir.removeSync();
-			}
-		},
-		10_000,
-	);
+	it("keeps a FIFO location as a header without reading its context", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-special-context-");
+		const fifo = path.join(tempDir.path(), "input.ts");
+		try {
+			expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
+			expect(await raceFifoRead(readLocationContext(fifo, 1), fifo)).toEqual([]);
+		} finally {
+			tempDir.removeSync();
+		}
+	}, 10_000);
 
-	it.skipIf(process.platform === "win32")(
-		"rejects an open document swapped for a FIFO when reconciling from disk",
-		async () => {
-			await withOpenDocumentSwappedForFifo(async (client, filePath) => {
-				const outcome = await raceFifoRead(lspClient.reconcileFileFromDisk(client, filePath), filePath);
-				expect(outcome).toBeInstanceOf(Error);
-				expect(outcome).toHaveProperty("message", fifoRefusal(filePath));
-			});
-		},
-		10_000,
-	);
+	it("rejects an open document swapped for a FIFO when reconciling from disk", async () => {
+		await withOpenDocumentSwappedForFifo(async (client, filePath) => {
+			const outcome = await raceFifoRead(lspClient.reconcileFileFromDisk(client, filePath), filePath);
+			expect(outcome).toBeInstanceOf(Error);
+			expect(outcome).toHaveProperty("message", fifoRefusal(filePath));
+		});
+	}, 10_000);
 
-	it.skipIf(process.platform === "win32")(
-		"rejects an open document swapped for a FIFO when refreshing it",
-		async () => {
-			await withOpenDocumentSwappedForFifo(async (client, filePath) => {
-				const outcome = await raceFifoRead(lspClient.refreshFile(client, filePath), filePath);
-				expect(outcome).toBeInstanceOf(Error);
-				expect(outcome).toHaveProperty("message", fifoRefusal(filePath));
-			});
-		},
-		10_000,
-	);
+	it("rejects an open document swapped for a FIFO when refreshing it", async () => {
+		await withOpenDocumentSwappedForFifo(async (client, filePath) => {
+			const outcome = await raceFifoRead(lspClient.refreshFile(client, filePath), filePath);
+			expect(outcome).toBeInstanceOf(Error);
+			expect(outcome).toHaveProperty("message", fifoRefusal(filePath));
+		});
+	}, 10_000);
 
 	it("sends the LSP exit notification after shutdown", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-shutdown-");
@@ -3108,30 +3088,6 @@ describe("lsp regressions", () => {
 		}
 	});
 
-	it("detects Windows local .exe LSP shims in node_modules/.bin", async () => {
-		if (process.platform !== "win32") {
-			return;
-		}
-
-		const tempDir = TempDir.createSync("@omp-lsp-win32-bin-");
-		const whichSpy = vi.spyOn(Bun, "which").mockReturnValue(null);
-
-		try {
-			await Bun.write(path.join(tempDir.path(), "package.json"), "{}");
-			const binDir = path.join(tempDir.path(), "node_modules", ".bin");
-			await fs.promises.mkdir(binDir, { recursive: true });
-			const localTsServer = path.join(binDir, "typescript-language-server.exe");
-			await Bun.write(localTsServer, "");
-
-			const config = loadConfig(tempDir.path());
-			expect(config.servers["typescript-language-server"]?.resolvedCommand).toBe(localTsServer);
-			expect(whichSpy).not.toHaveBeenCalledWith("typescript-language-server");
-		} finally {
-			vi.restoreAllMocks();
-			tempDir.removeSync();
-		}
-	});
-
 	// TypeScript 7 dropped lib/tsserver.js (typescript-language-server's backend) and
 	// speaks LSP via `tsc --lsp --stdio`; older tsc rejects `--lsp`. Exactly one of the
 	// two servers must survive config loading, chosen from the resolved tsc install.
@@ -3153,7 +3109,6 @@ describe("lsp regressions", () => {
 		}
 
 		it("prefers tsc --lsp when the workspace TypeScript ships no tsserver.js", async () => {
-			if (process.platform === "win32") return;
 			const tempDir = TempDir.createSync("@omp-lsp-ts7-");
 			vi.spyOn(Bun, "which").mockReturnValue(null);
 			try {
@@ -3202,7 +3157,6 @@ describe("lsp regressions", () => {
 
 		it("prefers tsc --lsp for a TypeScript 7 install outside any npm layout", async () => {
 			// #17659: nixpkgs ships TypeScript 7 without a package.json.
-			if (process.platform === "win32") return;
 			const tempDir = TempDir.createSync("@omp-lsp-ts7-native-");
 			const tsc = tempDir.join("store", "typescript-7.0.2", "bin", "tsc");
 			await Bun.write(tsc, "#!/bin/sh\nprintf 'Version 7.0.2\\n'\n");
@@ -3223,43 +3177,37 @@ describe("lsp regressions", () => {
 		});
 	});
 
-	it("detects Ruff in Windows virtualenv Scripts directories", async () => {
-		const originalPlatform = process.platform;
-		Object.defineProperty(process, "platform", { value: "win32", configurable: true, writable: true });
-
-		const tempDir = TempDir.createSync("@omp-lsp-win32-ruff-");
+	it("detects Ruff in a virtualenv Scripts directory", async () => {
+		const tempDir = TempDir.createSync("@omp-lsp-scripts-ruff-");
 		const whichSpy = vi.spyOn(Bun, "which").mockReturnValue(null);
 
 		try {
 			await Bun.write(path.join(tempDir.path(), "pyproject.toml"), '[project]\nname = "demo"\n');
 			const scriptsDir = path.join(tempDir.path(), ".venv", "Scripts");
 			await fs.promises.mkdir(scriptsDir, { recursive: true });
-			const localRuff = path.join(scriptsDir, "ruff.exe");
+			const localRuff = path.join(scriptsDir, "ruff");
 			await Bun.write(localRuff, "");
 
 			const config = loadConfig(tempDir.path());
 			expect(config.servers.ruff?.resolvedCommand).toBe(localRuff);
 			expect(whichSpy).not.toHaveBeenCalledWith("ruff");
 		} finally {
-			Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true, writable: true });
 			vi.restoreAllMocks();
 			tempDir.removeSync();
 		}
 	});
 
-	it("detects Ruff in Windows virtualenv Scripts directories for Ruff-only roots", async () => {
-		const originalPlatform = process.platform;
-		Object.defineProperty(process, "platform", { value: "win32", configurable: true, writable: true });
+	it("detects Ruff in a virtualenv Scripts directory for Ruff-only roots", async () => {
 		const whichSpy = vi.spyOn(Bun, "which").mockReturnValue(null);
 
 		try {
 			for (const marker of ["ruff.toml", ".ruff.toml"] as const) {
-				const tempDir = TempDir.createSync("@omp-lsp-win32-ruff-marker-");
+				const tempDir = TempDir.createSync("@omp-lsp-scripts-ruff-marker-");
 				try {
 					await Bun.write(path.join(tempDir.path(), marker), "");
 					const scriptsDir = path.join(tempDir.path(), ".venv", "Scripts");
 					await fs.promises.mkdir(scriptsDir, { recursive: true });
-					const localRuff = path.join(scriptsDir, "ruff.exe");
+					const localRuff = path.join(scriptsDir, "ruff");
 					await Bun.write(localRuff, "");
 
 					const config = loadConfig(tempDir.path());
@@ -3270,23 +3218,20 @@ describe("lsp regressions", () => {
 			}
 			expect(whichSpy).not.toHaveBeenCalledWith("ruff");
 		} finally {
-			Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true, writable: true });
 			vi.restoreAllMocks();
 		}
 	});
 
-	it("detects pyright and pylsp in Windows virtualenv Scripts for Python-only roots", async () => {
-		const originalPlatform = process.platform;
-		Object.defineProperty(process, "platform", { value: "win32", configurable: true, writable: true });
+	it("detects pyright and pylsp in a virtualenv Scripts directory for Python-only roots", async () => {
 		const whichSpy = vi.spyOn(Bun, "which").mockReturnValue(null);
 
 		try {
 			const cases: Array<{ marker: string; server: string; binary: string }> = [
-				{ marker: "pyrightconfig.json", server: "pyright", binary: "pyright-langserver.exe" },
-				{ marker: "setup.cfg", server: "pylsp", binary: "pylsp.exe" },
+				{ marker: "pyrightconfig.json", server: "pyright", binary: "pyright-langserver" },
+				{ marker: "setup.cfg", server: "pylsp", binary: "pylsp" },
 			];
 			for (const { marker, server, binary } of cases) {
-				const tempDir = TempDir.createSync("@omp-lsp-win32-py-marker-");
+				const tempDir = TempDir.createSync("@omp-lsp-scripts-py-marker-");
 				try {
 					await Bun.write(path.join(tempDir.path(), marker), "");
 					const scriptsDir = path.join(tempDir.path(), ".venv", "Scripts");
@@ -3303,7 +3248,6 @@ describe("lsp regressions", () => {
 			expect(whichSpy).not.toHaveBeenCalledWith("pyright-langserver");
 			expect(whichSpy).not.toHaveBeenCalledWith("pylsp");
 		} finally {
-			Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true, writable: true });
 			vi.restoreAllMocks();
 		}
 	});
@@ -6199,7 +6143,7 @@ describe("lsp regressions", () => {
 		}
 	});
 
-	it("shortens an outside-cwd Windows home path before separator normalization", async () => {
+	it("shortens an outside-cwd home path before separator normalization", async () => {
 		if (!lspHomeOverride) throw new Error("Expected isolated home");
 		const cwd = path.join(lspHomeOverride, "project");
 		const sourceFile = path.join(lspHomeOverride, "other", "locked.ts");
@@ -7414,7 +7358,7 @@ describe("ty python lsp", () => {
 		// that opts into ty with only that file (no pyproject/setup/requirements)
 		// must still pass the root-marker gate AND resolve the local venv binary.
 		const tempDir = TempDir.createSync("@omp-lsp-ty-toml-");
-		const venvBin = process.platform === "win32" ? ".venv/Scripts" : ".venv/bin";
+		const venvBin = ".venv/bin";
 		const resolvedTy = path.join(tempDir.path(), venvBin, "ty");
 		// $which never succeeds: only LOCAL_BIN_PATHS resolution can find ty.
 		vi.spyOn(piUtils, "$which").mockImplementation(() => null);

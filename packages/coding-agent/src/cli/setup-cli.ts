@@ -71,12 +71,6 @@ export interface PythonCheckResult {
 	managedEnvPath?: string;
 }
 
-function managedPythonPath(): string {
-	return process.platform === "win32"
-		? path.join(MANAGED_PYTHON_ENV, "Scripts", "python.exe")
-		: path.join(MANAGED_PYTHON_ENV, "bin", "python");
-}
-
 /**
  * Check Python environment and kernel dependencies.
  */
@@ -85,7 +79,7 @@ export async function checkPythonSetup(cwd: string, interpreter?: string): Promi
 	return {
 		available: availability.ok,
 		pythonPath: availability.pythonPath,
-		usingManagedEnv: availability.pythonPath === managedPythonPath(),
+		usingManagedEnv: availability.pythonPath === path.join(MANAGED_PYTHON_ENV, "bin", "python"),
 		managedEnvPath: MANAGED_PYTHON_ENV,
 	};
 }

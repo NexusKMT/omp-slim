@@ -58,7 +58,7 @@ describe("JSON selector target admission", () => {
 		expect(textOf(await tool.execute("ampersand", { path: `${file}?query="a%26b"&raw=true` }))).toBe("a&b");
 	});
 
-	it.skipIf(process.platform === "win32")("prefers literal question-mark filenames to selector recovery", async () => {
+	it("prefers literal question-mark filenames to selector recovery", async () => {
 		const file = path.join(dir, "literal.json");
 		await Bun.write(file, '{"ok":false}');
 		await Bun.write(`${file}?q=.ok`, "literal question-mark file\n");
@@ -89,13 +89,11 @@ describe("JSON selector target admission", () => {
 		expect(textOf(result)).toBe("true");
 		expect(result.details?.meta?.source).toEqual({ type: "internal", value: uri });
 
-		if (process.platform !== "win32") {
-			const literalUri = "local://literal.json%3Fq=.ok";
-			await Bun.write(resolveLocalUrlToPath("local://literal.json", options), '{"ok":false}');
-			await Bun.write(resolveLocalUrlToPath(literalUri, options), "literal local question-mark file\n");
-			expect(textOf(await locatedTool.execute("local-literal-question", { path: literalUri }))).toContain(
-				"literal local question-mark file",
-			);
-		}
+		const literalUri = "local://literal.json%3Fq=.ok";
+		await Bun.write(resolveLocalUrlToPath("local://literal.json", options), '{"ok":false}');
+		await Bun.write(resolveLocalUrlToPath(literalUri, options), "literal local question-mark file\n");
+		expect(textOf(await locatedTool.execute("local-literal-question", { path: literalUri }))).toContain(
+			"literal local question-mark file",
+		);
 	});
 });

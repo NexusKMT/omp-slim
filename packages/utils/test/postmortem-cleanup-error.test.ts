@@ -191,10 +191,8 @@ describe("postmortem expected cleanup errors", () => {
 		expect(result.stderr).toContain("[Recovery]\n  Main: omp --resume 019cafe0-dead-beef");
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"prints recovery commands once when repeated SIGTERMs stop the process",
-		async () => {
-			const result = await runPostmortemProbe(`
+	it("prints recovery commands once when repeated SIGTERMs stop the process", async () => {
+		const result = await runPostmortemProbe(`
 			import { postmortem } from "${postmortemModuleUrl}";
 
 			let saved = false;
@@ -217,13 +215,12 @@ describe("postmortem expected cleanup errors", () => {
 			process.kill(process.pid, "SIGTERM");
 		`);
 
-			expect(result.exitCode).toBe(143);
-			expect(result.stderr).toContain("[Stopped by SIGTERM]\n[Recovery]\n  Main: omp --resume 019cafe0-dead-beef");
-			expect(result.stderr.split("[Recovery]")).toHaveLength(2);
-		},
-	);
+		expect(result.exitCode).toBe(143);
+		expect(result.stderr).toContain("[Stopped by SIGTERM]\n[Recovery]\n  Main: omp --resume 019cafe0-dead-beef");
+		expect(result.stderr.split("[Recovery]")).toHaveLength(2);
+	});
 
-	it.skipIf(process.platform === "win32")("prints recovery commands when SIGHUP stops the process", async () => {
+	it("prints recovery commands when SIGHUP stops the process", async () => {
 		const result = await runPostmortemProbe(`
 			import { postmortem } from "${postmortemModuleUrl}";
 
@@ -248,10 +245,8 @@ describe("postmortem expected cleanup errors", () => {
 		expect(result.stderr.split("[Recovery]")).toHaveLength(2);
 	});
 
-	it.skipIf(process.platform === "win32")(
-		"skips the recovery hints when the terminal is already declared dead",
-		async () => {
-			const result = await runPostmortemProbe(`
+	it("skips the recovery hints when the terminal is already declared dead", async () => {
+		const result = await runPostmortemProbe(`
 			import { postmortem } from "${postmortemModuleUrl}";
 
 			postmortem.registerFatalRecoveryHint(() => ({
@@ -267,11 +262,10 @@ describe("postmortem expected cleanup errors", () => {
 			process.kill(process.pid, "SIGHUP");
 		`);
 
-			expect(result.exitCode).toBe(129);
-			expect(result.stderr).not.toContain("[Stopped by SIGHUP]");
-			expect(result.stderr).not.toContain("[Recovery]");
-		},
-	);
+		expect(result.exitCode).toBe(129);
+		expect(result.stderr).not.toContain("[Stopped by SIGHUP]");
+		expect(result.stderr).not.toContain("[Recovery]");
+	});
 
 	it("exits after an uncaught exception when terminal stderr is revoked", async () => {
 		const result = await runPostmortemProbe(`
@@ -583,7 +577,7 @@ describe("postmortem expected cleanup errors", () => {
 		expect(result.stdout).toContain('["outer","late","settled"]');
 	});
 
-	it.skipIf(process.platform === "win32")("finishes an async late registration before a SIGTERM exit", async () => {
+	it("finishes an async late registration before a SIGTERM exit", async () => {
 		const result = await runPostmortemProbe(`
 			import { postmortem } from "${postmortemModuleUrl}";
 

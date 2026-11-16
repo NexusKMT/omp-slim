@@ -1,4 +1,3 @@
-import { dlopen, FFIType, ptr } from "bun:ffi";
 import * as fs from "node:fs";
 import { TtyWriter } from "@oh-my-pi/pi-natives";
 import { $env, isBunTestRuntime, isTerminalHeadless, isWsl } from "@oh-my-pi/pi-utils/env";
@@ -34,24 +33,12 @@ import type { TerminalMultiplexerBackgroundColorCache } from "./multiplexers/typ
 import { classifyTerminalMultiplexerModule, terminalMultiplexerSessions } from "./terminal-multiplexer";
 import { setTmuxPaneApcTitles, tmuxSessionSpeaksTsp } from "./tmux";
 import { setHangulCompatibilityJamoWidth } from "./utils";
-import { translateWindowsAltGrSequence } from "./windows-altgr";
-import { Win32InputModeDecoder, Win32PasteMarkerNormalizer } from "./windows-input-mode";
 
 export { writeTerminalSequence, writeThroughActiveTerminal } from "./active-terminal";
 
 const TERMINAL_PROGRESS_KEEPALIVE_MS = 1000;
 const TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1b]9;4;3\x07";
 const TERMINAL_PROGRESS_CLEAR_SEQUENCE = "\x1b]9;4;0;\x07";
-const WINDOWS_TERMINAL_OSC11_POLL_MS = 30_000;
-/** How long a relayed ESC record waits for the rest of its sequence before acting as Escape (matches StdinBuffer). */
-const WIN32_RELAYED_ESCAPE_TIMEOUT_MS = 75;
-/**
- * How long a relayed OSC/DCS/APC string waits for its terminator. Far longer
- * than a lone ESC: a TSP event split across console-host reads must not be
- * released mid-string (its tail would be typed into the composer), and a stall
- * of the event loop longer than 75 ms fires the timer before the queued tail is read.
- */
-const WIN32_RELAYED_STRING_TIMEOUT_MS = 5000;
 
 /** How long a TSP hello waits for its reply inside tmux, which answers DA1 itself. */
 const TSP_TMUX_HELLO_TIMEOUT_MS = 1000;
@@ -100,21 +87,18 @@ function completeTspInput(buffered: string): string | undefined {
 	return `${TSP_PREFIX}${buffered.slice(TSP_OSC_PREFIX.length, -terminator)}\x1b\\`;
 }
 
-function shouldPollWindowsTerminalAppearance(env: NodeJS.ProcessEnv = Bun.env): boolean {
-	if (process.platform !== "win32") return false;
-	if (!env.WT_SESSION) return false;
-	return !env.TERM_PROGRAM || env.TERM_PROGRAM.toLowerCase() === "windows_terminal";
-}
 /**
- * Maximum encoded UTF-8 bytes per `process.stdout.write` call on Windows.
+ * Maximum encoded UTF-8 bytes per `process.stdout.write` call on a ConPTY host.
  *
- * Windows ConPTY ties viewport tracking to per-`WriteFile` boundaries: when a
- * single write exceeds ~32-64 KB, the pseudo-console stops following the
- * cursor and the host UI's viewport stays parked at whatever scroll position
- * the write started from. The visible symptom is that a full-paint of a long
- * session (resume, history rebuild, large permission dialog) shows only the
- * first ~30 lines until any focus event forces the host to re-query the
- * cursor. The data is delivered correctly — it's purely a viewport-sync bug.
+ * Under WSL, stdout still crosses into the Windows ConPTY pseudo-console at the
+ * `wslhost` boundary, and ConPTY ties viewport tracking to per-`WriteFile`
+ * boundaries: when a single write exceeds ~32-64 KB, the pseudo-console stops
+ * following the cursor and the host UI's viewport stays parked at whatever
+ * scroll position the write started from. The visible symptom is that a
+ * full-paint of a long session (resume, history rebuild, large permission
+ * dialog) shows only the first ~30 lines until any focus event forces the host
+ * to re-query the cursor. The data is delivered correctly — it's purely a
+ * viewport-sync bug.
  *
  * The cap is on **encoded UTF-8 bytes**, not JS code units, because
  * `process.stdout.write(string)` UTF-8-encodes before handing off to
@@ -123,15 +107,15 @@ function shouldPollWindowsTerminalAppearance(env: NodeJS.ProcessEnv = Bun.env): 
  * `WriteFile` traffic and reintroduce the #2034 parked-viewport bug for
  * non-ASCII content.
  *
- * 16 KiB is half the smallest observed Windows Terminal threshold (32 KiB),
- * which keeps the per-write parked-viewport bug fixed by #2034 while halving
- * the WriteFile count on multi-megabyte paints (a 3 MB session resume splits
- * into ~192 chunks instead of ~384). Fewer WriteFiles means fewer chances for
- * WT's viewport-following logic to lose track of the cursor during the burst,
- * which mitigates the residual mid-paint drift the original 8 KiB cap left
- * behind (#2095). Still well clear of the threshold so the other ConPTY hosts
- * (Tabby, Hyper, VS Code) — where the exact limit is undocumented — keep
- * their safety margin.
+ * 16 KiB is half the smallest observed ConPTY threshold (32 KiB), which keeps
+ * the per-write parked-viewport bug fixed by #2034 while halving the WriteFile
+ * count on multi-megabyte paints (a 3 MB session resume splits into ~192
+ * chunks instead of ~384). Fewer WriteFiles means fewer chances for the host's
+ * viewport-following logic to lose track of the cursor during the burst, which
+ * mitigates the residual mid-paint drift the original 8 KiB cap left behind
+ * (#2095). Still well clear of the threshold so other ConPTY hosts (Tabby,
+ * Hyper, VS Code) — where the exact limit is undocumented — keep their safety
+ * margin.
  */
 const MAX_CONPTY_WRITE_CHUNK_BYTES = 16 * 1024;
 
@@ -354,10 +338,9 @@ export class StdoutStallWatchdog {
 let terminalEverStarted = false;
 // Whether the alternate screen buffer is currently active (mirrors the TUI's
 // overlay enter/leave writes). Consulted by emergencyTerminalRestore: DECRST
-// 1049 must never be written blindly, because Windows' shared VT dispatcher
-// (conhost and Windows Terminal both use AdaptDispatch) executes an
-// unconditional cursor restore on it — with no prior DECSC save the cursor
-// jumps to the viewport home, dropping the parent shell prompt on top of the
+// 1049 must never be written blindly, because a terminal that executes an
+// unconditional cursor restore on it — with no prior DECSC save — jumps the
+// cursor to the viewport home, dropping the parent shell prompt on top of the
 // dead frame after exit.
 let altScreenActive = false;
 let terminalRestoreRegistered = false;
@@ -375,81 +358,6 @@ export function setAltScreenActive(active: boolean): void {
 	altScreenActive = active;
 }
 
-const STD_INPUT_HANDLE = -10;
-const ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200;
-/** UTF-8 codepage id for SetConsoleCP/SetConsoleOutputCP. */
-const CP_UTF8 = 65001;
-
-/**
- * Lazily-initialized closure re-asserting the UTF-8 console codepage, or
- * `null` when unavailable (non-win32, FFI failure, console detached).
- */
-let consoleCodepageGuard: (() => void) | null | undefined;
-
-/**
- * Re-assert the UTF-8 console codepage before writing (win32 only).
- *
- * Bun sets both console codepages to UTF-8 (65001) at startup, and
- * `process.stdout.write(string)` hands UTF-8 bytes to `WriteFile`, which
- * conhost translates using the *current* console output codepage. Child
- * processes spawned by tools (bash commands, MCP/LSP servers, eval kernels)
- * share this console, and some flip the codepage behind our back: PHP >=7.1
- * CLI issues the equivalent of `chcp` whenever `internal_encoding` mismatches
- * the console codepage (php.net request #73716) and skips the restore when
- * killed — and two PHP processes in a pipeline race their restores. Once the
- * codepage falls back to an OEM page (437/850), every non-ASCII glyph the TUI
- * paints is mis-translated: box-drawing borders degrade into `Γöé`/`ΓöÇ`
- * mojibake on the next full repaint (most visibly ctrl+o expand, which
- * rewrites every row).
- *
- * `GetConsoleOutputCP` is one cheap console call per `#safeWrite`; the setter
- * only runs after a foreign flip. A reading of 0 means "no console" — leave
- * that alone. Guarding the write chokepoint (rather than per-spawn cleanup)
- * covers every console-sharing child and long-running processes that flip
- * the codepage mid-session.
- */
-function ensureWindowsConsoleUtf8(): void {
-	if (consoleCodepageGuard === undefined) consoleCodepageGuard = createConsoleCodepageGuard();
-	consoleCodepageGuard?.();
-}
-
-let lastWarnedCodepage = 0;
-
-function createConsoleCodepageGuard(): (() => void) | null {
-	if (process.platform !== "win32") return null;
-	try {
-		const kernel32 = dlopen("kernel32.dll", {
-			GetConsoleOutputCP: { args: [], returns: FFIType.u32 },
-			SetConsoleOutputCP: { args: [FFIType.u32], returns: FFIType.bool },
-			GetConsoleCP: { args: [], returns: FFIType.u32 },
-			SetConsoleCP: { args: [FFIType.u32], returns: FFIType.bool },
-		});
-		return () => {
-			try {
-				const outCp = kernel32.symbols.GetConsoleOutputCP();
-				if (outCp !== 0 && outCp !== CP_UTF8) {
-					kernel32.symbols.SetConsoleOutputCP(CP_UTF8);
-					if (outCp !== lastWarnedCodepage) {
-						lastWarnedCodepage = outCp;
-						logger.warn("console output codepage changed by a child process; restoring UTF-8", {
-							codepage: outCp,
-						});
-					}
-				}
-				const inCp = kernel32.symbols.GetConsoleCP();
-				if (inCp !== 0 && inCp !== CP_UTF8) {
-					kernel32.symbols.SetConsoleCP(CP_UTF8);
-				}
-			} catch {
-				// Console APIs failed (console detached mid-session); disable the guard.
-				consoleCodepageGuard = null;
-			}
-		};
-	} catch {
-		// bun:ffi unavailable; rendering proceeds without the guard.
-		return null;
-	}
-}
 /**
  * Emergency terminal restore - call this from signal/crash handlers
  * Resets terminal state without requiring access to the ProcessTerminal instance
@@ -484,12 +392,11 @@ export function emergencyTerminalRestore(): void {
 					"\x1b[?5522l" + // Disable enhanced paste notifications
 					"\x1b[<u" + // Pop kitty keyboard protocol
 					"\x1b[>4;0m" + // Disable modifyOtherKeys fallback
-					"\x1b[?9001l" + // Disable win32-input-mode fallback (Windows console)
 					"\x1b[?1006l\x1b[?1003l\x1b[?1000l" + // Disable mouse tracking (fullscreen overlays)
 					// Leave the alternate screen only when a fullscreen overlay
-					// actually holds it — on Windows, DECRST 1049 on the main
-					// buffer homes the cursor (unconditional CursorRestoreState
-					// with no prior save), corrupting the shell handoff on exit.
+					// actually holds it — DECRST 1049 on the main buffer homes
+					// the cursor on hosts that restore unconditionally with no
+					// prior save, corrupting the shell handoff on exit.
 					(altScreenActive ? "\x1b[?1049l\x1b[?1l\x1b>\x1b[<u" : "") + // Leave alt; reset main keyboard
 					"\x1b[0 q" + // Restore the terminal's configured cursor shape (DECSCUSR)
 					"\x1b[?25h", // Show cursor
@@ -616,14 +523,14 @@ export interface Terminal {
 	/**
 	 * Whether a pseudoconsole host owns the grid this terminal writes to, so
 	 * neither the cursor nor the painted rows survive a resize under the
-	 * application's own model. Measured on Windows conhost: resizing the
-	 * pseudoconsole makes it re-emit its whole viewport from `CSI H` with
-	 * absolute addressing while the application writes nothing, and it re-homes
-	 * the cursor, so a DSR reply after a resize reports column 1 instead of the
-	 * column the application parked. The renderer's resize anchor recovery needs
-	 * both properties, so it takes the rebuild path instead when this is set.
-	 * Optional so custom Terminals built against older pi-tui versions keep
-	 * working; absent means the terminal itself owns the grid.
+	 * application's own model. Measured on the ConPTY pseudo-console that hosts
+	 * a WSL session: resizing it makes it re-emit its whole viewport from
+	 * `CSI H` with absolute addressing while the application writes nothing, and
+	 * it re-homes the cursor, so a DSR reply after a resize reports column 1
+	 * instead of the column the application parked. The renderer's resize anchor
+	 * recovery needs both properties, so it takes the rebuild path instead when
+	 * this is set. Optional so custom Terminals built against older pi-tui
+	 * versions keep working; absent means the terminal itself owns the grid.
 	 */
 	readonly hostOwnsGridOnResize?: boolean;
 
@@ -754,17 +661,15 @@ export interface Terminal {
 }
 
 /**
- * True when stdout flows through a ConPTY pseudo-console (native win32, or
- * Linux running under WSL where stdout still crosses into ConPTY at the
- * `wslhost` boundary). ConPTY hosts share the per-WriteFile viewport-tracking
- * quirks documented above and on {@link MAX_CONPTY_WRITE_CHUNK_BYTES}, so both
- * `#safeWrite` and the renderer's post-big-paint settle gate hang off this
- * single predicate.
+ * True when stdout flows through a ConPTY pseudo-console: Linux running under
+ * WSL, where stdout still crosses into ConPTY at the `wslhost` boundary.
+ * ConPTY hosts share the per-WriteFile viewport-tracking quirks documented
+ * above and on {@link MAX_CONPTY_WRITE_CHUNK_BYTES}, so both `#safeWrite` and
+ * the renderer's post-big-paint settle gate hang off this single predicate.
  */
 export function isConPTYHosted(): boolean {
-	// win32 always hosts through ConPTY; under WSL stdout still crosses into
-	// ConPTY at the `wslhost` boundary.
-	return process.platform === "win32" || isWsl(process.platform, $env);
+	// A WSL distro's stdout crosses into ConPTY at the `wslhost` boundary.
+	return isWsl(process.platform, $env);
 }
 
 /** Discriminated owner of an outstanding DA1 sentinel in the unified probe FIFO. */
@@ -839,15 +744,6 @@ export interface ProcessTerminalOptions {
 	 * `WSL_INTEROP`) — the suite must behave identically on WSL and on CI.
 	 */
 	conpty?: boolean;
-	/**
-	 * Whether stdin is a native Windows console handle (win32, not WSL), whose
-	 * console host is certain to answer `CSI ? 9001 h` with win32-input-mode key
-	 * records. When false (WSL), the keyboard fallback requests modifyOtherKeys
-	 * alongside win32-input-mode, since a WSL pty may not be relayed by a console
-	 * host. Defaults to `process.platform === "win32"`; only consulted when
-	 * `conpty` is also true.
-	 */
-	nativeWindowsConsole?: boolean;
 }
 
 /**
@@ -869,14 +765,8 @@ export class ProcessTerminal implements Terminal {
 	#kittyFlags = 0;
 	#modifyOtherKeysActive = false;
 	#modifyOtherKeysTimeout?: Timer;
-	// Windows console fallback when kitty is unavailable: key records arrive as
-	// win32-input-mode sequences and are decoded before reaching the handler.
-	#win32InputDecoder?: Win32InputModeDecoder;
-	#win32PasteNormalizer?: Win32PasteMarkerNormalizer;
-	// Releases a relayed lone ESC the decoder held for a sequence tail that never came.
-	#win32PendingFlushTimer?: Timer;
 	#stdinBuffer?: StdinBuffer;
-	/** Parsed input path shared by direct VT and win32-input-mode relayed text. */
+	/** Parsed input path shared by direct VT and relayed text. */
 	#stdinSequenceHandler?: (sequence: string) => void;
 	#stdinDataHandler?: (data: string) => void;
 	#disconnectHandler?: () => void;
@@ -909,7 +799,6 @@ export class ProcessTerminal implements Terminal {
 	// chunking (#safeWrite). Live-detected by default; tests inject a fixed
 	// value so WSL env does not change behavior. See {@link ProcessTerminalOptions}.
 	readonly #conpty: boolean;
-	readonly #nativeWindowsConsole: boolean;
 	#writeLogPath = $env.PI_TUI_WRITE_LOG || "";
 	#stdoutErrorCleanup?: () => void;
 	#stdoutErrorHandler = (err: Error) => {
@@ -933,7 +822,6 @@ export class ProcessTerminal implements Terminal {
 	// the live backlog cannot exceed this until the next enqueue refreshes it.
 	#pumpBacklogBound = 0;
 
-	#windowsVTInputRestore?: () => void;
 	#xtermScrollToBottomRestoreModes = new Set<number>();
 	#appearanceCallbacks: Array<
 		(appearance: TerminalAppearance, requestToken?: TerminalAppearanceRequestToken) => void
@@ -988,16 +876,14 @@ export class ProcessTerminal implements Terminal {
 	#reportedColumns?: number;
 	#reportedRows?: number;
 	#mode2031DebounceTimer?: Timer;
-	#windowsTerminalAppearancePollTimer?: Timer;
 	#progressActive = false;
-	// Ghostty and Monstar expire OSC 9;4 state without a heartbeat. Persistent hosts such
-	// as Windows Terminal restart their indeterminate animation on every write.
+	// Ghostty and Monstar expire OSC 9;4 state without a heartbeat. Hosts that
+	// restart their indeterminate animation on every write need no keepalive.
 	readonly #keepProgressAlive = TERMINAL.id === "ghostty" || TERMINAL.id === "monstar";
 	#progressTimer?: Timer;
 
 	constructor(options?: ProcessTerminalOptions) {
 		this.#conpty = options?.conpty ?? isConPTYHosted();
-		this.#nativeWindowsConsole = options?.nativeWindowsConsole ?? process.platform === "win32";
 	}
 
 	get kittyProtocolActive(): boolean {
@@ -1155,7 +1041,7 @@ export class ProcessTerminal implements Terminal {
 		// prebuilt natives module without the export falls back to direct writes.
 		// Test suites spy on `process.stdout.write` with a faked isTTY, so the
 		// pump stays off under `bun test` — same philosophy as isTerminalHeadless.
-		if (process.platform !== "win32" && process.stdout.isTTY && !isBunTestRuntime() && !this.#outputPump) {
+		if (process.stdout.isTTY && !isBunTestRuntime() && !this.#outputPump) {
 			try {
 				this.#outputPump = new TtyWriter(1);
 				this.#pumpBacklogBound = 0;
@@ -1181,10 +1067,8 @@ export class ProcessTerminal implements Terminal {
 		process.stdout.on("resize", this.#stdoutResizeListener);
 
 		// Refresh terminal dimensions - they may be stale after suspend/resume
-		// (SIGWINCH is lost while process is stopped). Unix only.
-		if (process.platform !== "win32") {
-			process.kill(process.pid, "SIGWINCH");
-		}
+		// (SIGWINCH is lost while process is stopped).
+		process.kill(process.pid, "SIGWINCH");
 
 		setHangulCompatibilityJamoWidth(TERMINAL.hangulJamoWidth);
 
@@ -1244,11 +1128,6 @@ export class ProcessTerminal implements Terminal {
 		// See #6374.
 		this.#safeWrite("\x1b[?1l\x1b>");
 
-		// On Windows, enable ENABLE_VIRTUAL_TERMINAL_INPUT so the console sends
-		// VT escape sequences (e.g. \x1b[Z for Shift+Tab) instead of raw console
-		// events that lose modifier information. Must run after setRawMode(true)
-		// since that resets console mode flags.
-		this.#enableWindowsVTInput();
 		// Every response-eliciting probe goes out inside the leak guard.
 		this.#safeWrite(PROBE_GUARD_BEGIN);
 		// Query and enable Kitty keyboard protocol
@@ -1290,8 +1169,7 @@ export class ProcessTerminal implements Terminal {
 		// WezTerm) detect the appearance once at startup and pick up later OS
 		// theme changes on next launch. Earlier builds polled OSC 11 every 30 s
 		// here for those terminals, but each poll's OSC 11/DA1 write wiped the
-		// user's active text selection on several of them (#3297). Native Windows
-		// Terminal gets a scoped fallback after DECRQM confirms 2031 is unsupported.
+		// user's active text selection on several of them (#3297).
 
 		// Probe DEC private-mode support via DECRQM. 2026 (synchronized output)
 		// gates the renderer's begin/end markers; 2048 (in-band resize) is enabled
@@ -1314,56 +1192,6 @@ export class ProcessTerminal implements Terminal {
 			this.#queryPrivateMode(mode);
 		}
 		this.#safeWrite(PROBE_GUARD_END);
-	}
-
-	/**
-	 * On Windows, add ENABLE_VIRTUAL_TERMINAL_INPUT to the stdin console mode
-	 * so modified keys (for example Shift+Tab) arrive as VT escape sequences.
-	 */
-	#enableWindowsVTInput(): void {
-		if (process.platform !== "win32") return;
-		this.#restoreWindowsVTInput();
-		try {
-			const kernel32 = dlopen("kernel32.dll", {
-				GetStdHandle: { args: [FFIType.i32], returns: FFIType.ptr },
-				GetConsoleMode: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.bool },
-				SetConsoleMode: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.bool },
-			});
-			const handle = kernel32.symbols.GetStdHandle(STD_INPUT_HANDLE);
-			const mode = new Uint32Array(1);
-			const modePtr = ptr(mode);
-			if (!modePtr || !kernel32.symbols.GetConsoleMode(handle, modePtr)) {
-				kernel32.close();
-				return;
-			}
-			const originalMode = mode[0]!;
-			const vtMode = originalMode | ENABLE_VIRTUAL_TERMINAL_INPUT;
-			if (vtMode !== originalMode && !kernel32.symbols.SetConsoleMode(handle, vtMode)) {
-				kernel32.close();
-				return;
-			}
-			this.#windowsVTInputRestore = () => {
-				try {
-					kernel32.symbols.SetConsoleMode(handle, originalMode);
-				} finally {
-					kernel32.close();
-				}
-			};
-		} catch {
-			// bun:ffi unavailable or console API unsupported; keep startup non-fatal.
-		}
-	}
-
-	#restoreWindowsVTInput(): void {
-		if (process.platform !== "win32") return;
-		const restore = this.#windowsVTInputRestore;
-		this.#windowsVTInputRestore = undefined;
-		if (!restore) return;
-		try {
-			restore();
-		} catch {
-			// Ignore restore errors during terminal teardown.
-		}
 	}
 
 	/**
@@ -1411,29 +1239,6 @@ export class ProcessTerminal implements Terminal {
 		const inBandResizePattern = /^\x1b\[48;(\d+)(?::[\d:]*)?;(\d+)(?::[\d:]*)?;(\d+)(?::[\d:]*)?;(\d+)(?::[\d:]*)?t$/;
 
 		this.#stdinSequenceHandler = (sequence: string) => {
-			const decoder = this.#win32InputDecoder;
-			const win32Keys = decoder?.decode(sequence);
-			if (decoder && win32Keys !== undefined) {
-				clearTimeout(this.#win32PendingFlushTimer);
-				this.#win32PendingFlushTimer = undefined;
-				// The record is ESC-led, so it interrupts any direct reply still being
-				// reassembled, just as a raw escape does below. Decoded keys carry no ESC
-				// of their own and would otherwise be appended to that fragment.
-				this.#privateCsiResponseBuffer = "";
-				this.#inBandResizeBuffer = "";
-				this.#osc11ResponseBuffer = "";
-				this.#osc99ResponseBuffer = "";
-				this.#glyphProtocolReplyBuffer = "";
-				this.#tspReplyBuffer = "";
-				for (const key of win32Keys) this.#stdinSequenceHandler?.(key);
-				if (decoder.hasPendingSequence) {
-					this.#win32PendingFlushTimer = setTimeout(
-						() => this.#releaseWin32PendingSequence(),
-						decoder.hasPendingString ? WIN32_RELAYED_STRING_TIMEOUT_MS : WIN32_RELAYED_ESCAPE_TIMEOUT_MS,
-					);
-				}
-				return;
-			}
 			// Fast path for plain-text bytes: every escape-probe regex below
 			// anchors on `^\x1b…`, so a byte that is not ESC can never match. A
 			// non-bracketed paste of N printable chars arrives as N per-scalar
@@ -1659,7 +1464,6 @@ export class ProcessTerminal implements Terminal {
 					this.#safeWrite("\x1b[>4;0m");
 					this.#modifyOtherKeysActive = false;
 				}
-				this.#disableWin32InputMode();
 				// Any reply to `\x1b[?u` means the terminal speaks the kitty keyboard
 				// protocol. The reported flag value is the *current* stack-top — fresh
 				// terminals report 0 — so support is implied by the reply itself, not by
@@ -1669,8 +1473,8 @@ export class ProcessTerminal implements Terminal {
 				this.#kittyProtocolActive = true;
 				setKittyProtocolActive(true);
 				if (this.#conpty) {
-					// ConPTY (native Windows and WSL) drops Shift+letter keypresses
-					// entirely when flag 4 (report alternate keys) is set. Use flag 1
+					// ConPTY (a WSL session) drops Shift+letter keypresses entirely
+					// when flag 4 (report alternate keys) is set. Use flag 1
 					// (disambiguate only), preserving flag 2 if already active.
 					this.#kittyFlags = (reportedFlags & 2) !== 0 ? 3 : 1;
 				} else if ((reportedFlags & 2) !== 0) {
@@ -1769,13 +1573,7 @@ export class ProcessTerminal implements Terminal {
 				return;
 			}
 			if (this.#inputHandler) {
-				// Windows console hosts drop AltGr text under kitty (AltGr+F → `CSI 102;3u`);
-				// recover it from the active layout before any keybinding sees an Alt chord.
-				const altGrText =
-					this.#kittyProtocolActive && this.#conpty && process.platform === "win32"
-						? translateWindowsAltGrSequence(sequence)
-						: undefined;
-				this.#inputHandler(altGrText ?? sequence);
+				this.#inputHandler(sequence);
 			}
 		};
 		this.#stdinBuffer.on("data", this.#stdinSequenceHandler);
@@ -1783,12 +1581,10 @@ export class ProcessTerminal implements Terminal {
 		// Re-wrap paste content with bracketed paste markers for existing editor
 		// handling. An Enter that shared the paste's stdin read rides along so
 		// paste and submit reach the component focused right now, not one the
-		// paste itself is about to open. Under win32-input-mode the console host
-		// encodes pasted line breaks as key records; decode them as text (#14065).
+		// paste itself is about to open.
 		this.#stdinBuffer.on("paste", (content: string, enter?: string) => {
 			if (this.#inputHandler) {
-				const text = this.#win32InputDecoder?.decodePaste(content) ?? content;
-				this.#inputHandler(`\x1b[200~${text}\x1b[201~${enter ?? ""}`);
+				this.#inputHandler(`\x1b[200~${content}\x1b[201~${enter ?? ""}`);
 			}
 		});
 
@@ -1803,8 +1599,7 @@ export class ProcessTerminal implements Terminal {
 			// turn one paste into thousands of writes (#15757).
 			if (data && this.#active && this.#rearmBracketedPaste && !this.#stdinBuffer!.pasting)
 				this.#safeWrite("\x1b[?2004h");
-			if (this.#win32PasteNormalizer) this.#win32PasteNormalizer.process(data);
-			else this.#stdinBuffer!.process(data);
+			this.#stdinBuffer!.process(data);
 		};
 	}
 
@@ -2112,53 +1907,12 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	#enableModifyOtherKeysFallback(): void {
-		if (this.#kittyProtocolActive || this.#modifyOtherKeysActive || this.#win32InputDecoder) return;
+		if (this.#kittyProtocolActive || this.#modifyOtherKeysActive) return;
 		const ssh = isSshSession();
-		if (this.#conpty && !ssh) {
-			// The Windows console host ignores modifyOtherKeys and folds Shift+Enter
-			// into a bare CR (Ctrl+Enter into LF). win32-input-mode is answered by the
-			// console host serving this process, so it works under every local ConPTY
-			// terminal, and under WSL through the `wsl.exe` relay's console host too.
-			// Under sshd the console host is fed the remote terminal's VT stream,
-			// and the mode splits arrow keys into Escape plus literal text (#14034).
-			this.#safeWrite("\x1b[?9001h");
-			this.#win32InputDecoder = new Win32InputModeDecoder();
-			// The normalizer's expiry already spent the ESC wait; release the decoder's hold
-			// at once instead of starting a second window. A held string keeps its own
-			// longer timer: releasing it here would type the rest of it as text.
-			this.#win32PasteNormalizer = new Win32PasteMarkerNormalizer(
-				data => this.#stdinBuffer?.process(data),
-				() => {
-					if (!this.#win32InputDecoder?.hasPendingString) this.#releaseWin32PendingSequence();
-				},
-			);
-			// A WSL pty is not always relayed by a console host (tmux, VS Code
-			// Remote-WSL, WSLg terminals). Those ignore 9001 and keep sending plain
-			// VT, which the decoder passes through, so also ask for modifyOtherKeys.
-			if (this.#nativeWindowsConsole) return;
-		}
 		// A remote terminal with no identifying env may not understand the request.
 		if (ssh && (TERMINAL.id === "base" || TERMINAL.id === "trueColor")) return;
 		this.#safeWrite("\x1b[>4;2m");
 		this.#modifyOtherKeysActive = true;
-	}
-
-	/** Deliver relayed VT text the decoder is holding (a lone ESC becomes Escape). */
-	#releaseWin32PendingSequence(): void {
-		clearTimeout(this.#win32PendingFlushTimer);
-		this.#win32PendingFlushTimer = undefined;
-		const pending = this.#win32InputDecoder?.flushPendingSequence() ?? [];
-		for (const key of pending) this.#stdinSequenceHandler?.(key);
-	}
-
-	#disableWin32InputMode(): void {
-		if (!this.#win32InputDecoder) return;
-		this.#win32PasteNormalizer?.flush();
-		this.#win32PasteNormalizer = undefined;
-		// Held input still belongs to the user (e.g. Escape before a late kitty reply).
-		this.#releaseWin32PendingSequence();
-		this.#safeWrite("\x1b[?9001l");
-		this.#win32InputDecoder = undefined;
 	}
 
 	/**
@@ -2221,7 +1975,6 @@ export class ProcessTerminal implements Terminal {
 			}
 		}
 		if (mode === 2048 && supported) this.#enableInBandResize();
-		if (mode === 2031) this.#syncWindowsTerminalAppearancePolling(supported);
 		// Confirmed bracketed-paste support means a genuine paste arrives
 		// wrapped, so an unmarked multiline burst is an input-method commit
 		// (#13344) unless an event-loop stall batched typed keys into one read
@@ -2234,22 +1987,6 @@ export class ProcessTerminal implements Terminal {
 		}
 	}
 
-	#syncWindowsTerminalAppearancePolling(mode2031Supported: boolean): void {
-		if (mode2031Supported || !shouldPollWindowsTerminalAppearance() || this.#dead) {
-			this.#clearWindowsTerminalAppearancePoll();
-			return;
-		}
-		if (this.#windowsTerminalAppearancePollTimer) return;
-		this.#windowsTerminalAppearancePollTimer = setInterval(() => {
-			this.#queryBackgroundColor();
-		}, WINDOWS_TERMINAL_OSC11_POLL_MS);
-	}
-
-	#clearWindowsTerminalAppearancePoll(): void {
-		if (!this.#windowsTerminalAppearancePollTimer) return;
-		clearInterval(this.#windowsTerminalAppearancePollTimer);
-		this.#windowsTerminalAppearancePollTimer = undefined;
-	}
 	#disableXtermScrollToBottomMode(mode: number): void {
 		if (this.#xtermScrollToBottomRestoreModes.has(mode) || this.#dead) return;
 		this.#xtermScrollToBottomRestoreModes.add(mode);
@@ -2294,7 +2031,7 @@ export class ProcessTerminal implements Terminal {
 	/**
 	 * Reconcile cached in-band geometry with the OS on an OS-level resize.
 	 *
-	 * SIGWINCH (POSIX) and ConPTY (Windows) refresh `process.stdout.columns`/
+	 * SIGWINCH and the ConPTY host refresh `process.stdout.columns`/
 	 * `rows` before the `resize` event fires, so they are authoritative for the
 	 * new cell geometry. A cached DEC 2048 report can be stale: the matching
 	 * post-resize report may be dropped (split across stdin reads past the flush
@@ -2333,7 +2070,6 @@ export class ProcessTerminal implements Terminal {
 			this.#safeWrite("\x1b[>4;0m");
 			this.#modifyOtherKeysActive = false;
 		}
-		this.#disableWin32InputMode();
 
 		const previousHandler = this.#inputHandler;
 		this.#inputHandler = undefined;
@@ -2452,7 +2188,6 @@ export class ProcessTerminal implements Terminal {
 		this.#appearanceReportCallbacks = [];
 		this.#osc11Pending = false;
 		this.#osc11ActiveToken = undefined;
-		this.#clearWindowsTerminalAppearancePoll();
 		this.#osc11QueuedQuery = undefined;
 		this.#osc11ResponseBuffer = "";
 		this.#osc99PendingId = undefined;
@@ -2495,9 +2230,7 @@ export class ProcessTerminal implements Terminal {
 			this.#safeWrite("\x1b[>4;0m");
 			this.#modifyOtherKeysActive = false;
 		}
-		this.#disableWin32InputMode();
 
-		this.#restoreWindowsVTInput();
 		// Clean up StdinBuffer
 		if (this.#stdinBuffer) {
 			this.#stdinBuffer.destroy();
@@ -2578,10 +2311,6 @@ export class ProcessTerminal implements Terminal {
 			logger.error("Terminal disconnect handler failed; exiting anyway", { err: handlerErr });
 		}
 
-		if (process.platform === "win32") {
-			void postmortem.quit(129, { drainStdout: false });
-			return;
-		}
 		try {
 			process.kill(process.pid, "SIGHUP");
 		} catch (signalErr) {
@@ -2643,23 +2372,17 @@ export class ProcessTerminal implements Terminal {
 			this.#trackStdoutBacklog(pending);
 			return;
 		}
-		// Without the pump, writes (and the codepage guard's console calls) block
-		// the event loop until the terminal drains; label them for the watchdog.
+		// Without the pump, writes block the event loop until the terminal
+		// drains; label them for the watchdog.
 		pushLoopPhase("ui.terminal-write");
 		try {
-			// A console-sharing child process may have flipped the console codepage
-			// away from UTF-8; repair it before any bytes hit WriteFile so no frame
-			// is ever translated through an OEM codepage. See ensureWindowsConsoleUtf8.
-			if (process.platform === "win32") ensureWindowsConsoleUtf8();
-			// Windows ConPTY drops viewport tracking when a single write exceeds
-			// ~32-64 KB: the host UI's scroll position stays parked at wherever
-			// the write began, even though every byte landed in scrollback. Split
-			// large paints into newline-aligned chunks so each underlying
-			// `WriteFile` stays well below the threshold. The gate also covers
-			// WSL — `process.platform === "linux"` there, but stdout still
-			// crosses into ConPTY at the `wslhost` boundary, so the same per-
-			// WriteFile cap applies. Non-ConPTY PTYs keep the single-write fast
-			// path. The cap is on encoded UTF-8 bytes, not JS code units, because
+			// The ConPTY pseudo-console hosting a WSL session drops viewport
+			// tracking when a single write exceeds ~32-64 KB: the host UI's scroll
+			// position stays parked at wherever the write began, even though every
+			// byte landed in scrollback. Split large paints into newline-aligned
+			// chunks so each underlying `WriteFile` stays well below the
+			// threshold. Non-ConPTY PTYs keep the single-write fast path. The cap
+			// is on encoded UTF-8 bytes, not JS code units, because
 			// `process.stdout.write(string)` UTF-8-encodes before `WriteFile`,
 			// and a code-unit cap would let CJK transcript rows expand past the
 			// threshold. See #2034 and #2095.

@@ -1,7 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { formatBytes } from "../format";
-import { hasFsCode } from "../fs-error";
 import { UTF8_DECODER } from "./bytes";
 import { ArchiveError } from "./error";
 import { type ArchiveLimits, assertInMemorySize, DEFAULT_ARCHIVE_LIMITS } from "./limits";
@@ -217,29 +216,7 @@ export async function extractArchive(
 		}
 		await fs.mkdir(path.dirname(outputPath), { recursive: true });
 		const relativeTarget = path.relative(path.dirname(outputPath), resolvedTarget) || ".";
-		const linkType = process.platform === "win32" && archive.getNode(link.path)?.isDirectory ? "dir" : "file";
-		try {
-			await fs.symlink(relativeTarget, outputPath, linkType);
-		} catch (error) {
-			if (process.platform !== "win32" || !hasFsCode(error, "EPERM")) throw error;
-			// Windows without the symlink privilege: degrade to a directory
-			// junction or a file copy so extraction still yields usable
-			// content instead of failing the whole archive.
-			if (linkType === "dir") {
-				await fs.symlink(resolvedTarget, outputPath, "junction");
-			} else {
-				// Resolve through the archive, not the extraction order: this
-				// link may target another link that has not materialized yet.
-				// A dangling target cannot be copied without the symlink
-				// privilege; skip the entry so the rest still extracts.
-				const extracted = await archive.readFile(link.path).catch(() => undefined);
-				if (!extracted) continue;
-				// Keep symlink creation's exclusive destination semantics.
-				await fs.writeFile(outputPath, extracted.bytes, { flag: "wx" });
-				const permissions = (extracted.mode ?? 0) & 0o777;
-				if (permissions) await fs.chmod(outputPath, permissions);
-			}
-		}
+		await fs.symlink(relativeTarget, outputPath);
 		count++;
 	}
 

@@ -145,7 +145,7 @@ describe("restricted folder resolution", () => {
 		);
 	});
 
-	it("names a folder through ~, a symlink, or (on Windows) different case", () => {
+	it("names a folder through ~ or a symlink", () => {
 		const read = pathTool("read", "read", cwd);
 		const home = path.join(os.homedir(), ".omp-restricted-probe", "file.txt");
 		const probe: AgentTool = { ...read, approvalCacheTargets: () => [approvalTargetKey(cwd, home)!] };
@@ -153,13 +153,6 @@ describe("restricted folder resolution", () => {
 			resolveApproval(probe, {}, "yolo", {}, undefined, { restrictedFolders: ["~/.omp-restricted-probe"], cwd })
 				.policy,
 		).toBe("prompt");
-
-		if (process.platform === "win32") {
-			const upper = { restrictedFolders: [restricted.toUpperCase()], cwd };
-			expect(resolveApproval(read, { path: "restricted/secret.txt" }, "yolo", {}, undefined, upper).policy).toBe(
-				"prompt",
-			);
-		}
 
 		const link = path.join(cwd, "link");
 		try {

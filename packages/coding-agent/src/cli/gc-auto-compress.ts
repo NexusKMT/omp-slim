@@ -32,7 +32,7 @@ export const GC_AUTO_COMPRESS_LOG = "gc-auto-compress.log";
 /**
  * Start a detached `omp gc --compress --apply` for `agentDir` when the last
  * background run is at least a day old and the sessions directory sits on a
- * volume with transparent compression (APFS, NTFS). Returns the child, or
+ * volume with transparent compression (APFS). Returns the child, or
  * undefined when no run was due or possible, or another launch is claiming it.
  * The child outlives this process.
  */
@@ -46,7 +46,7 @@ export async function scheduleGcAutoCompress(agentDir: string): Promise<Subproce
 		if (!(await runIsDue(logPath))) return undefined;
 		if ((await compressMethod(getSessionsDir(agentDir))) === undefined) {
 			// Stamps the interval, so the volume check also runs once a day.
-			await Bun.write(logPath, "compress skipped: unsupported on this filesystem (APFS or NTFS only)\n");
+			await Bun.write(logPath, "compress skipped: unsupported on this filesystem (APFS only)\n");
 			return undefined;
 		}
 
@@ -60,7 +60,7 @@ export async function scheduleGcAutoCompress(agentDir: string): Promise<Subproce
 			throw error;
 		}
 		try {
-			// Inherited by `ditto`/`compact`, so the copy-and-verify work yields to the foreground.
+			// Inherited by `ditto`, so the copy-and-verify work yields to the foreground.
 			os.setPriority(proc.pid, os.constants.priority.PRIORITY_LOW);
 		} catch {
 			// Already exited, or the platform refused; the run proceeds at normal priority.

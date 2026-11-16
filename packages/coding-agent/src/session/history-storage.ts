@@ -184,7 +184,7 @@ ON CONFLICT(prompt) DO UPDATE SET
 		if (existing) return existing;
 
 		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-		// Windows cannot move history.db aside while the session index holds it open.
+		// history.db cannot move aside while the session index holds it open.
 		closeSessionIndex();
 		let backupPath = undefined as string | undefined;
 		const instance = openSqliteDatabaseSync(

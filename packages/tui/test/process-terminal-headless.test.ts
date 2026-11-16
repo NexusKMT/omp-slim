@@ -149,11 +149,11 @@ describe("ProcessTerminal headless suppression", () => {
 		}
 	});
 
-	it("keeps Windows Terminal's indeterminate progress animation continuous", () => {
+	it("does not repeat the progress sequence for hosts that animate on every write", () => {
 		vi.useFakeTimers();
 		const previous = setTerminalHeadless(false);
 		Object.defineProperty(TERMINAL, "id", { value: "base", configurable: true });
-		const terminal = new ProcessTerminal({ conpty: true });
+		const terminal = new ProcessTerminal();
 		try {
 			terminal.setProgress(true);
 			terminal.setProgress(true);

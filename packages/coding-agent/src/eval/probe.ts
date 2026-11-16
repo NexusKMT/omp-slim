@@ -6,9 +6,9 @@
  * during `resolveBackend()` — before the eval cell's `IdleTimeout` is armed.
  * Two footguns let that probe wedge an entire agent turn (issue #9466):
  *
- *   1. Bun's `$` shell inherits the host stdin handle. On native Windows an
- *      inherited RPC/console stdin handle keeps the probe subprocess alive
- *      indefinitely even though the script never reads stdin.
+ *   1. Bun's `$` shell inherits the host stdin handle. An inherited
+ *      RPC/console handle keeps the probe subprocess alive indefinitely even
+ *      though the script never reads stdin.
  *   2. The probe had no timeout and honored no AbortSignal, so nothing bounded
  *      a hung interpreter and the documented eval timeout — armed only later —
  *      could never cancel it.
@@ -60,8 +60,8 @@ export interface BoundedProbeSpawnOptions extends BackendProbeOptions {
 
 /**
  * Spawn `command` detached from the host's stdio, bounded by a timeout and an
- * optional AbortSignal. Never inherits stdin (the Windows wedge in #9466) and
- * always resolves — a hung interpreter yields `{ timedOut: true, exitCode: null }`
+ * optional AbortSignal. Never inherits stdin (the wedge in #9466) and always
+ * resolves — a hung interpreter yields `{ timedOut: true, exitCode: null }`
  * rather than an unsettled promise.
  *
  * Throws only when the spawn itself fails (e.g. ENOENT); callers already treat
@@ -76,15 +76,13 @@ export async function runBoundedProbe(
 	}
 	const ceiling = Math.max(timeoutCeilingMs ?? 0, DEFAULT_PROBE_TIMEOUT_MS);
 	const bound = Math.min(timeoutMs && timeoutMs > 0 ? timeoutMs : ceiling, ceiling);
-	const detached = process.platform !== "win32";
 	const proc = Bun.spawn(command, {
 		cwd,
 		env,
 		stdin: "ignore",
 		stdout: "ignore",
 		stderr: "ignore",
-		windowsHide: true,
-		detached,
+		detached: true,
 	});
 	let timedOut = false;
 	let aborted = false;
@@ -98,38 +96,12 @@ export async function runBoundedProbe(
 	const forceKill = (): void => {
 		// Availability probes own no persistent state. Kill their whole process
 		// tree so a shim cannot strand the real interpreter after the bound.
-		if (detached) {
-			try {
-				process.kill(-proc.pid, "SIGKILL");
-				return;
-			} catch (error) {
-				if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") return;
-				// Fall back to the direct child if the group signal is denied.
-			}
-		} else {
-			try {
-				const killer = Bun.spawn(["taskkill.exe", "/PID", String(proc.pid), "/T", "/F"], {
-					stdin: "ignore",
-					stdout: "ignore",
-					stderr: "ignore",
-					windowsHide: true,
-				});
-				const fallback = setTimeout(killDirectChild, 1_000);
-				fallback.unref();
-				void killer.exited.then(
-					exitCode => {
-						clearTimeout(fallback);
-						if (exitCode !== 0) killDirectChild();
-					},
-					() => {
-						clearTimeout(fallback);
-						killDirectChild();
-					},
-				);
-				return;
-			} catch {
-				// taskkill unavailable; at least bound the direct child.
-			}
+		try {
+			process.kill(-proc.pid, "SIGKILL");
+			return;
+		} catch (error) {
+			if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") return;
+			// Fall back to the direct child if the group signal is denied.
 		}
 		killDirectChild();
 	};

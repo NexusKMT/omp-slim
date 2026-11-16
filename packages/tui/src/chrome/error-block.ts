@@ -17,7 +17,7 @@ export function sanitizeErrorLine(
 	homeDir: string = os.homedir(),
 ): string {
 	const message = error instanceof Error ? error.message : String(error);
-	const text = shortenEmbeddedPaths(replaceTabs(sanitizeText(message.replace(/\r\n?/g, "\n"))), homeDir, true);
+	const text = shortenEmbeddedPaths(replaceTabs(sanitizeText(message.replace(/\r\n?/g, "\n"))), homeDir);
 	return truncateToWidth(text.replace(/\s+/g, " ").trim() || "Unknown error", Math.max(0, maxWidth));
 }
 

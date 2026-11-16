@@ -8,6 +8,7 @@
 
 ### Removed
 
+- Removed the Windows addon staging path, the `@oh-my-pi/pi-natives/path` entrypoint, and the `expandWindowsLongPath` / `getWindowsShortPath` bindings.
 - OMP Slim removes the Mnemopi-only cosine similarity, vector index, and MMR ranking kernels and bindings.
 - OMP Slim removes desktop capture, input, accessibility, application control, front-app tracking, desktop compatibility wrappers, and their platform dependencies. Clipboard, terminal, shell, PTY, OAuth, and general OS utilities remain available.
 - Removed microphone capture, speaker playback, and live WebRTC bindings from OMP Slim.

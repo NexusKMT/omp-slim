@@ -66,14 +66,7 @@ const NATIVES_PACKAGE = "@oh-my-pi/pi-natives";
  * `packages/natives/scripts/gen-npm-packages.ts`; kept here as the local
  * source of truth so the update path stays free of cross-package imports.
  */
-const SUPPORTED_NATIVE_TAGS: ReadonlySet<string> = new Set([
-	"linux-x64",
-	"linux-arm64",
-	"darwin-x64",
-	"darwin-arm64",
-	"win32-x64",
-	"win32-arm64",
-]);
+const SUPPORTED_NATIVE_TAGS: ReadonlySet<string> = new Set(["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"]);
 
 function currentNativeTag(): string {
 	return `${process.platform}-${process.arch}`;
@@ -328,7 +321,7 @@ async function getNpmGlobalBinDir(): Promise<string | undefined> {
 		if (result.exitCode !== 0) return undefined;
 		const prefix = result.text().trim();
 		if (prefix.length === 0) return undefined;
-		return process.platform === "win32" ? prefix : path.join(prefix, "bin");
+		return path.join(prefix, "bin");
 	} catch {
 		return undefined;
 	}
@@ -365,19 +358,9 @@ async function getMiseBinDirs(): Promise<string[]> {
 function getMiseDataDir(): string {
 	const override = process.env.MISE_DATA_DIR;
 	if (override && override.length > 0) return override;
-	if (process.platform === "win32") {
-		const localAppData = process.env.LOCALAPPDATA;
-		if (localAppData && localAppData.length > 0) return path.join(localAppData, "mise");
-	}
 	const xdgDataHome = process.env.XDG_DATA_HOME;
 	if (xdgDataHome && xdgDataHome.length > 0) return path.join(xdgDataHome, "mise");
 	return path.join(os.homedir(), ".local", "share", "mise");
-}
-
-function normalizePathForComparison(filePath: string): string {
-	const normalized = path.normalize(filePath);
-	if (process.platform === "win32") return normalized.toLowerCase();
-	return normalized;
 }
 
 function tryRealpath(p: string): string | undefined {
@@ -403,7 +386,7 @@ export function isSourceCheckout(): boolean {
  *
  * A manager (Tern) keeps `manager.json` (`{"manager": "tern", "name": "Tern"}`) two
  * directories above every binary it installs (`<root>/versions/<version>`,
- * `<root>/bin/omp.exe`) and updates them itself, so `omp update` must leave them alone.
+ * `<root>/bin/omp`) and updates them itself, so `omp update` must leave them alone.
  * A missing or unreadable manifest means unmanaged.
  */
 export async function managedInstallName(binaryPath: string): Promise<string | undefined> {
@@ -439,35 +422,16 @@ function isSymlinkPath(p: string): boolean {
 		return false;
 	}
 }
-/** Windows script shims (npm's launchers) that a native executable cannot overwrite. */
-function isWindowsScriptLauncherPath(launcherPath: string): boolean {
-	const extension = path.extname(launcherPath).toLowerCase();
-	return extension === ".cmd" || extension === ".ps1" || extension === ".bat";
-}
-
-/**
- * Path of bun's Windows launcher metadata sidecar for `launcherPath`.
- *
- * `bun install -g` writes a `<name>.bunx` / `<name>.exe` pair: the `.exe` is a
- * generic shim and the `.bunx` names the package entrypoint it launches.
- */
-function bunShimMarkerPath(launcherPath: string): string {
-	const base = path.basename(launcherPath, path.extname(launcherPath));
-	return path.join(path.dirname(launcherPath), `${base}.bunx`);
-}
 function isPathInDirectoryLexical(filePath: string, directoryPath: string): boolean {
-	const normalizedPath = normalizePathForComparison(path.resolve(filePath));
-	const normalizedDirectory = normalizePathForComparison(path.resolve(directoryPath));
-	const relativePath = path.relative(normalizedDirectory, normalizedPath);
+	const relativePath = path.relative(path.resolve(directoryPath), path.resolve(filePath));
 	return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 }
 
 function isPathInDirectory(filePath: string, directoryPath: string): boolean {
 	if (isPathInDirectoryLexical(filePath, directoryPath)) return true;
-	// Layer realpath resolution on top of the lexical guard. On Windows, ~/.bun
-	// is a junction when Bun is installed via Scoop, so `bun pm bin -g` and the
-	// PATH-resolved omp path can refer to the same directory through different
-	// strings. path.resolve does not traverse junctions/symlinks; realpath does.
+	// Layer realpath resolution on top of the lexical guard: `bun pm bin -g` and
+	// the PATH-resolved omp path can refer to the same directory through
+	// different strings. path.resolve does not traverse symlinks; realpath does.
 	// Resolve both the file and its parent directory: the file catches manager
 	// links like Homebrew's `bin/omp -> Cellar/.../bin/omp`; the parent fallback
 	// still tolerates fresh install paths where the file does not exist yet.
@@ -491,7 +455,6 @@ function isPathInManagerRoot(linkTarget: string, nodeModulesDir: string): boolea
 
 function resolveNpmGlobalNodeModulesDir(globalBinDir: string | undefined): string | undefined {
 	if (!globalBinDir) return undefined;
-	if (process.platform === "win32") return path.join(globalBinDir, "node_modules");
 	return path.join(path.dirname(globalBinDir), "lib", "node_modules");
 }
 
@@ -524,13 +487,6 @@ interface UpdateMethodResolutionOptions {
 	 */
 	ompLinkTarget?: string;
 	/**
-	 * Whether bun's launcher metadata (`<name>.bunx`) sits beside the resolved
-	 * launcher. Bun writes that sidecar next to every `.exe` shim it installs, so
-	 * its presence is what makes a regular-file launcher in bun's bin dir
-	 * bun-managed rather than a standalone binary that took the launcher over.
-	 */
-	bunShimMarker?: boolean;
-	/**
 	 * Whether package-manager routing (bun/npm) is permitted. Binary-only
 	 * releases pass `false`: a manager launcher then resolves to `"binary"` and
 	 * is taken over in place rather than reinstalled through its manager. Defaults
@@ -556,7 +512,6 @@ function resolveUpdateMethod(
 	const {
 		allowPackageManagers = true,
 		bunGlobalDir,
-		bunShimMarker = false,
 		homebrewPrefix,
 		miseBinDirs = [],
 		miseDataDir,
@@ -564,8 +519,6 @@ function resolveUpdateMethod(
 		ompIsRegularFile = false,
 		ompLinkTarget,
 	} = options;
-	const launcherExtension = path.extname(ompPath).toLowerCase();
-	const isWindowsScriptLauncher = isWindowsScriptLauncherPath(ompPath);
 	if (isPathInDirectory(ompPath, NIX_STORE_DIR)) return "nix";
 	if (homebrewPrefix && isPathInDirectory(ompPath, path.join(homebrewPrefix, "bin"))) return "brew";
 	if (miseBinDirs.some(dir => isPathInDirectory(ompPath, dir))) return "mise";
@@ -576,16 +529,7 @@ function resolveUpdateMethod(
 	// installer's default (~/.local/bin), classifying by directory alone routes
 	// a binary install through npm/bun, whose reinstall then collides with the
 	// existing file (npm EEXIST). Fall through to binary replacement instead.
-	// On Windows every launcher is a regular file, so ownership keys off the
-	// manager's own artifacts instead: npm's script shims (`omp`, `omp.cmd`,
-	// `omp.ps1`) and bun's `omp.bunx` sidecar. A bare `.exe` with neither is the
-	// standalone binary a binary-only release installed over the launcher —
-	// routing that back through bun reinstalls a package which no longer owns
-	// the launcher, and bun silently tolerates failing to overwrite the running
-	// `.exe` (EBUSY), so the install would stay pinned to the old version.
-	const isWindowsManagedLauncher =
-		process.platform === "win32" && (isWindowsScriptLauncher || launcherExtension === "" || bunShimMarker);
-	const isStandaloneRegularFile = ompIsRegularFile && !isWindowsManagedLauncher;
+	const isStandaloneRegularFile = ompIsRegularFile;
 	const bunNodeModulesDir = resolveBunGlobalNodeModulesDirFromLocations({
 		globalDir: bunGlobalDir,
 		globalBinDir: bunBinDir,
@@ -609,7 +553,6 @@ function resolveUpdateMethod(
 	) {
 		return "npm";
 	}
-	if (isWindowsScriptLauncher) return "npm";
 	return "binary";
 }
 
@@ -631,7 +574,6 @@ export function resolveUpdateTargetFromPath(
 	let ompIsSymlink = false;
 	let ompLinkTarget: string | undefined;
 	let ompRealpath: string | undefined;
-	const bunShimMarker = process.platform === "win32" && fs.existsSync(bunShimMarkerPath(ompPath));
 	try {
 		const stat = fs.lstatSync(ompPath);
 		ompIsRegularFile = stat.isFile() && !stat.isSymbolicLink();
@@ -646,7 +588,6 @@ export function resolveUpdateTargetFromPath(
 
 	const method = resolveUpdateMethod(ompPath, bunBinDir, {
 		...options,
-		bunShimMarker,
 		ompIsRegularFile,
 		ompLinkTarget,
 	});
@@ -666,7 +607,6 @@ export function resolveUpdateTargetFromPath(
 			resolveUpdateMethod(ompPath, bunBinDir, {
 				...options,
 				allowPackageManagers: true,
-				bunShimMarker,
 				ompIsRegularFile,
 				ompLinkTarget,
 			}) !== "binary";
@@ -906,8 +846,8 @@ async function addBunCacheActualDir(
 	packageNames: Set<string> | undefined,
 ): Promise<void> {
 	try {
-		// `fs.promises` rather than `Bun.file().json()`: on Windows, Bun's rejected read of a
-		// missing file holds no loop handle, so the loop can drain mid-await (#13470).
+		// `fs.promises` rather than `Bun.file().json()`: a rejected read of a missing file
+		// holds no loop handle, so the loop can drain mid-await (#13470).
 		const manifest = JSON.parse(await fs.promises.readFile(path.join(dirPath, "package.json"), "utf8")) as Partial<
 			Record<"name" | "version", unknown>
 		>;
@@ -1174,8 +1114,8 @@ async function validateExistingUpdateTarget(targetPath: string): Promise<void> {
  * Run the PATH-resolved omp binary and check if it reports the expected version.
  */
 export async function verifyInstalledVersion(expectedVersion: string): Promise<InstalledVersionVerification> {
-	// A fresh lookup: the install may have moved what PATH resolves to (a Windows
-	// shim takeover retires `omp.cmd` for `omp.exe`) since the target was resolved.
+	// A fresh lookup: the install may have moved what PATH resolves to since the
+	// target was resolved.
 	const ompPath = $which(APP_NAME, { cache: WhichCachePolicy.Fresh }) ?? undefined;
 	if (!ompPath) return { ok: false };
 	const binaryPath = tryRealpath(ompPath) ?? ompPath;
@@ -1223,21 +1163,17 @@ async function unlinkIfExists(filePath: string): Promise<void> {
 /**
  * Remove a backup binary without letting the removal abort a completed update.
  *
- * On Windows the executable that was just moved aside is still mapped as the
- * running process image, so unlinking it fails with EPERM/EACCES until this
- * process exits (issue #845). On macOS the same unlink would instead succeed
- * while breaking the live process's TCC permission attribution — macOS
- * resolves grants against the executable's on-disk image path — so a `.bak`
- * still mapped by any process is retained for a later sweep. The replacement
- * and verification already succeeded by the time we get here, so every error
- * is swallowed; the leftover is reclaimed by {@link sweepStaleUpdateArtifacts}
- * on the next update once it is no longer in use. Returns whether the file is
- * gone.
+ * A `.bak` still mapped as some process's executable image must not be
+ * unlinked: macOS resolves TCC grants against that on-disk image path, so
+ * unlinking it would break the live process. The replacement and verification
+ * already succeeded by the time we get here, so every error is swallowed; the
+ * leftover is reclaimed by {@link sweepStaleUpdateArtifacts} on the next update
+ * once it is no longer in use. Returns whether the file is gone.
  */
 async function removeBackupBestEffort(filePath: string): Promise<boolean> {
 	// macOS only, `.bak` only: a `.new` temp file is a download in progress,
-	// never an installed image, and Windows/Linux locking is already handled by
-	// the swallow below — so both stay ungated.
+	// never an installed image, and a lock failure is already swallowed below —
+	// so both stay ungated.
 	if (process.platform === "darwin" && filePath.endsWith(".bak")) {
 		// `/usr/sbin/lsof -t` prints the PIDs holding the file; exit 1 with
 		// empty stdout and stderr is the only result that proves the file is
@@ -1265,12 +1201,11 @@ async function removeBackupBestEffort(filePath: string): Promise<boolean> {
  *
  * Each self-update writes to `<binary>.<timestamp>.<pid>.new` and moves the
  * previous executable to `<binary>.<timestamp>.<pid>.bak` before swapping the
- * new one in. On Windows a backup cannot be deleted while the updating process
- * is alive (it is the running process image), so it is left for a later run to
- * reclaim once its owning process has exited. On macOS the sweep must also
- * spare a backup that any process still maps as its executable image —
- * unlinking it would break the live process's TCC permission attribution — so
- * a live image survives until its process exits. A `.new` temp file or a
+ * new one in. A backup is left for a later run to reclaim once its owning
+ * process has exited. On macOS the sweep must also spare a backup that any
+ * process still maps as its executable image — unlinking it would break the
+ * live process's TCC permission attribution — so a live image survives until
+ * its process exits. A `.new` temp file or a
  * `.patch` download (`<binary>.<timestamp>.<pid>.patch`) only survives a hard
  * kill mid-update; it is reaped once older than the download window, which a
  * live download cannot exceed without timing out and cleaning up after
@@ -1328,8 +1263,7 @@ export async function replaceBinaryForUpdate(options: BinaryReplacementOptions):
 	try {
 		// `backupPath` is unique per attempt (see updateViaBinaryAt), so this rename
 		// never has to overwrite — or unlink — a possibly-locked leftover from an
-		// earlier run. Renaming the running executable itself is permitted on
-		// Windows; only deleting its still-mapped image is not.
+		// earlier run.
 		// A missing target is tolerated: repairing a launcher that a failed
 		// package-manager reinstall removed installs the binary at a vacant
 		// path. There is then nothing to restore, so a verification failure
@@ -1350,11 +1284,9 @@ export async function replaceBinaryForUpdate(options: BinaryReplacementOptions):
 		}
 
 		backupReady = false;
-		// Swap done and verified. On Windows the backup is still the running
-		// process image and cannot be unlinked until this process exits, and on
-		// macOS unlinking the still-mapped backup would break the live image's
-		// TCC permission attribution, so either way a failure here must NOT fail
-		// an otherwise-successful update.
+		// Swap done and verified. On macOS unlinking a still-mapped backup would
+		// break the live image's TCC permission attribution, so a failure here must
+		// NOT fail an otherwise-successful update.
 		await removeBackupBestEffort(options.backupPath);
 		return verification;
 	} catch (err) {
@@ -1720,13 +1652,7 @@ function packageManagerUpdateSteps(
 			// The launcher is a manager's script or shim, never a build a patch
 			// could start from, so the check names no installed version.
 			const build = await fetchBuild({ version: release.version });
-			// npm's script shims outrank `.exe` in PowerShell and Git Bash, so
-			// they must be retired rather than merely shadowed.
-			if (isWindowsScriptLauncherPath(launcherPath)) {
-				await updateViaShimTakeover(launcherPath, build, { onProgress });
-			} else {
-				await updateViaBinaryAt(launcherPath, build, { onProgress });
-			}
+			await updateViaBinaryAt(launcherPath, build, { onProgress });
 		},
 	};
 }
@@ -1736,10 +1662,8 @@ function packageManagerUpdateSteps(
  * succeeds without updating it or leaves no working launcher behind.
  *
  * A global reinstall has to replace files the running process still holds open.
- * On Windows that is unavoidable — the launcher image, the loaded native addon,
- * and the package tree being executed are all locked. Bun writes the new
- * `.bunx` metadata before ignoring EBUSY from the launcher replacement, while
- * npm can retire its shims before an install fails.
+ * Bun writes the new `.bunx` metadata before ignoring EBUSY from the launcher
+ * replacement, while npm can retire its shims before an install fails.
  *
  * A successful install whose PATH launcher still reports an older version
  * means the manager no longer controls that launcher, so it is taken over with
@@ -1963,9 +1887,9 @@ export async function updateViaBinaryAt(
 	// first kept writing to its open fd (size + digest still passed), then chmod
 	// hit the missing path and the update aborted (issue #8434). The backup needs
 	// the same uniqueness: a stale backup from an earlier update may still be
-	// locked (the previous process image on Windows), so a fixed name would force
-	// the move-aside rename to overwrite it. pid, timestamp, and a process-local
-	// counter keep two updates started in the same millisecond from colliding.
+	// locked, so a fixed name would force the move-aside rename to overwrite it.
+	// pid, timestamp, and a process-local counter keep two updates started in the
+	// same millisecond from colliding.
 	const attempt = `${Date.now()}.${process.pid}.${updateAttemptSeq++}`;
 	const tempPath = `${targetPath}.${attempt}.new`;
 	const backupPath = `${targetPath}.${attempt}.bak`;
@@ -1985,16 +1909,6 @@ export async function updateViaBinaryAt(
 			expectedVersion: build.version,
 			verifyInstalledVersion: options.verifyInstalledVersion ?? (version => verifyBinaryAtPath(targetPath, version)),
 		});
-		// The launcher is no longer bun-managed: drop bun's metadata sidecar so
-		// the next update classifies this install as a standalone binary instead
-		// of reinstalling a package that can no longer own the launcher (bun
-		// tolerates failing to overwrite the running `.exe`, so that reinstall
-		// would leave the install pinned to the old version). Done after the
-		// verified swap, so a rollback still restores a working bun shim, and
-		// best effort: a leftover sidecar only costs one misrouted classification.
-		try {
-			await unlinkIfExists(bunShimMarkerPath(targetPath));
-		} catch {}
 		// Reclaim backups from earlier updates whose owning process has since exited.
 		await sweepStaleUpdateArtifacts(targetPath);
 		return result;
@@ -2004,133 +1918,14 @@ export async function updateViaBinaryAt(
 }
 
 /**
- * In-place forwarder bodies, by shim extension, for launchers that cannot be
- * renamed aside during a script-shim takeover; each execs the sibling
- * `omp.exe`. Rewriting matters for the shims that outrank `.exe` at command
- * resolution: PowerShell prefers `.ps1` and Git Bash resolves the
- * extensionless sh shim first, so leaving the old body behind would keep
- * launching the replaced install.
- */
-const SHIM_FORWARDERS: Record<string, string> = {
-	"": `#!/bin/sh\nexec "$(dirname "$0")/${APP_NAME}.exe" "$@"\n`,
-	".cmd": `@"%~dp0${APP_NAME}.exe" %*\r\n`,
-	".bat": `@"%~dp0${APP_NAME}.exe" %*\r\n`,
-	".ps1": `& "$PSScriptRoot\\${APP_NAME}.exe" @args\nexit $LASTEXITCODE\n`,
-};
-
-/**
- * Take over a Windows script-launcher install for a binary-only release.
+ * Installer one-liner for recovery instructions.
  *
- * npm-managed Windows installs are launched through script shims
- * (`omp`/`omp.cmd`/`omp.ps1`) that cannot be overwritten with a native
- * executable. The release binary is installed as `omp.exe` beside them and
- * the shims are then renamed aside: cmd.exe would already prefer `.exe` via
- * PATHEXT, but PowerShell resolves `.ps1` first, so the takeover only sticks
- * once the shims are out of the way. A working launcher exists at every
- * step — the exe lands before any shim moves, a shim that refuses to move
- * (a running `.cmd` can be renamed but may be held open some other way) is
- * rewritten in place as a forwarder to the exe, and a failed version
- * verification moves everything back.
- */
-export async function updateViaShimTakeover(
-	shimPath: string,
-	build: BuildAnswer,
-	options: BuildDownloadOptions & { verifyBinary?: typeof verifyBinaryAtPath } = {},
-): Promise<void> {
-	const launcherDir = path.dirname(shimPath);
-	const exePath = path.join(launcherDir, `${APP_NAME}.exe`);
-	const attempt = `${Date.now()}.${process.pid}.${updateAttemptSeq++}`;
-	const tempPath = `${exePath}.${attempt}.new`;
-	await downloadBuild(build, { basePath: exePath, patchPath: `${exePath}.${attempt}.patch`, tempPath }, options);
-	options.onProgress?.({ phase: "installing", version: build.version });
-	const forwarded: Array<{ launcher: string; original: string }> = [];
-	const stuck: string[] = [];
-	// Serialize the launcher swap and artifact sweep so two overlapping updates
-	// never retire the same shims or reclaim a live run's backup before its
-	// verification can roll it back.
-	await withFileLock(exePath, async () => {
-		console.log(chalk.dim(`Installing ${APP_NAME}.exe beside the script launcher...`));
-		await fs.promises.rename(tempPath, exePath);
-		// Retire the shims so PATH resolution lands on the new exe. Renamed, not
-		// deleted: restorable on verification failure, and Windows permits
-		// renaming a batch file that is still executing. A shim that cannot be
-		// renamed (held open without delete sharing) is rewritten in place as a
-		// forwarder to the exe — write and rename take different Windows locks,
-		// so one can succeed where the other fails.
-		const backupSuffix = `${attempt}.bak`;
-		const retired: Array<{ launcher: string; backup: string }> = [];
-		for (const ext of ["", ".cmd", ".ps1", ".bat"]) {
-			const launcher = path.join(launcherDir, `${APP_NAME}${ext}`);
-			const backup = `${launcher}.${backupSuffix}`;
-			try {
-				await fs.promises.rename(launcher, backup);
-				retired.push({ launcher, backup });
-			} catch (err) {
-				if (isEnoent(err)) continue;
-				try {
-					const original = await Bun.file(launcher).text();
-					await Bun.write(launcher, SHIM_FORWARDERS[ext]);
-					forwarded.push({ launcher, original });
-				} catch {
-					stuck.push(launcher);
-				}
-			}
-		}
-
-		// Verify the exe by its explicit path: $which cached the shim path when
-		// the update target was resolved, and the shim was just renamed away, so
-		// a PATH re-resolution here would test a file that no longer exists.
-		const verify = options.verifyBinary ?? verifyBinaryAtPath;
-		const verification = await verify(exePath, build.version);
-		if (!verification.ok) {
-			for (const { launcher, backup } of retired) {
-				try {
-					await fs.promises.rename(backup, launcher);
-				} catch {}
-			}
-			for (const { launcher, original } of forwarded) {
-				try {
-					await Bun.write(launcher, original);
-				} catch {}
-			}
-			await unlinkIfExists(exePath);
-			throw new Error(
-				`${formatVerificationFailure(verification, build.version)}; restored previous ${APP_NAME} launcher`,
-			);
-		}
-		for (const { backup } of retired) {
-			await removeBackupBestEffort(backup);
-		}
-		// Reclaim exe backups and retired-shim leftovers from earlier attempts.
-		for (const ext of [".exe", "", ".cmd", ".ps1", ".bat"]) {
-			await sweepStaleUpdateArtifacts(path.join(launcherDir, `${APP_NAME}${ext}`));
-		}
-	});
-	for (const { launcher } of forwarded) {
-		console.log(chalk.dim(`Converted ${launcher} to a forwarder (it could not be removed).`));
-	}
-	for (const launcher of stuck) {
-		console.log(
-			chalk.yellow(
-				`Could not retire ${launcher}; shells that prefer it may keep launching the old version until it is deleted manually.`,
-			),
-		);
-	}
-	printVerifiedVersion(build.version);
-	console.log(chalk.dim(`Restart ${APP_NAME} to use the new version`));
-}
-
-/**
- * Platform-appropriate installer one-liner for recovery instructions.
- *
- * Forces the installer's binary mode (`--binary` / `-Binary`): the default
- * mode prefers a bun-based install whenever bun is present, which would send
- * a user recovering from a binary-only release straight back through bun.
+ * Forces the installer's binary mode (`--binary`): the default mode prefers a
+ * bun-based install whenever bun is present, which would send a user
+ * recovering from a binary-only release straight back through bun.
  */
 function installerHint(): string {
-	return process.platform === "win32"
-		? "& ([scriptblock]::Create((irm https://omp.sh/install.ps1))) -Binary"
-		: "curl -fsSL https://omp.sh/install | sh -s -- --binary";
+	return "curl -fsSL https://omp.sh/install | sh -s -- --binary";
 }
 
 /** Persisted channel, or undefined when settings are unavailable (SDK/test embedding without `Settings.init()`). */
@@ -2268,11 +2063,10 @@ async function runBinaryUpdate(
  * release is binary-only ({@link shouldForceBinaryUpdate}).
  *
  * The launcher is resolved again without package-manager routing: a manager
- * symlink is taken over in place, a Windows script launcher gets `omp.exe`
- * beside it. The binary is the build service's newest on the channel. A build
- * older than npm's release that would not move the install forward means the
- * release is still uploading, so the update stops instead of reinstalling or
- * downgrading.
+ * symlink is taken over in place. The binary is the build service's newest on
+ * the channel. A build older than npm's release that would not move the
+ * install forward means the release is still uploading, so the update stops
+ * instead of reinstalling or downgrading.
  */
 async function updateToStandaloneBinary(
 	manager: "bun" | "npm",
@@ -2292,23 +2086,15 @@ async function updateToStandaloneBinary(
 		console.log(chalk.dim(`Installing the newest published ${channel} build, ${build.version}.`));
 	}
 	const unmanaged = `This install is no longer managed by ${manager}. Removing the old global package may delete this launcher; if it does, reinstall with: ${installerHint()}`;
-	if (target.method === "binary") {
-		if (target.replacesSymlink) {
-			console.log(chalk.dim("Replacing the package-manager launcher with the standalone binary."));
-		}
-		await updateViaBinaryAt(target.path, build, {
-			validateExistingTarget: target.validateExistingTarget,
-			onProgress,
-		});
-		if (target.replacesSymlink) console.log(chalk.yellow(unmanaged));
-		return build.version;
+	if (target.method !== "binary") throw new Error(`Could not resolve ${APP_NAME} binary path in PATH`);
+	if (target.replacesSymlink) {
+		console.log(chalk.dim("Replacing the package-manager launcher with the standalone binary."));
 	}
-	// Without package-manager routing only a Windows script launcher resolves
-	// to a manager (the bun/npm bin-dir probes are skipped), so its path is known.
-	if (target.method !== "npm" || !target.path) throw new Error(`Could not resolve ${APP_NAME} launcher path in PATH`);
-	console.log(chalk.dim("This release ships as a standalone binary; replacing the script launcher."));
-	await updateViaShimTakeover(target.path, build, { onProgress });
-	console.log(chalk.yellow(unmanaged));
+	await updateViaBinaryAt(target.path, build, {
+		validateExistingTarget: target.validateExistingTarget,
+		onProgress,
+	});
+	if (target.replacesSymlink) console.log(chalk.yellow(unmanaged));
 	return build.version;
 }
 

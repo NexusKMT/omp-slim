@@ -97,8 +97,8 @@ function getDefaultSessionDirName(cwd: string): {
 	let shadowedHomeDirName: string | undefined;
 	let shadowedHomeHashedDirName: string | undefined;
 	let scope: "home" | "tmp" | "abs";
-	// The temp root is checked first: it is the more specific root wherever it
-	// nests inside home (Windows' `%USERPROFILE%\AppData\Local\Temp`).
+	// The temp root is checked first: it is the more specific root wherever a
+	// `TMPDIR` such as `~/tmp` nests inside home.
 	if (isRelativeWithin(tempRelative)) {
 		encodedDirName = encodeRelativeSessionDirName("-tmp", tempRelative);
 		if (inHome) {

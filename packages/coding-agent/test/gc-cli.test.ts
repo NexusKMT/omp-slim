@@ -2513,7 +2513,7 @@ const apfsCompresses = compresses && method === "apfs";
  * passes, and each batch "compresses" every candidate it is handed.
  * Returns the paths of every batch, in order.
  */
-function fakeCompressionBackend(volume: gcCompress.CompressMethod = "ntfs"): string[][] {
+function fakeCompressionBackend(volume: gcCompress.CompressMethod = "apfs"): string[][] {
 	const batches: string[][] = [];
 	spyOn(gcCompress, "compressMethod").mockResolvedValue(volume);
 	spyOn(gcCompress, "compressionWorks").mockResolvedValue(true);
@@ -2834,7 +2834,7 @@ describe("runGcCommand session compression", () => {
 
 	test("omp gc --compress --apply fails when the compression probe cannot run", async () => {
 		// A supported volume, but no sessions directory to hold the probe's scratch dir.
-		const volume = spyOn(gcCompress, "compressMethod").mockResolvedValue("ntfs");
+		const volume = spyOn(gcCompress, "compressMethod").mockResolvedValue("apfs");
 		try {
 			await runCli(["gc", "--agent-dir", root, "--compress", "--apply"]);
 		} finally {
@@ -2848,14 +2848,12 @@ describe("runGcCommand session compression", () => {
 		expect(writes.join("")).not.toContain("compress skipped");
 	});
 
-	test("the compression probe throws when the compression tool fails instead of reporting no compression", async () => {
-		// The other platform's tool is absent here, so its batch reports a command failure.
-		const absentTool = process.platform === "win32" ? "apfs" : "ntfs";
-
-		await expect(gcCompress.compressionWorks(root, absentTool)).rejects.toThrow(
-			absentTool === "apfs" ? "ditto exited" : "compact exited",
-		);
-	});
+	test.skipIf(Bun.which("ditto") !== null)(
+		"the compression probe throws when the compression tool is missing instead of reporting no compression",
+		async () => {
+			await expect(gcCompress.compressionWorks(root, "apfs")).rejects.toThrow("ditto exited");
+		},
+	);
 
 	test.skipIf(supported)("the background run never starts without filesystem compression", async () => {
 		const { file } = await writeIdleSession(Bun.randomUUIDv7());

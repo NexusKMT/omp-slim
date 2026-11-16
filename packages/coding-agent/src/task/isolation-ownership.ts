@@ -35,11 +35,9 @@ export interface IsolationOwner {
  * validate so an exact string compare rejects a recycled pid.
  *
  * Linux reads `/proc/<pid>/stat` field 22 (start time in clock ticks since
- * boot); other Unixes shell out to `ps -o lstart`. Windows reports neither (a
- * `ps` found there knows other pids), yielding `null`: a pid-only liveness check.
+ * boot); macOS shells out to `ps -o lstart`.
  */
 async function processStartToken(pid: number): Promise<string | null> {
-	if (process.platform === "win32") return null;
 	if (process.platform === "linux") {
 		let stat: string;
 		try {
@@ -119,7 +117,7 @@ export const RETAINED_BACKEND_FILE = ".omp-retained-backend.json";
 /**
  * Backends whose workspaces `omp worktree clear` must not remove with plain
  * recursive `rm`, but route through native `isoStop` teardown instead:
- * mounts (overlayfs, projfs), where `rm` destroys the preserved layer and
+ * mounts (overlayfs), where `rm` destroys the preserved layer and
  * fails on the mountpoint, and Btrfs subvolumes, whose root is only removable
  * via subvolume delete (its `stop` falls back to plain `rm` for ordinary
  * dirs, so routing it is always safe). Plain-copy and reflink backends need
@@ -132,7 +130,7 @@ export const RETAINED_BACKEND_FILE = ".omp-retained-backend.json";
  * before a sidecar here could help.
  */
 export function needsNativeTeardown(backend: unknown): backend is number {
-	return backend === IsoBackendKind.Overlayfs || backend === IsoBackendKind.Projfs || backend === IsoBackendKind.Btrfs;
+	return backend === IsoBackendKind.Overlayfs || backend === IsoBackendKind.Btrfs;
 }
 
 /**
