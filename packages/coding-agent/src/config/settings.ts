@@ -1807,10 +1807,9 @@ export class Settings {
 	 * Raw global settings layer (`config.yml`/`config.yaml`), deep-cloned.
 	 *
 	 * Exposes arbitrary namespaced keys (e.g. an extension's own `piVim` block)
-	 * that the typed, schema-bound {@link get} cannot reach. Used by the legacy
-	 * pi `SettingsManager` shim to match upstream Pi's `getGlobalSettings()`.
-	 * The clone means callers cannot mutate internal state. An {@link overlay}
-	 * reports its parent's layer with the overlay's own writes merged on top.
+	 * that the typed, schema-bound {@link get} cannot reach. The clone means
+	 * callers cannot mutate internal state. An {@link overlay} reports its
+	 * parent's layer with the overlay's own writes merged on top.
 	 */
 	getGlobalSettings(): RawSettings {
 		const own = structuredClone(this.#global);
@@ -1819,9 +1818,8 @@ export class Settings {
 
 	/**
 	 * Raw project settings layer (`.claude/settings.yml`, `.omp/config.yml`,
-	 * etc.), deep-cloned. Companion to {@link getGlobalSettings} for the legacy
-	 * pi `SettingsManager` shim's `getProjectSettings()`; an {@link overlay}
-	 * likewise reports its parent's layer under its own.
+	 * etc.), deep-cloned. Companion to {@link getGlobalSettings}; an
+	 * {@link overlay} likewise reports its parent's layer under its own.
 	 */
 	getProjectSettings(): RawSettings {
 		const own = structuredClone(this.#project);
@@ -3873,10 +3871,9 @@ const activeSettingsScope = new AsyncLocalStorage<Settings>();
 /**
  * Run extension-owned work with the settings instance of its active session.
  *
- * Legacy Pi extensions synchronously call `SettingsManager.create(ctx.cwd)`;
- * `cwd` alone cannot distinguish concurrent sessions that use different
- * settings for the same project. The async scope supplies that missing session
- * identity without process-global mutation.
+ * Code that resolves settings from `cwd` alone cannot distinguish concurrent
+ * sessions with different settings for the same project. The async scope
+ * supplies that missing session identity without process-global mutation.
  */
 export function withActiveSettings<T>(instance: Settings | undefined, fn: () => T): T {
 	return instance ? activeSettingsScope.run(instance, fn) : fn();
@@ -3899,7 +3896,7 @@ export function isSettingsInitialized(): boolean {
 }
 
 /**
- * Resolve the settings visible to a legacy Pi `SettingsManager.create()` call.
+ * Resolve the settings visible to code that only knows `cwd`/`agentDir`.
  *
  * An active extension session is authoritative because `cwd`/`agentDir` cannot
  * uniquely identify concurrent SDK sessions with per-session overrides. Outside

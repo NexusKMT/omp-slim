@@ -49,7 +49,7 @@ try {
 		`const fixture = ${JSON.stringify({ work, cwd, agentDir, resultPath, baseUrl: server.url.href })};\n` +
 			String.raw`
 import assert from "node:assert/strict";
-import { SettingsManager } from "@mariozechner/pi-coding-agent";
+import { findScopedSettings, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/settings";
 import { cfgTaskAgentModelOverrides } from "@oh-my-pi/pi-coding-agent/task/settings";
 import { hasMatch } from "@oh-my-pi/pi-natives";
@@ -104,13 +104,13 @@ export default function (api) {
 						extensions: [registerFixtureProvider, childApi => childApi.registerCommand("probe", {
 							handler: async (_args, childCtx) => {
 								try {
-									cfgExtensions.override(SettingsManager.create(childCtx.cwd), [fixture.work + "/extension-" + name]);
+									cfgExtensions.override(findScopedSettings(childCtx.cwd) ?? Settings.isolated(), [fixture.work + "/extension-" + name]);
 									entered[index].resolve();
 									await entered[1 - index].promise;
 									if (name === "b") await disposedA.promise;
 									// Re-enter after an overlapping callback (and, for B,
 									// after A's disposal) before mutating a second setting.
-									cfgTaskAgentModelOverrides.override(SettingsManager.create(childCtx.cwd), {
+									cfgTaskAgentModelOverrides.override(findScopedSettings(childCtx.cwd) ?? Settings.isolated(), {
 										["only-" + name]: "fixture/model-" + name,
 									});
 									const task = session.getToolByName("task");

@@ -132,10 +132,9 @@ const types = type.module({
 
 ## Adapters
 
-TypeBox-style and Zod-style authoring are backed by the omptype runtime:
+Zod-style authoring is backed by the omptype runtime:
 
 ```ts
-import { Type, type Static } from "@oh-my-pi/omptype/typebox";
 import { z } from "@oh-my-pi/omptype/zod";
 
 const User = z.object({ name: z.string() });

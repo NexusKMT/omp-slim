@@ -301,7 +301,6 @@ Also exposed:
 - `pi.logger`
 - `pi.arktype` (the omptype `type(...)` schema builder)
 - `pi.zod` (Zod-compatible builder backed by omptype)
-- `pi.typebox` (legacy TypeBox-compatible shim)
 - `pi.pi` (package exports)
 
 ### Runtime setting overrides
@@ -389,7 +388,6 @@ Handlers and tool `execute` receive `ctx` with:
    ```
 
 - `getSystemPrompt()`
-- `isProjectTrusted()` — always `true`; OMP does not ask for per-directory trust before loading project inputs
 - `agent` — the agent this session runs: `{ kind: "main" | "sub", id, name, depth, parentId? }`. Factories are rebound to every subagent session (task tool, eval `agent()`, `/tan` clones), so a handler can check `ctx.agent.kind === "sub"` or the lowercased agent definition `name` (for example `"explore"`) to act only in subagents. Use `kind`, not `depth`: `depth` counts `task` nesting only, so `/tan` clones are subagents at depth 0 and report `name: "sub"`. An advisor's own tool calls reach the session's `tool_call`/`tool_result` handlers with `{ kind: "sub", id: "advisor", name: "advisor", depth: 0, parentId }`, so `kind === "main"` also excludes advisor activity
 - `runEphemeralTurn(...)` (optional; see below)
 - `startLive(...)` (optional; interactive mode only; see below)
@@ -653,7 +651,7 @@ Current runtime note: `ExtensionRunner.emitResourcesDiscover(...)` is implemente
 
 ## Tool authoring details
 
-`registerTool` uses `ToolDefinition` from `types.ts`. Its `parameters` field accepts omptype schemas; the injected TypeBox compatibility shim remains available for legacy extensions.
+`registerTool` uses `ToolDefinition` from `types.ts`. Its `parameters` field accepts omptype schemas built with `pi.arktype` or `pi.zod`.
 
 Prefer registration in the factory, but tools discovered later (for example in
 `session_start`) are also mounted into the live registry. Registrations made

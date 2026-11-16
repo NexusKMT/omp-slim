@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { withFileMutationQueue } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-coding-agent-shim";
+import { withFileMutationQueue } from "@oh-my-pi/pi-coding-agent/tools/file-mutation-queue";
 
 /** Queue two operations on the given paths; the first blocks until released. Returns the observed event order. */
 async function runBlockedPair(first: string, second: string): Promise<{ beforeRelease: string[]; final: string[] }> {
@@ -25,7 +25,7 @@ async function runBlockedPair(first: string, second: string): Promise<{ beforeRe
 	return { beforeRelease, final: events };
 }
 
-describe("legacy shim withFileMutationQueue export", () => {
+describe("withFileMutationQueue", () => {
 	let tmpDir: string;
 
 	beforeEach(async () => {

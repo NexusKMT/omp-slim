@@ -183,10 +183,7 @@ export type KeyId = BaseKey | ModifiedKeyId<BaseKey>;
  * is literally `"enter"`); the value of `Key` over a bag of magic strings is
  * that each property is typed to the exact `KeyId` literal it produces and the
  * modifier methods return precisely-typed concatenations (e.g. `Key.ctrl("c")`
- * is `"ctrl+c"`, not just `string`). This mirrors the upstream
- * `@mariozechner/pi-tui` `Key` export verbatim so plugins built against any
- * scope alias (`@mariozechner`, `@earendil-works`, `@oh-my-pi`) keep working
- * once the specifier shim remaps them to this package.
+ * is `"ctrl+c"`, not just `string`).
  */
 export const Key = {
 	escape: "escape",

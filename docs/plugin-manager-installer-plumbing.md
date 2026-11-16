@@ -198,7 +198,7 @@ Each resolver includes base entries plus feature entries:
 - explicit feature list -> only selected features
 - `enabledFeatures === null` -> enable features marked `default: true`
 
-Manifest entries may point to a file. Tool/hook/command directories require a direct `index.ts`, `index.js`, `index.mjs`, or `index.cjs`. Extension directories instead use this precedence: their own `package.json` `omp`/`pi.extensions`, then a direct index, then a sorted one-level scan of module files and child directories with indexes. Declaration files are excluded from that scan. Missing paths are omitted during runtime resolution; enabled declared extension entries are validated during install.
+Manifest entries may point to a file. Tool/hook/command directories require a direct `index.ts`, `index.js`, `index.mjs`, or `index.cjs`. Extension directories instead use this precedence: their own `package.json` `omp.extensions`, then a direct index, then a sorted one-level scan of module files and child directories with indexes. Declaration files are excluded from that scan. Missing paths are omitted during runtime resolution; enabled declared extension entries are validated during install.
 
 ## Current runtime wiring
 

@@ -32,7 +32,6 @@ export {
 	type TranscriptPresenter,
 } from "@oh-my-pi/pi-tui/chat/extension-types";
 import type { type as ArkType } from "@oh-my-pi/omptype";
-import type * as TypeBox from "@oh-my-pi/omptype/typebox";
 import type * as zod from "@oh-my-pi/omptype/zod";
 import type {
 	AgentMessage,
@@ -792,14 +791,6 @@ export interface ExtensionContext {
 	sessionModes?: ExtensionSessionModes;
 	/** Identity of the agent this session runs: the top-level session or a subagent. */
 	agent: ExtensionAgentIdentity;
-	/**
-	 * Whether the current project/workspace is trusted. OMP performs no
-	 * project-trust gating — project-level settings and extensions load
-	 * unconditionally — so this always returns `true`. Exposed for
-	 * compatibility with extensions authored against upstream Pi, whose
-	 * `SettingsManager` accepts a `projectTrusted` flag.
-	 */
-	isProjectTrusted(): boolean;
 	/** Get the current effective system prompt. */
 	getSystemPrompt(): string[];
 
@@ -852,21 +843,6 @@ export interface ExtensionContext {
 		params: Record<string, unknown>,
 		options?: { signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback<TDetails> },
 	): Promise<AgentToolResult<TDetails>>;
-
-	/**
-	 * Whether project-local inputs for the current working directory (extensions, settings,
-	 * skills, resources) are trusted. Upstream `@earendil-works/pi-coding-agent` (>=0.79) asks the
-	 * user once per directory before loading project-local inputs and exposes the saved decision
-	 * here; extensions written against that API (e.g. Plannotator) feature-detect this method to
-	 * decide whether project-local config is safe to load, and warn when it is absent.
-	 *
-	 * OMP has no equivalent per-directory trust gate: `.omp/extensions`, `.omp/config.yml`, and
-	 * other project-local inputs are already discovered and loaded unconditionally (see
-	 * `docs/extension-loading.md`). This method exists for compatibility with that upstream surface
-	 * and always returns `true`, truthfully reflecting that OMP already trusts project-local inputs
-	 * by default -- it does not narrow or widen OMP's own security model.
-	 */
-	isProjectTrusted(): boolean;
 }
 
 /**
@@ -948,7 +924,7 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	label: string;
 	/** Description for LLM */
 	description: string;
-	/** Parameter schema (Zod, or TypeBox for legacy/extension compat). */
+	/** Parameter schema (arktype or omptype Zod). */
 	parameters: TParams;
 	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */
 	hidden?: boolean;
@@ -1029,11 +1005,7 @@ export type SourceScope = "user" | "project" | "temporary";
 /** Whether a tool's source came from an installed package or a top-level (loose) file. */
 export type SourceOrigin = "package" | "top-level";
 
-/**
- * Provenance metadata describing where a registered tool came from. Mirrors the
- * `@earendil-works/pi-coding-agent` `SourceInfo` contract so extensions authored
- * against upstream pi (e.g. gentle-pi) can read `sourceInfo.source` unchanged.
- */
+/** Provenance metadata describing where a registered tool came from. */
 export interface SourceInfo {
 	/** Synthetic or on-disk identifier for the tool's origin (e.g. `<builtin:read>`). */
 	path: string;
@@ -1749,9 +1721,6 @@ export interface ExtensionAPI {
 	/** File logger for error/warning/debug messages */
 	logger: typeof PiLogger;
 
-	/** Injected TypeBox shim for legacy `Type.Object(...)` parameter authoring. */
-	typebox: typeof TypeBox;
-
 	/** Injected omptype schema builder for extension tools. */
 	arktype: typeof ArkType;
 
@@ -2192,12 +2161,7 @@ export type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
 export interface RegisteredTool<TParams extends TSchema = TSchema, TDetails = unknown> {
 	definition: ToolDefinition<TParams, TDetails>;
 	extensionPath: string;
-	/**
-	 * Upstream-shaped provenance mirroring {@link SourceInfo}. Extensions authored
-	 * against `@earendil-works/pi-coding-agent` — whose registered tools expose
-	 * `sourceInfo` — read `sourceInfo.path` off `getAllRegisteredTools()` entries,
-	 * so it carries the same value `SessionTools.getAllToolInfos()` synthesizes.
-	 */
+	/** Provenance for this tool; the same value `SessionTools.getAllToolInfos()` synthesizes. */
 	sourceInfo: SourceInfo;
 }
 

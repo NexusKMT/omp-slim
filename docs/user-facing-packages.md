@@ -29,9 +29,9 @@ Sources: [`packages/omptype/README.md`](../packages/omptype/README.md), [`packag
 
 - Package: public `@oh-my-pi/omptype`; install with `bun add @oh-my-pi/omptype`. Its manifest declares Node 20 or newer and Bun 1.4.4 or newer.
 - Feature: callable ArkType-compatible schemas with cheap interpreted startup, lazy hot-path compilation, validation errors, defaults and morphs, and JSON Schema emission.
-- Public surfaces: `@oh-my-pi/omptype` for native authoring, `/typebox` and `/zod` for compatibility builders, and `/ark` for the alias-free ArkType compatibility facade.
+- Public surfaces: `@oh-my-pi/omptype` for native authoring, `/zod` for the Zod-style builder, and `/ark` for the alias-free ArkType facade.
 - Runtime behavior: schema calls return the validated value or `type.errors`; `.assert()` returns the value or throws; `.allows()` performs a boolean check.
-- Limits: this is an intentionally focused compatibility surface rather than a complete implementation of every ArkType, TypeBox, or Zod API.
+- Limits: this is an intentionally focused compatibility surface rather than a complete implementation of every ArkType or Zod API.
 
 ### `packages/metaharness` — unified benchmark manager
 

@@ -19,7 +19,6 @@ import type { HookUIContext } from "../../extensibility/hooks/types";
 import { getAllPluginToolPaths } from "../../extensibility/plugins/loader";
 import { loadLegacyPiModule } from "../plugins/legacy-pi-compat";
 import { getCodingAgentApi } from "../host-api";
-import * as typebox from "../legacy-typebox";
 import { createNoOpUIContext, resolvePath, withHostGuard } from "../utils";
 import type { CustomToolAPI, CustomToolFactory, LoadedCustomTool, ToolLoadError } from "./types";
 
@@ -168,7 +167,6 @@ export class CustomToolLoader {
 			ui: createNoOpUIContext(),
 			hasUI: false,
 			logger,
-			typebox,
 			arktype: type,
 			zod,
 			get pi() {

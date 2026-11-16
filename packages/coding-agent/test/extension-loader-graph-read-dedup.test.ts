@@ -73,12 +73,11 @@ describe("Extension Loader Graph Read Dedup", () => {
 		const entryPath = path.join(extDir, "index.ts");
 		const entryContent = `import "./mod-0.ts";
 export default function(pi) {
-    const { Type } = pi.typebox;
     pi.registerTool({
         name: "dedup-tool",
         label: "dedup-tool",
         description: "Test tool",
-        parameters: Type.Object({}),
+        parameters: pi.arktype({}),
         execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
     });
 }

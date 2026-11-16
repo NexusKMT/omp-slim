@@ -20,24 +20,20 @@ type RootWildcard = "flat" | "nested" | null;
 interface BundledPackage {
 	readonly dir: string;
 	readonly identifier: string;
-	readonly rootShim: string | null;
 	readonly rootWildcard: RootWildcard;
 }
 
 const BUNDLED_PACKAGES: readonly BundledPackage[] = [
-	{ dir: "agent", identifier: "PiAgentCore", rootShim: null, rootWildcard: null },
-	{ dir: "ai", identifier: "PiAi", rootShim: "legacy-pi-ai-shim.ts", rootWildcard: null },
-	{ dir: "catalog", identifier: "PiCatalog", rootShim: null, rootWildcard: "flat" },
-	{ dir: "coding-agent", identifier: "PiCodingAgent", rootShim: "legacy-pi-coding-agent-shim.ts", rootWildcard: null },
-	{ dir: "natives", identifier: "PiNatives", rootShim: null, rootWildcard: null },
+	{ dir: "agent", identifier: "PiAgentCore", rootWildcard: null },
+	{ dir: "ai", identifier: "PiAi", rootWildcard: null },
+	{ dir: "catalog", identifier: "PiCatalog", rootWildcard: "flat" },
+	{ dir: "coding-agent", identifier: "PiCodingAgent", rootWildcard: null },
+	{ dir: "natives", identifier: "PiNatives", rootWildcard: null },
 	// pi-tui keeps stateful singletons (`TERMINAL`, theme, figure settings) in
 	// root-level and nested modules; extensions must share the host's records.
-	{ dir: "tui", identifier: "PiTui", rootShim: "legacy-pi-tui-shim.ts", rootWildcard: "nested" },
-	{ dir: "utils", identifier: "PiUtils", rootShim: null, rootWildcard: "flat" },
+	{ dir: "tui", identifier: "PiTui", rootWildcard: "nested" },
+	{ dir: "utils", identifier: "PiUtils", rootWildcard: "flat" },
 ];
-
-const TYPEBOX_MODULE_KEY = "typebox";
-const TYPEBOX_COMPAT_MODULE = "legacy-typebox.ts";
 const MAIN_THREAD_UNSAFE_WILDCARD_BASENAMES = new Set(["worker-entry"]);
 
 /** One namespace module the binary must retain for legacy extension imports. */
@@ -98,10 +94,6 @@ function exportImportTarget(value: unknown): string | null {
 	return null;
 }
 
-function shimSpecifier(file: string): string {
-	return path.join(packageDir, "src", "extensibility", file);
-}
-
 /**
  * Derive the bundled legacy Pi module surface from current package exports.
  * Named wildcard exports are expanded from source, including `x/index`
@@ -129,8 +121,7 @@ export async function collectBundledPiEntries(): Promise<BundledPiEntry[]> {
 			throw new Error(`Bundled Pi package manifest has no name: ${manifestPath}`);
 		}
 		const exportsField = isRecord(manifest.exports) ? manifest.exports : {};
-		const rootSpecifier = pkg.rootShim ? shimSpecifier(pkg.rootShim) : manifest.name;
-		addEntry(manifest.name, `bundled${pkg.identifier}`, rootSpecifier);
+		addEntry(manifest.name, `bundled${pkg.identifier}`, manifest.name);
 
 		for (const exportKey in exportsField) {
 			if (!exportKey.startsWith("./") || exportKey === "." || exportKey.includes("*")) continue;
@@ -183,8 +174,6 @@ export async function collectBundledPiEntries(): Promise<BundledPiEntry[]> {
 			}
 		}
 	}
-
-	addEntry(TYPEBOX_MODULE_KEY, "bundledTypeBoxShim", shimSpecifier(TYPEBOX_COMPAT_MODULE));
 	return entries;
 }
 

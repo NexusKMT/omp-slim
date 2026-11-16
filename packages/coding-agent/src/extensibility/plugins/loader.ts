@@ -191,7 +191,7 @@ async function collectPluginsAtRoot(
 			throw err;
 		}
 
-		const manifest: PluginManifest | undefined = pluginPkg.omp || pluginPkg.pi;
+		const manifest: PluginManifest | undefined = pluginPkg.omp;
 		if (!manifest) {
 			// Not an omp plugin, skip
 			continue;
@@ -310,12 +310,12 @@ const PLUGIN_EXTENSION_DIRECTORY_OPTIONS = {
  * - a file entry → that file
  * - a directory:
  *   - when `expandDirectory` (the `extensions` key), resolved by
- *     {@link resolveExtensionDirectory} — its own package.json `omp`/`pi`
- *     `extensions`, then a direct index, then a one-level scan of
- *     sub-extensions — matching the pi `extensions/<name>/index.ts` convention
- *     and OMP's configured-directory (`-e`) extension loader
+ *     {@link resolveExtensionDirectory} — its own package.json `omp.extensions`,
+ *     then a direct index, then a one-level scan of sub-extensions — matching
+ *     the `extensions/<name>/index.ts` convention and OMP's configured-directory
+ *     (`-e`) extension loader
  *   - otherwise (tools/hooks/commands) only a direct index.{ts,js,mjs,cjs}.
- *     The sub-extension scan and the `omp`/`pi` `extensions` manifest are
+ *     The sub-extension scan and the `omp.extensions` manifest are
  *     extensions-specific and must not hijack a non-extension directory entry
  *     (e.g. a `tools: "."` entry must still resolve `./index.ts`).
  *

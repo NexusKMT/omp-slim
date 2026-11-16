@@ -795,10 +795,6 @@
     url = "https://registry.npmjs.org/@rolldown/pluginutils/-/pluginutils-1.0.1.tgz";
     hash = "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==";
   };
-  "@sinclair/typebox@0.34.52" = fetchurl {
-    url = "https://registry.npmjs.org/@sinclair/typebox/-/typebox-0.34.52.tgz";
-    hash = "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw==";
-  };
   "@stencil-hq/vibemon@0.3.2" = fetchurl {
     url = "https://registry.npmjs.org/@stencil-hq/vibemon/-/vibemon-0.3.2.tgz";
     hash = "sha512-ddVS9+iAXlRsnrfo6XzP9L2SiAHKOZsF51iup+0F8F0uV9ry/P+KUk3seo5vETnvZf2ArTdBCbmBfhXxPLYImQ==";

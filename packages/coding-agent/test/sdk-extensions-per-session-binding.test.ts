@@ -35,7 +35,7 @@ describe("loadExtensions per-session binding (#2190 review fix)", () => {
 				"  api.registerTool({",
 				"    name: 'tag',",
 				"    description: 'binding probe',",
-				"    parameters: api.typebox.Type.Object({}),",
+				"    parameters: api.arktype({}),",
 				"    async execute() { return { content: [{ type: 'text', text: '' }] }; },",
 				"  });",
 				"  Object.defineProperty(globalThis, '__lastExtBinding', {",

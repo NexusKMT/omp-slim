@@ -111,9 +111,9 @@ const factory: CustomToolFactory = pi => ({
 export default factory;
 ```
 
-Value imports of `@oh-my-pi/*` host packages (and their legacy `@mariozechner/*` / `@earendil-works/*` scopes) resolve to the copy omp itself runs, including in the compiled binary; the tool's other dependencies resolve from its own location. A tool module and its relative imports are evaluated once per process; each session calls the factory again.
+Value imports of `@oh-my-pi/*` host packages resolve to the copy omp itself runs, including in the compiled binary; the tool's other dependencies resolve from its own location. A tool module and its relative imports are evaluated once per process; each session calls the factory again.
 
-Parameter schemas may use the Zod-compatible omptype builder (`pi.zod`), native omptype builder (`pi.arktype`), or legacy-compatible TypeBox shim (`pi.typebox`) and flow through the shared validation/wire pipeline.
+Parameter schemas may use the Zod-compatible omptype builder (`pi.zod`) or the native omptype builder (`pi.arktype`) and flow through the shared validation/wire pipeline.
 
 Factory return type:
 
@@ -132,7 +132,6 @@ From `types.ts` and `loader.ts`:
 - `logger`: shared file logger
 - `arktype`: injected omptype `type(...)` builder
 - `zod`: injected Zod-compatible omptype builder
-- `typebox`: compatibility shim for legacy TypeBox-style schemas
 - `pi`: injected `@oh-my-pi/pi-coding-agent` exports
 - `pushPendingAction(action)`: stage a preview action that is finalized by writing a plain-text reason to `xd://resolve` or `xd://reject`
 
@@ -151,7 +150,7 @@ provide a pending-action store, calling `pushPendingAction` throws
 execute(toolCallId, params, onUpdate, ctx, signal);
 ```
 
-- `params` is statically typed from its omptype or TypeBox schema via `Static<TParams>`.
+- `params` is statically typed from its omptype schema via `Static<TParams>`.
 - Runtime argument validation happens before execution in the agent loop.
 - `onUpdate` emits partial results for UI streaming.
 - `ctx` includes `sessionManager`, `modelRegistry`, current `model`, `isIdle()`, `hasQueuedMessages()`, `abort()`, and `localProtocolOptions`. The public context type also permits `settings`, `fetch`, and `autoApprove`, but the normal SDK conversion does not populate those three fields.

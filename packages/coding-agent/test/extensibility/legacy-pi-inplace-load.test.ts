@@ -137,28 +137,6 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(mod.namedValue).toBe("named-cjs-ok");
 	});
 
-	it("remaps legacy Pi requires in graph-owned CommonJS packages to the host shim", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "cjs-legacy-pi-require-ext", version: "1.0.0", type: "module" }),
-			"node_modules/direct/package.json": JSON.stringify({
-				name: "direct",
-				version: "1.0.0",
-				main: "index.js",
-			}),
-			"node_modules/direct/index.js": 'module.exports = require("@mariozechner/pi-ai").Type;\n',
-			"index.ts": [
-				'import { Type } from "@oh-my-pi/pi-ai";',
-				'import requiredType from "direct";',
-				"export const sharesHostType = requiredType === Type;",
-				"export default function (pi) { void pi; }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as { sharesHostType: boolean };
-
-		expect(mod.sharesHostType).toBe(true);
-	});
-
 	it("loads a default import from an ESM package's CommonJS canvas fallback", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "esm-canvas-consumer", version: "1.0.0", type: "module" }),
@@ -860,19 +838,16 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(mod.inputPrice).toBe(0.15);
 	});
 
-	it("loads the extension's own node_modules deps natively while remapping legacy pi imports", async () => {
+	it("loads the extension's own node_modules deps natively while rewriting host pi imports", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "dep-ext", version: "1.0.0" }),
 			"node_modules/cjsdep/package.json": JSON.stringify({ name: "cjsdep", version: "1.0.0", main: "index.js" }),
 			"node_modules/cjsdep/index.js": 'module.exports = { value: "cjs-native" };',
 			"index.ts": [
 				'import cjs from "cjsdep";',
-				// `@earendil-works/*` is a fork alias with no real published package,
-				// so a working import proves the load-time rewrite fired rather than
-				// a coincidental native resolution against a cached package.
-				'import { Effort } from "@earendil-works/pi-ai";',
+				'import { resolveCacheRetention } from "@oh-my-pi/pi-ai";',
 				"export const depValue = cjs.value;",
-				'export const hasAi = typeof Effort === "object";',
+				'export const hasAi = typeof resolveCacheRetention === "function";',
 				"export default function (pi) { void pi; }",
 			].join("\n"),
 		});
@@ -880,207 +855,9 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as { depValue: string; hasAi: boolean };
 
 		// CJS dep under node_modules keeps Bun's native resolution (it is excluded
-		// from the rewrite onLoad), and the legacy pi import is remapped.
+		// from the rewrite onLoad), and the host pi import resolves to the host copy.
 		expect(mod.depValue).toBe("cjs-native");
 		expect(mod.hasAi).toBe(true);
-	});
-
-	it("exposes legacy root tool factories used by pi-lean-ctx", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-tool-factory-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { Text } from "@earendil-works/pi-tui";',
-				"import {",
-				"  createBashToolDefinition,",
-				"  createFindToolDefinition,",
-				"  createGrepToolDefinition,",
-				"  createLsToolDefinition,",
-				"  createReadToolDefinition,",
-				"  DEFAULT_MAX_LINES,",
-				"  getLanguageFromPath,",
-				"  highlightCode,",
-				"  truncateHead,",
-				'} from "@earendil-works/pi-coding-agent";',
-				"const cwd = process.cwd();",
-				"const definitions = [",
-				"  createBashToolDefinition(cwd),",
-				"  createReadToolDefinition(cwd),",
-				"  createGrepToolDefinition(cwd),",
-				"  createFindToolDefinition(cwd),",
-				"  createLsToolDefinition(cwd),",
-				"];",
-				"const fakeTheme = { fg: (_color, text) => text, bold: text => text };",
-				"const fakeContext = { lastComponent: new Text('', 0, 0) };",
-				"for (const definition of definitions) {",
-				"  if (typeof definition.renderCall === 'function') definition.renderCall({ command: 'echo ok', path: '.', pattern: '*.ts' }, fakeTheme, fakeContext);",
-				"}",
-				"export const toolNames = definitions.map(definition => definition.name);",
-				"export const helperValues = {",
-				"  maxLines: DEFAULT_MAX_LINES,",
-				"  language: getLanguageFromPath('src/example.ts'),",
-				"  highlighted: highlightCode('const x = 1;', 'ts').length,",
-				"  truncated: truncateHead('a\\nb', { maxLines: 1 }).truncated,",
-				"};",
-				"export default function (pi) { for (const definition of definitions) pi.registerTool(definition); }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as {
-			toolNames: string[];
-			helperValues: { maxLines: number; language: string; highlighted: number; truncated: boolean };
-		};
-
-		expect(mod.toolNames).toEqual(["bash", "read", "grep", "find", "ls"]);
-		expect(mod.helperValues).toEqual({
-			maxLines: 3000,
-			language: "typescript",
-			highlighted: 1,
-			truncated: true,
-		});
-	});
-
-	it("exposes a fresh legacy extension runtime through the package root", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-extension-runtime-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { createExtensionRuntime } from "@earendil-works/pi-coding-agent";',
-				"const first = createExtensionRuntime();",
-				"const second = createExtensionRuntime();",
-				"first.flagValues.set('sprite', true);",
-				"let initializationError;",
-				"try {",
-				"  first.getActiveTools();",
-				"} catch (error) {",
-				"  initializationError = error instanceof Error ? error.message : String(error);",
-				"}",
-				"export const runtimeContract = {",
-				"  firstFlag: first.flagValues.get('sprite'),",
-				"  secondHasFlag: second.flagValues.has('sprite'),",
-				"  initializationError,",
-				"};",
-				"export default function (pi) { void pi; }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as {
-			runtimeContract: {
-				firstFlag: boolean;
-				secondHasFlag: boolean;
-				initializationError: string;
-			};
-		};
-
-		expect(mod.runtimeContract).toEqual({
-			firstFlag: true,
-			secondHasFlag: false,
-			initializationError:
-				"Extension runtime not initialized. Action methods cannot be called during extension loading.",
-		});
-	});
-
-	it("honors legacy bash operations overrides", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-bash-ops-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";',
-				"const updates = [];",
-				"let captured;",
-				"const tool = createBashToolDefinition(process.cwd(), {",
-				"  operations: {",
-				"    async exec(command, cwd, options) {",
-				"      captured = { command, cwd, timeout: options.timeout, envValue: options.env.SENTINEL };",
-				"      options.onData(Buffer.from('remote output'));",
-				"      return { exitCode: 0 };",
-				"    },",
-				"  },",
-				"  spawnHook(context) {",
-				"    return { ...context, command: 'remote:' + context.command, cwd: '/remote', env: { ...context.env, SENTINEL: 'yes' } };",
-				"  },",
-				"});",
-				"const result = await tool.execute('call-1', { command: 'whoami', timeout: 7 }, undefined, update => {",
-				"  const text = update.content.find(block => block.type === 'text')?.text;",
-				"  if (text) updates.push(text);",
-				"});",
-				"export const observed = {",
-				"  captured,",
-				"  text: result.content.find(block => block.type === 'text')?.text,",
-				"  updates,",
-				"};",
-				"export default function (pi) { pi.registerTool(tool); }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as {
-			observed: {
-				captured: { command: string; cwd: string; timeout: number; envValue: string };
-				text: string;
-				updates: string[];
-			};
-		};
-
-		expect(mod.observed.captured).toEqual({
-			command: "remote:whoami",
-			cwd: "/remote",
-			timeout: 7,
-			envValue: "yes",
-		});
-		expect(mod.observed.text).toBe("remote output");
-		expect(mod.observed.updates).toEqual(["remote output"]);
-	});
-
-	it("runs a legacy bash spawn hook against the real tool, not only the operations override", async () => {
-		// Regression: the shim forwarded the hook's env as bash tool input, which
-		// the tool accepts only for a named service, so every agent bash call from
-		// an extension registering bash this way failed with
-		// "ready and env require a service name." The operations branch above never
-		// caught it because it bypasses the registry tool.
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-bash-spawn-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";',
-				"const tool = createBashToolDefinition(process.cwd(), {",
-				"  spawnHook(context) {",
-				"    return { ...context, command: 'echo hooked', env: { ...context.env, SENTINEL: 'yes' } };",
-				"  },",
-				"});",
-				"const result = await tool.execute('call-1', { command: 'echo original' });",
-				"export const observed = {",
-				"  text: result.content.find(block => block.type === 'text')?.text ?? '',",
-				"  isError: result.isError === true,",
-				"};",
-				"export default function (pi) { pi.registerTool(tool); }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as {
-			observed: { text: string; isError: boolean };
-		};
-
-		expect(mod.observed.isError).toBe(false);
-		expect(mod.observed.text).toContain("hooked");
-	});
-
-	it("preserves relative paths from legacy find operations", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-find-ops-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { createFindToolDefinition } from "@earendil-works/pi-coding-agent";',
-				"const tool = createFindToolDefinition('/remote/project', {",
-				"  operations: {",
-				"    exists: () => true,",
-				"    glob: () => ['src/a.ts', '/remote/project/src/b.ts'],",
-				"  },",
-				"});",
-				"const result = await tool.execute('call-1', { pattern: '**/*.ts', path: '.' });",
-				"const text = result.content.find(block => block.type === 'text')?.text ?? '';",
-				"export const lines = text.split('\\n');",
-				"export default function (pi) { pi.registerTool(tool); }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as { lines: string[] };
-
-		expect(mod.lines).toEqual(["src/a.ts", "src/b.ts"]);
 	});
 
 	it("rewrites extension bare deps to file URLs for compiled-binary loading", async () => {
@@ -1546,7 +1323,7 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 				'const local = require("./local.node");',
 				'const member = loader.require("plain-dep");',
 				'const importText = `from"plain-dep"`;',
-				'const importPattern = /from"typebox"/;',
+				'const importPattern = /from"plain-dep"/;',
 				'function shadowed(require) { return require("plain-dep"); }',
 				"export { binding, conditional, conditionalEquals, importPattern, importText, local, member, plain, shadowed };",
 			].join("\n"),
@@ -1563,7 +1340,7 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(rewritten).toContain('require("./local.node")');
 		expect(rewritten).toContain('loader.require("plain-dep")');
 		expect(rewritten).toContain('`from"plain-dep"`');
-		expect(rewritten).toContain('/from"typebox"/');
+		expect(rewritten).toContain('/from"plain-dep"/');
 		expect(rewritten).toContain('function shadowed(require) { return require("plain-dep"); }');
 	});
 
@@ -1599,11 +1376,11 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(loadSource).toContain(addon.replaceAll("\\", "/"));
 	});
 
-	it("rewrites legacy imports in ../src modules reached through relative imports", async () => {
+	it("rewrites host package imports in ../src modules reached through relative imports", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "dist-ext", version: "1.0.0" }),
 			"src/helper.ts": [
-				'import { isCompiledBinary } from "@earendil-works/pi-utils";',
+				'import { isCompiledBinary } from "@oh-my-pi/pi-utils";',
 				'export const ok = typeof isCompiledBinary === "function";',
 			].join("\n"),
 			"dist/extension.ts": [
@@ -1615,30 +1392,7 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		const mod = (await loadLegacyPiModule(path.join(dir, "dist", "extension.ts"))) as { ok: boolean };
 
 		// `../src/helper.ts` lives outside the entry's own dir but is part of the
-		// entry's relative-import graph, so its legacy import is still rewritten.
+		// entry's relative-import graph, so its host package import is still rewritten.
 		expect(mod.ok).toBe(true);
-	});
-
-	it("does not rewrite sibling files outside the loaded extension's import graph", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "scoped-ext", version: "1.0.0" }),
-			"index.ts": ['export { local } from "./local.ts";', "export default function (pi) { void pi; }"].join("\n"),
-			"local.ts": 'export const local = "local-ok";',
-			// Not imported by index.ts, so it must stay outside the rewrite scope.
-			// `@earendil-works/*` only resolves via the rewrite, so an un-rewritten
-			// import fails — proving the hook did not over-reach to this sibling.
-			"unrelated.ts": [
-				'import { Effort } from "@earendil-works/pi-ai";',
-				'export const hasAi = typeof Effort === "object";',
-			].join("\n"),
-		});
-
-		const entryMod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as { local: string };
-		expect(entryMod.local).toBe("local-ok");
-
-		// Loading the un-imported sibling directly must NOT benefit from the
-		// extension's rewrite hook; its fork-scope import stays unresolved.
-		const siblingUrl = `${url.pathToFileURL(await fs.realpath(path.join(dir, "unrelated.ts"))).href}?nonce=${Date.now()}`;
-		await expect(import(siblingUrl)).rejects.toThrow(/@earendil-works\/pi-ai/);
 	});
 });

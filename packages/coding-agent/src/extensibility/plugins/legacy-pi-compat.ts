@@ -38,7 +38,6 @@ const BUNDLED_VIRTUAL_SCHEME = "omp-legacy-pi-bundled:";
 const BUNDLED_VIRTUAL_NAMESPACE = "omp-legacy-pi-bundled";
 const BUNDLED_HOST_NAMESPACE = "omp-legacy-pi-host";
 const BUNDLED_HOST_SCHEME = `${BUNDLED_HOST_NAMESPACE}:`;
-const TYPEBOX_BUNDLED_MODULE_KEY = "typebox";
 
 type BundledModule = Readonly<Record<string, unknown>>;
 type BundledModuleLoaders = Readonly<Record<string, () => Promise<BundledModule>>>;
@@ -799,20 +798,16 @@ function resolveBundledVirtualSpecifier(
 	return { path: registryKey, namespace };
 }
 
-// Canonical scope for in-process pi packages. Plugins published against any of
-// the aliased scopes below (mariozechner's original publish, earendil-works'
-// fork, or the canonical @oh-my-pi scope itself) are remapped to this scope and
-// resolved against the bundled copy that ships inside the omp binary. This
-// keeps plugins running against the exact runtime state of the host (single
-// module registry, single tool registry, etc.) regardless of which historical
-// scope name they happened to declare in their peerDependencies.
+// Canonical scope for in-process host packages. Imports of `@oh-my-pi/*` are
+// resolved against the bundled copy that ships inside the omp binary, keeping
+// extensions on the host's exact runtime state (single module registry, single
+// tool registry, etc.) instead of pulling a duplicate copy from the plugin's
+// node_modules.
 const CANONICAL_PI_SCOPE = "@oh-my-pi";
 
-// Scopes that have historically been used to publish (or alias) internal host
-// packages. `@oh-my-pi` is intentionally included so direct
-// canonical imports still pass through the same host-bundled package resolution
-// path instead of pulling a duplicate copy from plugin node_modules.
-const PI_SCOPE_ALIASES = ["oh-my-pi", "mariozechner", "earendil-works"] as const;
+// `@oh-my-pi` is the only host scope; there is no compatibility mapping from
+// other publishers' package names.
+const PI_SCOPE_ALIASES = ["oh-my-pi"] as const;
 
 // Internal host package basenames bundled inside the omp binary.
 const PI_PACKAGE_NAMES = [
@@ -827,33 +822,6 @@ const PI_PACKAGE_NAMES = [
 
 const PI_SCOPE_ALTERNATION = PI_SCOPE_ALIASES.join("|");
 const PI_PACKAGE_ALTERNATION = PI_PACKAGE_NAMES.join("|");
-
-// Upstream `@mariozechner/*` packages exposed a few subpaths at the package
-// root that we relocated under a different folder. Each entry rewrites
-// `<pkg>/<from>` → `<pkg>/<to>` after the scope has been canonicalised, so
-// plugins importing the upstream layout still resolve to a real file in our
-// bundled copy. Entries ending in `/` rewrite the whole subtree; add new
-// `pkg/from -> pkg/to` pairs whenever an upstream-only subpath breaks resolution.
-const PI_SUBPATH_REMAPS: ReadonlyMap<string, string> = new Map<string, string>([
-	["pi-ai/utils/oauth", "pi-ai/oauth"],
-	["pi-ai/utils/oauth/", "pi-ai/oauth/"],
-	["pi-ai/compat", "pi-ai"],
-]);
-
-function remapLegacyPiSubpath(rest: string): string {
-	const exact = PI_SUBPATH_REMAPS.get(rest);
-	if (exact) {
-		return exact;
-	}
-
-	for (const [from, to] of PI_SUBPATH_REMAPS) {
-		if (from.endsWith("/") && rest.startsWith(from)) {
-			return `${to}${rest.slice(from.length)}`;
-		}
-	}
-
-	return rest;
-}
 
 const LEGACY_PI_SPECIFIER_FILTER = new RegExp(`^@(?:${PI_SCOPE_ALTERNATION})/(?:${PI_PACKAGE_ALTERNATION})(?:/.*)?$`);
 const resolvedSpecifierFallbacks = new Map<string, string>();
@@ -886,173 +854,24 @@ function clearLegacyPiResolutionCaches(): void {
 registerPluginCacheInvalidator(clearLegacyPiResolutionCaches);
 const PACKAGE_IMPORT_EXCLUDED = Symbol("packageImportExcluded");
 
-// Extensions importing TypeBox directly are redirected to omptype's TypeBox
-// facade, keeping legacy builders while producing callable omptype schemas at
-// the tool wire boundary. Submodules such as `@sinclair/typebox/compiler` are
-// intentionally not remapped: plugins relying on those TypeBox-only APIs must
-// vendor TypeBox directly.
-const TYPEBOX_SPECIFIER_FILTER = /^(?:@sinclair\/typebox|typebox)$/;
-
-// Compat-shim path resolution. In compiled-binary mode every bundled surface
-// is served through the `omp-legacy-pi-bundled:` virtual namespace (see the
-// bundled-module block above) — bunfs paths are unreachable on Bun 1.3.14+, so the
-// pre-#3423 helpers that derived `/$bunfs/root/...` paths from
-// `import.meta.dir` are gone. Dev / source-link / installed-package modes
-// still need a real filesystem path for the source shims, which
-// `sourceShimPath` computes either from the npm prebuilt `dist/cli.js`
-// bundle (`PI_BUNDLED=true`) or directly from the monorepo source tree.
-
 /**
- * Compute the package root for the npm prebuilt `dist/cli.js` bundle.
- *
- * `bundle-dist.ts` defines `process.env.PI_BUNDLED="true"`; after bundling,
- * `import.meta.dir` points at `<package>/dist`. Do not resolve the package via
- * bare `@oh-my-pi/pi-coding-agent` here: from a global install Bun can pick an
- * older cache entry, recreating mixed-runtime plugin loading.
- */
-export function __computeBundledSelfPackageRoot(metaDir: string, pathImpl: typeof path = path): string {
-	const normalizedMetaDir = pathImpl.normalize(metaDir);
-	if (pathImpl.basename(normalizedMetaDir) === "dist") {
-		return pathImpl.resolve(metaDir, "..");
-	}
-
-	const pluginsDirSuffix = pathImpl.join("src", "extensibility", "plugins");
-	if (normalizedMetaDir.endsWith(pluginsDirSuffix)) {
-		return pathImpl.resolve(metaDir, "..", "..", "..");
-	}
-
-	return pathImpl.resolve(metaDir);
-}
-
-function resolveBundledSelfPackageRoot(): string | undefined {
-	if (!process.env.PI_BUNDLED) return undefined;
-	return __computeBundledSelfPackageRoot(import.meta.dir);
-}
-
-const BUNDLED_SELF_PACKAGE_ROOT = resolveBundledSelfPackageRoot();
-
-function sourceShimPath(file: string): string {
-	return BUNDLED_SELF_PACKAGE_ROOT
-		? path.join(BUNDLED_SELF_PACKAGE_ROOT, "src", "extensibility", file)
-		: path.resolve(import.meta.dir, "..", file);
-}
-
-/**
- * Resolve the coding-agent compatibility surface that composes omptype's
- * TypeBox facade with legacy `Type.Unsafe`, then drop the remap when that
- * entrypoint is missing.
- *
- * In compiled binaries and npm bundles the surface is served through the
- * `omp-legacy-pi-bundled:` virtual namespace (issue #3423). Dev and source SDK
- * imports use the shipped source module.
- *
- * Exported for tests; production callers use `TYPEBOX_SHIM_PATH`.
- */
-export function __resolveTypeBoxShimPath(
-	useBundledModules: boolean,
-	sourcePath: string,
-	pathExistsSync: (p: string) => boolean = fs.existsSync,
-): string | null {
-	if (useBundledModules) {
-		return bundledModuleVirtualSpecifier(TYPEBOX_BUNDLED_MODULE_KEY);
-	}
-	return pathExistsSync(sourcePath) ? sourcePath : null;
-}
-
-const TYPEBOX_SHIM_PATH = __resolveTypeBoxShimPath(USE_BUNDLED_PI_MODULES, sourceShimPath("legacy-typebox.ts"));
-
-// Legacy extensions historically imported `Type` (and `Static`/`TSchema`) from
-// the package root of `@(scope)/pi-ai`. pi-ai 15.1.0 removed the runtime `Type`
-// export (see `packages/ai/CHANGELOG.md`), so the bare canonical specifier no
-// longer satisfies those imports. The override below redirects only the bare
-// pi-ai package root onto a sibling shim that re-exports the canonical surface
-// plus the borrowed `Type` runtime from the omptype TypeBox facade. Subpath
-// imports such as `@oh-my-pi/pi-ai/oauth` continue to resolve directly
-// against the bundled pi-ai package.
-const LEGACY_PI_AI_SHIM_PATH = USE_BUNDLED_PI_MODULES
-	? bundledModuleVirtualSpecifier(`${CANONICAL_PI_SCOPE}/pi-ai`)
-	: sourceShimPath("legacy-pi-ai-shim.ts");
-
-// The coding-agent's own `./src/index.ts` cannot be listed as an extra
-// `bun --compile` entrypoint alongside the CLI entry without breaking binary
-// startup (issue #1474 follow-up). In compiled binaries and npm bundles the
-// legacy `@(scope)/pi-coding-agent` root therefore resolves through the bundled
-// module shim; in dev / source-link / source SDK mode it points at the sibling
-// source shim whose distinct file path avoids the #1474 collision
-// while still re-exporting the canonical package surface.
-const LEGACY_PI_CODING_AGENT_SHIM_PATH = USE_BUNDLED_PI_MODULES
-	? bundledModuleVirtualSpecifier(`${CANONICAL_PI_SCOPE}/pi-coding-agent`)
-	: sourceShimPath("legacy-pi-coding-agent-shim.ts");
-
-// Legacy pi-tui exported `decodeKittyPrintable` from its package root. The
-// canonical TUI replaced it with the broader `decodePrintableKey`; route only
-// legacy root imports through a sibling shim that preserves the old name.
-const LEGACY_PI_TUI_SHIM_PATH = USE_BUNDLED_PI_MODULES
-	? bundledModuleVirtualSpecifier(`${CANONICAL_PI_SCOPE}/pi-tui`)
-	: sourceShimPath("legacy-pi-tui-shim.ts");
-
-// Package-root overrides. Shim entries (`pi-ai`, `pi-coding-agent`, `pi-tui`)
-// always replace the canonical surface so legacy helpers stay reachable. The
-// other bundled host packages (`pi-agent-core`, `pi-natives`, `pi-utils`) are
-// added in compiled binaries and npm bundles to route extensions onto the
-// in-process module instance — in dev / source-link / source SDK mode the
-// canonical specifier resolves cleanly through `Bun.resolveSync`; hardcoding a
-// source-tree path would miss installs where bundled packages live at
-// `node_modules/@oh-my-pi/pi-*`.
-//
-// Bundled entries are `omp-legacy-pi-bundled:<key>` specifiers handed to the
-// synthetic onLoad in `installLegacyPiSpecifierShim()`. Filesystem-shaped
-// overrides are still validated against on-disk presence so a missing dev-mode
-// shim falls through to `getResolvedSpecifier`.
-
-/**
- * Drop overrides whose filesystem targets are missing so they can fall
- * through to the canonical-resolution path. Virtual `omp-legacy-pi-bundled:`
- * entries always pass because live bundled module references are the source of
- * truth.
- *
- * `pathExistsSync` defaults to `fs.existsSync`; tests inject a stub to
- * simulate the missing-entrypoint failure mode without touching the real FS.
- */
-export function __validateLegacyPiPackageRootOverrides(
-	candidates: Record<string, string>,
-	pathExistsSync: (p: string) => boolean = fs.existsSync,
-): Record<string, string> {
-	const valid: Record<string, string> = {};
-	for (const key in candidates) {
-		const candidate = candidates[key];
-		if (candidate && (isBundledVirtualSpecifier(candidate) || pathExistsSync(candidate))) {
-			valid[key] = candidate;
-		}
-	}
-	return valid;
-}
-
-/**
- * Compute the override map keyed by every canonical specifier the host serves
- * directly: the pi-ai / pi-coding-agent roots (compat shims that re-attach
- * legacy helpers) plus, in bundled mode, every build-supplied module key.
- * Subpath coverage stops `@(scope)/pi-ai/oauth` and friends from falling
- * through to the extension's absent peer install.
+ * Compute the override map for bundled host packages: in compiled binaries and
+ * npm bundles every build-supplied module key routes to the in-process copy. In
+ * dev / source-link / source SDK mode the canonical specifier resolves cleanly
+ * through `Bun.resolveSync`, so no override is needed.
  */
 export function __buildLegacyPiPackageRootOverrides(
 	useBundledModules: boolean,
 	bundledModuleKeys: Iterable<string> = [],
 ): Record<string, string> {
-	const candidates: Record<string, string> = {
-		[`${CANONICAL_PI_SCOPE}/pi-ai`]: LEGACY_PI_AI_SHIM_PATH,
-		[`${CANONICAL_PI_SCOPE}/pi-coding-agent`]: LEGACY_PI_CODING_AGENT_SHIM_PATH,
-		[`${CANONICAL_PI_SCOPE}/pi-tui`]: LEGACY_PI_TUI_SHIM_PATH,
-	};
-	if (useBundledModules) {
-		for (const key of bundledModuleKeys) {
-			// Shim-bearing roots already map to their compat surfaces; TypeBox
-			// has a dedicated TYPEBOX_SHIM_PATH route.
-			if (key in candidates || key === TYPEBOX_BUNDLED_MODULE_KEY) continue;
-			candidates[key] = bundledModuleVirtualSpecifier(key);
-		}
+	if (!useBundledModules) {
+		return {};
 	}
-	return __validateLegacyPiPackageRootOverrides(candidates);
+	const overrides: Record<string, string> = {};
+	for (const key of bundledModuleKeys) {
+		overrides[key] = bundledModuleVirtualSpecifier(key);
+	}
+	return overrides;
 }
 
 // Seeded with compat roots at module init; first bundled extension load adds
@@ -1085,8 +904,7 @@ function remapLegacyPiSpecifier(specifier: string): string | null {
 		return null;
 	}
 	const rest = specifier.slice(slashIdx + 1);
-	const remappedSubpath = remapLegacyPiSubpath(rest);
-	return `${CANONICAL_PI_SCOPE}/${remappedSubpath}`;
+	return `${CANONICAL_PI_SCOPE}/${rest}`;
 }
 
 function getResolvedSpecifier(specifier: string): string {
@@ -1168,9 +986,6 @@ async function rewriteLegacyExtensionSource(
 				// Compiled fallback may be absent from a malformed build. Continue to
 				// the extension's on-disk peer dependency resolution below.
 			}
-		}
-		if (!replacement && TYPEBOX_SHIM_PATH && (specifier === "typebox" || specifier === "@sinclair/typebox")) {
-			replacement = toImportSpecifier(TYPEBOX_SHIM_PATH);
 		}
 		if (!replacement && specifier.startsWith("#")) {
 			const resolved = packageImportPath(specifier, await resolvePackageImportSpecifier(specifier, importerPath));
@@ -2355,12 +2170,7 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 							requiresSynchronousSourceHook = isRequired && !targetIsCommonJs;
 						}
 					}
-				} else if (
-					isBareExtensionDependencySpecifier(specifier) &&
-					!remapLegacyPiSpecifier(specifier) &&
-					specifier !== "typebox" &&
-					specifier !== "@sinclair/typebox"
-				) {
+				} else if (isBareExtensionDependencySpecifier(specifier) && !remapLegacyPiSpecifier(specifier)) {
 					const dependencyEntry = isRequired
 						? await resolveExtensionBareRequire(specifier, file)
 						: await resolveExtensionBareDependency(specifier, file);
@@ -2825,9 +2635,7 @@ function resolveRemappedLegacyPiSpecifier(
 		// Fallback for compiled binary mode: the bundled packages live inside
 		// /$bunfs/root and aren't reachable by filesystem resolution. Prefer the
 		// canonical specifier against the importing file's directory when the
-		// plugin installed @oh-my-pi peer deps, then try the original legacy
-		// specifier for plugins that still vendor only @mariozechner or
-		// @earendil-works peer deps.
+		// plugin installed its own @oh-my-pi peer deps.
 		const importerDir = path.dirname(args.importer);
 		try {
 			return toLegacyPiResolveResult(Bun.resolveSync(remappedSpecifier, importerDir));
@@ -2841,10 +2649,6 @@ function resolveRemappedLegacyPiSpecifier(
 	}
 }
 
-function resolveTypeBoxSpecifier(): LegacyPiResolveResult | undefined {
-	return TYPEBOX_SHIM_PATH ? toLegacyPiResolveResult(TYPEBOX_SHIM_PATH) : undefined;
-}
-
 export function installLegacyPiSpecifierShim(): void {
 	if (isLegacyPiSpecifierShimInstalled) {
 		return;
@@ -2855,7 +2659,6 @@ export function installLegacyPiSpecifierShim(): void {
 		name: "omp:legacy-pi-shim",
 		setup(build) {
 			build.onResolve({ filter: LEGACY_PI_SPECIFIER_FILTER, namespace: "file" }, resolveLegacyPiSpecifier);
-			build.onResolve({ filter: TYPEBOX_SPECIFIER_FILTER, namespace: "file" }, resolveTypeBoxSpecifier);
 			build.onResolve({ filter: /^omp-legacy-pi-bundled:.+$/, namespace: "file" }, args =>
 				resolveBundledVirtualSpecifier(args.path),
 			);

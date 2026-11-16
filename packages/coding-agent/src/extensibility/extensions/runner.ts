@@ -1627,11 +1627,11 @@ export class ExtensionRunner {
 	}
 
 	/**
-	 * Run an extension-owned callback within this session's settings scope, so a
-	 * synchronous `SettingsManager.create(ctx.cwd)` inside it resolves THIS
-	 * session's manager rather than a same-cwd sibling's. Event handlers get this
-	 * scope via {@link #runHandlerWithTimeout}; slash commands and shortcuts are
-	 * invoked directly by their controllers and route through here instead.
+	 * Run an extension-owned callback within this session's settings scope, so
+	 * settings resolved from `cwd` inside it reach THIS session's instance rather
+	 * than a same-cwd sibling's. Event handlers get this scope via
+	 * {@link #runHandlerWithTimeout}; slash commands and shortcuts are invoked
+	 * directly by their controllers and route through here instead.
 	 */
 	runScoped<T>(fn: () => T): T {
 		return withActiveSettings(this.settings, fn);
@@ -1679,7 +1679,6 @@ export class ExtensionRunner {
 			cwd: this.cwd,
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
-			isProjectTrusted: () => true,
 			agent,
 			get model() {
 				return getModel();

@@ -20,7 +20,7 @@ Extension loading builds an ordered list of module entry files, imports the modu
 - `src/extensibility/extensions/index.ts` — public exports
 - `src/extensibility/extensions/runner.ts` — runtime/event execution after load
 - `src/discovery/builtin.ts` — native auto-discovery provider for extension modules
-- `src/extensibility/plugins/legacy-pi-compat.ts` — in-place module graph loading and host-package compatibility rewriting
+- `src/extensibility/plugins/legacy-pi-compat.ts` — in-place module graph loading and host-package resolution
 - `src/config/settings.ts` — loads merged `extensions` / `disabledExtensions` settings
 - `src/sdk.ts` — session-specific discovery, prepared-factory rebinding, and live source reconciliation
 - `src/discovery/omp-extension-roots.ts` — sibling capability roots from extension packages
@@ -43,8 +43,7 @@ The project root is the native provider's `.omp` directory (`SOURCE_PATHS.native
 
 Notes:
 
-- Native auto-discovery is currently `.omp` based.
-- Legacy `.pi` is still accepted in package manifests (`pi.extensions`) and project override lookup, but `.pi/extensions` is not a native root here.
+- Native auto-discovery is `.omp` based; package manifests use the `omp` field.
 
 ### 2) Discovered JS/TS hook factories
 
@@ -56,12 +55,12 @@ Hook-capability loading already applies its own hook-specific disabled ids, so t
 
 After hook discovery, `discoverAndLoadExtensions()` appends extension entry points from enabled installed plugins via `listPackageExtensionModules()`.
 
-Plugin extension entries come from package `omp.extensions` / `pi.extensions` manifests, including enabled feature entries.
+Plugin extension entries come from the package `omp.extensions` manifest, including enabled feature entries.
 
 Installed-plugin manifest resolution accepts explicit `.ts`, `.js`, `.mjs`, and `.cjs` files. For a manifest entry that names a directory, it recognizes `index.ts`, `index.js`, `index.mjs`, or `index.cjs`; extension-directory expansion uses the same four suffixes. This is broader than native and configured-directory auto-scanning, which remains limited to `.ts` and `.js`.
 
 Installed-plugin extension directory resolution uses the directory's own
-non-empty `omp.extensions` / `pi.extensions` manifest first, then a direct index,
+non-empty `omp.extensions` manifest first, then a direct index,
 then a sorted one-level scan. That scan skips declaration files
 (`*.d.ts`, `*.d.mts`, `*.d.cts`); explicitly declared file entries are not
 suffix-filtered.
@@ -219,13 +218,13 @@ It is used directly as a module entry candidate. Explicit `.ts`, `.js`, `.mjs`, 
 
 Resolution order:
 
-1. `package.json` in that directory with a non-empty `omp.extensions` (or legacy `pi.extensions`) array -> use declared entries
+1. `package.json` in that directory with a non-empty `omp.extensions` array -> use declared entries
 2. `index.ts`
 3. `index.js`
 4. Otherwise scan one level for extension entries:
    - direct `*.ts` / `*.js`
    - subdir `index.ts` / `index.js`
-   - subdir `package.json` with `omp.extensions` / `pi.extensions`
+   - subdir `package.json` with `omp.extensions`
 
 Rules and constraints:
 
@@ -281,8 +280,8 @@ registration remain sequential in the discovered order.
 
 Each candidate path is loaded via `loadLegacyPiModule()` (`src/extensibility/plugins/legacy-pi-compat.ts`):
 
-- the entry's realpath is resolved, then dynamically imported with a per-load `?mtime` cache-buster. On POSIX the loader uses filesystem-path specifiers, and the same tag propagates through extension-owned relative imports, package `imports` aliases (`#alias/*`), and extension-local dependencies so same-process re-imports pick up graph edits. Host-resolved rewrites (pi-package specifiers and the TypeBox shim) stay untagged because they point at in-process host code
-- a scoped Bun `onLoad` hook rewrites legacy pi-package specifiers (`@mariozechner/*`, `@earendil-works/*`) and bare `@sinclair/typebox` onto the host-bundled copies before evaluation. Legacy Pi package-root imports resolve through compat shims: catalog symbols that moved to `@oh-my-pi/pi-catalog/models` (`calculateCost`, `modelsAreEqual`, `getBundledProviders`, plus `getModel`/`getModels` aliases) are re-exported by the legacy pi-ai shim (`src/extensibility/legacy-pi-ai-shim.ts`), and legacy `@oh-my-pi/pi-coding-agent` imports — including `DefaultResourceLoader` — resolve to the compat loader in `src/extensibility/legacy-pi-coding-agent-shim.ts`
+- the entry's realpath is resolved, then dynamically imported with a per-load `?mtime` cache-buster. On POSIX the loader uses filesystem-path specifiers, and the same tag propagates through extension-owned relative imports, package `imports` aliases (`#alias/*`), and extension-local dependencies so same-process re-imports pick up graph edits. Host-resolved `@oh-my-pi/*` rewrites stay untagged because they point at in-process host code
+- a scoped Bun `onResolve` hook maps `@oh-my-pi/*` host-package specifiers onto the copies the host itself runs, including every bundled subpath in compiled binaries. Modules importing `@oh-my-pi/*` share the host's module registry, so there is exactly one tool registry and one runtime state per process
 - graph-owned CommonJS modules use synchronous Bun `onLoad` object modules exposing runtime own-string export keys, including computed and non-enumerable names; `default` remains the complete `module.exports` value. The shared evaluator preserves cycles and `require`/import identity, while required host ESM shims are prepared before synchronous evaluation. No generated facade files or AST named-export reconstruction are needed
 - bundled host modules use Bun's native object loader. Modules exporting `theme` add a thin ESM binding bridge so the existing `theme` import follows host assignments synchronously without replacing the UI's change listener
 - package `imports` and `exports` patterns prefer the longest prefix before `*`, then the longest complete pattern; exact matches take precedence and excluded targets never fall back to broader patterns
@@ -386,11 +385,11 @@ described in [Extensions](./extensions.md#background-work-ctxsetinterval--ctxset
 }
 ```
 
-Legacy manifest key still accepted:
+Manifest shape:
 
 ```json
 {
-	"pi": {
+	"omp": {
 		"extensions": ["./index.ts"]
 	}
 }

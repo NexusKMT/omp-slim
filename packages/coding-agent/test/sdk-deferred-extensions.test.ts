@@ -25,12 +25,11 @@ import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 const DEFERRED_TOOL_EXTENSION = (logPath: string) => `
 	import * as fs from "node:fs";
 	export default function(pi) {
-		const { Type } = pi.typebox;
 		pi.registerTool({
 			name: "deferred_probe",
 			label: "Deferred probe",
 			description: "Registered by a startup-deferred extension.",
-			parameters: Type.Object({}),
+			parameters: pi.arktype({}),
 			execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
 		});
 		pi.on("session_start", () => { fs.appendFileSync(${JSON.stringify(logPath)}, "deferred\\n"); });

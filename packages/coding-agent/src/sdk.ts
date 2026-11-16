@@ -790,11 +790,6 @@ export interface CreateAgentSessionOptions {
 
 	/** Settings instance. Default: Settings.init({ cwd, agentDir }) */
 	settings?: Settings;
-	/**
-	 * Legacy alias for `settings`. Older Pi extensions pass SettingsManager.create(...)
-	 * through this field; accept it so their SDK calls keep the configured settings.
-	 */
-	settingsManager?: Settings | Promise<Settings>;
 
 	/** Whether UI is available (enables interactive tools like ask). Default: false */
 	hasUI?: boolean;
@@ -1442,9 +1437,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	registerSshCleanup();
 	registerEvalCleanup();
 
-	const settings = await (options.settings ??
-		options.settingsManager ??
-		logger.time("settings", Settings.init, { cwd, agentDir }));
+	const settings = await (options.settings ?? logger.time("settings", Settings.init, { cwd, agentDir }));
 	// Discovery provider toggles and process-wide setting effects (theme, request limits, …)
 	// follow the newest holder: each top-level session holds both on its settings until disposed,
 	// then hands them back to the previous holder. Subagents and helper sessions never take them,

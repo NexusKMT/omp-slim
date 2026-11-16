@@ -69,23 +69,19 @@ Failed validation returns `OmpErrors`; each entry exposes `code`, `path`,
 error text. `.toJsonSchema()` accepts `target`, `dialect`, and `fallback`
 options.
 
-## Compatibility adapters
+## Zod builder
 
-TypeBox-style and Zod-style builders produce native omptype schemas:
+`@oh-my-pi/omptype/zod` produces native omptype schemas from Zod syntax:
 
 ```ts
-import { Type, type Static } from "@oh-my-pi/omptype/typebox";
 import { z } from "@oh-my-pi/omptype/zod";
 
-const TypeBoxUser = Type.Object({ name: Type.String() });
-type TypeBoxUser = Static<typeof TypeBoxUser>;
-
-const ZodUser = z.object({ name: z.string() });
-const user = ZodUser.parse({ name: "Ada" });
+const User = z.object({ name: z.string() });
+const user = User.parse({ name: "Ada" });
 ```
 
-`@oh-my-pi/omptype/ark` provides the repository's ArkType compatibility facade
-and re-exports the same `type` and `scope` implementations.
+`@oh-my-pi/omptype/ark` provides the repository's ArkType facade and
+re-exports the same `type` and `scope` implementations.
 
 ## JSON Schema import
 

@@ -11,7 +11,7 @@ import {
 	SessionManager,
 } from "@oh-my-pi/pi-coding-agent";
 
-// Discover prompt templates from cwd/.pi/prompts/ and ~/.pi/agent/prompts/
+// Discover prompt templates from cwd/.omp/prompts/ and ~/.omp/agent/prompts/
 const discovered = await discoverPromptTemplates();
 console.log("Discovered prompt templates:");
 for (const cmd of discovered) {

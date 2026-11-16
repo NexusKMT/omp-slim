@@ -32,7 +32,6 @@ import type { FileDeleteFallbackHandler, FileWriteFallbackHandler } from "../../
 import { isFilesystemSourcePath } from "../../tools/path-utils";
 import { InternalUrlRouter } from "../../internal-urls/router";
 import { EventBus } from "../../utils/event-bus";
-import * as TypeBox from "../legacy-typebox";
 import { resolveExtensionDirectory } from "./directory-resolution";
 import { installLegacyPiSpecifierShim, loadLegacyPiModule } from "../plugins/legacy-pi-compat";
 import { getEnabledPlugins, resolvePluginExtensionPaths } from "../plugins/loader";
@@ -90,9 +89,8 @@ function getExtensionFactory(module: LoadedExtensionModule): ExtensionFactory | 
 }
 
 /**
- * Upstream-shaped provenance for an extension-registered tool. Consumers that
- * read `sourceInfo` off `getAllRegisteredTools()` (e.g. pi-fabric) receive an
- * absolute on-disk path: the tool's own `sourcePath` when it is filesystem-
+ * Provenance for an extension-registered tool. Consumers reading `sourceInfo`
+ * off `getAllRegisteredTools()` receive an absolute on-disk path: the tool's own `sourcePath` when it is filesystem-
  * absolute, otherwise the extension's resolved entry (`fallbackPath`). A tool
  * with no absolute origin at all falls back to the synthetic `<extension:name>`.
  */
@@ -205,7 +203,6 @@ export class ExtensionRuntime implements IExtensionRuntime {
  */
 class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 	readonly logger = logger;
-	readonly typebox = TypeBox;
 	readonly arktype = type;
 	readonly zod = zod;
 	readonly flagValues = new Map<string, boolean | string>();
@@ -708,7 +705,7 @@ export async function listPackageExtensionModules(
 /**
  * Discover absolute paths of extensions to load, without importing or
  * binding factories. Hot path on session startup — the scan walks native
- * `.omp`/`.pi` extension capabilities, JS/TS hook factories, the
+ * `.omp` extension capabilities, JS/TS hook factories, the
  * installed-plugin tree, and any configured paths.
  *
  * The root session imports these paths once and forwards prepared factories to

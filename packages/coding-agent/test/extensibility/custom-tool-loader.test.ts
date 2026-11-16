@@ -320,12 +320,14 @@ describe("custom tool host package imports", () => {
 	}
 
 	// Tools live outside any workspace (here a temp dir; in the shipped binary,
-	// anywhere), so `@oh-my-pi/*` and the legacy pi scopes have no node_modules
-	// to resolve from. They must resolve to the host's own copy, as extensions do.
-	it.each(["@oh-my-pi/pi-utils", "@mariozechner/pi-utils"])("resolves %s to the host copy", async specifier => {
+	// anywhere), so `@oh-my-pi/*` has no node_modules to resolve from. It must
+	// resolve to the host's own copy, as extensions do.
+	it("resolves @oh-my-pi/pi-utils to the host copy", async () => {
 		const toolPath = await writeTool(
 			"host_import.ts",
-			esmTool("host_import_tool", '"logger is " + typeof logger.warn', [`import { logger } from "${specifier}";`]),
+			esmTool("host_import_tool", '"logger is " + typeof logger.warn', [
+				'import { logger } from "@oh-my-pi/pi-utils";',
+			]),
 		);
 
 		const result = await loadCustomTools([{ path: toolPath }], requireTempRoot(), []);

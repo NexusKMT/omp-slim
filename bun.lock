@@ -130,7 +130,6 @@
       "name": "@oh-my-pi/omptype",
       "version": "18.18.3",
       "devDependencies": {
-        "@sinclair/typebox": "^0.34.0",
         "@types/bun": "catalog:",
         "arkregex": "0.0.8",
         "arktype": "2.2.3",
@@ -574,8 +573,6 @@
     "@oxlint/binding-win32-ia32-msvc": ["@oxlint/binding-win32-ia32-msvc@1.85.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-eSsIJx9n4yxvOqYTZyPEMyEXRmE60XH7xGAU7i0Qbsn1lf6Za3CWJ9aRd82oSFKXaxhp+sA6/yMJVRIpLpna6A=="],
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.85.0", "", { "os": "win32", "cpu": "x64" }, "sha512-pBebIPUpKKhWrhSMWhy8TdAZBewiXnfxmaAGxhzxM1068GagqFaTwgKlU6e+UyJ2sPR+VoHouhXuGJkQjsrDvA=="],
-
-    "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
 
     "@stencil-hq/vibemon": ["@stencil-hq/vibemon@0.3.2", "", { "dependencies": { "@bufbuild/protobuf": "^2", "@connectrpc/connect": "^2" } }, "sha512-ddVS9+iAXlRsnrfo6XzP9L2SiAHKOZsF51iup+0F8F0uV9ry/P+KUk3seo5vETnvZf2ArTdBCbmBfhXxPLYImQ=="],
 

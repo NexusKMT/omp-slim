@@ -144,7 +144,7 @@ await writeTool.execute("call-1", {
 | `contextFiles`              | Discovered                    | AGENTS.md files                   |
 | `slashCommands`             | Discovered                    | File commands                     |
 | `sessionManager`            | `SessionManager.create(cwd)`  | Persistence                       |
-| `settingsManager`           | From agentDir                 | Settings overrides                |
+| `settings`                  | From agentDir                 | Settings overrides                |
 
 ## Events
 

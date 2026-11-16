@@ -1,7 +1,6 @@
 import { type HookMessageRenderer } from "@oh-my-pi/pi-tui/chat/extension-types";
 export { type HookMessageRenderOptions, type HookMessageRenderer } from "@oh-my-pi/pi-tui/chat/extension-types";
 import type { type as ArkType } from "@oh-my-pi/omptype";
-import type * as TypeBox from "@oh-my-pi/omptype/typebox";
 import type * as zod from "@oh-my-pi/omptype/zod";
 import type { ImageContent, Message, Model, TextContent } from "@oh-my-pi/pi-ai";
 import type { Component, TUI } from "@oh-my-pi/pi-tui";
@@ -571,8 +570,6 @@ export interface HookAPI {
 
 	/** File logger for error/warning/debug messages */
 	logger: typeof PiLogger;
-	/** Injected TypeBox shim (legacy/compat — prefer `arktype`). */
-	typebox: typeof TypeBox;
 	/** Injected omptype schema builder for hooks. */
 	arktype: typeof ArkType;
 	/** Injected Zod-compatible omptype builder for hooks. */

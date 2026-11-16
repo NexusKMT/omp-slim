@@ -46,13 +46,12 @@ describe("legacy-pi specifier shim", () => {
 	});
 
 	it("resolves a canonical @oh-my-pi subpath that remaps to itself", async () => {
-		// Regression: the resolve hook matches `@oh-my-pi/pi-*` as well as the
-		// legacy scopes, so resolving the remapped specifier called
-		// `Bun.resolveSync` with a specifier this same hook matches. Bun
-		// re-entered the hook and re-prefixed the namespace on every pass until
-		// the import died as `NameTooLong reading "file:file:…"`, breaking every
-		// `require("@oh-my-pi/pi-ai/index.js")` first-use boundary — the
-		// `/login` provider selector among them.
+		// Regression: the resolve hook matches `@oh-my-pi/pi-*`, so resolving the
+		// remapped specifier called `Bun.resolveSync` with a specifier this same
+		// hook matches. Bun re-entered the hook and re-prefixed the namespace on
+		// every pass until the import died as `NameTooLong reading "file:file:…"`,
+		// breaking every `require("@oh-my-pi/pi-ai/index.js")` first-use boundary
+		// — the `/login` provider selector among them.
 		const loaded = parseLoaded(await requireThroughShim("@oh-my-pi/pi-ai/index.js"));
 		expect(loaded.pluginLocal).toBe(false);
 		expect(loaded.keys).toBeGreaterThan(1);

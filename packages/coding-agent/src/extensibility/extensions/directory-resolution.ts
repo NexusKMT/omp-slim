@@ -66,7 +66,7 @@ function readDeclaredManifestEntries(
 		return { declared: false, files: [] };
 	}
 
-	const manifest = isRecord(pkg) ? (pkg.omp ?? pkg.pi) : undefined;
+	const manifest = isRecord(pkg) ? pkg.omp : undefined;
 	const entries = isRecord(manifest) ? manifest.extensions : undefined;
 	if (!Array.isArray(entries) || entries.length === 0) {
 		return { declared: false, files: [] };

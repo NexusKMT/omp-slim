@@ -13,7 +13,6 @@ import { getConfigDirs } from "../../config";
 
 import { execCommand } from "../../exec/exec";
 import { getCodingAgentApi } from "../host-api";
-import * as typebox from "../legacy-typebox";
 import { GreenCommand } from "./bundled/ci-green";
 import { AnnotateCommand } from "./bundled/annotate";
 import { ReviewCommand } from "./bundled/review";
@@ -195,7 +194,6 @@ export async function loadCustomCommands(options: LoadCustomCommandsOptions = {}
 		cwd,
 		exec: (command: string, args: string[], execOptions) =>
 			execCommand(command, args, execOptions?.cwd ?? cwd, execOptions),
-		typebox,
 		arktype,
 		zod,
 		get pi() {

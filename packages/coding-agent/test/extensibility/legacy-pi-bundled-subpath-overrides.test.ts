@@ -25,11 +25,11 @@ async function runRegistryProbe(entries: BundledPiEntry[], source: string): Prom
 }
 
 // Regression for issue #3442: extension validation in compiled-binary mode
-// failed to resolve `@earendil-works/pi-ai/oauth` because the override map
-// only covered bare package roots — every non-wildcard subpath fell through
-// to `Bun.resolveSync`, which bunfs can't satisfy on Bun 1.3.14+, then the
-// `rewriteLegacyPiImports` catch left the original specifier in place and
-// Bun's native resolver couldn't find a peer install. The build plugin now
+// failed to resolve non-root subpaths of the bundled Pi packages because the
+// override map only covered bare package roots — every non-wildcard subpath
+// fell through to `Bun.resolveSync`, which bunfs can't satisfy on Bun 1.3.14+,
+// then the `rewriteLegacyPiImports` catch left the original specifier in place
+// and Bun's native resolver couldn't find a peer install. The build plugin now
 // derives every module key from current package exports, so subpaths route to
 // the same `omp-legacy-pi-bundled:` virtual namespace as package roots without
 // a generated registry or duplicate key list.
@@ -155,21 +155,10 @@ export const observed = {
 		expect(bundledModuleKeys.has("@oh-my-pi/pi-coding-agent/eval/js/worker-entry")).toBe(false);
 	});
 
-	it("maps every bundled key (minus shimmed roots + typebox) to its virtual specifier in compiled mode", () => {
+	it("maps every bundled key to its virtual specifier in compiled mode", () => {
 		const overrides = __buildLegacyPiPackageRootOverrides(true, bundledModuleKeys);
 		const missing: string[] = [];
 		for (const key of bundledModuleKeys) {
-			// pi-ai/pi-coding-agent/pi-tui roots intentionally use the legacy compat
-			// shims (they re-attach `Type`, `defineTool`, `decodeKittyPrintable`, etc.
-			// dropped from the canonical package surfaces); typebox is served via
-			// TYPEBOX_SHIM_PATH.
-			if (
-				key === "@oh-my-pi/pi-ai" ||
-				key === "@oh-my-pi/pi-coding-agent" ||
-				key === "@oh-my-pi/pi-tui" ||
-				key === "typebox"
-			)
-				continue;
 			if (overrides[key] !== `omp-legacy-pi-bundled:${key}`) {
 				missing.push(key);
 			}
@@ -177,21 +166,9 @@ export const observed = {
 		expect(missing).toEqual([]);
 	});
 
-	it("does not register subpath overrides in dev/install mode", () => {
-		const overrides = __buildLegacyPiPackageRootOverrides(false);
-		expect(overrides).not.toHaveProperty("@oh-my-pi/pi-ai/oauth");
-		expect(overrides).not.toHaveProperty("@oh-my-pi/pi-coding-agent/tools");
-		// Dev keeps only the historical shim entries so canonical subpath
-		// imports continue to flow through `Bun.resolveSync` against the live
-		// monorepo / installed `node_modules` tree.
-	});
-
-	it("never emits a virtual specifier for typebox via the override map", () => {
-		// typebox is routed through `TYPEBOX_SHIM_PATH` + a dedicated onResolve
-		// hook; mirroring it in the override map would double-register and the
-		// virtual loader would race the dedicated shim path.
-		const overrides = __buildLegacyPiPackageRootOverrides(true, bundledModuleKeys);
-		expect(overrides).not.toHaveProperty("typebox");
+	it("registers no overrides in dev/install mode", () => {
+		const overrides = __buildLegacyPiPackageRootOverrides(false, bundledModuleKeys);
+		expect(overrides).toEqual({});
 	});
 
 	it("loads pi-tui native/* modules through the bundled registry in compiled mode (issue #14834)", async () => {

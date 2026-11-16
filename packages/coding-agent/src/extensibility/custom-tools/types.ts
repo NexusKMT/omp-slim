@@ -6,7 +6,6 @@
  */
 
 import type { type as ArkType } from "@oh-my-pi/omptype";
-import type * as TypeBox from "@oh-my-pi/omptype/typebox";
 import type * as zod from "@oh-my-pi/omptype/zod";
 import type {
 	AgentToolResult,
@@ -69,8 +68,6 @@ export interface CustomToolAPI {
 	hasUI: boolean;
 	/** File logger for error/warning/debug messages */
 	logger: typeof PiLogger;
-	/** Injected typebox shim (legacy/compat — arktype-authored tools are preferred). */
-	typebox: typeof TypeBox;
 	/** Injected arktype module for arktype-authored custom tools. */
 	arktype: typeof ArkType;
 	/** Injected Zod-compatible omptype builder for custom tools. */
@@ -199,7 +196,7 @@ export interface CustomTool<TParams extends TSchema = TSchema, TDetails = any> {
 	strict?: boolean;
 	/** Description for LLM */
 	description: string;
-	/** Parameter schema (arktype, TypeBox, or legacy formats). */
+	/** Parameter schema (arktype or omptype Zod). */
 	parameters: TParams;
 	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */
 	hidden?: boolean;

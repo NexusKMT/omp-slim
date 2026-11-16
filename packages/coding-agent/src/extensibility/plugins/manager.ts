@@ -294,7 +294,7 @@ export class PluginManager {
 		}
 
 		const name = typeof pluginPkg.name === "string" && pluginPkg.name.length > 0 ? pluginPkg.name : fallbackName;
-		const manifest: PluginManifest = pluginPkg.omp || pluginPkg.pi || { version: pluginPkg.version };
+		const manifest: PluginManifest = pluginPkg.omp || { version: pluginPkg.version };
 		manifest.version = pluginPkg.version;
 		const runtimeState = config.plugins[name] || {
 			version: pluginPkg.version,
@@ -651,7 +651,7 @@ export class PluginManager {
 				}
 				throw err;
 			}
-			const manifest: PluginManifest = pkg.omp || pkg.pi || { version: pkg.version };
+			const manifest: PluginManifest = pkg.omp || { version: pkg.version };
 			manifest.version = pkg.version;
 
 			// Resolve enabled features
@@ -926,7 +926,7 @@ export class PluginManager {
 
 		await linkPluginDirectory(absolutePath, linkPath);
 
-		const manifest: PluginManifest = pkg.omp || pkg.pi || { version: pkg.version };
+		const manifest: PluginManifest = pkg.omp || { version: pkg.version };
 		manifest.version = pkg.version;
 
 		// Add to runtime config
@@ -1164,8 +1164,8 @@ export class PluginManager {
 				}
 			}
 
-			const hasManifest = !!(pluginPkg.omp || pluginPkg.pi);
-			const manifest: PluginManifest | undefined = pluginPkg.omp || pluginPkg.pi;
+			const hasManifest = !!pluginPkg.omp;
+			const manifest: PluginManifest | undefined = pluginPkg.omp;
 
 			checks.push({
 				name: `plugin:${name}`,

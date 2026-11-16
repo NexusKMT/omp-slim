@@ -8246,7 +8246,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			cwd: this.sessionManager.getCwd(),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.#modelRegistry,
-			isProjectTrusted: () => true,
 			// Used only when the session has no extension runner. `createAgentSession` always builds
 			// one (carrying the real identity), so only hand-constructed sessions land here.
 			agent: TOP_LEVEL_AGENT,

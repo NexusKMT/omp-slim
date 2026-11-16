@@ -957,9 +957,7 @@ export class SessionTools {
 	 * Full metadata for every registered tool, including source provenance.
 	 *
 	 * Backs the `getAllTools()` ExtensionAPI method. Returns {@link ToolInfo}
-	 * objects (not bare names) so extensions authored against upstream
-	 * `@earendil-works/pi-coding-agent` — which promises `ToolInfo[]` — can read
-	 * `sourceInfo.source` unchanged.
+	 * objects (not bare names), each carrying its `sourceInfo` provenance.
 	 */
 	getAllToolInfos(): ToolInfo[] {
 		return Array.from(this.#toolRegistry, ([name, tool]) => {

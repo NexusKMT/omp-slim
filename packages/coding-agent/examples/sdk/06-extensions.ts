@@ -5,7 +5,7 @@
  * They provide a unified system for extensions, custom tools, commands, and more.
  *
  * Extension files are discovered from:
- * - ~/.omp/agent/extensions/ (legacy: ~/.pi/agent/extensions/)
+ * - ~/.omp/agent/extensions/
  * - <cwd>/.omp/extensions/ (legacy: <cwd>/.pi/extensions/)
  * - Paths specified in settings.json "extensions" array
  * - Paths passed via --extension CLI flag
