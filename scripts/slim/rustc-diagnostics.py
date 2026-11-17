@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import resource
 import subprocess
 import sys
 import time
@@ -47,10 +48,13 @@ def main():
                 sys.stderr.write(line)
                 sys.stderr.flush()
         status = process.wait()
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
     result = {
         "crate": crate, "command": [compiler, *arguments, *extra],
         "frontend_threads": threads, "seconds": round(time.perf_counter() - started, 3),
         "exit_code": status, "phases": phases,
+        "cpu_user_seconds": usage.ru_utime, "cpu_system_seconds": usage.ru_stime,
+        "max_rss_bytes": usage.ru_maxrss if sys.platform == "darwin" else usage.ru_maxrss * 1024,
         "note": "rustc phase intervals can nest or overlap; do not sum them as wall time",
     }
     (record / f"{stem}.json").write_text(json.dumps(result, indent=2) + "\n")
