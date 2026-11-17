@@ -376,12 +376,9 @@ jobs:
          OMP_SLIM_BUILD_JOBS: "4"
          CARGO_BUILD_JOBS: "4"
          CARGO_BUILD_TARGET: x86_64-apple-darwin
-         CARGO_TARGET_DIR: ${{ runner.temp }}/omp-slim-development-cargo
          RUSTFLAGS: "-C target-cpu=x86-64-v3"
          OMP_NATIVE_CARGO_PROFILE: ${{ matrix.profile }}
          OMP_NATIVE_TIMINGS: "1"
-         PI_CODING_AGENT_DIR: ${{ runner.temp }}/omp-slim-development-state
-         PI_CONFIG_DIR: ${{ runner.temp }}/omp-slim-development-config
       steps:
          - name: Check out benchmark source
            uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -394,6 +391,9 @@ jobs:
               test "$(uname -m)" = x86_64
               test -d "$DEVELOPER_DIR"
               printf 'SDKROOT=%s\n' "$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+              printf 'CARGO_TARGET_DIR=%s/omp-slim-development-cargo\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+              printf 'PI_CODING_AGENT_DIR=%s/omp-slim-development-state\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+              printf 'PI_CONFIG_DIR=%s/omp-slim-development-config\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
               printf '%s\n' "$HOME/.bun/bin" "$HOME/.cargo/bin" >> "$GITHUB_PATH"
               mkdir -p "dist/validation/development-benchmark/$OMP_NATIVE_CARGO_PROFILE"
               sysctl machdep.cpu.brand_string hw.physicalcpu hw.logicalcpu hw.memsize > "dist/validation/development-benchmark/$OMP_NATIVE_CARGO_PROFILE/host.txt"
