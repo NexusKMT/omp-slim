@@ -117,6 +117,19 @@ These samples measure function-body edits in one retained checkout, excluding
 job startup and cache restoration. They do not measure dependency/API changes
 or a complete interactive remote editing service.
 
+For deeper investigation, `compiler_matrix=true` selects `dev` builds with
+1, 2 and 4 frontend threads on `pi-natives`, `pi-builtins` and `pi-shell`.
+Cargo remains limited to four jobs. Each configuration establishes a separate
+checkpoint and performs three actual function-body changes per crate, verifying
+the new addon behavior and source worker smoke after each change. The rustc
+wrapper preserves Cargo's jobserver descriptors and records JSON pass timings
+for the selected crates; fingerprint logs explain why Cargo rebuilt each unit.
+Pass timings can nest or overlap and must not be added together. Checkpoints
+record source SHA-256 and timestamps; only byte-identical tracked files regain
+their prior timestamps. New instrumentation forces the selected crates once
+before the measured edit sequence. The matrix uploads diagnostic evidence,
+not experimental binaries.
+
 ## Build and removal history
 
 The baseline was built before removal. Browser, desktop, speech and memory were
