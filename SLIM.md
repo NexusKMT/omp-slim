@@ -104,6 +104,19 @@ CLI change in 0.28s and caught a Rust cancellation regression in 3.28s; restorin
 the implementation passed in 3.77s. These are local command timings, not full
 native rebuild timings.
 
+The manual macOS workflow accepts `compare_development=true` to compare the
+existing `dev` and `local` profiles on separate Intel runners. Each job records
+its warm build and unchanged rebuild, then applies three distinct behavior
+changes to the same native tab-width function. Every sample rebuilds and
+installs the addon, verifies the changed result in a fresh Bun process, and
+runs source worker smoke. It restores the original source and addon before
+PTY, shell-session, grammar and export checks. Profile-specific warm caches
+are saved before edits; the evidence artifact includes per-command timings,
+Cargo timing reports, source restoration and validated addon checksums.
+These samples measure function-body edits in one retained checkout, excluding
+job startup and cache restoration. They do not measure dependency/API changes
+or a complete interactive remote editing service.
+
 ## Build and removal history
 
 The baseline was built before removal. Browser, desktop, speech and memory were
