@@ -50,6 +50,62 @@ after changing profiles must populate the new dependency cache. See the
 [build-performance report](docs/slim-build-performance-2026-11-17.md) for all
 three configurations, validation results and measurement limits.
 
+## Development feedback
+
+The goal is to see the effect of each edit quickly. With a verified native
+addon installed in `packages/natives/native/`, ordinary TypeScript changes use
+the existing source entrypoint:
+
+```sh
+# From the repository root; restart the CLI after an edit.
+bun run dev
+
+# Worker/service smoke without a model request or standalone build.
+bun run dev --smoke-test
+
+# First check the affected behavior and package.
+bun test packages/coding-agent/test/<file>.test.ts
+bun --cwd=packages/coding-agent run check:types
+```
+
+`bun run dev` runs in `packages/coding-agent/`. To run the source CLI against
+another project, invoke its absolute entrypoint from that project's directory:
+`bun /path/to/omp-slim/packages/coding-agent/src/cli.ts`. These commands use the
+normal agent configuration; use `PI_CODING_AGENT_DIR` and `PI_CONFIG_DIR` to
+isolate experiments. TypeScript source changes do not require `bun setup`,
+`build:native`, CLI packaging, or a new Actions job. Native API or implementation
+changes do require a matching new addon; matching package versions alone does
+not prove that the addon contains the current Rust implementation.
+
+For Rust edits, start with the affected crate instead of selecting the whole
+workspace. The test wrapper preserves doctests and accepts a nextest filter:
+
+```sh
+bun run check:rs --package pi-pty
+bun run test:rs --package pi-pty
+bun run test:rs --package pi-pty -E 'test(cancel)'
+```
+
+Keep the same Cargo profile, flags and target directory between edits. Small
+independent crates can be checked locally. Full native compilation still uses
+the authorized remote build path. The `ci` timings above are not measurements
+of a persistent incremental Rust development environment. Full workspace
+validation and standalone packaging are integration gates, separate from the
+first feedback after an edit.
+
+The workspace native addon was updated from verified comparison run
+`43947005367` (O3 without LTO). Source worker smoke and targeted behavior checks
+are recorded in `dist/validation/dev-loop-2026-11-17/`; its installation record
+includes the addon digest and source revision. Earlier local addon files were
+backed up there before replacement. The [development feedback measurements](docs/slim-build-performance-2026-11-17.md#local-development-feedback)
+record source smoke at 6.98s, four PTY binding tests at 1.86s, and the initial
+focused Rust test command at 11.03s. A temporary source-edit probe observed the
+CLI change in 0.28s and caught a Rust cancellation regression in 3.28s; restoring
+the implementation passed in 3.77s. These are local command timings, not full
+native rebuild timings.
+
+## Build and removal history
+
 The baseline was built before removal. Browser, desktop, speech and memory were
 then removed in four isolated worktrees and integrated on `main`. At most five
 agents may run concurrently, including the coordinator; workers must not spawn

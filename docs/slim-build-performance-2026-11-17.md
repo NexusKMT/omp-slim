@@ -5,6 +5,67 @@ fell from 10m 03s to 2m 46s (72.5% shorter), and the isolated PTY regression
 command takes 8s instead of the preceding 19m 14s. All three comparison jobs
 and the complete Linux Rust validation passed.
 
+The development goal is faster feedback after editing code. The source CLI and
+focused crate commands now provide that path; the local measurements below are
+separate from the remote full-build comparison.
+
+## Local development feedback
+
+The working checkout now loads the verified O3/no-LTO native addon from run
+`43947005367`, source `91e59623f58a23792c97c73f08d34d0d1acb08cd`.
+Its SHA-256 is
+`a99244e40901e09b3659befa708ae4c88b2cb10350dcd4e5c98f1c8c66efe327`.
+The previous local addon still exposed removed APIs despite having the same
+package version. It was backed up, replaced, and checked with
+`scripts/slim/verify-native.ts`. The generated declarations were recovered with
+the addon. Ordinary TypeScript edits can now use `bun run dev`, restarting the
+source process after each edit, without compiling or packaging Rust.
+
+The Rust task wrapper previously ignored extra arguments. It now accepts
+`--package` / `-p` for `check:rs`, `lint:rs` and `test:rs`, plus `-E` /
+`--filter-expr` for focused nextest runs. An explicit package runs regardless of
+the branch-diff gate. Formatting, Clippy and doctests are restricted to the
+selected packages; nextest filters leave those doctests enabled. Unknown
+options and a test filter without a package fail before Cargo starts.
+
+These are wall times measured on the local Intel Mac, including the command
+wrapper. The source CLI used isolated configuration directories and made no
+model requests. Rust commands used two build jobs and the same initially empty
+`CARGO_TARGET_DIR=/tmp/omp-slim-rust-feedback-501`; only `pi-pty` and its small
+dependency graph were compiled locally.
+
+| Operation | Wall time | Result |
+| --- | ---: | --- |
+| Source CLI `--version` | 0.516s | Passed |
+| Source CLI `--help` | 0.551s | Passed |
+| Source CLI `--smoke-test` | 6.977s | Worker and service responses passed |
+| Four native PTY binding cases | 1.860s | 4 passed |
+| `bun run check:rs --package pi-pty` | 5.871s | Formatting and Clippy passed |
+| `bun run test:rs --package pi-pty` | 11.029s | First test build, 7 tests passed, doctest pass completed |
+| `bun run test:rs --package pi-pty -E 'test(cancel)'` | 2.966s | Cached build, 2 tests passed, doctest pass completed |
+
+An additional edit/run/restore probe verified that changed source is actually
+observed. A temporary CLI help marker appeared on the next source invocation
+in 0.279s and disappeared after restoration in 0.271s. In `pi-pty`, temporarily
+dropping the cancellation callback instead of calling it caused the existing
+cancellation test to fail in 3.282s, including recompilation. Restoring the
+implementation recompiled the crate and passed both cancellation tests in
+3.766s. Both source files were restored byte for byte; the probe changes are
+not part of the implementation. Logs and source hashes are recorded alongside
+`edit-feedback-timings.json`.
+
+The 2.966s cached filtered run had no intervening source edit; the edit probe
+above did. Neither measures rebuilding the full addon after a Rust change.
+The complete native graph still requires a remote build, and a new addon is
+needed to observe native changes in the CLI. `--help` timing is also not an
+interactive-session or model-response latency measurement.
+
+Eight wrapper regression tests, script type checking, focused script lint and
+formatting, and native-package type checking passed. Raw command logs, timing
+JSON and the addon installation record are in
+`dist/validation/dev-loop-2026-11-17/`. See
+[`SLIM.md`](../SLIM.md#development-feedback) for the everyday commands.
+
 ## Implemented changes
 
 The seven output-drain regression tests now compile `pi-pty`, a small crate

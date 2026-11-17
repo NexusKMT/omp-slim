@@ -11,6 +11,20 @@ duplicating prose that goes stale.
 
 ## Local development
 
+From the repository root, use `bun run dev` to run the CLI directly from source
+with the installed, verified native addon. Restart it after TypeScript, prompt
+or theme edits to load those changes. This does not compile Rust or package a
+standalone executable. `bun run dev --smoke-test` checks the source worker and
+service paths without calling a model. Native implementation or binding changes
+require an updated addon; OMP Slim builds that addon remotely as described in
+[`SLIM.md`](../../SLIM.md).
+
+For the first feedback on an edit, run its test file directly with
+`bun test packages/coding-agent/test/<file>.test.ts` from the root, then the
+affected package's type check. Reserve the full suites and standalone build for
+integration validation. See [the development loop](../../SLIM.md#development-feedback)
+for the TypeScript and Rust commands.
+
 Run from `packages/coding-agent/` (or add `--cwd=packages/coding-agent`):
 
 | Task                           | Command               |

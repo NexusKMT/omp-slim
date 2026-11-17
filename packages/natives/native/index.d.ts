@@ -486,8 +486,8 @@ export declare class ShellVisualization {
  */
 export declare class TtyWriter {
   /**
-   * Start a pump thread for `fd` (typically 1). Fails on non-Unix hosts and
-   * when the descriptor cannot be duplicated.
+   * Start a pump thread for `fd` (typically 1). Fails when the descriptor
+   * cannot be duplicated.
    */
   constructor(fd: number)
   /**
@@ -720,7 +720,6 @@ export declare class VcsRepo {
   /** List tracked or untracked paths. */
   lsFiles(others: boolean, excludeStandard: boolean, signal?: unknown | undefined | null): Promise<Array<string>>
 }
-
 
 /**
  * Points the addon at the directory holding downloaded wasm grammars

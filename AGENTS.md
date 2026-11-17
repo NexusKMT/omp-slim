@@ -215,6 +215,23 @@ standalone compilation runs remotely through the public manual Actions
 workflows in `SLIM.md`. Local type checks, focused TS tests, and formatting checks
 are appropriate; do not start a full local native build.
 
+The development goal is fast feedback after each code change. For TypeScript,
+run the source CLI with `bun run dev` and test the affected files; reuse the
+verified native addon in `packages/natives/native/`. A standalone binary build
+is not required to observe TypeScript changes. Restart the source process to
+load edited modules. Use package type checks for a local change and `check:ts`
+for the wider TS gate; root `bun check` can also start the Rust workspace gate
+when this branch contains earlier Rust changes.
+
+For Rust, use `bun run check:rs --package CRATE` and
+`bun run test:rs --package CRATE`, optionally `-E 'test(NAME)'` for nextest.
+Explicit package selection runs even on an otherwise unchanged branch and
+retains that package's doctests. Small independent crates such as `pi-pty` can
+be checked locally; checks requiring the full native graph still run remotely.
+Measure a real edit/check/run cycle with a retained target directory before
+claiming that developer feedback has improved. Whole-build and release checks
+remain integration gates, not a prerequisite for every local edit.
+
 ## Generated Files
 
 RPC wire changes must regenerate the retained SDKs with `bun run gen:rpc` and
