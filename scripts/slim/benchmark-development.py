@@ -16,6 +16,7 @@ SOURCE = ROOT / "crates/pi-natives/src/text.rs"
 ANCHOR = "width.clamp(MIN_TAB_WIDTH, MAX_TAB_WIDTH) as usize"
 PROFILE = os.environ.get("OMP_NATIVE_CARGO_PROFILE", "")
 RECORD = ROOT / "dist/validation/development-benchmark" / PROFILE
+SAMPLES = int(os.environ.get("OMP_BENCHMARK_SAMPLES", "3"))
 
 
 def write_json(path, value):
@@ -91,7 +92,34 @@ def smoke(label):
     return command(label, ["bun", "run", "dev", "--smoke-test"])
 
 
+def verify_development_profile():
+    # Recent Cargo disables incremental by default when CI is present, even
+    # when the profile explicitly enables it. Verify effective units before
+    # spending time compiling; the manifest alone is not evidence.
+    result = subprocess.run([
+        "cargo", "build", "--locked", "-p", "pi-natives", "--profile", PROFILE,
+        "--target", os.environ["CARGO_BUILD_TARGET"], "--unit-graph", "-Z", "unstable-options",
+    ], cwd=ROOT, text=True, capture_output=True, check=True)
+    graph = json.loads(result.stdout)
+    write_json(RECORD / "unit-graph.json", graph)
+    selected = {
+        unit["target"]["name"]: unit["profile"] for unit in graph["units"]
+        if unit["target"]["name"] in {"pi_natives", "pi_shell", "pi_builtins"}
+    }
+    write_json(RECORD / "effective-profiles.json", {
+        "environment": {name: os.environ.get(name) for name in (
+            "CI", "CARGO_INCREMENTAL", "CARGO_BUILD_INCREMENTAL",
+        )},
+        "units": selected,
+    })
+    if len(selected) != 3 or any(not profile["incremental"] for profile in selected.values()):
+        raise RuntimeError("Development benchmark requires effective incremental=true for all three crates; set CARGO_INCREMENTAL=1")
+    if SAMPLES not in (1, 3):
+        raise RuntimeError("Choose OMP_BENCHMARK_SAMPLES=1 for a quick probe or 3 for repeated measurements")
+
+
 def warm():
+    verify_development_profile()
     original = SOURCE.read_bytes()
     write_json(RECORD / "provenance.json", {
         "source_commit": os.environ["GITHUB_SHA"],
@@ -103,6 +131,7 @@ def warm():
         "source_sha256": hashlib.sha256(original).hexdigest(),
         "sample_kind": "change the existing tab-width clamp function; verify the loaded addon returns the new limit",
         "scope": "native function-body edits in one retained checkout; excludes cross-job cache restore latency",
+        "samples": SAMPLES,
     })
     (RECORD / "original-text.rs").write_bytes(original)
     build("warm-build")
@@ -120,7 +149,7 @@ def edits():
     samples = []
     current = original
     try:
-        for index in range(1, 4):
+        for index in range(1, SAMPLES + 1):
             started = time.perf_counter()
             changed = text.replace(ANCHOR, f"width.clamp(MIN_TAB_WIDTH, MAX_TAB_WIDTH + {index}) as usize")
             current = changed.encode()

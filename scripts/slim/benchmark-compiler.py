@@ -13,6 +13,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 THREADS = int(os.environ.get("OMP_FRONTEND_THREADS", "1"))
+SCOPE = os.environ.get("OMP_BENCHMARK_SCOPE", "full")
 RECORD = ROOT / "dist/validation/compiler-matrix" / f"frontend-{THREADS}"
 spec = importlib.util.spec_from_file_location("development_benchmark", Path(__file__).with_name("benchmark-development.py"))
 bench = importlib.util.module_from_spec(spec)
@@ -115,6 +116,7 @@ def save_checkpoint():
 
 
 def warm():
+    bench.verify_development_profile()
     compatible = restore_timestamps()
     for name, case in CASES.items():
         source = ROOT / case["path"]
@@ -132,7 +134,7 @@ def warm():
         "rustflags": os.environ["RUSTFLAGS"], "target": os.environ["CARGO_BUILD_TARGET"],
         "cache_key": os.environ.get("OMP_DEVELOPMENT_CACHE_KEY"),
         "restored_cache_key": os.environ.get("OMP_DEVELOPMENT_RESTORED_CACHE_KEY"),
-        "samples_per_case": 3, "cases": {n: c["path"] for n, c in CASES.items()},
+        "samples_per_case": bench.SAMPLES, "cases": {n: c["path"] for n, c in CASES.items() if SCOPE == "full" or n == "native"},
         "instrumentation": "time-passes on pi_natives/pi_builtins/pi_shell; all threads use the same instrumented wrapper",
         "scope": "incremental edits in one checkout; excludes job/cache transfer; pass timings can overlap",
     })
@@ -150,13 +152,15 @@ def warm():
 def samples():
     results = []
     for name, case in CASES.items():
+        if SCOPE == "quick" and name != "native":
+            continue
         source = ROOT / case["path"]
         original = (RECORD / f"original-{name}.rs").read_bytes()
         if source.read_bytes() != original:
             raise RuntimeError(f"Unexpected source change before {name}")
         current = original
         try:
-            for index in range(1, 4):
+            for index in range(1, bench.SAMPLES + 1):
                 started = time.perf_counter()
                 current = original.decode().replace(case["anchor"], case["changed"](index)).encode()
                 source.write_bytes(current)
@@ -217,6 +221,8 @@ if __name__ == "__main__":
         raise SystemExit("Compiler matrix builds run only in public OMP Slim Actions")
     if THREADS not in (1, 2, 4) or os.environ.get("OMP_NATIVE_CARGO_PROFILE") != "dev":
         raise SystemExit("Use dev profile with 1, 2 or 4 frontend threads")
+    if SCOPE not in {"quick", "full"}:
+        raise SystemExit("Choose OMP_BENCHMARK_SCOPE=quick or full")
     action = sys.argv[1] if len(sys.argv) == 2 else ""
     if action not in {"warm", "samples", "summarize"}:
         raise SystemExit("Usage: benchmark-compiler.py warm|samples|summarize")

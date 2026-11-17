@@ -104,21 +104,36 @@ CLI change in 0.28s and caught a Rust cancellation regression in 3.28s; restorin
 the implementation passed in 3.77s. These are local command timings, not full
 native rebuild timings.
 
-The manual macOS workflow accepts `compare_development=true` to compare the
-existing `dev` and `local` profiles on separate Intel runners. Each job records
-its warm build and unchanged rebuild, then applies three distinct behavior
+The manual macOS workflow accepts `compare_development=true` to measure the
+existing `dev` and `local` profiles on separate Intel runners. It defaults to
+`development_profile=dev` and `benchmark_scope=quick` (one native edit).
+Choose `development_profile=both` and `benchmark_scope=full` for three distinct behavior
 changes to the same native tab-width function. Every sample rebuilds and
 installs the addon, verifies the changed result in a fresh Bun process, and
 runs source worker smoke. It restores the original source and addon before
 PTY, shell-session, grammar and export checks. Profile-specific warm caches
 are saved before edits; the evidence artifact includes per-command timings,
-Cargo timing reports, source restoration and validated addon checksums.
+Cargo timing reports and source restoration. Validated addon checksums and
+binaries are produced only when the complete restoration test gate passes.
 These samples measure function-body edits in one retained checkout, excluding
 job startup and cache restoration. They do not measure dependency/API changes
 or a complete interactive remote editing service.
 
-For deeper investigation, `compiler_matrix=true` selects `dev` builds with
-1, 2 and 4 frontend threads on `pi-natives`, `pi-builtins` and `pi-shell`.
+Both development experiment jobs explicitly set `CARGO_INCREMENTAL=1` and
+reject an effective Cargo unit graph that disables incremental for the three
+target crates. The pinned Cargo disables incremental by default under `CI`,
+even when Cargo.toml enables it. The first completed comparison and matrix
+therefore measured cached-dependency rebuilds with incremental disabled:
+native edit medians were 578.7s (`local`) and 60.5s (`dev`); the instrumented
+matrix measured about 30–43s for native edits, 200–234s for shell edits and
+288–329s for builtins edits. The corrected incremental configuration has not
+yet been timed on the complete project. See the
+[compiler investigation](docs/slim-compiler-investigation-2026-11-17.md) for
+raw evidence, limits, failed final session tests and their test fix.
+
+For deeper investigation, `compiler_matrix=true` defaults to one native edit
+with one frontend thread. With `benchmark_scope=full`, it selects `dev` builds
+with 1, 2 and 4 frontend threads on `pi-natives`, `pi-builtins` and `pi-shell`.
 Cargo remains limited to four jobs. Each configuration establishes a separate
 checkpoint and performs three actual function-body changes per crate, verifying
 the new addon behavior and source worker smoke after each change. The rustc

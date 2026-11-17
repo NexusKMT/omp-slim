@@ -12,16 +12,21 @@ on:
             type: boolean
             default: false
          compare_development:
-            description: Measure three real native edits with retained dev and local build state
+            description: Measure real native edits with retained development build state
             type: boolean
             default: false
          development_profile:
             description: Development comparison profiles to run
             type: choice
             options: [both, dev, local]
-            default: both
+            default: dev
+         benchmark_scope:
+            description: Quick uses one native edit; full runs all cases and three samples
+            type: choice
+            options: [quick, full]
+            default: quick
          compiler_matrix:
-            description: Profile native, builtins and shell edits with 1, 2 and 4 frontend threads
+            description: Profile compiler stages (full scope expands cases and frontend threads)
             type: boolean
             default: false
          benchmark_cache_key:
@@ -388,6 +393,8 @@ jobs:
          RUSTFLAGS: "-C target-cpu=x86-64-v3"
          OMP_NATIVE_CARGO_PROFILE: ${{ matrix.profile }}
          OMP_NATIVE_TIMINGS: "1"
+         CARGO_INCREMENTAL: "1"
+         OMP_BENCHMARK_SAMPLES: ${{ inputs.benchmark_scope == 'full' && '3' || '1' }}
       steps:
          - name: Check out benchmark source
            uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -418,8 +425,9 @@ jobs:
                  ~/.cargo/registry
                  ~/.cargo/git
                  ${{ runner.temp }}/omp-slim-development-cargo
-              key: slim-macos15-intel-xcode16.4-development-v1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-${{ github.sha }}
+              key: slim-macos15-intel-xcode16.4-development-v2-inc1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-${{ github.sha }}
               restore-keys: |
+                 slim-macos15-intel-xcode16.4-development-v2-inc1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-development-v1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
 
          - name: Install pinned toolchains and dependencies
@@ -451,7 +459,7 @@ jobs:
                  ${{ runner.temp }}/omp-slim-development-cargo
               key: ${{ steps.development-cache.outputs.cache-primary-key }}
 
-         - name: Measure three native behavior changes and source worker smoke
+         - name: Measure native behavior changes and source worker smoke
            id: edits
            shell: bash
            run: python3 scripts/slim/benchmark-development.py edits
@@ -500,7 +508,7 @@ jobs:
          fail-fast: false
          max-parallel: 3
          matrix:
-            threads: [1, 2, 4]
+            threads: ${{ fromJSON(inputs.benchmark_scope == 'full' && '[1,2,4]' || '[1]') }}
       env:
          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
          MACOSX_DEPLOYMENT_TARGET: "15.0"
@@ -512,6 +520,9 @@ jobs:
          OMP_NATIVE_CARGO_PROFILE: dev
          OMP_NATIVE_TIMINGS: "1"
          OMP_FRONTEND_THREADS: ${{ matrix.threads }}
+         CARGO_INCREMENTAL: "1"
+         OMP_BENCHMARK_SAMPLES: ${{ inputs.benchmark_scope == 'full' && '3' || '1' }}
+         OMP_BENCHMARK_SCOPE: ${{ inputs.benchmark_scope }}
       steps:
          - name: Check out compiler experiment
            uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -541,9 +552,11 @@ jobs:
                  ~/.cargo/registry
                  ~/.cargo/git
                  ${{ runner.temp }}/omp-slim-development-cargo
-              key: slim-macos15-intel-xcode16.4-compiler-v1-front${{ matrix.threads }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-${{ github.sha }}
+              key: slim-macos15-intel-xcode16.4-compiler-v2-inc1-front${{ matrix.threads }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-${{ github.sha }}
               restore-keys: |
+                 slim-macos15-intel-xcode16.4-compiler-v2-inc1-front${{ matrix.threads }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-compiler-v1-front${{ matrix.threads }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
+                 slim-macos15-intel-xcode16.4-development-v2-inc1-dev-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-development-v1-dev-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
 
          - name: Install toolchains and record exact versions

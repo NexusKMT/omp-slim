@@ -303,6 +303,15 @@ Profiles live in the root `Cargo.toml`; `.cargo/config.toml` carries the setting
 |`profiling`|`release` codegen with symbols kept, for `perf`/`samply`/Instruments.|
 |`ci`|O3 without LTO, no debuginfo, stripped.|
 
+The pinned Cargo disables incremental compilation by default when `CI` is set,
+even when the profile has `incremental = true`. Development feedback benchmarks
+must explicitly use `CARGO_INCREMENTAL=1` and verify the effective unit graph
+before compiling. Preserve the chosen environment throughout the measured edit
+loop. The first 2026-11-17 dev/local comparison and frontend matrix actually ran
+with incremental disabled; see `docs/slim-compiler-investigation-2026-11-17.md`.
+Start performance experiments with one representative edit and a retained build
+directory; expand the matrix only after checking the effective flags and result.
+
 **Never set `split-debuginfo = "off"` on a profile that has debuginfo.** On Mach-O the linker never merges DWARF into the executable — it writes a debug map (`N_OSO`) pointing at the `.o` files, and `"unpacked"` is what keeps those files. With `"off"` every backtrace frame in our own crates silently loses `file:line`; the `panicked at foo.rs:3` header still prints (that is `#[track_caller]`, not debuginfo), which makes the loss easy to miss. `ci` may use `"off"` only because it sets `debug = false`.
 
 `embed-metadata = false` (in `.cargo/config.toml`) keeps crate metadata in `.rmeta` instead of duplicating it into every rlib — measured 196 MB → 130 MB on a reqwest-sized graph at identical build times. Its accepted spelling is toolchain-coupled; keep it in sync with `rust-toolchain.toml`.
