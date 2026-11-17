@@ -15,6 +15,11 @@ on:
             description: Measure three real native edits with retained dev and local build state
             type: boolean
             default: false
+         development_profile:
+            description: Development comparison profiles to run
+            type: choice
+            options: [both, dev, local]
+            default: both
          benchmark_cache_key:
             description: Exact existing macOS build cache key for the comparison
             type: string
@@ -24,7 +29,7 @@ permissions:
    contents: read
 
 concurrency:
-   group: slim-macos-intel-${{ github.ref }}
+   group: slim-macos-intel-${{ github.ref }}-${{ inputs.compare_development && inputs.development_profile || 'build' }}
    cancel-in-progress: false
 
 jobs:
@@ -368,7 +373,7 @@ jobs:
       strategy:
          fail-fast: false
          matrix:
-            profile: [dev, local]
+            profile: ${{ fromJSON(inputs.development_profile == 'dev' && '["dev"]' || inputs.development_profile == 'local' && '["local"]' || '["dev","local"]') }}
       env:
          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
          MACOSX_DEPLOYMENT_TARGET: "15.0"
@@ -414,6 +419,7 @@ jobs:
                  slim-macos15-intel-xcode16.4-development-v1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
 
          - name: Install pinned toolchains and dependencies
+           id: development-toolchains
            shell: bash
            run: |
               bash scripts/slim/bootstrap.sh 2>&1 | tee "dist/validation/development-benchmark/$OMP_NATIVE_CARGO_PROFILE/bootstrap.log"
@@ -429,8 +435,8 @@ jobs:
               OMP_DEVELOPMENT_RESTORED_CACHE_KEY: ${{ steps.development-cache.outputs.cache-matched-key }}
            run: python3 scripts/slim/benchmark-development.py warm
 
-         - name: Preserve warm build state before editing
-           if: ${{ !cancelled() && steps.warm.outcome == 'success' && steps.development-cache.outputs.cache-hit != 'true' }}
+         - name: Preserve build state even if addon installation fails
+           if: ${{ !cancelled() && steps.development-toolchains.outcome == 'success' && steps.development-cache.outputs.cache-hit != 'true' }}
            continue-on-error: true
            uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
            with:
@@ -463,7 +469,9 @@ jobs:
            with:
               name: omp-slim-development-${{ matrix.profile }}-${{ github.sha }}
               retention-days: 7
-              path: dist/validation/development-benchmark/${{ matrix.profile }}/
+              path: |
+                 dist/validation/development-benchmark/${{ matrix.profile }}/
+                 ${{ runner.temp }}/omp-slim-development-cargo/cargo-timings/
 
          - name: Upload verified restored native addon
            if: ${{ !cancelled() && steps.restored.outcome == 'success' }}

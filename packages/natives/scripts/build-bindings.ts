@@ -165,9 +165,14 @@ const napiArgs = [
 	"index.d.ts",
 	"-o",
 	buildOutputDir,
-	"--profile",
-	cargoProfile,
 ];
+
+// Cargo writes the built-in `dev` profile into `debug/`. napi-rs treats an
+// explicit --profile as a literal output directory, so use its default debug
+// mode for dev. Custom profiles retain their named directory.
+if (cargoProfile !== "dev") {
+	napiArgs.push("--profile", cargoProfile);
+}
 
 // Local-only opt-in: pass extra cargo features through to napi build.
 const extraFeatures = Bun.env.OMP_NATIVE_FEATURES?.trim();
