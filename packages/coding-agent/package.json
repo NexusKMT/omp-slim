@@ -458,6 +458,8 @@
     "@opentelemetry/sdk-trace-node": "catalog:"
   },
   "devDependencies": {
+    "@babel/traverse": "catalog:",
+    "@types/babel__traverse": "catalog:",
     "@types/bun": "catalog:"
   },
   "engines": {
