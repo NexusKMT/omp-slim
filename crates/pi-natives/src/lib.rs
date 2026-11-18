@@ -23,7 +23,6 @@
 #![feature(alloc_error_hook)]
 
 pub mod appearance;
-pub mod applefm;
 pub mod ast;
 pub mod block;
 pub mod clipboard;
@@ -38,8 +37,6 @@ pub mod grammars;
 pub mod grep;
 pub mod held_files;
 pub mod highlight;
-/// HDiffPatch single-stream binary patch application.
-pub mod hpatch;
 pub mod html;
 /// Local IPC over Unix domain sockets.
 pub mod ipc;

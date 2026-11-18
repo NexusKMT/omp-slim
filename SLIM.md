@@ -12,6 +12,141 @@ control, speech/live audio, and automatic long-term memory, followed by independ
 resume/history, context compaction, file editing, shell execution, subagents,
 ordinary HTTP search, MCP and manually maintained instructions remain core.
 
+Current product targets are **macOS Intel and Linux x64**. Built-in SSH host
+management and `ssh://` file transport, upstream self-update, Apple Foundation
+Models, update-only binary patching, metaharness and Snapcompact research code
+are removed. The Snapcompact runtime, local stats and RPC SDKs remain.
+Native caches are checked against embedded SHA-256 digests, including same-version
+builds with equal file sizes. `bun run check:ts` also checks root build scripts.
+Go and Python SDK contracts have a manual public workflow, `slim-sdk-checks.yml`.
+This cleanup changes native inputs and requires a fresh full build; older
+validation records below apply only to the source revisions they name.
+See the [2026-11-17 cleanup report](docs/slim-cleanup-2026-11-17.md) for the
+implemented removals, local regression results and remaining remote checks.
+
+AST WASM grammars are disabled by default. Structural operations retain Bash,
+C/C++, CSS, Diff, Go, HTML, Java, JavaScript, JSON, Markdown, Python, Regex,
+Rust, TOML, TSX/TypeScript and YAML. Other registered languages are skipped by
+structural operations without downloading modules, including when an older
+build left cached grammars. Ordinary text operations remain available.
+An explicit `OMP_NATIVE_FEATURES=wasm-grammars` native build restores optional
+grammar loading. `slim-macos-intel.yml` accepts `compare_wasm=true` and a fixed
+`benchmark_cache_key` to compare both builds against the same restored cache;
+it records native/CLI/PTY timings, dependency graphs and addon sizes.
+The [2026-11-17 comparison](docs/slim-wasm-build-2026-11-17.md) passed both modes:
+the default addon shrank by 5.67 MB, but the first build from the old WASM cache
+was slower. The report separates compilation, cache restoration and tests.
+
+The macOS PTY regression command now builds `pi-pty`, the small output-drain
+crate also used by the native addon, and matches napi's explicit Cargo target.
+The workflow additionally tests `PtySession` through the freshly built addon.
+`compare_optimization=true` compares O3 ThinLTO, O3 without LTO, and workspace
+O2 without LTO against a fixed cache. It measures both the first native build
+and a second addon build with its dependencies already compiled, so a change
+of Cargo profile is not confused with the cost of an ordinary addon edit.
+The `ci` profile now retains O3 and disables LTO: addon-only compilation fell
+from 10m 03s to 2m 46s, while the isolated PTY command takes 8s. The first build
+after changing profiles must populate the new dependency cache. See the
+[build-performance report](docs/slim-build-performance-2026-11-17.md) for all
+three configurations, validation results and measurement limits.
+
+## Development feedback
+
+The goal is to see the effect of each edit quickly. With a verified native
+addon installed in `packages/natives/native/`, ordinary TypeScript changes use
+the existing source entrypoint:
+
+```sh
+# From the repository root; restart the CLI after an edit.
+bun run dev
+
+# Worker/service smoke without a model request or standalone build.
+bun run dev --smoke-test
+
+# First check the affected behavior and package.
+bun test packages/coding-agent/test/<file>.test.ts
+bun --cwd=packages/coding-agent run check:types
+```
+
+`bun run dev` runs in `packages/coding-agent/`. To run the source CLI against
+another project, invoke its absolute entrypoint from that project's directory:
+`bun /path/to/omp-slim/packages/coding-agent/src/cli.ts`. These commands use the
+normal agent configuration; use `PI_CODING_AGENT_DIR` and `PI_CONFIG_DIR` to
+isolate experiments. TypeScript source changes do not require `bun setup`,
+`build:native`, CLI packaging, or a new Actions job. Native API or implementation
+changes do require a matching new addon; matching package versions alone does
+not prove that the addon contains the current Rust implementation.
+
+For Rust edits, start with the affected crate instead of selecting the whole
+workspace. The test wrapper preserves doctests and accepts a nextest filter:
+
+```sh
+bun run check:rs --package pi-pty
+bun run test:rs --package pi-pty
+bun run test:rs --package pi-pty -E 'test(cancel)'
+```
+
+Keep the same Cargo profile, flags and target directory between edits. Small
+independent crates can be checked locally. Full native compilation still uses
+the authorized remote build path. The `ci` timings above are not measurements
+of a persistent incremental Rust development environment. Full workspace
+validation and standalone packaging are integration gates, separate from the
+first feedback after an edit.
+
+The workspace native addon was updated from verified comparison run
+`43947005367` (O3 without LTO). Source worker smoke and targeted behavior checks
+are recorded in `dist/validation/dev-loop-2026-11-17/`; its installation record
+includes the addon digest and source revision. Earlier local addon files were
+backed up there before replacement. The [development feedback measurements](docs/slim-build-performance-2026-11-17.md#local-development-feedback)
+record source smoke at 6.98s, four PTY binding tests at 1.86s, and the initial
+focused Rust test command at 11.03s. A temporary source-edit probe observed the
+CLI change in 0.28s and caught a Rust cancellation regression in 3.28s; restoring
+the implementation passed in 3.77s. These are local command timings, not full
+native rebuild timings.
+
+The manual macOS workflow accepts `compare_development=true` to measure the
+existing `dev` and `local` profiles on separate Intel runners. It defaults to
+`development_profile=dev` and `benchmark_scope=quick` (one native edit).
+Choose `development_profile=both` and `benchmark_scope=full` for three distinct behavior
+changes to the same native tab-width function. Every sample rebuilds and
+installs the addon, verifies the changed result in a fresh Bun process, and
+runs source worker smoke. It restores the original source and addon before
+PTY, shell-session, grammar and export checks. Profile-specific warm caches
+are saved before edits; the evidence artifact includes per-command timings,
+Cargo timing reports and source restoration. Validated addon checksums and
+binaries are produced only when the complete restoration test gate passes.
+These samples measure function-body edits in one retained checkout, excluding
+job startup and cache restoration. They do not measure dependency/API changes
+or a complete interactive remote editing service.
+
+Both development experiment jobs explicitly set `CARGO_INCREMENTAL=1` and
+reject an effective Cargo unit graph that disables incremental for the three
+target crates. The pinned Cargo disables incremental by default under `CI`,
+even when Cargo.toml enables it. The first completed comparison and matrix
+therefore measured cached-dependency rebuilds with incremental disabled:
+native edit medians were 578.7s (`local`) and 60.5s (`dev`); the instrumented
+matrix measured about 30–43s for native edits, 200–234s for shell edits and
+288–329s for builtins edits. The corrected incremental configuration has not
+yet been timed on the complete project. See the
+[compiler investigation](docs/slim-compiler-investigation-2026-11-17.md) for
+raw evidence, limits, failed final session tests and their test fix.
+
+For deeper investigation, `compiler_matrix=true` defaults to one native edit
+with one frontend thread. With `benchmark_scope=full`, it selects `dev` builds
+with 1, 2 and 4 frontend threads on `pi-natives`, `pi-builtins` and `pi-shell`.
+Cargo remains limited to four jobs. Each configuration establishes a separate
+checkpoint and performs three actual function-body changes per crate, verifying
+the new addon behavior and source worker smoke after each change. The rustc
+wrapper preserves Cargo's jobserver descriptors and records JSON pass timings
+for the selected crates; fingerprint logs explain why Cargo rebuilt each unit.
+Pass timings can nest or overlap and must not be added together. Checkpoints
+record source SHA-256 and timestamps; only byte-identical tracked files regain
+their prior timestamps. New instrumentation forces the selected crates once
+before the measured edit sequence. The matrix uploads diagnostic evidence,
+not experimental binaries.
+
+## Build and removal history
+
 The baseline was built before removal. Browser, desktop, speech and memory were
 then removed in four isolated worktrees and integrated on `main`. At most five
 agents may run concurrently, including the coordinator; workers must not spawn
@@ -305,11 +440,11 @@ expired. The test workflow records both the current source and native source.
 It also rebuilds and verifies the current standalone CLI, then uploads a separate archive with both application and native source provenance. Only the generated standalone Rust RPC SDK is excluded from native-input matching; native crate sources and dependencies remain guarded.
 
 Update this downstream through the pinned repository and its build artifacts.
-The retained `omp update` command and update check still target upstream's
-build service; they do not distribute this fork. Keep `update.auto` false
-(its default), and set `startup.checkUpdate` false for this downstream profile
-to suppress upstream update notices. These are application settings, separate
-from plugin marketplace updates. No local user settings were changed here.
+The `omp update` command, startup version check, background updater and update
+setup scene have been removed. Old `update.*` and `startup.checkUpdate` settings
+are ignored on load; no user files are deleted. Plugin marketplace updates remain
+independent. Upstream installers and package-manager channels do not distribute
+this fork.
 
 Use the resulting `omp-darwin-x64.tar.gz`, verify `ARCHIVE-SHA256SUMS`, extract it,
 then verify `SHA256SUMS` with `shasum -a 256 -c`. Test the extracted binary from

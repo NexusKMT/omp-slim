@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import packageJson from "../package.json" with { type: "json" };
 import { embeddedAddon } from "./embedded-addon.js";
-import { bindingsHaveReleaseIdentity, bindingsReleaseVersion, containsVersionStamp } from "./version-sentinel.js";
+import { bindingsReleaseVersion, containsVersionStamp } from "./version-sentinel.js";
 
 /**
  * Native addon loader for `@oh-my-pi/pi-natives`.
@@ -31,7 +31,7 @@ import { bindingsHaveReleaseIdentity, bindingsReleaseVersion, containsVersionSta
  * post-build `--reset` stub) is the authoritative compiled-mode signal.
  */
 
-const SUPPORTED_PLATFORMS = ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"];
+const SUPPORTED_PLATFORMS = ["linux-x64", "darwin-x64"];
 
 /**
  * Streaming startup marker, enabled by `PI_DEBUG_STARTUP`. Local copy of the
@@ -100,14 +100,15 @@ export function detectCompiledBinary({ embeddedAddon, env, importMetaUrl }) {
  * @returns {string[]}
  */
 export function getAddonFilenames({ tag, arch, variant }) {
-	const defaultFilename = `pi_natives.${tag}.node`;
-	if (arch !== "x64" || !variant) return [defaultFilename];
+	if (arch !== "x64" || !SUPPORTED_PLATFORMS.includes(tag)) {
+		throw new Error(`Unsupported native target: ${tag}`);
+	}
 	const baselineFilename = `pi_natives.${tag}-baseline.node`;
 	const modernFilename = `pi_natives.${tag}-modern.node`;
 	if (variant === "modern") {
-		return [modernFilename, baselineFilename, defaultFilename];
+		return [modernFilename, baselineFilename];
 	}
-	return [baselineFilename, defaultFilename];
+	return [baselineFilename];
 }
 
 /**
@@ -308,7 +309,7 @@ function detectAvx2Support() {
  *      from a worker context where the spawn may fail (issue #3238).
  *   3. `detectAvx2()` — the slow path, called at most once per process.
  *
- * Non-x64 architectures return `{ variant: null }` and never set the cache.
+ * Unsupported architectures are rejected before CPU detection.
  * When detection runs, the result is surfaced as `cacheEnvKey`/`cacheEnvValue`
  * so the caller can write `process.env` (the pure helper itself stays
  * side-effect-free, which keeps it easy to test).
@@ -320,14 +321,14 @@ function detectAvx2Support() {
  *   detectAvx2: () => boolean;
  * }} input
  * @returns {{
- *   variant: "modern" | "baseline" | null;
- *   source: "non-x64" | "override" | "cache" | "detect";
+ *   variant: "modern" | "baseline";
+ *   source: "override" | "cache" | "detect";
  *   cacheEnvKey?: string;
  *   cacheEnvValue?: string;
  * }}
  */
 export function selectCpuVariant({ arch, override, env, detectAvx2 }) {
-	if (arch !== "x64") return { variant: null, source: "non-x64" };
+	if (arch !== "x64") throw new Error(`Unsupported native architecture: ${arch}`);
 	if (override === "modern" || override === "baseline") {
 		return { variant: override, source: "override" };
 	}
@@ -359,8 +360,6 @@ function resolveCpuVariant(override) {
 
 function selectEmbeddedAddonFile(selectedVariant) {
 	if (!embeddedAddon) return null;
-	const defaultFile = embeddedAddon.files.find(file => file.variant === "default") || null;
-	if (process.arch !== "x64") return defaultFile || embeddedAddon.files[0] || null;
 	if (selectedVariant === "modern") {
 		return (
 			embeddedAddon.files.find(file => file.variant === "modern") ||
@@ -379,7 +378,10 @@ function isEmbeddedAddonFileCurrent(targetPath, file) {
 	try {
 		const stat = fs.statSync(targetPath);
 		if (!stat.isFile()) return false;
-		return stat.size === file.size;
+		return (
+			stat.size === file.size &&
+			new Bun.CryptoHasher("sha256").update(fs.readFileSync(targetPath)).digest("hex") === file.sha256
+		);
 	} catch (err) {
 		if (err && err.code === "ENOENT") return false;
 		throw err;
@@ -406,6 +408,9 @@ export function extractEmbeddedAddons({ files, targetDir }) {
 		if (!isSafeEmbeddedAddonFilename(file.filename)) {
 			throw new Error(`Unsafe embedded addon filename: ${file.filename}`);
 		}
+		if (!/^[a-f0-9]{64}$/.test(file.sha256)) {
+			throw new Error(`Invalid embedded addon SHA-256 for ${file.filename}`);
+		}
 	}
 	const writtenPaths = [];
 	for (const file of files) {
@@ -414,6 +419,9 @@ export function extractEmbeddedAddons({ files, targetDir }) {
 		const content = Bun.zstdDecompressSync(fs.readFileSync(file.zstdPath));
 		if (content.length !== file.size) {
 			throw new Error(`Embedded addon size mismatch for ${file.filename}: expected ${file.size}, got ${content.length}`);
+		}
+		if (new Bun.CryptoHasher("sha256").update(content).digest("hex") !== file.sha256) {
+			throw new Error(`Embedded addon SHA-256 mismatch for ${file.filename}`);
 		}
 		writeEmbeddedAddonFile(targetPath, content);
 		writtenPaths.push(targetPath);
@@ -444,22 +452,6 @@ function maybeExtractEmbeddedAddon(ctx, errors, file = selectEmbeddedAddonFile(c
 		errors.push(`embedded addon extraction (${file.filename}): ${message}`);
 		return null;
 	}
-}
-
-/**
- * Before release identities existed, published native addons still shared
- * this stable core ABI. Let those on-disk addons bridge a package-version bump
- * when they expose the signature; keep every identified addon and a current
- * on-disk file paired with resident old exports on the strict path below.
- */
-function isCompatiblePreSentinelNativeAddon(bindings, diskHasExpectedStamp) {
-	if (diskHasExpectedStamp) return false;
-	if (bindingsHaveReleaseIdentity(bindings)) return false;
-	return (
-		typeof bindings.countTokens === "function" &&
-		typeof bindings.executeShell === "function" &&
-		typeof bindings.visibleWidth === "function"
-	);
 }
 
 export function validateLoadedBindings(ctx, bindings, candidate) {
@@ -495,7 +487,6 @@ export function validateLoadedBindings(ctx, bindings, candidate) {
 		// The successful require above normally guarantees readability. If the
 		// file disappears concurrently, retain the safe reinstall diagnosis.
 	}
-	if (isCompatiblePreSentinelNativeAddon(bindings, diskHasExpectedStamp)) return;
 	if (residentVersion && diskHasExpectedStamp) {
 		throw new Error(
 			`Loaded ${candidate}, which reports @oh-my-pi/pi-natives@${residentVersion}, but this loader is ` +
@@ -517,6 +508,10 @@ export function validateLoadedBindings(ctx, bindings, candidate) {
  * @type {{ path: string; version: string | null; packageVersion: string; stale: boolean } | null}
  */
 let loadedAddon = null;
+
+// A resident N-API module cannot be hot-reloaded. Reuse its validated bindings
+// so lazy entrypoints do not rehash the addon on every clipboard operation.
+let loadedBindings = null;
 
 /**
  * Describe a loaded addon so a symbol it predates can name the file, the
@@ -702,13 +697,7 @@ function onMainThread() {
  * has its own main thread, and `subprocess/worker-client.ts` captures its
  * stderr to a file rather than the terminal.
  *
- * Latched, because `loadNative()` is not a startup-only call: the lazy
- * entrypoints in `clipboard.js` and friends call it on every invocation.
- *
- * Workspace loads only, because {@link validateLoadedBindings} has a second
- * success path — it accepts a pre-sentinel addon on an installed load
- * (`isCompatiblePreSentinelNativeAddon`), which reports no release and so
- * counts as `stale`. That user has no repository to build.
+ * Latched so repeated diagnostic calls cannot repaint a running TUI.
  *
  * The write is a synchronous `fs.writeSync` to fd 2 for the same reason as
  * {@link startupMarker}: it must survive a crash that follows it. `write` and
@@ -745,26 +734,16 @@ function configureGrammarDir(bindings, nativesDir) {
 	if (typeof setGrammarDir === "function") setGrammarDir(path.join(nativesDir, "grammars"));
 }
 
-
 function buildHelpMessage(ctx) {
 	if (ctx.isCompiledBinary) {
 		const expectedPaths = ctx.addonFilenames.map(filename => `  ${path.join(ctx.versionedDir, filename)}`).join("\n");
-		const downloadHints = ctx.addonFilenames
-			.map(filename => {
-				const downloadUrl = `https://github.com/can1357/oh-my-pi/releases/latest/download/${filename}`;
-				const targetPath = path.join(ctx.versionedDir, filename);
-				return `  curl -fsSL "${downloadUrl}" -o "${targetPath}"`;
-			})
-			.join("\n");
+
 		return (
 			`The compiled binary should extract one of:\n${expectedPaths}\n\n` +
-			`If missing, delete ${ctx.versionedDir} and re-run, or download manually:\n${downloadHints}`
+			"Rebuild OMP Slim from NexusKMT/omp-slim or install a verified artifact from its GitHub Actions workflows."
 		);
 	}
-	return (
-		"If installed via npm/bun, try reinstalling: bun install @oh-my-pi/pi-natives\n" +
-		"If developing locally, build with: bun --cwd=packages/natives run build"
-	);
+	return "Build the native addon from your OMP Slim checkout: bun --cwd=packages/natives run build";
 }
 
 /**
@@ -779,6 +758,9 @@ function buildHelpMessage(ctx) {
 export function initLoaderContext(overrides = {}) {
 	const platform = overrides.platform ?? process.platform;
 	const platformTag = `${platform}-${process.arch}`;
+	if (!SUPPORTED_PLATFORMS.includes(platformTag)) {
+		throw new Error(`Unsupported platform: ${platformTag}. OMP Slim supports macOS and Linux x64.`);
+	}
 	const packageVersion = packageJson.version;
 	const nativeDir = overrides.nativeDir ?? path.join(import.meta.dir, "..", "native");
 	const execDir = path.dirname(process.execPath);
@@ -838,6 +820,7 @@ export function initLoaderContext(overrides = {}) {
 }
 
 export function loadNative() {
+	if (loadedBindings) return loadedBindings;
 	startupMarker("native:loadNative:start");
 	const ctx = initLoaderContext();
 	const require_ = createRequire(import.meta.url);
@@ -858,13 +841,20 @@ export function loadNative() {
 		}
 		try {
 			startupMarker(`native:require:${path.basename(candidate)}`);
+			if (ctx.isCompiledBinary && embeddedAddon) {
+				const expected = embeddedAddon.files.find(file => file.filename === path.basename(candidate));
+				if (!expected || !isEmbeddedAddonFileCurrent(candidate, expected)) {
+					throw new Error("Native addon does not match this OMP Slim binary's embedded SHA-256");
+				}
+			}
 			const bindings = require_(candidate);
 			validateLoadedBindings(ctx, bindings, candidate);
 			configureGrammarDir(bindings, ctx.nativesDir);
 			loadedAddon = describeLoadedAddon(bindings, candidate, ctx);
 			reportStaleWorkspaceAddon(ctx, loadedAddon);
-	        cleanupStaleNativeVersions({ nativesDir: ctx.nativesDir, currentVersion: ctx.packageVersion });
+			cleanupStaleNativeVersions({ nativesDir: ctx.nativesDir, currentVersion: ctx.packageVersion });
 			startupMarker("native:loadNative:done");
+			loadedBindings = bindings;
 			return bindings;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -872,13 +862,6 @@ export function loadNative() {
 		}
 	}
 
-	if (!SUPPORTED_PLATFORMS.includes(ctx.platformTag)) {
-		throw new Error(
-			`Unsupported platform: ${ctx.platformTag}\n` +
-				`Supported platforms: ${SUPPORTED_PLATFORMS.join(", ")}\n` +
-				"If you need support for this platform, please open an issue.",
-		);
-	}
 	const details = errors.map(error => `- ${error}`).join("\n");
 	throw new Error(
 		`Failed to load pi_natives native addon for ${ctx.addonLabel}.\n\nTried:\n${details}\n\n${buildHelpMessage(ctx)}`,

@@ -180,19 +180,9 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.skillHelp,
 	},
 	{
-		name: "ssh",
-		load: () => import("./commands/ssh").then(m => m.default),
-		help: commandHelp.sshHelp,
-	},
-	{
 		name: "stats",
 		load: () => import("./commands/stats").then(m => m.default),
 		help: commandHelp.statsHelp,
-	},
-	{
-		name: "update",
-		load: () => import("./commands/update").then(m => m.default),
-		help: commandHelp.updateHelp,
 	},
 
 	{
@@ -250,6 +240,9 @@ export function isSubcommand(first: string | undefined): boolean {
 // a hint pointing there. See {@link reservedTopLevelWordMessage} for when a hint
 // fires vs. when the argv still falls through to `launch`.
 const RESERVED_TOP_LEVEL_WORDS: Record<string, string> = {
+	ssh: "Built-in SSH host management has been removed from OMP Slim. Use the system ssh command or a local sshfs mount.",
+	update:
+		"OMP Slim is updated from NexusKMT/omp-slim source or verified GitHub Actions artifacts. See SLIM.md for installation instructions.",
 	extensions:
 		'`omp extensions` is not a management command. Use `omp plugin list` / `omp plugin install`, or run `omp launch extensions` if you meant to send "extensions" as a prompt.',
 	list: '`omp list` is not a top-level command. Use `omp plugin list` to list installed plugins, or run `omp launch list` if you meant to send "list" as a prompt.',
@@ -292,6 +285,7 @@ export function reservedTopLevelWordMessage(argv: readonly string[]): string | u
 	if (!first || first.startsWith("-") || first.startsWith("@")) return undefined;
 	const hint = RESERVED_TOP_LEVEL_WORDS[first];
 	if (!hint) return undefined;
+	if (first === "update" || first === "ssh") return hint;
 	const second = argv[1];
 	if (second === undefined) return hint;
 	if (first === "marketplace" && MARKETPLACE_SUBCOMMANDS[second]) return hint;
@@ -315,7 +309,7 @@ function leadingSubcommandIndex(argv: string[]): number {
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
 		if (arg === "--") return -1;
-		if (!arg.startsWith("-")) return isSubcommand(arg) ? index : -1;
+		if (!arg.startsWith("-")) return isSubcommand(arg) || reservedTopLevelWordMessage(argv.slice(index)) ? index : -1;
 		if (flagConsumesValue(arg, argv[index + 1])) index += 1;
 	}
 	return -1;
@@ -336,7 +330,7 @@ function isLaunchGlobalFlag(arg: string): boolean {
 /**
  * Drop recognized launch-global flags (and any value they consume) from the
  * leading segment before a hoisted non-launch subcommand. `--cwd` and friends
- * belong to the launch surface and mean nothing to a subcommand like `update`,
+ * belong to the launch surface and mean nothing to a subcommand like `stats`,
  * whose strict parser would otherwise reject them with a cryptic
  * `node:util.parseArgs` error (#8891). Tokens the launch tables don't recognize
  * are kept, so a subcommand's own leading flags still reach it.
@@ -375,10 +369,12 @@ export function resolveCliArgv(argv: string[]): ResolvedCliArgv {
 	// hoist the subcommand to the front. Launch-shaped commands share the launch
 	// flag surface, so their leading flags are forwarded and applied; every other
 	// subcommand parses only its own flags, so launch-global flags placed before
-	// it (`omp --cwd <dir> update`) are stripped rather than forwarded into a
+	// it (`omp --cwd <dir> stats`) are stripped rather than forwarded into a
 	// crash (#8891). Genuine launch prompts (no trailing subcommand) are untouched.
 	const subIndex = leadingSubcommandIndex(argv);
 	if (subIndex >= 0) {
+		const reserved = reservedTopLevelWordMessage(argv.slice(subIndex));
+		if (reserved) return { error: reserved };
 		const sub = argv[subIndex];
 		const leading = argv.slice(0, subIndex);
 		const trailing = argv.slice(subIndex + 1);

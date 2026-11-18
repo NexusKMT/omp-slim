@@ -78,7 +78,6 @@ const STANDARD_LINK_SCHEMES: Readonly<Record<string, true>> = {
 	https: true,
 	javascript: true,
 	mailto: true,
-	ssh: true,
 	ws: true,
 	wss: true,
 };

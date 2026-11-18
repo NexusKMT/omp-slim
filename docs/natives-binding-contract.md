@@ -34,7 +34,6 @@ Do not import unexported `native/*` implementation paths from package consumers.
 | AST and code structure   | `astGrep`, `astMatch`, `astEdit`, `blockRangeAt`, `nodeChainAt`, `enclosingBlockBoundaries`, `summarizeCode`, `wasmGrammarFor`                                                       | `ast.rs`, `block.rs`, `summary.rs`, `grammars.rs`                     | mixed sync/promise                  |
 | Edit engine              | `EditSession`, `EditStore`, edit inspection/diff/grammar helpers, hashline helpers, `notebookToEditableText`                                                                         | `edit.rs`, `crates/pi-edit`                                           | mixed                               |
 | OAuth callbacks          | `NativeOAuthCallback`                                                                                                                                                                | `oauth_callback/mod.rs`                                               | class/promises                      |
-| Apple Foundation Models  | `appleFmAvailability`, `appleFmGenerate`, `appleFmCancel`                                                                                                                            | `applefm/mod.rs`                                                      | promise, handle/callback, sync      |
 | Mermaid rendering        | `renderMermaidAscii`                                                                                                                                                                 | `mermaid/mod.rs`                                                      | sync                                |
 | Diff         | `diffLines`, `diffWords`, `diffLineRuns`, `structuredPatchHunks`, `DiffStream`                                       | `diff.rs` (core in `pi-diff`)                           | sync transforms; mixed `DiffStream` |
 | Shell and PTY            | `executeShell`, `Shell`, `PtySession`                                                                                                                                                | `shell.rs`, `pty.rs`                                                  | classes/promises                    |
@@ -71,7 +70,7 @@ The call style is part of the public contract:
 
 Changing a public function between synchronous and promise-returning is breaking. `renderSnapcompactPng`, for example, must be awaited even though adjacent snapcompact character probing is synchronous.
 
-Callback parameters generated from napi-rs `ThreadsafeFunction` use an error-first shape such as `(error: Error | null, value) => void`. Where a streaming API returns a promise, its callback does not replace that promise. `appleFmGenerate` instead returns a numeric cancellation handle and streams JSON events through its callback. Exact timing and optionality are export-specific.
+Callback parameters generated from napi-rs `ThreadsafeFunction` use an error-first shape such as `(error: Error | null, value) => void`. Where a streaming API returns a promise, its callback does not replace that promise. Exact timing and optionality are export-specific.
 
 ## Objects, enums, and binary data
 

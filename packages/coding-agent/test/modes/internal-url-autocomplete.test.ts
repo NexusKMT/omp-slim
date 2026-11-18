@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as capability from "@oh-my-pi/pi-coding-agent/capability";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import { resetActiveRulesForTests, setActiveRules } from "@oh-my-pi/pi-coding-agent/capability/rule";
-import type { SSHHost } from "@oh-my-pi/pi-coding-agent/capability/ssh";
-import type { CapabilityResult } from "@oh-my-pi/pi-coding-agent/capability/types";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { resetActiveSkillsForTests, setActiveSkills } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
@@ -104,30 +101,6 @@ describe("internal-url-autocomplete", () => {
 
 		it("returns null for schemes without a completion handler", async () => {
 			expect(await getInternalUrlSuggestions("issue://")).toBeNull();
-		});
-
-		it("percent-encodes a configured ssh host with reserved characters while matching a raw query", async () => {
-			const result: CapabilityResult<SSHHost> = {
-				items: [
-					{
-						name: "alice@prod",
-						host: "10.0.0.9",
-						_source: { provider: "ssh-json", providerName: "SSH Config", path: "/x", level: "user" },
-					},
-				],
-				all: [],
-				warnings: [],
-				providers: [],
-			} as unknown as CapabilityResult<SSHHost>;
-			vi.spyOn(capability, "loadCapability").mockResolvedValue(result as CapabilityResult<unknown>);
-			const suggestions = await getInternalUrlSuggestions(
-				"ssh://alice@pr",
-				"/tmp/proj",
-				new AbortController().signal,
-			);
-			// Inserted value is percent-encoded so the URL stays well-formed; the label
-			// keeps the human-readable name and the raw query still fuzzy-matches.
-			expect(suggestions?.items[0]).toMatchObject({ value: "ssh://alice%40prod", label: "alice@prod" });
 		});
 	});
 

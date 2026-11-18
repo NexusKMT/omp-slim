@@ -96,18 +96,58 @@ it("keeps state and options after a call that exits non-zero", async () => {
 
 it("runs calls that overlap a backgrounded one in a copy of the session shell and leaves it intact", async () => {
 	const tool = bashTool({ "bash.autoBackground.thresholdMs": 100 });
-	await run(tool, "PI_STATE_VAR=kept");
-	expect((await run(tool, "sleep 2")).async?.state).toBe("running");
+	const foreground = bashTool({ "bash.autoBackground.enabled": false });
+	await run(foreground, "PI_STATE_VAR=kept");
+	const ready = Promise.withResolvers<void>();
+	const allocation = Promise.withResolvers<{ id?: string; path?: string }>();
+	try {
+		const owner = await tool.execute(
+			"held-session",
+			{ command: "printf 'owner-ready\\n'; while [ ! -e release-owner ]; do sleep 0.01; done" },
+			undefined,
+			update => {
+				if (update.content?.some(block => block.type === "text" && block.text.includes("owner-ready"))) {
+					ready.resolve();
+				}
+			},
+		);
+		expect(owner.details?.async?.state).toBe("running");
+		await ready.promise;
 
-	const overlapping = await run(tool, 'printf "[%s]" "$PI_STATE_VAR"; PI_STATE_VAR=lost');
-	expect(overlapping.text).toStartWith("Ran in a copy of the busy session shell");
-	// An overlapping call that itself moves to the background says so in its start result.
-	const promoted = await run(tool, "sleep 0.5");
-	expect(promoted.async?.state).toBe("running");
-	expect(promoted.text).toContain("Ran in a copy of the busy session shell");
+		const overlapping = await run(foreground, 'printf "[%s]" "$PI_STATE_VAR"; PI_STATE_VAR=lost');
+		expect(overlapping.text).toContain("[kept]");
+		expect(overlapping.text).toContain("Ran in a copy of the busy session shell");
 
-	await manager.waitForAll();
-	expect((await run(tool, 'printf "%s" "$PI_STATE_VAR"')).text).toBe("kept");
+		// Promotion can happen before shell selection. Its completed result must
+		// still disclose the fork, even when the start result cannot know yet.
+		const delayed = bashTool(
+			{ "bash.autoBackground.thresholdMs": 100 },
+			{ allocateOutputArtifact: () => allocation.promise },
+		);
+		const promoted = await run(delayed, 'printf "[%s]" "$PI_STATE_VAR"; PI_STATE_VAR=lost');
+		expect(promoted.async?.state).toBe("running");
+		const jobId = promoted.async?.jobId;
+		if (!jobId) throw new Error("expected background job");
+		const settled = Promise.withResolvers<void>();
+		const unsubscribe = manager.onJobSettled(() => {
+			if (manager.getJob(jobId)?.status !== "running") settled.resolve();
+		});
+		try {
+			allocation.resolve({});
+			await settled.promise;
+			const job = manager.getJob(jobId);
+			expect(job?.status).toBe("completed");
+			expect(job?.resultText).toContain("[kept]");
+			expect(job?.resultText).toContain("Ran in a copy of the busy session shell");
+		} finally {
+			unsubscribe();
+		}
+	} finally {
+		allocation.resolve({});
+		await Bun.write(path.join(cwd, "release-owner"), "");
+		await manager.waitForAll();
+	}
+	expect((await run(foreground, 'printf "%s" "$PI_STATE_VAR"')).text).toBe("kept");
 }, 10_000);
 
 it("runs a call in the shell of the session it started in when the session changes first", async () => {

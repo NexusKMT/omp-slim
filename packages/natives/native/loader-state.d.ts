@@ -1,9 +1,11 @@
 export interface EmbeddedAddonFile {
-	variant: "modern" | "baseline" | "default";
+	variant: "modern" | "baseline";
 	/** Basename of the extracted `.node` file. */
 	filename: string;
 	/** Decompressed addon size in bytes. */
 	size: number;
+	/** SHA-256 of the decompressed addon bytes. */
+	sha256: string;
 	/** Embedded zstd frame holding the addon bytes. */
 	zstdPath: string;
 }
@@ -81,7 +83,7 @@ export interface ExtractEmbeddedAddonsInput {
 	targetDir: string;
 }
 
-/** Decompress every manifest addon missing or wrong-sized in `targetDir`; returns the paths written. */
+/** Replace missing or content-mismatched addons in `targetDir`; returns the paths written. */
 export function extractEmbeddedAddons(input: ExtractEmbeddedAddonsInput): string[];
 
 export interface SelectCpuVariantInput {
@@ -92,8 +94,8 @@ export interface SelectCpuVariantInput {
 }
 
 export interface SelectCpuVariantResult {
-	variant: "modern" | "baseline" | null;
-	source: "non-x64" | "override" | "cache" | "detect";
+	variant: "modern" | "baseline";
+	source: "override" | "cache" | "detect";
 	cacheEnvKey?: string;
 	cacheEnvValue?: string;
 }

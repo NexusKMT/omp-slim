@@ -160,17 +160,23 @@ impl WasmGrammar {
 		Self { language, symbol, file, sha256, size, loaded: OnceLock::new() }
 	}
 
+	/// Whether this build can load the module (or a native replacement is
+	/// registered).
+	pub fn is_enabled(&self) -> bool {
+		cfg!(feature = "wasm") || self.loaded.get().is_some()
+	}
+
 	/// Whether [`Self::load`] can succeed without a download.
 	pub fn is_installed(&self) -> bool {
-		self.loaded.get().is_some() || module_path(self.file).is_some()
+		self.loaded.get().is_some() || (self.is_enabled() && module_path(self.file).is_some())
 	}
 
 	/// The grammar's language, loading the module on first use.
 	///
 	/// # Errors
-	/// [`GrammarError::NotInstalled`] when no grammar directory is set or the
-	/// module is not in it; [`GrammarError::Invalid`] when the module cannot be
-	/// read or loaded.
+	/// [`GrammarError::NotInstalled`] when WASM is disabled, no grammar
+	/// directory is set, or the module is not in it; [`GrammarError::Invalid`]
+	/// when an enabled module cannot be read or loaded.
 	pub fn load(&self) -> Result<Language, GrammarError> {
 		if let Some(language) = self.loaded.get() {
 			return Ok(language.clone());
@@ -178,6 +184,11 @@ impl WasmGrammar {
 		#[cfg(test)]
 		if let Some(language) = test_stand_in(self.language) {
 			return Ok(self.loaded.get_or_init(|| language).clone());
+		}
+		// Cached modules from an earlier build must not turn an unsupported
+		// language into a parse error or trigger repeated download attempts.
+		if !self.is_enabled() {
+			return Err(GrammarError::NotInstalled { language: self.language });
 		}
 		let _guard = LOAD_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
 		if let Some(language) = self.loaded.get() {

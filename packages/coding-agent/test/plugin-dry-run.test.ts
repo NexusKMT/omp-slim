@@ -15,16 +15,13 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type PluginCommandArgs, runPluginCommand } from "@oh-my-pi/pi-coding-agent/cli/plugin-cli";
-import Update from "@oh-my-pi/pi-coding-agent/commands/update";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import * as piUtils from "@oh-my-pi/pi-utils";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
-import type { CliConfig } from "@oh-my-pi/pi-utils/cli";
 
 const PLUGIN_ID = "hello@fixmkt";
 const LINKED = "lp";
 const UPGRADE_PREVIEW = `Would upgrade ${PLUGIN_ID} (user): 1.0.0 -> 2.0.0`;
-const CLI_CONFIG: CliConfig = { bin: "omp", version: "0.0.0-test", commands: new Map() };
 
 async function writeMarketplace(dir: string, name: string, version: string | undefined): Promise<void> {
 	await Bun.write(
@@ -318,15 +315,6 @@ describe("plugin --dry-run beyond install, uninstall and link", () => {
 		output.length = 0;
 		await runPluginCommand({ action: "upgrade", args: [], flags: {} });
 		expect(logged()).toContain("All marketplace plugins are up to date");
-		expect(await snapshotTree(root)).toEqual(before);
-	});
-
-	test("update --plugins --check reports plugin upgrades and changes no plugin state", async () => {
-		const before = await snapshotTree(root);
-
-		await new Update(["--plugins", "--check"], CLI_CONFIG).run();
-
-		expect(logged()).toContain(UPGRADE_PREVIEW);
 		expect(await snapshotTree(root)).toEqual(before);
 	});
 

@@ -3,6 +3,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type LocalProtocolOptions, resolveLocalRoot } from "@oh-my-pi/pi-coding-agent/internal-urls";
+import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
+import { execUrlProtocol } from "../helpers/exec-url-protocol";
 import { InternalUrlFilesystem } from "@oh-my-pi/pi-coding-agent/internal-urls/url-filesystem";
 import { executeShell, ShellFsFileType, ShellFsOp } from "@oh-my-pi/pi-natives";
 
@@ -36,6 +38,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+	InternalUrlRouter.instance().unregister(execUrlProtocol.scheme);
 	await fs.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -163,7 +166,8 @@ describe("InternalUrlFilesystem policy", () => {
 	});
 
 	it("refuses schemes whose read tier exceeds the command's approval tier", async () => {
-		const response = await shellFs("write").handle({ op: ShellFsOp.Metadata, path: "ssh://host/etc/hosts" });
+		InternalUrlRouter.instance().register(execUrlProtocol);
+		const response = await shellFs("write").handle({ op: ShellFsOp.Metadata, path: "execfs://host/etc/hosts" });
 
 		expect(response.error?.code).toBe("EACCES");
 	});

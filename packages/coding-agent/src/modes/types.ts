@@ -418,7 +418,6 @@ export interface InteractiveModeContext {
 	showPinnedError(message: string): void;
 	clearPinnedError(): void;
 	showWarning(message: string, options?: { hideWithToolActivity?: boolean }): void;
-	showNewVersionNotification(newVersion: string): void;
 	clearEditor(): void;
 	updatePendingMessagesDisplay(): void;
 	queueCompactionMessage(
@@ -551,7 +550,6 @@ export interface InteractiveModeContext {
 	handleBashCommand(command: string, excludeFromContext?: boolean): Promise<void>;
 	handlePythonCommand(code: string, excludeFromContext?: boolean): Promise<void>;
 	handleMCPCommand(text: string): Promise<void>;
-	handleSSHCommand(text: string): Promise<void>;
 	handleCompactCommand(
 		customInstructions?: string,
 		mode?: CompactMode,

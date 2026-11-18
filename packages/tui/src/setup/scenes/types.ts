@@ -25,8 +25,6 @@ export interface SetupHost extends SetupUiHost {
 	readonly composerShape: ComposerShape;
 	readonly symbolPreset: SymbolPreset;
 	readonly colorBlindMode: boolean;
-	/** Whether background self-update (`update.auto`) is on. */
-	readonly autoUpdate: boolean;
 	readonly modelSource: ModelBrowserSource;
 	/** Configured chat models available to the session. */
 	getModels(): { available: Model[]; all: Model[]; current: Model | undefined };
@@ -36,12 +34,6 @@ export interface SetupHost extends SetupUiHost {
 	saveSymbolPreset(preset: SymbolPreset): void;
 	saveColorBlindMode(enabled: boolean): void;
 	saveTheme(mode: "dark" | "light", name: string): void;
-	/**
-	 * Whether this omp can install its own updates; false where something else
-	 * owns them: Tern (which updates its omp itself), Nix, a source checkout.
-	 */
-	canAutoUpdate(): Promise<boolean>;
-	saveAutoUpdate(enabled: boolean): Promise<void>;
 	markComplete(version: number): Promise<void>;
 	playWelcomeIntro(): void;
 	showError(message: string): void;

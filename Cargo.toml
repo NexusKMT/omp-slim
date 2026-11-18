@@ -11,6 +11,7 @@ members = [
    "crates/pi-iso",
    "crates/pi-natives",
    "crates/pi-predict",
+   "crates/pi-pty",
    "crates/pi-shell",
    "crates/pi-vcs",
    "crates/pi-vfs",
@@ -76,7 +77,9 @@ codegen-units = 1
 
 [profile.ci]
 inherits = "release"
-lto = "thin"
+# O3 without LTO keeps addon rebuilds short; see docs/slim-build-performance-2026-11-17.md.
+# Use "off", not false: false still permits local ThinLTO within each crate.
+lto = "off"
 codegen-units = 16
 debug = false
 strip = "symbols"
@@ -109,7 +112,7 @@ strip = false
 
 [profile.dev]
 opt-level = 0
-lto = false
+lto = "off"
 codegen-units = 256
 incremental = true
 debug = "line-tables-only"
@@ -258,6 +261,7 @@ pi-edit = { path = "crates/pi-edit" }
 pi-iso = { path = "crates/pi-iso" }
 pi-shell = { path = "crates/pi-shell" }
 pi-predict = { path = "crates/pi-predict" }
+pi-pty = { path = "crates/pi-pty" }
 pi-walker = { path = "crates/pi-walker" }
 pi-vcs = { path = "crates/pi-vcs" }
 pi-vfs = { path = "crates/pi-vfs" }

@@ -12,7 +12,7 @@ function runCommand(command: string, args: string[]): string | null {
 /** Local N-API addon identity derived from a host platform and ISA. */
 export interface LocalHostAddon {
 	readonly filename: string;
-	readonly x64Variant: "modern" | "baseline" | null;
+	readonly x64Variant: "modern" | "baseline";
 }
 
 /** Resolve the exact filename and x86-64 ISA emitted by the local N-API build. */
@@ -21,10 +21,14 @@ export function resolveLocalHostAddon(host: {
 	readonly arch: string;
 	readonly avx2: boolean;
 }): LocalHostAddon {
-	const x64Variant = host.arch === "x64" ? (host.avx2 ? "modern" : "baseline") : null;
-	const variantSuffix = x64Variant ? `-${x64Variant}` : "";
+	if (host.arch !== "x64" || (host.platform !== "linux" && host.platform !== "darwin")) {
+		throw new Error(
+			`Unsupported native target: ${host.platform}-${host.arch}. OMP Slim supports macOS and Linux x64.`,
+		);
+	}
+	const x64Variant = host.avx2 ? "modern" : "baseline";
 	return {
-		filename: `pi_natives.${host.platform}-${host.arch}${variantSuffix}.node`,
+		filename: `pi_natives.${host.platform}-${host.arch}-${x64Variant}.node`,
 		x64Variant,
 	};
 }

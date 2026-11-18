@@ -486,8 +486,8 @@ export declare class ShellVisualization {
  */
 export declare class TtyWriter {
   /**
-   * Start a pump thread for `fd` (typically 1). Fails on non-Unix hosts and
-   * when the descriptor cannot be duplicated.
+   * Start a pump thread for `fd` (typically 1). Fails when the descriptor
+   * cannot be duplicated.
    */
   constructor(fd: number)
   /**
@@ -721,7 +721,6 @@ export declare class VcsRepo {
   lsFiles(others: boolean, excludeStandard: boolean, signal?: unknown | undefined | null): Promise<Array<string>>
 }
 
-
 /**
  * Points the addon at the directory holding downloaded wasm grammars
  * (`<dir>/<file>`). The loader (`native/loader-state.js`) calls this once
@@ -737,35 +736,6 @@ export declare function __ompSetGrammarDir(dir: string): void
  * with an actionable error instead of a later `<sym> is not a function` crash.
  */
 export declare function __piNativesBuildVersion(): string | null
-
-/**
- * Reports whether the on-device model can generate, as an `availability`
- * event JSON: `{available, reason?, contextSize?, variant?, vision?,
- * toolCalling?}`.
- */
-export declare function appleFmAvailability(): Promise<string>
-
-/**
- * Cancels a generation; its stream then ends with a `cancelled` error event.
- * Unknown or finished handles are ignored.
- */
-export declare function appleFmCancel(handle: number): void
-
-/**
- * Starts one model turn for a JSON request and streams JSON events to
- * `on_event` until a terminal `done` or `error` event. Returns a handle for
- * [`apple_fm_cancel`].
- */
-export declare function appleFmGenerate(request: string, onEvent: (err: null | Error, event: string) => void): number
-
-/**
- * Applies an `HDiffPatch` single-stream patch to `oldPath`, writing `outPath`.
- *
- * Accepts HDIFFSF20 patches, zstd-compressed or uncompressed; `outPath` is
- * created or truncated. Resolves to the result's size in bytes. Rejects on I/O
- * failure, a damaged or unsupported patch, or a patch made for other old data.
- */
-export declare function applyBinaryPatch(oldPath: string, patchPath: string, outPath: string): Promise<number>
 
 /**
  * Apply ast-grep rewrite rules to matching files; honors `dryRun` and returns
@@ -3648,7 +3618,9 @@ export interface WasmGrammarInfo {
   sha256: string
   /** Byte size of the decompressed `.wasm`. */
   size: number
-  /** Whether the grammar is downloaded (or already loaded). */
+  /** Whether this build supports loading this grammar. */
+  enabled: boolean
+  /** Whether the grammar can be used without a download. */
   installed: boolean
 }
 

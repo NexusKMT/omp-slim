@@ -517,7 +517,7 @@ function getSpillConfig(s: Settings | undefined) {
 
 /**
  * Resolve the OutputSink `headBytes` budget from session settings.
- * Exposed so streaming executors (bash/python/ssh/eval) can opt into
+ * Exposed so streaming executors (bash/python/eval) can opt into
  * middle elision with the same per-user configuration.
  */
 export function resolveOutputSinkHeadBytes(s: Settings | undefined): number {
@@ -546,7 +546,7 @@ export function resolveArtifactSpillThreshold(s: Settings | undefined): number {
 }
 
 /**
- * Resolve the `enforceInlineByteCap` budget for streaming tools (bash/ssh)
+ * Resolve the `enforceInlineByteCap` budget for streaming tools (bash)
  * from session settings: the user's spill threshold plus notice slack.
  */
 export function resolveInlineByteCapBudget(s: Settings | undefined): number {
@@ -555,7 +555,7 @@ export function resolveInlineByteCapBudget(s: Settings | undefined): number {
 
 /**
  * Resolve the per-line column cap from session settings. Shared by streaming
- * executors (bash/python/ssh/eval via OutputSink) and the `read` tool's
+ * executors (bash/python/eval via OutputSink) and the `read` tool's
  * line-buffer post-processing, so one setting controls both surfaces.
  */
 export function resolveOutputMaxColumns(s: Settings | undefined): number {

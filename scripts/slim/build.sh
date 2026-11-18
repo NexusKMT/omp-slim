@@ -7,7 +7,7 @@ export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"
 omp_platform="$(bun -p process.platform)"
 omp_arch="$(bun -p process.arch)"
 case "$omp_platform-$omp_arch" in
-  linux-x64|linux-arm64|darwin-x64|darwin-arm64) ;;
+  linux-x64|darwin-x64) ;;
   *) printf 'Unsupported build host: %s-%s\n' "$omp_platform" "$omp_arch" >&2; exit 2 ;;
 esac
 omp_label="${1:-baseline}"

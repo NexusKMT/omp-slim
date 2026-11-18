@@ -184,16 +184,6 @@ func TestSmoke(t *testing.T) {
 	}
 	t.Logf("cancel_subagent: %v", cancelled)
 
-	suffix, err := client.PredictWord(ctx, PredictWordCommand{Text: "hello wor", Cursor: 9})
-	if err != nil {
-		t.Fatalf("predict_word: %v", err)
-	}
-	if suffix == nil {
-		t.Logf("predict_word: null")
-	} else {
-		t.Logf("predict_word: %q", *suffix)
-	}
-
 	bash, err := client.Bash(ctx, BashCommand{Command: "echo hi"})
 	if err != nil || bash.Output != "hi\n" && bash.Output != "hi" {
 		t.Fatalf("bash: %#v %v", bash, err)

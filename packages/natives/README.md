@@ -10,7 +10,6 @@ Native Rust functionality via N-API.
 - **File locking**: Process-owned cross-process locks with in-memory kernel names on Linux and `flock(2)` sidecars on other Unix platforms
 - **Local IPC**: `IpcServer`/`IpcConnection` over Unix sockets — owner-only access, single-instance binding with stale-endpoint takeover, newline or raw framing; `ipcEndpoint(dir, name)` names endpoints per platform
 - **PDF**: In-memory PDF-to-Markdown extraction with OCR-page classification via `pdf-inspector`
-- **Binary patches**: `applyBinaryPatch(oldPath, patchPath, outPath)` applies an HDiffPatch single-stream patch (HDIFFSF20, zstd or uncompressed), streaming from files; callers verify digests
 
 General-purpose image processing (decode/resize/encode for files and buffers)
 lives in [`Bun.Image`](https://bun.com/docs/runtime/image) on the JS side; this
@@ -64,6 +63,11 @@ values truncated toward zero and dimensions clamped to 20–400 columns and
 emulator so its viewport matches the native PTY.
 
 ## Building
+
+Supported product targets are macOS Intel and Linux x64. Addons use baseline
+or modern x64 variants; ARM64 and unsuffixed legacy addon fallback are removed.
+Standalone builds embed a SHA-256 for each addon and verify cached bytes before
+loading, including builds that share the same release version and file size.
 
 ```bash
 # Build native addon from workspace root (requires Rust)

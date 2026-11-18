@@ -3,6 +3,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getBundledModel } from "../helpers/bundled-model";
+import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
+import { execUrlProtocol } from "../helpers/exec-url-protocol";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -26,6 +28,7 @@ describe("artifact reads through session approval", () => {
 	});
 
 	afterEach(async () => {
+		InternalUrlRouter.instance().unregister(execUrlProtocol.scheme);
 		await session?.dispose();
 		session = undefined;
 		await removeWithRetries(root);
@@ -103,16 +106,17 @@ describe("artifact reads through session approval", () => {
 		expect(approve("artifact://55:raw:4-4")).toBe("prompt");
 	});
 
-	it("preserves the SSH authority port when checking a selected read's grant", () => {
+	it("preserves a custom protocol authority port when checking a selected read's grant", () => {
+		InternalUrlRouter.instance().register(execUrlProtocol);
 		const read = readTool();
 		const grants = new SessionApprovals();
-		grants.record(approvalGrantKey("exec", "ssh://example.test:2222/log.txt"));
+		grants.record(approvalGrantKey("exec", "execfs://example.test:2222/log.txt"));
 
 		expect(
-			resolveApproval(read, { path: "ssh://example.test:2222/log.txt:raw:4-4" }, "always-ask-cached", {}, grants),
+			resolveApproval(read, { path: "execfs://example.test:2222/log.txt:raw:4-4" }, "always-ask-cached", {}, grants),
 		).toMatchObject({ policy: "allow", tier: "exec" });
 		expect(
-			resolveApproval(read, { path: "ssh://example.test:2223/log.txt:raw:4-4" }, "always-ask-cached", {}, grants),
+			resolveApproval(read, { path: "execfs://example.test:2223/log.txt:raw:4-4" }, "always-ask-cached", {}, grants),
 		).toMatchObject({ policy: "prompt", tier: "exec" });
 	});
 

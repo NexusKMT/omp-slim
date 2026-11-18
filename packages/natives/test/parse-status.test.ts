@@ -43,7 +43,7 @@ describe("parseCodeStatus", () => {
 		}
 	});
 
-	it("distinguishes a missing wasm grammar from a corrupt grammar", async () => {
+	it("skips disabled grammars and surfaces corrupt enabled grammars", async () => {
 		const child = Bun.spawn(
 			[process.execPath, path.join(import.meta.dir, "fixtures/parse-status-grammar-probe.ts")],
 			{
@@ -59,7 +59,12 @@ describe("parseCodeStatus", () => {
 		expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
 		const result = JSON.parse(stdout);
 		expect(result.missing).toEqual({ parsed: false, language: null });
-		expect(result.statusError).toBe(result.summaryError);
-		expect(result.statusError).toContain("the ini grammar is invalid:");
+		expect(result.enabled).toBe(wasmGrammarFor({ lang: "ini" })?.enabled !== false);
+		if (result.enabled) {
+			expect(result.statusError).toBe(result.summaryError);
+			expect(result.statusError).toContain("the ini grammar is invalid:");
+		} else {
+			expect(result.cached).toEqual({ parsed: false, language: null });
+		}
 	});
 });

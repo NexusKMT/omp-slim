@@ -49,6 +49,7 @@ async function makeFixture(): Promise<Fixture> {
 	const shimDir = path.join(root, "bin");
 	// `rustup` fails so the script falls back to the `cargo` on PATH: the stub.
 	await writeExecutable(path.join(shimDir, "rustup"), "#!/bin/sh\nexit 1\n");
+	await writeExecutable(path.join(shimDir, "rustc"), '#!/bin/sh\necho "host: x86_64-apple-darwin"\n');
 	await writeExecutable(path.join(shimDir, "cargo"), '#!/bin/sh\necho "cargo-stub $*"\n');
 
 	await Bun.write(path.join(origin, "scripts/run-rs-task.ts"), Bun.file(SCRIPT));
@@ -76,14 +77,29 @@ interface CheckRsResult {
 	cargoRan: boolean;
 }
 
-async function runCheckRs(fixture: Fixture, cwd: string, env: Record<string, string> = {}): Promise<CheckRsResult> {
+async function runCheckRs(
+	fixture: Fixture,
+	cwd: string,
+	env: Record<string, string> = {},
+	taskName = "check:rs",
+	args: string[] = [],
+): Promise<CheckRsResult> {
 	const base: Record<string, string | undefined> = { ...process.env };
 	// The ambient environment must not decide the case: an omp shell exports
 	// CI=true, a GitHub runner exports GITHUB_ACTIONS, and a git hook exports GIT_DIR.
-	for (const key of ["CI", "GITHUB_ACTIONS", "OMP_FORCE_RUST_TASKS", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) {
+	for (const key of [
+		"CI",
+		"GITHUB_ACTIONS",
+		"OMP_FORCE_RUST_TASKS",
+		"GIT_DIR",
+		"GIT_WORK_TREE",
+		"GIT_INDEX_FILE",
+		"CARGO_BUILD_TARGET",
+		"OMP_NATIVE_FEATURES",
+	]) {
 		delete base[key];
 	}
-	const proc = Bun.spawn([process.execPath, "scripts/run-rs-task.ts", "check:rs"], {
+	const proc = Bun.spawn([process.execPath, "scripts/run-rs-task.ts", taskName, ...args], {
 		cwd,
 		env: { ...base, ...env, PATH: `${fixture.shimDir}${path.delimiter}${process.env.PATH ?? ""}` },
 		stdout: "pipe",
@@ -150,6 +166,108 @@ describe("run-rs-task.ts check:rs", () => {
 
 			expect(result.cargoRan).toBe(true);
 			expect(result.output).toContain("crates/newcrate/");
+		},
+		CASE_TIMEOUT_MS,
+	);
+});
+
+describe("run-rs-task.ts test:rs:pty", () => {
+	test(
+		"uses the isolated PTY package with the same explicit host target as napi",
+		async () => {
+			const fixture = await makeFixture();
+			const result = await runCheckRs(
+				fixture,
+				fixture.work,
+				{
+					OMP_FORCE_RUST_TASKS: "1",
+					OMP_NATIVE_FEATURES: "wasm-grammars",
+				},
+				"test:rs:pty",
+			);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain("cargo-stub nextest run -p pi-pty --cargo-profile ci");
+			expect(result.output).toContain("--target x86_64-apple-darwin");
+			expect(result.output).not.toContain("--features");
+			expect(result.output).not.toContain("-p pi-natives");
+		},
+		CASE_TIMEOUT_MS,
+	);
+
+	test(
+		"honors an explicit Cargo target instead of creating a host cache",
+		async () => {
+			const fixture = await makeFixture();
+			await writeExecutable(path.join(fixture.shimDir, "rustc"), "#!/bin/sh\nexit 99\n");
+			const result = await runCheckRs(
+				fixture,
+				fixture.work,
+				{
+					OMP_FORCE_RUST_TASKS: "1",
+					CARGO_BUILD_TARGET: "x86_64-unknown-linux-gnu",
+				},
+				"test:rs:pty",
+			);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain("--target x86_64-unknown-linux-gnu");
+		},
+		CASE_TIMEOUT_MS,
+	);
+});
+
+describe("run-rs-task.ts focused checks", () => {
+	test(
+		"explicit package tests run on a clean tree and preserve doctests without compiling the workspace",
+		async () => {
+			const fixture = await makeFixture();
+			const result = await runCheckRs(fixture, fixture.work, {}, "test:rs", [
+				"--package",
+				"pi-pty",
+				"-E",
+				"test(cancel)",
+			]);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain("cargo-stub nextest run --package pi-pty");
+			expect(result.output).toContain("-E test(cancel)");
+			expect(result.output).toContain("cargo-stub test --doc --package pi-pty\n");
+			expect(result.output).not.toContain("--workspace");
+			expect(result.output).not.toContain("--exclude");
+		},
+		CASE_TIMEOUT_MS,
+	);
+
+	test(
+		"scopes both formatting and lint to the requested crates",
+		async () => {
+			const fixture = await makeFixture();
+			const result = await runCheckRs(fixture, fixture.work, {}, "check:rs", [
+				"--",
+				"-p",
+				"pi-pty",
+				"-p",
+				"pi-diff",
+			]);
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toContain("cargo-stub fmt --package pi-pty --package pi-diff -- --check");
+			expect(result.output).toContain(
+				"cargo-stub clippy --package pi-pty --package pi-diff --no-deps -- -D warnings",
+			);
+		},
+		CASE_TIMEOUT_MS,
+	);
+
+	test(
+		"rejects a test filter without a package and unknown options before starting Cargo",
+		async () => {
+			const fixture = await makeFixture();
+			const unscoped = await runCheckRs(fixture, fixture.work, {}, "test:rs", ["-E", "test(cancel)"]);
+			expect(unscoped.exitCode).not.toBe(0);
+			expect(unscoped.output).toContain("Use --package NAME with -E");
+			expect(unscoped.output).not.toContain("cargo-stub");
+			const typo = await runCheckRs(fixture, fixture.work, {}, "test:rs", ["--pakage", "pi-pty"]);
+			expect(typo.exitCode).not.toBe(0);
+			expect(typo.output).toContain("Unknown Rust task option");
+			expect(typo.output).not.toContain("cargo-stub");
 		},
 		CASE_TIMEOUT_MS,
 	);

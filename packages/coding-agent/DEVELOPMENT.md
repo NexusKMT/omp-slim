@@ -11,6 +11,20 @@ duplicating prose that goes stale.
 
 ## Local development
 
+From the repository root, use `bun run dev` to run the CLI directly from source
+with the installed, verified native addon. Restart it after TypeScript, prompt
+or theme edits to load those changes. This does not compile Rust or package a
+standalone executable. `bun run dev --smoke-test` checks the source worker and
+service paths without calling a model. Native implementation or binding changes
+require an updated addon; OMP Slim builds that addon remotely as described in
+[`SLIM.md`](../../SLIM.md).
+
+For the first feedback on an edit, run its test file directly with
+`bun test packages/coding-agent/test/<file>.test.ts` from the root, then the
+affected package's type check. Reserve the full suites and standalone build for
+integration validation. See [the development loop](../../SLIM.md#development-feedback)
+for the TypeScript and Rust commands.
+
 Run from `packages/coding-agent/` (or add `--cwd=packages/coding-agent`):
 
 | Task                           | Command               |
@@ -92,7 +106,7 @@ Top-level entry modules: `cli.ts`, `main.ts`, `sdk.ts`, `index.ts` (SDK barrel),
 | `session/`                                               | `AgentSession`, JSONL session tree, storage, history         | [session.md](../../docs/session.md), [session-tree-plan.md](../../docs/session-tree-plan.md)                                                                 |
 | `config/`, `registry/`, `secrets/`                       | Settings, model/provider registry, secret obfuscation        | [settings.md](../../docs/settings.md), [config-usage.md](../../docs/config-usage.md), [models.md](../../docs/models.md), [secrets.md](../../docs/secrets.md) |
 | `tools/`                                                 | Built-in tool implementations + render/meta helpers          | [custom-tools.md](../../docs/custom-tools.md), [`tools/`](../../docs/tools/)                                                                                 |
-| `exec/`, `eval/`, `ssh/`, `dap/`, `debug/`               | Execution backends (shell, py/js kernels, ssh, debugger)     | [bash-tool-runtime.md](../../docs/bash-tool-runtime.md), [python-repl.md](../../docs/python-repl.md)                                                         |
+| `exec/`, `eval/`, `dap/`, `debug/`               | Execution backends (shell, py/js kernels, debugger)     | [bash-tool-runtime.md](../../docs/bash-tool-runtime.md), [python-repl.md](../../docs/python-repl.md)                                                         |
 | `lsp/`                                                   | Language-server client/runtime                               | [lsp-config.md](../../docs/lsp-config.md), [tools/lsp.md](../../docs/tools/lsp.md)                                                                           |
 | `task/`, `swarm/`, `irc/`, `goals/`, `plan-mode/`        | Subagent delegation, parallelism, inter-agent IRC, plan mode | [task-agent-discovery.md](../../docs/task-agent-discovery.md), [tools/task.md](../../docs/tools/task.md)                                                     |
 | `web/`, `exa/`                                           | Fetch, search providers, scrapers        | [tools/web_search.md](../../docs/tools/web_search.md)                                                       |

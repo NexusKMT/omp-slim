@@ -50,18 +50,14 @@ export interface GenerateNpmPackagesInput {
 
 export const LEAF_TARGETS: readonly LeafTarget[] = [
 	{ tag: "linux-x64", os: "linux", cpu: "x64" },
-	{ tag: "linux-arm64", os: "linux", cpu: "arm64" },
 	{ tag: "darwin-x64", os: "darwin", cpu: "x64" },
-	{ tag: "darwin-arm64", os: "darwin", cpu: "arm64" },
 ];
 
 const packageDirDefault = path.join(import.meta.dir, "..");
 const NATIVE_LEAF_LEGAL_FILES = ["LICENSE", "THIRD-PARTY-NOTICES.txt"] as const;
 
 function expectedAddonFilenames(tag: string): string[] {
-	return tag.endsWith("-x64")
-		? [`pi_natives.${tag}-baseline.node`, `pi_natives.${tag}-modern.node`, `pi_natives.${tag}.node`]
-		: [`pi_natives.${tag}.node`];
+	return [`pi_natives.${tag}-baseline.node`, `pi_natives.${tag}-modern.node`];
 }
 
 function discoverAddonFiles(nativeDir: string, tag: string): Promise<string[]> {
@@ -75,8 +71,6 @@ function discoverAddonFiles(nativeDir: string, tag: string): Promise<string[]> {
 function selectPrimaryAddonFile(tag: string, files: readonly string[]): string {
 	const baseline = `pi_natives.${tag}-baseline.node`;
 	if (files.includes(baseline)) return baseline;
-	const defaultFile = `pi_natives.${tag}.node`;
-	if (files.includes(defaultFile)) return defaultFile;
 	return files[0];
 }
 
@@ -98,7 +92,7 @@ export function buildLeafManifest({ tag, os, cpu, files, version }: BuildLeafMan
 		license: "MIT",
 		repository: {
 			type: "git",
-			url: "git+https://github.com/can1357/oh-my-pi.git",
+			url: "git+https://github.com/NexusKMT/omp-slim.git",
 			directory: "packages/natives",
 		},
 		engines: {

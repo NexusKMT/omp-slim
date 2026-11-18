@@ -31,8 +31,8 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 
 |Package|Description|
 |---|---|
-|`packages/ai`|Multi-provider LLM client with streaming support|
-|`packages/catalog`|Model catalog: bundled models.json, provider descriptors, model identity/classification|
+|`packages/ai`|Chat Completions streaming client|
+|`packages/catalog`|Explicit model metadata, validation, effort and pricing helpers|
 |`packages/agent`|Agent runtime with tool calling and state management|
 |`packages/coding-agent`|Main CLI application (primary focus)|
 |`packages/tui`|Terminal UI library with differential rendering|
@@ -42,7 +42,7 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 |`packages/utils`|Shared utilities (logger, streams, temp files)|
 |`crates/pi-natives`|Rust crate for performance-critical text/grep ops|
 
-**Catalog import convention**: code in this repo imports catalog _values_ (bundled models, model-thinking helpers, identity, descriptors, model manager/cache) from `@oh-my-pi/pi-catalog/<module>` — never via `@oh-my-pi/pi-ai`. The pi-ai barrel re-exports only the model/effort _types_ its own signatures use (`Model`, `Api`, `ThinkingConfig`, `Effort`, …); type-only imports of those from `@oh-my-pi/pi-ai` are fine.
+**Catalog import convention**: code in this repo imports catalog _values_ (model-building, thinking, and pricing helpers) from `@oh-my-pi/pi-catalog/<module>` — never via `@oh-my-pi/pi-ai`. The pi-ai barrel re-exports only the model/effort _types_ its own signatures use (`Model`, `Api`, `ThinkingConfig`, `Effort`, …); type-only imports of those from `@oh-my-pi/pi-ai` are fine.
 
 ## GitHub
 
@@ -87,7 +87,7 @@ When authorized to create or edit a contributor-submitted PR, follow the checkli
 
 Before writing a helper, check whether one already exists — `packages/coding-agent/src/utils/`, `@oh-my-pi/pi-utils`, `@oh-my-pi/pi-tui`, and the domain modules next to your callsite. This applies to **everything**: VCS wrappers, formatting/truncation/path-display helpers, image handling, clipboard, streams, temp files, caching. The central versions carry hardening a fresh copy always loses (timeouts, output caps, non-interactive env, lock avoidance, caching, TUI sanitization).
 
-- Search first: `grep` for the operation before implementing it. Two implementations of the same thing is a bug even when both work.
+- Search first: `rg` for the operation before implementing it. Two implementations of the same thing is a bug even when both work.
 - Examples of the pattern: `@oh-my-pi/pi-natives/vcs` and `src/utils/active-repo-context.ts` are the only sanctioned way to run git/jj (`import * as vcs from "@oh-my-pi/pi-natives/vcs"` — never hand-spawn via `$`/`Bun.spawn`); rendering goes through the helpers in TUI Sanitization below (`replaceTabs`, `truncateToWidth`, `shortenPath`, `PREVIEW_LIMITS`) rather than ad-hoc string math.
 - Missing capability? Extend the central helper (new option, new sub-function on the namespace) and call it — don't fork its logic locally.
 
@@ -202,37 +202,44 @@ Manual reader loops only when the protocol requires it (SSE, streaming JSON-RPC)
 - **String width**: `Bun.stringWidth(text, { countAnsiEscapeCodes?: false })`.
 - **Wrapping**: `Bun.wrapAnsi(text, width, { wordWrap, hard, trim })`.
 
-## Model/Provider Policy Lives in KDL
+## Model and Platform Scope
 
-**NEVER hard-code model- or provider-conditional policy in TypeScript.** No `id.includes("claude")`, no model-name regexes, no per-model lookup tables (effort ladders, pricing, context windows, modalities, API routing, quirk flags). All of it belongs in the KDL rule tree at `packages/catalog/src/compat/rules/`, compiled by `bun run gen:compat` into the committed `rules.json` and resolved at build time via `resolveModelPolicy`/`buildModel`.
+OMP Slim supports only explicitly configured `openai-completions` endpoints and
+one selected main model. Model capabilities come from configuration and
+`packages/catalog/src/build.ts`; never infer capabilities from provider/model
+names. There is no bundled provider catalog, KDL rule tree, `gen:compat`, or
+`gen:models` command. See `docs/models.md` and `docs/slim-single-model.md`.
 
-Ownership strata (see `src/compat/rules/README.md`):
+The supported product targets are macOS Intel and Linux x64. Full native and
+standalone compilation runs remotely through the public manual Actions
+workflows in `SLIM.md`. Local type checks, focused TS tests, and formatting checks
+are appropriate; do not start a full local native build.
 
-- `taxonomy/*.kdl` — identity: class membership, families, revision extraction, reviewed overrides, suffix collapse.
-- `classes/*.kdl` — model-lineage truths (behavior inherent to a model line, on any host).
-- `providers/*.kdl` — deployment contracts (behavior a host imposes), plus documented exact-id residue.
-- `runtime/behavior.kdl` — heuristics that run before/outside exact model lookup (`api-routes`, `model-limits`, `exclude-models`, `pricing-peer`, hosted defaults).
+The development goal is fast feedback after each code change. For TypeScript,
+run the source CLI with `bun run dev` and test the affected files; reuse the
+verified native addon in `packages/natives/native/`. A standalone binary build
+is not required to observe TypeScript changes. Restart the source process to
+load edited modules. Use package type checks for a local change and `check:ts`
+for the wider TS gate; root `bun check` can also start the Rust workspace gate
+when this branch contains earlier Rust changes.
 
-Rules for TS code:
-
-- Branching on model identity in TS is allowed **only** through structured facts from `classifyModel()` (`class`/`family`/`revision`/effort facts) — never through string matching on ids, and prefer a KDL axis when one can express the policy.
-- Discovery mappers map authoritative upstream fields as reported; seed neutral values only for fields the upstream omits or misreports **and** KDL explicitly owns via a correction axis (`input-modalities`, `cost-patch`, `limits-patch`, `context-window-floor`, thinking axes). Assert rule-owned corrections through `buildModel`; raw discovery specs remain the right assertion surface for parsing/normalization contracts.
-- An id that no selector can isolate gets an exact-id `models` residue rule with a comment — never a special case in TS.
-- Equal-rank rule overlaps throw `AmbiguousOverlapError` at resolve time; fix with an explicit `priority=` in KDL, not code.
-- After editing rules: `bun run gen:compat` and commit `rules.json` alongside the `.kdl` change.
+For Rust, use `bun run check:rs --package CRATE` and
+`bun run test:rs --package CRATE`, optionally `-E 'test(NAME)'` for nextest.
+Explicit package selection runs even on an otherwise unchanged branch and
+retains that package's doctests. Small independent crates such as `pi-pty` can
+be checked locally; checks requiring the full native graph still run remotely.
+Measure a real edit/check/run cycle with a retained target directory before
+claiming that developer feedback has improved. Whole-build and release checks
+remain integration gates, not a prerequisite for every local edit.
 
 ## Generated Files
 
-**NEVER edit `packages/catalog/src/models.json` directly.** It is generated from upstream sources (stencil.so, provider catalog discovery, OpenCode docs) by `packages/catalog/scripts/generate-models.ts` and the descriptors/resolvers in `packages/catalog/src/provider-models/`. Hand-edits get overwritten on the next regen. The same applies to `packages/catalog/src/compat/rules.json`, compiled from the KDL tree by `bun run gen:compat`.
-
-To change an entry, fix the source:
-
-- **Model/provider policy** (identity, thinking ladders, wire quirks, modality/limit/pricing corrections, API routing, roster exclusions) → the KDL tree in `packages/catalog/src/compat/rules/` (see the section above).
-- **Provider catalog entries** (default model, discovery factory/flags) → the `CATALOG_PROVIDERS` table in `packages/catalog/src/provider-models/descriptors.ts`.
-- **Discovery/request plumbing** (endpoint shapes, auth, response parsing) → the mappers in `packages/catalog/src/provider-models/openai-compat.ts`.
-- **Generator wiring** (upstream merges, premium multipliers, post-processing order) → `packages/catalog/scripts/generate-models.ts`.
-
-Regenerate with `bun run gen:compat` and/or `bun run gen:models` and commit the generated files alongside the source change. Add a regression test against the **rule/descriptor/mapper**, not the bundled JSON, so it survives upstream metadata shifts.
+RPC wire changes must regenerate the retained SDKs with `bun run gen:rpc` and
+validate the affected clients. Native declarations are generated from Rust by
+`build:bindings`; `packages/natives/scripts/gen-enums.ts` derives the JS exports
+from those declarations. When removing native exports before a remote rebuild,
+remove their declarations and regenerate the JS exports, then verify the full
+native build remotely. Stats build assets use `gen:stats` / `gen:stats:reset`.
 
 ## Logging and CLI Output
 
@@ -294,7 +301,16 @@ Profiles live in the root `Cargo.toml`; `.cargo/config.toml` carries the setting
 |`release`|Shipping build: fat LTO, 1 codegen unit, stripped.|
 |`local`|Fast local release iteration: thin LTO, 16 codegen units, incremental.|
 |`profiling`|`release` codegen with symbols kept, for `perf`/`samply`/Instruments.|
-|`ci`|Thin LTO, no debuginfo, stripped.|
+|`ci`|O3 without LTO, no debuginfo, stripped.|
+
+The pinned Cargo disables incremental compilation by default when `CI` is set,
+even when the profile has `incremental = true`. Development feedback benchmarks
+must explicitly use `CARGO_INCREMENTAL=1` and verify the effective unit graph
+before compiling. Preserve the chosen environment throughout the measured edit
+loop. The first 2026-11-17 dev/local comparison and frontend matrix actually ran
+with incremental disabled; see `docs/slim-compiler-investigation-2026-11-17.md`.
+Start performance experiments with one representative edit and a retained build
+directory; expand the matrix only after checking the effective flags and result.
 
 **Never set `split-debuginfo = "off"` on a profile that has debuginfo.** On Mach-O the linker never merges DWARF into the executable — it writes a debug map (`N_OSO`) pointing at the `.o` files, and `"unpacked"` is what keeps those files. With `"off"` every backtrace frame in our own crates silently loses `file:line`; the `panicked at foo.rs:3` header still prints (that is `#[track_caller]`, not debuginfo), which makes the loss easy to miss. `ci` may use `"off"` only because it sets `debug = false`.
 
@@ -360,9 +376,10 @@ Location: `packages/*/CHANGELOG.md` (per package).
 - Internal (from issues): `Fixed foo bar ([#123](https://github.com/can1357/oh-my-pi/issues/123))`.
 - External contributions: `Added feature X ([#456](https://github.com/can1357/oh-my-pi/pull/456) by [@username](https://github.com/username))`.
 
-## Releasing
+## Downstream Distribution
 
-1. Ensure all changes since last release are in each affected package's `[Unreleased]` section.
-2. Run `bun run release`.
-
-The script handles version bump, CHANGELOG finalization, commit, tag, publish, and adding new `[Unreleased]` sections.
+Use the source and verified build artifacts of `NexusKMT/omp-slim`, following
+`SLIM.md`. The upstream npm package, Homebrew tap, mise source and installer do
+not distribute this fork. Self-update and startup release checks are removed.
+Do not use upstream publishing scripts to distribute OMP Slim. Record actual
+source revisions, checksums and validation outcomes for downstream artifacts.

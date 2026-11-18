@@ -15,10 +15,10 @@ describe("native addon embedding", () => {
 		it(`rejects ${label}`, async () => {
 			const nativeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-natives-embed-"));
 			try {
-				await Bun.write(path.join(nativeDir, "pi_natives.darwin-arm64.node"), contents);
+				await Bun.write(path.join(nativeDir, "pi_natives.darwin-x64-baseline.node"), contents);
 
 				await expect(
-					embeddedAddonFiles({ platform: "darwin", arch: "arm64", nativeDir, version: "18.1.1" }),
+					embeddedAddonFiles({ platform: "darwin", arch: "x64", nativeDir, version: "18.1.1" }),
 				).rejects.toThrow("does not carry the @oh-my-pi/pi-natives@18.1.1 version stamp");
 			} finally {
 				await fs.rm(nativeDir, { recursive: true, force: true });
@@ -53,12 +53,12 @@ describe("native addon embedding", () => {
 		const nativeDir = path.join(root, "native");
 		const outDir = path.join(root, "out");
 		const cacheDir = path.join(root, "cache");
-		// A pre-stamp addon whose legacy sentinel matches the version (the loader accepts it).
-		const addon = "binary__piNativesV18_1_1\0";
+		// The release stamp is required even when a cached addon exists.
+		const addon = "binaryPI_NATIVES_VERSION_STAMP:18.1.1\0";
 		try {
-			await Bun.write(path.join(nativeDir, "pi_natives.darwin-arm64.node"), addon);
+			await Bun.write(path.join(nativeDir, "pi_natives.darwin-x64-baseline.node"), addon);
 			await fs.mkdir(cacheDir);
-			const files = await embeddedAddonFiles({ platform: "darwin", arch: "arm64", nativeDir, version: "18.1.1" });
+			const files = await embeddedAddonFiles({ platform: "darwin", arch: "x64", nativeDir, version: "18.1.1" });
 			for (const filePath in files) {
 				await Bun.write(path.join(outDir, path.basename(filePath)), files[filePath]);
 			}
@@ -67,20 +67,21 @@ describe("native addon embedding", () => {
 			const { embeddedAddon }: { embeddedAddon: EmbeddedAddon } = await import(
 				path.join(outDir, "embedded-addon.js")
 			);
-			expect(embeddedAddon.platformTag).toBe("darwin-arm64");
+			expect(embeddedAddon.platformTag).toBe("darwin-x64");
 			expect(embeddedAddon.version).toBe("18.1.1");
 			expect(embeddedAddon.files).toEqual([
 				{
-					variant: "default",
-					filename: "pi_natives.darwin-arm64.node",
+					variant: "baseline",
+					filename: "pi_natives.darwin-x64-baseline.node",
 					size: addon.length,
-					zstdPath: path.join(await fs.realpath(outDir), "pi_natives.darwin-arm64.node.zst"),
+					sha256: new Bun.CryptoHasher("sha256").update(addon).digest("hex"),
+					zstdPath: path.join(await fs.realpath(outDir), "pi_natives.darwin-x64-baseline.node.zst"),
 				},
 			]);
 			expect(extractEmbeddedAddons({ files: embeddedAddon.files, targetDir: cacheDir })).toEqual([
-				path.join(cacheDir, "pi_natives.darwin-arm64.node"),
+				path.join(cacheDir, "pi_natives.darwin-x64-baseline.node"),
 			]);
-			expect(await Bun.file(path.join(cacheDir, "pi_natives.darwin-arm64.node")).text()).toBe(addon);
+			expect(await Bun.file(path.join(cacheDir, "pi_natives.darwin-x64-baseline.node")).text()).toBe(addon);
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
 		}

@@ -13,7 +13,7 @@ import {
 	cfgTopK,
 	cfgTopP,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
-import { cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
+import { cfgMarketplaceAutoUpdate, cfgStartupQuiet, cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import {
 	cfgEditFuzzyMatch,
 	cfgEditFuzzyThreshold,
@@ -358,6 +358,22 @@ describe("settings registry", () => {
 	it("rejects overrides for unknown setting ids", () => {
 		expect(() => Settings.isolated({ temprature: 0.2 })).toThrow('Unknown setting "temprature"');
 		expect(() => Settings.isolated().overlay({ "nope.nope": 1 })).toThrow('Unknown setting "nope.nope"');
+	});
+
+	it("drops retired self-update settings without losing startup or plugin preferences", () => {
+		for (const legacy of [
+			{ update: { auto: true, channel: "canary" }, startup: { checkUpdate: true, quiet: true } },
+			{ "update.auto": true, "update.channel": "canary", "startup.checkUpdate": true, "startup.quiet": true },
+		]) {
+			const settings = Settings.isolated({ ...legacy, "marketplace.autoUpdate": "notify" });
+			const saved = settings.getGlobalSettings();
+			expect(saved).not.toHaveProperty("update");
+			expect(saved).not.toHaveProperty("update.auto");
+			expect(saved).not.toHaveProperty("update.channel");
+			expect(saved).not.toHaveProperty("startup.checkUpdate");
+			expect(cfgStartupQuiet.get(settings)).toBe(true);
+			expect(cfgMarketplaceAutoUpdate.get(settings)).toBe("notify");
+		}
 	});
 
 	it("migrates, normalizes, and validates constructor overrides like handle writes", () => {

@@ -81,19 +81,18 @@ const TASK_COMMANDS = {
 		// (napi-rs's) has to be in VENDORED_FORK_EXCLUDES.
 		["cargo", "test", "--doc", "--workspace", ...VENDORED_FORK_EXCLUDES],
 	],
-	// macOS PTY regressions need the host's kernel and reuse the native build's
-	// ci profile. pi-natives is a cdylib and has no runnable doctests.
+	// Queue regressions compile the same implementation used by pi-natives,
+	// without rebuilding the full addon as a test executable. Real PTY behavior
+	// is covered by the native binding tests against the already-built addon.
 	"test:rs:pty": [
 		[
 			"cargo",
 			"nextest",
 			"run",
 			"-p",
-			"pi-natives",
+			"pi-pty",
 			"--cargo-profile",
 			"ci",
-			"-E",
-			"test(pty::reader_queue_tests)",
 			"--status-level=fail",
 			"--final-status-level=fail",
 		],
@@ -103,7 +102,6 @@ const TASK_COMMANDS = {
 type RustTaskName = keyof typeof TASK_COMMANDS;
 
 const repoRoot = path.join(import.meta.dir, "..");
-const cargoBinary = await resolveCargoBinary();
 const taskName = process.argv[2];
 
 if (!isRustTaskName(taskName)) {
@@ -111,14 +109,24 @@ if (!isRustTaskName(taskName)) {
 	process.exit(1);
 }
 
-if (taskName !== "fmt:rs") {
+interface TaskSelection {
+	packages: string[];
+	filter: string | undefined;
+}
+
+const selection = parseSelection(taskName, process.argv.slice(3));
+const cargoBinary = await resolveCargoBinary();
+
+if (selection.packages.length > 0) {
+	console.log(`Running ${taskName}: explicitly selected ${selection.packages.join(", ")}.`);
+} else if (taskName !== "fmt:rs") {
 	const decision = await decideWhetherToRun();
 	console.log(`${decision.run ? "Running" : "Skipping"} ${taskName}: ${decision.reason}`);
 	if (!decision.run) process.exit(0);
 }
 
 for (const command of TASK_COMMANDS[taskName]) {
-	const exitCode = await runCommand(command);
+	const exitCode = await runCommand(selectPackages(command, selection));
 	if (exitCode !== 0) {
 		process.exit(exitCode);
 	}
@@ -126,6 +134,52 @@ for (const command of TASK_COMMANDS[taskName]) {
 
 function isRustTaskName(value: string | undefined): value is RustTaskName {
 	return value != null && value in TASK_COMMANDS;
+}
+
+function parseSelection(task: RustTaskName, args: string[]): TaskSelection {
+	const selected: TaskSelection = { packages: [], filter: undefined };
+	if (args[0] === "--") args.shift();
+	if (args.length > 0 && task !== "check:rs" && task !== "lint:rs" && task !== "test:rs") {
+		throw new Error(`${task} does not accept package or test filters`);
+	}
+	for (let i = 0; i < args.length; i++) {
+		const flag = args[i];
+		if (flag !== "-p" && flag !== "--package" && flag !== "-E" && flag !== "--filter-expr") {
+			throw new Error(`Unknown Rust task option: ${flag}. Use --package NAME and, for test:rs, -E EXPR.`);
+		}
+		const value = args[++i];
+		if (!value || value.startsWith("-")) throw new Error(`Missing value for ${flag}`);
+		if (flag === "-p" || flag === "--package") {
+			selected.packages.push(value);
+		} else {
+			if (task !== "test:rs") throw new Error("Test filters are supported only by test:rs");
+			if (selected.filter !== undefined) throw new Error("Pass one -E filter expression");
+			selected.filter = value;
+		}
+	}
+	if (selected.filter !== undefined && selected.packages.length === 0) {
+		throw new Error("Use --package NAME with -E so a focused test does not compile the entire workspace");
+	}
+	return selected;
+}
+
+function selectPackages(command: readonly string[], selected: TaskSelection): string[] {
+	if (selected.packages.length === 0) return [...command];
+	const packageArgs = selected.packages.flatMap(name => ["--package", name]);
+	const scoped: string[] = [];
+	for (let i = 0; i < command.length; i++) {
+		const arg = command[i];
+		if (arg === "--workspace" || arg === "--all") {
+			scoped.push(...packageArgs);
+		} else if (arg === "--exclude") {
+			i++;
+		} else {
+			scoped.push(arg);
+		}
+	}
+	// nextest filters do not apply to rustdoc; keep the selected crates' doctests.
+	if (command[1] === "nextest" && selected.filter !== undefined) scoped.push("-E", selected.filter);
+	return scoped;
 }
 
 interface RunDecision {
@@ -262,6 +316,18 @@ async function runCommand(command: readonly string[]): Promise<number> {
 	const [head, ...rest] = command;
 	const isCargo = head === "cargo";
 	const argv = isCargo ? [cargoBinary, ...rest] : [head, ...rest];
+	if (taskName === "test:rs:pty") {
+		// napi always passes an explicit --target, including host builds. Match
+		// it so Cargo can reuse dependencies under <target>/<triple>/ci.
+		let target = process.env.CARGO_BUILD_TARGET?.trim();
+		if (!target) {
+			const rustc = path.isAbsolute(cargoBinary) ? path.join(path.dirname(cargoBinary), "rustc") : "rustc";
+			const info = await $`${rustc} -vV`.cwd(repoRoot).quiet();
+			target = /^host:\s*(\S+)/m.exec(info.text())?.[1];
+			if (!target) throw new Error("Cannot determine the Rust host target for PTY tests");
+		}
+		argv.push("--target", target);
+	}
 	const env: Record<string, string> = { ...(process.env as Record<string, string>) };
 	if (isCargo) {
 		// Cargo subprocesses (notably `rustc -vV` from `cargo metadata`) resolve

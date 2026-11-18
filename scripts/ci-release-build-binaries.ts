@@ -19,13 +19,6 @@ const entrypoint = path.join(repoRoot, "packages", "coding-agent", "src", "cli.t
 const isDryRun = process.argv.includes("--dry-run");
 const targets: BinaryTarget[] = [
 	{
-		id: "darwin-arm64",
-		platform: "darwin",
-		arch: "arm64",
-		target: "bun-darwin-arm64",
-		outfile: "packages/coding-agent/binaries/omp-darwin-arm64",
-	},
-	{
 		id: "darwin-x64",
 		platform: "darwin",
 		arch: "x64",
@@ -40,25 +33,11 @@ const targets: BinaryTarget[] = [
 		outfile: "packages/coding-agent/binaries/omp-linux-x64",
 	},
 	{
-		id: "linux-arm64",
-		platform: "linux",
-		arch: "arm64",
-		target: "bun-linux-arm64",
-		outfile: "packages/coding-agent/binaries/omp-linux-arm64",
-	},
-	{
 		id: "linux-musl-x64",
 		platform: "linux",
 		arch: "x64",
-		target: "bun-linux-x64-musl-baseline",
+		target: "bun-linux-x64-baseline-musl",
 		outfile: "packages/coding-agent/binaries/omp-linux-musl-x64",
-	},
-	{
-		id: "linux-musl-arm64",
-		platform: "linux",
-		arch: "arm64",
-		target: "bun-linux-arm64-musl",
-		outfile: "packages/coding-agent/binaries/omp-linux-musl-arm64",
 	},
 ];
 
