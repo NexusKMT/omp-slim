@@ -75,7 +75,7 @@ export const sessionHelp = {
 } satisfies CommandMetadata;
 
 export const setupHelp = {
-	description: "Run onboarding setup or install dependencies for optional features",
+	description: "Install dependencies for optional features",
 } satisfies CommandMetadata;
 
 export const shellHelp = { description: "Interactive shell console" } satisfies CommandMetadata;

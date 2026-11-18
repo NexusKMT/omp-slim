@@ -37,7 +37,6 @@ import {
 } from "../../src/utils/changelog";
 
 import { cfgStartupChangelogMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
-import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
 
 const CURRENT_VERSION = "2.0.0";
 const repoRoot = path.resolve(import.meta.dir, "..", "..", "..", "..");
@@ -405,10 +404,7 @@ describe.skipIf(!hasPtyHarness)("interactive startup changelog PTY smoke", () =>
 					await fs.mkdir(path.join(root, "xdg-data"), { recursive: true });
 					// Setup already completed, so the interactive transcript (where the startup
 					// changelog renders) comes up instead of the animated setup wizard.
-					await Bun.write(
-						path.join(agentDir, "config.yml"),
-						`setupVersion: ${CURRENT_SETUP_VERSION}\ncollapseChangelog: false\n`,
-					);
+					await Bun.write(path.join(agentDir, "config.yml"), "collapseChangelog: false\n");
 
 					const proc = Bun.spawn(["script", "-q", "-c", `bun ${JSON.stringify(cliEntry)}`, "/dev/null"], {
 						cwd: repoRoot,

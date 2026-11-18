@@ -28,8 +28,6 @@ const EMPTY_UNKNOWN_RECORD: Record<string, unknown> = {};
 // ────────────────────────────────────────────────────────────────────────
 // General settings (no UI)
 // ────────────────────────────────────────────────────────────────────────
-export const cfgSetupVersion = register({ id: "setupVersion", type: "number", default: 0 });
-
 export const cfgAutoResume = register({
 	id: "autoResume",
 	type: "boolean",
@@ -1175,31 +1173,6 @@ export const cfgStartupQuiet = register({
 		group: "Startup & Updates",
 		label: "Quiet Startup",
 		description: "Skip welcome screen and startup status messages",
-	},
-});
-
-export const cfgStartupShowSplash = register({
-	id: "startup.showSplash",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "interaction",
-		group: "Startup & Updates",
-		label: "Show Startup Splash",
-		description:
-			"Show the full animated setup splash on normal interactive startup without rerunning setup. Quiet Startup still suppresses it.",
-	},
-});
-
-export const cfgStartupSetupWizard = register({
-	id: "startup.setupWizard",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "interaction",
-		group: "Startup & Updates",
-		label: "Setup Wizard",
-		description: "Show newly added onboarding steps once per setup version",
 	},
 });
 

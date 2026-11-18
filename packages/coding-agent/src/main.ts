@@ -79,9 +79,6 @@ import { formatSessionContinuationNotice } from "./modes/persistence-failure";
 import type { PrintModeOptions } from "./modes/print-mode";
 import type { RpcModeOptions } from "./modes/rpc/rpc-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
-import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
-import type * as SetupWizardModule from "./modes/setup";
-import type { SetupScene } from "@oh-my-pi/pi-tui/setup/scenes/types";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./modes/skill-command";
 import {
 	applyStartupComposerPreferences,
@@ -116,7 +113,6 @@ import {
 } from "./session/session-listing";
 import { ForkSourceNotFoundError, SessionManager, SessionMoveRefusedError } from "./session/session-manager";
 import { forkIfMovedAway } from "./session/session-transfer";
-import { shouldShowStartupSplash } from "./startup-splash";
 import {
 	discoverSystemPromptOverride,
 	discoverTitleSystemPromptFile,
@@ -148,14 +144,11 @@ import {
 	cfgComposerShape,
 	cfgImagesAutoResize,
 	cfgMarketplaceAutoUpdate,
-	cfgSetupVersion,
 	cfgShowHardwareCursor,
 	cfgSpellingAutocorrect,
 	cfgSpellingTypoDetection,
 	cfgStartupChangelogMode,
 	cfgStartupQuiet,
-	cfgStartupSetupWizard,
-	cfgStartupShowSplash,
 	cfgSymbolPreset,
 	cfgThemeDark,
 	cfgThemeLight,
@@ -594,8 +587,6 @@ async function runInteractiveMode(
 	lspServers: LspStartupServerInfo[] | undefined,
 	mcpManager: MCPManager | undefined,
 	resuming: boolean,
-	forceSetupWizard: boolean,
-	showStartupSplash: boolean,
 	eventBus?: EventBus,
 	subagentEventBus?: EventBus,
 	initialMessage?: string,
@@ -624,59 +615,18 @@ async function runInteractiveMode(
 		throw error;
 	}
 
-	// Cold-launch gate: the full setup wizard (every scene + the overlay and
-	// their TUI/OAuth/search/theme deps) is heavy, yet the common case only needs
-	// to know whether the stored setup version is current. Lazy-load the wizard
-	// barrel only when setup is stale, forced, or the explicit startup splash
-	// setting needs the shared setup splash renderer.
-	const storedSetupVersion = cfgSetupVersion.get(settings);
-	const setupWizard: typeof SetupWizardModule | undefined =
-		forceSetupWizard || storedSetupVersion < CURRENT_SETUP_VERSION || showStartupSplash
-			? await import("./modes/setup")
-			: undefined;
-	const setupOptions = {
-		resuming,
-		isTTY: process.stdin.isTTY && process.stdout.isTTY,
-		setupWizardEnabled: cfgStartupSetupWizard.get(settings),
-		force: forceSetupWizard,
-	};
-	const setupScenes: SetupScene[] = setupWizard
-		? await setupWizard.selectSetupScenes(storedSetupVersion, setupWizard.ALL_SCENES, mode, setupOptions)
-		: [];
-	// Record skipped setup scenes so the next launch does not load them again.
-	if (
-		setupWizard &&
-		setupScenes.length === 0 &&
-		storedSetupVersion < CURRENT_SETUP_VERSION &&
-		setupWizard.setupWizardAllowed(setupOptions)
-	) {
-		await setupWizard.markSetupWizardComplete(settings);
-	}
-	const playStartupSplash = showStartupSplash && setupScenes.length === 0;
 	const offersStartupWorktree = !resuming;
 
 	await logger.time("InteractiveMode.init", () =>
 		mode.init({
-			suppressWelcomeIntro: resuming || setupScenes.length > 0 || playStartupSplash,
+			suppressWelcomeIntro: resuming,
 			clearInitialTerminalHistory: true,
-			// Setup scenes and the startup worktree question wait on the user before any
-			// prompt runs, so they keep the boot `idle`. The worktree check runs before its
-			// async git check, so a folder where the question never shows also keeps `idle`.
 			startupRun:
-				setupScenes.length === 0 &&
 				!(offersStartupWorktree && mode.mayAskForStartupWorktree()) &&
 				(startupGoal !== undefined || initialMessage !== undefined || initialMessages.length > 0),
 		}),
 	);
 	startDeferredStartupWork?.(mode);
-
-	if (setupWizard && playStartupSplash) {
-		await setupWizard.runStartupSplash(mode);
-	}
-
-	if (setupWizard && setupScenes.length > 0) {
-		await setupWizard.runSetupWizard(mode, setupScenes);
-	}
 
 	// `init` already cleared native history before painting the startup frame.
 	// Replaying resumed transcript rows and repainting the viewport is enough;
@@ -1582,7 +1532,6 @@ interface RunRootCommandDependencies {
 	selectSession?: SessionPicker;
 	runAcpMode?: RunAcpMode;
 	settings?: Settings;
-	forceSetupWizard?: boolean;
 }
 const DEFAULT_RUN_ROOT_DEPENDENCIES: RunRootCommandDependencies = {};
 
@@ -2231,16 +2180,6 @@ export async function runRootCommand(
 				stdinContent: pipedInput,
 			});
 
-			const showStartupSplash = shouldShowStartupSplash({
-				configured: cfgStartupShowSplash.get(settingsInstance),
-				isInteractive,
-				resuming: Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork),
-				quiet: cfgStartupQuiet.get(settingsInstance),
-				timing: Boolean($env.PI_TIMING),
-				stdinIsTTY: process.stdin.isTTY,
-				stdoutIsTTY: process.stdout.isTTY,
-			});
-
 			// Read the changelog marker once, before the post-paint changelog step in
 			// `startDeferredStartupWork` advances it; the first-launch eval warning judges
 			// the marker as this launch found it. The probe may spawn a detached
@@ -2505,8 +2444,6 @@ export async function runRootCommand(
 						lspServers,
 						mcpManager,
 						Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork),
-						deps.forceSetupWizard === true,
-						showStartupSplash,
 						eventBus,
 						subagentEventBus,
 						initialMessage,

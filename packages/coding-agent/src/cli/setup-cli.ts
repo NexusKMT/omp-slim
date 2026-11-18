@@ -139,10 +139,9 @@ async function handlePythonSetup(flags: { json?: boolean; check?: boolean }): Pr
  * Print setup command help.
  */
 export function printSetupHelp(): void {
-	console.log(`${chalk.bold(`${APP_NAME} setup`)} - Run onboarding or install dependencies for optional features
+	console.log(`${chalk.bold(`${APP_NAME} setup`)} - Install dependencies for optional features
 
 ${chalk.bold("Usage:")}
-  ${APP_NAME} setup                     Run the onboarding wizard
   ${APP_NAME} setup <component> [options]
 
 ${chalk.bold("Components:")}
@@ -153,7 +152,6 @@ ${chalk.bold("Options:")}
   --json        Output status as JSON
 
 ${chalk.bold("Examples:")}
-  ${APP_NAME} setup                  Run the onboarding wizard
   ${APP_NAME} setup python           Check Python execution dependencies
   ${APP_NAME} setup python --check   Check if Python execution is available
 `);
