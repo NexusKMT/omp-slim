@@ -112,7 +112,7 @@ strip = false
 
 [profile.dev]
 opt-level = 0
-lto = false
+lto = "off"
 codegen-units = 256
 incremental = true
 debug = "line-tables-only"
