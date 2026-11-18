@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
-import type { Model } from "@oh-my-pi/pi-catalog/types";
+import { Effort } from "@oh-my-pi/pi-ai/effort";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { ModelControls, type ModelControlsHost } from "@oh-my-pi/pi-coding-agent/session/model-controls";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";

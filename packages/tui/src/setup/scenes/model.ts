@@ -1,5 +1,5 @@
 import type { Model } from "@oh-my-pi/pi-ai";
-import { modelKind } from "@oh-my-pi/pi-catalog/types";
+import { modelKind } from "@oh-my-pi/pi-ai/types";
 import type { TspPickerProps } from "@oh-my-pi/pi-wire";
 import type { SgrMouseEvent } from "../../mouse";
 import { Text } from "../../components/text";

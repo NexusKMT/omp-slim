@@ -1,5 +1,5 @@
-import { buildModel, requireChatCompletionsApi } from "@oh-my-pi/pi-catalog/build";
-import type { Api, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { buildModel, requireChatCompletionsApi } from "@oh-my-pi/pi-ai/build";
+import type { Api, ModelSpec } from "@oh-my-pi/pi-ai/types";
 import { ConfigFile } from "./config-file";
 import type { ModelsConfig, ProviderAuthMode } from "./models-config-schema";
 import { getModelsConfigSchema } from "./models-config-schema-bundle";

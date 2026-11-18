@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { MODEL_KINDS } from "@oh-my-pi/pi-catalog/types";
+import { MODEL_KINDS } from "@oh-my-pi/pi-ai/types";
 import Models from "@oh-my-pi/pi-coding-agent/commands/models";
 import type { CliConfig } from "@oh-my-pi/pi-utils/cli";
 

@@ -1,5 +1,5 @@
 import { expect, it } from "bun:test";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 import { lastDispatchOrigin, transportFetch } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 
 it("refuses a later HTTP attempt after the cost gate closes without recording a dispatch", async () => {

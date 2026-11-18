@@ -12,7 +12,7 @@ bun add @oh-my-pi/pi-agent-core
 
 ```typescript
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 
 const agent = new Agent({
 	initialState: {

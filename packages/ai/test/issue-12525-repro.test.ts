@@ -10,7 +10,7 @@ import { describe, expect, it } from "bun:test";
 import * as AIError from "../src/error";
 import { streamOpenAICompletions } from "../src/providers/openai-completions";
 import type { Context, FetchImpl } from "../src/types";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 
 const model = buildModel({
 	id: "issue-12525-model",

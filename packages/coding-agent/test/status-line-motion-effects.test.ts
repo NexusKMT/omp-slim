@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { getBundledModel } from "./helpers/bundled-model";
-import type { Model } from "@oh-my-pi/pi-catalog/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { statusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";

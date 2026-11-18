@@ -1,12 +1,12 @@
 import type { Type } from "@oh-my-pi/omptype";
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
-import type { Api, FetchImpl, Model, Provider, ThinkingBudgets, Usage } from "@oh-my-pi/pi-catalog/types";
+import type { Effort } from "./models/effort";
+import type { Api, FetchImpl, Model, Provider, ThinkingBudgets, Usage } from "./models/types";
 import type { ApiKey } from "./auth-retry";
 import type { OpenAICompletionsOptions } from "./providers/openai-completions";
 import type { kStreamingPartialJson } from "./utils/block-symbols";
 import type { AssistantMessageEventStream } from "./utils/event-stream";
 export type { AssistantMessageEventStream } from "./utils/event-stream";
-export type * from "@oh-my-pi/pi-catalog/types";
+export * from "./models/types";
 export const OPENAI_MAX_OUTPUT_TOKENS = 64000;
 export interface ApiOptionsMap {
 	"openai-completions": OpenAICompletionsOptions;

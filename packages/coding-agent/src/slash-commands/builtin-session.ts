@@ -1,6 +1,5 @@
 import { clearSubmittedText } from "./helpers/draft";
 
-import { journalJudgmentUsage, resolveJudge } from "../judgment";
 import type { AgentSession } from "../session/agent-session";
 
 import {
@@ -22,13 +21,6 @@ import { markdownFenceFor } from "../utils/markdown-fence";
 import { openLocalFileInEditor } from "../modes/local-file-editor";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./helpers/parse";
 
-import {
-	launchStatsDashboard,
-	parseStatsDashboardArgs,
-	type StatsDashboardArgs,
-	type StatsDashboardLaunchResult,
-} from "./helpers/stats-dashboard";
-import { StatsNotice } from "@oh-my-pi/pi-tui/overlays/stats-notice";
 import { handleTodoAcp } from "./helpers/todo";
 
 import type { SlashCommandRuntime, SlashCommandSpec } from "./types";
@@ -76,26 +68,6 @@ async function handleJobsKillCommand(
 			? `Cancelled background job ${safeTarget}.`
 			: `Could not cancel background job ${safeTarget}.`,
 	);
-}
-
-/**
- * Start (or reuse) the stats dashboard for this session. The Frustration page
- * judges through this session's settings and registry; its cost lands on this
- * session's ledger.
- */
-function launchSessionStatsDashboard(
-	args: StatsDashboardArgs,
-	owner: Pick<SlashCommandRuntime, "settings" | "session" | "sessionManager">,
-): Promise<StatsDashboardLaunchResult> {
-	const judge = resolveJudge({
-		settings: owner.settings,
-		registry: owner.session.modelRegistry,
-		sessionId: owner.session.sessionId,
-		purpose: "stats_frustration",
-		onUsage: journalJudgmentUsage(owner.sessionManager),
-		telemetry: owner.session.agent.telemetry,
-	});
-	return launchStatsDashboard(args, async () => judge);
 }
 
 export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
@@ -272,45 +244,6 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 				await runtime.ctx.handleJobsCommand({ full: verb === "full" });
 			}
 			clearSubmittedText(runtime);
-		},
-	},
-
-	{
-		name: "stats",
-		icon: "stats",
-		description: "Launch the local stats dashboard",
-		inlineHint: "[--port <port>] [--host <host>]",
-		allowArgs: true,
-		handle: async (command, runtime) => {
-			const parsed = parseStatsDashboardArgs(command.args);
-			if ("error" in parsed) return usage(parsed.error, runtime);
-
-			await runtime.output("Syncing session files...");
-			try {
-				const result = await launchSessionStatsDashboard(parsed, runtime);
-				await runtime.output(result.message);
-			} catch (error) {
-				await runtime.output(`Stats dashboard failed: ${errorMessage(error)}`);
-				// Mark the failure like `usage()` does, for hosts that report a
-				// failed builtin (print mode does not dispatch `/stats`).
-				return commandConsumed({ failed: true });
-			}
-			return commandConsumed();
-		},
-		handleTui: async (command, runtime) => {
-			const ctx = runtime.ctx;
-			ctx.editor.setText("");
-			const parsed = parseStatsDashboardArgs(command.args);
-			if ("error" in parsed) {
-				ctx.showStatus(parsed.error);
-				return;
-			}
-			try {
-				const result = await launchSessionStatsDashboard(parsed, ctx);
-				ctx.presentCommandOutput(new StatsNotice(result.message, result.url));
-			} catch (error) {
-				ctx.showError(`Stats dashboard failed: ${errorMessage(error)}`);
-			}
 		},
 	},
 	{

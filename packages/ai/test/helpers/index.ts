@@ -2,8 +2,8 @@ import { afterEach, beforeEach } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai/types";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
+import type { ModelSpec } from "@oh-my-pi/pi-ai/types";
 import { isEnoent } from "@oh-my-pi/pi-utils";
 
 export async function withEnv(

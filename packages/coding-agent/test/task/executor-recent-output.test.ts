@@ -17,7 +17,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as os from "node:os";
 import type { Api, AssistantMessage, Model, TextContent } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";

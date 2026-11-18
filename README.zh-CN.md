@@ -7,7 +7,7 @@ OMP Slim 是基于 [OMP](https://github.com/can1357/oh-my-pi) v18.18.3 的独立
 规划、子任务和辅助请求均使用当前主模型。
 
 保留会话历史与恢复、文件编辑和搜索、Shell 与 PTY、LSP 与调试工具、子任务、上下文压缩、
-HTTP 搜索、MCP、手动管理的技能和本地统计面板。
+HTTP 搜索、MCP 和手动管理的技能。
 
 已移除内置浏览器自动化、桌面控制、语音、自动长期记忆、提供商订阅与其他传输协议、
 自动换模、共享与录屏、SSH 主机管理、Apple Foundation Models、外部 RPC SDK 和上游自更新。
@@ -63,14 +63,11 @@ TypeScript 测试通过公开仓库的手动 Actions 工作流执行。
 | 组件 | 位置 |
 | --- | --- |
 | CLI、会话、工具与 MCP | [coding-agent](packages/coding-agent) |
-| Chat Completions 传输 | [ai](packages/ai) |
-| 显式模型元数据与计价 | [catalog](packages/catalog) |
+| Chat Completions 传输与模型元数据 | [ai](packages/ai) |
 | 智能体运行时 | [agent](packages/agent) |
 | 终端界面 | [tui](packages/tui) |
 | 原生绑定、Shell 与文件操作 | [natives](packages/natives)、[Rust crates](crates) |
-| 本地统计面板 | [stats](packages/stats) |
 | 上下文图像渲染 | [snapcompact](packages/snapcompact) |
-| RPC 客户端 | [sdk](sdk) |
 
 ## 许可证与来源
 

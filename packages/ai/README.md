@@ -6,7 +6,7 @@ explicitly configured endpoint. The only supported API identifier is
 but active requests reject them before any network call.
 
 ```ts
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 import { completeSimple } from "@oh-my-pi/pi-ai";
 
 const model = buildModel({

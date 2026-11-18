@@ -9,7 +9,7 @@ import {
 } from "../config/compaction-threshold";
 import { effect, register } from "../config/registry";
 import { type ServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../config/service-tier";
-import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
+import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
 import { $which, isRecord, logger, setWorktreesDir } from "@oh-my-pi/pi-utils";
 import { setFeedModelBadgeEnabled } from "@oh-my-pi/pi-tui/render/render-utils";
 import { getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";

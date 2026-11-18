@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { resolveThresholdTokens, shouldCompact } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { Effort } from "@oh-my-pi/pi-ai/effort";
 import { getBundledModel } from "../helpers/bundled-model";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";

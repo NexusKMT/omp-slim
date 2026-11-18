@@ -8,7 +8,7 @@ using one selected model through an explicitly configured Chat Completions endpo
 
 The retained core includes session history and resume, file editing and search,
 shell and PTY execution, LSP and debugger tools, subagents, context compaction,
-HTTP web search, MCP, manually managed skills, and the local stats dashboard.
+HTTP web search, MCP, and manually managed skills.
 Planning, subagents, and helper requests inherit the main model.
 
 Built-in browser automation, desktop control, speech, automatic long-term memory,
@@ -74,14 +74,11 @@ public Actions workflows.
 | Component | Location |
 | --- | --- |
 | CLI, sessions, tools, and MCP | [coding-agent](packages/coding-agent) |
-| Chat Completions transport | [ai](packages/ai) |
-| Explicit model metadata and pricing | [catalog](packages/catalog) |
+| Chat Completions transport and model metadata | [ai](packages/ai) |
 | Agent runtime | [agent](packages/agent) |
 | Terminal UI | [tui](packages/tui) |
 | Native bindings, shell, and file operations | [natives](packages/natives), [Rust crates](crates) |
-| Local usage dashboard | [stats](packages/stats) |
 | Context image rendering | [snapcompact](packages/snapcompact) |
-| RPC clients | [sdk](sdk) |
 
 ## License and origin
 

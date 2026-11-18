@@ -8,8 +8,8 @@
  */
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { getEffectiveTokenCost, getModelPricingStatus } from "@oh-my-pi/pi-catalog/models";
-import { modelKind, type ModelKind, type ModelPricingStatus } from "@oh-my-pi/pi-catalog/types";
+import { getEffectiveTokenCost, getModelPricingStatus } from "@oh-my-pi/pi-ai/models";
+import { modelKind, type ModelKind, type ModelPricingStatus } from "@oh-my-pi/pi-ai/types";
 import type { Component } from "../tui";
 import { FuzzyCorpus, fuzzyRank } from "../fuzzy";
 import { Input } from "../components/input";

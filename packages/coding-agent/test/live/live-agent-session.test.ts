@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import type { Model } from "@oh-my-pi/pi-ai/types";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";

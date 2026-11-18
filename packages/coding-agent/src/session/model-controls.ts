@@ -7,9 +7,9 @@ import {
 	serviceTierFamily,
 	shouldSendServiceTier,
 } from "@oh-my-pi/pi-ai";
-import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
-import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
-import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
+import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
+import { getSupportedEfforts } from "@oh-my-pi/pi-ai/model-thinking";
+import { modelsAreEqual } from "@oh-my-pi/pi-ai/models";
 import type { ModelRegistry } from "../config/model-registry";
 import {
 	filterAvailableModelsByEnabledPatterns,

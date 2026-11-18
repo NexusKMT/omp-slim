@@ -20,7 +20,7 @@ import {
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { isEmbeddedImageContent } from "@oh-my-pi/pi-ai/images/shared";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
-import { modelKind } from "@oh-my-pi/pi-catalog/types";
+import { modelKind } from "@oh-my-pi/pi-ai/types";
 import { logger, untilAborted } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";

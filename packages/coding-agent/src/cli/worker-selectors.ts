@@ -15,7 +15,5 @@ export const LSP_MUX_WORKER_ARG = "__omp_worker_lsp_mux";
 export const PARENT_WATCHDOG_WORKER_ARG = "__omp_worker_parent_watchdog";
 /** Subagent host worker selector shared by the CLI dispatcher and `SubagentWorker`. */
 export const SUBAGENT_WORKER_ARG = "__omp_worker_subagent";
-/** Activity-worker selector shared by the CLI dispatcher and worker launcher. */
-export const STATS_ACTIVITY_WORKER_ARG = "__omp_worker_stats_activity";
 /** Terminal-output selector shared by the CLI dispatcher and worker launcher. */
 export const TERMINAL_OUTPUT_WORKER_ARG = "__omp_worker_terminal_output";

@@ -23,7 +23,7 @@ describe("SDK import process ownership", () => {
 				process.exit(0);
 			});
 			// Dynamic import tests the host's process listener before the SDK dependency graph evaluates.
-			await import("@oh-my-pi/pi-catalog");
+			await import("@oh-my-pi/pi-ai");
 			process.kill(process.pid, "SIGTERM");
 		`);
 

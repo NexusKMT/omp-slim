@@ -13,9 +13,9 @@
  */
 import type { Api, Effort, Model } from "@oh-my-pi/pi-ai";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
-import { getEffectiveTokenCost, getModelPricingStatus } from "@oh-my-pi/pi-catalog/models";
-import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
-import { type ModelKind, type ModelPricingStatus, modelKind } from "@oh-my-pi/pi-catalog/types";
+import { getEffectiveTokenCost, getModelPricingStatus } from "@oh-my-pi/pi-ai/models";
+import { getSupportedEfforts } from "@oh-my-pi/pi-ai/model-thinking";
+import { type ModelKind, type ModelPricingStatus, modelKind } from "@oh-my-pi/pi-ai/types";
 import { formatNumber, getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { ConfigError } from "../config/config-file";

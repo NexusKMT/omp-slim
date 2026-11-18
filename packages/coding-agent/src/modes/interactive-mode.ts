@@ -8507,9 +8507,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	// Command handling
-	handleTraceCommand(): Promise<void> {
-		return this.#commandController.handleTraceCommand();
-	}
 
 	async handleDumpCommand(): Promise<void> {
 		return this.#commandController.handleDumpCommand();

@@ -8,7 +8,7 @@ import {
 } from "../config/service-tier";
 import { DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS, MAX_WEB_SEARCH_TIMEOUT_SECONDS } from "../web/search/types";
 import { configureProviderMaxInFlightRequests } from "@oh-my-pi/pi-ai/stream";
-import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
+import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
 import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
 import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 

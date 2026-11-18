@@ -1,5 +1,5 @@
 import { type } from "@oh-my-pi/omptype";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { Effort } from "@oh-my-pi/pi-ai/effort";
 import { once } from "@oh-my-pi/pi-utils";
 
 /** Manual endpoint schema: unsupported protocols and retired routing fields are errors. */

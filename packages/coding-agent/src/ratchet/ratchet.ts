@@ -12,8 +12,8 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { calculateUsageCost } from "@oh-my-pi/pi-catalog/models";
-import type { ModelCost, Usage } from "@oh-my-pi/pi-catalog/types";
+import { calculateUsageCost } from "@oh-my-pi/pi-ai/models";
+import type { ModelCost, Usage } from "@oh-my-pi/pi-ai/types";
 import { isEnoent, isRecord } from "@oh-my-pi/pi-utils";
 
 export const RATCHET_ROOT = path.join(".omp", "ratchet");

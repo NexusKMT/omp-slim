@@ -1,5 +1,5 @@
 import type { Model } from "@oh-my-pi/pi-ai";
-import type { ModelTokenizer } from "@oh-my-pi/pi-catalog/types";
+import type { ModelTokenizer } from "@oh-my-pi/pi-ai/types";
 import * as natives from "@oh-my-pi/pi-natives";
 import { materializeString, stringifyJson } from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";

@@ -35,7 +35,6 @@ import {
 	DAEMON_BROKER_WORKER_ARG,
 	LSP_MUX_WORKER_ARG,
 	PARENT_WATCHDOG_WORKER_ARG,
-	STATS_ACTIVITY_WORKER_ARG,
 	SUBAGENT_WORKER_ARG,
 	TERMINAL_OUTPUT_WORKER_ARG,
 } from "./cli/worker-selectors";
@@ -130,29 +129,12 @@ async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
  * tarball installs all exercise it on every CI run.
  */
 async function runSmokeTest(): Promise<void> {
-	const { smokeTestSyncWorker, startServer } = await import("@oh-my-pi/omp-stats");
-	const { smokeTestStatsActivityWorker } = await import("./stats/activity-client");
 	const { smokeTestJsEvalWorker } = await import("./eval/js/context-manager");
 	// Other smoke dependencies stay lazy so normal CLI startup does not load their worker clients.
 	const { smokeTestDaemonBroker } = await import("./launch/client");
 	const { smokeTestLspMux } = await import("./lsp/mux/daemon");
 	const { smokeTestTerminalOutputWorker } = await import("./launch/terminal-output-worker-client");
 	const { smokeTestSubagentWorker } = await import("./thread/subagent-worker");
-	await smokeTestSyncWorker();
-	await smokeTestStatsActivityWorker();
-
-	const statsServer = await startServer(0);
-	try {
-		const response = await fetch(`http://127.0.0.1:${statsServer.port}/`);
-		if (!response.ok) throw new Error(`stats dashboard smoke failed: HTTP ${response.status}`);
-		const html = await response.text();
-		if (!html.includes('<div id="root"></div>') || !html.includes("index.js")) {
-			throw new Error("stats dashboard smoke failed: dashboard HTML was not served");
-		}
-	} finally {
-		statsServer.stop();
-	}
-
 	await smokeTestJsEvalWorker();
 	await smokeTestDaemonBroker();
 	await smokeTestLspMux();
@@ -161,33 +143,10 @@ async function runSmokeTest(): Promise<void> {
 	process.stdout.write("smoke-test: ok\n");
 }
 
-const STATS_SYNC_WORKER_ARG = "__omp_worker_stats_sync";
 const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 const JS_EVAL_PROCESS_ARG = "__omp_worker_js_eval_process";
 
 async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
-	if (arg === STATS_SYNC_WORKER_ARG) {
-		// The sync worker handles messages via `self.onmessage`, assigned during
-		// this *async* dynamic import. Bun flushes the worker's initial message
-		// buffer when the entry module's top-level evaluation finishes — before
-		// this dispatch completes — so anything the parent posted right after
-		// spawning (the smoke ping, the first parse request) would be dropped.
-		// Park early events and replay them once the module's handler is live.
-		// Worker-thread entries using `parentPort` need the same sync-prefix
-		// buffering; the eval cases install that inbox below.
-		const scope = globalThis as unknown as { onmessage: ((event: MessageEvent) => void) | null };
-		const pending: MessageEvent[] = [];
-		const buffer = (event: MessageEvent): void => {
-			pending.push(event);
-		};
-		scope.onmessage = buffer;
-		await import("@oh-my-pi/omp-stats/sync-worker");
-		const handler = scope.onmessage;
-		if (handler && handler !== buffer) {
-			for (const event of pending) handler.call(scope, event);
-		}
-		return true;
-	}
 	// Bun flushes messages the parent posted before spawn once this entry's
 	// top-level evaluation completes. Install a buffering inbox synchronously
 	// before binding the selected worker's real handler so the parent's
@@ -219,11 +178,6 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 			transport => startJsEvalProcess(transport, interceptUnhandledRejections),
 			{ rethrowConnectedSendErrors: true },
 		);
-		return true;
-	}
-	if (arg === STATS_ACTIVITY_WORKER_ARG) {
-		const { startStatsActivityWorker } = await import("./stats/activity-worker");
-		await runIpcSubprocessWorker(startStatsActivityWorker);
 		return true;
 	}
 	if (arg === TERMINAL_OUTPUT_WORKER_ARG) {

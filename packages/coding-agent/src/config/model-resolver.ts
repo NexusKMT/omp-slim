@@ -1,5 +1,5 @@
 /** Model selection over explicitly configured Chat Completions endpoints. */
-import type { Model } from "@oh-my-pi/pi-catalog/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 import { MAX_THINKING_SUFFIX_OPTIONS, splitThinkingSuffix } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { type ConfiguredThinkingLevel, concreteThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";

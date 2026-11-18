@@ -4,13 +4,12 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { withStatsSyncLock } from "@oh-my-pi/omp-stats/aggregator";
+import { type GcResult, runGcCommand, withStatsSyncLock } from "@oh-my-pi/pi-coding-agent/cli/gc-cli";
 import {
 	GC_AUTO_COMPRESS_INTERVAL_MS,
 	GC_AUTO_COMPRESS_LOG,
 	scheduleGcAutoCompress,
 } from "@oh-my-pi/pi-coding-agent/cli/gc-auto-compress";
-import { type GcResult, runGcCommand } from "@oh-my-pi/pi-coding-agent/cli/gc-cli";
 import * as gcCompress from "@oh-my-pi/pi-coding-agent/cli/gc-compress";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";

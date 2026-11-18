@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
-import type { Model } from "@oh-my-pi/pi-catalog/types";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
+import { Effort } from "@oh-my-pi/pi-ai/effort";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 import {
 	assertModelSupportsEffortCeiling,
 	clampThinkingLevelToCeiling,

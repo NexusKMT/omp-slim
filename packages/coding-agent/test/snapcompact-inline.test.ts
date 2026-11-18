@@ -1,7 +1,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { Tokenizer } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Context, ImageContent, Message, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 import toolResultNote from "../src/prompts/system/snapcompact-toolresult-note.md" with { type: "text" };
 import {
 	estimateInlineSavings,

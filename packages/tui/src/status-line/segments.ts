@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { getTimeBasedPricingPeriod } from "@oh-my-pi/pi-catalog/models";
+import { getTimeBasedPricingPeriod } from "@oh-my-pi/pi-ai/models";
 import { sharedSpinnerFrame, TERMINAL } from "../index";
 import {
 	formatDuration,

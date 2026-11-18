@@ -1,8 +1,8 @@
 import * as path from "node:path";
 import type { ApiKeyResolver, ResolvedApiKey } from "@oh-my-pi/pi-ai";
 import type { AuthApiKeyOptions } from "@oh-my-pi/pi-ai/auth-storage";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import type { Api, Model, ModelKind, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
+import type { Api, Model, ModelKind, ModelSpec } from "@oh-my-pi/pi-ai/types";
 import { getAgentDir, isBunTestRuntime } from "@oh-my-pi/pi-utils";
 import type { AuthStorage } from "../session/auth-storage";
 import {

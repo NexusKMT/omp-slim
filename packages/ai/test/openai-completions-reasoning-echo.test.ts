@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 import type { AssistantMessage, Model } from "../src/types";
 import { streamOpenAICompletions } from "../src/providers/openai-completions";
 

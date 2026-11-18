@@ -12,7 +12,7 @@ import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { $ } from "bun";
-import { COMPRESS_SCRATCH_PREFIX } from "@oh-my-pi/omp-stats/parser";
+import { COMPRESS_SCRATCH_PREFIX } from "./gc-cli";
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import { FileSessionStorage } from "../session/session-storage";
 import { errorMessage } from "../slash-commands/helpers/parse";

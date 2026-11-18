@@ -19,7 +19,7 @@ import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 import { createSessionDefaults } from "../helpers/session-defaults";
 
 const agent: AgentDefinition = { name: "task", description: "test", systemPrompt: "test", source: "bundled" };

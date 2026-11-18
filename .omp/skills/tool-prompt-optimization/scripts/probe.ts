@@ -27,8 +27,8 @@
 import { parseArgs } from "node:util";
 import { completeSimple } from "@oh-my-pi/pi-ai";
 import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
-import type { GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import type { GeneratedProvider } from "@oh-my-pi/pi-ai/models";
+import { getBundledModel } from "@oh-my-pi/pi-ai/models";
 
 /** Default 3-model panel when the caller does not pin a model. */
 const DEFAULT_MODELS = ["fireworks/kimi-k2.7-code", "anthropic/claude-opus-4-8", "openai/gpt-5.5"];

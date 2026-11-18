@@ -1,8 +1,0 @@
-.providers-mix {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	padding: 12px 16px 14px;
-	background: var(--bg);
-	border-top: 1px solid var(--line-1);
-}

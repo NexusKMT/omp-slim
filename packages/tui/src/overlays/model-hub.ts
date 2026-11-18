@@ -1,8 +1,8 @@
 /** Provider catalogue and current chat model/thinking selection. */
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
-import { modelKind } from "@oh-my-pi/pi-catalog/types";
+import { getSupportedEfforts } from "@oh-my-pi/pi-ai/model-thinking";
+import { modelKind } from "@oh-my-pi/pi-ai/types";
 import type { Component, TUI } from "../tui";
 import { sanitizeDisplayWarning } from "../render/render-utils";
 import { Input } from "../components/input";

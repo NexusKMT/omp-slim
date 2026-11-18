@@ -1,6 +1,6 @@
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Tool } from "@oh-my-pi/pi-ai";
-import type { Model } from "@oh-my-pi/pi-catalog/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 import type { JobWidgetEntry } from "../tools/job-widget";
 import type { CompactionBoundaries } from "./context-usage";
 import type { StatusLineSettings } from "./types";

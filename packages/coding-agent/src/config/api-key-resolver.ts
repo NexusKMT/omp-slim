@@ -1,6 +1,6 @@
 import type { ApiKeyResolution, ApiKeyResolver } from "@oh-my-pi/pi-ai/auth-retry";
 import type { AuthApiKeyOptions } from "@oh-my-pi/pi-ai/auth-storage";
-import type { Model } from "@oh-my-pi/pi-catalog/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 
 export type ApiKeyResolverModel = Pick<Model, "provider" | "baseUrl" | "id">;
 export interface ApiKeyResolverOptions {

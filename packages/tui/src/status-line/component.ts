@@ -1,8 +1,8 @@
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { getNextTimeBasedPricingTransition } from "@oh-my-pi/pi-catalog/models";
-import type { Model, ModelCost } from "@oh-my-pi/pi-catalog/types";
+import { getNextTimeBasedPricingTransition } from "@oh-my-pi/pi-ai/models";
+import type { Model, ModelCost } from "@oh-my-pi/pi-ai/types";
 import type { VcsGitRepo, VcsRepo } from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import {

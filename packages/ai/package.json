@@ -47,6 +47,14 @@
       "types": "./src/judgment/index.ts",
       "import": "./src/judgment/index.ts"
     },
+    "./models": {
+      "types": "./src/models/index.ts",
+      "import": "./src/models/index.ts"
+    },
+    "./models/*": {
+      "types": "./src/models/*.ts",
+      "import": "./src/models/*.ts"
+    },
     "./*": {
       "types": "./src/*.ts",
       "import": "./src/*.ts"
@@ -81,7 +89,6 @@
   },
   "dependencies": {
     "@oh-my-pi/omptype": "catalog:",
-    "@oh-my-pi/pi-catalog": "catalog:",
     "@oh-my-pi/pi-utils": "catalog:"
   },
   "devDependencies": {

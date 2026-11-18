@@ -2,7 +2,7 @@
  * List, search, and refresh available models.
  */
 
-import { MODEL_KINDS, type ModelKind } from "@oh-my-pi/pi-catalog/types";
+import { MODEL_KINDS, type ModelKind } from "@oh-my-pi/pi-ai/types";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { modelsHelp as commandHelp } from "../cli/command-help";

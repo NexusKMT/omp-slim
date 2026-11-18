@@ -1,5 +1,5 @@
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import type { Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
 import { createConfigHeaderResolver } from "./resolve-config-value";
 import type { ProviderValidationConfig } from "./models-config";
 

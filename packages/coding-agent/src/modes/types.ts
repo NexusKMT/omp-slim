@@ -525,7 +525,6 @@ export interface InteractiveModeContext {
 	toggleTodoExpansion(): void;
 	setTodoExpanded(expanded: boolean): void;
 	// Command handling
-	handleTraceCommand(): Promise<void>;
 	handleTodoCommand(args: string): Promise<void>;
 	handleSessionCommand(): Promise<void>;
 	handleAdvisorStatusCommand(): Promise<void>;

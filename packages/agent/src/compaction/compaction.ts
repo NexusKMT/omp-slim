@@ -22,7 +22,7 @@ import {
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { isSurvivingAssistant } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
+import { clampThinkingLevelForModel } from "@oh-my-pi/pi-ai/model-thinking";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";

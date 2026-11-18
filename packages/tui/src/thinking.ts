@@ -1,9 +1,9 @@
 import type { ResolvedThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { ConfiguredThinkingLevel } from "./render/render-utils";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
-import { Effort, THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
-import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
-import type { Model } from "@oh-my-pi/pi-catalog/types";
+import { Effort, THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
+import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-ai/model-thinking";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 /** Thinking selectors accepted by CLI inputs, in display order. */
 export const CLI_THINKING_LEVELS: readonly ConfiguredThinkingLevel[] = ["off", ...THINKING_EFFORTS, "auto"];
 

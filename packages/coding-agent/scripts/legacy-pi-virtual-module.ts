@@ -26,7 +26,6 @@ interface BundledPackage {
 const BUNDLED_PACKAGES: readonly BundledPackage[] = [
 	{ dir: "agent", identifier: "PiAgentCore", rootWildcard: null },
 	{ dir: "ai", identifier: "PiAi", rootWildcard: null },
-	{ dir: "catalog", identifier: "PiCatalog", rootWildcard: "flat" },
 	{ dir: "coding-agent", identifier: "PiCodingAgent", rootWildcard: null },
 	{ dir: "natives", identifier: "PiNatives", rootWildcard: null },
 	// pi-tui keeps stateful singletons (`TERMINAL`, theme, figure settings) in

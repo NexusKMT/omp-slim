@@ -1,11 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { type DOMWindow, parseHTML } from "../src/dom";
 
 const fixtureDirectory = new URL("./fixtures/dom/", import.meta.url);
 const originalGlobals = new Map<string, PropertyDescriptor | undefined>();
-let reactRoot: Root | null = null;
 
 async function fixture(name: string): Promise<string> {
 	return Bun.file(new URL(name, fixtureDirectory)).text();
@@ -35,10 +32,6 @@ function installWindow(window: DOMWindow): void {
 }
 
 afterEach(async () => {
-	if (reactRoot) {
-		await act(async () => reactRoot?.unmount());
-		reactRoot = null;
-	}
 	for (const [name, descriptor] of originalGlobals) {
 		if (descriptor) Object.defineProperty(globalThis, name, descriptor);
 		else Reflect.deleteProperty(globalThis, name);
@@ -165,23 +158,5 @@ describe("DOM scraper compatibility", () => {
 		expect(div.children.map(child => child.tagName)).toEqual(["B", "SPAN", "EM"]);
 		span.remove();
 		expect(div.textContent).toBe("onelast");
-	});
-
-	test("renders and unmounts a React root", async () => {
-		const window = parseHTML('<html><body><div id="root"></div></body></html>');
-		installWindow(window);
-		const container = window.document.getElementById("root");
-		if (!container) throw new Error("Expected React root");
-		reactRoot = createRoot(container as unknown as globalThis.Element);
-		await act(async () => {
-			reactRoot?.render(
-				createElement(
-					"section",
-					{ className: "ready", "data-state": "ok" },
-					createElement("strong", null, "Rendered"),
-				),
-			);
-		});
-		expect(container.innerHTML).toBe('<section data-state="ok" class="ready"><strong>Rendered</strong></section>');
 	});
 });

@@ -31,18 +31,16 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 
 |Package|Description|
 |---|---|
-|`packages/ai`|Chat Completions streaming client|
-|`packages/catalog`|Explicit model metadata, validation, effort and pricing helpers|
+|`packages/ai`|Chat Completions streaming client, model metadata, effort, and pricing helpers|
 |`packages/agent`|Agent runtime with tool calling and state management|
 |`packages/coding-agent`|Main CLI application (primary focus)|
 |`packages/tui`|Terminal UI library with differential rendering|
 |`packages/natives`|Bindings for native text/image/grep operations|
-|`packages/stats`|Local observability dashboard (`omp stats`)|
 |`packages/omptype`|ArkType-compatible schema validation with a lazy JIT runtime|
 |`packages/utils`|Shared utilities (logger, streams, temp files)|
 |`crates/pi-natives`|Rust crate for performance-critical text/grep ops|
 
-**Catalog import convention**: code in this repo imports catalog _values_ (model-building, thinking, and pricing helpers) from `@oh-my-pi/pi-catalog/<module>` — never via `@oh-my-pi/pi-ai`. The pi-ai barrel re-exports only the model/effort _types_ its own signatures use (`Model`, `Api`, `ThinkingConfig`, `Effort`, …); type-only imports of those from `@oh-my-pi/pi-ai` are fine.
+**Model and AI import convention**: code in this repo imports model-building, thinking, and pricing helpers directly from `@oh-my-pi/pi-ai` (or subpaths `@oh-my-pi/pi-ai/build`, `@oh-my-pi/pi-ai/effort`, `@oh-my-pi/pi-ai/models`).
 
 ## GitHub
 

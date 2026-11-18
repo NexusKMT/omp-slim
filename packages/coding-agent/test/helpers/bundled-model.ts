@@ -6,7 +6,7 @@
  * asserted real bundled metadata (native apis, rate cards) must adapt separately.
  */
 import { Effort, type Api, type Model, type ModelSpec } from "@oh-my-pi/pi-ai";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 
 /** Provider identifier accepted by the bundled model registry. */
 export type GeneratedProvider = string;

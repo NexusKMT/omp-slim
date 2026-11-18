@@ -180,12 +180,6 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.skillHelp,
 	},
 	{
-		name: "stats",
-		load: () => import("./commands/stats").then(m => m.default),
-		help: commandHelp.statsHelp,
-	},
-
-	{
 		name: "token",
 		load: () => import("./commands/token").then(m => m.default),
 		help: commandHelp.tokenHelp,

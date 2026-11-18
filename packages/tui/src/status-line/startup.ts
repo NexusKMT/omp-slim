@@ -15,7 +15,7 @@
  */
 import { type } from "@oh-my-pi/omptype";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-catalog/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 import type { ComposerNativeState } from "../prompt/custom-editor";
 import { parseThinkingLevel } from "../thinking";
 import { StatusLineComponent } from "./component";

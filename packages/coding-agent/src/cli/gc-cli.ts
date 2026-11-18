@@ -4,8 +4,6 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { withStatsSyncLock } from "@oh-my-pi/omp-stats/aggregator";
-import { isCompressScratchPath } from "@oh-my-pi/omp-stats/parser";
 import {
 	formatBytes,
 	getAgentDir,
@@ -21,8 +19,24 @@ import {
 	isPidAlive,
 	normalizePathForComparison,
 	readLines,
+	withFileLock,
 	type FileLockHandle,
 } from "@oh-my-pi/pi-utils";
+
+export const COMPRESS_SCRATCH_PREFIX = ".omp-gc-compress-";
+
+/** Whether `relativePath` (from any ancestor directory) lies inside a compress scratch directory. */
+export function isCompressScratchPath(relativePath: string): boolean {
+	return relativePath.split(/[\\/]/).some(part => part.startsWith(COMPRESS_SCRATCH_PREFIX));
+}
+
+export async function withStatsSyncLock<T>(dbPath: string, fn: () => Promise<T>): Promise<T> {
+	await fs.mkdir(path.dirname(dbPath), { recursive: true });
+	return await withFileLock(`${dbPath}.sync`, fn, {
+		retryDelayMs: 25,
+		retries: 200,
+	});
+}
 import { Settings } from "../config/settings";
 import type { Setting } from "../config/registry";
 

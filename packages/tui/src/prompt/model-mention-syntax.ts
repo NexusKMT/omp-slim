@@ -1,5 +1,5 @@
 /** Historical model tags retained for session replay and message display. */
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import type { Effort } from "@oh-my-pi/pi-ai/effort";
 
 /** Submitted historical mention; groups are agent pseudonym and display name. */
 export const MODEL_MENTION_TAG_RE = /<model agent="(m\d+)" name="([^"]*)"\/>/g;

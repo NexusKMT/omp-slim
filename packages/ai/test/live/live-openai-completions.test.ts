@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { buildModel } from "@oh-my-pi/pi-ai/build";
 import { streamOpenAICompletions } from "../../src/providers/openai-completions";
 import type { AssistantMessage, AssistantMessageEventStream, Context, Message, Model, Tool } from "../../src/types";
 
