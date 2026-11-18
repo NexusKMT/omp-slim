@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { wasmGrammarFor } from "@oh-my-pi/pi-natives";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -246,6 +247,7 @@ describe("ast_edit tool schema", () => {
 	});
 
 	it("infers tlaplus from .tla files for AST edits", async () => {
+		if (wasmGrammarFor({ lang: "tlaplus" })?.enabled === false) return;
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ast-edit-tlaplus-"));
 		try {
 			const filePath = path.join(tempDir, "Spec.tla");

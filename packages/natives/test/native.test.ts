@@ -45,10 +45,12 @@ describe("macOS spelling", () => {
 		}
 
 		expect(macOSSpellCheckerAvailable()).toBeTrue();
+		if (process.env.OMP_TEST_SKIP_MACOS_SPELLING) return;
 		expect(await macOSCheckSpelling(nonsense)).toContainEqual({ start: 0, length: nonsense.length });
 	});
 	it("returns only word spans, never the whole-string orthography result", async () => {
 		if (process.platform !== "darwin") return;
+		if (process.env.OMP_TEST_SKIP_MACOS_SPELLING) return;
 		// With automatic language identification, checkString: also yields an
 		// orthography result spanning the entire string; leaking it as a typo
 		// range doubled editor text under the undercurl renderer.

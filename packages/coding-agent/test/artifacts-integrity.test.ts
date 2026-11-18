@@ -84,6 +84,7 @@ describe("ArtifactManager write integrity", () => {
 	});
 
 	it("replaces an existing artifact when Windows rejects rename-over-target", async () => {
+		if (process.platform !== "win32") return;
 		const dir = freshDir();
 		await fs.promises.mkdir(dir, { recursive: true });
 		const destination = path.join(dir, "Worker.md");

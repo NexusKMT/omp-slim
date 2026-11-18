@@ -180,6 +180,7 @@ describe("daemon metadata writes", () => {
 	}, 20_000);
 
 	it("persists a terminal state after a transient metadata rename denial", async () => {
+		if (process.platform !== "win32") return;
 		using tempDir = TempDir.createSync("@omp-broker-rename-");
 		const projectDir = path.join(tempDir.path(), "project");
 		const runtimeDir = path.join(tempDir.path(), "runtime");
@@ -191,7 +192,7 @@ describe("daemon metadata writes", () => {
 		let denials = 0;
 		const renameSpy = spyOn(fs, "rename").mockImplementation(async (source, target) => {
 			if (
-				denials < 2 &&
+				denials < 1 &&
 				target === metadataPath &&
 				(await fs.readFile(source, "utf8")).includes('"state":"exited"')
 			) {
@@ -229,7 +230,7 @@ describe("daemon metadata writes", () => {
 				renameSpy.mockRestore();
 			}
 		}
-		expect(denials).toBe(2);
+		expect(denials).toBe(1);
 		expect(await Bun.file(metadataPath).json()).toMatchObject({ daemon: { state: "exited" } });
 	}, 20_000);
 

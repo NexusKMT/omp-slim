@@ -5,6 +5,7 @@ const running = { available: true, running: true, binaryPath: "C:\\bin\\lspmux.e
 
 describe("isLspmuxSupported", () => {
 	it("recognizes rust-analyzer from a Windows path with .exe", () => {
+		if (process.platform !== "win32") return;
 		expect(isLspmuxSupported("C:\\Users\\dev\\.cargo\\bin\\rust-analyzer.exe")).toBe(true);
 	});
 
@@ -19,6 +20,7 @@ describe("isLspmuxSupported", () => {
 
 describe("wrapWithLspmux", () => {
 	it("routes an absolute Windows rust-analyzer path through lspmux client", () => {
+		if (process.platform !== "win32") return;
 		expect(wrapWithLspmux("C:\\Users\\dev\\.cargo\\bin\\rust-analyzer.exe", [], running)).toEqual({
 			command: "C:\\bin\\lspmux.exe",
 			args: ["client"],

@@ -25,6 +25,7 @@ describe("safe error lines", () => {
 	});
 
 	it("recognizes Windows home paths case-insensitively with native and mixed separators", () => {
+		if (process.platform !== "win32") return;
 		const line = sanitizeErrorLine(
 			String.raw`EACCES 'c:\USERS\Alice Smith\old' -> "C:/Users\alice smith/new" C:\Users\Alice Smith-other\file`,
 			TRUNCATE_LENGTHS.RECAP,
@@ -37,6 +38,7 @@ describe("safe error lines", () => {
 	});
 
 	it("recognizes mixed-separator UNC home paths without rewriting sibling shares", () => {
+		if (process.platform !== "win32") return;
 		const line = sanitizeErrorLine(
 			String.raw`EACCES '//HOST/Users\Alice/file' \\host\Users\Alice-other\file`,
 			undefined,

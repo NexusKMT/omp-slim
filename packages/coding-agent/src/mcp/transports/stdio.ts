@@ -666,6 +666,8 @@ export async function createStdioTransport(
 	config: MCPStdioServerConfig,
 	signal?: AbortSignal,
 ): Promise<StdioTransport> {
+	await Promise.resolve();
+	signal?.throwIfAborted();
 	const transport = new StdioTransport(config);
 	try {
 		await transport.connect(signal);
