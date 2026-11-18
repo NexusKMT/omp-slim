@@ -98,8 +98,6 @@
     "stats:audit": "bun scripts/session-stats/audit.ts",
     "pi:image": "docker build -t \"${PI_IMAGE:-oh-my-pi/pi:dev}\" .",
     "pi:run": "docker run --rm -it \"${PI_IMAGE:-oh-my-pi/pi:dev}\"",
-    "lint:py": "ruff check sdk/python && ruff format --check sdk/python",
-    "fix:py": "ruff check --fix sdk/python && ruff format sdk/python",
     "prepublishOnly": "bun run check",
     "publish": "bun run prepublishOnly && npm publish -ws --access public",
     "publish:dry": "bun run prepublishOnly && npm publish -ws --access public --dry-run",
@@ -117,7 +115,6 @@
     "test:scripts": "bun test scripts",
     "test:rs": "bun scripts/run-rs-task.ts test:rs",
     "test:rs:pty": "bun scripts/run-rs-task.ts test:rs:pty",
-    "test:py": "uv run --with pytest pytest -x sdk/python/omp-rpc/tests",
     "ci:test:full": "bun run ci:test:ts && OMP_FORCE_RUST_TASKS=1 bun run test:rs",
     "ci:test:ts": "bun scripts/ci-test-ts.ts all",
     "ci:test:ts:workspace": "bun scripts/ci-test-ts.ts workspace",
@@ -129,8 +126,7 @@
     "ci:test:coding-agent:heavy": "bun scripts/ci-test-ts.ts coding-agent-heavy",
     "ci:test:smoke": "bun packages/coding-agent/src/cli.ts --version && bun packages/coding-agent/src/cli.ts --help && bun packages/coding-agent/src/cli.ts stats --help && bun packages/coding-agent/src/cli.ts --smoke-test",
     "ci:test:install-methods": "bash scripts/install-tests/run-ci.sh",
-    "check:scripts": "bun check --no-script -p tsconfig.tools.json",
-    "test:go": "cd sdk/go/omp-rpc && go test ./..."
+    "check:scripts": "bun check --no-script -p tsconfig.tools.json"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

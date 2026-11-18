@@ -8,13 +8,13 @@ using one selected model through an explicitly configured Chat Completions endpo
 
 The retained core includes session history and resume, file editing and search,
 shell and PTY execution, LSP and debugger tools, subagents, context compaction,
-HTTP web search, MCP, manually managed skills, the local stats dashboard, and
-RPC SDKs. Planning, subagents, and helper requests inherit the main model.
+HTTP web search, MCP, manually managed skills, and the local stats dashboard.
+Planning, subagents, and helper requests inherit the main model.
 
 Built-in browser automation, desktop control, speech, automatic long-term memory,
 provider subscriptions and alternate transports, automatic model switching,
-sharing and recording, SSH host management, Apple Foundation Models, and
-upstream self-update are removed. The benchmark-only metaharness and Snapcompact
+sharing and recording, SSH host management, Apple Foundation Models, external RPC SDKs,
+and upstream self-update are removed. The benchmark-only metaharness and Snapcompact
 research tree are removed; the Snapcompact runtime remains.
 
 ## Install and update
@@ -65,14 +65,11 @@ unsupported transport names are rejected. See [single-model behavior](docs/slim-
 ```sh
 bun run check:ts           # lint, formatting, root scripts, and package types
 bun run test:scripts       # build/release helper contracts
-bun run test:go            # Go RPC SDK (requires Go)
-bun run test:py            # Python RPC SDK (requires uv)
 ```
 
 Run focused tests for the area being changed. Full native builds, Rust tests,
 standalone worker smoke tests, and the complete TypeScript suite use the manual
-public Actions workflows. [SDK validation](https://github.com/NexusKMT/omp-slim/actions/workflows/slim-sdk-checks.yml)
-checks the Go and Python RPC contracts without provider credentials.
+public Actions workflows.
 
 | Component | Location |
 | --- | --- |

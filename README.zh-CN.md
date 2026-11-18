@@ -7,10 +7,10 @@ OMP Slim 是基于 [OMP](https://github.com/can1357/oh-my-pi) v18.18.3 的独立
 规划、子任务和辅助请求均使用当前主模型。
 
 保留会话历史与恢复、文件编辑和搜索、Shell 与 PTY、LSP 与调试工具、子任务、上下文压缩、
-HTTP 搜索、MCP、手动管理的技能、本地统计面板和 RPC SDK。
+HTTP 搜索、MCP、手动管理的技能和本地统计面板。
 
 已移除内置浏览器自动化、桌面控制、语音、自动长期记忆、提供商订阅与其他传输协议、
-自动换模、共享与录屏、SSH 主机管理、Apple Foundation Models 和上游自更新。
+自动换模、共享与录屏、SSH 主机管理、Apple Foundation Models、外部 RPC SDK 和上游自更新。
 仅用于基准实验的 metaharness 与 Snapcompact research 目录也已移除；保留 Snapcompact 运行时。
 
 ## 安装与更新
@@ -55,14 +55,10 @@ omp --model my-endpoint/my-model
 ```sh
 bun run check:ts           # lint、格式、根目录脚本和各包类型检查
 bun run test:scripts       # 构建与发布辅助脚本测试
-bun run test:go            # Go RPC SDK，需要 Go
-bun run test:py            # Python RPC SDK，需要 uv
 ```
 
 日常按改动范围运行针对性测试。完整原生构建、Rust 测试、独立 CLI worker 冒烟测试和完整
 TypeScript 测试通过公开仓库的手动 Actions 工作流执行。
-[SDK 验证工作流](https://github.com/NexusKMT/omp-slim/actions/workflows/slim-sdk-checks.yml)
-覆盖 Go 和 Python RPC 契约，不需要提供商凭据。
 
 | 组件 | 位置 |
 | --- | --- |
