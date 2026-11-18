@@ -49,33 +49,26 @@ async function main(): Promise<void> {
 		Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";
 	const outName = crossBuild ? `omp-${crossBuild.id}` : "omp";
 	const outputPath = path.join(packageDir, "dist", outName);
-	// Generate inside the try so the finally always restores the empty checked-in
-	// placeholders (stats client archive, docs index) even on failure.
-	try {
-		await runCommand(["bun", "--cwd=../stats", "run", "gen:stats"]);
-		await compileCodingAgent({
-			repoRoot,
-			entrypoint: path.join(packageDir, "src", "cli.ts"),
-			outfile: outputPath,
-			native: crossBuild ?? { platform: process.platform, arch: process.arch },
-			target: crossBuild?.target,
-			executablePath: Bun.env.BUN_COMPILE_EXECUTABLE_PATH || undefined,
-			skipBuiltinCodesign: shouldAdhocSign,
-		});
+	await compileCodingAgent({
+		repoRoot,
+		entrypoint: path.join(packageDir, "src", "cli.ts"),
+		outfile: outputPath,
+		native: crossBuild ?? { platform: process.platform, arch: process.arch },
+		target: crossBuild?.target,
+		executablePath: Bun.env.BUN_COMPILE_EXECUTABLE_PATH || undefined,
+		skipBuiltinCodesign: shouldAdhocSign,
+	});
 
-		if (shouldAdhocSign) {
-			await runCommand([
-				"codesign",
-				"--force",
-				"--sign",
-				"-",
-				"--entitlements",
-				path.join(repoRoot, "scripts", "macos-entitlements.plist"),
-				outputPath,
-			]);
-		}
-	} finally {
-		await runCommand(["bun", "--cwd=../stats", "run", "gen:stats:reset"]);
+	if (shouldAdhocSign) {
+		await runCommand([
+			"codesign",
+			"--force",
+			"--sign",
+			"-",
+			"--entitlements",
+			path.join(repoRoot, "scripts", "macos-entitlements.plist"),
+			outputPath,
+		]);
 	}
 }
 
