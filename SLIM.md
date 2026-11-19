@@ -15,10 +15,11 @@ ordinary HTTP search, MCP and manually maintained instructions remain core.
 Current product targets are **macOS Intel and Linux x64**. Built-in SSH host
 management and `ssh://` file transport, upstream self-update, Apple Foundation
 Models, update-only binary patching, metaharness and Snapcompact research code
-are removed. The Snapcompact runtime, local stats and RPC SDKs remain.
+are removed. The Snapcompact runtime, RPC interface and TypeScript SDK remain.
+Local stats, runtime telemetry, Nix integration and the separate Go/Python SDKs
+have also been removed; model metadata now lives in `packages/ai`.
 Native caches are checked against embedded SHA-256 digests, including same-version
 builds with equal file sizes. `bun run check:ts` also checks root build scripts.
-Go and Python SDK contracts have a manual public workflow, `slim-sdk-checks.yml`.
 This cleanup changes native inputs and requires a fresh full build; older
 validation records below apply only to the source revisions they name.
 See the [2026-11-17 cleanup report](docs/slim-cleanup-2026-11-17.md) for the
@@ -169,6 +170,7 @@ been removed from the product. Track the actual state below.
 | Heuristic audit reconciliation (2026-11-19) | H1–H9 repaired: cleanse model inheritance, benchmark config export, Python Chat Completions bridge, configured benchmark defaults, dead commands/docs and profile-scoped audit paths. Retained benchmarks and maintenance scripts now participate in type checks; retired supplier experiments have been deleted, including their temporary text archives. Full TS checks, 145 script tests, 154 focused package tests (1 skip), local Python integration and source smoke passed. See [the repair report](docs/slim-heuristic-fixes-2026-11-19.md). |
 | Supplier research cleanup (2026-11-19) | Deleted supplier experiments and text archives, fixed-checkpoint analysis, orphan prompts, upstream Pi comparator, unused bridge/prompt and retired protocol docs (122 source files total across the two cleanup passes). Full TS checks, 213 focused tests, both Python QA entries, five renderer parity cases and source smoke passed. See [the cleanup report](docs/slim-supplier-cleanup-2026-11-19.md). |
 | Test cleanup (2026-11-19) | Removed obsolete live suites, empty/redundant tests and an unreferenced 2.37 MB fixture; retained tree-navigation behavior now runs locally. Test/helper source reduced by 1,686 lines. Full TS checks and 1,161 distinct focused tests passed. See [the test cleanup report](docs/slim-test-cleanup-2026-11-19.md). |
+| Integration and maintenance-cost assessment (2026-11-19) | Source `ae480c973c` incorporates the 48 intervening remote commits and the applicable cleanup. The preceding four November 19 reports describe the earlier `e8d1f678b3` tree; some of their consumers/tests were subsequently removed. Intel build [44549416311](https://github.com/NexusKMT/omp-slim/actions/runs/44549416311) compiled and passed worker smoke, PTY and TS checks; the full TS gate passed 135/157 groups. A real rules-injection regression was repaired in `06ef50a1ea` (40 local behavior tests pass); [44556806308](https://github.com/NexusKMT/omp-slim/actions/runs/44556806308) compiled the repaired CLI using the verified addon and passed 136/157 TS groups. The full gate remains failed. Both archives were recovered and SHA-256 checked; repaired CLI signature/local smoke and actual addon spelling passed. See [the current assessment](docs/slim-maintenance-cost-2026-11-19.md) for scope, checksums and remaining failures. |
 
 As of 2026-11-10 (Asia/Shanghai), Codespace
 `omp-slim-build-vrxqgpxrj7gfp579` was verified **Shutdown** after both Linux builds

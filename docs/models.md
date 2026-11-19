@@ -31,9 +31,10 @@ local configuration identifier, not a subscription or vendor integration.
 `openai-completions`, which is also the default when omitted.
 
 Provider entries accept `apiKey`, `auth`, `authHeader`, `headers`, `compat`, and
-an explicit `models` array. Unknown provider/model fields and retired protocol
-names are rejected. Models require an `id`; duplicate IDs within a provider
-are rejected.
+an explicit `models` array. Unknown provider/model fields, including retired
+compatibility fields, are silently discarded. Unsupported protocol names are
+rejected. Models require an `id`; duplicate IDs within a provider are rejected.
+Check field spelling carefully: an unrecognized capability setting has no effect.
 
 ## Capabilities and wire options
 
@@ -62,7 +63,7 @@ The precise accepted shape is defined in
 [`models-config-schema-bundle.ts`](../packages/coding-agent/src/config/models-config-schema-bundle.ts).
 Endpoint validation is shared with extension-supplied manual providers in
 [`models-config.ts`](../packages/coding-agent/src/config/models-config.ts), and
-model materialization lives in [`build.ts`](../packages/catalog/src/build.ts).
+model materialization lives in [`build.ts`](../packages/ai/src/models/build.ts).
 
 ## Select the main model
 
