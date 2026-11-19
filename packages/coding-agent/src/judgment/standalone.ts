@@ -19,7 +19,7 @@ export interface StandaloneJudge {
 
 /**
  * Resolve the configured primary chat model for `cwd`'s project settings and extensions.
- * No session ledger exists here, so `purpose` only labels telemetry; native
+ * No session ledger exists here, so `purpose` only labels journaled usage entries; native
  * answers still go through the shared answer cache.
  */
 export async function openStandaloneJudge(cwd: string, purpose: string): Promise<StandaloneJudge> {

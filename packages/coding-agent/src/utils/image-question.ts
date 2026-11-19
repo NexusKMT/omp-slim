@@ -1,4 +1,4 @@
-import { instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
+import { completeSimpleWithRetry } from "@oh-my-pi/pi-agent-core";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import { type Api, type AssistantMessage, completeSimple, type Model, type Usage } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
@@ -66,7 +66,6 @@ export async function askImageQuestion(
 		);
 	}
 
-	const telemetry = resolveTelemetry(session.getTelemetry?.(), session.getSessionId?.() ?? undefined);
 	const timeoutMs = cfgImagesQuestionTimeoutMs.get(session.settings);
 	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0;
 	const timeoutSignal = hasTimeout ? AbortSignal.timeout(timeoutMs) : undefined;
@@ -80,7 +79,7 @@ export async function askImageQuestion(
 	session.costGate?.admit();
 	let response: AssistantMessage;
 	try {
-		response = await instrumentedCompleteSimple(
+		response = await completeSimpleWithRetry(
 			model,
 			{
 				systemPrompt: [prompt.render(imageQuestionSystemPromptTemplate)],
@@ -99,7 +98,7 @@ export async function askImageQuestion(
 				apiKey: modelRegistry.resolver(model, session.getSessionId?.() ?? undefined),
 				signal: effectiveSignal,
 			},
-			{ telemetry, oneshotKind: "image_question", completeImpl },
+			{ completeImpl },
 		);
 		session.costGate?.record(response.usage.cost.total);
 	} catch (error) {

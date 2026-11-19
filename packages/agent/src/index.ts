@@ -8,19 +8,17 @@ export * from "./append-only-context";
 export * from "./compaction";
 // Output cap sized to the remaining context window
 export * from "./output-budget";
+// Oneshot completion helper (retry + transport injection seams)
+export * from "./oneshot";
 // Process-global pause gate
 export * from "./pause";
 // Proxy utilities
 // Replay policy
 export * from "./replay-policy";
-// Run-level telemetry collector + aggregators
-export * from "./run-collector";
 // Tool definitions remembered for Anthropic inactive-tool re-declaration
 export * from "./sent-tool-definitions";
 // Speculative execution coordinator
 export * from "./speculative-execution";
-// Telemetry
-export * from "./telemetry";
 // Thinking selectors
 export * from "./thinking";
 // Tool-context augmentation

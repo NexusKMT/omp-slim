@@ -1,11 +1,5 @@
 /** Typed judgments run only through the current chat model, when explicitly requested. */
 import {
-	type AgentTelemetry,
-	type AgentTelemetryConfig,
-	recordJudgmentTelemetry,
-	resolveTelemetry,
-} from "@oh-my-pi/pi-agent-core";
-import {
 	type AssistantMessage,
 	chatTextBackend,
 	type Judge,
@@ -49,7 +43,6 @@ export interface JudgeDeps {
 	metadataResolver?: (provider: string) => Record<string, unknown> | undefined;
 	purpose: string;
 	onUsage?: (usage: JudgmentUsage) => void;
-	telemetry?: AgentTelemetryConfig;
 	costGate?: CostGateApi;
 }
 
@@ -90,11 +83,9 @@ export function resolveJudge(deps: JudgeDeps): ChainJudge {
 export class ChainJudge implements Judge {
 	readonly label = "current model";
 	readonly #deps: JudgeDeps;
-	readonly #telemetry: AgentTelemetry | undefined;
 
 	constructor(deps: JudgeDeps) {
 		this.#deps = deps;
-		this.#telemetry = resolveTelemetry(deps.telemetry, deps.sessionId);
 	}
 
 	primaryModel(): Model | undefined {
@@ -166,15 +157,6 @@ export class ChainJudge implements Judge {
 		const usage: JudgmentUsage = { purpose: this.#deps.purpose, ...rest };
 		this.#deps.costGate?.record(usage.usage.cost.total);
 		this.#deps.onUsage?.(usage);
-		recordJudgmentTelemetry(this.#telemetry, {
-			provider: usage.provider,
-			model: usage.model,
-			purpose: usage.purpose,
-			usage: usage.usage,
-			stopReason: usage.stopReason,
-			errorMessage: usage.errorMessage,
-			startTime: startedAt,
-		}).catch(error => logger.warn("judgment telemetry failed", { error: String(error) }));
 	}
 }
 

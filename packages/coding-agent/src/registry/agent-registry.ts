@@ -42,7 +42,7 @@ export interface AgentRunLifecycle {
 	terminalAt?: number;
 }
 
-/** Historical identity and telemetry that remain available after the live session is disposed. */
+/** Historical identity and metrics that remain available after the live session is disposed. */
 export interface AgentHistorySummary {
 	agent?: string;
 	modelRole?: string;
@@ -78,7 +78,7 @@ export interface AgentRef {
 	lastActivity: number;
 	/** Short gist of what the agent is currently doing (latest intent or tool), for the work-aware roster. Display-only. */
 	activity?: string;
-	/** Persisted identity and telemetry restored after the live observer is gone. */
+	/** Persisted identity and metrics restored after the live observer is gone. */
 	history?: AgentHistorySummary;
 	/** Run lifecycle milestones (launch is {@link createdAt}). */
 	lifecycle?: AgentRunLifecycle;
@@ -126,7 +126,7 @@ export interface RegisterInput {
 	createdAt?: number;
 	/** Last transcript activity timestamp, when known from persisted history. */
 	lastActivity?: number;
-	/** Persisted identity and telemetry restored after the live observer is gone. */
+	/** Persisted identity and metrics restored after the live observer is gone. */
 	history?: AgentHistorySummary;
 	/** Run lifecycle milestones restored from persisted history, when known. */
 	lifecycle?: AgentRunLifecycle;

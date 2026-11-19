@@ -5,7 +5,6 @@ import {
 	type AgentTool,
 	AppendOnlyContextManager,
 	type CompactionSummaryMessage,
-	resolveTelemetry,
 	type StreamFn,
 	TERMINAL_TOOL_RESULT_ABORT_REASON,
 	ThinkingLevel,
@@ -639,8 +638,8 @@ export class SessionAdvisors {
 
 	/**
 	 * Rebind every live advisor to the active primary conversation's provider
-	 * identity (session id, prompt-cache key, credential + metadata resolvers,
-	 * telemetry). Invoked on every provider-session change — including branch
+	 * identity (session id, prompt-cache key, credential + metadata resolvers).
+	 * Invoked on every provider-session change — including branch
 	 * paths that skip conversation restore — so advisors never keep emitting the
 	 * previous conversation's session id/metadata (issue #6625).
 	 */
@@ -755,19 +754,6 @@ export class SessionAdvisors {
 		advisor.agent.promptCacheKey = this.#host.agent.promptCacheKey ?? providerSessionId;
 		advisor.agent.getApiKey = requestModel => this.#host.modelRegistry.resolver(requestModel, providerSessionId);
 		advisor.agent.setMetadataResolver(providerSessionId ? () => buildSessionMetadata(providerSessionId) : undefined);
-
-		const telemetry = advisor.agent.telemetry;
-		if (telemetry?.agent) {
-			advisor.agent.setTelemetry({
-				...telemetry,
-				agent: {
-					...telemetry.agent,
-					id: advisor.slug
-						? `${primaryProviderSessionId}-advisor-${advisor.slug}`
-						: `${primaryProviderSessionId}-advisor`,
-				},
-			});
-		}
 	}
 
 	/**
@@ -1009,27 +995,9 @@ export class SessionAdvisors {
 			let currentAdvisorInput = "";
 
 			const primaryProviderSessionId = this.#host.sessionId();
-			const advisorSessionLabel = slug
-				? `${primaryProviderSessionId}-advisor-${slug}`
-				: `${primaryProviderSessionId}-advisor`;
 			const advisorProviderSessionId = this.#advisorProviderSessionId(slug);
 			const appendOnlyContext = new AppendOnlyContextManager();
 
-			// Thread the primary's telemetry into the advisor loop so the advisor
-			// model's GenAI spans + usage/cost hooks fire stamped with the local advisor
-			// identity. `conversationId` is cleared so provider telemetry falls back to
-			// the UUIDv7 provider session id, not the local `-advisor` label.
-			const advisorTelemetry = this.#host.agent.telemetry
-				? {
-						...this.#host.agent.telemetry,
-						agent: {
-							id: advisorSessionLabel,
-							name: slug ? `Advisor: ${advisorName}` : "Advisor",
-							description: formatModelString(advisorModel),
-						},
-						conversationId: undefined,
-					}
-				: undefined;
 			// Mirror the SDK's provider-shaping options (streamFn/onPayload/...,
 			// promptCacheKey, transformProviderContext) so each
 			// advisor's requests cache, route, and obfuscate like the main turn.
@@ -1090,7 +1058,6 @@ export class SessionAdvisors {
 					if (ctx.toolCall.id === lastAdviseId) advisorAgent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
 					return undefined;
 				},
-				telemetry: advisorTelemetry,
 			});
 			advisorAgent.setDisableReasoning(shouldDisableReasoning(advisorThinkingLevel));
 			advisorAgent.setModelResolver(model => this.#host.modelRegistry.fitContextWindow(model, this.#host.settings));
@@ -1758,7 +1725,6 @@ export class SessionAdvisors {
 				{
 					thinkingLevel: agent.state.disableReasoning ? ThinkingLevel.Off : agent.state.thinkingLevel,
 					convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
-					telemetry: resolveTelemetry(agent.telemetry, advisorProviderSessionId),
 					sessionId: advisorProviderSessionId,
 					promptCacheKey: this.#host.agent.promptCacheKey,
 					metadata: advisorProviderSessionId ? buildSessionMetadata(advisorProviderSessionId) : undefined,

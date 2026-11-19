@@ -21,9 +21,7 @@ import type {
 	TSchema,
 } from "@oh-my-pi/pi-ai";
 import type { AppendOnlyContextManager } from "./append-only-context";
-import type { AgentRunCoverage, AgentRunSummary } from "./run-collector";
 import type { SentToolDefinitions } from "./sent-tool-definitions";
-import type { AgentTelemetryConfig } from "./telemetry";
 
 /** Stream function - can return sync or Promise for async config lookup */
 export type StreamFn = (
@@ -266,8 +264,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 
 	/**
 	 * Optional transform applied to the final provider context after conversion,
-	 * normalization, and append-only context handling, but before telemetry capture
-	 * and provider send.
+	 * normalization, and append-only context handling, but before provider send.
 	 */
 	transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
 
@@ -540,8 +537,8 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	/**
 	 * Per-call effective service-tier resolver. Unlike {@link getReasoning},
 	 * this is *authoritative*: when set, its return value (including
-	 * `undefined`) fully replaces the static `serviceTier` for the request and
-	 * its telemetry. The resolver receives the model being requested so the
+	 * `undefined`) fully replaces the static `serviceTier` for the request.
+	 * The resolver receives the model being requested so the
 	 * caller can scope the tier per provider/model without mutating the shared
 	 * session `serviceTier` (e.g. opting a Fireworks model into the Priority
 	 * serving path while leaving the OpenAI/Anthropic tier untouched).
@@ -616,7 +613,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	/**
 	 * Called after a tool finishes executing, before `tool_execution_end` and the
 	 * tool-result message are emitted.
-	 *
+	/**
 	 * Return an `AfterToolCallResult` to override individual fields of the executed
 	 * tool result. Omitted fields keep their original values; there is no deep merge.
 	 *
@@ -626,16 +623,6 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 		context: AfterToolCallContext,
 		signal?: AbortSignal,
 	) => Promise<AfterToolCallResult | undefined> | AfterToolCallResult | undefined;
-	/**
-	 * Opt-in OpenTelemetry instrumentation. Passing `{}` enables the loop's
-	 * GenAI-semantic-convention spans (`invoke_agent`, `chat`, `execute_tool`)
-	 * using the global tracer provider. Leaving this field undefined disables
-	 * the instrumentation entirely — the loop performs zero tracer lookups.
-	 *
-	 * See {@link AgentTelemetryConfig} for the full surface (hooks, content
-	 * capture, cost estimator, agent identity).
-	 */
-	telemetry?: AgentTelemetryConfig;
 }
 
 /**
@@ -1284,9 +1271,6 @@ export type AgentEvent =
 	| {
 			type: "agent_end";
 			messages: AgentMessage[];
-			/** Present iff `AgentTelemetryConfig` was supplied on this run. */
-			telemetry?: AgentRunSummary;
-			coverage?: AgentRunCoverage;
 	  }
 	// Turn lifecycle - a turn is one assistant response + any tool calls/results
 	| { type: "turn_start" }

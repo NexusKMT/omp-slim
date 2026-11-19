@@ -108,7 +108,7 @@ export interface AgentOptions {
 
 	/**
 	 * Optional transform applied after provider context assembly and before
-	 * telemetry capture/provider send.
+	 * provider send.
 	 */
 	transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
 
@@ -195,9 +195,9 @@ export interface AgentOptions {
 	serviceTier?: ServiceTier;
 	/**
 	 * Per-call effective service-tier resolver. When set, it authoritatively
-	 * supplies the request's tier (replacing the static `serviceTier` and its
-	 * telemetry) per model — used to scope a provider/model into a priority
-	 * serving path without mutating the shared session `serviceTier`.
+	 * supplies the request's tier (replacing the static `serviceTier`) per
+	 * model — used to scope a provider/model into a priority serving path
+	 * without mutating the shared session `serviceTier`.
 	 */
 	serviceTierResolver?: (model: Model) => ServiceTier | undefined;
 	/**
@@ -290,12 +290,6 @@ export interface AgentOptions {
 	/** See {@link AgentLoopConfig.transformAssistantMessagePreservesToolCalls}. */
 	transformAssistantMessagePreservesToolCalls?: boolean;
 
-	/**
-	 * Opt-in OpenTelemetry instrumentation. Passing `{}` enables the loop's
-	 * GenAI-semantic-convention spans using the global tracer provider. See
-	 * {@link AgentLoopConfig.telemetry} for the full surface.
-	 */
-	telemetry?: AgentLoopConfig["telemetry"];
 	/**
 	 * Immutable context mode — stabilizes system prompt + tool spec bytes
 	 * across turns so DeepSeek/Anthropic prefix caches hit at maximum rate.
@@ -404,7 +398,6 @@ export class Agent {
 	#beforeModelCall?: AgentBeforeModelCall;
 	#additionalBeforeModelCalls = new Set<AgentBeforeModelCall>();
 	#asideMessageProvider?: (boundary: AsideBoundary) => AsideMessage[] | Promise<AsideMessage[]>;
-	#telemetry?: AgentLoopConfig["telemetry"];
 	#appendOnlyContext?: AppendOnlyContextManager;
 	#beforeQueuedMessageDequeueHooks = new Set<(signal?: AbortSignal) => Promise<void> | void>();
 	#beforeModelCallHooks = new Set<(signal: AbortSignal | undefined, context: AgentContext) => Promise<void> | void>();
@@ -499,7 +492,6 @@ export class Agent {
 		this.afterToolCall = opts.afterToolCall;
 		this.transformAssistantMessage = opts.transformAssistantMessage;
 		this.transformAssistantMessagePreservesToolCalls = opts.transformAssistantMessagePreservesToolCalls;
-		this.#telemetry = opts.telemetry;
 		this.#appendOnlyContext = opts.appendOnlyContext;
 		this.#transformProviderContext = opts.transformProviderContext;
 	}
@@ -587,25 +579,6 @@ export class Agent {
 	 */
 	setMetadataResolver(resolver: ((provider: string) => Record<string, unknown> | undefined) | undefined): void {
 		this.#metadataResolver = resolver;
-	}
-
-	/**
-	 * Read the active OpenTelemetry configuration. Returns `undefined` when
-	 * instrumentation is disabled. Callers spawning child runs (e.g. subagent
-	 * dispatch) forward this to the child's loop so its spans appear under the
-	 * parent's active context with the subagent's own identity stamped.
-	 */
-	get telemetry(): AgentLoopConfig["telemetry"] | undefined {
-		return this.#telemetry;
-	}
-
-	/**
-	 * Replace the active OpenTelemetry configuration. Pass `undefined` to
-	 * disable instrumentation. Applies to the *next* `agentLoop` invocation —
-	 * in-flight loops keep the configuration they started with.
-	 */
-	setTelemetry(telemetry: AgentLoopConfig["telemetry"] | undefined): void {
-		this.#telemetry = telemetry;
 	}
 
 	/**
@@ -1790,7 +1763,6 @@ export class Agent {
 			getAsideMessages: async boundary => (await this.#asideMessageProvider?.(boundary)) ?? [],
 			onBeforeYield: () => this.#onBeforeYield?.(),
 			onDetachedToolUpdate: event => this.emitExternalEvent(event),
-			telemetry: this.#telemetry,
 		};
 
 		let partial: AgentMessage | null = null;

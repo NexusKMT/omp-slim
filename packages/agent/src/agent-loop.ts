@@ -27,24 +27,7 @@ import { stamp } from "@oh-my-pi/pi-ai/utils/schema/stamps";
 import { cloneJsonTree, logger, sanitizeText, toError } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { agentPauseGate } from "./pause";
-import { type AgentRunCoverage, type AgentRunSummary, ToolCallBlockedError } from "./run-collector";
 import { SpeculativeOperationCoordinator } from "./speculative-execution";
-import {
-	type AgentTelemetry,
-	failChatSpan,
-	finishChatSpan,
-	finishExecuteToolSpan,
-	finishInvokeAgentSpan,
-	fireOnRunEnd,
-	OmpGenAIAttr,
-	recordSkippedTool,
-	resolveTelemetry,
-	runInActiveSpan,
-	type Span,
-	startChatSpan,
-	startExecuteToolSpan,
-	startInvokeAgentSpan,
-} from "./telemetry";
 import { renderToolExamples } from "./tool-examples";
 import { validateAgentToolArguments } from "./tool-arguments";
 import { createAdditionalContextMessage, isNonBlankContext, joinAdditionalContext } from "./tool-context";
@@ -486,24 +469,6 @@ function createAgentStream(): EventStream<AgentEvent, AgentMessage[]> {
 }
 
 /**
- * Build the `agent_end` event payload. When telemetry is enabled, snapshots
- * the run collector so consumers receive {@link AgentRunSummary} +
- * {@link AgentRunCoverage} alongside the messages without parsing OTEL spans.
- * When telemetry is unset, returns the bare event for backwards compatibility.
- */
-function buildAgentEndEvent(
-	messages: AgentMessage[],
-	telemetry: AgentTelemetry | undefined,
-	stepCount: number,
-): Extract<AgentEvent, { type: "agent_end" }> {
-	if (!telemetry) return { type: "agent_end", messages };
-	const snapshot = telemetry.collector.snapshot({ stepCount });
-	if (telemetry.collector.markRunEnded()) {
-		fireOnRunEnd(telemetry, snapshot.summary, snapshot.coverage);
-	}
-	return { type: "agent_end", messages, telemetry: snapshot.summary, coverage: snapshot.coverage };
-}
-/**
  * Push a `turn_end` event and run the awaited per-turn hook when the run is
  * still healthy. The hook is skipped for externally aborted or errored turns so
  * a user interrupt does not hang on a background backlog wait.
@@ -559,94 +524,6 @@ function createGateStopMessage(model: Model, reason: string | undefined): Assist
 		stopReason: "aborted",
 		errorMessage: reason ?? "Stopped before model call",
 		timestamp: Date.now(),
-	};
-}
-
-/**
- * Detailed-result handle returned by {@link agentLoopDetailed}. Adds the
- * run-level telemetry/coverage rollup to the existing `AgentMessage[]`
- * payload without changing the resolved type of `stream.result()`.
- */
-export interface AgentLoopDetailedResult {
-	readonly messages: AgentMessage[];
-	readonly telemetry: AgentRunSummary | undefined;
-	readonly coverage: AgentRunCoverage | undefined;
-}
-
-/**
- * Convenience wrapper over {@link agentLoop} that exposes the run-level
- * summary + coverage alongside the messages. The returned `stream` is the
- * same `EventStream` callers already consume; `detailed()` awaits the
- * stream's `agent_end` event and returns the additive fields.
- *
- * Existing `stream.result()` semantics are preserved — it still resolves to
- * `AgentMessage[]`. Use {@link agentLoopDetailed} when you need the rollup;
- * use {@link agentLoop} when you do not.
- */
-export function agentLoopDetailed(
-	prompts: AgentMessage[],
-	context: AgentContext,
-	config: AgentLoopConfig,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
-): {
-	readonly stream: EventStream<AgentEvent, AgentMessage[]>;
-	readonly detailed: () => Promise<AgentLoopDetailedResult>;
-} {
-	const capture = createDetailedCapture(config);
-	const stream = agentLoop(prompts, context, capture.config, signal, streamFn);
-	return { stream, detailed: () => capture.detailed(stream) };
-}
-
-/**
- * Like {@link agentLoopDetailed} but built on top of
- * {@link agentLoopContinue}.
- */
-export function agentLoopContinueDetailed(
-	context: AgentContext,
-	config: AgentLoopConfig,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
-): {
-	readonly stream: EventStream<AgentEvent, AgentMessage[]>;
-	readonly detailed: () => Promise<AgentLoopDetailedResult>;
-} {
-	const capture = createDetailedCapture(config);
-	const stream = agentLoopContinue(context, capture.config, signal, streamFn);
-	return { stream, detailed: () => capture.detailed(stream) };
-}
-
-/**
- * Wire an `onRunEnd` telemetry hook onto `config` so the detailed helper can
- * capture the run summary without consuming the event stream. Preserves any
- * existing `onRunEnd` the caller had set.
- */
-function createDetailedCapture(config: AgentLoopConfig): {
-	readonly config: AgentLoopConfig;
-	readonly detailed: (stream: EventStream<AgentEvent, AgentMessage[]>) => Promise<AgentLoopDetailedResult>;
-} {
-	let captured: { summary: AgentRunSummary; coverage: AgentRunCoverage } | undefined;
-	const userHook = config.telemetry?.onRunEnd;
-	const wired: AgentLoopConfig = {
-		...config,
-		telemetry: {
-			...config.telemetry,
-			onRunEnd: (summary, coverage) => {
-				captured = { summary, coverage };
-				userHook?.(summary, coverage);
-			},
-		},
-	};
-	return {
-		config: wired,
-		detailed: async stream => {
-			const messages = await stream.result();
-			return {
-				messages,
-				telemetry: captured?.summary,
-				coverage: captured?.coverage,
-			};
-		},
 	};
 }
 
@@ -808,38 +685,7 @@ async function runLoop(
 	streamFn?: StreamFn,
 	initialMessages: AgentMessage[] = [],
 ): Promise<void> {
-	const telemetry = resolveTelemetry(config.telemetry, config.sessionId);
-	const invokeAgentSpan = startInvokeAgentSpan(telemetry, config.model);
-	const stepCounter = { count: 0 };
-	let caughtError: unknown;
-	try {
-		await runInActiveSpan(invokeAgentSpan, () =>
-			runLoopBody(
-				currentContext,
-				newMessages,
-				config,
-				signal,
-				stream,
-				telemetry,
-				invokeAgentSpan,
-				stepCounter,
-				initialMessages,
-				streamFn,
-			),
-		);
-	} catch (err) {
-		caughtError = err;
-		throw err;
-	} finally {
-		finishInvokeAgentSpan(telemetry, invokeAgentSpan, {
-			stepCount: stepCounter.count,
-			errorObject: caughtError,
-		});
-	}
-}
-
-interface StepCounter {
-	count: number;
+	await runLoopBody(currentContext, newMessages, config, signal, stream, initialMessages, streamFn);
 }
 
 /** Largest setTimeout delay before 32-bit overflow (Node/Bun fire in ~1 ms past this). */
@@ -849,13 +695,8 @@ function isDeadlineExceeded(deadline: number | undefined): boolean {
 	return deadline !== undefined && Date.now() >= deadline;
 }
 
-function endAgentStream(
-	stream: EventStream<AgentEvent, AgentMessage[]>,
-	newMessages: AgentMessage[],
-	telemetry: AgentTelemetry | undefined,
-	stepCount: number,
-): void {
-	stream.push(buildAgentEndEvent(newMessages, telemetry, stepCount));
+function endAgentStream(stream: EventStream<AgentEvent, AgentMessage[]>, newMessages: AgentMessage[]): void {
+	stream.push({ type: "agent_end", messages: newMessages });
 	stream.end(newMessages);
 }
 function emitInputMessages(stream: EventStream<AgentEvent, AgentMessage[]>, messages: readonly AgentMessage[]): void {
@@ -923,9 +764,6 @@ async function runLoopBody(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	stream: EventStream<AgentEvent, AgentMessage[]>,
-	telemetry: AgentTelemetry | undefined,
-	invokeAgentSpan: Span | undefined,
-	stepCounter: StepCounter,
 	initialMessages: AgentMessage[],
 	streamFn?: StreamFn,
 ): Promise<void> {
@@ -967,14 +805,14 @@ async function runLoopBody(
 		const aborted = emitAbortedAssistantMessage(null, false, new Set(), currentContext, config, stream, signal);
 		newMessages.push(aborted);
 		await emitTurnEnd(stream, currentContext, aborted, [], config, signal, { willContinue: false });
-		endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+		endAgentStream(stream, newMessages);
 		return true;
 	};
 	try {
 		let messagesToEmit = [...initialMessages];
 		if (isDeadlineExceeded(config.deadline)) {
 			emitInputMessages(stream, messagesToEmit);
-			endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+			endAgentStream(stream, newMessages);
 			return;
 		}
 		// Check for steering messages at start (user may have typed while waiting).
@@ -1011,15 +849,7 @@ async function runLoopBody(
 			emitInputMessages(stream, messagesToEmit);
 			messagesToEmit = [];
 			turnOpen = true;
-			const executionResult = await executeToolCalls(
-				currentContext,
-				resumeTail,
-				signal,
-				stream,
-				config,
-				telemetry,
-				invokeAgentSpan,
-			);
+			const executionResult = await executeToolCalls(currentContext, resumeTail, signal, stream, config);
 			for (const result of executionResult.toolResults) {
 				currentContext.messages.push(result);
 				newMessages.push(result);
@@ -1038,7 +868,7 @@ async function runLoopBody(
 			// A tool hook may mark its completed result as terminal (e.g. subagent
 			// yield) — same stop-before-next-model-call rule as the main loop.
 			if (signal?.reason === TERMINAL_TOOL_RESULT_ABORT_REASON) {
-				endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+				endAgentStream(stream, newMessages);
 				return;
 			}
 		}
@@ -1051,7 +881,7 @@ async function runLoopBody(
 			while (hasMoreToolCalls || pendingMessages.length > 0) {
 				if (isDeadlineExceeded(config.deadline)) {
 					emitInputMessages(stream, messagesToEmit);
-					endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+					endAgentStream(stream, newMessages);
 					return;
 				}
 				// Park at the turn boundary while the process-wide pause gate is
@@ -1166,7 +996,7 @@ async function runLoopBody(
 						turnOpen = false;
 					}
 					preserveSoftRequirementState = !signal?.aborted;
-					endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+					endAgentStream(stream, newMessages);
 					return;
 				}
 
@@ -1185,9 +1015,6 @@ async function runLoopBody(
 						config,
 						signal,
 						stream,
-						telemetry,
-						invokeAgentSpan,
-						stepCounter,
 						streamFn,
 
 						hostToolChoice,
@@ -1255,22 +1082,11 @@ async function runLoopBody(
 						currentContext.messages.push(result);
 						newMessages.push(result);
 						toolResults.push(result);
-						// The placeholder result above keeps the API's tool_use/tool_result
-						// pairing intact, but no execute_tool span is started for these
-						// calls. Mirror the run-collector entry directly so the run
-						// summary's tool counters and `coverage.toolsInvoked` reflect
-						// what the user actually saw on the wire.
-						recordSkippedTool(telemetry, {
-							toolCallId: toolCall.id,
-							toolName: toolCall.name,
-							status: message.stopReason === "aborted" ? "aborted" : "error",
-						});
 					}
 					await emitTurnEnd(stream, currentContext, message, toolResults, config, signal, { willContinue: false });
 					turnOpen = false;
 
-					stream.push(buildAgentEndEvent(newMessages, telemetry, stepCounter.count));
-					stream.end(newMessages);
+					endAgentStream(stream, newMessages);
 					return;
 				}
 
@@ -1324,25 +1140,12 @@ async function runLoopBody(
 						currentContext.messages.push(result);
 						newMessages.push(result);
 						toolResults.push(result);
-						recordSkippedTool(telemetry, {
-							toolCallId: toolCall.id,
-							toolName: toolCall.name,
-							status: "skipped",
-						});
 					}
 					softRequirementState.forcedToolChoice = { type: "tool", name: softRequiredTool };
 					softRequirementState.escalations++;
 					hasMoreToolCalls = true;
 				} else if (hasMoreToolCalls) {
-					const executionResult = await executeToolCalls(
-						currentContext,
-						message,
-						signal,
-						stream,
-						config,
-						telemetry,
-						invokeAgentSpan,
-					);
+					const executionResult = await executeToolCalls(currentContext, message, signal, stream, config);
 					toolResults.push(...executionResult.toolResults);
 
 					for (const result of toolResults) {
@@ -1371,11 +1174,6 @@ async function runLoopBody(
 						currentContext.messages.push(result);
 						newMessages.push(result);
 						toolResults.push(result);
-						recordSkippedTool(telemetry, {
-							toolCallId: toolCall.id,
-							toolName: toolCall.name,
-							status: deadlinePassed ? "aborted" : "skipped",
-						});
 					}
 					if (message.stopReason === "length" && toolResults.length > 0 && !deadlinePassed) {
 						hasMoreToolCalls = true;
@@ -1395,7 +1193,7 @@ async function runLoopBody(
 				turnOpen = false;
 
 				if (isDeadlineExceeded(config.deadline)) {
-					endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+					endAgentStream(stream, newMessages);
 					return;
 				}
 				// On external abort (user interrupt), leave the steering queue intact: the
@@ -1413,7 +1211,7 @@ async function runLoopBody(
 			}
 
 			if (isDeadlineExceeded(config.deadline)) {
-				endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+				endAgentStream(stream, newMessages);
 				return;
 			}
 
@@ -1421,7 +1219,7 @@ async function runLoopBody(
 			await config.onBeforeYield?.();
 
 			if (isDeadlineExceeded(config.deadline)) {
-				endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+				endAgentStream(stream, newMessages);
 				return;
 			}
 			// Skip queue drains when externally aborted (same stranding hazard as above).
@@ -1441,7 +1239,7 @@ async function runLoopBody(
 			break;
 		}
 
-		endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+		endAgentStream(stream, newMessages);
 	} finally {
 		discardAsides(pendingMessages, new Error("Aside message was not committed before the agent loop ended"));
 		if (!preserveSoftRequirementState) {
@@ -1537,9 +1335,6 @@ async function streamAssistantResponse(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	stream: EventStream<AgentEvent, AgentMessage[]>,
-	telemetry: AgentTelemetry | undefined,
-	invokeAgentSpan: Span | undefined,
-	stepCounter: StepCounter,
 	streamFn?: StreamFn,
 
 	hostToolChoice?: ToolChoice,
@@ -1556,8 +1351,8 @@ async function streamAssistantResponse(
 	const dynamicReasoning = config.getReasoning?.();
 	const dynamicDisableReasoning = config.getDisableReasoning?.();
 	// `getServiceTier` is authoritative when present (replaces the static tier
-	// for both the wire request and telemetry), so callers can scope priority
-	// per model without touching the shared session `serviceTier`.
+	// for the wire request), so callers can scope priority per model without
+	// touching the shared session `serviceTier`.
 	const effectiveServiceTier = config.getServiceTier ? config.getServiceTier(model) : config.serviceTier;
 	const requestSignal = signal;
 	const finalRequestSignal = signal;
@@ -1581,488 +1376,435 @@ async function streamAssistantResponse(
 	// workspace-scoped provider discovery; falls back to the static `cwd` when unset.
 	const effectiveCwd = config.getCwd?.() ?? config.cwd;
 
-	const chatStepNumber = stepCounter.count;
-	stepCounter.count += 1;
-	const chatSpan = startChatSpan(telemetry, model, {
-		parent: invokeAgentSpan,
-		stepNumber: chatStepNumber,
-		request: {
-			maxTokens: config.maxTokens,
-			temperature: effectiveTemperature,
-			topP: config.topP,
-			topK: config.topK,
-			presencePenalty: config.presencePenalty,
-			serviceTier: effectiveServiceTier,
-			reasoningEffort: typeof effectiveReasoning === "string" ? effectiveReasoning : undefined,
+	return (async () => {
+		onProviderStart?.();
+		const response = await streamFunction(model, llmContext, {
+			...config,
+			apiKey,
+			metadata: resolvedMetadata,
 			toolChoice: effectiveToolChoice,
-			tools: llmContext.tools,
-			systemPrompt: llmContext.systemPrompt,
-			messages: llmContext.messages,
-		},
-	});
-
-	// Wrap the user-supplied onResponse so we always observe response headers
-	// for telemetry (`ChatUsageEvent.headers`, gateway auto-detection) without
-	// stealing them from the configured hook.
-	let capturedHeaders: Readonly<Record<string, string>> | undefined;
-	const userOnResponse = config.onResponse;
-	const captureOnResponse: AgentLoopConfig["onResponse"] = (response, modelInfo) => {
-		capturedHeaders = response.headers;
-		return userOnResponse?.(response, modelInfo);
-	};
-
-	const finishChat = async (message: AssistantMessage): Promise<void> => {
-		await finishChatSpan(telemetry, chatSpan, message, {
-			stepNumber: chatStepNumber,
-			modelId: model.id,
+			reasoning: effectiveReasoning,
+			disableReasoning: effectiveDisableReasoning,
+			temperature: effectiveTemperature,
 			serviceTier: effectiveServiceTier,
-			responseHeaders: capturedHeaders,
-			baseUrl: model.baseUrl,
+			cwd: effectiveCwd,
+			signal: finalRequestSignal,
 		});
-	};
 
-	try {
-		return await runInActiveSpan(chatSpan, async () => {
-			onProviderStart?.();
-			const response = await streamFunction(model, llmContext, {
-				...config,
-				apiKey,
-				metadata: resolvedMetadata,
-				toolChoice: effectiveToolChoice,
-				reasoning: effectiveReasoning,
-				disableReasoning: effectiveDisableReasoning,
-				temperature: effectiveTemperature,
-				serviceTier: effectiveServiceTier,
-				cwd: effectiveCwd,
-				signal: finalRequestSignal,
-				onResponse: captureOnResponse,
-			});
-
-			let partialMessage: AssistantMessage | null = null;
-			let addedPartial = false;
-			// Previous `message_update` snapshot for the incremental rebuild below;
-			// null until the turn's `start` event seeds it.
-			let turnSnapshot: AssistantMessage | null = null;
-			// Content indices of blocks that started streaming but have not ended
-			// yet — re-cloned on every delta because live blocks may be patched
-			// without a paired event.
-			const openBlocks = new Set<number>();
-			const completedToolCallIds = new Set<string>();
-			const argStreams = new Map<number, { id: string; stream: AgentToolArgStream }>();
-			const cancelArgStreams = (): void => {
-				for (const { id, stream: argStream } of argStreams.values()) {
-					try {
-						argStream.cancel();
-					} catch (error) {
-						logger.debug("Tool argument stream cancel failed", { toolCallId: id, error });
-					}
-				}
-				argStreams.clear();
-			};
-			const speculationConfig =
-				config.speculativeToolExecution?.enabled === true ? config.speculativeToolExecution : undefined;
-			const speculationCoordinator = speculationConfig
-				? new SpeculativeOperationCoordinator(speculationConfig, {
-						context,
-						loopConfig: config,
-						signal: requestSignal,
-					})
-				: undefined;
-			const speculationPlansFromStream =
-				!config.transformAssistantMessage || config.transformAssistantMessagePreservesToolCalls === true;
-
-			let providerStreamSettled = false;
-			let speculationSettled = false;
-			const responseIterator = response[Symbol.asyncIterator]();
-			const finishAbortedStream = async (): Promise<AssistantMessage> => {
+		let partialMessage: AssistantMessage | null = null;
+		let addedPartial = false;
+		// Previous `message_update` snapshot for the incremental rebuild below;
+		// null until the turn's `start` event seeds it.
+		let turnSnapshot: AssistantMessage | null = null;
+		// Content indices of blocks that started streaming but have not ended
+		// yet — re-cloned on every delta because live blocks may be patched
+		// without a paired event.
+		const openBlocks = new Set<number>();
+		const completedToolCallIds = new Set<string>();
+		const argStreams = new Map<number, { id: string; stream: AgentToolArgStream }>();
+		const cancelArgStreams = (): void => {
+			for (const { id, stream: argStream } of argStreams.values()) {
 				try {
-					const cleanup = responseIterator.return?.();
-					if (cleanup) void cleanup.catch(() => {});
-				} catch {
-					// Provider cancellation failures cannot change the committed aborted message.
+					argStream.cancel();
+				} catch (error) {
+					logger.debug("Tool argument stream cancel failed", { toolCallId: id, error });
 				}
-				await speculationCoordinator?.discardAll("run aborted", "aborted");
-				speculationSettled = true;
-				const aborted = emitAbortedAssistantMessage(
-					partialMessage,
-					addedPartial,
-					completedToolCallIds,
-					context,
-					config,
-					stream,
-					requestSignal,
-				);
-				await finishChat(aborted);
-				return aborted;
-			};
-
-			// Set up a single abort race: register the abort listener once for the whole
-			// stream and reuse the same race promise for every iterator.next() instead of
-			// allocating Promise.withResolvers and add/removeEventListener per event.
-			let abortRacePromise: Promise<typeof ABORTED> | undefined;
-			let detachAbortListener: (() => void) | undefined;
-			if (requestSignal) {
-				if (requestSignal.aborted) {
-					return await finishAbortedStream();
-				}
-				const { promise, resolve } = Promise.withResolvers<typeof ABORTED>();
-				const onAbort = () => resolve(ABORTED);
-				requestSignal.addEventListener("abort", onAbort, { once: true });
-				abortRacePromise = promise;
-				detachAbortListener = () => requestSignal.removeEventListener("abort", onAbort);
 			}
+			argStreams.clear();
+		};
+		const speculationConfig =
+			config.speculativeToolExecution?.enabled === true ? config.speculativeToolExecution : undefined;
+		const speculationCoordinator = speculationConfig
+			? new SpeculativeOperationCoordinator(speculationConfig, {
+					context,
+					loopConfig: config,
+					signal: requestSignal,
+				})
+			: undefined;
+		const speculationPlansFromStream =
+			!config.transformAssistantMessage || config.transformAssistantMessagePreservesToolCalls === true;
 
+		let providerStreamSettled = false;
+		let speculationSettled = false;
+		const responseIterator = response[Symbol.asyncIterator]();
+		const finishAbortedStream = async (): Promise<AssistantMessage> => {
 			try {
-				while (true) {
-					let next: IteratorResult<AssistantMessageEvent>;
-					if (abortRacePromise) {
-						const result = await Promise.race([responseIterator.next(), abortRacePromise]);
-						if (result === ABORTED) {
-							return await finishAbortedStream();
-						}
-						next = result;
-					} else {
-						next = await responseIterator.next();
-					}
-					if (next.done) {
-						providerStreamSettled = true;
-						break;
-					}
+				const cleanup = responseIterator.return?.();
+				if (cleanup) void cleanup.catch(() => {});
+			} catch {
+				// Provider cancellation failures cannot change the committed aborted message.
+			}
+			await speculationCoordinator?.discardAll("run aborted", "aborted");
+			speculationSettled = true;
+			const aborted = emitAbortedAssistantMessage(
+				partialMessage,
+				addedPartial,
+				completedToolCallIds,
+				context,
+				config,
+				stream,
+				requestSignal,
+			);
+			return aborted;
+		};
 
-					const event = next.value;
-					if (event.type === "done" || event.type === "error") {
-						let finalMessage = recoverTransientErrorToolTurn(
-							retainCompletedToolCalls(await response.result(), completedToolCallIds),
-							context.tools ?? [],
-						);
-						finalMessage = snapshotAssistantMessage(finalMessage);
-						// Expand inline macros (and any other registered rewrite) on the
-						// finalized message before it reaches the context, the UI, or tool
-						// dispatch — so a single mutation is the source of truth for all three.
-						if (config.transformAssistantMessage) {
-							await config.transformAssistantMessage(finalMessage, requestSignal);
-						}
-						// A pre-dispatch hook may request approval or change external state, so
-						// do not run it until the outer loop has established this tool turn can
-						// actually dispatch. The same gate keeps host-deferred speculation from
-						// being released for truncated, expired, or soft-tool-rejected turns.
-						const finalToolCallsCanDispatch =
-							!requestSignal?.aborted &&
-							(canDispatchFinalToolCalls?.(finalMessage) ??
-								(finalMessage.stopReason !== "error" &&
-									finalMessage.stopReason !== "aborted" &&
-									finalMessage.stopReason !== "length"));
-						const preparedDispatch = finalToolCallsCanDispatch
-							? await prepareToolCallDispatch(finalMessage, context, config, requestSignal)
-							: undefined;
-						if (preparedDispatch?.size) {
-							preparedDispatchByMessage.set(finalMessage, preparedDispatch);
-						}
-						if (speculationCoordinator) {
-							if (!finalToolCallsCanDispatch || !preparedDispatch) {
-								await speculationCoordinator.discardAll(
-									"final message cannot reach tool dispatch",
-									requestSignal?.aborted ? "aborted" : "discarded",
-								);
-							} else {
-								await speculationCoordinator.reconcileFinalCalls(
-									await speculativeFinalCalls(
-										finalMessage,
-										preparedDispatch,
-										config.transformToolCallArguments,
-										speculationCoordinator,
-									),
-								);
-								await speculationCoordinator.finalizeAdmissions();
-								speculationCoordinator.attach(finalMessage);
-							}
-						}
-						if (addedPartial) {
-							context.messages[context.messages.length - 1] = finalMessage;
-						} else {
-							context.messages.push(finalMessage);
-						}
+		// Set up a single abort race: register the abort listener once for the whole
+		// stream and reuse the same race promise for every iterator.next() instead of
+		// allocating Promise.withResolvers and add/removeEventListener per event.
+		let abortRacePromise: Promise<typeof ABORTED> | undefined;
+		let detachAbortListener: (() => void) | undefined;
+		if (requestSignal) {
+			if (requestSignal.aborted) {
+				return await finishAbortedStream();
+			}
+			const { promise, resolve } = Promise.withResolvers<typeof ABORTED>();
+			const onAbort = () => resolve(ABORTED);
+			requestSignal.addEventListener("abort", onAbort, { once: true });
+			abortRacePromise = promise;
+			detachAbortListener = () => requestSignal.removeEventListener("abort", onAbort);
+		}
 
-						if (!addedPartial) {
-							stream.push({ type: "message_start", message: snapshotAssistantMessage(finalMessage) });
-						}
-						stream.push({ type: "message_end", message: snapshotAssistantMessage(finalMessage) });
-						await finishChat(finalMessage);
-						speculationSettled = true;
-						providerStreamSettled = true;
-						return finalMessage;
-					}
-					if (requestSignal?.aborted) {
+		try {
+			while (true) {
+				let next: IteratorResult<AssistantMessageEvent>;
+				if (abortRacePromise) {
+					const result = await Promise.race([responseIterator.next(), abortRacePromise]);
+					if (result === ABORTED) {
 						return await finishAbortedStream();
 					}
+					next = result;
+				} else {
+					next = await responseIterator.next();
+				}
+				if (next.done) {
+					providerStreamSettled = true;
+					break;
+				}
 
-					if (event.type === "toolcall_start") {
-						const block = event.partial.content[event.contentIndex];
-						if (block?.type === "toolCall") {
-							const tool = resolveToolForCall(context.tools, block, config.resolveFallbackTool);
-							if (tool?.openArgStream) {
-								try {
-									const argStream = tool.openArgStream({
-										toolCallId: block.id,
-										toolName: block.name,
-										customWireName: block.customWireName,
-										emit: update =>
-											stream.push({
-												type: "tool_stream_update",
-												toolCallId: block.id,
-												toolName: block.name,
-												update,
-											}),
-									});
-									if (argStream) argStreams.set(event.contentIndex, { id: block.id, stream: argStream });
-								} catch (error) {
-									logger.debug("Tool argument stream open failed", { toolCallId: block.id, error });
-								}
-							}
+				const event = next.value;
+				if (event.type === "done" || event.type === "error") {
+					let finalMessage = recoverTransientErrorToolTurn(
+						retainCompletedToolCalls(await response.result(), completedToolCallIds),
+						context.tools ?? [],
+					);
+					finalMessage = snapshotAssistantMessage(finalMessage);
+					// Expand inline macros (and any other registered rewrite) on the
+					// finalized message before it reaches the context, the UI, or tool
+					// dispatch — so a single mutation is the source of truth for all three.
+					if (config.transformAssistantMessage) {
+						await config.transformAssistantMessage(finalMessage, requestSignal);
+					}
+					// A pre-dispatch hook may request approval or change external state, so
+					// do not run it until the outer loop has established this tool turn can
+					// actually dispatch. The same gate keeps host-deferred speculation from
+					// being released for truncated, expired, or soft-tool-rejected turns.
+					const finalToolCallsCanDispatch =
+						!requestSignal?.aborted &&
+						(canDispatchFinalToolCalls?.(finalMessage) ??
+							(finalMessage.stopReason !== "error" &&
+								finalMessage.stopReason !== "aborted" &&
+								finalMessage.stopReason !== "length"));
+					const preparedDispatch = finalToolCallsCanDispatch
+						? await prepareToolCallDispatch(finalMessage, context, config, requestSignal)
+						: undefined;
+					if (preparedDispatch?.size) {
+						preparedDispatchByMessage.set(finalMessage, preparedDispatch);
+					}
+					if (speculationCoordinator) {
+						if (!finalToolCallsCanDispatch || !preparedDispatch) {
+							await speculationCoordinator.discardAll(
+								"final message cannot reach tool dispatch",
+								requestSignal?.aborted ? "aborted" : "discarded",
+							);
+						} else {
+							await speculationCoordinator.reconcileFinalCalls(
+								await speculativeFinalCalls(
+									finalMessage,
+									preparedDispatch,
+									config.transformToolCallArguments,
+									speculationCoordinator,
+								),
+							);
+							await speculationCoordinator.finalizeAdmissions();
+							speculationCoordinator.attach(finalMessage);
 						}
-					} else if (event.type === "toolcall_delta") {
-						const entry = argStreams.get(event.contentIndex);
-						if (entry) {
+					}
+					if (addedPartial) {
+						context.messages[context.messages.length - 1] = finalMessage;
+					} else {
+						context.messages.push(finalMessage);
+					}
+
+					if (!addedPartial) {
+						stream.push({ type: "message_start", message: snapshotAssistantMessage(finalMessage) });
+					}
+					stream.push({ type: "message_end", message: snapshotAssistantMessage(finalMessage) });
+					speculationSettled = true;
+					providerStreamSettled = true;
+					return finalMessage;
+				}
+				if (requestSignal?.aborted) {
+					return await finishAbortedStream();
+				}
+
+				if (event.type === "toolcall_start") {
+					const block = event.partial.content[event.contentIndex];
+					if (block?.type === "toolCall") {
+						const tool = resolveToolForCall(context.tools, block, config.resolveFallbackTool);
+						if (tool?.openArgStream) {
 							try {
-								entry.stream.push(event.delta);
+								const argStream = tool.openArgStream({
+									toolCallId: block.id,
+									toolName: block.name,
+									customWireName: block.customWireName,
+									emit: update =>
+										stream.push({
+											type: "tool_stream_update",
+											toolCallId: block.id,
+											toolName: block.name,
+											update,
+										}),
+								});
+								if (argStream) argStreams.set(event.contentIndex, { id: block.id, stream: argStream });
 							} catch (error) {
-								logger.debug("Tool argument stream push failed", { toolCallId: entry.id, error });
-							}
-						}
-					} else if (event.type === "toolcall_end") {
-						const entry = argStreams.get(event.contentIndex);
-						if (entry) {
-							try {
-								entry.stream.end(event.toolCall.arguments);
-							} catch (error) {
-								logger.debug("Tool argument stream end failed", { toolCallId: entry.id, error });
-							} finally {
-								argStreams.delete(event.contentIndex);
+								logger.debug("Tool argument stream open failed", { toolCallId: block.id, error });
 							}
 						}
 					}
+				} else if (event.type === "toolcall_delta") {
+					const entry = argStreams.get(event.contentIndex);
+					if (entry) {
+						try {
+							entry.stream.push(event.delta);
+						} catch (error) {
+							logger.debug("Tool argument stream push failed", { toolCallId: entry.id, error });
+						}
+					}
+				} else if (event.type === "toolcall_end") {
+					const entry = argStreams.get(event.contentIndex);
+					if (entry) {
+						try {
+							entry.stream.end(event.toolCall.arguments);
+						} catch (error) {
+							logger.debug("Tool argument stream end failed", { toolCallId: entry.id, error });
+						} finally {
+							argStreams.delete(event.contentIndex);
+						}
+					}
+				}
 
-					switch (event.type) {
-						case "start":
-							partialMessage = event.partial;
-							if (addedPartial) {
-								context.messages[context.messages.length - 1] = partialMessage;
-								completedToolCallIds.clear();
-								// `message` and `assistantMessageEvent.partial` intentionally share one
-								// immutable snapshot of the streaming partial: every message_update
-								// consumer treats both as read-only, so cloning the identical partial
-								// twice per delta was pure waste.
-								const messageSnapshot = snapshotAssistantMessage(partialMessage);
-								turnSnapshot = messageSnapshot;
-								openBlocks.clear();
-								stream.push({
-									type: "message_update",
-									assistantMessageEvent: snapshotAssistantMessageEvent(event, messageSnapshot),
-									message: messageSnapshot,
-								});
-							} else {
-								context.messages.push(partialMessage);
-								addedPartial = true;
-								turnSnapshot = snapshotAssistantMessage(partialMessage);
-								stream.push({ type: "message_start", message: turnSnapshot });
-							}
-							break;
+				switch (event.type) {
+					case "start":
+						partialMessage = event.partial;
+						if (addedPartial) {
+							context.messages[context.messages.length - 1] = partialMessage;
+							completedToolCallIds.clear();
+							// `message` and `assistantMessageEvent.partial` intentionally share one
+							// immutable snapshot of the streaming partial: every message_update
+							// consumer treats both as read-only, so cloning the identical partial
+							// twice per delta was pure waste.
+							const messageSnapshot = snapshotAssistantMessage(partialMessage);
+							turnSnapshot = messageSnapshot;
+							openBlocks.clear();
+							stream.push({
+								type: "message_update",
+								assistantMessageEvent: snapshotAssistantMessageEvent(event, messageSnapshot),
+								message: messageSnapshot,
+							});
+						} else {
+							context.messages.push(partialMessage);
+							addedPartial = true;
+							turnSnapshot = snapshotAssistantMessage(partialMessage);
+							stream.push({ type: "message_start", message: turnSnapshot });
+						}
+						break;
 
-						case "text_start":
-						case "text_delta":
-						case "text_end":
-						case "image_end":
-						case "thinking_start":
-						case "thinking_delta":
-						case "thinking_end":
-						case "toolcall_start":
-						case "toolcall_delta":
-						case "toolcall_end":
-							if (partialMessage) {
-								if (event.type === "toolcall_start" && speculationCoordinator && speculationPlansFromStream) {
-									// Stream sessions plan from pre-transform arguments, exactly like
-									// direct candidates (see admitFinalized below): with a transformer
-									// that may rewrite calls, the authoritative call may differ, so any
-									// speculative work started from the original would be phantom I/O.
-									speculationCoordinator.register(event.contentIndex);
-									const toolCall = event.partial.content[event.contentIndex];
-									if (toolCall?.type === "toolCall") {
-										const tool = context.tools?.find(candidate => candidate.name === toolCall.name);
-										try {
-											const session = await tool?.speculation?.stream?.open({
-												coordinator: speculationCoordinator,
-												parentToolCallId: toolCall.id,
-											});
-											if (session) {
-												if (!speculationCoordinator.registerStreamSession(toolCall.id, session)) {
-													await session.discard("stream speculation coordinator rejected session");
-												}
-											}
-										} catch {
-											await speculationCoordinator.discardStreamSession(
-												toolCall.id,
-												"stream speculation policy failed to open",
-											);
-										}
-									}
-								}
-								if (event.type === "toolcall_delta") {
-									const toolCall = event.partial.content[event.contentIndex];
-									if (toolCall?.type === "toolCall") {
-										try {
-											await speculationCoordinator
-												?.streamSession(toolCall.id)
-												?.update(toolCall, getStreamingPartialJson(toolCall));
-										} catch {
-											await speculationCoordinator?.discardStreamSession(
-												toolCall.id,
-												"stream speculation update failed",
-											);
-										}
-									}
-								}
-								if (event.type === "toolcall_end") {
-									completedToolCallIds.add(event.toolCall.id);
-									const session = speculationCoordinator?.streamSession(event.toolCall.id);
+					case "text_start":
+					case "text_delta":
+					case "text_end":
+					case "image_end":
+					case "thinking_start":
+					case "thinking_delta":
+					case "thinking_end":
+					case "toolcall_start":
+					case "toolcall_delta":
+					case "toolcall_end":
+						if (partialMessage) {
+							if (event.type === "toolcall_start" && speculationCoordinator && speculationPlansFromStream) {
+								// Stream sessions plan from pre-transform arguments, exactly like
+								// direct candidates (see admitFinalized below): with a transformer
+								// that may rewrite calls, the authoritative call may differ, so any
+								// speculative work started from the original would be phantom I/O.
+								speculationCoordinator.register(event.contentIndex);
+								const toolCall = event.partial.content[event.contentIndex];
+								if (toolCall?.type === "toolCall") {
+									const tool = context.tools?.find(candidate => candidate.name === toolCall.name);
 									try {
-										await session?.finalize({
-											toolCall: event.toolCall,
-											args:
-												event.toolCall.arguments && typeof event.toolCall.arguments === "object"
-													? (event.toolCall.arguments as Record<string, unknown>)
-													: {},
+										const session = await tool?.speculation?.stream?.open({
+											coordinator: speculationCoordinator,
+											parentToolCallId: toolCall.id,
 										});
+										if (session) {
+											if (!speculationCoordinator.registerStreamSession(toolCall.id, session)) {
+												await session.discard("stream speculation coordinator rejected session");
+											}
+										}
 									} catch {
-										await speculationCoordinator?.discardStreamSession(
-											event.toolCall.id,
-											"stream speculation finalize failed",
+										await speculationCoordinator.discardStreamSession(
+											toolCall.id,
+											"stream speculation policy failed to open",
 										);
 									}
 								}
-								partialMessage = event.partial;
-								context.messages[context.messages.length - 1] = partialMessage;
-								config.onAssistantMessageEvent?.(partialMessage, event);
-								// Track which blocks are still streaming: open blocks are
-								// re-cloned on every delta, finalized blocks are shared.
-								const contentIndex = (event as { contentIndex?: number }).contentIndex;
-								if (contentIndex !== undefined) {
-									if (event.type.endsWith("_start")) openBlocks.add(contentIndex);
-									else if (event.type.endsWith("_end")) openBlocks.delete(contentIndex);
+							}
+							if (event.type === "toolcall_delta") {
+								const toolCall = event.partial.content[event.contentIndex];
+								if (toolCall?.type === "toolCall") {
+									try {
+										await speculationCoordinator
+											?.streamSession(toolCall.id)
+											?.update(toolCall, getStreamingPartialJson(toolCall));
+									} catch {
+										await speculationCoordinator?.discardStreamSession(
+											toolCall.id,
+											"stream speculation update failed",
+										);
+									}
 								}
-								// READ-ONLY-CONSUMER INVARIANT: `message` and
-								// `assistantMessageEvent.partial` intentionally share one snapshot,
-								// and the snapshot is rebuilt incrementally — only the delta's
-								// block, open blocks, and newly appended blocks are deep-cloned;
-								// finalized blocks are carried over from the previous snapshot by
-								// reference (see `snapshotAssistantMessageIncremental`), so they are
-								// shared across ALL message_update snapshots of the turn.
-								// Consumers MUST treat both fields — and every content block inside
-								// them — as read-only: mutating a snapshot would corrupt every
-								// earlier and later snapshot of the turn, not just this one. In
-								// exchange, per-delta work is proportional to the live stream
-								// instead of the whole turn (issue #10605).
-								const messageSnapshot: AssistantMessage = turnSnapshot
-									? snapshotAssistantMessageIncremental(
-											partialMessage,
-											turnSnapshot,
-											contentIndex ?? -1,
-											openBlocks,
-										)
-									: snapshotAssistantMessage(partialMessage);
-								turnSnapshot = messageSnapshot;
-								stream.push({
-									type: "message_update",
-									assistantMessageEvent: snapshotAssistantMessageEvent(event, messageSnapshot),
-									message: messageSnapshot,
-								});
 							}
-							if (
-								event.type === "toolcall_end" &&
-								speculationCoordinator &&
-								speculationConfig &&
-								speculationPlansFromStream
-							) {
-								speculationCoordinator.admitFinalized(context, event.toolCall, config, requestSignal);
+							if (event.type === "toolcall_end") {
+								completedToolCallIds.add(event.toolCall.id);
+								const session = speculationCoordinator?.streamSession(event.toolCall.id);
+								try {
+									await session?.finalize({
+										toolCall: event.toolCall,
+										args:
+											event.toolCall.arguments && typeof event.toolCall.arguments === "object"
+												? (event.toolCall.arguments as Record<string, unknown>)
+												: {},
+									});
+								} catch {
+									await speculationCoordinator?.discardStreamSession(
+										event.toolCall.id,
+										"stream speculation finalize failed",
+									);
+								}
 							}
-							break;
-					}
-				}
-			} finally {
-				detachAbortListener?.();
-				cancelArgStreams();
-				if (!providerStreamSettled) {
-					await speculationCoordinator?.discardAll("provider stream failed", "aborted");
-					speculationSettled = true;
+							partialMessage = event.partial;
+							context.messages[context.messages.length - 1] = partialMessage;
+							config.onAssistantMessageEvent?.(partialMessage, event);
+							// Track which blocks are still streaming: open blocks are
+							// re-cloned on every delta, finalized blocks are shared.
+							const contentIndex = (event as { contentIndex?: number }).contentIndex;
+							if (contentIndex !== undefined) {
+								if (event.type.endsWith("_start")) openBlocks.add(contentIndex);
+								else if (event.type.endsWith("_end")) openBlocks.delete(contentIndex);
+							}
+							// READ-ONLY-CONSUMER INVARIANT: `message` and
+							// `assistantMessageEvent.partial` intentionally share one snapshot,
+							// and the snapshot is rebuilt incrementally — only the delta's
+							// block, open blocks, and newly appended blocks are deep-cloned;
+							// finalized blocks are carried over from the previous snapshot by
+							// reference (see `snapshotAssistantMessageIncremental`), so they are
+							// shared across ALL message_update snapshots of the turn.
+							// Consumers MUST treat both fields — and every content block inside
+							// them — as read-only: mutating a snapshot would corrupt every
+							// earlier and later snapshot of the turn, not just this one. In
+							// exchange, per-delta work is proportional to the live stream
+							// instead of the whole turn (issue #10605).
+							const messageSnapshot: AssistantMessage = turnSnapshot
+								? snapshotAssistantMessageIncremental(
+										partialMessage,
+										turnSnapshot,
+										contentIndex ?? -1,
+										openBlocks,
+									)
+								: snapshotAssistantMessage(partialMessage);
+							turnSnapshot = messageSnapshot;
+							stream.push({
+								type: "message_update",
+								assistantMessageEvent: snapshotAssistantMessageEvent(event, messageSnapshot),
+								message: messageSnapshot,
+							});
+						}
+						if (
+							event.type === "toolcall_end" &&
+							speculationCoordinator &&
+							speculationConfig &&
+							speculationPlansFromStream
+						) {
+							speculationCoordinator.admitFinalized(context, event.toolCall, config, requestSignal);
+						}
+						break;
 				}
 			}
-
-			try {
-				let trailing = recoverTransientErrorToolTurn(
-					retainCompletedToolCalls(await response.result(), completedToolCallIds),
-					context.tools ?? [],
-				);
-				if (config.transformAssistantMessage) {
-					await config.transformAssistantMessage(trailing, requestSignal);
-				}
-				trailing = snapshotAssistantMessage(trailing);
-				const finalToolCallsCanDispatch =
-					!requestSignal?.aborted &&
-					(canDispatchFinalToolCalls?.(trailing) ??
-						(trailing.stopReason !== "error" &&
-							trailing.stopReason !== "aborted" &&
-							trailing.stopReason !== "length"));
-				const preparedDispatch = finalToolCallsCanDispatch
-					? await prepareToolCallDispatch(trailing, context, config, requestSignal)
-					: undefined;
-				if (preparedDispatch?.size) {
-					preparedDispatchByMessage.set(trailing, preparedDispatch);
-				}
-				if (speculationCoordinator) {
-					if (!finalToolCallsCanDispatch || !preparedDispatch) {
-						await speculationCoordinator.discardAll(
-							"final message cannot reach tool dispatch",
-							requestSignal?.aborted ? "aborted" : "discarded",
-						);
-					} else {
-						await speculationCoordinator.reconcileFinalCalls(
-							await speculativeFinalCalls(
-								trailing,
-								preparedDispatch,
-								config.transformToolCallArguments,
-								speculationCoordinator,
-							),
-						);
-						await speculationCoordinator.finalizeAdmissions();
-						speculationCoordinator.attach(trailing);
-					}
-				}
-				if (addedPartial) {
-					context.messages[context.messages.length - 1] = trailing;
-				} else {
-					context.messages.push(trailing);
-					stream.push({ type: "message_start", message: snapshotAssistantMessage(trailing) });
-				}
-
-				stream.push({ type: "message_end", message: snapshotAssistantMessage(trailing) });
-				await finishChat(trailing);
+		} finally {
+			detachAbortListener?.();
+			cancelArgStreams();
+			if (!providerStreamSettled) {
+				await speculationCoordinator?.discardAll("provider stream failed", "aborted");
 				speculationSettled = true;
-				providerStreamSettled = true;
-				return trailing;
-			} catch (error) {
-				if (!speculationSettled) {
-					await speculationCoordinator?.discardAll("provider stream finalization failed", "aborted");
-				}
-				throw error;
 			}
-		});
-	} catch (err) {
-		failChatSpan(telemetry, chatSpan, {
-			errorObject: err,
-			responseHeaders: capturedHeaders,
-			baseUrl: model.baseUrl,
-		});
-		throw err;
-	}
+		}
+
+		try {
+			let trailing = recoverTransientErrorToolTurn(
+				retainCompletedToolCalls(await response.result(), completedToolCallIds),
+				context.tools ?? [],
+			);
+			if (config.transformAssistantMessage) {
+				await config.transformAssistantMessage(trailing, requestSignal);
+			}
+			trailing = snapshotAssistantMessage(trailing);
+			const finalToolCallsCanDispatch =
+				!requestSignal?.aborted &&
+				(canDispatchFinalToolCalls?.(trailing) ??
+					(trailing.stopReason !== "error" &&
+						trailing.stopReason !== "aborted" &&
+						trailing.stopReason !== "length"));
+			const preparedDispatch = finalToolCallsCanDispatch
+				? await prepareToolCallDispatch(trailing, context, config, requestSignal)
+				: undefined;
+			if (preparedDispatch?.size) {
+				preparedDispatchByMessage.set(trailing, preparedDispatch);
+			}
+			if (speculationCoordinator) {
+				if (!finalToolCallsCanDispatch || !preparedDispatch) {
+					await speculationCoordinator.discardAll(
+						"final message cannot reach tool dispatch",
+						requestSignal?.aborted ? "aborted" : "discarded",
+					);
+				} else {
+					await speculationCoordinator.reconcileFinalCalls(
+						await speculativeFinalCalls(
+							trailing,
+							preparedDispatch,
+							config.transformToolCallArguments,
+							speculationCoordinator,
+						),
+					);
+					await speculationCoordinator.finalizeAdmissions();
+					speculationCoordinator.attach(trailing);
+				}
+			}
+			if (addedPartial) {
+				context.messages[context.messages.length - 1] = trailing;
+			} else {
+				context.messages.push(trailing);
+				stream.push({ type: "message_start", message: snapshotAssistantMessage(trailing) });
+			}
+
+			stream.push({ type: "message_end", message: snapshotAssistantMessage(trailing) });
+			speculationSettled = true;
+			providerStreamSettled = true;
+			return trailing;
+		} catch (error) {
+			if (!speculationSettled) {
+				await speculationCoordinator?.discardAll("provider stream finalization failed", "aborted");
+			}
+			throw error;
+		}
+	})();
 }
 
 function retainCompletedToolCalls(
@@ -2231,6 +1973,18 @@ function emitAbortedAssistantMessage(
 	}
 	stream.push({ type: "message_end", message: snapshotAssistantMessage(abortedMessage) });
 	return abortedMessage;
+}
+
+/**
+ * Distinguishable error class thrown when `beforeToolCall` returns
+ * `{ block: true }`, so blocked-tool results surface distinctly from real
+ * tool exceptions on the wire.
+ */
+export class ToolCallBlockedError extends Error {
+	override readonly name = "ToolCallBlockedError";
+	constructor(reason?: string) {
+		super(reason ?? "Tool execution was blocked");
+	}
 }
 
 /** Per-call outcome of the pre-dispatch prepare phase (validation + `beforeToolCall`). */
@@ -2632,8 +2386,6 @@ async function executeToolCalls(
 	signal: AbortSignal | undefined,
 	stream: EventStream<AgentEvent, AgentMessage[]>,
 	config: AgentLoopConfig,
-	telemetry: AgentTelemetry | undefined,
-	invokeAgentSpan: Span | undefined,
 ): Promise<{ toolResults: ToolResultMessage[]; additionalContext?: string }> {
 	const tools = currentContext.tools;
 	const {
@@ -2884,11 +2636,10 @@ async function executeToolCalls(
 		// batch boundary; the cooperative soft signal lets long-running tools
 		// step aside on their own.
 		if (interruptState.triggered && record.interruptible && !record.handlesToolInterrupt) {
-			// Skip both span emission and the collector orphan record here. The
-			// tail sweep below (after `Promise.allSettled`) is the single path
+			// The tail sweep below (after `Promise.allSettled`) is the single path
 			// that handles "no result message was produced" — it calls
-			// `recordSkippedTool` and `emitToolResult` once per record, so any
-			// work we did here would double-count.
+			// `emitToolResult` once per record, so any work done here would
+			// double-count.
 			record.skipped = true;
 			return;
 		}
@@ -2919,11 +2670,6 @@ async function executeToolCalls(
 		const effectiveArgs = record.args;
 		if (isToolAborted(record)) {
 			record.skipped = true;
-			recordSkippedTool(telemetry, {
-				toolCallId: toolCall.id,
-				toolName: toolCall.name,
-				status: "aborted",
-			});
 			emitToolResult(record, createToolSignalAbortedResult(signal?.aborted ? signal : record.signal), true);
 			return;
 		}
@@ -2935,17 +2681,6 @@ async function executeToolCalls(
 			args: effectiveArgs,
 			intent: toolCall.intent,
 		});
-
-		const toolSpan = startExecuteToolSpan(telemetry, {
-			tool,
-			toolName: toolCall.name,
-			toolCallId: toolCall.id,
-			args: effectiveArgs,
-			parent: invokeAgentSpan,
-		});
-		if (toolSpan && toolCall.intent) {
-			toolSpan.setAttribute(OmpGenAIAttr.ToolCallIntent, toolCall.intent);
-		}
 
 		let result: AgentToolResult<any> = { content: [], details: {} };
 		let isError = false;
@@ -2959,7 +2694,7 @@ async function executeToolCalls(
 			return true;
 		};
 
-		await runInActiveSpan(toolSpan, async () => {
+		await (async () => {
 			try {
 				if (!tool) {
 					throw new Error(formatToolNotFoundMessage(toolCall.name, tools, suggestFallbackToolNames?.()));
@@ -3099,7 +2834,7 @@ async function executeToolCalls(
 					isError = true;
 				}
 			}
-		});
+		})();
 
 		const interrupted = interruptState.triggered;
 		const perToolAborted = record.signal.aborted;
@@ -3117,26 +2852,6 @@ async function executeToolCalls(
 			// Non-interruptible tools also retain errors from external user aborts.
 			emitToolResult(record, result, isError);
 		}
-
-		const firstTextBlock = result.content?.[0];
-		const errorMessageForSpan =
-			caughtError === undefined && isError && firstTextBlock?.type === "text" ? firstTextBlock.text : undefined;
-		const status = abortedDuringExecution
-			? "aborted"
-			: caughtError instanceof ToolCallBlockedError
-				? "blocked"
-				: isError
-					? "error"
-					: "ok";
-		finishExecuteToolSpan(telemetry, toolSpan, {
-			result,
-			isError,
-			status,
-			errorMessage: errorMessageForSpan,
-			errorObject: caughtError,
-			toolCallId: toolCall.id,
-			toolName: toolCall.name,
-		});
 
 		// Best-effort steering probe: its own failure is surfaced by the
 		// dedicated watch path (which guards the identical call), so a rejecting
@@ -3267,11 +2982,6 @@ async function executeToolCalls(
 	for (const record of records) {
 		if (!record.toolResultMessage) {
 			record.skipped = true;
-			recordSkippedTool(telemetry, {
-				toolCallId: record.toolCall.id,
-				toolName: record.toolCall.name,
-				status: "skipped",
-			});
 			emitToolResult(record, createSkippedToolResult(interruptState.source, false), true);
 		}
 	}
@@ -3302,8 +3012,8 @@ async function executeToolCalls(
  * assistant but never actually invoked locally.
  *
  * The synthetic result exists only to preserve the tool_use / tool_result
- * pairing the provider API requires; no `tool.execute()` ran. UI, telemetry,
- * and history consumers can key on `__synthetic === true` to render or
+ * pairing the provider API requires; no `tool.execute()` ran. UI and history
+ * consumers can key on `__synthetic === true` to render or
  * classify these as "call emitted, not executed" instead of a real local
  * tool failure — the mislabeling this discriminator was introduced to fix
  * (#4321): a provider-side stream error after tool-call emission (e.g. Codex

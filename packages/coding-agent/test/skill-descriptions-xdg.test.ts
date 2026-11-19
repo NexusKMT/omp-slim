@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, spyOn, vi } from "bun:test
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as agentCore from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { __resetProfileSnapshotForTests, getAgentDir, Snowflake, setAgentDir } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../src/config/model-registry";
@@ -154,12 +153,12 @@ describe("skill description failure caching and shutdown", () => {
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		const settings = Settings.isolated({});
 		const registry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"), { settings });
-		vi.spyOn(agentCore, "instrumentedCompleteSimple").mockResolvedValue({
-			...createAssistantMessage(compressed),
-			stopReason,
-		});
 		const compressor = createSkillDescriptionCompressor(registry, {
 			getModel: () => getBundledModel("anthropic", "claude-sonnet-4-5"),
+			completeImpl: async () => ({
+				...createAssistantMessage(compressed),
+				stopReason,
+			}),
 		});
 		vi.spyOn(compressor, "compress");
 		return compressor;

@@ -1,13 +1,7 @@
 /** Handoff document generation. Committing the document as a compaction entry is owned by SessionMaintenance. */
 
 import * as path from "node:path";
-import {
-	type Agent,
-	type AgentMessage,
-	resolveTelemetry,
-	type StreamFn,
-	type ThinkingLevel,
-} from "@oh-my-pi/pi-agent-core";
+import { type Agent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { generateHandoffFromContext, renderHandoffPrompt } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Message, Model, ServiceTier, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import { logger, Snowflake } from "@oh-my-pi/pi-utils";
@@ -178,7 +172,6 @@ export class SessionHandoff {
 						const stream = await this.#host.sideStreamFn(requestModel, requestContext, requestOptions);
 						return stream.result();
 					},
-					telemetry: resolveTelemetry(this.#host.agent.telemetry, this.#host.sessionId()),
 					// Honor the user's /model thinking selection on the handoff path.
 					// Clamped per-model inside generateHandoffFromContext via
 					// resolveCompactionEffort so unsupported-effort models don't trip

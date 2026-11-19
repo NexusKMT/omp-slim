@@ -3513,16 +3513,6 @@
 				"awaitingAsyncWork": {
 					"type": "boolean",
 					"description": "Non-terminal end whose only possible resume is a background-job result."
-				},
-				"telemetry": {
-					"type": "object",
-					"properties": {},
-					"additionalProperties": {}
-				},
-				"coverage": {
-					"type": "object",
-					"properties": {},
-					"additionalProperties": {}
 				}
 			},
 			"required": [

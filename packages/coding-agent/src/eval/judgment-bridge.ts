@@ -243,7 +243,6 @@ export function sessionJudge(
 		sessionModel: session.getActiveModel?.(),
 		sessionId: session.getSessionId?.() ?? undefined,
 		purpose,
-		telemetry: session.getTelemetry?.(),
 		costGate: session.costGate,
 		onUsage:
 			onUsage && journal

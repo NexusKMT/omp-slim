@@ -8,7 +8,7 @@
 import type { Api, ApiKey, AssistantMessage, Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
-import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
+import { completeSimpleWithRetry } from "../oneshot";
 import { Tokenizer } from "../tokenizer";
 import type { AgentMessage } from "../types";
 import type { ReadonlySessionManager, SessionEntry } from "./entries";
@@ -79,11 +79,6 @@ export interface GenerateBranchSummaryOptions {
 	metadata?: Record<string, unknown>;
 	/** Convert app-specific messages before serializing the branch summary prompt. */
 	convertToLlm?: ConvertToLlm;
-	/**
-	 * Optional telemetry handle. When provided, the branch summary LLM call is
-	 * wrapped in an OTEL chat span tagged with `omp.gen_ai.oneshot.kind = "branch_summary"`.
-	 */
-	telemetry?: AgentTelemetry;
 	/**
 	 * Optional completion transport override (same contract as
 	 * {@link SummaryOptions.completeImpl}). Lets the host route the branch
@@ -349,11 +344,11 @@ export async function generateBranchSummary(
 	// Call LLM for summarization
 	let response: AssistantMessage;
 	try {
-		response = await instrumentedCompleteSimple(
+		response = await completeSimpleWithRetry(
 			model,
 			{ systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT], messages: summarizationMessages },
 			{ apiKey, signal, maxTokens: 2048, metadata },
-			{ telemetry: options.telemetry, oneshotKind: "branch_summary", completeImpl: options.completeImpl, retry: {} },
+			{ completeImpl: options.completeImpl, retry: {} },
 		);
 	} catch (error) {
 		if (signal.aborted) return { aborted: true };

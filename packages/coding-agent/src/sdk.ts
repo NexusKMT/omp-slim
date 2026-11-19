@@ -6,11 +6,9 @@ import {
 	Agent,
 	type AgentMessage,
 	type AgentOptions,
-	type AgentTelemetryConfig,
 	type AgentTool,
 	AppendOnlyContextManager,
 	filterProviderReplayMessages,
-	resolveTelemetry,
 	type StreamFn,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
@@ -814,17 +812,6 @@ export interface CreateAgentSessionOptions {
 	 * Default: false, which starts it once the session (and so its cost gate) exists.
 	 */
 	deferSkillDescriptionCompression?: boolean;
-
-	/**
-	 * Opt-in OpenTelemetry instrumentation forwarded to the underlying Agent.
-	 * Passing `{}` enables the loop's GenAI-semantic-convention spans. See
-	 * {@link AgentTelemetryConfig} for the full surface (hooks, content capture,
-	 * cost estimator, agent identity).
-	 *
-	 * Safe to enable without an OTEL SDK registered in the host: the
-	 * `@opentelemetry/api` package returns a no-op tracer in that case.
-	 */
-	telemetry?: AgentTelemetryConfig;
 
 	/**
 	 * Fired once, when the agent loop hands its first request to the provider
@@ -1868,7 +1855,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			modelRegistry,
 			sessionId: () => sessionManager.getSessionId(),
 			costGate: currentCostGate,
-			telemetry: () => agent?.telemetry,
 			obfuscate: () => (obfuscator?.hasSecrets() ? text => obfuscator?.obfuscate(text) ?? text : undefined),
 		};
 		asyncJobManager.widgets = new JobWidgets({
@@ -2092,7 +2078,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			settings,
 			authStorage,
 			modelRegistry,
-			getTelemetry: () => agent?.telemetry,
 			// Tools and nested subagents use this root's manager, never another root's singleton.
 			asyncJobManager: scopedAsyncJobManager,
 		};
@@ -2910,10 +2895,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			compress: createSkillDescriptionCompressor(modelRegistry, {
 				getModel: () => agent?.state.model ?? model,
 				getCostGate: currentCostGate,
-				getTelemetry: () =>
-					agent
-						? resolveTelemetry(agent.telemetry, agent.sessionId)
-						: resolveTelemetry(options.telemetry, providerSessionId),
 			}),
 		});
 		// Instructions from MCP servers the host connects outside `mcpManager`
@@ -3550,7 +3531,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			speculativeToolExecution,
 			getToolChoice: () => session?.nextToolChoiceDirective(),
 			onToolChoiceUnavailable: () => session?.toolChoiceQueue.reject("unavailable"),
-			telemetry: options.telemetry,
 			appendOnlyContext: model
 				? shouldEnableAppendOnlyContext(cfgProviderAppendOnlyContext.get(settings))
 					? new AppendOnlyContextManager()

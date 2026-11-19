@@ -25,7 +25,7 @@ import { isSurvivingAssistant } from "@oh-my-pi/pi-ai/providers/transform-messag
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-ai/model-thinking";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
-import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
+import { completeSimpleWithRetry } from "../oneshot";
 import { ThinkingLevel } from "../thinking";
 import { Tokenizer } from "../tokenizer";
 import type { AgentMessage } from "../types";
@@ -625,7 +625,6 @@ export interface SummaryOptions {
 	initiatorOverride?: MessageAttribution;
 	metadata?: Record<string, unknown>;
 	convertToLlm?: ConvertToLlm;
-	telemetry?: AgentTelemetry;
 	thinkingLevel?: ThinkingLevel;
 	sessionId?: string;
 	promptCacheKey?: string;
@@ -862,7 +861,7 @@ async function summarizeConversationWindow(
 		},
 	];
 
-	const response = await instrumentedCompleteSimple(
+	const response = await completeSimpleWithRetry(
 		model,
 		{ systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT], messages: summarizationMessages },
 		{
@@ -877,8 +876,6 @@ async function summarizeConversationWindow(
 			promptCacheKey: options?.promptCacheKey,
 		},
 		{
-			telemetry: options?.telemetry,
-			oneshotKind: "compaction_summary",
 			completeImpl: options?.completeImpl,
 			retry: summaryOneshotRetry(options),
 		},
@@ -913,11 +910,6 @@ export interface HandoffOptions {
 	initiatorOverride?: MessageAttribution;
 	metadata?: Record<string, unknown>;
 	/**
-	 * Optional telemetry handle. When provided, the handoff LLM call is
-	 * wrapped in an OTEL chat span tagged with `omp.gen_ai.oneshot.kind = "handoff"`.
-	 */
-	telemetry?: AgentTelemetry;
-	/**
 	 * Active session thinking level. Threaded from `agent-session.ts` so
 	 * handoff generation honors the user's `/model` thinking selection
 	 * instead of silently overriding it with `Effort.High`. See
@@ -950,8 +942,6 @@ export interface HandoffFromContextOptions {
 		ctx: Context,
 		options: SimpleStreamOptions,
 	) => Promise<AssistantMessage>;
-	/** See {@link HandoffOptions.telemetry}. */
-	telemetry?: AgentTelemetry;
 	/** See {@link HandoffOptions.thinkingLevel}. */
 	thinkingLevel?: ThinkingLevel;
 }
@@ -966,8 +956,8 @@ export interface HandoffFromContextOptions {
  * cache-preserving context construction in the host (which owns the transform
  * pipeline) while this function centralizes the handoff request contract:
  * cache-first `toolChoice: "none"`, clamped reasoning effort, one retry for
- * auto-only `tool_choice` providers, oneshot telemetry, text-only extraction,
- * and provider-error mapping.
+ * auto-only `tool_choice` providers, text-only extraction, and provider-error
+ * mapping.
  */
 export async function generateHandoffFromContext(
 	context: Context,
@@ -979,18 +969,19 @@ export async function generateHandoffFromContext(
 		reasoning: resolveCompactionEffort(model, options.thinkingLevel),
 		toolChoice: "none" as const,
 	};
-	let response = await instrumentedCompleteSimple(model, context, requestOptions, {
-		telemetry: options.telemetry,
-		oneshotKind: "handoff",
+	let response = await completeSimpleWithRetry(model, context, requestOptions, {
 		completeImpl: options.completeImpl,
 		retry: {},
 	});
 	if (response.stopReason === "error" && shouldRetryHandoffWithAutoToolChoice(response)) {
-		response = await instrumentedCompleteSimple(
+		response = await completeSimpleWithRetry(
 			model,
 			context,
 			{ ...requestOptions, toolChoice: "auto" },
-			{ telemetry: options.telemetry, oneshotKind: "handoff", completeImpl: options.completeImpl, retry: {} },
+			{
+				completeImpl: options.completeImpl,
+				retry: {},
+			},
 		);
 	}
 
@@ -1034,7 +1025,6 @@ export async function generateHandoff(
 				signal,
 				metadata: options.metadata,
 			},
-			telemetry: options.telemetry,
 			thinkingLevel: options.thinkingLevel,
 		},
 	);
@@ -1070,7 +1060,7 @@ async function generateShortSummary(
 
 	let outcome: ShortSummaryOutcome;
 	try {
-		const response = await instrumentedCompleteSimple(
+		const response = await completeSimpleWithRetry(
 			model,
 			{
 				systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT],
@@ -1088,8 +1078,6 @@ async function generateShortSummary(
 				promptCacheKey: options?.promptCacheKey,
 			},
 			{
-				telemetry: options?.telemetry,
-				oneshotKind: "compaction_short_summary",
 				completeImpl: options?.completeImpl,
 				retry: summaryOneshotRetry(options),
 			},
@@ -1511,7 +1499,7 @@ async function generateTurnPrefixSummary(
 		},
 	];
 
-	const response = await instrumentedCompleteSimple(
+	const response = await completeSimpleWithRetry(
 		model,
 		{ systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT], messages: summarizationMessages },
 		{
@@ -1526,8 +1514,6 @@ async function generateTurnPrefixSummary(
 			promptCacheKey: options?.promptCacheKey,
 		},
 		{
-			telemetry: options?.telemetry,
-			oneshotKind: "compaction_turn_prefix",
 			completeImpl: options?.completeImpl,
 			retry: summaryOneshotRetry(options),
 		},

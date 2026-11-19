@@ -34,8 +34,6 @@ export const eventDefs = {
 			"The agent finished its turn and resumes only for queued input or background-job results.",
 		),
 		"awaitingAsyncWork?": doc("boolean", "Non-terminal end whose only possible resume is a background-job result."),
-		"telemetry?": JSON_OBJECT,
-		"coverage?": JSON_OBJECT,
 	},
 	TurnStartEvent: { type: "'turn_start'" },
 	TurnEndEvent: { type: "'turn_end'", message: "AgentMessage", toolResults: "ToolResultMessage[]" },

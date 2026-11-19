@@ -39,7 +39,6 @@ import {
 	type BeforeToolCallContext,
 	type BeforeToolCallResult,
 	type QueuedMessagePreparation,
-	resolveTelemetry,
 	type StreamFn,
 	TERMINAL_TOOL_RESULT_ABORT_REASON,
 	type ThinkingLevel,
@@ -4536,7 +4535,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			// getLastAssistantMessage) — pruning made the terminal error invisible to
 			// anything inspecting agent state after prompt() resolved.
 			// Fall through to the standard error tail so `session_stop` hooks (block,
-			// continue, telemetry) still fire — matching the pre-fix flow for
+			// continue) still fire — matching the pre-fix flow for
 			// `stopReason === "error"`.
 			if (this.#recovery.isClassifierRefusal(msg)) {
 				this.#prunedTerminalFailure = msg;
@@ -12818,7 +12817,6 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				reserveTokens: cfgBranchSummaryReserveTokens.get(this.settings),
 				metadata: this.agent.metadataForProvider(model.provider),
 				convertToLlm: messages => this.#convertToLlmForSideRequest(messages),
-				telemetry: resolveTelemetry(this.agent.telemetry, this.sessionId),
 				// Same per-provider concurrency cap rationale as the compaction
 				// path above (chatgpt-codex review on #3751).
 				completeImpl: async (requestModel, requestContext, requestOptions) => {

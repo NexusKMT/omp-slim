@@ -907,7 +907,7 @@ The optional `messageUpdates: "delta"` projects only `message_update` frames to 
 
 Each command replaces the whole filter state: omitting `messageUpdates` resets it to `"full"`, the default, which retains the original full snapshots. An invalid `events` shape (anything other than `null` or an array of non-empty strings), or a mode other than `"full"` or `"delta"`, returns an error without changing either setting. Event names are not checked against a fixed catalog; unknown non-empty names are accepted. Projection works in protocol v1 and v2, including with `events: null`. Detect support from the echoed `data.messageUpdates` field: older servers ignore the option and do not echo it. This opt-in is raw-protocol only; the TypeScript `RpcClient` and Python client keep their full-message listener contracts.
 
-`agent_end` has this session-level shape (in addition to optional telemetry fields):
+`agent_end` has this session-level shape:
 
 ```ts
 {

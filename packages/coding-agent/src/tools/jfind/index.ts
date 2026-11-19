@@ -102,7 +102,6 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			sessionId: this.session.getSessionId?.() ?? undefined,
 			purpose: "find",
 			onUsage: journalJudgmentUsage(this.session.sessionManager),
-			telemetry: this.session.getTelemetry?.(),
 			costGate: this.session.costGate,
 		});
 		const started = performance.now();

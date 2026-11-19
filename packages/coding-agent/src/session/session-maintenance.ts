@@ -6,7 +6,6 @@ import {
 	type AgentMessage,
 	type AgentTurnEndContext,
 	type MessageCountOptions,
-	resolveTelemetry,
 	type StreamFn,
 	type ThinkingLevel,
 	Tokenizer,
@@ -2210,7 +2209,7 @@ export class SessionMaintenance {
 				{
 					promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
 					extraContext: compactionPrep.hookContext,
-					// Give background summary telemetry its own request identity.
+					// Give the background summary its own request identity.
 					sessionId: `${this.#host.sessionId()}:spec:${Snowflake.next()}`,
 				},
 				candidates,
@@ -3241,7 +3240,6 @@ export class SessionMaintenance {
 					? (payload, model, signal) =>
 							this.#host.extensionRunner?.emitBeforeProviderRequest(payload, model, signal)
 					: undefined,
-				telemetry: resolveTelemetry(this.#host.agent.telemetry, this.#host.sessionId()),
 				thinkingLevel: this.#host.thinkingLevel(),
 				sessionId: options?.sessionId ?? this.#host.sessionId(),
 				promptCacheKey: this.#host.getPromptCacheKeyForModel(candidate),

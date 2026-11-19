@@ -13,8 +13,7 @@
  */
 
 import { type } from "@oh-my-pi/omptype";
-import { instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
-import { type Api, type AssistantMessage, type Effort, type Model, type Tool } from "@oh-my-pi/pi-ai";
+import { completeSimple, type Api, type AssistantMessage, type Effort, type Model, type Tool } from "@oh-my-pi/pi-ai";
 import { isRecord, Snowflake } from "@oh-my-pi/pi-utils";
 import { extractTextContent, extractToolCall, parseJsonPayload } from "../commit/utils";
 
@@ -128,7 +127,6 @@ async function executeCompletion(
 				},
 			]
 		: undefined;
-	const telemetry = resolveTelemetry(session.getTelemetry?.(), session.getSessionId?.() ?? undefined);
 	const systemPrompt = system ? [system] : ["You are a helpful assistant."];
 	const refusal = session.costGate?.check();
 	if (refusal) throw new ToolError(refusal.message);
@@ -145,7 +143,7 @@ async function executeCompletion(
 			attempt.outcome = "no-credentials";
 			throw new ToolError(`completion() has no API key for current model ${formatModelString(model)}.`);
 		}
-		response = await instrumentedCompleteSimple(
+		response = await completeSimple(
 			model,
 			{
 				systemPrompt,
@@ -157,7 +155,6 @@ async function executeCompletion(
 				signal,
 				toolChoice: schema ? { type: "tool", name: STRUCTURED_TOOL_NAME } : undefined,
 			},
-			{ telemetry, oneshotKind: "eval_completion" },
 		);
 		session.costGate?.record(response.usage.cost.total);
 		if (response.stopReason === "aborted") throw new ToolError("completion() request aborted.");

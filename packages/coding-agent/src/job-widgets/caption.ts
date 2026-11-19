@@ -4,8 +4,7 @@
  * writes it once per job, from the command and the intent it was
  * started with; it never sees the job's output.
  */
-import { instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
-import type { UserMessage } from "@oh-my-pi/pi-ai";
+import { completeSimple, type UserMessage } from "@oh-my-pi/pi-ai";
 import { markPerCallContextMessage } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { shortenEmbeddedPaths } from "@oh-my-pi/pi-tui/render/render-utils";
 import { prompt, sanitizeText, truncate } from "@oh-my-pi/pi-utils";
@@ -95,7 +94,7 @@ export function createModelJobCaptionWriter(options: ModelJobWidgetAuthorOptions
 		};
 		// The system prompt is the reusable prefix; the command never repeats.
 		markPerCallContextMessage(message);
-		const response = await instrumentedCompleteSimple(
+		const response = await completeSimple(
 			model,
 			{ systemPrompt: [systemPrompt], messages: [message] },
 			{
@@ -104,7 +103,6 @@ export function createModelJobCaptionWriter(options: ModelJobWidgetAuthorOptions
 				disableReasoning: true,
 				maxTokens: MAX_CAPTION_TOKENS,
 			},
-			{ telemetry: resolveTelemetry(options.telemetry?.(), sessionId), oneshotKind: "job_caption" },
 		);
 		costGate?.record(response.usage.cost.total);
 		options.onUsage?.(response);

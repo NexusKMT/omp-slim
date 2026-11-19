@@ -1,8 +1,14 @@
 import { Database, type Statement } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type AgentTelemetry, instrumentedCompleteSimple } from "@oh-my-pi/pi-agent-core";
-import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
+import {
+	completeSimple,
+	type Api,
+	type AssistantMessage,
+	type Context,
+	type Model,
+	type SimpleStreamOptions,
+} from "@oh-my-pi/pi-ai";
 import { transportFetch } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import {
 	getAgentDir,
@@ -48,8 +54,13 @@ export function createSkillDescriptionCompressor(
 	options: {
 		getModel: () => Model<Api> | undefined;
 		sessionId?: string;
-		getTelemetry?: () => AgentTelemetry | undefined;
 		getCostGate?: () => CostGateApi | undefined;
+		/** Completion transport override (test injection seam). */
+		completeImpl?: <TApi extends Api>(
+			model: Model<TApi>,
+			ctx: Context,
+			streamOptions: SimpleStreamOptions,
+		) => Promise<AssistantMessage>;
 	},
 ): SkillDescriptionCompressor {
 	const select = options.getModel;
@@ -77,7 +88,7 @@ export function createSkillDescriptionCompressor(
 			};
 			let response: AssistantMessage;
 			try {
-				response = await instrumentedCompleteSimple(
+				response = await (options.completeImpl ?? completeSimple)(
 					model,
 					{
 						messages: [{ role: "user", content: request, timestamp: Date.now() }],
@@ -93,7 +104,6 @@ export function createSkillDescriptionCompressor(
 						fetch: gate ? transportFetch(model, undefined, refuseAttempt) : undefined,
 						onAttempt: message => gate?.record(message.usage.cost.total),
 					},
-					{ telemetry: options.getTelemetry?.(), oneshotKind: "skill_description" },
 				);
 			} catch (error) {
 				if (refused.signal.aborted) throw refused.signal.reason;

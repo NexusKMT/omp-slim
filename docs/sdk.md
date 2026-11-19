@@ -235,7 +235,7 @@ const unsubscribe = session.subscribe(event => {
 - `config_warnings_changed`
 - `advisor_cost_changed` / `advisor_yielded`
 
-`agent_end` includes `messages`, optional telemetry fields, and
+`agent_end` includes `messages` and
 `isTerminal?: boolean`. When `isTerminal` is `false`, maintenance or async
 delivery will resume the session before its true final settle. Subscribers that
 use `agent_end` as a completion signal MUST wait for `isTerminal !== false`.
@@ -370,8 +370,6 @@ Use these when you want partial control without recreating internal discovery lo
 - `interactivePrompts` defaults to `hasUI`. A non-TUI host that can answer
   synchronous prompts can set it to `true` to enable `ask` without enabling
   UI-only startup behavior such as LSP warmup.
-- `telemetry: {}` enables agent-loop OpenTelemetry spans. Without a registered
-  host OpenTelemetry SDK, the API uses a no-op tracer.
 - `additionalDirectories` adds absolute or cwd-relative workspace roots.
 - `providerSessionId` can reuse provider-side session identity while session
   persistence stays isolated; `providerPromptCacheKey` sets a separate cache key.

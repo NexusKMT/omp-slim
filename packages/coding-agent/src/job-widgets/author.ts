@@ -2,8 +2,7 @@
  * Writes job-widget specs with the current session model and a forced `respond`
  * call carrying the spec schema, job brief and redacted output samples.
  */
-import { type AgentTelemetryConfig, instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
-import type { Api, AssistantMessage, Model, UserMessage } from "@oh-my-pi/pi-ai";
+import { completeSimple, type Api, type AssistantMessage, type Model, type UserMessage } from "@oh-my-pi/pi-ai";
 import { markPerCallContextMessage } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { formatBytes, prompt, truncate } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
@@ -159,9 +158,8 @@ export interface ModelJobWidgetAuthorOptions {
 	getModel: () => Model<Api> | undefined;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
-	/** The root session id, for session-sticky credentials and telemetry. */
+	/** The root session id, for session-sticky credentials. */
 	sessionId: () => string | undefined;
-	telemetry?: () => AgentTelemetryConfig | undefined;
 	/** The session's secret obfuscation, when secret handling is on. */
 	obfuscate?: () => ((text: string) => string) | undefined;
 	/** Each completed request's assistant message, for usage accounting (purpose `job-widget`). */
@@ -205,7 +203,7 @@ export function createModelJobWidgetAuthor(options: ModelJobWidgetAuthorOptions)
 		// The system prompt and schema are the reusable prefix (cached by the provider). The job's
 		// samples never repeat, so a cache breakpoint on them would only bill a cache write.
 		markPerCallContextMessage(message);
-		const response = await instrumentedCompleteSimple(
+		const response = await completeSimple(
 			model,
 			{
 				systemPrompt: [systemPrompt],
@@ -227,7 +225,6 @@ export function createModelJobWidgetAuthor(options: ModelJobWidgetAuthorOptions)
 				maxTokens: MAX_SPEC_TOKENS,
 				toolChoice: { type: "tool", name: RESPOND_TOOL },
 			},
-			{ telemetry: resolveTelemetry(options.telemetry?.(), sessionId), oneshotKind: "job_widget" },
 		);
 		costGate?.record(response.usage.cost.total);
 		options.onUsage?.(response);

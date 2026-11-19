@@ -791,8 +791,6 @@ export interface AgentEndEvent {
 	yielded?: boolean;
 	/** Non-terminal end whose only possible resume is a background-job result. */
 	awaitingAsyncWork?: boolean;
-	telemetry?: Record<string, unknown>;
-	coverage?: Record<string, unknown>;
 }
 
 export interface TurnStartEvent {
