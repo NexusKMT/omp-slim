@@ -206,5 +206,5 @@ Local evidence is under `dist/validation/maintenance-cost-2026-11-19/`:
 both failure lists and `local-artifact-verification.json`. These are ignored
 audit artifacts, not a new permanent measurement framework. The recovered
 follow-up validation artifact is in `dist/actions/44556806308/validation/`.
-No OMP Slim Codespace was running at the end; the listed running Codespace
-belonged to a different repository and was left alone.
+No OMP Slim Codespace was running at the end. The only listed Codespace belonged
+to a different repository, was left alone, and reported `Shutdown` on the final check.
