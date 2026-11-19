@@ -84,7 +84,7 @@ This only controls the startup splash animation. It does not rerun setup or chan
 | boolean | `true`, `false`, `yes`, `no`, `on`, `off`, `1`, `0`  | Case-insensitive. Anything else is rejected.                                                         |
 | number  | Any finite JavaScript number                         | `Infinity`/`NaN` are rejected.                                                                       |
 | enum    | One of the key's allowed values, bare or JSON-quoted | Must match exactly; the error lists the valid values.                                                |
-| array   | A JSON array                                         | e.g. `'["anthropic","openai"]'`. Must parse and be an array.                                         |
+| array   | A JSON array                                         | e.g. `'["local","remote"]'`. Must parse and be an array.                                         |
 | record  | A JSON object                                        | e.g. `'{"bash":"prompt"}'`. Must parse and be a non-array object.                                    |
 | string  | Bare text or a JSON-quoted string                    | Bare text is trimmed; JSON string contents are decoded. Multi-word arguments are joined with spaces. |
 
@@ -138,8 +138,6 @@ Environment variables are never written back to `config.yml`. Variables declared
 | `PI_NO_PTY=1`                                       | (disables PTY bash)                               | Equivalent to `--no-pty` for the process.                                                         |
 | `PI_PY`                                             | `eval.py`                                         | `PI_PY=0` disables the Python eval backend.                                                       |
 | `PI_JS`                                             | `eval.js`                                         | `PI_JS=0` disables the JavaScript eval backend.                                                   |
-| `OMP_AUTH_BROKER_URL`                               | `auth.broker.url`                                 | Env value takes precedence over config.                                                           |
-| `OMP_AUTH_BROKER_TOKEN`                             | `auth.broker.token`                               | Env value takes precedence over config.                                                           |
 | `PI_CODING_AGENT_DIR`                               | (relocates default-profile agent dir)             | Named profiles ignore this override.                                                              |
 | `OMP_PROFILE` / `PI_PROFILE`                        | (selects profile)                                 | `OMP_PROFILE` wins when present; `--profile` wins over env.                                       |
 | `PI_EDIT_VARIANT`                                   | `edit.mode`                                       | `apply_patch`, `hashline`, `patch`, `replace`, or `sloppy`; `auto` is unset.                      |
@@ -234,7 +232,7 @@ tools:
       bash: prompt
       read: allow
 disabledProviders:
-   - anthropic
+   - local
    - openai
    - google
 
@@ -266,7 +264,7 @@ Create `<repo>/.omp/config.yml` when a repository needs its own settings:
 
 ```yaml
 # <repo>/.omp/config.yml
-model: anthropic/claude-sonnet-4-5:high
+model: local/chat:high
 
 tools:
    approvalMode: write
@@ -304,10 +302,10 @@ Three array settings — `enabledModels`, `enabledProviders`, and `disabledProvi
 
 ```yaml
 enabledModels:
-   - claude-sonnet-4-5 # applies everywhere
+   - chat # applies everywhere
    - path: ~/work/high-context
      models:
-        - anthropic/claude-opus-4-5
+        - remote/chat
 
 disabledProviders:
    - ollama # applies everywhere
@@ -315,7 +313,7 @@ disabledProviders:
         - ~/projects/sensitive
         - ~/clients/acme
      providers:
-        - anthropic
+        - local
         - openai
 ```
 
@@ -340,17 +338,17 @@ Project roots remain enabled. Native OMP and `.agents` roots—including native 
 
 | Entry kind        | Example ids                                                                        | Effect                                                                                                                                                         |
 | ----------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model providers   | `anthropic`, `openai`, `google`, `groq`, `ollama`, `openrouter`                    | Removes those backends from model selection, even when credentials are available. See [Providers](./providers.md).                                             |
+| Model providers   | User-defined ids such as `local` and `remote`                    | Removes those backends from model selection, even when credentials are available. See [Providers](./providers.md).                                             |
 | Discovery sources | `native`, `claude`, `codex`, `gemini`, `github`, `opencode`, `cursor`, `agents-md` | Stops that source from contributing context files, MCP servers, commands, skills, hooks, tools, prompts, or settings. See [Context files](./context-files.md). |
 
-Most provider-control use cases list model provider ids. Disabling the `claude` discovery source is different from disabling the `anthropic` model provider — one stops Claude-format config discovery, the other stops the Anthropic model backend.
+Most provider-control use cases list model provider ids. Disabling the `claude` discovery source is different from disabling a configured `local` model provider — one stops Claude-format config discovery, the other stops the Anthropic model backend.
 
 Because arrays replace rather than append, a project that sets `disabledProviders` must list the complete desired set:
 
 ```yaml
 # ~/.omp/agent/config.yml
 disabledProviders:
-   - anthropic
+   - local
    - openai
 
 # <repo>/.omp/config.yml — inside this repo ONLY groq is disabled
@@ -380,21 +378,21 @@ The catalog below highlights common settings; it is not the complete schema. `om
 `model` holds one primary selector. It may include a thinking suffix: `:off`, `:minimal`, `:low`, `:medium`, `:high`, `:xhigh`, `:max`, `:auto`, or `:inherit`.
 
 ```yaml
-model: anthropic/claude-sonnet-4-5:high
+model: local/chat:high
 modelStorage: global
 
 modelProviderOrder:
-   - anthropic
+   - local
    - openai
 
 enabledModels:
-   - anthropic/claude-sonnet-4-5
-   - openai/gpt-5.2
+   - local/chat
+   - remote/chat
 ```
 
 Open `/model` or `/models` to browse providers and select the primary model. Planning, subagents, advisors, titles, commit helpers, judgments, and summary compaction use the current session model. A manual model change also updates subsequent advisor reviews and subagent launches. Image operations check that model’s capabilities; they do not choose an image or vision model independently.
 
-The catalog can still describe non-chat APIs for lower-level clients. Use `omp models --kind all` to inspect those records; catalog classification does not create a separate model assignment in OMP Slim.
+The model registry contains explicitly configured Chat Completions models. Refresh reloads local definitions; it does not discover supplier catalogs or non-chat APIs.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -471,7 +469,6 @@ For the numeric sampling settings, a negative value (normally `-1`) means "use t
 | `repetitionPenalty`              | number | `-1`      | Repetition penalty.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `textVerbosity`                  | enum   | `low`     | `low`, `medium`, `high`. Sent by OpenAI Responses and Codex.                                                                                                                                                                                                                                                                                                                                              |
 | `tier.openai`                    | enum   | `none`    | `none`, `auto`, `default`, `flex`, `scale`, `priority`, `ultrafast`. Sent as `service_tier` for OpenAI / OpenAI-Codex and OpenAI-family OpenRouter models. `ultrafast` is sent only to the OpenAI API, and to Codex models and OpenAI-compatible relay models whose discovered `service_tiers` lists it (`/fast ultra`). Launch with `--service-tier <value>` for a one-session OpenAI override; the flag is not persisted (`none` omits `service_tier`). |
-| `tier.anthropic`                 | enum   | `none`    | `none`, `priority`. `priority` realizes fast mode on supported direct Claude models (ignored on Bedrock/Vertex and via OpenRouter).                                                                                                                                                                                                                                                                       |
 | `tier.google`                    | enum   | `none`    | `none`, `flex`, `priority`. Gemini API sends it in the body; Vertex sends `priority` via header (`flex` is a no-op on Vertex).                                                                                                                                                                                                                                                                            |
 | `tier.subagent`                  | enum   | `inherit` | `inherit`, `none`, `auto`, `default`, `flex`, `scale`, `priority`, `ultrafast`. Applied to the spawned model's family; `inherit` tracks the main agent.                                                                                                                                                                                                                                                   |
 | `task.agentServiceTierOverrides` | record | `{}`      | Sparse exact-name overrides for agents spawned by task/eval dispatch (Vibe workers keep `tier.subagent`). Values: `inherit`, `none`, `auto`, `default`, `flex`, `scale`, `priority`, `ultrafast`. An entry overrides `tier.subagent`; concrete values apply only when supported by the resolved model's provider family. A non-mapping value fails settings load.                                         |
@@ -480,7 +477,7 @@ For the numeric sampling settings, a negative value (normally `-1`) means "use t
 
 ### Retry and fallback
 
-Retries stay on the selected model. Recovery may rotate eligible credentials for that model or wait for an admitted provider reset. Exhausted retries report the failure; changing models is an explicit user action.
+Retries stay on the selected model and configured credentials. Exhausted retries report the failure; changing models is an explicit user action.
 
 ```yaml
 retry:
@@ -488,8 +485,6 @@ retry:
    maxRetries: 10
    baseDelayMs: 500
    maxDelayMs: 300000
-   waitForUsageReset: false
-   usageReservePct: 10
 ```
 
 | Key | Type | Default | Notes |
@@ -497,9 +492,7 @@ retry:
 | `retry.enabled` | boolean | `true` | Retry transient failures on the current model. |
 | `retry.maxRetries` | number | `10` | Maximum retries per request. |
 | `retry.baseDelayMs` | number | `500` | Initial backoff. |
-| `retry.maxDelayMs` | number | `300000` | Backoff ceiling (5 minutes); `0` disables the cap. Longer provider waits fail unless `waitForUsageReset` admits an authoritative quota-reset wait. |
-| `retry.waitForUsageReset` | boolean | `false` | Allow authoritative provider usage-reset waits past `maxDelayMs`. Waits are abortable and can hold subagents. |
-| `retry.usageReservePct` | number | `10` | Remaining quota percentage used by account routing and usage reporting. This does not select another model. |
+| `retry.maxDelayMs` | number | `300000` | Backoff ceiling (5 minutes); `0` disables the cap. |
 
 Model fallback chains, usage-based model switching, and automatic context promotion are retired. Context pressure is handled by [compaction](#context-and-compaction), using the current model for summaries.
 
@@ -518,7 +511,6 @@ tools:
 
 | Key                            | Type    | Default   | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------ | ------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tools.format`                 | enum    | `auto`    | Tool wire format: `auto`, `native`, `glm`, `hermes`, `kimi`, `xml`, `anthropic`, `deepseek`, `harmony`, `qwen3`, `gemini`, `gemma`, or `minimax`. `native` always uses provider-native tool calls. `auto` also uses native calls unless the selected model explicitly has `supportsTools: false`; then it selects the model-family owned dialect, falling back to GLM when no specific family dialect is known. Other values force that owned in-band dialect. `xml` is the [generic XML format](./toolconv/xml.md); `minimax` is the [MiniMax format](./toolconv/minimax.md). See [GLM](./toolconv/glm-4.5.md), [Qwen3/Hermes](./toolconv/qwen3.md), [Kimi](./toolconv/kimi-k2.md), [Anthropic](./toolconv/anthropic.md), [DeepSeek](./toolconv/deepseek.md), [Harmony](./toolconv/harmony.md), [Gemini](./toolconv/gemini.md), and [Gemma](./toolconv/gemma.md). |
 | `tools.approvalMode`           | enum    | `yolo`    | `always-ask` (auto-approve read-only), `always-ask-cached` (_Ask and remember_: also asks before file reads, and can remember a file or folder; see [approval mode](./approval-mode.md)), `write` (auto-approve read + workspace-write), `yolo` (auto-approve all tiers). `--approval-mode` and `--auto-approve`/`--yolo` override per run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `tools.approval`               | record  | `{}`      | Per-tool policy keyed by tool name; each value is `allow`, `deny`, or `prompt`. e.g. `omp config set tools.approval '{"bash":"prompt"}'`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `tools.restrictedFolders`      | array   | `[]`      | Folders where every read, write, edit, search, or command needs an explicit approval in every approval mode (`yolo` included), whatever was remembered: the folder and everything below it, commands matched by the directory they run in. See [approval mode](./approval-mode.md#restricted-folders).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -640,15 +632,15 @@ read:
 
 ### Context and compaction
 
-`/extended-context on` opts in to larger context windows; `/extended-context off` restores standard windows and premium-pricing caps. For `openai-codex/gpt-6-astra`, `openai-codex/gpt-6.1-sol`, and their `-wm` routes, off uses the Codex default window (272,000 tokens for Astra, 500,000 for GPT-6.1 Sol) and on uses the curated 922,000-token input window (1.05M total context with 128K output), or a higher discovered maximum. The curated maximum corrects stale lower discovery values. Explicit per-model `contextWindow` overrides in `models.yml` take precedence in both modes; remove an override if you want the toggle to control that model again. Codex overrides still clamp to the effective server-honored ceiling, allowing the curated or higher live maximum rather than an arbitrary larger window.
+`/extended-context on` opts in to the explicitly configured `maxContextWindow`; `/extended-context off` returns to `contextWindow`. These limits come from `models.yml`, not supplier or model-name rules.
 
 Custom providers can opt into the same toggle by setting `contextWindow` (normal)
-and `maxContextWindow` (extended) on a model or `modelOverrides` entry in
+and `maxContextWindow` (extended) on a model definition in
 `models.yml`. A `contextWindow` override without `maxContextWindow` remains
 fixed in both modes. See [model configuration](models.md); these values control
 local budgeting, not the upstream endpoint's accepted request size.
 
-Compaction headroom is separate from this opt-in. With the default 15% reserve, Astra's documented extended window has an auto-compaction threshold of 783,700 tokens. A larger window can consume more usage even when there is no additional long-context pricing multiplier.
+Compaction headroom is separate from this opt-in. With a 15% reserve, the threshold uses 85% of the configured context window unless a threshold override applies.
 
 ```yaml
 extendedContext: false
@@ -691,8 +683,8 @@ compaction:
    thresholdPercent: 80
    modelThresholds:
       "deepseek/*": 90000
-      "openrouter/anthropic/*": "60%"
-      anthropic/claude-opus-5.5: 150000 # base: compacts at 80% of 150k
+      "remote/*": "60%"
+      local/chat: 150000 # base: compacts at 80% of 150k
       openai/gpt-5.6-terra: "f400000" # fixed: compacts at exactly 400k
 ```
 
@@ -805,67 +797,36 @@ The `cache` segment (in the `full` and `nerd` presets) shows before you send whe
 
 ### Providers and services
 
-Web search keeps its HTTP engines and can use the current model’s hosted search capabilities. Image generation and judgments use the current model when supported. This section configures transport and service behavior, independently of the primary model selector.
+Model inference uses explicitly configured Chat Completions endpoints. Web
+search and fetch use their HTTP integrations. These settings control transport
+and service behavior independently of the primary model selection.
 
 ```yaml
 providers:
    fetch: auto
    webSearchTimeoutSeconds: 60
-   openaiWebsockets: auto
-   openaiLiveSteering: false
-   openai-codex:
-      daybreak: true
-   openrouterVariant: default
-   kimiApiFormat: auto
-   cacheRetention: auto
    maxInFlightRequests:
-      anthropic: 2
-
+      local: 2
 provider:
    appendOnlyContext: auto # auto, on, off
 
 ```
 
-`providers.openaiResponsesWebsockets` opts standard Responses into WS and defaults
-to `false`; `providers.openaiWebsockets` and `PI_CODEX_WEBSOCKET` govern Codex only.
-See [Standard Responses WebSockets](./models.md#standard-responses-websockets) for
-capability gating, model/request vetoes, hooks, chaining and recovery tradeoffs.
-
-| Key                                        | Type    | Default    | Values / notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------------------ | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Key | Type | Default | Values / notes |
+| --- | --- | --- | --- |
 | `providers.webSearchTimeoutSeconds`        | number  | `60`       | Per-request web-search transport timeout. Values above `300` are capped at five minutes; HTTP engine recovery keeps its own request sequence.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `providers.fetch`                          | enum    | `auto`     | `auto`, `native`, `trafilatura`, `lynx`, `parallel`, `firecrawl`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `providers.maxInFlightRequests`            | record  | `{}`       | Positive per-provider concurrency limits for LLM HTTP requests, shared across local `omp` processes using the same config root. Omitted providers are unlimited. `omp config set` rejects non-positive or non-numeric values.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `providers.openaiWebsockets` | enum | `auto` | `auto`, `off`, `on`; OpenAI Codex only. |
-| `providers.openaiResponsesWebsockets` | boolean | `false` | Opt in to standard Responses WS for catalog-supported models; model/request `false` disables it. |
 | `providers.streamFirstEventTimeoutSeconds` | number  | `-1`       | First stream-event watchdog: `-1` uses provider/env defaults, `0` disables, positive values set seconds.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `providers.streamIdleTimeoutSeconds`       | number  | `-1`       | Maximum silence between stream events, with the same `-1`/`0` conventions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `providers.anthropic.slowMode`             | enum    | `off`      | `off`, `auto`. Anthropic subscription low-priority recovery when a 5-hour limit is reached and the lane is offered; `/slow on` enables it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `providers.openaiLiveSteering`             | boolean | `false`    | Deliver messages typed while a GPT-6 response streams into that response (`response.steer` over the Codex WebSocket) instead of waiting for the next tool boundary. Off by default; the Codex native turn lane can reject mid-response messages (`unsupported_native_inflight_message`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `providers.openai-codex.daybreak`          | boolean | `true`     | Automatically request the Daybreak Blue cyber access program (`access_programs.cyber`) on ChatGPT accounts eligible for it. OpenAI may use content from Daybreak Blue sessions to improve its models; set `false` to opt out. Each session reads its own value. Does not cover dedicated Daybreak Blue models (`gpt-daybreak-blue-*`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `providers.openrouterVariant`              | enum    | `default`  | `default`, `nitro`, `floor`, `online`, `exacto`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `providers.kimiApiFormat`                  | enum    | `auto`     | `auto`, `openai`, `anthropic`. `auto` follows live model metadata.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `providers.cacheRetention`                 | enum    | `auto`     | `auto`, `short`, `long`, `none`. Prompt-cache retention forwarded to providers that support it. `auto` keeps provider defaults (Anthropic: 1h entries on OAuth subscriber sessions, 5m entries on API keys) and honors `PI_CACHE_RETENTION`; `short` forces 5m; `long` uses 1h TTLs where supported; `none` disables prompt caching and cache-affinity routing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `providers.cacheWarming`                   | enum    | `idle`     | `off`, `streaming`, `idle`. Prompt-cache warming replays the last request shortly before its cache entry expires with a one-token output budget: Anthropic Messages stops at its first generated output; Converse completes a one-total-token request to consume terminal cache usage. Warming runs only when the expected avoided-miss cost exceeds the refresh cost by at least $0.05. A refresh that misses the cache or fails ends warming until the next real request. `off` disables warming; `streaming` protects prefixes during long tool executions and stops when the agent settles; `idle` also refreshes between runs (15% continuation probability) until 30 minutes after the last real request, so it covers only cache lifetimes shorter than that window (Anthropic and AWS Claude 5m entries, not 1h entries such as OAuth subscriber sessions). Warming follows the lifetime of the retention tier actually used; `providers.cacheRetention: none` suppresses warming. Models without a declared lifetime for the retention tier used (see [Models](./models.md)) are never warmed. |
 | `provider.appendOnlyContext`               | enum    | `auto`     | `auto`, `on`, `off`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `auth.broker.url`                          | string  | _(unset)_  | Auth-broker URL. The actual credential connection uses env then the main global config, not project/config-overlay values.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `auth.broker.token`                        | string  | _(unset)_  | Auth-broker token. `OMP_AUTH_BROKER_TOKEN` wins over the main global config; the broker token file is a fallback. Project/config-overlay values do not redirect credentials.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `task.agentAccountPools`                   | record  | `{}`       | Exact-name task/eval agent → provider id → OAuth identity keys (the `identityKey` values of [client account pools](./auth-broker-gateway.md#client-account-pools-routing-not-authorization), e.g. `email:<address>\|org:<id>` for Anthropic; `omp usage accounts` lists them). The agent authenticates for each listed provider only with those accounts, never another account or an API key, and fails when none can serve; an empty list allows no account. A malformed entry fails settings load. See [Task agent discovery](./task-agent-discovery.md#model-and-structured-output-precedence).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `secrets.enabled`                          | boolean | `false`    | Enable configured secret obfuscation and built-in credential-shaped token redaction before provider requests. See [Secret obfuscation](./secrets.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-Provider credentials and custom model definitions are configured separately — see [Providers](./providers.md) and [Models](./models.md).
-
-#### Saved reset auto-consumption
-
-`codexResets.autoRedeem` and `claudeResets.autoRedeem` independently control saved-reset consumption: `yes` enables automatic spending, `no` disables it, and `unset` requires consent before the first spend. A session with no prompt UI to ask (such as `omp -p`) spends a reset under `unset` only when that reset expires within 5 minutes and would otherwise be lost; everything else waits for consent, with a notice pointing at `/usage reset`.
-
-When a usage refresh detects an eligible banked reset expiring within the next **5 minutes**, auto-consumption attempts it even with little or no usage, a credit reserve, or `salvageHorizonHours: 0`. Provider eligibility, covered-limit requirements, cooldowns, and duplicate-spend protections still apply.
-
-`salvageHorizonHours` controls earlier, usage-based salvage; setting it to `0` leaves the five-minute last-chance rule active. Set the provider's `autoRedeem` to `no` to disable all automatic spending.
-
-To spend one by hand, use `/usage reset` in a session or `omp usage reset` from a shell, which needs no session or TTY and works from an auth-broker client: without arguments it lists each account's saved resets by `<provider>/<credential id>`, and with one it spends a single reset on that account.
-
-`omp usage` and the active account's status-line usage segment flag banked resets expiring within **7 days** when the account's fullest window they restore is at least 25% used. Within **24 hours**, `omp usage` opens with a banner per account: whether the sweep above spends the reset or asks first (only while an interactive omp session is open), or that it will not, and the `/usage reset` target that spends it now when the provider allows. In a reset's final 6 hours, the interactive TUI shows a one-line warning about it once, across every conversation and omp window (`agent.db` records which resets were announced).
+Provider credentials, capabilities and model definitions are configured
+separately; see [Providers](./providers.md) and [Models](./models.md).
 
 ### Cost limits
 
@@ -961,7 +922,7 @@ Arrays replace; they do not append. If a project sets `disabledProviders`, `enab
 
 ### A provider is still available after editing config
 
-- Check whether you disabled the model provider id (e.g. `anthropic`) or a discovery source id (e.g. `claude`) — they are different ids in the shared `disabledProviders` namespace, with different effects.
+- Check whether you disabled the model provider id (e.g. `local`) or a discovery source id (e.g. `claude`) — they are different ids in the shared `disabledProviders` namespace, with different effects.
 - Check for a project (or overlay) `disabledProviders` array replacing your global one.
 - Credentials can still come from environment variables, `.env`, OAuth, stored auth, or `models.yml`; disabling a provider blocks selection regardless, but verify you edited the right layer. See [Providers](./providers.md).
 - Check for a warning that a live reload retained the last good layer. Provider-source switches affect the next discovery pass; an already-open catalog/picker may need refreshing.

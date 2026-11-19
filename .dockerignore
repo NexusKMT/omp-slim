@@ -1,8 +1,7 @@
 # Default build context filter, used by every build whose Dockerfile has no
 # `<dockerfile>.dockerignore` shadow next to it — today the install smokes in
 # scripts/install-tests (`podman build -f scripts/install-tests/*.dockerfile .`).
-# The pi and robomp images shadow this file with Dockerfile.dockerignore and
-# Dockerfile.robomp.dockerignore; keep the three roughly in sync.
+# The main image uses Dockerfile.dockerignore.
 #
 # Patterns are depth-agnostic (`**/`) to match .gitignore semantics: dockerignore
 # anchors a bare `target/` at the context root only, so nested build dirs
@@ -62,10 +61,6 @@ changes/
 # Generated, regenerated in-image.
 packages/ai/test/.temp-images/
 sdk/python/omp-rpc/src/omp_rpc.egg-info/
-python/robomp/data/
-python/robomp/.cache/
-python/robomp/src/robomp/static/
-python/robomp/web/dist/
 
 # Scratch files the repo creates ad-hoc.
 syntax.jsonl
@@ -77,5 +72,5 @@ pi-*.html
 **/.venv/
 
 # Secrets. Should never be in an image regardless. Depth-agnostic: a bare
-# `.env` misses nested ones such as `python/robomp/.env`.
+# `.env` misses nested ones such as `tools/.env`.
 **/.env

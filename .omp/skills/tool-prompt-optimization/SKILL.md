@@ -17,7 +17,7 @@ bun .omp/skills/tool-prompt-optimization/scripts/probe.ts \
 ```
 
 - Required: `--schema`, `--template` — file path or inline value.
-- No `--model`: panel `fireworks/kimi-k2.7-code`, `anthropic/claude-opus-4-8`, `openai/gpt-5.5` × `--samples` (default 3); requires `FIREWORKS_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`.
+- With `--model` omitted, the probe uses OMP's configured main model for `--samples` requests (default 3). Endpoint and API-key configuration comes from `models.yml`, local credential storage, or provider environment variables.
 - `--model p/id,p/id`: override panel. Tune: `--samples N`, `--max-tokens`, `--json`.
 - Programmatic: `import { probe } from "./scripts/probe.ts"` → `{ prompt, results: [{ model, samples: [{ text, stopReason, usage, error }] }] }`.
 

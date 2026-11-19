@@ -27,6 +27,8 @@
 
 ### Fixed
 
+- `cleanse` defaults to the configured main model, `/cleanse` inherits the active session model, and both discovery and repair workers follow the current subagent inheritance policy.
+
 - Advisors adopt the current main model's replacement endpoint and headers even when its provider and model ID stay the same.
 - Reviving a worker-hosted subagent preserves its parent's dynamic authentication headers and resolves them for every request.
 - Subagents preserve their parent's custom model endpoint and headers during startup, revival, and local runtime metadata updates.

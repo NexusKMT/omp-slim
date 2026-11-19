@@ -4,6 +4,7 @@
  * cancel-then-dismiss (mirroring the `/omfg` panel).
  */
 import { runCleanse } from "../../cleanse";
+import { formatModelString } from "../../config/model-resolver";
 import { appKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
 import { CleanseBoardModel } from "@oh-my-pi/pi-tui/apps/cleanse-board";
 import type { CleanseCheckerDescriptor } from "../../cleanse/checkers";
@@ -93,7 +94,7 @@ export class CleanseCommandController {
 					all: options.all,
 					includeTests: options.includeTests,
 					maxAgents: options.maxAgents,
-					model: options.model,
+					model: options.model ?? (this.ctx.session.model ? formatModelString(this.ctx.session.model) : undefined),
 				},
 				{
 					board: run.panel,

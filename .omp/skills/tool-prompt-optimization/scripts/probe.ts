@@ -8,11 +8,10 @@
  * the hand-written prompt. Run several samples and several models: trust only content
  * that is STABLE across samples AND agrees across models.
  *
- * Routes through @oh-my-pi/pi-ai (`completeSimple`) rather than raw HTTP so model
- * resolution, auth, and provider quirks match production.
- * Per-provider env keys (<PROVIDER>_API_KEY) are resolved automatically; temperature is never sent.
+ * Routes through @oh-my-pi/pi-ai (`completeSimple`) and OMP's model configuration.
+ * API keys resolve through models.yml, local storage, or provider environment variables.
  * Caller passes two things: a JSON schema and a template. Everything else has defaults.
- * With no `--model`, probes a 3-model panel (Fireworks Kimi, Claude Opus, GPT) x 3 samples.
+ * With no `--model`, probes the configured main model with 3 samples.
  *
  * CLI:
  *   bun probe.ts --schema <file|json> --template <file|text> [options]
@@ -26,12 +25,9 @@
  */
 import { parseArgs } from "node:util";
 import { completeSimple } from "@oh-my-pi/pi-ai";
-import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
-import type { GeneratedProvider } from "@oh-my-pi/pi-ai/models";
-import { getBundledModel } from "@oh-my-pi/pi-ai/models";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { type ConfiguredScriptModel, resolveConfiguredScriptModel } from "../../../../scripts/configured-model";
 
-/** Default 3-model panel when the caller does not pin a model. */
-const DEFAULT_MODELS = ["fireworks/kimi-k2.7-code", "anthropic/claude-opus-4-8", "openai/gpt-5.5"];
 const DEFAULT_SAMPLES = 3;
 
 const SYSTEM_PROMPT = [
@@ -50,7 +46,7 @@ export interface ProbeOptions {
 	name?: string;
 	/** Independent samples per model. Only content stable across samples is trustworthy. */
 	samples?: number;
-	/** `provider/id` list. Defaults to the 3-model panel. */
+	/** Explicit `provider/id` list. Defaults to the configured main model. */
 	models?: string[];
 	maxTokens?: number;
 	signal?: AbortSignal;
@@ -71,17 +67,6 @@ export interface ProbeModelResult {
 export interface ProbeRun {
 	prompt: string;
 	results: ProbeModelResult[];
-}
-
-function resolveModel(ref: string): Model<Api> {
-	const slash = ref.indexOf("/");
-	if (slash === -1) throw new Error(`model must be "provider/id", got: ${ref}`);
-	// Runtime-validated below: getBundledModel returns undefined for an unknown provider/id.
-	const provider = ref.slice(0, slash) as GeneratedProvider;
-	const id = ref.slice(slash + 1);
-	const model = getBundledModel(provider, id);
-	if (!model) throw new Error(`unknown bundled model: ${ref}`);
-	return model;
 }
 
 function extractText(content: AssistantMessage["content"]): string {
@@ -109,12 +94,12 @@ function buildUserPrompt(name: string, schema: unknown, template: string): strin
 }
 
 export async function probe(opts: ProbeOptions): Promise<ProbeRun> {
-	const refs = opts.models && opts.models.length > 0 ? opts.models : DEFAULT_MODELS;
+	const refs = opts.models && opts.models.length > 0 ? opts.models : [undefined];
 	const name = opts.name ?? "the tool";
 	const sampleCount = Math.max(1, opts.samples ?? DEFAULT_SAMPLES);
 	const userPrompt = buildUserPrompt(name, opts.schema, opts.template);
 
-	const drawOne = async (model: Model<Api>): Promise<ProbeSample> => {
+	const drawOne = async ({ model, apiKey }: ConfiguredScriptModel): Promise<ProbeSample> => {
 		try {
 			const response = await completeSimple(
 				model,
@@ -123,6 +108,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeRun> {
 					messages: [{ role: "user", content: userPrompt, timestamp: Date.now() }],
 				},
 				{
+					apiKey,
 					maxTokens: opts.maxTokens ?? 1200,
 					disableReasoning: true,
 					signal: opts.signal,
@@ -139,14 +125,17 @@ export async function probe(opts: ProbeOptions): Promise<ProbeRun> {
 
 	const results = await Promise.all(
 		refs.map(async (ref): Promise<ProbeModelResult> => {
-			let model: Model<Api>;
+			let configured: ConfiguredScriptModel;
 			try {
-				model = resolveModel(ref);
+				configured = await resolveConfiguredScriptModel(ref);
 			} catch (err) {
-				return { model: ref, samples: [{ text: "", stopReason: "error", error: err instanceof Error ? err.message : String(err) }] };
+				return {
+					model: ref ?? "configured main model",
+					samples: [{ text: "", stopReason: "error", error: err instanceof Error ? err.message : String(err) }],
+				};
 			}
-			const samples = await Promise.all(Array.from({ length: sampleCount }, () => drawOne(model)));
-			return { model: `${model.provider}/${model.id}`, samples };
+			const samples = await Promise.all(Array.from({ length: sampleCount }, () => drawOne(configured)));
+			return { model: `${configured.model.provider}/${configured.model.id}`, samples };
 		}),
 	);
 
@@ -201,7 +190,12 @@ async function main(): Promise<void> {
 		template,
 		name: values.name,
 		samples: values.samples ? Number(values.samples) : undefined,
-		models: values.model ? values.model.split(",").map(s => s.trim()).filter(Boolean) : undefined,
+		models: values.model
+			? values.model
+					.split(",")
+					.map(s => s.trim())
+					.filter(Boolean)
+			: undefined,
 		maxTokens: values["max-tokens"] ? Number(values["max-tokens"]) : undefined,
 	});
 

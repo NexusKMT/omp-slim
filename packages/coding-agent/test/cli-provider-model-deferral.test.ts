@@ -10,10 +10,8 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
-// An id the startup catalog lacks may still come from an extension or account
-// discovery, so `--provider p --model id` defers like `--model p/id` instead of
-// exiting before either has run.
-describe("--provider with a model the startup catalog lacks", () => {
+// Extensions may register a model after CLI parsing, so defer unresolved selectors until they load.
+describe("--provider with a model registered by an extension", () => {
 	let tempDir: string;
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
@@ -21,24 +19,18 @@ describe("--provider with a model the startup catalog lacks", () => {
 	beforeAll(async () => {
 		tempDir = path.join(os.tmpdir(), `pi-cli-provider-deferral-${Snowflake.next()}`);
 		fs.mkdirSync(tempDir, { recursive: true });
-		fs.writeFileSync(
-			path.join(tempDir, "models.yml"),
-			`providers:
-  anthropic:
-    baseUrl: https://api.anthropic.com/v1
-    api: openai-completions
-    auth: none
-    models:
-      - id: claude-sonnet-4-5
-        name: Claude Sonnet 4.5
-        reasoning: false
-        input: [text]
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
-        contextWindow: 128000
-        maxTokens: 8192
-`,
-		);
 		authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
+		await Bun.write(
+			path.join(tempDir, "models.yml"),
+			[
+				"providers:",
+				"  gateway:",
+				"    baseUrl: https://models.example.invalid/v1",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: configured-model",
+			].join("\n"),
+		);
 		modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
 	});
 
@@ -52,7 +44,7 @@ describe("--provider with a model the startup catalog lacks", () => {
 	});
 
 	async function deferredPattern(cliArgs: string[]): Promise<string | string[] | undefined> {
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("gateway", "test-key");
 		vi.spyOn(process, "exit").mockImplementation((code?: number | string | null) => {
 			throw new Error(`buildSessionOptions exited with ${code}`);
 		});
@@ -68,134 +60,105 @@ describe("--provider with a model the startup catalog lacks", () => {
 	}
 
 	test("defers the provider-qualified selector to post-extension resolution", async () => {
-		expect(await deferredPattern(["--provider", "anthropic", "--model", "claude-unreleased-9"])).toBe(
-			"anthropic/claude-unreleased-9",
+		expect(await deferredPattern(["--provider", "gateway", "--model", "extension-model"])).toBe(
+			"gateway/extension-model",
 		);
 	});
 
 	test("does not double the provider prefix", async () => {
-		expect(await deferredPattern(["--provider", "anthropic", "--model", "anthropic/claude-unreleased-9"])).toBe(
-			"anthropic/claude-unreleased-9",
+		expect(await deferredPattern(["--provider", "gateway", "--model", "gateway/extension-model"])).toBe(
+			"gateway/extension-model",
 		);
 	});
-
-	test("defers a discovery provider that holds no models until its refresh", async () => {
-		const hasProvider = modelRegistry.hasProvider.bind(modelRegistry);
-		vi.spyOn(modelRegistry, "hasProvider").mockImplementation(id => id === "proxy" || hasProvider(id));
-		expect(await deferredPattern(["--provider", "proxy", "--model", "some-model"])).toBe("proxy/some-model");
-	});
 });
 
-describe("print-mode suggestions for a provider-qualified miss", () => {
-	test("never lists other providers' models", async () => {
-		const home = path.join(os.tmpdir(), `pi-cli-qualified-hint-${Snowflake.next()}`);
-		fs.mkdirSync(home, { recursive: true });
-		try {
-			const proc = Bun.spawn(
-				[
-					process.execPath,
-					path.resolve(import.meta.dir, "../src/cli.ts"),
-					"--no-title",
-					"--no-lsp",
-					"--no-extensions",
-					"--no-tools",
-					"--no-session",
-					"-p",
-					"--provider",
-					"anthropic",
-					"--model",
-					"gpt-4o",
-					"hi",
-				],
-				{
-					cwd: home,
-					env: {
-						PATH: process.env.PATH,
-						HOME: home,
-						USERPROFILE: home,
-						TMPDIR: process.env.TMPDIR,
-						NO_COLOR: "1",
-						ANTHROPIC_API_KEY: "test-key",
-						OPENAI_API_KEY: "test-key",
-					},
-					stdin: "ignore",
-					stdout: "pipe",
-					stderr: "pipe",
+describe("print mode with an unavailable model", () => {
+	test.each([
+		{
+			name: "CLI selector",
+			args: ["--provider", "gateway", "--model", "missing-model"],
+			error: 'Model "gateway/missing-model" is not configured',
+		},
+		{
+			name: "configured selector",
+			args: [],
+			error: "Configured model gateway/missing-model is unavailable.",
+		},
+	])(
+		"rejects the $name without requesting another available model",
+		async ({ args, error }) => {
+			const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "pi-cli-unavailable-model-"));
+			const agentDir = path.join(workspace, "agent");
+			let providerRequests = 0;
+			const provider = Bun.serve({
+				hostname: "127.0.0.1",
+				port: 0,
+				fetch() {
+					providerRequests++;
+					return Response.json({ error: { message: "Unexpected request" } }, { status: 500 });
 				},
-			);
-			const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-			expect(exitCode).toBe(1);
-			expect(stderr).toContain('Model "anthropic/gpt-4o" is not configured');
-			expect(stderr).not.toContain("openai/");
-		} finally {
-			removeSyncWithRetries(home);
-		}
-	}, 60_000);
-});
-
-describe("print mode with a stale configured default", () => {
-	test("warns on stderr naming the stale default", async () => {
-		const home = path.join(os.tmpdir(), `pi-cli-stale-default-${Snowflake.next()}`);
-		const agentDir = path.join(home, ".omp", "agent");
-		fs.mkdirSync(agentDir, { recursive: true });
-		fs.writeFileSync(
-			path.join(agentDir, "config.yml"),
-			"modelRoles:\n  default: anthropic/claude-sonnet-9-9\nretry:\n  enabled: false\n",
-		);
-		try {
-			const proc = Bun.spawn(
-				[
-					process.execPath,
-					path.resolve(import.meta.dir, "../src/cli.ts"),
-					"--no-title",
-					"--no-lsp",
-					"--no-extensions",
-					"--no-tools",
-					"--no-session",
-					"-p",
-					"hi",
-				],
-				{
-					cwd: home,
-					env: {
-						PATH: process.env.PATH,
-						HOME: home,
-						USERPROFILE: home,
-						TMPDIR: process.env.TMPDIR,
-						NO_COLOR: "1",
-						ANTHROPIC_API_KEY: "test-key",
-						// The fallback model's request never reaches Anthropic; the test stops the run once the warning is out.
-						ANTHROPIC_BASE_URL: "http://127.0.0.1:9",
+			});
+			try {
+				await Bun.write(
+					path.join(agentDir, "config.yml"),
+					"model: gateway/missing-model\nretry:\n  enabled: false\n",
+				);
+				await Bun.write(
+					path.join(agentDir, "models.yml"),
+					`providers:
+  other:
+    baseUrl: ${provider.url.href}v1
+    apiKey: test-key
+    models:
+      - id: available-model
+`,
+				);
+				const proc = Bun.spawn(
+					[
+						process.execPath,
+						path.resolve(import.meta.dir, "../src/cli.ts"),
+						"--no-title",
+						"--no-lsp",
+						"--no-extensions",
+						"--no-tools",
+						"--no-session",
+						"-p",
+						...args,
+						"hi",
+					],
+					{
+						cwd: workspace,
+						env: {
+							PATH: process.env.PATH,
+							TMPDIR: process.env.TMPDIR,
+							PI_CODING_AGENT_DIR: agentDir,
+							NO_COLOR: "1",
+						},
+						stdin: "ignore",
+						stdout: "pipe",
+						stderr: "pipe",
 					},
-					stdin: "ignore",
-					stdout: "pipe",
-					stderr: "pipe",
-				},
-			);
-			const warning = "Configured model anthropic/claude-sonnet-9-9 is unavailable.";
-			const stderr = await readUntil(proc.stderr, warning);
-			proc.kill();
-			await proc.exited;
-			expect(stderr).toContain(warning);
-		} finally {
-			removeSyncWithRetries(home);
-		}
-	}, 60_000);
+				);
+				try {
+					const [exitCode, stdout, stderr] = await Promise.all([
+						proc.exited,
+						new Response(proc.stdout).text(),
+						new Response(proc.stderr).text(),
+					]);
+					expect(exitCode).toBe(1);
+					expect(stderr).toContain(error);
+					expect(stderr).not.toContain("other/available-model");
+					expect(stdout).toBe("");
+					expect(providerRequests).toBe(0);
+				} finally {
+					proc.kill();
+					await proc.exited;
+				}
+			} finally {
+				provider.stop(true);
+				removeSyncWithRetries(workspace);
+			}
+		},
+		60_000,
+	);
 });
-
-/** Stderr read until it contains `needle`, or all of it once the stream ends without it. */
-async function readUntil(stream: ReadableStream<Uint8Array>, needle: string): Promise<string> {
-	const reader = stream.getReader();
-	const decoder = new TextDecoder();
-	let text = "";
-	try {
-		while (!text.includes(needle)) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			text += decoder.decode(value, { stream: true });
-		}
-	} finally {
-		reader.releaseLock();
-	}
-	return text;
-}

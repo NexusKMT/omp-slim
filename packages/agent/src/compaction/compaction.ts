@@ -792,9 +792,7 @@ export async function generateSummary(
 				options,
 			);
 		} catch (error) {
-			// The catalog window can overstate what the provider actually accepts:
-			// `claude-sonnet-4-5` advertises 1M but is beta-gated to 200k on OAuth
-			// credentials (see `anthropic.ts` — the 1M beta is never advertised).
+			// The configured window can overstate what the endpoint actually accepts.
 			// Halve and re-plan rather than failing the whole compaction on a
 			// window size only the provider can tell us is wrong.
 			// Halve what was actually SENT, not the budget it was planned against:

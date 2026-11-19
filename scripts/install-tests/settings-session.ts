@@ -55,7 +55,7 @@ import { cfgTaskAgentModelOverrides } from "@oh-my-pi/pi-coding-agent/task/setti
 import { hasMatch } from "@oh-my-pi/pi-natives";
 
 function registerFixtureProvider(api) {
-	// Same registration shape as sdk-default-role-extension-provider.test.ts.
+	// Same registration shape as sdk-extension-model-selection.test.ts.
 	api.registerProvider("fixture", {
 		baseUrl: fixture.baseUrl,
 		apiKey: "offline-fixture-key",

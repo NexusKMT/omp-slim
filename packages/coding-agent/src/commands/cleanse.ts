@@ -20,8 +20,7 @@ export default class Cleanse extends Command {
 		}),
 		model: Flags.string({
 			char: "m",
-			description: "Subagent model selector",
-			default: "@smol",
+			description: "Configured model selector (defaults to the main model)",
 		}),
 		tests: Flags.boolean({
 			char: "t",
@@ -40,9 +39,9 @@ export default class Cleanse extends Command {
 		"omp cleanse --all",
 		'omp cleanse "ts errors"',
 		"omp cleanse -n 8",
-		"omp cleanse -m opus",
+		"omp cleanse -m local/chat",
 		"omp cleanse -t",
-		"omp cleanse --agents 12 --model anthropic/claude-opus-4-6",
+		"omp cleanse --agents 12 --model local/chat",
 	];
 
 	async run(): Promise<void> {

@@ -186,7 +186,7 @@ Task dispatch uses the current parent model. Agent frontmatter, legacy `task.age
 
 Every worker request is checked against its inherited model identity. Automatic model fallback and provider-side model fallback are disabled. Missing credentials or an unavailable model fails the request instead of choosing another model. Seance retains the selected transcript context while using the current parent model. Revived workers take the current live parent's model when available and otherwise retain the saved inherited model.
 
-Manual effort, tool selection, output schemas, service tiers, and account pools remain independent controls on the same model. Advisors and compaction also use their owning session's current model.
+Manual effort, tool selection and output schemas remain independent controls on the same model. Advisors and compaction also use their owning session's current model.
 
 Compaction triggers are separate from model and service-tier selection: an exact, case-sensitive
 `task.agentCompactionThresholdOverrides[agentName]` entry (`90000` or `"80%"`) replaces the
@@ -209,24 +209,6 @@ parked agent revived after a restart keeps its per-agent tier instead of re-deri
 `tier.subagent`. The entry is looked up by task/eval dispatch only; Vibe workers launched through
 the same executor keep `tier.subagent`. Service tiers are configuration-only; agent frontmatter and
 the task/eval wire formats do not expose a tier field or automatic Fast policy.
-
-Account selection is independent of model and service-tier selection: an exact, case-sensitive
-`task.agentAccountPools[agentName]` entry maps provider ids to OAuth identity keys (the `identityKey`
-values broker [client account pools](./auth-broker-gateway.md#client-account-pools-routing-not-authorization)
-use, such as `email:<address>|org:<id>` for Anthropic; [`omp usage accounts`](./cli-reference.md)
-lists them). For each listed provider the child authenticates
-only with those accounts: ranking, the parent's copied account affinity, restored pins, fallback
-passes, credential rotation, and saved-reset restores stay inside the pool, and runtime,
-environment, and stored API keys
-are not used; a `models.yml` `apiKey` for the provider fails the request instead of sending a pooled
-token to that endpoint. When no pooled account can serve, the request fails with `No API key for
-provider: … restricted to its OAuth account pool` instead of borrowing another account; an empty
-list allows no account. Saved resets about to expire are still salvaged on every account, because
-salvage serves the account that holds the reset. Pools select accounts for the inherited model; they never pick another model or provider. The pool covers every key lookup the agent makes, whatever provider
-session id it carries: fresh or reset sessions, advisors, title generation, skill compression, and
-subagents it spawns without their own entry (an entry of their own replaces it). Vibe workers take
-the pool from their first turn, and a parked agent revived in the same process or after a restart
-takes the live entry for its agent name. A custom SDK `getApiKey` resolver bypasses pools.
 
 Runtime output schema precedence is:
 

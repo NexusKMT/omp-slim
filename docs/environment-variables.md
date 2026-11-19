@@ -28,397 +28,62 @@ Variables declared on a setting definition (see [settings precedence](./settings
 
 ---
 
-## 1) Model/provider authentication
-
-These are consumed via `getEnvApiKey()` (`packages/ai/src/stream.ts`) unless noted otherwise.
-
-Plain provider credential names come from `env` entries in `packages/catalog/src/compat/rules/providers/*.kdl` and `auth/*.kdl`; `packages/ai/src/registry/hooks/env.ts` supplies computed Foundry, Bedrock, and Vertex resolvers.
-
-### Core provider credentials
-
-| Variable                              | Used for                                           | Required when                                                  | Notes / precedence                                                                                                                           |
-| ------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_OAUTH_TOKEN`               | Anthropic API auth                                 | Using Anthropic with OAuth token auth                          | Takes precedence over `ANTHROPIC_API_KEY` for provider auth resolution                                                                       |
-| `ANTHROPIC_API_KEY`                   | Anthropic API auth                                 | Using Anthropic without OAuth token                            | Fallback after `ANTHROPIC_OAUTH_TOKEN`                                                                                                       |
-| `ANTHROPIC_FOUNDRY_API_KEY`           | Anthropic via Azure Foundry / enterprise gateway   | `CLAUDE_CODE_USE_FOUNDRY` enabled                              | Takes precedence over `ANTHROPIC_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` when Foundry mode is enabled                                           |
-| `OPENAI_API_KEY`                      | OpenAI auth                                        | Using OpenAI-family providers without explicit apiKey argument | Used by OpenAI Completions/Responses providers                                                                                               |
-| `OPENAI_CODEX_OAUTH_TOKEN`            | OpenAI Codex auth                                  | Using `openai-codex` provider                                  | Environment-supplied Codex OAuth token                                                                                                       |
-| `GEMINI_API_KEY`                      | Google Gemini auth                                 | Using `google` provider models                                 | Primary key for Gemini provider mapping                                                                                                      |
-| `GOOGLE_API_KEY`                      | Gemini image tool auth fallback                    | Using `gemini_image` tool without `GEMINI_API_KEY`             | Used by coding-agent image tool fallback path                                                                                                |
-| `GROQ_API_KEY`                        | Groq auth                                          | Using Groq models                                              |                                                                                                                                              |
-| `CEREBRAS_API_KEY`                    | Cerebras auth                                      | Using Cerebras models                                          |                                                                                                                                              |
-| `FIREWORKS_API_KEY`                   | Fireworks auth                                     | Using Fireworks models                                         |                                                                                                                                              |
-| `FIREPASS_API_KEY`                    | Fire Pass auth                                     | Using Fire Pass models                                         |                                                                                                                                              |
-| `TOGETHER_API_KEY`                    | Together auth                                      | Using `together` provider                                      |                                                                                                                                              |
-| `MODULAR_API_KEY`                     | Modular auth                                       | Using `modular` provider                                       | Also configured via the interactive API-key login (`/login modular`)                                                                         |
-| `ABLITERATION_API_KEY` / `ABLIT_KEY`  | Abliteration auth                                  | Using `abliteration` provider                                  | `ABLITERATION_API_KEY` wins                                                                                                                  |
-| `AIMLAPI_API_KEY`                     | AIML API auth                                      | Using `aimlapi` provider                                       | OpenAI-compatible AIML API endpoint at `https://api.aimlapi.com/v1`                                                                          |
-| `HUGGINGFACE_HUB_TOKEN`               | Hugging Face auth                                  | Using `huggingface` provider                                   | Primary Hugging Face token env var                                                                                                           |
-| `HF_TOKEN`                            | Hugging Face auth                                  | Using `huggingface` provider                                   | Fallback when `HUGGINGFACE_HUB_TOKEN` is unset                                                                                               |
-| `SYNTHETIC_API_KEY`                   | Synthetic auth                                     | Using Synthetic models                                         |                                                                                                                                              |
-| `NVIDIA_API_KEY`                      | NVIDIA auth                                        | Using `nvidia` provider                                        |                                                                                                                                              |
-| `NANO_GPT_API_KEY`                    | NanoGPT auth                                       | Using `nanogpt` provider                                       |                                                                                                                                              |
-| `NOVITA_API_KEY`                      | Novita auth                                        | Using `novita` provider                                        |                                                                                                                                              |
-| `VENICE_API_KEY`                      | Venice auth                                        | Using `venice` provider                                        |                                                                                                                                              |
-| `LITELLM_API_KEY`                     | LiteLLM auth                                       | Using `litellm` provider                                       | OpenAI-compatible LiteLLM proxy key                                                                                                          |
-| `LM_STUDIO_API_KEY`                   | LM Studio auth (optional)                          | Using `lm-studio` provider with authenticated hosts            | Local LM Studio usually runs without auth; any non-empty token works when a key is required                                                  |
-| `OLLAMA_API_KEY`                      | Ollama auth (optional)                             | Using `ollama` provider with authenticated hosts               | Local Ollama usually runs without auth; any non-empty token works when a key is required                                                     |
-| `LLAMA_CPP_API_KEY`                   | llama.cpp auth (optional)                          | Using `llama.cpp` provider with authenticated hosts            | Local llama.cpp usually runs without auth; any non-empty token works when a key is configured                                                |
-| `XIAOMI_API_KEY`                      | Xiaomi MiMo auth                                   | Using `xiaomi` provider                                        |                                                                                                                                              |
-| `XIAOMI_TOKEN_PLAN_AMS_API_KEY`       | Xiaomi MiMo Token Plan auth (AMS)                  | Using `xiaomi-token-plan-ams` provider                         |                                                                                                                                              |
-| `XIAOMI_TOKEN_PLAN_CN_API_KEY`        | Xiaomi MiMo Token Plan auth (CN)                   | Using `xiaomi-token-plan-cn` provider                          |                                                                                                                                              |
-| `XIAOMI_TOKEN_PLAN_SGP_API_KEY`       | Xiaomi MiMo Token Plan auth (SGP)                  | Using `xiaomi-token-plan-sgp` provider                         |                                                                                                                                              |
-| `MOONSHOT_API_KEY`                    | Moonshot auth                                      | Using `moonshot` provider                                      | `KIMI_API_KEY` is accepted as a fallback alias                                                                                               |
-| `STEPFUN_API_KEY`                     | StepFun auth                                       | Using `stepfun` provider                                       | Keys are region-scoped: the `.ai` key works against `api.stepfun.ai`, the `.com` key against `api.stepfun.com`                               |
-| `HELMCODE_API_KEY`                    | Helmcode auth                                      | Using `helmcode` provider                                      |                                                                                                                                              |
-| `XAI_API_KEY`                         | xAI auth                                           | Using xAI models or as fallback for `xai-oauth`                |                                                                                                                                              |
-| `XAI_OAUTH_TOKEN`                     | xAI OAuth/SuperGrok auth                           | Using `xai-oauth` provider                                     | Takes precedence over `XAI_API_KEY` for `xai-oauth`                                                                                          |
-| `OPENROUTER_API_KEY`                  | OpenRouter auth                                    | Using OpenRouter models                                        | Also used by image tool when preferred/auto provider is OpenRouter                                                                           |
-| `MISTRAL_API_KEY`                     | Mistral auth                                       | Using Mistral models                                           |                                                                                                                                              |
-| `ZAI_API_KEY`                         | z.ai auth                                          | Using z.ai models                                              | Also used by z.ai web search provider                                                                                                        |
-| `ZHIPU_API_KEY`                       | Zhipu Coding Plan auth                             | Using `zhipu-coding-plan` provider                             |                                                                                                                                              |
-| `UMANS_AI_CODING_PLAN_API_KEY`        | Umans AI Coding Plan auth                          | Using `umans` provider                                         |                                                                                                                                              |
-| `MINIMAX_API_KEY`                     | MiniMax auth                                       | Using `minimax` provider                                       |                                                                                                                                              |
-| `MINIMAX_CODE_API_KEY`                | MiniMax Code auth                                  | Using `minimax-code` provider                                  |                                                                                                                                              |
-| `MINIMAX_CODE_CN_API_KEY`             | MiniMax Code CN auth                               | Using `minimax-code-cn` provider                               |                                                                                                                                              |
-| `OPENCODE_API_KEY`                    | OpenCode auth                                      | Using `opencode-go` / `opencode-zen` models                    |                                                                                                                                              |
-| `QIANFAN_API_KEY`                     | Qianfan auth                                       | Using `qianfan` provider                                       |                                                                                                                                              |
-| `QWEN_OAUTH_TOKEN`                    | Qwen Portal auth                                   | Using `qwen-portal` with OAuth token                           | Takes precedence over `QWEN_PORTAL_API_KEY`                                                                                                  |
-| `QWEN_PORTAL_API_KEY`                 | Qwen Portal auth                                   | Using `qwen-portal` with API key                               | Fallback after `QWEN_OAUTH_TOKEN`                                                                                                            |
-| `ZENMUX_API_KEY`                      | ZenMux auth                                        | Using `zenmux` provider                                        | Used for ZenMux OpenAI and Anthropic-compatible routes                                                                                       |
-| `COMMAND_CODE_API_KEY`                | Command Code auth                                  | Using `commandcode` provider                                   | `COMMANDCODE_API_KEY` is accepted as a legacy alias                                                                                          |
-| `CHARM_HYPER_API_KEY`                 | Charm Hyper auth                                   | Using `charm-hyper` provider                                   | `HYPER_API_KEY` is accepted as a fallback alias                                                                                              |
-| `VLLM_API_KEY`                        | vLLM auth/discovery opt-in                         | Using `vllm` provider (local OpenAI-compatible servers)        | Any non-empty value works for no-auth local servers                                                                                          |
-| `CURSOR_ACCESS_TOKEN`                 | Cursor provider auth                               | Using Cursor provider                                          | `CURSOR_API_KEY` is accepted as an alias                                                                                                     |
-| `AI_GATEWAY_API_KEY`                  | Vercel AI Gateway auth                             | Using `vercel-ai-gateway` provider                             | `VERCEL_AI_GATEWAY_API_KEY` is accepted as an alias                                                                                          |
-| `CLOUDFLARE_AI_GATEWAY_API_KEY`       | Cloudflare AI Gateway auth                         | Using `cloudflare-ai-gateway` provider                         | Gateway token with AI Gateway Run permission; `/login` stores it with the routing IDs                                                        |
-| `CLOUDFLARE_API_TOKEN`                | Cloudflare Workers AI auth                         | Using `cloudflare-workers-ai` provider (Clef judges)           | API token with Workers AI Read and Edit permissions; `CLOUDFLARE_AUTH_TOKEN` is accepted as a fallback                                       |
-| `CLOUDFLARE_ACCOUNT_ID`               | Cloudflare AI Gateway / Workers AI account routing | Using an environment-supplied gateway or Workers AI token      | Not required when the account ID was stored by `/login`                                                                                      |
-| `CLOUDFLARE_GATEWAY_ID`               | Cloudflare AI Gateway selection                    | Using an environment-supplied gateway token                    | Gateway slug, commonly `default`; not required when stored by `/login`                                                                       |
-| `SNOWFLAKE_PAT`                       | Snowflake Cortex auth                              | Using `snowflake` provider without `/login`                    | Programmatic access token; prefer short-lived and role-restricted                                                                            |
-| `SNOWFLAKE_ACCOUNT`                   | Snowflake Cortex account routing                   | Using `SNOWFLAKE_PAT`                                          | Account identifier (`orgname-accountname`) or account URL; not required after `/login`                                                       |
-| `ALIBABA_CODING_PLAN_API_KEY`         | Alibaba Coding Plan auth                           | Using `alibaba-coding-plan` provider                           |                                                                                                                                              |
-| `ALIBABA_TOKEN_PLAN_API_KEY`          | QwenCloud Token Plan auth                          | Using `alibaba-token-plan` provider                            | Preferred provider-specific name                                                                                                             |
-| `BAILIAN_TOKEN_PLAN_API_KEY`          | QwenCloud Token Plan auth                          | Using `alibaba-token-plan` provider                            | Compatible with Qwen Code's Token Plan preset                                                                                                |
-| `CORAL_API_KEY`                       | CoralBricks auth (alias: `CORALBRICKS_API_KEY`)    | Using `coralbricks` provider                                   |                                                                                                                                              |
-| `DEEPINFRA_API_KEY`                   | DeepInfra auth                                     | Using `deepinfra` provider                                     |                                                                                                                                              |
-| `DEEPSEEK_API_KEY`                    | DeepSeek auth                                      | Using DeepSeek models                                          |                                                                                                                                              |
-| `SILICONFLOW_API_KEY`                 | SiliconFlow auth                                   | Using `siliconflow` provider                                   |                                                                                                                                              |
-| `SILICONFLOW_CN_API_KEY`              | SiliconFlow (China) auth                           | Using `siliconflow-cn` provider                                |                                                                                                                                              |
-| `KILO_API_KEY`                        | Kilo auth                                          | Using Kilo models                                              |                                                                                                                                              |
-| `OLLAMA_CLOUD_API_KEY`                | Ollama Cloud auth                                  | Using `ollama-cloud` provider                                  |                                                                                                                                              |
-| `CLINE_API_KEY`                       | ClinePass subscription + free-tier auth            | Using the `cline-pass` provider                                | Official Cline API-key variable                                                                                                              |
-| `YOLO_AUTO_API_KEY`                   | Yolo-Auto auth                                     | Using `yolo-auto` provider                                     | Flat-rate Qwen models; validated against `https://yolo-auto.com/v1/models`                                                                   |
-| `WAFER_SERVERLESS_API_KEY`            | Wafer Serverless auth                              | Using `wafer-serverless` provider                              | Pay-as-you-go Wafer SKU; validated against `https://pass.wafer.ai/v1/models`                                                                 |
-| `GITLAB_TOKEN`                        | GitLab Duo auth                                    | Using `gitlab-duo` / `gitlab-duo-agent` providers              | Both GitLab providers read the same token                                                                                                    |
-| `BASETEN_API_KEY`                     | Baseten auth                                       | Using `baseten` provider                                       | Also configured via the interactive API-key login (`/login baseten`, key from the Baseten dashboard)                                         |
-| `COREWEAVE_API_KEY` / `WANDB_API_KEY` | CoreWeave Serverless Inference auth                | Using `coreweave` provider                                     | Either variable works (W&B fallback). `COREWEAVE_PROJECT` (fallback `WANDB_INFERENCE_PROJECT`) supplies the required `OpenAI-Project` header |
-| `SAKANA_API_KEY` / `FUGU_API_KEY`     | Sakana AI auth                                     | Using `sakana` provider                                        | Either variable works; `SAKANA_BASE_URL` / `FUGU_BASE_URL` override the request base URL                                                     |
-| `SAMBANOVA_API_KEY`                   | SambaNova Cloud auth                               | Using `sambanova` provider                                     | Also configured via the interactive API-key login (`/login sambanova`)                                                                       |
-| `DEVIN_API_KEY`                       | Devin auth                                         | Using `devin` provider                                         | Also available via the interactive login (`/login devin`, OAuth)                                                                             |
-| `AIAND_API_KEY`                       | ai& auth                                           | Using `aiand` provider                                         |                                                                                                                                              |
-| `GMI_API_KEY`                         | GMI Cloud auth                                     | Using `gmi-cloud` provider                                     |                                                                                                                                              |
-| `MODEL_API_KEY` / `META_API_KEY`      | Meta Model API auth                                | Using `meta` provider                                          | Either variable works                                                                                                                        |
-| `INCEPTION_API_KEY`                   | Inception Mercury API auth                         | Using `inception` provider                                     | Also available via `/login inception`, which validates the key with a one-token Mercury 3 request (`/v1/models` is public)                   |
-| `SINGULARITYAPI_DEV_API_KEY`          | SingularityAPI universal gateway auth              | Using `singularityapi-dev` provider                            | Pay-as-you-go, 300+ models; validated against `https://api.singularityapi.dev/v1/models`                                                     |
-| `SINGULARITYAPI_TECH_API_KEY`         | SingularityAPI reserved lanes auth                 | Using `singularityapi-tech` provider                           | Slot-reserved DeepSeek lanes; validated against `https://api.singularityapi.tech/v1/models`                                                  |
-| `SCW_SECRET_KEY`                      | Scaleway Generative APIs auth                      | Using `scaleway` provider                                      | Serverless open-weight chat models; validated against `https://api.scaleway.ai/v1/models`; `SCW_API_KEY` is accepted as a legacy alias       |
-
-### GitHub/Copilot tokens
-
-| Variable                 | Used for                                | Notes                                                                                                                                                                                          |
-| ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `COPILOT_GITHUB_TOKEN`   | GitHub Copilot provider auth            | Generic GitHub tokens are not used here                                                                                                                                                        |
-| `COPILOT_INTEGRATION_ID` | GitHub Copilot client identity override | Default `copilot-chat` (chat surface). Denied requests retry once as the Copilot CLI; set to pin the client id and skip the retry ([#11372](https://github.com/can1357/oh-my-pi/issues/11372)) |
-| `GH_TOKEN`               | GitHub API auth in web scraper          | Web scraper fallback after `GITHUB_TOKEN`                                                                                                                                                      |
-| `GITHUB_TOKEN`           | GitHub API auth in web scraper          | Web scraper checks this before `GH_TOKEN`                                                                                                                                                      |
-
-### Auth broker / auth gateway (remote credential vault)
-
-When the broker is enabled, the local SQLite credential store is bypassed and all OAuth refresh / access tokens live on the broker host. See [`auth-broker-gateway.md`](./auth-broker-gateway.md) for the full protocol, CLI surface, and 5-min/15-s usage cache layering.
-
-| Variable                            | Used for                                                                                      | Required when                                                                                                             | Notes / precedence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ----------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OMP_AUTH_BROKER_URL`               | Base URL of the remote auth-broker (e.g. `https://broker.tailnet:8765`); selects broker mode  | Resolving credentials through a broker; also required by `omp auth-gateway serve` (the gateway is itself a broker client) | Wins over `auth.broker.url` in `config.yml`. When set with no resolvable token, `resolveAuthBrokerConfig()` hard-errors instead of falling back to local SQLite.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `OMP_AUTH_BROKER_TOKEN`             | Bearer token sent on every broker endpoint except `/v1/healthz`                               | `OMP_AUTH_BROKER_URL` is set and no token is available from `auth.broker.token` or `<config-dir>/auth-broker.token`       | Resolution: this env → `auth.broker.token` (`$ENV_NAME` indirection supported) → `<config-dir>/auth-broker.token` (mode `0600`). `<config-dir>` is `~/.omp/` (respecting `PI_CONFIG_DIR`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `OMP_AUTH_BROKER_SNAPSHOT_TTL_MS`   | Freshness window for the encrypted local broker snapshot cache                                | Optional in broker mode                                                                                                   | Default `3600000` (1 h). Freshness is based on broker `snapshot.generatedAt`; `0` disables cache reads/writes and forces the old blocking fetch every startup.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `OMP_AUTH_BROKER_SNAPSHOT_CACHE`    | Path to the encrypted local broker snapshot cache                                             | Optional in broker mode                                                                                                   | Defaults to `~/.omp/cache/auth-broker-snapshot.enc` (or XDG cache equivalent). Useful for tests, ephemeral hosts, or relocating the `0600` cache file.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `OMP_AUTH_BROKER_ACCOUNT_POOL_FILE` | Process-scoped broker credential visibility (OAuth accounts and API keys) for a broker client | Optional in broker mode                                                                                                   | Path to a JSON object mapping provider IDs to rules: an `identityKey` array (`[]` hides that provider's OAuth accounts; API keys stay visible), `true`/`false` (everything/nothing), or `{ "accounts"?: [...], "apiKeys"?: boolean }`. Providers without an entry follow the `"*"` rule, else are unrestricted; `"*": false` makes the file an allow-list. Parsed once at startup and fails closed on invalid input. Not broker authorization: a direct client still holds the broker token. Inside `omp auth-gateway serve` it bounds what the gateway's clients can reach; see [auth-broker-gateway.md](./auth-broker-gateway.md#client-account-pools). |
-
-The gateway has no dedicated env vars — it inherits `OMP_AUTH_BROKER_*`. Its own inbound bearer token lives at `<config-dir>/auth-gateway.token` and is managed via `omp auth-gateway token`.
-
----
-
-## 2) Provider-specific runtime configuration
-
-### Outbound proxy routing
-
-Provider HTTP fetches resolve proxies in this order after applying `NO_PROXY` / `no_proxy`:
-
-1. `PI_PROXY_<PROVIDER>` (provider ID uppercased, non-alphanumerics replaced with `_`, for example `PI_PROXY_GITHUB_COPILOT`)
-2. `PI_PROXY`
-3. `HTTPS_PROXY` / `https_proxy` for HTTPS and WebSocket targets, or `HTTP_PROXY` / `http_proxy` for HTTP
-4. `ALL_PROXY` / `all_proxy`
-
-Provider proxy lookups are cached for the process lifetime. Localhost targets bypass the provider fetch wrapper.
-
-Scope differs between the two `PI_PROXY` forms:
-
-- `PI_PROXY` is installed on the process-wide `fetch` at CLI startup, so it also
-  covers requests made outside the provider fetch wrapper — OAuth token refresh
-  and login, usage probes, model discovery. Without that, a region-blocked token
-  endpoint returns `403 Request not allowed` on refresh even though the stream
-  itself is proxied.
-- `PI_PROXY_<PROVIDER>` applies only to that provider's requests, and overrides
-  `PI_PROXY` for them. It does not cover the non-provider-scoped calls above; set
-  `PI_PROXY` too if the provider blocks your region.
-
-Loopback, link-local, private-range (`10/8`, `172.16/12`, `192.168/16`), and
-`NO_PROXY` targets always bypass, so local model servers and MCP hosts stay direct.
-
-### Request body compression
-
-Request bodies of 1 KiB or more are compressed when sent to a provider's own endpoint that decodes them, as declared by the `request-encodings` / `endpoint-hosts` catalog rules: the official Anthropic API (gzip), the ChatGPT Codex backend (zstd), and the GitHub Copilot API at `api[.individual|.business|.enterprise].githubcopilot.com` (zstd, falling back to gzip). Proxies, relays, models.yml gateways (even under a built-in provider id), and every other host receive uncompressed JSON. If an endpoint, or a TLS-inspecting proxy in front of it, rejects an encoding and the uncompressed resend succeeds, that encoding stays off for the host for the rest of the process.
-
-| Variable                 | Behavior                                                                          |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| `PI_REQUEST_COMPRESSION` | `0`/`false`/`no`/`off` sends every request body uncompressed (enabled by default) |
-
-### Anthropic API version
-
-| Variable                   | Behavior                                                                                                                                                                                                                                                                                                                                                                         |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PI_ANTHROPIC_API_VERSION` | `anthropic-version` sent to the official Anthropic API (`api.anthropic.com`): `2023-06-01` (default) or `2026-10-21`. Under `2026-10-21`, `temperature`/`top_p`/`top_k` are omitted because that version rejects them. Other hosts (Bedrock, Foundry, Copilot, gateways, Anthropic-compatible providers) stay on `2023-06-01`; unknown values log a warning and use `2023-06-01` |
-
-### Anthropic message threads
-
-| Variable                       | Behavior                                                                                                                                                                                                                                                       |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PI_ANTHROPIC_MESSAGE_THREADS` | Overrides the message-threads default (`message-threads-2026-08-12`: later turns send only new messages): on by default for Claude 4.5+ against `api.anthropic.com`, off elsewhere. `0` turns it off; `1` also enables it on other endpoints (Foundry, gateways) |
-
-### Anthropic Foundry Gateway (Azure / enterprise proxy)
-
-When `CLAUDE_CODE_USE_FOUNDRY` is enabled, Anthropic requests switch to Foundry mode:
-
-- Base URL resolves from `FOUNDRY_BASE_URL` (fallback remains model/default base URL if unset).
-- API key resolution for provider `anthropic` becomes:
-  `ANTHROPIC_FOUNDRY_API_KEY` → `ANTHROPIC_OAUTH_TOKEN` → `ANTHROPIC_API_KEY`.
-- `ANTHROPIC_CUSTOM_HEADERS` is parsed as comma/newline-separated `key: value`
-  pairs and merged into request headers. They are also forwarded when
-  `ANTHROPIC_BASE_URL` points to a non-Anthropic host (e.g. a corporate API
-  gateway), so enterprise gateways requiring proprietary auth headers work
-  without enabling Foundry mode.
-- `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` (same contract as Claude Code) makes
-  provider `anthropic` requests omit pre-release body fields and their
-  `anthropic-beta` tokens: `context_management`, the beta tool fields
-  (`strict`, `defer_loading`, `eager_input_streaming`) and mid-conversation
-  tool changes, `output_config.format` and `output_config.task_budget`, plus
-  `thinking.block_binding` and Anthropic server compaction. Effort, adaptive
-  thinking, interleaved thinking, and extended context stay. Unlike Claude
-  Code, the matching betas are also removed from caller-supplied betas and
-  `anthropic-beta` headers. Use it when an `ANTHROPIC_BASE_URL` gateway
-  rejects them; it works with or without Foundry mode. Which providers honor
-  it is the `honors-claude-code-beta-kill-switch` compat axis
-  (`compat.honorsClaudeCodeBetaKillSwitch` in `models.yml`).
-- TLS client/server material can be injected from env values:
-  `NODE_EXTRA_CA_CERTS`, `CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`.
-  Each accepts either:
-   - a filesystem path to PEM content, or
-   - inline PEM (including escaped `\n` sequences).
-
-   `NODE_EXTRA_CA_CERTS` is honoured for provider fetches (OpenAI-compatible,
-   Codex, Ollama, Azure Responses, Google, Anthropic) and remote MCP HTTP/SSE
-   transports. Bun's `fetch` does not consume the env var natively, so the
-   bundle is merged into `RequestInit.tls.ca` alongside the system root store,
-   including when loaded from the agent `.env` after process startup. The
-   `CLAUDE_CODE_*` mTLS material remains Anthropic-Foundry-specific.
-
-| Variable                                 | Value type                                     | Behavior                                                                                                                                                                                              |
-| ---------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLAUDE_CODE_USE_FOUNDRY`                | Boolean-like string (`1`, `true`, `yes`, `on`) | Enables Foundry mode for Anthropic provider                                                                                                                                                           |
-| `FOUNDRY_BASE_URL`                       | URL string                                     | Anthropic endpoint base URL in Foundry mode                                                                                                                                                           |
-| `ANTHROPIC_FOUNDRY_API_KEY`              | Token string                                   | Used for `Authorization: Bearer <token>`                                                                                                                                                              |
-| `ANTHROPIC_CUSTOM_HEADERS`               | Header list string                             | Extra headers; format `header-a: value, header-b: value` or newline-separated. Also forwarded outside Foundry whenever `ANTHROPIC_BASE_URL` is non-Anthropic.                                         |
-| `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` | Boolean-like string (`1`, `true`, `yes`, `on`) | Omits pre-release fields (`context_management`, beta tool fields, task budgets, structured-output format, `thinking.block_binding`, server compaction) and their beta headers on provider `anthropic` |
-| `NODE_EXTRA_CA_CERTS`                    | PEM path or inline PEM                         | Extra CA chain for server certificate validation                                                                                                                                                      |
-| `CLAUDE_CODE_CLIENT_CERT`                | PEM path or inline PEM                         | mTLS client certificate                                                                                                                                                                               |
-| `CLAUDE_CODE_CLIENT_KEY`                 | PEM path or inline PEM                         | mTLS client private key (must be paired with cert)                                                                                                                                                    |
-
-### Amazon Bedrock
-
-| Variable                                                                        | Default / behavior                                                                                                                              |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AWS_REGION`                                                                    | Primary region source                                                                                                                           |
-| `AWS_DEFAULT_REGION`                                                            | Fallback if `AWS_REGION` unset                                                                                                                  |
-| `AWS_PROFILE`                                                                   | Enables named profile auth path                                                                                                                 |
-| `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`                                   | Enables IAM key auth path                                                                                                                       |
-| `AWS_BEARER_TOKEN_BEDROCK`                                                      | Highest-precedence bearer token auth path; skips AWS profile/credential-chain lookup when set                                                   |
-| `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` / `AWS_CONTAINER_CREDENTIALS_FULL_URI` | Marks Bedrock as available in provider detection (credential resolution itself covers env keys, profiles/SSO/`credential_process`, then IMDSv2) |
-| `AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`                                  | Marks Bedrock as available in provider detection (same caveat as the ECS variables above)                                                       |
-| `AWS_BEDROCK_SKIP_AUTH`                                                         | Boolean flag injects dummy credentials for Converse (proxy/non-auth scenarios); empty defers to false                                           |
-| `HTTPS_PROXY` / `HTTP_PROXY`                                                    | Honored via Bun's native fetch proxy support (the provider no longer ships an AWS SDK / proxy-agent transport)                                  |
-| `NO_PROXY`                                                                      | Excludes matching hosts from Bun's native proxy routing                                                                                         |
-
-Region fallback in provider code: `options.region` → `AWS_REGION` → `AWS_DEFAULT_REGION` → `us-east-1`.
-
-The `bedrock-mantle` provider also detects bearer tokens and AWS credential sources through `packages/ai/src/registry/aws.ts`; `AWS_BEDROCK_SKIP_AUTH` applies only to the Converse provider's resolver, not Mantle.
-
-Additional credential-chain controls implemented by the native Bedrock resolver:
-
-| Variable                                                                      | Behavior                                                                |
-| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `AWS_SESSION_TOKEN`                                                           | Session token paired with `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
-| `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`                              | Override the shared credentials/config INI paths                        |
-| `AWS_SDK_LOAD_CONFIG`                                                         | `1`/`true` enables shared config loading without an explicit profile    |
-| `AWS_ROLE_SESSION_NAME`                                                       | Session name for web-identity role assumption                           |
-| `AWS_CONTAINER_AUTHORIZATION_TOKEN`, `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` | Authorization for ECS container credentials                             |
-| `AWS_EC2_METADATA_DISABLED`                                                   | `true` disables IMDSv2                                                  |
-| `AWS_EC2_METADATA_SERVICE_ENDPOINT`, `AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE` | Override IMDS endpoint / select the IPv6 fallback                       |
-
-### Azure OpenAI Responses
-
-| Variable                           | Default / behavior                                                          |
-| ---------------------------------- | --------------------------------------------------------------------------- |
-| `AZURE_OPENAI_API_KEY`             | Required unless API key passed as option                                    |
-| `AZURE_OPENAI_API_VERSION`         | Default `v1`                                                                |
-| `AZURE_OPENAI_BASE_URL`            | Direct base URL override                                                    |
-| `AZURE_OPENAI_RESOURCE_NAME`       | Used to construct base URL: `https://<resource>.openai.azure.com/openai/v1` |
-| `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` | Optional mapping string: `modelId=deploymentName,model2=deployment2`        |
-
-Base URL resolution: option `azureBaseUrl` → env `AZURE_OPENAI_BASE_URL` → option/env resource name → `model.baseUrl`.
-
-### Google Vertex AI
-
-| Variable                         | Required?                      | Notes                                                                                                                     |
-| -------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `GOOGLE_CLOUD_PROJECT`           | Yes (unless passed in options) | Primary project ID source                                                                                                 |
-| `GCP_PROJECT`                    | Fallback                       | Alternate project ID source                                                                                               |
-| `GCLOUD_PROJECT`                 | Fallback                       | Alternate project ID source                                                                                               |
-| `GOOGLE_CLOUD_PROJECT_ID`        | OAuth login helper only        | Used by Gemini CLI OAuth project discovery                                                                                |
-| `GOOGLE_VERTEX_LOCATION`         | Yes (unless passed in options) | Primary Vertex location source                                                                                            |
-| `GOOGLE_CLOUD_LOCATION`          | Fallback                       | Alternate Vertex location source                                                                                          |
-| `VERTEX_LOCATION`                | Fallback                       | Alternate Vertex location source                                                                                          |
-| `GOOGLE_CLOUD_API_KEY`           | Conditional                    | Direct Vertex API-key auth; otherwise ADC fallback can authenticate when project and location are set                     |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Conditional                    | If set, file must exist; otherwise ADC fallback path is checked (`~/.config/gcloud/application_default_credentials.json`) |
-
-`GOOGLE_CLOUD_ACCESS_TOKEN` (or the compatible `CLOUDSDK_AUTH_ACCESS_TOKEN` fallback) supplies an explicit Google OAuth access token and bypasses ADC token acquisition.
-
-### Kimi
-
-| Variable               | Default / behavior                                       |
-| ---------------------- | -------------------------------------------------------- |
-| `KIMI_CODE_OAUTH_HOST` | Primary OAuth host override                              |
-| `KIMI_OAUTH_HOST`      | Fallback OAuth host override                             |
-| `KIMI_CODE_BASE_URL`   | Overrides Kimi usage endpoint base URL (`usage/kimi.ts`) |
-
-OAuth host chain: `KIMI_CODE_OAUTH_HOST` → `KIMI_OAUTH_HOST` → `https://auth.kimi.com`.
-
-### OpenAI-compatible endpoint controls
-
-| Variable                            | Default / behavior                                                                                                                                                                                                                            |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPENAI_BASE_URL`                   | Base URL fallback for OpenAI-compatible requests when the model/provider supplies a default                                                                                                                                                   |
-| `MOONSHOT_BASE_URL`                 | Moonshot chat and model-discovery endpoint override                                                                                                                                                                                           |
-| `XAI_BASE_URL`                      | xAI endpoint override for `xai`/`xai-oauth` chat and image generation; applies only when the model uses the bundled `https://api.x.ai/v1` endpoint, so a models.yml `baseUrl` wins; never receives `xai-oauth` OAuth credentials |
-| `SAKANA_BASE_URL` / `FUGU_BASE_URL` | Sakana/Fugu endpoint override (`SAKANA_BASE_URL` wins)                                                                                                                                                                                        |
-| `PI_OPENROUTER_RESPONSES`           | Responses API is enabled unless set to `0`; `0` selects the OpenAI Completions route                                                                                                                                                          |
-
-### Gemini CLI and Antigravity compatibility
-
-| Variable                    | Default / behavior                                                                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PI_AI_GEMINI_CLI_VERSION`  | Overrides Gemini CLI user-agent version tag (`0.46.0` if unset)                                                                                   |
-| `PI_AI_ANTIGRAVITY_VERSION` | Overrides the auto-discovered Antigravity hub user-agent version; when unset and discovery fails, the fallback is `2.26.0`                        |
-| `PI_AI_ANTIGRAVITY_CL`      | Overrides Antigravity hub user-agent build changelist (`1005016104` if unset)                                                                     |
-| `PI_AI_ANTIGRAVITY_OS`      | Overrides Antigravity hub user-agent os_type (unset: the native build for the host OS, `darwin` or `linux`; other OSes report `linux`) |
-| `PI_AI_ANTIGRAVITY_ARCH`    | Overrides Antigravity hub user-agent arch (unset: that build's arch, `arm64` on macOS, `amd64` on Linux)                              |
-
-### GitLab Duo
-
-| Variable                         | Default / behavior                                                                                                                                                                                                                                                                                               |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GITLAB_CLIENT_ID`               | OAuth client ID. If unset, the bundled GitLab OAuth application client ID is used.                                                                                                                                                                                                                               |
-| `GITLAB_REDIRECT_URI`            | Exact OAuth redirect URI advertised to GitLab. If unset, the local callback uses `http://localhost:8080/callback`, with random-port fallback. Must use HTTP or HTTPS; loopback callbacks must use HTTP and bind the URI's host and port.                                                                         |
-| `GITLAB_DUO_NAMESPACE_ID`        | Workflow namespace override. Runtime options take precedence; otherwise namespace/project discovery uses the current credentials and working directory.                                                                                                                                                          |
-| `GITLAB_DUO_PROJECT_ID`          | Workflow project override by ID. Runtime `projectId`, then runtime `projectPath`, take precedence; this variable takes precedence over `GITLAB_DUO_PROJECT_PATH`.                                                                                                                                                |
-| `GITLAB_DUO_PROJECT_PATH`        | Workflow project override by path when no runtime project or `GITLAB_DUO_PROJECT_ID` is set.                                                                                                                                                                                                                     |
-| `GITLAB_DUO_WORKFLOW_DEFINITION` | Workflow definition override; runtime `workflowDefinition` takes precedence. Defaults to `ambient`.                                                                                                                                                                                                              |
-| `GITLAB_DUO_WORKFLOW_TRACE`      | Workflow tracing is enabled only when the value is exactly `1`. Each trace event is appended as one JSON object per line; trace write failures are ignored.                                                                                                                                                      |
-| `GITLAB_DUO_WORKFLOW_TRACE_FILE` | Trace output path. The value is trimmed; unset or blank defaults to the absolute path obtained by resolving `../../../../.tmp/gitlab-duo-workflow-trace.log` from the provider module (in a source checkout, `<repo>/.tmp/gitlab-duo-workflow-trace.log`). Missing parent directories are created automatically. |
-
-`GITLAB_CLIENT_ID` and `GITLAB_REDIRECT_URI` affect OAuth login. The four routing/creation
-overrides (`GITLAB_DUO_NAMESPACE_ID`, `GITLAB_DUO_PROJECT_ID`,
-`GITLAB_DUO_PROJECT_PATH`, and `GITLAB_DUO_WORKFLOW_DEFINITION`) affect
-`gitlab-duo-agent` Workflow namespace/project resolution or workflow creation; they
-do not configure OAuth. The two trace variables above affect only local diagnostic
-output. A non-loopback
-redirect URI cannot be served directly by the local callback listener and
-therefore completes through the paste-code path.
-
-### OpenAI Codex responses (feature/debug controls)
-
-| Variable                                    | Behavior                                                                                                                                                                                                      |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PI_CODEX_DEBUG`                            | `1`/`true` enables Codex provider debug logging                                                                                                                                                               |
-| `PI_CODEX_WEBSOCKET`                        | `1`/`true` enables websocket transport preference                                                                                                                                                             |
-| `PI_CODEX_RESPONSES_LITE`                   | `1`/`true` opts normal inference into Responses Lite; `0`/`false` forces the standard Responses body; unset defaults normal inference to full Responses                                                       |
-| `PI_OPENAI_STATEFUL`                        | Overrides the stateful-chaining default for the platform OpenAI Responses API (`previous_response_id`, forces `store: true`): on by default against api.openai.com, off elsewhere                             |
-| `PI_CODEX_WEBSOCKET_IDLE_TIMEOUT_MS`        | Positive integer override (default `300000`)                                                                                                                                                                  |
-| `PI_CODEX_WEBSOCKET_FIRST_EVENT_TIMEOUT_MS` | First-event timeout override (default `300000`)                                                                                                                                                               |
-| `PI_CODEX_WEBSOCKET_PING_INTERVAL_MS`       | Ping interval override (default `10000`)                                                                                                                                                                      |
-| `PI_CODEX_WEBSOCKET_PONG_TIMEOUT_MS`        | Pong timeout override (default `60000`)                                                                                                                                                                       |
-| `PI_CODEX_WEBSOCKET_MESSAGE_QUEUE_CAPACITY` | Buffered message capacity override (default `4096`)                                                                                                                                                           |
-| `PI_CODEX_WEBSOCKET_MAX_IDLE_REUSE_MS`      | Maximum idle time before a connection is not reused (default `30000`); `0` disables the idle-age cutoff                                                                                                       |
-| `PI_CODEX_WEBSOCKET_RETRY_BUDGET`           | Non-negative integer override (default `5`)                                                                                                                                                                   |
-| `PI_CODEX_WEBSOCKET_RETRY_DELAY_MS`         | Positive integer base backoff override (default `500`)                                                                                                                                                        |
-| `PI_STREAM_FIRST_EVENT_TIMEOUT_MS`          | Generic stream first-event timeout; `0` disables                                                                                                                                                              |
-| `PI_STREAM_IDLE_TIMEOUT_MS`                 | Generic stream idle timeout; `0` disables                                                                                                                                                                     |
-| `PI_OPENAI_STREAM_FIRST_EVENT_TIMEOUT_MS`   | OpenAI-specific first-event timeout override; `0` disables and takes precedence over the generic value. `omp config set providers.streamFirstEventTimeoutSeconds <seconds>` provides the persisted equivalent |
-| `PI_OPENAI_STREAM_IDLE_TIMEOUT_MS`          | OpenAI-specific idle timeout override; `0` disables and takes precedence over the generic value. `omp config set providers.streamIdleTimeoutSeconds <seconds>` provides the persisted equivalent              |
-
-### Cursor provider debug
-
-| Variable           | Behavior                                                                 |
-| ------------------ | ------------------------------------------------------------------------ |
-| `DEBUG_CURSOR`     | Enables provider debug logs; `2`/`verbose` for detailed payload snippets |
-| `DEBUG_CURSOR_LOG` | Optional file path for JSONL debug log output                            |
-
-### Prompt cache compatibility switch
-
-| Variable             | Behavior                                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PI_CACHE_RETENTION` | Cache-retention override where supported (`anthropic`, `openai-responses`, Bedrock). Accepts `long`, `short`, or `none`; other values are ignored |
-
----
-
-## 3) Web search subsystem
-
-### Search provider credentials
-
-`web_search` runs one HTTP engine, Parallel. Fetch readers share the same credential store.
-
-| Variable             | Used by                                                                                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `PARALLEL_API_KEY`   | Parallel Search API (search) and the `parallel` fetch reader. Without it, search still runs through Parallel's keyless public MCP endpoint; the reader needs it.    |
-| `FIRECRAWL_API_KEY`  | `firecrawl` fetch reader (required).                                                                                                                               |
-| `FIRECRAWL_BASE_URL` | Firecrawl endpoint override for self-hosting (`FIRECRAWL_API_URL` is a fallback alias).                                                                            |
-| `EXA_API_KEY`        | Exa MCP server; alternatively use `/login exa`. Exa's tools arrive as MCP tools, not as `web_search` engines.                                                      |
-
-Search needs no credential at all. There is no second search engine, no hosted search adapter and therefore no search-only model key: `ANTHROPIC_SEARCH_API_KEY`, the Perplexity variables, and the other engine keys (`BRAVE_API_KEY`, `TAVILY_API_KEY`, `KAGI_API_KEY`, `JINA_API_KEY`, `ZAI_API_KEY`, `TINYFISH_API_KEY`, `KEENABLE_API_KEY`, `MOONSHOT_SEARCH_*`, `OLLAMA_CLOUD_API_KEY`, `SEARXNG_*`) are gone.
-
-### TypeSafe judgments
-
-TypeSafe and the other native judgment APIs remain available in the provider catalog and lower-level `pi-ai` clients. These credentials authenticate their discovery and API requests. OMP Slim’s explicit `judge()` helper uses the current chat model, while `auto` thinking and unexpected-stop detection use local rules; none selects a separate judgment model.
-
-| Variable                 | Default / behavior                                                                                                                                                                                                                                          |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TYPESAFE_API_KEY`       | TypeSafe API key for discovery and System One requests; alternatively use `/login typesafe`                                                                                                                                                                 |
-| `TYPESAFE_BASE_URL`      | API root override (default `https://api.typesafe.ai`), used by model discovery, `/login` validation, and System One requests                                                                                                                                |
-| `OPENAI_API_KEY`         | Also authenticates the OpenAI Decisions judge `openai/gpt-6-luna-decisions` (GPT-6 Luna over `POST /v1/decisions`) in lower-level API clients                                                                                                 |
-| `CLOUDFLARE_API_TOKEN`   | Authenticates the Cloudflare Workers AI Clef judges (`cloudflare-workers-ai/@cf/cloudflare/clef`, `.../clef-flash`) with `CLOUDFLARE_ACCOUNT_ID`; alternatively use `/login cloudflare-workers-ai`                                                          |
-| `TYPESAFE_DEFAULT_MODEL` | Standalone `pi-ai` TypeSafe client default when its caller does not pass a model (default `jev-latest`). This does not override OMP Slim’s selected chat model or discovered model IDs. |
-
----
+## 1) Model endpoint authentication
+
+Endpoints and models are explicitly configured in `models.yml`; see
+[Models](./models.md) and [Providers](./providers.md). The namespace-derived key
+fallback is `<PROVIDER>_API_KEY`: uppercase the configured provider name and
+replace non-alphanumeric characters with `_`. For provider `local-chat`, the
+variable is `LOCAL_CHAT_API_KEY`. This fallback reads the process environment.
+
+An explicit `apiKey` or header value in `models.yml` can reference an exact
+variable name using the configuration value resolver. The `.env` loading rules
+above apply to that resolver. A provider with `auth: none` requires no key.
+There are no built-in supplier credential aliases, OAuth tokens, broker/gateway
+variables, or model-discovery endpoint variables.
+
+## 2) Model transport configuration
+
+Chat Completions requests resolve outbound proxies in this order, after local
+network and `NO_PROXY` exclusions:
+
+1. `PI_PROXY_<PROVIDER>`, using the normalized configured namespace.
+2. `PI_PROXY`.
+3. `HTTPS_PROXY` / `https_proxy` for HTTPS, or `HTTP_PROXY` / `http_proxy` for HTTP.
+4. `ALL_PROXY` / `all_proxy`.
+
+Provider proxy lookups are cached for the process lifetime. Loopback,
+link-local, private network and cloud metadata targets bypass the proxy.
+`PI_PROXY` also wraps process-wide fetches at CLI startup.
+
+`NODE_EXTRA_CA_CERTS` adds a custom CA bundle for Bun fetches. It accepts a file
+path or inline PEM; the standard root certificates remain included unless the
+caller has explicitly supplied its own CA list. A missing bundle is a
+configuration error.
+
+`PI_NO_STRICT` bypasses strict function-schema adaptation. Endpoint capabilities
+and wire fields are otherwise declared in `models.yml`, including
+`compat.maxTokensField`, `supportsUsageInStreaming`, `supportsDeveloperRole`,
+`supportsStrictMode`, and `supportsStore`.
+
+## 3) Web search and fetch
+
+Search backends are separate from model inference. Current integrations use
+public search pages, SearXNG, Exa, Firecrawl and Parallel; no supplier model
+request is used as a search fallback.
+
+| Variable | Use |
+| --- | --- |
+| `EXA_API_KEY` | Exa search authentication. |
+| `FIRECRAWL_API_KEY` | Firecrawl search and fetch reader authentication. |
+| `FIRECRAWL_BASE_URL`, `FIRECRAWL_API_URL` | Firecrawl endpoint override; the first takes precedence. |
+| `PARALLEL_API_KEY` | Parallel search and fetch authentication. |
+| `SEARXNG_ENDPOINT`, `SEARXNG_TOKEN` | SearXNG endpoint and optional bearer token, used when the corresponding setting is unset or blank. |
+| `SEARXNG_BASIC_USERNAME`, `SEARXNG_BASIC_PASSWORD` | SearXNG HTTP Basic credentials, used when the corresponding setting is unset or null. |
+| `GITHUB_TOKEN`, `GH_TOKEN` | GitHub scraper API authentication; `GITHUB_TOKEN` takes precedence. |
+
+Public search does not require model credentials. SearXNG settings under
+`searxng.*` take precedence over their environment fallbacks.
 
 ## 4) Python tooling and kernel runtime
 
@@ -446,7 +111,6 @@ Shell subprocess filtering is separate (`packages/utils/src/env.ts`): it strips 
 | `PI_SPINNER_INTERVAL`        | `tui.spinnerInterval`: milliseconds between spinner frames (`0` = static). `--spinner-interval` takes precedence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `PI_MAX_FPS`                 | `tui.maxFps`: repaint ceiling in frames per second (`1`–`120`). `--max-fps` takes precedence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `OMP_BUILD_LABEL`            | Free-form name (collapsed to one line, first 80 characters) recorded with the build on every session entry this process writes, so transcripts from a custom or experimental build can be told apart; shown by `/session`                                                                                                                                                                                                                                                                                                                                                                                  |
-| `PI_NO_INTERLEAVED_THINKING` | If `1`, disables Anthropic interleaved thinking budget behavior and uses output-token inflation for older thinking mode                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `PI_NO_THINKING_LOOP_GUARD`  | If `1`, disables the model thinking-loop guard                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `NULL_PROMPT`                | If `true`, system prompt builder returns empty string                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `PI_BLOCKED_AGENT`           | Blocks a specific subagent type in task tool                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -463,19 +127,12 @@ Shell subprocess filtering is separate (`packages/utils/src/env.ts`): it strips 
 | `SMITHERY_URL`               | Smithery web URL override (default `https://smithery.ai`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `SMITHERY_API_URL`           | Smithery API base URL override (default `https://api.smithery.ai`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `SMITHERY_API_KEY`           | Smithery API key for managed MCP auth lookup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `LITELLM_BASE_URL`           | LiteLLM proxy base URL fallback (`http://localhost:4000/v1` if unset); explicit `providers.litellm.baseUrl` / `models.yml` config wins                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `LM_STUDIO_BASE_URL`         | Default implicit LM Studio discovery base URL override (`http://127.0.0.1:1234/v1` if unset)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `OLLAMA_BASE_URL`            | Default implicit Ollama discovery base URL override (`OLLAMA_HOST` if unset, then `http://127.0.0.1:11434`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `OLLAMA_HOST`                | Ollama host used for implicit Ollama discovery when `OLLAMA_BASE_URL` is unset; accepts Ollama-style values such as `127.0.0.1:11434` or `http://host:11434`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `OLLAMA_CONTEXT_LENGTH`      | Positive integer context-window override for implicit Ollama discovery; affects OMP context budgeting only and does not change Ollama's runtime `num_ctx`                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `LLAMA_CPP_BASE_URL`         | Default implicit Llama.cpp discovery base URL override (`http://127.0.0.1:8080` if unset)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `PI_EDIT_VARIANT`            | Forces the edit tool variant when valid (`patch`, `replace`, `hashline`, `apply_patch`, `sloppy`); invalid values (including `auto`) are ignored. A matching `edit.modelVariants` entry still wins over it; `none` removes the edit tool and keeps `bash` enabled                                                                                                                                                                                                                                                                                                                                                                                                |
 | `PI_EDIT_FUZZY`              | `1`/`true` forces edit fuzzy matching on, `0`/`false` off; `auto` or any other value is ignored and `edit.fuzzyMatch` applies                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `PI_EDIT_FUZZY_THRESHOLD`    | Fuzzy-match similarity threshold in `[0, 1]` overriding `edit.fuzzyThreshold`; `auto`, non-numeric, or out-of-range values are ignored                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `PI_INTENT_TRACING`          | Boolean flag override for tool intent metadata; unset or empty falls back to `tools.intentTracing`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `PI_INTENT_DESC`             | Replaces the tool-schema description of the injected intent field (default `concise intent`); unset or empty keeps the default                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `PI_INTENT_PROMPT`           | Replaces the system-prompt guidance line for the intent field (text after ``Most tools take `i`: ``); unset or empty keeps the default                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `PI_STRICT_EDIT_MODE`        | If `1`, disables built-in model-specific edit-mode fallbacks, so the configured/global `edit.mode` is used unless `PI_EDIT_VARIANT` or `edit.modelVariants` overrides it                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `PI_FORCE_IMAGE_PROTOCOL`    | Forces supported image protocol (`kitty`, `iterm2`/`iterm`, `sixel`, `none`) where used. Setting `kitty` inside tmux also opts into Kitty Unicode placeholder placement unless `PI_KITTY_PLACEHOLDERS=0` or `PI_NO_KITTY_PLACEHOLDERS=1` disables it                                                                                                                                                                                                                                                                                                                                                       |
 | `PI_ALLOW_SIXEL_PASSTHROUGH` | Allows SIXEL passthrough when `PI_FORCE_IMAGE_PROTOCOL=sixel`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `PI_NO_PTY`                  | If `1`, disables interactive PTY path for bash tool                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -620,9 +277,10 @@ The desktop protocol handler must route the host to the remote machine, percent-
 
 Treat these as secrets; do not log or commit them:
 
-- Provider/API keys and OAuth/bearer credentials (all `*_API_KEY`, `*_TOKEN`, OAuth access/refresh tokens)
+- API keys, bearer credentials, and MCP OAuth credentials
 - Cloud credentials (`AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS` path may expose service-account material)
-- Search/fetch auth vars (`PARALLEL_API_KEY`, `FIRECRAWL_API_KEY`, `EXA_API_KEY`)
-- Foundry mTLS material (`CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`, `NODE_EXTRA_CA_CERTS` when it points to private CA bundles)
+- Search authentication variables (`EXA_API_KEY`, `FIRECRAWL_API_KEY`, `PARALLEL_API_KEY`, SearXNG credentials)
+- Custom TLS trust material (`NODE_EXTRA_CA_CERTS` when it points to private CA bundles)
+- OTLP exporter headers (`OTEL_EXPORTER_OTLP_HEADERS` and the per-signal `..._{TRACES,LOGS,METRICS}_HEADERS` variants) — they carry ingest bearer tokens/project keys
 
 Python runtime also explicitly strips many common key vars before spawning kernel subprocesses (`packages/coding-agent/src/eval/py/runtime.ts`).

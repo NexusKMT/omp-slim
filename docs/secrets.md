@@ -149,5 +149,3 @@ Environment variables are collected first, file-defined entries follow, and the 
 - `packages/coding-agent/src/secrets/settings.ts` -- `secrets.enabled` setting definition
 
 ## See also
-
-- [`auth-broker-gateway.md`](./auth-broker-gateway.md) -- remote credential vault and forward-proxy that keep provider OAuth refresh tokens and access tokens off developer hosts entirely (complementary to in-process obfuscation).

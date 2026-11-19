@@ -6,6 +6,13 @@
 		"emitDeclarationOnly": false,
 		"allowImportingTsExtensions": true
 	},
-	"include": ["scripts", "packages/*/scripts"],
-	"exclude": ["node_modules", "packages/*/node_modules"]
+	"include": [
+		"scripts",
+		"packages/*/scripts",
+		".omp/skills/tool-prompt-optimization/scripts"
+	],
+	"exclude": [
+		"node_modules",
+		"packages/*/node_modules"
+	]
 }

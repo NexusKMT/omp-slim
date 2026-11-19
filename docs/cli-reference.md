@@ -292,7 +292,7 @@ Run `omp <command> --help` for each command's own flags and examples.
 | `session` | Pack, unpack or mark moved sessions; inspect ownership leases. | |
 | `zsh`, `bash`, `sh` | Run the corresponding native shell entrypoint with its arguments. | |
 
-> `install`, `join`, and `auth-gateway` are also
+> `install` and `join` are also
 > reachable through related mechanisms (the `plugin` command, the `/join` slash
 > command, and so on). The table lists each as it is registered in
 > `packages/coding-agent/src/cli-commands.ts`.

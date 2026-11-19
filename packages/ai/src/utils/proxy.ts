@@ -245,12 +245,11 @@ export function __resetGlobalProxyFetch(): void {
 export function installGlobalProxyFetch(): void {
 	if (globalProxyFetchInstalled) return;
 	const proxyUrl = Bun.env.PI_PROXY?.trim();
-	// One line naming every proxy-relevant variable this process can see: a
+	// One line naming the global proxy variables this process can see: a
 	// missing PI_PROXY and a NO_PROXY rule that silences it are otherwise
 	// indistinguishable from a working proxy that the peer rejected.
 	const env = {
 		PI_PROXY: proxyUrl ? proxyLogTarget(proxyUrl) : undefined,
-		PI_PROXY_ANTHROPIC: Bun.env.PI_PROXY_ANTHROPIC ? proxyLogTarget(Bun.env.PI_PROXY_ANTHROPIC) : undefined,
 		HTTPS_PROXY: Bun.env.HTTPS_PROXY || Bun.env.https_proxy ? "set" : undefined,
 		ALL_PROXY: Bun.env.ALL_PROXY || Bun.env.all_proxy ? "set" : undefined,
 		NO_PROXY: Bun.env.NO_PROXY || Bun.env.no_proxy,

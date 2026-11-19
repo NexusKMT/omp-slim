@@ -18,7 +18,6 @@ import {
 import { runCleanseLoop } from "./loop";
 import type { CleanseCommandResult, CleanseDiagnosticReport, CleanseLoopResult } from "./types";
 
-const DEFAULT_MODEL = "@smol";
 const DISPLAY_FILE_LIMIT = 50;
 
 /** User-facing options for `omp cleanse`. */
@@ -58,7 +57,7 @@ export async function runCleanse(
 ): Promise<CleanseCommandResult> {
 	const maxAgents = options.maxAgents ?? 32;
 	if (!Number.isInteger(maxAgents) || maxAgents <= 0) throw new Error("--agents must be a positive integer");
-	const model = options.model?.trim() || DEFAULT_MODEL;
+	const model = options.model?.trim() || undefined;
 	const cwd = getProjectDir();
 	let runtime: CleanseAgentRuntime | undefined;
 	let runtimePromise: Promise<CleanseAgentRuntime> | undefined;
@@ -75,7 +74,7 @@ export async function runCleanse(
 	};
 	const ensureRuntime = async (): Promise<CleanseAgentRuntime> => {
 		runtimePromise ??= (async () => {
-			board.phase(`Resolving model ${model}...`);
+			board.phase(model ? `Resolving model ${model}...` : "Resolving main model...");
 			try {
 				runtime = await createCleanseAgentRuntime({ cwd, model, hooks });
 			} finally {

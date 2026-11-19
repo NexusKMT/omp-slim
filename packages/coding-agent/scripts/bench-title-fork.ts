@@ -23,7 +23,7 @@ import { Database } from "bun:sqlite";
  * Usage:
  *   bun scripts/bench-title-fork.ts --limit 10
  *   bun scripts/bench-title-fork.ts --limit 100 --concurrency 6
- *   bun scripts/bench-title-fork.ts --model anthropic/claude-opus-5-5 --thinking high --fork-thinking off
+ *   bun scripts/bench-title-fork.ts --model local/chat --thinking high --fork-thinking off
  *   bun scripts/bench-title-fork.ts --count 500 --resample
  *   bun scripts/bench-title-fork.ts --prompt scripts/bench-title-card.md --no-baseline
  *   bun scripts/bench-title-fork.ts --report
@@ -121,7 +121,7 @@ interface MainSnapshot {
 	thinkingBlocks: number;
 	thinkingChars: number;
 	redactedThinkingBlocks: number;
-	/** Usage reported so far (prefix input/cache buckets on Anthropic). */
+	/** Usage reported so far (input/cache buckets when reported by the endpoint). */
 	usage: Usage;
 }
 
@@ -355,8 +355,8 @@ function snapshotMain(
 
 /**
  * A headless in-memory session with the user's settings and credentials, minus
- * MCP, LSP, IRC, and extensions. Model discovery runs before returning, as the
- * CLI's startup refresh does, so the explicitly selected primary model is available.
+ * MCP, LSP, IRC, and extensions. The model registry reloads local configuration
+ * before returning, so the explicitly selected primary model is available.
  */
 async function createHeadlessSession(cwd: string, config: Config, agentId: string): Promise<AgentSession> {
 	const { session } = await createAgentSession({

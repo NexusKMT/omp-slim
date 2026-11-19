@@ -76,7 +76,7 @@ packages/natives/npm/
 CPU*.md
 packages/coding-agent/binaries/
 
-# robomp runtime state
+# Protect historical RoboOMP runtime data when switching older branches.
 python/robomp/data/
 python/robomp/.cache/
 python/robomp/src/robomp/static/

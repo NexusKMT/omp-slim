@@ -1,7 +1,7 @@
 import { type } from "@oh-my-pi/omptype";
 import { getProjectDir, isRecord, prompt } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../config/model-registry";
-import { formatModelString, resolveCliModel } from "../config/model-resolver";
+import { formatModelString, pickDefaultAvailableModel, resolveCliModel } from "../config/model-resolver";
 import { Settings } from "../config/settings";
 import { IrcBus } from "../irc/bus";
 import { holdSharedLsp } from "../lsp/client";
@@ -66,26 +66,28 @@ export interface CleanseAgentRuntime {
 /** Resolve the requested model and create a fresh persisted cleanse session. */
 export async function createCleanseAgentRuntime(options: {
 	cwd?: string;
-	model: string;
+	model?: string;
 	hooks?: CleanseAgentHooks;
 }): Promise<CleanseAgentRuntime> {
 	const cwd = options.cwd ?? getProjectDir();
 	const settings = await Settings.init({ cwd });
 	const authStorage = await discoverAuthStorage(undefined);
-	const modelRegistry = new ModelRegistry(authStorage);
+	const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
 	await modelRegistry.refresh();
-	const resolved = resolveCliModel({ cliModel: options.model, modelRegistry, settings });
-	if (resolved.error || !resolved.model) {
-		throw new Error(resolved.error ?? `Model "${options.model}" not found`);
-	}
-	const modelSelector = resolved.selector ?? formatModelString(resolved.model);
-	const modelDisplay = formatModelString(resolved.model);
+	const configError = modelRegistry.getError();
+	if (configError) throw configError;
+	const resolved = resolveCliModel({ cliModel: options.model ?? settings.getModel(), modelRegistry, settings });
+	if (resolved.error) throw new Error(resolved.error);
+	const model = resolved.model ?? pickDefaultAvailableModel(modelRegistry.getAvailable());
+	if (!model) throw new Error("No chat model configured. Configure an endpoint and model in models.yml.");
+	const modelSelector = resolved.selector ?? formatModelString(model);
+	const modelDisplay = formatModelString(model);
 	const sessionManager = SessionManager.create(cwd);
 	await sessionManager.setSessionName("Cleanse", "auto");
 	sessionManager.appendCustomEntry("cleanse", {
 		status: "running",
 		model: modelDisplay,
-		selector: options.model,
+		selector: modelSelector,
 	});
 	await sessionManager.ensureOnDisk();
 	const sessionFile = sessionManager.getSessionFile();
@@ -107,7 +109,7 @@ export async function createCleanseAgentRuntime(options: {
 		getSessionSpawns: () => "sonic,task",
 		getModelString: () => modelSelector,
 		getActiveModelString: () => modelSelector,
-		getActiveModel: () => resolved.model,
+		getActiveModel: () => model,
 		sessionManager,
 		settings,
 		authStorage,
@@ -130,7 +132,6 @@ export async function createCleanseAgentRuntime(options: {
 				invocationKind: "task",
 				assignment: prompt.render(discoveryPrompt, { request }),
 				agent: "task",
-				model: modelSelector,
 				outputSchema: DISCOVERY_SCHEMA,
 				identity: { label: "CleanseDiscovery" },
 				enableLsp: true,
@@ -164,7 +165,6 @@ export async function createCleanseAgentRuntime(options: {
 					invocationKind: "task",
 					assignment: renderAssignment(assignment, context.peers, context.worker, context.checkers),
 					agent: "sonic",
-					model: modelSelector,
 					identity: { id: agentId, label: name },
 					index: assignment.index,
 					enableLsp: true,

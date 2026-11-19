@@ -95,14 +95,15 @@ _context-residency_ metric: result tokens × subsequent requests), repeated
 reads of the same file, the largest single tool results, compactions, and
 edit-failure churn.
 
-The LLM phase (default `anthropic/claude-sonnet-4-6` via `@oh-my-pi/pi-ai`,
-credentials resolved through omp's auth storage — stored key, OAuth, or env
-var) classifies the costliest sessions: multi-topic sessions that should have
+The LLM phase uses OMP's configured main model. `--model <provider>/<model-id>`
+selects another endpoint from `models.yml`. API keys resolve through that
+configuration, local credential storage, or provider environment variables.
+It classifies the costliest sessions, including multi-topic sessions that should have
 been split or handed off, task spawns that were wasteful or failed to transfer
 context, and the biggest waste sources with concrete fixes. A final aggregate
 call distills systemic findings and quick wins across sessions.
 
-Verdicts are cached in `~/.omp/stats-audit-cache.json` (keyed by session id +
+Verdicts are cached in `stats-audit-cache.json` in the active agent directory (keyed by session id +
 digest hash + model + prompt hash, so any change to the transcript, digest
 format, or `audit-prompt.md` invalidates the entry automatically). Re-runs
 reuse cached verdicts for free; `--no-cache` bypasses reads but still writes
@@ -112,3 +113,6 @@ The Rust crate that previously lived here was retired in favor of this
 SQLite-backed flow. The schema persists everything the analyses used to
 recompute on every run (token counts, hashline parse output, success flags),
 so subsequent invocations are sub-second over the full corpus.
+
+Session scanning uses `getSessionsDir()` and honors `PI_CODING_AGENT_DIR`,
+`PI_CONFIG_DIR` and `OMP_PROFILE`, matching the model configuration.

@@ -116,7 +116,7 @@ Top-level entry modules: `cli.ts`, `main.ts`, `sdk.ts`, `index.ts` (SDK barrel),
 | `advisor/`, `autoresearch/`                | Advisor/watchdog and background research        | [advisor-watchdog.md](../../docs/advisor-watchdog.md)                                                                                                        |
 | `internal-urls/`                                         | Router + handlers (`agent://`, `docs://`, `rule://`, …)      | [tree.md](../../docs/tree.md)                                                                                                                                |
 | `tui/`, `collab/`                                        | Low-level TUI primitives, live session sharing               | [tui.md](../../docs/tui.md), [collab.md](../../docs/collab.md)                                                                                               |
-| `tiny/`, `auto-thinking/`                                | Embedded tiny-model experiments, auto thinking level         | [local-models.md](../../docs/local-models.md)                                                                                                                |
+| `tiny/`, `auto-thinking/`                                | Text normalization and automatic thinking level         | [local-models.md](../../docs/local-models.md)                                                                                                                |
 | `async/`, `lib/`, `utils/`, `prompts/`, `edit/`          | Shared plumbing, prompt assets, patch/diff engine            | [tools/edit.md](../../docs/tools/edit.md)                                                                                                                    |
 
 ## Subsystem reference
@@ -136,12 +136,11 @@ Top-level entry modules: `cli.ts`, `main.ts`, `sdk.ts`, `index.ts` (SDK barrel),
 
 - [settings.md](../../docs/settings.md), [config-usage.md](../../docs/config-usage.md)
 - [environment-variables.md](../../docs/environment-variables.md)
-- [models.md](../../docs/models.md), [providers.md](../../docs/providers.md), [adding-a-provider.md](../../docs/adding-a-provider.md)
+- [models.md](../../docs/models.md), [providers.md](../../docs/providers.md)
 - [local-models.md](../../docs/local-models.md)
-- [provider-streaming-internals.md](../../docs/provider-streaming-internals.md), [ai-schema-normalize.md](../../docs/ai-schema-normalize.md)
-- [toolconv/](../../docs/toolconv/) — per-family tool-call conversion (anthropic, deepseek, gemini, gemma, glm-4.5, harmony, hermes, kimi-k2, minimax, pi-native, qwen3, xml); see also [ERRATA-GPT5-HARMONY.md](../../docs/ERRATA-GPT5-HARMONY.md)
+- [ai-schema-normalize.md](../../docs/ai-schema-normalize.md)
 - [keybindings.md](../../docs/keybindings.md)
-- [secrets.md](../../docs/secrets.md), [auth-broker-gateway.md](../../docs/auth-broker-gateway.md), [install-id.md](../../docs/install-id.md)
+- [secrets.md](../../docs/secrets.md), [install-id.md](../../docs/install-id.md)
 - [system-prompt-customization.md](../../docs/system-prompt-customization.md)
 
 ### Tools framework and built-in tools
@@ -209,7 +208,7 @@ Top-level entry modules: `cli.ts`, `main.ts`, `sdk.ts`, `index.ts` (SDK barrel),
 | A skill                     | [skills.md](../../docs/skills.md)                                                                                                                                                                                                                                                                |
 | A marketplace plugin        | [marketplace.md](../../docs/marketplace.md), [plugin-manager-installer-plumbing.md](../../docs/plugin-manager-installer-plumbing.md), [skills/authoring-marketplaces.md](../../docs/skills/authoring-marketplaces.md), [gemini-manifest-extensions.md](../../docs/gemini-manifest-extensions.md) |
 | A custom MCP tool/server    | [mcp-server-tool-authoring.md](../../docs/mcp-server-tool-authoring.md), [custom-tools.md](../../docs/custom-tools.md)                                                                                                                                                                           |
-| A provider                  | [adding-a-provider.md](../../docs/adding-a-provider.md)                                                                                                                                                                                                                                          |
+| A provider                  | [models.md](../../docs/models.md)                                                                                                                                                                                                                                          |
 | Programmatic/SDK use        | [sdk.md](../../docs/sdk.md)                                                                                                                                                                                                                                                                      |
 
 See also `AGENTS.md` at the repo root for repo-wide conventions (Bun-over-Node,

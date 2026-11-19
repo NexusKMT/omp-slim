@@ -34,7 +34,7 @@ Rust（12 crate，含 vendor）：~708K 行。pi-shell 342K、pi-builtins 173K�
 6. 供应商名残留文案 — `main.ts` 的 API key 提示改为 `OPENAI_API_KEY (or <PROVIDER>_API_KEY…)`；`plugins/doctor.ts` 移除 ANTHROPIC_API_KEY 检查；`rpc-mode.ts` 注释中 ollama 示例改为实际存在的发现源（proxy / models.yml `discovery:` / 导入的 coding-agent 配置）。
 7. Rust：pi-predict 预测引擎（ngram/smollm/prose + web-prior.bin.zst + build-web-prior.ts）已删；`pi-predict` 收缩为 `apple::appkit` 拼写服务（`pi_natives::spelling` 的唯一消费方）。`pi-natives` 删除 `predict.rs` + `lib.rs` 的 mod 声明；工作区 candle-core/candle-nn pin 已移除（全仓无其他消费者）。⚠ 按审计保留 `pi_predict::apple::appkit`。
 8. 随 #7 的死 TS：`TEXT_PREDICT_WORKER_ARG`（worker-selectors.ts）、`getPredictStateDir` + 仅其使用的 `adoptLegacyDir`（utils/dirs.ts）、ps-data.ts/jsonl-server.ts 陈旧注释 — 已删；`utils/test/dirs-xdg.test.ts` 的 predict 路由与 legacy-adopt 断言已移除。
-9. 原生生成物：`packages/natives/native/index.d.ts` 的 TextPredictor 声明 + `index.js:42` 的 shim 因本机无 cmake（napi 构建需要）无法重生成，暂留（零 TS 消费者，shim 有 `missingNativeClass` 兜底，仅实例化时报错）。后续在 CI 重跑 `bun run build:bindings` 后以生成物为准。
+9. 原生生成物：审计当日，`packages/natives/native/index.d.ts` 的 TextPredictor 声明及 `index.js` 的 shim 因本机无 cmake（napi 构建需要）暂留。2026-11-13 的 `c6c5d4521e` 已重生成绑定并删除这两处残留，此项已完成。
 
 P0 全部落地；P1（显式-only 搜索引擎尾）与 P2（blob-broker / 外部会话导入 / IDA / eval+benchmark / scraper 长尾）在早前提交中已按产品决策执行完毕。
 
@@ -55,7 +55,7 @@ P0 全部落地；P1（显式-only 搜索引擎尾）与 P2（blob-broker / 外�
 
 | 优先级 | 动作 | 预估收益 | 状态 |
 |---|---|---|---|
-| P0 | 删 pi-predict 死引擎（保留 appkit）+ candle 依赖图 | 7K Rust + 大额构建/体积 | ✅ 已执行（见 二.7–9；原生生成物待 CI 重生成） |
+| P0 | 删 pi-predict 死引擎（保留 appkit）+ candle 依赖图 | 7K Rust + 大额构建/体积 | ✅ 已执行（见 二.7–9；原生生成物已于 `c6c5d4521e` 更新） |
 | P0 | 删 redis/sql 会话存储 + 2 个 SDK 示例 | ~790 TS | ✅ 已执行（见 二.2） |
 | P0 | 删 azure-openai-endpoint + judgment cache + 死桩 + 帮助文案 | ~330 TS | ✅ 已执行（见 二.1/3/4/5/6） |
 | P1 | 显式-only 搜索引擎尾（11 个） | ~2.9K TS | ✅ 已执行（早前提交） |
@@ -68,7 +68,7 @@ P0 全部落地；P1（显式-only 搜索引擎尾）与 P2（blob-broker / 外�
 - legacy-pi-ai-shim：运行时插件加载器字符串引用（legacy-pi-compat.ts:975），活。
 - models-config-schema-bundle（83 行）：被 models-config.ts 消费，活。
 - web 面 112 文件：无任何死文件/死注册；无已删传输接线残留。
-- aws-sigv4（223 行）：被 blob-broker S3 上传使用，不是 Bedrock 残留。
+- aws-sigv4（223 行）：当时被 blob-broker S3 上传使用。2026-11-19 复核确认生产消费者已随 blob-broker 删除，本轮已删除该文件和专用测试。
 
 ## 六、裁切后回归修复（2026-11-12 同日晚）
 

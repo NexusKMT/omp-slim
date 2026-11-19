@@ -204,9 +204,13 @@ Manual reader loops only when the protocol requires it (SSE, streaming JSON-RPC)
 
 OMP Slim supports only explicitly configured `openai-completions` endpoints and
 one selected main model. Model capabilities come from configuration and
-`packages/catalog/src/build.ts`; never infer capabilities from provider/model
+`packages/ai/src/models/build.ts`; never infer capabilities from provider/model
 names. There is no bundled provider catalog, KDL rule tree, `gen:compat`, or
 `gen:models` command. See `docs/models.md` and `docs/slim-single-model.md`.
+
+Standalone model-backed tools should reuse `config/configured-model.ts`; interactive
+helpers should inherit the active session model. Delete retired experiments and
+their unused prompts instead of retaining source copies as text archives.
 
 The supported product targets are macOS Intel and Linux x64. Full native and
 standalone compilation runs remotely through the public manual Actions
@@ -232,12 +236,12 @@ remain integration gates, not a prerequisite for every local edit.
 
 ## Generated Files
 
-RPC wire changes must regenerate the retained SDKs with `bun run gen:rpc` and
+RPC wire changes must regenerate the retained wire definitions with `bun run gen:rpc` and
 validate the affected clients. Native declarations are generated from Rust by
 `build:bindings`; `packages/natives/scripts/gen-enums.ts` derives the JS exports
 from those declarations. When removing native exports before a remote rebuild,
 remove their declarations and regenerate the JS exports, then verify the full
-native build remotely. Stats build assets use `gen:stats` / `gen:stats:reset`.
+native build remotely.
 
 ## Logging and CLI Output
 

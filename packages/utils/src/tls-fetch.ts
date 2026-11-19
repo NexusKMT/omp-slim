@@ -2,10 +2,8 @@
  * `NODE_EXTRA_CA_CERTS` shim for Bun's `fetch`.
  *
  * Node's TLS layer honours `NODE_EXTRA_CA_CERTS` natively, but Bun's
- * `fetch` does not, and both the provider streams (`openai-responses`,
- * `openai-completions`, `openai-codex-responses`, `ollama-chat`, ...) and
- * catalog model discovery (`/models` probes) route every request through
- * Bun's runtime. Without this wrapper, corporate relays and private
+ * `fetch` does not. Configured Chat Completions requests use Bun's runtime.
+ * Without this wrapper, corporate relays and private
  * gateways behind a custom CA bundle fail with
  * `unknown certificate verification error` even when the env var is set.
  *
@@ -118,9 +116,8 @@ export function __resetExtraCaCache(): void {
  * Merge `extraCa` into `init.tls.ca`. When the caller has not supplied a CA
  * list, the system root store is included alongside the extra bundle —
  * Bun's `tls.ca` replaces the default trust store, so omitting roots would
- * break every public host. When the caller already curated a list (e.g.
- * Anthropic Foundry's mTLS options, which already seed
- * `tls.rootCertificates`), only the extra CA is appended.
+ * break every public host. When the caller already curated a CA list,
+ * only the extra CA is appended.
  */
 export function withExtraCaInit(init: RequestInit | undefined, extraCa: string): RequestInit {
 	const existingTls = (init as BunTlsRequestInit | undefined)?.tls;
@@ -139,7 +136,7 @@ export function withExtraCaInit(init: RequestInit | undefined, extraCa: string):
 /**
  * Wrap `fetchImpl` so every call honours `NODE_EXTRA_CA_CERTS`. Idempotent:
  * a fetch already wrapped is returned unchanged so repeated composition
- * (Anthropic auth-retry replays, request-debug fan-out) never stacks
+ * (request retries or request-debug fan-out) never stacks
  * wrappers. When the env var is unset the original fetch is returned, so
  * default deployments pay nothing.
  */

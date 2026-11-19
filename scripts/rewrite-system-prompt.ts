@@ -9,15 +9,15 @@
  * XML tags, or Handlebars directives are preserved verbatim. Prose lines have
  * their list/indent prefix and any wrapping `{{#…}}`/`{{/…}}` block tokens
  * peeled off; the remaining sentence keeps its inline code/tags/URLs/template
- * expressions visible and is sent to an LLM (Sonnet 4.5 via OpenRouter by
- * default) in small id-keyed JSON batches that run in parallel. Each response
+ * expressions visible and is sent to OMP's configured main model in small
+ * id-keyed JSON batches that run in parallel. Each response
  * is validated — every fragile token must survive — and any line whose rewrite
  * drops a token falls back to its original text.
  *
  * Usage:
- *   OPENROUTER_API_KEY=… bun scripts/rewrite-system-prompt.ts            # rewrite system prompt in place
- *   OPENROUTER_API_KEY=… bun scripts/rewrite-system-prompt.ts --all      # rewrite every prompt + rule in place
- *   OPENROUTER_API_KEY=… bun scripts/rewrite-system-prompt.ts -i a -o b  # write to a different file
+ *   bun scripts/rewrite-system-prompt.ts              # rewrite system prompt in place
+ *   bun scripts/rewrite-system-prompt.ts --all        # rewrite every prompt + rule in place
+ *   bun scripts/rewrite-system-prompt.ts -i a -o b    # write to a different file
  *   bun scripts/rewrite-system-prompt.ts --dry-run                       # plan only, no network
  *
  * Output is in place by default (the input is overwritten); pass -o/--output to
@@ -28,8 +28,8 @@
  *   -i, --input <path>     source file (default: the coding-agent system prompt)
  *   -o, --output <path>    destination for a single-file run (default: in place)
  *       --all              rewrite every bundled prompt and rule (always in place)
- *       --model <id>       OpenRouter model id (default: anthropic/claude-sonnet-4.5)
- *       --base-url <url>   OpenRouter-compatible base (default: https://openrouter.ai/api/v1)
+ *       --model <p/id>     model from models.yml (default: configured main model)
+ *       --base-url <url>   override the selected model's Chat Completions endpoint
  *       --chunk <n>        prose lines per request (default: 3)
  *       --concurrency <n>  parallel requests in flight (default: 6)
  *       --retries <n>      network/parse retries per chunk (default: 2)
@@ -40,11 +40,13 @@
 
 import * as path from "node:path";
 import { parseArgs } from "node:util";
+import { complete } from "@oh-my-pi/pi-ai";
+import type { OpenAICompletionsOptions } from "@oh-my-pi/pi-ai/providers/openai-completions";
+import { formatModelString } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import { type ConfiguredScriptModel, resolveConfiguredScriptModel } from "./configured-model";
 import STYLE_GUIDE from "./rewrite-system-prompt.style.md" with { type: "text" };
 
 const DEFAULT_INPUT = "packages/coding-agent/src/prompts/system/system-prompt.md";
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4.5";
-const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 
 /** Prompt + rule markdown globs for `--all`, repo-root anchored. */
 const PROMPT_GLOBS = [
@@ -354,10 +356,7 @@ export function parseItemsResponse(text: string): { id: number; text: string }[]
 	return out;
 }
 
-interface OpenRouterOptions {
-	apiKey: string;
-	model: string;
-	baseUrl: string;
+interface ChatCompletionsRewriteOptions extends ConfiguredScriptModel {
 	temperature: number;
 	retries: number;
 	system: string;
@@ -391,44 +390,42 @@ const REWRITE_RESPONSE_FORMAT = {
 	},
 } as const;
 
-/** Build a {@link RewriteChunk} backed by an OpenRouter chat-completions endpoint. */
-export function makeOpenRouterRewriter(opts: OpenRouterOptions): RewriteChunk {
+/** Build a {@link RewriteChunk} using the configured Chat Completions transport. */
+export function makeChatCompletionsRewriter(opts: ChatCompletionsRewriteOptions): RewriteChunk {
 	return async items => {
 		const result = new Map<number, string>();
 		let pending = items;
 		let lastErr: unknown;
 		for (let attempt = 0; attempt <= opts.retries && pending.length > 0; attempt++) {
 			try {
-				const body = JSON.stringify({
-					model: opts.model,
+				const requestOptions: OpenAICompletionsOptions = {
+					apiKey: opts.apiKey,
 					temperature: opts.temperature,
-					response_format: REWRITE_RESPONSE_FORMAT,
-					messages: [
-						{ role: "system", content: opts.system },
-						{
-							role: "user",
-							content: JSON.stringify({ items: pending.map(p => ({ id: p.id, text: p.text })) }),
-						},
-					],
-				});
-				const res = await fetch(`${opts.baseUrl}/chat/completions`, {
-					method: "POST",
-					headers: {
-						Authorization: `Bearer ${opts.apiKey}`,
-						"Content-Type": "application/json",
-						"HTTP-Referer": "https://omp.sh/",
-						"X-Title": "omp",
-					},
-					body,
-				});
-				if (!res.ok) {
-					throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-				}
-				const data = (await res.json()) as {
-					choices?: { message?: { content?: unknown } }[];
+					responseFormat: REWRITE_RESPONSE_FORMAT,
+					stream: false,
 				};
-				const content = data.choices?.[0]?.message?.content;
-				if (typeof content !== "string") throw new Error("no message content");
+				const response = await complete(
+					opts.model,
+					{
+						systemPrompt: [opts.system],
+						messages: [
+							{
+								role: "user",
+								content: JSON.stringify({ items: pending.map(p => ({ id: p.id, text: p.text })) }),
+								timestamp: Date.now(),
+							},
+						],
+					},
+					requestOptions,
+				);
+				if (response.stopReason === "error" || response.stopReason === "aborted") {
+					throw new Error(response.errorMessage ?? response.stopReason);
+				}
+				const content = response.content
+					.filter(block => block.type === "text")
+					.map(block => block.text)
+					.join("");
+				if (!content) throw new Error("no message content");
 				const got = new Map<number, string>();
 				for (const it of parseItemsResponse(content)) got.set(it.id, it.text);
 				// Keep only rewrites that preserve every fragile token; re-request the rest.
@@ -456,8 +453,8 @@ export function makeOpenRouterRewriter(opts: OpenRouterOptions): RewriteChunk {
 interface CliOptions {
 	input: string;
 	output: string;
-	model: string;
-	baseUrl: string;
+	model?: string;
+	baseUrl?: string;
 	chunkSize: number;
 	concurrency: number;
 	retries: number;
@@ -474,8 +471,8 @@ function parseCli(argv: string[]): CliOptions {
 			input: { type: "string", short: "i" },
 			output: { type: "string", short: "o" },
 			all: { type: "boolean", default: false },
-			model: { type: "string", default: DEFAULT_MODEL },
-			"base-url": { type: "string", default: DEFAULT_BASE_URL },
+			model: { type: "string" },
+			"base-url": { type: "string" },
 			chunk: { type: "string", default: "3" },
 			concurrency: { type: "string", default: "6" },
 			retries: { type: "string", default: "2" },
@@ -495,8 +492,8 @@ function parseCli(argv: string[]): CliOptions {
 	return {
 		input,
 		output,
-		model: values.model ?? DEFAULT_MODEL,
-		baseUrl: values["base-url"] ?? DEFAULT_BASE_URL,
+		model: values.model,
+		baseUrl: values["base-url"],
 		chunkSize: num("chunk", values.chunk, 3),
 		concurrency: num("concurrency", values.concurrency, 6),
 		retries: num("retries", values.retries, 2),
@@ -541,16 +538,11 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const apiKey = process.env.OPENROUTER_API_KEY;
-	if (!apiKey) {
-		console.error("Error: OPENROUTER_API_KEY is not set.");
-		process.exit(1);
-	}
-
-	const rewriteChunk = makeOpenRouterRewriter({
-		apiKey,
-		model: opts.model,
-		baseUrl: opts.baseUrl,
+	const configured = await resolveConfiguredScriptModel(opts.model);
+	const model = opts.baseUrl ? { ...configured.model, baseUrl: opts.baseUrl } : configured.model;
+	const rewriteChunk = makeChatCompletionsRewriter({
+		...configured,
+		model,
 		temperature: opts.temperature,
 		retries: opts.retries,
 		system: STYLE_GUIDE,
@@ -569,7 +561,7 @@ async function main(): Promise<void> {
 		});
 		await Bun.write(output, rewritten);
 		console.error(
-			`Wrote ${output}: ${stats.changed} changed, ${stats.fallback} fallback, ${stats.proseLines} prose / ${stats.totalLines} lines (model ${opts.model}).`,
+			`Wrote ${output}: ${stats.changed} changed, ${stats.fallback} fallback, ${stats.proseLines} prose / ${stats.totalLines} lines (model ${formatModelString(model)}).`,
 		);
 	}
 }

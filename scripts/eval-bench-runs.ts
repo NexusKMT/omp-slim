@@ -205,22 +205,14 @@ function fmtNum(value: number): string {
 
 function shortModel(model: string): string {
 	const segs = model.split("/");
-	return segs[segs.length - 1].replace(/:nitro/, "");
+	return segs[segs.length - 1];
 }
 
 function sortRows(rows: ReportRow[], by: typeof sortBy): ReportRow[] {
 	const sepOrder = ["gt", "plus", "div", "pipe", "bslash", "tilde", "pct", "colon"];
-	const modelOrder = (m: string) => {
-		if (m.includes("glm")) return 0;
-		if (m.includes("gpt")) return 1;
-		if (m.includes("claude")) return 2;
-		return 3;
-	};
 	const cmp: Record<typeof sortBy, (a: ReportRow, b: ReportRow) => number> = {
-		sep: (a, b) =>
-			sepOrder.indexOf(a.sepSlug) - sepOrder.indexOf(b.sepSlug) || modelOrder(a.model) - modelOrder(b.model),
-		model: (a, b) =>
-			modelOrder(a.model) - modelOrder(b.model) || sepOrder.indexOf(a.sepSlug) - sepOrder.indexOf(b.sepSlug),
+		sep: (a, b) => sepOrder.indexOf(a.sepSlug) - sepOrder.indexOf(b.sepSlug) || a.model.localeCompare(b.model),
+		model: (a, b) => a.model.localeCompare(b.model) || sepOrder.indexOf(a.sepSlug) - sepOrder.indexOf(b.sepSlug),
 		task: (a, b) => b.taskSuccessPct - a.taskSuccessPct,
 		edit: (a, b) => b.editSuccessPct - a.editSuccessPct,
 		tokens: (a, b) => a.totalTokensAvg - b.totalTokensAvg,

@@ -9,7 +9,7 @@
  * failures, compactions).
  *
  * Phase 2 (classify): for the costliest sessions, builds a compact digest and
- * asks a small model (default: anthropic/claude-sonnet-4-6 via @oh-my-pi/pi-ai)
+ * asks the configured main model via @oh-my-pi/pi-ai
  * to judge:
  *   a) session hygiene — multiple topics in one chat, missed handoff points,
  *   b) task-spawn quality — wasteful spawns, context-transfer failures,
@@ -22,31 +22,22 @@
  *   bun scripts/session-stats/audit.ts --folder Projects-pi --max-llm 6
  *   bun scripts/session-stats/audit.ts --json out.json
  *
- * Auth: resolves an API key for the classifier provider through omp's auth
- * storage (~/.omp/agent/agent.db: stored key, OAuth, or env var fallback).
+ * Auth: resolves the configured endpoint's API key through models.yml,
+ * omp's local auth storage, or its provider environment variable.
  */
 
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs } from "node:util";
-import {
-	type Api,
-	AuthStorage,
-	completeSimple,
-	type Model,
-	SqliteAuthCredentialStore,
-	type Tool,
-	type ToolCall,
-} from "@oh-my-pi/pi-ai";
-import { getAgentDbPath, getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { completeSimple, type Tool, type ToolCall } from "@oh-my-pi/pi-ai";
+import { formatModelString } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import { getAgentDir, getSessionsDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { type ConfiguredScriptModel, resolveConfiguredScriptModel } from "../configured-model";
 import SYSTEM_PROMPT from "./audit-prompt.md" with { type: "text" };
 
-const SESSIONS_ROOT = path.join(os.homedir(), ".omp", "agent", "sessions");
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
-const CACHE_PATH = path.join(os.homedir(), ".omp", "stats-audit-cache.json");
+const SESSIONS_ROOT = getSessionsDir();
+const CACHE_PATH = path.join(getAgentDir(), "stats-audit-cache.json");
 
 // --------------------------------------------------------------------------
 // CLI
@@ -55,7 +46,7 @@ interface CliOptions {
 	since: number; // ms window
 	folder?: string;
 	exclude?: string;
-	model: string;
+	model?: string;
 	maxLlm: number;
 	minCost: number;
 	concurrency: number;
@@ -91,7 +82,7 @@ function parseCli(argv: string[]): CliOptions {
 			since: { type: "string", default: "1w" },
 			folder: { type: "string" },
 			exclude: { type: "string" },
-			model: { type: "string", default: DEFAULT_MODEL },
+			model: { type: "string" },
 			"max-llm": { type: "string", default: "12" },
 			"min-cost": { type: "string", default: "1" },
 			concurrency: { type: "string", default: "4" },
@@ -106,18 +97,18 @@ function parseCli(argv: string[]): CliOptions {
 	});
 	if (values.help) {
 		console.log(
-			`session audit — token usage analysis over ~/.omp/agent/sessions\n\n` +
+			`session audit — token usage analysis over the active profile’s sessions\n\n` +
 				`  --since <12h|3d|1w|1mo>  window by session mtime (default 1w)\n` +
 				`  --folder <substr>        only folders containing substring\n` +
 				`  --exclude <substr>       drop folders containing substring\n` +
-				`  --model <prov/id>        classifier model (default ${DEFAULT_MODEL})\n` +
+				`  --model <prov/id>        model from models.yml (default configured main model)\n` +
 				`  --max-llm <n>            classify at most n sessions (default 12)\n` +
 				`  --min-cost <usd>         classify only sessions >= cost (default 1)\n` +
 				`  --concurrency <n>        parallel classifier calls (default 4)\n` +
 				`  --json <file>            write full machine-readable results\n` +
 				`  --digest-dir <dir>       dump per-session digests fed to the model\n` +
 				`  --session <substr>       classify sessions whose id/title matches (ignores --min-cost)\n` +
-				`  --no-cache               skip the verdict cache (~/.omp/stats-audit-cache.json)\n` +
+				`  --no-cache               skip the verdict cache in the active agent directory\n` +
 				`  --no-llm                 scan + report only\n` +
 				`  --limit <n>              scan at most n session groups (debug)`,
 		);
@@ -993,33 +984,8 @@ function normalizeVerdict(v: SessionVerdict): SessionVerdict {
 	};
 }
 
-interface Classifier {
-	model: Model<Api>;
-	apiKey: string;
-}
-
-async function openClassifier(modelSpec: string): Promise<Classifier> {
-	const slash = modelSpec.indexOf("/");
-	if (slash <= 0) throw new Error(`--model must be <provider>/<model-id>, got "${modelSpec}"`);
-	const provider = modelSpec.slice(0, slash);
-	const modelId = modelSpec.slice(slash + 1);
-	const store = await SqliteAuthCredentialStore.open(getAgentDbPath());
-	const storage = new AuthStorage(store);
-	await storage.credentials.reload();
-	const registry = new ModelRegistry(storage, path.join(getAgentDir(), "models.yml"));
-	const model = registry.find(provider, modelId);
-	if (!model) {
-		throw new Error(`unknown model "${modelSpec}" (not in ${path.join(getAgentDir(), "models.yml")})`);
-	}
-	const apiKey = await storage.keys.get(provider);
-	if (!apiKey) {
-		throw new Error(`no credentials for provider "${provider}" (omp login or env var required)`);
-	}
-	return { model, apiKey };
-}
-
 async function completeStructured<T>(
-	cls: Classifier,
+	cls: ConfiguredScriptModel,
 	prompt: string,
 	schema: Record<string, unknown>,
 	validate: (value: T) => string | undefined,
@@ -1355,8 +1321,9 @@ async function main(): Promise<void> {
 					: `\n(no sessions ≥ ${fmtMoney(opts.minCost)}; skipping LLM analysis)`,
 			);
 		} else {
-			const cls = await openClassifier(opts.model);
-			res.classifierModel = `${cls.model.provider}/${cls.model.id}`;
+			const cls = await resolveConfiguredScriptModel(opts.model);
+			const classifierModel = formatModelString(cls.model);
+			res.classifierModel = classifierModel;
 			process.stderr.write(`\nclassifying ${candidates.length} sessions with ${res.classifierModel} …\n`);
 			if (opts.digestDir) await fs.mkdir(opts.digestDir, { recursive: true });
 
@@ -1367,7 +1334,7 @@ async function main(): Promise<void> {
 				if (opts.digestDir) {
 					await Bun.write(path.join(opts.digestDir, `${g.id}.md`), digest);
 				}
-				const key = verdictCacheKey(g.id, digest, res.classifierModel ?? opts.model);
+				const key = verdictCacheKey(g.id, digest, classifierModel);
 				if (!opts.noCache) {
 					const hit = cache.entries[key];
 					if (hit) {
@@ -1386,7 +1353,7 @@ async function main(): Promise<void> {
 					);
 					const verdict = normalizeVerdict(value);
 					res.verdicts.set(g.id, verdict);
-					cache.entries[key] = { verdict, model: res.classifierModel ?? opts.model, ts: Date.now() };
+					cache.entries[key] = { verdict, model: classifierModel, ts: Date.now() };
 					addUsage(res.classifierUsage, usage);
 					process.stderr.write(`  ✓ ${clip(g.main.title ?? g.id, 50)} (score ${verdict.score})\n`);
 				} catch (err) {

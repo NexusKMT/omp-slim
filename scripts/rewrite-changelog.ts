@@ -8,7 +8,7 @@
  * the final shipped behavior belongs in release notes.
  *
  * For every non-empty `[Unreleased]` section this script hands the whole section
- * to an explicitly configured Chat Completions model via `@oh-my-pi/pi-ai`,
+ * to the configured main model via `@oh-my-pi/pi-ai`,
  * and asks for a complete replacement grouped by changelog category. The model
  * returns structured sections/items; markdown is rendered locally so only the
  * Unreleased section changes and formatting stays deterministic.
@@ -19,29 +19,22 @@
  * protocol churn is not.
  *
  * Usage:
- *   bun scripts/rewrite-changelog.ts --model my-endpoint/my-model
- *   bun scripts/rewrite-changelog.ts --model my-endpoint/my-model --dry-run
- *   bun scripts/rewrite-changelog.ts --model my-endpoint/my-model --check
- *   bun scripts/rewrite-changelog.ts --model my-endpoint/my-model --package coding-agent
+ *   bun scripts/rewrite-changelog.ts                       # rewrite + write
+ *   bun scripts/rewrite-changelog.ts --dry-run             # report only
+ *   bun scripts/rewrite-changelog.ts --check               # exit 1 if any would change
+ *   bun scripts/rewrite-changelog.ts --package coding-agent
+ *   bun scripts/rewrite-changelog.ts --model proxy/chat-model
  *
- * Auth: uses the selected endpoint's models.yml settings and stored API keys.
+ * Auth: resolves the configured endpoint's API key through models.yml,
+ * omp's local auth storage, or its provider environment variable.
  */
 
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 import { type } from "@oh-my-pi/omptype";
-import {
-	type Api,
-	AuthStorage,
-	completeSimple,
-	Effort,
-	type Model,
-	SqliteAuthCredentialStore,
-	type Tool,
-	type ToolCall,
-} from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { getAgentDbPath, getAgentDir } from "@oh-my-pi/pi-utils";
+import { completeSimple, Effort, type Tool, type ToolCall } from "@oh-my-pi/pi-ai";
+import { formatModelString } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import { type ConfiguredScriptModel, resolveConfiguredScriptModel } from "./configured-model";
 import {
 	type ChangelogDocument,
 	changelogPaths,
@@ -88,35 +81,6 @@ Call the \`rewrite\` tool with the rewritten release note sections.
   > Added GitLab Duo Workflow provider support including official OAuth callback verification, workspace project auto-discovery, and automatic login-time namespace Duo enablement.
 - **Be Concise and User-Facing**: Turn developer jargon (e.g., "replayed thinking blocks without context-management.keep") into description of the actual benefit (e.g., "Fixed preserving multi-turn thinking/reasoning context for Anthropic-compatible models").
 - **Remove Leading Symbols**: Write the item as a clean text string without prepending "- " or "* ". The harness will handle bullet formatting locally.`;
-
-// --------------------------------------------------------------------------
-// Model + auth
-
-interface RewriteModel {
-	model: Model<Api>;
-	apiKey: string;
-	spec: string;
-}
-
-async function openModel(modelSpec: string): Promise<RewriteModel> {
-	const slash = modelSpec.indexOf("/");
-	if (slash <= 0) throw new Error(`--model must be <provider>/<model-id>, got "${modelSpec}"`);
-	const provider = modelSpec.slice(0, slash);
-	const modelId = modelSpec.slice(slash + 1);
-	const store = await SqliteAuthCredentialStore.open(getAgentDbPath());
-	const storage = new AuthStorage(store);
-	await storage.credentials.reload();
-	const registry = new ModelRegistry(storage, path.join(getAgentDir(), "models.yml"));
-	const model = registry.find(provider, modelId);
-	if (!model) {
-		throw new Error(`unknown model "${modelSpec}" (not in ${path.join(getAgentDir(), "models.yml")})`);
-	}
-	const apiKey = await registry.getApiKey(model);
-	if (!apiKey) {
-		throw new Error(`no API key for provider "${provider}"; configure apiKey or auth: none in models.yml`);
-	}
-	return { model, apiKey, spec: modelSpec };
-}
 
 // --------------------------------------------------------------------------
 // Unreleased entries
@@ -224,7 +188,7 @@ function normalizeRewriteItem(text: string): string[] {
 }
 
 async function requestRewrite(
-	model: RewriteModel,
+	model: ConfiguredScriptModel,
 	packageName: string,
 	unreleasedBody: string,
 ): Promise<RewrittenSection[]> {
@@ -282,7 +246,7 @@ interface RewrittenFile {
 
 interface RunOptions {
 	repoRoot?: string;
-	model: string;
+	model?: string;
 	write: boolean;
 	packageFilter?: string;
 	concurrency?: number;
@@ -308,11 +272,7 @@ async function run(options: RunOptions): Promise<RunResult> {
 	const paths = (await changelogPaths(repoRoot)).filter(
 		changelogPath => !options.packageFilter || changelogPath.includes(options.packageFilter),
 	);
-	let opened: Promise<RewriteModel> | undefined;
-	async function rewrite(packageName: string, unreleasedBody: string): Promise<RewrittenSection[]> {
-		opened ??= openModel(options.model);
-		return requestRewrite(await opened, packageName, unreleasedBody);
-	}
+	let model: Promise<ConfiguredScriptModel> | undefined;
 	const concurrency = options.concurrency ?? 4;
 	// oxlint-disable-next-line unicorn/no-new-array -- length preallocation
 	const results: Array<RewrittenFile | undefined> = new Array(paths.length);
@@ -336,7 +296,8 @@ async function run(options: RunOptions): Promise<RunResult> {
 				.replace(/^## \[Unreleased\]\n?/, "")
 				.trim();
 
-			const rewritten = await rewrite(changelogPath, unreleasedBody);
+			model ??= resolveConfiguredScriptModel(options.model);
+			const rewritten = await requestRewrite(await model, changelogPath, unreleasedBody);
 			applyRewrite(section, rewritten);
 			const next = renderChangelog(document);
 			if (next === content) continue;
@@ -363,7 +324,10 @@ async function run(options: RunOptions): Promise<RunResult> {
 		if (res !== undefined) changed.push(res);
 	}
 
-	return { model: options.model, changed };
+	return {
+		model: model ? formatModelString((await model).model) : (options.model ?? "configured main model"),
+		changed,
+	};
 }
 
 // --------------------------------------------------------------------------
@@ -371,7 +335,7 @@ async function run(options: RunOptions): Promise<RunResult> {
 
 interface CliOptions {
 	mode: "write" | "dry-run" | "check";
-	model: string;
+	model?: string;
 	repoRoot?: string;
 	packageFilter?: string;
 	concurrency: number;
@@ -391,7 +355,6 @@ function parseCli(argv: string[]): CliOptions | "help" {
 		},
 	});
 	if (values.help) return "help";
-	if (!values.model) throw new Error("--model <provider/id> is required; configure the endpoint in models.yml first.");
 	return {
 		mode: values.check ? "check" : values["dry-run"] ? "dry-run" : "write",
 		model: values.model,
@@ -403,14 +366,14 @@ function parseCli(argv: string[]): CliOptions | "help" {
 
 function usage(): string {
 	return [
-		"Usage: bun scripts/rewrite-changelog.ts --model <prov/id> [--dry-run|--check] [--package <substr>] [--concurrency <n>]",
+		"Usage: bun scripts/rewrite-changelog.ts [--dry-run|--check] [-m|--model <prov/id>] [--package <substr>] [--concurrency <n>]",
 		"",
-		"Hands each non-empty [Unreleased] changelog section to a small model and rewrites the entries",
+		"Hands each non-empty [Unreleased] changelog section to the selected model and rewrites the entries",
 		"into user-facing release notes, dropping intermediate developer churn and implementation-only details",
 		"while preserving public contract, exports, API, config, auth, and billing behavior.",
 		"",
 		"Options:",
-		"  -m, --model <prov/id>  Required: an explicitly configured Chat Completions model.",
+		"  -m, --model <prov/id>  Model from models.yml (defaults to the configured main model).",
 		"  --package <substr> Only changelogs whose path contains this substring.",
 		"  --concurrency <n>  Max concurrent changelogs to process in parallel (default 4).",
 		"  --dry-run          Report what would be dropped without writing files.",
