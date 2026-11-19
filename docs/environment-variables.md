@@ -20,7 +20,7 @@ Most runtime lookups use `$env` from `@oh-my-pi/pi-utils` (`packages/utils/src/e
 4. Active config-root `.env` (normally `~/.omp/.env`) for keys whose current value is empty/unset
 5. Home `.env` (`~/.env`) for keys whose current value is empty/unset
 
-`OTEL_*` entries in the agent, config-root and home `.env` files are not part of `$env`: omp's telemetry reads them privately (see [OpenTelemetry export](#11-opentelemetry-export)). Their precedence among themselves, and below a shell export or project `.env`, is unchanged.
+`OTEL_*` entries in the agent, config-root and home `.env` files are not part of `$env`: the agent's GenAI content-capture instrumentation reads them privately (see `$otelEnv` in `@oh-my-pi/pi-utils`). Their precedence among themselves, and below a shell export or project `.env`, is unchanged.
 
 The agent/root locations respect profiles, `PI_CONFIG_DIR`, and—only for the default profile—`PI_CODING_AGENT_DIR`. Whole dotenv files are parsed with Bun's `node:util.parseEnv`, including quoted multiline values, escaped newlines, and inline comments. Names must be shell identifiers (`[A-Za-z_][A-Za-z0-9_]*`); unsafe names/values are discarded. Variable references remain literal in this parser; only Bun's launch-directory dotenv autoload performs variable expansion before this module runs. Child-shell filtering uses the same parser to identify project dotenv values across `.env`, `.env.<NODE_ENV>` (default `development`), `.env.local`, and `.env.<NODE_ENV>.local`. It removes project-dotenv credentials from shell subprocesses while preserving launcher-owned variables; Linux's original exec environment provides the authoritative launch snapshot, with best-effort value matching elsewhere.
 
@@ -618,32 +618,6 @@ The desktop protocol handler must route the host to the remote machine, percent-
 
 ---
 
-## 11) OpenTelemetry export
-
-OMP initializes OTLP export only when at least one signal has an endpoint. Set `telemetry.otlpExportEnabled: false` (`/settings` → Providers → Privacy) to skip export even when endpoints are configured. `OTEL_SDK_DISABLED=true` also disables initialization.
-
-| Variable group                                                                                                  | Behavior                                                                                        |
-| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`                                                                                   | Common endpoint fallback                                                                        |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Per-signal endpoint; wins over the common endpoint                                              |
-| `OTEL_EXPORTER_OTLP_HEADERS`                                                                                    | Common OTLP request headers, as a `key=value,key2=value2` list with percent-encoded values      |
-| `OTEL_EXPORTER_OTLP_TRACES_HEADERS`, `OTEL_EXPORTER_OTLP_LOGS_HEADERS`, `OTEL_EXPORTER_OTLP_METRICS_HEADERS`    | Per-signal request headers; merged per key over the common headers, which they override         |
-| `OTEL_TRACES_EXPORTER`, `OTEL_LOGS_EXPORTER`, `OTEL_METRICS_EXPORTER`                                           | A list containing `none` disables that signal                                                   |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` and per-signal `..._PROTOCOL` variants                                            | Only `http/protobuf` is enabled by this runtime; another explicit protocol disables that signal |
-| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`                                                                 | OpenTelemetry resource metadata                                                                 |
-| `OTEL_LOG_LEVEL`                                                                                                | Minimum exported OMP log level                                                                  |
-
-`OTEL_*` entries in OMP's own `.env` files (agent dir, config root, home `.env`) configure OMP's exporter only. OMP keeps them in a private map instead of `Bun.env`/`process.env`, so they are absent from the process environment of the programs omp launches (bash and PTY commands, subagent shells, JS eval and tab workers, LSP/DAP/MCP servers, installers) and from `process.env` seen by extensions and hooks. This is isolation from inheritance, not confidentiality: the files remain readable on disk, and in-process code that imports `$otelEnv` from `@oh-my-pi/pi-utils` can read the values. While omp constructs its OpenTelemetry exporters at startup, the values are placed in `process.env` for the duration of that synchronous step only. A variable exported in the launching shell wins over the file and stays visible to children, and the project `.env` is unchanged. One limitation: when omp starts in a directory whose `.env` is itself one of omp's own files (for example `$HOME`), that file is applied to the environment before omp's loader runs (by Bun's dotenv autoload, or by omp's own loader when autoload is off), so its values are treated like project `.env` values and stay visible; start omp from a project directory, or keep `OTEL_*` in the agent-dir file (`~/.omp/agent/.env`), which Bun does not auto-load unless that directory is the working directory. Because these values are not in `process.env`, secret masking, which collects secrets from `process.env`, does not see a credential embedded in such a value, such as the password in `scheme://user:pass@host`. An extension that needs its own OpenTelemetry configuration should get it from the shell environment. A child `omp` process re-reads the same files and exports with its own configuration.
-
-Header values are percent-decoded, so encode spaces and the `,`/`=` delimiters:
-
-```bash
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://localhost:8000/v1/traces"
-export OTEL_EXPORTER_OTLP_TRACES_HEADERS="authorization=Bearer%20$LAMINAR_PROJECT_API_KEY"
-```
-
----
-
 ## Security-sensitive variables
 
 Treat these as secrets; do not log or commit them:
@@ -652,6 +626,5 @@ Treat these as secrets; do not log or commit them:
 - Cloud credentials (`AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS` path may expose service-account material)
 - Search/fetch auth vars (`PARALLEL_API_KEY`, `FIRECRAWL_API_KEY`, `EXA_API_KEY`)
 - Foundry mTLS material (`CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`, `NODE_EXTRA_CA_CERTS` when it points to private CA bundles)
-- OTLP exporter headers (`OTEL_EXPORTER_OTLP_HEADERS` and the per-signal `..._{TRACES,LOGS,METRICS}_HEADERS` variants) — they carry ingest bearer tokens/project keys
 
 Python runtime also explicitly strips many common key vars before spawning kernel subprocesses (`packages/coding-agent/src/eval/py/runtime.ts`).

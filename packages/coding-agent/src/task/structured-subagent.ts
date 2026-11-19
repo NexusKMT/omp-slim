@@ -706,7 +706,6 @@ function buildExecutorOptions(
 						lease.unregister?.();
 					}
 				: undefined,
-		parentTelemetry: session.getTelemetry?.(),
 		parentAgentId: session.getAgentId?.() ?? MAIN_AGENT_ID,
 		parentPromptCacheKey: session.getPromptCacheKey?.(),
 		parentServiceTier: session.getServiceTierByFamily ? (session.getServiceTierByFamily() ?? null) : undefined,

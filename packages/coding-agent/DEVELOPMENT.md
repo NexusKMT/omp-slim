@@ -97,7 +97,7 @@ registry (see `AGENTS.md` → _Worker scripts_).
 
 Top-level entry modules: `cli.ts`, `main.ts`, `sdk.ts`, `index.ts` (SDK barrel),
 `config.ts`, `system-prompt.ts`, `thinking.ts`, `workspace-tree.ts`,
-`cli-commands.ts`, `telemetry-export.ts`.
+`cli-commands.ts`.
 
 | Directory                                                | Responsibility                                               | Reference                                                                                                                                                    |
 | -------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |

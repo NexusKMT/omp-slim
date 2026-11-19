@@ -15,7 +15,6 @@ import { type AgentSession, type AgentSessionEvent } from "../session/agent-sess
 import { COST_GATE_NOTICE_SOURCE } from "../session/cost-gate";
 
 import { isSilentAbort } from "../session/messages";
-import { flushTelemetryExport } from "../telemetry-export";
 import { parseSlashCommand, parseSubcommand } from "../slash-commands/helpers/parse";
 import type { SlashCommandRuntime } from "../slash-commands/types";
 import { reconnectMcpManagerServer } from "../mcp/oauth-reauth";
@@ -619,9 +618,6 @@ async function runPrintModeCore(
 			{ waitThroughRecovery: true, strictWithoutDeadline: true },
 		);
 	}
-	// Error spans must reach the exporter; the postmortem `exit` handler can't await.
-	if (terminalFailure) await flushTelemetryExport();
-
 	// Block shutdown until every serialized stdout write (including the final
 	// agent_end and late JSON advisor events) has drained; process.exit would
 	// otherwise discard the buffered tail and truncate the last record.

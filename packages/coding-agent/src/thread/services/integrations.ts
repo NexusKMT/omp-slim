@@ -36,7 +36,6 @@ import { type RpcCodec, type RpcServe, rpcSync } from "../rpc";
 import { trackWorkerSubscription } from "./support";
 import type { ThreadService, WorkerPeer } from "../services";
 import { MCP_MANAGER_KIND, type McpManagerProtocol, type McpToolsReply, RemoteMCPManager } from "./mcp-remote";
-import { toWorkerTelemetryConfig } from "./telemetry";
 import { toolContextCodec } from "./tool-context";
 
 /** Codec kind of `LocalProtocolOptions`. */
@@ -119,8 +118,6 @@ export function toWorkerCustomTool<TParams extends TSchema, TDetails>(
  *
  * - `extensionRoots`, `preparedSession.promptSuffix`: called synchronously by the child → `rpcSync`.
  * - `customTools`: {@link toWorkerCustomTool} views.
- * - `parentTelemetry`: `toWorkerTelemetryConfig` (captures the active span as the child's parent, so
- *   call this inside the parent's `execute_tool task` context).
  *
  * Everything else in this module's scope crosses automatically through codecs and exported
  * classes (`mcpManager`, `localProtocolOptions`, `preloadedPreparedExtensions`, tool contexts);
@@ -139,7 +136,6 @@ export function bridgeIntegrationOptions(options: ExecutorOptions): ExecutorOpti
 		};
 	}
 	if (options.customTools) bridged.customTools = options.customTools.map(tool => toWorkerCustomTool(tool));
-	if (options.parentTelemetry) bridged.parentTelemetry = toWorkerTelemetryConfig(options.parentTelemetry);
 	return bridged;
 }
 

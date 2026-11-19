@@ -23,13 +23,11 @@ import * as mcpSettings from "../mcp/settings";
 import * as secretsSettings from "../secrets/settings";
 import * as commitSettings from "../commit/settings";
 import * as cliGcSettings from "../cli/gc-settings";
-import * as telemetrySettings from "../telemetry-settings";
 
 const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	configModelSettings,
 	modesSettings,
 	sessionSettings,
-	telemetrySettings,
 	advisorSettings,
 	sessionContextSettings,
 	exportTtsrSettings,

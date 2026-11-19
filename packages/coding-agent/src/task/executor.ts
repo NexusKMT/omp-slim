@@ -8,8 +8,8 @@
 
 import * as fs from "node:fs/promises";
 import path from "node:path";
-import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
-import { AgentBusyError, recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
+import type { AgentEvent, AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import type { Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
 import {
 	isRecord,
@@ -488,7 +488,6 @@ export interface ExecutorOptions {
 	 * `handoff` span is emitted on dispatch to mark the parent → subagent
 	 * transition explicitly.
 	 */
-	parentTelemetry?: AgentTelemetryConfig;
 	/** Skills to autoload via sendCustomMessage before the first prompt */
 	autoloadSkills?: Skill[];
 	/**
@@ -4622,40 +4621,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			const enableMCP = !restrictToolNames && (options.enableMCP ?? true);
 			const mcpManager = enableMCP ? options.mcpManager : undefined;
 
-			// Derive subagent-scoped telemetry from the parent's config so the
-			// child loop's spans nest under the parent's active execute_tool span
-			// (OTEL context propagation handles parent linkage automatically),
-			// carry the subagent's own agent identity, and use the subagent's
-			// own session id for `gen_ai.conversation.id`.
-			const subagentAgentIdentity: AgentIdentity | undefined = options.parentTelemetry
-				? {
-						id,
-						name: agent.name,
-						description: agent.description,
-					}
-				: undefined;
-			const subagentTelemetry: AgentTelemetryConfig | undefined =
-				options.parentTelemetry && subagentAgentIdentity
-					? {
-							...options.parentTelemetry,
-							agent: subagentAgentIdentity,
-							// Clear parent's conversationId; the child loop falls back to
-							// its own AgentLoopConfig.sessionId.
-							conversationId: undefined,
-						}
-					: undefined;
-
-			if (options.parentTelemetry && subagentAgentIdentity) {
-				const parentTelemetryHandle = resolveTelemetry(
-					options.parentTelemetry,
-					options.parentTelemetry.conversationId,
-				);
-				recordHandoff(parentTelemetryHandle, {
-					fromAgent: options.parentTelemetry.agent,
-					toAgent: subagentAgentIdentity,
-				});
-			}
-
 			const { normalized: normalizedOutputSchema } = normalizeSchema(outputSchema);
 			// Rebuilding an equivalent session from the same JSONL file re-invokes
 			// createAgentSession with this spec (same agent id, tools, model, system
@@ -4714,7 +4679,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 					// MCP proxies are minted per build as `mcpTools` in buildSubagentSessionOptions.
 					customTools: options.customTools,
 					localProtocolOptions: options.localProtocolOptions,
-					telemetry: subagentTelemetry,
 					// Seance isolation overrides every inherited field above in one place.
 					...(preparedSession ? seanceIsolationOptions(effectiveCwd) : {}),
 				},

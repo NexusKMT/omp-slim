@@ -8,7 +8,6 @@ import * as fsSync from "node:fs";
 import * as os from "node:os";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
-import { getModelPricingStatus } from "@oh-my-pi/pi-ai/models";
 import { ensureSqliteLockShim, isEnoent, isEnotdir } from "@oh-my-pi/pi-utils";
 import {
 	APP_NAME,
@@ -117,8 +116,6 @@ import {
 } from "./system-prompt";
 import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
 import { type RestoreOutcome, restoreSession } from "./task/restore";
-import { createTelemetryExportConfig, initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
-import { cfgTelemetryOtlpExportEnabled } from "./telemetry-settings";
 import { automaticThinkingLevel, concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { LspStartupServerInfo } from "./tools";
 import { sanitizeDisplayWarnings } from "@oh-my-pi/pi-tui/render/render-utils";
@@ -1950,7 +1947,6 @@ export async function runRootCommand(
 				: undefined;
 		daemonPresencePromise?.catch(() => {});
 
-		let startupTelemetry: CreateAgentSessionOptions["telemetry"];
 		let startupExtensions: CreateAgentSessionOptions["extensions"];
 		// An interactive launch writes nothing to the terminal before its UI: the
 		// first paint clears the screen, and in Tern the surface would open over
@@ -1986,31 +1982,11 @@ export async function runRootCommand(
 			options.autoTitle = isInteractive;
 			options.deferSkillDescriptionCompression = isInteractive;
 			options.settings = settingsInstance;
-			options.telemetry = startupTelemetry;
 			options.extensions = startupExtensions;
 			return options;
 		};
 		let sessionOptions = await buildStartupSessionOptions(sessionManager);
 
-		// OTEL: unless `telemetry.otlpExportEnabled` is off, register global OTLP
-		// exporters when an endpoint is configured via env, then switch on the agent
-		// loop's telemetry hooks so traces, run-level metrics, and structured logs
-		// have source events to export. Content capture remains governed by
-		// OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT.
-		await logger.time(
-			"initTelemetryExport",
-			initTelemetryExport,
-			cfgTelemetryOtlpExportEnabled.get(settingsInstance),
-		);
-		if (isTelemetryExportEnabled()) {
-			// Chat telemetry reports each request's provider-computed cost. A model
-			// without a known rate card reports an unavailable reason instead of $0.
-			sessionOptions.telemetry = createTelemetryExportConfig(sessionOptions.telemetry, (providerId, modelId) => {
-				const model = modelRegistry.find(providerId, modelId);
-				return model !== undefined && getModelPricingStatus(model) !== "unknown";
-			});
-			startupTelemetry = sessionOptions.telemetry;
-		}
 		await daemonPresencePromise;
 
 		// Handle CLI --api-key as runtime override (not persisted)

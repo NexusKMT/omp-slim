@@ -12,7 +12,6 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runPrintMode } from "@oh-my-pi/pi-coding-agent/modes/print-mode";
 import { type AgentSession, type AgentSessionDisposeOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SILENT_ABORT_MARKER } from "@oh-my-pi/pi-coding-agent/session/messages";
-import * as telemetryExport from "../src/telemetry-export";
 
 function makeAssistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
 	return {
@@ -69,7 +68,6 @@ describe("Print-mode exit status", () => {
 	let stdoutOutput: string[];
 
 	beforeEach(() => {
-		vi.spyOn(telemetryExport, "flushTelemetryExport").mockResolvedValue();
 		stderrOutput = [];
 		stdoutOutput = [];
 		vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
