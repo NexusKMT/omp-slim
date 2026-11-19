@@ -27,6 +27,7 @@
 
 ### Fixed
 
+- User-authored system customization and always-apply rules remain in the minimal system prompt, including after session reset and template fallback.
 - `cleanse` defaults to the configured main model, `/cleanse` inherits the active session model, and both discovery and repair workers follow the current subagent inheritance policy.
 
 - Advisors adopt the current main model's replacement endpoint and headers even when its provider and model ID stay the same.
