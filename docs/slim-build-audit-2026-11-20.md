@@ -174,3 +174,42 @@ offline metadata，三次调用）。这是为构建一致性支付的开销，�
 当前构建性能。
 已有编译实验脚本合计 562 行，macOS 工作流 608 行；这些是实际维护成本，不能
 继续以增加矩阵规模替代对日常入口、缓存失效原因和关键行为的验证。
+
+## main 提交后的完整构建验证
+
+上述修正已提交并推送为 `8e3f7ea1d0f4fe5c449380635b2e08846cfb0c3b`。
+公开 Intel Mac 运行 [44571654491](https://github.com/NexusKMT/omp-slim/actions/runs/44571654491)
+使用该源码完成正常交付构建。native 构建/安装为 500s（Cargo 496s），CLI 构建
+为 41s；缓存恢复为 50s，仍有 22 条 Cargo 包编译记录。相较此前 626s 的 native
+构建，这次单次墙钟更短，但没有隔离 runner、缓存和负载因素，不能归因于入口修正。
+
+新加的依赖锁检查通过，构建前后源码状态均为空；生成的 `index.js`、`index.d.ts`
+与提交文件完全一致。native 导出检查、独立 CLI 的架构/签名/worker smoke、
+7 项 Rust PTY 测试、4 项绑定 PTY 测试，以及完整 `check:ts` 均通过。
+此次正常构建没有执行 development/compiler benchmark，计时脚本的零编译单元
+检查仍以上述隔离验证和真实记录拒绝为依据。
+
+完整 TS gate 用时 6m34s，仍为 **136/157 组通过、21 组失败**；因此工作流总体
+状态是失败。与 `44556806308` 比较，失败分组集合相同。44 条失败报告中有一条
+ReportPanel 重复报告的文件标签从 `shell-viz.test.ts` 变成
+`write-streaming-incremental-render.test.ts`；两次的真实堆栈和断言都指向
+`packages/tui/test/report-panel.test.ts:142:68`（`Tip:` 可见性）。校正这个报告归属后，
+失败名称及出现次数完全一致，没有发现本次新增失败行为。未将既有失败记为通过。
+
+三个 Actions ZIP 均按 GitHub 提供的 SHA-256 校验；内部 tar.gz 和可执行文件
+又分别按随附 checksum 校验。产物源码为上述提交：
+
+| 产物 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `omp-darwin-x64.tar.gz` | 97,524,321 | `d875e493b90ce8b70a7f9ca2b1bcb7da28cb719a6f746f8828c2a99da2522060` |
+| `omp` | 188,671,216 | `bc6441d45f9181434efd522673dd82708f8210a709a22bece537990211554f74` |
+| native addon | 93,884,000 | `2fbb3b6dc96cfb6ec0462f93fc91569973e1534180e14f73955cc06d95553386` |
+
+本机解包后以隔离配置目录运行，签名、x86_64 架构、`--version`、`--help`、
+`--smoke-test` 全部通过。直接加载下载的 addon，已删除导出检查通过，真实 macOS
+拼写返回 `[{start: 6, length: 10}]`；服务先报告一次超时，随后成功。addon 与工作区
+已验证插件的哈希相同。没有替换用户安装的独立 CLI。
+
+原始日志、失败对照和本机校验记录保存在 `dist/validation/main-build-2026-11-20/`；
+下载产物在 `dist/actions/44571654491/`。关键结果写入同名审核 JSON 的
+`main_validation`，以便 artifact 过期后仍可核查。结束时未发现本项目的活动 Codespace。

@@ -953,5 +953,181 @@
 		"bytes": 195280920,
 		"run": 44562078213
 	},
-	"local_host": "machdep.cpu.brand_string: Intel(R) Core(TM) m3-8100Y CPU @ 1.10GHz\nhw.physicalcpu: 2\nhw.logicalcpu: 4\nhw.memsize: 17179869184\n"
+	"local_host": "machdep.cpu.brand_string: Intel(R) Core(TM) m3-8100Y CPU @ 1.10GHz\nhw.physicalcpu: 2\nhw.logicalcpu: 4\nhw.memsize: 17179869184\n",
+	"main_validation": {
+		"run": 44571654491,
+		"url": "https://github.com/NexusKMT/omp-slim/actions/runs/44571654491",
+		"source_commit": "8e3f7ea1d0f4fe5c449380635b2e08846cfb0c3b",
+		"workflow_conclusion": "failure",
+		"job_started_utc": "2026-11-19T16:56:17Z",
+		"job_completed_utc": "2026-11-19T17:14:44Z",
+		"remote_checks": {
+			"Compile and verify native addon and standalone CLI": "success",
+			"Test native PTY lifecycle on macOS": "success",
+			"Check TypeScript workspace": "success",
+			"Test retained TypeScript workspace behavior": "failure"
+		},
+		"cargo_native_seconds": 496,
+		"cargo_compiling_package_log_lines": 22,
+		"cache_restore_seconds": 50,
+		"rust_pty_tests_passed": 7,
+		"binding_pty_tests_passed": 4,
+		"full_ts_seconds": 394,
+		"artifacts": {
+			"run": 44571654491,
+			"source_commit": "8e3f7ea1d0f4fe5c449380635b2e08846cfb0c3b",
+			"artifact_zips": [
+				{
+					"kind": "bindings",
+					"artifact_id": 14555582857,
+					"sha256": "941411dbf8989b8faea63d749388a14b94008a9ade70bbbde24f94dd2935ec9c",
+					"bytes": 42563,
+					"verified_against_github_digest": true
+				},
+				{
+					"kind": "binary",
+					"artifact_id": 14555373050,
+					"sha256": "85075044cb13b742247c4d8b904c2c85edf135af23d73ed075ce86737466f34e",
+					"bytes": 97651620,
+					"verified_against_github_digest": true
+				},
+				{
+					"kind": "native",
+					"artifact_id": 14555328116,
+					"sha256": "28340f341bee6ba808863f282c08324964270bd9cc1e9ef59bf012b8e1f8f3e3",
+					"bytes": 93884180,
+					"verified_against_github_digest": true
+				}
+			],
+			"archive": {
+				"path": "dist/actions/44571654491/binary/builds/macos-intel-20261119T165743Z/omp-darwin-x64.tar.gz",
+				"sha256": "d875e493b90ce8b70a7f9ca2b1bcb7da28cb719a6f746f8828c2a99da2522060",
+				"bytes": 97524321
+			},
+			"executable": {
+				"path": "dist/actions/44571654491/binary/builds/macos-intel-20261119T165743Z/extracted/omp",
+				"sha256": "bc6441d45f9181434efd522673dd82708f8210a709a22bece537990211554f74",
+				"bytes": 188671216
+			},
+			"native": {
+				"path": "dist/actions/44571654491/native/pi_natives.darwin-x64-modern.node",
+				"sha256": "2fbb3b6dc96cfb6ec0462f93fc91569973e1534180e14f73955cc06d95553386",
+				"bytes": 93884000
+			},
+			"native_build_seconds": 500,
+			"cli_build_seconds": 41,
+			"source_clean_before_and_after": true,
+			"generated_bindings_match_tracked_source": true
+		},
+		"failure_comparison": {
+			"baseline_run": 44556806308,
+			"run": 44571654491,
+			"source_commit": "8e3f7ea1d0f4fe5c449380635b2e08846cfb0c3b",
+			"passed_chunks": 136,
+			"failed_chunks": 21,
+			"failure_reports": 44,
+			"unique_test_paths": 27,
+			"added_failures": [
+				"test/write-streaming-incremental-render.test.ts > ReportPanel in text mode > keeps the editor on the bottom row when rows reached scrollback while the report was open"
+			],
+			"absent_baseline_failures": [
+				"test/shell-viz.test.ts > ReportPanel in text mode > keeps the editor on the bottom row when rows reached scrollback while the report was open"
+			],
+			"added_failed_groups": [],
+			"absent_baseline_failed_groups": [],
+			"failures": [
+				"test/report-panel.test.ts > ReportPanel in text mode > keeps the editor on the bottom row when rows reached scrollback while the report was open",
+				"test/write-streaming-incremental-render.test.ts > ReportPanel in text mode > keeps the editor on the bottom row when rows reached scrollback while the report was open",
+				"test/discovery/disabled-extensions.test.ts > disabledExtensions runtime filtering > keeps the runtime context winner active in the dashboard when its competitor is disabled",
+				"test/discovery/disabled-extensions.test.ts > disabledExtensions runtime filtering > shows the enabled agents skill when an opted-out Claude skill has the same name",
+				"test/discovery/disabled-extensions.test.ts > disabledExtensions runtime filtering > deduplicates against the caller's session-local disabled list, not global settings",
+				"test/discovery/disabled-extensions.test.ts > disabledExtensions runtime filtering > deduplicates against an empty snapshot when the caller omits disabled IDs",
+				"test/discovery/disabled-extensions.test.ts > disabledExtensions runtime filtering > marks a disabled lower-priority row shadowed when an enabled higher-priority item owns the key",
+				"test/flag-tables.test.ts > restartArgv (/restart relaunch argv) > drops every session-source flag, including inline = and value forms",
+				"test/extension-dashboard-mcp-parity.test.ts > loadAllExtensions MCP parity with /mcp list (issue #3827) > dashboard re-enable force-enables a tool-owned source (opencode.json) via enabledServers",
+				"test/system-prompt-personality.test.ts > PERSONALITY.md override > replaces the selected preset's text with <agentDir>/PERSONALITY.md",
+				"test/system-prompt-personality.test.ts > PERSONALITY.md override > falls back to the configured preset when the file is empty",
+				"test/system-prompt-personality.test.ts > PERSONALITY.md override > renders the selected preset when no override file exists",
+				"test/discovery/agent-discovery-disabled-providers.test.ts > discoverAgents — claude-plugins disabled provider > includes plugin agents once claude-plugins is opted in",
+				"test/sdk-yield-report.test.ts > SDK data-less yield report > submits preceding prose through the real loop (done-only=true, delayed=false, budget-stop=false)",
+				"test/sdk-yield-report.test.ts > SDK data-less yield report > prefers report prose beside yield over a previous report",
+				"test/slash-commands/detached-draft.test.ts > builtin commands and detached drafts > /skills search leaves a newer draft alone once its own draft was detached",
+				"test/slash-commands/detached-draft.test.ts > builtin commands and detached drafts > /skills search still clears its own draft from the editor when it was not detached",
+				"test/slash-commands/plugins.test.ts > /plugins live enable and disable > marketplace toggle changes the discovered skills in the running TUI session",
+				"test/marketplace/manager.test.ts > MarketplaceManager > installPlugin keeps marketplace packages out of OMP extension roots",
+				"test/sdk-visuals-prompt.test.ts > visuals guidance in the system prompt > is offered to the top-level TUI session only, not to RPC or subagent sessions",
+				"test/session/agent-session-live-settings.test.ts > AgentSession live settings > rebuilds the system prompt when prompt-affecting settings change",
+				"test/cli-argv-routing.test.ts > resolveCliArgv strips launch-global flags before non-launch subcommands (#8891) > `--cwd <dir> stats` drops the inapplicable launch flag instead of forwarding it",
+				"test/cli-argv-routing.test.ts > resolveCliArgv strips launch-global flags before non-launch subcommands (#8891) > `--cwd=<dir>` inline form is stripped too",
+				"test/cli-argv-routing.test.ts > resolveCliArgv strips launch-global flags before non-launch subcommands (#8891) > a trailing subcommand flag survives while the leading launch flag is stripped",
+				"test/cli-argv-routing.test.ts > resolveCliArgv strips launch-global flags before non-launch subcommands (#8891) > multiple leading launch flags are all stripped before a non-launch subcommand",
+				"test/cli-argv-routing.test.ts > resolveCliArgv strips launch-global flags before non-launch subcommands (#8891) > a subcommand's own flag placed before it is kept, not treated as launch-global",
+				"test/discovery/mcp-enabled-import.test.ts > translated MCP importers propagate enabled: false > claude carries enabled: false",
+				"test/discovery/mcp-enabled-import.test.ts > translated MCP importers propagate enabled: false > cursor carries enabled: false",
+				"test/discovery/mcp-enabled-import.test.ts > translated MCP importers propagate enabled: false > gemini carries enabled: false",
+				"test/discovery/mcp-enabled-import.test.ts > translated MCP importers propagate enabled: false > windsurf carries enabled: false",
+				"test/discovery/mcp-enabled-import.test.ts > translated MCP importers propagate enabled: false > vscode carries enabled: false",
+				"test/extensions-discovery.test.ts > extensions discovery > discoverExtensionPaths only invokes the native extension-module provider (#4198)",
+				"test/history-storage-sqlite-compat.test.ts > quarantines a store whose newest rows are unreadable and keeps every readable prompt, title, and recap",
+				"test/issue-12247-abandoned-tool-call-rebuild.test.ts > issue #12247 mid-turn transcript rebuild > keeps the in-flight call and strips an abandoned call from an earlier turn",
+				"test/non-interactive-env.test.ts > buildNonInteractiveEnv > drops CI when PI_BASH_NO_CI or its legacy alias is set",
+				"test/sdk-generate-image-tool-gating.test.ts > generate_image tool gating > mounts ambient tools across runtime selection with a device-only write",
+				"test/sdk-generate-image-tool-gating.test.ts > generate_image tool gating > upgrades explicit write selection while devices are already mounted",
+				"test/sdk-task-async-guidance.test.ts > SDK async task guidance > sends guidance once through descriptors without repeating it in results (inline=on)",
+				"test/sdk-system-prompt-template.test.ts > SDK systemPrompt replacements > falls back to the bundled prompt for callbacks when the native template is malformed",
+				"test/security/gate.test.ts > security feature gate > security:// is omitted from the system prompt while disabled",
+				"test/slash-commands/subcommand-completions.test.ts > declarative subcommand completion > gives the selected dropdown item the same ghost text as the closed-dropdown hint",
+				"test/settings-gated-tools-live.test.ts > settings-gated tools in a live session > removes and restores grep in the request tools and system prompt",
+				"test/task-executor-mcp-parity.test.ts > Skill URI reader capability > preserves the skill catalog and URI guidance through to the rendered prompt",
+				"test/tools/lsp-regressions.test.ts > lsp regressions > loads config-only marketplace LSP servers from Claude plugin cache"
+			],
+			"canonical_failure_multiset_matches_baseline": true,
+			"canonical_unique_failure_names": 43,
+			"reporter_attribution_difference": {
+				"test_name": "ReportPanel in text mode > keeps the editor on the bottom row when rows reached scrollback while the report was open",
+				"baseline_duplicate_file_label": "test/shell-viz.test.ts",
+				"current_duplicate_file_label": "test/write-streaming-incremental-render.test.ts",
+				"actual_stack_in_both_runs": "packages/tui/test/report-panel.test.ts:142:68",
+				"assertion_in_both_runs": "terminal.getViewport().some(row => row.includes(\"Tip:\")); Expected true; Received false",
+				"reason": "Both logs report the same assertion once with its original file and again with a different current-file label; the test declaration exists only in report-panel.test.ts."
+			}
+		},
+		"local_cli_exit_codes": {
+			"codesign": 0,
+			"architecture": 0,
+			"version": 0,
+			"help": 0,
+			"smoke": 0
+		},
+		"local_cli_version": "omp/18.18.3",
+		"local_cli_smoke": "smoke-test: ok",
+		"local_configuration_isolated": true,
+		"local_native": {
+			"addon": "/Users/aaron/Projects/omp-slim/dist/actions/44571654491/native/pi_natives.darwin-x64-modern.node",
+			"version": "18.18.3",
+			"retiredExports": [],
+			"retainedExportsPresent": true,
+			"actualMacOSSpelling": [
+				{
+					"start": 6,
+					"length": 10
+				}
+			],
+			"spellingSkip": null
+		},
+		"local_spelling_service_note": "NSSpellServer emitted one timeout message, then reported success; the returned word span matched the expected result.",
+		"user_installed_cli_replaced": false,
+		"new_benchmark_guard_remote_run": false,
+		"active_project_codespaces_at_end": [],
+		"evidence_directory": "dist/validation/main-build-2026-11-20",
+		"evidence_sha256": {
+			"actions.log": "6af75f9bb08c22f9a952673a44bd671753eba913316b346e1a9011204cb8aa3d",
+			"status.json": "cb8e02473b3b6355336851fb4d6fe52053a1e2dff9995ccbe1e363d7ab426ec4",
+			"artifacts.json": "7e81701cc17dfb76bd007c698a91affd860ee405714ef8f598525fe4a7dc3077",
+			"failure-comparison.json": "2448d1ecbb356b3e356229184e0ece0b557b79ac63b97aaf7d1bab7ed583b21a",
+			"artifact-verification.json": "23342e2674faa5e3a59ae34e622e8262804af08daaf9f9be5dc74ebcb707c4f1",
+			"local-binary-verification.json": "ae18b853d1ff3bb0c6a7704b7dcc56fdde29fa5375d57f2f4f40b703eee3cb4a",
+			"local-native-verification.json": "32c57a9d4de896d299c309b3a090d4e581ea03b4adbf00d4e2caad37618305a5"
+		}
+	}
 }
