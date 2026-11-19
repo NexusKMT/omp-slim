@@ -12,7 +12,7 @@ import { CONFIG_DIR_NAME, TempDir } from "@oh-my-pi/pi-utils";
 type SystemPromptOption = string | string[] | ((defaultPrompt: string[]) => string | string[]);
 type SessionOverrides = Pick<
 	CreateAgentSessionOptions,
-	"systemPromptTemplate" | "customSystemPrompt" | "settings" | "taskDepth"
+	"systemPromptTemplate" | "customSystemPrompt" | "settings" | "taskDepth" | "rules"
 >;
 
 async function withSession<T>(
@@ -92,15 +92,26 @@ describe("SDK systemPrompt replacements", () => {
 		).rejects.toThrow("systemPromptTemplate cannot be combined with a literal custom system prompt");
 	});
 
-	it("falls back to the bundled prompt for callbacks when the native template is malformed", async () => {
+	it("preserves user rules in the fallback passed to callbacks when the native template is malformed", async () => {
 		await withSession(
 			"{{#if eagerTasks}}",
 			defaultPrompt => {
-				expect(defaultPrompt.join("\n\n")).toContain("⁂ Tool Policy");
+				expect(defaultPrompt.join("\n\n")).toContain("Keep generated files outside the source tree.");
 				return "callback replacement";
 			},
 			async session => {
 				expect(session.systemPrompt).toEqual(["callback replacement"]);
+			},
+			{
+				rules: [
+					{
+						name: "output-paths",
+						path: "/project/RULES.md",
+						content: "Keep generated files outside the source tree.",
+						alwaysApply: true,
+						_source: { provider: "native", providerName: "OMP", path: "/project/RULES.md", level: "project" },
+					},
+				],
 			},
 		);
 	});

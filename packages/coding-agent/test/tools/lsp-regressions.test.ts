@@ -7,9 +7,7 @@ import type { AgentToolResult, RenderResultOptions } from "@oh-my-pi/pi-agent-co
 import { arkToWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { preloadPluginRoots } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { rejectionOf, trackUnhandled } from "../helpers/rejection";
-import { restoreEnvValue } from "../helpers/settings-test-state";
 import { createLspWritethrough, LspTool } from "@oh-my-pi/pi-coding-agent/lsp";
 import * as lspClient from "@oh-my-pi/pi-coding-agent/lsp/client";
 import * as lspConfig from "@oh-my-pi/pi-coding-agent/lsp/config";
@@ -3285,98 +3283,6 @@ describe("lsp regressions", () => {
 		expect(detectLanguageId(emacsPath)).toBe("emacs-lisp");
 	});
 
-	it("loads config-only marketplace LSP servers from Claude plugin cache", async () => {
-		const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
-		delete process.env.CLAUDE_CONFIG_DIR;
-		delete Bun.env.CLAUDE_CONFIG_DIR;
-		const tempDir = TempDir.createSync("@omp-lsp-marketplace-config-");
-		const home = path.join(tempDir.path(), "home");
-		const cwd = path.join(tempDir.path(), "repo");
-		const pluginRoot = path.join(
-			home,
-			".claude",
-			"plugins",
-			"cache",
-			"claude-plugins-official",
-			"csharp-lsp",
-			"1.0.0",
-		);
-		const marketplaceRoot = path.dirname(path.dirname(pluginRoot));
-		const registryPath = path.join(home, ".claude", "plugins", "installed_plugins.json");
-
-		await fs.promises.mkdir(pluginRoot, { recursive: true });
-		await fs.promises.mkdir(cwd, { recursive: true });
-		await fs.promises.mkdir(path.dirname(registryPath), { recursive: true });
-		await Bun.write(path.join(cwd, "Example.csproj"), "<Project />\n");
-		await Bun.write(
-			registryPath,
-			`${JSON.stringify(
-				{
-					version: 2,
-					plugins: {
-						"csharp-lsp@claude-plugins-official": [
-							{
-								scope: "user",
-								installPath: pluginRoot,
-								version: "1.0.0",
-								installedAt: "2026-05-25T00:00:00.000Z",
-								lastUpdated: "2026-05-25T00:00:00.000Z",
-							},
-						],
-					},
-				},
-				null,
-				2,
-			)}\n`,
-		);
-		await Bun.write(
-			path.join(marketplaceRoot, "marketplace.json"),
-			`${JSON.stringify(
-				{
-					name: "claude-plugins-official",
-					owner: { name: "anthropic" },
-					plugins: [
-						{
-							name: "csharp-lsp",
-							version: "1.0.0",
-							source: "./csharp-lsp/1.0.0",
-							lspServers: {
-								"csharp-ls": {
-									command: "csharp-ls",
-									extensionToLanguage: { ".cs": "csharp" },
-								},
-							},
-						},
-					],
-				},
-				null,
-				2,
-			)}\n`,
-		);
-
-		const resolvedCsharpLs = path.join(tempDir.path(), "bin", "csharp-ls");
-		const whichSpy = vi
-			.spyOn(piUtils, "$which")
-			.mockImplementation(command => (command === "csharp-ls" ? resolvedCsharpLs : null));
-
-		try {
-			await preloadPluginRoots(home, cwd);
-
-			const config = loadConfig(cwd);
-
-			expect(config.servers["csharp-ls"]?.resolvedCommand).toBe(resolvedCsharpLs);
-			expect(getServersForFile(config, path.join(cwd, "Program.cs")).map(([name]) => name)).toEqual(["csharp-ls"]);
-			expect(config.servers["csharp-ls"]?.rootMarkers).toEqual(["."]);
-			expect(whichSpy).toHaveBeenCalledWith("csharp-ls");
-		} finally {
-			try {
-				await preloadPluginRoots(path.join(tempDir.path(), "empty-home"), cwd);
-			} finally {
-				restoreEnvValue("CLAUDE_CONFIG_DIR", originalClaudeConfigDir);
-				tempDir.removeSync();
-			}
-		}
-	});
 	it("rename_file applies LSP willRenameFiles edits and renames the file", async () => {
 		const tempDir = TempDir.createSync("@omp-lsp-rename-file-");
 		try {

@@ -52,7 +52,12 @@ describe("/plugins live enable and disable", () => {
 	test("marketplace toggle changes the discovered skills in the running TUI session", async () => {
 		const id = "example@local";
 		const installPath = path.join(root, "example");
-		await Bun.write(path.join(installPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
+		await Bun.write(
+			path.join(installPath, "package.json"),
+			JSON.stringify({ name: "example", version: "1.0.0", omp: {} }),
+		);
+		await fs.mkdir(path.join(pluginsDir, "node_modules"), { recursive: true });
+		await fs.symlink(installPath, path.join(pluginsDir, "node_modules", "example"));
 		await Bun.write(
 			path.join(installPath, "skills", "market-skill", "SKILL.md"),
 			"---\nname: market-skill\ndescription: Marketplace fixture\n---\nSkill body\n",

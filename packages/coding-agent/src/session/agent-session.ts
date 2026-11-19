@@ -2297,7 +2297,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				build: buildAsyncResultBatchMessage,
 			});
 		}
-		this.agent.setAssistantMessageEventInterceptor((message, assistantMessageEvent) => {});
+		this.agent.setOnAssistantMessageEnd(message => this.#waitForSessionMessagePersistence(message));
 		// Tool-result hook owns synchronous post-tool actions that must affect the current loop.
 		this.agent.afterToolCall = ctx => this.#afterToolCall(ctx);
 		// Pre-scheduling tool_call wiring: extension handlers run at arg-prep

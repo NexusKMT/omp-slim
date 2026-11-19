@@ -234,9 +234,10 @@ describe("restartArgv (/restart relaunch argv)", () => {
 	});
 
 	it("drops every session-source flag, including inline = and value forms", () => {
-		expect(
-			restartArgv(["--resume=old", "-r", "old2", "--continue", "-c", "--fork", "xyz", "--from-claude"], "sid"),
-		).toEqual(["--restore", "sid"]);
+		expect(restartArgv(["--resume=old", "-r", "old2", "--continue", "-c", "--fork", "xyz"], "sid")).toEqual([
+			"--restore",
+			"sid",
+		]);
 	});
 
 	it("keeps the value of an unknown extension flag instead of dropping it as a positional", () => {

@@ -111,8 +111,8 @@ describe("Skill URI reader capability", () => {
 				workspaceTree: { rootPath: tempDir, rendered: "", truncated: false, totalLines: 0, agentsMdFiles: [] },
 			});
 			const text = systemPrompt.join("\n\n");
-			expect(text).toContain("bridge-skill");
-			expect(text).toContain("`skill://<name>`");
+			expect(text).toContain("skill://bridge-skill");
+			expect(text).toContain("Readable through the custom reader bridge");
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}

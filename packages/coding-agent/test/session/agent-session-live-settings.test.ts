@@ -116,11 +116,10 @@ describe("AgentSession live settings", () => {
 		await live.refreshBaseSystemPrompt();
 		expect(live.systemPrompt.join("\n")).toContain("live-settings-tree-marker/");
 
-		const beforePersonality = live.systemPrompt.join("\n");
-		cfgPersonality.set(settings, "none");
+		cfgIncludeWorkspaceTree.set(settings, false);
 		await Promise.resolve();
 		await live.refreshBaseSystemPrompt();
-		expect(live.systemPrompt.join("\n")).not.toBe(beforePersonality);
+		expect(live.systemPrompt.join("\n")).not.toContain("live-settings-tree-marker/");
 	});
 
 	it("rebuilds the system prompt once for a bulk change across several prompt inputs", async () => {

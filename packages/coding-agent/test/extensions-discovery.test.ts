@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import * as path from "node:path";
-import { type ExtensionModule, extensionModuleCapability } from "@oh-my-pi/pi-coding-agent/capability/extension-module";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getCapability, initializeWithSettings } from "@oh-my-pi/pi-coding-agent/discovery";
+import { initializeWithSettings } from "@oh-my-pi/pi-coding-agent/discovery";
 import {
 	discoverAndLoadExtensions,
 	discoverExtensionPaths,
@@ -748,34 +747,5 @@ describe("extensions discovery", () => {
 		expect(result.extensions).toHaveLength(1);
 		expect(result.extensions[0].tools.has("explicit")).toBe(true);
 		expect(result.extensions[0].tools.has("discovered")).toBe(false);
-	});
-
-	it("discoverExtensionPaths only invokes the native extension-module provider (#4198)", async () => {
-		// The extension-module capability has multiple providers
-		// (native, claude, codex, gemini, opencode), but discoverExtensionPaths
-		// only surfaces native-provider paths. Regression: pre-fix it still
-		// invoked every provider's load() and then dropped foreign items,
-		// running four unused directory walks per startup (worst on Windows).
-		const capability = getCapability<ExtensionModule>(extensionModuleCapability.id);
-		expect(capability, "extension-modules capability must be registered").toBeDefined();
-
-		const providers = capability?.providers ?? [];
-		const foreignIds = providers.map(p => p.id).filter(id => id !== "native");
-		// Guard the invariant this test is defending — without foreign providers
-		// the test would trivially pass and hide a future regression.
-		expect(foreignIds.length).toBeGreaterThan(0);
-
-		const spies = providers.map(provider => vi.spyOn(provider, "load"));
-		try {
-			await discoverExtensionPaths([], tempDir.path());
-
-			const callsById = new Map(providers.map((provider, i) => [provider.id, spies[i].mock.calls.length]));
-			expect(callsById.get("native")).toBe(1);
-			for (const id of foreignIds) {
-				expect(callsById.get(id), `foreign provider ${id} must not be walked`).toBe(0);
-			}
-		} finally {
-			for (const spy of spies) spy.mockRestore();
-		}
 	});
 });

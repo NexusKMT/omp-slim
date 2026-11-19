@@ -110,7 +110,7 @@ describe("ReportPanel in text mode", () => {
 	});
 
 	it("keeps the editor on the bottom row when rows reached scrollback while the report was open", async () => {
-		// With the welcome header on screen, opening a tall report retires the
+		// With a header on screen, opening a tall report retires the
 		// header into scrollback, so the frame left after closing is shorter
 		// than the screen. The interactive mode notes the editor sat on the
 		// bottom row before opening and pins it there again on close.
@@ -122,6 +122,7 @@ describe("ReportPanel in text mode", () => {
 			preferences: { ...COMPOSER_DEFAULTS, quiet: false },
 		});
 		const transcript = new TranscriptContainer();
+		composer.setHeaderExtras([new Text("Report fixture header", 0, 0)], []);
 		let transcriptRows = 0;
 		const dock = new Container();
 		const editor = new Container();
@@ -130,8 +131,7 @@ describe("ReportPanel in text mode", () => {
 		composer.start({ playWelcomeIntro: false });
 		await scheduler.settle(terminal);
 		const editorRow = () => terminal.getViewport().findIndex(row => row.includes("EDITOR"));
-		// The welcome tip is picked at random and wraps to a varying height, so
-		// grow the transcript until the frame exactly fills the screen.
+		// Grow the transcript until the frame exactly fills the screen.
 		for (; transcriptRows < ROWS && editorRow() < ROWS - 1; transcriptRows++) {
 			const row = transcriptRows;
 			transcript.addChild({ render: () => [`Transcript ${row}`], isTranscriptBlockFinalized: () => true } as never);
@@ -139,7 +139,7 @@ describe("ReportPanel in text mode", () => {
 			await scheduler.settle(terminal);
 		}
 		expect(editorRow()).toBe(ROWS - 1);
-		expect(terminal.getViewport().some(row => row.includes("Tip:"))).toBe(true);
+		expect(terminal.getViewport().some(row => row.includes("Report fixture header"))).toBe(true);
 		const viewport = composer.ui.getMutableViewport();
 		expect(viewport.top + viewport.length).toBe(ROWS);
 

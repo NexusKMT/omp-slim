@@ -31,6 +31,7 @@ async function promptWithSecurity(securityEnabled: boolean): Promise<string> {
 		},
 		activeRepoContext: null,
 		securityEnabled,
+		systemPromptTemplate: "{{#each internalUrls}}{{this}}\n{{/each}}",
 		includeModelInPrompt: false,
 	});
 	return systemPrompt.join("\n");
@@ -76,7 +77,7 @@ describe("security feature gate", () => {
 		}
 	});
 
-	test("security:// is omitted from the system prompt while disabled", async () => {
+	test("custom templates expose security:// only while enabled", async () => {
 		expect(await promptWithSecurity(false)).not.toContain("security://");
 		expect(await promptWithSecurity(true)).toContain("security://");
 	});

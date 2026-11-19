@@ -250,7 +250,7 @@ it("recalls and searches only text prompts when a row decodes as a BLOB", async 
 	expect(fs.readdirSync(tempDir.path()).filter(name => name.includes(".corrupt-"))).toEqual([]);
 });
 
-it("quarantines a store whose newest rows are unreadable and keeps every readable prompt, title, and recap", async () => {
+it("quarantines a store whose newest rows are unreadable and keeps every readable prompt and title", async () => {
 	tempDir = TempDir.createSync("@omp-history-storage-salvage-");
 	const dbPath = tempDir.join("history.db");
 	HistoryStorage.open(dbPath);
@@ -261,9 +261,7 @@ it("quarantines a store whose newest rows are unreadable and keeps every readabl
 	seed.run("PRAGMA secure_delete = ON");
 	seed.run(`
 CREATE TABLE session_titles (session_id TEXT PRIMARY KEY, title TEXT NOT NULL, updated_at INTEGER NOT NULL);
-CREATE TABLE session_recaps (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, cwd TEXT NOT NULL, recap TEXT NOT NULL, created_at INTEGER NOT NULL);
 INSERT INTO session_titles VALUES ('session-a', 'Title A', 1700000000);
-INSERT INTO session_recaps (session_id, cwd, recap, created_at) VALUES ('session-a', '/project', 'Recap A', 1700000000);
 	`);
 	const insert = seed.prepare("INSERT INTO history (id, prompt, created_at, cwd, session_id) VALUES (?, ?, ?, ?, ?)");
 	seed.transaction(() => {
@@ -310,9 +308,6 @@ INSERT INTO session_recaps (session_id, cwd, recap, created_at) VALUES ('session
 	try {
 		expect(db.query("SELECT session_id, title FROM session_titles").all()).toEqual([
 			{ session_id: "session-a", title: "Title A" },
-		]);
-		expect(db.query("SELECT session_id, cwd, recap FROM session_recaps").all()).toEqual([
-			{ session_id: "session-a", cwd: "/project", recap: "Recap A" },
 		]);
 		expect(db.query<{ quick_check: string }, []>("PRAGMA quick_check").get()?.quick_check).toBe("ok");
 	} finally {

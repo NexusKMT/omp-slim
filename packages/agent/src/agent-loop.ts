@@ -1538,9 +1538,11 @@ async function streamAssistantResponse(
 					if (!addedPartial) {
 						stream.push({ type: "message_start", message: snapshotAssistantMessage(finalMessage) });
 					}
-					stream.push({ type: "message_end", message: snapshotAssistantMessage(finalMessage) });
+					const deliveredMessage = snapshotAssistantMessage(finalMessage);
+					stream.push({ type: "message_end", message: deliveredMessage });
 					speculationSettled = true;
 					providerStreamSettled = true;
+					await config.onAssistantMessageEnd?.(deliveredMessage, requestSignal);
 					return finalMessage;
 				}
 				if (requestSignal?.aborted) {
@@ -1794,9 +1796,11 @@ async function streamAssistantResponse(
 				stream.push({ type: "message_start", message: snapshotAssistantMessage(trailing) });
 			}
 
-			stream.push({ type: "message_end", message: snapshotAssistantMessage(trailing) });
+			const deliveredMessage = snapshotAssistantMessage(trailing);
+			stream.push({ type: "message_end", message: deliveredMessage });
 			speculationSettled = true;
 			providerStreamSettled = true;
+			await config.onAssistantMessageEnd?.(deliveredMessage, requestSignal);
 			return trailing;
 		} catch (error) {
 			if (!speculationSettled) {

@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Commit the final assistant message to host state before dispatching its tools, including streams that return only a final result.
 - Fixed provider-context normalization dropping every assistant thinking block, so the openai-completions encoder can replay `reasoning_content` on follow-up turns (DeepSeek-class endpoints reject requests that omit it with HTTP 400).
 
 ## [18.18.2] - 2026-11-08

@@ -486,6 +486,9 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 */
 	onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
 
+	/** Wait for the final message_end to reach host state and persistence before tool dispatch. */
+	onAssistantMessageEnd?: (message: AssistantMessage, signal?: AbortSignal) => Promise<void> | void;
+
 	/**
 	 * Dynamic tool-choice directive, resolved once per turn. Returns a hard
 	 * {@link ToolChoice} (applied verbatim, overriding the static `toolChoice`),

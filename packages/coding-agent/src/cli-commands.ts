@@ -318,7 +318,7 @@ function isLaunchGlobalFlag(arg: string): boolean {
 /**
  * Drop recognized launch-global flags (and any value they consume) from the
  * leading segment before a hoisted non-launch subcommand. `--cwd` and friends
- * belong to the launch surface and mean nothing to a subcommand like `stats`,
+ * belong to the launch surface and mean nothing to a subcommand like `gc`,
  * whose strict parser would otherwise reject them with a cryptic
  * `node:util.parseArgs` error (#8891). Tokens the launch tables don't recognize
  * are kept, so a subcommand's own leading flags still reach it.
@@ -357,7 +357,7 @@ export function resolveCliArgv(argv: string[]): ResolvedCliArgv {
 	// hoist the subcommand to the front. Launch-shaped commands share the launch
 	// flag surface, so their leading flags are forwarded and applied; every other
 	// subcommand parses only its own flags, so launch-global flags placed before
-	// it (`omp --cwd <dir> stats`) are stripped rather than forwarded into a
+	// it (`omp --cwd <dir> gc`) are stripped rather than forwarded into a
 	// crash (#8891). Genuine launch prompts (no trailing subcommand) are untouched.
 	const subIndex = leadingSubcommandIndex(argv);
 	if (subIndex >= 0) {

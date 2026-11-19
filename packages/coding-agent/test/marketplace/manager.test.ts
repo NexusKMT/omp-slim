@@ -733,7 +733,7 @@ describe("MarketplaceManager", () => {
 		}
 	});
 
-	it("installPlugin keeps marketplace packages out of OMP extension roots", async () => {
+	it("installPlugin exposes user marketplace packages to the runtime loader", async () => {
 		const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-mgr-home-"));
 		try {
 			const pluginsDir = path.join(tmpHome, ".omp", "plugins");
@@ -753,7 +753,7 @@ describe("MarketplaceManager", () => {
 				repoRoot: null,
 				extensionRoots: { explicit: [], configured: [], configuredLevel: "user", mode: "merge" },
 			});
-			expect(roots.map(root => root.name)).toEqual([]);
+			expect(roots.map(root => root.name)).toEqual(["hello-plugin"]);
 		} finally {
 			fs.rmSync(tmpHome, { recursive: true, force: true });
 		}

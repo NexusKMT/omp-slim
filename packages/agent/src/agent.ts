@@ -392,6 +392,7 @@ export class Agent {
 	#onResponse?: SimpleStreamOptions["onResponse"];
 	#onSseEvent?: SimpleStreamOptions["onSseEvent"];
 	#onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
+	#onAssistantMessageEnd?: AgentLoopConfig["onAssistantMessageEnd"];
 	#onBeforeYield?: () => Promise<void> | void;
 	#onTurnEnd?: (messages: AgentMessage[], signal?: AbortSignal, context?: AgentTurnEndContext) => Promise<void> | void;
 	#onModelCallSystemPrompt?: (systemPrompt: string[]) => void;
@@ -955,6 +956,10 @@ export class Agent {
 
 	setOnBeforeYield(fn: (() => Promise<void> | void) | undefined): void {
 		this.#onBeforeYield = fn;
+	}
+	/** Commit the final assistant message before its tools run, without awaiting notification listeners. */
+	setOnAssistantMessageEnd(fn: AgentLoopConfig["onAssistantMessageEnd"]): void {
+		this.#onAssistantMessageEnd = fn;
 	}
 	setOnTurnEnd(
 		fn:
@@ -1658,6 +1663,9 @@ export class Agent {
 			return refreshToolChoiceForActiveTools(options?.toolChoice, this.#state.tools);
 		};
 
+		let deliveredAssistantMessage: AssistantMessage | undefined;
+		let pendingAssistantDelivery: { message: AssistantMessage; resolve: () => void } | undefined;
+		let assistantDeliveryClosed = false;
 		const config: AgentLoopConfig = {
 			model,
 			reasoning,
@@ -1725,6 +1733,14 @@ export class Agent {
 				: undefined,
 			transformAssistantMessagePreservesToolCalls: this.transformAssistantMessagePreservesToolCalls,
 			onAssistantMessageEvent: this.#onAssistantMessageEvent,
+			onAssistantMessageEnd: async (message, signal) => {
+				if (!assistantDeliveryClosed && deliveredAssistantMessage !== message) {
+					const { promise, resolve } = Promise.withResolvers<void>();
+					pendingAssistantDelivery = { message, resolve };
+					await promise;
+				}
+				if (!assistantDeliveryClosed) await this.#onAssistantMessageEnd?.(message, signal);
+			},
 			onTurnEnd: (messages, signal, context) => this.#onTurnEnd?.(messages, signal, context),
 			onPauseChange: paused => {
 				if (this.#isPaused === paused) return;
@@ -1832,6 +1848,13 @@ export class Agent {
 
 				// Emit to listeners
 				this.#emit(event);
+				if (event.type === "message_end" && event.message.role === "assistant") {
+					deliveredAssistantMessage = event.message;
+					if (pendingAssistantDelivery?.message === event.message) {
+						pendingAssistantDelivery.resolve();
+						pendingAssistantDelivery = undefined;
+					}
+				}
 			}
 
 			// Handle any remaining partial message
@@ -1948,6 +1971,8 @@ export class Agent {
 				this.#emit({ type: "agent_end", messages: [errorMsg] });
 			}
 		} finally {
+			assistantDeliveryClosed = true;
+			pendingAssistantDelivery?.resolve();
 			this.#isPaused = false;
 			this.#restoreUndeliveredQueuedMessages(loopAbortController);
 			resolveRun?.();

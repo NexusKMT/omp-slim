@@ -31,14 +31,14 @@ afterEach(async () => {
 
 async function harness(
 	options: {
-		doneOnly?: boolean;
+		streamMode?: "streaming" | "done" | "result";
 		delayed?: boolean;
 		input?: Record<string, unknown>;
 		outputSchema?: unknown;
 		text?: string;
 	} = {},
 ) {
-	const { doneOnly = false, delayed = false } = options;
+	const { streamMode = "streaming", delayed = false } = options;
 	const root = TempDir.createSync("@pi-yield-report-");
 	roots.push(root);
 	const auth = createInMemoryAuthStorage();
@@ -92,13 +92,13 @@ async function harness(
 			: [],
 	});
 	sessions.push(session);
-	if (doneOnly) {
+	if (streamMode !== "streaming") {
 		session.agent.streamFn = () => {
 			const stream = new AssistantMessageEventStream();
 			const message = createAssistantMessage("");
 			message.content = content;
 			message.stopReason = "toolUse";
-			stream.push({ type: "done", reason: "toolUse", message });
+			if (streamMode === "done") stream.push({ type: "done", reason: "toolUse", message });
 			stream.end(message);
 			return stream;
 		};
@@ -107,14 +107,15 @@ async function harness(
 }
 
 describe("SDK data-less yield report", () => {
-	for (const [doneOnly, delayed, budgetStop] of [
-		[false, false, false],
-		[true, false, false],
-		[false, true, false],
-		[false, false, true],
-	]) {
-		it(`submits preceding prose through the real loop (done-only=${doneOnly}, delayed=${delayed}, budget-stop=${budgetStop})`, async () => {
-			const { session, releaseUpdate } = await harness({ doneOnly, delayed });
+	for (const [streamMode, delayed, budgetStop] of [
+		["streaming", false, false],
+		["done", false, false],
+		["result", false, false],
+		["streaming", true, false],
+		["streaming", false, true],
+	] as const) {
+		it(`submits preceding prose through the real loop (stream=${streamMode}, delayed=${delayed}, budget-stop=${budgetStop})`, async () => {
+			const { session, releaseUpdate } = await harness({ streamMode, delayed });
 			const report = "# Review\nNo confirmed defects.\n";
 			const history: AgentMessage[] = [
 				{ role: "user", content: "Review the source", timestamp: Date.now() },
@@ -182,7 +183,7 @@ describe("SDK data-less yield report", () => {
 	}
 
 	it("prefers report prose beside yield over a previous report", async () => {
-		const { session } = await harness({ doneOnly: true, text: "Current report" });
+		const { session } = await harness({ streamMode: "done", text: "Current report" });
 		session.agent.replaceMessages([createAssistantMessage("Superseded report"), reminder()]);
 		await session.agent.continue();
 		const result = session.messages.find(message => message.role === "toolResult");

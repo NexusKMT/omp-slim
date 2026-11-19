@@ -64,28 +64,30 @@ describe("resolveCliArgv routes subcommands hidden behind leading global flags",
 });
 
 describe("resolveCliArgv strips launch-global flags before non-launch subcommands (#8891)", () => {
-	test("`--cwd <dir> stats` drops the inapplicable launch flag instead of forwarding it", () => {
-		// Forwarding `--cwd` into stats's strict parser crashed with
+	test("`--cwd <dir> gc` drops the inapplicable launch flag instead of forwarding it", () => {
+		// Forwarding `--cwd` into gc's strict parser crashed with
 		// `Unknown option '--cwd'`; the launch-only flag is now dropped.
-		expect(resolveCliArgv(["--cwd", "/tmp", "stats"])).toEqual({ argv: ["stats"] });
+		expect(resolveCliArgv(["--cwd", "/tmp", "gc"])).toEqual({ argv: ["gc"] });
 	});
 
 	test("`--cwd=<dir>` inline form is stripped too", () => {
-		expect(resolveCliArgv(["--cwd=/tmp", "stats"])).toEqual({ argv: ["stats"] });
+		expect(resolveCliArgv(["--cwd=/tmp", "gc"])).toEqual({ argv: ["gc"] });
 	});
 
 	test("a trailing subcommand flag survives while the leading launch flag is stripped", () => {
-		expect(resolveCliArgv(["--cwd", "/tmp", "stats", "--port=8080"])).toEqual({
-			argv: ["stats", "--port=8080"],
+		expect(resolveCliArgv(["--cwd", "/tmp", "gc", "--apply"])).toEqual({
+			argv: ["gc", "--apply"],
 		});
 	});
 
 	test("multiple leading launch flags are all stripped before a non-launch subcommand", () => {
-		expect(resolveCliArgv(["--model", "gpt", "--cwd", "/x", "stats"])).toEqual({ argv: ["stats"] });
+		expect(resolveCliArgv(["--model", "gpt", "--cwd", "/x", "gc"])).toEqual({ argv: ["gc"] });
 	});
 
 	test("a subcommand's own flag placed before it is kept, not treated as launch-global", () => {
-		expect(resolveCliArgv(["-j", "stats"])).toEqual({ argv: ["stats", "-j"] });
+		expect(resolveCliArgv(["--agent-dir=/tmp/agent", "gc"])).toEqual({
+			argv: ["gc", "--agent-dir=/tmp/agent"],
+		});
 	});
 
 	test("launch-shaped `acp` still receives forwarded launch-global flags", () => {

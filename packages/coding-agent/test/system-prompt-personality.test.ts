@@ -15,15 +15,10 @@ const EMPTY_TREE = {
 	agentsMdFiles: [],
 };
 
-// Distinctive line from the bundled default preset (prompts/system/personalities/default.md).
-const DEFAULT_PRESET_MARKER = "Evidence-first terse engineer";
 const OVERRIDE = "Follow ASD-STE100 Simplified Technical English for all responses.";
 
-// PERSONALITY.md contract (issue #8528): `<agentDir>/PERSONALITY.md` replaces
-// the selected preset's text in the personality block; `none` still omits the
-// block (subagents always run with `none`); an empty file falls back to the
-// configured preset.
-describe("PERSONALITY.md override", () => {
+// Custom templates can opt into the retained personality setting and user override.
+describe("PERSONALITY.md in an explicit template", () => {
 	let tempDir = "";
 	let tempAgentDir = "";
 	let originalAgentDirEnv: string | undefined;
@@ -56,6 +51,7 @@ describe("PERSONALITY.md override", () => {
 			rules: [],
 			toolNames: [],
 			personality,
+			systemPromptTemplate: "{{personality}}",
 			workspaceTree: { ...EMPTY_TREE, rootPath: tempDir },
 		});
 		return systemPrompt.join("\n\n");
@@ -69,28 +65,21 @@ describe("PERSONALITY.md override", () => {
 		writePersonalityFile(OVERRIDE);
 
 		const rendered = await renderPrompt("default");
-		expect(rendered).toContain("# Personality");
 		expect(rendered).toContain(OVERRIDE);
-		expect(rendered).not.toContain(DEFAULT_PRESET_MARKER);
 	});
 
 	it(`omits the block for personality "none" even when PERSONALITY.md exists (subagent contract)`, async () => {
 		writePersonalityFile(OVERRIDE);
 
 		const rendered = await renderPrompt("none");
-		expect(rendered).not.toContain("# Personality");
 		expect(rendered).not.toContain(OVERRIDE);
 	});
 
 	it("falls back to the configured preset when the file is empty", async () => {
+		const fallback = await renderPrompt("default");
 		writePersonalityFile("   \n");
 
 		const rendered = await renderPrompt("default");
-		expect(rendered).toContain(DEFAULT_PRESET_MARKER);
-	});
-
-	it("renders the selected preset when no override file exists", async () => {
-		const rendered = await renderPrompt("default");
-		expect(rendered).toContain(DEFAULT_PRESET_MARKER);
+		expect(rendered).toBe(fallback);
 	});
 });

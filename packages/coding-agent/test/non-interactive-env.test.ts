@@ -59,9 +59,8 @@ describe("buildNonInteractiveEnv", () => {
 		expect(buildNonInteractiveEnv(undefined, { baseEnv: {} }).CI).toBe("true");
 	});
 
-	it("drops CI when PI_BASH_NO_CI or its legacy alias is set", () => {
+	it("drops CI when PI_BASH_NO_CI is set", () => {
 		expect(buildNonInteractiveEnv(undefined, { baseEnv: { PI_BASH_NO_CI: "1" } })).not.toHaveProperty("CI");
-		expect(buildNonInteractiveEnv(undefined, { baseEnv: { CLAUDE_BASH_NO_CI: "1" } })).not.toHaveProperty("CI");
 	});
 
 	it("lets a per-command CI override win over the opt-out", () => {

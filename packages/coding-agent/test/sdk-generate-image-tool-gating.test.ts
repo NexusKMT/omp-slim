@@ -73,14 +73,6 @@ describe("generate_image tool gating", () => {
 		} as CustomTool;
 	}
 
-	function specializedToolsPolicy(session: AgentSession): string {
-		const rendered = session.systemPrompt.join("\n");
-		const start = rendered.indexOf("# Specialized Tools");
-		const end = rendered.indexOf("\n# Exploration", start);
-		if (start < 0 || end < 0) throw new Error("Expected the specialized-tools policy section");
-		return rendered.slice(start, end);
-	}
-
 	async function sessionWithCustomTools(toolNames: string[], customTools: CustomTool[]): Promise<AgentSession> {
 		const { session } = await createAgentSession({
 			...startupShortcuts(),
@@ -105,7 +97,6 @@ describe("generate_image tool gating", () => {
 		expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["read", "write"]));
 		expect(session.getActiveToolNames()).not.toContain(ambientTool.name);
 		expect(session.getXdevToolEntries().map(entry => entry.name)).toContain(ambientTool.name);
-		expect(specializedToolsPolicy(session)).not.toContain("`write`");
 
 		await session.setActiveToolsByName(session.getEnabledToolNames());
 
@@ -131,7 +122,6 @@ describe("generate_image tool gating", () => {
 		await session.setActiveToolsByName(["read", "write"]);
 
 		expect(session.getXdevToolEntries().map(entry => entry.name)).not.toContain(ambientTool.name);
-		expect(specializedToolsPolicy(session)).toContain("`write`");
 		const write = session.getToolByName("write");
 		expect(write).toBeDefined();
 		const target = path.join(registryDir, "mounted-runtime-upgrade.txt");

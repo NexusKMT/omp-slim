@@ -6,10 +6,13 @@
 {{content}}
 {{/each}}
 {{/if}}
+{{#if toolInventory}}
+{{toolInventory}}
+{{/if}}
 {{#if skills.length}}
 <skills>
 {{#each skills}}
-- {{name}}: {{description}}
+- skill://{{name}}: {{description}}
 {{/each}}
 </skills>
 {{/if}}

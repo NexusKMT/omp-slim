@@ -27,6 +27,8 @@
 
 ### Fixed
 
+- Wait for assistant transcript persistence before tool execution so data-less `yield` can read its report and session rebuilds retain the active tool call ([#12247](https://github.com/can1357/oh-my-pi/issues/12247)).
+- Include inline tool descriptions and resolvable `skill://` addresses in the minimal system prompt.
 - User-authored system customization and always-apply rules remain in the minimal system prompt, including after session reset and template fallback.
 - `cleanse` defaults to the configured main model, `/cleanse` inherits the active session model, and both discovery and repair workers follow the current subagent inheritance policy.
 
