@@ -84,25 +84,25 @@ describe("skillful setting and /skillful session toggle", () => {
 	it("lists skills in the system prompt by default and omits them when skillful is false", async () => {
 		const listed = await createSession();
 		expect(listed.skills.some(skill => skill.name === "test-skill")).toBe(true);
-		expect(listed.agent.state.systemPrompt.join("\n")).toContain("- test-skill:");
+		expect(listed.agent.state.systemPrompt.join("\n")).toContain("skill://test-skill");
 		await listed.dispose();
 		session = undefined;
 
 		const unlisted = await createSession({ skillful: false });
 		expect(unlisted.skills.some(skill => skill.name === "test-skill")).toBe(true);
-		expect(unlisted.agent.state.systemPrompt.join("\n")).not.toContain("- test-skill:");
+		expect(unlisted.agent.state.systemPrompt.join("\n")).not.toContain("skill://test-skill");
 	});
 
 	it("rebuilds the system prompt when toggled on an empty transcript without persisting", async () => {
 		const s = await createSession({ skillful: false });
-		expect(s.agent.state.systemPrompt.join("\n")).not.toContain("- test-skill:");
+		expect(s.agent.state.systemPrompt.join("\n")).not.toContain("skill://test-skill");
 
 		expect(await s.toggleSkillful()).toBe(true);
 		expect(cfgSkillful.get(s.settings)).toBe(true);
-		expect(s.agent.state.systemPrompt.join("\n")).toContain("- test-skill:");
+		expect(s.agent.state.systemPrompt.join("\n")).toContain("skill://test-skill");
 
 		expect(await s.toggleSkillful()).toBe(false);
-		expect(s.agent.state.systemPrompt.join("\n")).not.toContain("- test-skill:");
+		expect(s.agent.state.systemPrompt.join("\n")).not.toContain("skill://test-skill");
 	});
 
 	it("appends one hidden notice instead of rewriting the prompt when enabled mid-session", async () => {
