@@ -22,9 +22,6 @@ function makeSkillMd(name: string, dir: string) {
 }
 
 const ALL_DEFAULT_SOURCES_DISABLED = {
-	enableCodexUser: false,
-	enableClaudeUser: false,
-	enableClaudeProject: false,
 	enablePiUser: false,
 	enablePiProject: false,
 	enableAgentsUser: false,

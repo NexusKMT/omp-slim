@@ -100,10 +100,6 @@ export function nativeShellHelp(name: keyof typeof NATIVE_SHELL_DESCRIPTIONS) {
 	} satisfies CommandMetadata;
 }
 
-export const skillHelp = {
-	description: "Install, search, publish, and manage skills on the Skillshare registry (skills.omp.sh)",
-} satisfies CommandMetadata;
-
 export const tokenHelp = { description: "Get the configured API key for a provider" } satisfies CommandMetadata;
 
 export const toksHelp = {

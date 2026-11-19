@@ -34,7 +34,6 @@ import {
 import { allowsSkillTokens, SKILL_TOKEN_RE } from "@oh-my-pi/pi-tui/prompt/skill-tokens";
 import autoloadTemplate from "../prompts/skills/autoload.md" with { type: "text" };
 import userInvocationTemplate from "../prompts/skills/user-invocation.md" with { type: "text" };
-import { SKILLSHARE_PROVIDER_ID } from "../discovery/skillshare";
 import type { SkillPromptDetails } from "../session/messages";
 import { expandTilde } from "../tools/path-utils";
 
@@ -134,13 +133,10 @@ interface CollisionResolution {
 /**
  * Resolve a same-name skill against what is already loaded.
  * - Precedence, when raw names collide:
- *   1. An authored skill always outranks a registry-installed package
- *      (`omp skill install`, the `skillshare` provider) — installed steps
- *      aside regardless of admission order.
- *   2. A custom-directory skill always outranks a provider skill (#7190's
+ *   1. A custom-directory skill always outranks a provider skill (#7190's
  *      override contract) — the provider skill steps aside even though it
  *      was admitted first (custom directories are merged after providers).
- *   3. Otherwise, whichever was admitted first — provider-priority order for
+ *   2. Otherwise, whichever was admitted first — provider-priority order for
  *      providers, array order within `skills.customDirectories` for custom
  *      directories — keeps the bare name.
  * - A candidate that outranks the bare holder always takes the bare name (the
@@ -166,15 +162,13 @@ function resolveCollision(
 	}
 
 	const bareSkill = skillMap.get(candidate.name);
-	const candidateInstalled = candidate._source?.provider === SKILLSHARE_PROVIDER_ID;
-	const bareInstalled = bareSkill?._source?.provider === SKILLSHARE_PROVIDER_ID;
 	const candidateCustom = candidate._source?.provider === CUSTOM_DIR_PROVIDER_ID;
 	const bareCustom = bareSkill?._source?.provider === CUSTOM_DIR_PROVIDER_ID;
 	const identical = existingEntries
 		.filter(([_, e]) => e.body === candidateBody && Bun.deepEquals(e.frontmatter, candidateFrontmatter))
 		.map(([name]) => name);
 
-	if (bareSkill && ((bareInstalled && !candidateInstalled) || (candidateCustom && !bareCustom))) {
+	if (bareSkill && candidateCustom && !bareCustom) {
 		if (identical.includes(candidate.name)) return { name: candidate.name, dropped: identical };
 		const bareEntry = admitted.get(candidate.name)!;
 		let namespacedBare = `${bareEntry.namespace}/${bareEntry.rawName}`;
@@ -185,25 +179,17 @@ function resolveCollision(
 			dropped: identical,
 			displaced: {
 				newName: namespacedBare,
-				warning: `name collision: ${bareInstalled ? "installed " : ""}"${bareEntry.rawName}" from ${bareSkill.filePath} is overridden by ${candidate.filePath}; available as "${namespacedBare}"`,
+				warning: `name collision: "${bareEntry.rawName}" from ${bareSkill.filePath} is overridden by ${candidate.filePath}; available as "${namespacedBare}"`,
 			},
 		};
 	}
 	if (identical.length > 0) return undefined;
 
 	// Otherwise the already-admitted skill keeps the bare name (first-admitted
-	// wins, or the authored skill over an installed package); only the new
-	// candidate is namespaced.
+	// wins); only the new candidate is namespaced.
 	let namespaced = `${namespace}/${candidate.name}`;
 	for (let n = 2; skillMap.has(namespaced); n++) {
 		namespaced = `${namespace}/${candidate.name}~${n}`;
-	}
-	if (bareSkill && !bareInstalled && candidateInstalled) {
-		return {
-			name: namespaced,
-			dropped: [],
-			warning: `name collision: installed "${candidate.name}" from ${candidate.filePath} is overridden by ${bareSkill.filePath}; available as "${namespaced}"`,
-		};
 	}
 	const referencePath = existingEntries[0][1].filePath;
 	return {

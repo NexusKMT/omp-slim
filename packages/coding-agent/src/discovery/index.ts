@@ -26,7 +26,6 @@ import "./builtin-defaults";
 import "./agents";
 import "./mcp-json";
 import "./omp-plugins";
-import "./skillshare";
 
 // Re-export the main API from capability registry
 export {

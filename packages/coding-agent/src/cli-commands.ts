@@ -174,12 +174,6 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.renderHelp,
 	},
 	{
-		name: "skill",
-		load: () => import("./commands/skill").then(m => m.default),
-		aliases: ["skills"],
-		help: commandHelp.skillHelp,
-	},
-	{
 		name: "token",
 		load: () => import("./commands/token").then(m => m.default),
 		help: commandHelp.tokenHelp,
