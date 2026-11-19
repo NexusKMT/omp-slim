@@ -24,7 +24,7 @@ Before changes in these directories, MUST read:
 {{/if}}
 
 {{#ifAny contextFiles.length agentsMdSearch.files.length}}
-Context files above auto-loaded. NEVER `grep`/`glob` for `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, or similar agent/context files: relevant files already in context; others noise.
+Context files above auto-loaded. NEVER `grep`/`glob` for `AGENTS.md` or similar instruction files: relevant files already in context; others noise.
 {{/ifAny}}
 
 {{#if includeWorkspaceTree}}

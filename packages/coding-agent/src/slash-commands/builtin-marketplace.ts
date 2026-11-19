@@ -73,7 +73,7 @@ export const BUILTIN_MARKETPLACE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec>
 					const marketplaces = await manager.listMarketplaces();
 					if (marketplaces.length === 0) {
 						await runtime.output(
-							"No marketplaces configured.\n\nGet started:\n  /marketplace add anthropics/claude-plugins-official\n\nThen browse with /marketplace discover",
+							"No marketplaces configured.\n\nGet started:\n  /marketplace add <owner/repo>\n\nThen browse with /marketplace discover",
 						);
 					} else {
 						const lines = marketplaces.map(m => `  ${m.name}  ${m.sourceUri}`);
@@ -102,7 +102,7 @@ export const BUILTIN_MARKETPLACE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec>
 						"  /marketplace upgrade [name@marketplace]    Upgrade plugin(s)",
 						"",
 						"Quick start:",
-						"  /marketplace add anthropics/claude-plugins-official",
+						"  /marketplace add <owner/repo>",
 					].join("\n"),
 				);
 				return commandConsumed();
@@ -155,7 +155,7 @@ export const BUILTIN_MARKETPLACE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec>
 							const marketplaces = await manager.listMarketplaces();
 							await runtime.output(
 								marketplaces.length === 0
-									? "No marketplaces configured. Try:\n  /marketplace add anthropics/claude-plugins-official"
+									? "No marketplaces configured. Try:\n  /marketplace add <owner/repo>"
 									: "No plugins available in configured marketplaces",
 							);
 							return commandConsumed();
@@ -297,9 +297,7 @@ export const BUILTIN_MARKETPLACE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec>
 						if (plugins.length === 0) {
 							const marketplaces = await mgr.listMarketplaces();
 							if (marketplaces.length === 0) {
-								runtime.ctx.showStatus(
-									"No marketplaces configured. Try:\n  /marketplace add anthropics/claude-plugins-official",
-								);
+								runtime.ctx.showStatus("No marketplaces configured. Try:\n  /marketplace add <owner/repo>");
 							} else {
 								runtime.ctx.showStatus("No plugins available in configured marketplaces");
 							}
@@ -395,7 +393,7 @@ export const BUILTIN_MARKETPLACE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec>
 								"  /marketplace upgrade [name@marketplace]    Upgrade plugin(s)",
 								"",
 								"Quick start:",
-								"  /marketplace add anthropics/claude-plugins-official",
+								"  /marketplace add <owner/repo>",
 								"  /marketplace                               (opens interactive browser)",
 							].join("\n"),
 						);
@@ -405,7 +403,7 @@ export const BUILTIN_MARKETPLACE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec>
 						const marketplaces = await mgr.listMarketplaces();
 						if (marketplaces.length === 0) {
 							runtime.ctx.showStatus(
-								"No marketplaces configured.\n\nGet started:\n  /marketplace add anthropics/claude-plugins-official\n\nThen browse plugins with /marketplace or /marketplace discover",
+								"No marketplaces configured.\n\nGet started:\n  /marketplace add <owner/repo>\n\nThen browse plugins with /marketplace or /marketplace discover",
 							);
 						} else {
 							const lines = marketplaces.map(m => `  ${m.name}  ${m.sourceUri}`);

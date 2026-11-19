@@ -104,9 +104,7 @@ async function runAgenticCommitWithAuth(
 
 	process.stdout.write("● Discovering context files...\n");
 
-	const contextMdFiles = contextFiles.filter(
-		file => file.path.endsWith("AGENTS.md") || file.path.endsWith("CLAUDE.md"),
-	);
+	const contextMdFiles = contextFiles.filter(file => file.path.endsWith("AGENTS.md"));
 	if (contextMdFiles.length > 0) {
 		for (const file of contextMdFiles) {
 			process.stdout.write(`  └─ ${file.path}\n`);

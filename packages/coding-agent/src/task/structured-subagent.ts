@@ -356,12 +356,7 @@ const inflightDiscovery = new Map<string, { fn: typeof discoverAgents; promise: 
 
 function discoverAgentsShared(cwd: string, extensionRoots?: EffectiveExtensionRoots): Promise<DiscoveryResult> {
 	const fn = discoverAgents;
-	const policy = [
-		isProviderEnabled("omp-plugins"),
-		isProviderEnabled("claude-plugins"),
-		isUserSourceEnabled("claude-plugins"),
-		isUserSourceEnabled("claude"),
-	].join(",");
+	const policy = [isProviderEnabled("omp-plugins")].join(",");
 	const key = `${path.resolve(cwd)}\0${policy}\0${JSON.stringify(extensionRoots ?? null)}`;
 	const existing = inflightDiscovery.get(key);
 	if (existing && existing.fn === fn) return existing.promise;

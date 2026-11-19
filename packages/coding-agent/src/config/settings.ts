@@ -3086,17 +3086,6 @@ export class Settings {
 			if (migrated !== undefined) providersObj.tinyModel = migrated;
 		}
 
-		// Saved-reset autoRedeem booleans -> tri-state enums. Existing explicit
-		// false keeps "do not run"; missing config falls through to "unset",
-		// which asks before the first eligible provider-specific spend.
-		const codexResetsObj = raw.codexResets as Record<string, unknown> | undefined;
-		if (codexResetsObj && typeof codexResetsObj.autoRedeem === "boolean") {
-			codexResetsObj.autoRedeem = codexResetsObj.autoRedeem ? "yes" : "no";
-		}
-		if (typeof raw["codexResets.autoRedeem"] === "boolean") {
-			raw["codexResets.autoRedeem"] = raw["codexResets.autoRedeem"] ? "yes" : "no";
-		}
-
 		// Retired automatic memory and learning settings are ignored. Their stores
 		// remain on disk so removing the feature never deletes user data.
 		const retiredMemorySettings = [

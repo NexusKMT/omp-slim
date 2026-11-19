@@ -97,7 +97,7 @@ export const launchHelp = {
 		"no-skills": Flags.boolean({ description: "Disable skills discovery and loading" }),
 		skills: Flags.string({ description: "Comma-separated glob patterns to filter skills (e.g., git-*,docker)" }),
 		"no-rules": Flags.boolean({ description: "Disable rules discovery and loading" }),
-		"no-context-files": Flags.boolean({ description: "Disable context files (AGENTS.md, CLAUDE.md, ...)" }),
+		"no-context-files": Flags.boolean({ description: "Disable context files (AGENTS.md, ...)" }),
 		"no-title": Flags.boolean({ description: "Disable title auto-generation" }),
 		"spinner-interval": Flags.string({
 			description:

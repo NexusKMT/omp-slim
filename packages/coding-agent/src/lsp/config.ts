@@ -360,10 +360,7 @@ function selectTypescriptServer(servers: Record<string, ServerConfig>, cwd: stri
 }
 
 function readMarketplaceLspConfig(root: ClaudePluginRoot): NormalizedConfig | null {
-	const catalogPaths = [
-		path.resolve(root.path, "..", "..", "marketplace.json"),
-		path.resolve(root.path, "..", "..", ".claude-plugin", "marketplace.json"),
-	];
+	const catalogPaths = [path.resolve(root.path, "..", "..", "marketplace.json")];
 
 	for (const catalogPath of catalogPaths) {
 		try {
@@ -401,8 +398,8 @@ function marketplaceConfigSource(root: ClaudePluginRoot): ConfigFileSource<Norma
  *
  * Priority (highest to lowest):
  * 1. Project root: lsp.json/.lsp.json/lsp.yml/.lsp.yml/lsp.yaml/.lsp.yaml
- * 2. Project config dirs: .omp/lsp.*, .claude/lsp.* (+ hidden variants)
- * 3. User config dirs: ~/.omp/agent/lsp.*, ~/.claude/lsp.* (+ hidden variants)
+ * 2. Project config dirs: .omp/lsp.* (+ hidden variants)
+ * 3. User config dirs: ~/.omp/agent/lsp.* (+ hidden variants)
  * 4. User home root: ~/lsp.*, ~/.lsp.*
  * 5. Auto-detect from project markers + available binaries
  *

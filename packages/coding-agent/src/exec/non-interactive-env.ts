@@ -90,11 +90,12 @@ export function buildNonInteractiveEnv(
 	overrides?: Record<string, string>,
 	{ baseEnv = Bun.env, inheritLocale = false }: NonInteractiveEnvOptions = {},
 ): Record<string, string> {
-	// `PI_BASH_NO_CI` (and its legacy alias) opts out of the automatic `CI=true`
-	// injection. Mirrors the session-env gate in `procmgr.ts` so the opt-out
-	// reaches the per-command env, which otherwise overrides the session value.
-	const env: Record<string, string> =
-		baseEnv.PI_BASH_NO_CI || baseEnv.CLAUDE_BASH_NO_CI ? withoutCI(NON_INTERACTIVE_ENV) : { ...NON_INTERACTIVE_ENV };
+	// `PI_BASH_NO_CI` opts out of the automatic `CI=true` injection.
+	// Mirrors the session-env gate in `procmgr.ts` so the opt-out reaches
+	// the per-command env, which otherwise overrides the session value.
+	const env: Record<string, string> = baseEnv.PI_BASH_NO_CI
+		? withoutCI(NON_INTERACTIVE_ENV)
+		: { ...NON_INTERACTIVE_ENV };
 
 	// Agent commands pin the locale whatever the launcher inherited, so sort
 	// order, number formats, and messages do not vary by machine; a locale in

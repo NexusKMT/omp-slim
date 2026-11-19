@@ -319,7 +319,7 @@ export class PluginManager {
 			Object.entries(registry.plugins).flatMap(([pluginId, entries]) =>
 				entries.map(async entry => {
 					// Legacy registries written before `scope` was added omit the field;
-					// `listClaudePluginRoots` treats those as user-scoped, so do the same.
+					// `listPluginRoots` treats those as user-scoped, so do the same.
 					if ((entry.scope ?? "user") !== "user") return;
 					const packageJsonPath = path.join(entry.installPath, "package.json");
 					const parsedId = parsePluginId(pluginId);

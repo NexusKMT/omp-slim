@@ -1,12 +1,9 @@
 /**
- * @-import expansion for context files (AGENTS.md / CLAUDE.md / GEMINI.md / …).
+ * @-import expansion for context files (AGENTS.md, …).
  *
- * Other coding agents (Claude Code, Goose, Cline, …) treat `@path/to/file`
- * references inside their markdown memory files as inline includes. omp
- * loads the same files in their native shape, so this module performs the
- * same expansion before content lands in the system prompt.
+ * Expands `@path/to/file` references inside markdown instruction files as inline includes.
  *
- * Semantics mirror Claude Code's documented behavior:
+ * Rules:
  * - `@` must sit at start of line or after whitespace (so `git@github.com`
  *   and `user@example.com` are not treated as imports).
  * - Relative paths resolve against the importing file's directory, not the

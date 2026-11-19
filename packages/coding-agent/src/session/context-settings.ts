@@ -25,9 +25,6 @@ export const cfgWorkspaceAdditionalDirectories = register({
 /** Built-in context filenames. Listing them in `contextFiles.extra` would load a second copy or bypass one-per-depth shadowing. */
 const BUILTIN_CONTEXT_FILE_NAMES: Record<string, true> = {
 	"agents.md": true,
-	"claude.md": true,
-	"gemini.md": true,
-	"copilot-instructions.md": true,
 };
 
 /** Why `entry` is not a valid `contextFiles.extra` name; undefined for a plain, non-built-in file name. */
@@ -44,7 +41,7 @@ function contextFileNameError(entry: unknown): string | undefined {
 	return undefined;
 }
 
-/** Extra instruction filenames discovered in addition to AGENTS.md / CLAUDE.md / GEMINI.md. */
+/** Extra instruction filenames discovered in addition to AGENTS.md. */
 export const cfgContextFilesExtra = register({
 	id: "contextFiles.extra",
 	type: "array",
