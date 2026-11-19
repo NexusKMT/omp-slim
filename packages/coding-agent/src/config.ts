@@ -56,17 +56,6 @@ export function getPackageDir(): string | undefined {
 	return walkUpForPackageDir(import.meta.dir);
 }
 
-/**
- * Path to omp's own `CHANGELOG.md`, or `undefined` when the package directory
- * cannot be resolved (e.g. inside `bun --compile` binaries that don't bundle
- * package assets). Callers MUST skip changelog parsing when this is undefined;
- * see issue #1423.
- */
-export function getChangelogPath(): string | undefined {
-	const packageDir = getPackageDir();
-	return packageDir ? path.resolve(packageDir, "CHANGELOG.md") : undefined;
-}
-
 // =============================================================================
 // Multi-Config Directory Helpers
 // =============================================================================
