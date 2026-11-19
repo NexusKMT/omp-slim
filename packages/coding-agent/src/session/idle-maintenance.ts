@@ -1,20 +1,13 @@
 /**
- * Idle maintenance owned by one session: the idle recap and idle compaction that run once the
- * session has been quiet for a while and its owner does not hold them back.
+ * Idle maintenance owned by one session: idle compaction that runs once the
+ * session has been quiet for a while and its owner does not hold it back.
  *
- * A stretch of activity ends at `agent_end`. Its recap is armed once the run that produced the
- * `agent_end` has unwound and nothing is admitted, queued or scheduled; background work does not
- * hold it back. Idle compaction also waits until no background job or delivery can wake the
+ * Idle compaction waits until no background job or delivery can wake the
  * session. New activity, compaction, a session transition or disposal invalidates everything
- * captured before it: timers, the settling check and an in-flight recap, so a late reply can never
- * be announced.
+ * captured before it: timers and the settling check.
  */
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import { logger } from "@oh-my-pi/pi-utils";
 import { combine } from "../config/registry";
-import { cfgRecap } from "../modes/settings";
-import idleRecapPrompt from "../prompts/system/recap-user.md" with { type: "text" };
-import { nextActionableTask } from "../tools/todo";
 import type { AgentSession } from "./agent-session";
 import type { AgentSessionEvent } from "./agent-session-events";
 import {
@@ -30,8 +23,6 @@ export interface IdleMaintenanceOptions {
 	isBlocked?: () => boolean;
 	/** True while the owner has decided to start a turn it has not yet admitted (for example a scheduled goal continuation). */
 	scheduledTurn?: () => boolean;
-	/** Receives each nonblank recap reply, after it has been journaled to the history database. */
-	onRecap?: (recap: string) => void;
 }
 
 /** The session surface idle maintenance reads and drives. */
@@ -42,20 +33,13 @@ export type IdleMaintenanceSession = SessionSettleHost &
 		| "sessionManager"
 		| "isCompacting"
 		| "isSessionTransitioning"
-		| "model"
-		| "messages"
 		| "subscribe"
 		| "waitForIdle"
 		| "waitForAdmittedSubmissions"
 		| "getContextUsage"
-		| "getGoalModeState"
-		| "getTodoPhases"
 		| "runIdleCompaction"
-		| "runEphemeralTurn"
 	>;
 
-const RECAP_MIN_SECONDS = 1;
-const RECAP_MAX_SECONDS = 3600;
 const COMPACTION_MIN_SECONDS = 60;
 const COMPACTION_MAX_SECONDS = 3600;
 
@@ -66,9 +50,8 @@ const cfgIdleCompaction = combine({
 	timeoutSeconds: cfgCompactionIdleTimeoutSeconds,
 });
 
-/** Work the current stretch of activity still owes; each flag drops once its work has been done. */
+/** Work the current stretch of activity still owes; drops once compaction has been done. */
 interface PendingStretch {
-	recap: boolean;
 	compaction: boolean;
 }
 
@@ -79,18 +62,14 @@ export class IdleMaintenance {
 	#pending: PendingStretch | undefined;
 	/** Bumped to supersede the settling check that will arm this stretch. */
 	#check = 0;
-	/** The recap request in flight; aborted when it is no longer wanted. */
-	#recapRun: AbortController | undefined;
-	#recapTimer: NodeJS.Timeout | undefined;
 	#compactionTimer: NodeJS.Timeout | undefined;
 	#disposed = false;
 
-	constructor(session: IdleMaintenanceSession, options: IdleMaintenanceOptions) {
+	constructor(session: IdleMaintenanceSession, options: IdleMaintenanceOptions = {}) {
 		this.#session = session;
 		this.#options = options;
 		this.#stops = [
 			session.subscribe(event => this.#observe(event)),
-			cfgRecap.listen(session.settings, () => this.refresh()),
 			cfgIdleCompaction.listen(session.settings, () => this.refresh()),
 		];
 	}
@@ -101,19 +80,17 @@ export class IdleMaintenance {
 	 */
 	refresh(): void {
 		if (this.#disposed || !this.#pending) return;
-		if (this.#recapRun && !this.#recapWanted()) this.#cancelRecap();
 		this.#schedule();
 	}
 
 	/**
-	 * Supersede the current stretch: nothing captured before this call may arm, record or announce
+	 * Supersede the current stretch: nothing captured before this call may arm or record
 	 * afterwards. Called on new activity, maintenance, at the start of every session transition and on disposal.
 	 */
 	invalidate(): void {
 		this.#pending = undefined;
 		this.#clearTimers();
 		this.#check++;
-		this.#cancelRecap();
 	}
 
 	dispose(): void {
@@ -132,23 +109,15 @@ export class IdleMaintenance {
 				break;
 			case "agent_end":
 				this.invalidate();
-				// Nothing was generated to recap: the stretch owes no recap, however its blockers change later.
-				this.#pending = { recap: priorMessageWasGenerated(event.messages), compaction: true };
+				this.#pending = { compaction: true };
 				this.#schedule();
 				break;
 		}
 	}
 
 	#clearTimers(): void {
-		clearTimeout(this.#recapTimer);
 		clearTimeout(this.#compactionTimer);
-		this.#recapTimer = undefined;
 		this.#compactionTimer = undefined;
-	}
-
-	#cancelRecap(): void {
-		this.#recapRun?.abort();
-		this.#recapRun = undefined;
 	}
 
 	/** Compaction or a session transition is under way, or the owner does not want autonomous work. */
@@ -159,7 +128,7 @@ export class IdleMaintenance {
 
 	/**
 	 * Nothing is live, admitted, queued or scheduled. Background work may still wake the session;
-	 * both recap and idle compaction additionally require {@link #isSettled}.
+	 * idle compaction additionally requires {@link #isSettled}.
 	 */
 	#isQuiet(): boolean {
 		const session = this.#session;
@@ -174,10 +143,6 @@ export class IdleMaintenance {
 	/** Quiet, and no background job or delivery can wake the session. */
 	#isSettled(): boolean {
 		return isSessionSettled(this.#session, this.#options.scheduledTurn);
-	}
-
-	#recapWanted(): boolean {
-		return cfgRecap.get(this.#session.settings).enabled && !this.#isBlocked() && this.#isQuiet();
 	}
 
 	#contextTokens(): number {
@@ -208,25 +173,12 @@ export class IdleMaintenance {
 			if (!isCurrent()) return;
 		}
 		if (this.#isBlocked() || !this.#isQuiet()) return;
-		// Both recap and compaction wait for settlement: a background job can still wake the session and
-		// invalidate what either would produce.
 		const settled = await waitForSessionSettlement(session, {
 			isCurrent,
 			scheduledTurn: this.#options.scheduledTurn,
 		});
 		if (!settled || this.#isBlocked()) return;
-		this.#armRecap();
 		this.#armCompaction();
-	}
-
-	/** Start the recap delay, if this quiet stretch still owes a recap. */
-	#armRecap(): void {
-		if (!this.#pending?.recap || this.#recapRun) return;
-		const recap = cfgRecap.get(this.#session.settings);
-		if (!recap.enabled) return;
-		const seconds = Math.max(RECAP_MIN_SECONDS, Math.min(RECAP_MAX_SECONDS, recap.idleSeconds));
-		this.#recapTimer = setTimeout(() => this.#onRecapDue(), seconds * 1000);
-		this.#recapTimer.unref?.();
 	}
 
 	/** Start the idle compaction delay, if this settled stretch still owes it and the context is over the threshold. */
@@ -242,16 +194,6 @@ export class IdleMaintenance {
 		}
 	}
 
-	/**
-	 * Compact just before a 1h (long-tier) prompt cache entry expires, while the summary request can still read the
-	 * cached prefix; a stretch that settles past that point but before expiry compacts right away. A 5-minute entry
-	 * lapses too soon after a turn for compaction to be worth starting on its schedule, so it, an unknown lifetime, and
-	 * an expired entry all fall back to the configured delay.
-	 * Deliberate cost: the delay counts from the quiet stretch while the entry's TTL counts from the request send
-	 * (`touchedAt`), so with the default 300s delay a short-tier idle summary always runs after the 5-minute entry
-	 * expired and pays a cold full-prefix read. That is the price of never compacting after a short break; do not
-	 * re-time short entries to dodge it.
-	 */
 	#compactionDelayMs(timeoutSeconds: number): number {
 		return Math.max(COMPACTION_MIN_SECONDS, Math.min(COMPACTION_MAX_SECONDS, timeoutSeconds)) * 1000;
 	}
@@ -260,103 +202,23 @@ export class IdleMaintenance {
 		this.#compactionTimer = undefined;
 		const pending = this.#pending;
 		if (!pending?.compaction) return;
-		// Blocked work stays owed: the owner's refresh re-arms it. Busy means the stretch is not over after all.
 		if (this.#isBlocked()) return;
 		if (!this.#isSettled()) {
 			this.#schedule();
 			return;
 		}
-		// Pruning may have run since arming and dropped usage back below the threshold.
 		const idle = cfgIdleCompaction.get(this.#session.settings);
 		if (!idle.enabled || idle.thresholdTokens <= 0 || this.#contextTokens() < idle.thresholdTokens) {
 			return;
 		}
-		this.#complete(pending, "compaction");
+		this.#complete(pending);
 		this.#session.runIdleCompaction().catch(error => logger.warn("Idle compaction failed", { error: String(error) }));
 	}
 
-	#onRecapDue(): void {
-		this.#recapTimer = undefined;
-		if (!this.#pending?.recap || this.#recapRun) return;
-		if (this.#isBlocked()) return;
-		if (!this.#isSettled()) {
-			this.#schedule();
-			return;
-		}
-		void this.#runRecap();
-	}
-
-	/**
-	 * Generate the recap with an ephemeral side-channel turn over the current conversation, journal it to
-	 * history.db (`session_recaps`), then hand it to the owner's `onRecap`. Live goal/title and the active todo
-	 * task anchor the request because the snapshot only carries conversation history. Quiet and unblocked state is
-	 * re-read when the reply lands, so a reply for a stretch that has since ended is never announced.
-	 */
-	async #runRecap(): Promise<void> {
-		const pending = this.#pending;
-		const session = this.#session;
-		if (!pending) return;
-		const run = new AbortController();
-		this.#recapRun = run;
-		try {
-			if (!session.model || !priorMessageWasGenerated(session.messages)) {
-				this.#complete(pending, "recap");
-				return;
-			}
-			const promptText = prompt.render(idleRecapPrompt, {
-				goal: this.#goalText() ?? "",
-				task: nextActionableTask(session.getTodoPhases())?.content ?? "",
-			});
-			const { replyText } = await session.runEphemeralTurn({ promptText, signal: run.signal });
-			if (this.#recapRun !== run || run.signal.aborted) return;
-			if (this.#isBlocked()) return;
-			if (!this.#isSettled()) {
-				this.#recapRun = undefined;
-				this.#schedule();
-				return;
-			}
-			this.#complete(pending, "recap");
-			if (!replyText.trim()) return;
-			session.sessionManager.recordRecap(replyText);
-			this.#options.onRecap?.(replyText);
-		} catch (error) {
-			if (run.signal.aborted) return;
-			this.#complete(pending, "recap");
-			logger.debug("Idle recap turn failed", { error: String(error) });
-		} finally {
-			if (this.#recapRun === run) this.#recapRun = undefined;
-		}
-	}
-
-	/** One kind of work is done. A stretch that owes nothing more is dropped, so later refreshes cost nothing. */
-	#complete(pending: PendingStretch, work: keyof PendingStretch): void {
-		pending[work] = false;
-		if (pending.recap || pending.compaction || this.#pending !== pending) return;
+	#complete(pending: PendingStretch): void {
+		pending.compaction = false;
+		if (this.#pending !== pending) return;
 		this.#pending = undefined;
 		this.#check++;
 	}
-
-	#goalText(): string | undefined {
-		const goal = this.#session.getGoalModeState()?.goal.objective.trim();
-		if (goal) return goal;
-		return this.#session.sessionManager.getSessionName()?.trim() || undefined;
-	}
-}
-
-/**
- * Prior message is the last message of `messages`.
- * Generated means that message is an assistant message whose content has
- * non-empty text, non-empty thinking, or a tool call. stopReason is not a
- * veto: an aborted or errored turn that already produced that output still
- * recaps. An empty `messages` array is not generated, and this does not
- * fall back to an older session tail.
- */
-function priorMessageWasGenerated(messages: readonly AgentMessage[]): boolean {
-	const last = messages.at(-1);
-	if (last?.role !== "assistant") return false;
-	return last.content.some(block => {
-		if (block.type === "text") return block.text.length > 0;
-		if (block.type === "thinking") return block.thinking.length > 0;
-		return block.type === "toolCall";
-	});
 }

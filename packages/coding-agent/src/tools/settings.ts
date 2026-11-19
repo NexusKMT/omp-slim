@@ -615,8 +615,7 @@ export const cfgArchiveEnabled = register({
 		tab: "tools",
 		group: "Available Tools",
 		label: "Archive",
-		description:
-			"Enable the read-only archive eval prelude: prompt history, recent projects, past sessions and recaps",
+		description: "Enable the read-only archive eval prelude: prompt history, recent projects, and past sessions",
 	},
 });
 

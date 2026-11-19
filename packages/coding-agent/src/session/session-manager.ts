@@ -132,7 +132,7 @@ import {
 	normalizeSessionWorkspace,
 	normalizeWorkspaceDirectory,
 } from "./session-workspace";
-import { recordSessionRecap, recordSessionTitle } from "./session-index";
+import { recordSessionTitle } from "./session-index";
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
@@ -3538,16 +3538,6 @@ export class SessionManager {
 			} finally {
 				probe();
 			}
-		}
-	}
-
-	/**
-	 * Journal an idle recap for this session in history.db. Recaps never enter
-	 * the session file or LLM context; in-memory sessions are not journaled.
-	 */
-	recordRecap(recap: string): void {
-		if (this.#persist && this.#storage instanceof FileSessionStorage) {
-			recordSessionRecap(this.#sessionId, this.#cwd, recap);
 		}
 	}
 

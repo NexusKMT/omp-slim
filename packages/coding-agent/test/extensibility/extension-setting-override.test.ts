@@ -15,9 +15,9 @@ const EXTENSION_SOURCE = `
 import { lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 
 export default function (pi) {
-	const recap = lookup("recap.enabled");
-	if (!recap) throw new Error("recap.enabled is not registered");
-	if (!recap.isConfigured(pi.pi.settings)) recap.override(pi.pi.settings, false);
+	const autoResume = lookup("autoResume");
+	if (!autoResume) throw new Error("autoResume is not registered");
+	if (!autoResume.isConfigured(pi.pi.settings)) autoResume.override(pi.pi.settings, true);
 }
 `;
 
@@ -53,17 +53,17 @@ describe("extension runtime setting overrides", () => {
 
 	it("applies a runtime override the host session observes", async () => {
 		const settings = await loadOverrideExtension();
-		const recap = lookup("recap.enabled")!;
+		const autoResume = lookup("autoResume")!;
 
-		expect(recap.get(settings)).toBe(false);
-		expect(recap.provenance(settings)).toBe("runtime");
+		expect(autoResume.get(settings)).toBe(true);
+		expect(autoResume.provenance(settings)).toBe("runtime");
 	});
 
 	it("sees the user's configured value and leaves it in place", async () => {
-		const settings = await loadOverrideExtension("recap:\n  enabled: true\n");
-		const recap = lookup("recap.enabled")!;
+		const settings = await loadOverrideExtension("autoResume: false\n");
+		const autoResume = lookup("autoResume")!;
 
-		expect(recap.get(settings)).toBe(true);
-		expect(recap.provenance(settings)).toBe("global");
+		expect(autoResume.get(settings)).toBe(false);
+		expect(autoResume.provenance(settings)).toBe("global");
 	});
 });

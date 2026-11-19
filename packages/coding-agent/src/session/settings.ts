@@ -23,7 +23,7 @@ export const cfgSessionWorktreeScope = register({
 	default: "repo",
 	ui: {
 		tab: "interaction",
-		group: "Startup & Updates",
+		group: "Startup",
 		label: "Resume Worktree Scope",
 		description:
 			"Choose whether the resume picker's current folder includes sessions from other repository worktrees",

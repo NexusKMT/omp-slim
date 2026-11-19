@@ -63,13 +63,6 @@ import { TernError, type TernErrorKind, TernSocketClient } from "../../utils/ter
 import { outputMeta } from "../../tools/output-meta";
 import { resolveToCwd, stripOuterDoubleQuotes } from "../../tools/path-utils";
 import { replaceTabs, shortenEmbeddedPaths } from "@oh-my-pi/pi-tui/render/render-utils";
-import {
-	getChangelogPath,
-	parseChangelog,
-	parseChangelogView,
-	renderChangelogEntries,
-	selectChangelogEntries,
-} from "../../utils/changelog";
 import { copyToClipboard } from "../../utils/clipboard";
 import { formatDumpArchiveReport, type SessionDumpArchive } from "../../session/session-dump-format";
 import { openPath } from "../../utils/open";
@@ -704,35 +697,6 @@ export class CommandController {
 		}
 
 		this.showCommandReport({ title: "Background Jobs", body: new Text(info.trimEnd(), 0, 0) });
-	}
-
-	async handleChangelogCommand(args = ""): Promise<void> {
-		const view = parseChangelogView(args);
-		if ("error" in view) {
-			this.ctx.showWarning(view.error);
-			return;
-		}
-		const changelogPath = getChangelogPath();
-		const allEntries = await parseChangelog(changelogPath);
-		const entriesToShow = selectChangelogEntries(allEntries, view);
-		const changelogMarkdown =
-			entriesToShow.length > 0 ? renderChangelogEntries(entriesToShow).markdown : "No changelog entries found.";
-		const shown = entriesToShow.length;
-		const titleCount = shown > 0 ? shown : view.kind === "last" ? view.count : shown;
-		const title =
-			view.kind === "full"
-				? "Full Changelog"
-				: view.kind === "last"
-					? titleCount === 1
-						? "Last Release"
-						: `Last ${titleCount} Releases`
-					: "Recent Changes";
-		const hint =
-			view.kind === "full"
-				? ""
-				: `\n\n${theme.fg("dim", "Use")} ${theme.bold("/changelog full")} ${theme.fg("dim", "to view the complete changelog.")}`;
-
-		this.#showMarkdownPanel(title, changelogMarkdown + hint);
 	}
 
 	handleHotkeysCommand(): void {

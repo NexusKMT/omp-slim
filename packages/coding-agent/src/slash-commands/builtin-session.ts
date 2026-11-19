@@ -2,13 +2,6 @@ import { clearSubmittedText } from "./helpers/draft";
 
 import type { AgentSession } from "../session/agent-session";
 
-import {
-	getChangelogPath,
-	parseChangelog,
-	parseChangelogView,
-	renderChangelogEntries,
-	selectChangelogEntries,
-} from "../utils/changelog";
 import { formatTokenCount } from "./builtin-modes";
 import { buildContextReportText } from "./helpers/context-report";
 import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
@@ -243,35 +236,6 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			} else {
 				await runtime.ctx.handleJobsCommand({ full: verb === "full" });
 			}
-			clearSubmittedText(runtime);
-		},
-	},
-	{
-		name: "changelog",
-		icon: "news",
-		description: "Show changelog entries",
-		acpDescription: "Show changelog",
-		acpInputHint: "[full|last [N]]",
-		subcommands: [
-			{ name: "full", description: "Show complete changelog" },
-			{ name: "last", description: "Show the last N releases (default 1)", usage: "[N]" },
-		],
-		allowArgs: true,
-		handle: async (command, runtime) => {
-			const view = parseChangelogView(command.args);
-			if ("error" in view) return usage(view.error, runtime);
-			const changelogPath = getChangelogPath();
-			const allEntries = await parseChangelog(changelogPath);
-			const entriesToShow = selectChangelogEntries(allEntries, view);
-			if (entriesToShow.length === 0) {
-				await runtime.output("No changelog entries found.");
-				return commandConsumed();
-			}
-			await runtime.output(renderChangelogEntries(entriesToShow).markdown);
-			return commandConsumed();
-		},
-		handleTui: async (command, runtime) => {
-			await runtime.ctx.handleChangelogCommand(command.args);
 			clearSubmittedText(runtime);
 		},
 	},

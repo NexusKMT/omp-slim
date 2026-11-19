@@ -68,10 +68,6 @@ import { formatExtensionLoadNotifications } from "./extensibility/extensions/loa
 import { loadExtensions } from "./extensibility/extensions/loader";
 import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
-import {
-	scheduleMarketplaceAutoUpdate,
-	type MarketplaceAutoUpdateOptions,
-} from "./extensibility/plugins/marketplace-auto-update";
 import { registerDaemonProjectPresence } from "./launch/presence";
 import type { MCPManager } from "./mcp";
 import type { InteractiveMode } from "./modes/interactive-mode";
@@ -126,7 +122,6 @@ import { cfgTelemetryOtlpExportEnabled } from "./telemetry-settings";
 import { automaticThinkingLevel, concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { LspStartupServerInfo } from "./tools";
 import { sanitizeDisplayWarnings } from "@oh-my-pi/pi-tui/render/render-utils";
-import { getChangelogPath, readLastChangelogVersion, resolveStartupChangelogForDisplay } from "./utils/changelog";
 import { EventBus } from "./utils/event-bus";
 import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
 import { CliUsageError } from "./cli/usage-error";
@@ -143,11 +138,9 @@ import {
 	cfgColorBlindMode,
 	cfgComposerShape,
 	cfgImagesAutoResize,
-	cfgMarketplaceAutoUpdate,
 	cfgShowHardwareCursor,
 	cfgSpellingAutocorrect,
 	cfgSpellingTypoDetection,
-	cfgStartupChangelogMode,
 	cfgStartupQuiet,
 	cfgSymbolPreset,
 	cfgThemeDark,
@@ -1998,11 +1991,6 @@ export async function runRootCommand(
 			return options;
 		};
 		let sessionOptions = await buildStartupSessionOptions(sessionManager);
-		const marketplaceAutoUpdateOptions: MarketplaceAutoUpdateOptions = {
-			autoUpdate: cfgMarketplaceAutoUpdate.get(settingsInstance),
-			resolveActiveProjectRegistryPath,
-			clearPluginRootsCache: clearPluginRootsAndCaches,
-		};
 
 		// OTEL: unless `telemetry.otlpExportEnabled` is off, register global OTLP
 		// exporters when an endpoint is configured via env, then switch on the agent
@@ -2074,7 +2062,6 @@ export async function runRootCommand(
 			});
 			// Branch-only protocol runner: keep ACP server code out of normal interactive startup.
 			const runAcpMode = deps.runAcpMode ?? (await import("./modes/acp/acp-mode")).runAcpMode;
-			scheduleMarketplaceAutoUpdate(marketplaceAutoUpdateOptions);
 			stopStartupWatchdog();
 			// Startup is over: stop recording spans, or every later session and subagent
 			// appends to the timing tree for the life of the server.
@@ -2185,10 +2172,8 @@ export async function runRootCommand(
 			// the marker as this launch found it. The probe may spawn a detached
 			// interpreter; abort it on process exit so Ctrl-C during startup cannot orphan
 			// a hung configured python.interpreter.
-			let lastChangelogVersion: string | undefined;
 			let pythonEvalWarningPromise: Promise<string | undefined> | undefined;
-			if (isInteractive) {
-				lastChangelogVersion = await readLastChangelogVersion();
+			if (isInteractive && !(parsedArgs.continue || parsedArgs.resume)) {
 				const pythonEvalProbeAbort = new AbortController();
 				const unregisterPythonEvalProbe = postmortem.register(
 					"python-eval-startup-probe",
@@ -2197,14 +2182,11 @@ export async function runRootCommand(
 				);
 				pythonEvalWarningPromise = resolveFirstLaunchPythonEvalWarning({
 					args: parsedArgs,
-					lastChangelogVersion,
 					cwd: sessionOptions.cwd ?? getProjectDir(),
 					settings: settingsInstance,
 					signal: pythonEvalProbeAbort.signal,
 				}).finally(unregisterPythonEvalProbe);
 			}
-			// Resumed and imported sessions neither show nor advance the startup changelog.
-			const showsStartupChangelog = isInteractive && !(parsedArgs.continue || parsedArgs.resume);
 
 			const preloadProviderRegistrations =
 				isInteractive && autoResumed ? extensionsResult.runtime.pendingProviderRegistrations.slice() : [];
@@ -2252,7 +2234,6 @@ export async function runRootCommand(
 				}
 				throw error;
 			}
-			scheduleMarketplaceAutoUpdate(marketplaceAutoUpdateOptions);
 
 			// Cold-revive support: a `parked` subagent ref restored from disk (Agent Hub
 			// scan, collab mirror, resumed process) has a sessionFile but no in-memory
@@ -2303,17 +2284,7 @@ export async function runRootCommand(
 			// runInteractiveMode calls it once init has painted. None feeds the first
 			// prompt: fallback-chain validation and the startup changelog only add header
 			// rows, and the background refresh already raced the first prompt when it ran earlier.
-			const startDeferredStartupWork = (interactive: InteractiveMode): void => {
-				if (showsStartupChangelog) {
-					void resolveStartupChangelogForDisplay({
-						mode: cfgStartupChangelogMode.get(settingsInstance),
-						currentVersion: VERSION,
-						lastVersion: lastChangelogVersion,
-						changelogPath: getChangelogPath(),
-					})
-						.then(selection => selection && interactive.showStartupChangelog(selection))
-						.catch(error => logger.warn("Startup changelog failed", { error: String(error) }));
-				}
+			const startDeferredStartupWork = (_interactive: InteractiveMode): void => {
 				void session.loadDeferredExtensions();
 				session.startSkillDescriptionCompression();
 

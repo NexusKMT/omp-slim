@@ -8,7 +8,6 @@ import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mod
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import type { StartupChangelogSelection } from "@oh-my-pi/pi-coding-agent/utils/changelog";
 import * as themeModule from "@oh-my-pi/pi-tui/theme";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -18,17 +17,6 @@ import { TempDir } from "@oh-my-pi/pi-utils";
  * background, the header must repaint in the light palette: a dark-palette
  * accent is near-white and disappears on a light background.
  */
-
-const startupChangelog: StartupChangelogSelection = {
-	markdown: "## [9.9.9]\n\n### Fixed\n\n- Something",
-	persistCurrentVersion: true,
-	truncated: false,
-	selectedEntries: 1,
-	totalUnseenEntries: 1,
-	latestVersion: "9.9.9",
-	changeCount: 1,
-	categoryCounts: { Fixed: 1 },
-};
 
 /** Opening SGR sequence `theme.fg(color, ...)` emits under the active theme. */
 function fgPrefix(color: "accent" | "warning"): string {
@@ -102,21 +90,6 @@ describe("InteractiveMode startup header after the terminal reports a light back
 		if (line === undefined) throw new Error(`Expected a rendered row containing ${JSON.stringify(text)}`);
 		return line;
 	}
-
-	it("recolors the What's New heading", async () => {
-		await mode.init();
-		mode.showStartupChangelog(startupChangelog);
-		const darkAccent = fgPrefix("accent");
-		expect(renderedLine("What's New")).toContain(darkAccent);
-
-		await switchTerminalToLight();
-		const lightAccent = fgPrefix("accent");
-		expect(lightAccent).not.toBe(darkAccent);
-
-		const heading = renderedLine("What's New");
-		expect(heading).toContain(lightAccent);
-		expect(heading).not.toContain(darkAccent);
-	});
 
 	it("recolors a config warning", async () => {
 		session.configWarnings.push("theme.dark names a missing theme");

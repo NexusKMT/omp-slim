@@ -23,7 +23,8 @@ import {
 	type FileLockHandle,
 } from "@oh-my-pi/pi-utils";
 
-export const COMPRESS_SCRATCH_PREFIX = ".omp-gc-compress-";
+import { COMPRESS_SCRATCH_PREFIX } from "./gc-compress";
+export { COMPRESS_SCRATCH_PREFIX };
 
 /** Whether `relativePath` (from any ancestor directory) lies inside a compress scratch directory. */
 export function isCompressScratchPath(relativePath: string): boolean {

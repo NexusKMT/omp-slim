@@ -6,14 +6,7 @@ import archiveDocumentation from "../prompts/tools/archive.md" with { type: "tex
 import type { ToolSession } from "../tools";
 import { resolveToCwd } from "../tools/path-utils";
 import { cfgArchiveEnabled } from "../tools/settings";
-import {
-	type ArchiveView,
-	archiveProjects,
-	archivePrompts,
-	archiveRecaps,
-	archiveSession,
-	archiveSessions,
-} from "./archive";
+import { type ArchiveView, archiveProjects, archivePrompts, archiveSession, archiveSessions } from "./archive";
 // @ts-expect-error Bun imports this JavaScript source as text instead of evaluating its module shape.
 import archiveJavascript from "./prelude.js" with { type: "text" };
 import archivePython from "./prelude.py" with { type: "text" };
@@ -25,7 +18,7 @@ const limit = "1 <= number.integer <= 500";
 const project = "string > 0";
 
 const paramsSchema = type({ action: "'projects'", "limit?": limit, "+": "reject" })
-	.or({ action: "'sessions' | 'recaps'", "project?": project, "limit?": limit, "+": "reject" })
+	.or({ action: "'sessions'", "project?": project, "limit?": limit, "+": "reject" })
 	.or({ action: "'session'", id: "string > 0", "limit?": limit, "+": "reject" })
 	.or({ action: "'prompts'", "query?": "string > 0", "project?": project, "limit?": limit, "+": "reject" });
 
@@ -52,8 +45,6 @@ async function archiveView(params: ArchiveParams, cwd: string): Promise<ArchiveV
 			return archiveSession(params.id.endsWith(".jsonl") ? resolveToCwd(params.id, cwd) : params.id, count);
 		case "prompts":
 			return archivePrompts(params.query, resolveProject(params.project, cwd), count);
-		case "recaps":
-			return archiveRecaps(resolveProject(params.project, cwd), count);
 	}
 }
 
@@ -70,12 +61,11 @@ function describeArchiveCall(parameters: unknown): string | undefined {
 			if (parsed.query) return `archive.search(${JSON.stringify(parsed.query)})`;
 			return `archive.prompts(${parsed.project ? shortenPath(parsed.project) : ""})`;
 		case "sessions":
-		case "recaps":
-			return `archive.${parsed.action}(${parsed.project ? shortenPath(parsed.project) : ""})`;
+			return `archive.sessions(${parsed.project ? shortenPath(parsed.project) : ""})`;
 	}
 }
 
-/** Create the read-only archive prelude: prompt history, recent projects, past sessions, and recaps. */
+/** Create the read-only archive prelude: prompt history, recent projects, and past sessions. */
 export function createArchivePrelude(session: ToolSession): EvalPreludeDefinition {
 	return {
 		name: "archive",

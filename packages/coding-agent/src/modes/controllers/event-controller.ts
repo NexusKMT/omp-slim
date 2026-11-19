@@ -14,7 +14,6 @@ import {
 	readArgsCollapseIntoGroup,
 	readArgsHaveTarget,
 } from "@oh-my-pi/pi-tui/chat/read-tool-group";
-import { RecapNotice } from "@oh-my-pi/pi-tui/chat/recap-notice";
 import {
 	isReplyWrite,
 	ReplyWriteComponent,
@@ -461,12 +460,6 @@ export class EventController {
 				this.ctx.updatePendingMessagesDisplay();
 			},
 		} satisfies AgentSessionEventHandlers;
-	}
-
-	/** Surface an idle recap reply in the transcript as a one-line {@link RecapNotice}; a blank reply mounts nothing. */
-	presentIdleRecap(reply: string): void {
-		const recap = previewLine(reply, TRUNCATE_LENGTHS.RECAP);
-		if (recap) this.ctx.present(new RecapNotice(recap));
 	}
 
 	dispose(): void {

@@ -18,7 +18,6 @@ import {
 	expandTilde,
 	getAgentDbPath,
 	getAgentDir,
-	getLastChangelogVersionPath,
 	getProjectDir,
 	getProjectAgentDir,
 	isEnoent,
@@ -673,9 +672,6 @@ export class Settings {
 	#persistedMutationGeneration = 0;
 	/** Original CLI override temporarily replaced by a project model edit, restored on cwd changes. */
 	#savedRuntimeModelOverride: { value: unknown } | undefined;
-
-	/** Legacy `lastChangelogVersion` captured from config.yml during migration (now a marker file). */
-	#legacyLastChangelogVersion?: string;
 
 	/** Pending save (debounced) */
 	#saveTimer?: NodeJS.Timeout;
@@ -2047,7 +2043,6 @@ export class Settings {
 			await this.#migrateFromLegacy();
 			this.#global = await this.#loadYaml(this.#configPath!);
 		}
-		await this.#seedLastChangelogVersionMarker();
 	}
 
 	async #loadReadOnly(): Promise<Settings> {
@@ -2780,40 +2775,15 @@ export class Settings {
 			raw.doubleEscapeAction = "rewind";
 		}
 
-		// lastChangelogVersion moved out of config.yml into the
-		// <agentDir>/last-changelog-version marker file so version bumps no
-		// longer dirty user-tracked configs. Capture for marker seeding (see
-		// #seedLastChangelogVersionMarker), then strip the key — the next
-		// config save drops it from disk.
-		if (captureLegacyChangelogVersion && typeof raw.lastChangelogVersion === "string") {
-			this.#legacyLastChangelogVersion ??= raw.lastChangelogVersion;
-		}
 		delete raw.lastChangelogVersion;
-
-		// collapseChangelog (boolean) -> startup.changelogMode (enum). Preserve
-		// every explicit legacy choice while giving new installs the schema's
-		// "summary" default: true -> summary, false -> expanded. A separately
-		// configured new mode always wins.
-		const startupObj = isRecord(raw.startup) ? (raw.startup as Record<string, unknown>) : undefined;
-		const legacyCollapseChangelog = typeof raw.collapseChangelog === "boolean" ? raw.collapseChangelog : undefined;
-		const flatChangelogMode = raw["startup.changelogMode"];
-		const normalizedFlatChangelogMode =
-			flatChangelogMode === "summary" || flatChangelogMode === "expanded" || flatChangelogMode === "hidden"
-				? flatChangelogMode
-				: undefined;
-		if (legacyCollapseChangelog !== undefined || normalizedFlatChangelogMode !== undefined) {
-			if (!startupObj) {
-				raw.startup = {};
-			}
-			const target = raw.startup as Record<string, unknown>;
-			if (target.changelogMode === undefined) {
-				target.changelogMode =
-					normalizedFlatChangelogMode ??
-					(legacyCollapseChangelog !== undefined ? (legacyCollapseChangelog ? "summary" : "expanded") : undefined);
-			}
-		}
 		delete raw.collapseChangelog;
 		delete raw["startup.changelogMode"];
+		if (isRecord(raw.startup)) delete raw.startup.changelogMode;
+
+		const retiredPrunedFeatures = ["recap", "marketplace"];
+		for (const key of Object.keys(raw)) {
+			if (retiredPrunedFeatures.some(prefix => key === prefix || key.startsWith(`${prefix}.`))) delete raw[key];
+		}
 
 		// Migrate old flat "theme" string to nested theme.dark/theme.light
 		if (typeof raw.theme === "string") {
@@ -3522,27 +3492,6 @@ export class Settings {
 		}
 
 		return raw;
-	}
-
-	/**
-	 * One-time migration: seed the last-changelog-version marker file from the
-	 * legacy config.yml key. An existing marker always wins — it is the newer
-	 * source of truth.
-	 */
-	async #seedLastChangelogVersionMarker(): Promise<void> {
-		const legacy = this.#legacyLastChangelogVersion;
-		if (!legacy) return;
-		const markerPath = getLastChangelogVersionPath(this.#agentDir);
-		try {
-			if ((await Bun.file(markerPath).text()).trim()) return;
-		} catch (error) {
-			if (!isEnoent(error)) return;
-		}
-		try {
-			await Bun.write(markerPath, legacy);
-		} catch (error) {
-			logger.warn("Settings: failed to seed last-changelog-version marker", { error: String(error) });
-		}
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────

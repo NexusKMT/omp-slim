@@ -46,7 +46,7 @@ export async function resolveFirstLaunchPythonEvalWarning({
 	signal,
 }: {
 	args: Pick<Args, "continue" | "resume" | "tools" | "noTools">;
-	lastChangelogVersion: string | undefined;
+	lastChangelogVersion?: string | undefined;
 	cwd: string;
 	settings: Settings;
 	signal?: AbortSignal;

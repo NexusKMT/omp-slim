@@ -34,7 +34,7 @@ export const cfgAutoResume = register({
 	default: false,
 	ui: {
 		tab: "interaction",
-		group: "Startup & Updates",
+		group: "Startup",
 		label: "Auto Resume",
 		description:
 			"Automatically resume the most recent session in the current directory. If its model cannot be restored and model fallback is disabled, interactive startup warns and starts a new session without the saved history",
@@ -1170,57 +1170,9 @@ export const cfgStartupQuiet = register({
 	default: false,
 	ui: {
 		tab: "interaction",
-		group: "Startup & Updates",
+		group: "Startup",
 		label: "Quiet Startup",
 		description: "Skip welcome screen and startup status messages",
-	},
-});
-
-export const cfgMarketplaceAutoUpdate = register({
-	id: "marketplace.autoUpdate",
-	type: "enum",
-	values: ["off", "notify", "auto"] as const,
-	default: "notify",
-	ui: {
-		tab: "interaction",
-		group: "Startup & Updates",
-		label: "Marketplace Auto-Update",
-		description: "Check for plugin updates on startup",
-		options: [
-			{ value: "off", label: "Off", description: "Don't check for plugin updates" },
-			{ value: "notify", label: "Notify", description: "Check on startup and notify when updates are available" },
-			{ value: "auto", label: "Auto", description: "Check on startup and auto-install updates" },
-		],
-	},
-});
-
-export const cfgStartupChangelogMode = register({
-	id: "startup.changelogMode",
-	type: "enum",
-	values: ["summary", "expanded", "hidden"] as const,
-	default: "summary",
-	ui: {
-		tab: "interaction",
-		group: "Startup & Updates",
-		label: "Startup Changelog",
-		description: "Choose whether update notes start as a summary, full details, or stay hidden",
-		options: [
-			{
-				value: "summary",
-				label: "Summary",
-				description: "Show release and change counts with a /changelog hint",
-			},
-			{
-				value: "expanded",
-				label: "Expanded",
-				description: "Show the recent release notes in full",
-			},
-			{
-				value: "hidden",
-				label: "Hidden",
-				description: "Do not show release notes on startup",
-			},
-		],
 	},
 });
 
@@ -1318,37 +1270,3 @@ export const cfgAskNotify = register({
 		description: "Notify when the ask tool is waiting for input",
 	},
 });
-
-export const cfgRecapEnabled = register({
-	id: "recap.enabled",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "interaction",
-		group: "Notifications",
-		label: "Idle Recap",
-		description: "Generate a brief LLM recap of where things stand after the terminal has been idle",
-	},
-});
-
-export const cfgRecapIdleSeconds = register({
-	id: "recap.idleSeconds",
-	type: "number",
-	default: 240,
-	ui: {
-		tab: "interaction",
-		group: "Notifications",
-		label: "Idle Recap Delay",
-		description: "Seconds to wait while idle before showing the recap",
-		options: [
-			{ value: "60", label: "1 minute" },
-			{ value: "120", label: "2 minutes" },
-			{ value: "240", label: "4 minutes" },
-			{ value: "300", label: "5 minutes" },
-			{ value: "600", label: "10 minutes" },
-		],
-	},
-});
-
-/** Idle recap policy (`recap.*`). */
-export const cfgRecap = combine({ enabled: cfgRecapEnabled, idleSeconds: cfgRecapIdleSeconds });

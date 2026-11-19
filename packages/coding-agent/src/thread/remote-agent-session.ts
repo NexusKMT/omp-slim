@@ -751,11 +751,10 @@ export class RemoteAgentSession implements AgentViewSession {
 
 	/** Idle maintenance runs on the home worker; its blocking predicates are answered synchronously from main. */
 	enableIdleMaintenance(options: IdleMaintenanceOptions = {}): void {
-		const { isBlocked, scheduledTurn, onRecap } = options;
+		const { isBlocked, scheduledTurn } = options;
 		this.#notify("enableIdleMaintenance", {
 			isBlocked: isBlocked && rpcSync(() => isBlocked()),
 			scheduledTurn: scheduledTurn && rpcSync(() => scheduledTurn()),
-			onRecap,
 		});
 	}
 

@@ -101,7 +101,7 @@ describe("issue #4806 command output during streaming", () => {
 			expect(mode.reportContainer.children).toHaveLength(0);
 
 			// A second report replaces the first sheet instead of stacking.
-			await mode.handleChangelogCommand("full");
+			mode.handleToolsCommand();
 			expect(mode.ui.overlayStack).toHaveLength(1);
 			// The sheet body is the terminal's scroller; Page Down reaches it as a scroll request.
 			const bodyScroll = () =>

@@ -9,10 +9,6 @@
  *   content-scanning every session file in the project directory (seconds on
  *   dirs with thousands of sessions). A title has no life beyond its session;
  *   `omp gc` drops rows of archived sessions.
- * - `session_recaps`: append-only journal of idle recaps
- *   ({@link SessionManager.recordRecap}). Recaps are side-channel output that
- *   never enters the session JSONL or LLM context; this table is their only
- *   durable record. `omp gc` drops rows of archived sessions.
  *
  * Holds its own lazily-opened connection instead of {@link HistoryStorage}'s
  * path-pinned singleton: the db path is re-resolved on every call so
@@ -39,14 +35,6 @@ CREATE TABLE IF NOT EXISTS session_titles (
 	title TEXT NOT NULL,
 	updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
 );
-CREATE TABLE IF NOT EXISTS session_recaps (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	session_id TEXT NOT NULL,
-	cwd TEXT NOT NULL,
-	recap TEXT NOT NULL,
-	created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
-);
-CREATE INDEX IF NOT EXISTS idx_session_recaps_session ON session_recaps(session_id, created_at);
 `;
 
 interface SessionIndexHandle {
@@ -56,7 +44,6 @@ interface SessionIndexHandle {
 	db: Database;
 	upsertTitle: Statement;
 	selectTitle: Statement;
-	insertRecap: Statement;
 }
 
 let handle: SessionIndexHandle | undefined;
@@ -68,7 +55,6 @@ function closeHandle(): void {
 	try {
 		handle.upsertTitle.finalize();
 		handle.selectTitle.finalize();
-		handle.insertRecap.finalize();
 		handle.db.close();
 	} catch {}
 	handle = undefined;
@@ -111,7 +97,6 @@ ON CONFLICT(session_id) DO UPDATE SET
 	updated_at = excluded.updated_at
 			`),
 			selectTitle: db.prepare("SELECT title FROM session_titles WHERE session_id = ? AND typeof(title) = 'text'"),
-			insertRecap: db.prepare("INSERT INTO session_recaps (session_id, cwd, recap) VALUES (?, ?, ?)"),
 		};
 		failedPath = undefined;
 		return handle;
@@ -191,89 +176,6 @@ export function lookupSessionTitle(sessionId: string): string | undefined {
 	}
 }
 
-/**
- * Append an idle recap to the session's recap journal. Best-effort: a journal
- * failure must never disturb the recap display, so errors are logged and swallowed.
- */
-export function recordSessionRecap(sessionId: string, cwd: string, recap: string): void {
-	const index = openSessionIndex();
-	if (!index) return;
-	try {
-		index.insertRecap.run(sessionId, cwd, recap);
-	} catch (error) {
-		logger.debug("Session recap journal write failed", { sessionId, error: String(error) });
-	}
-}
-
-/** One journaled idle recap. */
-export interface SessionRecap {
-	sessionId: string;
-	/** Working directory of the session that produced the recap. */
-	cwd: string;
-	recap: string;
-	/** Unix seconds. */
-	createdAt: number;
-}
-
-/** Narrows {@link listSessionRecaps}; omitted fields match everything. */
-export interface SessionRecapQuery {
-	/** Recaps of these sessions only; empty matches nothing. */
-	sessionIds?: readonly string[];
-	/** Recaps produced in this exact working directory. */
-	cwd?: string;
-	/** Maximum rows returned. */
-	limit?: number;
-}
-
-interface SessionRecapRow {
-	session_id: string;
-	cwd: string;
-	recap: string;
-	created_at: number;
-}
-
-/**
- * Journaled recaps matching `query`, newest first. Best-effort like the
- * writers: an unavailable index or failed read yields an empty list.
- */
-export function listSessionRecaps(query: SessionRecapQuery = {}): SessionRecap[] {
-	if (query.sessionIds?.length === 0) return [];
-	const index = openSessionIndex();
-	if (!index) return [];
-	// A damaged page can decode foreign bytes into these columns; never hand them to callers.
-	const where = ["typeof(recap) = 'text'", "typeof(cwd) = 'text'", "typeof(created_at) = 'integer'"];
-	const params: SQLQueryBindings[] = [];
-	if (query.sessionIds) {
-		where.push(`session_id IN (${query.sessionIds.map(() => "?").join(", ")})`);
-		params.push(...query.sessionIds);
-	}
-	if (query.cwd !== undefined) {
-		where.push("cwd = ?");
-		params.push(query.cwd);
-	}
-	let sql = "SELECT session_id, cwd, recap, created_at FROM session_recaps";
-	if (where.length > 0) sql += ` WHERE ${where.join(" AND ")}`;
-	sql += " ORDER BY created_at DESC, id DESC";
-	if (query.limit !== undefined) {
-		sql += " LIMIT ?";
-		params.push(query.limit);
-	}
-	try {
-		// Ad-hoc SQL (the IN list varies), so prepare and finalize per call
-		// instead of growing the connection's statement cache.
-		using statement = index.db.prepare(sql);
-		return (statement.all(...params) as SessionRecapRow[]).map(row => ({
-			sessionId: row.session_id,
-			cwd: row.cwd,
-			recap: row.recap,
-			createdAt: row.created_at,
-		}));
-	} catch (error) {
-		logger.debug("Session recap journal read failed", { error: String(error) });
-		return [];
-	}
-}
-
 /** Closes the cached connection; the next call reopens it. History recovery closes it so history.db can be replaced. */
 export function closeSessionIndex(): void {
 	closeHandle();
@@ -286,13 +188,6 @@ interface SalvagedTitle {
 	updated_at: unknown;
 }
 
-interface SalvagedRecap {
-	session_id: unknown;
-	cwd: unknown;
-	recap: unknown;
-	created_at: unknown;
-}
-
 function readSalvageable<T extends object>(source: Database, table: string, columns: string): T[] {
 	try {
 		return readSalvageableRows<T>(source, table, columns);
@@ -303,22 +198,14 @@ function readSalvageable<T extends object>(source: Database, table: string, colu
 }
 
 /**
- * Copies the readable titles and recaps of a quarantined history.db into the
- * replacement `target`. Runs once per quarantined store, so recaps append
- * as-is; a title already rewritten in the replacement keeps the newer value.
+ * Copies the readable titles of a quarantined history.db into the
+ * replacement `target`.
  */
-export function salvageSessionIndex(source: Database, target: Database): { titles: number; recaps: number } {
+export function salvageSessionIndex(source: Database, target: Database): { titles: number } {
 	target.run(SESSION_INDEX_DDL);
 	const titles = readSalvageable<SalvagedTitle>(source, "session_titles", "session_id, title, updated_at").filter(
 		row =>
 			typeof row.session_id === "string" && typeof row.title === "string" && Number.isSafeInteger(row.updated_at),
-	);
-	const recaps = readSalvageable<SalvagedRecap>(source, "session_recaps", "session_id, cwd, recap, created_at").filter(
-		row =>
-			typeof row.session_id === "string" &&
-			typeof row.cwd === "string" &&
-			typeof row.recap === "string" &&
-			Number.isSafeInteger(row.created_at),
 	);
 	using upsertTitle = target.prepare(`
 INSERT INTO session_titles (session_id, title, updated_at) VALUES (?, ?, ?)
@@ -326,11 +213,5 @@ ON CONFLICT(session_id) DO UPDATE SET title = excluded.title, updated_at = exclu
 WHERE excluded.updated_at > session_titles.updated_at
 	`);
 	for (const row of titles) upsertTitle.run(row.session_id as string, row.title as string, row.updated_at as number);
-	using insertRecap = target.prepare(
-		"INSERT INTO session_recaps (session_id, cwd, recap, created_at) VALUES (?, ?, ?, ?)",
-	);
-	for (const row of recaps) {
-		insertRecap.run(row.session_id as string, row.cwd as string, row.recap as string, row.created_at as number);
-	}
-	return { titles: titles.length, recaps: recaps.length };
+	return { titles: titles.length };
 }

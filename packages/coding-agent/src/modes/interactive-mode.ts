@@ -216,7 +216,6 @@ import {
 	setTranscriptPresenters,
 } from "@oh-my-pi/pi-tui/chat/transcript-presentation";
 import { renderTreeList } from "@oh-my-pi/pi-tui/render/tree-list";
-import { formatStartupChangelogSummary, type StartupChangelogSelection } from "../utils/changelog";
 import { copyToClipboard } from "../utils/clipboard";
 import type { EventBus } from "../utils/event-bus";
 import { getEditorCommand, getEditorName, openInEditor } from "../utils/external-editor";
@@ -380,12 +379,9 @@ import {
 	cfgLoopConditionTimeoutMs,
 	cfgLoopMode,
 	cfgMagicKeywordsEnabled,
-	cfgRecapEnabled,
-	cfgRecapIdleSeconds,
 	cfgShowHardwareCursor,
 	cfgSpellingAutocorrect,
 	cfgSpellingTypoDetection,
-	cfgStartupChangelogMode,
 	cfgStartupQuiet,
 	cfgStatusLineCompactThinkingLevel,
 	cfgStatusLineContextLine,
@@ -459,8 +455,6 @@ const cfgLiveUiSettings = combine({
 	"compaction.idleEnabled": cfgCompactionIdleEnabled,
 	"compaction.idleThresholdTokens": cfgCompactionIdleThresholdTokens,
 	"compaction.idleTimeoutSeconds": cfgCompactionIdleTimeoutSeconds,
-	"recap.enabled": cfgRecapEnabled,
-	"recap.idleSeconds": cfgRecapIdleSeconds,
 	"compaction.enabled": cfgCompactionEnabled,
 	"compaction.methodOrder": cfgCompactionMethodOrder,
 	"display.hideToolActivity": cfgDisplayHideToolActivity,
@@ -1804,8 +1798,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		ready: boolean;
 		isComposing: boolean;
 		scheduledTurn: ((target: AgentViewSession) => boolean) | undefined;
-		presentRecap: ((recap: string) => void) | undefined;
-	} = { target: undefined, ready: false, isComposing: false, scheduledTurn: undefined, presentRecap: undefined };
+	} = { target: undefined, ready: false, isComposing: false, scheduledTurn: undefined };
 
 	syncIdleMaintenanceView(target: AgentViewSession | null = this.viewSession): void {
 		const activity = this.#idleMaintenanceActivity;
@@ -1815,7 +1808,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			activity.ready = false;
 			activity.isComposing = false;
 			activity.scheduledTurn = undefined;
-			activity.presentRecap = undefined;
 			previous?.refreshIdleMaintenance();
 			return;
 		}
@@ -1825,8 +1817,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		target.enableIdleMaintenance({
 			isBlocked: () => !activity.ready || activity.target !== target || activity.isComposing,
 			scheduledTurn: () => activity.scheduledTurn?.(target) === true,
-			// Delivered only while unblocked, so `target` is the session on screen.
-			onRecap: recap => activity.presentRecap?.(recap),
 		});
 		if (previous !== target) previous?.refreshIdleMaintenance();
 		target.refreshIdleMaintenance();
@@ -2335,7 +2325,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.#pendingGoalContinuationTurns > 0 ||
 				this.#loopAutoSubmitTimer !== undefined ||
 				this.#pendingLoopIterations > 0);
-		this.#idleMaintenanceActivity.presentRecap = recap => this.#eventController.presentIdleRecap(recap);
 		this.syncIdleMaintenanceView();
 
 		// Fresh dialog lifetime: a previous stop (if this mode is ever
@@ -8352,34 +8341,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.setWorkingMessage(message);
 	}
 
-	/**
-	 * Add this launch's release notes below the welcome header. Startup calls it
-	 * after the first session-bound frame; quiet startup and hidden mode show nothing.
-	 */
-	showStartupChangelog(selection: StartupChangelogSelection): void {
-		const mode = cfgStartupChangelogMode.get(settings);
-		if (cfgStartupQuiet.get(settings) || mode === "hidden") return;
-		const notes =
-			mode === "summary"
-				? new Text(
-						formatStartupChangelogSummary(selection).replace(/\/changelog(?: full)?/g, command =>
-							theme.bold(command),
-						),
-						1,
-						0,
-					)
-				: new Markdown(selection.markdown?.trim() ?? "", 1, 0, getMarkdownTheme());
-		this.#headerAfter = [
-			new DynamicBorder(),
-			new Text("What's New", 1, 0).setStyleFn(t => theme.bold(theme.fg("accent", t))),
-			new Spacer(1),
-			notes,
-			new Spacer(1),
-			new DynamicBorder(),
-		];
-		this.#syncHeaderExtras();
-	}
-
 	clearEditor(): void {
 		this.#uiHelpers.clearEditor();
 	}
@@ -8542,10 +8503,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleJobsCommand(options?: { full?: boolean }): Promise<void> {
 		return this.#commandController.handleJobsCommand(options);
-	}
-
-	async handleChangelogCommand(args = ""): Promise<void> {
-		await this.#commandController.handleChangelogCommand(args);
 	}
 
 	handleHotkeysCommand(): void {
