@@ -1367,7 +1367,6 @@ export class Settings {
 		const projectConfigDir = getProjectAgentDir(projectCwd);
 		addFile(path.join(projectConfigDir, "config.yml"));
 		addFile(path.join(projectConfigDir, "settings.json"));
-		addFile(path.join(projectCwd, ".claude", "settings.json"));
 		for (const file of this.#projectSourcePaths) addFile(file);
 		for (const file of this.#configFiles) addFile(file);
 		return targets;
@@ -2509,7 +2508,6 @@ export class Settings {
 		const projectConfigPath = path.join(projectConfigDir, "config.yml");
 		invalidateCapabilityFsCache(projectConfigPath);
 		invalidateCapabilityFsCache(path.join(projectConfigDir, "settings.json"));
-		invalidateCapabilityFsCache(path.join(discoveryCwd, ".claude", "settings.json"));
 		for (const sourcePath of this.#projectSourcePaths) invalidateCapabilityFsCache(sourcePath);
 		let projectItems: SettingsCapabilityItem[] = [];
 		let rejectedWarnings: string[] | undefined;

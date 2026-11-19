@@ -318,16 +318,7 @@ import {
 import { cfgInterruptMode } from "./modes/settings";
 import { cfgFollowUpMode } from "./modes/settings";
 import { cfgSteeringMode } from "./modes/settings";
-import {
-	cfgCommandsEnableClaudeProject,
-	cfgCommandsEnableClaudeUser,
-	cfgCommandsEnableOpencodeProject,
-	cfgCommandsEnableOpencodeUser,
-	cfgDisabledExtensions,
-	cfgExtensions,
-	cfgSkills,
-	type SkillsSettings,
-} from "./extensibility/settings";
+import { cfgDisabledExtensions, cfgExtensions, cfgSkills, type SkillsSettings } from "./extensibility/settings";
 import { cfgTtsr } from "./export/ttsr-settings";
 import { cfgDisabledProviders, cfgEnabledModels, cfgEnabledProviders, cfgModel } from "./config/model-settings";
 import { cfgEditRecoverInlineEdits } from "./edit/settings";
@@ -368,13 +359,9 @@ const cfgToolCallSwitches = combine({
 	intentTracing: cfgToolsIntentTracing,
 });
 
-/** Settings skill and file slash-command discovery reads (foreign sources gated by the provider lists). */
+/** Settings skill and file slash-command discovery reads. */
 const cfgSkillsAndCommandsDiscovery = combine({
 	skills: cfgSkills,
-	commandsClaudeUser: cfgCommandsEnableClaudeUser,
-	commandsClaudeProject: cfgCommandsEnableClaudeProject,
-	commandsOpencodeUser: cfgCommandsEnableOpencodeUser,
-	commandsOpencodeProject: cfgCommandsEnableOpencodeProject,
 	enabledProviders: cfgEnabledProviders,
 	disabledProviders: cfgDisabledProviders,
 });

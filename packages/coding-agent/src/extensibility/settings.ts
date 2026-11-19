@@ -40,16 +40,6 @@ export const cfgSkillsEnableSkillCommands = register({
 	},
 });
 
-export const cfgSkillsEnableCodexUser = register({ id: "skills.enableCodexUser", type: "boolean", default: false });
-
-export const cfgSkillsEnableClaudeUser = register({ id: "skills.enableClaudeUser", type: "boolean", default: false });
-
-export const cfgSkillsEnableClaudeProject = register({
-	id: "skills.enableClaudeProject",
-	type: "boolean",
-	default: true,
-});
-
 export const cfgSkillsEnablePiUser = register({ id: "skills.enablePiUser", type: "boolean", default: true });
 
 export const cfgSkillsEnablePiProject = register({ id: "skills.enablePiProject", type: "boolean", default: true });
@@ -90,9 +80,6 @@ export const cfgSkillsIncludeSkills = register({
 export const cfgSkills = combine({
 	enabled: cfgSkillsEnabled,
 	enableSkillCommands: cfgSkillsEnableSkillCommands,
-	enableCodexUser: cfgSkillsEnableCodexUser,
-	enableClaudeUser: cfgSkillsEnableClaudeUser,
-	enableClaudeProject: cfgSkillsEnableClaudeProject,
 	enablePiUser: cfgSkillsEnablePiUser,
 	enablePiProject: cfgSkillsEnablePiProject,
 	enableAgentsUser: cfgSkillsEnableAgentsUser,
@@ -107,53 +94,6 @@ export const cfgSkills = combine({
 export type SkillsSettings = Partial<SettingValueOf<typeof cfgSkills>>;
 
 // Commands
-export const cfgCommandsEnableClaudeUser = register({
-	id: "commands.enableClaudeUser",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "tasks",
-		group: "Commands & Skills",
-		label: "Claude User Commands",
-		description: "Load commands from ~/.claude/commands/",
-	},
-});
-
-export const cfgCommandsEnableClaudeProject = register({
-	id: "commands.enableClaudeProject",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "tasks",
-		group: "Commands & Skills",
-		label: "Claude Project Commands",
-		description: "Load commands from .claude/commands/",
-	},
-});
-
-export const cfgCommandsEnableOpencodeUser = register({
-	id: "commands.enableOpencodeUser",
-	type: "boolean",
-	default: false,
-	ui: {
-		tab: "tasks",
-		group: "Commands & Skills",
-		label: "OpenCode User Commands",
-		description: "Load commands from ~/.config/opencode/commands/",
-	},
-});
-
-export const cfgCommandsEnableOpencodeProject = register({
-	id: "commands.enableOpencodeProject",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "tasks",
-		group: "Commands & Skills",
-		label: "OpenCode Project Commands",
-		description: "Load commands from .opencode/commands/",
-	},
-});
 
 export const cfgExtensionHandlersToolCallTimeoutMs = register({
 	id: "extensionHandlers.toolCallTimeoutMs",

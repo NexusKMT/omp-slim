@@ -19,26 +19,14 @@ import "../capability/slash-command";
 import "../capability/system-prompt";
 import "../capability/tool";
 // Import providers (each registers itself on import)
-import "./agent-plugins";
 import "./agents-md";
-import "./claude-md";
 import "./custom-context-files";
 import "./builtin";
 import "./builtin-defaults";
-import "./claude";
-import "./claude-plugins";
-import "./cline";
 import "./agents";
-import "./codex";
-import "./cursor";
-import "./gemini";
-import "./opencode";
-import "./github";
 import "./mcp-json";
 import "./omp-plugins";
 import "./skillshare";
-import "./vscode";
-import "./windsurf";
 
 // Re-export the main API from capability registry
 export {

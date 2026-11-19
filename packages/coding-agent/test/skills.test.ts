@@ -39,9 +39,6 @@ const expectedFixtureSkillOrder: string[] = [
  * installs out of every assertion.
  */
 const DISABLE_ALL_BUILTIN_SKILLS = {
-	enableCodexUser: false,
-	enableClaudeUser: false,
-	enableClaudeProject: false,
 	enablePiUser: false,
 	enablePiProject: false,
 	enableAgentsUser: false,
@@ -159,44 +156,6 @@ describe("skills", () => {
 			expect(skills.map(s => s.name)).toEqual(expectedFixtureSkillOrder);
 		});
 
-		it("should keep user Claude skills when project .claude/skills is missing", async () => {
-			const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
-			delete process.env.CLAUDE_CONFIG_DIR;
-			delete Bun.env.CLAUDE_CONFIG_DIR;
-			const tempHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-claude-home-"));
-			const tempProjectDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-claude-project-"));
-			enableUserSource("claude");
-
-			try {
-				const userSkillDir = path.join(tempHomeDir, ".claude", "skills", "user-only-skill");
-				await fs.mkdir(userSkillDir, { recursive: true });
-				await fs.writeFile(
-					path.join(userSkillDir, "SKILL.md"),
-					[
-						"---",
-						"name: user-only-skill",
-						"description: User-only Claude skill",
-						"---",
-						"",
-						"# User-only skill",
-					].join("\n"),
-				);
-
-				const capability = getCapability<CapabilitySkill>(skillCapability.id);
-				expect(capability).toBeDefined();
-				const claudeProvider = capability?.providers.find(provider => provider.id === "claude");
-				expect(claudeProvider).toBeDefined();
-
-				const result = await claudeProvider!.load({ cwd: tempProjectDir, home: tempHomeDir, repoRoot: null });
-				expect(result.items.some(skill => skill.name === "user-only-skill" && skill.level === "user")).toBe(true);
-			} finally {
-				disableUserSource("claude");
-				restoreEnvValue("CLAUDE_CONFIG_DIR", originalClaudeConfigDir);
-				await removeWithRetries(tempProjectDir);
-				await removeWithRetries(tempHomeDir);
-			}
-		});
-
 		// Regression for issue #2401: a user who disables the named third-party
 		// CLI toggles (codex/claude/native) MUST still see skills from the
 		// canonical OMP-native `~/.agent[s]/skills` (the `agents` provider).
@@ -214,9 +173,6 @@ describe("skills", () => {
 			const homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
 			try {
 				const { skills } = await loadSkills({
-					enableCodexUser: false,
-					enableClaudeUser: false,
-					enableClaudeProject: false,
 					enablePiUser: false,
 					enablePiProject: false,
 					// enableAgentsUser/enableAgentsProject left at their default-true value
@@ -249,9 +205,6 @@ describe("skills", () => {
 			process.env.USERPROFILE = tempHostHome;
 			try {
 				const { skills } = await loadSkills({
-					enableCodexUser: false,
-					enableClaudeUser: false,
-					enableClaudeProject: false,
 					enablePiUser: false,
 					enablePiProject: false,
 					cwd: tempCwd,
@@ -353,9 +306,6 @@ describe("skills", () => {
 			const homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
 			try {
 				const { skills } = await loadSkills({
-					enableCodexUser: false,
-					enableClaudeUser: false,
-					enableClaudeProject: false,
 					enablePiUser: false,
 					enablePiProject: false,
 					// enableAgentsUser / enableAgentsProject default true
@@ -625,6 +575,7 @@ describe("manual skill visibility", () => {
 		try {
 			const prompt = await buildSystemPrompt({
 				cwd: project,
+				customPrompt: "custom",
 				contextFiles: [],
 				rules: [],
 				toolNames: ["read"],
@@ -641,26 +592,26 @@ describe("manual skill visibility", () => {
 	it("matches the final name of a displaced provider skill", async () => {
 		const project = await fs.mkdtemp(path.join(os.tmpdir(), "skills-displaced-manual-"));
 		try {
-			const providerDir = path.join(project, ".claude", "skills", "calendar");
-			const claudeRoot = path.join(project, "x", "claude");
+			const providerDir = path.join(project, ".omp", "skills", "calendar");
+			const nativeRoot = path.join(project, "x", "native");
 			await fs.mkdir(providerDir, { recursive: true });
-			await fs.mkdir(path.join(claudeRoot, "calendar"), { recursive: true });
+			await fs.mkdir(path.join(nativeRoot, "calendar"), { recursive: true });
 			await fs.copyFile(path.join(first, "calendar", "SKILL.md"), path.join(providerDir, "SKILL.md"));
 			await fs.copyFile(
 				path.join(collisionFixturesDir, "nested", "second", "calendar", "SKILL.md"),
-				path.join(claudeRoot, "calendar", "SKILL.md"),
+				path.join(nativeRoot, "calendar", "SKILL.md"),
 			);
 			const { skills } = await loadSkills({
 				...DISABLE_ALL_BUILTIN_SKILLS,
-				enableClaudeProject: true,
+				enablePiProject: true,
 				cwd: project,
-				customDirectories: [second, claudeRoot],
-				manualSkills: ["claude/calendar"],
+				customDirectories: [second, nativeRoot],
+				manualSkills: ["native/calendar"],
 			});
 			const byName = new Map(skills.map(skill => [skill.name, skill]));
 			expect(byName.get("calendar")?.hide).not.toBe(true);
-			expect(byName.get("claude/calendar")?.hide).toBe(true);
-			expect(byName.get("claude/calendar~2")?.hide).not.toBe(true);
+			expect(byName.get("native/calendar")?.hide).toBe(true);
+			expect(byName.get("native/calendar~2")?.hide).not.toBe(true);
 		} finally {
 			await removeWithRetries(project);
 		}
@@ -733,27 +684,27 @@ describe("collision handling", () => {
 		expect(nested.content).toContain("Calendar (Second)");
 	});
 
-	/** Project with `.claude/skills/calendar` (priority 80) and `.agents/skills/calendar` (priority 70) copied from fixtures. */
-	async function projectWithProviderCopies(claudeFrom: string, agentsFrom: string | undefined) {
+	/** Project with `.omp/skills/calendar` (priority 90) and `.agents/skills/calendar` (priority 70) copied from fixtures. */
+	async function projectWithProviderCopies(ompFrom: string, agentsFrom: string | undefined) {
 		const project = await fs.mkdtemp(path.join(os.tmpdir(), "skills-provider-copies-"));
-		const claudeFile = path.join(project, ".claude", "skills", "calendar", "SKILL.md");
-		await fs.mkdir(path.dirname(claudeFile), { recursive: true });
-		await fs.copyFile(claudeFrom, claudeFile);
+		const ompFile = path.join(project, ".omp", "skills", "calendar", "SKILL.md");
+		await fs.mkdir(path.dirname(ompFile), { recursive: true });
+		await fs.copyFile(ompFrom, ompFile);
 		let agentsFile: string | undefined;
 		if (agentsFrom) {
 			agentsFile = path.join(project, ".agents", "skills", "calendar", "SKILL.md");
 			await fs.mkdir(path.dirname(agentsFile), { recursive: true });
 			await fs.copyFile(agentsFrom, agentsFile);
 		}
-		return { project, claudeFile, agentsFile };
+		return { project, ompFile, agentsFile };
 	}
-	const providerOptions = { ...DISABLE_ALL_BUILTIN_SKILLS, enableClaudeProject: true, enableAgentsProject: true };
+	const providerOptions = { ...DISABLE_ALL_BUILTIN_SKILLS, enablePiProject: true, enableAgentsProject: true };
 
 	it("lets a custom override that matches a namespaced provider alias take the bare name", async () => {
-		// .claude (A) holds the bare name, .agents (B) is namespaced, and the custom
+		// .omp (A) holds the bare name, .agents (B) is namespaced, and the custom
 		// override is byte-identical to B: it must still override A (#7190), and B's
 		// alias is redundant once the override carries the same content.
-		const { project, claudeFile } = await projectWithProviderCopies(
+		const { project, ompFile } = await projectWithProviderCopies(
 			path.join(first, "calendar", "SKILL.md"),
 			path.join(second, "calendar", "SKILL.md"),
 		);
@@ -763,15 +714,15 @@ describe("collision handling", () => {
 				cwd: project,
 				customDirectories: [second],
 			});
-			expect(skills.map(skill => skill.name).sort()).toEqual(["calendar", "claude/calendar"]);
+			expect(skills.map(skill => skill.name).sort()).toEqual(["calendar", "native/calendar"]);
 			expect(skills.find(skill => skill.name === "calendar")?.filePath).toBe(
 				path.join(second, "calendar", "SKILL.md"),
 			);
-			expect(skills.find(skill => skill.name === "claude/calendar")?.filePath).toBe(claudeFile);
+			expect(skills.find(skill => skill.name === "native/calendar")?.filePath).toBe(ompFile);
 			// Only the displacement is reported; the dropped alias's own warning is retracted.
 			const collision = warnings.filter(warning => warning.message.includes("name collision"));
 			expect(collision).toHaveLength(1);
-			expect(collision[0].message).toContain('available as "claude/calendar"');
+			expect(collision[0].message).toContain('available as "native/calendar"');
 		} finally {
 			await removeWithRetries(project);
 		}
@@ -981,32 +932,32 @@ describe("collision handling", () => {
 	it("lets a custom-directory skill override a provider skill and keeps a taken namespaced slot suffixed", async () => {
 		const project = await fs.mkdtemp(path.join(os.tmpdir(), "skills-displaced-"));
 		try {
-			// Project-level .claude/skills/calendar (provider "claude"; the dotted
+			// Project-level .omp/skills/calendar (provider "native"; the dotted
 			// home makes its namespace fall back to the provider id) versus a custom
-			// root literally named "claude" that derives the same namespace.
-			const providerDir = path.join(project, ".claude", "skills", "calendar");
-			const claudeRoot = path.join(project, "x", "claude");
+			// root literally named "native" that derives the same namespace.
+			const providerDir = path.join(project, ".omp", "skills", "calendar");
+			const nativeRoot = path.join(project, "x", "native");
 			await fs.mkdir(providerDir, { recursive: true });
-			await fs.mkdir(path.join(claudeRoot, "calendar"), { recursive: true });
+			await fs.mkdir(path.join(nativeRoot, "calendar"), { recursive: true });
 			await fs.copyFile(path.join(first, "calendar", "SKILL.md"), path.join(providerDir, "SKILL.md"));
 			await fs.copyFile(
 				path.join(collisionFixturesDir, "nested", "second", "calendar", "SKILL.md"),
-				path.join(claudeRoot, "calendar", "SKILL.md"),
+				path.join(nativeRoot, "calendar", "SKILL.md"),
 			);
 			const { skills } = await loadSkills({
 				...DISABLE_ALL_BUILTIN_SKILLS,
-				enableClaudeProject: true,
+				enablePiProject: true,
 				cwd: project,
-				customDirectories: [second, claudeRoot],
+				customDirectories: [second, nativeRoot],
 			});
 			const byName = new Map(skills.map(skill => [skill.name, skill]));
 			// `second` (custom) is admitted first and overrides the provider skill
-			// onto "claude/calendar" (#7190). `claudeRoot` (also custom, its own
-			// namespace happens to be "claude" too) then collides with that taken
+			// onto "native/calendar" (#7190). `nativeRoot` (also custom, its own
+			// namespace happens to be "native" too) then collides with that taken
 			// slot and falls back to the `~2` suffix.
 			expect(byName.get("calendar")?.filePath).toBe(path.join(second, "calendar", "SKILL.md"));
-			expect(byName.get("claude/calendar")?.filePath).toBe(path.join(providerDir, "SKILL.md"));
-			expect(byName.get("claude/calendar~2")?.filePath).toBe(path.join(claudeRoot, "calendar", "SKILL.md"));
+			expect(byName.get("native/calendar")?.filePath).toBe(path.join(providerDir, "SKILL.md"));
+			expect(byName.get("native/calendar~2")?.filePath).toBe(path.join(nativeRoot, "calendar", "SKILL.md"));
 			expect(skills).toHaveLength(3);
 		} finally {
 			await removeWithRetries(project);

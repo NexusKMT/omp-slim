@@ -9,11 +9,70 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isEnoent, parseFrontmatter } from "@oh-my-pi/pi-utils";
+import { isEnoent, isRecord, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import { SKILL_DEFAULT_IGNORES, SKILL_LIMITS, SKILL_NAME_MAX, SKILL_NAME_RE } from "@oh-my-pi/pi-wire/skillshare";
-import { validateAgentSkillFrontmatter } from "../discovery/agent-plugin-format";
 import { CREDENTIAL_PATTERNS } from "../secrets/patterns";
 import { type TarEntry, writeTar } from "./tar";
+
+const SKILL_FIELDS: Record<string, true> = {
+	name: true,
+	description: true,
+	license: true,
+	compatibility: true,
+	metadata: true,
+	"allowed-tools": true,
+	hide: true,
+	disableModelInvocation: true,
+};
+
+function validateSkillName(name: unknown, dirName: string): string | null {
+	if (typeof name !== "string" || name.length === 0) return `missing required "name"`;
+	if (name !== dirName) return `frontmatter name "${name}" must match directory name "${dirName}"`;
+	if (name.length > SKILL_NAME_MAX) return `"name" exceeds ${SKILL_NAME_MAX} characters`;
+	if (!SKILL_NAME_RE.test(name)) {
+		return `"name" must contain only lowercase letters, digits, and hyphens (cannot start or end with a hyphen)`;
+	}
+	return null;
+}
+
+export function validateAgentSkillFrontmatter(frontmatter: Record<string, unknown>, dirName: string): string | null {
+	for (const key in frontmatter) {
+		if (!SKILL_FIELDS[key]) return `unexpected frontmatter field "${key}"`;
+	}
+
+	const nameViolation = validateSkillName(frontmatter.name, dirName);
+	if (nameViolation !== null) return nameViolation;
+
+	const description = frontmatter.description;
+	if (typeof description !== "string" || description.trim().length === 0) {
+		return `missing required "description"`;
+	}
+	if (description.length > 1024) return `"description" exceeds 1024 characters`;
+
+	const license = frontmatter.license;
+	if (license !== undefined && typeof license !== "string") return `"license" must be a string`;
+
+	const compatibility = frontmatter.compatibility;
+	if (compatibility !== undefined) {
+		if (typeof compatibility !== "string") return `"compatibility" must be a string`;
+		if (compatibility.length > 500) return `"compatibility" exceeds 500 characters`;
+	}
+
+	const metadata = frontmatter.metadata;
+	if (metadata !== undefined) {
+		if (!isRecord(metadata)) return `"metadata" must be a map of string keys to string values`;
+		for (const key in metadata) {
+			if (typeof metadata[key] !== "string") return `"metadata.${key}" must be a string`;
+		}
+	}
+
+	const allowedTools = frontmatter["allowed-tools"];
+	if (allowedTools !== undefined && typeof allowedTools !== "string") {
+		return `"allowed-tools" must be a string`;
+	}
+
+	return null;
+}
 
 export interface PackedFile {
 	path: string;

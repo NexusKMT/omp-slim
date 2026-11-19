@@ -28,7 +28,6 @@ import { type Skill, skillCapability } from "../capability/skill";
 import { type SlashCommand, slashCommandCapability } from "../capability/slash-command";
 import { type CustomTool, toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
-import { legacyProviderAllowed } from "./agent-plugin-format";
 import {
 	discoverRuleFromMarkdown,
 	createSourceMeta,
@@ -47,15 +46,10 @@ const DESCRIPTION =
 const PRIORITY = 90;
 
 /**
- * Extension roots this legacy provider may process for a given surface. Roots
- * whose root `plugin.json` targets the Agent Plugins standard keep their
- * portable components (skills, MCP) exclusive to the `agent-plugins` provider;
- * fatally invalid Agent Plugins packages are skipped entirely.
+ * Extension roots this provider processes for a given surface.
  */
-async function allowedRoots(ctx: LoadContext, surface: "skills" | "mcp" | "other"): Promise<OmpExtensionRoot[]> {
-	const roots = await listOmpExtensionRoots(ctx);
-	const flags = await Promise.all(roots.map(root => legacyProviderAllowed(root.path, surface)));
-	return roots.filter((_, i) => flags[i]);
+async function allowedRoots(ctx: LoadContext, _surface: "skills" | "mcp" | "other"): Promise<OmpExtensionRoot[]> {
+	return listOmpExtensionRoots(ctx);
 }
 
 // =============================================================================

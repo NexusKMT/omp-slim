@@ -48,16 +48,7 @@ const cfgDisabledProviderSet = cfgDisabledProviders.map(ids => new Set(ids));
 const cfgEnabledProviderSet = cfgEnabledProviders.map(ids => new Set(ids));
 
 /** Foreign tools whose user-level (~/...) configs are opt-in */
-const FOREIGN_USER_PROVIDERS: Record<string, true> = {
-	cursor: true,
-	codex: true,
-	claude: true,
-	"claude-plugins": true,
-	gemini: true,
-	opencode: true,
-	windsurf: true,
-	github: true,
-};
+const FOREIGN_USER_PROVIDERS: Record<string, true> = {};
 
 /** Outstanding {@link initializeWithSettings} holds, oldest first; the newest one is bound. */
 const settingsHolds: { settings: Settings }[] = [];
@@ -416,16 +407,9 @@ export function isForeignUserProvider(providerId: string): boolean {
  * via `enabledProviders`. Project-level (cwd) config is unaffected; see
  * {@link isProviderEnabled} for the whole-provider switch.
  */
-export function isUserSourceEnabled(source: string, ctx?: LoadContext): boolean {
+export function isUserSourceEnabled(source: string, _ctx?: LoadContext): boolean {
 	const id = source.replace(/^\./, "");
-	if (disabledProviders().has(id)) return false;
-	if (FOREIGN_USER_PROVIDERS[id] !== true) return true;
-	if (ctx?.explicitProviders?.has(id) || ctx?.includeOptOutUserSources) return true;
-	const enabled = enabledProviders();
-	if (enabled.has(id) || enabled.has("*") || enabled.has("all")) return true;
-	if (id === "claude-plugins" && enabled.has("claude")) return true;
-	if (id === "claude" && process.env.CLAUDE_CONFIG_DIR?.trim()) return true;
-	return false;
+	return !disabledProviders().has(id);
 }
 
 /** Opt a foreign provider's `~/` config in. */

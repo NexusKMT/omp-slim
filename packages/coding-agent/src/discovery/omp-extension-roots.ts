@@ -24,7 +24,6 @@ import { readDirEntries, readFile } from "../capability/fs";
 import type { ExtensionRootMode, LoadContext } from "../capability/types";
 import { getEnabledPlugins } from "../extensibility/plugins/loader";
 import { expandTilde } from "../tools/path-utils";
-import { listClaudePluginRoots } from "./helpers";
 
 /** A resolved extension package directory wired into the discovery surfaces. */
 export interface OmpExtensionRoot {
@@ -361,23 +360,8 @@ async function realpathOrResolved(p: string): Promise<string> {
 
 async function listInstalledPluginRoots(ctx: LoadContext): Promise<InjectedRoot[]> {
 	try {
-		const [plugins, marketplaceRoots] = await Promise.all([
-			getEnabledPlugins(ctx.cwd, { home: ctx.home }),
-			listClaudePluginRoots(ctx.home, ctx.cwd),
-		]);
-		const marketplaceRealpaths = new Set(
-			await Promise.all(marketplaceRoots.roots.map(root => realpathOrResolved(root.path))),
-		);
-		const installedRoots = await Promise.all(
-			plugins.map(async plugin => ({
-				path: plugin.path,
-				scope: plugin.scope,
-				realpath: await realpathOrResolved(plugin.path),
-			})),
-		);
-		return installedRoots
-			.filter(root => !marketplaceRealpaths.has(root.realpath))
-			.map(({ path: p, scope }) => ({ path: p, level: scope }));
+		const plugins = await getEnabledPlugins(ctx.cwd, { home: ctx.home });
+		return plugins.map(({ path: p, scope }) => ({ path: p, level: scope }));
 	} catch (err) {
 		logger.debug("listInstalledPluginRoots: enumeration failed", { error: String(err) });
 		return [];

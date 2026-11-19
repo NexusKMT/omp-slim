@@ -56,8 +56,6 @@ export const launchHelp = {
 			description:
 				"Resume a session as --resume does, then go on with what its last process left unfinished (the interrupted turn and the subagents it was running)",
 		}),
-		"from-claude": Flags.boolean({ description: "Import a Claude Code session into OMP" }),
-		"from-codex": Flags.boolean({ description: "Import a Codex session into OMP" }),
 		"session-dir": Flags.string({ description: "Directory for session storage and lookup" }),
 		"no-session": Flags.boolean({ description: "Don't save session (ephemeral)" }),
 		models: Flags.string({ description: `Comma-separated model patterns for ${formatKeyHint("ctrl+p")} cycling` }),

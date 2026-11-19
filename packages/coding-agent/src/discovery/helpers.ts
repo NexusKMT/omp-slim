@@ -29,7 +29,6 @@ import {
 } from "../capability/rule";
 import type { Skill, SkillFrontmatter } from "../capability/skill";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
-import { resolveClaudePaths } from "../config/claude-paths";
 import type { MCPRequestIdFormat } from "../mcp/types";
 import { type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { normalizeToolNames } from "../tools/builtin-names";
@@ -109,7 +108,6 @@ export function resolveUserPath(ctx: LoadContext, source: SourceId, subpath: str
 	// Native user config is profile-scoped via getAgentDir() (the active profile's
 	// agent dir), matching builtin.ts and getMCPConfigPath("user").
 	if (source === "native") return path.join(getAgentDir(), subpath);
-	if (source === "claude") return path.join(resolveClaudePaths(ctx.home).configDir, subpath);
 	const paths = SOURCE_PATHS[source];
 	if (!paths.userAgent) return null;
 	return path.join(ctx.home, paths.userAgent, subpath);
@@ -1211,7 +1209,7 @@ export function registerPluginCacheInvalidator(invalidator: () => void): void {
 
 /** The registry files {@link listClaudePluginRoots} reads for `home` and `cwd`. */
 async function resolvePluginRegistryFiles(home: string, cwd: string | undefined) {
-	const claudeConfigDir = resolveClaudePaths(home).configDir;
+	const claudeConfigDir = path.join(home, ".claude");
 	const ompRegistryPath = path.join(getPluginsDir(home), "installed_plugins.json");
 	const projectPath = cwd ? await resolveActiveProjectRegistryPath(cwd) : null;
 	const resolvedProjectPath =
@@ -1295,10 +1293,10 @@ export async function isSupersededPluginPath(filePath: string, home: string, cwd
  * Results are cached per Claude and OMP config directories, project registry, and canonical active project.
  */
 export function listClaudePluginRoots(
-	home: string,
-	cwd?: string,
+	_home?: string,
+	_cwd?: string,
 ): Promise<{ roots: ClaudePluginRoot[]; warnings: string[] }> {
-	return readPluginRoots(home, cwd, false);
+	return Promise.resolve({ roots: [], warnings: [] });
 }
 
 /** {@link listClaudePluginRoots}; with `revalidate`, a cached result whose registry files changed is read again. */
@@ -1554,7 +1552,6 @@ export function clearClaudePluginRootsCache(): void {
  * installing/uninstalling/enabling/disabling plugins.
  */
 export function clearPluginRootsAndCaches(extraPaths?: readonly string[]): void {
-	invalidateFsCache(path.join(resolveClaudePaths().configDir, "plugins", "installed_plugins.json"));
 	invalidateFsCache(path.join(getPluginsDir(), "installed_plugins.json"));
 	for (const p of extraPaths ?? []) invalidateFsCache(p);
 	clearClaudePluginRootsCache();
