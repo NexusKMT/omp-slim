@@ -75,6 +75,14 @@ def build(label):
     return result
 
 
+def verify_unchanged_build(result):
+    if result["cargo_units"] != 0:
+        raise RuntimeError(
+            f"Unchanged build compiled {result['cargo_units']} units; "
+            "the retained build state is not stable. Inspect the timing report before measuring edits."
+        )
+
+
 def probe(label, expected):
     # A separate Bun process reloads the newly installed addon on every sample.
     return command(label, [
@@ -137,7 +145,10 @@ def warm():
     build("warm-build")
     probe("warm-probe", 16)
     smoke("warm-smoke")
-    build("unchanged-build")
+    # napi-rs drops NAPI_FORCE_BUILD after creating its typedef cache. That
+    # environment change can compile units even without a source edit.
+    build("settle-build")
+    verify_unchanged_build(build("unchanged-build"))
     probe("unchanged-probe", 16)
 
 
@@ -221,7 +232,7 @@ def summarize():
     if samples:
         for field in ["build_install_seconds", "cargo_seconds", "edit_to_verified_seconds"]:
             summary["median_" + field] = statistics.median(row[field] for row in samples)
-    for label in ["warm-build", "unchanged-build", "restored-build", "source-restoration", "validated-addon"]:
+    for label in ["warm-build", "settle-build", "unchanged-build", "restored-build", "source-restoration", "validated-addon"]:
         file = RECORD / f"{label}.json"
         if file.exists():
             summary[label] = {k: v for k, v in json.loads(file.read_text()).items() if k != "units"}

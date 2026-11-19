@@ -82,23 +82,32 @@ For Rust edits, start with the affected crate instead of selecting the whole
 workspace. The test wrapper preserves doctests and accepts a nextest filter:
 
 ```sh
-bun run check:rs --package pi-pty
-bun run test:rs --package pi-pty
-bun run test:rs --package pi-pty -E 'test(cancel)'
+CARGO_INCREMENTAL=1 bun run check:rs --package pi-pty
+CARGO_INCREMENTAL=1 bun run test:rs --package pi-pty
+CARGO_INCREMENTAL=1 bun run test:rs --package pi-pty -E 'test(cancel)'
 ```
 
 Keep the same Cargo profile, flags and target directory between edits. Small
-independent crates can be checked locally. Full native compilation still uses
+independent crates can be checked locally. The explicit incremental setting is
+needed even locally when OMP's shell injects `CI=true`. Plain Cargo defaults to
+`dev`, but `bun run build:native` defaults to the O3/ThinLTO `local` profile;
+select `OMP_NATIVE_CARGO_PROFILE=dev CARGO_INCREMENTAL=1` explicitly for a remote
+development build. Full native compilation still uses
 the authorized remote build path. The `ci` timings above are not measurements
 of a persistent incremental Rust development environment. Full workspace
 validation and standalone packaging are integration gates, separate from the
 first feedback after an edit.
 
-The workspace native addon was updated from verified comparison run
-`43947005367` (O3 without LTO). Source worker smoke and targeted behavior checks
-are recorded in `dist/validation/dev-loop-2026-11-17/`; its installation record
-includes the addon digest and source revision. Earlier local addon files were
-backed up there before replacement. The [development feedback measurements](docs/slim-build-performance-2026-11-17.md#local-development-feedback)
+The workspace addon was refreshed during the 2026-11-20 audit from verified
+build `44549416311`, native source `ae480c973c183d9ca66fc19a25ed6a7d8546418d`
+(O3 without LTO). Its SHA-256 is
+`2fbb3b6dc96cfb6ec0462f93fc91569973e1534180e14f73955cc06d95553386`.
+The source CLI had been loading an older same-version addon with retired exports;
+the audit backed it up and verified the replacement with export checks, worker
+smoke and PTY/shell tests. The record is in
+`dist/validation/build-audit-2026-11-20/workspace-native-installation.json`.
+The previous file is backed up in `workspace-native-backup/` under that evidence
+directory. The earlier [development feedback measurements](docs/slim-build-performance-2026-11-17.md#local-development-feedback)
 record source smoke at 6.98s, four PTY binding tests at 1.86s, and the initial
 focused Rust test command at 11.03s. A temporary source-edit probe observed the
 CLI change in 0.28s and caught a Rust cancellation regression in 3.28s; restoring
@@ -127,8 +136,18 @@ even when Cargo.toml enables it. The first completed comparison and matrix
 therefore measured cached-dependency rebuilds with incremental disabled:
 native edit medians were 578.7s (`local`) and 60.5s (`dev`); the instrumented
 matrix measured about 30–43s for native edits, 200–234s for shell edits and
-288–329s for builtins edits. The corrected incremental configuration has not
-yet been timed on the complete project. See the
+288–329s for builtins edits. A later successful run on 2026-11-18,
+`44300999380`, did enable incremental: its one native edit took 26.125s to build
+and install, or 29.530s through behavior verification and worker smoke. It used
+the older `dev` LTO setting (`false`, not the current `"off"`), so it does not
+validate the current profile or establish a repeated-sample speedup. This run
+was recovered during the [2026-11-20 audit](docs/slim-build-audit-2026-11-20.md).
+That audit also completed `44562078213` with the current `dev` profile:
+three native edits took 26.907 / 16.420 / 23.421s through behavior verification
+and worker smoke (median 23.421s), each rebuilding one native unit. The initial
+uncached warm build took 1880.567s. These are separate costs; the samples do not
+measure shell edits, cross-job restoration or runtime performance parity.
+See the
 [compiler investigation](docs/slim-compiler-investigation-2026-11-17.md) for
 raw evidence, limits, failed final session tests and their test fix.
 

@@ -180,9 +180,8 @@ if (extraFeatures) {
 	napiArgs.push("--features", extraFeatures);
 }
 
-if (Bun.env.OMP_NATIVE_TIMINGS === "1") {
-	napiArgs.push("--", "--timings");
-}
+napiArgs.push("--", "--locked");
+if (Bun.env.OMP_NATIVE_TIMINGS === "1") napiArgs.push("--timings");
 
 // napi-rs / cargo route much failure detail to stdout (e.g. `cargo metadata`
 // errors), so a stderr-only error collapses real failures to a bare message.
@@ -199,6 +198,18 @@ function tailSection(label: string, text: string): string {
 }
 
 try {
+	// napi-rs resolves metadata before forwarding Cargo build arguments. Check
+	// the lock first so that resolution cannot silently update Cargo.lock.
+	const metadataResult =
+		await $`cargo metadata --manifest-path ${path.join(rustDir, "Cargo.toml")} --format-version 1 --locked`
+			.quiet()
+			.nothrow();
+	if (metadataResult.exitCode !== 0) {
+		throw new Error(
+			`Locked Cargo metadata check failed (exit ${metadataResult.exitCode}). Update Cargo.lock explicitly before building.${tailSection("stderr", metadataResult.stderr.toString("utf-8"))}`,
+		);
+	}
+
 	// The package declares Bun as its build runtime. Invoke napi's JavaScript
 	// entry through this Bun process instead of its `#!/usr/bin/env node` shim so
 	// an old host Node installation cannot make an otherwise supported Bun build fail.

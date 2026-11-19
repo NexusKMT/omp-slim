@@ -1,0 +1,957 @@
+{
+	"baseline_commit": "131cb27e2ff7bfe04b5dcd6d22cc58e3c51f9181",
+	"rustc": "rustc 1.102.0-nightly (f5cedb83a 2026-11-07)",
+	"cargo": "cargo 1.102.0-nightly (c07ac2c4d 2026-11-06)",
+	"bun": "1.4.4",
+	"effective_profiles": [
+		{
+			"case": "dev-local",
+			"environment": {
+				"CI": null,
+				"CARGO_INCREMENTAL": null,
+				"CARGO_BUILD_INCREMENTAL": null,
+				"CARGO_BUILD_TARGET": "x86_64-apple-darwin",
+				"RUSTFLAGS": "-C target-cpu=x86-64-v3"
+			},
+			"total_units": 763,
+			"selected": [
+				{
+					"name": "pi_builtins",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				},
+				{
+					"name": "pi_natives",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				},
+				{
+					"name": "pi_pty",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				},
+				{
+					"name": "pi_shell",
+					"opt_level": "1",
+					"lto": "off",
+					"incremental": true
+				}
+			]
+		},
+		{
+			"case": "dev-ci-default",
+			"environment": {
+				"CI": "true",
+				"CARGO_INCREMENTAL": null,
+				"CARGO_BUILD_INCREMENTAL": null,
+				"CARGO_BUILD_TARGET": "x86_64-apple-darwin",
+				"RUSTFLAGS": "-C target-cpu=x86-64-v3"
+			},
+			"total_units": 763,
+			"selected": [
+				{
+					"name": "pi_builtins",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": false
+				},
+				{
+					"name": "pi_natives",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": false
+				},
+				{
+					"name": "pi_pty",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": false
+				},
+				{
+					"name": "pi_shell",
+					"opt_level": "1",
+					"lto": "off",
+					"incremental": false
+				}
+			]
+		},
+		{
+			"case": "dev-ci-enabled",
+			"environment": {
+				"CI": "true",
+				"CARGO_INCREMENTAL": "1",
+				"CARGO_BUILD_INCREMENTAL": null,
+				"CARGO_BUILD_TARGET": "x86_64-apple-darwin",
+				"RUSTFLAGS": "-C target-cpu=x86-64-v3"
+			},
+			"total_units": 763,
+			"selected": [
+				{
+					"name": "pi_builtins",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				},
+				{
+					"name": "pi_natives",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				},
+				{
+					"name": "pi_pty",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				},
+				{
+					"name": "pi_shell",
+					"opt_level": "1",
+					"lto": "off",
+					"incremental": true
+				}
+			]
+		},
+		{
+			"case": "local-ci-default",
+			"environment": {
+				"CI": "true",
+				"CARGO_INCREMENTAL": null,
+				"CARGO_BUILD_INCREMENTAL": null,
+				"CARGO_BUILD_TARGET": "x86_64-apple-darwin",
+				"RUSTFLAGS": "-C target-cpu=x86-64-v3"
+			},
+			"total_units": 763,
+			"selected": [
+				{
+					"name": "pi_builtins",
+					"opt_level": "3",
+					"lto": "thin",
+					"incremental": false
+				},
+				{
+					"name": "pi_natives",
+					"opt_level": "3",
+					"lto": "thin",
+					"incremental": false
+				},
+				{
+					"name": "pi_pty",
+					"opt_level": "3",
+					"lto": "thin",
+					"incremental": false
+				},
+				{
+					"name": "pi_shell",
+					"opt_level": "3",
+					"lto": "thin",
+					"incremental": false
+				}
+			]
+		},
+		{
+			"case": "ci",
+			"environment": {
+				"CI": "true",
+				"CARGO_INCREMENTAL": null,
+				"CARGO_BUILD_INCREMENTAL": null,
+				"CARGO_BUILD_TARGET": "x86_64-apple-darwin",
+				"RUSTFLAGS": "-C target-cpu=x86-64-v3"
+			},
+			"total_units": 763,
+			"selected": [
+				{
+					"name": "pi_builtins",
+					"opt_level": "3",
+					"lto": "off",
+					"incremental": false
+				},
+				{
+					"name": "pi_natives",
+					"opt_level": "3",
+					"lto": "off",
+					"incremental": false
+				},
+				{
+					"name": "pi_pty",
+					"opt_level": "3",
+					"lto": "off",
+					"incremental": false
+				},
+				{
+					"name": "pi_shell",
+					"opt_level": "3",
+					"lto": "off",
+					"incremental": false
+				}
+			]
+		},
+		{
+			"case": "pty-tests",
+			"environment": {
+				"CI": null,
+				"CARGO_INCREMENTAL": null,
+				"CARGO_BUILD_INCREMENTAL": null,
+				"CARGO_BUILD_TARGET": "x86_64-apple-darwin",
+				"RUSTFLAGS": "-C target-cpu=x86-64-v3"
+			},
+			"total_units": 10,
+			"selected": [
+				{
+					"name": "pi_pty",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				},
+				{
+					"name": "pi_pty",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				},
+				{
+					"name": "pi_pty",
+					"opt_level": "0",
+					"lto": "off",
+					"incremental": true
+				}
+			]
+		}
+	],
+	"omp_shell": {
+		"CI": "true",
+		"command": [
+			"cargo",
+			"build",
+			"--offline",
+			"--locked",
+			"-p",
+			"pi-natives",
+			"--profile",
+			"dev",
+			"--target",
+			"x86_64-apple-darwin",
+			"--unit-graph",
+			"-Z",
+			"unstable-options"
+		],
+		"units": [
+			{
+				"name": "pi_builtins",
+				"incremental": false,
+				"lto": "off"
+			},
+			{
+				"name": "pi_natives",
+				"incremental": false,
+				"lto": "off"
+			},
+			{
+				"name": "pi_shell",
+				"incremental": false,
+				"lto": "off"
+			}
+		]
+	},
+	"unchanged_gate_probe": [
+		{
+			"label": "initial",
+			"units": 3,
+			"seconds": 6.048,
+			"guard_rejected": true,
+			"program_output": "41"
+		},
+		{
+			"label": "environment-settle",
+			"units": 2,
+			"seconds": 1.059,
+			"guard_rejected": true,
+			"program_output": "41"
+		},
+		{
+			"label": "unchanged",
+			"units": 0,
+			"seconds": 0.214,
+			"guard_rejected": false,
+			"program_output": "41"
+		},
+		{
+			"label": "real-edit",
+			"units": 1,
+			"seconds": 0.926,
+			"guard_rejected": true,
+			"program_output": "42"
+		},
+		{
+			"label": "unchanged-after-edit",
+			"units": 0,
+			"seconds": 0.217,
+			"guard_rejected": false,
+			"program_output": "42"
+		}
+	],
+	"metadata_mechanism_probe": [
+		{
+			"embed_metadata": true,
+			"rlib_bytes": 5648,
+			"rlib_members": [
+				"__.SYMDEF",
+				"lib.rmeta",
+				"lib.rmeta-link",
+				"metadata_audit-b1b826c2899ea5ca.metadata_audit.7ba6d8e31d069d3f-cgu.0.rcgu.o"
+			],
+			"embedded_metadata_bytes": 2608,
+			"separate_rmeta_bytes": 2282,
+			"consumer_output": "42"
+		},
+		{
+			"embed_metadata": false,
+			"rlib_bytes": 3504,
+			"rlib_members": [
+				"__.SYMDEF",
+				"lib.rmeta",
+				"lib.rmeta-link",
+				"metadata_audit-b1b826c2899ea5ca.metadata_audit.7ba6d8e31d069d3f-cgu.0.rcgu.o"
+			],
+			"embedded_metadata_bytes": 464,
+			"separate_rmeta_bytes": 2282,
+			"consumer_output": "42"
+		}
+	],
+	"napi_lock_reproduction": {
+		"preflight_exit": 101,
+		"preflight_lock_unchanged": true,
+		"napi_exit": 1,
+		"napi_metadata_changed_lock_before_build": true,
+		"compile_attempt_prevented_by": "nonexistent Cargo profile",
+		"before_sha256": "017b97257285024a0bf66e2fe8832a5b16774b5518d37400bbc38c70b9e79552",
+		"after_sha256": "f8e561b4925445929399f55f4a02fe553962e68b11295015356b9f7343ed127f"
+	},
+	"fixed_native_entry_probe": [
+		{
+			"case": "stale-lock",
+			"exit": 1,
+			"lock_unchanged": true,
+			"cargo_commands": [
+				[
+					"metadata",
+					"--manifest-path",
+					"/private/var/folders/j9/8jfjfrsn38s5gq4_s77k04l40000gn/T/omp-native-entry-audit-rrlknh85/crates/pi-natives/Cargo.toml",
+					"--format-version",
+					"1",
+					"--locked"
+				]
+			],
+			"compile_prevented": true
+		},
+		{
+			"case": "valid-lock",
+			"exit": 1,
+			"lock_unchanged": true,
+			"cargo_commands": [
+				[
+					"metadata",
+					"--manifest-path",
+					"/private/var/folders/j9/8jfjfrsn38s5gq4_s77k04l40000gn/T/omp-native-entry-audit-rrlknh85/crates/pi-natives/Cargo.toml",
+					"--format-version",
+					"1",
+					"--locked"
+				],
+				[
+					"metadata",
+					"--manifest-path",
+					"/private/var/folders/j9/8jfjfrsn38s5gq4_s77k04l40000gn/T/omp-native-entry-audit-rrlknh85/crates/pi-natives/Cargo.toml",
+					"--format-version",
+					"1"
+				],
+				[
+					"build",
+					"--target",
+					"x86_64-apple-darwin",
+					"--profile",
+					"audit-nonexistent",
+					"--manifest-path",
+					"/private/var/folders/j9/8jfjfrsn38s5gq4_s77k04l40000gn/T/omp-native-entry-audit-rrlknh85/crates/pi-natives/Cargo.toml",
+					"--locked",
+					"--timings"
+				]
+			],
+			"compile_prevented": true
+		}
+	],
+	"historical_optimization": {
+		"run": 43947005367,
+		"source": "91e59623f58a23792c97c73f08d34d0d1acb08cd",
+		"conclusion": "success",
+		"samples_per_mode": 1,
+		"results": {
+			"o3-no-lto": {
+				"cargo_seconds": 166.0,
+				"build_install_seconds": 171
+			},
+			"o3-thin": {
+				"cargo_seconds": 603.0,
+				"build_install_seconds": 606
+			},
+			"o2-no-lto": {
+				"cargo_seconds": 120.0,
+				"build_install_seconds": 124
+			}
+		}
+	},
+	"current_development": {
+		"run": 44562078213,
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-11-19T16:05:17Z",
+		"completed_at": "2026-11-19T16:42:52Z",
+		"summary": {
+			"profile": "dev",
+			"source": "131cb27e2ff7bfe04b5dcd6d22cc58e3c51f9181",
+			"samples": [
+				{
+					"index": 1,
+					"expected_tab_width": 17,
+					"build_install_seconds": 23.053,
+					"cargo_seconds": 18.4,
+					"cargo_units": 1,
+					"probe_seconds": 0.137,
+					"source_smoke_seconds": 3.549,
+					"edit_to_verified_seconds": 26.907
+				},
+				{
+					"index": 2,
+					"expected_tab_width": 18,
+					"build_install_seconds": 13.028,
+					"cargo_seconds": 10.32,
+					"cargo_units": 1,
+					"probe_seconds": 0.084,
+					"source_smoke_seconds": 3.218,
+					"edit_to_verified_seconds": 16.42
+				},
+				{
+					"index": 3,
+					"expected_tab_width": 19,
+					"build_install_seconds": 19.665,
+					"cargo_seconds": 16.34,
+					"cargo_units": 1,
+					"probe_seconds": 0.131,
+					"source_smoke_seconds": 3.456,
+					"edit_to_verified_seconds": 23.421
+				}
+			],
+			"median_build_install_seconds": 19.665,
+			"median_cargo_seconds": 16.34,
+			"median_edit_to_verified_seconds": 23.421,
+			"warm-build": {
+				"label": "warm-build",
+				"command": ["bun", "run", "build:native"],
+				"seconds": 1880.567,
+				"exit_code": 0,
+				"cargo_units": 763,
+				"cargo_seconds": 1866.02
+			},
+			"unchanged-build": {
+				"label": "unchanged-build",
+				"command": ["bun", "run", "build:native"],
+				"seconds": 18.47,
+				"exit_code": 0,
+				"cargo_units": 2,
+				"cargo_seconds": 15.39
+			},
+			"restored-build": {
+				"label": "restored-build",
+				"command": ["bun", "run", "build:native"],
+				"seconds": 20.643,
+				"exit_code": 0,
+				"cargo_units": 1,
+				"cargo_seconds": 16.21
+			},
+			"source-restoration": {
+				"restored": true,
+				"sha256": "d37ca0a79ba139b63224ebef9b7e00c10742e6d27eafdcf731a8816cbc4d42f4"
+			},
+			"validated-addon": {
+				"file": "pi_natives.darwin-x64-modern.node",
+				"size": 195280920,
+				"sha256": "21cf4957e0f82a6a80d6b609b2309baceafdc6701291e20afa7994e0d4e5dd17",
+				"source_commit": "131cb27e2ff7bfe04b5dcd6d22cc58e3c51f9181",
+				"profile": "dev",
+				"source_restored": true
+			}
+		},
+		"effective_profiles": {
+			"environment": {
+				"CI": "true",
+				"CARGO_INCREMENTAL": "1",
+				"CARGO_BUILD_INCREMENTAL": null
+			},
+			"units": {
+				"pi_builtins": {
+					"name": "dev",
+					"opt_level": "0",
+					"lto": "off",
+					"codegen_backend": null,
+					"codegen_units": 256,
+					"debuginfo": "line-tables-only",
+					"split_debuginfo": "unpacked",
+					"debug_assertions": true,
+					"overflow_checks": true,
+					"rpath": false,
+					"incremental": true,
+					"panic": "unwind",
+					"strip": {
+						"deferred": "None"
+					},
+					"trim_paths": "none"
+				},
+				"pi_natives": {
+					"name": "dev",
+					"opt_level": "0",
+					"lto": "off",
+					"codegen_backend": null,
+					"codegen_units": 256,
+					"debuginfo": "line-tables-only",
+					"split_debuginfo": "unpacked",
+					"debug_assertions": true,
+					"overflow_checks": true,
+					"rpath": false,
+					"incremental": true,
+					"panic": "unwind",
+					"strip": {
+						"deferred": "None"
+					},
+					"trim_paths": "none"
+				},
+				"pi_shell": {
+					"name": "dev",
+					"opt_level": "1",
+					"lto": "off",
+					"codegen_backend": null,
+					"codegen_units": 256,
+					"debuginfo": "line-tables-only",
+					"split_debuginfo": "unpacked",
+					"debug_assertions": true,
+					"overflow_checks": true,
+					"rpath": false,
+					"incremental": true,
+					"panic": "unwind",
+					"strip": {
+						"deferred": "None"
+					},
+					"trim_paths": "none"
+				}
+			}
+		},
+		"provenance": {
+			"source_commit": "131cb27e2ff7bfe04b5dcd6d22cc58e3c51f9181",
+			"profile": "dev",
+			"target": "x86_64-apple-darwin",
+			"rustflags": "-C target-cpu=x86-64-v3",
+			"cache_key": "slim-macos15-intel-xcode16.4-development-v2-inc1-dev-0a77f2b661bfbd6605a604dd064a92331d3b5b9e3c6e99f3cf9f44ee3e13cd5c-131cb27e2ff7bfe04b5dcd6d22cc58e3c51f9181",
+			"restored_cache_key": "",
+			"source_sha256": "d37ca0a79ba139b63224ebef9b7e00c10742e6d27eafdcf731a8816cbc4d42f4",
+			"sample_kind": "change the existing tab-width clamp function; verify the loaded addon returns the new limit",
+			"scope": "native function-body edits in one retained checkout; excludes cross-job cache restore latency",
+			"samples": 3
+		}
+	},
+	"recovered_incremental": {
+		"run": 44300999380,
+		"summary": {
+			"profile": "dev",
+			"source": "f5f4e6dcdb6baad5e0c4444eccf5774cda014ccb",
+			"samples": [
+				{
+					"index": 1,
+					"expected_tab_width": 17,
+					"build_install_seconds": 26.125,
+					"cargo_seconds": 23.04,
+					"cargo_units": 1,
+					"probe_seconds": 0.083,
+					"source_smoke_seconds": 3.305,
+					"edit_to_verified_seconds": 29.53
+				}
+			],
+			"median_build_install_seconds": 26.125,
+			"median_cargo_seconds": 23.04,
+			"median_edit_to_verified_seconds": 29.53,
+			"warm-build": {
+				"label": "warm-build",
+				"command": ["bun", "run", "build:native"],
+				"seconds": 824.465,
+				"exit_code": 0,
+				"cargo_units": 32,
+				"cargo_seconds": 817.22
+			},
+			"unchanged-build": {
+				"label": "unchanged-build",
+				"command": ["bun", "run", "build:native"],
+				"seconds": 5.638,
+				"exit_code": 0,
+				"cargo_units": 0,
+				"cargo_seconds": 0
+			},
+			"restored-build": {
+				"label": "restored-build",
+				"command": ["bun", "run", "build:native"],
+				"seconds": 17.598,
+				"exit_code": 0,
+				"cargo_units": 1,
+				"cargo_seconds": 14.49
+			},
+			"source-restoration": {
+				"restored": true,
+				"sha256": "d37ca0a79ba139b63224ebef9b7e00c10742e6d27eafdcf731a8816cbc4d42f4"
+			},
+			"validated-addon": {
+				"file": "pi_natives.darwin-x64-modern.node",
+				"size": 192323008,
+				"sha256": "c1b75257fe3f2531d70ca70ce6fd5525a3e2c2c7a86643a6a7d2eba5d67c8563",
+				"source_commit": "f5f4e6dcdb6baad5e0c4444eccf5774cda014ccb",
+				"profile": "dev",
+				"source_restored": true
+			}
+		},
+		"effective_profiles": {
+			"environment": {
+				"CI": "true",
+				"CARGO_INCREMENTAL": "1",
+				"CARGO_BUILD_INCREMENTAL": null
+			},
+			"units": {
+				"pi_builtins": {
+					"name": "dev",
+					"opt_level": "0",
+					"lto": "false",
+					"codegen_backend": null,
+					"codegen_units": 256,
+					"debuginfo": "line-tables-only",
+					"split_debuginfo": "unpacked",
+					"debug_assertions": true,
+					"overflow_checks": true,
+					"rpath": false,
+					"incremental": true,
+					"panic": "unwind",
+					"strip": {
+						"deferred": "None"
+					},
+					"trim_paths": "none"
+				},
+				"pi_natives": {
+					"name": "dev",
+					"opt_level": "0",
+					"lto": "false",
+					"codegen_backend": null,
+					"codegen_units": 256,
+					"debuginfo": "line-tables-only",
+					"split_debuginfo": "unpacked",
+					"debug_assertions": true,
+					"overflow_checks": true,
+					"rpath": false,
+					"incremental": true,
+					"panic": "unwind",
+					"strip": {
+						"deferred": "None"
+					},
+					"trim_paths": "none"
+				},
+				"pi_shell": {
+					"name": "dev",
+					"opt_level": "1",
+					"lto": "false",
+					"codegen_backend": null,
+					"codegen_units": 256,
+					"debuginfo": "line-tables-only",
+					"split_debuginfo": "unpacked",
+					"debug_assertions": true,
+					"overflow_checks": true,
+					"rpath": false,
+					"incremental": true,
+					"panic": "unwind",
+					"strip": {
+						"deferred": "None"
+					},
+					"trim_paths": "none"
+				}
+			}
+		}
+	},
+	"preflight_overhead": {
+		"command": [
+			"cargo",
+			"metadata",
+			"--manifest-path",
+			"crates/pi-natives/Cargo.toml",
+			"--format-version",
+			"1",
+			"--locked",
+			"--offline"
+		],
+		"seconds": [1.467, 1.033, 1.022],
+		"scope": "warm local registry metadata preflight; no compilation"
+	},
+	"workspace_addon_repair": {
+		"time_utc": "2026-11-19T16:34:29.916660+00:00",
+		"old": {
+			"sha256": "002fff2ffb5642500854659580ead51ae60c6784e1cea563560220601ae7fa92",
+			"bytes": 123963296,
+			"mtime": 1794514318.0663035,
+			"loader": {
+				"path": "/Users/aaron/Projects/omp-slim/packages/natives/native/pi_natives.darwin-x64-modern.node",
+				"version": "18.18.3",
+				"packageVersion": "18.18.3",
+				"stale": false
+			}
+		},
+		"backup": "dist/validation/build-audit-2026-11-20/workspace-native-backup/pi_natives.darwin-x64-modern.node",
+		"new": {
+			"sha256": "2fbb3b6dc96cfb6ec0462f93fc91569973e1534180e14f73955cc06d95553386",
+			"bytes": 93884000,
+			"native_source_commit": "ae480c973c183d9ca66fc19a25ed6a7d8546418d",
+			"build_run": 44549416311
+		},
+		"rust_sources_and_cargo_lock_match_audit_baseline": true
+	},
+	"runtime_comparison": {
+		"scope": "Three small retained workloads on the local Intel Mac; alternating fresh processes; not a full runtime gate",
+		"rounds": 3,
+		"summary": [
+			{
+				"name": "visibleWidth",
+				"samples_per_profile": 9,
+				"median_ms": {
+					"ci": 0.08316560999999993,
+					"dev": 0.8944886650000001
+				},
+				"dev_over_ci": 10.755511382649642,
+				"observed": "5632",
+				"samples_ms": {
+					"ci": [
+						0.09648582500000004, 0.07987287500000001, 0.08316560999999993, 0.08407460999999998, 0.104587905,
+						0.08376917500000004, 0.08286610500000002, 0.07953628500000001, 0.07381245000000007
+					],
+					"dev": [
+						1.011210465, 0.8944886650000001, 0.9242357799999996, 0.8792542450000002, 0.9728828099999999,
+						0.8706861699999996, 0.89964225, 0.8771400599999999, 0.8752042400000005
+					]
+				}
+			},
+			{
+				"name": "countTokens",
+				"samples_per_profile": 9,
+				"median_ms": {
+					"ci": 0.12142819999999972,
+					"dev": 2.278624199999996
+				},
+				"dev_over_ci": 18.765197870017023,
+				"observed": "2048",
+				"samples_ms": {
+					"ci": [
+						0.17467764999999957, 0.12091984999999994, 0.12068579999999969, 0.12128759999999943,
+						0.12142819999999972, 0.12245924999999999, 0.12397890000000018, 0.20116514999999993,
+						0.10526114999999976
+					],
+					"dev": [
+						2.4389053999999986, 2.061249799999996, 2.3391938499999982, 2.3791555000000018, 2.0880792499999985,
+						2.253679199999999, 2.278624199999996, 2.232897449999996, 2.414888049999996
+					]
+				}
+			},
+			{
+				"name": "shell-arithmetic-loop",
+				"samples_per_profile": 9,
+				"median_ms": {
+					"ci": 0.8381548000000066,
+					"dev": 1.1633520000000317
+				},
+				"dev_over_ci": 1.3879918124909891,
+				"observed": "4950",
+				"samples_ms": {
+					"ci": [
+						0.8628720000000044, 0.6060874000000013, 1.2876151999999934, 0.8661397999999962, 0.6134939999999915,
+						1.000101799999993, 0.8381548000000066, 0.5122296000000006, 0.48622759999999515
+					],
+					"dev": [
+						1.1725210000000061, 0.8326724000000013, 0.8720732000000225, 1.1633520000000317, 1.7302720000000136,
+						1.150613999999996, 1.3068030000000364, 1.2647935999999844, 0.895690999999988
+					]
+				}
+			}
+		],
+		"runs": [
+			{
+				"addon": "/Users/aaron/Projects/omp-slim/dist/actions/44549416311/native/pi_natives.darwin-x64-modern.node",
+				"version": "18.18.3",
+				"bun": "1.4.4",
+				"rows": [
+					{
+						"name": "visibleWidth",
+						"iterations": 200,
+						"milliseconds_per_operation": [0.09648582500000004, 0.07987287500000001, 0.08316560999999993],
+						"observed": 5632
+					},
+					{
+						"name": "countTokens",
+						"iterations": 20,
+						"milliseconds_per_operation": [0.17467764999999957, 0.12091984999999994, 0.12068579999999969],
+						"observed": 2048
+					},
+					{
+						"name": "shell-arithmetic-loop",
+						"iterations": 5,
+						"milliseconds_per_operation": [0.8628720000000044, 0.6060874000000013, 1.2876151999999934],
+						"observed": "4950"
+					}
+				],
+				"profile": "ci",
+				"round": 1
+			},
+			{
+				"addon": "/Users/aaron/Projects/omp-slim/dist/validation/build-audit-2026-11-20/current-addon/packages/natives/native/pi_natives.darwin-x64-modern.node",
+				"version": "18.18.3",
+				"bun": "1.4.4",
+				"rows": [
+					{
+						"name": "visibleWidth",
+						"iterations": 200,
+						"milliseconds_per_operation": [1.011210465, 0.8944886650000001, 0.9242357799999996],
+						"observed": 5632
+					},
+					{
+						"name": "countTokens",
+						"iterations": 20,
+						"milliseconds_per_operation": [2.4389053999999986, 2.061249799999996, 2.3391938499999982],
+						"observed": 2048
+					},
+					{
+						"name": "shell-arithmetic-loop",
+						"iterations": 5,
+						"milliseconds_per_operation": [1.1725210000000061, 0.8326724000000013, 0.8720732000000225],
+						"observed": "4950"
+					}
+				],
+				"profile": "dev",
+				"round": 1
+			},
+			{
+				"addon": "/Users/aaron/Projects/omp-slim/dist/validation/build-audit-2026-11-20/current-addon/packages/natives/native/pi_natives.darwin-x64-modern.node",
+				"version": "18.18.3",
+				"bun": "1.4.4",
+				"rows": [
+					{
+						"name": "visibleWidth",
+						"iterations": 200,
+						"milliseconds_per_operation": [0.8792542450000002, 0.9728828099999999, 0.8706861699999996],
+						"observed": 5632
+					},
+					{
+						"name": "countTokens",
+						"iterations": 20,
+						"milliseconds_per_operation": [2.3791555000000018, 2.0880792499999985, 2.253679199999999],
+						"observed": 2048
+					},
+					{
+						"name": "shell-arithmetic-loop",
+						"iterations": 5,
+						"milliseconds_per_operation": [1.1633520000000317, 1.7302720000000136, 1.150613999999996],
+						"observed": "4950"
+					}
+				],
+				"profile": "dev",
+				"round": 2
+			},
+			{
+				"addon": "/Users/aaron/Projects/omp-slim/dist/actions/44549416311/native/pi_natives.darwin-x64-modern.node",
+				"version": "18.18.3",
+				"bun": "1.4.4",
+				"rows": [
+					{
+						"name": "visibleWidth",
+						"iterations": 200,
+						"milliseconds_per_operation": [0.08407460999999998, 0.104587905, 0.08376917500000004],
+						"observed": 5632
+					},
+					{
+						"name": "countTokens",
+						"iterations": 20,
+						"milliseconds_per_operation": [0.12128759999999943, 0.12142819999999972, 0.12245924999999999],
+						"observed": 2048
+					},
+					{
+						"name": "shell-arithmetic-loop",
+						"iterations": 5,
+						"milliseconds_per_operation": [0.8661397999999962, 0.6134939999999915, 1.000101799999993],
+						"observed": "4950"
+					}
+				],
+				"profile": "ci",
+				"round": 2
+			},
+			{
+				"addon": "/Users/aaron/Projects/omp-slim/dist/actions/44549416311/native/pi_natives.darwin-x64-modern.node",
+				"version": "18.18.3",
+				"bun": "1.4.4",
+				"rows": [
+					{
+						"name": "visibleWidth",
+						"iterations": 200,
+						"milliseconds_per_operation": [0.08286610500000002, 0.07953628500000001, 0.07381245000000007],
+						"observed": 5632
+					},
+					{
+						"name": "countTokens",
+						"iterations": 20,
+						"milliseconds_per_operation": [0.12397890000000018, 0.20116514999999993, 0.10526114999999976],
+						"observed": 2048
+					},
+					{
+						"name": "shell-arithmetic-loop",
+						"iterations": 5,
+						"milliseconds_per_operation": [0.8381548000000066, 0.5122296000000006, 0.48622759999999515],
+						"observed": "4950"
+					}
+				],
+				"profile": "ci",
+				"round": 3
+			},
+			{
+				"addon": "/Users/aaron/Projects/omp-slim/dist/validation/build-audit-2026-11-20/current-addon/packages/natives/native/pi_natives.darwin-x64-modern.node",
+				"version": "18.18.3",
+				"bun": "1.4.4",
+				"rows": [
+					{
+						"name": "visibleWidth",
+						"iterations": 200,
+						"milliseconds_per_operation": [0.89964225, 0.8771400599999999, 0.8752042400000005],
+						"observed": 5632
+					},
+					{
+						"name": "countTokens",
+						"iterations": 20,
+						"milliseconds_per_operation": [2.278624199999996, 2.232897449999996, 2.414888049999996],
+						"observed": 2048
+					},
+					{
+						"name": "shell-arithmetic-loop",
+						"iterations": 5,
+						"milliseconds_per_operation": [1.3068030000000364, 1.2647935999999844, 0.895690999999988],
+						"observed": "4950"
+					}
+				],
+				"profile": "dev",
+				"round": 3
+			}
+		]
+	},
+	"recovered_dev_addon": {
+		"path": "/Users/aaron/Projects/omp-slim/dist/validation/build-audit-2026-11-20/current-addon/packages/natives/native/pi_natives.darwin-x64-modern.node",
+		"sha256": "21cf4957e0f82a6a80d6b609b2309baceafdc6701291e20afa7994e0d4e5dd17",
+		"bytes": 195280920,
+		"run": 44562078213
+	},
+	"local_host": "machdep.cpu.brand_string: Intel(R) Core(TM) m3-8100Y CPU @ 1.10GHz\nhw.physicalcpu: 2\nhw.logicalcpu: 4\nhw.memsize: 17179869184\n"
+}

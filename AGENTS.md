@@ -225,8 +225,10 @@ load edited modules. Use package type checks for a local change and `check:ts`
 for the wider TS gate; root `bun check` can also start the Rust workspace gate
 when this branch contains earlier Rust changes.
 
-For Rust, use `bun run check:rs --package CRATE` and
-`bun run test:rs --package CRATE`, optionally `-E 'test(NAME)'` for nextest.
+For Rust development, use `CARGO_INCREMENTAL=1 bun run check:rs --package CRATE`
+and `CARGO_INCREMENTAL=1 bun run test:rs --package CRATE`, optionally
+`-E 'test(NAME)'` for nextest. OMP injects `CI=true` into tool commands, which
+otherwise disables incremental compilation on the pinned Cargo even locally.
 Explicit package selection runs even on an otherwise unchanged branch and
 retains that package's doctests. Small independent crates such as `pi-pty` can
 be checked locally; checks requiring the full native graph still run remotely.
@@ -299,11 +301,11 @@ Profiles live in the root `Cargo.toml`; `.cargo/config.toml` carries the setting
 
 |Profile|Use|
 |---|---|
-|`dev`|Default. Line tables for our crates, no debuginfo for deps, deps at `opt-level = 2`.|
-|`release`|Shipping build: fat LTO, 1 codegen unit, stripped.|
-|`local`|Fast local release iteration: thin LTO, 16 codegen units, incremental.|
-|`profiling`|`release` codegen with symbols kept, for `perf`/`samply`/Instruments.|
-|`ci`|O3 without LTO, no debuginfo, stripped.|
+|`dev`|Cargo build/check default; `test` inherits its settings. Line tables for our crates, no debuginfo for deps, deps at `opt-level = 2`. Native builds require `OMP_NATIVE_CARGO_PROFILE=dev`.|
+|`release`|Inherited upstream profile: fat LTO, 1 codegen unit, stripped.|
+|`local`|Default for `bun run build:native`: O3, thin LTO, 16 codegen units; requests incremental in the manifest.|
+|`profiling`|`release` codegen with symbols kept. Its fat LTO differs from the downstream shipping `ci` profile.|
+|`ci`|Downstream standalone/native build: O3 without LTO, no debuginfo, stripped.|
 
 The pinned Cargo disables incremental compilation by default when `CI` is set,
 even when the profile has `incremental = true`. Development feedback benchmarks
@@ -316,9 +318,17 @@ directory; expand the matrix only after checking the effective flags and result.
 
 **Never set `split-debuginfo = "off"` on a profile that has debuginfo.** On Mach-O the linker never merges DWARF into the executable — it writes a debug map (`N_OSO`) pointing at the `.o` files, and `"unpacked"` is what keeps those files. With `"off"` every backtrace frame in our own crates silently loses `file:line`; the `panicked at foo.rs:3` header still prints (that is `#[track_caller]`, not debuginfo), which makes the loss easy to miss. `ci` may use `"off"` only because it sets `debug = false`.
 
-`embed-metadata = false` (in `.cargo/config.toml`) keeps crate metadata in `.rmeta` instead of duplicating it into every rlib — measured 196 MB → 130 MB on a reqwest-sized graph at identical build times. Its accepted spelling is toolchain-coupled; keep it in sync with `rust-toolchain.toml`.
+`embed-metadata = false` (in `.cargo/config.toml`) keeps crate metadata in `.rmeta` instead of duplicating it into every rlib. Its accepted spelling is toolchain-coupled; keep it in sync with `rust-toolchain.toml`. This is a disk-space mechanism, not proof of faster OMP builds.
 
-Rejected, with measurements, so nobody re-litigates them: **sccache** (cannot cache incremental, bin, or proc-macro crates — measured slower than not using it), **mold** (ELF-only; no Mach-O support), and **`panic = "abort"` on `dev`** (Cargo ignores `panic` for the test profile, so the whole dep graph builds twice — 131 MB → 214 MB).
+The earlier 196 MB → 130 MB metadata example, 131 MB → 214 MB panic example,
+and claim that sccache measured slower came from upstream commit `ce1d1fee68`.
+No corresponding OMP Slim measurement was recovered in the 2026-11-20 audit;
+do not use those numbers as downstream results or prohibit further measurement
+on that basis. Official sccache documentation excludes incremental compilations
+and crates that invoke the system linker, including cdylib/bin/proc-macro.
+Keep `panic = "unwind"`: retained shell/native error recovery depends on it,
+and Cargo's normal test harness also uses unwind. See
+`docs/slim-build-audit-2026-11-20.md` for sources and current evidence.
 
 ## Testing Guidance
 

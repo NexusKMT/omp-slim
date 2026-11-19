@@ -144,7 +144,7 @@ def warm():
     # NAPI_FORCE_BUILD can change after the initial typedef cache is created.
     # Stabilize it, then explicitly measure a third, unchanged invocation.
     build("settle-build")
-    build("unchanged-build")
+    bench.verify_unchanged_build(build("unchanged-build"))
     bench.smoke("checkpoint-smoke")
     save_checkpoint()
 

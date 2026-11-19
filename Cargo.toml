@@ -101,8 +101,9 @@ strip = false
 opt-level = 3
 codegen-units = 16
 
-# `release` codegen with symbols kept for `perf`/`samply`/Instruments. Full
-# opt-level so timings match production; only the binary size differs.
+# `release` codegen with symbols kept for `perf`/`samply`/Instruments.
+# This retains fat LTO; downstream artifacts use `ci` without LTO, so this
+# profile does not reproduce their exact optimization settings.
 # `cargo build --profile profiling`.
 [profile.profiling]
 inherits = "release"
