@@ -106,6 +106,13 @@ jobs:
                  find "$OMP_SLIM_CARGO_TARGET_DIR" -type f -path '*/out/*' -exec touch -t 202001010000.00 {} +
               fi
 
+         - name: Dump restored cargo state for cache diagnostics
+           shell: bash
+           run: |
+              test -f "$OMP_SLIM_CARGO_TARGET_DIR/.rustc_info.json" && cat "$OMP_SLIM_CARGO_TARGET_DIR/.rustc_info.json" || true
+              ls "$OMP_SLIM_CARGO_TARGET_DIR/x86_64-apple-darwin/ci" 2>/dev/null | head -8 || true
+              find "$OMP_SLIM_CARGO_TARGET_DIR/x86_64-apple-darwin/ci/.fingerprint" -name 'lib-proc_macro2.json' -exec head -c 2000 {} \; 2>/dev/null || true
+
          - name: Install pinned toolchains and dependencies
            id: toolchains
            shell: bash
@@ -116,6 +123,8 @@ jobs:
          - name: Compile and verify native addon and standalone CLI
            id: native-build
            shell: bash
+           env:
+              OMP_NATIVE_CARGO_VERBOSE: "2"
            run: bash scripts/slim/build.sh macos-intel
 
          - name: Install nextest for macOS PTY regressions

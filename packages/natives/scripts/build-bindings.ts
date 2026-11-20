@@ -181,6 +181,7 @@ if (extraFeatures) {
 }
 
 napiArgs.push("--", "--locked");
+if (Bun.env.OMP_NATIVE_CARGO_VERBOSE === "2") napiArgs.push("-vv");
 if (Bun.env.OMP_NATIVE_TIMINGS === "1") napiArgs.push("--timings");
 
 // napi-rs / cargo route much failure detail to stdout (e.g. `cargo metadata`
