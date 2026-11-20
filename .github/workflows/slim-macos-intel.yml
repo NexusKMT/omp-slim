@@ -83,6 +83,19 @@ jobs:
               restore-keys: |
                  slim-macos15-intel-xcode16.4-ci-v1-
 
+         - name: Normalize source mtimes so a cache hit reuses path-crate fingerprints
+           if: ${{ steps.build-cache.outputs.cache-hit == 'true' }}
+           shell: bash
+           run: |
+              # actions/checkout stamps every file with the checkout time, which
+              # cargo fingerprints as "modified after the last build" and rebuilds
+              # all workspace and vendored path crates on every run. On a primary
+              # cache hit the sources are byte-identical to the cached build, so
+              # pinning mtimes into the past makes cargo treat them as Fresh; on a
+              # miss the untouched checkout mtimes are newer than the restored
+              # cache, so everything still rebuilds correctly.
+              git ls-files -z | xargs -0 touch -t 202001010000.00
+
          - name: Install pinned toolchains and dependencies
            id: toolchains
            shell: bash
