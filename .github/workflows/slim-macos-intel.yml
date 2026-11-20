@@ -95,6 +95,16 @@ jobs:
               # miss the untouched checkout mtimes are newer than the restored
               # cache, so everything still rebuilds correctly.
               git ls-files -z | xargs -0 touch -t 202001010000.00
+              # Build scripts (pi-shell, napi, pi-natives) write files into
+              # OUT_DIR that the crate sources embed via include!(), so those
+              # paths land in the dep-info too. actions/cache restamps them
+              # with the restore time, later than the recorded build time,
+              # which marks the crate dirty. Pin them to the same past epoch:
+              # cargo does not mtime-check build-script outputs (verified),
+              # so this cannot re-trigger the build script.
+              if [ -d "$OMP_SLIM_CARGO_TARGET_DIR" ]; then
+                 find "$OMP_SLIM_CARGO_TARGET_DIR" -type f -path '*/out/*' -exec touch -t 202001010000.00 {} +
+              fi
 
          - name: Install pinned toolchains and dependencies
            id: toolchains
