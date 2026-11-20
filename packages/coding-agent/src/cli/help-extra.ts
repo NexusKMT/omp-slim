@@ -19,7 +19,7 @@ export function getExtraHelpText(): string {
   PI_PACKAGE_DIR             - Override package directory (for Nix/Guix store paths)
   PI_NO_PTY                  - Disable PTY-based interactive bash execution
   For complete environment variable reference, see:
-  ${chalk.dim("docs/environment-variables.md")}
+  ${chalk.dim("DOC.md#environment-variables-current-runtime-reference")}
 ${chalk.bold("Available Tools (default-enabled unless noted):")}
   read          - Read file contents
   bash          - Execute bash commands

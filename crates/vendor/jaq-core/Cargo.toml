@@ -4,7 +4,6 @@ version = "3.1.1"
 authors = ["Michael Färber <michael.faerber@gedenkt.at>"]
 edition = "2021"
 license = "MIT"
-readme = "README.md"
 description = "Interpreter for the jaq language"
 repository = "https://github.com/01mf02/jaq"
 

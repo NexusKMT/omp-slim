@@ -10,7 +10,7 @@
  * Destructive clears (ED3) happen through explicit user gestures or configured
  * settled-width rebuilds. Hosts without a
  * provider paint their composed children as a bounded viewport and never
- * touch history. See `docs/tui-core-renderer.md`.
+ * touch history. See `DOC.md#tui-core-renderer--explicit-history-and-viewport-contract`.
  */
 import * as fs from "node:fs";
 import { performance } from "node:perf_hooks";

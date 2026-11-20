@@ -35,7 +35,7 @@ function launchWith<M extends TerminalLaunchMultiplexer>(
 /**
  * Create a terminal pane or multiplexer group and run a command in it.
  * Provider-specific execution, targeting, environment, focus, and shell-input
- * behavior are described by the canonical capability map and in docs/extensions.md.
+ * behavior are described by the canonical capability map and in DOC.md#extensions.
  */
 export function createTerminalLauncher(dependencies: TerminalLaunchDependencies = {}) {
 	const runCli = dependencies.runCli ?? processCli;

@@ -33,13 +33,11 @@
   "files": [
     "src",
     "dist/cli.js",
-    "dist/docs-index.generated.txt",
     "dist/CHANGELOG-*.md",
     "dist/*.node",
     "dist/*.json-*.zst",
     "scripts",
     "examples",
-    "README.md",
     "CHANGELOG.md",
     "THIRD-PARTY-NOTICES.txt"
   ],

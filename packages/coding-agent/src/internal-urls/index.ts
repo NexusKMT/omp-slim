@@ -18,8 +18,6 @@ export * from "./history-protocol";
 export * from "./issue-pr-protocol";
 export * from "./local-protocol";
 export * from "./mcp-protocol";
-export * from "./omp-protocol";
-export * from "./omp-scope";
 export * from "./out-protocol";
 export * from "./parse";
 export * from "./router";

@@ -25,7 +25,6 @@ autoexamples = false
 autotests = false
 autobenches = false
 description = "N-API bindings"
-readme = "README.md"
 keywords = [
     "NodeJS",
     "Node",

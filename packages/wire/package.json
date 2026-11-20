@@ -24,7 +24,6 @@
   },
   "files": [
     "src",
-    "README.md",
     "CHANGELOG.md"
   ],
   "type": "module",

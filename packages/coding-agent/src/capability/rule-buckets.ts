@@ -5,7 +5,7 @@
  * session. It applies the user's disable levers, registers TTSR rules with the
  * manager, and splits the rest into the always-apply and rulebook buckets.
  *
- * Precedence (matches docs/rulebook-matching-pipeline.md §5):
+ * Precedence (matches DOC.md#rulebook-matching-pipeline §5):
  *   1. disabledRules  — dropped before any bucket assignment
  *   2. builtin drop   — `builtinRules === false` drops `builtin-defaults` rules
  *   3. agents scope   — rules whose `agents` globs do not match `options.agentName` are dropped

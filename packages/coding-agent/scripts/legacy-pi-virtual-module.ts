@@ -150,8 +150,7 @@ export async function collectBundledPiEntries(): Promise<BundledPiEntry[]> {
 				const matches: string[] = [];
 				for await (const match of glob.scan({ cwd: sourceDir, onlyFiles: true })) {
 					// Bun.Glob yields host separators; the export keys and generated
-					// identifiers below are `/`-shaped. Same normalization as
-					// `generate-docs-index.ts`.
+					// identifiers below are `/`-shaped.
 					matches.push(match.split(path.sep).join("/"));
 				}
 				matches.sort();

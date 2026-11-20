@@ -18,7 +18,7 @@ const cachedPlaceholderKeys = new Map<string, string>();
  * by dictionary-hashing candidate secrets. Stable across sessions so persisted
  * transcripts deobfuscate consistently. Defaults to `getSecretPlaceholderKeyPath()`
  * — `$XDG_STATE_HOME/omp/secret-placeholder.key` (or `~/.omp/agent/secret-placeholder.key`
- * without XDG), per docs/secrets.md.
+ * without XDG), per DOC.md#secret-obfuscation.
  */
 export async function getSecretPlaceholderKey(keyDir?: string): Promise<string> {
 	const keyPath = keyDir ? path.join(keyDir, "secret-placeholder.key") : getSecretPlaceholderKeyPath();

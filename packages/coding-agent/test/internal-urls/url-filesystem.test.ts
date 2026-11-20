@@ -6,7 +6,7 @@ import { type LocalProtocolOptions, resolveLocalRoot } from "@oh-my-pi/pi-coding
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
 import { execUrlProtocol } from "../helpers/exec-url-protocol";
 import { InternalUrlFilesystem } from "@oh-my-pi/pi-coding-agent/internal-urls/url-filesystem";
-import { executeShell, ShellFsFileType, ShellFsOp } from "@oh-my-pi/pi-natives";
+import { executeShell, ShellFsOp } from "@oh-my-pi/pi-natives";
 
 const READ = { read: true, write: false, append: false, truncate: false, create: false, createNew: false };
 const CREATE = { read: false, write: true, append: false, truncate: true, create: true, createNew: false };
@@ -105,7 +105,7 @@ describe("InternalUrlFilesystem local://", () => {
 
 	it("applies the link target's write policy when writing through a URL symlink", async () => {
 		await fs.mkdir(localRoot, { recursive: true });
-		await nativeSymlink("omp://README.md", path.join(localRoot, "doc"));
+		await nativeSymlink("history://README.md", path.join(localRoot, "doc"));
 
 		const response = await shellFs().handle({ op: ShellFsOp.Open, path: "local://doc", open: CREATE });
 
@@ -122,7 +122,7 @@ describe("InternalUrlFilesystem local://", () => {
 			path: path.join(localRoot, "dir", "new", "file.txt"),
 		});
 		await expect(fs.stat(path.join(localRoot, "dir", "new"))).rejects.toThrow();
-		await expect(shellFs().handle({ op: ShellFsOp.BackingPath, path: "omp://" })).resolves.toEqual({});
+		await expect(shellFs().handle({ op: ShellFsOp.BackingPath, path: "history://" })).resolves.toEqual({});
 	});
 
 	it("refuses renames that leave the URL namespace", async () => {
@@ -170,31 +170,5 @@ describe("InternalUrlFilesystem policy", () => {
 		const response = await shellFs("write").handle({ op: ShellFsOp.Metadata, path: "execfs://host/etc/hosts" });
 
 		expect(response.error?.code).toBe("EACCES");
-	});
-});
-
-describe("InternalUrlFilesystem rendered resources", () => {
-	it("serves omp:// as a read-only tree whose files hold the rendered bytes", async () => {
-		const filesystem = shellFs();
-		const listing = await filesystem.handle({ op: ShellFsOp.ReadDir, path: "omp://" });
-		const entry = listing.entries?.find(item => item.fileType === ShellFsFileType.File);
-		if (!entry) throw new Error("omp:// listed no documents");
-		const url = `omp://${entry.name}`;
-
-		const opened = await filesystem.handle({ op: ShellFsOp.Open, path: url, open: READ });
-		const handle = opened.handle;
-		if (handle === undefined) throw new Error(`open ${url} returned no handle`);
-		const metadata = await filesystem.handle({ op: ShellFsOp.FileMetadata, handle });
-		const read = await filesystem.handle({ op: ShellFsOp.Read, handle, offset: 0n, length: 1 << 20 });
-		const rendered = await filesystem.handle({ op: ShellFsOp.Open, path: url, open: CREATE });
-		await filesystem.handle({ op: ShellFsOp.Close, handle });
-
-		expect(metadata.metadata).toEqual({
-			fileType: ShellFsFileType.File,
-			size: read.data?.length ?? -1,
-			mode: 0o444,
-		});
-		expect(read.data?.length).toBeGreaterThan(0);
-		expect(rendered.error?.code).toBe("EROFS");
 	});
 });

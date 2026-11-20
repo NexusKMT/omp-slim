@@ -9,7 +9,7 @@ import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } f
 
 // Issue #13326: 18.3 removed `settings.override(path, value)`. Extensions reach the
 // replacement through the `@oh-my-pi/pi-coding-agent/config/registry` subpath
-// (documented in docs/extensions.md § Runtime setting overrides); the override only
+// (documented in DOC.md#extensions § Runtime setting overrides); the override only
 // lands if that import resolves to the host's registry, not a second copy.
 const EXTENSION_SOURCE = `
 import { lookup } from "@oh-my-pi/pi-coding-agent/config/registry";

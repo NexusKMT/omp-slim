@@ -1,11 +1,11 @@
 # OMP Slim Project
 
-This checkout is the public `NexusKMT/omp-slim` downstream. Read `SLIM.md` for
+This checkout is the public `NexusKMT/omp-slim` downstream. Read `DOC.md` for
 the pinned baseline, requested removal scope, build commands and Codespace
 lifecycle. Use the NexusKMT GitHub account for this project. Upstream
 publishing scripts and archived workflows are removed; downstream Linux
 builds can use Codespaces, and validation plus Intel macOS builds use manual
-public GitHub Actions workflows described in `SLIM.md`. Record actual build and removal status, recover artifacts
+public GitHub Actions workflows described in `DOC.md`. Record actual build and removal status, recover artifacts
 with checksums, and verify the Codespace is stopped when the task ends unless
 the user asks to keep it running. Preserve the core session/edit/shell behavior
 while removing browser, desktop, speech and long-term-memory integrations.
@@ -53,8 +53,8 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 
 When authorized to create or edit a contributor-submitted PR, follow the checklist below.
 
-- MUST read `CONTRIBUTING.md` and `.github/PULL_REQUEST_TEMPLATE.md` first. Preserve the template sections and checklist, including when shortening an existing description.
-- MUST obtain at least one sentence written by the contributor in their own words explaining what changed and why, as required by `CONTRIBUTING.md`. If it is missing, ask the contributor; NEVER generate a substitute. Preserve that sentence during edits.
+- MUST read `DOC.md#contributing-to-omp` and `.github/PULL_REQUEST_TEMPLATE.md` first. Preserve the template sections and checklist, including when shortening an existing description.
+- MUST obtain at least one sentence written by the contributor in their own words explaining what changed and why, as required by `DOC.md#contributing-to-omp`. If it is missing, ask the contributor; NEVER generate a substitute. Preserve that sentence during edits.
 - For user-facing changes, MUST follow the [Changelog](#changelog) attribution rules. Internal issue fixes keep their issue links. For external contributions, add the PR link and contributor credit after GitHub assigns the number, then push the entry before marking the changelog checklist item complete.
 - MUST read back the published PR description after creating or editing it. Check only verified checklist items; explain skipped or inapplicable checks in `Testing`.
 
@@ -206,7 +206,7 @@ OMP Slim supports only explicitly configured `openai-completions` endpoints and
 one selected main model. Model capabilities come from configuration and
 `packages/ai/src/models/build.ts`; never infer capabilities from provider/model
 names. There is no bundled provider catalog, KDL rule tree, `gen:compat`, or
-`gen:models` command. See `docs/models.md` and `docs/slim-single-model.md`.
+`gen:models` command. See `DOC.md#model-configuration-in-omp-slim` and `DOC.md#single-model-omp-slim`.
 
 Standalone model-backed tools should reuse `config/configured-model.ts`; interactive
 helpers should inherit the active session model. Delete retired experiments and
@@ -214,7 +214,7 @@ their unused prompts instead of retaining source copies as text archives.
 
 The supported product targets are macOS Intel and Linux x64. Full native and
 standalone compilation runs remotely through the public manual Actions
-workflows in `SLIM.md`. Local type checks, focused TS tests, and formatting checks
+workflows in `DOC.md`. Local type checks, focused TS tests, and formatting checks
 are appropriate; do not start a full local native build.
 
 The development goal is fast feedback after each code change. For TypeScript,
@@ -312,7 +312,7 @@ even when the profile has `incremental = true`. Development feedback benchmarks
 must explicitly use `CARGO_INCREMENTAL=1` and verify the effective unit graph
 before compiling. Preserve the chosen environment throughout the measured edit
 loop. The first 2026-11-17 dev/local comparison and frontend matrix actually ran
-with incremental disabled; see `docs/slim-compiler-investigation-2026-11-17.md`.
+with incremental disabled; see `DOC.md#omp-slim编译原理与差分实验`.
 Start performance experiments with one representative edit and a retained build
 directory; expand the matrix only after checking the effective flags and result.
 
@@ -328,7 +328,7 @@ on that basis. Official sccache documentation excludes incremental compilations
 and crates that invoke the system linker, including cdylib/bin/proc-macro.
 Keep `panic = "unwind"`: retained shell/native error recovery depends on it,
 and Cargo's normal test harness also uses unwind. See
-`docs/slim-build-audit-2026-11-20.md` for sources and current evidence.
+`DOC.md#omp-slim-构建审核--2026-11-20` for sources and current evidence.
 
 ## Testing Guidance
 
@@ -391,7 +391,7 @@ Location: `packages/*/CHANGELOG.md` (per package).
 ## Downstream Distribution
 
 Use the source and verified build artifacts of `NexusKMT/omp-slim`, following
-`SLIM.md`. The upstream npm package, Homebrew tap, mise source and installer do
+`DOC.md`. The upstream npm package, Homebrew tap, mise source and installer do
 not distribute this fork. Self-update and startup release checks are removed.
 Do not use upstream publishing scripts to distribute OMP Slim. Record actual
 source revisions, checksums and validation outcomes for downstream artifacts.

@@ -51,10 +51,9 @@ describe("read with a `;` list mixing URLs and local paths", () => {
 	});
 
 	it("splits an internal URL followed by a local path", async () => {
-		const text = await readText("omp://;a.ts:1-1");
+		const text = await readText("local://;a.ts:1-1");
 		expect(text).toContain("interpreted as 2 paths");
 		expect(text).toContain("export const a = 1;");
-		expect(text).not.toContain("Documentation file not found");
 	});
 
 	it("splits a URL followed by an existing local path", async () => {

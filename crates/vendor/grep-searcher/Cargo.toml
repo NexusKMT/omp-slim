@@ -25,7 +25,6 @@ description = """
 Fast line oriented regex searching as a library.
 """
 documentation = "https://docs.rs/grep-searcher"
-readme = "README.md"
 keywords = [
     "regex",
     "grep",

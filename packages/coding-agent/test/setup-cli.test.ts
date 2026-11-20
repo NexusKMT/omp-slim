@@ -9,7 +9,7 @@ import { restoreEnvValue } from "./helpers/settings-test-state";
 const cliEntry = path.join(import.meta.dir, "..", "src", "cli.ts");
 
 // An activated venv/conda env legitimately outranks the project `.venv`
-// (docs/environment-variables.md: VIRTUAL_ENV, then CONDA_PREFIX, then
+// (DOC.md#environment-variables-current-runtime-reference: VIRTUAL_ENV, then CONDA_PREFIX, then
 // `<cwd>/.venv`), so probes that assert on the project venv must not see one.
 const ACTIVE_PYTHON_ENV_VARS = ["VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"] as const;
 

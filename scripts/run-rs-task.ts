@@ -33,7 +33,7 @@ const VENDORED_FORK_EXCLUDES = [
 	"napi",
 ] as const satisfies readonly string[];
 // grep-searcher's upstream ripgrep code predates the workspace clippy policy, but
-// the fork's own `search_push` (src/searcher/push.rs, see its README.md) carries
+// the fork's own `search_push` (src/searcher/push.rs) carries
 // tests, so it is exempt from the lint gates only and still runs under test:rs.
 const LINT_EXEMPT_FORK_EXCLUDES = [
 	...VENDORED_FORK_EXCLUDES,

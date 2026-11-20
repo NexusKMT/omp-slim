@@ -100,7 +100,7 @@ export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOpt
 	// Load user-level disable/force-enable lists. The denylist always wins; the
 	// allowlist overrides a non-writable source config's `enabled: false`.
 	// A malformed or unreadable user mcp.json must not take down the whole MCP
-	// stack (docs/mcp-config.md: the file simply contributes no entries): its
+	// stack (DOC.md#mcp-configuration-in-omp: the file simply contributes no entries): its
 	// servers are already skipped by the mcp-json provider with a warning, so
 	// the lists degrade to empty here instead of rejecting every source.
 	const userPath = getMCPConfigPath("user", cwd);

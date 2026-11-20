@@ -105,10 +105,10 @@ describe("classifyGroupedLines", () => {
 	});
 
 	it("leaves url-like headers and their body lines to caller-side resolution", () => {
-		const ctx = classifyGroupedLines(["# omp://docs/", "  body"], REPO_ROOT);
-		expect(ctx[0]).toMatchObject({ kind: "file", url: "omp://docs/" });
+		const ctx = classifyGroupedLines(["# skill://docs/", "  body"], REPO_ROOT);
+		expect(ctx[0]).toMatchObject({ kind: "file", url: "skill://docs/" });
 		expect(ctx[0]?.headerPath).toBeUndefined();
-		expect(ctx[1]).toMatchObject({ kind: "content", url: "omp://docs/", filePath: undefined });
+		expect(ctx[1]).toMatchObject({ kind: "content", url: "skill://docs/", filePath: undefined });
 	});
 
 	it("gives a headerless URL scope's lines its URL, never a filesystem path", () => {

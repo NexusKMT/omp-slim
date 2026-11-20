@@ -14,7 +14,7 @@
  * dedup.
  *
  * @see ./omp-extension-roots.ts
- * @see ../../docs/extension-loading.md
+ * @see DOC.md#extension-loading-typescriptjavascript-modules
  */
 import * as path from "node:path";
 import { logger, parseFrontmatter, tryParseJson } from "@oh-my-pi/pi-utils";

@@ -434,7 +434,7 @@ export class AssistantMessageComponent extends Container {
 	 * installed transform (live-command output) always wins and keeps its
 	 * historical paint-everything contract; otherwise the optional
 	 * `assistantMessageText` theme token paints prose, flagged `proseFg` so
-	 * markdown sub-elements keep their own `md*` tokens (docs/theme.md).
+	 * markdown sub-elements keep their own `md*` tokens (DOC.md#theming-reference).
 	 * Returns undefined when the token is unset or empty so the terminal
 	 * default foreground is used byte-for-byte, exactly as before the token
 	 * existed.

@@ -41,7 +41,7 @@ git diff --no-renames --name-only -z "$omp_source_sha" "$omp_target_sha" > "$omp
 while IFS= read -r -d '' omp_path; do
   case "$omp_path" in
     *.rs|Cargo.toml|Cargo.lock|*/Cargo.toml|*/Cargo.lock|rust-toolchain*|*/rust-toolchain*|.cargo/*|*/.cargo/*|crates/*) ;;
-    packages/natives/test/*|packages/natives/bench/*|packages/natives/README.md|packages/natives/CHANGELOG.md|packages/natives/THIRD-PARTY-NOTICES.txt) continue ;;
+    packages/natives/test/*|packages/natives/bench/*|packages/natives/CHANGELOG.md|packages/natives/THIRD-PARTY-NOTICES.txt) continue ;;
     packages/natives/*|package.json|bun.lock|bunfig.toml|.npmrc|patches/*) ;;
     scripts/host-detect.ts|scripts/stamp-native-version.ts) ;;
     scripts/slim/bootstrap.sh|scripts/slim/build.sh|scripts/slim/verify-native.ts|.github/workflows/slim-macos-intel.yml) ;;

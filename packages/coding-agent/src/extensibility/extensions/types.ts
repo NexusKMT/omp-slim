@@ -1828,7 +1828,7 @@ export interface ExtensionAPI {
 	 * `req.sessionId` names the session that issued the write and
 	 * `ctx.sessionManager.getSessionId()` names the handler's own; compare them
 	 * before prompting, because `ctx.ui` belongs to the latter. See
-	 * `docs/extensions.md`.
+	 * `DOC.md#extensions`.
 	 */
 	registerFileWriteFallback(handler: FileWriteFallbackHandler): void;
 

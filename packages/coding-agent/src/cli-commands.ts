@@ -225,7 +225,7 @@ export function isSubcommand(first: string | undefined): boolean {
 const RESERVED_TOP_LEVEL_WORDS: Record<string, string> = {
 	ssh: "Built-in SSH host management has been removed from OMP Slim. Use the system ssh command or a local sshfs mount.",
 	update:
-		"OMP Slim is updated from NexusKMT/omp-slim source or verified GitHub Actions artifacts. See SLIM.md for installation instructions.",
+		"OMP Slim is updated from NexusKMT/omp-slim source or verified GitHub Actions artifacts. See DOC.md#build-procedure for installation instructions.",
 	extensions:
 		'`omp extensions` is not a management command. Use `omp plugin list` / `omp plugin install`, or run `omp launch extensions` if you meant to send "extensions" as a prompt.',
 	list: '`omp list` is not a top-level command. Use `omp plugin list` to list installed plugins, or run `omp launch list` if you meant to send "list" as a prompt.',

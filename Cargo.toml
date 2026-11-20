@@ -38,17 +38,16 @@ repository = "https://github.com/can1357/oh-my-pi"
 # future-incompatible trailing semicolons.
 cfg_aliases = { path = "crates/vendor/cfg_aliases" }
 # grep-searcher 0.1.17 (latest release) searches either a blocking `io::Read`
-# or a whole slice; the vendored copy adds the chunk-fed `search_push` (see its
-# README.md).
+# or a whole slice; the vendored copy adds the chunk-fed `search_push`.
 grep-searcher = { path = "crates/vendor/grep-searcher" }
 # jaq-core 3.1.1 has no way to interrupt an iterator before its next output;
 # the vendored copy polls cancellation inside filter evaluation.
 jaq-core = { path = "crates/vendor/jaq-core" }
 # napi 3.13.0 pins every `bun test --isolate` realm through per-thread handles
-# of never-torn-down envs; the vendored copy releases them (see its README.md).
+# of never-torn-down envs; the vendored copy releases them.
 napi = { path = "crates/vendor/napi" }
 # tree-sitter-go 0.25.0 (latest release) rejects Go 1.26 `new(expr)`; the
-# vendored copy carries the upstream grammar fix (see its README.md).
+# vendored copy carries the upstream grammar fix.
 tree-sitter-go = { path = "crates/vendor/tree-sitter-go" }
 
 [profile.release]
@@ -77,7 +76,7 @@ codegen-units = 1
 
 [profile.ci]
 inherits = "release"
-# O3 without LTO keeps addon rebuilds short; see docs/slim-build-performance-2026-11-17.md.
+# O3 without LTO keeps addon rebuilds short; see DOC.md#native-build-performance--2026-11-17.
 # Use "off", not false: false still permits local ThinLTO within each crate.
 lto = "off"
 codegen-units = 16

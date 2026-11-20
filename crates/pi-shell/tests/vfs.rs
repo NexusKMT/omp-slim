@@ -58,7 +58,7 @@ impl FileSystem for DelayedFilesystem {
 			return Ok(None);
 		};
 		// `virtual://rendered/…` stands in for a scheme that aliases no file
-		// (`omp://`, `history://`): the provider serves it, but there is
+		// (`history://`): the provider serves it, but there is
 		// nothing for the operating system to open.
 		if spelled.starts_with("virtual://rendered") {
 			return Ok(None);
