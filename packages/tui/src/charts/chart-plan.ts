@@ -4350,14 +4350,6 @@ function statStory(series: readonly ChartSeries[]): number | undefined {
 	return Math.abs(Math.log(strongest)) >= Math.log(STRIKING_MOVE) ? strongest : undefined;
 }
 
-/**
- * Each metric of a `stat` comparison as a takeaway: the compared condition's
- * value against the baseline's (`Peak RSS: ~4.5 GiB → ~105 MiB (43× less)`
- * for a transition, `wall: on 34.7 s vs off 17.1 s (2× more)` between peers),
- * striking from {@link STRIKING_MOVE}×; and over two or more metrics, every
- * move in one line, strongest first (`advisor: Cost 3× more, Precision −46%,
- * Recall unchanged`), above any one of them.
- */
 function statFacts(spec: ChartSpec): Fact[] {
 	const base = spec.reference?.[0] ?? 0;
 	const other = 1 - base;

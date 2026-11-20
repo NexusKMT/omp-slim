@@ -4,12 +4,7 @@
  * that adds or removes a server reaches the live child instead of the child
  * retaining its spawn-time snapshot forever.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { CustomTool } from "@oh-my-pi/pi-coding-agent/extensibility/custom-tools/types";
@@ -20,7 +15,12 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { followMCPTools } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { manyToolName } from "./fixtures/many-tools-mcp";
+import { createTestModel } from "./helpers/test-model";
 
 const FIXTURE_PATH = path.join(import.meta.dir, "fixtures", "many-tools-mcp.ts");
 
@@ -75,7 +75,7 @@ describe("subagent session MCP tools follow the shared manager", () => {
 			modelRegistry: new ModelRegistry(authStorage),
 			sessionManager: SessionManager.inMemory(),
 			settings: Settings.isolated(),
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

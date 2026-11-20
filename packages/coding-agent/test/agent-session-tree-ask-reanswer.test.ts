@@ -13,17 +13,17 @@
  * actions) must keep getting the pre-#5642 plain leaf move instead of
  * silently reporting a successful no-op navigation (review on #5895).
  */
-import { describe, expect, it, vi } from "bun:test";
 import { Agent, AgentBusyError, type AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel } from "./helpers/bundled-model";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
+import { describe, expect, it, vi } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
-const TEST_MODEL = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+const TEST_MODEL = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 
 async function createTestSession(
 	options: { inMemory?: boolean; extensionRunner?: ExtensionRunner; obfuscator?: SecretObfuscator } = {},

@@ -7,10 +7,8 @@
  * reintroducing the "can outlast any client's prompt timeout" problem the
  * admission-gated ack is meant to avoid.
  */
-import { afterEach, describe, expect, it } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -20,6 +18,8 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { withTimeout } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 describe("AgentSession prompt admission via extension command routing", () => {
 	let session: AgentSession | undefined;
@@ -58,7 +58,7 @@ describe("AgentSession prompt admission via extension command routing", () => {
 		const modelRegistry = new ModelRegistry(authStorage);
 		const sessionManager = SessionManager.inMemory();
 		const extensionRunner = new ExtensionRunner([extension], runtime, process.cwd(), sessionManager, modelRegistry);
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 		const agent = new Agent({
 			getApiKey: () => "test-key",

@@ -1,15 +1,10 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { agentPauseGate } from "@oh-my-pi/pi-agent-core";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { TspDocument } from "@oh-my-pi/pi-tui/native/apply";
 import type { DescribeContext, NativeChild, NativeNode } from "@oh-my-pi/pi-tui/native/node";
 import { Reconciler } from "@oh-my-pi/pi-tui/native/reconcile";
-import type { TspNode } from "@oh-my-pi/pi-wire";
-import { BUILTIN_CONTROL_SLASH_COMMANDS } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-control";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { TuiSlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
-import { Settings } from "../../../src/config/settings";
+import { setNativeRendering } from "@oh-my-pi/pi-tui/native/state";
 import {
 	PauseScreenComponent,
 	type PauseScreenHost,
@@ -17,8 +12,10 @@ import {
 	renderPauseScreen,
 	runPauseScreen,
 } from "@oh-my-pi/pi-tui/overlays/pause-screen";
-import { setNativeRendering } from "@oh-my-pi/pi-tui/native/state";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-tui/theme";
+import type { TspNode } from "@oh-my-pi/pi-wire";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import { Settings } from "../../../src/config/settings";
 
 // Strip SGR colors so assertions see visible text only.
 const stripAnsi = (text: string): string => text.replace(/\x1b\[[0-9;]*m/g, "");
@@ -192,163 +189,6 @@ describe("pause screen", () => {
 			expect(text).toContain("▌▌ P A U S E D");
 		});
 	});
-	it("stops waiting on parked or quota-yielded advisor work", async () => {
-		vi.useFakeTimers();
-		setNativeRendering(false);
-		AgentRegistry.resetGlobalForTests();
-		const rootAgent = { isPaused: false };
-		const subagentAgent = { isPaused: false };
-		const advisorStatus = {
-			name: "Review",
-			status: "running",
-			yielded: false,
-			backlog: 1,
-			isPaused: false,
-		};
-		const noAdvisors = () => ({ configured: false, advisors: [] });
-		AgentRegistry.global().register({
-			id: "Main/worker",
-			displayName: "worker",
-			kind: "sub",
-			status: "running",
-			session: {
-				isStreaming: true,
-				agent: subagentAgent,
-				getAdvisorStatusOverview: noAdvisors,
-			} as unknown as AgentSession,
-		});
-		AgentRegistry.global().register({
-			id: "Main/stale-worker",
-			displayName: "stale worker",
-			kind: "sub",
-			status: "running",
-			session: {
-				isStreaming: false,
-				agent: { isPaused: false },
-				getAdvisorStatusOverview: noAdvisors,
-			} as unknown as AgentSession,
-		});
-		const { host, shown } = makeHost();
-		const ctx = {
-			...host,
-			session: {
-				isStreaming: true,
-				agent: rootAgent,
-				getAdvisorStatusOverview: () => ({
-					configured: true,
-					advisors: [advisorStatus],
-				}),
-				getAsyncJobTree: () => null,
-			},
-		};
-		const runtime = { draftDetached: true, ctx } as unknown as TuiSlashCommandRuntime;
-		const pause = BUILTIN_CONTROL_SLASH_COMMANDS.find(command => command.name === "pause");
-		if (!pause?.handleTui) throw new Error("expected /pause TUI handler");
-		const running = pause.handleTui({ name: "pause", args: "", text: "/pause" }, runtime);
-		const component = shown[0];
-		if (!(component instanceof PauseScreenComponent)) throw new Error("expected /pause screen");
-
-		try {
-			const active = component.render(80).map(stripAnsi).join("\n");
-			expect(active).toContain("Pausing — waiting for work to settle");
-			expect(active).toContain("Unsettled turns: 3");
-			expect(active).toContain("Unfinished jobs: 0");
-
-			rootAgent.isPaused = true;
-			advisorStatus.yielded = true;
-			vi.advanceTimersByTime(1_000);
-			const liveWorkerOnly = component.render(80).map(stripAnsi).join("\n");
-			expect(liveWorkerOnly).toContain("Pausing — waiting for work to settle");
-			expect(liveWorkerOnly).toContain("Unsettled turns: 1");
-			expect(liveWorkerOnly).toContain("Unfinished jobs: 0");
-
-			subagentAgent.isPaused = true;
-			vi.advanceTimersByTime(1_000);
-			const quotaHalted = component.render(80).map(stripAnsi).join("\n");
-			expect(quotaHalted).toContain("Paused — ready to suspend");
-			expect(quotaHalted).not.toContain("Unsettled turns:");
-			expect(quotaHalted).not.toContain("Unfinished jobs:");
-
-			advisorStatus.yielded = false;
-			vi.advanceTimersByTime(1_000);
-			const eligible = component.render(80).map(stripAnsi).join("\n");
-			expect(eligible).toContain("Pausing — waiting for work to settle");
-			expect(eligible).toContain("Unsettled turns: 1");
-			expect(eligible).toContain("Unfinished jobs: 0");
-
-			advisorStatus.isPaused = true;
-			vi.advanceTimersByTime(1_000);
-			const parked = component.render(80).map(stripAnsi).join("\n");
-			expect(parked).toContain("Paused — ready to suspend");
-			expect(parked).not.toContain("Unsettled turns:");
-			expect(parked).not.toContain("Unfinished jobs:");
-		} finally {
-			component.handleInput("\r");
-			await running;
-		}
-	});
-
-	it("keeps waiting on a parked subagent's advisor and on task jobs whose subagent is not live", async () => {
-		vi.useFakeTimers();
-		setNativeRendering(false);
-		AgentRegistry.resetGlobalForTests();
-		const childAdvisor = { name: "Review", status: "running", yielded: false, backlog: 1, isPaused: false };
-		AgentRegistry.global().register({
-			id: "Main/parked",
-			displayName: "parked",
-			kind: "sub",
-			status: "running",
-			session: {
-				isStreaming: true,
-				agent: { isPaused: true },
-				getAdvisorStatusOverview: () => ({ configured: true, advisors: [childAdvisor] }),
-			} as unknown as AgentSession,
-		});
-		// Pre-live: registered `running` before its session exists.
-		AgentRegistry.global().register({
-			id: "Main/starting",
-			displayName: "starting",
-			kind: "sub",
-			status: "running",
-			session: null,
-		});
-		const taskJob = (agentId: string) => ({ type: "task", agentId });
-		const running = [taskJob("Main/parked"), taskJob("Main/starting"), { type: "bash", agentId: undefined }];
-		const { host, shown } = makeHost();
-		const ctx = {
-			...host,
-			session: {
-				isStreaming: false,
-				agent: { isPaused: false },
-				getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
-				getAsyncJobTree: () => ({ running }),
-			},
-		};
-		const runtime = { draftDetached: true, ctx } as unknown as TuiSlashCommandRuntime;
-		const pause = BUILTIN_CONTROL_SLASH_COMMANDS.find(command => command.name === "pause");
-		if (!pause?.handleTui) throw new Error("expected /pause TUI handler");
-		const done = pause.handleTui({ name: "pause", args: "", text: "/pause" }, runtime);
-		const component = shown[0];
-		if (!(component instanceof PauseScreenComponent)) throw new Error("expected /pause screen");
-
-		try {
-			// Parked child's advisor still reviewing → 1 turn; the parked child's task job is
-			// represented by its live ref, the pre-live child's task job and the bash job are not.
-			const active = component.render(80).map(stripAnsi).join("\n");
-			expect(active).toContain("Unsettled turns: 1");
-			expect(active).toContain("Unfinished jobs: 2");
-
-			childAdvisor.isPaused = true;
-			running.splice(1);
-			vi.advanceTimersByTime(1_000);
-			const settled = component.render(80).map(stripAnsi).join("\n");
-			expect(settled).toContain("Paused — ready to suspend");
-		} finally {
-			component.handleInput("\r");
-			await done;
-		}
-	});
-
 	describe("native sheet", () => {
 		// Every described node, depth-first (components inside are not walked).
 		const nodes = (root: NativeChild): NativeNode[] => {

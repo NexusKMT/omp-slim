@@ -1,10 +1,7 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -12,6 +9,9 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 function lastAgentMessage(session: AgentSession): AssistantMessage {
 	const message = session.agent.state.messages.at(-1);
@@ -47,7 +47,7 @@ describe("AgentSession manual retry", () => {
 	});
 
 	it("removes the failed assistant turn and continues with a fresh attempt", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
@@ -89,7 +89,7 @@ describe("AgentSession manual retry", () => {
 	});
 
 	it("returns false when the trailing assistant turn succeeded", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
@@ -124,7 +124,7 @@ describe("AgentSession manual retry", () => {
 	});
 
 	it("retries past synthetic tool results left by a mid-tool-call stream stall", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
@@ -183,7 +183,7 @@ describe("AgentSession manual retry", () => {
 	});
 
 	it("reports an aborted tool-call tail only when the failed turn ended on a tool call", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
@@ -260,7 +260,7 @@ describe("AgentSession manual retry", () => {
 	});
 
 	it("re-executes the aborted tool call instead of re-issuing it via the model", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
@@ -355,7 +355,7 @@ describe("AgentSession manual retry", () => {
 	});
 
 	it("retries an aborted tool-call turn past a background-job result folded in after the interrupt", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
@@ -455,7 +455,7 @@ describe("AgentSession manual retry", () => {
 	});
 
 	it("retries a persisted failed turn after rebuilding provider context", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}
@@ -547,7 +547,7 @@ describe("AgentSession manual retry", () => {
 	});
 
 	it("lets an idle aside start a turn after the user resumes an interrupted run with retry", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
 		}

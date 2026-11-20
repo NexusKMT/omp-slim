@@ -4,21 +4,18 @@
  * any parent message or extra poll — on the initial run, on a follow-up turn,
  * and on an autonomous IRC wake turn.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { resetRegisteredArtifactDirsForTests } from "@oh-my-pi/pi-coding-agent/internal-urls/registry-helpers";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { IrcBridge, type IrcBridgeHost } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
 import {
@@ -28,11 +25,14 @@ import {
 } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { WaitTool } from "@oh-my-pi/pi-coding-agent/tools/wait";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
+import { WaitTool } from "@oh-my-pi/pi-coding-agent/tools/wait";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 const AGENT_ID = "accepted-result";
 
@@ -159,9 +159,6 @@ function createHarness(options?: { hangPrompt?: boolean; asyncJobManager?: Async
 			return true;
 		},
 		waitForIdle: async () => {},
-		isAdvisorActive: () => false,
-		prepareForHeadlessAdvisorDrain: () => {},
-		waitForAdvisorCatchup: async () => true,
 		getLastAssistantMessage: () => messages[messages.length - 1],
 		hasPendingAsyncWork: () => false,
 		getAsyncJobSnapshot: () => ({ running: [], recent: [] }),
@@ -236,7 +233,7 @@ describe("runSubprocess result acceptance", () => {
 			task: "do the work",
 			index: 0,
 			id: AGENT_ID,
-			parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 		});
 
 		expect(result.exitCode).toBe(0);
@@ -271,7 +268,7 @@ describe("runSubprocess result acceptance", () => {
 				index: 0,
 				id: AGENT_ID,
 				signal,
-				parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+				parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 			});
 			if (result.exitCode !== 0) throw new Error(result.abortReason ?? result.error ?? "Task failed");
 			return result.output;

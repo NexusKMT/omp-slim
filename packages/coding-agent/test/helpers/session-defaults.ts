@@ -6,8 +6,6 @@ export function createSessionDefaults() {
 		setActiveToolsByName: async (_toolNames: string[]) => {},
 		getMountedXdevToolNames: () => [],
 		waitForIdle: async () => {},
-		prepareForHeadlessAdvisorDrain: () => {},
-		waitForAdvisorCatchup: async () => true,
 		getToolByName: () => undefined,
 		getLastAssistantMessage: () => undefined,
 		hasPendingAsyncWork: () => false,
@@ -16,7 +14,6 @@ export function createSessionDefaults() {
 		setIrcWakeTurnObserver: () => {},
 		holdIrcWakes: () => () => {},
 		isParentIrcSteer: () => false,
-		isAdvisorActive: () => false,
 		subscribeRunState: () => () => {},
 		addDisposer: () => {},
 	} satisfies Partial<AgentSession>;

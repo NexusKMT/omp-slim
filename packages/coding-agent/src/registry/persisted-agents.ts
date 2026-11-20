@@ -1,15 +1,12 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
-import { ADVISOR_TRANSCRIPT_FILENAME, isAdvisorTranscriptName } from "../advisor/transcript-recorder";
-import { resolveExplicitModelRole } from "../config/model-resolver";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { assistantTurnProducedOutput } from "../session/messages";
 import { EPHEMERAL_MODEL_CHANGE_ROLE, PREWALK_MODEL_CHANGE_ROLE } from "../session/session-entries";
 import { readSessionHeaderId, visitEntriesFromFileStream } from "../session/session-loader";
 import { loadBundledAgents } from "../task/agents";
 import { isReadOnlyAgent } from "../task/read-only-policy";
-import { persistedVibeChildIds } from "../vibe/lifecycle";
 import {
 	type AgentHistorySummary,
 	type AgentMetricsSummary,
@@ -21,13 +18,6 @@ import { getAgentTombstonePath } from "./agent-tombstone";
 
 /** Maximum prefix entries inspected for task metadata. */
 const MAX_METADATA_LINES = 64;
-/**
- * Upper bound on records scanned to compute an advisor transcript's Hub metrics.
- * Well above any healthy advisor file (post issue #9553 the file grows O(new
- * content)); it exists only so a legacy multi-GB transcript can't stall the
- * render thread when the Hub roster is built.
- */
-const MAX_ADVISOR_HISTORY_LINES = 200_000;
 
 interface PersistedAgentMetadata {
 	activity?: string;
@@ -90,7 +80,7 @@ function finiteNumber(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function inferBundledAgent(systemPrompt: string): { agent?: string; modelRole?: string; readOnly?: boolean } {
+function inferBundledAgent(systemPrompt: string): { agent?: string; readOnly?: boolean } {
 	const matches = loadBundledAgents().filter(agent => {
 		const rolePrompt = agent.systemPrompt.trim();
 		return rolePrompt.length > 0 && systemPrompt.includes(rolePrompt);
@@ -101,7 +91,6 @@ function inferBundledAgent(systemPrompt: string): { agent?: string; modelRole?: 
 	const [agent] = matches;
 	return {
 		agent: agent.name,
-		modelRole: resolveExplicitModelRole(agent.model),
 		readOnly: isReadOnlyAgent(agent),
 	};
 }
@@ -217,16 +206,8 @@ async function readPersistedAgentHistory(
 					directCost += assistant.cost;
 				}
 			},
-			// Advisor transcripts are the one file that can grow pathologically large
-			// (issue #9553); cap their scan so one bad transcript can't stall the Hub
-			// on the render thread. Healthy advisor files sit far below this bound,
-			// so their metrics stay exact; a capped legacy file reports approximate
-			// (lower-bound) cost/tokens rather than freezing `hub list`.
 			{
 				shouldContinue,
-				maxRecords: isAdvisorTranscriptName(path.basename(transcript.sessionFile))
-					? MAX_ADVISOR_HISTORY_LINES
-					: undefined,
 			},
 		);
 	} catch (error) {
@@ -257,7 +238,6 @@ async function readPersistedAgentHistory(
 	// run to it would report work the previous model did.
 	let resolvedModel: string | undefined;
 	let resolvedModelIsFallback: boolean | undefined;
-	let modelRole: string | undefined;
 	let contextTokens: number | undefined;
 	let servedModel: string | undefined;
 	let latestModelChange: { model: string; resolvedModelIsFallback: boolean } | undefined;
@@ -267,13 +247,6 @@ async function readPersistedAgentHistory(
 		const modelChange = modelChangeById.get(id);
 		if (modelChange) {
 			latestModelChange ??= modelChange;
-			if (
-				modelChange.role &&
-				modelChange.role !== EPHEMERAL_MODEL_CHANGE_ROLE &&
-				modelChange.role !== PREWALK_MODEL_CHANGE_ROLE
-			) {
-				modelRole ??= modelChange.role;
-			}
 			// The transition that installed the serving model: it carries the
 			// fallback flag the raw message lacks. Every writer records the selector
 			// through `formatModelStringWithRouting`, which appends an `@upstream`
@@ -311,7 +284,6 @@ async function readPersistedAgentHistory(
 		directCost,
 		...(metrics.requests > 0 ? { metrics } : {}),
 		...(resolvedModel ? { resolvedModel, resolvedModelIsFallback } : {}),
-		...(modelRole ? { modelRole } : {}),
 	};
 }
 
@@ -398,8 +370,6 @@ async function readPersistedAgentMetadata(
 					...history,
 					...inferred,
 					agent: typeof record.agent === "string" ? record.agent : inferred.agent,
-					modelRole:
-						typeof record.modelRole === "string" ? record.modelRole : (history.modelRole ?? inferred.modelRole),
 					resolvedModel: typeof record.resolvedModel === "string" ? record.resolvedModel : history.resolvedModel,
 					readOnly: typeof record.readOnly === "boolean" ? record.readOnly : inferred.readOnly,
 				};
@@ -433,23 +403,6 @@ async function readPersistedAgentMetadata(
 			...(nestedPatchPaths.length > 0 ? { nestedPatchPaths: [...nestedPatchPaths] } : {}),
 		},
 	};
-}
-
-async function readPersistedVibeChildIds(sessionFile: string, shouldContinue: () => boolean): Promise<Set<string>> {
-	const ids = new Set<string>();
-	try {
-		await visitEntriesFromFileStream(
-			sessionFile,
-			entry => {
-				for (const id of persistedVibeChildIds([entry])) ids.add(id);
-			},
-			{ shouldContinue },
-		);
-		return ids;
-	} catch (error) {
-		if (isFilesystemError(error)) throw error;
-		return new Set();
-	}
 }
 
 /**
@@ -662,7 +615,6 @@ export async function ensurePersistedRoster(
 	return root;
 }
 
-/** Register persisted subagent and advisor transcripts as parked registry refs. */
 export async function registerPersistedSubagents(
 	registry: AgentRegistryApi,
 	sessionFile: string | null | undefined,
@@ -685,15 +637,12 @@ export async function registerPersistedSubagents(
 	const hydrateHistory = options.hydrateHistory ?? true;
 	if (!shouldContinue()) return;
 	// The main transcript can be large: read it once, and only for a transcript the registry does not hold yet.
-	let vibeOwnedIds: Promise<Set<string>> | undefined;
-	const vibeOwned = () => (vibeOwnedIds ??= readPersistedVibeChildIds(sessionFile, shouldContinue));
 	const root = sessionFile.slice(0, -6);
 	const transcripts: PersistedTranscript[] = [];
 	await registerPersistedSubagentsFromDir(
 		registry,
 		root,
 		undefined,
-		vibeOwned,
 		transcripts,
 		shouldContinue,
 		sessionFile,
@@ -726,7 +675,6 @@ async function registerPersistedSubagentsFromDir(
 	registry: AgentRegistryApi,
 	dir: string,
 	parentId: string | undefined,
-	vibeOwned: () => Promise<ReadonlySet<string>>,
 	transcripts: PersistedTranscript[],
 	shouldContinue: () => boolean,
 	rootSessionFile: string,
@@ -757,60 +705,10 @@ async function registerPersistedSubagentsFromDir(
 		if (!shouldContinue()) return;
 		if (!entry.isFile() || !entry.name.endsWith(".jsonl") || entry.name.includes(".bak")) continue;
 		const sessionFile = path.join(dir, entry.name);
-		// The advisor transcript is observability-only: register it as a non-peer
-		// `advisor` kind under its owning session so the Hub can show its read-only
-		// transcript, but it never joins agent-facing rosters and is not revivable.
-		if (isAdvisorTranscriptName(entry.name)) {
-			const owner = parentId ?? MAIN_AGENT_ID;
-			// `__advisor.jsonl` → the default advisor (no slug); `__advisor.<slug>.jsonl`
-			// → a named advisor, keyed and labeled by its slug.
-			const slug =
-				entry.name === ADVISOR_TRANSCRIPT_FILENAME ? "" : entry.name.slice("__advisor.".length, -".jsonl".length);
-			const advisorId = slug ? `${owner}/advisor:${slug}` : `${owner}/advisor`;
-			const displayName = slug ? `advisor:${slug}` : "advisor";
-			const existing = registry.get(advisorId);
-			// Never clobber a non-advisor ref that happens to share this id (a freak
-			// user task literally named `<owner>/advisor`): leave it, skip the advisor.
-			if (existing && existing.kind !== "advisor") continue;
-			if (existing?.sessionFile !== sessionFile) {
-				const metadata = await readPersistedAgentMetadata(sessionFile);
-				if (!shouldContinue()) return;
-				// The id is reused across `/new`; refresh it to the current session's file.
-				if (existing) registry.unregister(advisorId);
-				registry.register({
-					id: advisorId,
-					displayName,
-					kind: "advisor",
-					parentId: owner,
-					session: null,
-					sessionFile,
-					activity: metadata.activity,
-					createdAt: metadata.createdAt,
-					lastActivity: metadata.lastActivity,
-					history: { ...metadata.history, readOnly: true },
-					status: "parked",
-				});
-				owned?.set(advisorId, sessionFile);
-				transcripts.push({
-					id: advisorId,
-					sessionFile,
-					createdAt: metadata.createdAt,
-					lastActivity: metadata.lastActivity,
-				});
-			} else if (existing) {
-				owned?.set(advisorId, sessionFile);
-				transcripts.push({
-					id: advisorId,
-					sessionFile,
-					createdAt: existing.createdAt,
-					lastActivity: existing.lastActivity,
-				});
-			}
-			continue;
-		}
+		// Retired passive review transcripts are never executable tasks.
+		if (/^__advisor(?:\.|$)/.test(entry.name)) continue;
 		const id = entry.name.slice(0, -6);
 		const existing = registry.get(id);
-		if (existing?.sessionFile !== sessionFile && (await vibeOwned()).has(id)) continue;
 		let tombstoned = false;
 		try {
 			await fs.promises.access(getAgentTombstonePath(sessionFile));
@@ -906,7 +804,6 @@ async function registerPersistedSubagentsFromDir(
 				registry,
 				path.join(dir, id),
 				id,
-				vibeOwned,
 				transcripts,
 				shouldContinue,
 				rootSessionFile,

@@ -11,7 +11,6 @@
  * collisions across repeated or nested task invocations.
  */
 import * as fs from "node:fs/promises";
-import { ADVISOR_TRANSCRIPT_STEM } from "../advisor/transcript-recorder";
 /** HUD expander click target reserved by the allocator so it cannot name a subagent. */
 export const PINNED_HUD_TOGGLE_ID = "@omp:toggle-pinned-hud";
 
@@ -33,12 +32,7 @@ export class AgentOutputManager {
 	constructor(getArtifactsDir: () => string | null, options?: { parentPrefix?: string }) {
 		this.#getArtifactsDir = getArtifactsDir;
 		this.#parentPrefix = options?.parentPrefix;
-		// Reserve the advisor transcript stem: a subagent allocated this id would
-		// write `<id>.jsonl`, clobbering the advisor's `__advisor.jsonl` in the same
-		// artifacts dir. Reserving bumps such a request to `__advisor-2`.
-		this.#taken.add(ADVISOR_TRANSCRIPT_STEM);
-		// Reserve the pinned-HUD toggle sentinel the same way: a colliding agent
-		// id would be indistinguishable from the expander row in click routing.
+
 		this.#taken.add(PINNED_HUD_TOGGLE_ID);
 	}
 

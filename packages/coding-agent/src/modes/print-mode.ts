@@ -14,10 +14,10 @@ import { resolveMCPTimeoutMs } from "../mcp/timeout";
 import { type AgentSession, type AgentSessionEvent } from "../session/agent-session";
 import { COST_GATE_NOTICE_SOURCE } from "../session/cost-gate";
 
+import { reconnectMcpManagerServer } from "../mcp/oauth-reauth";
 import { isSilentAbort } from "../session/messages";
 import { parseSlashCommand, parseSubcommand } from "../slash-commands/helpers/parse";
 import type { SlashCommandRuntime } from "../slash-commands/types";
-import { reconnectMcpManagerServer } from "../mcp/oauth-reauth";
 import {
 	formatPersistenceDurabilityFailure,
 	formatPersistenceFailure,
@@ -50,10 +50,6 @@ export interface PrintModeOptions {
 	deadline?: number;
 }
 
-/** Matches the longest built-in provider request deadline while bounding tool-loop stalls. */
-export const PRINT_MODE_ADVISOR_DRAIN_TIMEOUT_MS = 10 * 60_000;
-/** Error exits cannot hold automation for the full normal drain budget. */
-export const PRINT_MODE_ERROR_ADVISOR_DRAIN_TIMEOUT_MS = 30_000;
 /** Largest setTimeout delay before 32-bit overflow (Node/Bun fire in ~1 ms past this). */
 const MAX_TIMER_MS = 2_147_483_647;
 /** Exit status of a run the cost gate stopped (`--max-cost` / `session.maxCost` reached). */
@@ -499,15 +495,6 @@ async function runPrintModeCore(
 		if (unavailable.length > 0) reportStrictFailure();
 	}
 
-	// Opt-in (`async.printWake` / `--wait-async`): background jobs the run started
-	// would otherwise be cancelled by the dispose below. Keep the process alive and
-	// let each job's async-result wake the same session for another turn, until no
-	// owned job or delivery remains (a follow-up turn may start new jobs). This runs
-	// before the headless advisor drain because these follow-ups are primary turns
-	// whose answer print mode still reports. The `--max-time` deadline only aborts
-	// running turns, not idle waiting or a retry backoff sleep, so every wait here
-	// races it; reaching it cancels the jobs and any pending retry (dispose below)
-	// and fails the run.
 	let asyncWaitExpired = false;
 	if (admittedAgentTurn && !strictMCPFailure && cfgAsyncPrintWake.get(session.settings)) {
 		const { deadline } = options;
@@ -553,7 +540,6 @@ async function runPrintModeCore(
 
 	// From this point onward a late blocker must be recorded without starting a
 	// primary turn whose response print mode would never emit.
-	session.prepareForHeadlessAdvisorDrain();
 	// Past --max-time a follow-up turn can still sit in retry backoff, which this wait
 	// includes and only dispose cancels: skip it so teardown can run.
 	if (!asyncWaitExpired) await session.waitForIdle();
@@ -605,22 +591,6 @@ async function runPrintModeCore(
 		session.setTextOutputCommitted(true);
 	}
 
-	// A turn-fatal exit cannot hold automation for the full normal drain budget. A run
-	// past --max-time skips the drain entirely: its jobs are still live until dispose.
-	if (!strictMCPFailure && !asyncWaitExpired) {
-		// Print mode's drain budget covers a fallback-chain switch; the reviewer's
-		// verdict is the point of a headless advisor run, so wait through recovery,
-		// and wait on `strict` reviewers past the budget like every primary boundary.
-		await session.waitForAdvisorCatchup(
-			terminalFailure || costCapped
-				? PRINT_MODE_ERROR_ADVISOR_DRAIN_TIMEOUT_MS
-				: PRINT_MODE_ADVISOR_DRAIN_TIMEOUT_MS,
-			{ waitThroughRecovery: true, strictWithoutDeadline: true },
-		);
-	}
-	// Block shutdown until every serialized stdout write (including the final
-	// agent_end and late JSON advisor events) has drained; process.exit would
-	// otherwise discard the buffered tail and truncate the last record.
 	await stdout.drained();
 	// Dispose before returning the status instead of hard-exiting ahead of it:
 	// the awaited `dispose()` runs the browser reaper (releaseTabsForOwner), so

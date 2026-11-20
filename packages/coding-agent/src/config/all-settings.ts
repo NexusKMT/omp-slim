@@ -2,33 +2,31 @@
  * Every settings domain, in settings-panel order. Importing this module registers every setting;
  * {@link orderedSettings} lists them by domain order, then declaration order within a domain.
  */
-import { all, type AnySetting, Setting } from "./registry";
-import * as modesSettings from "../modes/settings";
-import * as sessionSettings from "../session/settings";
-import * as advisorSettings from "../advisor/settings";
-import * as configModelSettings from "./model-settings";
-import * as sessionContextSettings from "../session/context-settings";
-import * as exportTtsrSettings from "../export/ttsr-settings";
-import * as editSettings from "../edit/settings";
-import * as toolsSettings from "../tools/settings";
-import * as lspSettings from "../lsp/settings";
-import * as execSettings from "../exec/settings";
-import * as evalSettings from "../eval/settings";
-import * as taskSettings from "../task/settings";
-import * as planModeSettings from "../plan-mode/settings";
-import * as goalsSettings from "../goals/settings";
-import * as titleSettings from "../utils/title-settings";
-import * as extensibilitySettings from "../extensibility/settings";
-import * as mcpSettings from "../mcp/settings";
-import * as secretsSettings from "../secrets/settings";
-import * as commitSettings from "../commit/settings";
 import * as cliGcSettings from "../cli/gc-settings";
+import * as commitSettings from "../commit/settings";
+import * as editSettings from "../edit/settings";
+import * as evalSettings from "../eval/settings";
+import * as execSettings from "../exec/settings";
+import * as exportTtsrSettings from "../export/ttsr-settings";
+import * as extensibilitySettings from "../extensibility/settings";
+import * as goalsSettings from "../goals/settings";
+import * as lspSettings from "../lsp/settings";
+import * as mcpSettings from "../mcp/settings";
+import * as modesSettings from "../modes/settings";
+import * as planModeSettings from "../plan-mode/settings";
+import * as secretsSettings from "../secrets/settings";
+import * as sessionContextSettings from "../session/context-settings";
+import * as sessionSettings from "../session/settings";
+import * as taskSettings from "../task/settings";
+import * as toolsSettings from "../tools/settings";
+import * as titleSettings from "../utils/title-settings";
+import * as configModelSettings from "./model-settings";
+import { all, type AnySetting, Setting } from "./registry";
 
 const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	configModelSettings,
 	modesSettings,
 	sessionSettings,
-	advisorSettings,
 	sessionContextSettings,
 	exportTtsrSettings,
 	editSettings,

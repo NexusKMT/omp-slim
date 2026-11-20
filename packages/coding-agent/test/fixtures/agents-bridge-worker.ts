@@ -4,10 +4,9 @@
  * probe service that hands the test functions driving real `AgentSession`s
  * homed on this worker.
  */
-import { MessagePort, parentPort } from "node:worker_threads";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../helpers/bundled-model";
+import { MessagePort, parentPort } from "node:worker_threads";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { AgentLifecycleManager } from "../../src/registry/agent-lifecycle";
@@ -23,6 +22,7 @@ import { type RpcFrame, RpcLink } from "../../src/thread/rpc";
 import type { ThreadService } from "../../src/thread/services";
 import { agentsThreadService } from "../../src/thread/services/agents";
 import { identityThreadService } from "../../src/thread/services/identity";
+import { createTestModel } from "../helpers/test-model";
 
 /** What a worker-side peer handle reports about a session homed elsewhere. */
 export interface PeerReport {
@@ -85,7 +85,7 @@ let gate = Promise.withResolvers<void>();
 let gateOpen = false;
 
 async function makeSession(id: string, gated: boolean): Promise<AgentSession> {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("bundled model missing");
 	const mock = createMockModel({
 		handler: async () => {

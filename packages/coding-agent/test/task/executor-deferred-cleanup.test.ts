@@ -12,7 +12,6 @@
  * The deferred-cleanup path is exercised deterministically with a blocking
  * teardown and a zero grace, so no wall-clock timers are needed.
  */
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
@@ -21,8 +20,9 @@ import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { createSessionDefaults } from "../helpers/session-defaults";
+import { createTestModel } from "../helpers/test-model";
 
 const baseAgent: AgentDefinition = { name: "task", description: "test", systemPrompt: "test", source: "bundled" };
 
@@ -122,7 +122,7 @@ describe("runSubprocess deferred cleanup outcome (issue #9670)", () => {
 			task: "do the work",
 			index: 0,
 			id: "issue-9670-aborted",
-			parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 			keepAlive: false,
 			signal: controller.signal,
 			cleanupGraceMs: 0,

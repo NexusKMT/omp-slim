@@ -1,10 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { TextContent } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -13,7 +10,10 @@ import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TodoTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
 import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 import { cfgTodoEnabled } from "@oh-my-pi/pi-coding-agent/tools/settings";
 
@@ -89,7 +89,7 @@ describe("AgentSession eager task prelude", () => {
 		agentKind?: "main" | "sub",
 	): Harness {
 		const observedCalls: ObservedPromptCall[] = [];
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 
 		const authStorage = createInMemoryAuthStorage();

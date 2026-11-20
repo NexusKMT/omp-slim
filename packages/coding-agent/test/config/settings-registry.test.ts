@@ -1,27 +1,27 @@
-import { describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { orderedSettings } from "@oh-my-pi/pi-coding-agent/config/all-settings";
 import { all, bindEffects, combine, effect, lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { logger, TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { cfgTestToken, installTestSettings } from "../helpers/test-settings";
 
+import {
+	cfgEditFuzzyMatch,
+	cfgEditFuzzyThreshold,
+	cfgEditModelVariants,
+} from "@oh-my-pi/pi-coding-agent/edit/settings";
+import { cfgEvalPy } from "@oh-my-pi/pi-coding-agent/eval/settings";
+import { cfgStartupQuiet, cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import {
 	cfgProvidersMaxInFlightRequests,
 	cfgTemperature,
 	cfgTopK,
 	cfgTopP,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
-import { cfgStartupQuiet, cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
-import {
-	cfgEditFuzzyMatch,
-	cfgEditFuzzyThreshold,
-	cfgEditModelVariants,
-} from "@oh-my-pi/pi-coding-agent/edit/settings";
 import { cfgTaskMaxConcurrency } from "@oh-my-pi/pi-coding-agent/task/settings";
-import { cfgEvalPy } from "@oh-my-pi/pi-coding-agent/eval/settings";
-import { cfgDevAutoqaPushToken } from "@oh-my-pi/pi-coding-agent/tools/settings";
 
 const tick = () => Promise.resolve();
 
@@ -84,16 +84,16 @@ describe("settings registry", () => {
 	});
 
 	it("reads a configured null as unset and reports the default provenance", () => {
-		const cleared = Settings.isolated({ "dev.autoqaPush.token": null });
-		expect(cfgDevAutoqaPushToken.get(cleared)).toBeUndefined();
-		expect(cfgDevAutoqaPushToken.isConfigured(cleared)).toBe(false);
-		expect(cfgDevAutoqaPushToken.provenance(cleared)).toBe("default");
+		const cleared = Settings.isolated({ "test.token": null });
+		expect(cfgTestToken.get(cleared)).toBeUndefined();
+		expect(cfgTestToken.isConfigured(cleared)).toBe(false);
+		expect(cfgTestToken.provenance(cleared)).toBe("default");
 
 		const configured = Settings.isolated();
-		cfgDevAutoqaPushToken.set(configured, "token");
-		expect(cfgDevAutoqaPushToken.get(configured)).toBe("token");
-		expect(cfgDevAutoqaPushToken.isConfigured(configured)).toBe(true);
-		expect(cfgDevAutoqaPushToken.provenance(configured)).toBe("global");
+		cfgTestToken.set(configured, "token");
+		expect(cfgTestToken.get(configured)).toBe("token");
+		expect(cfgTestToken.isConfigured(configured)).toBe(true);
+		expect(cfgTestToken.provenance(configured)).toBe("global");
 	});
 
 	it("rejects writes whose value does not fit the setting's type", () => {
@@ -401,3 +401,5 @@ describe("settings registry", () => {
 		expect(() => Settings.isolated({ temperature: "hot" })).toThrow("Invalid value for temperature");
 	});
 });
+beforeEach(installTestSettings);
+afterEach(() => vi.restoreAllMocks());

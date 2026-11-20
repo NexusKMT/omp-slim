@@ -1,9 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent, type AgentMessage, AppendOnlyContextManager } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -15,7 +12,10 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 // Regression: a keep-alive subagent's AgentSession is disposed at park() but
 // stays reachable through the lifecycle adoption record's reviver closure
@@ -47,7 +47,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	function createSession(): AgentSession {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({
@@ -195,7 +195,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	it("drains pending notifications before releasing retained session memory", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({
@@ -281,7 +281,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	it("keeps session memory empty when notifications finish after the drain deadline", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({
@@ -362,7 +362,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	it("seals the session file at release so an immediate revival owns it exclusively", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({
@@ -546,7 +546,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	it("preserves the agent_end transcript for an asynchronous extension during dispose", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({

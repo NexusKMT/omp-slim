@@ -1,6 +1,6 @@
-import { describe, expect, it } from "bun:test";
 import { retryTransientCompletion } from "@oh-my-pi/pi-ai/oneshot-retry";
 import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai/types";
+import { describe, expect, it } from "bun:test";
 
 /**
  * Defends the contract every oneshot LLM call site now depends on:
@@ -54,18 +54,6 @@ const rateLimited = (): AssistantMessage =>
 const fast = { baseDelayMs: 1, maxAttempts: 3 } as const;
 
 describe("retryTransientCompletion", () => {
-	it("re-issues an Anthropic 529 error-stop and returns the eventual success", async () => {
-		const results = [overloaded(), overloaded(), message({ stopReason: "stop" })];
-		let calls = 0;
-		const final = await retryTransientCompletion(() => {
-			calls += 1;
-			return Promise.resolve(results.shift()!);
-		}, fast);
-
-		expect(calls).toBe(3);
-		expect(final.stopReason).toBe("stop");
-	});
-
 	it("re-issues a 429 rate-limit error-stop", async () => {
 		let calls = 0;
 		const final = await retryTransientCompletion(() => {

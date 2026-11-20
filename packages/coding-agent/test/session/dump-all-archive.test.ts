@@ -3,19 +3,19 @@
  * separate `subagents/<path>.md` per persisted subagent (nested paths kept,
  * empty transcripts skipped) instead of concatenating them into one document.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { readArchiveEntries } from "@oh-my-pi/pi-utils/ar";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createTestModel } from "../helpers/test-model";
 
 function subagentJsonl(id: string, userText: string | null): string {
 	const lines = [
@@ -48,7 +48,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 	const archives: string[] = [];
 
 	function createSession(prompt: string): AgentSession {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled anthropic model");
 		const authStorage = createInMemoryAuthStorage();
 		return new AgentSession({
@@ -63,7 +63,6 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 			sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),
 			settings: Settings.isolated({ "compaction.enabled": false }),
 			modelRegistry: new ModelRegistry(authStorage),
-			advisorTools: [],
 		});
 	}
 
@@ -250,7 +249,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 	it("reports malformed records skipped while loading the main session", async () => {
 		const file = path.join(tempDir.path(), "corrupt.jsonl");
 		await Bun.write(file, `${subagentJsonl("main", "hello")}{"type":"message","id":"broken`);
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled anthropic model");
 		const reopened = new AgentSession({
 			agent: new Agent({
@@ -264,7 +263,6 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 			sessionManager: await SessionManager.open(file, tempDir.path()),
 			settings: Settings.isolated({ "compaction.enabled": false }),
 			modelRegistry: new ModelRegistry(createInMemoryAuthStorage()),
-			advisorTools: [],
 		});
 		try {
 			const archive = await reopened.dumpAnonymizedArchiveToTmpDir();

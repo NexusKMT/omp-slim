@@ -73,7 +73,7 @@ omp --model my-endpoint/my-model
 
 Use `/model` to change the main selection interactively, or set
 `model: my-endpoint/my-model` in settings. Planning, subagents, compaction,
-advisors and helper requests use that main model. An unavailable saved model
+helper requests use that main model. An unavailable saved model
 reports an error; explicitly choosing another model remains possible.
 
 Retries retain the selected model. Model roles, provider-specific protocol

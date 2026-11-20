@@ -1,4 +1,3 @@
-import { afterEach, expect, it, vi } from "bun:test";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { ExtensionRuntime } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -9,8 +8,9 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, expect, it, vi } from "bun:test";
 import { createSessionDefaults } from "../helpers/session-defaults";
+import { createTestModel } from "../helpers/test-model";
 
 const authStorages: AuthStorage[] = [];
 const tempDirs: TempDir[] = [];
@@ -86,7 +86,7 @@ it("overlaps registry refresh with session-file opening and session setup", asyn
 		task: "test",
 		index: 0,
 		id: "task-launch-overlap",
-		parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+		parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 		authStorage,
 		enableLsp: false,
 		enableIrc: false,

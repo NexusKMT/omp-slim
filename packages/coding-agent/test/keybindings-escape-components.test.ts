@@ -1,14 +1,14 @@
-import { createModelBrowserSource } from "../src/modes/model-browser-source";
-import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { getBundledModel } from "./helpers/bundled-model";
-import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
+import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
+import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { ModelHubComponent } from "@oh-my-pi/pi-tui/overlays/model-hub";
 import { SessionSelectorComponent } from "@oh-my-pi/pi-tui/overlays/session-selector";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
-import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import { createModelBrowserSource } from "../src/modes/model-browser-source";
+import { createTestModel } from "./helpers/test-model";
 
 beforeAll(() => {
 	initTheme();
@@ -66,7 +66,7 @@ describe("component escape bindings", () => {
 		});
 		setKeybindings(keybindings);
 
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected bundled model anthropic/claude-sonnet-4-5");
 		}

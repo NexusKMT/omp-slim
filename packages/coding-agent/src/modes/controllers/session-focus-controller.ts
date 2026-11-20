@@ -1,26 +1,19 @@
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { type AgentLifecycleApi, AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import {
+	type AgentRef,
 	AgentRegistry,
 	type AgentRegistryApi,
 	MAIN_AGENT_ID,
-	type AgentRef,
 	type RegistryEvent,
 } from "../../registry/agent-registry";
 import { type AgentViewSession, isAgentViewSession } from "../../session/agent-session-handle";
 import { setRunStatus } from "../../utils/run-status";
 import type { InteractiveModeContext } from "../types";
 
-/**
- * Pick the most recently active focusable subagent. Advisors are read-only
- * transcripts and killed agents wait for an explicit revive, so neither is
- * cycled to; the main session is the view itself, not a focus target. A focused caller passes
- * its id to cycle to the next-most-recent agent (wrapping), so repeated
- * presses walk the roster instead of sticking on the newest row.
- */
 export function pickRecentFocusableAgentId(refs: readonly AgentRef[], currentId?: string): string | undefined {
 	const ordered = refs
-		.filter(ref => ref.id !== MAIN_AGENT_ID && ref.kind !== "advisor" && ref.status !== "aborted")
+		.filter(ref => ref.id !== MAIN_AGENT_ID && ref.status !== "aborted")
 		.filter(ref => ref.status === "running" || ref.status === "idle" || ref.status === "parked")
 		.toSorted(
 			(a, b) =>

@@ -1,8 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -12,7 +10,9 @@ import { cfgCompactionAutoContinue } from "@oh-my-pi/pi-coding-agent/session/con
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 const CALL_ID = "toolu_running_wait";
 
@@ -32,7 +32,7 @@ describe("session transitions while a tool runs", () => {
 
 	/** Start a turn whose only tool call settles when the turn is aborted, like `wait` on a long job. */
 	async function startRunningTool(toolName = "wait") {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic model");
 		const toolStarted = Promise.withResolvers<void>();
 		const waitTool: AgentTool = {

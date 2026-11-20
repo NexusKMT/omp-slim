@@ -1,15 +1,15 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 import { cfgEditMode } from "@oh-my-pi/pi-coding-agent/edit/settings";
 import { cfgBashEnabled } from "@oh-my-pi/pi-coding-agent/exec/settings";
@@ -46,7 +46,7 @@ describe("settings-gated tools in a live session", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings,
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			disableExtensionDiscovery: true,
 			enableMCP: false,
 			enableLsp: false,

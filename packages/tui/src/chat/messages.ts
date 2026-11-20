@@ -1,7 +1,7 @@
+import type { BranchSummaryMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
 import type { AssistantMessage, ImageContent, MessageAttribution, TextContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import type { OutputMeta } from "../tools/output-meta";
-import type { BranchSummaryMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
 
 declare module "@oh-my-pi/pi-agent-core" {
 	interface CustomAgentMessages {
@@ -23,10 +23,6 @@ export const LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE = "lsp-late-diagnostic";
 export const BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE = "background-tan-dispatch";
 
 export const PREWALK_PLAN_MESSAGE_TYPE = "prewalk-plan";
-
-/** Custom message type for the transient Vibe mode directive. */
-export const VIBE_MODE_CONTEXT_MESSAGE_TYPE = "vibe-mode-context";
-
 /** Fallback type for extension-injected messages that omit a custom type. */
 export const DEFAULT_CUSTOM_MESSAGE_TYPE = "custom-message";
 
@@ -279,28 +275,6 @@ export function isUserInvokedSkillPrompt(message: CustomMessage): boolean {
  */
 export function isUserTurnInitiator(message: CustomMessage): boolean {
 	return isUserInvokedSkillPrompt(message);
-}
-
-/** Advisor note severities, weakest first; ranks severity thresholds such as `advisor.continueSeverity`. */
-export const ADVISOR_SEVERITIES = ["nit", "concern", "blocker"] as const;
-
-export type AdvisorSeverity = (typeof ADVISOR_SEVERITIES)[number];
-
-/** One queued advice note. */
-export interface AdvisorNote {
-	note: string;
-	severity?: AdvisorSeverity;
-	/** Which configured advisor produced this note (omitted for the default advisor). */
-	advisor?: string;
-	/** Primary turns completed when note was emitted. */
-	turn?: number;
-	/** Primary turns elapsed before merged-batch delivery. */
-	turnsAgo?: number;
-}
-
-/** Details payload on the batched `advisor` custom message rendered in the transcript. */
-export interface AdvisorMessageDetails {
-	notes: AdvisorNote[];
 }
 
 /** Custom message type for supervised process completions. */

@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "bun:test";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext, SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { describe, expect, it, vi } from "bun:test";
 
 type Attachments = Pick<SubmittedUserInput, "images" | "imageLinks">;
 
@@ -10,7 +10,6 @@ function createHarness(
 ) {
 	const oldImage: ImageContent = { type: "image", data: "b2xk", mimeType: "image/png" };
 	const handlePlanModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
-	const handleVibeModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
 	const handleGoalModeCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
 	const handleGuidedGoalCommand = vi.fn(async (_prompt?: string, _input?: Attachments) => true);
 	let editorText = "";
@@ -41,7 +40,6 @@ function createHarness(
 		editor,
 		planModeEnabled: false,
 		planModePaused: false,
-		vibeModeEnabled: false,
 		goalModeEnabled: false,
 		goalModePaused: false,
 		skillCommands: new Map(),
@@ -70,7 +68,6 @@ function createHarness(
 		showWarning: vi.fn(),
 		showError,
 		handlePlanModeCommand,
-		handleVibeModeCommand,
 		handleGoalModeCommand,
 		handleGuidedGoalCommand,
 	} as unknown as InteractiveModeContext;
@@ -80,7 +77,6 @@ function createHarness(
 		editor,
 		showError,
 		handlePlanModeCommand,
-		handleVibeModeCommand,
 		handleGoalModeCommand,
 		handleGuidedGoalCommand,
 	};
@@ -113,9 +109,9 @@ describe("mode command attachments", () => {
 	it("preserves source links when an extension leaves attachments unchanged", async () => {
 		const harness = createHarness({});
 
-		await harness.editor.onSubmit?.("/vibe inspect this [Image #1]");
+		await harness.editor.onSubmit?.("/plan inspect this [Image #1]");
 
-		expect(harness.handleVibeModeCommand).toHaveBeenCalledWith(
+		expect(harness.handlePlanModeCommand).toHaveBeenCalledWith(
 			"inspect this [Image #1]",
 			expect.objectContaining({ imageLinks: ["file:///old.png"] }),
 		);
@@ -184,7 +180,6 @@ describe("mode command attachments", () => {
 
 	it.each([
 		["/plan", "handlePlanModeCommand"],
-		["/vibe", "handleVibeModeCommand"],
 		["/goal", "handleGoalModeCommand"],
 		["/guided-goal", "handleGuidedGoalCommand"],
 	] as const)("restores a failed %s beside a later draft, remapping its image markers", async (command, handler) => {

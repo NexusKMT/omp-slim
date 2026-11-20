@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { generateTaskLabel, labelEchoesHandle } from "@oh-my-pi/pi-coding-agent/task/label";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 function getModelOrThrow(id: string): Model<Api> {
-	const model = getBundledModel("anthropic", id);
+	const model = createTestModel({ provider: "anthropic", id: id });
 	if (!model) throw new Error(`Expected model ${id}`);
 	return model;
 }

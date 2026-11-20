@@ -1,15 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
-import { cfgAsyncEnabled, cfgToolsXdev } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import { cfgGoalEnabled } from "@oh-my-pi/pi-coding-agent/goals/settings";
+import { cfgAsyncEnabled, cfgToolsXdev } from "@oh-my-pi/pi-coding-agent/tools/settings";
 
 describe("goal tool registration when goal mode is enabled at runtime", () => {
 	let tempDir: TempDir;
@@ -44,7 +44,7 @@ describe("goal tool registration when goal mode is enabled at runtime", () => {
 			authStorage,
 			modelRegistry,
 			settings,
-			model: getBundledModel("anthropic", "claude-sonnet-4-5"),
+			model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

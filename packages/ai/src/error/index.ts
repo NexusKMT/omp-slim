@@ -1,7 +1,6 @@
 export * from "./abort";
 export * from "./auth";
 export * from "./auth-classify";
-export * from "./aws";
 export * from "./body-error";
 export * from "./classes";
 export * from "./finalize";

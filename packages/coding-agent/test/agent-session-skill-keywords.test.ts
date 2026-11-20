@@ -1,9 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { renderWorkflowNotice } from "@oh-my-pi/pi-coding-agent/modes/magic-keywords";
@@ -16,7 +13,10 @@ import {
 } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 type ObservedSkillTurn = {
 	texts: string[];
@@ -53,7 +53,7 @@ describe("AgentSession skill prompt keyword steering", () => {
 		authStorage = await AuthStorage.create(":memory:");
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 
 		const agent = new Agent({

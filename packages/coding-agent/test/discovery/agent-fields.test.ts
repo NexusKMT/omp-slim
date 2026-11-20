@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test";
 import { Effort } from "@oh-my-pi/pi-ai";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { parseAgentFields } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { resolveBuiltinToolPlan, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { AUTO_THINKING } from "@oh-my-pi/pi-tui/thinking";
+import { describe, expect, test } from "bun:test";
 
 describe("parseAgentFields", () => {
 	test("rejects the reserved `main` and `sub` agent definition names", () => {
@@ -197,22 +197,5 @@ describe("parseAgentFields", () => {
 
 	test("returns undefined readSummarize when field absent", () => {
 		expect(parseAgentFields({ name: "scout", description: "desc" })?.readSummarize).toBeUndefined();
-	});
-	test("parses advisor from boolean frontmatter and boolean strings", () => {
-		expect(parseAgentFields({ name: "worker", description: "desc", advisor: true })?.advisor).toBe(true);
-		expect(parseAgentFields({ name: "worker", description: "desc", advisor: false })?.advisor).toBe(false);
-		expect(parseAgentFields({ name: "worker", description: "desc", advisor: "true" })?.advisor).toBe(true);
-		expect(parseAgentFields({ name: "worker", description: "desc", advisor: "false" })?.advisor).toBe(false);
-	});
-
-	test("parses advisor model pattern strings and ignores empty/absent values", () => {
-		expect(parseAgentFields({ name: "worker", description: "desc", advisor: " moonshot/k3 " })?.advisor).toBe(
-			"moonshot/k3",
-		);
-		expect(parseAgentFields({ name: "worker", description: "desc", advisor: "@smol:high" })?.advisor).toBe(
-			"@smol:high",
-		);
-		expect(parseAgentFields({ name: "worker", description: "desc", advisor: "  " })?.advisor).toBeUndefined();
-		expect(parseAgentFields({ name: "worker", description: "desc" })?.advisor).toBeUndefined();
 	});
 });

@@ -1,8 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { ServiceTierByFamily } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import {
 	resolveAgentServiceTierOverride,
 	validateAgentServiceTierOverrides,
@@ -11,12 +7,16 @@ import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
+import { createTestModel } from "./helpers/test-model";
 
 import { cfgTierOpenai, cfgTierSubagent } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 function requiredBundledModel(provider: "openai-codex" | "anthropic" | "google", id: string) {
-	const model = getBundledModel(provider, id);
+	const model = createTestModel({ provider: provider, id: id });
 	if (!model) throw new Error(`Expected bundled model ${provider}/${id}`);
 	return model;
 }

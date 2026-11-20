@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, it } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { beforeAll, describe, expect, it } from "bun:test";
 import type { SegmentContext } from "../src/status-line/segments";
 import { renderSegment } from "../src/status-line/segments";
 import { initTheme, theme } from "../src/theme";
@@ -8,18 +8,13 @@ beforeAll(async () => {
 	await initTheme();
 });
 
-function createModelContext(advisorActive: boolean): SegmentContext {
+function createModelContext(): SegmentContext {
 	return {
 		session: {
 			state: { model: { id: "test-model", name: "Test Model" } },
 			isFastModeActive: () => false,
 			isAutoThinking: false,
 			autoResolvedThinkingLevel: () => undefined,
-			isAdvisorActive: () => advisorActive,
-			getAdvisorStatusOverview: () => ({
-				configured: advisorActive,
-				advisors: advisorActive ? [{ name: "default", status: "running", yielded: false }] : [],
-			}),
 		} as unknown as SegmentContext["session"],
 		width: 120,
 		compactThinkingLevel: false,
@@ -27,7 +22,6 @@ function createModelContext(advisorActive: boolean): SegmentContext {
 		planMode: null,
 		loopMode: null,
 		goalMode: null,
-		vibeMode: null,
 		vim: null,
 		usageStats: {
 			input: 0,
@@ -57,74 +51,10 @@ function createModelContext(advisorActive: boolean): SegmentContext {
 	};
 }
 
-describe("status line model segment advisor badge", () => {
-	it("appends a success-colored advisor symbol when all advisors run", () => {
-		const rendered = renderSegment("model", createModelContext(true));
-		expect(rendered.content).toContain("Test Model");
-		expect(rendered.content).toContain(theme.fg("success", ` ${theme.icon.advisor}`));
-	});
-
-	it("colors the badge by the worst roster status", () => {
-		const ctx = createModelContext(true);
-		ctx.session.getAdvisorStatusOverview = () => ({
-			configured: true,
-			advisors: [
-				{ name: "a", status: "running", yielded: false },
-				{ name: "b", status: "quota_exhausted", yielded: false },
-			],
-		});
-		expect(renderSegment("model", ctx).content).toContain(theme.fg("warning", ` ${theme.icon.advisor}`));
-		ctx.session.getAdvisorStatusOverview = () => ({
-			configured: true,
-			advisors: [
-				{ name: "a", status: "error", yielded: false },
-				{ name: "b", status: "quota_exhausted", yielded: false },
-			],
-		});
-		expect(renderSegment("model", ctx).content).toContain(theme.fg("error", ` ${theme.icon.advisor}`));
-	});
-	it("closes the eye once every advisor has yielded its review", () => {
-		const ctx = createModelContext(true);
-		ctx.session.getAdvisorStatusOverview = () => ({
-			configured: true,
-			advisors: [{ name: "default", status: "running", yielded: true }],
-		});
-		const rendered = renderSegment("model", ctx).content;
-		expect(rendered).toContain(theme.fg("success", ` ${theme.icon.advisorClosed}`));
-		// ASCII mode resolves both icons to `(adv)`, so absence is only provable
-		// when the two tokens differ.
-		if (theme.icon.advisorClosed !== theme.icon.advisor) {
-			expect(rendered).not.toContain(theme.icon.advisor);
-		}
-	});
-
-	it("keeps the eye open while any advisor may still comment", () => {
-		const ctx = createModelContext(true);
-		ctx.session.getAdvisorStatusOverview = () => ({
-			configured: true,
-			advisors: [
-				{ name: "a", status: "running", yielded: true },
-				{ name: "b", status: "running", yielded: false },
-			],
-		});
-		const rendered = renderSegment("model", ctx).content;
-		expect(rendered).toContain(theme.fg("success", ` ${theme.icon.advisor}`));
-		if (theme.icon.advisorClosed !== theme.icon.advisor) {
-			expect(rendered).not.toContain(theme.icon.advisorClosed);
-		}
-	});
-
-	it("omits the badge when the advisor is inactive", () => {
-		const rendered = renderSegment("model", createModelContext(false));
-		expect(rendered.content).toContain("Test Model");
-		expect(rendered.content).not.toContain(theme.icon.advisor);
-	});
-});
-
 describe("status line model segment compact thinking level", () => {
 	function createThinkingContext(compactThinkingLevel: boolean): SegmentContext {
 		return {
-			...createModelContext(false),
+			...createModelContext(),
 			compactThinkingLevel,
 			session: {
 				state: {
@@ -134,8 +64,6 @@ describe("status line model segment compact thinking level", () => {
 				isFastModeActive: () => false,
 				isAutoThinking: false,
 				autoResolvedThinkingLevel: () => undefined,
-				isAdvisorActive: () => false,
-				getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
 			} as unknown as SegmentContext["session"],
 		};
 	}

@@ -1,19 +1,19 @@
 // Tests #emit listener isolation in agent.ts (Agent) and agent-session.ts (AgentSession):
 // a throwing or rejecting listener must not prevent later listeners from receiving the event,
 // and an async listener's rejection must not become an unhandled rejection.
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { Agent, type AgentEvent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 function makeEvent(): AgentEvent {
 	return { type: "tool_execution_start", toolCallId: "probe-1", toolName: "probe", args: {} };
@@ -71,7 +71,7 @@ describe("#emit listener isolation", () => {
 		beforeEach(async () => {
 			tempDir = path.join(os.tmpdir(), `pi-emit-iso-${Snowflake.next()}`);
 			fs.mkdirSync(tempDir, { recursive: true });
-			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+			const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 			if (!model) throw new Error("Test model not found");
 			authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
 			authStorage.keys.setRuntime("anthropic", "test-key");

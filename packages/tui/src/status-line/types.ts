@@ -1,8 +1,8 @@
 import type { TspSpan, TspTone } from "@oh-my-pi/pi-wire";
 import type { NativeNode, NativeUiEvent } from "../native/node";
-import type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle } from "./schema";
 import type { ActiveRepoContext, StatusLineSession } from "./host";
 import type { LoopConditionConfig, LoopLimitRuntime } from "./loop";
+import type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle } from "./schema";
 
 export type { ContextLineMode, StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle };
 
@@ -88,9 +88,6 @@ export interface SegmentContext {
 	goalMode: {
 		enabled: boolean;
 		paused: boolean;
-	} | null;
-	vibeMode: {
-		enabled: boolean;
 	} | null;
 	/** Modal editing state, or null when `tui.vimMode` is off. */
 	vim: {
@@ -199,7 +196,7 @@ export interface ComposerFacts {
 	 * the share as `label` and the window as `total`.
 	 */
 	readonly context: NativeNode;
-	/** The model chip's label: name plus the advisor, fast-mode and slow-mode marks. */
+
 	readonly model: SegmentView;
 	/**
 	 * `status` (role `omp.composer.extras`, `grow: 1`) of the other configured

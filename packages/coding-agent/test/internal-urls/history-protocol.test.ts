@@ -8,13 +8,8 @@
  *   the JSONL session file.
  * - An unknown id fails with an error listing the known ids.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
-import { getInternalUrlSuggestions } from "@oh-my-pi/pi-tui/prompt/internal-url-autocomplete";
 import {
 	formatCurrentBranchFullHistory,
 	HistoryProtocolHandler,
@@ -29,7 +24,12 @@ import { CURRENT_SESSION_VERSION, type SessionEntry } from "@oh-my-pi/pi-coding-
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
+import { getInternalUrlSuggestions } from "@oh-my-pi/pi-tui/prompt/internal-url-autocomplete";
 import { removeWithRetries, TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import { cfgCompactionExperimentalContextManagement } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 
@@ -529,70 +529,6 @@ describe("history:// protocol", () => {
 		expect(resource.content).toMatch(/Started \d+s ago\./);
 		expect(resource.notes).toContain("Source: agent registry (no transcript yet)");
 	});
-
-	it("hides advisor transcripts from the index and direct lookup", async () => {
-		AgentRegistry.global().register({
-			id: "HubAgent",
-			displayName: "task",
-			kind: "sub",
-			session: fakeLiveSession([]),
-			status: "idle",
-		});
-		AgentRegistry.global().register({
-			id: "Main/advisor",
-			displayName: "advisor",
-			kind: "advisor",
-			session: fakeLiveSession([{ role: "user", content: "should stay hidden", timestamp: 1 }]),
-			status: "parked",
-		});
-		AgentRegistry.global().register({
-			id: "AdvisorProbe",
-			displayName: "advisor",
-			kind: "advisor",
-			session: fakeLiveSession([{ role: "user", content: "should stay hidden", timestamp: 1 }]),
-			status: "parked",
-		});
-
-		// Index lists the subagent but never the advisor.
-		const index = await InternalUrlRouter.instance().resolve("history://");
-		expect(index.content).toContain("HubAgent");
-		expect(index.content).not.toContain("advisor");
-
-		// Direct lookup of an advisor-kind ref is reported as unknown — the driving
-		// agent must not be able to read it via history://.
-		const error = await InternalUrlRouter.instance()
-			.resolve("history://AdvisorProbe")
-			.then(
-				() => null,
-				err => err as Error,
-			);
-		expect(error).toBeInstanceOf(Error);
-		expect(error?.message).toContain("Unknown agent");
-	});
-
-	it("omits advisor refs from history:// completions", async () => {
-		AgentRegistry.global().register({
-			id: "HubAgent",
-			displayName: "task",
-			kind: "sub",
-			session: fakeLiveSession([]),
-			status: "idle",
-		});
-		AgentRegistry.global().register({
-			id: "AdvisorProbe",
-			displayName: "advisor",
-			kind: "advisor",
-			session: null,
-			sessionFile: "/tmp/x/__advisor.jsonl",
-			status: "parked",
-		});
-
-		const completions = await new HistoryProtocolHandler().complete();
-		const values = completions.map(c => c.value);
-		expect(values).toContain("HubAgent");
-		expect(values).not.toContain("AdvisorProbe");
-	});
-
 	it("history://<id> serves an unregistered subagent's transcript from disk", async () => {
 		await withTempDir(async dir => {
 			const sessionFile = path.join(dir, "session.jsonl");
@@ -642,37 +578,6 @@ describe("history:// protocol", () => {
 			expect(resource.content).toContain("# AuthLoader (on disk)");
 		});
 	});
-
-	it("bare history:// and completions include on-disk agents but never advisor transcripts", async () => {
-		await withTempDir(async dir => {
-			const sessionFile = path.join(dir, "session.jsonl");
-			const artifactsDir = sessionFile.slice(0, -6);
-			await fs.mkdir(artifactsDir, { recursive: true });
-			await Bun.write(path.join(artifactsDir, "Sub1.jsonl"), sessionFixtureJsonl());
-			await Bun.write(path.join(artifactsDir, "__advisor.jsonl"), sessionFixtureJsonl());
-			AgentRegistry.global().register({
-				id: "Main",
-				displayName: "main",
-				kind: "main",
-				session: {
-					messages: [],
-					sessionManager: { getArtifactsDir: () => artifactsDir },
-				} as unknown as AgentSession,
-				sessionFile,
-				status: "idle",
-			});
-
-			const index = await InternalUrlRouter.instance().resolve("history://");
-			expect(index.content).toContain("| Sub1 | on disk |");
-			expect(index.content).not.toContain("__advisor");
-
-			const completions = await new HistoryProtocolHandler().complete();
-			const values = completions.map(c => c.value);
-			expect(values).toContain("Sub1");
-			expect(values).not.toContain("__advisor");
-		});
-	});
-
 	it("resolves a nested child transcript one level deeper on disk", async () => {
 		await withTempDir(async dir => {
 			const sessionFile = path.join(dir, "session.jsonl");

@@ -1,13 +1,12 @@
-import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import type { Tool } from "@oh-my-pi/pi-ai/types";
 import {
-	adaptSchemaForStrict,
 	normalizeEmptySchemas,
 	stripSchemaDescriptions,
 	stripToolDescriptions,
 	toolWireSchema,
 } from "@oh-my-pi/pi-ai/utils/schema";
+import { describe, expect, it } from "bun:test";
 
 // ---------------------------------------------------------------------------
 // normalizeEmptySchemas — provider-agnostic post-pipeline normalization
@@ -220,21 +219,6 @@ describe("arkToWireSchema — undefined-union branch pruning", () => {
 		const xs = (wire.properties as Record<string, unknown>).xs as Record<string, unknown>;
 		expect(xs.items).toEqual({ type: "string" });
 		expect(hasPermissiveBranch(wire)).toBe(false);
-	});
-
-	it("stays strict-mode-representable end to end (Codex acceptance)", () => {
-		const wire = toolWireSchema(
-			arkTool(
-				type({
-					agent: "string",
-					context: "string",
-					tasks: type({ id: "string | undefined", assignment: "string" }).array(),
-				}),
-			),
-		);
-		const adapted = adaptSchemaForStrict(wire, true);
-		expect(adapted.strict).toBe(true);
-		expect(hasPermissiveBranch(adapted.schema)).toBe(false);
 	});
 });
 

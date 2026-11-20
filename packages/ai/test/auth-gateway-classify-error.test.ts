@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
 import { classifyGatewayError } from "@oh-my-pi/pi-ai/error";
+import { describe, expect, it } from "bun:test";
 
 describe("auth-gateway classifyGatewayError", () => {
 	it("honours an explicit numeric `status` property on the error", () => {
@@ -59,22 +59,6 @@ describe("auth-gateway classifyGatewayError", () => {
 		expect(c.status).toBe(429);
 		expect(c.type).toBe("rate_limit_error");
 	});
-
-	it("classifies Codex 'You have hit your ChatGPT usage limit' as 429", () => {
-		// Verbatim shape Codex returns from the `usage_limit_reached` branch
-		// in `parseCodexError`. No embedded `HTTP NNN`/`(NNN)`/`status NNN`
-		// token, no `rate limit`/`too many requests` wording — only the
-		// gateway's `isUsageLimitError` branch catches this. Previously it
-		// fell through to the default 502/upstream_error, which is why the
-		// `lg` retry loop kept looping instead of switching to another
-		// credential.
-		const c = classifyGatewayError(
-			new Error("You have hit your ChatGPT usage limit (pro plan). Try again in ~158 min."),
-		);
-		expect(c.status).toBe(429);
-		expect(c.type).toBe("rate_limit_error");
-	});
-
 	it("classifies generic 'usage_limit_reached' code text as 429", () => {
 		const c = classifyGatewayError(new Error('{"code":"usage_limit_reached","message":"…"}'));
 		expect(c.status).toBe(429);

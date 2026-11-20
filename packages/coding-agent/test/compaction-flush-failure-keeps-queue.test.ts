@@ -5,10 +5,8 @@
  * arrived before the flush, while it was delivering, or after it finished; they are never
  * discarded with the failed batch.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
@@ -19,7 +17,9 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { createInteractiveModeContext } from "./helpers/interactive-mode-context";
+import { createTestModel } from "./helpers/test-model";
 
 describe("flushCompactionQueue failure", () => {
 	let tempDir: TempDir;
@@ -58,7 +58,11 @@ describe("flushCompactionQueue failure", () => {
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			convertToLlm,
-			initialState: { model: getBundledModel("anthropic", "claude-sonnet-4-5")!, systemPrompt: ["Test"], tools: [] },
+			initialState: {
+				model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+				systemPrompt: ["Test"],
+				tools: [],
+			},
 			streamFn: mock.stream,
 		});
 		const authStorage = await AuthStorage.create(":memory:");

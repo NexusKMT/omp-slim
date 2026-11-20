@@ -1,5 +1,3 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type {
 	ImageContent,
 	Message,
@@ -8,6 +6,8 @@ import type {
 	TextContent,
 	Usage,
 } from "@oh-my-pi/pi-ai";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import { isTaskToolDetails, type StructuredSubagentSchemaMode } from "@oh-my-pi/pi-tui/tools/task";
 import {
 	directoryIsEnterable,
 	directoryIsMissing,
@@ -24,14 +24,16 @@ import {
 	stringifyJson,
 	toError,
 } from "@oh-my-pi/pi-utils";
-import { isTaskToolDetails, type StructuredSubagentSchemaMode } from "@oh-my-pi/pi-tui/tools/task";
-import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import * as snapcompact from "@oh-my-pi/snapcompact";
-import { moveFileAcrossDevices } from "../utils/atomic-file";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { hasAnnotationDraftsSync } from "../extensibility/custom-commands/bundled/annotate/draft-store";
+import type { WorkPoolYieldItem } from "../task/workpool-yield";
+import { moveFileAcrossDevices } from "../utils/atomic-file";
 import { ArtifactManager, type ArtifactManagerApi } from "./artifacts";
 import { type BlobPutOptions, type BlobPutResult, BlobStore, lazyImageDataSync } from "./blob-store";
 import type { CompactionMethod } from "./compaction-methods";
+import { createInterruptedToolResults, sessionExitFollowsLastMessage } from "./exit-diagnostics";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -42,12 +44,11 @@ import {
 	sanitizeRehydratedOpenAIResponsesAssistantMessage,
 	stripInternalDetailsFields,
 } from "./messages";
-import type { WorkPoolYieldItem } from "../task/workpool-yield";
-import { createInterruptedToolResults, sessionExitFollowsLastMessage } from "./exit-diagnostics";
 import type { RetryFallbackRole } from "./retry-fallback-chains";
+import { currentRuntimeIdentity, type RuntimeIdentity } from "./runtime-identity";
 import {
-	type BuildSessionContextOptions,
 	buildSessionContext,
+	type BuildSessionContextOptions,
 	type SessionContext,
 	snapcompactHistoryBlockOptions,
 } from "./session-context";
@@ -59,18 +60,18 @@ import {
 	type CustomEntry,
 	type CustomMessageEntry,
 	EPHEMERAL_MODEL_CHANGE_ROLE,
-	PREWALK_MODEL_CHANGE_ROLE,
 	type FileEntry,
 	type LabelEntry,
+	lastSelfSelectedLeafId,
 	type ModeChangeEntry,
 	type ModelChangeEntry,
 	type ModelUsageEntry,
-	lastSelfSelectedLeafId,
 	type NewSessionOptions,
+	PREWALK_MODEL_CHANGE_ROLE,
 	type ResetBoundaryEntry,
 	type ServiceTierChangeEntry,
-	sessionEntryLeafId,
 	type SessionEntry,
+	sessionEntryLeafId,
 	type SessionHeader,
 	type SessionInitEntry,
 	type SessionMessageEntry,
@@ -82,7 +83,7 @@ import {
 	type TtsrInjectionEntry,
 	type UsageStatistics,
 } from "./session-entries";
-import { currentRuntimeIdentity, type RuntimeIdentity } from "./runtime-identity";
+import { recordSessionTitle } from "./session-index";
 import {
 	findMostRecentNonEmptySession,
 	findRecentSessionContinuation,
@@ -126,13 +127,12 @@ import {
 	type SessionStorageWriter,
 	SessionWriteConflictError,
 } from "./session-storage";
-import { type SessionTitleUpdate, serializeTitleSlot } from "./session-title-slot";
+import { serializeTitleSlot, type SessionTitleUpdate } from "./session-title-slot";
 import {
 	additionalWorkspaceDirectories,
 	normalizeSessionWorkspace,
 	normalizeWorkspaceDirectory,
 } from "./session-workspace";
-import { recordSessionTitle } from "./session-index";
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
@@ -3694,7 +3694,6 @@ export class SessionManager {
 		restrictToolNames?: boolean;
 		spawns?: string;
 		readSummarize?: boolean;
-		advisor?: string;
 		compactionThreshold?: { thresholdPercent: number; thresholdTokens: number };
 		isolated?: boolean;
 		workPoolYieldItems?: WorkPoolYieldItem[];
@@ -4765,7 +4764,6 @@ export interface PersistedSessionInit {
 	restrictToolNames?: boolean;
 	spawns?: string;
 	readSummarize?: boolean;
-	advisor?: string;
 	compactionThreshold?: { thresholdPercent: number; thresholdTokens: number };
 	isolated?: boolean;
 	workPoolYieldItems?: WorkPoolYieldItem[];
@@ -4797,7 +4795,6 @@ export function extractSessionInit(entries: readonly FileEntry[]): PersistedSess
 			restrictToolNames: entry.restrictToolNames,
 			readSummarize: entry.readSummarize,
 			spawns: entry.spawns,
-			advisor: entry.advisor,
 			isolated: entry.isolated,
 			...(entry.compactionThreshold !== undefined ? { compactionThreshold: entry.compactionThreshold } : undefined),
 			...(entry.workPoolYieldItems !== undefined ? { workPoolYieldItems: entry.workPoolYieldItems } : undefined),

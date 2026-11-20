@@ -98,8 +98,6 @@ export type SymbolKey =
 	| "icon.tokens"
 	| "icon.context"
 	| "icon.cost"
-	| "icon.advisor"
-	| "icon.advisorClosed"
 	| "icon.time"
 	| "icon.omp"
 	| "icon.ghost"
@@ -205,9 +203,6 @@ export type SymbolKey =
 	| "md.hrChar"
 	| "md.bullet"
 	| "md.colorSwatch"
-	// Advisor note rail
-	| "advisor.rail"
-	// Skill callout rail (user turn that opened with a skill chip)
 	| "skill.rail"
 	// /btw steering-prompt rail (the <inject> block a side answer drafted)
 	| "btw.rail"
@@ -376,7 +371,6 @@ export type SlashCommandIconName =
 	| "tree"
 	| "signIn"
 	| "signOut"
-	| "advisor"
 	| "host"
 	| "package"
 	| "fast"
@@ -478,8 +472,6 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"icon.tokens": "🪙",
 	"icon.context": "◫",
 	"icon.cost": "💲",
-	"icon.advisor": "👁",
-	"icon.advisorClosed": "🙈",
 	"icon.time": "⏱",
 	"icon.omp": "π",
 	"icon.ghost": "👻",
@@ -586,8 +578,7 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"md.hrChar": "─",
 	"md.bullet": "•",
 	"md.colorSwatch": "■",
-	// Advisor note rail (heavier than md.quoteBorder so notes read as a distinct voice)
-	"advisor.rail": "▎",
+
 	"skill.rail": "▎",
 	"btw.rail": "▎",
 	// Language/file icons (emoji-centric, no Nerd Font required)
@@ -856,9 +847,7 @@ const NERD_SYMBOLS: SymbolMap = {
 	"icon.cost": "\uf155",
 	// pick: 󰙺 (nf-md-currency_usd_off)
 	// pick:  (nf-cod-eye)
-	"icon.advisor": "\uea70",
 	// pick:  (nf-oct-eye_closed)
-	"icon.advisorClosed": "\ueae7",
 	// pick:  | alt: ◷ ◴
 	"icon.time": "\uf017",
 	// pick: 󰵗 (nf-md-pi) | alt:  π ∏ ∑
@@ -954,8 +943,7 @@ const NERD_SYMBOLS: SymbolMap = {
 	"cmd.swap": "\u{f04e1}",
 	// pick: 󰁌 (nf-md-arrow_expand_all) | alt: 󰘖 (nf-md-arrow_expand)
 	"cmd.expand": "\u{f004c}",
-	// pick:  (nf-fa-desktop) | alt:  (nf-oct-device_desktop)
-	// pick:  (nf-fa-eye) | alt:  (nf-cod-eye, matches icon.advisor)
+
 	"cmd.eye": "\uf06e",
 	// pick:  (nf-fa-tasks) | alt:  (nf-cod-checklist)
 	"cmd.todo": "\uf0ae",
@@ -1059,7 +1047,6 @@ const NERD_SYMBOLS: SymbolMap = {
 	// pick: ■ | alt:  (U+F096)
 	"md.colorSwatch": "■",
 	// pick: ▎ | alt: ┃ │
-	"advisor.rail": "▎",
 	"skill.rail": "▎",
 	"btw.rail": "▎",
 	// Language icons (nerd font devicons)
@@ -1267,8 +1254,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"icon.tokens": "tok:",
 	"icon.context": "ctx:",
 	"icon.cost": "$",
-	"icon.advisor": "(adv)",
-	"icon.advisorClosed": "(adv)",
 	"icon.time": "t:",
 	"icon.omp": "pi",
 	"icon.ghost": "@",
@@ -1371,7 +1356,6 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"md.hrChar": "-",
 	"md.bullet": "*",
 	"md.colorSwatch": "[]",
-	"advisor.rail": "|",
 	"skill.rail": "|",
 	"btw.rail": "|",
 	// Language icons (ASCII uses abbreviations)

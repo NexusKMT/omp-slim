@@ -1,12 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import * as path from "node:path";
-import { setImmediate } from "node:timers/promises";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import { AsyncJobManager, type AsyncJobManagerApi } from "@oh-my-pi/pi-coding-agent/async";
 import type { AssistantMessage, Context, ImageContent } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { AsyncJobManager, type AsyncJobManagerApi } from "@oh-my-pi/pi-coding-agent/async";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -15,15 +12,17 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import { AgentSession, PromptDroppedError } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { IrcBridge, type IrcBridgeHost } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
-import { convertToLlm, type CustomMessage, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { SessionAdvisors } from "@oh-my-pi/pi-coding-agent/session/session-advisors";
-import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
+import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { WaitTool } from "@oh-my-pi/pi-coding-agent/tools/wait";
+import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import * as imageLoading from "@oh-my-pi/pi-coding-agent/utils/image-loading";
+import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import { TempDir, untilAborted } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import * as path from "node:path";
+import { setImmediate } from "node:timers/promises";
 
 const zeroUsage = {
 	input: 0,
@@ -117,7 +116,7 @@ describe("AgentSession aside delivery", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -165,7 +164,7 @@ describe("AgentSession aside delivery", () => {
 				"todo.enabled": false,
 				"launch.enabled": false,
 			});
-			settings.setModelRole("default", `${model.provider}/${model.id}`);
+			settings.setModel(`${model.provider}/${model.id}`);
 			const wait = new WaitTool({
 				cwd: tempDir.path(),
 				settings,
@@ -319,7 +318,7 @@ describe("AgentSession aside delivery", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -372,7 +371,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -438,7 +437,7 @@ describe("AgentSession aside delivery", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -488,7 +487,7 @@ describe("AgentSession aside delivery", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -544,7 +543,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -601,7 +600,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.create(tempDir.path(), sessionDir),
@@ -704,7 +703,7 @@ describe("AgentSession aside delivery", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -772,7 +771,7 @@ describe("AgentSession aside delivery", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -849,7 +848,7 @@ describe("AgentSession aside delivery", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -915,7 +914,7 @@ describe("AgentSession aside delivery", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -1173,7 +1172,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager,
@@ -1255,7 +1254,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: () => new AssistantMessageEventStream(),
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -1304,7 +1303,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -1376,7 +1375,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),
@@ -1387,17 +1386,14 @@ describe("AgentSession aside delivery", () => {
 
 		const run = session.prompt("go");
 		await started.promise;
-
-		const advisorsGateReached = Promise.withResolvers<void>();
-		const releaseAdvisorsGate = Promise.withResolvers<void>();
-		const originalDrainAndDetachRecorders = SessionAdvisors.prototype.drainAndDetachRecorders;
-		const advisorsSpy = spyOn(SessionAdvisors.prototype, "drainAndDetachRecorders").mockImplementation(
-			async function (this: SessionAdvisors) {
-				advisorsGateReached.resolve();
-				await releaseAdvisorsGate.promise;
-				return originalDrainAndDetachRecorders.call(this);
-			},
-		);
+		const abortGateReached = Promise.withResolvers<void>();
+		const releaseAbortGate = Promise.withResolvers<void>();
+		const originalAbort = session.abort.bind(session);
+		const abortSpy = spyOn(session, "abort").mockImplementation(async (...args) => {
+			await originalAbort(...args);
+			abortGateReached.resolve();
+			await releaseAbortGate.promise;
+		});
 		const normalizeStarted = Promise.withResolvers<void>();
 		const releaseNormalize = Promise.withResolvers<void>();
 		const normalizeSpy = spyOn(imageLoading, "normalizeModelContextImages").mockImplementation(async images => {
@@ -1412,7 +1408,7 @@ describe("AgentSession aside delivery", () => {
 
 			const newSessionPromise = session.newSession();
 			// #disconnectFromAgent()/abort() have run; agent.reset() and the generation bump have not.
-			await advisorsGateReached.promise;
+			await abortGateReached.promise;
 
 			releaseNormalize.resolve();
 			await asidePromise;
@@ -1422,7 +1418,7 @@ describe("AgentSession aside delivery", () => {
 
 			expect(callCount).toBe(1);
 
-			releaseAdvisorsGate.resolve();
+			releaseAbortGate.resolve();
 			expect(await newSessionPromise).toBe(true);
 			await run.catch(() => {});
 			await session.waitForIdle();
@@ -1430,7 +1426,7 @@ describe("AgentSession aside delivery", () => {
 			expect(JSON.stringify(session.agent.state.messages)).not.toContain("DISCONNECTED_ASIDE");
 		} finally {
 			normalizeSpy.mockRestore();
-			advisorsSpy.mockRestore();
+			abortSpy.mockRestore();
 		}
 	});
 
@@ -1465,7 +1461,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.create(tempDir.path(), sessionDir),
@@ -1583,7 +1579,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		const manager = new AsyncJobManager({});
 		AsyncJobManager.setInstance(manager);
 		session = new AgentSession({
@@ -1665,7 +1661,7 @@ describe("AgentSession aside delivery", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		const manager = new AsyncJobManager({});
 		AsyncJobManager.setInstance(manager);
 		session = new AgentSession({

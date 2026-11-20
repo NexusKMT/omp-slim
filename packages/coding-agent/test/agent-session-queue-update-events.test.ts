@@ -7,14 +7,9 @@
  * these tests prove the externally observable coalescing contract that signal
  * produces, not the internal wiring.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -22,6 +17,11 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 interface QueueSnapshot {
 	steering: readonly string[];
@@ -54,7 +54,7 @@ describe("AgentSession queue_update events", () => {
 		streamFn: StreamFn = createMockModel({ responses }).stream,
 		options: { tools?: AgentTool[] } = {},
 	) {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const tools = options.tools ?? [];
 		const agent = new Agent({
 			getApiKey: () => "test-key",

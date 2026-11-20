@@ -11,16 +11,15 @@
  */
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
 import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
+import { logger } from "@oh-my-pi/pi-utils";
 import type { EffectiveExtensionRoots } from "../capability/types";
+import type { AgentSessionEvent, AgentSessionEventListener } from "../session/agent-session-events";
 import type {
-	AgentSessionAdvisorOverview,
 	AgentSessionHandle,
 	AgentSessionLoopHandle,
 	AgentSessionManagerHandle,
 } from "../session/agent-session-handle";
-import type { AgentSessionEvent, AgentSessionEventListener } from "../session/agent-session-events";
 import type {
 	AgentSessionDisposeOptions,
 	PromptOptions,
@@ -146,10 +145,6 @@ export class PeerAgentSession implements AgentSessionHandle {
 
 	getSessionStats(): SessionStats {
 		return this.#field("sessionStats");
-	}
-
-	getAdvisorStatusOverview(): AgentSessionAdvisorOverview {
-		return this.#field("advisorOverview");
 	}
 
 	getSessionAgents(): AgentDefinition[] {

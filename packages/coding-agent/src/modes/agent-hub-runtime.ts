@@ -1,9 +1,9 @@
-import * as fs from "node:fs";
 import type { AgentHubDeps } from "@oh-my-pi/pi-tui/overlays/agent-hub";
-import type { AgentRecordLike } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
 import { type AgentCostSnapshot, aggregateCost } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
+import type { AgentRecordLike } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
 import type { AgentTranscriptSource } from "@oh-my-pi/pi-tui/overlays/agent-transcript-viewer";
 import type { ObservableSession, SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+import * as fs from "node:fs";
 import { AgentActivityIndex } from "../activity";
 import type { Settings } from "../config/settings";
 import { IrcBus, type IrcBusApi } from "../irc/bus";
@@ -62,13 +62,6 @@ export function createAgentHubRuntime(
 	};
 }
 
-/**
- * Agent Hub cost total for the main session's subagent tree (descendants
- * included). Excludes the main session's own advisors, which the status line
- * bills separately. Refs with a transcript count only inside `rootSessionFile`'s
- * artifacts tree (the process-global registry keeps earlier sessions' agents);
- * file-less refs count only while this session's observer tracks them.
- */
 export function sumSubagentTreeCost(args: {
 	refs: readonly AgentRef[];
 	observers: SessionObserverRegistry;
@@ -80,7 +73,6 @@ export function sumSubagentTreeCost(args: {
 	const observedById = new Map<string, ObservableSession>();
 	for (const ref of args.refs) {
 		if (ref.id === MAIN_AGENT_ID) continue;
-		if (ref.kind === "advisor" && (ref.parentId ?? MAIN_AGENT_ID) === MAIN_AGENT_ID) continue;
 		const observed = observers.getSession(ref.id);
 		const inTree = ref.sessionFile
 			? rootSessionFile !== undefined && sessionFileBelongsToRoot(ref.sessionFile, rootSessionFile)

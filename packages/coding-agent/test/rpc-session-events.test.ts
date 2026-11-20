@@ -1,11 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEvent, Context, Model } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { MAX_RPC_FRAME_BYTES, RpcFrameEncoder } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
@@ -19,6 +14,11 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 import { makeAssistantMessage } from "./session-manager/helpers";
 
 const reply = { role: "assistant", content: [] } as unknown as AgentMessage;
@@ -354,7 +354,7 @@ describe("delta message updates over a real session run", () => {
 	])(
 		"every streamed message rebuilds from delta frames alone and matches the full-mode message (%s)",
 		async (_name, paced) => {
-			const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+			const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 			let turn = 0;
 			// Mutates one partial message in place and yields between events, like a provider reading a socket.
 			const streamFn = (streamModel: Model, _context: Context) => {

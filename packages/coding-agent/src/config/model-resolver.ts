@@ -1,15 +1,15 @@
 /** Model selection over explicitly configured Chat Completions endpoints. */
+import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai/types";
 import { MAX_THINKING_SUFFIX_OPTIONS, splitThinkingSuffix } from "@oh-my-pi/pi-tui/overlays/model-selector";
-import { type ConfiguredThinkingLevel, concreteThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { ModelRegistry } from "./model-registry";
+import { concreteThinkingLevel, type ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import {
 	DEFAULT_MODEL_ROLE_ALIAS,
 	LEGACY_MODEL_ROLE_ALIAS_PREFIX,
 	MODEL_ROLE_ALIAS_PREFIX,
-	type ModelRoleLookup,
-} from "./model-roles";
+	type ConfiguredModelLookup,
+} from "./legacy-model-selector";
+import type { ModelRegistry } from "./model-registry";
 import { cfgDisabledProviders, cfgEnabledModels, cfgModelProviderOrder } from "./model-settings";
 import type { Settings } from "./settings";
 
@@ -31,7 +31,7 @@ export interface ParsedModelResult {
 	warning: string | undefined;
 	explicitThinkingLevel: boolean;
 }
-export interface ResolvedModelRoleValue extends ParsedModelResult {
+export interface ResolvedModelValue extends ParsedModelResult {
 	matchedPatternIndex?: number;
 }
 
@@ -156,7 +156,7 @@ function modelRoleAliasPrefixLength(value: string): number | undefined {
 	return MODEL_ROLE_ALIAS_PREFIXES.find(prefix => value.startsWith(prefix))?.length;
 }
 
-function getModelRoleAlias(value: string, _settings?: ModelRoleLookup): string | undefined {
+function getModelRoleAlias(value: string, _settings?: ConfiguredModelLookup): string | undefined {
 	const normalized = value.trim();
 	const prefixLength = modelRoleAliasPrefixLength(normalized);
 	if (prefixLength === undefined) return undefined;
@@ -171,29 +171,9 @@ export function normalizeModelPatternList(value: string | string[] | undefined):
 	return patterns.map(pattern => pattern.trim()).filter(Boolean);
 }
 
-/**
- * Extract the first explicit model-role alias from a raw model selection.
- *
- * Only the legacy default aliases are accepted. Retired role names never
- * select a different model.
- */
-export function resolveExplicitModelRole(
-	value: string | string[] | undefined,
-	settings?: ModelRoleLookup,
-): string | undefined {
-	for (const pattern of normalizeModelPatternList(value)) {
-		const prefixLength = modelRoleAliasPrefixLength(pattern);
-		if (prefixLength === undefined) continue;
-		const { base } = splitThinkingSuffix(pattern, prefixLength, MAX_THINKING_SUFFIX_OPTIONS);
-		const role = getModelRoleAlias(base, settings);
-		if (role) return role;
-	}
-	return undefined;
-}
-
 function resolveConfiguredRolePattern(
 	value: string,
-	settings?: ModelRoleLookup,
+	settings?: ConfiguredModelLookup,
 	visited = new Set<string>(),
 ): string[] | undefined {
 	const normalized = value.trim();
@@ -212,7 +192,7 @@ function resolveConfiguredRolePattern(
 	}
 	if (visited.has(role)) return [];
 	visited.add(role);
-	const configured = settings?.getModelRole("default");
+	const configured = settings?.getModel();
 	if (!configured) return [];
 	const patterns = normalizeModelPatternList(configured).flatMap(
 		pattern => resolveConfiguredRolePattern(pattern, settings, visited) ?? [],
@@ -223,10 +203,10 @@ function resolveConfiguredRolePattern(
 /**
  * Expand the legacy default alias to the primary model string.
  */
-export function expandRoleAlias(value: string, settings?: ModelRoleLookup): string {
+export function expandRoleAlias(value: string, settings?: ConfiguredModelLookup): string {
 	const normalized = value.trim();
 	if (normalized === DEFAULT_MODEL_ROLE) {
-		return settings?.getModelRole("default") ?? value;
+		return settings?.getModel() ?? value;
 	}
 
 	const resolved = resolveConfiguredRolePattern(value, settings)?.[0];
@@ -235,35 +215,13 @@ export function expandRoleAlias(value: string, settings?: ModelRoleLookup): stri
 
 export function resolveConfiguredModelPatterns(
 	value: string | string[] | undefined,
-	settings?: ModelRoleLookup,
+	settings?: ConfiguredModelLookup,
 ): string[] {
 	const patterns = normalizeModelPatternList(value);
 	return patterns.flatMap(pattern => {
 		const resolved = resolveConfiguredRolePattern(pattern, settings);
 		return resolved ?? [];
 	});
-}
-export interface AgentAdvisorResolutionOptions {
-	/** `task.agentAdvisor` settings value for this agent: `"on"` or `"off"`; legacy model strings only enable it. */
-	settingsOverride?: string;
-	/** Agent definition `advisor` frontmatter: `true` enables it; legacy model strings only enable it. */
-	agentAdvisor?: boolean | string;
-}
-
-/** Enablement only: advisors inherit their owning session's model. */
-export interface AgentAdvisorSelection {
-	enabled: true;
-}
-
-export function resolveAgentAdvisorSelection(
-	options: AgentAdvisorResolutionOptions,
-): AgentAdvisorSelection | undefined {
-	const configured = options.settingsOverride?.trim().toLowerCase();
-	if (configured === "off" || configured === "false") return undefined;
-	if (configured) return { enabled: true };
-	const advisor = options.agentAdvisor;
-	if (advisor === true || (typeof advisor === "string" && advisor.trim())) return { enabled: true };
-	return undefined;
 }
 
 interface ExplicitThinkingSelectorOptions {
@@ -318,12 +276,12 @@ export function extractExplicitThinkingSelector(
 	return undefined;
 }
 
-export function resolveModelRoleValue(
+export function resolveModelValue(
 	value: string | undefined,
 	available: Model[],
-	options?: { settings?: Settings; roleLookup?: ModelRoleLookup; matchPreferences?: ModelMatchPreferences },
-): ResolvedModelRoleValue {
-	const patterns = resolveConfiguredModelPatterns(value, options?.roleLookup ?? options?.settings);
+	options?: { settings?: Settings; matchPreferences?: ModelMatchPreferences },
+): ResolvedModelValue {
+	const patterns = resolveConfiguredModelPatterns(value, options?.settings);
 	let warning: string | undefined;
 	for (const [matchedPatternIndex, pattern] of patterns.entries()) {
 		const result = parseModelPattern(
@@ -365,7 +323,7 @@ export function resolvePrimaryModelSelection(
 	currentModel?: Model,
 ): { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined {
 	if (currentModel) return { model: currentModel };
-	const resolved = resolveModelRoleValue(settings.getModel(), available, { settings });
+	const resolved = resolveModelValue(settings.getModel(), available, { settings });
 	return resolved.model ? { model: resolved.model, thinkingLevel: resolved.thinkingLevel } : undefined;
 }
 
@@ -449,7 +407,6 @@ export function filterAvailableModelsByEnabledPatterns(
 export interface ResolveCliModelResult {
 	model: Model | undefined;
 	configuredPatterns?: string[];
-	configuredRole?: string;
 	configuredPatternIndex?: number;
 	selector?: string;
 	thinkingLevel?: ConfiguredThinkingLevel;
@@ -504,7 +461,6 @@ export function resolveCliModel(options: {
 				thinkingLevel: resolved.thinkingLevel,
 				configuredPatterns: patterns,
 				configuredPatternIndex,
-				configuredRole: resolveExplicitModelRole(selector, settings),
 				warning: resolved.warning,
 				error: undefined,
 			};

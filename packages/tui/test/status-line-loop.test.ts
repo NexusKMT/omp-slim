@@ -20,7 +20,6 @@ function createContext(loopMode: SegmentContext["loopMode"]): SegmentContext {
 		planMode: null,
 		loopMode,
 		goalMode: null,
-		vibeMode: null,
 		vim: null,
 		usageStats: {
 			input: 0,

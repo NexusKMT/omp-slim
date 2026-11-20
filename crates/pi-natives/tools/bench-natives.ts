@@ -16,15 +16,10 @@ const CASES: Record<string, string> = {
 const ENCODINGS = [
 	Encoding.O200kBase,
 	Encoding.Cl100kBase,
-	Encoding.ClaudeV3,
-	Encoding.ClaudeV47,
-	Encoding.ClaudeV5,
-	Encoding.ClaudeV5Sonnet,
 	Encoding.Qwen3,
 	Encoding.DeepSeekV3,
 	Encoding.KimiK2,
 	Encoding.Glm5,
-	Encoding.Jev,
 ];
 
 console.log("pi-natives countTokens (JS string → UTF-16 → native)");

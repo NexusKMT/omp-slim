@@ -4,6 +4,8 @@
 
 ### Removed
 
+- Removed tool-issue reporting callbacks and retired provider-specific retry handling.
+
 - Removed the browser proxy transport and its custom streaming protocol.
 - Removed vendor execution channels, native protocol replay, and tool-call dialect translation; agent requests now use standard Chat Completions with the explicitly configured model.
 

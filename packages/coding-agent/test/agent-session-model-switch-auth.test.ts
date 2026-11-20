@@ -1,14 +1,14 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 // Switching the active model (Ctrl+P role cycling, /models selection) must be a
 // cheap, synchronous operation. It used to call the async `getApiKey`, which can
@@ -44,7 +44,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 	});
 
 	function modelOrThrow(id: string): Model<Api> {
-		const model = getBundledModel("anthropic", id);
+		const model = createTestModel({ provider: "anthropic", id: id });
 		if (!model) throw new Error(`Expected anthropic model ${id} to exist`);
 		return model;
 	}
@@ -52,7 +52,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 	function makeSession(initialModel: Model<Api>, roles?: Record<string, string>): AgentSession {
 		const settings = Settings.isolated();
 		if (roles) {
-			for (const role in roles) settings.setModelRole(role, roles[role]);
+			for (const role in roles) settings.setModel(roles[role]);
 		}
 		const agent = new Agent({
 			initialState: {

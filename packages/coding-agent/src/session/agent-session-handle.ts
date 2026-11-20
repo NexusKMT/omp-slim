@@ -22,11 +22,11 @@ import type { ExtensionRunner } from "../extensibility/extensions";
 import type { ContextUsage } from "../extensibility/extensions/types";
 import type { Skill } from "../extensibility/skills";
 import type { GoalModeState } from "../goals/state";
-import type { ApprovalGrantStore } from "../tools/approval-cache";
-import type { TokenRateMeter } from "../utils/token-rate";
 import type { AgentDefinition } from "../task/types";
 import type { WorkPoolYieldItem } from "../task/workpool-yield";
 import { currentThreadId } from "../thread/identity";
+import type { ApprovalGrantStore } from "../tools/approval-cache";
+import type { TokenRateMeter } from "../utils/token-rate";
 import type { AgentSession } from "./agent-session";
 import type { AgentSessionEvent, AgentSessionEventListener } from "./agent-session-events";
 import type {
@@ -45,7 +45,6 @@ import type { BlobPutOptions, BlobPutResult } from "./blob-store";
 import type { IdleMaintenanceOptions } from "./idle-maintenance";
 import type { CustomMessage } from "./messages";
 import type { ServingModel } from "./retry-fallback-chains";
-import type { AdvisorStatusOverviewEntry } from "./session-advisors";
 import type { SessionContext, TranscriptSessionContextOptions } from "./session-context";
 import type { ModelUsageEntry, SessionEntry, UsageStatistics } from "./session-entries";
 
@@ -81,14 +80,6 @@ export interface AgentSessionLoopHandle {
 	readonly state: AgentSessionLoopStateHandle;
 }
 
-/** Advisor overview of a session, as reported by `getAdvisorStatusOverview`. */
-export interface AgentSessionAdvisorOverview {
-	/** Whether any advisor is configured for the session. */
-	configured: boolean;
-	/** Per-advisor status rows. */
-	advisors: AdvisorStatusOverviewEntry[];
-}
-
 /** The surface other agents' code uses on a session obtained from the registry, lifecycle, or IRC delivery. */
 export interface AgentSessionHandle {
 	/** Cross-thread identity token: `${homeThreadId}:${snowflake}`, unique per session object. */
@@ -121,8 +112,6 @@ export interface AgentSessionHandle {
 	subscribeRunState(listener: (state: "running" | "idle") => void): () => void;
 	/** Token, request, tool, and cost totals of the session. */
 	getSessionStats(): SessionStats;
-	/** Advisor overview of the session. */
-	getAdvisorStatusOverview(): AgentSessionAdvisorOverview;
 	/** Session-local general-purpose agents pinned to user-tagged models. */
 	getSessionAgents(): AgentDefinition[];
 	/** Whether a message from `from` still waits for a turn of its own. */
@@ -323,9 +312,6 @@ export interface AgentViewSession extends AgentSessionHandle {
 
 	/** Goal-mode state. */
 	getGoalModeState(): GoalModeState | undefined;
-	/** Total advisor cost. */
-	getAdvisorCost(): number;
-
 	/** Snapshot of the session's async jobs. */
 	getAsyncJobSnapshot(options?: { recentLimit?: number }): AsyncJobSnapshot | null;
 	/** Tree of the session's async jobs. */

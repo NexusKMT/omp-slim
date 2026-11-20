@@ -1,28 +1,15 @@
-/**
- * Fullscreen `/pause` screen.
- *
- * `/pause` engages the process-global {@link agentPauseGate}, freezing every
- * agent loop in the process (main agent, in-process subagents, advisor) at its
- * next safe boundary — nothing is aborted, so a later resume continues exactly
- * where each loop parked. While engaged, this component owns the alternate
- * screen (the `runStartupSplash` idiom) and paints a large pause glyph with a
- * live hold timer; esc / enter / space / ctrl+c releases the gate.
- *
- * Use case: freeze a busy session, hand-edit the repo, resume, then explain
- * the change via a normal steering message.
- */
 import { agentPauseGate } from "@oh-my-pi/pi-agent-core";
-import { type Component, matchesKey, type OverlayFocusOwner, type OverlayHandle, type OverlayOptions } from "../index";
-import { formatCoarseDuration } from "../chrome/format";
-import { centerLine, visibleWidth } from "../utils";
-import { theme } from "../theme/theme";
-import { matchesAppInterrupt } from "../keybinding-matchers";
 import { formatKeyHint, formatTooltipKey } from "../app-keybindings";
+import { formatCoarseDuration } from "../chrome/format";
 import { boundKeys, interruptKey } from "../chrome/keybinding-hints";
-import type { NativeNode, NativeUiEvent } from "../native/node";
+import { type Component, matchesKey, type OverlayFocusOwner, type OverlayHandle, type OverlayOptions } from "../index";
+import { matchesAppInterrupt } from "../keybinding-matchers";
 import { col, keyed, node, row, span, text } from "../native/describe";
+import type { NativeNode, NativeUiEvent } from "../native/node";
 import { actionBar, actionButton } from "../native/overlay";
 import { isNativeRendering } from "../native/state";
+import { theme } from "../theme/theme";
+import { centerLine, visibleWidth } from "../utils";
 
 /** Outstanding turn and job counts supplied by the pause-screen host. */
 export interface PauseWorkStatus {
@@ -65,13 +52,13 @@ const MIN_FULL_HEIGHT = 23;
 
 const TITLE = "P A U S E D";
 const BODY_LINES = [
-	"Main agent, subagents, and advisor hold at their next step.",
+	"Main agent and subagents hold at their next step.",
 	"In-flight calls finish; nothing new starts until you resume.",
 ] as const;
 
 /** What the hold means, one fact per row of the native sheet: icon, what, detail. */
 const HOLD_FACTS = [
-	["users", "Every agent holds", "Main agent, subagents and advisor stop at their next step."],
+	["users", "Every agent holds", "Main agent and subagents stop at their next step."],
 	["activity", "Running calls finish", "A reply or tool already under way completes; nothing new starts."],
 	["message", "Queued messages wait", "Steering and follow-ups already queued send after you resume."],
 	["pen", "The repo is yours", "Edit files freely, then tell the agent what changed."],

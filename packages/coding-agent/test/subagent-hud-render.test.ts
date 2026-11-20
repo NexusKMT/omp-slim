@@ -4,16 +4,9 @@
  * sync task calls alike — as numbered `N Id: description` jump-list rows and
  * yields no output once nothing qualifies, so the block self-clears.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, setSystemTime, vi } from "bun:test";
-import * as os from "node:os";
-import * as path from "node:path";
-import { getBundledModel } from "./helpers/bundled-model";
 import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { resetHangulCompatibilityJamoWidthForTests, setHangulCompatibilityJamoWidth } from "@oh-my-pi/pi-tui";
-import type { DescribeContext } from "@oh-my-pi/pi-tui/native/node";
-import { PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-coding-agent/task/output-manager";
 import {
 	InteractiveMode,
 	layoutPinnedHud,
@@ -21,21 +14,28 @@ import {
 	renderSubagentHudLines,
 	SubagentHudComponent,
 } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
-import { type ObservableSession, SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
-import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { type AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
-import { type TodoPhase, todoToolRenderer } from "@oh-my-pi/pi-tui/tools/todo";
 import {
 	type SubagentLifecyclePayload,
 	type SubagentProgressPayload,
 	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "@oh-my-pi/pi-coding-agent/task";
+import { PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-coding-agent/task/output-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { resetHangulCompatibilityJamoWidthForTests, setHangulCompatibilityJamoWidth } from "@oh-my-pi/pi-tui";
+import type { DescribeContext } from "@oh-my-pi/pi-tui/native/node";
+import { type ObservableSession, SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
+import { type AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
+import { type TodoPhase, todoToolRenderer } from "@oh-my-pi/pi-tui/tools/todo";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, setSystemTime, vi } from "bun:test";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 import { cfgDisplayPinnedAgents, cfgDisplaySubagentLivePreview } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { cfgTaskShowResolvedModelBadge } from "@oh-my-pi/pi-coding-agent/task/settings";
@@ -118,37 +118,6 @@ describe("subagent HUD lines", () => {
 		afterEach(() => {
 			resetSettingsForTest();
 		});
-
-		it("places thinking, model and optional advisor before the detached agent name", () => {
-			const session = makeSession({
-				id: "BadgeWorker",
-				agent: "scout",
-				description: "Inspect rendering",
-				progress: makeProgress({
-					id: "BadgeWorker",
-					resolvedModel: "openai/gpt-5:high",
-					resolvedModelIdentity: "openai/gpt-5",
-					resolvedThinkingLevel: ThinkingLevel.High,
-					advisor: true,
-				}),
-			});
-			const out = render([session]);
-			expect(out).toContain(`${theme.thinking.high.split(" ")[0]} openai/gpt-5 ${theme.icon.advisor} BadgeWorker`);
-			expect(out).toContain(`BadgeWorker ${theme.format.bracketLeft}scout${theme.format.bracketRight}`);
-			expect(out).toContain(": Inspect rendering");
-
-			session.progress = makeProgress({
-				id: "BadgeWorker",
-				resolvedModel: "openai/gpt-5:high",
-				resolvedModelIdentity: "openai/gpt-5",
-				resolvedThinkingLevel: ThinkingLevel.High,
-				advisor: false,
-			});
-			const withoutAdvisor = render([session]);
-			expect(withoutAdvisor).toContain("openai/gpt-5 BadgeWorker");
-			expect(withoutAdvisor).not.toContain(theme.icon.advisor);
-		});
-
 		it("keeps metadata hidden when disabled or settings have not initialized", () => {
 			const sessions = [
 				makeSession({
@@ -159,7 +128,6 @@ describe("subagent HUD lines", () => {
 						resolvedModel: "openai/gpt-5:high",
 						resolvedModelIdentity: "openai/gpt-5",
 						resolvedThinkingLevel: ThinkingLevel.High,
-						advisor: true,
 					}),
 				}),
 			];
@@ -167,8 +135,6 @@ describe("subagent HUD lines", () => {
 			const disabled = render(sessions);
 			expect(disabled).toContain(`${theme.status.running} HiddenBadge: Inspect rendering`);
 			expect(disabled).not.toContain("openai/gpt-5");
-			expect(disabled).not.toContain(theme.icon.advisor);
-
 			resetSettingsForTest();
 			expect(render(sessions)).toBe(disabled);
 		});
@@ -178,7 +144,6 @@ describe("subagent HUD lines", () => {
 				resolvedModel: `provider/${"shared-prefix-".repeat(8)}variant-z:high`,
 				resolvedModelIdentity: `provider/${"shared-prefix-".repeat(8)}variant-z`,
 				resolvedThinkingLevel: ThinkingLevel.High,
-				advisor: true,
 			};
 			const sessions = [
 				makeSession({
@@ -194,7 +159,7 @@ describe("subagent HUD lines", () => {
 			const lines = render(sessions, 60).split("\n");
 			for (const id of ["Description", "TaskPreview"]) {
 				const row = lines.find(line => line.includes(id))!;
-				expect(row).toContain(`variant-z ${theme.icon.advisor} ${id}`);
+				expect(row).toContain(`variant-z ${id}`);
 				expect(row.indexOf("variant-z")).toBeLessThan(row.indexOf(id));
 				expect(row).not.toContain(":high");
 			}
@@ -215,7 +180,7 @@ describe("subagent HUD lines", () => {
 						id: `LongWorker${"界".repeat(30)}`,
 						agent: `custom-role-${"extended-".repeat(10)}`,
 						description: "Every available column ".repeat(10),
-						progress: makeProgress({ id: "LongWorker", resolvedModelIdentity: "provider/model", advisor: true }),
+						progress: makeProgress({ id: "LongWorker", resolvedModelIdentity: "provider/model" }),
 					}),
 					makeSession({ id: "ShortWorker", agent: "scout", description: "Every available column ".repeat(10) }),
 				];
@@ -946,7 +911,7 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		});
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 
 		eventBus = new EventBus();
 		session = new AgentSession({

@@ -1,74 +1,58 @@
-/**
- * Builds transcript components from persisted session message entries — the
- * file/remote-backed counterpart to {@link UiHelpers.addMessageToChat} (which is
- * bound to the live InteractiveModeContext). Used by the fullscreen transcript
- * viewer ({@link AgentTranscriptViewer}) to render a parked subagent / advisor /
- * historical transcript that has no live session.
- *
- * Unlike incremental transcript sync, {@link ChatTranscriptBuilder.rebuild}
- * always discards prior components and rebuilds the whole transcript from the
- * supplied entries. Re-rendering a growing transcript is therefore O(n) in the
- * entry count, but it cannot duplicate or misorder rows the way incremental
- * component reuse could.
- */
 import type { AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
+import { TranscriptContainer } from "../chrome/transcript-container";
+import { createUsageRowBlock, turnElapsedMs, TurnUsageTally } from "../overlays/usage-row";
 import { type Component, type TUI } from "../tui";
-import type { AdvisorMessageDetails } from "./messages";
-import { chatTranscriptDisplayPreferences as displayPreferences } from "./display-preferences";
-import type { AssistantTextRenderer, MessageRenderer } from "./extension-types";
-import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "./messages";
-import {
-	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
-	type CustomMessage,
-	isUserTurnInitiator,
-	LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE,
-	SKILL_PROMPT_MESSAGE_TYPE,
-	type SkillPromptDetails,
-} from "./messages";
-import {
-	imageContent,
-	textContent,
-	type TranscriptEntryLike as TranscriptEntry,
-	transcriptEntryMessage,
-} from "./transcript-entry";
-import { theme } from "../theme";
-import {
-	assistantHasVisibleContent,
-	assistantUsageIsBilled,
-	buildAsyncResultComponent,
-	buildFileMentionBlock,
-	buildIrcMessageCard,
-	buildParentIrcMessageCard,
-	buildLaunchCompletionBlock,
-	normalizeToolArgs,
-	resolveAssistantErrorPresentation,
-	splitAssistantMessageToolTimeline,
-} from "./transcript-render-helpers";
-import { createAdvisorMessageCard } from "./advisor-message";
 import { AssistantMessageComponent } from "./assistant-message";
 import { createBackgroundTanDispatchBlock } from "./background-tan-message";
 import { BashExecutionComponent } from "./bash-execution";
 import { detectCacheInvalidation } from "./cache-invalidation-marker";
-import { ServedModelTracker } from "./served-model-marker";
 import {
 	BranchSummaryMessageComponent,
 	CompactionSummaryMessageComponent,
 	createHandoffSummaryMessageComponent,
 } from "./compaction-summary-message";
 import { CustomMessageComponent } from "./custom-message";
+import { chatTranscriptDisplayPreferences as displayPreferences } from "./display-preferences";
 import { EvalExecutionComponent } from "./eval-execution";
+import type { AssistantTextRenderer, MessageRenderer } from "./extension-types";
 import {
 	type LateDiagnosticsFile,
 	LateDiagnosticsMessageComponent,
 	routeLateDiagnostics,
 } from "./late-diagnostics-message";
-import { groupedReadUsageCallIds, ReadToolGroupComponent, readArgsCollapseIntoGroup } from "./read-tool-group";
-import { isReplyWrite, ReplyWriteComponent, replyDisplayMessage, toolResultReplies } from "./reply-write";
+import {
+	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
+	type CustomMessage,
+	isUserTurnInitiator,
+	LAUNCH_COMPLETION_MESSAGE_TYPE,
+	LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE,
+	SKILL_PROMPT_MESSAGE_TYPE,
+	type SkillPromptDetails,
+} from "./messages";
+import { groupedReadUsageCallIds, readArgsCollapseIntoGroup, ReadToolGroupComponent } from "./read-tool-group";
+import { isReplyWrite, replyDisplayMessage, ReplyWriteComponent, toolResultReplies } from "./reply-write";
+import { ServedModelTracker } from "./served-model-marker";
 import { SkillMessageComponent } from "./skill-message";
-import { toolRenderName, ToolExecutionComponent, type ToolExecutionHandle } from "./tool-execution";
-import { TranscriptContainer } from "../chrome/transcript-container";
-import { createUsageRowBlock, TurnUsageTally, turnElapsedMs } from "../overlays/usage-row";
+import { ToolExecutionComponent, type ToolExecutionHandle, toolRenderName } from "./tool-execution";
+import {
+	imageContent,
+	textContent,
+	type TranscriptEntryLike as TranscriptEntry,
+	transcriptEntryMessage,
+} from "./transcript-entry";
+import {
+	assistantHasVisibleContent,
+	assistantUsageIsBilled,
+	buildAsyncResultComponent,
+	buildFileMentionBlock,
+	buildIrcMessageCard,
+	buildLaunchCompletionBlock,
+	buildParentIrcMessageCard,
+	normalizeToolArgs,
+	resolveAssistantErrorPresentation,
+	splitAssistantMessageToolTimeline,
+} from "./transcript-render-helpers";
 import { CollapsedSyntheticMessageComponent, UserMessageComponent } from "./user-message";
 
 export interface ChatTranscriptBuilderDeps {
@@ -308,8 +292,6 @@ export class ChatTranscriptBuilder {
 				break;
 			case "user":
 			case "developer": {
-				// Only genuinely user-attributed prompts anchor the delta; a mid-run
-				// agent-attributed `user` message (advisor tool-loop redirect) must not.
 				if (message.role === "user" && message.attribution !== "agent") {
 					this.#turnStartedAt = message.timestamp;
 					this.#turnUsage.reset();
@@ -338,11 +320,7 @@ export class ChatTranscriptBuilder {
 				const userText = message.role === "user" ? textContent(message.content) : "";
 				if (userText) {
 					const isSynthetic = message.role === "developer" ? true : (message.synthetic ?? false);
-					// Synthetic (agent-attributed) inputs — chiefly the advisor's `Session
-					// update` replay dumps — can be hundreds of KiB of Markdown each.
-					// Rendering their full body on cold open blocked the TUI (issue #6308);
-					// collapse them behind a compact summary that builds Markdown only on
-					// ctrl+o expand. Real user prompts stay fully rendered.
+
 					if (isSynthetic) {
 						const collapsed = new CollapsedSyntheticMessageComponent(userText);
 						this.#trackExpandable(collapsed);
@@ -654,14 +632,6 @@ export class ChatTranscriptBuilder {
 			message.customType === "irc:workpool"
 		) {
 			this.container.addChild(buildIrcMessageCard(message, () => this.#expanded));
-			return;
-		}
-		if (message.customType === "advisor") {
-			const details = (message as CustomMessage<AdvisorMessageDetails>).details;
-			const card = createAdvisorMessageCard(details, () => this.#expanded, theme);
-			// Tracked so a transcript-wide toggle also clears a per-card native toggle.
-			this.#trackExpandable(card);
-			this.container.addChild(card);
 			return;
 		}
 		if (message.customType === LAUNCH_COMPLETION_MESSAGE_TYPE) {

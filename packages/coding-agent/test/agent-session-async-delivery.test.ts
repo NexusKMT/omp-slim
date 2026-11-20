@@ -5,12 +5,9 @@
  * THAT session, and `hasPendingAsyncWork()` / `settleAsyncWork()` define the
  * run quiescence the task executor's barrier is built on.
  */
-import { afterEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import type { AsyncJob } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -18,10 +15,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import type { DaemonCompletionNotification } from "@oh-my-pi/pi-coding-agent/launch/protocol";
 import { AcpAgent } from "@oh-my-pi/pi-coding-agent/modes/acp/acp-agent";
-import { buildAsyncResultBlock } from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
-import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { ArtifactManager } from "@oh-my-pi/pi-coding-agent/session/artifacts";
 import {
@@ -33,13 +27,17 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm, type CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { formatTaskResultSummary, INLINE_OUTPUT_CHARS } from "@oh-my-pi/pi-coding-agent/task/result-summary";
+import { buildAsyncResultBlock } from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
-import { type OutputMeta } from "@oh-my-pi/pi-tui/tools/output-meta";
-import { formatOutputNotice } from "@oh-my-pi/pi-tui/tools/output-meta";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { formatOutputNotice, type OutputMeta } from "@oh-my-pi/pi-tui/tools/output-meta";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import type { AgentSideConnection, SessionNotification } from "@oh-my-pi/pi-utils/acp";
 function observeAsyncResultEnqueue(session: AgentSession): Promise<void> {
@@ -68,7 +66,7 @@ describe("AgentSession owner-routed async delivery", () => {
 	});
 
 	it("delivers background text and images to the owning model and reaches quiescence", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -139,7 +137,7 @@ describe("AgentSession owner-routed async delivery", () => {
 
 	it("keeps ACP follow-ups visible during final output and folds only completions after end_turn", async () => {
 		await using temp = await TempDir.create("@acp-async-delivery-");
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({
 			responses: [
 				{ content: ["First answer"] },
@@ -250,7 +248,7 @@ describe("AgentSession owner-routed async delivery", () => {
 	});
 
 	it("exposes a process job's full command in the async job snapshot", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -291,7 +289,7 @@ describe("AgentSession owner-routed async delivery", () => {
 	});
 
 	it("delivers a background task's whole inline report without cutting it again", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -355,7 +353,7 @@ describe("AgentSession owner-routed async delivery", () => {
 	});
 
 	it("does not spill an incomplete background capture as full output during follow-up delivery", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -422,7 +420,7 @@ describe("AgentSession owner-routed async delivery", () => {
 
 	it("keeps healthy follow-up output recoverable when another job's capture failed", async () => {
 		await using temp = await TempDir.create("@capture-followup-mixed-");
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -506,7 +504,7 @@ describe("AgentSession owner-routed async delivery", () => {
 
 	it("links a background bash follow-up to the sink's raw capture instead of its elided body", async () => {
 		await using temp = await TempDir.create("@bash-followup-raw-");
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -968,63 +966,8 @@ describe("AgentSession owner-routed async delivery", () => {
 		expect(message?.content).not.toContain("schema unavailable");
 		expect(message?.content).not.toContain("```json");
 	});
-
-	it("routes an advisor-owned launch completion through the session", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
-		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
-		const agent = new Agent({
-			getApiKey: () => "test-key",
-			initialState: { model, systemPrompt: ["Test"], tools: [] },
-			convertToLlm,
-			streamFn: mock.stream,
-		});
-		const authStorage = await AuthStorage.create(":memory:");
-		authStorages.push(authStorage);
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		const sessionManager = SessionManager.inMemory();
-		const owner = `${sessionManager.getSessionId()}-advisor`;
-		session = new AgentSession({
-			agent,
-			sessionManager,
-			settings: Settings.isolated(),
-			modelRegistry: new ModelRegistry(authStorage),
-		});
-		const completion = {
-			event: "daemon-completed",
-			completionId: "advisor-completion",
-			owner,
-			daemon: {
-				name: "advisor-worker",
-				id: "daemon-id",
-				state: "exited",
-				createdAt: 1,
-				startedAt: 1,
-				exitedAt: 2,
-				exitCode: 0,
-				restartCount: 0,
-				outputBytes: 0,
-				owner,
-				persist: false,
-				detached: false,
-			},
-		} satisfies DaemonCompletionNotification;
-
-		await session.queueLaunchCompletion(completion);
-		await session.waitForIdle();
-
-		expect(
-			mock.calls.some(call =>
-				call.context.messages.some(message =>
-					typeof message.content === "string"
-						? message.content.includes("advisor-worker")
-						: message.content.some(content => content.type === "text" && content.text.includes("advisor-worker")),
-				),
-			),
-		).toBe(true);
-	});
-
 	it("purges finished owned jobs when starting a new session", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -1078,7 +1021,7 @@ describe("AgentSession owner-routed async delivery", () => {
 	});
 
 	it("does not inject a prior session's pending async result after a new session", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -1133,7 +1076,7 @@ describe("AgentSession owner-routed async delivery", () => {
 	});
 
 	it("drops a prior session's late delivery even after its job id is reused", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -1197,7 +1140,7 @@ describe("AgentSession owner-routed async delivery", () => {
 		mock: MockModel;
 		targetSessionFile: string;
 	}> {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -1390,7 +1333,7 @@ describe("AgentSession owner-routed async delivery", () => {
 	});
 
 	it("keeps delivery pending until the queued follow-up is injected", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",

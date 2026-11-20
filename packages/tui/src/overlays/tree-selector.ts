@@ -1,6 +1,15 @@
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { oklabDistance, sanitizeText } from "@oh-my-pi/pi-utils";
+import type { TspPickerItem, TspPickerProps, TspSpan, TspText } from "@oh-my-pi/pi-wire";
+import { formatKeyHint, formatKeyHints } from "../app-keybindings";
+import { canonicalizeMessage } from "../chat/thinking-display";
+import { isUserRequestEntry, type TranscriptEntryLike } from "../chat/transcript-entry";
+import type { OutlineTarget } from "../chat/transcript-outline";
+import { resolveAssistantErrorPresentation } from "../chat/transcript-render-helpers";
+import { boundKeys, editorKey, editorKeys, interruptKey } from "../chrome/keybinding-hints";
+import { OverlayPanel, PanelDivider } from "../chrome/overlay-box";
+import { TreeView, type TreeAncestor, type TreeRow } from "../components/tree-view";
 import {
-	type Component,
 	Container,
 	FuzzyQuery,
 	FuzzyText,
@@ -9,13 +18,8 @@ import {
 	Spacer,
 	TruncatedText,
 	truncateToWidth,
+	type Component,
 } from "../index";
-import { isRecord, oklabDistance, sanitizeText } from "@oh-my-pi/pi-utils";
-/** Available session-tree display filters. */
-export const TREE_FILTER_MODES = ["default", "no-tools", "user-only", "labeled-only", "all"] as const;
-/** Session-tree display filter. */
-export type TreeFilterMode = (typeof TREE_FILTER_MODES)[number];
-import { theme } from "../theme/theme";
 import {
 	matchesAppInterrupt,
 	matchesSelectDown,
@@ -23,7 +27,20 @@ import {
 	matchesSelectPageUp,
 	matchesSelectUp,
 } from "../keybinding-matchers";
-import { isUserRequestEntry, type TranscriptEntryLike } from "../chat/transcript-entry";
+import { getKeybindings } from "../keybindings";
+import { col, keyed, node, span, text } from "../native/describe";
+import type { DescribeContext, NativeChild, NativeNode, NativeUiEvent } from "../native/node";
+import { actionHint, hintsRow, overlayCard } from "../native/overlay";
+import { CLOSE_ACTION, picker, pickerAction, pickerEvent, pickerQuery, type PickerEvent } from "../native/picker";
+import { plainText } from "../native/spans";
+import { shortenPath, toPathList } from "../render/render-utils";
+import type { ThemeColor } from "../theme/schema";
+import { theme } from "../theme/theme";
+import { collectBlocks, targetCopy, turnPreview } from "./copy-selector";
+/** Available session-tree display filters. */
+export const TREE_FILTER_MODES = ["default", "no-tools", "user-only", "labeled-only", "all"] as const;
+/** Session-tree display filter. */
+export type TreeFilterMode = (typeof TREE_FILTER_MODES)[number];
 
 /** Fields consumed when displaying persisted entries in the session tree. */
 export type SessionTreeEntry = { id: string; parentId: string | null } & (
@@ -49,24 +66,6 @@ export interface TreeSelectorNode {
 	children: TreeSelectorNode[];
 	label?: string;
 }
-import { toPathList } from "../render/render-utils";
-import { shortenPath } from "../render/render-utils";
-import { canonicalizeMessage } from "../chat/thinking-display";
-import { resolveAssistantErrorPresentation } from "../chat/transcript-render-helpers";
-import { OverlayPanel, PanelDivider } from "../chrome/overlay-box";
-import { TreeView, type TreeAncestor, type TreeRow } from "../components/tree-view";
-import { formatKeyHint, formatKeyHints } from "../app-keybindings";
-import { boundKeys, editorKey, editorKeys, interruptKey } from "../chrome/keybinding-hints";
-import { getKeybindings } from "../keybindings";
-import type { TspPickerItem, TspPickerProps, TspSpan, TspText } from "@oh-my-pi/pi-wire";
-import type { ThemeColor } from "../theme/schema";
-import { col, keyed, node, span, text } from "../native/describe";
-import type { DescribeContext, NativeChild, NativeNode, NativeUiEvent } from "../native/node";
-import { actionHint, hintsRow, overlayCard } from "../native/overlay";
-import { CLOSE_ACTION, type PickerEvent, picker, pickerAction, pickerEvent, pickerQuery } from "../native/picker";
-import { plainText } from "../native/spans";
-import type { OutlineTarget } from "../chat/transcript-outline";
-import { collectBlocks, targetCopy, turnPreview } from "./copy-selector";
 
 /** Filter mode for tree display */
 type FilterMode = TreeFilterMode;
@@ -78,14 +77,6 @@ type FilterMode = TreeFilterMode;
 interface ToolCallInfo {
 	name: string;
 	arguments: Record<string, unknown>;
-}
-
-/** Advisor note metadata surfaced on a single session-tree row. */
-interface AdvisorTreeDisplay {
-	/** Non-default advisor names then severities, comma-joined (e.g. `sec, blocker`). */
-	qualifier: string;
-	/** Note bodies joined into one line. */
-	text: string;
 }
 
 /**
@@ -101,32 +92,6 @@ function sanitizeTreeField(value: string): string {
 /** Strip ANSI/control characters and fold line breaks for single-line tree rows and headers. */
 function treeRowText(value: string): string {
 	return plainText(value.replace(/[\r\n\u2028\u2029]/g, " "));
-}
-
-/**
- * Extract display metadata from an advisor custom-message's `details.notes`,
- * ignoring the model-facing `<advisory>` wrapper stored in `content`. Collects
- * distinct non-default advisor names and severities so the tree row can tag the
- * note the way its transcript card does.
- */
-function advisorTreeDisplay(details: unknown): AdvisorTreeDisplay {
-	if (!isRecord(details) || !Array.isArray(details.notes)) return { qualifier: "", text: "" };
-	const notes: string[] = [];
-	const advisors: string[] = [];
-	const severities: string[] = [];
-	for (const note of details.notes) {
-		if (!isRecord(note)) continue;
-		if (typeof note.note === "string") notes.push(note.note);
-		if (typeof note.advisor === "string") {
-			const name = sanitizeTreeField(note.advisor);
-			if (name && name !== "default" && !advisors.includes(name)) advisors.push(name);
-		}
-		if (typeof note.severity === "string") {
-			const severity = sanitizeTreeField(note.severity);
-			if (severity && !severities.includes(severity)) severities.push(severity);
-		}
-	}
-	return { qualifier: [...advisors, ...severities].join(", "), text: notes.join(" ") };
 }
 
 /**
@@ -624,14 +589,8 @@ class TreeList implements Component {
 			}
 			case "custom_message": {
 				parts.push(entry.customType);
-				if (entry.customType === "advisor") {
-					const { qualifier, text } = advisorTreeDisplay(entry.details);
-					if (qualifier) parts.push(qualifier);
-					if (text) parts.push(text);
-				} else {
-					const content = stripSystemWrapperTags(this.#joinTextContent(entry.content)).slice(0, SEARCH_TEXT_LIMIT);
-					if (content) parts.push(content);
-				}
+				const content = stripSystemWrapperTags(this.#joinTextContent(entry.content)).slice(0, SEARCH_TEXT_LIMIT);
+				if (content) parts.push(content);
 				break;
 			}
 			case "compaction":
@@ -1155,14 +1114,6 @@ class TreeList implements Component {
 				return [{ t: `[${role}]`, s: "dim" }];
 			}
 			case "custom_message": {
-				if (entry.customType === "advisor") {
-					const { qualifier, text } = advisorTreeDisplay(entry.details);
-					const label = qualifier ? `advisor (${qualifier}): ` : "advisor: ";
-					return [
-						{ t: label, s: "customMessageLabel" },
-						{ t: normalize(text), s: "muted" },
-					];
-				}
 				const content = stripSystemWrapperTags(this.#joinTextContent(entry.content));
 				return [
 					{ t: `[${entry.customType}]: `, s: "customMessageLabel" },

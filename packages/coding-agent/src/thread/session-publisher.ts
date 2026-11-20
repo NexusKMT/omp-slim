@@ -97,7 +97,6 @@ export function captureSessionState(session: AgentSession): SessionMirrorState {
 		artifactsDir: read.artifactsDir(session),
 		usageStatistics: read.usageStatistics(session),
 		sessionStats: read.sessionStats(session),
-		advisorOverview: read.advisorOverview(session),
 		sessionAgents: read.sessionAgents(session),
 		effectiveExtensionRoots: read.effectiveExtensionRoots(session),
 	};
@@ -505,7 +504,6 @@ export class SessionPublisher {
 			fastModeActive: session.isFastModeActive(),
 
 			goalMode: toWireData(session.getGoalModeState()),
-			advisorCost: session.getAdvisorCost(),
 
 			todoPhases: toWireData(session.getTodoPhases()),
 			queuedMessages: toWireData(session.getQueuedMessages()),

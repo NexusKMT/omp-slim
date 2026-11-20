@@ -18,23 +18,23 @@
  *   an array index when the current value is an array
  *   (`agent://Parent.Child/reports/0/data`)
  */
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
 import { formatDuration, isEnoent, prompt } from "@oh-my-pi/pi-utils";
-import { type AgentRef, AgentRegistry, type AgentRegistryApi } from "../registry/agent-registry";
-import { ensurePersistedRoster } from "../registry/persisted-agents";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { executeSend, isIrcEnabled } from "../irc/messaging";
 import agentPromptDoc from "../prompts/internal-urls/agent.md" with { type: "text" };
 import agentProgressTemplate from "../prompts/tools/agent-url-progress.md" with { type: "text" };
 import agentSupersededTemplate from "../prompts/tools/agent-url-superseded.md" with { type: "text" };
+import { type AgentRef, AgentRegistry, type AgentRegistryApi } from "../registry/agent-registry";
+import { ensurePersistedRoster } from "../registry/persisted-agents";
 import { loadSessionMessagesReadOnly } from "../session/session-loader";
 import { artifactsDirsFromRegistry } from "./registry-helpers";
 import type {
 	InternalResource,
-	InternalWriteResult,
 	InternalUrl,
+	InternalWriteResult,
 	ProtocolHandler,
 	ResolveContext,
 	SchemeHost,
@@ -131,7 +131,7 @@ function lastAssistantText(messages: readonly AgentMessage[]): string | undefine
 /** Whether `<id>`'s published output predates a turn the agent is streaming now. */
 function isSuperseded(registry: AgentRegistryApi, outputId: string): boolean {
 	const ref = registry.get(outputId);
-	return ref !== undefined && ref.kind !== "advisor" && registry.isRunning(ref);
+	return ref !== undefined && registry.isRunning(ref);
 }
 
 /**
@@ -224,12 +224,12 @@ export class AgentProtocolHandler implements ProtocolHandler {
 			// non-terminal yield, or parked before publishing) is the same
 			// registry `write agent://<id>` delivers to: answer with its progress.
 			const ref = registry.get(outputId);
-			if (ref && ref.kind !== "advisor") return this.#resolveProgress(url, ref, extraction);
+			if (ref) return this.#resolveProgress(url, ref, extraction);
 			if (!scan) throw new Error("No session - agent outputs unavailable");
 			if (!scan.anyDirExists) throw new Error("No artifacts directory found");
 			const registered = registry
 				.list()
-				.filter(candidate => candidate.kind !== "advisor")
+
 				.map(candidate => candidate.id);
 			throw notFoundError(outputId, [...scan.availableIds, ...registered]);
 		}

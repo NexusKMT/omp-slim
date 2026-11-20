@@ -1,23 +1,23 @@
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentsHubDeps } from "@oh-my-pi/pi-tui/overlays/agents-hub";
 import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { isEnoent, prompt } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { EffectiveExtensionRoots } from "../capability/types";
 import { getConfigDirs } from "../config";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
-import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import agentCreationArchitectPrompt from "../prompts/system/agent-creation-architect.md" with { type: "text" };
 import agentCreationUserPrompt from "../prompts/system/agent-creation-user.md" with { type: "text" };
 import { createAgentSession } from "../sdk";
 import { refreshAgentDiscovery } from "../task";
 import { discoverAgents } from "../task/discovery";
 
-import { cfgTaskAgentAdvisor, cfgTaskDisabledAgents } from "../task/settings";
+import { cfgTaskDisabledAgents } from "../task/settings";
 
 function extractAssistantText(messages: AgentMessage[]): string | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -51,17 +51,12 @@ export function createAgentsHubDeps(
 		loadAgents: async () => {
 			const { agents } = await discoverAgents(cwd, undefined, extensionRoots());
 			const disabled = new Set(cfgTaskDisabledAgents.get(settings));
-			const advisorOverrides = cfgTaskAgentAdvisor.get(settings);
 			return agents.map(agent => ({
 				...agent,
 				disabled: disabled.has(agent.name),
-				advisor:
-					advisorOverrides[agent.name] === "on" ||
-					(advisorOverrides[agent.name] !== "off" && agent.advisor === true),
 			}));
 		},
 		setAgentDisabled: (name, { disabled }) => cfgTaskDisabledAgents.setMember(settings, name, { member: disabled }),
-		setAgentAdvisor: (name, enabled) => cfgTaskAgentAdvisor.setEntry(settings, name, enabled ? "on" : "off"),
 		generateAgent: async (description, onText) => {
 			const selectedModel = activeModel;
 			if (!selectedModel) throw new Error("Select a current model before creating an agent.");

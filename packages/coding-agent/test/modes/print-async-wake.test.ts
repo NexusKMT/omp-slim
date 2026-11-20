@@ -5,11 +5,9 @@
  * pending, each job result wakes the same session for another turn (a turn may
  * start further jobs), and the text output is the answer of the last turn.
  */
-import { afterEach, describe, expect, test, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../helpers/bundled-model";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -19,6 +17,8 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { cfgAsyncPrintWake } from "@oh-my-pi/pi-coding-agent/tools/settings";
+import { afterEach, describe, expect, test, vi } from "bun:test";
+import { createTestModel } from "../helpers/test-model";
 
 function assistant(text: string): AssistantMessage {
 	return { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" } as unknown as AssistantMessage;
@@ -63,13 +63,8 @@ function sessionWithJobs(
 			onPersistenceNotice: () => () => {},
 		},
 		disableStopTimeTodoReminders: () => {},
-		prepareForHeadlessAdvisorDrain: () => events.push("advisor-drain"),
 		waitForIdle,
 		setTextOutputCommitted: () => {},
-		waitForAdvisorCatchup: async () => {
-			events.push("advisor-catchup");
-			return true;
-		},
 		prompt: async (text: string) => {
 			events.push(`prompt:${text}`);
 			pending = jobs;
@@ -125,26 +120,6 @@ describe("print mode async-result wake", () => {
 		expect(events).toEqual(["prompt:go", "advisor-drain", "advisor-catchup", "dispose(pending=1)"]);
 		expect(lines.join("")).toBe("started\n");
 	});
-
-	test("with async.printWake, every job result wakes the session before the advisor drain and exit", async () => {
-		const { lines } = captureStdout();
-		const settings = Settings.isolated();
-		cfgAsyncPrintWake.override(settings, true);
-		const { session, events } = sessionWithJobs(settings, 2);
-
-		expect(await runPrintMode(session, { mode: "text", messages: ["go"] })).toBe(0);
-
-		expect(events).toEqual([
-			"prompt:go",
-			"wake:1",
-			"wake:2",
-			"advisor-drain",
-			"advisor-catchup",
-			"dispose(pending=0)",
-		]);
-		expect(lines.join("")).toBe("result 2\n");
-	});
-
 	test("with async.printWake, a job started by a follow-up turn is waited for and answers last", async () => {
 		const { lines } = captureStdout();
 		const settings = Settings.isolated();
@@ -287,7 +262,11 @@ describe("print mode async-result wake with a real session", () => {
 		});
 		const agent = new Agent({
 			getApiKey: () => "test-key",
-			initialState: { model: getBundledModel("anthropic", "claude-sonnet-4-5")!, systemPrompt: ["Test"], tools: [] },
+			initialState: {
+				model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+				systemPrompt: ["Test"],
+				tools: [],
+			},
 			convertToLlm,
 			streamFn: mock.stream,
 		});

@@ -52,11 +52,6 @@ function resolveExperimentalContextSession(session: ToolSession): ExperimentalCo
 	return manager;
 }
 
-/**
- * Resolves the live session journal only when experimental context management is enabled and
- * owned by this ToolSession. The identity comparison prevents advisor tools from writing the
- * parent agent's notebook or resolving its raw history.
- */
 export function getExperimentalContextSession(session: ToolSession): ExperimentalContextSessionManager {
 	const manager = resolveExperimentalContextSession(session);
 	if (manager) return manager;

@@ -11,16 +11,11 @@
  *      indistinguishable from success.
  */
 
-import { afterEach, beforeEach, expect, it, vi } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, StopReason, ToolCall } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
@@ -30,6 +25,11 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 function createAssistantMessage(content: AssistantMessage["content"], stopReason: StopReason): AssistantMessage {
 	return {
@@ -89,7 +89,7 @@ function createSessionWith(
 	settingsOverrides: Record<string, unknown> = {},
 ): Promise<{ agent: Agent; session: AgentSession; authStorage: AuthStorage }> {
 	return (async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: { model, systemPrompt: ["Test"], tools: [tool] },

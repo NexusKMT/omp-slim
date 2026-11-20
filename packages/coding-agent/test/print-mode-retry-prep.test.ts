@@ -14,11 +14,11 @@
  *   outlive the one-shot run, so the literal text reaches the model like
  *   every undispatched command.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import type { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import { runPrintMode } from "@oh-my-pi/pi-coding-agent/modes/print-mode";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 
 interface RetryPrepSpies {
 	prompt: ReturnType<typeof vi.fn>;
@@ -62,9 +62,7 @@ function createMockSession(): { session: AgentSession; spies: RetryPrepSpies } {
 		refreshMCPTools: spies.refreshMCPTools,
 		waitForIdle: spies.waitForIdle,
 		disableStopTimeTodoReminders: () => {},
-		prepareForHeadlessAdvisorDrain: () => {},
 		setTextOutputCommitted: () => {},
-		waitForAdvisorCatchup: async () => true,
 		dispose: async () => {},
 	} as unknown as AgentSession;
 	return { session, spies };

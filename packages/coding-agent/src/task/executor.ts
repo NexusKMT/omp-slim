@@ -6,11 +6,17 @@
  * progress tracking.
  */
 
-import * as fs from "node:fs/promises";
-import path from "node:path";
 import type { AgentEvent, AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import type { Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
+import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
+import {
+	previewLine,
+	replaceTabs,
+	shortenToolArgumentPaths,
+	TRUNCATE_LENGTHS,
+} from "@oh-my-pi/pi-tui/render/render-utils";
+import { type EditMode, getEditInputPaths } from "@oh-my-pi/pi-tui/tools/edit";
 import {
 	isRecord,
 	logger,
@@ -21,6 +27,8 @@ import {
 	sanitizeText,
 	untilAborted,
 } from "@oh-my-pi/pi-utils";
+import * as fs from "node:fs/promises";
+import path from "node:path";
 import {
 	ASYNC_JOB_MANAGER_SHUTDOWN_REASON,
 	AsyncJobError,
@@ -29,20 +37,9 @@ import {
 } from "../async";
 import type { Rule } from "../capability/rule";
 import type { EffectiveExtensionRoots } from "../capability/types";
+import type { CompactionThresholdPair } from "../config/compaction-threshold";
 import { ModelRegistry } from "../config/model-registry";
-import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
-import {
-	previewLine,
-	replaceTabs,
-	shortenToolArgumentPaths,
-	TRUNCATE_LENGTHS,
-} from "@oh-my-pi/pi-tui/render/render-utils";
-import { type EditMode, getEditInputPaths } from "@oh-my-pi/pi-tui/tools/edit";
-import {
-	formatModelStringWithRouting,
-	resolveAgentAdvisorSelection,
-	resolveModelOverride,
-} from "../config/model-resolver";
+import { formatModelStringWithRouting, resolveModelOverride } from "../config/model-resolver";
 import type { PromptTemplate } from "../config/prompt-templates";
 import {
 	buildServiceTierByFamily,
@@ -51,15 +48,34 @@ import {
 	resolveSubagentServiceTier,
 	type ServiceTierInheritSettingValue,
 } from "../config/service-tier";
-import type { CompactionThresholdPair } from "../config/compaction-threshold";
 import { type OverlayLayers, Settings } from "../config/settings";
 
+import {
+	assertModelSupportsEffortCeiling,
+	type ConfiguredThinkingLevel,
+	resolveTaskEffortLevel,
+	type TaskEffort,
+} from "@oh-my-pi/pi-tui/thinking";
+import { DEFAULT_PEER_ROSTER_LIMIT, LIST_STATUS_ORDER } from "@oh-my-pi/pi-tui/tools/irc";
+import { truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import {
+	type AgentProgress,
+	type SingleResult,
+	type StructuredSubagentOutput,
+	type StructuredSubagentSchemaMode,
+	type StructuredSubagentSchemaSource,
+	type TaskToolDetails,
+	type YieldItem,
+} from "@oh-my-pi/pi-tui/tools/task";
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import type { PreparedExtension } from "../extensibility/extensions/types";
 import { buildSkillPromptMessage, type Skill } from "../extensibility/skills";
 import type { LocalProtocolOptions } from "../internal-urls";
 import { IrcBus } from "../irc/bus";
+import { isIrcEnabled } from "../irc/messaging";
+import { TextTap } from "../job-widgets/text-tap";
+import { TOOLS_SOURCE_ID } from "../job-widgets/types";
 import type { MCPManagerApi, MCPToolScope } from "../mcp/manager";
 import { initializeExtensions } from "../modes/runtime-init";
 import subagentAsyncPendingTemplate from "../prompts/system/subagent-async-pending.md" with { type: "text" };
@@ -69,9 +85,9 @@ import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-life
 import { AgentRegistry, type AgentRegistryApi, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { ensurePersistedRoster, isCurrentSessionRosterRef } from "../registry/persisted-agents";
 import {
+	createAgentSession,
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
-	createAgentSession,
 	discoverAuthStorage,
 } from "../sdk";
 import {
@@ -85,44 +101,32 @@ import type { AgentSessionDisposeOptions } from "../session/agent-session-types"
 import { type ArtifactManagerApi, writeArtifact } from "../session/artifacts";
 import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
-import { type CostCapRefusal, CostCapError, type CostGateApi } from "../session/cost-gate";
+import { CostCapError, type CostCapRefusal, type CostGateApi } from "../session/cost-gate";
 import { INTERRUPTED_TURN_ERROR } from "../session/exit-diagnostics";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "../session/messages";
 import { hasConversationalHistory, SessionManager } from "../session/session-manager";
-import { truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
-import {
-	assertModelSupportsEffortCeiling,
-	type ConfiguredThinkingLevel,
-	resolveTaskEffortLevel,
-	type TaskEffort,
-} from "@oh-my-pi/pi-tui/thinking";
-import { inheritedModelGuard } from "./model-inheritance";
+import { runFollowUpTurnOnHome, runSubprocessPlaced } from "../thread/executor-routing";
+import { isMainThread } from "../thread/identity";
+import { existingSubagentWorkerPool, subagentWorkerPool } from "../thread/subagent-worker";
 import type { ContextFileEntry, ToolSession } from "../tools";
 import { resolveEvalBackends } from "../tools/eval-backends";
-import { isIrcEnabled } from "../irc/messaging";
-import { LIST_STATUS_ORDER } from "@oh-my-pi/pi-tui/tools/irc";
-import { DEFAULT_PEER_ROSTER_LIMIT } from "@oh-my-pi/pi-tui/tools/irc";
 import { normalizeSchema } from "../tools/jtd-to-json-schema";
 import { buildOutputValidator, summarizeValidationFailure } from "../tools/output-schema-validator";
 import { ToolAbortError } from "../tools/tool-errors";
 import { resetYieldTurnState } from "../tools/yield";
-import { type EventBus, emitSubagentFrame } from "../utils/event-bus";
+import { emitSubagentFrame, type EventBus } from "../utils/event-bus";
 import { trackLateCleanup } from "../utils/late-cleanup";
-import { isMainThread } from "../thread/identity";
-import { runFollowUpTurnOnHome, runSubprocessPlaced } from "../thread/executor-routing";
-import { existingSubagentWorkerPool, subagentWorkerPool } from "../thread/subagent-worker";
 import { buildNamedToolChoice } from "../utils/tool-choice";
 import type { WorkspaceTree } from "../workspace-tree";
 import { isCompletionProbeEnabled, startCompletionProbe } from "./completion-probe";
-import { appendToolResult, createTaskWidgetInputs, TOOLS_SOURCE_LABEL } from "./widget-inputs";
-import { TextTap } from "../job-widgets/text-tap";
-import { TOOLS_SOURCE_ID } from "../job-widgets/types";
 import { attributeSubagentError } from "./error-attribution";
 import { generateTaskLabel } from "./label";
+import { inheritedModelGuard } from "./model-inheritance";
 import { isReadOnlyAgent } from "./read-only-policy";
 import { formatTaskResultSummary } from "./result-summary";
+import type { PreparedSeanceSession } from "./seance";
+import { seanceIsolationOptions } from "./seance-policy";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
-import type { WorkPoolYieldItem } from "./workpool-yield";
 import {
 	type AgentDefinition,
 	MAX_OUTPUT_BYTES,
@@ -131,36 +135,26 @@ import {
 	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "./types";
-import { seanceIsolationOptions } from "./seance-policy";
-import type { PreparedSeanceSession } from "./seance";
-import {
-	type AgentProgress,
-	type SingleResult,
-	type StructuredSubagentOutput,
-	type StructuredSubagentSchemaMode,
-	type StructuredSubagentSchemaSource,
-	type TaskToolDetails,
-	type YieldItem,
-} from "@oh-my-pi/pi-tui/tools/task";
+import { appendToolResult, createTaskWidgetInputs, TOOLS_SOURCE_LABEL } from "./widget-inputs";
+import type { WorkPoolYieldItem } from "./workpool-yield";
 import { yieldSectionShapes } from "./yield-assembly";
 
 import { assembleYieldResult } from "@oh-my-pi/pi-tui/tools/task-yield-assembly";
-import {
-	cfgTaskMaxEffort,
-	cfgTaskSoftRequestBudgetNotice,
-	cfgTaskSoftRequestBudget,
-	cfgTaskAgentSoftRequestBudget,
-	cfgTaskAgentIdleTtlMs,
-	cfgTaskMaxRuntimeMs,
-	cfgTaskMaxRecursionDepth,
-	cfgTaskAgentAdvisor,
-} from "./settings";
-import { cfgTierSubagent, cfgTierOpenai, cfgDefaultThinkingLevel } from "../session/settings";
 import {
 	cfgCompactionModelThresholdsEnabled,
 	cfgCompactionThresholdPercent,
 	cfgCompactionThresholdTokens,
 } from "../session/context-settings";
+import { cfgDefaultThinkingLevel, cfgTierOpenai, cfgTierSubagent } from "../session/settings";
+import {
+	cfgTaskAgentIdleTtlMs,
+	cfgTaskAgentSoftRequestBudget,
+	cfgTaskMaxEffort,
+	cfgTaskMaxRecursionDepth,
+	cfgTaskMaxRuntimeMs,
+	cfgTaskSoftRequestBudget,
+	cfgTaskSoftRequestBudgetNotice,
+} from "./settings";
 
 export type { YieldItem } from "@oh-my-pi/pi-tui/tools/task";
 
@@ -292,12 +286,7 @@ export function collectIrcPeerRoster(
 	}));
 	let parkedCount = 0;
 	for (const ref of registry.list()) {
-		if (
-			ref.id !== selfId &&
-			ref.kind !== "advisor" &&
-			ref.status === "parked" &&
-			isCurrentSessionRosterRef(ref, rootSessionFile)
-		) {
+		if (ref.id !== selfId && ref.status === "parked" && isCurrentSessionRosterRef(ref, rootSessionFile)) {
 			parkedCount++;
 		}
 	}
@@ -463,11 +452,7 @@ export interface ExecutorOptions {
 	 * inherit falls back to the subagent's configured `tier.*` settings.
 	 */
 	parentServiceTier?: ServiceTierByFamily | null;
-	/**
-	 * Exact-name `task.agentServiceTierOverrides` entry that task/eval dispatch
-	 * resolved for this agent, applied after model resolution. Spawns that keep
-	 * `tier.subagent` (Vibe workers) omit it.
-	 */
+
 	serviceTierOverride?: ServiceTierInheritSettingValue;
 	/** Exact-name `task.agentCompactionThresholdOverrides` pair selected by dispatch. */
 	compactionThresholdOverride?: CompactionThresholdPair;
@@ -1120,17 +1105,6 @@ export function createSubagentSettings(
 			// the parent task approval is the authorization boundary. Use yolo mode
 			// to preserve unattended subagent execution. User `tools.approval` policies still apply.
 			"tools.approvalMode": "yolo",
-			// Subagents run unadvised by default; runSubprocess opts a spawn back in
-			// per agent (frontmatter `advisor` / `task.agentAdvisor`) via overrides.
-			"advisor.enabled": false,
-			// A subagent assignment is one turn: its tool loop ends only when the run
-			// yields, so post-turn `checkCompaction` (driven from `agent_end`) fires
-			// after the run is over and `maintainContextMidRun` is the only proactive
-			// compaction the child ever reaches. `compaction.midTurnEnabled` encodes an
-			// interactive preference — keep compaction boundaries on real user turns —
-			// that has no counterpart here, so inheriting `false` left hours-long
-			// worker runs sailing past the configured threshold until the provider
-			// rejected the context (#13211). A per-spawn override still wins.
 			"compaction.midTurnEnabled": true,
 			...overrides,
 		},
@@ -2119,22 +2093,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 
 		scheduleProgress(flushProgress);
 	};
-
-	const publishAdvisorState = (session: AgentSession | null): void => {
-		// A runtime can attach after startup when model discovery finishes.
-		// Retain this run's advised state through teardown for settled badges.
-		if (!progress.advisor && session?.isAdvisorActive() === true) {
-			progress.advisor = true;
-			scheduleProgress(true);
-		}
-	};
-
 	const attach = (session: AgentSession): (() => void) => {
-		// The session owns attribution: it knows which model produced its output
-		// and withholds an armed-but-unproven fallback. Re-deriving that here from
-		// the event stream got it wrong twice over — the stream also carries
-		// advisor turns running on a different model, and a routing switch was
-		// read as evidence the target had served.
 		const publishServingModel = (): void => {
 			const serving = session.servingModel;
 			if (!serving) return;
@@ -2163,7 +2122,6 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		};
 		return session.subscribe(event => {
 			emitSubagentEvent(event);
-			publishAdvisorState(session);
 			publishServingModel();
 			if (event.type === "auto_retry_start") {
 				progress.retryState = {
@@ -2283,7 +2241,6 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		resolveAbortReasonText,
 		setActiveSession: session => {
 			activeSession = session;
-			publishAdvisorState(session);
 			if (session && completionProbe && !completionProbeStarted) {
 				completionProbeStarted = true;
 				startCompletionProbe({
@@ -2977,7 +2934,6 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		resolvedThinkingLevel: progress.resolvedThinkingLevel,
 		resolvedModelIsFallback: progress.resolvedModelIsFallback,
 		resolvedModelRoute: progress.resolvedModelRoute,
-		advisor: progress.advisor,
 		error: exitCode !== 0 && stderr ? stderr : undefined,
 		aborted: wasAborted,
 		abortReason: finalAbortReason,
@@ -3533,15 +3489,6 @@ export async function finalizeSubagentLifecycle(args: {
 	const ownsRef = Boolean(ref && ref.session === args.session);
 	const cleanupDeadlineAt = args.cleanupDeadlineAt ?? Date.now() + 5000;
 	const disposeSession = async (options?: AgentSessionDisposeOptions): Promise<void> => {
-		// On a graceful finish (e.g. a `yield`) the advisor's review of the final
-		// turn was enqueued at turn end but may still be draining. Give it a
-		// chance to land in the transcript before the runtime is torn down —
-		// mirroring print mode's headless drain — bounded by the shared cleanup
-		// deadline. Hard aborts skip this to keep kill teardown fast.
-		if (!args.aborted) {
-			args.session.prepareForHeadlessAdvisorDrain();
-			await args.session.waitForAdvisorCatchup(Math.max(0, cleanupDeadlineAt - Date.now()));
-		}
 		const disposal = args.session.dispose(options);
 		const remainingMs = Math.max(0, cleanupDeadlineAt - Date.now());
 		try {
@@ -3565,13 +3512,6 @@ export async function finalizeSubagentLifecycle(args: {
 		}
 	};
 
-	// An aborted run leaves a consistent session with its transcript on disk, so
-	// a kept-alive agent with a reviver stays resumable like a finished one.
-	// Manager shutdown also preserves the transcript, but disposes and unregisters
-	// the process-local session (restorable as parked); its exit is recorded as a
-	// process exit, so `omp --restore` goes on with the turn the shutdown cut off.
-	// An explicit kill (Agent Hub, RPC `cancel_subagent`, collab, vibe) publishes
-	// the `aborted` tombstone before the run observes its abort, and stays terminal.
 	const resumableAbort =
 		args.abortKind !== "shutdown" && args.keepAlive && args.reviveSession !== null && ref?.status !== "aborted";
 	if (args.aborted && !resumableAbort) {
@@ -4340,12 +4280,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 	}
 
 	const settings = options.settings ?? Settings.isolated();
-	const advisorSelection = preparedSession
-		? undefined
-		: resolveAgentAdvisorSelection({
-				settingsOverride: cfgTaskAgentAdvisor.get(settings)[agent.name],
-				agentAdvisor: agent.advisor,
-			});
 	const subagentSettings = createSubagentSettings(
 		settings,
 		{
@@ -4353,7 +4287,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			...(agent.readSummarize === false ? { "read.summarize.enabled": false } : undefined),
 			// Isolated runs must not expose roots outside the worktree.
 			...(worktree !== undefined ? { "workspace.additionalDirectories": [] } : undefined),
-			...(advisorSelection ? { "advisor.enabled": true } : undefined),
 		},
 		options.parentServiceTier,
 	);
@@ -4538,8 +4471,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 				);
 			}
 			checkAbort();
-			if (!registryFromParent) {
-			} else {
+			if (registryFromParent) {
 				logger.debug("runSubagent: reusing parent modelRegistry; skipping refresh");
 			}
 			checkAbort();
@@ -4849,7 +4781,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 				readOnly: isReadOnlyAgent(agent),
 				spawns: spawnsEnv,
 				readSummarize: agent.readSummarize,
-				advisor: advisorSelection ? "on" : undefined,
 				compactionThreshold: options.compactionThresholdOverride,
 				outputSchema,
 				outputSchemaMode: options.outputSchemaMode,
@@ -4946,14 +4877,6 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 			let deferredSessionShutdown: Promise<void> | undefined;
 			const deferCleanup = (completion: Promise<void>): void => {
 				lateCleanups.push(completion);
-				// The run's terminal outcome (a successful `yield`, or a genuine
-				// abort) is already settled; `aborted` reflects the authoritative
-				// run status after the abort-signal reconciliation below. Late
-				// cleanup (advisor drain, session disposal, owner-job reaping)
-				// draining past the deadline is orthogonal — it MUST NOT downgrade
-				// a non-aborted run to `aborted`, which discarded valid `agent()`
-				// results (issue #9670). The deferred work still completes
-				// asynchronously via `lateCleanups`/`onCleanupDeferred`.
 				if (!aborted) return;
 				exitCode = 1;
 				abortReasonText = `cleanup exceeded ${cleanupGraceMs} ms`;

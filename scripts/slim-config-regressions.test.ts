@@ -116,36 +116,4 @@ describe("Slim configured-model regressions", () => {
 		expect(invalid.stdout + invalid.stderr).toContain('Model "local/missing" is not configured');
 		expect(requests).toEqual([]);
 	}, 30_000);
-
-	it("audit reads only the selected agent directory", async () => {
-		const transcript = [
-			{ type: "session", id: "isolated-session", cwd: "/fixture/project", timestamp: new Date().toISOString() },
-			{
-				type: "message",
-				message: {
-					role: "assistant",
-					timestamp: Date.now(),
-					model: "fixture",
-					content: [{ type: "text", text: "done" }],
-					usage: { input: 7, output: 2, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } },
-				},
-			},
-		]
-			.map(entry => JSON.stringify(entry))
-			.join("\n");
-		await Bun.write(path.join(agentDir, "sessions/fixture/isolated-session.jsonl"), transcript);
-		const output = path.join(root, "audit.json");
-		const result = await child([
-			process.execPath,
-			path.join(repo, "scripts/session-stats/audit.ts"),
-			"--no-llm",
-			"--json",
-			output,
-		]);
-		expect(result.code, result.stderr).toBe(0);
-		const audit = await Bun.file(output).json();
-		expect(audit.sessions).toHaveLength(1);
-		expect(JSON.stringify(audit.sessions[0])).toContain("isolated-session");
-		expect(requests).toEqual([]);
-	});
 });

@@ -1,12 +1,14 @@
-import type { Component } from "../tui";
-import { Text } from "../components/text";
-import { visibleWidth } from "../utils";
 import { formatAge } from "@oh-my-pi/pi-utils";
-import { shimmerEnabled, shimmerText } from "../theme/shimmer";
-import type { Theme } from "../theme/theme";
-import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../render/index";
-import { formatArtifactErrorNotice, stripOutputNotice, type OutputMeta } from "./output-meta";
+import type { TspSpan } from "@oh-my-pi/pi-wire";
+import { Text } from "../components/text";
+import { card as cardNode, compact, elapsed, keyed, md, node, row, span, text } from "../native/describe";
+import { OwnerMemo } from "../native/memo";
+import type { NativeNode } from "../native/node";
+import { plainText } from "../native/spans";
+import { Ellipsis, Hasher, renderStatusLine, renderTreeList, truncateToWidth, type RenderCache } from "../render/index";
 import {
+	cappedHeadLines,
+	createCachedComponent,
 	FEED_MODEL_BADGE_WIDTH,
 	formatBadge,
 	formatDuration,
@@ -17,23 +19,26 @@ import {
 	isFeedModelBadgeEnabled,
 	PREVIEW_LIMITS,
 	replaceTabs,
+	type ConfiguredThinkingLevel,
 	type ToolUIColor,
 	type ToolUIStatus,
-	cappedHeadLines,
-	createCachedComponent,
-	type ConfiguredThinkingLevel,
 } from "../render/render-utils";
-import type { StructuredSubagentOutput } from "./task";
-import { describeJobTiles, type JobTile, type JobWidgetView, renderJobTileLines } from "./job-widget";
-import type { RenderResultOptions, ToolRenderer, ToolActivitySummary } from "./renderer";
+import { shimmerEnabled, shimmerText } from "../theme/shimmer";
+import type { Theme } from "../theme/theme";
+import type { Component } from "../tui";
+import { visibleWidth } from "../utils";
 import type { IrcDeliveryReceipt, IrcMessage } from "./irc";
-import type { TspSpan } from "@oh-my-pi/pi-wire";
-import { card as cardNode, compact, elapsed, keyed, md, node, row, span, text } from "../native/describe";
-import type { NativeNode } from "../native/node";
-import { OwnerMemo } from "../native/memo";
-import { plainText } from "../native/spans";
+import { describeJobTiles, renderJobTileLines, type JobTile, type JobWidgetView } from "./job-widget";
 import { errorView, resultText, toolHead } from "./native-view";
-import type { NativeToolView, ToolRenderResult } from "./renderer";
+import { formatArtifactErrorNotice, stripOutputNotice, type OutputMeta } from "./output-meta";
+import type {
+	NativeToolView,
+	RenderResultOptions,
+	ToolActivitySummary,
+	ToolRenderer,
+	ToolRenderResult,
+} from "./renderer";
+import type { StructuredSubagentOutput } from "./task";
 
 /** Whether a wait snapshot contains only running jobs and no cancellations. */
 export function isWaitingPollDetails(details: unknown): boolean {
@@ -62,8 +67,6 @@ export interface JobSnapshot {
 	resolvedModelIdentity?: string;
 	/** Explicit thinking metadata, independent of the model identity. */
 	resolvedThinkingLevel?: ConfiguredThinkingLevel;
-	/** True when the task progress reports an attached live advisor. */
-	advisor?: boolean;
 	/** The task agent's latest self-estimated completion (0–100); see `AgentProgress.completionPercent`. */
 	completionPercent?: number;
 	/** The task agent's latest stage in its own words; see `AgentProgress.stage`. */
@@ -533,7 +536,6 @@ function jobsRenderResult(
 											? formatFeedModelBadge(
 													modelIdentity,
 													job.resolvedThinkingLevel,
-													job.advisor === true,
 													uiTheme,
 													Math.min(
 														FEED_MODEL_BADGE_WIDTH,

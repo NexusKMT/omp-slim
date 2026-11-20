@@ -1,6 +1,6 @@
+import chalk from "@oh-my-pi/pi-utils/chalk";
 import { colorLuma, relativeLuminance } from "@oh-my-pi/pi-utils/color";
 import * as logger from "@oh-my-pi/pi-utils/logger";
-import chalk from "@oh-my-pi/pi-utils/chalk";
 import { bgAnsi, colorToAnsi, fgAnsi, resolveToHex } from "./color";
 import {
 	ANSI_COLOR_INDEX,
@@ -666,8 +666,6 @@ export class Theme {
 			tokens: this.#symbols["icon.tokens"],
 			context: this.#symbols["icon.context"],
 			cost: this.#symbols["icon.cost"],
-			advisor: this.#symbols["icon.advisor"],
-			advisorClosed: this.#symbols["icon.advisorClosed"],
 			time: this.#symbols["icon.time"],
 			omp: this.#symbols["icon.omp"],
 			ghost: this.#symbols["icon.ghost"],
@@ -763,7 +761,6 @@ export class Theme {
 			tree: this.#symbols["icon.worktree"],
 			signIn: this.#symbols["icon.input"],
 			signOut: this.#symbols["icon.output"],
-			advisor: this.#symbols["icon.advisor"],
 			host: this.#symbols["icon.host"],
 			package: this.#symbols["icon.package"],
 			fast: this.#symbols["icon.fast"],

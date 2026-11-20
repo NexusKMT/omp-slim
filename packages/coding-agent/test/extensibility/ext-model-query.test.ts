@@ -1,11 +1,11 @@
-import { describe, expect, test } from "bun:test";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { getBundledModel } from "../helpers/bundled-model";
+import { describe, expect, test } from "bun:test";
 import { createExtensionModelQuery } from "../../src/extensibility/extensions/model-api";
+import { createTestModel } from "../helpers/test-model";
 
 function model(id: string, provider: string): Model<Api> {
-	return getBundledModel(provider, id);
+	return createTestModel({ provider: provider, id: id });
 }
 
 const claude = model("claude-opus-4-8", "anthropic");

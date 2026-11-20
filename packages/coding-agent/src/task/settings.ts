@@ -3,16 +3,16 @@ import type { Settings } from "../config/settings";
  * Settings declared by this domain (see `config/registry.ts`). Declaration order is the
  * settings-panel order; `config/all-settings.ts` registers every domain.
  */
+import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
+import { setFeedModelBadgeEnabled } from "@oh-my-pi/pi-tui/render/render-utils";
+import { getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
+import { $which, isRecord, logger, setWorktreesDir } from "@oh-my-pi/pi-utils";
 import {
 	type AgentCompactionThresholdOverride,
 	validateAgentCompactionThresholdOverrides,
 } from "../config/compaction-threshold";
 import { effect, register } from "../config/registry";
 import { type ServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../config/service-tier";
-import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
-import { $which, isRecord, logger, setWorktreesDir } from "@oh-my-pi/pi-utils";
-import { setFeedModelBadgeEnabled } from "@oh-my-pi/pi-tui/render/render-utils";
-import { getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 
 const EMPTY_AGENT_SERVICE_TIER_OVERRIDES: Record<string, ServiceTierInheritSettingValue> = {};
 const EMPTY_AGENT_COMPACTION_THRESHOLD_OVERRIDES: Record<string, AgentCompactionThresholdOverride> = {};
@@ -557,14 +557,6 @@ export const cfgTaskAgentCompactionThresholdOverrides = register({
 	default: EMPTY_AGENT_COMPACTION_THRESHOLD_OVERRIDES,
 	validate: validateAgentCompactionThresholdOverrides,
 });
-
-export const cfgTaskAgentAdvisor = register({
-	id: "task.agentAdvisor",
-	protocolDefault: ["rpc", "acp"],
-	type: "record",
-	default: {} as Record<string, string>,
-});
-
 export const cfgTaskShowResolvedModelBadge = register({
 	id: "task.showResolvedModelBadge",
 	type: "boolean",

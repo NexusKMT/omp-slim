@@ -2,13 +2,8 @@
  * Contract: while an SDK session's `ask` dialog waits for the user, the session's agent counts as blocked on the
  * user, so a peer's `wait` for its reply returns at once naming it instead of sitting out the reply cap.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -23,6 +18,11 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { WaitTool } from "@oh-my-pi/pi-coding-agent/tools/wait";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 describe("a reply wait on an agent in `ask`", () => {
 	let tempDir: string;
@@ -71,7 +71,7 @@ describe("a reply wait on an agent in `ask`", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings: Settings.isolated({ "async.enabled": false }),
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			hasUI: true,
 			disableExtensionDiscovery: true,
 			skills: [],

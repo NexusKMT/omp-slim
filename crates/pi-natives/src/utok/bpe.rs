@@ -227,11 +227,6 @@ impl RankTable {
 		let (&n, rest) = p[6..].split_first_chunk::<4>().unwrap();
 		let n = u32::from_le_bytes(n) as usize;
 		p = rest;
-		// Size `short` to its real population: dead slots and pair/long
-		// tokens would otherwise round a sparse table up a power of two. A
-		// sparse subset table (Jev's base set: 49k short tokens over 200k
-		// ranks) still keeps half the container's slots: it answers mostly
-		// misses, which at a ~0.75 load cost Jev ~12% of its count time.
 		let short_count = {
 			let mut entries = p;
 			(0..n)
@@ -308,11 +303,6 @@ impl RankTable {
 		self.count_merged(piece, memo)
 	}
 
-	/// Token count of `piece` from the merge loop alone: unlike
-	/// [`count_piece`](Self::count_piece), a whole-piece table hit is not
-	/// short-circuited, so entries the merges cannot reach stay split. Jev
-	/// resolves whole pieces against a separate vocabulary and uses its
-	/// base table only for merging.
 	pub fn count_merged(&self, piece: &[u8], memo: &mut PieceMemo) -> u32 {
 		if piece.is_empty() {
 			return 0;
@@ -501,10 +491,6 @@ impl BpeEncoding {
 	}
 }
 
-/// Normalize/transcode as required, split with `splitter`, and feed each
-/// piece's UTF-8 bytes to `f`. Crate-visible so count-only families that
-/// price pieces differently (Jev) reuse the normalization and splitting
-/// unchanged.
 pub(crate) fn for_each_piece<U: Unit>(
 	splitter: &Splitter,
 	nfc: bool,

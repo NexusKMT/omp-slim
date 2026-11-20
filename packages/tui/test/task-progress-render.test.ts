@@ -1,14 +1,14 @@
+import { type RenderResultOptions, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { FEED_MODEL_BADGE_WIDTH } from "@oh-my-pi/pi-tui/render/render-utils";
+import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-tui/theme";
+import { getSubprocessToolRenderer } from "@oh-my-pi/pi-tui/tools/subprocess";
+import type { AgentProgress, SingleResult, TaskToolDetails } from "@oh-my-pi/pi-tui/tools/task";
+import { taskToolRenderer } from "@oh-my-pi/pi-tui/tools/task";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as os from "node:os";
 import { setFeedModelBadgeEnabled } from "../src/render/render-utils";
 import { setShimmerMode } from "../src/theme/shimmer";
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { type RenderResultOptions, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-tui/theme";
-import { taskToolRenderer } from "@oh-my-pi/pi-tui/tools/task";
-import { getSubprocessToolRenderer } from "@oh-my-pi/pi-tui/tools/subprocess";
-import type { AgentProgress, SingleResult, TaskToolDetails } from "@oh-my-pi/pi-tui/tools/task";
-import { FEED_MODEL_BADGE_WIDTH } from "@oh-my-pi/pi-tui/render/render-utils";
-import { visibleWidth } from "@oh-my-pi/pi-tui";
 
 function runningProgress(overrides: Partial<AgentProgress> = {}): AgentProgress {
 	return {
@@ -197,80 +197,6 @@ describe("task progress rendering", () => {
 			expect(text).not.toContain(os.homedir());
 		}
 	});
-
-	it("places the model and advisor before the live agent title without displacing stats", async () => {
-		setFeedModelBadgeEnabled(true);
-		const theme = (await getThemeByName("dark"))!;
-		const progress = runningProgress({
-			id: "BadgeWorker",
-			agent: "scout",
-			description: "Inspect rendering",
-			resolvedModel: "openai/gpt-5:high",
-			resolvedModelIdentity: "openai/gpt-5",
-			resolvedThinkingLevel: ThinkingLevel.High,
-			advisor: true,
-			requests: 3,
-			cost: 0.25,
-		});
-		const row = Bun.stripANSI(
-			findRow(
-				taskToolRenderer.renderResult(
-					{ content: [], details: detailsFor(progress) },
-					{ expanded: false, isPartial: true },
-					theme,
-				),
-				"BadgeWorker",
-			),
-		);
-		expect(row).toContain(`openai/gpt-5 ${theme.icon.advisor} BadgeWorker: Inspect rendering`);
-		expect(row).not.toContain(":high");
-		expect(row).toContain(`${theme.thinking.high.split(" ")[0]} openai/gpt-5`);
-		expect(row.indexOf(theme.status.running)).toBeLessThan(row.indexOf("openai/gpt-5"));
-		expect(row).toContain(`${theme.format.bracketLeft}scout${theme.format.bracketRight}`);
-		expect(row.indexOf("3 req")).toBeGreaterThan(row.indexOf("BadgeWorker"));
-		expect(row).toContain("$0.25");
-	});
-
-	it("keeps the settled model before the name and only marks an enabled advisor", async () => {
-		setFeedModelBadgeEnabled(true);
-		const theme = (await getThemeByName("dark"))!;
-		const renderRow = (advisor: boolean): string =>
-			Bun.stripANSI(
-				findRow(
-					taskToolRenderer.renderResult(
-						{
-							content: [],
-							details: {
-								projectAgentsDir: null,
-								totalDurationMs: 1000,
-								results: [
-									finishedResult({
-										id: "SettledWorker",
-										description: "Inspect rendering",
-										resolvedModel: "openai/gpt-5:high",
-										resolvedModelIdentity: "openai/gpt-5",
-										resolvedThinkingLevel: ThinkingLevel.High,
-										advisor,
-										durationMs: 1000,
-										requests: 3,
-									}),
-								],
-							},
-						},
-						{ expanded: false, isPartial: false },
-						theme,
-					),
-					"SettledWorker",
-				),
-			);
-		const withoutAdvisor = renderRow(false);
-		expect(withoutAdvisor).toContain("openai/gpt-5 SettledWorker: Inspect rendering");
-		expect(withoutAdvisor).not.toContain(theme.icon.advisor);
-		expect(withoutAdvisor).not.toContain(":high");
-		expect(withoutAdvisor.indexOf("3 req")).toBeGreaterThan(withoutAdvisor.indexOf("SettledWorker"));
-		expect(renderRow(true)).toContain(`openai/gpt-5 ${theme.icon.advisor} SettledWorker`);
-	});
-
 	it("keeps the name and status on the first row at 40 columns across resizes", async () => {
 		setFeedModelBadgeEnabled(true);
 		const theme = (await getThemeByName("dark"))!;
@@ -280,7 +206,6 @@ describe("task progress rendering", () => {
 			description: "Inspect rendering boundaries",
 			resolvedModelIdentity: "openai/custom-architecture-model:high",
 			resolvedThinkingLevel: ThinkingLevel.High,
-			advisor: true,
 		};
 		const snapshots: { details: TaskToolDetails; status?: string }[] = [
 			{ details: detailsFor(runningProgress(metadata)) },
@@ -326,44 +251,10 @@ describe("task progress rendering", () => {
 						.slice(firstStatusRow!.indexOf(thinkingGlyph), firstStatusRow!.indexOf(metadata.id))
 						.trimEnd();
 					expect(visibleWidth(badge)).toBeLessThanOrEqual(FEED_MODEL_BADGE_WIDTH);
-					expect(firstStatusRow).toContain(theme.icon.advisor);
 				}
 			}
 		}
 	});
-
-	it("hides model and advisor metadata together on progress and settled rows", async () => {
-		setFeedModelBadgeEnabled(false);
-		const theme = (await getThemeByName("dark"))!;
-		const metadata = {
-			id: "HiddenBadge",
-			resolvedModel: "openai/gpt-5:high",
-			resolvedModelIdentity: "openai/gpt-5",
-			resolvedThinkingLevel: ThinkingLevel.High,
-			advisor: true,
-		};
-		const snapshots: TaskToolDetails[] = [
-			detailsFor(runningProgress(metadata)),
-			{ projectAgentsDir: null, totalDurationMs: 0, results: [finishedResult(metadata)] },
-		];
-		for (const details of snapshots) {
-			const row = Bun.stripANSI(
-				findRow(
-					taskToolRenderer.renderResult(
-						{ content: [], details },
-						{ expanded: false, isPartial: !!details.progress },
-						theme,
-					),
-					"HiddenBadge",
-				),
-			);
-			const glyph = details.progress ? theme.status.running : theme.status.success;
-			expect(row).toContain(`${glyph} HiddenBadge`);
-			expect(row).not.toContain("openai/gpt-5");
-			expect(row).not.toContain(theme.icon.advisor);
-		}
-	});
-
 	it("preserves nested subprocess IDs and status when no width is known during row construction", async () => {
 		const theme = (await getThemeByName("dark"))!;
 		const details: TaskToolDetails = {
@@ -386,7 +277,6 @@ describe("task progress rendering", () => {
 			agent: `custom-role-${"extended-".repeat(10)}`,
 			description,
 			resolvedModelIdentity: "provider/model",
-			advisor: true,
 		};
 		for (const enabled of [true, false]) {
 			setFeedModelBadgeEnabled(enabled);

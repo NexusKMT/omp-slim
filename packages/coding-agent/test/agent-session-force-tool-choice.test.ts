@@ -1,9 +1,6 @@
-import { afterEach, beforeEach, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { createMockModel, type MockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -11,7 +8,10 @@ import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, expect, it, vi } from "bun:test";
+import * as path from "node:path";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 let tempDir: TempDir;
 let authStorage: AuthStorage | undefined;
@@ -21,7 +21,7 @@ let mock: MockModel;
 
 beforeEach(() => {
 	tempDir = TempDir.createSync("@pi-agent-session-force-tool-");
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 
 	authStorage = createInMemoryAuthStorage();

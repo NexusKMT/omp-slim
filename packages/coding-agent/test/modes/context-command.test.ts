@@ -1,5 +1,3 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -12,7 +10,9 @@ import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storag
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { TempDir, withTimeout } from "@oh-my-pi/pi-utils";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 describe("context command viewer", () => {
 	let authStorage: AuthStorage;
@@ -51,7 +51,7 @@ describe("context command viewer", () => {
 
 	it("keeps /context focused fullscreen while a real pending turn continues, restoring draft without abort or submission", async () => {
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		const entered = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();

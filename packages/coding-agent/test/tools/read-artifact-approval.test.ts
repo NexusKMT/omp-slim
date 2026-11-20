@@ -1,11 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
-import { getBundledModel } from "../helpers/bundled-model";
-import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
-import { execUrlProtocol } from "../helpers/exec-url-protocol";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -14,6 +8,12 @@ import { approvalGrantKey, SessionApprovals } from "@oh-my-pi/pi-coding-agent/to
 import { approvalTargetKey } from "@oh-my-pi/pi-coding-agent/tools/approval-targets";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { execUrlProtocol } from "../helpers/exec-url-protocol";
+import { createTestModel } from "../helpers/test-model";
 
 function textOf(result: { content: ReadonlyArray<{ type: string; text?: string }> }): string {
 	return result.content.flatMap(block => (block.type === "text" ? [block.text ?? ""] : [])).join("\n");
@@ -53,7 +53,7 @@ describe("artifact reads through session approval", () => {
 					"bash.autoBackground.enabled": false,
 					"bashInterceptor.enabled": false,
 				}),
-				model: getBundledModel("openai", "gpt-4o-mini"),
+				model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 				bindProcessState: false,
 				taskDepth,
 				disableExtensionDiscovery: true,

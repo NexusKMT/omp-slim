@@ -1,18 +1,7 @@
-import { describe, expect, it } from "bun:test";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { describe, expect, it } from "bun:test";
 
 describe("AIError.classify — structural provider errors", () => {
-	it("classifies an Anthropic connection timeout as timeout + transient (no regex)", () => {
-		const id = AIError.classify(new AIError.AnthropicConnectionTimeoutError());
-		expect(AIError.is(id, AIError.Flag.Timeout)).toBe(true);
-		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
-	});
-
-	it("classifies an Anthropic connection error as transient", () => {
-		const id = AIError.classify(new AIError.AnthropicConnectionError(new Error("ECONNRESET")));
-		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
-	});
-
 	it("maps a 5xx ProviderHttpError to transient via status", () => {
 		const id = AIError.classify(new AIError.ProviderHttpError("Service Unavailable", 503));
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
@@ -50,34 +39,12 @@ describe("AIError.classify — structural provider errors", () => {
 			AIError.is(AIError.classify(new AIError.ProviderHttpError("Forbidden", 403)), AIError.Flag.AuthFailed),
 		).toBe(true);
 	});
-
-	it("classifies a typed AWS credential-resolution failure as authFailed", () => {
-		const id = AIError.classify(new AIError.AwsCredentialsError("opaque provider setup failure", "resolution"));
-		expect(AIError.is(id, AIError.Flag.AuthFailed)).toBe(true);
-	});
-
 	it("maps the usage_limit_reached code to usageLimit on a 429", () => {
 		const id = AIError.classify(
 			new AIError.ProviderHttpError("Payment Required", 429, { code: "usage_limit_reached" }),
 		);
 		expect(AIError.is(id, AIError.Flag.UsageLimit)).toBe(true);
 	});
-
-	it("recognizes Codex transport errors by name without importing the provider", () => {
-		const transport = Object.assign(new Error("websocket closed"), { name: "CodexWebSocketTransportError" });
-		expect(AIError.is(AIError.classify(transport), AIError.Flag.Transient)).toBe(true);
-		const retryableStream = Object.assign(new Error("server error"), {
-			name: "CodexProviderStreamError",
-			retryable: true,
-		});
-		expect(AIError.is(AIError.classify(retryableStream), AIError.Flag.Transient)).toBe(true);
-		const fatalStream = Object.assign(new Error("bad request"), {
-			name: "CodexProviderStreamError",
-			retryable: false,
-		});
-		expect(AIError.is(AIError.classify(fatalStream), AIError.Flag.Transient)).toBe(false);
-	});
-
 	it("classifies an incomplete provider stream as transient + retryable", () => {
 		const err = new AIError.ProviderResponseError(
 			"Google API stream ended without a finish reason (connection dropped or response truncated)",
@@ -139,7 +106,7 @@ describe("AIError.classify — structural provider errors", () => {
 
 describe("AIError.finalize", () => {
 	it("bundles id, status, error stopReason, and message for a connection timeout", async () => {
-		const result = await AIError.finalize(new AIError.AnthropicConnectionTimeoutError(), {});
+		const result = await AIError.finalize(new Error("Request timed out."), {});
 		expect(result.stopReason).toBe("error");
 		expect(AIError.is(result.id, AIError.Flag.Timeout)).toBe(true);
 		expect(AIError.is(result.id, AIError.Flag.Transient)).toBe(true);
@@ -188,18 +155,6 @@ describe("AIError.finalize", () => {
 		const reId = AIError.classifyMessage({ errorId: result.id, errorMessage: result.message });
 		expect(AIError.retriable(reId)).toBe(true);
 	});
-
-	it("treats Aliyun multimodal-gateway 400s as transient (flaky, replay succeeds)", () => {
-		const phrasings = [
-			"400 <400> InternalError.Algo.InvalidParameter: The provided URL does not appear to be valid. Ensure it is correctly formatted.\n<400> InternalError.Algo.InvalidParameter: The provided URL does not appear to be valid. Ensure it is correctly formatted. (type=invalid_request_error param=invalid_parameter_error)",
-			"400 <400> InternalError.Algo.InvalidParameter: Download multimodal file timed out\n<400> InternalError.Algo.InvalidParameter: Download multimodal file timed out (type=invalid_request_error param=invalid_parameter_error)",
-		];
-		for (const errorMessage of phrasings) {
-			const id = AIError.classifyMessage({ errorStatus: 400, errorMessage });
-			expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
-		}
-	});
-
 	it("keeps genuine 400 validation errors terminal", () => {
 		const id = AIError.classifyMessage({
 			errorStatus: 400,

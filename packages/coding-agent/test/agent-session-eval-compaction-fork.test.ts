@@ -1,7 +1,4 @@
-import { afterEach, expect, it } from "bun:test";
-import * as path from "node:path";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -12,6 +9,9 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, expect, it } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 const temp = TempDir.createSync("@pi-eval-fork-");
 let session: AgentSession | undefined;
@@ -28,7 +28,7 @@ afterEach(async () => {
 it("keeps the compacted eval context in the fork's provider prefix", async () => {
 	auth = await AuthStorage.create(":memory:");
 	const registry = new ModelRegistry(auth);
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("Expected bundled model");
 	const settings = Settings.isolated({ "compaction.keepRecentTokens": 1 });
 	const manager = SessionManager.create(temp.path(), path.join(temp.path(), "sessions"));

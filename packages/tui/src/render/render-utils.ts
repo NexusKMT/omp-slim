@@ -5,11 +5,11 @@
  * tool renderers to ensure a unified TUI experience.
  */
 
-import * as os from "node:os";
-import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Ellipsis } from "@oh-my-pi/pi-natives";
 import { pluralize, sanitizeText } from "@oh-my-pi/pi-utils";
+import * as os from "node:os";
+import * as path from "node:path";
 import { formatKeyHint, type KeyId } from "../app-keybindings";
 import { getKeybindings } from "../keybindings";
 import type { Theme, ThemeColor } from "../theme/theme";
@@ -148,14 +148,9 @@ export function thinkingLevelGlyph(level: ConfiguredThinkingLevel, uiTheme: Them
 	return space < 0 ? symbol : symbol.slice(0, space);
 }
 
-/**
- * Compact feed-row prefix: explicit thinking glyph, sanitized model identity,
- * then advisor eye. Keep fitting icons if no model fits; preserve literal identity suffixes.
- */
 export function formatFeedModelBadge(
 	modelIdentity: string | undefined,
 	thinkingLevel: ConfiguredThinkingLevel | undefined,
-	advisor: boolean | undefined,
 	uiTheme: Theme,
 	maxWidth = FEED_MODEL_BADGE_WIDTH,
 ): string {
@@ -164,20 +159,13 @@ export function formatFeedModelBadge(
 	const clean = sanitizeText(modelIdentity).replace(/\s+/g, " ").trim();
 	if (!clean || !(width > 0)) return "";
 	const glyph = thinkingLevel !== undefined ? thinkingLevelGlyph(thinkingLevel, uiTheme) : "";
-	const advisorIcon = advisor === true ? uiTheme.icon.advisor : "";
 	const prefix = glyph ? `${glyph} ` : "";
-	const suffix = advisorIcon ? ` ${advisorIcon}` : "";
-	const modelWidth = width - visibleWidth(prefix) - visibleWidth(suffix);
+	const modelWidth = width - visibleWidth(prefix);
 	if (modelWidth < 1) {
-		const advisorWidth = visibleWidth(advisorIcon);
-		if (advisorIcon && advisorWidth <= width) {
-			const thinkingPrefix = glyph && visibleWidth(prefix) + advisorWidth <= width ? prefix : "";
-			return uiTheme.fg("accent", thinkingPrefix) + uiTheme.fg("dim", advisorIcon);
-		}
 		return glyph && visibleWidth(glyph) <= width ? uiTheme.fg("accent", glyph) : "";
 	}
 	const model = truncateMiddleToWidth(clean, modelWidth);
-	return uiTheme.fg("accent", prefix) + uiTheme.fg("dim", `${model}${suffix}`);
+	return uiTheme.fg("accent", prefix) + uiTheme.fg("dim", model);
 }
 
 /** Truncation lengths for different content types */

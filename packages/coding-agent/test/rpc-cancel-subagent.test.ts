@@ -1,7 +1,3 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-ai/build";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -21,6 +17,10 @@ import {
 } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // Slim removed subagent model-pattern resolution (`resolveModelOverrideWithAuthFallback`):
 // a nested run now inherits the parent session's exact model via `parentModel`.
@@ -252,9 +252,6 @@ describe("handleRpcCancelSubagent", () => {
 				await Promise.withResolvers<never>().promise;
 			},
 			waitForIdle: async () => {},
-			isAdvisorActive: () => false,
-			prepareForHeadlessAdvisorDrain: () => {},
-			waitForAdvisorCatchup: async () => true,
 			getLastAssistantMessage: () => undefined,
 			hasPendingAsyncWork: () => false,
 			getAsyncJobSnapshot: () => ({ running: [], recent: [] }),

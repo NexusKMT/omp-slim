@@ -1,7 +1,7 @@
 import { type } from "@oh-my-pi/omptype";
 import type { Usage } from "@oh-my-pi/pi-ai";
-import type { ThemeColor } from "../theme/theme";
 import type { ConfiguredThinkingLevel } from "../render/render-utils";
+import type { ThemeColor } from "../theme/theme";
 import type { ToolRenderer } from "./renderer";
 /**
  * TUI rendering for task tool.
@@ -9,19 +9,22 @@ import type { ToolRenderer } from "./renderer";
  * Provides renderCall and renderResult functions for displaying
  * task execution in the terminal UI.
  */
+import { sanitizeText } from "@oh-my-pi/pi-utils";
+import type { TspAgentProps, TspProps, TspTone } from "@oh-my-pi/pi-wire";
 import * as path from "node:path";
-import { Container, type Component } from "../tui";
 import { Markdown } from "../components/markdown";
 import { Text } from "../components/text";
-import { visibleWidth, wrapTextWithAnsi } from "../utils";
-import { sanitizeText } from "@oh-my-pi/pi-utils";
-import type { RenderResultOptions } from "./renderer";
-import { formatAgentStatRun, renderAgentTreeRow } from "./agent-tree";
-import { getMarkdownTheme, type Theme } from "../theme/theme";
-import { stripGeneratedOutputNotice, stripRawOutputArtifactNotice, stripTrailingNotice } from "./output-meta";
+import { compact, kv, md, node, propNode, span, text } from "../native/describe";
+import { OwnerMemo, sameItems } from "../native/memo";
+import type { NativeNode } from "../native/node";
+import { plainText } from "../native/spans";
+import { taskSummary } from "../overlays/agent-hub-renderer";
+import { renderStatusLine } from "../render/index";
 import {
 	capPreviewLines,
+	clipCollapsed,
 	FEED_MODEL_BADGE_WIDTH,
+	flattenLine,
 	formatBadge,
 	formatDuration,
 	formatExpandHint,
@@ -32,32 +35,27 @@ import {
 	isFeedModelBadgeEnabled,
 	pluralize,
 	previewLine,
-	clipCollapsed,
-	flattenLine,
 	previewWindowRows,
 	replaceTabs,
 	shortenEmbeddedPaths,
 	shortenPath,
 	shortenToolArgumentPaths,
-	type ToolUIStatus,
 	TRUNCATE_LENGTHS,
 	truncateToWidth,
+	type ToolUIStatus,
 } from "../render/render-utils";
-import { renderStatusLine } from "../render/index";
 import { framedToolCard } from "../render/tool-card";
-import { formatOutputInline, renderJsonTreeLines } from "./json-tree";
-import { repairDoubleEncodedJsonString } from "./task-repair-args";
-import { getSubprocessToolRenderer } from "./subprocess";
-import { assembleYieldResult, type YieldSectionShapes } from "./task-yield-assembly";
-import type { TspAgentProps, TspProps, TspTone } from "@oh-my-pi/pi-wire";
-import { compact, kv, md, node, propNode, span, text } from "../native/describe";
-import type { NativeNode } from "../native/node";
-import { OwnerMemo, sameItems } from "../native/memo";
-import { plainText } from "../native/spans";
+import { getMarkdownTheme, type Theme } from "../theme/theme";
+import { Container, type Component } from "../tui";
+import { visibleWidth, wrapTextWithAnsi } from "../utils";
+import { formatAgentStatRun, renderAgentTreeRow } from "./agent-tree";
+import { describeJsonValue, formatOutputInline, renderJsonTreeLines } from "./json-tree";
 import { errorText, noteText, resultText } from "./native-view";
-import { describeJsonValue } from "./json-tree";
-import { taskSummary } from "../overlays/agent-hub-renderer";
-import type { NativeToolView, ToolRenderResult } from "./renderer";
+import { stripGeneratedOutputNotice, stripRawOutputArtifactNotice, stripTrailingNotice } from "./output-meta";
+import type { NativeToolView, RenderResultOptions, ToolRenderResult } from "./renderer";
+import { getSubprocessToolRenderer } from "./subprocess";
+import { repairDoubleEncodedJsonString } from "./task-repair-args";
+import { assembleYieldResult, type YieldSectionShapes } from "./task-yield-assembly";
 
 /** Render context threaded in from `ToolExecutionComponent.#buildRenderContext`. */
 interface TaskRenderContext {
@@ -746,7 +744,6 @@ function renderAgentProgress(
 			width: maxWidth,
 			model: progress.resolvedModelIdentity ?? progress.resolvedModel,
 			thinkingLevel: progress.resolvedThinkingLevel,
-			advisor: progress.advisor,
 			spinnerFrame,
 			frozen,
 			roleBadge: agentTypeBadge(progress.agent, theme),
@@ -1095,7 +1092,6 @@ function renderAgentResult(
 		? formatFeedModelBadge(
 				result.resolvedModelIdentity ?? result.resolvedModel,
 				result.resolvedThinkingLevel,
-				result.advisor,
 				theme,
 				Math.min(
 					FEED_MODEL_BADGE_WIDTH,
@@ -2421,8 +2417,6 @@ export interface AgentProgress {
 	resolvedModelIsFallback?: boolean;
 	/** Extension routing note (e.g. model-pools) explaining why {@link resolvedModel} was chosen. */
 	resolvedModelRoute?: string;
-	/** True when a live advisor was attached to this run's session, not merely enabled in settings. */
-	advisor?: boolean;
 	/** The agent's latest self-estimate of task completion (0–100), from the periodic `task.completionProbe` side request. */
 	completionPercent?: number;
 	/**
@@ -2516,8 +2510,6 @@ export interface SingleResult {
 	resolvedModelIsFallback?: boolean;
 	/** Mirrors {@link AgentProgress.resolvedModelRoute} onto the settled result. */
 	resolvedModelRoute?: string;
-	/** Retains {@link AgentProgress.advisor} after the advised session is disposed. */
-	advisor?: boolean;
 	error?: string;
 	aborted?: boolean;
 	abortReason?: string;

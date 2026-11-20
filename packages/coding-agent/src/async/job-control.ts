@@ -14,10 +14,10 @@ import {
 	agentProgress,
 } from "./job-manager";
 
+import { parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import type { StructuredSubagentOutput } from "@oh-my-pi/pi-tui/tools/task";
 import { renderStructuredJson, structuredStatusLabel, taskAgentHandles } from "../session/async-job-delivery";
 import { USER_INTERRUPT_LABEL } from "../session/messages";
-import type { StructuredSubagentOutput } from "@oh-my-pi/pi-tui/tools/task";
-import { parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 
 import type { ToolSession } from "../tools";
 
@@ -177,7 +177,6 @@ export function snapshotJobs(session: ToolSession, jobs: TrackedJobLike[]): JobS
 		const exitCode = typeof latest.latestDetails?.exitCode === "number" ? latest.latestDetails.exitCode : undefined;
 		let resolvedModelIdentity: string | undefined;
 		let resolvedThinkingLevel: JobSnapshot["resolvedThinkingLevel"];
-		let advisor = false;
 		let completionPercent: number | undefined;
 		let stage: string | undefined;
 		let requests: number | undefined;
@@ -202,7 +201,6 @@ export function snapshotJobs(session: ToolSession, jobs: TrackedJobLike[]): JobS
 				if (typeof thinkingValue === "string") {
 					resolvedThinkingLevel = parseConfiguredThinkingLevel(thinkingValue);
 				}
-				advisor = progressRecord?.advisor === true;
 				const completionValue = progressRecord?.completionPercent;
 				if (typeof completionValue === "number" && Number.isFinite(completionValue)) {
 					completionPercent = completionValue;
@@ -231,7 +229,6 @@ export function snapshotJobs(session: ToolSession, jobs: TrackedJobLike[]): JobS
 			...(resolvedModel ? { resolvedModel } : {}),
 			...(resolvedModelIdentity ? { resolvedModelIdentity } : {}),
 			...(resolvedThinkingLevel !== undefined ? { resolvedThinkingLevel } : {}),
-			...(advisor ? { advisor: true } : {}),
 			...(completionPercent !== undefined && running ? { completionPercent } : {}),
 			...(stage ? { stage } : {}),
 			...(requests !== undefined && running ? { requests } : {}),
@@ -450,15 +447,6 @@ export async function executeCancel(
 	return buildJobResult(session, manager, "cancel", visibleJobs(manager, ids, ownerId), cancelOutcomes);
 }
 
-/**
- * Kill a non-job-backed agent registration named by `id`: abort any in-flight
- * turn, then release it from the lifecycle (dispose session + unregister). This
- * is the only kill path for a keep-alive subagent that was budget-aborted, went
- * `idle`/`parked`, and outlived its job row — otherwise it is unstoppable short
- * of a broker restart (issue #6315). Scoped to the caller's own descendants so
- * cross-agent kills stay impossible; an unowned caller (no owner id) reaches
- * only parentless subs. Never touches Main, the caller, or advisor transcripts.
- */
 export async function cancelAgentRegistration(
 	session: ToolSession,
 	ownerId: string | undefined,

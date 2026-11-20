@@ -12,12 +12,9 @@
  *     the persisted message (in-place mutation) and the emitted display event
  *     (deobfuscated spread copy) carry the marker (A4).
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
@@ -26,6 +23,9 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SILENT_ABORT_MARKER } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 function makeAbortedAssistantMessage(text = "partial draft"): AssistantMessage {
 	return {
@@ -62,7 +62,7 @@ async function createSessionWithObfuscator(
 	modelRegistry: ModelRegistry,
 	obfuscator?: SecretObfuscator,
 ): Promise<SessionFixture> {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("Expected built-in anthropic model to exist");
 
 	const agent = new Agent({

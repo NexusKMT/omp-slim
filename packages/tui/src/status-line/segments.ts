@@ -1,8 +1,5 @@
-import * as os from "node:os";
-import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getTimeBasedPricingPeriod } from "@oh-my-pi/pi-ai/models";
-import { sharedSpinnerFrame, TERMINAL } from "../index";
 import {
 	formatDuration,
 	formatNumber,
@@ -11,24 +8,27 @@ import {
 	normalizePathForComparison,
 	relativePathWithinNormalizedRoot,
 } from "@oh-my-pi/pi-utils";
-import { type SymbolKey, type Theme, type ThemeColor, theme } from "../theme";
-import { shortenPath, TRUNCATE_LENGTHS } from "../render/render-utils";
-import { fileHyperlink } from "../render/hyperlink";
-import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
-import { summarizeLoopCondition } from "./loop";
-import { formatMetric } from "../components/metric";
-import { formatBillingSummary } from "./metrics";
-import { sanitizeStatusText } from "../chrome/shared";
+import type { TspSpan, TspTone } from "@oh-my-pi/pi-wire";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	formatContextUsage,
 	getContextUsageLevel,
 	getContextUsageThemeColor,
 	getContextUsageTone,
 } from "../chrome/context-thresholds";
-import type { TspSpan, TspTone } from "@oh-my-pi/pi-wire";
+import { sanitizeStatusText } from "../chrome/shared";
+import { formatMetric } from "../components/metric";
+import { sharedSpinnerFrame, TERMINAL } from "../index";
 import { node, span } from "../native/describe";
+import { fileHyperlink } from "../render/hyperlink";
+import { shortenPath, TRUNCATE_LENGTHS } from "../render/render-utils";
+import { type SymbolKey, type Theme, type ThemeColor, theme } from "../theme";
+import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { thinkingLevelToken } from "../theme/theme-class";
 import type { StatusLineSession } from "./host";
+import { summarizeLoopCondition } from "./loop";
+import { formatBillingSummary } from "./metrics";
 import type { RenderedSegment, SegmentContext, SegmentView, StatusLineSegment, StatusLineSegmentId } from "./types";
 
 export type { SegmentContext } from "./types";
@@ -316,31 +316,6 @@ function modelThinkingDisplay(ctx: SegmentContext): string {
 		: (theme.thinking[level as keyof Theme["thinking"]] ?? level);
 }
 
-/**
- * Advisor symbol, colored by the worst status in the roster: success = all
- * running, warning = quota-exhausted, error = failed, dim = everything
- * paused/no-model. Undefined when no advisor is configured.
- */
-function modelAdvisorBadge(ctx: SegmentContext): { icon: string; color: ThemeColor } | undefined {
-	// Optional chaining: lightweight session doubles (test mocks) that don't
-	// implement getAdvisorStatusOverview skip the badge instead of crashing.
-	const advisorStats = ctx.session.getAdvisorStatusOverview?.();
-	if (!advisorStats?.configured || advisorStats.advisors.length === 0) return undefined;
-	const statuses = advisorStats.advisors.map(a => a.status);
-	const color: ThemeColor = statuses.includes("error")
-		? "error"
-		: statuses.includes("quota_exhausted")
-			? "warning"
-			: statuses.includes("running")
-				? "success"
-				: "dim";
-	// Closed eye once every advisor has finished reviewing the yielded
-	// turn — no more comments until a new primary turn starts.
-	const allYielded = advisorStats.advisors.every(a => a.yielded);
-	const icon = allYielded ? theme.icon.advisorClosed || theme.icon.advisor : theme.icon.advisor;
-	return icon ? { icon, color } : undefined;
-}
-
 const modelSegment: StatusLineSegment = {
 	id: "model",
 	render(ctx) {
@@ -352,11 +327,6 @@ const modelSegment: StatusLineSegment = {
 		const compact = ctx.compactThinkingLevel && thinkingDisplay !== "";
 		const modelIcon = compact ? leadingGlyph(thinkingDisplay) : theme.icon.model;
 
-		// Fast-mode icon and thinking-level suffix trail the model name and are
-		// colored together with it as `statusLineModel`. The advisor symbol sits
-		// between the name and that tail, so it reads as a distinct marker.
-		// theme.fg resets only the fg, so the spans are concatenated (not
-		// nested) to keep each color intact.
 		let tail = "";
 		if (ctx.session.isFastModeActive() && theme.icon.fast) {
 			tail += ` ${theme.icon.fast}`;
@@ -368,9 +338,6 @@ const modelSegment: StatusLineSegment = {
 		// `statusLineModel` is aliased to `accent` in many themes, so the badge
 		// uses status colors to stay visibly distinct from the model name color.
 		let content = accentFg(ctx, "statusLineModel", withIcon(modelIcon, modelName));
-		// Per-advisor detail lives in `/advisor status`.
-		const advisor = modelAdvisorBadge(ctx);
-		if (advisor) content += theme.fg(advisor.color, ` ${advisor.icon}`);
 		if (tail) {
 			content += accentFg(ctx, "statusLineModel", tail);
 		}
@@ -382,8 +349,6 @@ const modelSegment: StatusLineSegment = {
 		// quiet separator; the terminal draws the model icon.
 		const token = accentToken(ctx, "statusLineModel");
 		const spans: TspSpan[] = [span(modelDisplayName(ctx), token)];
-		const advisor = modelAdvisorBadge(ctx);
-		if (advisor) spans.push(span(` ${advisor.icon}`, advisor.color));
 		if (ctx.session.isFastModeActive() && theme.icon.fast) spans.push(span(` ${theme.icon.fast}`, token));
 		const level = ctx.options.model?.showThinkingLevel === false ? undefined : thinkingLevelWord(ctx.session);
 		if (level !== undefined) spans.push(span(" · ", "dim"), span(level, thinkingLevelToken(level)));
@@ -502,13 +467,6 @@ const modeSegment: StatusLineSegment = {
 		if (goal && (goal.enabled || goal.paused)) {
 			return renderGoalMode(ctx, goal);
 		}
-
-		const vibe = ctx.vibeMode;
-		if (vibe?.enabled) {
-			const content = withIcon(theme.icon.agents, "Vibe");
-			return { content: accentFg(ctx, "accent", content), visible: true };
-		}
-
 		const loop = ctx.loopMode;
 		if (loop) {
 			const icon = loop.state === "paused" ? theme.icon.pause || theme.icon.loop : theme.icon.loop;
@@ -535,7 +493,6 @@ const modeSegment: StatusLineSegment = {
 		}
 		const goal = ctx.goalMode;
 		if (goal && (goal.enabled || goal.paused)) return describeGoalMode(ctx, goal);
-		if (ctx.vibeMode?.enabled) return segView([span("Vibe", accentToken(ctx, "accent"))], "agents");
 		const loop = ctx.loopMode;
 		if (loop) {
 			const paused = loop.state === "paused";
@@ -778,7 +735,6 @@ function costSummary(ctx: SegmentContext): string | undefined {
 	const taskResultCost = ctx.usageStats.subagentCost ?? 0;
 	const ownCost = Math.max(0, cost - taskResultCost);
 	const subagentCost = Math.max(ctx.subagentTreeCost ?? 0, taskResultCost);
-	const advisorCost = ctx.session.getAdvisorCost?.() ?? 0;
 	const state = ctx.session.state;
 	const pricingPeriod = state.model?.cost
 		? getTimeBasedPricingPeriod(state.model.cost, ctx.now?.getTime())
@@ -789,7 +745,6 @@ function costSummary(ctx: SegmentContext): string | undefined {
 			subagentCost,
 			fractionDigits: 2,
 			pricingPeriod,
-			advisor: advisorCost ? { cost: advisorCost } : undefined,
 		},
 		theme,
 	);

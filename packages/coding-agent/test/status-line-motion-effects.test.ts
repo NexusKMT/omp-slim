@@ -1,5 +1,3 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { getBundledModel } from "./helpers/bundled-model";
 import type { Model } from "@oh-my-pi/pi-ai/types";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { statusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
@@ -8,6 +6,8 @@ import { setMotionEffects } from "@oh-my-pi/pi-tui/motion-effects";
 import { DEFAULT_SPINNER_INTERVAL_MS, setSpinnerInterval } from "@oh-my-pi/pi-tui/spinner-clock";
 import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 beforeAll(async () => {
 	resetSettingsForTest();
@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 function fixture(): { component: StatusLineComponent; render: () => string } {
-	const model: Model = getBundledModel("deepseek", "deepseek-v4-flash");
+	const model: Model = createTestModel({ provider: "deepseek", id: "deepseek-v4-flash" });
 	const session = {
 		state: { model, messages: [] },
 		model,

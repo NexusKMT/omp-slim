@@ -209,33 +209,6 @@ interface RootState {
  */
 const MAX_ROOTS = 8;
 
-/**
- * Keeps volatile date/cwd reminders append-only across provider requests.
- *
- * The first value is attached to the first user turn. A changed value attaches
- * to a newly appended user turn or a persistent developer turn, leaving every
- * previously sent message byte-identical. Neither is ever a per-call message
- * (one a context hook or side request builds for a single provider call): the
- * next request can leave it out or move it, and the reminder would go with it.
- *
- * Turns are recognised by a key, not by object identity: context hooks, secret
- * obfuscation and conversion-cache resets hand the injector equal but newly
- * allocated messages on every request, and an identity miss on the first user
- * turn would read as a new conversation and rewrite the reminder that turn was
- * first sent with. The key leaves content out, so a turn whose content a later
- * request rewrites (a newly redacted secret, a clamped image) stays the same turn.
- *
- * One injector can see more than one conversation: a compaction or a branch
- * switch starts another history, and a side request goes through the main
- * loop's transform. State is therefore held per conversation root, so a request
- * for one conversation leaves the reminders of the others alone. Each advisor
- * has an injector of its own: two advisors can start their histories with turns
- * that share a key, so a root key alone cannot tell them apart.
- *
- * With a journal, every placement is recorded, and a conversation this injector
- * has not served starts from the placements an earlier injector recorded for it
- * (a resumed session, a revived subagent, a switched-in transcript).
- */
 export class DateCwdReminderInjector {
 	#states = new Map<string, RootState>();
 	readonly #journal: DateCwdReminderJournal | undefined;

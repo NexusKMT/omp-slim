@@ -11,33 +11,32 @@ import type {
 	SimpleStreamOptions,
 	ToolChoice,
 } from "@oh-my-pi/pi-ai";
+import type { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import type { JobWidgetView } from "@oh-my-pi/pi-tui/tools/job-widget";
 import type { postmortem } from "@oh-my-pi/pi-utils";
-import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import type { AsyncJob, AsyncJobDeliveryState, AsyncJobManager, AsyncJobManagerApi } from "../async";
 import type { EffectiveExtensionRoots } from "../capability/types";
-import type { AgentDefinition } from "../task/types";
-import type { AgentRegistryApi } from "../registry/agent-registry";
 import type { ModelRegistry } from "../config/model-registry";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";
-import type { SkillsSettings } from "../extensibility/settings";
-import type { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
 import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { TtsrManager } from "../export/ttsr";
 import type { LoadedCustomCommand } from "../extensibility/custom-commands";
 import type { ExtensionRunner, PreparedExtension } from "../extensibility/extensions";
 import type { ContextUsage } from "../extensibility/extensions/types";
+import type { SkillsSettings } from "../extensibility/settings";
 import type { SkillDescriptionCatalog } from "../extensibility/skill-descriptions";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import type { FileSlashCommand } from "../extensibility/slash-commands";
+import type { AgentRegistryApi } from "../registry/agent-registry";
 import type { SecretObfuscator } from "../secrets/obfuscator";
-import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
-import type { JobWidgetView } from "@oh-my-pi/pi-tui/tools/job-widget";
+import type { AgentDefinition } from "../task/types";
 import type { ToolSession } from "../tools";
 import type { XdevState } from "../tools/xdev";
-import type { SettingsGatedToolDelta, SystemPromptRebuilder } from "./session-tools";
 import type { CostGateApi } from "./cost-gate";
 import type { SessionManager } from "./session-manager";
+import type { SettingsGatedToolDelta, SystemPromptRebuilder } from "./session-tools";
 
 /** Options controlling session disposal. */
 export interface AgentSessionDisposeOptions {
@@ -196,18 +195,8 @@ export interface AgentSessionConfig {
 	 * `allowSessionModelFallback` option. Default: false.
 	 */
 	allowSessionModelFallback?: boolean;
-	/**
-	 * `false` when the extension UI context cannot reach a human: ACP installs one
-	 * for every client, but without form elicitation its prompts resolve empty.
-	 * Saved-reset consent then takes its no-prompt-UI path. `createAgentSession`
-	 * passes its `interactivePrompts` option. Default: true.
-	 */
-	interactivePrompts?: boolean;
-
 	/** Tool registry for LSP and settings. */
 	toolRegistry?: Map<string, AgentTool>;
-	/** Creates tools registered only while vibe mode is active. */
-	createVibeTools?: () => AgentTool[];
 	/** Names whose current registry entry is the built-in implementation. */
 	builtInToolNames?: Iterable<string>;
 	/** MCP names whose initial registry entries came from the manager snapshot. */
@@ -230,17 +219,8 @@ export interface AgentSessionConfig {
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	/** Provider request transform applied after message conversion. */
 	transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
-	/**
-	 * Builds one advisor's provider request transform. Each advisor is its own
-	 * conversation, so it gets its own transform state (the date/cwd reminder).
-	 * Without it, advisors share {@link transformProviderContext}.
-	 */
-	createAdvisorTransformProviderContext?: () => (context: Context, model: Model) => Context | Promise<Context>;
 	/** Stream wrapper for side-channel requests. */
 	sideStreamFn?: StreamFn;
-	/** Stream wrapper for advisor requests. */
-	advisorStreamFn?: StreamFn;
-
 	/** Provider payload hook used by the active session request path. */
 	onPayload?: SimpleStreamOptions["onPayload"];
 	/** Provider response hook used by the active session request path. */
@@ -284,21 +264,6 @@ export interface AgentSessionConfig {
 
 	/** Whether the provider prompt-cache key was explicit or fork-inherited. */
 	providerPromptCacheKeySource?: "explicit" | "fork";
-	/** Full advisor toolset built against an advisor-scoped tool session. */
-	advisorTools?: AgentTool[];
-
-	/** Preloaded watchdog prompt content for the advisor. */
-	advisorWatchdogPrompt?: string;
-	/** Shared advisor instructions loaded from WATCHDOG.yml. */
-	advisorSharedInstructions?: string;
-	/** Shared non-blocker budget from top-level WATCHDOG.yml maxNotesPerUpdate. */
-	advisorSharedMaxNotesPerUpdate?: number;
-	/** Project context rendered for advisor sessions. */
-	advisorContextPrompt?: string;
-	/** Advisors discovered from WATCHDOG.yml. */
-	advisorConfigs?: AdvisorConfig[];
-	/** Config problems collected during WATCHDOG.yml discovery. */
-	advisorConfigWarnings?: string[];
 	/** Disconnect the MCP manager owned by this session during disposal. */
 	disconnectOwnedMcpManager?: () => Promise<void>;
 	/** System prompt used by automatic session-title generation. */

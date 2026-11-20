@@ -1,5 +1,3 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { getEditStore } from "@oh-my-pi/pi-coding-agent/edit/store";
@@ -10,7 +8,9 @@ import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it } from "bun:test";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 describe("sdk edit-store session reset", () => {
 	let authStorage: AuthStorage;
@@ -30,7 +30,7 @@ describe("sdk edit-store session reset", () => {
 		authStorage = createInMemoryAuthStorage();
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!bundled) throw new Error("Expected built-in anthropic model to exist");
 		tempDir = TempDir.createSync("@omp-edit-store-reset-");
 		const settings = Settings.isolated({
@@ -38,7 +38,7 @@ describe("sdk edit-store session reset", () => {
 			"compaction.enabled": false,
 			"todo.enabled": false,
 		});
-		settings.setModelRole("default", `${bundled.provider}/${bundled.id}`);
+		settings.setModel(`${bundled.provider}/${bundled.id}`);
 		const result = await createAgentSession({
 			cwd: tempDir.path(),
 			agentDir: tempDir.path(),

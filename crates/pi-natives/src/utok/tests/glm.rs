@@ -30,7 +30,7 @@ fn glm5_matches_reference() {
 		let count = case["count"].as_u64().expect("count") as u32;
 		assert_eq!(count as usize, want.len(), "fixture self-consistency: {text:?}");
 
-		let got = Encoding::Glm5.encode(text).expect("glm is a BPE family");
+		let got = Encoding::Glm5.encode(text);
 		assert_eq!(got, want, "encode mismatch on {text:?}");
 		assert_eq!(Encoding::Glm5.count(text), count, "count mismatch on {text:?}");
 	}
@@ -42,17 +42,14 @@ fn glm5_matches_reference() {
 /// `ignore_merges=false`). The whole-piece short-circuit must win.
 #[test]
 fn glm5_ignore_merges_whole_piece_wins() {
-	assert_eq!(Encoding::Glm5.encode(" 参考").unwrap(), vec![99855]);
+	assert_eq!(Encoding::Glm5.encode(" 参考"), vec![99855]);
 	assert_eq!(Encoding::Glm5.count(" 参考"), 1);
-	assert_eq!(Encoding::Glm5.encode(" 参考资料").unwrap(), vec![99924]);
+	assert_eq!(Encoding::Glm5.encode(" 参考资料"), vec![99924]);
 	// Same token mid-text: pretokenizer isolates ' 参考' as its own piece.
-	assert_eq!(Encoding::Glm5.encode("龘 参考").unwrap(), vec![82225, 246, 99855]);
+	assert_eq!(Encoding::Glm5.encode("龘 参考"), vec![82225, 246, 99855]);
 	// Extended so the piece is NOT a whole-vocab hit: the merge loop runs
 	// and must match the reference (rank-order merging, ' 参考龘' is OOV).
-	assert_eq!(
-		Encoding::Glm5.count(" 参考龘"),
-		Encoding::Glm5.encode(" 参考龘").unwrap().len() as u32
-	);
+	assert_eq!(Encoding::Glm5.count(" 参考龘"), Encoding::Glm5.encode(" 参考龘").len() as u32);
 }
 
 /// UTF-16 / UTF-32 parity: every fixture case must produce identical ids
@@ -79,9 +76,9 @@ fn glm5_utf16_utf32_parity() {
 		let utf32: Vec<u32> = text.chars().map(|c| c as u32).collect();
 		saw_surrogate_pair |= utf16.len() > utf32.len();
 
-		assert_eq!(Encoding::Glm5.encode(&utf16).unwrap(), want, "utf16 encode mismatch on {text:?}");
+		assert_eq!(Encoding::Glm5.encode(&utf16), want, "utf16 encode mismatch on {text:?}");
 		assert_eq!(Encoding::Glm5.count(&utf16), count, "utf16 count mismatch on {text:?}");
-		assert_eq!(Encoding::Glm5.encode(&utf32).unwrap(), want, "utf32 encode mismatch on {text:?}");
+		assert_eq!(Encoding::Glm5.encode(&utf32), want, "utf32 encode mismatch on {text:?}");
 		assert_eq!(Encoding::Glm5.count(&utf32), count, "utf32 count mismatch on {text:?}");
 	}
 	assert!(saw_surrogate_pair, "corpus must exercise a UTF-16 surrogate pair");

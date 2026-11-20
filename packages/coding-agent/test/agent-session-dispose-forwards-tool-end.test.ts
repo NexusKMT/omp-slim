@@ -3,18 +3,18 @@
  * must still reach session subscribers as `tool_execution_end`; one that
  * outlives the drain must not be forwarded after dispose returns.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 const CALL_ID = "toolu_dispose_drain";
 
@@ -36,7 +36,7 @@ describe("AgentSession dispose forwards tool ends settled inside its drain", () 
 
 	/** Start a turn whose tool ignores abort and settles only when the test releases it, like a client-bridge read. */
 	async function startUncancellableTool() {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic model");
 		const toolStarted = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();

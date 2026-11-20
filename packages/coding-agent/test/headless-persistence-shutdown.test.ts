@@ -9,8 +9,6 @@
  * isolation; this file drives the externally observable shutdown path the three
  * review threads (3979594811, 3979644907, 3983906393) asked for.
  */
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
-import * as fs from "node:fs";
 import { parseArgs, type Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { clearOmpExtensionCliRoots } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
@@ -18,6 +16,8 @@ import { runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { TempDir, postmortem } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import * as fs from "node:fs";
 import type { AgentSession } from "../src/session/agent-session";
 import { SessionManager } from "../src/session/session-manager";
 
@@ -133,10 +133,8 @@ async function createHarness(): Promise<ShutdownHarness> {
 		validateRetryFallbackChains: () => {},
 		getLastAssistantMessage: () => undefined,
 		disableStopTimeTodoReminders: () => {},
-		prepareForHeadlessAdvisorDrain: () => {},
 		waitForIdle: async () => {},
 		setTextOutputCommitted: () => {},
-		waitForAdvisorCatchup: async () => true,
 		// Later writes keep failing on the real store path; the manager latches
 		// once and reports the failure a single time.
 		prompt: async () => {

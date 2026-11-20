@@ -1,5 +1,5 @@
-import * as path from "node:path";
 import { isBunTestRuntime, TempDir } from "@oh-my-pi/pi-utils";
+import * as path from "node:path";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { createAgentSession } from "../../src/sdk";
@@ -31,7 +31,7 @@ try {
 		"session.warnCost": 1,
 		"marketplace.autoUpdate": "off",
 	});
-	settings.setModelRole("default", "denied/probe");
+	settings.setModel("denied/probe");
 	const registry = new ModelRegistry(auth, path.join(dir.path(), "models.yml"), { settings });
 	registry.registerProvider("denied", {
 		api: "openai-completions",

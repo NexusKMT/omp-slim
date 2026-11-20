@@ -1,38 +1,38 @@
-import { type ElidedRange, formatSingleLine } from "@oh-my-pi/pi-tui/tools/read";
-import * as path from "node:path";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { countNewlines } from "@oh-my-pi/pi-utils";
-import { getEditStore } from "../edit/store";
+import { formatBytes, shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
+import { isMarkdownPath } from "@oh-my-pi/pi-tui/theme";
 import {
 	formatHashlineHeader,
 	formatNumberedLines,
 	splitAddressableFileLines,
 } from "@oh-my-pi/pi-tui/tools/hashline-format";
-import { normalizeToLF } from "../edit/normalize";
-import { isMarkdownPath } from "@oh-my-pi/pi-tui/theme";
-import type { ToolSession } from "../sdk";
+import { type LineRange } from "@oh-my-pi/pi-tui/tools/line-ranges";
+import type { ReadToolDetails, ReadTruncationStats } from "@oh-my-pi/pi-tui/tools/read";
+import { type ElidedRange, formatSingleLine } from "@oh-my-pi/pi-tui/tools/read";
 import {
 	DEFAULT_MAX_BYTES,
 	noTruncResult,
-	type TruncationResult,
 	truncateHead,
 	truncateHeadBytes,
+	type TruncationResult,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+import { countNewlines } from "@oh-my-pi/pi-utils";
+import * as path from "node:path";
+import { normalizeToLF } from "../edit/normalize";
+import { getEditStore } from "../edit/store";
+import type { ToolSession } from "../sdk";
 import {
 	buildLineEntriesWithBlockContext,
-	type LineEntry,
 	lineEntriesToPlainText,
+	type LineEntry,
 	spansCoverEveryLine,
 	warmBlockContext,
 } from "../utils/block-context";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
-import { formatPathRelativeToCwd } from "./path-utils";
-import { type LineRange } from "@oh-my-pi/pi-tui/tools/line-ranges";
-import type { ReadToolDetails, ReadTruncationStats } from "@oh-my-pi/pi-tui/tools/read";
-import { isRawSelector, type ParsedSelector, resolveTailSelector, selToOffsetLimit } from "./read-selector";
-import { formatBytes, shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
-import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { TruncationMetaInput } from "./output-meta";
+import { formatPathRelativeToCwd } from "./path-utils";
+import { isRawSelector, type ParsedSelector, resolveTailSelector, selToOffsetLimit } from "./read-selector";
 import { toolResult } from "./tool-result";
 
 import { cfgReadRenderMarkdown } from "./settings";
@@ -275,7 +275,7 @@ export const READ_CHUNK_SIZE = 8 * 1024;
 /**
  * Context lines added around an explicit range read. Anchor-stale failures
  * cluster on edits whose anchors land just outside the most recent read
- * window, but the data (`scripts/session-stats/analyze_selector_reads.py`)
+ * window, but the historical selector-read measurements
  * shows most follow-up reads are disjoint hops, not adjacent extensions —
  * so symmetric padding rarely pays for itself.
  *

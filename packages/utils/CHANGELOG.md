@@ -4,6 +4,8 @@
 
 ### Removed
 
+- Removed Auto-QA issue-spool and unused install-identity helpers.
+
 - Removed the self-update state-directory helper.
 - Removed the Windows extended-length path prefix stripper, the Windows shell resolver and its `cmd`-shell predicate; shell helpers are POSIX-only.
 - OMP Slim removes browser profile, Puppeteer cache and browser relay directory helpers.

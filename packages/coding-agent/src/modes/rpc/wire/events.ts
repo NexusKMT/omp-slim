@@ -132,8 +132,6 @@ export const eventDefs = {
 	RetryFallbackSucceededEvent: { type: "'retry_fallback_succeeded'", model: "string", role: "string" },
 	ModelChangedEvent: { type: "'model_changed'" },
 	ConfigWarningsChangedEvent: { type: "'config_warnings_changed'" },
-	AdvisorCostChangedEvent: { type: "'advisor_cost_changed'" },
-	AdvisorYieldedEvent: { type: "'advisor_yielded'" },
 	TtsrTriggeredEvent: doc(
 		{ type: "'ttsr_triggered'", rules: `${JSON_OBJECT}[]` },
 		"Rule injection: a TTSR rule matched the stream and its text was injected. Each rule carries at least `name`, `path`, and `content`.",
@@ -192,8 +190,6 @@ export const eventDefs = {
 			"RetryFallbackSucceededEvent",
 			"ModelChangedEvent",
 			"ConfigWarningsChangedEvent",
-			"AdvisorCostChangedEvent",
-			"AdvisorYieldedEvent",
 			"TtsrTriggeredEvent",
 			"TodoReminderEvent",
 			"TodoAutoClearEvent",

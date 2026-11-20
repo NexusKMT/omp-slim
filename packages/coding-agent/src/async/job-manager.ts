@@ -136,11 +136,7 @@ export interface AsyncJob {
 	 * supply an id (e.g. legacy tests, SDK consumers without an agent context).
 	 */
 	ownerId?: string;
-	/**
-	 * Registry id of the subagent this job runs (task/tan/vibe jobs). Lets
-	 * job-view code link a job row to its AgentRegistry ref even when the job
-	 * id differs from the agent id (vibe turn jobs, tan clones).
-	 */
+
 	agentId?: string;
 	/**
 	 * Whether this job's turn published the agent's `<agentId>.md` output. A

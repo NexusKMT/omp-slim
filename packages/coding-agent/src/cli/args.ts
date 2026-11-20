@@ -1,13 +1,13 @@
 /**
  * CLI argument parsing and help display
  */
-import * as path from "node:path";
+import { CLI_THINKING_LEVELS, type ConfiguredThinkingLevel, parseCliThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { $env, APP_NAME } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import * as path from "node:path";
 import type { MotionMode } from "../config/motion-presets";
 import type { ServiceTierOpenAISettingValue } from "../config/service-tier";
 import type { ApprovalMode } from "../tools/approval";
-import { CLI_THINKING_LEVELS, type ConfiguredThinkingLevel, parseCliThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { BUILTIN_TOOL_NAMES, normalizeToolNames } from "../tools/builtin-names";
 import {
 	OPTIONAL_FLAGS,
@@ -47,7 +47,6 @@ export interface Args {
 	thinking?: ConfiguredThinkingLevel;
 	serviceTier?: ServiceTierOpenAISettingValue;
 	hideThinking?: boolean;
-	advisor?: boolean;
 	/** Print mode: wake the session with background-job results before exiting (`async.printWake`). */
 	waitAsync?: boolean;
 	externalThinking?: boolean;
@@ -352,8 +351,6 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.noPty = true;
 		} else if (arg === "--hide-thinking") {
 			result.hideThinking = true;
-		} else if (arg === "--advisor") {
-			result.advisor = true;
 		} else if (arg === "--wait-async") {
 			result.waitAsync = true;
 		} else if (arg === "--external-thinking") {

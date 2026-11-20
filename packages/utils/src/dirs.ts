@@ -790,10 +790,6 @@ export function getDocsRsCacheDir(): string {
 	return dirs.rootSubdir("webcache", "cache");
 }
 
-/** Get the auto-QA grievances SQLite database path (~/.omp/autoqa.db; XDG: $XDG_DATA_HOME/omp/autoqa.db). */
-export function getAutoQaDbPath(): string {
-	return dirs.rootSubdir("autoqa.db", "data");
-}
 /**
  * Stable 7-character hex digest of an absolute filesystem path.
  *
@@ -869,26 +865,6 @@ export function getNativesDir(): string {
 /** Get the stats database path (~/.omp/stats.db). */
 export function getStatsDbPath(): string {
 	return dirs.rootSubdir("stats.db", "data");
-}
-
-/** Get the autoresearch state directory (~/.omp/autoresearch). */
-export function getAutoresearchDir(): string {
-	return dirs.rootSubdir("autoresearch", "state");
-}
-
-/** Get the per-project autoresearch state directory (~/.omp/autoresearch/<encoded-project>). */
-export function getAutoresearchProjectDir(encodedProject: string): string {
-	return path.join(getAutoresearchDir(), encodedProject);
-}
-
-/** Get the per-project autoresearch SQLite database path (~/.omp/autoresearch/<encoded-project>.db). */
-export function getAutoresearchDbPath(encodedProject: string): string {
-	return path.join(getAutoresearchDir(), `${encodedProject}.db`);
-}
-
-/** Get the per-run artifact directory (~/.omp/autoresearch/<encoded-project>/runs/<runId>). */
-export function getAutoresearchRunDir(encodedProject: string, runId: number): string {
-	return path.join(getAutoresearchProjectDir(encodedProject), "runs", String(runId).padStart(4, "0"));
 }
 
 /** Get the security-analysis state directory (~/.omp/security). */
@@ -1117,9 +1093,6 @@ export function getSSHConfigPath(scope: "user" | "project", cwd: string = getPro
 // Install identity
 // =============================================================================
 
-let cachedInstallId: string | null = null;
-
-const INSTALL_ID_FILE = "install-id";
 /**
  * Application label for usage attribution (`OMP_APP_NAME`), defaulting to
  * `omp`. Embedders that drive omp programmatically (CI bots, …) set
@@ -1129,75 +1102,4 @@ const INSTALL_ID_FILE = "install-id";
 export function getAppName(): string {
 	const value = process.env.OMP_APP_NAME?.trim();
 	return value ? value : "omp";
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * Persistent per-install UUID stored at `~/.omp/install-id`.
- *
- * Generated lazily on first call and persisted with `O_CREAT|O_EXCL` so
- * concurrent first-call races don't clobber each other (loser re-reads the
- * winner's id). Survives independently of agent state: deleting
- * `~/.omp/agent/` does not regenerate it. Server-side dedup for grievance
- * pushes (and similar telemetry) keys on this id.
- *
- * Anchored to the base config root (`~/.omp/install-id`) regardless of the
- * active profile: install identity is per-install, not per-profile, so every
- * profile shares one id and the global cache stays correct no matter the
- * profile / `getInstallId` call order.
- */
-export function getInstallId(): string {
-	if (cachedInstallId) return cachedInstallId;
-	const filePath = path.join(getBaseConfigRoot(), INSTALL_ID_FILE);
-
-	let observedInvalid = false;
-	try {
-		const existing = fs.readFileSync(filePath, "utf8").trim();
-		if (UUID_RE.test(existing)) {
-			cachedInstallId = existing;
-			return existing;
-		}
-		// File present but unparseable — fall through and overwrite below.
-		observedInvalid = existing.length > 0;
-	} catch {}
-
-	const next = crypto.randomUUID();
-	try {
-		fs.mkdirSync(path.dirname(filePath), { recursive: true });
-		// If we already saw garbage in the file, unlink first so O_EXCL doesn't
-		// trip on it. Ignored if the unlink races against another writer.
-		if (observedInvalid) {
-			try {
-				fs.unlinkSync(filePath);
-			} catch {}
-		}
-		const fd = fs.openSync(filePath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
-		try {
-			fs.writeSync(fd, `${next}\n`);
-		} finally {
-			fs.closeSync(fd);
-		}
-	} catch (err) {
-		// Lost the create race — re-read whatever the winner wrote.
-		if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-			try {
-				const existing = fs.readFileSync(filePath, "utf8").trim();
-				if (UUID_RE.test(existing)) {
-					cachedInstallId = existing;
-					return existing;
-				}
-			} catch {}
-		}
-		// Any other failure: keep the generated id in-memory so the rest of
-		// this process has a stable value; future processes will retry.
-	}
-
-	cachedInstallId = next;
-	return next;
-}
-
-/** Test-only: clear cached install id. Never call from production code. */
-export function __resetInstallIdCacheForTests(): void {
-	cachedInstallId = null;
 }

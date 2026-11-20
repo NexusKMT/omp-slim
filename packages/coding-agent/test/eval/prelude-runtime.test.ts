@@ -1,14 +1,14 @@
-import { afterAll, describe, expect, it } from "bun:test";
 import type { ImageContent, Message } from "@oh-my-pi/pi-ai";
-import { getBundledModels } from "../helpers/bundled-model";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { EvalPreludeDefinition } from "@oh-my-pi/pi-coding-agent/eval/preludes";
-import { executeJs } from "@oh-my-pi/pi-coding-agent/eval/js/executor";
 import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
+import { executeJs } from "@oh-my-pi/pi-coding-agent/eval/js/executor";
+import type { EvalPreludeDefinition } from "@oh-my-pi/pi-coding-agent/eval/preludes";
 import { disposeAllKernelSessions, executePython } from "@oh-my-pi/pi-coding-agent/eval/py/executor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EvalTool } from "@oh-my-pi/pi-coding-agent/tools/eval";
 import { normalizeModelContextMessages } from "@oh-my-pi/pi-coding-agent/utils/image-loading";
+import { afterAll, describe, expect, it } from "bun:test";
+import { createTestModel } from "../helpers/test-model";
 
 const IMAGE_DATA = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString("base64");
 
@@ -94,7 +94,7 @@ describe("eval prelude runtime", () => {
 			const result = await tool.execute(`frame-fidelity-${language}`, { language, code, timeout: 30 });
 			expect(result.details?.cells?.[0]?.status).toBe("complete");
 			expect(calls).toHaveLength(1);
-			const model = getBundledModels("openai")[0];
+			const model = createTestModel({ provider: "test", id: "model" });
 			if (!model) throw new Error("Missing bundled OpenAI model");
 			const messages: Message[] = [
 				{

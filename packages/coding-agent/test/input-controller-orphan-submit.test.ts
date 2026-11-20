@@ -1,8 +1,5 @@
-import { describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
@@ -11,6 +8,9 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 /**
  * Regression: a submission arriving while the main loop has no input waiter
@@ -168,7 +168,7 @@ describe("InputController orphaned submit", () => {
 		let session: AgentSession | undefined;
 		let authStorage: AuthStorage | undefined;
 		try {
-			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+			const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 			if (!model) throw new Error("Expected built-in anthropic model to exist");
 			authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 			authStorage.keys.setRuntime("anthropic", "test-key");

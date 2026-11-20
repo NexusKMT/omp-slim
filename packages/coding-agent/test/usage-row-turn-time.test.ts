@@ -3,22 +3,14 @@
  * rows, gated by `display.showTurnTime` — the delta sits right after the turn's
  * timestamp and counts hooks, tool calls, and the final generation.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
-import { ChatTranscriptBuilder } from "@oh-my-pi/pi-tui/chat/chat-transcript-builder";
-import { formatUsageRow } from "@oh-my-pi/pi-tui/overlays/usage-row";
 import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
-import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -28,8 +20,16 @@ import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import type { SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { Container, type TUI } from "@oh-my-pi/pi-tui";
+import { ChatTranscriptBuilder } from "@oh-my-pi/pi-tui/chat/chat-transcript-builder";
+import { formatUsageRow } from "@oh-my-pi/pi-tui/overlays/usage-row";
+import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createInteractiveModeContext } from "./helpers/interactive-mode-context";
+import { createTestModel } from "./helpers/test-model";
 
 import { cfgDisplayShowTokenUsage, cfgDisplayShowTurnTime } from "@oh-my-pi/pi-coding-agent/modes/settings";
 
@@ -455,7 +455,7 @@ describe("AgentSession synthetic follow-up marking", () => {
 	});
 
 	it("marks a queued synthetic follow-up as a run-initiating developer message", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -483,7 +483,7 @@ describe("AgentSession synthetic follow-up marking", () => {
 		}
 	});
 	it("persists a user-attributed custom prompt with its original submission timestamp", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({
 			// Real provider delay: the session's internal settle timers use the
 			// platform clock, so fake timers would freeze both the submission and

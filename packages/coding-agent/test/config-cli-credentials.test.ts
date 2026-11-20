@@ -1,16 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { runConfigCommand } from "@oh-my-pi/pi-coding-agent/cli/config-cli";
+import { all, lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 import { resetSettingsForTest } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { getConfigRootDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
-import { all, lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 import { getSettingDef } from "@oh-my-pi/pi-tui/overlays/settings-defs";
+import { getConfigRootDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
 import { createSettingsHost } from "../src/config/settings-ui";
+import { installTestSettings } from "./helpers/test-settings";
 
 describe("credential settings", () => {
 	it("marks every known credential, including those with no settings panel entry", () => {
-		for (const path of ["dev.autoqaPush.token"] as const) {
+		for (const path of ["test.token"] as const) {
 			expect(lookup(path)?.isCredential).toBe(true);
 		}
 	});
@@ -32,7 +33,7 @@ describe("credential settings", () => {
 
 describe("credential masking reaches every surface", () => {
 	it("keeps credentials with no panel entry out of the panel entirely", () => {
-		for (const path of ["dev.autoqaPush.token"] as const) {
+		for (const path of ["test.token"] as const) {
 			expect(getSettingDef(createSettingsHost().entries, path)).toBeUndefined();
 		}
 	});
@@ -96,39 +97,41 @@ describe("config list output", () => {
 	}
 
 	it("masks a configured credential and never prints it", async () => {
-		await runConfigCommand({ action: "set", key: "dev.autoqaPush.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "test.token", value: SECRET, flags: { json: true } });
 		const output = await humanList();
-		expect(output).toContain("dev.autoqaPush.token = ********");
+		expect(output).toContain("test.token = ********");
 		expect(output).not.toContain(SECRET);
 	});
 
 	it("omits the value and flags redaction in JSON, rather than emitting a placeholder", async () => {
-		await runConfigCommand({ action: "set", key: "dev.autoqaPush.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "test.token", value: SECRET, flags: { json: true } });
 		const { raw, parsed } = await jsonList();
 		// A consumer must not be able to write the stand-in back as the credential.
 		expect(raw).not.toContain(SECRET);
 		expect(raw).not.toContain("********");
-		expect(parsed["dev.autoqaPush.token"]).toMatchObject({ redacted: true });
-		expect(parsed["dev.autoqaPush.token"]).not.toHaveProperty("value");
+		expect(parsed["test.token"]).toMatchObject({ redacted: true });
+		expect(parsed["test.token"]).not.toHaveProperty("value");
 	});
 
 	it("does not report an unset credential as configured", async () => {
 		// Redacting on classification alone would make a fresh install look like
 		// every credential is already set.
 		const output = await humanList();
-		expect(output).not.toContain("dev.autoqaPush.token = ********");
+		expect(output).not.toContain("test.token = ********");
 		const { parsed } = await jsonList();
-		expect(parsed["dev.autoqaPush.token"]).not.toHaveProperty("redacted");
+		expect(parsed["test.token"]).not.toHaveProperty("redacted");
 	});
 
 	it("does not report a cleared credential as configured", async () => {
 		// The settings panel persists "" when a credential is cleared and renders
 		// that as unset; `config list` must agree, or a cleared token looks set.
-		await runConfigCommand({ action: "set", key: "dev.autoqaPush.token", value: SECRET, flags: { json: true } });
-		await runConfigCommand({ action: "set", key: "dev.autoqaPush.token", value: "", flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "test.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "test.token", value: "", flags: { json: true } });
 		const output = await humanList();
-		expect(output).not.toContain("dev.autoqaPush.token = ********");
+		expect(output).not.toContain("test.token = ********");
 		const { parsed } = await jsonList();
-		expect(parsed["dev.autoqaPush.token"]).not.toHaveProperty("redacted");
+		expect(parsed["test.token"]).not.toHaveProperty("redacted");
 	});
 });
+beforeEach(installTestSettings);
+afterEach(() => vi.restoreAllMocks());

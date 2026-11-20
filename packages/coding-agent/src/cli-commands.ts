@@ -105,11 +105,6 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.gitHelp,
 	},
 	{
-		name: "grievances",
-		load: () => import("./commands/grievances").then(m => m.default),
-		help: commandHelp.grievancesHelp,
-	},
-	{
 		name: "install",
 		load: () => import("./commands/install").then(m => m.default),
 		help: commandHelp.installHelp,

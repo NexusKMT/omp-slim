@@ -2,16 +2,16 @@ import { clearSubmittedText } from "./helpers/draft";
 
 import type { AgentSession } from "../session/agent-session";
 
-import { formatTokenCount } from "./builtin-modes";
-import { buildContextReportText } from "./helpers/context-report";
 import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
-import { shortenEmbeddedPaths, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
 import { buildJobTree, jobTreeGuide, jobTreeIndent } from "@oh-my-pi/pi-tui/overlays/job-tree";
+import { shortenEmbeddedPaths, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
 import { theme } from "@oh-my-pi/pi-tui/theme";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { handleMcpAcp } from "./helpers/mcp";
-import { markdownFenceFor } from "../utils/markdown-fence";
 import { openLocalFileInEditor } from "../modes/local-file-editor";
+import { markdownFenceFor } from "../utils/markdown-fence";
+import { formatTokenCount } from "./builtin-modes";
+import { buildContextReportText } from "./helpers/context-report";
+import { handleMcpAcp } from "./helpers/mcp";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./helpers/parse";
 
 import { handleTodoAcp } from "./helpers/todo";
@@ -309,7 +309,7 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 	{
 		name: "agents",
 		icon: "agents",
-		description: "Manage agent personas, enablement, and advisors",
+		description: "Manage agent personas, and enablement",
 		handleTui: (_command, runtime) => {
 			runtime.ctx.showAgentsDashboard();
 			clearSubmittedText(runtime);

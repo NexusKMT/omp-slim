@@ -1,11 +1,3 @@
-/**
- * Frameless, reusable model browser: a fuzzy search row, a windowed model
- * list with metadata columns, and a selection detail block.
- *
- * Hosts own the surrounding chrome and the data scope — the fullscreen
- * /models hub ({@link ./model-hub}) feeds it scope-filtered items, while the advisor config overlay embeds it as a plain "pick one
- * model" list.
- */
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { getEffectiveTokenCost, getModelPricingStatus } from "@oh-my-pi/pi-ai/models";

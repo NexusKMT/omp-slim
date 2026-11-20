@@ -1,14 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { Effort, type Model } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 describe("issue #775: per-model defaultLevel", () => {
 	let tempDir: TempDir;
@@ -30,13 +30,13 @@ describe("issue #775: per-model defaultLevel", () => {
 	});
 
 	function getOpus() {
-		const model = getBundledModel("anthropic", "claude-opus-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-opus-4-5" });
 		if (!model) throw new Error("expected claude-opus-4-5");
 		return model;
 	}
 
 	function getSonnet() {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("expected claude-sonnet-4-5");
 		return model;
 	}

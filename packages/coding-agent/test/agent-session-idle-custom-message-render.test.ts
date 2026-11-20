@@ -1,5 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
@@ -10,6 +8,8 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
 
 describe("AgentSession idle custom message render", () => {
 	let tempDir: TempDir;
@@ -42,7 +42,7 @@ describe("AgentSession idle custom message render", () => {
 			},
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		const created = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(tempDir.path()),

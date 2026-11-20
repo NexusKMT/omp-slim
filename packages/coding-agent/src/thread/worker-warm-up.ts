@@ -15,8 +15,6 @@
  *    and no prompt.
  */
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
-import { discoverAdvisorConfigs } from "../advisor/config";
-import { discoverWatchdogFiles } from "../advisor/watchdog";
 import { AgentRegistry } from "../registry/agent-registry";
 import { createAgentSession, discoverPromptTemplates, discoverSlashCommands } from "../sdk";
 import { SessionManager } from "../session/session-manager";
@@ -35,8 +33,6 @@ export async function warmUpSubagentWorker({ cwd, settings, modelRegistry }: Sub
 	const results = await Promise.allSettled([
 		discoverSlashCommands(cwd),
 		discoverPromptTemplates(cwd, agentDir),
-		discoverWatchdogFiles(cwd, agentDir),
-		discoverAdvisorConfigs(cwd, agentDir),
 		resolveActiveRepoContext(cwd),
 	]);
 	for (const result of results) {

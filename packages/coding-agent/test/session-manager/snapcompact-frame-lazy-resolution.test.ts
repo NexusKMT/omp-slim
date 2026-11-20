@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as fsp from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
-import { getBundledModel } from "../helpers/bundled-model";
 import * as blobStore from "@oh-my-pi/pi-coding-agent/session/blob-store";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getAgentDir, getBlobsDir, setAgentDir } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fsp from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 const FRAME_COUNT = 10;
 const FRAME_RAW_BYTES = 300_000;
@@ -16,7 +16,7 @@ function frameData(index: number): string {
 }
 
 function makeAssistantMessage(text: string) {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("Expected built-in anthropic model to exist");
 	return {
 		role: "assistant" as const,

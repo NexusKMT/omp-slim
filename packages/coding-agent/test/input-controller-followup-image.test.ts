@@ -5,10 +5,10 @@
  * queued message reached the model as text only and the image was silently
  * dropped.
  */
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 
 interface StubEditor {
 	setText: (text: string) => void;
@@ -67,7 +67,6 @@ function createContext(opts: {
 
 	const handleGoalModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => true);
 	const handlePlanModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => true);
-	const handleVibeModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => true);
 	const ctx = {
 		editor,
 		ui: { requestRender },
@@ -87,17 +86,15 @@ function createContext(opts: {
 		showError,
 		planModeEnabled: false,
 		planModePaused: false,
-		vibeModeEnabled: false,
 		goalModeEnabled: false,
 		goalModePaused: false,
 		handleGoalModeCommand,
 		handlePlanModeCommand,
-		handleVibeModeCommand,
 		withLocalSubmission: async (_text: string, fn: () => unknown) => fn(),
 		sessionManager: { getSessionId: () => "session", getLeafId: () => null },
 	} as unknown as InteractiveModeContext;
 
-	return { ctx, editor, handleGoalModeCommand, handlePlanModeCommand, handleVibeModeCommand, prompt, showError };
+	return { ctx, editor, handleGoalModeCommand, handlePlanModeCommand, prompt, showError };
 }
 
 describe("InputController.handleFollowUp image forwarding", () => {

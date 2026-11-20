@@ -1,7 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { scheduler } from "node:timers/promises";
 import { Agent, CompactionCancelledError } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel } from "./helpers/bundled-model";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -12,9 +9,9 @@ import {
 	type AsyncResultEntry,
 	buildAsyncResultBatchMessage,
 } from "@oh-my-pi/pi-coding-agent/session/async-job-delivery";
-import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	ContextNotesTool,
@@ -26,6 +23,9 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tools";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir, withTimeout } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { scheduler } from "node:timers/promises";
+import { createTestModel } from "./helpers/test-model";
 
 import {
 	cfgCompactionAutoContinue,
@@ -82,7 +82,7 @@ describe.each([false, true])("AgentSession compaction cancellation source (exper
 		const sessionManager = SessionManager.inMemory(tempDir.path());
 		const modelRegistry = new ModelRegistry(authStorage);
 		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic model");
 		const settings = Settings.isolated({
 			"compaction.keepRecentTokens": 1,

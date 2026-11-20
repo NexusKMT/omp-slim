@@ -1,11 +1,6 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { CustomTool } from "@oh-my-pi/pi-coding-agent/extensibility/custom-tools/types";
@@ -13,6 +8,11 @@ import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 // Regression for issue #5305: image-gen is registered as a custom tool, and
 // custom tools are force-activated regardless of the `toolNames` filter. Before
@@ -82,7 +82,7 @@ describe("generate_image tool gating", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings: Settings.isolated({ "plan.enabled": false }),
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			disableExtensionDiscovery: true,
 			toolNames,
 			customTools,
@@ -150,7 +150,7 @@ describe("generate_image tool gating", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings: Settings.isolated({}),
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			disableExtensionDiscovery: true,
 			toolNames: ["read"],
 			customTools: [mcpTool],
@@ -299,7 +299,7 @@ describe("generate_image tool gating", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings: Settings.isolated({ "plan.enabled": false }),
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			disableExtensionDiscovery: true,
 			enableMCP: false,
 			toolNames: ["read"],

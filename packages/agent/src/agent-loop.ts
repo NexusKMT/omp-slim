@@ -3,9 +3,9 @@
  * Transforms to Message[] only at the LLM call boundary.
  */
 import {
+	type ApiKeyResolution,
 	type AssistantMessage,
 	type AssistantMessageEvent,
-	type ApiKeyResolution,
 	type Context,
 	EventStream,
 	isApiKeyResolver,
@@ -16,8 +16,8 @@ import {
 	stripSchemaDescriptions,
 	type ToolChoice,
 	type ToolResultMessage,
-	type TSchema,
 	toolWireSchema,
+	type TSchema,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { appendDuplicateSuffix, MAX_TOOL_CALL_ID_LENGTH } from "@oh-my-pi/pi-ai/providers/transform-messages";
@@ -28,9 +28,9 @@ import { cloneJsonTree, logger, sanitizeText, toError } from "@oh-my-pi/pi-utils
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { agentPauseGate } from "./pause";
 import { SpeculativeOperationCoordinator } from "./speculative-execution";
-import { renderToolExamples } from "./tool-examples";
 import { validateAgentToolArguments } from "./tool-arguments";
 import { createAdditionalContextMessage, isNonBlankContext, joinAdditionalContext } from "./tool-context";
+import { renderToolExamples } from "./tool-examples";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -468,20 +468,6 @@ function createAgentStream(): EventStream<AgentEvent, AgentMessage[]> {
 	);
 }
 
-/**
- * Push a `turn_end` event and run the awaited per-turn hook when the run is
- * still healthy. The hook is skipped for externally aborted or errored turns so
- * a user interrupt does not hang on a background backlog wait.
- *
- * A {@link TERMINAL_TOOL_RESULT_ABORT_REASON} abort is the exception: it is a
- * graceful yield (e.g. a subagent's final `yield` tool), not a user interrupt.
- * The completed tool batch is persisted and the turn must still reach
- * `onTurnEnd` so per-turn bookkeeping — notably advisor review of the yield
- * delta (#9505) — runs exactly as it does for a plain end-of-turn message. The
- * hook receives no signal in that case so downstream waits (advisor catch-up)
- * behave identically to a normal final turn instead of short-circuiting on the
- * spent abort.
- */
 async function emitTurnEnd(
 	stream: EventStream<AgentEvent, AgentMessage[]>,
 	currentContext: AgentContext,
@@ -1258,12 +1244,6 @@ interface PreparedProviderCall {
 	context: Context;
 }
 
-/**
- * Classify the first `count` steering messages for a tool-batch interrupt:
- * any user-authored message wins, then agent-attributed user messages, else
- * system steering (advisor cards, hidden directives). Shared by the agent's
- * queue peek and the loop's live-taken steering.
- */
 export function steeringQueueState(messages: readonly AgentMessage[], count = messages.length): SteeringQueueState {
 	if (count === 0) return { queued: false };
 	let hasAgentSteering = false;
@@ -1863,7 +1843,6 @@ function recoverTransientErrorToolTurn(
 	const errorText = `${message.errorMessage ?? ""}\n${message.stopDetails?.explanation ?? ""}`;
 	if (
 		!AIError.isStreamReadErrorText(errorText) &&
-		!AIError.isStreamEnvelopeErrorText(errorText) &&
 		!AIError.isTransientStreamParseError(message.errorMessage) &&
 		!AIError.isTransientStreamParseError(message.stopDetails?.explanation)
 	)
@@ -2112,31 +2091,6 @@ function formatToolNotFoundMessage(
 	return `Tool ${name} not found. Closest available: ${suggestions.slice(0, MAX_TOOL_NAME_SUGGESTIONS).join(", ")}`;
 }
 
-/**
- * Enforce the invariant every downstream matcher keys on: `toolCall.id` is
- * unique and non-empty across the whole run — not just within one assistant
- * message. Providers can deliver a reused id (wire length truncation, Responses
- * `callId|itemId` composite collapse) or an id that never materialized (`""`) —
- * the same occurrences the replay pipeline repairs or drops
- * (`deduplicateToolCallIds` / `sanitizeMalformedToolCalls`). Id-keyed per-call
- * state — the prepare map below, every UI and persistence matcher — would
- * otherwise merge sibling calls: the later call's prepared entry overwrites the
- * earlier's, both calls execute the sibling's payload, and colliding result ids
- * merge or drop one sibling's output in every consumer. Message-scope
- * uniqueness is not enough for the session-wide consumers
- * (`formatSessionHistoryMarkdown`'s last-entry-wins map, the advisor delta
- * split, `EventController.#toolTimelineComponents`, persistence keys): a second
- * assistant turn whose ids never materialized used to re-mint `call_1`,
- * `call_2`, … and re-derive the same `_dup` suffixes, so those consumers merged
- * the cross-turn collisions. Every id kept or minted here is therefore claimed
- * in the run-scoped registry (`toolCallIdsDispatchedUnder`) and every candidate
- * is generated until unused at run scope. Never-materialized is the sanitizer's
- * trim test (`isMalformedToolCallId`): a whitespace-only id is minted like an
- * empty one, never kept — it would be dropped from provider replay together
- * with its result, the live/replay divergence this repair exists to close.
- * Idempotent: the message is marked repaired and re-entry is a no-op, so
- * dispatch preparation retains the ids observed by prior snapshots.
- */
 const kToolCallIdsRepaired = Symbol("agent-loop.toolCallIdsRepaired");
 
 /** Assistant message optionally carrying the {@link kToolCallIdsRepaired} mark. */
@@ -2425,11 +2379,6 @@ async function executeToolCalls(
 	// backgrounds itself so the message injects promptly — but it never kills
 	// anything; ignoring it is always safe.
 	const steeringSoftController = new AbortController();
-	// Interruptible tools (pure waits: wait, vibe) observe steering +
-	// external + IRC aborts. Every other tool sees ONLY the external signal:
-	// neither queued steering nor a peer IRC ever hard-kills a partially
-	// side-effecting foreground tool (e.g. `bash`) — those get the cooperative
-	// `steeringSignal` above, and the message injects at the next boundary.
 	const nonInterruptibleSignal: AbortSignal = signal ?? new AbortController().signal;
 	const interruptibleSignal: AbortSignal = signal
 		? AbortSignal.any([signal, steeringAbortController.signal, ircAbortController.signal])
@@ -2688,7 +2637,6 @@ async function executeToolCalls(
 
 		let result: AgentToolResult<any> = { content: [], details: {} };
 		let isError = false;
-		let caughtError: unknown;
 		let completedToolExecution = false;
 		let executionStarted = false;
 		const abortBeforeToolExecution = (): boolean => {
@@ -2790,7 +2738,6 @@ async function executeToolCalls(
 					if (coerced.malformed || result.isError) isError = true;
 				}
 			} catch (e) {
-				caughtError = e;
 				result = {
 					content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
 					details: {},
@@ -2830,7 +2777,6 @@ async function executeToolCalls(
 						}
 					}
 				} catch (e) {
-					caughtError = e;
 					result = {
 						content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
 						details: {},

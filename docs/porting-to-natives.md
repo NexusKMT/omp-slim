@@ -27,7 +27,7 @@ Two commands serve different purposes:
 - `bun --cwd=packages/natives run build:bindings` runs napi-rs for the host, installs a local variant addon and generated declarations, and regenerates explicit ESM/enum exports. Use this when the Rust public type surface changes.
 - `bun --cwd=packages/natives run build` runs the same host Cargo/napi-rs build (`packages/natives/scripts/build-bindings.ts`), so it also regenerates declarations and exports and load-probes the addon.
 
-Release packaging publishes the host-built `.node` in platform leaf packages; build it on each target platform. The core publish rewrite removes addons and injects lockstep optional dependencies generated from `LEAF_TARGETS` in `gen-npm-packages.ts`.
+OMP Slim distributes source and verified standalone artifacts from its public manual Actions workflows. Upstream npm leaf generation and publishing scripts are removed; see `SLIM.md`.
 
 ## Design the N-API boundary
 

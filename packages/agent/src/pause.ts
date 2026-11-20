@@ -1,24 +1,3 @@
-/**
- * Process-global pause gate for agent loops.
- *
- * Every agent in a process — main session, in-process subagents, advisor —
- * funnels through {@link ../agent-loop!agentLoop}, which polls this gate at its
- * two action boundaries: before each model call and before each tool call
- * starts. Engaging the gate therefore freezes all of them at the next safe
- * point without aborting anything: in-flight provider streams and
- * already-started tool executions run to completion, then every loop parks
- * until {@link AgentPauseGate.resume}. Queued steering/follow-up messages stay
- * queued and deliver normally after resume.
- *
- * A run's own `AbortSignal` still unwinds a parked loop immediately: the park
- * releases on abort (without releasing the gate), so cancelling one run never
- * requires resuming the whole process.
- *
- * Hosts drive the singleton {@link agentPauseGate} (e.g. the TUI `/pause`
- * command); library code only ever reads it.
- */
-
-/** Listener invoked with the new state on every pause/resume transition. */
 export type AgentPauseListener = (paused: boolean) => void;
 
 /** Freeze switch shared by every agent loop in the process. See module docs. */

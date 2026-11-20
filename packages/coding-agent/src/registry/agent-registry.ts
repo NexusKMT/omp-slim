@@ -9,22 +9,16 @@
  * revival) and are only removed on explicit release/teardown.
  */
 
+import { oneLineLabel } from "@oh-my-pi/pi-tui/tools/task";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AgentSessionHandle } from "../session/agent-session-handle";
 import { AgentAwaits, type AgentAwaitsApi } from "./agent-awaits";
-import { oneLineLabel } from "@oh-my-pi/pi-tui/tools/task";
 
-import { MAIN_AGENT_ID, type AgentStatus, type AgentMetricsSummary } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
+import { MAIN_AGENT_ID, type AgentMetricsSummary, type AgentStatus } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
 export { MAIN_AGENT_ID };
-export type { AgentStatus, AgentMetricsSummary };
+export type { AgentMetricsSummary, AgentStatus };
 
-/**
- * - `main`/`sub`: the user-facing agent tree (driving agent + task subagents).
- * - `advisor`: a passive review transcript persisted like a subagent for usage
- *   attribution and Agent Hub observability, but never a peer — hidden from
- *   agent-facing rosters (`proc://`, `history://`) and not messageable/revivable.
- */
-export type AgentKind = "main" | "sub" | "advisor";
+export type AgentKind = "main" | "sub";
 
 /**
  * Run lifecycle milestones, stamped as they happen and scoped to the CURRENT
@@ -167,7 +161,7 @@ export interface AgentRegistryApi {
 	get(id: string): AgentRef | undefined;
 	/** Every registered ref. */
 	list(): AgentRef[];
-	/** Every alive non-advisor agent except `id`. */
+
 	listVisibleTo(id: string): AgentRef[];
 	/** Whether a ref's claimed running state is corroborated by its attached live session. */
 	isRunning(ref: AgentRef): boolean;
@@ -446,15 +440,8 @@ export class AgentRegistry implements AgentRegistryApi {
 		return [...this.#refs.values()];
 	}
 
-	/**
-	 * Returns every alive agent (running | idle) except the caller. Advisor refs
-	 * are observability-only transcripts, never peers, so they are excluded.
-	 * Flat namespace: every other agent is visible.
-	 */
 	listVisibleTo(id: string): AgentRef[] {
-		return this.list().filter(
-			ref => ref.id !== id && ref.kind !== "advisor" && (ref.status === "running" || ref.status === "idle"),
-		);
+		return this.list().filter(ref => ref.id !== id && (ref.status === "running" || ref.status === "idle"));
 	}
 
 	/** Whether a ref's claimed running state is corroborated by its attached live session. */

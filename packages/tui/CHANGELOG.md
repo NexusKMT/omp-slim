@@ -8,6 +8,8 @@
 
 ### Removed
 
+- Removed Advisor cards/settings, Vibe dashboards/tools, Autoresearch controls and built-in personality selection.
+
 - Removed the self-update setup screen and welcome-banner download progress.
 - Removed shared-session viewers, sharing and recording status controls, provider login, account quota dashboards and subscription-specific billing UI; local history, token counts and configured token costs remain.
 

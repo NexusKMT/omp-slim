@@ -1,5 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Api, AssistantMessage, Model, ThinkingContent } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-ai/build";
@@ -19,8 +17,10 @@ import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-ent
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
-import { getBundledModel } from "./helpers/bundled-model";
+import { createTestModel } from "./helpers/test-model";
 
 const REASONING_TEXT = "I have partly reasoned through the implementation and should preserve this.";
 const VISIBLE_TEXT = "visible interrupted text";
@@ -148,7 +148,7 @@ describe("AgentSession interrupted thinking persistence", () => {
 	// axis is `thinking.mode === "effort"`, which is what replays reasoning.
 	function createSession(
 		extensionRunner?: ExtensionRunner,
-		model: Model<Api> = getBundledModel("openai", "gpt-5.2"),
+		model: Model<Api> = createTestModel({ provider: "openai", id: "gpt-5.2" }),
 	): {
 		model: Model<Api>;
 		sessionManager: SessionManager;
@@ -160,12 +160,11 @@ describe("AgentSession interrupted thinking persistence", () => {
 			convertToLlm,
 		});
 		const settings = Settings.isolated({
-			"advisor.enabled": false,
 			"compaction.enabled": false,
 			"retry.enabled": false,
 			"todo.enabled": false,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		const sessionManager = SessionManager.inMemory();
 		session = new AgentSession({
 			agent,

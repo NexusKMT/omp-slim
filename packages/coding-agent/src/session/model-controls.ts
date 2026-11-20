@@ -10,38 +10,35 @@ import {
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
 import { getSupportedEfforts } from "@oh-my-pi/pi-ai/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-ai/models";
-import type { ModelRegistry } from "../config/model-registry";
-import {
-	filterAvailableModelsByEnabledPatterns,
-	formatModelStringWithRouting,
-	getModelMatchPreferences,
-	type ResolvedModelRoleValue,
-	resolveModelRoleValue,
-} from "../config/model-resolver";
-import { buildServiceTierByFamily } from "../config/service-tier";
-import type { Settings } from "../config/settings";
 import { containsMagicKeyword } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
-import type { MagicKeywordId } from "../modes/magic-keywords";
 import {
 	AUTO_THINKING,
 	automaticThinkingLevel,
-	type ConfiguredThinkingLevel,
 	clampAutoThinkingEffort,
 	clampThinkingLevelToCeiling,
+	type ConfiguredThinkingLevel,
 	resolveProvisionalAutoLevel,
 	resolveThinkingLevelForModel,
 	shouldDisableReasoning,
 	toReasoningEffort,
 } from "@oh-my-pi/pi-tui/thinking";
+import type { ModelRegistry } from "../config/model-registry";
+import {
+	filterAvailableModelsByEnabledPatterns,
+	getModelMatchPreferences,
+	resolveModelValue,
+} from "../config/model-resolver";
+import { buildServiceTierByFamily } from "../config/service-tier";
+import type { Settings } from "../config/settings";
 import type { EditModeSetting } from "../edit/settings";
+import type { MagicKeywordId } from "../modes/magic-keywords";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ModelCycleResult } from "./agent-session-types";
-import { formatRoleModelValue, resolveRoleModelFull } from "./role-models";
-import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
+import { formatSelectedModelValue } from "./model-selection";
 import type { SessionManager } from "./session-manager";
 
-import { cfgDefaultThinkingLevel, cfgTierOpenai } from "./settings";
 import { cfgDisabledProviders, cfgEnabledModels } from "../config/model-settings";
+import { cfgDefaultThinkingLevel, cfgTierOpenai } from "./settings";
 
 /** Whether `model` takes effort per message, so changing it mid-conversation keeps the cached prefix. */
 function takesPerMessageEffort(model: Model): boolean {
@@ -53,7 +50,7 @@ function takesPerMessageEffort(model: Model): boolean {
  * Explicit thinking suffix of the primary selector when it resolves to `model`
  * among `availableModels`; what a temporary picker applies when it selects that model.
  */
-export function roleThinkingLevelForModel(
+export function configuredThinkingLevelForModel(
 	settings: Settings,
 	availableModels: Model[],
 	model: Model,
@@ -61,7 +58,7 @@ export function roleThinkingLevelForModel(
 	if (availableModels.length === 0) return undefined;
 	const value = settings.getModel();
 	if (!value) return undefined;
-	const resolved = resolveModelRoleValue(value, availableModels, {
+	const resolved = resolveModelValue(value, availableModels, {
 		settings,
 		matchPreferences: getModelMatchPreferences(settings),
 	});
@@ -226,30 +223,19 @@ export class ModelControls {
 	restoreServiceTiers(tiers: ServiceTierByFamily): void {
 		this.#serviceTierByFamily = tiers;
 	}
-	resolveRoleModel(role: string): Model | undefined {
-		return resolveRoleModelFull(this.#host.settings, role, this.#host.modelRegistry.getAvailable(), this.#model)
-			.model;
-	}
-
-	resolveRoleModelWithThinking(role: string): ResolvedModelRoleValue {
-		return resolveRoleModelFull(this.#host.settings, role, this.#host.modelRegistry.getAvailable(), this.#model);
-	}
 
 	resolveTemporaryModelThinkingLevel(model: Model): ConfiguredThinkingLevel | undefined {
-		return roleThinkingLevelForModel(this.#host.settings, this.#host.modelRegistry.getAvailable(), model);
+		return configuredThinkingLevelForModel(this.#host.settings, this.#host.modelRegistry.getAvailable(), model);
 	}
 
 	async setModel(
 		model: Model,
-		role: string = "default",
 		options?: {
 			selector?: string;
 			thinkingLevel?: ConfiguredThinkingLevel;
 			persist?: boolean;
 		},
 	): Promise<{ switched: boolean }> {
-		if (role !== "default")
-			throw new Error(`Model role "${role}" has been removed; select the session model instead.`);
 		const previousEditMode = this.#host.resolveActiveEditMode();
 		if (!this.#host.modelRegistry.hasConfiguredAuth(model)) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
@@ -257,13 +243,12 @@ export class ModelControls {
 
 		const targetModel = this.#host.modelRegistry.fitContextWindow(model, this.#host.settings);
 		await this.#host.setModelWithProviderSessionReset(targetModel);
-		this.#host.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`, role);
+		this.#host.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`);
 		if (options?.persist) {
 			this.#host.settings.setModel(
-				formatRoleModelValue(
+				formatSelectedModelValue(
 					this.#host.settings,
 					this.#host.modelRegistry,
-					role,
 					targetModel,
 					options.selector,
 					options.thinkingLevel,
@@ -299,10 +284,7 @@ export class ModelControls {
 
 		const targetModel = this.#host.modelRegistry.fitContextWindow(model, this.#host.settings);
 		await this.#host.setModelWithProviderSessionReset(targetModel, selection);
-		this.#host.sessionManager.appendModelChange(
-			`${targetModel.provider}/${targetModel.id}`,
-			options?.ephemeral ? EPHEMERAL_MODEL_CHANGE_ROLE : "temporary",
-		);
+		this.#host.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`);
 		this.#host.settings.getStorage()?.recordModelUsage(`${targetModel.provider}/${targetModel.id}`);
 
 		// Apply explicit thinking level if given; otherwise prefer the model's

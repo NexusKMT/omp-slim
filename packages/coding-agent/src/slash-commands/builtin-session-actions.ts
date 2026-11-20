@@ -1,131 +1,13 @@
-import { clearSubmittedText } from "./helpers/draft";
 import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
 import { extractLastCodeBlock, extractLastCommand, extractLastLink } from "@oh-my-pi/pi-tui/overlays/copy-targets";
-import { openPath } from "../utils/open";
-import { copyToClipboard } from "../utils/clipboard";
-import { refreshStatusLine } from "./builtin-modes";
-import { commandConsumed, errorMessage, parseSubcommand, usage } from "./helpers/parse";
 import { formatDumpArchiveReport } from "../session/session-dump-format";
+import { copyToClipboard } from "../utils/clipboard";
+import { openPath } from "../utils/open";
+import { clearSubmittedText } from "./helpers/draft";
+import { commandConsumed, parseSubcommand, usage } from "./helpers/parse";
 import type { SlashCommandSpec } from "./types";
 
 export const BUILTIN_SESSION_ACTION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
-	{
-		name: "advisor",
-		icon: "advisor",
-		description: "Toggle the advisor (reviews each turn using the current model)",
-		acpDescription: "Toggle advisor",
-		acpInputHint: "[on|off|status|dump [raw]|configure]",
-		subcommands: [
-			{ name: "on", description: "Enable the advisor" },
-			{ name: "off", description: "Disable the advisor" },
-			{ name: "status", description: "Show advisor status" },
-			{ name: "dump", description: "Copy the advisor's transcript to clipboard", usage: "[raw]" },
-			{ name: "configure", description: "Open the advisor configuration editor (TUI)" },
-		],
-		allowArgs: true,
-		getTuiAutocompleteDescription: runtime => {
-			const stats = runtime.ctx.session.getAdvisorStats();
-			if (stats.active && stats.advisors.length > 1) return `Advisor: on (${stats.advisors.length} advisors)`;
-			if (stats.active && stats.model) return `Advisor: on (${stats.model.provider}/${stats.model.id})`;
-			if (stats.configured) return "Advisor: configured, no model";
-			return "Advisor: off";
-		},
-		handle: async (command, runtime) => {
-			const { verb, rest } = parseSubcommand(command.args);
-			if (!verb || verb === "toggle") {
-				const active = runtime.session.toggleAdvisorEnabled();
-				const configured = runtime.session.isAdvisorEnabled();
-				if (active) {
-					await runtime.output("Advisor enabled.");
-				} else if (configured) {
-					await runtime.output("Advisor setting enabled, but no current model is available.");
-				} else {
-					await runtime.output("Advisor disabled.");
-				}
-				return commandConsumed();
-			}
-			if (verb === "on") {
-				const active = runtime.session.setAdvisorEnabled(true);
-				await runtime.output(
-					active ? "Advisor enabled." : "Advisor setting enabled, but no current model is available.",
-				);
-				return commandConsumed();
-			}
-			if (verb === "off") {
-				runtime.session.setAdvisorEnabled(false);
-				await runtime.output("Advisor disabled.");
-				return commandConsumed();
-			}
-			if (verb === "status") {
-				await runtime.output(runtime.session.formatAdvisorStatus());
-				return commandConsumed();
-			}
-			if (verb === "dump") {
-				const isRaw = rest.toLowerCase() === "raw";
-				const text = runtime.session.formatAdvisorHistoryAsText({ compact: !isRaw });
-				await runtime.output(text ?? "Advisor is not active for this session.");
-				return commandConsumed();
-			}
-			if (verb === "configure") {
-				await runtime.output(
-					"/advisor configure opens an interactive editor and is only available in the interactive TUI.",
-				);
-				return commandConsumed();
-			}
-			return usage("Usage: /advisor [on|off|status|dump [raw]|configure]", runtime);
-		},
-		handleTui: async (command, runtime) => {
-			const { verb, rest } = parseSubcommand(command.args);
-			if (!verb || verb === "toggle") {
-				const active = runtime.ctx.session.toggleAdvisorEnabled();
-				const configured = runtime.ctx.session.isAdvisorEnabled();
-				if (active) {
-					runtime.ctx.showStatus("Advisor enabled.");
-				} else if (configured) {
-					runtime.ctx.showStatus("Advisor setting enabled, but no current model is available.");
-				} else {
-					runtime.ctx.showStatus("Advisor disabled.");
-				}
-				refreshStatusLine(runtime.ctx);
-				clearSubmittedText(runtime);
-				return;
-			}
-			if (verb === "on") {
-				const active = runtime.ctx.session.setAdvisorEnabled(true);
-				runtime.ctx.showStatus(
-					active ? "Advisor enabled." : "Advisor setting enabled, but no current model is available.",
-				);
-				refreshStatusLine(runtime.ctx);
-				clearSubmittedText(runtime);
-				return;
-			}
-			if (verb === "off") {
-				runtime.ctx.session.setAdvisorEnabled(false);
-				runtime.ctx.showStatus("Advisor disabled.");
-				refreshStatusLine(runtime.ctx);
-				clearSubmittedText(runtime);
-				return;
-			}
-			if (verb === "status") {
-				await runtime.ctx.handleAdvisorStatusCommand();
-				clearSubmittedText(runtime);
-				return;
-			}
-			if (verb === "dump") {
-				const isRaw = rest.toLowerCase() === "raw";
-				runtime.ctx.handleAdvisorDumpCommand(isRaw);
-				clearSubmittedText(runtime);
-				return;
-			}
-			if (verb === "configure") {
-				runtime.ctx.showAdvisorConfigure();
-				clearSubmittedText(runtime);
-				return;
-			}
-			runtime.ctx.showStatus("Usage: /advisor [on|off|status|dump [raw]|configure]");
-			clearSubmittedText(runtime);
-		},
-	},
 	{
 		name: "dump",
 		icon: "clipboard",

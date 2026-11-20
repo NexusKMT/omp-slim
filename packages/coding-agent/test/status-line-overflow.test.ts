@@ -1,16 +1,16 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
 import { statusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
+import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
 import type { SegmentContext } from "@oh-my-pi/pi-tui/status-line/segments";
 import { renderSegment } from "@oh-my-pi/pi-tui/status-line/segments";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import { getSessionAccentAnsi, getSessionAccentHex } from "@oh-my-pi/pi-tui/theme/session-color";
-import { visibleWidth } from "@oh-my-pi/pi-tui";
 import { getProjectDir, setProjectDir } from "@oh-my-pi/pi-utils";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { StatusLineTestComponents } from "./helpers/status-line";
 
 const originalProjectDir = getProjectDir();
@@ -58,7 +58,6 @@ function createCtx(overrides?: {
 		planMode: null,
 		loopMode: null,
 		goalMode: null,
-		vibeMode: null,
 		vim: null,
 		usageStats: {
 			input: 0,
@@ -105,8 +104,6 @@ function createStatusLineSession(sessionName: string, modelName?: string) {
 		isStreaming: false,
 		isAutoThinking: false,
 		autoResolvedThinkingLevel: () => undefined,
-		isAdvisorActive: () => false,
-		getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
 		isFastModeActive: () => false,
 		getAsyncJobSnapshot: () => ({ running: [] }),
 		getCurrentModel: () => undefined,

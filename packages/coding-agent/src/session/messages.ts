@@ -6,70 +6,69 @@
  */
 import { type AgentMessage, isProviderRefusalMessage } from "@oh-my-pi/pi-agent-core";
 import {
-	isUserInterruptAbort,
-	isCustomMessageContent,
-	type BashExecutionMessage,
-	type PythonExecutionMessage,
-	type CustomMessage,
-	type HookMessage,
-	type FileMentionMessage,
-	isUserInvokedSkillPrompt,
-	isUserTurnInitiator,
-} from "@oh-my-pi/pi-tui/chat/messages";
-export {
-	SKILL_PROMPT_MESSAGE_TYPE,
-	LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE,
-	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
-	PREWALK_PLAN_MESSAGE_TYPE,
-	VIBE_MODE_CONTEXT_MESSAGE_TYPE,
-	DEFAULT_CUSTOM_MESSAGE_TYPE,
-	LIVE_DELEGATION_MESSAGE_TYPE,
-	type CustomMessageContent,
-	type CustomMessagePayload,
-	type NormalizedCustomMessagePayload,
-	type BackgroundTanDispatchDetails,
-	type SkillPromptDetails,
-	SILENT_ABORT_MARKER,
-	isSilentAbort,
-	USER_INTERRUPT_LABEL,
-	isUserInterruptAbort,
-	shouldRenderAbortReason,
-	GENERIC_ABORT_SENTINEL,
-	resolveAbortLabel,
-	isCustomMessageContent,
-	normalizeCustomMessagePayload,
-	type BashExecutionMessage,
-	type PythonExecutionMessage,
-	type CustomMessage,
-	type HookMessage,
-	type FileMentionMessage,
-	isUserInvokedSkillPrompt,
-	isUserTurnInitiator,
-} from "@oh-my-pi/pi-tui/chat/messages";
-import {
 	invalidateMessageCache,
 	registerMessageCacheInvalidator,
 } from "@oh-my-pi/pi-agent-core/compaction/message-cache";
 import { convertMessageToLlm } from "@oh-my-pi/pi-agent-core/compaction/messages";
 import type { AssistantMessage, ImageContent, Message, TextContent, UserMessage } from "@oh-my-pi/pi-ai";
 import { copyPerCallContextMessage } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import {
+	type BashExecutionMessage,
+	type CustomMessage,
+	type FileMentionMessage,
+	type HookMessage,
+	isCustomMessageContent,
+	isUserInterruptAbort,
+	isUserInvokedSkillPrompt,
+	isUserTurnInitiator,
+	type PythonExecutionMessage,
+} from "@oh-my-pi/pi-tui/chat/messages";
+import { stripXdUrlPrefix } from "@oh-my-pi/pi-tui/tools/xd-url";
 import { isRecord, logger, prompt } from "@oh-my-pi/pi-utils";
-// Read-only recognition of historical collaboration messages.
-const COLLAB_PROMPT_MESSAGE_TYPE = "collab-prompt";
 import userInterjectionTemplate from "../prompts/steering/user-interjection.md" with { type: "text" };
 import { formatTitleConversationContext, type TitleConversationTurn } from "../tiny/message-preproc";
-import { stripXdUrlPrefix } from "@oh-my-pi/pi-tui/tools/xd-url";
+export {
+	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
+	DEFAULT_CUSTOM_MESSAGE_TYPE,
+	GENERIC_ABORT_SENTINEL,
+	isCustomMessageContent,
+	isSilentAbort,
+	isUserInterruptAbort,
+	isUserInvokedSkillPrompt,
+	isUserTurnInitiator,
+	LIVE_DELEGATION_MESSAGE_TYPE,
+	LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE,
+	normalizeCustomMessagePayload,
+	PREWALK_PLAN_MESSAGE_TYPE,
+	resolveAbortLabel,
+	shouldRenderAbortReason,
+	SILENT_ABORT_MARKER,
+	SKILL_PROMPT_MESSAGE_TYPE,
+	USER_INTERRUPT_LABEL,
+	type BackgroundTanDispatchDetails,
+	type BashExecutionMessage,
+	type CustomMessage,
+	type CustomMessageContent,
+	type CustomMessagePayload,
+	type FileMentionMessage,
+	type HookMessage,
+	type NormalizedCustomMessagePayload,
+	type PythonExecutionMessage,
+	type SkillPromptDetails,
+} from "@oh-my-pi/pi-tui/chat/messages";
+// Read-only recognition of historical collaboration messages.
+const COLLAB_PROMPT_MESSAGE_TYPE = "collab-prompt";
 
 export {
-	type BranchSummaryMessage,
-	type CompactionSummaryMessage,
 	createBranchSummaryMessage,
 	createCompactionSummaryMessage,
 	createCustomMessage,
+	type BranchSummaryMessage,
+	type CompactionSummaryMessage,
 } from "@oh-my-pi/pi-agent-core/compaction/messages";
 
-import { formatOutputNotice } from "@oh-my-pi/pi-tui/tools/output-meta";
 import { titleTextFromSkillPrompt } from "@oh-my-pi/pi-tui/chat/skill-title-input";
+import { formatOutputNotice } from "@oh-my-pi/pi-tui/tools/output-meta";
 
 /**
  * Logs provider-error turns so their actual cause is available outside the

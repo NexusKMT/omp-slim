@@ -2,8 +2,6 @@
  * Interactive mode for the coding agent.
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { type Agent, AgentBusyError, type AgentMessage, agentPauseGate, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, Model, Usage } from "@oh-my-pi/pi-ai";
@@ -19,44 +17,105 @@ import type {
 	SlashCommand,
 } from "@oh-my-pi/pi-tui";
 import {
-	Container,
 	clearRenderCache,
+	Container,
 	getComposerStyle,
 	getPaddingX,
 	getWidthConfigEpoch,
 	Loader,
-	Markdown,
 	minFrameIntervalMs,
-	Spacer,
 	setTerminalTextSizing,
 	setTuiTight,
+	Spacer,
 	TERMINAL,
 	Text,
 	type TUI,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
-import type { TerminalAppearanceRequestToken } from "@oh-my-pi/pi-tui/terminal";
-import type { DescribeContext, NativeChild, NativeNode, NativeUiEvent } from "@oh-my-pi/pi-tui/native/node";
+import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
+import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
+import type { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-execution";
+import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
+import { setSvgFigureRendering } from "@oh-my-pi/pi-tui/chat/svg-figure";
+import { setTableCharts } from "@oh-my-pi/pi-tui/chat/table-chart";
+import { messageHasDisplayableThinking } from "@oh-my-pi/pi-tui/chat/thinking-display";
+import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { setTranscriptActionHandler } from "@oh-my-pi/pi-tui/chat/transcript-actions";
+import {
+	isTranscriptPresentable,
+	messageBlock,
+	onTranscriptPresentationRedrawn,
+	onTranscriptPresentersChanged,
+	PresentedBlock,
+	setTranscriptPresenters,
+} from "@oh-my-pi/pi-tui/chat/transcript-presentation";
+import { ChatBlock, type ChatBlockHost } from "@oh-my-pi/pi-tui/chrome/chat-block";
+import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
+import { appKey, editorKey, rawKeyHint } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
+import { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
+import type { WorkingRowSpec } from "@oh-my-pi/pi-tui/components/loader";
+import { formatDoubleTap } from "@oh-my-pi/pi-tui/key-hint-format";
 import { col, compact, kbd, keyed, node, row, span, text } from "@oh-my-pi/pi-tui/native/describe";
+import { sameItems } from "@oh-my-pi/pi-tui/native/memo";
+import type { DescribeContext, NativeChild, NativeNode, NativeUiEvent } from "@oh-my-pi/pi-tui/native/node";
+import { isNativeRendering, onNativeRenderingChange } from "@oh-my-pi/pi-tui/native/state";
+import type { AgentCostSnapshot } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
+import type { AgentHubRegistry } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
+import { AttachmentChipsBand } from "@oh-my-pi/pi-tui/prompt/attachment-chips";
+import { shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
+import {
+	extensionLinkClicksAvailable,
+	extensionLinksRouted,
+	extensionLinksVersion,
+	setExtensionLinkPicking,
+	setExtensionLinks,
+} from "@oh-my-pi/pi-tui/render/extension-links";
+import { applyFileLinkSetting, applyHyperlinkSetting, fileHyperlink } from "@oh-my-pi/pi-tui/render/hyperlink";
+import {
+	FEED_MODEL_BADGE_WIDTH,
+	formatFeedModelBadge,
+	formatMoreItems,
+	formatStatusIcon,
+	isFeedModelBadgeEnabled,
+	previewLine,
+	replaceTabs,
+	shortenEmbeddedPaths,
+	shortenPath,
+	shortenToolArgumentPaths,
+	TRUNCATE_LENGTHS,
+	truncateToWidth,
+} from "@oh-my-pi/pi-tui/render/render-utils";
+import { renderTreeList } from "@oh-my-pi/pi-tui/render/tree-list";
+import { thinkingLevelWord } from "@oh-my-pi/pi-tui/status-line/segments";
+import type { TerminalAppearanceRequestToken } from "@oh-my-pi/pi-tui/terminal";
+import { isInsideTerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-capabilities";
+import { getSessionAccentAnsi, getSessionAccentHex } from "@oh-my-pi/pi-tui/theme/session-color";
+import {
+	AUTO_THINKING,
+	type ConfiguredThinkingLevel,
+	newSessionThinkingLevel,
+	parseConfiguredThinkingLevel,
+	resolveConfiguredThinkingLevel,
+} from "@oh-my-pi/pi-tui/thinking";
 import {
 	describeJobWidgetMiniSpark,
 	describeJobWidgetsHovercard,
 	type JobWidgetEntry,
-	type JobWidgetView,
 	jobWidgetGlance,
 	jobWidgetGlanceSpans,
 	jobWidgetSummary,
+	type JobWidgetView,
 	latestJobWidget,
 } from "@oh-my-pi/pi-tui/tools/job-widget";
-import type { AsyncJobManagerApi } from "../async/job-manager";
-import type { JobWidgetRegistry } from "../job-widgets/types";
-import { sameItems } from "@oh-my-pi/pi-tui/native/memo";
-import type { WorkingRowSpec } from "@oh-my-pi/pi-tui/components/loader";
-import { formatDoubleTap } from "@oh-my-pi/pi-tui/key-hint-format";
-import { thinkingLevelWord } from "@oh-my-pi/pi-tui/status-line/segments";
-import type { TspChecklistItem, TspChecklistPhase, TspSpan, TspText, TspTreeNode } from "@oh-my-pi/pi-wire";
-import { isInsideTerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-capabilities";
+import { agentTypeBadge, formatTaskId } from "@oh-my-pi/pi-tui/tools/task";
+import {
+	formatPhaseDisplayName,
+	isClosedTodo,
+	selectCollapsedTodos,
+	setActiveTodoDescriptionsProvider,
+	todoMatchesAnyDescription,
+} from "@oh-my-pi/pi-tui/tools/todo";
 import {
 	adjustHsv,
 	formatDuration,
@@ -71,12 +130,20 @@ import {
 	setProjectDir,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import type { TspChecklistItem, TspChecklistPhase, TspSpan, TspText, TspTreeNode } from "@oh-my-pi/pi-wire";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import type { AsyncJobManagerApi } from "../async/job-manager";
 import { restartArgv } from "../cli/flag-tables";
-import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
-import { appKey, editorKey, rawKeyHint } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
-import { formatModelString, resolveModelRoleValue } from "../config/model-resolver";
+import { resolveModelValue } from "../config/model-resolver";
 import { isSettingsInitialized, Settings, settings } from "../config/settings";
 import { clearClaudePluginRootsCache } from "../discovery/helpers";
+import { onDownloadActivity } from "../downloads/activity";
+import {
+	isJudgmentBatchProgress,
+	JUDGMENT_BATCH_PROGRESS_EVENT_CHANNEL,
+	type JudgmentBatchProgress,
+} from "../eval/judgment-batch-events";
 import type {
 	AssistantTextRenderer,
 	AutocompleteProviderFactory,
@@ -104,6 +171,10 @@ import type { FileSlashCommand } from "../extensibility/slash-commands";
 import { loadSlashCommands } from "../extensibility/slash-commands";
 import type { GoalModeState } from "../goals/state";
 import { copyLocalArtifacts, resolveLocalRoot } from "../internal-urls";
+import { type CfgApproval, type CfgChangeRequest, setCfgApprovalHost } from "../internal-urls/cfg-protocol";
+import { resolveMarkdownLinkHrefs } from "../internal-urls/hyperlink-targets";
+import type { ResolveContext } from "../internal-urls/index";
+import type { JobWidgetRegistry } from "../job-widgets/types";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "../lsp/startup-events";
 import type { MCPManager } from "../mcp";
 import {
@@ -114,31 +185,19 @@ import {
 	type McpConnectionStatusEvent,
 } from "../mcp/startup-events";
 import { humanizePlanTitle, type PlanApprovalDetails, resolvePlanTitle } from "../plan-mode/approved-plan";
-import {
-	isJudgmentBatchProgress,
-	JUDGMENT_BATCH_PROGRESS_EVENT_CHANNEL,
-	type JudgmentBatchProgress,
-} from "../eval/judgment-batch-events";
-import { onDownloadActivity } from "../downloads/activity";
-import { DownloadActivityHud, JudgmentBatchProgressHud } from "./progress-hud";
 import { autosaveApprovedPlan, planSaveFileName } from "../plan-mode/plan-autosave";
+import { resolvePlanFilePath } from "../plan-mode/plan-files";
 import guidedGoalInterviewPrompt from "../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planFilenamePrompt from "../prompts/system/plan-filename.md" with { type: "text" };
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
 import planModeCompactInstructionsPrompt from "../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
-import type { AgentHubRegistry } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { registerPersistedSubagents } from "../registry/persisted-agents";
-import type { AgentCostSnapshot } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
-import { sumSubagentTreeCost } from "./agent-hub-runtime";
 import { type AgentSession, type AgentSessionEvent, type DroppedPrompt } from "../session/agent-session";
 import type { AgentViewSession } from "../session/agent-session-handle";
 import type { CompactMode } from "../session/compact-modes";
 import { HistoryStorage } from "../session/history-storage";
 import { USER_INTERRUPT_LABEL } from "../session/messages";
-import { resolveMarkdownLinkHrefs } from "../internal-urls/hyperlink-targets";
-import type { ResolveContext } from "../internal-urls/index";
-import { shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
 import { isTranscriptEntry, type SessionContext } from "../session/session-context";
 import type { SessionManager } from "../session/session-manager";
 import { loadPinnedSessionIds } from "../session/session-pins";
@@ -150,40 +209,14 @@ import {
 	type WorktreeExitPlan,
 } from "../session/session-worktree";
 import type { ShakeMode } from "../session/shake-types";
-import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
-import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
+import { buildTuiBuiltinSlashCommands, BUILTIN_SLASH_COMMAND_RESERVED_NAMES } from "../slash-commands/builtin-registry";
 import { resolveCliEntryCmd } from "../subprocess/worker-client";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
 import { labelEchoesHandle } from "../task/label";
-import { agentTypeBadge, formatTaskId } from "@oh-my-pi/pi-tui/tools/task";
-import {
-	AUTO_THINKING,
-	type ConfiguredThinkingLevel,
-	newSessionThinkingLevel,
-	parseConfiguredThinkingLevel,
-	resolveConfiguredThinkingLevel,
-} from "@oh-my-pi/pi-tui/thinking";
-import { isMCPToolName } from "../tools/builtin-names";
 import type { LspStartupServerInfo } from "../tools";
-import { resolvePlanFilePath } from "../plan-mode/plan-files";
+import { isMCPToolName } from "../tools/builtin-names";
 import { resolveToCwd } from "../tools/path-utils";
-import {
-	FEED_MODEL_BADGE_WIDTH,
-	formatFeedModelBadge,
-	formatMoreItems,
-	formatStatusIcon,
-	isFeedModelBadgeEnabled,
-	previewLine,
-	replaceTabs,
-	shortenEmbeddedPaths,
-	shortenToolArgumentPaths,
-	shortenPath,
-	TRUNCATE_LENGTHS,
-	truncateToWidth,
-} from "@oh-my-pi/pi-tui/render/render-utils";
-import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
-import { type CfgApproval, type CfgChangeRequest, setCfgApprovalHost } from "../internal-urls/cfg-protocol";
 import {
 	createTodoHudStateData,
 	getTodoHudVisibility,
@@ -191,39 +224,11 @@ import {
 	TODO_HUD_STATE_CUSTOM_TYPE,
 	type TodoHudStateEntryData,
 } from "../tools/todo";
-import {
-	formatPhaseDisplayName,
-	isClosedTodo,
-	selectCollapsedTodos,
-	setActiveTodoDescriptionsProvider,
-	todoMatchesAnyDescription,
-} from "@oh-my-pi/pi-tui/tools/todo";
-import { applyFileLinkSetting, applyHyperlinkSetting, fileHyperlink } from "@oh-my-pi/pi-tui/render/hyperlink";
-import {
-	extensionLinkClicksAvailable,
-	extensionLinksRouted,
-	extensionLinksVersion,
-	setExtensionLinkPicking,
-	setExtensionLinks,
-} from "@oh-my-pi/pi-tui/render/extension-links";
-import { isNativeRendering, onNativeRenderingChange } from "@oh-my-pi/pi-tui/native/state";
-import {
-	isTranscriptPresentable,
-	messageBlock,
-	onTranscriptPresentationRedrawn,
-	onTranscriptPresentersChanged,
-	PresentedBlock,
-	setTranscriptPresenters,
-} from "@oh-my-pi/pi-tui/chat/transcript-presentation";
-import { renderTreeList } from "@oh-my-pi/pi-tui/render/tree-list";
 import { copyToClipboard } from "../utils/clipboard";
 import type { EventBus } from "../utils/event-bus";
 import { getEditorCommand, getEditorName, openInEditor } from "../utils/external-editor";
 import { openPath } from "../utils/open";
 import { resumeCommand } from "../utils/resume-command";
-import { getSessionAccentAnsi, getSessionAccentHex } from "@oh-my-pi/pi-tui/theme/session-color";
-import { messageHasDisplayableThinking } from "@oh-my-pi/pi-tui/chat/thinking-display";
-import type { TokenRateMeter } from "../utils/token-rate";
 import {
 	disposeProgramStatus,
 	initProgramStatus,
@@ -244,49 +249,63 @@ import {
 	setTerminalTitleSpinnerStyle,
 	setTerminalTitleStateEnabled,
 } from "../utils/title-generator";
-import {
-	aggregateVibeWorkerTokensPerSecond,
-	type VibeOwnerScope,
-	type VibeParentSession,
-	VibeSessionRegistry,
-} from "../vibe/runtime";
-import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
-import { setSvgFigureRendering } from "@oh-my-pi/pi-tui/chat/svg-figure";
-import { setTableCharts } from "@oh-my-pi/pi-tui/chat/table-chart";
-import { setTranscriptActionHandler } from "@oh-my-pi/pi-tui/chat/transcript-actions";
-import { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
-import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
-import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
-import { AttachmentChipsBand } from "@oh-my-pi/pi-tui/prompt/attachment-chips";
-import type { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-execution";
-import { ChatBlock, type ChatBlockHost } from "@oh-my-pi/pi-tui/chrome/chat-block";
+import type { TokenRateMeter } from "../utils/token-rate";
+import { sumSubagentTreeCost } from "./agent-hub-runtime";
+import { DownloadActivityHud, JudgmentBatchProgressHud } from "./progress-hud";
 
-import { type ComposerNativeState, CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
-import { DynamicBorder } from "@oh-my-pi/pi-tui/chrome/dynamic-border";
-import { EditorTopGap } from "@oh-my-pi/pi-tui/prompt/editor-top-gap";
-import { ErrorBannerComponent } from "@oh-my-pi/pi-tui/overlays/error-banner";
 import type { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
+import { ServedModelTracker } from "@oh-my-pi/pi-tui/chat/served-model-marker";
+import { SkillMessageComponent } from "@oh-my-pi/pi-tui/chat/skill-message";
+import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { isUserRequestEntry, type TranscriptEntryLike } from "@oh-my-pi/pi-tui/chat/transcript-entry";
+import { sanitizeStatusText } from "@oh-my-pi/pi-tui/chrome/shared";
+import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
+import { ErrorBannerComponent } from "@oh-my-pi/pi-tui/overlays/error-banner";
 import type { HookEditorComponent } from "@oh-my-pi/pi-tui/overlays/hook-editor";
 import type { HookInputComponent } from "@oh-my-pi/pi-tui/overlays/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "@oh-my-pi/pi-tui/overlays/hook-selector";
+import { JobsSheet } from "@oh-my-pi/pi-tui/overlays/jobs-panel";
+import { LinkBrowserComponent, type LinkBrowserDeps } from "@oh-my-pi/pi-tui/overlays/link-browser";
 import { type PlanReviewAnnotationState, PlanReviewOverlay } from "@oh-my-pi/pi-tui/overlays/plan-review-overlay";
 import { PlanSaveOverlay, type PlanSaveOverlayResult } from "@oh-my-pi/pi-tui/overlays/plan-save-overlay";
-import { ServedModelTracker } from "@oh-my-pi/pi-tui/chat/served-model-marker";
+import {
+	getInspectableSubagentCount,
+	getRunningSubagentBadgeAgentIds,
+} from "@oh-my-pi/pi-tui/overlays/running-subagent-badge";
 import { SessionInfoOverlay } from "@oh-my-pi/pi-tui/overlays/session-info-overlay";
-import { JobsSheet } from "@oh-my-pi/pi-tui/overlays/jobs-panel";
-import { SkillMessageComponent } from "@oh-my-pi/pi-tui/chat/skill-message";
-import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
-import { statusLineHost } from "./status-line-host";
-import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "@oh-my-pi/pi-tui/chat/tool-execution";
-import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
+import {
+	type ObservableSession,
+	type SessionObserverChangeKind,
+	SessionObserverRegistry,
+} from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
 import { Composer, type ComposerPreferences, type ComposerStatusCache } from "@oh-my-pi/pi-tui/prompt/composer";
-import { PINNED_HUD_TOGGLE_ID } from "../task/output-manager";
-import { isUserRequestEntry, type TranscriptEntryLike } from "@oh-my-pi/pi-tui/chat/transcript-entry";
-import { LinkBrowserComponent, type LinkBrowserDeps } from "@oh-my-pi/pi-tui/overlays/link-browser";
+import { sharedComposerCache } from "@oh-my-pi/pi-tui/prompt/composer-cache";
+import { resolveComposerHint } from "@oh-my-pi/pi-tui/prompt/composer-hints";
+import { type ComposerNativeState, CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
+import { EditorTopGap } from "@oh-my-pi/pi-tui/prompt/editor-top-gap";
+import { imageReferenceHyperlink, setImageBlobWriter } from "@oh-my-pi/pi-tui/prompt/image-references";
 import { getAssistantMessageLinkTargets } from "@oh-my-pi/pi-tui/prompt/interactive-context-helpers";
 import { setMagicKeywords } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
-import { MAGIC_KEYWORDS } from "./magic-keywords";
-import { sharedComposerCache } from "@oh-my-pi/pi-tui/prompt/composer-cache";
+import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
+import type { LoopConditionConfig, LoopLimitRuntime } from "@oh-my-pi/pi-tui/status-line/loop";
+import type { Theme } from "@oh-my-pi/pi-tui/theme";
+import {
+	getEditorTheme,
+	onTerminalAppearanceChange,
+	onThemeChange,
+	setMarkdownColorful,
+	setMarkdownMermaidRendering,
+	setSymbolPreset,
+	startMacOSAppearanceReprobeFallback,
+	theme,
+	warmHighlighter,
+} from "@oh-my-pi/pi-tui/theme";
+import { clearMermaidCache } from "@oh-my-pi/pi-tui/theme/mermaid-cache";
+import { shimmerEnabled, type ShimmerPalette, shimmerText } from "@oh-my-pi/pi-tui/theme/shimmer";
+import { getSlashCommandTypeIcon } from "@oh-my-pi/pi-tui/theme/tui-adapters";
+import type { TodoItem, TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
+import { PINNED_HUD_TOGGLE_ID } from "../task/output-manager";
+import { hintUsage } from "../utils/usage-counter";
 import { BtwController } from "./controllers/btw-controller";
 import { CleanseCommandController } from "./controllers/cleanse-command-controller";
 import { CommandController } from "./controllers/command-controller";
@@ -299,7 +318,6 @@ import { SelectorController } from "./controllers/selector-controller";
 import { SessionFocusController } from "./controllers/session-focus-controller";
 import { TanCommandController } from "./controllers/tan-command-controller";
 import { TodoCommandController } from "./controllers/todo-command-controller";
-import { imageReferenceHyperlink, setImageBlobWriter } from "@oh-my-pi/pi-tui/prompt/image-references";
 import { describeLoopCondition, evaluateLoopCondition, type LoopConditionVerdict } from "./loop-condition";
 import {
 	consumeLoopLimitIteration,
@@ -308,42 +326,15 @@ import {
 	describeLoopLimitRuntime,
 	isLoopDurationExpired,
 	isLoopLimitExhausted,
-	parseLoopArgs,
 	type LoopLimitConfig,
+	parseLoopArgs,
 } from "./loop-limit";
-import type { LoopConditionConfig, LoopLimitRuntime } from "@oh-my-pi/pi-tui/status-line/loop";
+import { MAGIC_KEYWORDS } from "./magic-keywords";
 import { OAuthManualInputManager } from "./oauth-manual-input";
 import { formatPersistenceNotice } from "./persistence-failure";
-import { resolveComposerHint } from "@oh-my-pi/pi-tui/prompt/composer-hints";
-import { hintUsage } from "../utils/usage-counter";
-import {
-	getInspectableSubagentCount,
-	getRunningSubagentBadgeAgentIds,
-} from "@oh-my-pi/pi-tui/overlays/running-subagent-badge";
-import {
-	type ObservableSession,
-	type SessionObserverChangeKind,
-	SessionObserverRegistry,
-} from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
 import { createSessionTeardown, type SessionTeardown } from "./session-teardown";
-import { sanitizeStatusText } from "@oh-my-pi/pi-tui/chrome/shared";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./skill-command";
-import { clearMermaidCache } from "@oh-my-pi/pi-tui/theme/mermaid-cache";
-import { type ShimmerPalette, shimmerEnabled, shimmerText } from "@oh-my-pi/pi-tui/theme/shimmer";
-import type { Theme } from "@oh-my-pi/pi-tui/theme";
-import {
-	getEditorTheme,
-	getMarkdownTheme,
-	onTerminalAppearanceChange,
-	onThemeChange,
-	setMarkdownColorful,
-	setMarkdownMermaidRendering,
-	setSymbolPreset,
-	startMacOSAppearanceReprobeFallback,
-	theme,
-	warmHighlighter,
-} from "@oh-my-pi/pi-tui/theme";
-import { getSlashCommandTypeIcon } from "@oh-my-pi/pi-tui/theme/tui-adapters";
+import { statusLineHost } from "./status-line-host";
 import type {
 	AgentHubOpenOptions,
 	CompactionQueuedMessage,
@@ -357,16 +348,31 @@ import type {
 	SubmittedUserInput,
 	YieldCompaction,
 } from "./types";
-import type { TodoItem, TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import type { ConversationPosition } from "./utils/conversation-position";
 import { materializeImageChipLinks, UiHelpers } from "./utils/ui-helpers";
 
+import { combine, type SettingValueOf } from "../config/registry";
+import {
+	cfgExtensionAssistantTextRenderers,
+	cfgExtensionHandlersModeControl,
+	cfgExtensionTranscriptPresenters,
+} from "../extensibility/settings";
+import { cfgGoalContinuationModes, cfgGoalEnabled } from "../goals/settings";
+import { goalContinuationActivity, goalFromModeData } from "../goals/state";
+import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "../plan-mode/settings";
+import {
+	cfgDefaultThinkingLevel,
+	cfgExpandThinkingBlocks,
+	cfgHideThinkingBlock,
+	cfgProseOnlyThinking,
+} from "../session/settings";
+import { cfgWorktreeOnExit, cfgWorktreeOnStart } from "../task/settings";
+import { cfgTasksTodoClearDelay } from "../tools/settings";
 import {
 	askTimeoutMs,
 	cfgAutocompleteMaxVisible,
 	cfgComposerShape,
 	cfgComposerTokenRate,
-	cfgDisplayAdvisorCollapsedLines,
 	cfgDisplayCacheMissMarker,
 	cfgDisplayCollapseCompacted,
 	cfgDisplayHideToolActivity,
@@ -379,6 +385,7 @@ import {
 	cfgLoopConditionTimeoutMs,
 	cfgLoopMode,
 	cfgMagicKeywordsEnabled,
+	cfgMotionResolved,
 	cfgShowHardwareCursor,
 	cfgSpellingAutocorrect,
 	cfgSpellingTypoDetection,
@@ -396,35 +403,23 @@ import {
 	cfgSymbolPreset,
 	cfgTerminalProgramStatus,
 	cfgTerminalShowImages,
+	cfgTuiAutoGraph,
+	cfgTuiColorfulMarkdown,
+	cfgTuiCompleteScrollback,
 	cfgTuiHyperlinks,
 	cfgTuiImeSafeCursor,
 	cfgTuiMaxInlineImages,
-	cfgTuiAutoGraph,
 	cfgTuiMouse,
-	cfgTuiColorfulMarkdown,
 	cfgTuiRenderMermaid,
 	cfgTuiRenderSvg,
 	cfgTuiResizeScrollback,
-	cfgTuiCompleteScrollback,
 	cfgTuiTextSizing,
 	cfgTuiTight,
 	cfgTuiTitleSpinner,
-	cfgMotionResolved,
 	cfgTuiTitleState,
 	cfgTuiVimMode,
 	cfgTuiVimModeDisplay,
 } from "./settings";
-import { cfgTasksTodoClearDelay } from "../tools/settings";
-import { cfgWorktreeOnExit, cfgWorktreeOnStart } from "../task/settings";
-import { cfgExpandThinkingBlocks, cfgProseOnlyThinking } from "../session/settings";
-import { cfgDefaultThinkingLevel, cfgHideThinkingBlock } from "../session/settings";
-import { cfgExtensionHandlersModeControl } from "../extensibility/settings";
-import { cfgGoalContinuationModes, cfgGoalEnabled } from "../goals/settings";
-import { goalContinuationActivity, goalFromModeData } from "../goals/state";
-import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "../plan-mode/settings";
-import { combine, type SettingValueOf } from "../config/registry";
-import { cfgAdvisorEnabled, cfgAdvisorMaxNotesPerUpdate } from "../advisor/settings";
-import { cfgExtensionAssistantTextRenderers, cfgExtensionTranscriptPresenters } from "../extensibility/settings";
 
 import {
 	cfgCompactionEnabled,
@@ -464,7 +459,6 @@ const cfgLiveUiSettings = combine({
 	hideThinkingBlock: cfgHideThinkingBlock,
 	proseOnlyThinking: cfgProseOnlyThinking,
 	expandThinkingBlocks: cfgExpandThinkingBlocks,
-	"display.advisorCollapsedLines": cfgDisplayAdvisorCollapsedLines,
 	"display.cacheMissMarker": cfgDisplayCacheMissMarker,
 	"display.collapseCompacted": cfgDisplayCollapseCompacted,
 	"display.showTokenUsage": cfgDisplayShowTokenUsage,
@@ -492,8 +486,6 @@ const cfgLiveUiSettings = combine({
 	"statusLine.compactThinkingLevel": cfgStatusLineCompactThinkingLevel,
 	"statusLine.contextLine": cfgStatusLineContextLine,
 	"git.enabled": cfgGitEnabled,
-	"advisor.enabled": cfgAdvisorEnabled,
-	"advisor.maxNotesPerUpdate": cfgAdvisorMaxNotesPerUpdate,
 });
 type LiveUiSettings = SettingValueOf<typeof cfgLiveUiSettings>;
 
@@ -627,17 +619,6 @@ function formatContextTokenCount(value: number): string {
 
 function hasAssistantToolCall(message: AgentMessage): boolean {
 	return message.role === "assistant" && message.content.some(block => block.type === "toolCall");
-}
-
-/**
- * Reads a tool-name snapshot out of a persisted `mode_change` payload. Session
- * files are user-editable and survive across versions, so anything that is not
- * a plain array of strings is treated as absent rather than trusted.
- */
-function readPersistedToolNames(value: unknown): string[] | undefined {
-	if (!Array.isArray(value)) return undefined;
-	if (!value.every(name => typeof name === "string")) return undefined;
-	return value as string[];
 }
 
 export function shouldEnterPlanModeOnStartup(
@@ -1237,7 +1218,6 @@ export function renderSubagentHudLines(
 					? formatFeedModelBadge(
 							session.progress?.resolvedModelIdentity ?? session.progress?.resolvedModel,
 							session.progress?.resolvedThinkingLevel,
-							session.progress?.advisor,
 							theme,
 							Math.min(FEED_MODEL_BADGE_WIDTH, Math.max(0, titleBudget - 1)),
 						)
@@ -1365,7 +1345,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	planModePaused = false;
 	goalModeEnabled = false;
 	goalModePaused = false;
-	vibeModeEnabled = false;
 	planModePlanFilePath: string | undefined = undefined;
 	loopModeEnabled = false;
 	loopModePaused = false;
@@ -1375,7 +1354,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	/** Last state reported through `mode_changed`; starts inactive so a restored session's modes are reported too. */
 	#reportedModeState: SessionModeState = {
 		plan: { status: "inactive" },
-		vibe: { status: "inactive" },
 		goal: { status: "inactive" },
 		loop: { status: "inactive" },
 	};
@@ -1720,22 +1698,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	// session switches. While set, short replies like "c" are answers, not
 	// continue shortcuts.
 	#guidedGoalInterviewActive = false;
-	#vibeModePreviousTools: string[] | undefined;
-	#vibeModeOwnerScope: VibeOwnerScope | undefined;
-	// In-flight #enterVibeMode promise: set before the activateVibeTools await
-	// (while vibeModeEnabled is still false) and cleared when entry settles.
-	// Loop reset guards treat a pending entry as active, and a concurrent /vibe
-	// command awaits it instead of dispatching its prompt on the stale toolset.
-	#vibeModeEntry: Promise<void> | undefined;
-	// FIFO tail + live count for concurrent /vibe skill dispatches. A skill
-	// prompt yields on its file read before the turn reserves, so each skill
-	// links behind its predecessor (arrival order) while the count — visible
-	// synchronously, unlike a single shared slot — stops later prompts from
-	// overtaking any of them. Both settle when the dispatch settles, so a
-	// failure unblocks every waiter instead of hanging it.
-	#vibeSkillTail: Promise<void> = Promise.resolve();
-	#vibeSkillInFlight = 0;
-	#vibeScopeSuspendedForSwitch = false;
 	#goalContinuationTimer: NodeJS.Timeout | undefined;
 	/** Submitted continuation turns awaiting their asynchronously delivered `agent_end`. */
 	#pendingGoalContinuationTurns = 0;
@@ -2195,14 +2157,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.statusLine.onNativePullRequest = pr => setTerminalTitlePullRequest(pr?.number);
 		this.statusLine.setAutoCompactEnabled(session.autoCompactionEnabled);
 
-		// Vibe worker tok/s aggregator — keeps the status-line render layer off
-		// the heavy vibe/task dependency graph. The director is often idle while
-		// workers stream, so without this the tok/s badge would show a stale
-		// value while parallel work is actively generating tokens.
-		this.statusLine.setVibeWorkerTokenRateProvider(() =>
-			aggregateVibeWorkerTokensPerSecond(this.session.getAgentId() ?? MAIN_AGENT_ID),
-		);
-
 		this.hideToolActivity = cfgDisplayHideToolActivity.get(settings);
 		this.chatContainer.setToolActivityVisible(!this.hideToolActivity);
 		this.hideThinkingBlock = cfgHideThinkingBlock.get(settings);
@@ -2374,7 +2328,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// `Settings.instance` is the disk-backed singleton; passing it explicitly
 		// guarantees the decision persists even when the prompt is triggered
 		// from a subagent whose own `Settings` is an in-memory snapshot.
-		setAutoQaConsentHandler(() => this.session.waitForUser(() => this.#promptAutoQaConsent()), Settings.instance);
 		// Same wiring for cfg:// writes: every settings change the agent makes is
 		// confirmed here, and `/save` persists to disk. Subagents and headless
 		// sessions are refused by the handler before reaching this host. Changes
@@ -2658,9 +2611,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 
 		// Restore mode from session (e.g. plan mode on resume)
-		this.session.setSessionBeforeSwitchReconciler?.(async () => {
-			await this.#quiesceVibeForSessionSwitch();
-		});
+		this.session.setSessionBeforeSwitchReconciler?.(async () => {});
 		this.session.setSessionSwitchReconciler?.(() => this.#reconcileModeFromSession({ preserveActiveGoal: true }));
 		await logger.time("InteractiveMode.init:reconcileMode", () => this.#reconcileModeFromSession());
 		this.#modesRestored = true;
@@ -3258,12 +3209,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			});
 			return;
 		}
-
-		if (action === "reset" && (this.vibeModeEnabled || this.#vibeModeEntry !== undefined)) {
-			this.disableLoopMode("Exit vibe mode before using reset loops. Loop mode disabled.");
-			return;
-		}
-
 		// An exhausted budget ends the loop regardless of the condition, so check
 		// it first: the user's command must not run one last time for nothing.
 		if (isLoopLimitExhausted(this.loopLimit)) {
@@ -3283,16 +3228,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#deferLoopAutoSubmit(() => {
 				void this.#runLoopIteration(action, prompt);
 			});
-			return;
-		}
-
-		// /vibe can be enabled while the gate was awaiting: the pre-gate guard
-		// above is stale, and handleClearCommand would only warn and then let
-		// the iteration submit without resetting. Check the entering transition
-		// too: vibeModeEnabled is still false while activateVibeTools is in
-		// flight, but the reset must not run concurrently with the toolset switch.
-		if (action === "reset" && (this.vibeModeEnabled || this.#vibeModeEntry !== undefined)) {
-			this.disableLoopMode("Exit vibe mode before using reset loops. Loop mode disabled.");
 			return;
 		}
 
@@ -3466,7 +3401,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			plan: this.planModeEnabled
 				? { status: "active", planFilePath: this.session.getPlanModeState()?.planFilePath }
 				: { status: this.planModePaused ? "paused" : "inactive" },
-			vibe: { status: this.vibeModeEnabled ? "active" : "inactive" },
 			goal:
 				goalActive || this.goalModePaused
 					? {
@@ -3590,15 +3524,7 @@ export class InteractiveMode implements InteractiveModeContext {
 					return { code: "disabled", message: "Plan mode is disabled in settings (plan.enabled)." };
 				}
 				if (goalBlocks) return conflict("goal");
-				if (this.vibeModeEnabled) return conflict("vibe");
 				return () => this.#enterPlanMode();
-			case "vibe":
-				if (request.action === "exit") return this.vibeModeEnabled ? () => this.#exitVibeMode() : undefined;
-				if (request.action !== "enter") break;
-				if (this.vibeModeEnabled) return undefined;
-				if (planBlocks) return conflict("plan");
-				if (goalBlocks) return conflict("goal");
-				return () => this.#enterVibeMode();
 			case "goal":
 				switch (request.action) {
 					case "enter": {
@@ -3618,7 +3544,6 @@ export class InteractiveMode implements InteractiveModeContext {
 							return { code: "disabled", message: "Goal mode is disabled in settings (goal.enabled)." };
 						}
 						if (planBlocks) return conflict("plan");
-						if (this.vibeModeEnabled) return conflict("vibe");
 						return () => this.#enterGoalMode({ objective, tokenBudget: budget });
 					}
 					case "pause":
@@ -4123,18 +4048,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Usage-row detection, compacted-history collapse, and markdown render
 		// options are baked in at build time: rebuild, then retire rows already
 		// committed to native scrollback.
-		if (
-			any(
-				"display.advisorCollapsedLines",
-				"display.shellVisualization",
-				"display.cacheMissMarker",
-				"display.collapseCompacted",
-				"display.showTokenUsage",
-				"display.showTurnTime",
-			)
-		) {
-			rebuildChat = true;
-		}
 		if (any("tui.colorfulMarkdown")) {
 			setMarkdownColorful(cfgTuiColorfulMarkdown.get(this.settings));
 			rebuildChat = true;
@@ -4201,11 +4114,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.ui.requestRender();
 		}
 		if (any("statusLine.sessionAccent")) this.#handleSessionAccentInputsChanged();
-		// Advisor runtime start/stop has no session event; repaint its status segment.
-		if (any("advisor.enabled", "advisor.maxNotesPerUpdate")) {
-			this.statusLine.invalidate();
-			this.ui.requestRender();
-		}
 
 		if (rebuildChat) this.rebuildChatFromMessages();
 		if (rebuildChat || resetDisplay) this.ui.resetDisplay();
@@ -4505,7 +4413,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!this.sessionManager.getSessionFile()) return;
 		// Prepaint runs only for launches without model flags, which read the persisted
 		// selected model: `--model` overrides and session-only switches stay out.
-		const selected = resolveModelRoleValue(
+		const selected = resolveModelValue(
 			this.settings.getProjectModel() ?? this.settings.getGlobalModel(),
 			this.session.modelRegistry.getAvailable(),
 			{ settings: this.settings },
@@ -4547,7 +4455,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		};
 		// A project-scoped default must not become every other folder's first frame.
 		sharedComposerCache()?.writeStatus(this.sessionManager.getCwd(), status, {
-			shared: this.settings.getProjectModelRole("default") === undefined,
+			shared: this.settings.getProjectModel() === undefined,
 		});
 	}
 
@@ -5333,12 +5241,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#notifyModeChanged();
 	}
 
-	#updateVibeModeStatus(): void {
-		this.statusLine.setVibeModeStatus(this.vibeModeEnabled ? { enabled: true } : undefined);
-		this.ui.requestRender();
-		this.#notifyModeChanged();
-	}
-
 	/**
 	 * Anchored HUD of in-flight subagents, mirroring the Todos block above the
 	 * editor. Driven entirely by observer-registry change events, so rows appear
@@ -5408,29 +5310,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			clearTimeout(this.#subagentPreviewTickTimer);
 			this.#subagentPreviewTickTimer = undefined;
 		}
-	}
-
-	#vibeParentSession(): VibeParentSession {
-		return {
-			getAgentId: () => this.session.getAgentId() ?? null,
-			getSessionId: () => this.sessionManager.getSessionId(),
-			getSessionFile: () => this.sessionManager.getSessionFile() ?? null,
-			sessionManager: this.sessionManager,
-			asyncJobManager: this.session.asyncJobManager,
-			settings: this.session.settings,
-			// Resolve restored/switched-to workers against this session's active model
-			// (same as the spawn-path ToolSession), not the settings default. This is
-			// the primary fallback in resolveAgentModelPatterns, so the `good` worker's
-			// pi/task inheritance tracks the reopened session's model.
-			getActiveModelString: () => (this.session.model ? formatModelString(this.session.model) : undefined),
-		};
-	}
-
-	async #quiesceVibeForSessionSwitch(): Promise<void> {
-		const ownerScope = this.#vibeModeOwnerScope;
-		if (!this.vibeModeEnabled || !ownerScope) return;
-		await VibeSessionRegistry.global().suspendScope(ownerScope, this.session.asyncJobManager);
-		this.#vibeScopeSuspendedForSwitch = true;
 	}
 
 	#updateGoalModeStatus(): void {
@@ -5504,10 +5383,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.syncIdleMaintenanceView();
 	}
 
-	async #clearTransientModeState(options?: {
-		preserveVibe?: boolean;
-		vibeScopeAlreadySuspended?: boolean;
-	}): Promise<void> {
+	async #clearTransientModeState(): Promise<void> {
 		if (this.planModeEnabled || this.planModePaused) {
 			this.session.setPlanModeState(undefined);
 			try {
@@ -5545,55 +5421,15 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.syncIdleMaintenanceView();
 			this.#updateGoalModeStatus();
 		}
-
-		if (this.vibeModeEnabled && !options?.preserveVibe) {
-			const ownerScope = this.#vibeModeOwnerScope;
-			// This runs only from #reconcileModeFromSession, i.e. after switchSession
-			// already loaded and restored the target session's active tools. The
-			// #vibeModePreviousTools snapshot belongs to the SOURCE session, so
-			// applying it here would clobber the target's tools — strip only the
-			// transient vibe tools and keep the target's active set intact.
-			await this.session.removeVibeToolsPreservingActive();
-			this.session.setVibeModeState(undefined);
-			this.vibeModeEnabled = false;
-			this.#vibeModePreviousTools = undefined;
-			this.#vibeModeOwnerScope = undefined;
-			if (ownerScope && !options?.vibeScopeAlreadySuspended) {
-				await VibeSessionRegistry.global().suspendScope(ownerScope, this.session.asyncJobManager);
-			}
-			this.#updateVibeModeStatus();
-		}
 	}
 
 	/** Reconcile mode state from session entries on resume/switch. */
 	async #reconcileModeFromSession(options?: { preserveActiveGoal?: boolean }): Promise<void> {
 		// Report only the restored result, not the cleared state in between.
 		using _hold = this.#holdModeChanges();
-		const vibeScopeAlreadySuspended = this.#vibeScopeSuspendedForSwitch;
-		this.#vibeScopeSuspendedForSwitch = false;
 		this.#guidedGoalInterviewActive = false;
 		const sessionContext = this.sessionManager.buildSessionContext();
-		const vibeSession = this.#vibeParentSession();
-		const targetVibeScope = VibeSessionRegistry.global().ownerScope(vibeSession);
-		const preserveVibe =
-			this.vibeModeEnabled &&
-			sessionContext.mode === "vibe" &&
-			this.#vibeModeOwnerScope?.ownerId === targetVibeScope.ownerId &&
-			this.#vibeModeOwnerScope.parentSessionId === targetVibeScope.parentSessionId &&
-			this.#vibeModeOwnerScope.parentSessionFile === targetVibeScope.parentSessionFile;
-		// #clearTransientModeState below keeps the live active set instead of
-		// applying a snapshot, so for a vibe -> vibe switch the live toolset is
-		// already the reduced vibe set and cannot serve as the pre-vibe snapshot.
-		// That is the only case the persisted snapshot is for: a cold resume or a
-		// switch in from a non-vibe session built its toolset from the current CLI
-		// flags and settings, and that set — not a historical one — is what exiting
-		// vibe must restore.
-		const vibeToolsetLostToTeardown = this.vibeModeEnabled && !preserveVibe;
-		await this.#clearTransientModeState({
-			preserveVibe,
-			vibeScopeAlreadySuspended,
-		});
-		await VibeSessionRegistry.global().rehydrate(vibeSession);
+		await this.#clearTransientModeState();
 		const goalEnabled = cfgGoalEnabled.get(this.session.settings);
 		if (!goalEnabled && (sessionContext.mode === "goal" || sessionContext.mode === "goal_paused")) {
 			this.session.goalRuntime.clearAccounting();
@@ -5627,17 +5463,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		this.session.goalRuntime.clearAccounting();
-		if (sessionContext.mode === "vibe") {
-			if (!preserveVibe) {
-				await this.#enterVibeMode({
-					persistModeChange: false,
-					previousTools: vibeToolsetLostToTeardown
-						? readPersistedToolNames(sessionContext.modeData?.previousTools)
-						: undefined,
-				});
-			}
-			return;
-		}
 		if (!cfgPlanEnabled.get(this.session.settings)) {
 			// Clear stale plan/plan_paused mode so re-enabling the setting
 			// later doesn't unexpectedly restore an old plan session.
@@ -5656,12 +5481,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	/**
-	 * Enters plan mode when `plan.defaultOnStartup` applies to the current session
-	 * (see {@link shouldEnterPlanModeOnStartup}). Called at launch and after `/new`.
-	 * #enterPlanMode is idempotent and self-guards against an active plan/goal/vibe
-	 * mode; plan.enabled is checked by shouldEnterPlanModeOnStartup.
-	 */
 	async #applyPlanModeDefault(): Promise<void> {
 		if (shouldEnterPlanModeOnStartup(this.sessionManager, this.session.settings)) {
 			await this.#enterPlanMode();
@@ -5676,11 +5495,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.showWarning("Exit goal mode first.");
 			return;
 		}
-		if (this.vibeModeEnabled) {
-			this.showWarning("Exit vibe mode first.");
-			return;
-		}
-
 		this.planModePaused = false;
 
 		const planFilePath = options?.planFilePath ?? (await this.#getPlanFilePath());
@@ -5816,13 +5630,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	/**
-	 * Warn that a plan session blocks entering goal/vibe mode, distinguishing an
-	 * active session from a paused one. A paused session already restored the
-	 * tools/model and cleared the `xd://propose` handler, so "Exit plan mode
-	 * first." reads as stale right after the user toggled plan mode off (#11692);
-	 * point them at the second `/plan` toggle that fully exits instead.
-	 */
 	#warnPlanModeBlocks(): void {
 		this.showWarning(
 			this.planModePaused ? "Plan mode is paused — run /plan again to fully exit." : "Exit plan mode first.",
@@ -5841,10 +5648,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		if (this.planModeEnabled || this.planModePaused) {
 			this.#warnPlanModeBlocks();
-			return;
-		}
-		if (this.vibeModeEnabled) {
-			this.showWarning("Exit vibe mode first.");
 			return;
 		}
 		const previousTools = this.session.getEnabledToolNames().filter(name => name !== "goal");
@@ -6554,10 +6357,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.showWarning("Exit goal mode first.");
 			return false;
 		}
-		if (this.vibeModeEnabled) {
-			this.showWarning("Exit vibe mode first.");
-			return false;
-		}
 		if (this.planModeEnabled) {
 			const planFilePath = this.planModePlanFilePath ?? (await this.#getPlanFilePath());
 			if (await this.#hasPlanModeDraftContent(planFilePath)) {
@@ -6610,222 +6409,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		return false;
 	}
 
-	/**
-	 * `/vibe` toggle. Entering installs the ephemeral vibe tools, strips the
-	 * active toolset down to `read`, optional parent-owned `todo`, plus those
-	 * tools, and injects the director context. Exiting unregisters them, restores
-	 * the previous toolset, and kills every worker session so workers cannot
-	 * outlive the mode that directs them.
-	 */
-	async handleVibeModeCommand(
-		initialPrompt?: string,
-		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
-	): Promise<boolean> {
-		if (this.vibeModeEnabled) {
-			await this.#exitVibeMode();
-			return false;
-		}
-		if (this.planModeEnabled || this.planModePaused) {
-			this.#warnPlanModeBlocks();
-			return false;
-		}
-		if (this.goalModeEnabled || this.goalModePaused) {
-			this.showWarning("Exit goal mode first.");
-			return false;
-		}
-		await this.#enterVibeMode();
-		if (!initialPrompt) return false;
-		if (isKnownSkillCommand(this, initialPrompt)) {
-			// Append synchronously: the skill file read below yields before the
-			// turn reserves, so a concurrent plain prompt must see this claim
-			// before it can take the idle waiter — and a later skill must queue
-			// behind this one rather than overwrite a shared slot.
-			const prev = this.#vibeSkillTail;
-			this.#vibeSkillInFlight++;
-			const mine = (async () => {
-				try {
-					await prev;
-					await this.#waitForInFlightSubmission(true);
-					await invokeSkillCommandFromText(this, initialPrompt, "steer", {
-						images: input?.images,
-						propagateErrors: true,
-					});
-				} finally {
-					this.#vibeSkillInFlight--;
-				}
-			})();
-			// Never reject: a failed skill must not break the chain for later ones.
-			this.#vibeSkillTail = mine.catch(() => {});
-			await mine;
-			return true;
-		}
-		if (this.session.isStreaming) {
-			// Same ordering covenant as below: a skill prompt may be reserving
-			// ahead of us even though the session looks continuously busy.
-			await this.#waitForInFlightSubmission();
-			const images = input?.images?.length ? input.images : undefined;
-			await this.withLocalSubmission(
-				initialPrompt,
-				() =>
-					this.session.prompt(initialPrompt, {
-						streamingBehavior: "steer",
-						images,
-					}),
-				{ imageCount: images?.length ?? 0 },
-			);
-			return true;
-		}
-		const dispatchViaWaiter = (): boolean => {
-			// A skill prompt reserving ahead of us owns the next turn: leave the
-			// waiter armed until it reserves, so the main loop submits in order.
-			if (this.#vibeSkillInFlight > 0) return false;
-			const onInput = this.onInputCallback;
-			if (!onInput) return false;
-			onInput(this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }));
-			return true;
-		};
-		if (dispatchViaWaiter()) return true;
-		// No input waiter: a concurrent dispatch may have just taken the one-shot
-		// waiter — its submission exists but the main loop hasn't handed it to the
-		// session yet. Steering now would overtake it and reverse prompt order, so
-		// yield until it reserves its turn, then re-check for a fresh waiter.
-		await this.#waitForInFlightSubmission();
-		if (dispatchViaWaiter()) return true;
-		// Still no waiter (the main loop is between turns): steer directly instead
-		// of silently swallowing the prompt — the same fallback the normal submit
-		// path uses when its waiter is gone.
-		const images = input?.images?.length ? input.images : undefined;
-		await this.withLocalSubmission(
-			initialPrompt,
-			() =>
-				this.session.prompt(initialPrompt, {
-					streamingBehavior: "steer",
-					images,
-				}),
-			{ imageCount: images?.length ?? 0 },
-		);
-		return true;
-	}
-
-	/**
-	 * Yield until prior dispatches reserve their turn (streaming, queued, or
-	 * dropped) or a fresh waiter arms. Without this, a prompt dispatched right
-	 * after a concurrent submit resolved the one-shot input waiter — or while a
-	 * skill prompt is still reading its file — would reach
-	 * {@link session.prompt} before the main loop submits the earlier input,
-	 * reversing their order. No-op when nothing is in flight; bounded so a
-	 * stalled loop degrades to immediate dispatch. `ignoreSkills` lets a skill
-	 * dispatch wait for earlier plain submissions only: concurrent skills order
-	 * themselves through the tail chain, and counting the live total here would
-	 * stall an earlier skill behind a later one it must precede.
-	 */
-	async #waitForInFlightSubmission(ignoreSkills = false): Promise<void> {
-		for (let index = 0; index < 200; index++) {
-			const skillBlocked = !ignoreSkills && this.#vibeSkillInFlight > 0;
-			const awaited = this.#pendingSubmittedInput;
-			const pendingBlocked =
-				awaited !== undefined &&
-				!awaited.cancelled &&
-				!this.session.isStreaming &&
-				this.session.queuedMessageCount === 0 &&
-				!this.onInputCallback;
-			if (!skillBlocked && !pendingBlocked) return;
-			await Bun.sleep(10);
-		}
-	}
-
-	async #enterVibeMode(options?: { persistModeChange?: boolean; previousTools?: string[] }): Promise<void> {
-		if (this.vibeModeEnabled) {
-			return;
-		}
-		const inFlight = this.#vibeModeEntry;
-		if (inFlight) {
-			// A second /vibe (possibly with a prompt) submitted while activation
-			// is still in flight must not dispatch on the stale toolset: wait for
-			// the first entry, then return with vibe active. A failed entry
-			// rejects here too, so the prompt is dropped instead of running
-			// outside vibe mode.
-			await inFlight;
-			return;
-		}
-		if (this.planModeEnabled || this.planModePaused) {
-			this.#warnPlanModeBlocks();
-			return;
-		}
-		if (this.goalModeEnabled || this.goalModePaused) {
-			this.showWarning("Exit goal mode first.");
-			return;
-		}
-
-		const vibeRegistry = VibeSessionRegistry.global();
-		const ownerScope = vibeRegistry.ownerScope(this.#vibeParentSession());
-		vibeRegistry.activateScope(ownerScope);
-		// When a vibe session switches into another session that is also in vibe
-		// mode, the teardown keeps the live active set, which is by then the reduced
-		// vibe set, so re-snapshotting it here would make the snapshot useless. That
-		// path passes the pre-vibe toolset recorded on the target's own mode_change
-		// entry instead.
-		const previousTools = options?.previousTools ?? this.session.getEnabledToolNames();
-		const vibeBaseTools = ["read"];
-		if (this.session.hasBuiltInTool("todo")) vibeBaseTools.push("todo");
-		// The entry runs as a stored promise so a concurrent /vibe joins it
-		// above instead of dispatching on the stale toolset. The first caller
-		// awaits it below, so a failure is always observed (no unhandled
-		// rejection) and propagates to every joiner, dropping their prompts.
-		const entry = (async () => {
-			await this.session.activateVibeTools(vibeBaseTools);
-			this.#vibeModePreviousTools = previousTools;
-			this.#vibeModeOwnerScope = ownerScope;
-			this.vibeModeEnabled = true;
-			// Suppress cache-miss marker on the next turn: vibe mode changes the
-			// injected context, which predictably invalidates the cache.
-			this.lastAssistantUsage = undefined;
-			this.session.setVibeModeState({ enabled: true });
-			if (this.session.isStreaming) {
-				await this.session.sendVibeModeContext({ deliverAs: "steer" });
-			}
-			this.#updateVibeModeStatus();
-			if (options?.persistModeChange !== false) this.sessionManager.appendModeChange("vibe", { previousTools });
-			this.showStatus(
-				"Vibe mode enabled. You direct fast/good worker sessions; toolset is read + optional parent Todo + vibe tools.",
-			);
-		})();
-		this.#vibeModeEntry = entry;
-		try {
-			await entry;
-		} finally {
-			if (this.#vibeModeEntry === entry) this.#vibeModeEntry = undefined;
-		}
-	}
-
-	async #exitVibeMode(): Promise<void> {
-		if (!this.vibeModeEnabled) {
-			return;
-		}
-		// Tear down with the queued-message drain suppressed: aborting the active
-		// turn would otherwise let a queued user steer/follow-up restart on the
-		// still-live Vibe tools before this teardown removes them (issue #8326).
-		let killed = 0;
-		await this.session.runModeExitTeardown(async () => {
-			if (this.session.isStreaming) {
-				await this.session.abort();
-			}
-			killed = await VibeSessionRegistry.global().killAll(this.#vibeParentSession(), this.#vibeModeOwnerScope);
-			await this.session.deactivateVibeTools(this.#vibeModePreviousTools ?? []);
-			this.session.setVibeModeState(undefined);
-		});
-		this.vibeModeEnabled = false;
-		this.#vibeModePreviousTools = undefined;
-		this.#vibeModeOwnerScope = undefined;
-		this.lastAssistantUsage = undefined;
-		this.#updateVibeModeStatus();
-		this.showStatus(
-			killed > 0
-				? `Vibe mode disabled. Killed ${killed} worker session${killed === 1 ? "" : "s"}.`
-				: "Vibe mode disabled.",
-		);
-	}
-
 	async #handleGoalBudgetCommand(rawBudget: string): Promise<void> {
 		const state = this.session.getGoalModeState();
 		if (!this.goalModeEnabled || !state?.enabled) {
@@ -6858,10 +6441,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	): Promise<boolean> {
 		if (this.planModeEnabled || this.planModePaused) {
 			this.#warnPlanModeBlocks();
-			return false;
-		}
-		if (this.vibeModeEnabled) {
-			this.showWarning("Exit vibe mode first.");
 			return false;
 		}
 		if (!cfgGoalEnabled.get(this.session.settings)) {
@@ -6903,10 +6482,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		try {
 			if (this.planModeEnabled || this.planModePaused) {
 				this.#warnPlanModeBlocks();
-				return false;
-			}
-			if (this.vibeModeEnabled) {
-				this.showWarning("Exit vibe mode first.");
 				return false;
 			}
 			if (!cfgGoalEnabled.get(this.session.settings)) {
@@ -7465,68 +7040,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	/**
-	 * Pool of consent-prompt variants. Each entry is `[headline, reassurance]`;
-	 * the second line always promises the same scope (tool name + confusion
-	 * details, never personal data) so users learn what they're consenting to
-	 * even as the top line rotates.
-	 *
-	 * Kept in-module rather than i18n'd because the whole charm is the tone
-	 * — translations would need to preserve it deliberately, not auto-render.
-	 */
-	static #AUTOQA_CONSENT_PROMPTS: ReadonlyArray<readonly [string, string]> = [
-		[
-			"🧾 Your agent drafted a strongly worded letter to one of its tools.",
-			"Mail it to the devs? Just the tool name + the grievance, nothing personal.",
-		],
-		[
-			"🕵️ Your agent caught a tool acting suspicious.",
-			"Tip off the devs? Tool name + the evidence, no personal info.",
-		],
-		[
-			"👻 Your agent swears one of its tools is haunted.",
-			"Call in the devs for an exorcism? Tool name + the spooky bit, nothing personal.",
-		],
-		["🫖 Your agent has tea about a tool.", "Spill it to the devs? Tool name + the tea, never anything personal."],
-		[
-			"🦆 Your agent explained a tool to its rubber duck. The duck is also confused.",
-			"Escalate past the duck to the devs? Tool name + the confusion, no personal info.",
-		],
-		[
-			"📟 Your agent is asking to speak to a tool's manager.",
-			"Put the call through to the devs? Tool name + the complaint, nothing personal.",
-		],
-		[
-			"🧂 Your agent is extremely salty about a tool.",
-			"Let it salt the devs' inbox? Tool name + what soured it, no personal info.",
-		],
-		[
-			"🐛 Your agent found a bug. A real one. In a tool.",
-			"Hand the specimen to the devs? Tool name + where it crawled out, nothing personal.",
-		],
-		[
-			"🍿 Your agent just watched a tool pull a plot twist nobody asked for.",
-			"Send the devs a spoiler? Tool name + what happened, never anything personal.",
-		],
-		[
-			"📉 Your agent's opinion of a tool just crashed.",
-			"Send the post-mortem to the devs? Tool name + what tanked it, no personal info.",
-		],
-	];
-
-	/**
-	 * Show the report_tool_issue consent popup
-	 * and return the user's decision.
-	 * Invoked by the process-global consent handler the tool dispatches to;
-	 * subagent invocations bubble up here through the shared module state.
-	 */
-	async #promptAutoQaConsent(): Promise<boolean | null> {
-		const pool = InteractiveMode.#AUTOQA_CONSENT_PROMPTS;
-		const [headline, body] = pool[Math.floor(Math.random() * pool.length)];
-		const choice = await this.#extensionUiController.showHookSelector(`${headline}\n${body}`, ["Yes", "No"]);
-		return choice === "Yes";
-	}
-
-	/**
 	 * Ask the user to approve one `cfg://` settings change. Dismissing the dialog denies it, as does
 	 * aborting the calling turn or stopping the mode. The wait honors `ask.timeout`
 	 * (seconds, 0 waits indefinitely); while a deadline is armed, any
@@ -7619,7 +7132,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		// Clear the process-global consent handler so it doesn't outlive this
 		// InteractiveMode instance (e.g. test harnesses, headless re-init).
-		setAutoQaConsentHandler(null, null);
 		setCfgApprovalHost(null);
 		this.#disposeImageBlobWriter?.();
 		this.#disposeImageBlobWriter = undefined;
@@ -8481,10 +7993,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#commandController.handleDumpAnonCommand();
 	}
 
-	handleAdvisorDumpCommand(isRaw?: boolean) {
-		return this.#commandController.handleAdvisorDumpCommand(isRaw);
-	}
-
 	handleDebugTranscriptCommand(): Promise<void> {
 		return this.#commandController.handleDebugTranscriptCommand();
 	}
@@ -8495,10 +8003,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleSessionCommand(): Promise<void> {
 		return this.#commandController.handleSessionCommand();
-	}
-
-	handleAdvisorStatusCommand(): Promise<void> {
-		return this.#commandController.handleAdvisorStatusCommand();
 	}
 
 	handleJobsCommand(options?: { full?: boolean }): Promise<void> {
@@ -8517,12 +8021,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#commandController.handleContextCommand();
 	}
 
-	#vibeSessionTransitionBlocked(): boolean {
-		if (!this.vibeModeEnabled) return false;
-		this.showWarning("Exit vibe mode first.");
-		return true;
-	}
-
 	async prepareSessionSwitch(): Promise<void> {
 		this.#clearJudgmentBatchProgress(true);
 		await this.#btwController.dispose();
@@ -8534,7 +8032,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async handleClearCommand(): Promise<void> {
-		if (this.#vibeSessionTransitionBlocked()) return;
 		await this.prepareSessionSwitch();
 		await this.#commandController.handleClearCommand();
 	}
@@ -8560,13 +8057,11 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async handleDeleteCommand(): Promise<void> {
-		if (this.#vibeSessionTransitionBlocked()) return;
 		await this.prepareSessionSwitch();
 		await this.#commandController.handleDeleteCommand();
 	}
 
 	async handleForkCommand(placement?: "pane" | "window"): Promise<void> {
-		if (this.#vibeSessionTransitionBlocked()) return;
 		if (!placement) {
 			await this.#btwController.dispose();
 			this.#omfgController.dispose();
@@ -8576,12 +8071,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async handleMoveCommand(targetPath?: string): Promise<void> {
-		if (this.#vibeSessionTransitionBlocked()) return;
 		await this.#commandController.handleMoveCommand(targetPath);
 	}
 
 	async handleWorktreeCommand(branch?: string, options?: { keepChanges?: boolean }): Promise<void> {
-		if (this.#vibeSessionTransitionBlocked()) return;
 		const worktree = await this.#commandController.handleWorktreeCommand(branch, options);
 		if (worktree) this.#ownedWorktrees.push(worktree);
 	}
@@ -8687,10 +8180,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	// Selector handling
 	showSettingsSelector(): void {
 		this.#selectorController.showSettingsSelector();
-	}
-
-	showAdvisorConfigure(): void {
-		this.#selectorController.showAdvisorConfigure();
 	}
 
 	showHistorySearch(): void {

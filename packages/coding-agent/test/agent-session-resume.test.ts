@@ -5,12 +5,9 @@
  * `/skill:` prompt or compacted history), and refuses to continue an empty
  * conversation.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
-import * as path from "node:path";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import { createMockModel, type MockHandler, type MockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -18,7 +15,10 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm, SKILL_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import * as path from "node:path";
 import manualContinuePrompt from "../src/prompts/system/manual-continue.md" with { type: "text" };
+import { createTestModel } from "./helpers/test-model";
 
 /** A response that stalls until aborted; `started` resolves once the request is in flight. */
 function stalledResponse(): { handler: MockHandler; started: Promise<void> } {
@@ -71,7 +71,11 @@ describe("AgentSession.resume", () => {
 		const mock = createMockModel({ responses });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
-			initialState: { model: getBundledModel("anthropic", "claude-sonnet-4-5")!, systemPrompt: ["Test"], tools: [] },
+			initialState: {
+				model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+				systemPrompt: ["Test"],
+				tools: [],
+			},
 			convertToLlm,
 			streamFn: mock.stream,
 		});

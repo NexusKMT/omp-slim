@@ -1,12 +1,12 @@
-import { describe, expect, test } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-ai/build";
 import {
 	resolveCliModel,
 	resolveModelFromString,
-	resolveModelRoleValue,
+	resolveModelValue,
 } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { describe, expect, test } from "bun:test";
 
 function model(provider: string, id: string): Model {
 	return buildModel({
@@ -41,8 +41,8 @@ describe("issue #980 provider-qualified model resolution", () => {
 			modelRoles: { default: "anthropic/claude-3-7-sonnet" },
 		});
 
-		const roleValue = settings.getModelRole("default");
-		const roleResolved = resolveModelRoleValue(roleValue, availableModels, { settings });
+		const roleValue = settings.getModel();
+		const roleResolved = resolveModelValue(roleValue, availableModels, { settings });
 		expect(roleResolved.model).toBeUndefined();
 
 		const settingsResolved = resolveModelFromString(settings.getModel()!, availableModels);

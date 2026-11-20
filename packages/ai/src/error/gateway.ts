@@ -50,13 +50,6 @@ export function classifyGatewayError(err: unknown): GatewayErrorClassification {
 		/\brate[- _]?limit(?:s|ed|ing)?\b|\bquota(?:_exceeded| exceeded)?\b|\btoo[- _]many[- _]requests\b/i.test(
 			message,
 		) ||
-		// Usage-limit phrasings emit no embedded status. Codex friendly text
-		// reads "You have hit your ChatGPT usage limit … Try again in ~158
-		// min."; the central usage-limit classifier already encodes every known
-		// provider variant, so reuse it instead of forking the regex. Without
-		// this branch the classifier falls through to the default
-		// 502/upstream_error, which is what callers saw when their account
-		// hit its cap.
 		isUsageLimit(message)
 	) {
 		return { status: 429, type: "rate_limit_error", message };
@@ -83,9 +76,6 @@ function bucketStatus(status: number, message: string): GatewayErrorClassificati
  * no contextual keyword is present, so we never guess at incidental numbers.
  */
 function extractEmbeddedStatus(message: string): number | undefined {
-	// `Google API error (400)`, `OpenAI API error (429): …`, `(503)`
-	// `HTTP 429: too many requests`
-	// `status: 503`, `status_code=429`, `status=400`
 	const re = /(?:\bHTTP\b|\bAPI error\b|\bstatus(?:[- _]?code)?\b)\s*[:=]?\s*\(?\s*(\d{3})\b|\((\d{3})\)/i;
 	const m = message.match(re);
 	if (!m) return undefined;

@@ -7,10 +7,10 @@
  * disposes, reports terminal and persistence failures, and RETURNS the exit
  * code the caller passes to `postmortem.quit`.
  */
-import * as path from "node:path";
-import { describe, expect, it, spyOn } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { postmortem, TempDir } from "@oh-my-pi/pi-utils";
+import { describe, expect, it, spyOn } from "bun:test";
+import * as path from "node:path";
 import { Settings } from "../../src/config/settings";
 import { runPrintMode } from "../../src/modes/print-mode";
 import type { AgentSession } from "../../src/session/agent-session";
@@ -47,13 +47,8 @@ describe("print mode disposes the session before terminating", () => {
 			state: { messages: [errorMsg] },
 			getLastAssistantMessage: () => errorMsg,
 			disableStopTimeTodoReminders: () => {},
-			prepareForHeadlessAdvisorDrain: () => {},
 			waitForIdle: async () => {},
 			setTextOutputCommitted: () => {},
-			waitForAdvisorCatchup: async () => {
-				order.push("catchup");
-				return true;
-			},
 			dispose: async () => {
 				order.push("dispose");
 			},
@@ -125,10 +120,8 @@ describe("print mode disposes the session before terminating", () => {
 			},
 			getLastAssistantMessage: () => abortedMsg,
 			disableStopTimeTodoReminders: () => {},
-			prepareForHeadlessAdvisorDrain: () => {},
 			waitForIdle: async () => {},
 			setTextOutputCommitted: () => {},
-			waitForAdvisorCatchup: async () => true,
 			// Mimic a real mid-turn signal: the postmortem teardown fires (which
 			// disposes and aborts the agent), and only then does the awaited turn
 			// settle with an aborted assistant message.

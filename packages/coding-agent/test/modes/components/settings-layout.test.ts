@@ -1,14 +1,10 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { all } from "@oh-my-pi/pi-coding-agent/config/registry";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 
-import { getSettingsForTab, SETTING_TABS, TAB_GROUPS } from "@oh-my-pi/pi-tui/overlays/settings-defs";
 import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
-import { createPluginSettingsHost } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/settings-host";
-import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
-import { initTheme, setTheme } from "@oh-my-pi/pi-tui/theme";
-import { cfgAdvisorEnabled } from "@oh-my-pi/pi-coding-agent/advisor/settings";
-
+import { getSettingsForTab, SETTING_TABS, TAB_GROUPS } from "@oh-my-pi/pi-tui/overlays/settings-defs";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 beforeAll(async () => {
 	await initTheme();
 });
@@ -57,57 +53,5 @@ describe("settings layout", () => {
 			const expected = TAB_GROUPS[tab].filter(group => grouped.includes(group));
 			expect(grouped).toEqual(expected);
 		}
-	});
-
-	it("hides advisor dependent settings when advisor is disabled", () => {
-		const advisorDependentPaths = ["advisor.syncBacklog", "advisor.immuneTurns"];
-		const advisorDependentPathSet = new Set<string>(advisorDependentPaths);
-		const defs = getSettingsForTab(createSettingsHost().entries, "model").filter(def =>
-			advisorDependentPathSet.has(def.path),
-		);
-
-		expect(defs.map(def => def.path)).toEqual(advisorDependentPaths);
-		for (const def of defs) {
-			expect(def.condition?.()).toBe(false);
-		}
-
-		cfgAdvisorEnabled.set(Settings.instance, true);
-
-		for (const def of defs) {
-			expect(def.condition?.()).toBe(true);
-		}
-	});
-
-	it("hides advisor dependent settings when advisories are disabled", async () => {
-		await setTheme("dark");
-		const selector = new SettingsSelectorComponent(
-			{
-				availableThinkingLevels: [],
-				thinkingLevel: undefined,
-				availableThemes: ["dark", "light"],
-				providers: [],
-				settings: createSettingsHost(),
-				plugins: createPluginSettingsHost(process.cwd()),
-			},
-			{
-				onChange: () => {},
-				onCancel: () => {},
-			},
-		);
-
-		for (const ch of "composer shape") selector.handleInput(ch);
-		// Open the composer.shape submenu
-		selector.handleInput("\n");
-
-		const rendered = selector.render(80).join("\n");
-		expect(rendered).toContain("Composer Shape");
-		expect(rendered).toContain("Preview:");
-		expect(rendered).toContain("Ask anything");
-
-		// Cycle down to claude
-		selector.handleInput("\x1b[B");
-		const nextRendered = selector.render(80).join("\n");
-		expect(nextRendered).toContain("Claude Code");
-		expect(nextRendered).toContain("Preview:");
 	});
 });

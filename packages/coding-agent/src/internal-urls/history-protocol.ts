@@ -1,29 +1,10 @@
-/**
- * Protocol handler for history:// URLs.
- *
- * Exposes agent transcripts as concise markdown. Live refs render from the
- * in-memory message array; parked refs (session disposed, sessionFile
- * retained) load read-only from the JSONL session file — no writer, no lock.
- *
- * Agents that are no longer in the `AgentRegistry` — one-shot helpers
- * unregistered after `finalizeSubagentLifecycle` (`keepAlive: false`, e.g. the
- * `eval` `agent()` bridge), agents released via the Agent Hub / vibe kill, or
- * any agent after a session resume — remain reachable: `resolve`, `complete`,
- * and the index all fall back to scanning artifacts dirs for `<id>.jsonl`,
- * mirroring how `agent://` reads `.md` outputs straight off disk.
- *
- * URL forms:
- * - history:// - Index of all registry + on-disk agents (id, status, kind, last activity)
- * - history://<agentId> - Concise markdown transcript of that agent
- * - history://current/full - Full, caller-bound current branch history (experimental)
- */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
+import historyPromptDoc from "../prompts/internal-urls/history.md" with { type: "text" };
 import type { AgentRef } from "../registry/agent-registry";
 import { AgentRegistry } from "../registry/agent-registry";
 import { ensurePersistedRoster } from "../registry/persisted-agents";
-import { formatSessionHistoryMarkdown } from "../session/session-history-format";
 import {
 	bashExecutionToText,
 	pythonExecutionToText,
@@ -35,9 +16,9 @@ import {
 	type HookMessage,
 	type PythonExecutionMessage,
 } from "../session/messages";
-import { loadSessionMessagesReadOnly } from "../session/session-loader";
 import type { SessionEntry } from "../session/session-entries";
-import historyPromptDoc from "../prompts/internal-urls/history.md" with { type: "text" };
+import { formatSessionHistoryMarkdown } from "../session/session-history-format";
+import { loadSessionMessagesReadOnly } from "../session/session-loader";
 import { artifactsDirsFromRegistry, sessionFilesFromDisk } from "./registry-helpers";
 import type {
 	InternalResource,
@@ -71,7 +52,7 @@ function diskIdsForCompletion(preferredArtifactDir?: string, onlyPreferred = fal
 /** Registry lookup for a `history://<id>` URL, bound to the caller's root. */
 interface RefLookup {
 	ref?: AgentRef;
-	/** Registered, non-advisor refs. */
+
 	visible: AgentRef[];
 	/** Caller root's artifact dir, scanned first by on-disk fallbacks. */
 	preferredArtifactDir?: string;
@@ -354,20 +335,14 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		// same-named transcript restored by another root's scan never shadows
 		// this caller's own on-disk transcript.
 		const preferredArtifactDir = rootSessionFile?.slice(0, -".jsonl".length);
-		// Advisor transcripts are observability-only — surfaced in the Agent Hub, never
-		// in the agent-facing roster. Hide them from the index, lookup, and completions.
-		const visible = registry.list().filter(ref => ref.kind !== "advisor");
+
+		const visible = registry.list();
 		return { visible, preferredArtifactDir };
 	}
 
-	/**
-	 * Find the registry ref for `agentId` (exact, then case-insensitive),
-	 * skipping advisor transcripts.
-	 */
 	async #lookup(agentId: string, context: ResolveContext | undefined): Promise<RefLookup> {
 		const { visible, preferredArtifactDir, onlyPreferred } = await this.#roster(context);
 		let ref = onlyPreferred ? undefined : AgentRegistry.global().get(agentId);
-		if (ref?.kind === "advisor") ref = undefined;
 		if (!ref) {
 			// Case-insensitive fallback: agent ids are human-typed (e.g. AuthLoader).
 			const lower = agentId.toLowerCase();
@@ -555,7 +530,6 @@ export class HistoryProtocolHandler implements ProtocolHandler {
 		const completions: UrlCompletion[] = [];
 		const seen = new Set<string>();
 		for (const ref of AgentRegistry.global().list()) {
-			if (ref.kind === "advisor") continue;
 			seen.add(ref.id);
 			completions.push({
 				value: ref.id,

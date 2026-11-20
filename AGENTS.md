@@ -2,8 +2,8 @@
 
 This checkout is the public `NexusKMT/omp-slim` downstream. Read `SLIM.md` for
 the pinned baseline, requested removal scope, build commands and Codespace
-lifecycle. Use the NexusKMT GitHub account for this project. Keep upstream
-publishing workflows archived outside `.github/workflows`; downstream Linux
+lifecycle. Use the NexusKMT GitHub account for this project. Upstream
+publishing scripts and archived workflows are removed; downstream Linux
 builds can use Codespaces, and validation plus Intel macOS builds use manual
 public GitHub Actions workflows described in `SLIM.md`. Record actual build and removal status, recover artifacts
 with checksums, and verify the Codespace is stopped when the task ends unless
@@ -79,7 +79,7 @@ When authorized to create or edit a contributor-submitted PR, follow the checkli
   ```
   When the process was started from the omp CLI — source `cli.ts`, npm-bundle `dist/cli.js`, or compiled binary — `workerHostEntry()` is `Bun.main` and the worker re-enters the single entry module, so no per-worker `--compile` entrypoints or bundle entries exist. Outside a CLI host (`bun test`, SDK embedding) it returns `null` and the direct-module fallback loads the worker source. New worker kinds MUST add their selector to the dispatch table in `cli.ts` and keep the fallback branch.
   History: `with { type: "file" }` only copied the entry as a raw asset (workers crashed silently in compiled binaries — issues #1011, #1027), and the later literal-path + extra-entrypoint pattern required keeping spawn literals and two build scripts in sync (issue #1150). The smoke probe below is the live validation of this contract.
-  Validate any new worker with the dedicated smoke probe: `omp --smoke-test` exercises the retained workers and local services (JS eval, subagents, terminal output, and the daemon brokers), checks their responses, and exits — it's wired into `ci:test:smoke` and `scripts/install-tests/run-ci.sh` so binary, source-link, and tarball installs all exercise it. Add a sibling smoke if the new worker is on a different module graph.
+  Validate any new worker with the dedicated smoke probe: `omp --smoke-test` exercises the retained workers and local services (JS eval, subagents, terminal output, and the daemon brokers), checks their responses, and exits — it's wired into `ci:test:smoke` and `scripts/install-tests/run-ci.sh` so binary and source-link installs all exercise it. Add a sibling smoke if the new worker is on a different module graph.
 
 ## Central Utilities
 
@@ -381,7 +381,7 @@ Location: `packages/*/CHANGELOG.md` (per package).
 - New entries always go under `## [Unreleased]`.
 - Entries are one line, brief, and user-facing: lead with what the user will see or can now do. Root-cause narration and implementation detail belong in the commit/PR, not the changelog.
 - Never modify already-released sections (e.g., `## [0.12.2]`) — they are immutable.
-- Don't flag changelog section order or formatting in reviews or PRs — `bun run release` runs `fix-changelogs` which normalizes everything automatically.
+- Use `bun run fix:changelogs` to normalize changelog sections when needed; this fork does not ship an upstream publishing command.
 
 **Attribution:**
 

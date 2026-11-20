@@ -4,11 +4,15 @@
  * This file handles CLI argument parsing and translates them into
  * createAgentSession() options. The SDK does the heavy lifting.
  */
-import * as fsSync from "node:fs";
-import * as os from "node:os";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
+import { formatKeyHint, KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
+import type { SessionPickerOptions } from "@oh-my-pi/pi-tui/apps/session-picker";
+import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
+import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
+import { ensureTheme, initTheme, stopThemeWatcher } from "@oh-my-pi/pi-tui/theme";
 import { ensureSqliteLockShim, isEnoent, isEnotdir } from "@oh-my-pi/pi-utils";
+import chalk from "@oh-my-pi/pi-utils/chalk";
 import {
 	APP_NAME,
 	directoryIsMissing,
@@ -22,8 +26,8 @@ import {
 import { $env, isBunTestRuntime, setInteractiveHost } from "@oh-my-pi/pi-utils/env";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
-import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
-import chalk from "@oh-my-pi/pi-utils/chalk";
+import * as fsSync from "node:fs";
+import * as os from "node:os";
 import { reset as resetCapabilities } from "./capability";
 import {
 	type Args,
@@ -38,30 +42,22 @@ import {
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
 import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
-import { formatKeyHint, KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
-import type { SessionPickerOptions } from "@oh-my-pi/pi-tui/apps/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
 import { findConfigFile } from "./config";
 import { ModelRegistry } from "./config/model-registry";
-import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import {
 	getModelMatchPreferences,
 	resolveCliModel,
-	resolveModelRoleValue,
 	resolveModelScope,
+	resolveModelValue,
 	type ScopedModel,
 } from "./config/model-resolver";
 import { ModelsConfigFile } from "./config/models-config";
-import { serviceTierSettingToTier } from "./config/service-tier";
 import { all, combine, type ProtocolHost } from "./config/registry";
+import { serviceTierSettingToTier } from "./config/service-tier";
 import { Settings, settings } from "./config/settings";
 import { initializeWithSettings } from "./discovery";
-import {
-	clearPluginRootsAndCaches,
-	injectPluginDirRoots,
-	preloadPluginRoots,
-	resolveActiveProjectRegistryPath,
-} from "./discovery/helpers";
+import { clearPluginRootsAndCaches, injectPluginDirRoots, preloadPluginRoots } from "./discovery/helpers";
 import { injectOmpExtensionCliRoots } from "./discovery/omp-extension-roots";
 import { formatExtensionLoadNotifications } from "./extensibility/extensions/load-errors";
 import { loadExtensions } from "./extensibility/extensions/loader";
@@ -72,8 +68,8 @@ import type { MCPManager } from "./mcp";
 import type { InteractiveMode } from "./modes/interactive-mode";
 import { formatSessionContinuationNotice } from "./modes/persistence-failure";
 import type { PrintModeOptions } from "./modes/print-mode";
-import type { RpcModeOptions } from "./modes/rpc/rpc-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
+import type { RpcModeOptions } from "./modes/rpc/rpc-mode";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./modes/skill-command";
 import {
 	applyStartupComposerPreferences,
@@ -81,54 +77,28 @@ import {
 	stopPendingStartupComposer,
 	takeStartupComposerLease,
 } from "./modes/startup-composer";
-import { ensureTheme, initTheme, stopThemeWatcher } from "@oh-my-pi/pi-tui/theme";
 import type { SubmittedUserInput } from "./modes/types";
 import { createWarpEventBridgeExtension } from "./modes/warp-events";
 import { AgentLifecycleManager } from "./registry/agent-lifecycle";
 import {
+	createAgentSession,
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
-	createAgentSession,
 	discoverAuthStorage,
 	loadSessionExtensions,
 	SessionModelRestoreError,
 } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
 
-import type { AuthStorage } from "./session/auth-storage";
-import { describePendingToolCalls } from "./session/exit-diagnostics";
-import {
-	findSessionContinuation,
-	type PickerListing,
-	readSessionInfo,
-	resolveResumeTarget,
-	resolveResumableSession,
-	type SessionContinuation,
-	type SessionInfo,
-} from "./session/session-listing";
-import { ForkSourceNotFoundError, SessionManager, SessionMoveRefusedError } from "./session/session-manager";
-import { forkIfMovedAway } from "./session/session-transfer";
-import {
-	discoverSystemPromptOverride,
-	discoverTitleSystemPromptFile,
-	loadSystemPromptTemplateFile,
-	resolvePromptInput,
-} from "./system-prompt";
-import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
-import { type RestoreOutcome, restoreSession } from "./task/restore";
-import { automaticThinkingLevel, concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
-import type { LspStartupServerInfo } from "./tools";
 import { sanitizeDisplayWarnings } from "@oh-my-pi/pi-tui/render/render-utils";
-import { EventBus } from "./utils/event-bus";
-import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
-import { CliUsageError } from "./cli/usage-error";
+import { automaticThinkingLevel, concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { scheduleGcAutoCompress } from "./cli/gc-auto-compress";
 import { cfgGcAutoCompress } from "./cli/gc-settings";
+import { CliUsageError } from "./cli/usage-error";
+import { cfgDisabledProviders, cfgEnabledModels } from "./config/model-settings";
+import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
+import { cfgSkillsIncludeSkills } from "./extensibility/settings";
 import { cfgGoalEnabled } from "./goals/settings";
-import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
-
-import { cfgAdvisorEnabled } from "./advisor/settings";
-import { cfgAsyncPrintWake, cfgToolsApprovalMode } from "./tools/settings";
 import {
 	cfgAutocompleteMaxVisible,
 	cfgAutoResume,
@@ -144,12 +114,27 @@ import {
 	cfgThemeLight,
 	cfgTuiCompleteScrollback,
 	cfgTuiImeSafeCursor,
+	cfgTuiMaxFps,
 	cfgTuiMaxInlineImages,
+	cfgTuiMotion,
 	cfgTuiResizeScrollback,
 	cfgTuiSpinnerInterval,
-	cfgTuiMaxFps,
-	cfgTuiMotion,
 } from "./modes/settings";
+import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
+import type { AuthStorage } from "./session/auth-storage";
+import { cfgWorkspaceAdditionalDirectories } from "./session/context-settings";
+import { describePendingToolCalls } from "./session/exit-diagnostics";
+import {
+	findSessionContinuation,
+	type PickerListing,
+	readSessionInfo,
+	resolveResumableSession,
+	resolveResumeTarget,
+	type SessionContinuation,
+	type SessionInfo,
+} from "./session/session-listing";
+import { ForkSourceNotFoundError, SessionManager, SessionMoveRefusedError } from "./session/session-manager";
+import { forkIfMovedAway } from "./session/session-transfer";
 import {
 	cfgDefaultThinkingLevel,
 	cfgExternalThinking,
@@ -159,10 +144,18 @@ import {
 	cfgSessionWarnCost,
 	cfgSessionWorktreeScope,
 } from "./session/settings";
-import { cfgDisabledProviders, cfgEnabledModels } from "./config/model-settings";
+import {
+	discoverSystemPromptOverride,
+	discoverTitleSystemPromptFile,
+	loadSystemPromptTemplateFile,
+	resolvePromptInput,
+} from "./system-prompt";
+import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
+import { type RestoreOutcome, restoreSession } from "./task/restore";
 import { cfgTaskAgentIdleTtlMs } from "./task/settings";
-import { cfgSkillsIncludeSkills } from "./extensibility/settings";
-import { cfgWorkspaceAdditionalDirectories } from "./session/context-settings";
+import type { LspStartupServerInfo } from "./tools";
+import { cfgAsyncPrintWake, cfgToolsApprovalMode } from "./tools/settings";
+import { EventBus } from "./utils/event-bus";
 
 type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
 type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<number>;
@@ -625,13 +618,6 @@ async function runInteractiveMode(
 	await logger.time("InteractiveMode.renderInitialMessages", () =>
 		mode.renderInitialMessages({ preserveExistingChat: true }),
 	);
-	const advisorConfigWarnings = session.getAdvisorConfigWarnings();
-	if (advisorConfigWarnings.length > 0) {
-		// Pulled here, not pushed from SessionAdvisors: the constructor-time
-		// `emitNotice` fired before the UI subscribed and was silently lost.
-		mode.showWarning(`WATCHDOG.yml: ${sanitizeDisplayWarnings(advisorConfigWarnings).join("; ")}`);
-	}
-
 	for (const notify of notifs) {
 		if (!notify) {
 			continue;
@@ -1348,20 +1334,20 @@ export async function buildSessionOptions(
 
 			// The recorded role must carry the effort the session actually starts
 			// at, or the first cycle back into `default` overrides it.
-			activeSettings.overrideModelRoles({
-				default: formatModelSelectorValue(
+			activeSettings.overrideModel(
+				formatModelSelectorValue(
 					resolved.selector ?? `${resolved.model.provider}/${resolved.model.id}`,
 					parsed.thinking ?? resolved.thinkingLevel,
 				),
-			});
+			);
 			if (!parsed.thinking && resolved.thinkingLevel) {
 				options.thinkingLevel = resolved.thinkingLevel;
 			}
 		}
 	} else if (scopedModels.length > 0 && !restoringSession) {
-		const remembered = activeSettings.getModelRole("default");
+		const remembered = activeSettings.getModel();
 		if (remembered) {
-			const rememberedSpec = resolveModelRoleValue(
+			const rememberedSpec = resolveModelValue(
 				remembered,
 				scopedModels.map(scopedModel => scopedModel.model),
 				{
@@ -1710,11 +1696,6 @@ export async function runRootCommand(
 		if (parsedArgs.hideThinking) {
 			cfgHideThinkingBlock.override(settingsInstance, true);
 		}
-		// Apply --advisor CLI flag (ephemeral, not persisted)
-		if (parsedArgs.advisor) {
-			cfgAdvisorEnabled.override(settingsInstance, true);
-		}
-		// Apply --wait-async CLI flag (ephemeral, not persisted); only print mode reads it
 		if (parsedArgs.waitAsync) {
 			cfgAsyncPrintWake.override(settingsInstance, true);
 		}

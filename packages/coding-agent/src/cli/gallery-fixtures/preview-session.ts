@@ -6,10 +6,7 @@ export const GALLERY_CONTEXT_WINDOW = 200_000;
 export interface GallerySessionOptions {
 	contextTokens?: number;
 	fastMode?: boolean;
-	advisorStatus?: "running" | "quota_exhausted" | "error" | "paused";
-	advisorYielded?: boolean;
 	cost?: number;
-	advisorCost?: number;
 	goalStatus?: "active" | "paused" | "complete" | "budget-limited" | "dropped";
 }
 
@@ -62,21 +59,6 @@ export function createGallerySession(options: GallerySessionOptions = {}): Agent
 		getGoalModeState: () => ({
 			goal: { status: goalStatus, tokensUsed: 12_400, tokenBudget: 50_000 },
 		}),
-		getAdvisorStatusOverview: () =>
-			options.advisorStatus
-				? {
-						configured: true,
-						advisors: [
-							{
-								status: options.advisorStatus,
-								yielded: options.advisorYielded ?? false,
-								backlog: 0,
-								isPaused: false,
-							},
-						],
-					}
-				: { configured: false, advisors: [] },
-		getAdvisorCost: () => options.advisorCost ?? 0.08,
 		compactionSpeculation: "idle",
 	} as unknown as AgentSession;
 }

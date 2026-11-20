@@ -4,7 +4,6 @@
  * startup — every session and subagent the run spawns — must not keep
  * appending to that tree for the life of the process.
  */
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { parseArgs, type Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { clearOmpExtensionCliRoots } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
@@ -14,6 +13,7 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { logger, postmortem, TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 
 const tempDirs: TempDir[] = [];
 
@@ -59,10 +59,8 @@ describe("startup timing after a headless runner starts", () => {
 			validateRetryFallbackChains: () => {},
 			getLastAssistantMessage: () => undefined,
 			disableStopTimeTodoReminders: () => {},
-			prepareForHeadlessAdvisorDrain: () => {},
 			waitForIdle: async () => {},
 			setTextOutputCommitted: () => {},
-			waitForAdvisorCatchup: async () => true,
 			prompt: async () => {
 				recordedDuringPrompt = spanRecorded();
 			},

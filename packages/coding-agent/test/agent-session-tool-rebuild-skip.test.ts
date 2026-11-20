@@ -1,15 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Message, Model } from "@oh-my-pi/pi-ai";
-import { createMockModel, type MockResponseSource } from "@oh-my-pi/pi-ai/providers/mock";
 import { buildModel } from "@oh-my-pi/pi-ai/build";
+import { createMockModel, type MockResponseSource } from "@oh-my-pi/pi-ai/providers/mock";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { CustomTool } from "@oh-my-pi/pi-coding-agent/extensibility/custom-tools/types";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { type CustomMessage, convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { convertToLlm, type CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
@@ -18,9 +17,10 @@ import {
 } from "@oh-my-pi/pi-coding-agent/session/session-tools";
 import { listXdevTools, XDEV_EXTERNAL_DESCRIPTION_CAP, type XdevState } from "@oh-my-pi/pi-coding-agent/tools/xdev";
 import { logger } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 
-import { cfgSkillful } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { cfgStartupQuiet } from "@oh-my-pi/pi-coding-agent/modes/settings";
+import { cfgSkillful } from "@oh-my-pi/pi-coding-agent/session/settings";
 import {
 	cfgToolsXdevDocs,
 	cfgToolsXdevInlineDevices,
@@ -108,7 +108,6 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 
 	interface NewSessionOptions {
 		getMcpServerInstructions?: () => Map<string, string> | undefined;
-		createVibeTools?: () => AgentTool[];
 		xdev?: XdevState;
 		lazyWrite?: boolean;
 		deviceOnlyWrite?: boolean;
@@ -183,7 +182,6 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 			settings: Settings.isolated({ "compaction.enabled": false }),
 			modelRegistry: { getApiKey: async () => "test-key" } as never,
 			toolRegistry,
-			createVibeTools: options.createVibeTools,
 			builtInToolNames: options.xdev && !options.lazyWrite ? ["read", "write"] : ["read"],
 			ensureWriteRegistered: async () => {
 				if (!options.xdev) return false;
@@ -255,33 +253,6 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 	});
 
 	for (const exit of ["restore snapshot", "preserve active"] as const) {
-		it(`restores MCP tools after a failed vibe exit is retried (${exit})`, async () => {
-			let failExit = false;
-			const { session } = newSession(
-				async toolNames => {
-					if (failExit && toolNames.includes("mcp__nucleus_fetch")) {
-						failExit = false;
-						throw new Error("prompt rebuild failed");
-					}
-					return `tools:${toolNames.join(",")}`;
-				},
-				{ createVibeTools: () => [createBasicTool("vibe_spawn", "Spawn")] },
-			);
-			const beforeVibe = session.getEnabledToolNames();
-			await session.activateVibeTools(["read"]);
-			const added = createMcpCustomTool("mcp__nucleus_fetch", "nucleus", "fetch", "Fetch");
-			await session.refreshMCPTools([added]);
-			expect(session.getActiveToolNames()).not.toContain(added.name);
-
-			const leaveVibe = () =>
-				exit === "restore snapshot"
-					? session.deactivateVibeTools(beforeVibe)
-					: session.removeVibeToolsPreservingActive();
-			failExit = true;
-			await expect(leaveVibe()).rejects.toThrow("prompt rebuild failed");
-			await leaveVibe();
-			expect(session.getActiveToolNames()).toContain(added.name);
-		});
 	}
 
 	it("warns and keeps the stable winner when distinct MCP tools mint the same name", async () => {

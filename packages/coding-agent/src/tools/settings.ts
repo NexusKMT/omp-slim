@@ -1,9 +1,9 @@
 import { combine, register } from "../config/registry";
-import { cfgBashEnabled } from "../exec/settings";
 import { cfgEditMode } from "../edit/settings";
-import { cfgCompactionExperimentalContextManagement } from "../session/context-settings";
 import { cfgEvalJs, cfgEvalPy } from "../eval/settings";
+import { cfgBashEnabled } from "../exec/settings";
 import { cfgLspEnabled } from "../lsp/settings";
+import { cfgCompactionExperimentalContextManagement } from "../session/context-settings";
 import { cfgTaskMaxRecursionDepth } from "../task/settings";
 
 const EMPTY_STRING_ARRAY: string[] = [];
@@ -556,14 +556,14 @@ export const cfgFindEnabled = register({
 		group: "Available Tools",
 		label: "Find (semantic grep)",
 		description:
-			"Enable the find tool: natural-language search for files and line ranges, judged by the judge model role. Auto enables it only when the judge role resolves to a native TypeSafe jev model",
+			"Enable natural-language search for files and line ranges using the selected model. Auto leaves it disabled; choose On to spend model tokens on search.",
 		options: [
 			{
 				value: "auto",
 				label: "Auto",
-				description: "Enable when the judge role resolves to a native TypeSafe jev model",
+				description: "Leave semantic search disabled by default",
 			},
-			{ value: "on", label: "On", description: "Always enable, whichever model the judge role resolves to" },
+			{ value: "on", label: "On", description: "Enable semantic search using the selected model" },
 			{ value: "off", label: "Off", description: "Disable the find tool" },
 		],
 	},
@@ -954,60 +954,6 @@ export const cfgToolsXdevNotices = register({
 			"Show an `xd://: mounted …` notice when MCP or extension tools are mounted or unmounted. The model still learns of the change with its next prompt.",
 	},
 });
-
-export const cfgDevAutoqa = register({
-	id: "dev.autoqa",
-	type: "boolean",
-	default: true,
-	env: "PI_AUTO_QA",
-	ui: {
-		tab: "tools",
-		group: "Developer",
-		label: "Auto QA",
-		description:
-			"Automated tool issue reporting (xd://report_issue). On by default; the first report asks for consent, and denying it disables reporting until re-enabled explicitly",
-	},
-});
-
-export const cfgDevAutoqaPushEndpoint = register({
-	id: "dev.autoqaPush.endpoint",
-	type: "string",
-	default: "https://qa.omp.sh/v1/grievances" as const,
-	ui: {
-		tab: "tools",
-		group: "Developer",
-		label: "Auto QA Push Endpoint",
-		description: "Full URL receiving Auto QA JSON reports (default https://qa.omp.sh/v1/grievances)",
-	},
-});
-
-export const cfgDevAutoqaPushToken = register({
-	id: "dev.autoqaPush.token",
-	type: "string",
-	default: undefined,
-	credential: true,
-});
-
-/**
- * User decision on sharing automatic `report_tool_issue` grievances.
- *
- *   - `"unset"`  — never asked; the first `report_tool_issue` invocation
- *                  pops a consent dialog and persists the answer here.
- *   - `"granted"` — record and (when push is configured) ship grievances.
- *   - `"denied"`  — silently no-op every `report_tool_issue` call.
- *
- * Owned by `packages/coding-agent/src/tools/report-tool-issue.ts` via the
- * process-global consent handler registered by `InteractiveMode`.
- *
- * @default "unset"
- */
-export const cfgDevAutoqaConsent = register({
-	id: "dev.autoqaConsent",
-	type: "enum",
-	values: ["unset", "granted", "denied"] as const,
-	default: "unset" as const,
-});
-
 /** Settings read by `resolveBuiltinToolPlan` (`tools/index.ts`); a live session reconciles its built-ins when any changes. */
 export const cfgBuiltinToolGates = combine({
 	ask: cfgAskEnabled,

@@ -1,3 +1,6 @@
+import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
+import { configureProviderMaxInFlightRequests } from "@oh-my-pi/pi-ai/stream";
+import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { combine, effect, register, type SettingValueOf } from "../config/registry";
 import {
@@ -7,10 +10,6 @@ import {
 	SERVICE_TIER_OPENAI_VALUES,
 } from "../config/service-tier";
 import { DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS, MAX_WEB_SEARCH_TIMEOUT_SECONDS } from "../web/search/types";
-import { configureProviderMaxInFlightRequests } from "@oh-my-pi/pi-ai/stream";
-import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai/effort";
-import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
-import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 
 const EMPTY_NUMBER_RECORD: Record<string, number> = {};
 const DEFAULT_TOOL_CALL_LOOP_EXEMPT_TOOLS: string[] = ["wait"];
@@ -324,41 +323,6 @@ export const cfgSkillful = register({
 			"List available skills in the system prompt; disable to save context and toggle per-session with /skillful",
 	},
 });
-
-/** Personality preset. */
-export type Personality = SettingValueOf<typeof cfgPersonality>;
-
-export const cfgPersonality = register({
-	id: "personality",
-	type: "enum",
-	values: ["default", "friendly", "pragmatic", "none"] as const,
-	default: "default",
-	ui: {
-		tab: "model",
-		group: "Prompt",
-		label: "Personality",
-		description: "Communication style rendered into the system prompt's personality block",
-		options: [
-			{
-				value: "default",
-				label: "Default",
-				description: "Terse, evidence-first engineer; dense, action-oriented replies",
-			},
-			{
-				value: "friendly",
-				label: "Friendly",
-				description: "Warm, encouraging collaborator focused on momentum and morale",
-			},
-			{
-				value: "pragmatic",
-				label: "Pragmatic",
-				description: "Direct, efficient engineer focused on clarity and rigor",
-			},
-			{ value: "none", label: "None", description: "Omit the personality block entirely" },
-		],
-	},
-});
-
 // Sampling
 export const cfgTemperature = register({
 	id: "temperature",

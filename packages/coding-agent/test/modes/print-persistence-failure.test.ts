@@ -3,16 +3,16 @@
  * print mode reports it on stderr and returns a nonzero code, RPC mode emits a
  * `notice` — instead of escaping as a raw fatal dump or going unreported.
  */
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { isRecord, TempDir } from "@oh-my-pi/pi-utils";
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { isRecord, TempDir } from "@oh-my-pi/pi-utils";
-import { disposeSessionQuietly } from "../../src/main";
 import { Settings } from "../../src/config/settings";
-import { runPrintMode } from "../../src/modes/print-mode";
+import { disposeSessionQuietly } from "../../src/main";
 import { formatPersistenceFailure } from "../../src/modes/persistence-failure";
+import { runPrintMode } from "../../src/modes/print-mode";
 import { registerRpcPersistenceSurface } from "../../src/modes/rpc/rpc-mode";
 import type { AgentSession } from "../../src/session/agent-session";
 import { SessionManager } from "../../src/session/session-manager";
@@ -76,11 +76,9 @@ function assistantSession(manager: SessionManager, dispose: () => Promise<void>)
 		settings: Settings.isolated(),
 		sessionManager: manager,
 		getLastAssistantMessage: () => assistant(""),
-		prepareForHeadlessAdvisorDrain: () => {},
 		waitForIdle: async () => {},
 		disableStopTimeTodoReminders: () => {},
 		setTextOutputCommitted: () => {},
-		waitForAdvisorCatchup: async () => true,
 		dispose,
 	} as unknown as AgentSession;
 }
@@ -103,10 +101,8 @@ describe("headless persistence-failure surface", () => {
 			sessionManager: manager,
 			getLastAssistantMessage: () => assistant(""),
 			disableStopTimeTodoReminders: () => {},
-			prepareForHeadlessAdvisorDrain: () => {},
 			waitForIdle: async () => {},
 			setTextOutputCommitted: () => {},
-			waitForAdvisorCatchup: async () => true,
 			prompt: async () => {
 				manager.appendMessage({ role: "user", content: "boom-user", timestamp: Date.now() } as never);
 			},
@@ -152,10 +148,8 @@ describe("headless persistence-failure surface", () => {
 			sessionManager: manager,
 			getLastAssistantMessage: () => assistant(""),
 			disableStopTimeTodoReminders: () => {},
-			prepareForHeadlessAdvisorDrain: () => {},
 			waitForIdle: async () => {},
 			setTextOutputCommitted: () => {},
-			waitForAdvisorCatchup: async () => true,
 			prompt: async () => {
 				// The store rejects this entry and keeps it in memory...
 				manager.appendMessage({ role: "user", content: "boom-user", timestamp: Date.now() } as never);
@@ -256,10 +250,8 @@ describe("headless persistence-failure surface", () => {
 			},
 			getLastAssistantMessage: () => assistant(""),
 			disableStopTimeTodoReminders: () => {},
-			prepareForHeadlessAdvisorDrain: () => {},
 			waitForIdle: async () => {},
 			setTextOutputCommitted: () => {},
-			waitForAdvisorCatchup: async () => true,
 			prompt: async () => {
 				notifyPersistenceError?.(persistenceError);
 			},
@@ -299,10 +291,8 @@ describe("headless persistence-failure surface", () => {
 			sessionManager: manager,
 			getLastAssistantMessage: () => assistant(""),
 			disableStopTimeTodoReminders: () => {},
-			prepareForHeadlessAdvisorDrain: () => {},
 			waitForIdle: async () => {},
 			setTextOutputCommitted: () => {},
-			waitForAdvisorCatchup: async () => true,
 			prompt: async () => {
 				manager.appendMessage({ role: "user", content: "boom-user", timestamp: Date.now() } as never);
 			},

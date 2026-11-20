@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
 import { extractRetryHint } from "@oh-my-pi/pi-utils";
+import { describe, expect, it } from "bun:test";
 
 describe("extractRetryHint – header parsing", () => {
 	it("reads retry-after header as seconds", () => {
@@ -38,25 +38,6 @@ describe("extractRetryHint – body text parsing", () => {
 	it("parses compound duration 'reset after 1h30m10s'", () => {
 		expect(extractRetryHint(undefined, "Your quota will reset after 1h30m10s")).toBe(5_410_000);
 	});
-
-	it("parses Codex-style 'try again in Xms'", () => {
-		expect(extractRetryHint(undefined, "try again in 250ms")).toBe(250);
-	});
-
-	it("parses Codex-style 'try again in Xs'", () => {
-		expect(extractRetryHint(undefined, "try again in 12s")).toBe(12_000);
-	});
-
-	it("parses Codex 'Try again in ~X min.' (usage_limit_reached friendly text)", () => {
-		// Verbatim shape Codex's parseCodexError builds when usage_limit_reached
-		// arrives with a `resets_at` minutes-out reset time. Used to fall
-		// through to undefined → the gateway and TUI both had no retry-after
-		// signal to honour, so they defaulted to QUOTA_EXHAUSTED's 30-min
-		// blanket and rotated immediately even when the actual reset window
-		// was much longer.
-		expect(extractRetryHint(undefined, "Try again in ~158 min.")).toBe(158 * 60_000);
-	});
-
 	it("parses 'try again in X min' / 'X minutes' without the tilde", () => {
 		expect(extractRetryHint(undefined, "try again in 5 min")).toBe(5 * 60_000);
 		expect(extractRetryHint(undefined, "try again in 90 minutes")).toBe(90 * 60_000);

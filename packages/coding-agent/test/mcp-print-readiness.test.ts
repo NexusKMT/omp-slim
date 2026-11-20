@@ -1,5 +1,3 @@
-import * as path from "node:path";
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { callTool } from "@oh-my-pi/pi-coding-agent/mcp/client";
 import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
@@ -8,6 +6,8 @@ import type { MCPStdioServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
 import { runPrintMode } from "@oh-my-pi/pi-coding-agent/modes/print-mode";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import * as path from "node:path";
 
 const FIXTURE = path.join(import.meta.dir, "fixtures", "readiness-mcp.ts");
 const SLOW_START_MS = 1_100;
@@ -97,10 +97,8 @@ function printSession(manager: MCPManager, refreshGate?: Promise<void>, onRefres
 		},
 		getLastAssistantMessage: () => undefined,
 		disableStopTimeTodoReminders: () => {},
-		prepareForHeadlessAdvisorDrain: () => {},
 		waitForIdle: async () => {},
 		setTextOutputCommitted: () => {},
-		waitForAdvisorCatchup: async () => true,
 		dispose: async () => {
 			disposed = true;
 			await manager.disconnectAll();

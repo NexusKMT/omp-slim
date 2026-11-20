@@ -1,15 +1,15 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import * as envApiKey from "@oh-my-pi/pi-ai/env-api-key";
-import { getBundledModel } from "./helpers/bundled-model";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 // The exact body LithosAI answers for an account with no credit left. It is a
 // 402 `insufficient_quota`, so the retry classifier files it under UsageLimit
@@ -57,7 +57,7 @@ describe("AgentSession out-of-credit handling", () => {
 		calls: () => number;
 		retryEndEvents: RetryEndEvent[];
 	}> {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
 		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
 
@@ -75,7 +75,7 @@ describe("AgentSession out-of-credit handling", () => {
 			"retry.maxDelayMs": 1_800_000,
 			"retry.maxRetries": 2,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
 		const session = new AgentSession({ agent, sessionManager, settings, modelRegistry });
 		sessions.push(session);

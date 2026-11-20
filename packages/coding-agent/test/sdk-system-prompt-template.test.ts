@@ -1,6 +1,3 @@
-import { describe, expect, it } from "bun:test";
-import * as path from "node:path";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { type CreateAgentSessionOptions, createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
@@ -8,6 +5,9 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { CONFIG_DIR_NAME, TempDir } from "@oh-my-pi/pi-utils";
+import { describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 type SystemPromptOption = string | string[] | ((defaultPrompt: string[]) => string | string[]);
 type SessionOverrides = Pick<
@@ -36,7 +36,7 @@ async function withSession<T>(
 			modelRegistry,
 			settings: Settings.isolated(),
 			sessionManager: SessionManager.inMemory(cwd),
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

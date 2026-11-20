@@ -5,9 +5,6 @@
  * and a message sent to a session must reach that session's transcript only, once, if it is the
  * session left live, and must never hang the process.
  */
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
@@ -19,6 +16,9 @@ import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as imageLoading from "@oh-my-pi/pi-coding-agent/utils/image-loading";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 const BODY = "which files do you own?";
 /** A 1x1 PNG, so a message carries an image whose normalization a test can hold. */
@@ -61,7 +61,7 @@ describe("overlapping session switches", () => {
 			streamFn: mock.stream,
 		});
 		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		settings.setModel(`${mock.model.provider}/${mock.model.id}`);
 		const created = new AgentSession({
 			agent,
 			sessionManager: SessionManager.create(

@@ -11,10 +11,6 @@ import type { AgentMessage } from "./types";
 const testEnv = Bun.env.NODE_ENV === "test";
 
 const NATIVE_ENCODING: Record<ModelTokenizer, natives.Encoding> = {
-	"claude-v3": natives.Encoding.ClaudeV3,
-	"claude-v47": natives.Encoding.ClaudeV47,
-	"claude-v5": natives.Encoding.ClaudeV5,
-	"claude-v5-sonnet": natives.Encoding.ClaudeV5Sonnet,
 	qwen3: natives.Encoding.Qwen3,
 	"deepseek-v3": natives.Encoding.DeepSeekV3,
 	"kimi-k2": natives.Encoding.KimiK2,

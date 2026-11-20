@@ -5,13 +5,13 @@
  * when stopReason is "aborted", which would surface the sentinel to stderr
  * (and exit with code 1). This test verifies the guard skips silent-abort.
  */
-import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runPrintMode } from "@oh-my-pi/pi-coding-agent/modes/print-mode";
 import { type AgentSession, type AgentSessionDisposeOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SILENT_ABORT_MARKER } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
 
 function makeAssistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
 	return {
@@ -54,9 +54,7 @@ function createMockSession(
 		subscribe: () => () => {},
 		prompt: async () => {},
 		disableStopTimeTodoReminders: () => {},
-		prepareForHeadlessAdvisorDrain: () => {},
 		setTextOutputCommitted: () => {},
-		waitForAdvisorCatchup: async () => true,
 		waitForIdle: async () => {},
 		dispose,
 	} as unknown as AgentSession;

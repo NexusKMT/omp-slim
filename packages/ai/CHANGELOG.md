@@ -4,6 +4,8 @@
 
 ### Removed
 
+- Removed unused provider-specific HTTP error classes and retry policies, Claude/Jev tokenizer metadata, and unsupported native box judgments; configured Chat Completions requests keep generic HTTP recovery.
+
 - OMP Slim removes the browser cookie-capture login callback; Perplexity email-code, token and API-key authentication remain supported.
 
 ### Fixed

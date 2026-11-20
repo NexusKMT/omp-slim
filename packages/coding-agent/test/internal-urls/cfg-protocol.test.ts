@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, it } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	type CfgAppliedChange,
@@ -8,11 +7,10 @@ import {
 } from "@oh-my-pi/pi-coding-agent/internal-urls/cfg-protocol";
 import { parseInternalUrl } from "@oh-my-pi/pi-coding-agent/internal-urls/parse";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { cfgTestEnabled, cfgTestEndpoint, cfgTestMode, installTestSettings } from "../helpers/test-settings";
 
-import { cfgAdvisorEnabled, cfgAdvisorSyncBacklog } from "@oh-my-pi/pi-coding-agent/advisor/settings";
 import { cfgEditFuzzyMatch } from "@oh-my-pi/pi-coding-agent/edit/settings";
-import { cfgDevAutoqaPushEndpoint } from "@oh-my-pi/pi-coding-agent/tools/settings";
-import type { InternalWriteResult } from "@oh-my-pi/pi-coding-agent/internal-urls/types";
 
 function sessionWith(settings: Settings, caller: Partial<ToolSession> = {}): ToolSession {
 	return { settings, hasUI: true, settingsApproval: true, taskDepth: 0, ...caller } as unknown as ToolSession;
@@ -23,35 +21,33 @@ const read = (url: string, settings: Settings) =>
 	handler.resolve(parseInternalUrl(url), { session: sessionWith(settings) });
 const write = (url: string, content: string, settings: Settings, caller?: Partial<ToolSession>) =>
 	handler.write(parseInternalUrl(url), content, { session: sessionWith(settings, caller) });
-const textOf = (result: InternalWriteResult) => (result.content[0]?.type === "text" ? result.content[0].text : "");
-
 describe("CfgProtocolHandler", () => {
 	afterEach(() => setCfgApprovalHost(null));
 
 	it("lists a namespace relative to its prefix and a setting with its source", async () => {
-		const settings = Settings.isolated({ "advisor.syncBacklog": "3" });
+		const settings = Settings.isolated({ "test.mode": "3" });
 
-		const namespace = await read("cfg://advisor", settings);
-		expect(namespace.content).toContain('syncBacklog: "3"  # off|1|3|5|strict · default "off"');
-		expect(namespace.content).not.toContain("advisor:");
-		expect(namespace.details?.cfg).toMatchObject({ path: "advisor", modified: 1 });
+		const namespace = await read("cfg://test", settings);
+		expect(namespace.content).toContain('mode: "3"  # off|1|3|5|strict · default "off"');
+		expect(namespace.content).not.toContain("test:");
+		expect(namespace.details?.cfg).toMatchObject({ path: "test", modified: 1 });
 
-		const leaf = await read("cfg://Advisor.SyncBacklog", settings);
-		expect(leaf.content).toStartWith('advisor.syncBacklog: "3"');
+		const leaf = await read("cfg://Test.Mode", settings);
+		expect(leaf.content).toStartWith('test.mode: "3"');
 		expect(leaf.content).toContain("source: session override");
 	});
 
 	it("redacts credential values", async () => {
-		const settings = Settings.isolated({ "dev.autoqaPush.token": "sekrit" });
-		const resource = await read("cfg://dev.autoqaPush", settings);
+		const settings = Settings.isolated({ "test.token": "sekrit" });
+		const resource = await read("cfg://test", settings);
 		expect(resource.content).toContain("token: <redacted>");
 		expect(resource.content).not.toContain("sekrit");
 	});
 
 	it("refuses writes when no host can ask the user", async () => {
 		const settings = Settings.isolated();
-		await expect(write("cfg://advisor/enabled", "true", settings)).rejects.toThrow("requires user approval");
-		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		await expect(write("cfg://test/enabled", "true", settings)).rejects.toThrow("requires user approval");
+		expect(cfgTestEnabled.get(settings)).toBe(false);
 	});
 
 	it("refuses subagent and headless writes without prompting the user", async () => {
@@ -63,14 +59,14 @@ describe("CfgProtocolHandler", () => {
 			persistentSettings: settings,
 		});
 
-		await expect(write("cfg://advisor/enabled", "true", settings, { taskDepth: 1 })).rejects.toThrow(
+		await expect(write("cfg://test/enabled", "true", settings, { taskDepth: 1 })).rejects.toThrow(
 			"Subagents cannot change settings",
 		);
-		await expect(write("cfg://advisor/enabled/save", "true", settings, { settingsApproval: false })).rejects.toThrow(
+		await expect(write("cfg://test/enabled/save", "true", settings, { settingsApproval: false })).rejects.toThrow(
 			"no interactive UI",
 		);
 		expect(asked).toEqual([]);
-		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		expect(cfgTestEnabled.get(settings)).toBe(false);
 	});
 
 	it("applies a session change only after approval and leaves disk untouched", async () => {
@@ -85,22 +81,22 @@ describe("CfgProtocolHandler", () => {
 			persistentSettings: persistent,
 		});
 
-		const declined = await write("cfg://advisor/enabled", "true", settings);
+		const declined = await write("cfg://test/enabled", "true", settings);
 		expect(declined.details?.cfg?.outcome).toBe("declined");
-		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		expect(cfgTestEnabled.get(settings)).toBe(false);
 		expect(applied).toEqual([]);
 
 		allow = true;
-		const result = await write("cfg://advisor/enabled", "true", settings);
+		const result = await write("cfg://test/enabled", "true", settings);
 		expect(result.details?.cfg?.outcome).toBe("applied");
-		expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("cfg://advisor/enabled/save");
-		// The host must learn about the change to start components (e.g. the advisor) that read it once.
-		expect(applied).toEqual([{ path: "advisor.enabled", value: true, settings, save: false }]);
-		expect(cfgAdvisorEnabled.get(settings)).toBe(true);
-		expect(cfgAdvisorEnabled.isConfigured(persistent)).toBe(false);
+		expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("cfg://test/enabled/save");
+		// The host must learn about the change to start components (e.g. a tool) that read it once.
+		expect(applied).toEqual([{ path: "test.enabled", value: true, settings, save: false }]);
+		expect(cfgTestEnabled.get(settings)).toBe(true);
+		expect(cfgTestEnabled.isConfigured(persistent)).toBe(false);
 		expect(asked).toEqual([
-			{ path: "advisor.enabled", previous: "false", value: "true", save: false },
-			{ path: "advisor.enabled", previous: "false", value: "true", save: false },
+			{ path: "test.enabled", previous: "false", value: "true", save: false },
+			{ path: "test.enabled", previous: "false", value: "true", save: false },
 		]);
 	});
 
@@ -114,22 +110,22 @@ describe("CfgProtocolHandler", () => {
 		});
 		const inSession = (sessionId: string) => ({ getSessionId: () => sessionId });
 
-		await write("cfg://advisor/enabled", "true", settings, inSession("a"));
-		await write("cfg://advisor/syncBacklog", '"3"', settings, inSession("a"));
-		expect(cfgAdvisorSyncBacklog.get(settings)).toBe("3");
-		expect(asked.map(request => request.path)).toEqual(["advisor.enabled"]);
+		await write("cfg://test/enabled", "true", settings, inSession("a"));
+		await write("cfg://test/mode", '"3"', settings, inSession("a"));
+		expect(cfgTestMode.get(settings)).toBe("3");
+		expect(asked.map(request => request.path)).toEqual(["test.enabled"]);
 
 		// A session-change grant does not cover persisting to config.yml ...
-		await write("cfg://advisor/syncBacklog/save", '"5"', settings, inSession("a"));
+		await write("cfg://test/mode/save", '"5"', settings, inSession("a"));
 		// ... but the grant given on the save prompt covers later saves.
-		await write("cfg://advisor/enabled/save", "false", settings, inSession("a"));
-		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		await write("cfg://test/enabled/save", "false", settings, inSession("a"));
+		expect(cfgTestEnabled.get(settings)).toBe(false);
 		// Nor does any grant carry over to another session.
-		await write("cfg://advisor/syncBacklog", '"1"', settings, inSession("b"));
+		await write("cfg://test/mode", '"1"', settings, inSession("b"));
 		expect(asked.map(request => [request.path, request.save])).toEqual([
-			["advisor.enabled", false],
-			["advisor.syncBacklog", true],
-			["advisor.syncBacklog", false],
+			["test.enabled", false],
+			["test.mode", true],
+			["test.mode", false],
 		]);
 	});
 
@@ -138,11 +134,11 @@ describe("CfgProtocolHandler", () => {
 		let answer: "timeout" | "once" = "timeout";
 		setCfgApprovalHost({ approve: async () => answer, applied: () => {}, persistentSettings: settings });
 
-		await expect(write("cfg://advisor/enabled", "true", settings)).rejects.toThrow();
-		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		await expect(write("cfg://test/enabled", "true", settings)).rejects.toThrow();
+		expect(cfgTestEnabled.get(settings)).toBe(false);
 
 		answer = "once";
-		const retried = await write("cfg://advisor/enabled", "true", settings);
+		const retried = await write("cfg://test/enabled", "true", settings);
 		expect(retried.details?.cfg?.outcome).toBe("applied");
 	});
 
@@ -175,12 +171,12 @@ describe("CfgProtocolHandler", () => {
 			applied: () => {},
 			persistentSettings: settings,
 		});
-		const session = await write("cfg://dev.autoqaPush/endpoint", '"http://session.example"', settings);
+		const session = await write("cfg://test/endpoint", '"http://session.example"', settings);
 		expect(session.details?.cfg).toMatchObject({ outcome: "applied" });
-		expect(cfgDevAutoqaPushEndpoint.get(settings)).toBe("http://session.example");
+		expect(cfgTestEndpoint.get(settings)).toBe("http://session.example");
 
-		await write("cfg://dev.autoqaPush/endpoint/save", '"http://saved.example"', settings);
-		expect(cfgDevAutoqaPushEndpoint.get(settings)).toBe("http://saved.example");
+		await write("cfg://test/endpoint/save", '"http://saved.example"', settings);
+		expect(cfgTestEndpoint.get(settings)).toBe("http://saved.example");
 		expect(asked).toHaveLength(2);
 		expect(asked.map(request => request.shadowedBy)).toEqual([undefined, undefined]);
 	});
@@ -195,10 +191,10 @@ describe("CfgProtocolHandler", () => {
 			persistentSettings: persistent,
 		});
 
-		await write("cfg://advisor/syncBacklog/save", '"5"', settings);
-		expect(cfgAdvisorSyncBacklog.get(persistent)).toBe("5");
-		expect(cfgAdvisorSyncBacklog.provenance(persistent)).toBe("global");
-		expect(cfgAdvisorSyncBacklog.get(settings)).toBe("5");
+		await write("cfg://test/mode/save", '"5"', settings);
+		expect(cfgTestMode.get(persistent)).toBe("5");
+		expect(cfgTestMode.provenance(persistent)).toBe("global");
+		expect(cfgTestMode.get(settings)).toBe("5");
 		expect(applied).toHaveLength(2);
 		expect(applied[0]).toBe(persistent);
 		expect(applied[1]).toBe(settings);
@@ -213,9 +209,11 @@ describe("CfgProtocolHandler", () => {
 			persistentSettings: settings,
 		});
 
-		await expect(write("cfg://advisor", "true", settings)).rejects.toThrow("is a namespace");
-		await expect(write("cfg://advisor/syncBacklog", "7", settings)).rejects.toThrow("Valid values: off, 1, 3, 5");
-		await expect(write("cfg://advisr/enabled", "true", settings)).rejects.toThrow("Similar: advisor.enabled");
+		await expect(write("cfg://test", "true", settings)).rejects.toThrow("is a namespace");
+		await expect(write("cfg://test/mode", "7", settings)).rejects.toThrow("Valid values: off, 1, 3, 5");
+		await expect(write("cfg://tes/enabled", "true", settings)).rejects.toThrow("Similar: test.enabled");
 		expect(asked).toEqual([]);
 	});
 });
+beforeEach(installTestSettings);
+afterEach(() => vi.restoreAllMocks());

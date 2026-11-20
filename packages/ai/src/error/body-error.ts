@@ -280,9 +280,6 @@ export function createInBandProviderError(frame: unknown): Error | undefined {
 		return attach(new ProviderHttpError(formatInBandMessage(status, detail, code), status, { code }), IN_BAND_FLAGS);
 	}
 	if (detail === undefined && code === undefined) return undefined;
-	// Keep the upstream code visible (`(<code>)`) — it is real provider data and
-	// the same convention the Anthropic provider already uses for its
-	// `(<errorType>)` suffix.
 	return attach(
 		new ProviderResponseError(`${detail ?? IN_BAND_DETAIL_PLACEHOLDER}${code ? ` (${code})` : ""}`, {
 			kind: "runtime",

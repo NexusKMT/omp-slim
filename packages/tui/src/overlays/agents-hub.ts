@@ -1,21 +1,21 @@
 /** Browse agent instructions, enable agents, and create a persona using the current session model. */
 import type { TspPickerItem } from "@oh-my-pi/pi-wire";
 import {
-	type Component,
 	Editor,
 	Input,
 	SelectList,
 	matchesKey,
 	routeSgrMouseInput,
-	type TUI,
 	truncateToWidth,
+	type Component,
+	type TUI,
 } from "../index";
 import { code, col, md, span, text } from "../native/describe";
 import type { DescribeContext, NativeNode, NativeUiEvent } from "../native/node";
+import { actionBar, actionButton, overlayCard } from "../native/overlay";
 import { CLOSE_ACTION, picker, pickerAction, pickerEvent, pickerQuery } from "../native/picker";
-import { overlayCard, actionBar, actionButton } from "../native/overlay";
-import type { AgentSource } from "../tools/task";
 import { getEditorTheme, getSelectListTheme } from "../theme";
+import type { AgentSource } from "../tools/task";
 import { HubFrame, describeHubFrame, describeHubSidebar, type SidebarEntry } from "./hub-frame";
 
 export interface HubAgent {
@@ -25,7 +25,6 @@ export interface HubAgent {
 	source: AgentSource;
 	filePath?: string;
 	disabled: boolean;
-	advisor?: boolean;
 }
 export interface GeneratedAgentSpec {
 	identifier: string;
@@ -35,7 +34,6 @@ export interface GeneratedAgentSpec {
 export interface AgentsHubDeps {
 	loadAgents(): Promise<HubAgent[]>;
 	setAgentDisabled(name: string, options: { disabled: boolean }): void;
-	setAgentAdvisor?(name: string, enabled: boolean): void;
 	generateAgent(description: string, onText: (text: string) => void): Promise<string>;
 	saveAgent(scope: "project" | "user", spec: GeneratedAgentSpec): Promise<string>;
 }
@@ -211,18 +209,7 @@ export class AgentsHubComponent implements Component {
 		}
 		this.#repaint();
 	}
-	#toggleAdvisor(): void {
-		const agent = this.#selected();
-		if (!agent || !this.deps.setAgentAdvisor) return;
-		try {
-			this.deps.setAgentAdvisor(agent.name, !agent.advisor);
-			agent.advisor = !agent.advisor;
-			this.#notice = `${agent.name} advisor ${agent.advisor ? "enabled" : "disabled"}`;
-		} catch (error) {
-			this.#notice = String(error);
-		}
-		this.#repaint();
-	}
+
 	#beginCreate(): void {
 		if (this.#busy) return;
 		this.#createSpec = undefined;
@@ -449,9 +436,6 @@ export class AgentsHubComponent implements Component {
 				scope: this.#scope,
 				actions: [
 					pickerAction("toggle", selected?.disabled ? "Enable" : "Disable", "space"),
-					...(this.deps.setAgentAdvisor
-						? [pickerAction("advisor", selected?.advisor ? "Disable advisor" : "Enable advisor")]
-						: []),
 					pickerAction("new", "New agent", "ctrl+n"),
 					CLOSE_ACTION,
 				],
@@ -494,7 +478,6 @@ export class AgentsHubComponent implements Component {
 		}
 		if (picked.act === "scope" && picked.value) this.#setScope(picked.value);
 		else if (picked.act === "toggle") this.#toggle();
-		else if (picked.act === "advisor") this.#toggleAdvisor();
 		else if (picked.act === "new") this.#beginCreate();
 		else if (picked.act === "close") this.handleInput("\x1b");
 	}

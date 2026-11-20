@@ -1,10 +1,5 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
@@ -13,7 +8,12 @@ import { type CustomTool, type ExtensionFactory, createAgentSession } from "@oh-
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils/dirs";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 // Contract for B1 (interactive MCP deferral): when `hasUI` is true, MCP
 // discovery is deferred off the first-paint path, so an explicitly requested
@@ -36,7 +36,7 @@ describe("createAgentSession MCP deferral (B1)", () => {
 		modelRegistry,
 		sessionManager: SessionManager.inMemory(),
 		settings: Settings.isolated({}),
-		model: getBundledModel("openai", "gpt-4o-mini"),
+		model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 		disableExtensionDiscovery: true,
 		skills: [],
 		contextFiles: [],
@@ -192,7 +192,7 @@ describe("createAgentSession MCP catalog handoff", () => {
 				agentDir: tempDir,
 				authStorage,
 				modelRegistry: new ModelRegistry(authStorage, path.join(tempDir, "models.yml")),
-				model: getBundledModel("openai", "gpt-4o-mini"),
+				model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 				// A zero startup window waits for the fixture to connect, so its change
 				// lands while extensions load, the window this contract covers.
 				settings: Settings.isolated({ "mcp.enableProjectConfig": true, "mcp.startupTimeoutMs": 0 }),

@@ -132,7 +132,7 @@ static GLM5: LazyLock<BpeEncoding> = LazyLock::new(|| BpeEncoding {
 	ignore_merges: true,
 });
 
-/// Resolve the BPE encoding for a non-Claude family.
+/// Resolve the BPE encoding for a supported family.
 pub(crate) fn bpe_for(enc: Encoding) -> &'static BpeEncoding {
 	match enc {
 		Encoding::O200kBase => &O200K_BASE,
@@ -141,7 +141,6 @@ pub(crate) fn bpe_for(enc: Encoding) -> &'static BpeEncoding {
 		Encoding::DeepSeekV3 => &DEEPSEEK3,
 		Encoding::KimiK2 => &KIMI_K2,
 		Encoding::Glm5 => &GLM5,
-		_ => unreachable!("count-only families (claude, jev) never reach bpe_for"),
 	}
 }
 

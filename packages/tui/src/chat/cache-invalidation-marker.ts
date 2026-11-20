@@ -17,43 +17,6 @@ export interface CacheInvalidation {
 	reprocessedTokens: number;
 }
 
-/**
- * Decide whether `current` turn lost a *working* prompt cache that `prev` was
- * reusing.
- *
- * The provider reports a warm prefix as `cacheRead`; a model/thinking/tool/
- * system-prompt change, a history rewrite or an expired entry breaks the
- * prefix, so the next request re-pays for the prompt past the break. We flag
- * only the transition where a demonstrably warm cache goes cold: the previous
- * turn must have actually READ a meaningful prefix back, and this turn read
- * back less than half of it while it still reprocessed a non-trivial prompt.
- *
- * A collapse need not reach zero: the leading system/tool block is shared with
- * every concurrent session on the same prompt, which keeps it warm while this
- * session's history expires, so a cold turn still reads that block (~15k
- * tokens) back while re-writing hundreds of thousands behind it.
- *
- * Requiring a prior warm read is deliberate. A turn that merely WROTE the prefix
- * (`cacheRead` 0) has not proven the cache is live — that is the session's first
- * request, or a re-write after expiry — so a following cold turn there is
- * expected, not an invalidation the user caused (e.g. a long-running first tool
- * call outliving the provider's 5-minute cache TTL surfaced a spurious "cache
- * miss" right under the opening message). It also collapses a run of consecutive
- * cold turns to the single marker at the moment the cache actually broke, instead
- * of repeating the banner on every turn while it re-warms. Measuring the loss
- * against what the predecessor READ (not what it wrote) keeps both guarantees
- * when only the shared block was warm: nothing proven live was lost.
- *
- * Returns `undefined` (no marker) for the first turn, turns whose predecessor
- * never read a warm prefix, tiny contexts, turns that read back at least half
- * of the predecessor's warm prefix, and — crucially — turns on providers with
- * *implicit* best-effort caching. Only an
- * explicit, prefix-controlled cache (Anthropic / Bedrock `cache_control`)
- * re-creates the prefix on a cold turn (`cacheWrite > 0`); implicit caches
- * (Google / OpenAI / Fireworks) report `cacheWrite: 0` and drop `cacheRead` to
- * zero intermittently as routine propagation noise that self-heals the next
- * turn, so flagging it would be a false positive.
- */
 export function detectCacheInvalidation(prev: Usage | undefined, current: Usage): CacheInvalidation | undefined {
 	if (!prev) return undefined;
 	// Only flag a warm→cold transition: the previous turn must have actually read

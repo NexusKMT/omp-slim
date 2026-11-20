@@ -1,20 +1,20 @@
+import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
+import { createPluginSettingsHost } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/settings-host";
+import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
+import { TspDocument } from "@oh-my-pi/pi-tui/native/apply";
+import { Reconciler } from "@oh-my-pi/pi-tui/native/reconcile";
+import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { getProjectAgentDir, removeWithRetries } from "@oh-my-pi/pi-utils";
+import type { TspNode } from "@oh-my-pi/pi-wire";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
-import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
-import { createPluginSettingsHost } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/settings-host";
-import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import { TspDocument } from "@oh-my-pi/pi-tui/native/apply";
-import { Reconciler } from "@oh-my-pi/pi-tui/native/reconcile";
-import type { TspNode } from "@oh-my-pi/pi-wire";
-import { getProjectAgentDir, removeWithRetries } from "@oh-my-pi/pi-utils";
 
-import { cfgDevAutoqa } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import { cfgContextFilesExtra } from "@oh-my-pi/pi-coding-agent/session/context-settings";
+import { cfgToolsXdev } from "@oh-my-pi/pi-coding-agent/tools/settings";
 
 beforeAll(async () => {
 	await initTheme();
@@ -89,13 +89,13 @@ describe("settings section sidebar", () => {
 	it("does not toggle the selected section's first setting", () => {
 		const comp = createSelector();
 		comp.handleNativeEvent({ type: "action", key: "", act: "page", value: "tools", mods: [] });
-		expect(cfgDevAutoqa.get(settings)).toBe(true);
+		expect(cfgToolsXdev.get(settings)).toBe(true);
 
-		clickOption(comp, "Developer");
-		expect(cfgDevAutoqa.get(settings)).toBe(true);
+		clickOption(comp, "Discovery & MCP");
+		expect(cfgToolsXdev.get(settings)).toBe(true);
 
-		clickOption(comp, "Developer");
-		expect(cfgDevAutoqa.get(settings)).toBe(true);
+		clickOption(comp, "Discovery & MCP");
+		expect(cfgToolsXdev.get(settings)).toBe(true);
 	});
 });
 

@@ -1,5 +1,3 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { ThinkingContent } from "@oh-my-pi/pi-ai";
@@ -12,6 +10,8 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir, withTimeout } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
 import { mockSchedulerWaitWithClock } from "./helpers/mock-scheduler-clock";
 
 const recordToolSchema = type({ value: type("string") });
@@ -126,7 +126,7 @@ async function createHarness(
 		"todo.reminders": false,
 		...settingsOverrides,
 	});
-	settings.setModelRole("default", `${mock.provider}/${mock.id}`);
+	settings.setModel(`${mock.provider}/${mock.id}`);
 
 	const sessionManager = options.persistSession
 		? SessionManager.create(tempDir.path(), tempDir.path())

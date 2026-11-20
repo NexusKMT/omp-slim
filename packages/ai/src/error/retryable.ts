@@ -1,9 +1,6 @@
 import { isRetryableError, isUnexpectedSocketCloseMessage } from "@oh-my-pi/pi-utils";
 import { getHeadersFromError, getShouldRetryFromHeaders } from "../utils/retry-after";
 import {
-	ALIYUN_MM_GATEWAY_PATTERN,
-	CODEX_HTTP_BODY_READ_ERROR_PATTERN,
-	isRetryableStreamEnvelopeError,
 	isTransientStreamDropError,
 	isTransientStreamParseError,
 	isUsageLimit,
@@ -54,20 +51,16 @@ export function isProviderRetryableError(error: unknown): boolean {
 	if (verdict !== undefined) return verdict;
 	const httpStatus = status(error);
 	if (httpStatus !== undefined && httpStatus >= 400 && httpStatus < 500 && httpStatus !== 408 && httpStatus !== 429) {
-		// Aliyun's multimodal gateway 400s are flaky, not malformed — the same
-		// payload succeeds on replay (see the pattern's rationale in flags.ts).
-		return ALIYUN_MM_GATEWAY_PATTERN.test(error.message);
+		return false;
 	}
 	const msg = error.message.toLowerCase();
 	if (
 		isUnexpectedSocketCloseMessage(msg) ||
 		isTransientTransportMessage(msg) ||
 		TRANSIENT_TRANSPORT_PATTERN.test(msg) ||
-		CODEX_HTTP_BODY_READ_ERROR_PATTERN.test(msg) ||
 		PROVIDER_TRANSIENT_EXTRA_PATTERN.test(msg) ||
 		isTransientStreamParseError(error) ||
-		isTransientStreamDropError(error) ||
-		isRetryableStreamEnvelopeError(error)
+		isTransientStreamDropError(error)
 	) {
 		return true;
 	}

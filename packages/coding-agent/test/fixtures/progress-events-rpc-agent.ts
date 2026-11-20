@@ -1,6 +1,4 @@
-import * as path from "node:path";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runRpcMode } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
@@ -8,11 +6,13 @@ import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { cfgAsyncEnabled } from "@oh-my-pi/pi-coding-agent/tools/settings";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 // Real SDK session and RPC dispatch for the progress-event tests; the model always answers "pong".
 // A `session_before_compact` hook supplies the summary, so a manual compaction commits without a
 // summarizer call.
-const MODEL = getBundledModel("anthropic", "claude-sonnet-4-5");
+const MODEL = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 if (!MODEL) throw new Error("bundled test model missing");
 
 const cwd = process.cwd();

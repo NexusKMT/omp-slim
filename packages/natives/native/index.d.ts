@@ -1074,10 +1074,8 @@ export declare function copyToClipboard(text: string): void
  * aggregate budget question without paying a per-element napi crossing.
  *
  * Measures user/model content, not wire-protocol tokens: BPE encodings
- * use ordinary encoding (no special-token handling) and the Claude
- * encodings count message content without the fixed per-message frame.
- * Defaults to `o200k_base`; pass a `Claude*` encoding for exact Claude
- * counts, or the matching family encoding for Qwen/DeepSeek/Kimi/GLM/Jev.
+ * use ordinary encoding without special tokens or message framing.
+ * Defaults to `o200k_base`; select the configured encoding when available.
  */
 export declare function countTokens(input: string | string[], encoding?: Encoding | undefined | null): number
 
@@ -1461,14 +1459,6 @@ export declare enum Encoding {
   O200kBase = 'O200kBase',
   /** GPT-3.5 / GPT-4 / older. */
   Cl100kBase = 'Cl100kBase',
-  /** Claude 3 … Opus 4.6 (ctok v3 reconstruction). */
-  ClaudeV3 = 'ClaudeV3',
-  /** Claude Opus 4.7–4.9 (ctok v4.7 reconstruction). */
-  ClaudeV47 = 'ClaudeV47',
-  /** Claude Opus 5+ (ctok v5 reconstruction). */
-  ClaudeV5 = 'ClaudeV5',
-  /** Claude Sonnet/Fable 5+ (live-measured non-opus v5 frame). */
-  ClaudeV5Sonnet = 'ClaudeV5Sonnet',
   /** Qwen 3.5 / 3.6 / 3.8 (248k vocabulary). */
   Qwen3 = 'Qwen3',
   /** `DeepSeek` V3 … V4 (identical base BPE). */
@@ -1477,8 +1467,6 @@ export declare enum Encoding {
   KimiK2 = 'KimiK2',
   /** GLM-5.x exact; GLM-4.x near-exact. */
   Glm5 = 'Glm5',
-  /** `TypeSafe` Jev 1.13 judgment `state` (request frame excluded). */
-  Jev = 'Jev'
 }
 
 /**

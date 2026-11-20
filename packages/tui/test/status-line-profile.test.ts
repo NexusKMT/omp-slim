@@ -1,5 +1,5 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as piUtils from "@oh-my-pi/pi-utils";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { SegmentContext } from "../src/status-line/segments";
 import { describeSegment, renderSegment } from "../src/status-line/segments";
 import { initTheme, theme } from "../src/theme";
@@ -21,7 +21,6 @@ function createContext(overrides: Partial<SegmentContext> = {}): SegmentContext 
 		planMode: null,
 		loopMode: null,
 		goalMode: null,
-		vibeMode: null,
 		vim: null,
 		usageStats: {
 			input: 0,

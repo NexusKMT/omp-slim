@@ -1,6 +1,5 @@
 /** Context maintenance for an active coding-agent session. */
 
-import { scheduler } from "node:timers/promises";
 import {
 	type Agent,
 	type AgentMessage,
@@ -12,22 +11,22 @@ import {
 } from "@oh-my-pi/pi-agent-core";
 import {
 	AGGRESSIVE_SHAKE_CONFIG,
-	AUTO_HANDOFF_THRESHOLD_FOCUS,
 	applyShakeRegions,
+	AUTO_HANDOFF_THRESHOLD_FOCUS,
+	calculateContextTokens,
+	collectShakeRegions,
+	compact,
+	COMPACTION_RECOVERY_BAND,
 	CompactionCancelledError,
+	compactionContextTokens,
 	type CompactionDetails,
 	type CompactionPreparation,
 	type CompactionResult,
 	type CompactionSummaryMessage,
-	calculateContextTokens,
-	collectShakeRegions,
-	COMPACTION_RECOVERY_BAND,
-	compact,
-	compactionContextTokens,
 	createCompactionSummaryMessage,
 	DEFAULT_SHAKE_CONFIG,
-	type CompactionSettings as EngineCompactionSettings,
 	effectiveReserveTokens,
+	type CompactionSettings as EngineCompactionSettings,
 	invalidateMessageCache,
 	isTranscriptUsageAnchor,
 	prepareCompaction,
@@ -37,9 +36,9 @@ import {
 	resolveThresholdTokens,
 	type ShakeConfig,
 	type ShakeRegion,
-	type SummaryOptions,
 	shouldCompact,
 	stripLegacyCompactionData,
+	type SummaryOptions,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import {
 	DEFAULT_PRUNE_CONFIG,
@@ -52,20 +51,24 @@ import type { ProtectedToolMatcher } from "@oh-my-pi/pi-agent-core/compaction/to
 import type { AssistantMessage, Message, Model } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
+import { customMessageEntryMessage } from "@oh-my-pi/pi-tui/chat/transcript-entry";
+import { computeNonMessageTokens, type NonMessageTokenSource } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import { isRecord, logger, prompt, Snowflake, toError } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
-import { writeArtifact } from "./artifacts";
+import { scheduler } from "node:timers/promises";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
 import type { ExtensionRunner, SessionBeforeCompactResult } from "../extensibility/extensions";
 import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
 import type { GoalModeState } from "../goals/state";
-import { customMessageEntryMessage } from "@oh-my-pi/pi-tui/chat/transcript-entry";
-import { computeNonMessageTokens, type NonMessageTokenSource } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import { createPlanReadMatcher } from "../plan-mode/plan-protection";
+import experimentalContextNotesReminderPrompt from "../prompts/system/experimental-context-notes-reminder.md" with { type: "text" };
+import experimentalContextRolloverPrompt from "../prompts/system/experimental-context-rollover.md" with { type: "text" };
+import lengthStopRetryTemplate from "../prompts/system/length-stop-retry.md" with { type: "text" };
 import { isCompleteReadResult } from "../tools/read-supersede";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ContextUsageBreakdown, HandoffResult, SessionHandoffOptions } from "./agent-session-types";
+import { writeArtifact } from "./artifacts";
 import { findCompactMode } from "./compact-modes";
 import {
 	type CompactionMethod,
@@ -87,16 +90,13 @@ import type { CompactionEntry, SessionEntry } from "./session-entries";
 import type { SessionManager } from "./session-manager";
 import type { ShakeMode, ShakeResult } from "./shake-types";
 import { resolveSpeculationLeadTokens, SPECULATION_LEAD_MIN_TOKENS } from "./speculation-lead";
-import experimentalContextNotesReminderPrompt from "../prompts/system/experimental-context-notes-reminder.md" with { type: "text" };
-import experimentalContextRolloverPrompt from "../prompts/system/experimental-context-rollover.md" with { type: "text" };
-import lengthStopRetryTemplate from "../prompts/system/length-stop-retry.md" with { type: "text" };
 
 import {
-	type CompactionSettings,
 	cfgCompactionAutoContinue,
 	cfgCompactionEnabled,
 	cfgCompactionMethodOrder,
 	cfgSnapcompactShape,
+	type CompactionSettings,
 } from "./context-settings";
 import { resolveModelCompactionSettings } from "./model-compaction-threshold";
 import { cfgRetry } from "./settings";
@@ -399,10 +399,6 @@ export interface SessionMaintenanceHost {
 	getPromptCacheKeyForModel(model: Model | undefined): string | undefined;
 	resetPlanReference(): void;
 	syncTodoPhasesFromBranch(): void;
-	/** `compacted` marks a rewrite that replaced history with a summary. */
-	resetAdvisorRuntimes(reason?: string, options?: { compacted?: boolean }): void;
-	/** Re-aligns advisors after an in-place prune their own contexts already cover (no re-prime). */
-	rebaseAdvisorPrefix(reason: string): void;
 	rebaseAfterCompaction(): void;
 	recordAnchoredHistoryRewrite(tokensRemoved: number): void;
 	getContextBreakdown(options?: {
@@ -650,11 +646,6 @@ export class SessionMaintenance {
 		return { ...config, protectedTools: [...config.protectedTools, planMatcher] };
 	}
 
-	/**
-	 * Durably commit a prune pass, restoring the blanked results when the rewrite
-	 * fails so live context never diverges from the history its derived state
-	 * (advisor prefix, todo phases, provider sessions) was built from.
-	 */
 	async #persistPrune(result: PruneResult): Promise<void> {
 		try {
 			await this.#host.sessionManager.rewriteEntries();
@@ -687,7 +678,6 @@ export class SessionMaintenance {
 		await this.#persistPrune(result);
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
-		this.#host.rebaseAdvisorPrefix("prune-tool-outputs");
 		this.#host.syncTodoPhasesFromBranch();
 		return result;
 	}
@@ -732,7 +722,6 @@ export class SessionMaintenance {
 		await this.#persistPrune(result);
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
-		this.#host.rebaseAdvisorPrefix("prune-stale-tool-results");
 		this.#host.syncTodoPhasesFromBranch();
 		return result;
 	}
@@ -815,7 +804,6 @@ export class SessionMaintenance {
 		await this.#host.sessionManager.rewriteEntries();
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
-		this.#host.resetAdvisorRuntimes("drop-images");
 		return { removed, tokensFreed };
 	}
 
@@ -889,7 +877,6 @@ export class SessionMaintenance {
 			await this.#host.sessionManager.rewriteEntries();
 			const sessionContext = this.#host.buildDisplaySessionContext();
 			this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
-			this.#host.resetAdvisorRuntimes("shake");
 			return {
 				mode,
 				toolResultsDropped: 0,
@@ -1005,8 +992,6 @@ export class SessionMaintenance {
 		}
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
-		this.#host.resetAdvisorRuntimes("shake");
-
 		return {
 			mode,
 			toolResultsDropped,
@@ -1150,13 +1135,6 @@ export class SessionMaintenance {
 
 		try {
 			if (ownsCompactionController) {
-				// A manual compaction aborts the live turn, tool loop included. Without a
-				// resume the agent sits idle on a half-finished loop (an autoresearch run,
-				// a pending tool result) until the user types "continue" by hand.
-				// Only a turn the agent actually owns counts: the session-level busy flag
-				// is also true while a prompt is still in async setup (before its message
-				// reaches the agent). The abort bump drops that prompt, so resuming on
-				// its behalf would nudge the model on the previous transcript instead.
 				const interruptedActiveTurn = this.#host.agent.state.isStreaming;
 				this.#host.disconnectFromAgent();
 				await this.#host.abort({ goalReason: "internal", preserveCompaction: true });
@@ -1454,7 +1432,6 @@ export class SessionMaintenance {
 				preserveData,
 				providerReplayThroughEntryId,
 				method: fromExtension ? undefined : selectedMethod,
-				advisorResetReason: "compact",
 			});
 
 			const compactionResult: CompactionResult = {
@@ -1649,7 +1626,6 @@ export class SessionMaintenance {
 			...result,
 			fromExtension,
 			method: undefined,
-			advisorResetReason: "experimental-context-rollover",
 		});
 		this.#experimentalNotesReminderBoundaryId = undefined;
 		return {
@@ -1817,7 +1793,6 @@ export class SessionMaintenance {
 				...result,
 				fromExtension,
 				method: undefined,
-				advisorResetReason: "experimental-context-rollover",
 				detachExtensionEmit: detachPostCommit,
 			});
 			this.#experimentalNotesReminderBoundaryId = undefined;
@@ -2042,7 +2017,6 @@ export class SessionMaintenance {
 				fromExtension: false,
 				preserveData: undefined,
 				method: "handoff",
-				advisorResetReason: "handoff",
 			});
 			return result;
 		} finally {
@@ -2343,12 +2317,6 @@ export class SessionMaintenance {
 		return run.armed;
 	}
 
-	/**
-	 * Append a compaction entry and run the shared post-commit sequence:
-	 * rebuild the display context, swap live agent messages, re-anchor stats,
-	 * reset plan/advisor/todo runtime state derived from the replaced history,
-	 * reset provider sessions, and emit the `session_compact` extension hook.
-	 */
 	async #commitCompactionEntry(args: {
 		summary: string;
 		shortSummary: string | undefined;
@@ -2359,7 +2327,6 @@ export class SessionMaintenance {
 		preserveData: Record<string, unknown> | undefined;
 		providerReplayThroughEntryId?: string;
 		method: CompactionMethod | undefined;
-		advisorResetReason: string;
 		detachExtensionEmit?: boolean;
 	}): Promise<CompactionEntry | undefined> {
 		const entryId = this.#host.sessionManager.appendCompaction(
@@ -2388,7 +2355,6 @@ export class SessionMaintenance {
 		// plan reference. Clear the sent-flag so #buildPlanReferenceMessage re-reads
 		// the plan from disk and re-injects it on the next turn (issue #1246).
 		this.#host.resetPlanReference();
-		this.#host.resetAdvisorRuntimes(args.advisorResetReason, { compacted: true });
 		this.#host.syncTodoPhasesFromBranch();
 		const savedCompactionEntry = newEntries.find(e => e.type === "compaction" && e.id === entryId) as
 			| CompactionEntry
@@ -4092,12 +4058,7 @@ export class SessionMaintenance {
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.replaceMessagesFromSessionContext(sessionContext.messages);
 		this.#host.rebaseAfterCompaction();
-		// Same post-rewrite bookkeeping as the regular compaction append: the
-		// rebuilt context no longer carries the transient plan reference (#1246),
-		// and advisor cursors / todo phases were derived from the replaced
-		// history.
 		this.#host.resetPlanReference();
-		this.#host.resetAdvisorRuntimes("compaction-rescue", { compacted: true });
 		this.#host.syncTodoPhasesFromBranch();
 		// Extensions must see the entry that is now active, not (only) the one
 		// this rebuild just superseded — mirror the regular append path's hook.
@@ -5410,7 +5371,6 @@ export class SessionMaintenance {
 			fromExtension: args.fromExtension,
 			preserveData: args.preserveData,
 			method: args.method,
-			advisorResetReason: "auto-compaction",
 			detachExtensionEmit: detachPostCommit,
 		});
 

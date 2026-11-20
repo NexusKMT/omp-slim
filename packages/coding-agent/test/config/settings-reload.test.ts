@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { acquireFileLock, getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
 
 import { cfgEditModelVariants } from "@oh-my-pi/pi-coding-agent/edit/settings";
@@ -58,13 +58,13 @@ describe("Settings layer refresh", () => {
 		await writeConfig({ model: "mock/target", temperature: 0.1 });
 		const settings = await Settings.loadIsolated({ cwd: startProject, agentDir });
 		const overlay = settings.overlay({ temperature: 0.7 });
-		expect(overlay.getModelRole("default")).toBe("mock/target");
+		expect(overlay.getModel()).toBe("mock/target");
 
 		await writeConfig({ temperature: 0.2 });
 		await overlay.reloadFromDisk();
-		expect(overlay.getModelRole("default")).toBe("mock/target");
+		expect(overlay.getModel()).toBe("mock/target");
 		await overlay.reloadFromDisk({ includeParents: true });
-		expect(overlay.getModelRole("default")).toBeUndefined();
+		expect(overlay.getModel()).toBeUndefined();
 		expect(cfgTemperature.get(settings)).toBe(0.2);
 		expect(cfgTemperature.get(overlay)).toBe(0.7);
 	});
@@ -153,14 +153,14 @@ describe("Settings layer refresh", () => {
 			const settings = await Settings.init({ cwd: startProject, agentDir });
 			try {
 				cfgTemperature.set(settings, 0.5);
-				settings.setModelRole("default", "openai/session");
+				settings.setModel("openai/session");
 				await expect(settings.flush()).rejects.toThrow();
 
 				// Every later reload (task preflight) must still succeed with the in-memory values.
 				await settings.reloadFromDisk();
 				await settings.reloadFromDisk();
 				expect(cfgTemperature.get(settings)).toBe(0.5);
-				expect(settings.getModelRole("default")).toBe("openai/session");
+				expect(settings.getModel()).toBe("openai/session");
 
 				fs.chmodSync(storeDir, 0o755);
 				await settings.reloadFromDisk();
@@ -169,7 +169,7 @@ describe("Settings layer refresh", () => {
 					model: "openai/session",
 				});
 				expect(cfgTemperature.get(settings)).toBe(0.5);
-				expect(settings.getModelRole("default")).toBe("openai/session");
+				expect(settings.getModel()).toBe("openai/session");
 			} finally {
 				fs.chmodSync(storeDir, 0o755);
 			}
@@ -185,7 +185,7 @@ describe("Settings layer refresh", () => {
 		await settings.reloadFromDisk();
 		expect(cfgTemperature.get(settings)).toBe(0.5);
 		expect(cfgCompactionEnabled.get(settings)).toBe(false);
-		expect(settings.getModelRole("default")).toBe("openai/base");
+		expect(settings.getModel()).toBe("openai/base");
 
 		await settings.flush();
 		expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({

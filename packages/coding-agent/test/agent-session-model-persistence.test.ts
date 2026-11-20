@@ -1,8 +1,5 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { type Api, type AssistantMessage, Effort, type Model } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { type CreateAgentSessionResult, createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
@@ -14,6 +11,9 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { encodeRawPng } from "@oh-my-pi/pi-coding-agent/utils/png-encode";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 describe("AgentSession model persistence", () => {
 	let tempDir: TempDir;
@@ -86,7 +86,7 @@ describe("AgentSession model persistence", () => {
 	});
 
 	function getAnthropicModelOrThrow(id: string): Model<Api> {
-		const model = getBundledModel("anthropic", id);
+		const model = createTestModel({ provider: "anthropic", id: id });
 		if (!model) throw new Error(`Expected anthropic model ${id} to exist`);
 		return model;
 	}
@@ -155,7 +155,7 @@ describe("AgentSession model persistence", () => {
 			for (const role in modelRoles) {
 				const modelRoleValue = modelRoles[role];
 				if (modelRoleValue !== undefined) {
-					sessionSettings.setModelRole(role, modelRoleValue);
+					sessionSettings.setModel(modelRoleValue);
 				}
 			}
 		}
@@ -212,7 +212,7 @@ describe("AgentSession model persistence", () => {
 		await created.session.setModel(nextModel);
 
 		expect(created.session.model?.id).toBe(nextModel.id);
-		expect(created.settings.getModelRole("default")).toBe(defaultRoleValue);
+		expect(created.settings.getModel()).toBe(defaultRoleValue);
 		expect(modelChangedCount).toBe(1);
 
 		await created.session.setModel(nextModel);
@@ -228,10 +228,10 @@ describe("AgentSession model persistence", () => {
 			modelRoles: { default: modelValue(defaultModel) },
 		});
 
-		await created.session.setModel(nextModel, "default", { persist: true });
+		await created.session.setModel(nextModel, { persist: true });
 
 		expect(created.session.model?.id).toBe(nextModel.id);
-		expect(created.settings.getModelRole("default")).toBe(modelValue(nextModel));
+		expect(created.settings.getModel()).toBe(modelValue(nextModel));
 	});
 
 	it("switches the active model even when the live context is over the target window", async () => {
@@ -246,11 +246,11 @@ describe("AgentSession model persistence", () => {
 		const targetWindow = nextModel.contextWindow ?? 0;
 		expect(targetWindow).toBeGreaterThan(0);
 
-		const result = await created.session.setModel(nextModel, "default", { persist: true });
+		const result = await created.session.setModel(nextModel, { persist: true });
 
 		expect(result).toEqual({ switched: true });
 		expect(created.session.model?.id).toBe(nextModel.id);
-		expect(created.settings.getModelRole("default")).toBe(modelValue(nextModel));
+		expect(created.settings.getModel()).toBe(modelValue(nextModel));
 	});
 
 	it("cycles available models without persisting the default role", async () => {
@@ -265,7 +265,7 @@ describe("AgentSession model persistence", () => {
 		const initialModel = created.session.model;
 		if (!initialModel) throw new Error("Expected initial model to be set");
 		const defaultRoleValue = modelValue(initialModel);
-		created.settings.setModelRole("default", defaultRoleValue);
+		created.settings.setModel(defaultRoleValue);
 
 		const result = await created.session.cycleModel();
 
@@ -274,7 +274,7 @@ describe("AgentSession model persistence", () => {
 		const activeModel = created.session.model;
 		if (!activeModel) throw new Error("Expected active model after cycleModel");
 		expect(modelValue(activeModel)).toBe(modelValue(result.model));
-		expect(created.settings.getModelRole("default")).toBe(defaultRoleValue);
+		expect(created.settings.getModel()).toBe(defaultRoleValue);
 	});
 
 	it("restores the saved default model when switch-session last role is fallback", async () => {
@@ -307,7 +307,7 @@ describe("AgentSession model persistence", () => {
 			EPHEMERAL_MODEL_CHANGE_ROLE,
 		);
 		const settings = Settings.isolated();
-		settings.setModelRole("default", modelValue(fallbackModel));
+		settings.setModel(modelValue(fallbackModel));
 
 		const result = await createStartupResumeSession(targetSessionFile, settings);
 
@@ -336,7 +336,7 @@ describe("AgentSession model persistence", () => {
 		const defaultRoleValue = modelValue(defaultModel);
 		const targetSessionFile = await writeRoleModelSession(defaultRoleValue, modelValue(temporaryModel), "temporary");
 		const settings = Settings.isolated();
-		settings.setModelRole("default", defaultRoleValue);
+		settings.setModel(defaultRoleValue);
 
 		const result = await createStartupResumeSession(targetSessionFile, settings);
 
@@ -404,7 +404,7 @@ describe("AgentSession model persistence", () => {
 	it("marks a first user-message process-exit tail aborted with the selected model", async () => {
 		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
 		const settings = Settings.isolated();
-		settings.setModelRole("default", modelValue(defaultModel));
+		settings.setModel(modelValue(defaultModel));
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "interrupted-user"));
 		sessionManager.appendModelChange(modelValue(defaultModel));
 		sessionManager.appendMessage({ role: "user", content: "inspect state", timestamp: Date.now() });
@@ -494,7 +494,7 @@ describe("AgentSession model persistence", () => {
 	): Promise<CreateAgentSessionResult> {
 		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
 		const settings = Settings.isolated();
-		settings.setModelRole("default", modelValue(defaultModel));
+		settings.setModel(modelValue(defaultModel));
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "archived"));
 		sessionManager.appendModelChange(modelValue(defaultModel));
 		const firstKeptEntryId = sessionManager.appendMessage({

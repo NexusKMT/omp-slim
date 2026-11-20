@@ -1,9 +1,9 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, ApiKey, Model } from "@oh-my-pi/pi-ai";
-import type { ApiKeyResolverRegistry } from "../config/api-key-resolver";
-import { getModelMatchPreferences, type ModelLookupRegistry, resolveModelRoleValue } from "../config/model-resolver";
-import type { Settings } from "../config/settings";
 import { concreteThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import type { ApiKeyResolverRegistry } from "../config/api-key-resolver";
+import { getModelMatchPreferences, type ModelLookupRegistry, resolveModelValue } from "../config/model-resolver";
+import type { Settings } from "../config/settings";
 
 export interface ResolvedCommitModel {
 	model: Model<Api>;
@@ -34,7 +34,7 @@ export async function resolvePrimaryModel(
 	const available = modelRegistry.getAvailable();
 	const matchPreferences = getModelMatchPreferences(settings);
 	const selector = override ?? settings.getModel();
-	const resolved = selector ? resolveModelRoleValue(selector, available, { settings, matchPreferences }) : undefined;
+	const resolved = selector ? resolveModelValue(selector, available, { settings, matchPreferences }) : undefined;
 	const model = resolved?.model;
 	if (!model) {
 		throw new Error("No model available for commit generation");

@@ -3,27 +3,22 @@ import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
-import { formatDuration, isRecord, logger, sanitizeText } from "@oh-my-pi/pi-utils";
-import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
-import { settings } from "../../config/settings";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import { detectCacheInvalidation } from "@oh-my-pi/pi-tui/chat/cache-invalidation-marker";
 import {
 	groupedReadUsageCallIds,
-	ReadToolGroupComponent,
 	readArgsCollapseIntoGroup,
 	readArgsHaveTarget,
+	ReadToolGroupComponent,
 } from "@oh-my-pi/pi-tui/chat/read-tool-group";
 import {
 	isReplyWrite,
-	ReplyWriteComponent,
 	replyDisplayMessage,
+	ReplyWriteComponent,
 	toolResultReplies,
 } from "@oh-my-pi/pi-tui/chat/reply-write";
-import { readMediaPath } from "@oh-my-pi/pi-tui/native/blobs";
+import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
 import { TodoReminderComponent } from "@oh-my-pi/pi-tui/chat/todo-reminder";
-import { isNativeRendering, nativePacing } from "@oh-my-pi/pi-tui/native/state";
-import { textContent } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import {
 	asyncJobState,
 	isSettledJobFrame,
@@ -33,21 +28,41 @@ import {
 	type ToolExecutionHandle,
 	toolRenderName,
 } from "@oh-my-pi/pi-tui/chat/tool-execution";
-import { TtsrNotificationComponent } from "@oh-my-pi/pi-tui/chat/ttsr-notification";
+import { textContent } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { eventBlockId, PresentedBlock } from "@oh-my-pi/pi-tui/chat/transcript-presentation";
-import { createUsageRowBlock, TurnUsageTally, turnElapsedMs } from "@oh-my-pi/pi-tui/overlays/usage-row";
+import {
+	assistantHasVisibleContent,
+	assistantUsageIsBilled,
+	splitAssistantMessageToolTimeline,
+} from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
+import { TtsrNotificationComponent } from "@oh-my-pi/pi-tui/chat/ttsr-notification";
 import { appKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
+import { fieldQuestions } from "@oh-my-pi/pi-tui/html-form/data";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { readMediaPath } from "@oh-my-pi/pi-tui/native/blobs";
+import { isNativeRendering, nativePacing } from "@oh-my-pi/pi-tui/native/state";
+import { createUsageRowBlock, turnElapsedMs, TurnUsageTally } from "@oh-my-pi/pi-tui/overlays/usage-row";
+import {
+	assistantMessageLinkTargets,
+	createAssistantMessageComponent,
+	refreshAssistantMessageLinkTargets,
+} from "@oh-my-pi/pi-tui/prompt/interactive-context-helpers";
+import { PREVIEW_LIMITS, previewLine, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
 import { getSymbolTheme, theme } from "@oh-my-pi/pi-tui/theme";
-import type { InteractiveModeContext } from "../../modes/types";
+import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
 import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
+import { formatDuration, isRecord, logger, sanitizeText } from "@oh-my-pi/pi-utils";
+import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
+import { settings } from "../../config/settings";
+import type { InteractiveModeContext } from "../../modes/types";
 import type { AgentSessionEvent } from "../../session/agent-session";
 import {
 	isSilentAbort,
+	isUserInterruptAbort,
 	isUserInvokedSkillPrompt,
 	isUserTurnInitiator,
 	readQueueChipText,
 	resolveAbortLabel,
-	isUserInterruptAbort,
 	USER_INTERRUPT_LABEL,
 } from "../../session/messages";
 import {
@@ -57,29 +72,15 @@ import {
 	sessionApprovalScope,
 } from "../../tools/approval";
 import { recoverAskHtml } from "../../tools/ask";
-import { fieldQuestions } from "@oh-my-pi/pi-tui/html-form/data";
-import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
-import { previewLine, PREVIEW_LIMITS, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
-import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
 import { writeDeviceDispatch } from "../../tools/resolve";
-import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
 import { type RunStatus, setRunStatus } from "../../utils/run-status";
 import { setTerminalTitleState } from "../../utils/title-generator";
-import {
-	assistantMessageLinkTargets,
-	createAssistantMessageComponent,
-	refreshAssistantMessageLinkTargets,
-} from "@oh-my-pi/pi-tui/prompt/interactive-context-helpers";
-import {
-	assistantHasVisibleContent,
-	assistantUsageIsBilled,
-	splitAssistantMessageToolTimeline,
-} from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
 import { isWarpCliAgentProtocolActive } from "../warp-events";
 import { StreamingRevealController } from "./streaming-reveal";
 import { streamingStringKeysForTool, ToolArgsRevealController } from "./tool-args-reveal";
 import { createToolCallBlock } from "./tool-call-block";
 
+import { cfgReadToolResultPreview, cfgToolsApproval, cfgToolsApprovalMode } from "../../tools/settings";
 import {
 	cfgCompletionNotify,
 	cfgDisplayCacheMissMarker,
@@ -90,7 +91,6 @@ import {
 	cfgTerminalShowImages,
 	cfgTerminalShowProgress,
 } from "../settings";
-import { cfgReadToolResultPreview, cfgToolsApproval, cfgToolsApprovalMode } from "../../tools/settings";
 
 type AgentSessionEventKind = AgentSessionEvent["type"];
 
@@ -416,16 +416,6 @@ export class EventController {
 			// Header rebuild is owned by InteractiveMode's own session
 			// subscription (mirrors model_changed); nothing to do here.
 			config_warnings_changed: async () => {},
-			advisor_cost_changed: async () => {
-				this.ctx.statusLine.invalidate();
-				this.ctx.ui.requestRender();
-			},
-			advisor_yielded: async () => {
-				// The advisor finished reviewing the yielded primary turn (no more
-				// comments coming) — repaint so the closed-eye state lands.
-				this.ctx.statusLine.invalidate();
-				this.ctx.ui.requestRender();
-			},
 			thinking_level_changed: async () => {
 				this.ctx.statusLine.invalidate();
 				this.ctx.updateEditorBorderColor();
@@ -1239,8 +1229,6 @@ export class EventController {
 			}
 			this.ctx.ui.requestRender();
 		} else if (event.message.role === "user") {
-			// Only genuinely user-attributed prompts anchor the delta; a mid-run
-			// agent-attributed `user` message (advisor tool-loop redirect) must not.
 			if (event.message.attribution !== "agent") {
 				this.#turnStartedAt = event.message.timestamp;
 				this.#turnUsage.reset();

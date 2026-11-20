@@ -1,12 +1,12 @@
-import { describe, expect, it } from "bun:test";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 import { postOpenAIStream } from "@oh-my-pi/pi-ai/utils/openai-http";
+import { describe, expect, it } from "bun:test";
 
-const OFFLINE_ANTHROPIC =
-	"No internet connection: couldn't reach api.anthropic.com (getaddrinfo ETIMEOUT). Check your network or proxy and try again.";
+const OFFLINE_ENDPOINT =
+	"No internet connection: couldn't reach api.example.com (getaddrinfo ETIMEOUT). Check your network or proxy and try again.";
 
-function bunDnsFailure(host = "api.anthropic.com"): TypeError {
+function bunDnsFailure(host = "api.example.com"): TypeError {
 	return Object.assign(new TypeError(`getaddrinfo ETIMEOUT ${host}`), { code: "ETIMEOUT" });
 }
 
@@ -17,10 +17,10 @@ describe("classifyNetworkCause", () => {
 			kind: "offline",
 			code: "ETIMEOUT",
 			detail: "getaddrinfo ETIMEOUT",
-			host: "api.anthropic.com",
+			host: "api.example.com",
 		});
 		// Host parsed from the error text when no request URL is supplied.
-		expect(new AIError.AnthropicConnectionError(err).message).toBe(OFFLINE_ANTHROPIC);
+		expect(AIError.networkFailureMessage(err)).toBe(OFFLINE_ENDPOINT);
 	});
 
 	it("walks the cause chain for a Bun socket-open failure that names no host", () => {
@@ -36,8 +36,8 @@ describe("classifyNetworkCause", () => {
 			host: undefined,
 		});
 		// The request URL supplies the host the error text lacks.
-		expect(new AIError.AnthropicConnectionError(outer, "https://api.anthropic.com/v1/messages").message).toBe(
-			"Couldn't reach api.anthropic.com (FailedToOpenSocket). Check the URL, your network, or proxy.",
+		expect(AIError.networkFailureMessage(outer, "https://api.example.com/v1/chat/completions")).toBe(
+			"Couldn't reach api.example.com (FailedToOpenSocket). Check the URL, your network, or proxy.",
 		);
 	});
 
@@ -110,7 +110,7 @@ describe("classifyNetworkCause", () => {
 		for (const err of [new Error("Overloaded"), new TypeError("fetch failed")]) {
 			expect(AIError.classifyNetworkCause(err)).toBeUndefined();
 			expect(AIError.networkFailureError(err, "https://api.openai.com/v1/responses")).toBe(err);
-			expect(new AIError.AnthropicConnectionError(err).message).toBe("Connection error.");
+			expect(AIError.networkFailureMessage(err)).toBeUndefined();
 		}
 	});
 
@@ -125,7 +125,7 @@ describe("classifyNetworkCause", () => {
 
 describe("network failure classification flags", () => {
 	it("keeps every network-failure sentence transient and retryable", () => {
-		const id = AIError.classify(new AIError.AnthropicConnectionError(bunDnsFailure()));
+		const id = AIError.classify(AIError.networkFailureError(bunDnsFailure()));
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
 		expect(AIError.retriable(id)).toBe(true);
 
@@ -134,7 +134,7 @@ describe("network failure classification flags", () => {
 				cause: Object.assign(new Error("connect ENETUNREACH 1.2.3.4:443"), { code: "ENETUNREACH" }),
 			}),
 			// Detail the errno alternatives do not list: coverage must come from the sentence.
-			unreachable: new Error("getaddrinfo EAI_NONAME api.anthropic.com"),
+			unreachable: new Error("getaddrinfo EAI_NONAME api.example.com"),
 			refused: new TypeError("fetch failed", {
 				cause: new AggregateError([
 					Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), { code: "ECONNREFUSED" }),
@@ -146,7 +146,7 @@ describe("network failure classification flags", () => {
 		};
 
 		for (const [kind, cause] of Object.entries(causes) as [AIError.NetworkFailureKind, unknown][]) {
-			const message = AIError.networkFailureMessage(cause, "https://api.anthropic.com/v1/messages");
+			const message = AIError.networkFailureMessage(cause, "https://api.example.com/v1/chat/completions");
 			expect(AIError.classifyNetworkCause(cause)?.kind).toBe(kind);
 			if (message === undefined) throw new Error(`Expected a ${kind} network-failure sentence`);
 			expect(AIError.isProviderRetryableError(new Error(message))).toBe(true);
@@ -154,7 +154,7 @@ describe("network failure classification flags", () => {
 		}
 
 		// Flattened runtime text (no sentence) must stay retryable too.
-		for (const message of [OFFLINE_ANTHROPIC, "getaddrinfo ENOTFOUND api.openai.com", "FailedToOpenSocket"]) {
+		for (const message of [OFFLINE_ENDPOINT, "getaddrinfo ENOTFOUND api.openai.com", "FailedToOpenSocket"]) {
 			expect(AIError.isProviderRetryableError(new Error(message))).toBe(true);
 			expect(AIError.is(AIError.classify(new Error(message)), AIError.Flag.Transient)).toBe(true);
 		}

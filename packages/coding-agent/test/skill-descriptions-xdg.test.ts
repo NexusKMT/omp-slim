@@ -1,10 +1,10 @@
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { __resetProfileSnapshotForTests, getAgentDir, setAgentDir, Snowflake } from "@oh-my-pi/pi-utils";
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, spyOn, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { __resetProfileSnapshotForTests, getAgentDir, Snowflake, setAgentDir } from "@oh-my-pi/pi-utils";
 import { ModelRegistry } from "../src/config/model-registry";
 import { Settings } from "../src/config/settings";
 import {
@@ -18,7 +18,7 @@ import type { Skill } from "../src/extensibility/skills";
 import type { AuthStorage } from "../src/session/auth-storage";
 import { CostCapError, type CostGateApi } from "../src/session/cost-gate";
 import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/agent-session-setup";
-import { getBundledModel } from "./helpers/bundled-model";
+import { createTestModel } from "./helpers/test-model";
 
 const ENV_KEYS = ["PI_CONFIG_DIR", "PI_CODING_AGENT_DIR", "XDG_DATA_HOME"] as const;
 
@@ -154,7 +154,7 @@ describe("skill description failure caching and shutdown", () => {
 		const settings = Settings.isolated({});
 		const registry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"), { settings });
 		const compressor = createSkillDescriptionCompressor(registry, {
-			getModel: () => getBundledModel("anthropic", "claude-sonnet-4-5"),
+			getModel: () => createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
 			completeImpl: async () => ({
 				...createAssistantMessage(compressed),
 				stopReason,

@@ -39,7 +39,6 @@
     "lint": "oxlint .",
     "fix": "oxlint --fix --fix-suggestions . && bun run fmt",
     "fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{examples,scripts}/**/*.ts' '*.ts'",
-    "gen:npm": "bun scripts/gen-npm-packages.ts",
     "test": "bun test --parallel"
   },
   "devDependencies": {

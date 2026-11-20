@@ -1,9 +1,11 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as os from "node:os";
-import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import {
+	DEFAULT_TAB_WIDTH,
+	getKeybindings,
+	setKeybindings,
+	type KeybindingsManager as TuiKeybindingsManager,
+} from "@oh-my-pi/pi-tui";
 import { KeybindingsManager, setKeyHintPlatform } from "@oh-my-pi/pi-tui/app-keybindings";
-import { getThemeByName, initTheme, type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import {
 	dedupeParseErrors,
 	expandKeyHint,
@@ -12,28 +14,26 @@ import {
 	formatDiagnostics,
 	formatErrorMessage,
 	formatExpandHint,
+	formatFeedModelBadge,
 	formatParseErrors,
 	formatStyledPath,
-	formatFeedModelBadge,
 	PREVIEW_LIMITS,
 	resolveImageOptions,
-	setInlineImageMaxColumns,
-	setInlineImageMaxRows,
 	sanitizeDisplayLines,
 	sanitizeDisplayWarning,
 	sanitizeDisplayWarnings,
+	setInlineImageMaxColumns,
+	setInlineImageMaxRows,
 	shortenEmbeddedPaths,
 	shortenPath,
 	shortenToolArgumentPaths,
 	TRUNCATE_LENGTHS,
 	truncateDiffByHunk,
 } from "@oh-my-pi/pi-tui/render/render-utils";
-import {
-	DEFAULT_TAB_WIDTH,
-	getKeybindings,
-	setKeybindings,
-	type KeybindingsManager as TuiKeybindingsManager,
-} from "@oh-my-pi/pi-tui";
+import { getThemeByName, initTheme, type Theme, theme } from "@oh-my-pi/pi-tui/theme";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as os from "node:os";
+import * as path from "node:path";
 
 describe("embedded home path normalization", () => {
 	it("shortens every adjacent home path in path lists", () => {
@@ -137,65 +137,44 @@ describe("feed model badges", () => {
 
 	it("preserves literal effort-like model suffixes and uses only explicit thinking metadata", () => {
 		const glyph = uiTheme.thinking.high.split(" ")[0];
-		expect(Bun.stripANSI(formatFeedModelBadge("custom:model:max", undefined, false, uiTheme))).toBe(
-			"custom:model:max",
+		expect(Bun.stripANSI(formatFeedModelBadge("custom:model:max", undefined, uiTheme))).toBe("custom:model:max");
+		expect(Bun.stripANSI(formatFeedModelBadge("custom:model:max", ThinkingLevel.High, uiTheme))).toBe(
+			`${glyph} custom:model:max`,
 		);
-		expect(Bun.stripANSI(formatFeedModelBadge("custom:model:max", ThinkingLevel.High, true, uiTheme))).toBe(
-			`${glyph} custom:model:max ${uiTheme.icon.advisor}`,
-		);
-		expect(formatFeedModelBadge("custom:model:max", ThinkingLevel.High, true, uiTheme)).toBe(
-			uiTheme.fg("accent", `${glyph} `) + uiTheme.fg("dim", `custom:model:max ${uiTheme.icon.advisor}`),
+		expect(formatFeedModelBadge("custom:model:max", ThinkingLevel.High, uiTheme)).toBe(
+			uiTheme.fg("accent", `${glyph} `) + uiTheme.fg("dim", `custom:model:max`),
 		);
 		expect(uiTheme.fg("accent", glyph)).not.toBe(uiTheme.fg("dim", glyph));
-		expect(Bun.stripANSI(formatFeedModelBadge("custom:model:auto", ThinkingLevel.Inherit, false, uiTheme))).toBe(
+		expect(Bun.stripANSI(formatFeedModelBadge("custom:model:auto", ThinkingLevel.Inherit, uiTheme))).toBe(
 			"custom:model:auto",
 		);
 	});
 
 	it("ignores unknown runtime thinking levels without changing the model identity", () => {
 		for (const level of ["future-level", "toString"]) {
-			expect(Bun.stripANSI(formatFeedModelBadge("custom:model:max", level as ThinkingLevel, true, uiTheme))).toBe(
-				`custom:model:max ${uiTheme.icon.advisor}`,
+			expect(Bun.stripANSI(formatFeedModelBadge("custom:model:max", level as ThinkingLevel, uiTheme))).toBe(
+				`custom:model:max`,
 			);
 		}
 	});
 
 	it("removes terminal controls and collapses whitespace into a single model row", () => {
-		const badge = formatFeedModelBadge("\x1b[31mcustom\tmodel\nname\x1b[0m", undefined, false, uiTheme);
+		const badge = formatFeedModelBadge("\x1b[31mcustom\tmodel\nname\x1b[0m", undefined, uiTheme);
 		expect(badge).not.toContain("\x1b[31m");
 		expect(Bun.stripANSI(badge)).toBe("custom model name");
-		expect(formatFeedModelBadge("\t\n\x1b[31m", undefined, true, uiTheme)).toBe("");
+		expect(formatFeedModelBadge("\t\n\x1b[31m", undefined, uiTheme)).toBe("");
 	});
-
-	it("preserves disambiguating model tails and reserves advisor space when truncating wide names", () => {
-		const badge = Bun.stripANSI(
-			formatFeedModelBadge(`provider/${"界".repeat(20)}-variant-b`, ThinkingLevel.High, true, uiTheme, 24),
-		);
-		expect(badge).toContain("…");
-		expect(badge.endsWith(`variant-b ${uiTheme.icon.advisor}`)).toBe(true);
-		expect(Bun.stringWidth(badge)).toBeLessThanOrEqual(24);
-	});
-
 	it("never overflows tiny budgets even when glyphs leave no room for a model", () => {
 		for (let width = 0; width <= 8; width++) {
-			const badge = formatFeedModelBadge("provider/界界界-version", ThinkingLevel.Off, true, uiTheme, width);
+			const badge = formatFeedModelBadge("provider/界界界-version", ThinkingLevel.Off, uiTheme, width);
 			expect(Bun.stringWidth(badge)).toBeLessThanOrEqual(width);
 		}
 		const glyph = uiTheme.thinking.high.split(" ")[0];
-		const advisor = uiTheme.icon.advisor;
-		const advisorWidth = Bun.stringWidth(advisor);
-		const iconsWidth = Bun.stringWidth(`${glyph} ${advisor}`);
-		expect(Bun.stripANSI(formatFeedModelBadge("model", ThinkingLevel.High, true, uiTheme, advisorWidth))).toBe(
-			advisor,
+		expect(Bun.stripANSI(formatFeedModelBadge("model", ThinkingLevel.High, uiTheme, Bun.stringWidth(glyph)))).toBe(
+			glyph,
 		);
-		expect(Bun.stripANSI(formatFeedModelBadge("model", ThinkingLevel.High, true, uiTheme, iconsWidth))).toBe(
-			`${glyph} ${advisor}`,
-		);
-		expect(
-			Bun.stripANSI(formatFeedModelBadge("model", ThinkingLevel.High, false, uiTheme, Bun.stringWidth(glyph))),
-		).toBe(glyph);
-		expect(formatFeedModelBadge("model", ThinkingLevel.High, true, uiTheme, 0)).toBe("");
-		expect(formatFeedModelBadge(undefined, ThinkingLevel.High, true, uiTheme)).toBe("");
+		expect(formatFeedModelBadge("model", ThinkingLevel.High, uiTheme, 0)).toBe("");
+		expect(formatFeedModelBadge(undefined, ThinkingLevel.High, uiTheme)).toBe("");
 	});
 });
 

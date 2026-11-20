@@ -63,18 +63,6 @@
       "types": "./src/async/*.ts",
       "import": "./src/async/*.ts"
     },
-    "./autoresearch": {
-      "types": "./src/autoresearch/index.ts",
-      "import": "./src/autoresearch/index.ts"
-    },
-    "./autoresearch/*": {
-      "types": "./src/autoresearch/*.ts",
-      "import": "./src/autoresearch/*.ts"
-    },
-    "./autoresearch/tools/*": {
-      "types": "./src/autoresearch/tools/*.ts",
-      "import": "./src/autoresearch/tools/*.ts"
-    },
     "./capability": {
       "types": "./src/capability/index.ts",
       "import": "./src/capability/index.ts"

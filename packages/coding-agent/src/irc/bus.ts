@@ -218,23 +218,7 @@ export class IrcBus implements IrcBusApi {
 				error: `Unknown agent "${message.to}" — check the subagent roster or read history:// for known peers.`,
 			};
 		}
-		// Advisor refs are observability-only transcripts, never messageable peers.
-		if (ref.kind === "advisor") {
-			return {
-				to: message.to,
-				outcome: "failed",
-				error: `Agent "${message.to}" is a read-only advisor transcript and cannot be messaged.`,
-			};
-		}
 
-		// A `parked` or killed (`aborted`) recipient always needs the lifecycle to
-		// revive it from its transcript — this is read from *this* bus's registry,
-		// so it holds for any registry. The mid-park / adopted checks below query
-		// the lifecycle's own state, which only describes the registry it manages:
-		// consult them only when the lifecycle owns this bus's registry, otherwise
-		// a custom-registry bus (fallen back to the global manager) would gate a
-		// live recipient on unrelated global park state. Main/non-adopted live
-		// peers skip the gate, and pending waiters still win without a session.
 		const lifecycle = this.#lifecycle();
 		const lifecycleOwnsRegistry = lifecycle.manages(this.#registry);
 		const needsLifecycleGate =

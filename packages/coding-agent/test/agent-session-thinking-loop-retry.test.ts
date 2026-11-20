@@ -1,4 +1,3 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions, TextContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
@@ -10,6 +9,7 @@ import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { type CustomMessage, convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { mockSchedulerWaitWithClock } from "./helpers/mock-scheduler-clock";
 
 function emptyUsage(): AssistantMessage["usage"] {
@@ -114,7 +114,7 @@ describe("AgentSession thinking-loop retry", () => {
 			"retry.modelFallback": false,
 			"todo.enabled": false,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),
@@ -169,7 +169,7 @@ describe("AgentSession thinking-loop retry", () => {
 			"todo.enabled": false,
 			"model.loopGuard.enabled": true,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),
@@ -236,7 +236,7 @@ describe("AgentSession thinking-loop retry", () => {
 			"todo.enabled": false,
 			"model.loopGuard.enabled": true,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),

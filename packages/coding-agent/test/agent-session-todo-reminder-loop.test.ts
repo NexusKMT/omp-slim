@@ -1,7 +1,5 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, TextContent, ToolCall } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -9,7 +7,9 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TodoTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { cfgTodoEnabled, cfgTodoReminders } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 /**
  * Regression coverage for issue #2590: `#checkTodoCompletion` used to schedule
@@ -114,7 +114,7 @@ describe("AgentSession todo reminder self-continuation suppression", () => {
 		tempDir = TempDir.createSync("@pi-todo-reminder-loop-");
 		sessionManager = SessionManager.inMemory(tempDir.path());
 
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 
 		const settings = Settings.isolated({

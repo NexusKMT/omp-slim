@@ -11,11 +11,9 @@
  *  3. End to end on a real session: a job that finishes after the wait was
  *     ended lands in context and does not start a model turn.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../../helpers/bundled-model";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -29,7 +27,9 @@ import * as titleGenerator from "@oh-my-pi/pi-coding-agent/utils/title-generator
 import { TERMINAL } from "@oh-my-pi/pi-tui";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { createInteractiveModeContext } from "../../helpers/interactive-mode-context";
+import { createTestModel } from "../../helpers/test-model";
 
 type AgentEnd = Extract<AgentSessionEvent, { type: "agent_end" }>;
 
@@ -199,7 +199,7 @@ describe("EventController — ending the wait on a real session", () => {
 
 	it("folds a job result that lands after the wait was ended into context without starting a turn", async () => {
 		tempDir = TempDir.createSync("@pi-async-wait-esc-");
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 		const mock = createMockModel({
 			responses: [{ content: ["job started"], stopReason: "stop" }],

@@ -4,19 +4,18 @@
  * {@link TranscriptPresentationState}.
  */
 import type { TspProps, TspSpan, TspText } from "@oh-my-pi/pi-wire";
-import { type Component, Container, ownDescription } from "../tui";
-import { theme } from "../theme";
-import { truncateToWidth } from "../render";
-import { card, col, node, span, text, withHidden } from "../native/describe";
-import { type DescribeContext, type NativeNode, type NativeUiEvent, rootToggleExpanded } from "../native/node";
-import { Memo } from "../native/memo";
-import { plainLine, plainText, spansLine } from "../native/spans";
 import type { AnimationFrame, CompactTranscriptBlock } from "../chrome/transcript-container";
+import { card, col, node, span, text, withHidden } from "../native/describe";
+import { Memo } from "../native/memo";
+import { type DescribeContext, type NativeNode, type NativeUiEvent, rootToggleExpanded } from "../native/node";
+import { plainLine, plainText, spansLine } from "../native/spans";
+import { truncateToWidth } from "../render";
+import { theme } from "../theme";
 import type { DaemonSnapshot } from "../tools/daemon";
+import { type Component, Container, ownDescription } from "../tui";
 import type { TranscriptBlock, TranscriptPresentation, TranscriptPresenter } from "./extension-types";
 import type { LateDiagnosticsFile } from "./late-diagnostics-message";
 import {
-	type AdvisorMessageDetails,
 	type BashExecutionMessage,
 	type CustomMessage,
 	type HookMessage,
@@ -438,12 +437,6 @@ function blockHead(block: WrappedTranscriptBlock): BlockHead {
 			: { terminal, name: "eval", role: "omp.eval", title: "Python", target: source };
 	}
 	switch (message.customType) {
-		case "advisor": {
-			const notes = (message.details as AdvisorMessageDetails | undefined)?.notes ?? [];
-			const blockers = notes.filter(note => note.severity === "blocker").length;
-			const tally = `${countOf(notes.length, "note")}${blockers > 0 ? ` · ${countOf(blockers, "blocker")}` : ""}`;
-			return plainHead("advisor", "omp.advisor", "Advisor", tally);
-		}
 		case SKILL_PROMPT_MESSAGE_TYPE: {
 			const name = (message.details as SkillPromptDetails | undefined)?.name?.trim() || "unknown";
 			return plainHead("skill", "omp.skill", "Skill", name);
@@ -504,12 +497,6 @@ interface WrappedComponent extends Component, CompactTranscriptBlock {
 	setTranscriptAllocation?(rows: number, frame: AnimationFrame): void;
 }
 
-/**
- * A non-tool transcript block (advisor, skill, late diagnostics, `!`/`$` run, background job,
- * supervised process, TTSR, todo reminder) with the presenters' answer applied around the
- * component that draws it. In full it draws and describes as `inner` does; expansion, native
- * events, tool-activity visibility and finalization reach `inner`.
- */
 export class PresentedBlock<T extends WrappedComponent = WrappedComponent>
 	extends Container
 	implements TranscriptPresentable

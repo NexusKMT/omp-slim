@@ -13,6 +13,8 @@
 
 ### Removed
 
+- Removed Claude and Jev tokenizer reconstructions, vocabularies, native enum variants and their research/packing tools.
+
 - Restricted build and runtime targets to macOS and Linux x64.
 - Removed the unused Apple Foundation Models bridge and update-only binary patch bindings.
 - Removed the Bazel build system, hermetic cross toolchains, and Bazel CI caching. Native addons now build only through the host Cargo/napi-rs path in `build-bindings.ts`, which stamps, installs, regenerates bindings, and load-probes the addon.

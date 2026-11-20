@@ -1,11 +1,11 @@
-import { describe, expect, it } from "bun:test";
 import type { ScopedModel } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { buildModelScopeNotification } from "@oh-my-pi/pi-coding-agent/main";
-import { getBundledModel } from "./helpers/bundled-model";
+import { describe, expect, it } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 function scopedModel(id: string): ScopedModel {
 	return {
-		model: getBundledModel("anthropic", id),
+		model: createTestModel({ provider: "anthropic", id: id }),
 		explicitThinkingLevel: false,
 	};
 }

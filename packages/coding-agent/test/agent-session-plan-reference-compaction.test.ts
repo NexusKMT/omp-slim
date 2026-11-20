@@ -13,15 +13,14 @@
  * MUST carry the approved plan reference again (re-read from disk).
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { TextContent } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { getBundledModel } from "./helpers/bundled-model";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { ModelRegistry } from "../src/config/model-registry";
 import { Settings } from "../src/config/settings";
 import { resolveLocalUrlToPath } from "../src/internal-urls";
@@ -29,6 +28,7 @@ import { AgentSession } from "../src/session/agent-session";
 import { AuthStorage } from "../src/session/auth-storage";
 import { convertToLlm } from "../src/session/messages";
 import { SessionManager } from "../src/session/session-manager";
+import { createTestModel } from "./helpers/test-model";
 
 type ObservedPromptCall = { callIndex: number; messageTexts: string[] };
 
@@ -147,7 +147,7 @@ describe("AgentSession approved-plan reference re-injection after compaction (is
 			resolve: (call: ObservedPromptCall) => void;
 		}> = [];
 
-		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!bundled) throw new Error("Expected claude-sonnet-4-5 model to exist");
 		// Pin the context window so the fixed 191k high-usage turn stays above the
 		// compaction threshold across catalog regenerations: claude-sonnet-4-5's

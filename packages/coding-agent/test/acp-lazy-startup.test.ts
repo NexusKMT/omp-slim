@@ -1,5 +1,3 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-ai/build";
 import { lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
@@ -20,13 +18,15 @@ import {
 	type RequestPermissionResponse,
 	type SessionNotification,
 } from "@oh-my-pi/pi-utils/acp";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as path from "node:path";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
-import { cfgAsyncEnabled, cfgAsyncMaxJobs } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import {
 	cfgBashAutoBackgroundEnabled,
 	cfgBashAutoBackgroundThresholdMs,
 } from "@oh-my-pi/pi-coding-agent/exec/settings";
+import { cfgAsyncEnabled, cfgAsyncMaxJobs } from "@oh-my-pi/pi-coding-agent/tools/settings";
 
 const TEST_MODEL: Model = buildModel({
 	id: "claude-sonnet-4-20250514",
@@ -270,10 +270,6 @@ describe("ACP lazy startup", () => {
 			"task.maxConcurrency": 4,
 			"task.maxRecursionDepth": 5,
 			"task.disabledAgents": ["scout"],
-			"task.agentAdvisor": { task: "on" },
-			"advisor.enabled": true,
-			"advisor.syncBacklog": "5",
-			"advisor.immuneTurns": 7,
 			"todo.enabled": false,
 			"todo.reminders": false,
 			"todo.eager": "always",

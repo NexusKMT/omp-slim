@@ -1,8 +1,4 @@
-import { describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel } from "./helpers/bundled-model";
 import { type Args, parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import type { ScopedModel } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
@@ -14,8 +10,12 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { CURRENT_SESSION_VERSION, type SessionHeader } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
-const OPENAI_TEST_MODEL = getBundledModel("openai", "gpt-4o-mini");
+const OPENAI_TEST_MODEL = createTestModel({ provider: "openai", id: "gpt-4o-mini" });
 
 interface ArgsWithPromptCacheKey extends Args {
 	providerPromptCacheKey?: string;

@@ -1,9 +1,9 @@
-import * as path from "node:path";
 import type { ApiKeyResolver, ResolvedApiKey } from "@oh-my-pi/pi-ai";
 import type { AuthApiKeyOptions } from "@oh-my-pi/pi-ai/auth-storage";
 import { buildModel } from "@oh-my-pi/pi-ai/build";
 import type { Api, Model, ModelKind, ModelSpec } from "@oh-my-pi/pi-ai/types";
-import { getAgentDir, isBunTestRuntime } from "@oh-my-pi/pi-utils";
+import { getAgentDir } from "@oh-my-pi/pi-utils";
+import * as path from "node:path";
 import type { AuthStorage } from "../session/auth-storage";
 import {
 	cfgCompactionModelThresholds,
@@ -11,17 +11,17 @@ import {
 	cfgExtendedContext,
 } from "../session/context-settings";
 import { type ApiKeyResolverModel, type ApiKeyResolverOptions, createApiKeyResolver } from "./api-key-resolver";
-import type { ConfigError, ConfigFile } from "./config-file";
 import { matchModelCompactionThreshold } from "./compaction-threshold";
+import type { ConfigError, ConfigFile } from "./config-file";
 import { buildCustomModels, type ManualProviderConfig } from "./custom-models";
 import { cfgDisabledProviders } from "./model-settings";
 import { ModelsConfigFile, validateProviderConfiguration } from "./models-config";
 import type { ModelsConfig } from "./models-config-schema";
 import {
+	createConfigHeaderResolver,
 	invalidateAllCommandConfigs,
 	invalidateCommandConfig,
 	isCommandConfigValue,
-	createConfigHeaderResolver,
 	resolveConfigValue,
 } from "./resolve-config-value";
 import { type Settings, settings } from "./settings";
@@ -205,22 +205,6 @@ export class ModelRegistry {
 				if (config.apiKey) this.authStorage.keys.setConfig(name, config.apiKey);
 		}
 		this.#models = [...this.#providers].flatMap(([name, config]) => buildCustomModels(name, config));
-		if (this.#models.length === 0 && isBunTestRuntime()) {
-			this.#models = [
-				buildModel({
-					id: "claude-sonnet-4-5",
-					name: "claude-sonnet-4-5",
-					provider: "anthropic",
-					api: "openai-completions",
-					baseUrl: "https://example.invalid/v1",
-					reasoning: false,
-					input: ["text", "image"],
-					cost: { input: 0.003, output: 0.015, cacheRead: 0.000375, cacheWrite: 0.00375 },
-					contextWindow: 200_000,
-					maxTokens: 8_192,
-				}),
-			];
-		}
 		for (const model of this.#models) {
 			if (
 				model.contextWindow !== null &&

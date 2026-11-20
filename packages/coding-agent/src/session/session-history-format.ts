@@ -8,6 +8,7 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import { truncateMiddle } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { countNewlines, escapeXmlText, isRecord } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import type {
@@ -19,7 +20,6 @@ import type {
 	HookMessage,
 	PythonExecutionMessage,
 } from "./messages";
-import { truncateMiddle } from "@oh-my-pi/pi-tui/tools/streaming-output";
 
 export interface HistoryFormatOptions {
 	/** Optional H1 prepended to the transcript. */
@@ -28,66 +28,29 @@ export interface HistoryFormatOptions {
 	includeThinking?: boolean;
 	/** Render tool intent comment before tool call lines. */
 	includeToolIntent?: boolean;
-	/** Render watched-session roles as inline `**agent**:` / `**user**:` labels (collapsing consecutive same-role messages) instead of `## ` headings, so a primary transcript embedded inside an advisor turn stays visually distinct. */
+
 	watchedRoles?: boolean;
-	/**
-	 * Expand the primary agent's injected constraint context — plan mode's rules
-	 * (`plan-mode-context`) and the approved plan it implements
-	 * (`plan-mode-reference`) — verbatim instead of as a truncated one-liner,
-	 * wrapped in a `<primary-context>` tag so a reviewer reads it as the primary's
-	 * instructions, not its own. The advisor sets this: a truncated rule (plan
-	 * mode's "NEVER create files … except the plan file") makes it raise false
-	 * blockers. See {@link PRIMARY_CONTEXT_CUSTOM_TYPES}. Other custom messages
-	 * still collapse to a one-liner.
-	 */
+
 	expandPrimaryContext?: boolean;
-	/**
-	 * Append the unified diff (from a tool result's `details.diff`) below
-	 * edit/apply_patch tool lines, instead of just the path. The advisor sets
-	 * this so it sees what changed without re-reading the file. Bounded by the
-	 * same byte budget as expanded tool IO but its own, higher line cap
-	 * ({@link EXPANDED_DIFF_MAX_LINES}): a huge diff is middle-truncated rather
-	 * than admitted whole.
-	 */
+
 	expandEditDiffs?: boolean;
-	/**
-	 * Append bounded tool-result text and, for `ask`, the form it showed.
-	 * Advisor transcripts enable this so reviewers see user decisions and the
-	 * evidence returned by primary tools without admitting unbounded output.
-	 */
+
 	expandToolIO?: boolean;
-	/**
-	 * Transform tool input/output — expanded bodies and one-line previews —
-	 * before any byte, line or character truncation. The advisor passes its
-	 * secret redaction here: a cut through a secret leaves a fragment that no
-	 * later whole-transcript pass can recognize.
-	 */
+
 	transformExpandedToolIO?: ToolIOTransform;
-	/**
-	 * Chunked rendering support: a caller formatting one logical transcript in
-	 * several calls (the advisor's chunked delta render) passes a result index
-	 * built over the WHOLE delta plus one shared consumed-id set, so a toolCall
-	 * finds its toolResult across chunk boundaries and the result is never
-	 * re-rendered as an orphan in a later chunk.
-	 */
+
 	toolResultIndex?: ReadonlyMap<string, ToolResultMessage>;
 	consumedToolCallIds?: Set<string>;
-	/**
-	 * Chunked rendering state: a mutable holder for the watched-role label
-	 * (`**user**:` / `**agent**:`) that ended the previous chunk. Lets a caller
-	 * formatting one logical transcript across several calls (advisor
-	 * multi-message split) keep consecutive same-role collapsing byte-identical
-	 * to the single-block render: pass one object across all chunk calls.
-	 */
+
 	watchedRoleState?: { lastLabel: string | undefined };
 }
 
 /** Max length of the primary-arg summary inside `→ tool(...)` lines. */
 const PRIMARY_ARG_MAX = 120;
-/** Per-tool budget for expanded advisor input/output. */
+
 const EXPANDED_TOOL_IO_MAX_BYTES = 8 * 1024;
 const EXPANDED_TOOL_IO_MAX_LINES = 80;
-/** Diffs get more lines than generic tool IO (same byte cap) so mid-edit hunks reach the advisor. */
+
 const EXPANDED_DIFF_MAX_LINES = 300;
 const EXPANDED_ASK_FIELD_MAX_BYTES = 2 * 1024;
 const EXPANDED_ASK_FIELD_MAX_LINES = 20;
@@ -182,14 +145,6 @@ export function formatToolCallPrimaryArg(
 
 function primaryArgText(name: string, args: Record<string, unknown> | undefined): string {
 	if (!args || typeof args !== "object") return "";
-	// Advisor note is the most informative summary; preserve severity too.
-	if (name === "advise") {
-		const note = typeof args.note === "string" ? args.note : "";
-		const severity = typeof args.severity === "string" ? args.severity : "";
-		if (note && severity) return `${severity}: ${note}`;
-		if (note) return note;
-		if (severity) return severity;
-	}
 	if (name === "grep") {
 		const pattern = primaryArgValue(args.pattern);
 		const paths = primaryArgValue(args.path) || primaryArgValue(args.paths);
@@ -279,7 +234,7 @@ function boundedFencedToolContext(text: string, language: string, maxLines = EXP
 	// A pathological run can make Markdown fences larger than the whole budget.
 	// Use indented code in that case: constant wrapper cost and no delimiter collision.
 	if (longestFence * 2 > EXPANDED_TOOL_IO_MAX_BYTES / 2) {
-		const marker = "[…content elided to fit advisor context…]";
+		const marker = "[…content elided to fit the context limit…]";
 		const truncated = truncateMiddle(text, {
 			maxBytes: EXPANDED_TOOL_IO_MAX_BYTES - Buffer.byteLength(marker) - 2,
 			maxLines,
@@ -375,10 +330,6 @@ function toolCallLine(
 	return base;
 }
 
-/** One line for a user-initiated `!`/`$` execution. Always attributed to the
- *  user: these roles never carry agent-run commands (the model's bash goes
- *  through `toolCall`), so the `user-` prefix makes provenance explicit for the
- *  advisor and history readers regardless of render mode. */
 function executionLine(
 	kind: "bash" | "python",
 	source: string,
@@ -395,19 +346,6 @@ function executionLine(
 	return `→ user-${kind}! ${sourcePreview} ⇒ ${status} · ${lines} ${lines === 1 ? "line" : "lines"}`;
 }
 
-/**
- * Hidden custom messages that inject the primary agent's operative *constraints*
- * — plan mode's rules and the approved plan it implements. A reviewer (the
- * advisor) must read these verbatim; truncating them hides load-bearing
- * exceptions (e.g. plan mode permits exactly one plan file). Every other custom
- * type stays a one-liner.
- *
- * Deliberately excludes `goal-mode-context`: its body carries live budget
- * counters (tokens/seconds used) that change every turn, so it can neither be
- * deduped against a prior copy nor expanded each turn without flooding the
- * reviewer — and its constraints don't drive the file-write misreads this
- * targets.
- */
 export const PRIMARY_CONTEXT_CUSTOM_TYPES: ReadonlySet<string> = new Set(["plan-mode-context", "plan-mode-reference"]);
 
 /**
@@ -497,10 +435,6 @@ export function formatSessionHistoryMarkdown(messages: unknown[], opts?: History
 	// Chunked callers seed the previous chunk's trailing label so collapsing
 	// stays byte-identical to the single-block render.
 	let lastWatchedLabel: string | undefined = opts?.watchedRoleState?.lastLabel;
-	// Emit a watched-mode role label, collapsing consecutive same-role turns
-	// under one label (matching the user/assistant paths). Used for the
-	// user-attributed `!`/`$` execution lines so the advisor never reads them
-	// as agent actions.
 	const pushWatchedRole = (label: string, body: string): void => {
 		if (lastWatchedLabel === label) {
 			lines.push(body, "");

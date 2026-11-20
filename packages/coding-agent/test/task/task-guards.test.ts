@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -9,8 +8,9 @@ import { formatResultOutputFallback } from "@oh-my-pi/pi-coding-agent/task";
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { createSessionDefaults } from "../helpers/session-defaults";
+import { createTestModel } from "../helpers/test-model";
 
 /**
  * Contract: runaway-subagent guards.
@@ -182,7 +182,7 @@ const baseOptions = {
 	id: "subagent-guards",
 	modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 	enableLsp: false,
-	parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+	parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 };
 
 describe("runSubprocess request guards", () => {

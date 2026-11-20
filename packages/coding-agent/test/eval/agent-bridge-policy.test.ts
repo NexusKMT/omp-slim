@@ -1,7 +1,8 @@
+import type { AgentProgress, SingleResult, StructuredSubagentOutput } from "@oh-my-pi/pi-tui/tools/task";
+import { TempDir } from "@oh-my-pi/pi-utils";
 import { afterAll, afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { TempDir } from "@oh-my-pi/pi-utils";
 import { AsyncJobManager } from "../../src/async";
 import { Settings } from "../../src/config/settings";
 import { runEvalAgent, type EvalAgentBridgeOptions, type EvalAgentResult } from "../../src/eval/agent-bridge";
@@ -22,7 +23,6 @@ import * as taskExecutor from "../../src/task/executor";
 import * as isolationRunner from "../../src/task/isolation-runner";
 import { AgentOutputManager } from "../../src/task/output-manager";
 import type { AgentDefinition } from "../../src/task/types";
-import type { AgentProgress, SingleResult, StructuredSubagentOutput } from "@oh-my-pi/pi-tui/tools/task";
 import type { ToolSession } from "../../src/tools";
 
 const taskAgent = {
@@ -439,13 +439,6 @@ describe("runEvalAgent", () => {
 		const order: string[] = [];
 		let disposed = false;
 		const cleanupSession = {
-			prepareForHeadlessAdvisorDrain: () => {
-				order.push("prepare");
-			},
-			waitForAdvisorCatchup: async () => {
-				order.push("catchup");
-				return true;
-			},
 			dispose: async () => {
 				order.push("dispose");
 				disposed = true;

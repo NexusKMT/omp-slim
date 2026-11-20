@@ -1,16 +1,16 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel } from "../helpers/bundled-model";
-import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/router";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { Snowflake } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { execUrlProtocol } from "../helpers/exec-url-protocol";
+import { createTestModel } from "../helpers/test-model";
 
 beforeEach(() => {
 	InternalUrlRouter.instance().register(execUrlProtocol);
@@ -45,7 +45,7 @@ describe("execfs:// tools are exec-gated through the production approval wrapper
 			agentDir: tempDir,
 			sessionManager,
 			settings: Settings.isolated(BASE_SETTINGS),
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

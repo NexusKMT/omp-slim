@@ -45,7 +45,6 @@ export function createGallerySegmentContext(sessionOptions?: GallerySessionOptio
 		loopMode: null,
 		goalMode: null,
 		goalStatusInFooter: true,
-		vibeMode: null,
 		vim: null,
 		usageStats: {
 			input: 12_400,
@@ -91,19 +90,11 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 				{ label: "multiple extension statuses", context: { hookStatuses: ["Indexer ready", "Tests passing"] } },
 			];
 		case "model":
-			return [
-				{ label: "normal" },
-				{ label: "fast + advisor active", session: { fastMode: true, advisorStatus: "running" } },
-				{ label: "advisor warning", session: { advisorStatus: "quota_exhausted" } },
-				{ label: "advisor error", session: { advisorStatus: "error" } },
-				{ label: "advisor paused", session: { advisorStatus: "paused" } },
-				{ label: "advisor done (yielded)", session: { advisorStatus: "running", advisorYielded: true } },
-			];
+			return [{ label: "normal" }];
 		case "mode":
 			return [
 				{ label: "active", context: { planMode: { enabled: true, paused: false } } },
 				{ label: "warning / paused", context: { planMode: { enabled: true, paused: true } } },
-				{ label: "vibe active", context: { planMode: null, vibeMode: { enabled: true } } },
 				{
 					label: "loop active",
 					context: {
@@ -166,9 +157,8 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 			];
 		case "cost":
 			return [
-				{ label: "session and advisor" },
-				{ label: "zero cost", session: { cost: 0, advisorCost: 0 } },
-				{ label: "with subagents", session: { cost: 0.38, advisorCost: 0 }, context: { subagentTreeCost: 1.27 } },
+				{ label: "zero cost", session: { cost: 0 } },
+				{ label: "with subagents", session: { cost: 0.38 }, context: { subagentTreeCost: 1.27 } },
 			];
 		case "context_pct":
 			return [

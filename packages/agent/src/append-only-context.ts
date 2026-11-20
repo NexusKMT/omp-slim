@@ -367,11 +367,6 @@ export class AppendOnlyContextManager {
 			this.#messageDigests = [];
 		}
 
-		// In-place rewrite: trim the log down to the longest byte-stable prefix
-		// that both the previous sync and the new messages share. Bound it by
-		// the current log length because `log.clear()` is public; direct clears
-		// (advisor reset) can leave the sync cursor ahead of the physical log.
-		// Anything past that point will be re-appended below with the new bytes.
 		if (this.#lastSyncCount > 0) {
 			const stableCount = Math.min(this.#longestStablePrefix(normalizedMessages), this.log.length);
 			if (stableCount < this.#lastSyncCount) {

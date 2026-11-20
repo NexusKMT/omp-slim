@@ -67,27 +67,6 @@ export interface AssistantTextRendering {
 	contentOffset: number;
 }
 
-/**
- * One transcript block a {@link TranscriptPresenter} decides the display of. Later omp versions
- * add block types; answer `undefined` for a `type` you do not know.
- *
- * - `toolCall`: a model tool call, `id` its `toolCallId`. `result` arrives with the call's first
- *   result frame; `isPartial` stays true while the call still streams progress.
- * - `message`: a session message drawn as its own block, `id` the decimal `message.timestamp`
- *   (shared by messages recorded in the same millisecond).
- *   `custom` messages with `customType` `"advisor"`, `"skill-prompt"`, `"lsp-late-diagnostic"`,
- *   `"async-result"` or `"launch-completion"`, and `!`/`$` runs (`bashExecution`,
- *   `pythonExecution`). A `!`/`$` run still going has a provisional message and id; it is asked
- *   again with the recorded message once the session records the run. In Tern, late diagnostics
- *   an edit/write card takes are drawn with that card instead, so an `"lsp-late-diagnostic"`
- *   block appears only for the files no card took.
- * - `event`: a TTSR rule hit or an incomplete-todo reminder, shaped like the extension event of
- *   the same `type`. These exist only in the session that raised them; `id` is unique per process.
- *
- * Read-only, and not a copy: `args`, `result`'s `content` and `details`, `message` and `event`
- * are the live objects omp draws the block from, often the session's own message data. Never
- * mutate them: the change would reach the block and possibly the session.
- */
 export type TranscriptBlock =
 	| {
 			readonly type: "toolCall";

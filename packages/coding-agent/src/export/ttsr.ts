@@ -9,10 +9,10 @@
  * model about each completed output ({@link TtsrManager.judgedCandidates}) and
  * delivers a yes as a non-interrupting warning.
  */
-import * as path from "node:path";
 import type { Judge, JudgeOptions, NoulQuestion } from "@oh-my-pi/pi-ai";
-import { AstMatchStrictness, astMatch, countTokens, Encoding } from "@oh-my-pi/pi-natives";
+import { astMatch, AstMatchStrictness, countTokens, Encoding } from "@oh-my-pi/pi-natives";
 import { logger } from "@oh-my-pi/pi-utils";
+import * as path from "node:path";
 import { compileRuleCondition, type Rule } from "../capability/rule";
 import { ensureGrammar } from "../utils/grammars";
 import type { TtsrSettings } from "./ttsr-settings";
@@ -57,21 +57,21 @@ export interface JudgedCandidate {
 /** Yes-probability at or above which a judged rule counts as violated. */
 export const JUDGED_RULE_THRESHOLD = 0.7;
 /**
- * Jev tokens of output content sent per judgment. Jev rejects a judgment branch
- * past ~33k tokens (`max_tokens_exceeded`), and each branch also carries the
+ * Estimated output-content budget per judgment.
+ * The content budget leaves space for the
  * request template, the state keys, the subject and one question.
  */
 export const JUDGED_CONTENT_MAX_TOKENS = 32_000;
 
-/** Longest prefix of `text` within `maxTokens` Jev tokens, never ending on half a surrogate pair. */
-function jevPrefix(text: string, maxTokens: number): string {
-	if (countTokens(text, Encoding.Jev) <= maxTokens) return text;
+/** Longest prefix of `text` within `maxTokens` Estimated tokens, never ending on half a surrogate pair. */
+function contentPrefix(text: string, maxTokens: number): string {
+	if (countTokens(text, Encoding.O200kBase) <= maxTokens) return text;
 	// Counts grow with length up to whole-word jitter, so bisect; `lo` always fits, `hi` never does.
 	let lo = 0;
 	let hi = text.length;
 	while (hi - lo > 1) {
 		const mid = (lo + hi) >>> 1;
-		if (countTokens(text.slice(0, mid), Encoding.Jev) <= maxTokens) lo = mid;
+		if (countTokens(text.slice(0, mid), Encoding.O200kBase) <= maxTokens) lo = mid;
 		else hi = mid;
 	}
 	const last = text.charCodeAt(lo - 1);
@@ -79,7 +79,7 @@ function jevPrefix(text: string, maxTokens: number): string {
 }
 
 /**
- * Ask every candidate's question about `output` in one request — Jev bills the
+ * Ask every candidate's question about `output` in one request — the judge receives the
  * shared state once — and return the rules judged violated. Judge failures
  * propagate to the caller.
  */
@@ -94,7 +94,10 @@ export async function judgeRules(
 		questions[`q${index}`] = { type: "noul", instructions: candidate.question };
 	}
 	const { answers } = await judge.judge(
-		{ state: { output: output.subject, content: jevPrefix(output.content, JUDGED_CONTENT_MAX_TOKENS) }, questions },
+		{
+			state: { output: output.subject, content: contentPrefix(output.content, JUDGED_CONTENT_MAX_TOKENS) },
+			questions,
+		},
 		options,
 	);
 	return candidates

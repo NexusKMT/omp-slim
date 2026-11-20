@@ -1,9 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { Effort } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
@@ -13,7 +8,12 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { cfgDefaultThinkingLevel } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { createSubagentSettings } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createInteractiveModeContext } from "../helpers/interactive-mode-context";
+import { createTestModel } from "../helpers/test-model";
 
 // `defaultThinkingLevel` seeds new sessions. A later write that is not the user's
 // in-process choice (config reload, another omp process, a parent session) must not
@@ -54,7 +54,7 @@ describe("defaultThinkingLevel on running sessions", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings,
-			model: getBundledModel("anthropic", "claude-sonnet-4-5"),
+			model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

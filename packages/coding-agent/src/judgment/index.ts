@@ -15,7 +15,7 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import { isEmbeddedImageContent } from "@oh-my-pi/pi-ai/images/shared";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import { modelKind } from "@oh-my-pi/pi-ai/types";
-import { logger, untilAborted } from "@oh-my-pi/pi-utils";
+import { untilAborted } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
 import type { CostGateApi } from "../session/cost-gate";
@@ -46,9 +46,7 @@ export interface JudgeDeps {
 	costGate?: CostGateApi;
 }
 
-interface JudgmentAttempt extends Omit<JudgmentUsage, "purpose"> {
-	startedAt: number;
-}
+interface JudgmentAttempt extends Omit<JudgmentUsage, "purpose"> {}
 
 /** Session journal surface that records off-transcript model cost; journal-only managers omit it. */
 export type JudgmentUsageLedger = Pick<SessionManager, "appendModelUsage" | "getSessionId" | "getLeafId">;
@@ -106,9 +104,6 @@ export class ChainJudge implements Judge {
 				);
 			}
 		}
-		for (const question of Object.values(request.questions)) {
-			if (question.type === "box") throw new Error("judgment: the current chat model cannot answer box questions");
-		}
 		if (images.length > 0 && !sendsImageInputOnWire(model)) {
 			throw new Error("judgment: the current model does not support images");
 		}
@@ -139,7 +134,6 @@ export class ChainJudge implements Judge {
 						usage: attempt.usage,
 						stopReason: attempt.stopReason,
 						errorMessage: attempt.errorMessage,
-						startedAt: attempt.timestamp,
 					}),
 			});
 			return run(withCandidateSignal(new TextJudge(backend), signal));
@@ -153,8 +147,7 @@ export class ChainJudge implements Judge {
 	}
 
 	#report(attempt: JudgmentAttempt): void {
-		const { startedAt, ...rest } = attempt;
-		const usage: JudgmentUsage = { purpose: this.#deps.purpose, ...rest };
+		const usage: JudgmentUsage = { purpose: this.#deps.purpose, ...attempt };
 		this.#deps.costGate?.record(usage.usage.cost.total);
 		this.#deps.onUsage?.(usage);
 	}

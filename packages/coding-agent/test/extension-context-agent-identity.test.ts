@@ -1,8 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type {
@@ -12,9 +7,12 @@ import type {
 import { type CreateAgentSessionOptions, createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import * as sessionAdvisors from "@oh-my-pi/pi-coding-agent/session/session-advisors";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { Snowflake } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 // Extensions need to know which agent they run in: the same factory is rebound to every
@@ -110,52 +108,4 @@ describe("ExtensionContext.agent", () => {
 	// Advisors share the session's runner for approval enforcement; an extension scoping
 	// tool hooks to the main agent (e.g. injecting hints into tool results) must not act
 	// on the advisor's own investigation (issue #13598).
-	test("an advisor's tool calls report the advisor, not the session's agent", async () => {
-		const RealSessionAdvisors = sessionAdvisors.SessionAdvisors;
-		let advisorTools: AgentTool[] = [];
-		const advisorsSpy = spyOn(sessionAdvisors, "SessionAdvisors").mockImplementation(function (
-			host: sessionAdvisors.SessionAdvisorsHost,
-			options: sessionAdvisors.SessionAdvisorsOptions,
-		) {
-			advisorTools = options.tools ?? [];
-			return new RealSessionAdvisors(host, options);
-		} as never);
-		const seen: Array<{ event: string; toolCallId: string; agent: ExtensionAgentIdentity }> = [];
-		fs.writeFileSync(path.join(tempDir, "probe.txt"), "needle\n");
-		let session: AgentSession;
-		try {
-			session = await createSession(pi => {
-				pi.on("tool_call", (event, ctx) => {
-					seen.push({ event: event.type, toolCallId: event.toolCallId, agent: ctx.agent });
-				});
-				pi.on("tool_result", (event, ctx) => {
-					seen.push({ event: event.type, toolCallId: event.toolCallId, agent: ctx.agent });
-				});
-			});
-		} finally {
-			advisorsSpy.mockRestore();
-		}
-		try {
-			const advisorGrep = advisorTools.find(tool => tool.name === "grep");
-			await advisorGrep!.execute("advisor-call", { pattern: "needle", path: tempDir });
-			await session.getToolByName("read")!.execute("main-call", { path: path.join(tempDir, "probe.txt") });
-		} finally {
-			await session.dispose();
-		}
-
-		const advisor: ExtensionAgentIdentity = {
-			kind: "sub",
-			id: "advisor",
-			name: "advisor",
-			depth: 0,
-			parentId: "Main",
-		};
-		const main: ExtensionAgentIdentity = { kind: "main", id: "Main", name: "main", depth: 0 };
-		expect(seen).toEqual([
-			{ event: "tool_call", toolCallId: "advisor-call", agent: advisor },
-			{ event: "tool_result", toolCallId: "advisor-call", agent: advisor },
-			{ event: "tool_call", toolCallId: "main-call", agent: main },
-			{ event: "tool_result", toolCallId: "main-call", agent: main },
-		]);
-	});
 });

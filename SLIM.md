@@ -51,6 +51,14 @@ after changing profiles must populate the new dependency cache. See the
 [build-performance report](docs/slim-build-performance-2026-11-17.md) for all
 three configurations, validation results and measurement limits.
 
+The 2026-11-20 scope pass removes Auto-QA/report_issue, grievances, Advisors,
+Vibe, Autoresearch, built-in personalities, provider-specific error policies,
+Claude/Jev tokenizer reconstructions and their data, the production test-model
+fallback, session research scripts and upstream publishing machinery. Internal
+model selection uses one model; legacy main-model configuration and session
+entries are read only at migration boundaries. See
+[the scope cleanup report](docs/slim-scope-cleanup-2026-11-20.md) for validation.
+
 ## Development feedback
 
 The goal is to see the effect of each edit quickly. With a verified native
@@ -365,7 +373,6 @@ The historical Sharpshooter-only removal was verified with:
 bun check
 bun test \
   packages/coding-agent/test/settings-manager.test.ts \
-  packages/coding-agent/test/advisor-memory.test.ts \
   packages/coding-agent/test/agent-session-memory-backend.test.ts \
   packages/coding-agent/test/memory-backend-resolve.test.ts \
   packages/coding-agent/test/session-manager/build-context.test.ts \
@@ -397,9 +404,8 @@ Linux standard runners increase from 2 CPUs / 8 GB privately to
 4 CPUs / 16 GB publicly. Standard public runners are free to use.
 
 The manual workflow is `.github/workflows/slim-macos-intel.yml`. Upstream
-workflows are archived in `.github/upstream-workflows/`, outside GitHub's
-workflow discovery directory. Repository Actions can be enabled for this build
-without activating upstream release or cache-warming jobs.
+publishing scripts and archived workflows are removed. The retained manual
+workflows build and validate the downstream source and artifacts.
 
 As verified on 2026-11-10, GitHub still provides Intel macOS runners through
 `macos-15-intel` and `macos-26-intel`. `macos-latest` is arm64, and macOS 14

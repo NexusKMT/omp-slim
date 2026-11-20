@@ -1,17 +1,17 @@
+import { Agent } from "@oh-my-pi/pi-agent-core";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { getActiveProfile, setProfile } from "@oh-my-pi/pi-utils";
 import { vi } from "bun:test";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { getActiveProfile, setProfile } from "@oh-my-pi/pi-utils";
-import { getBundledModel } from "../helpers/bundled-model";
 import { extractProfileFlags } from "../../src/cli/profile-bootstrap";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { InteractiveMode } from "../../src/modes/interactive-mode";
-import { AuthStorage } from "../../src/session/auth-storage";
 import { AgentSession } from "../../src/session/agent-session";
+import { AuthStorage } from "../../src/session/auth-storage";
 import { SessionManager } from "../../src/session/session-manager";
 import * as workerClient from "../../src/subprocess/worker-client";
-import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { createTestModel } from "../helpers/test-model";
 
 if (process.argv[2] === "receive") {
 	const extracted = extractProfileFlags(process.argv.slice(3));
@@ -35,7 +35,7 @@ if (process.argv[2] === "receive") {
 	await Settings.init({ inMemory: true, cwd: process.cwd() });
 	const authStorage = await AuthStorage.create(path.join(process.cwd(), "auth.db"));
 	const modelRegistry = new ModelRegistry(authStorage);
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	const sessionManager = SessionManager.create(process.cwd());
 	sessionManager.appendMessage({ role: "user", content: "profile restart marker", timestamp: Date.now() });
 	await sessionManager.ensureOnDisk();

@@ -1,28 +1,28 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { PreparedExtension } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
-import { createPersistedSubagentReviverFactory } from "@oh-my-pi/pi-coding-agent/task/persisted-revive";
 import { getBundledAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
-import subagentSystemPromptTemplate from "../../src/prompts/system/subagent-system-prompt.md" with { type: "text" };
-import seanceAssignmentTemplate from "../../src/prompts/system/seance-assignment.md" with { type: "text" };
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
-import { TASK_SUBAGENT_LIFECYCLE_CHANNEL } from "@oh-my-pi/pi-coding-agent/task/types";
+import { createPersistedSubagentReviverFactory } from "@oh-my-pi/pi-coding-agent/task/persisted-revive";
 import type { PreparedSeanceSession } from "@oh-my-pi/pi-coding-agent/task/seance";
 import { seanceIsolationOptions } from "@oh-my-pi/pi-coding-agent/task/seance-policy";
+import { TASK_SUBAGENT_LIFECYCLE_CHANNEL } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { getAgentDir, prompt, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import seanceAssignmentTemplate from "../../src/prompts/system/seance-assignment.md" with { type: "text" };
+import subagentSystemPromptTemplate from "../../src/prompts/system/subagent-system-prompt.md" with { type: "text" };
 import { localSession } from "../helpers/local-session";
+import { createTestModel } from "../helpers/test-model";
 
 function preparedSourceSession(sourceFile: string, sourceSessionId: string): PreparedSeanceSession {
 	return {
@@ -107,7 +107,7 @@ function revivalParent(cwd: string, preparedExtensions: PreparedExtension[]): Ag
 			getCwd: () => cwd,
 			getArtifactManager: () => undefined,
 		},
-		model: getBundledModel("anthropic", "claude-sonnet-4-5"),
+		model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
 		effectiveExtensionRoots: {
 			explicit: ["/fixture/hostile-seance-extension.ts"],
 			mode: "explicit-only",
@@ -147,7 +147,7 @@ describe("seance startup contracts", () => {
 		const sourceFile = path.join(tempDir.path(), "source.jsonl");
 		const sourceText = await writeSourceSession(sourceFile, cwd, [sourceRoot]);
 		const forked = await forkSeance(sourceFile, cwd, path.join(tempDir.path(), "forks", "seance.jsonl"));
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected anthropic/claude-sonnet-4-5");
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorage.keys.setRuntime("anthropic", "test-key");
@@ -256,7 +256,7 @@ describe("seance startup contracts", () => {
 				id,
 				settings: Settings.isolated(),
 				modelRegistry,
-				parentModel: getBundledModel("anthropic", "claude-sonnet-4-5"),
+				parentModel: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
 				preparedSession: preparedSourceSession(sourceFile, "source-session"),
 				artifactsDir,
 				preloadedPreparedExtensions: [extension],
@@ -321,7 +321,7 @@ describe("seance startup contracts", () => {
 		try {
 			const seanceAgent = getBundledAgent("seance");
 			if (!seanceAgent) throw new Error("Expected the bundled seance agent");
-			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+			const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 			if (!model) throw new Error("Expected anthropic/claude-sonnet-4-5");
 			const resolvedModel = `${model.provider}/${model.id}`;
 			const subagentPrompt = prompt.render(subagentSystemPromptTemplate, {

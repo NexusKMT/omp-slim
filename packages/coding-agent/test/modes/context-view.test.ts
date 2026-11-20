@@ -1,18 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "../helpers/bundled-model";
-import { Settings } from "../../src/config/settings";
-import { AgentSession } from "../../src/session/agent-session";
-import { SessionManager } from "../../src/session/session-manager";
-import { buildSessionContextView } from "../../src/session/context-view";
-import { buildSystemPrompt } from "../../src/system-prompt";
-import type { Skill } from "../../src/extensibility/skills";
-import { computeSessionContextBreakdown } from "../../src/session/context-usage-runtime";
 import type { ContextViewData } from "@oh-my-pi/pi-tui/chrome/context-view-model";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import { Settings } from "../../src/config/settings";
+import type { Skill } from "../../src/extensibility/skills";
+import { AgentSession } from "../../src/session/agent-session";
+import { computeSessionContextBreakdown } from "../../src/session/context-usage-runtime";
+import { buildSessionContextView } from "../../src/session/context-view";
+import { SessionManager } from "../../src/session/session-manager";
+import { buildSystemPrompt } from "../../src/system-prompt";
+import { createTestModel } from "../helpers/test-model";
 
-const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 const sessions: AgentSession[] = [];
 afterEach(async () => {
 	for (const session of sessions.splice(0)) await session.dispose();
@@ -120,7 +120,6 @@ describe("context snapshot system prompt and skills", () => {
 		];
 		const built = await buildSystemPrompt({
 			cwd: import.meta.dir,
-			personality: "none",
 			activeRepoContext: null,
 			contextFiles: [{ path: "/nonexistent/instructions.md", content: "Unique instruction body" }],
 			skills,

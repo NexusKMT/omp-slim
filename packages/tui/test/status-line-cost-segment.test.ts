@@ -13,7 +13,6 @@ interface CostCtxOptions {
 	/** Task-result portion of `cost`. */
 	subagentCost?: number;
 	subagentTreeCost?: number;
-	advisorCost?: number;
 }
 
 function costCtx(options: CostCtxOptions): SegmentContext {
@@ -30,7 +29,6 @@ function costCtx(options: CostCtxOptions): SegmentContext {
 		subagentTreeCost: options.subagentTreeCost,
 		session: {
 			state: { model: undefined },
-			getAdvisorCost: () => options.advisorCost ?? 0,
 		},
 	} as unknown as SegmentContext;
 }
@@ -48,13 +46,5 @@ describe("cost status-line segment", () => {
 		expect(render({ cost: 0.5, subagentCost: 0.12, subagentTreeCost: 0.05 })).toBe("$0.38 (+0.12)");
 		// No subagent spend: no suffix.
 		expect(render({ cost: 0.38 })).toBe("$0.38");
-	});
-
-	it("never repeats a billing unit symbol across session and advisor spend", () => {
-		const render = (options: Partial<CostCtxOptions>) =>
-			stripVTControlCharacters(renderSegment("cost", costCtx({ ...options })).content);
-		const metered = render({ cost: 0.42, subagentTreeCost: 0.1, advisorCost: 0.08 });
-		expect(metered.split("$")).toHaveLength(2);
-		expect(metered).toMatch(/^\$0\.42 \(\+0\.10\) \+ .*0\.08/);
 	});
 });

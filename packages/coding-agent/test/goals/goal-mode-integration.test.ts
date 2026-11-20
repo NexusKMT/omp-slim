@@ -1,15 +1,10 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getBundledModel } from "../helpers/bundled-model";
 import { GoalTool } from "@oh-my-pi/pi-coding-agent/goals/tools/goal-tool";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
-import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -17,8 +12,13 @@ import { normalizeCustomMessagePayload } from "@oh-my-pi/pi-coding-agent/session
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { createTools, type Tool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import * as vcs from "@oh-my-pi/pi-natives/vcs";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 function createToolSession(cwd: string, settings: Settings, overrides: Partial<ToolSession> = {}): ToolSession {
 	return {
@@ -60,7 +60,7 @@ async function createSharedFixture(): Promise<SharedFixture> {
 	// The real prompt path gates on a resolvable key; never rely on ambient env.
 	authStorage.keys.setRuntime("anthropic", "test-key");
 	const modelRegistry = new ModelRegistry(authStorage);
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	return { authStorage, modelRegistry, model, baseDir };
 }
 
@@ -275,21 +275,6 @@ describe("InteractiveMode goal mode integration", () => {
 		expect(sendPlanModeContext).toHaveBeenCalledWith({ deliverAs: "steer" });
 		expect(promptSpy).toHaveBeenCalledWith(text, { streamingBehavior: "steer", images });
 	});
-
-	it("steers vibe prompt attachments while streaming", async () => {
-		vi.spyOn(harness.session, "activateVibeTools").mockResolvedValue();
-		Object.defineProperty(harness.session, "isStreaming", { configurable: true, get: () => true });
-		const sendVibeModeContext = vi.spyOn(harness.session, "sendVibeModeContext").mockResolvedValue();
-		const promptSpy = vi.spyOn(harness.session, "prompt").mockResolvedValue(true);
-		const images: ImageContent[] = [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }];
-		const text = "[Image #1, 10x10] Delegate this";
-
-		expect(await harness.mode.handleVibeModeCommand(text, { images, imageLinks: ["file:///shot.png"] })).toBe(true);
-
-		expect(sendVibeModeContext).toHaveBeenCalledWith({ deliverAs: "steer" });
-		expect(promptSpy).toHaveBeenCalledWith(text, { streamingBehavior: "steer", images });
-	});
-
 	const attachmentCases: Array<{
 		name: string;
 		text: string;
@@ -314,15 +299,6 @@ describe("InteractiveMode goal mode integration", () => {
 			text: "[Image #1, 10x10] plan this",
 			submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) =>
 				mode.handlePlanModeCommand("[Image #1, 10x10] plan this", input),
-		},
-		{
-			name: "/vibe",
-			text: "[Image #1, 10x10] delegate this",
-			prepare: async mode => {
-				vi.spyOn(mode.session, "activateVibeTools").mockResolvedValue();
-			},
-			submit: (mode: InteractiveMode, input: Pick<SubmittedUserInput, "images" | "imageLinks">) =>
-				mode.handleVibeModeCommand("[Image #1, 10x10] delegate this", input),
 		},
 	];
 

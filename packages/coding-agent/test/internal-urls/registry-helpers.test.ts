@@ -6,10 +6,6 @@
  * and false otherwise, without ever throwing. Follow-up hints in
  * `task/index.ts` gate their `history://` links on it.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import {
 	hasResolvableTranscript,
 	registerArtifactsDir,
@@ -18,6 +14,10 @@ import {
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 function fakeLiveSession(): AgentSession {
 	return { messages: [] } as unknown as AgentSession;
@@ -118,16 +118,5 @@ describe("hasResolvableTranscript", () => {
 		} finally {
 			await removeWithRetries(dir);
 		}
-	});
-
-	it("excludes advisor refs, matching history:// visibility", async () => {
-		AgentRegistry.global().register({
-			id: "__advisor1",
-			displayName: "advisor",
-			kind: "advisor",
-			session: fakeLiveSession(),
-			status: "running",
-		});
-		expect(await hasResolvableTranscript("__advisor1")).toBe(false);
 	});
 });

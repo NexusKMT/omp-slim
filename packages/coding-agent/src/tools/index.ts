@@ -1,14 +1,16 @@
 import type { AgentOptions, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
-import type { EditStore } from "@oh-my-pi/pi-natives";
 import type { FetchImpl, ImageContent, Model, ServiceTierByFamily, ToolChoice } from "@oh-my-pi/pi-ai";
+import type { EditStore } from "@oh-my-pi/pi-natives";
+import { type StructuredSubagentSchemaMode } from "@oh-my-pi/pi-tui/tools/task";
+import { type TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AsyncJobManagerApi } from "../async/job-manager";
 import type { Rule } from "../capability/rule";
 import type { EffectiveExtensionRoots } from "../capability/types";
-import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";
 import { EditTool } from "../edit";
+import type { EvalPreludeDefinition } from "../eval/preludes";
 import { checkPythonKernelAvailability } from "../eval/py/kernel";
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
 import type {
@@ -20,6 +22,7 @@ import type { Skill, SkillRediscoveryHost } from "../extensibility/skills";
 import type { GoalModeState, GoalRuntime } from "../goals";
 import { GoalTool } from "../goals/tools/goal-tool";
 import type { LocalProtocolOptions } from "../internal-urls";
+import { isIrcEnabled } from "../irc/messaging";
 import type { DaemonCompletionNotification } from "../launch/protocol";
 import { LspTool } from "../lsp";
 import type { MCPManagerApi, MCPToolScope } from "../mcp";
@@ -36,7 +39,6 @@ import type { ToolChoiceQueue } from "../session/tool-choice-queue";
 import { TaskTool } from "../task";
 import type { AgentOutputManager } from "../task/output-manager";
 import { type AgentDefinition, canSpawnAtDepth } from "../task/types";
-import { type StructuredSubagentSchemaMode } from "@oh-my-pi/pi-tui/tools/task";
 import type { WorkPoolYieldItem } from "../task/workpool-yield";
 import type { EventBus } from "../utils/event-bus";
 import { WebSearchTool } from "../web/search";
@@ -54,7 +56,6 @@ import { resolveEvalBackends } from "./eval-backends";
 import { GithubTool } from "./gh";
 import { GlobTool } from "./glob";
 import { GrepTool } from "./grep";
-import { isIrcEnabled } from "../irc/messaging";
 import { FindTool, isFindEnabled } from "./jfind";
 import { ManageSkillTool } from "./manage-skill";
 import { wrapToolWithMetaNotice } from "./output-meta";
@@ -62,13 +63,20 @@ import { ReadTool } from "./read";
 import type { PlanProposalHandler } from "./resolve";
 import { SecurityScanTool } from "./security-scan";
 import { supportsExternalThinking, ThinkTool } from "./think";
-import { type TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import { TodoTool } from "./todo";
-import { WriteTool } from "./write";
 import { WaitTool } from "./wait";
+import { WriteTool } from "./write";
 import { isMountableUnderXdev, resolveXdevTool, type XdevState } from "./xdev";
 import { YieldTool } from "./yield";
 
+import { cfgEditMode } from "../edit/settings";
+import { cfgPythonInterpreter } from "../eval/settings";
+import { cfgBashEnabled } from "../exec/settings";
+import { cfgGoalEnabled } from "../goals/settings";
+import { cfgLspEnabled } from "../lsp/settings";
+import { cfgCompactionExperimentalContextManagement } from "../session/context-settings";
+import { cfgExternalThinking } from "../session/settings";
+import { cfgTaskMaxRecursionDepth } from "../task/settings";
 import {
 	cfgAskEnabled,
 	cfgAstEditEnabled,
@@ -85,31 +93,30 @@ import {
 	cfgToolsXdev,
 	cfgWebSearchEnabled,
 } from "./settings";
-import { cfgBashEnabled } from "../exec/settings";
-import { cfgEditMode } from "../edit/settings";
-import { cfgCompactionExperimentalContextManagement } from "../session/context-settings";
-import { cfgPythonInterpreter } from "../eval/settings";
-import { cfgExternalThinking } from "../session/settings";
-import { cfgGoalEnabled } from "../goals/settings";
-import { cfgLspEnabled } from "../lsp/settings";
-import { cfgTaskMaxRecursionDepth } from "../task/settings";
 
+export type {
+	BashRenderArgs,
+	BashRenderContext,
+	BashToolDetails,
+	ShellRendererConfig,
+} from "@oh-my-pi/pi-tui/tools/bash";
+export * from "@oh-my-pi/pi-tui/tools/streaming-output";
+export type {
+	FindingDetails,
+	FindingPriority,
+	FindingPriorityInfo,
+	SubmitReviewDetails,
+} from "@oh-my-pi/pi-tui/tools/task";
+export type { AgentActivitySnapshot, CoordinationDetails, JobSnapshot } from "@oh-my-pi/pi-tui/tools/wait";
 export * from "../edit";
 export * from "../goals";
 export * from "../lsp";
-export * from "@oh-my-pi/pi-tui/tools/streaming-output";
 export * from "../task";
 export * from "../web/search";
 export * from "./ask";
 export * from "./ast-edit";
 export * from "./ast-grep";
 export * from "./bash";
-export type {
-	BashToolDetails,
-	BashRenderArgs,
-	BashRenderContext,
-	ShellRendererConfig,
-} from "@oh-my-pi/pi-tui/tools/bash";
 export * from "./checkpoint";
 export * from "./context-notes";
 export * from "./debug";
@@ -122,23 +129,13 @@ export * from "./gh";
 export * from "./glob";
 export * from "./grep";
 export * from "./jfind";
-export type { AgentActivitySnapshot, CoordinationDetails, JobSnapshot } from "@oh-my-pi/pi-tui/tools/wait";
 export * from "./manage-skill";
 export * from "./read";
-export * from "./report-tool-issue";
 export * from "./resolve";
-export type {
-	FindingPriority,
-	FindingPriorityInfo,
-	FindingDetails,
-	SubmitReviewDetails,
-} from "@oh-my-pi/pi-tui/tools/task";
 export * from "./security-scan";
 export * from "./think";
 export * from "./todo";
-export * from "./vibe";
 export * from "./wait";
-export type { VibeToolDetails } from "@oh-my-pi/pi-tui/tools/vibe";
 export * from "./write";
 export * from "./xdev";
 export * from "./yield";
@@ -321,10 +318,7 @@ export interface ToolSession {
 	getEvalSessionId?: () => string | null;
 	/** Get session file */
 	getSessionFile: () => string | null;
-	/**
-	 * Owning journal; full SDK managers also supply registered identity and the
-	 * cost ledger (`appendModelUsage`) without changing advisor-local IDs.
-	 */
+
 	sessionManager?: Pick<SessionManager, "appendCustomEntry" | "ensureOnDisk" | "flush" | "getBranch" | "getEntries"> &
 		Partial<Pick<SessionManager, "getSessionId" | "getLeafId" | "appendModelUsage" | "getArtifactContent">>;
 	/** Get eval kernel owner ID for session-scoped retained-kernel cleanup. */
@@ -341,7 +335,7 @@ export interface ToolSession {
 	assertEvalExecutionAllowed?: () => void;
 	/** Track tool-owned eval work so session disposal can await/abort it like direct session eval runs. */
 	trackEvalExecution?<T>(execution: Promise<T>, abortController: AbortController): Promise<T>;
-	/** Get tool-state session ID (distinct from the owning session for advisors). */
+
 	getSessionId?: () => string | null;
 	/** Agent identity used for IRC routing. Returns the registry id (e.g. "Main", "AuthLoader"). */
 	getAgentId?: () => string | null;
@@ -889,21 +883,21 @@ export type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
 // package). Re-export it so the pi-tui renderer migration doesn't drop it.
 export { askToolRenderer } from "@oh-my-pi/pi-tui/tools/ask";
 export type {
-	TodoStatus,
-	TodoOperation,
-	TodoItem,
-	TodoPhase,
-	TodoCompletionTransition,
-	TodoToolDetails,
-	CollapsedTodoSelection,
-} from "@oh-my-pi/pi-tui/tools/todo";
-export type { ThinkRenderArgs } from "@oh-my-pi/pi-tui/tools/think";
-export type { ResolutionDeviceName, ResolveDetails } from "@oh-my-pi/pi-tui/tools/resolve";
-export type {
-	GhToolDetails,
 	GhPrCheckoutSummary,
+	GhRunWatchFailedLogDetails,
 	GhRunWatchJobDetails,
 	GhRunWatchRunDetails,
-	GhRunWatchFailedLogDetails,
 	GhRunWatchViewDetails,
+	GhToolDetails,
 } from "@oh-my-pi/pi-tui/tools/github";
+export type { ResolutionDeviceName, ResolveDetails } from "@oh-my-pi/pi-tui/tools/resolve";
+export type { ThinkRenderArgs } from "@oh-my-pi/pi-tui/tools/think";
+export type {
+	CollapsedTodoSelection,
+	TodoCompletionTransition,
+	TodoItem,
+	TodoOperation,
+	TodoPhase,
+	TodoStatus,
+	TodoToolDetails,
+} from "@oh-my-pi/pi-tui/tools/todo";

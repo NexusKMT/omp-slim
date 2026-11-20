@@ -1,19 +1,19 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { getBundledModel } from "./helpers/bundled-model";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
-import * as loopCondition from "@oh-my-pi/pi-coding-agent/modes/loop-condition";
 import type { LoopConditionVerdict } from "@oh-my-pi/pi-coding-agent/modes/loop-condition";
-import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import * as loopCondition from "@oh-my-pi/pi-coding-agent/modes/loop-condition";
 import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 import { cfgLoopMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 
@@ -37,7 +37,7 @@ describe("InteractiveMode loop auto-submit", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 
 		session = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),
@@ -63,7 +63,6 @@ describe("InteractiveMode loop auto-submit", () => {
 		}
 		await pendingInput;
 		pendingInput = undefined;
-		mode.vibeModeEnabled = false;
 		Reflect.deleteProperty(session, "isCompacting");
 		Reflect.deleteProperty(session, "isStreaming");
 		Reflect.deleteProperty(session, "hasPostPromptWork");
@@ -160,27 +159,6 @@ describe("InteractiveMode loop auto-submit", () => {
 		expect(resolved).toHaveLength(1);
 		expect(resolved[0].text).toBe("deliver this");
 	});
-
-	it("disables reset loops when vibe blocks the session transition", async () => {
-		vi.useFakeTimers();
-		cfgLoopMode.set(settings, "reset");
-		mode.vibeModeEnabled = true;
-		mode.loopModeEnabled = true;
-		mode.loopPrompt = "do not resubmit";
-		const showStatus = vi.spyOn(mode, "showStatus");
-		const resolved: SubmittedUserInput[] = [];
-		pendingInput = mode.getUserInput();
-		void pendingInput.then(input => resolved.push(input));
-
-		vi.advanceTimersByTime(800);
-		await flushMicrotasks();
-
-		expect(resolved).toHaveLength(0);
-		expect(mode.loopModeEnabled).toBe(false);
-		expect(mode.loopPrompt).toBeUndefined();
-		expect(showStatus).toHaveBeenCalledWith("Exit vibe mode before using reset loops. Loop mode disabled.");
-	});
-
 	it("reports waiting, running, paused, resumed, and disabled loop states", async () => {
 		const setLoopModeStatus = vi.spyOn(mode.statusLine, "setLoopModeStatus");
 
@@ -369,70 +347,10 @@ describe("InteractiveMode loop auto-submit", () => {
 		// warn while the iteration still submitted without resetting. Goes
 		// through the real /vibe command so the vibeModeEnabled transition is
 		// exercised instead of assigned directly.
-		it("disables a reset loop when vibe is enabled while the condition is in flight", async () => {
-			vi.useFakeTimers();
-			cfgLoopMode.set(settings, "reset");
-			idleSession();
-			const pending = Promise.withResolvers<LoopConditionVerdict>();
-			vi.spyOn(loopCondition, "evaluateLoopCondition").mockImplementation(async () => await pending.promise);
-			const clear = vi.spyOn(mode, "handleClearCommand");
-			const showStatus = vi.spyOn(mode, "showStatus");
-			vi.spyOn(session, "activateVibeTools").mockResolvedValue();
-			mode.loopCondition = { command: "sleep 30", until: false };
-
-			const resolved = armLoop("reset me");
-			vi.advanceTimersByTime(800);
-			await flushMicrotasks();
-
-			await mode.handleVibeModeCommand();
-			expect(mode.vibeModeEnabled).toBe(true);
-			pending.resolve({ kind: "continue" });
-			await flushMicrotasks();
-
-			expect(clear).not.toHaveBeenCalled();
-			expect(resolved).toHaveLength(0);
-			expect(mode.loopModeEnabled).toBe(false);
-			expect(mode.loopPrompt).toBeUndefined();
-			expect(showStatus).toHaveBeenCalledWith("Exit vibe mode before using reset loops. Loop mode disabled.");
-		});
-
 		// The condition can resolve while /vibe tool activation is still in
 		// flight: vibeModeEnabled is still false, but the reset must not run
 		// concurrently with the toolset switch. The loop must disable on the
 		// entering transition, not just the settled flag.
-		it("disables a reset loop when the condition resolves during vibe activation", async () => {
-			vi.useFakeTimers();
-			cfgLoopMode.set(settings, "reset");
-			idleSession();
-			const pending = Promise.withResolvers<LoopConditionVerdict>();
-			vi.spyOn(loopCondition, "evaluateLoopCondition").mockImplementation(async () => await pending.promise);
-			const clear = vi.spyOn(mode, "handleClearCommand");
-			const showStatus = vi.spyOn(mode, "showStatus");
-			const vibeGate = Promise.withResolvers<void>();
-			vi.spyOn(session, "activateVibeTools").mockImplementation(() => vibeGate.promise);
-			mode.loopCondition = { command: "sleep 30", until: false };
-
-			const resolved = armLoop("reset me");
-			vi.advanceTimersByTime(800);
-			await flushMicrotasks();
-
-			const vibeEnter = mode.handleVibeModeCommand();
-			await flushMicrotasks();
-			expect(mode.vibeModeEnabled).toBe(false);
-
-			pending.resolve({ kind: "continue" });
-			await flushMicrotasks();
-
-			expect(clear).not.toHaveBeenCalled();
-			expect(resolved).toHaveLength(0);
-			expect(mode.loopModeEnabled).toBe(false);
-			expect(mode.loopPrompt).toBeUndefined();
-			expect(showStatus).toHaveBeenCalledWith("Exit vibe mode before using reset loops. Loop mode disabled.");
-
-			vibeGate.resolve();
-			await vibeEnter;
-			expect(mode.vibeModeEnabled).toBe(true);
-		});
 	});
 
 	it("resubmits a /skill: prompt dispatched inline by the submit handler", async () => {

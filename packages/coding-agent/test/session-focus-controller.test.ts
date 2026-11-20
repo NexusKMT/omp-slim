@@ -1,15 +1,15 @@
-import { beforeAll, describe, expect, it } from "bun:test";
-import { Container } from "@oh-my-pi/pi-tui";
 import {
 	pickRecentFocusableAgentId,
 	SessionFocusController,
 } from "@oh-my-pi/pi-coding-agent/modes/controllers/session-focus-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID, type AgentRef } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
+import { Container } from "@oh-my-pi/pi-tui";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { beforeAll, describe, expect, it } from "bun:test";
 
 interface SessionStub {
 	session: AgentSession;
@@ -819,25 +819,10 @@ describe("pickRecentFocusableAgentId", () => {
 		expect(pickRecentFocusableAgentId(refs)).toBe("Live");
 		expect(pickRecentFocusableAgentId(refs.filter(r => r.id !== "Live"))).toBe("Parked");
 	});
-
-	it("skips the main session, advisors, and aborted agents", () => {
-		const refs = [
-			ref(MAIN_AGENT_ID, { kind: "main", lastActivity: 9000 }),
-			ref("Advisor", { kind: "advisor", lastActivity: 8000 }),
-			ref("Dead", { status: "aborted", lastActivity: 7000 }),
-			ref("Worker", { status: "idle", lastActivity: 1000 }),
-		];
-		expect(pickRecentFocusableAgentId(refs)).toBe("Worker");
-	});
-
 	it("returns undefined when no agent has a focusable session state", () => {
 		expect(pickRecentFocusableAgentId([])).toBeUndefined();
 		expect(
-			pickRecentFocusableAgentId([
-				ref(MAIN_AGENT_ID, { kind: "main" }),
-				ref("Advisor", { kind: "advisor" }),
-				ref("Dead", { status: "aborted" }),
-			]),
+			pickRecentFocusableAgentId([ref(MAIN_AGENT_ID, { kind: "main" }), ref("Dead", { status: "aborted" })]),
 		).toBeUndefined();
 	});
 

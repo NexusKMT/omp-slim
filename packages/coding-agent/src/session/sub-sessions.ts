@@ -1,24 +1,14 @@
-/**
- * Subagent session discovery shared by `/export` (HTML) and `/dump all` (zip of text dumps).
- *
- * A session at `<dir>/<name>.jsonl` keeps its subagent sessions at `<dir>/<name>/<AgentId>.jsonl`;
- * each subagent's own children nest the same way under `<dir>/<name>/<AgentId>/`. Advisor
- * transcripts (`__advisor*.jsonl`) share those directories and are only collected when
- * requested. Read-only exports can also include gc-compressed `.jsonl.gz` transcripts.
- */
+import { isEnoent } from "@oh-my-pi/pi-utils";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
-import { isAdvisorTranscriptName } from "../advisor/transcript-recorder";
 import { getAgentTombstonePath } from "../registry/agent-tombstone";
 import { resolveSessionLeafId, type SessionEntry, type SessionHeader } from "./session-entries";
 import { loadSessionFile, parseSessionContent, type SessionLoadResult } from "./session-loader";
 
 const utf8Decoder = new TextDecoder();
 
-/** Persisted child transcript (subagent or opted-in advisor), keyed by slash-joined path. */
 export interface SubSession {
-	/** Transcript stem, e.g. "ToolAsk" or "__advisor.reviewer". */
+	/** Subagent transcript stem, for example "ToolAsk". */
 	agentId: string;
 	/** Key of the parent sub-session, or null when spawned by the main session. */
 	parent: string | null;
@@ -37,20 +27,10 @@ export type UnreadableSubSessionHandler = (key: string) => void;
 /** Read-only discovery scope and malformed-transcript reporting for child collectors. */
 export interface CollectSubSessionsOptions {
 	onUnreadable?: UnreadableSubSessionHandler;
-	/** Include advisor transcripts for read-only exports, never task restoration. */
-	includeAdvisors?: boolean;
 	/** Include gc-compressed transcripts for read-only exports. */
 	includeCompressed?: boolean;
 }
 
-/**
- * Collect subagent session transcripts stored next to a session file.
- *
- * Keys in the returned record are slash-joined ids relative to the main session
- * ("ToolAsk", "ToolAsk/Helper"). Empty files are skipped silently; corrupt ones
- * are skipped and reported to `onUnreadable`. Advisors and compressed transcripts
- * are opt-in, so task restoration and text dumps retain their subagent-only scope.
- */
 export async function collectSubSessions(
 	sessionFile: string,
 	options: CollectSubSessionsOptions = {},
@@ -98,14 +78,10 @@ async function collectSubSessionsFromDir(
 		const compressed = name.endsWith(".jsonl.gz");
 		if (compressed && !options.includeCompressed) continue;
 		const transcriptName = compressed ? name.slice(0, -3) : name;
-		if (
-			!transcriptName.endsWith(".jsonl") ||
-			name.includes(".bak") ||
-			(!options.includeAdvisors && isAdvisorTranscriptName(transcriptName))
-		)
-			continue;
 		// A live transcript wins over an archive of the same session during gc.
 		if (compressed && fileNames.has(transcriptName)) continue;
+		if (!transcriptName.endsWith(".jsonl") || name.includes(".bak") || /^__advisor(?:\.|$)/.test(transcriptName))
+			continue;
 		const agentId = transcriptName.slice(0, -6);
 		const key = parentKey ? `${parentKey}/${agentId}` : agentId;
 		const loaded = await loadCollectedSession(path.join(dir, name));

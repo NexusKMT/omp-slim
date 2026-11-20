@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { IrcBus } from "../../src/irc/bus";
@@ -18,6 +17,7 @@ import { agentsThreadService } from "../../src/thread/services/agents";
 import { identityThreadService } from "../../src/thread/services/identity";
 import { SubagentWorker } from "../../src/thread/subagent-worker";
 import type { AgentsProbe, AgentsProbeGlobals } from "../fixtures/agents-bridge-worker";
+import { createTestModel } from "../helpers/test-model";
 
 const cleanups: Array<() => unknown> = [];
 
@@ -75,7 +75,7 @@ function mirrorOf(session: AgentSessionHandle | null | undefined): RemoteAgentSe
 }
 
 async function mainSession(id: string): Promise<AgentSession> {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("bundled model missing");
 	const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 	const agent = new Agent({

@@ -1,6 +1,4 @@
-import * as path from "node:path";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgGoalContinuationModes } from "@oh-my-pi/pi-coding-agent/goals/settings";
@@ -9,6 +7,8 @@ import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { cfgAsyncEnabled } from "@oh-my-pi/pi-coding-agent/tools/settings";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 // Real SDK session (goal tool registered as in production), RPC dispatch and goal
 // runtime; only the model is scripted.
@@ -34,7 +34,7 @@ const { session } = await createAgentSession({
 	authStorage,
 	modelRegistry,
 	settings,
-	model: getBundledModel("anthropic", "claude-sonnet-4-5"),
+	model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
 	disableExtensionDiscovery: true,
 	skills: [],
 	contextFiles: [],

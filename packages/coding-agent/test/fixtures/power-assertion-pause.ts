@@ -1,17 +1,17 @@
-import { spyOn } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, agentPauseGate, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
+import * as power from "@oh-my-pi/pi-coding-agent/session/power-assertion-backend";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { cfgPowerSleepPrevention } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import * as power from "@oh-my-pi/pi-coding-agent/session/power-assertion-backend";
+import { spyOn } from "bun:test";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import { createTestModel } from "../helpers/test-model";
 
 const events: Array<[string, string | null]> = [];
 let held: string | null = null;
@@ -37,7 +37,7 @@ const tool: AgentTool<typeof schema> = {
 		return { content: [{ type: "text", text: "done" }], details: {} };
 	},
 };
-const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 if (!model) throw new Error("Missing bundled test model");
 const mock = createMockModel({
 	responses: [

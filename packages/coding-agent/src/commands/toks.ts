@@ -2,27 +2,22 @@
  * Count a file or text through every embedded offline tokenizer and print a
  * per-encoding stats table (see `crates/pi-natives/src/utok`).
  */
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import * as natives from "@oh-my-pi/pi-natives";
 import { formatBytes, pluralize } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { Args, CliUsageError, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { toksHelp as commandHelp } from "../cli/command-help";
 
 /** Display name and served model lines per native encoding; `Record` keeps it exhaustive. */
 const ENCODINGS: Record<natives.Encoding, { name: string; models: string }> = {
 	[natives.Encoding.O200kBase]: { name: "o200k_base", models: "GPT-4o · o1 · GPT-5+" },
 	[natives.Encoding.Cl100kBase]: { name: "cl100k_base", models: "GPT-3.5 · GPT-4" },
-	[natives.Encoding.ClaudeV3]: { name: "claude-v3", models: "Claude 3 … Opus 4.6" },
-	[natives.Encoding.ClaudeV47]: { name: "claude-v47", models: "Opus 4.7–4.9" },
-	[natives.Encoding.ClaudeV5]: { name: "claude-v5", models: "Opus 5+" },
-	[natives.Encoding.ClaudeV5Sonnet]: { name: "claude-v5-sonnet", models: "Sonnet/Fable 5+ · Haiku 5.5" },
 	[natives.Encoding.Qwen3]: { name: "qwen3", models: "Qwen 3.5+" },
 	[natives.Encoding.DeepSeekV3]: { name: "deepseek-v3", models: "DeepSeek V3–V4" },
 	[natives.Encoding.KimiK2]: { name: "kimi-k2", models: "Kimi K2–K3" },
 	[natives.Encoding.Glm5]: { name: "glm5", models: "GLM-5.x" },
-	[natives.Encoding.Jev]: { name: "jev", models: "TypeSafe Jev 1.13" },
 };
 
 type Source = { kind: "file"; path: string } | { kind: "text" };

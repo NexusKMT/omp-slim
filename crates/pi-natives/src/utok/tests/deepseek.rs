@@ -22,9 +22,7 @@ fn deepseek_matches_reference() {
 		let count = case["count"].as_u64().expect("count") as u32;
 		assert_eq!(count as usize, want.len(), "fixture self-consistency: {text:?}");
 
-		let got = Encoding::DeepSeekV3
-			.encode(text)
-			.expect("deepseek is a BPE family");
+		let got = Encoding::DeepSeekV3.encode(text);
 		assert_eq!(got, want, "encode mismatch on {text:?}");
 		// Merge-unreachable sentinels (ids 0..2) are blanked in the packed
 		// table; encode_ordinary must never emit them — including for the
@@ -49,7 +47,7 @@ fn deepseek_v3_parity_sample() {
 		.iter()
 		.map(|v| v.as_u64().expect("id") as u32)
 		.collect();
-	assert_eq!(Encoding::DeepSeekV3.encode(text).unwrap(), want);
+	assert_eq!(Encoding::DeepSeekV3.encode(text), want);
 	assert_eq!(Encoding::DeepSeekV3.count(text) as usize, want.len());
 }
 
@@ -61,15 +59,15 @@ fn deepseek_utf16_utf32_parity() {
 	let fixture: serde_json::Value = serde_json::from_str(raw).expect("fixture parses");
 	for case in fixture["cases"].as_array().expect("cases array") {
 		let text = case["text"].as_str().expect("text");
-		let want = Encoding::DeepSeekV3.encode(text).unwrap();
+		let want = Encoding::DeepSeekV3.encode(text);
 		let count = Encoding::DeepSeekV3.count(text);
 
 		let u16s: Vec<u16> = text.encode_utf16().collect();
-		assert_eq!(Encoding::DeepSeekV3.encode(&u16s).unwrap(), want, "utf16 ids on {text:?}");
+		assert_eq!(Encoding::DeepSeekV3.encode(&u16s), want, "utf16 ids on {text:?}");
 		assert_eq!(Encoding::DeepSeekV3.count(&u16s), count, "utf16 count on {text:?}");
 
 		let u32s: Vec<u32> = text.chars().map(|c| c as u32).collect();
-		assert_eq!(Encoding::DeepSeekV3.encode(&u32s).unwrap(), want, "utf32 ids on {text:?}");
+		assert_eq!(Encoding::DeepSeekV3.encode(&u32s), want, "utf32 ids on {text:?}");
 		assert_eq!(Encoding::DeepSeekV3.count(&u32s), count, "utf32 count on {text:?}");
 	}
 }

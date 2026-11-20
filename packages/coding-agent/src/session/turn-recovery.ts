@@ -22,8 +22,8 @@ import type { ModelRegistry } from "../config/model-registry";
 import { formatModelStringWithRouting } from "../config/model-resolver";
 
 import type { Settings } from "../config/settings";
-import type { RetryErrorUpdate } from "../extensibility/shared-events";
 import { isEvalStateContext } from "../eval/state";
+import type { RetryErrorUpdate } from "../extensibility/shared-events";
 import emptyStopRetryTemplate from "../prompts/system/empty-stop-retry.md" with { type: "text" };
 import malformedFunctionCallRetryTemplate from "../prompts/system/malformed-function-call-retry.md" with { type: "text" };
 import streamStallContinueTemplate from "../prompts/system/stream-stall-continue.md" with { type: "text" };
@@ -31,11 +31,11 @@ import thinkingLoopRedirectTemplate from "../prompts/system/thinking-loop-redire
 import unexpectedStopRetryTemplate from "../prompts/system/unexpected-stop-retry.md" with { type: "text" };
 import type { AgentSessionEvent } from "./agent-session-events";
 import { assistantTurnProducedOutput, isEmptyAssistantStop, isEmptyErrorTurn, isUserAuthoredMessage } from "./messages";
+import { isUserQueuedMessage } from "./queued-messages";
 import { calculateRetryBackoffDelayMs, formatRetryFallbackSelector, type ServingModel } from "./retry-fallback-chains";
 import { getLatestCompactionEntry } from "./session-context";
 import { type SessionEntry } from "./session-entries";
 import type { SessionManager } from "./session-manager";
-import { isUserQueuedMessage } from "./queued-messages";
 import { sameMessageContent, sessionMessagePersistenceKey } from "./turn-persistence";
 import { isUnexpectedStopCandidate } from "./unexpected-stop";
 
@@ -1189,7 +1189,7 @@ export class TurnRecovery {
 				AIError.retriable(id)) &&
 			this.#unexecutedToolCallsReplaySafe(message);
 		if (this.#hasReplayUnsafeOutput(message) && !replaySafeUnexecutedTools) return false;
-		if (AIError.is(id, AIError.Flag.AccountPolicy) || this.isClassifierRefusal(message)) return true;
+		if (this.isClassifierRefusal(message)) return true;
 		return AIError.retriable(id);
 	}
 
@@ -1318,7 +1318,6 @@ export class TurnRecovery {
 			return false;
 		}
 		return (
-			AIError.isStreamEnvelopeTruncationText(errorMessage) ||
 			HTTP2_STREAM_RESET_ERROR_RE.test(errorMessage) ||
 			AIError.PYTHON_HTTP2_STREAM_RESET_PATTERN.test(errorMessage) ||
 			AIError.PYTHON_HTTP_INCOMPLETE_CHUNK_PATTERN.test(errorMessage) ||
@@ -1433,7 +1432,6 @@ export class TurnRecovery {
 			((classifierRefusal || AIError.is(id, AIError.Flag.MalformedFunctionCall) || AIError.retriable(id)) &&
 				this.#unexecutedToolCallsReplaySafe(message));
 		const rateLimitReason = parseRateLimitReason(errorMessage);
-		const accountPolicyDenial = AIError.is(id, AIError.Flag.AccountPolicy);
 		const parsedRetryAfterMs = this.#parseRetryAfterMsFromError(errorMessage);
 		let delayMs = calculateRetryBackoffDelayMs(retrySettings.baseDelayMs, this.#retryAttempt);
 		if (parsedRetryAfterMs !== undefined) delayMs = Math.max(delayMs, parsedRetryAfterMs);
@@ -1455,7 +1453,7 @@ export class TurnRecovery {
 				return false;
 			}
 		}
-		if (classifierRefusal || accountPolicyDenial) {
+		if (classifierRefusal) {
 			// A prior attempt in this saga already announced `auto_retry_start`
 			// (retryAttempt was incremented for each call to this method, so > 1
 			// means at least one earlier attempt started the loop) but this

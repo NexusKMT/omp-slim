@@ -193,16 +193,6 @@ function safetyCheckLines(checks: readonly ComputerSafetyCheck[]): string[] {
 	});
 }
 
-/**
- * Wraps a tool with extension callbacks for interception.
- * - Emits tool_call event before execution (can block)
- * - Emits tool_result event after execution (can modify result)
- *
- * `agent` overrides the runner's own `ctx.agent` for those events when the tool
- * runs on behalf of a different agent than the runner's session — the advisor's
- * toolset shares the primary session's runner (for approval enforcement) but
- * must not be reported as the primary agent.
- */
 export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetails = unknown> implements AgentTool<
 	TParameters,
 	TDetails

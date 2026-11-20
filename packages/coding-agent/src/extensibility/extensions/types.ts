@@ -8,29 +8,6 @@
  * - Interact with the user via UI primitives
  */
 
-import {
-	type ExtensionUiComponent,
-	type ExtensionUiComponentFactory,
-	type ExtensionWidgetContent,
-	type MessageRenderer,
-	type AssistantThinkingRenderer,
-	type AssistantTextRenderer,
-	type TranscriptPresenter,
-} from "@oh-my-pi/pi-tui/chat/extension-types";
-export {
-	type ExtensionUiComponent,
-	type ExtensionUiComponentFactory,
-	type ExtensionWidgetContent,
-	type MessageRenderOptions,
-	type MessageRenderer,
-	type AssistantThinkingRenderContext,
-	type AssistantThinkingRenderer,
-	type AssistantTextRenderContext,
-	type AssistantTextRenderer,
-	type TranscriptBlock,
-	type TranscriptPresentation,
-	type TranscriptPresenter,
-} from "@oh-my-pi/pi-tui/chat/extension-types";
 import type { type as ArkType } from "@oh-my-pi/omptype";
 import type * as zod from "@oh-my-pi/omptype/zod";
 import type {
@@ -42,14 +19,10 @@ import type {
 	ToolLoadMode,
 } from "@oh-my-pi/pi-agent-core";
 import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
-import type { ContextUsage } from "@oh-my-pi/pi-tui/status-line/types";
-import type { LoopConditionConfig } from "@oh-my-pi/pi-tui/status-line/loop";
 import type {
 	Api,
 	AssistantMessage,
 	AssistantMessageEvent,
-	AssistantMessageEventStream,
-	Context,
 	ImageContent,
 	Model,
 	ModelSpec,
@@ -57,7 +30,6 @@ import type {
 	ServiceTier,
 	ServiceTierByFamily,
 	ServiceTierFamily,
-	SimpleStreamOptions,
 	Static,
 	TextContent,
 	TSchema,
@@ -73,33 +45,44 @@ import type {
 	OverlayOptions,
 	TUI,
 } from "@oh-my-pi/pi-tui";
-import type { logger as PiLogger } from "@oh-my-pi/pi-utils";
 import type { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
-import type { ComposerShapeDefinition } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
+import {
+	type AssistantTextRenderer,
+	type AssistantThinkingRenderer,
+	type ExtensionUiComponent,
+	type ExtensionUiComponentFactory,
+	type ExtensionWidgetContent,
+	type MessageRenderer,
+	type TranscriptPresenter,
+} from "@oh-my-pi/pi-tui/chat/extension-types";
 import type { CodeReviewAnnotation, TextReviewAnnotation } from "@oh-my-pi/pi-tui/overlays/annotation-types";
-export type { ComposerShapeDefinition } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
-import type { ModelRegistry } from "../../config/model-registry";
+import type { ComposerShapeDefinition } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
+import type { CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
+import type { LoopConditionConfig } from "@oh-my-pi/pi-tui/status-line/loop";
+import type { ContextUsage } from "@oh-my-pi/pi-tui/status-line/types";
+import type { Theme } from "@oh-my-pi/pi-tui/theme";
+import type { BashToolDetails } from "@oh-my-pi/pi-tui/tools/bash";
 import type { EditToolDetails } from "@oh-my-pi/pi-tui/tools/edit";
+import type { GlobToolDetails } from "@oh-my-pi/pi-tui/tools/glob";
+import type { GrepToolDetails } from "@oh-my-pi/pi-tui/tools/grep";
+import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
+import type { NativeToolView } from "@oh-my-pi/pi-tui/tools/renderer";
+import type { logger as PiLogger } from "@oh-my-pi/pi-utils";
+import type { ModelRegistry } from "../../config/model-registry";
 import type { PythonResult } from "../../eval/py/executor";
 import type { BashResult } from "../../exec/bash-executor";
 import type { ExecOptions, ExecResult } from "../../exec/exec";
 import type * as PiCodingAgent from "../../index";
 import type { LocalProtocolOptions } from "../../internal-urls/local-protocol";
 import type { LoopLimitConfig } from "../../modes/loop-limit";
-import type { CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
-import type { Theme } from "@oh-my-pi/pi-tui/theme";
-import type { NativeToolView } from "@oh-my-pi/pi-tui/tools/renderer";
 import type { AsyncJobSnapshot, SendUserMessageOptions } from "../../session/agent-session";
 import type { EphemeralTurnOptions, EphemeralTurnResult } from "../../session/agent-session-types";
 import type { CompactMode } from "../../session/compact-modes";
 import type { CustomMessagePayload } from "../../session/messages";
 import type { ReadonlySessionManager, SessionManager } from "../../session/session-manager";
+import type { TerminalLaunchRequest, TerminalLaunchResult } from "../../subprocess/terminal-launch";
 import type { BashToolInput, GlobToolInput, GrepToolInput, ReadToolInput, WriteToolInput } from "../../tools";
-import type { GlobToolDetails } from "@oh-my-pi/pi-tui/tools/glob";
-import type { GrepToolDetails } from "@oh-my-pi/pi-tui/tools/grep";
-import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import type { ApprovalMode } from "../../tools/approval";
-import type { BashToolDetails } from "@oh-my-pi/pi-tui/tools/bash";
 import type { FileDeleteFallbackHandler, FileWriteFallbackHandler } from "../../tools/file-write-fallback";
 import type { EventBus } from "../../utils/event-bus";
 import type {
@@ -140,7 +123,21 @@ import type {
 	TurnStartEvent,
 } from "../shared-events";
 import type { SlashCommandInfo } from "../slash-commands";
-import type { TerminalLaunchRequest, TerminalLaunchResult } from "../../subprocess/terminal-launch";
+export {
+	type AssistantTextRenderContext,
+	type AssistantTextRenderer,
+	type AssistantThinkingRenderContext,
+	type AssistantThinkingRenderer,
+	type ExtensionUiComponent,
+	type ExtensionUiComponentFactory,
+	type ExtensionWidgetContent,
+	type MessageRenderer,
+	type MessageRenderOptions,
+	type TranscriptBlock,
+	type TranscriptPresentation,
+	type TranscriptPresenter,
+} from "@oh-my-pi/pi-tui/chat/extension-types";
+export type { ComposerShapeDefinition } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
 
 export type { Keybinding, OverlayHandle, OverlayOptions } from "@oh-my-pi/pi-tui";
 export type { AppKeybinding, KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
@@ -163,17 +160,17 @@ import type {
 	ExtensionAskDialogResult,
 	ExtensionAskDialogSubmitResult,
 } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
+export type { HtmlFormData, HtmlFormValue } from "@oh-my-pi/pi-tui/html-form/data";
 export type {
+	ExtensionAskDialogChatResult,
 	ExtensionAskDialogOption,
 	ExtensionAskDialogQuestion,
+	ExtensionAskDialogResult,
 	ExtensionAskDialogResultItem,
 	ExtensionAskDialogSubmitResult,
-	ExtensionAskDialogChatResult,
-	ExtensionAskDialogResult,
 } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
 
 import type { HtmlFormData } from "@oh-my-pi/pi-tui/html-form/data";
-export type { HtmlFormData, HtmlFormValue } from "@oh-my-pi/pi-tui/html-form/data";
 
 /** A submitted {@link ExtensionUIContext.formDialog}: the form data, flagged when the timeout submitted the defaults. */
 export interface ExtensionFormDialogResult {
@@ -571,12 +568,6 @@ export interface ExtensionModelQuery {
 /** Runtime host mode exposed to Pi-compatible extensions. */
 export type ExtensionMode = "tui" | "rpc" | "json" | "print";
 
-/**
- * The agent a session runs. Extension factories are rebound to every subagent session
- * (task tool, eval `agent()`, `/tan` clones), so this tells a handler which agent it is serving.
- * An advisor's own tool calls reach the advising session's `tool_call`/`tool_result` handlers
- * with `{ kind: "sub", id: "advisor", name: "advisor", depth: 0, parentId: <session agent id> }`.
- */
 export interface ExtensionAgentIdentity {
 	/**
 	 * `"main"` for a top-level session, `"sub"` for any spawned session. Check this, not `depth`,
@@ -785,7 +776,7 @@ export interface ExtensionContext {
 	 */
 	openPlanReview(): Promise<boolean>;
 	/**
-	 * Query and control the built-in plan, vibe, goal, and loop modes. Interactive (TUI) sessions
+	 * Query and control the built-in plan, goal, and loop modes. Interactive (TUI) sessions
 	 * only: `undefined` in print, JSON, RPC, and ACP modes and in subagents.
 	 */
 	sessionModes?: ExtensionSessionModes;
@@ -1363,7 +1354,7 @@ export interface PlanReviewResolvedEvent {
  * loop it replaces that text, and on a paused loop `enter` resumes it.
  */
 export type SessionModeRequest =
-	| { mode: "plan" | "vibe"; action: "enter" | "exit" }
+	| { mode: "plan"; action: "enter" | "exit" }
 	| { mode: "goal"; action: "enter"; objective: string; tokenBudget?: number }
 	| { mode: "goal"; action: "pause" | "resume" | "drop" }
 	| { mode: "loop"; action: "enter"; prompt?: string; limit?: LoopLimitConfig; condition?: LoopConditionConfig }
@@ -1372,7 +1363,6 @@ export type SessionModeRequest =
 /** Detached snapshot of the built-in session modes. `paused` states come from the slash commands or a goal pause. */
 export interface SessionModeState {
 	plan: { status: "inactive" | "active" | "paused"; planFilePath?: string };
-	vibe: { status: "inactive" | "active" };
 	goal: { status: "inactive" | "active" | "paused"; objective?: string; tokenBudget?: number };
 	loop: { status: "inactive" | "active" | "paused" };
 }

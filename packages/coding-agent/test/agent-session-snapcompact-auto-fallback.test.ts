@@ -1,15 +1,15 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { Message } from "@oh-my-pi/pi-ai";
-import { type GeneratedProvider, getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { CompactionMethod } from "@oh-my-pi/pi-coding-agent/session/compaction-methods";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { cfgCompaction } from "@oh-my-pi/pi-coding-agent/session/context-settings";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 const UNRENDERABLE_SNAPCOMPACT_TEXT = "\uE000\uE001\uE002\uE003\uE004\uE005\uE006\uE007\uE008\uE009";
 
@@ -23,7 +23,7 @@ interface Harness {
 }
 
 interface HarnessOptions {
-	activeModel: { provider: GeneratedProvider; id: string };
+	activeModel: { provider: string; id: string };
 	seedMessages?: Message[];
 	/** Null leaves compaction.methodOrder at its schema default. */
 	methodOrder?: readonly CompactionMethod[] | null;
@@ -32,7 +32,7 @@ interface HarnessOptions {
 }
 
 async function createHarness(modelRegistry: ModelRegistry, options: HarnessOptions): Promise<Harness> {
-	const activeModel = getBundledModel(options.activeModel.provider, options.activeModel.id);
+	const activeModel = createTestModel({ provider: options.activeModel.provider, id: options.activeModel.id });
 	if (!activeModel) throw new Error(`Missing bundled model ${options.activeModel.provider}/${options.activeModel.id}`);
 	const agent = new Agent({
 		initialState: { model: activeModel, systemPrompt: ["Test"], tools: [], messages: [] },

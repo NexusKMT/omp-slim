@@ -1,4 +1,3 @@
-import { describe, expect, it, vi } from "bun:test";
 import type { Agent, AgentEvent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Judge, JudgmentRequest, NoulAnswer } from "@oh-my-pi/pi-ai";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
@@ -7,6 +6,7 @@ import { JUDGED_CONTENT_MAX_TOKENS, TtsrManager } from "@oh-my-pi/pi-coding-agen
 import type { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TtsrCoordinator, type TtsrCoordinatorHost } from "@oh-my-pi/pi-coding-agent/session/ttsr-coordinator";
 import { countTokens, Encoding } from "@oh-my-pi/pi-natives";
+import { describe, expect, it, vi } from "bun:test";
 
 function judgedRule(name: string, fields: Partial<Rule>): Rule {
 	return {
@@ -158,7 +158,7 @@ describe("TTSR judged rules", () => {
 		expect(warnings).toHaveLength(0);
 	});
 
-	it("sends as much output as fits Jev's state budget, measured in Jev tokens", async () => {
+	it("sends as much output as fits the judgment content budget, measured with the default tokenizer", async () => {
 		const { judge, requests } = fakeJudge({});
 		const { coordinator } = setup([judgedRule("no-todo", { question: HAS_TODO, scope: ["text"] })], judge);
 		// One Jev token per character: 60k characters would overflow the ~33k-token branch limit.
@@ -172,7 +172,7 @@ describe("TTSR judged rules", () => {
 
 		const sent = requests.map(sentContent);
 		expect(chinese.startsWith(sent[0])).toBe(true);
-		const tokens = countTokens(sent[0], Encoding.Jev);
+		const tokens = countTokens(sent[0], Encoding.O200kBase);
 		expect(tokens).toBeLessThanOrEqual(JUDGED_CONTENT_MAX_TOKENS);
 		expect(tokens).toBeGreaterThan(JUDGED_CONTENT_MAX_TOKENS - 50);
 		expect(sent[1]).toBe(english);

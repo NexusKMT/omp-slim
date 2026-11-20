@@ -1,46 +1,31 @@
-/**
- * Fullscreen transcript viewer.
- *
- * `AgentHubOverlayComponent.openChat` mounts this as a `fullscreen` overlay
- * (`ui.showOverlay(..., { fullscreen: true })`), so it borrows the terminal's
- * alternate screen buffer (the vim/less idiom) and paints the whole screen — no
- * compositing into the live transcript's scrollback. It renders a parked
- * subagent / advisor transcript that has no live in-view session.
- *
- * Local transcripts tail append-only growth: unchanged file identity plus stable
- * sentinels means only newly appended JSONL is parsed and rendered. Rewrites,
- * truncation, rotation, or sentinel drift fall back to a full rebuild so changed
- * historical entries cannot leave stale components behind.
- */
-import type * as fs from "node:fs";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { TspSpan, TspTone } from "@oh-my-pi/pi-wire";
-import type { Component, TUI } from "../tui";
-import { Editor } from "../components/editor";
-import { matchesKey } from "../keys";
-import { routeSgrMouseInput } from "../mouse";
 import { formatDuration, formatNumber, logger } from "@oh-my-pi/pi-utils";
+import type { TspSpan, TspTone } from "@oh-my-pi/pi-wire";
+import type * as fs from "node:fs";
 import { formatKeyHint, formatKeyHints, type KeyId } from "../app-keybindings";
-import { editorKey } from "../chrome/keybinding-hints";
-import type { MessageRenderer } from "../chat/extension-types";
-import type { AgentLifecycleLike } from "./agent-hub-types";
-import type { AgentHubRegistry, AgentStatus } from "./agent-hub-types";
-import type { SessionMessageEntryLike } from "../chat/transcript-entry";
-import type { ObservableSession, SessionObserverRegistry } from "./session-observer-registry";
-import { getEditorTheme, theme } from "../theme/theme";
-import { matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { ChatTranscriptBuilder } from "../chat/chat-transcript-builder";
+import type { MessageRenderer } from "../chat/extension-types";
 import {
 	TranscriptBrowser,
 	type TranscriptBrowserFrame,
 	type TranscriptBrowserRenderContext,
 } from "../chat/transcript-browser";
-import { sanitizeErrorLine } from "../chrome/error-block";
-import type { ScrollRangeAnchor } from "../components/scroll-view";
+import type { SessionMessageEntryLike } from "../chat/transcript-entry";
 import { formatContextUsage } from "../chrome/context-thresholds";
+import { sanitizeErrorLine } from "../chrome/error-block";
+import { editorKey } from "../chrome/keybinding-hints";
+import { Editor } from "../components/editor";
+import type { ScrollRangeAnchor } from "../components/scroll-view";
+import { matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
+import { matchesKey } from "../keys";
+import { routeSgrMouseInput } from "../mouse";
 import { node, span, text } from "../native/describe";
 import type { DescribeContext, NativeChild, NativeNode, NativeUiEvent } from "../native/node";
 import { actionHint, escCloseButton, hintsRow, overlayCard } from "../native/overlay";
+import { getEditorTheme, theme } from "../theme/theme";
+import type { Component, TUI } from "../tui";
+import type { AgentHubRegistry, AgentLifecycleLike, AgentStatus } from "./agent-hub-types";
+import type { ObservableSession, SessionObserverRegistry } from "./session-observer-registry";
 
 /** Parsed message and model metadata relevant to a transcript viewer. */
 export type AgentTranscriptEntry = SessionMessageEntryLike | { type: "model_change"; model: string };
@@ -87,7 +72,6 @@ export interface AgentTranscriptViewerDeps {
 	onHubClose: () => void;
 }
 
-/** How often to re-stat a file-backed transcript for growth (advisor/live tail). */
 const POLL_MS = 250;
 /** Every Nth idle poll re-verifies sentinels, catching same-size/mtime rewrites. */
 const IDLE_SENTINEL_CHECK_EVERY = 5;
@@ -203,7 +187,7 @@ export class AgentTranscriptViewer implements Component {
 			hideThinkingBlock: deps.hideThinkingBlock,
 			proseOnlyThinking: deps.proseOnlyThinking,
 			expandThinkingBlocks: deps.expandThinkingBlocks,
-			// Charts are for the main session's answers, not parked subagent or advisor transcripts.
+
 			tableCharts: false,
 			requestRender: deps.requestRender,
 		});
@@ -224,10 +208,9 @@ export class AgentTranscriptViewer implements Component {
 		this.#pollTimer.unref?.();
 	}
 
-	/** Advisor transcripts are read-only; every other agent revives on send. */
 	get #sendable(): boolean {
 		const ref = this.#deps.registry.get(this.#deps.agentId);
-		if (!ref || ref.kind === "advisor") return false;
+		if (!ref) return false;
 		return Boolean(this.#deps.lifecycle);
 	}
 

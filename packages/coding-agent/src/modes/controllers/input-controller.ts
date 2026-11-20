@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import {
@@ -15,19 +14,16 @@ import {
 	type PasteOptions,
 	type SlashCommand,
 } from "@oh-my-pi/pi-tui";
-import { isEnoent, logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
 import { formatDoubleTap } from "@oh-my-pi/pi-tui/app-keybindings";
-import { appKey, editorKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
-import { isSettingsInitialized, settings } from "../../config/settings";
-import { InternalUrlRouter, resolveLocalRoot } from "../../internal-urls";
-import { ApprovalDialogComponent } from "@oh-my-pi/pi-tui/overlays/approval-dialog";
-import { AskDialogComponent } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
-import { extractImagePathFromText } from "@oh-my-pi/pi-tui/prompt/custom-editor";
-import { HistorySearchComponent } from "@oh-my-pi/pi-tui/overlays/history-search";
-import { HookEditorComponent } from "@oh-my-pi/pi-tui/overlays/hook-editor";
+import { ensureSupportedImageInput, ImageInputTooLargeError } from "@oh-my-pi/pi-tui/chat/image-loading";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { appKey, editorKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
+import { ApprovalDialogComponent } from "@oh-my-pi/pi-tui/overlays/approval-dialog";
+import { AskDialogComponent } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
+import { HistorySearchComponent } from "@oh-my-pi/pi-tui/overlays/history-search";
+import { HookEditorComponent } from "@oh-my-pi/pi-tui/overlays/hook-editor";
 import { TreeSelectorComponent } from "@oh-my-pi/pi-tui/overlays/tree-selector";
 import {
 	chipLabel,
@@ -35,24 +31,30 @@ import {
 	formatVisionMarker,
 	shiftImageMarkers,
 } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
+import { extractImagePathFromText } from "@oh-my-pi/pi-tui/prompt/custom-editor";
 import { expandEmoticons } from "@oh-my-pi/pi-tui/prompt/emoji-autocomplete";
+import { blobExtensionForImageMimeType } from "@oh-my-pi/pi-tui/prompt/image-format";
 import { setCachedImageDimensions } from "@oh-my-pi/pi-tui/prompt/image-references";
+import { type ImageAttachmentSource, tagImageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
 import { createPromptActionAutocompleteProvider } from "@oh-my-pi/pi-tui/prompt/prompt-action-autocomplete";
 import { parseQueueShorthand, splitQueuedMessages } from "@oh-my-pi/pi-tui/prompt/queue-input";
-import { invokeSkillCommandFromText, isKnownSkillCommand } from "../../modes/skill-command";
+import { isVideoPath } from "@oh-my-pi/pi-tui/prompt/video";
+import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
+import { isEnoent, logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
+import * as path from "node:path";
+import { isSettingsInitialized, settings } from "../../config/settings";
 import { parseFileSlashInvocation, renderFileSlashCommand } from "../../extensibility/slash-commands";
+import { InternalUrlRouter, resolveLocalRoot } from "../../internal-urls";
+import { invokeSkillCommandFromText, isKnownSkillCommand } from "../../modes/skill-command";
 import type { InteractiveModeContext, SubmittedUserInput } from "../../modes/types";
-import { openLocalFileInEditor } from "../local-file-editor";
 import { AgentRegistry } from "../../registry/agent-registry";
 import type { RestoredQueuedMessage } from "../../session/agent-session-types";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
-import { PINNED_HUD_TOGGLE_ID } from "../../task/output-manager";
-import { pickRecentFocusableAgentId } from "./session-focus-controller";
 import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { restoreDetachedDraft } from "../../slash-commands/helpers/draft";
 import { parseSlashCommand, parseSubcommand } from "../../slash-commands/helpers/parse";
+import { PINNED_HUD_TOGGLE_ID } from "../../task/output-manager";
 import { resolveReadPath } from "../../tools/path-utils";
-import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
 import {
 	copyToClipboard,
 	isClipboardTerminalLocal,
@@ -60,20 +62,19 @@ import {
 	readMacFileUrlsFromClipboard,
 	readTextFromClipboard,
 } from "../../utils/clipboard";
-import { commandUsage, hintUsage } from "../../utils/usage-counter";
 import { EnhancedPasteController } from "../../utils/enhanced-paste";
 import { getEditorCommand, openInEditor } from "../../utils/external-editor";
-import { resendProgramStatus } from "../../utils/run-status";
 import { loadImageInput } from "../../utils/image-loading";
-import { materializeImageChipLinks } from "../utils/ui-helpers";
-import { type ConversationPosition, continuesConversation, conversationPosition } from "../utils/conversation-position";
-import { ensureSupportedImageInput, ImageInputTooLargeError } from "@oh-my-pi/pi-tui/chat/image-loading";
-import { type ImageAttachmentSource, tagImageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
-import { blobExtensionForImageMimeType } from "@oh-my-pi/pi-tui/prompt/image-format";
-import { VideoError, buildVideoContactSheetPng, probeVideo } from "../../utils/video";
-import { isVideoPath } from "@oh-my-pi/pi-tui/prompt/video";
 import { resizeImage } from "../../utils/image-resize";
+import { resendProgramStatus } from "../../utils/run-status";
+import { commandUsage, hintUsage } from "../../utils/usage-counter";
+import { buildVideoContactSheetPng, probeVideo, VideoError } from "../../utils/video";
+import { openLocalFileInEditor } from "../local-file-editor";
+import { continuesConversation, type ConversationPosition, conversationPosition } from "../utils/conversation-position";
+import { materializeImageChipLinks } from "../utils/ui-helpers";
+import { pickRecentFocusableAgentId } from "./session-focus-controller";
 
+import { cfgHideThinkingBlock } from "../../session/settings";
 import {
 	cfgBareExitOnEmptySession,
 	cfgBareSlashCommands,
@@ -84,7 +85,6 @@ import {
 	cfgPasteLargeMenuThreshold,
 	cfgTuiMouse,
 } from "../settings";
-import { cfgHideThinkingBlock } from "../../session/settings";
 
 /** Bare words that quit (as `/<word>`) when typed alone into a session with no messages. */
 const BARE_EXIT_WORDS: Record<string, true> = { exit: true, quit: true, q: true };
@@ -187,17 +187,7 @@ const FOCUSED_VIEW_COMMAND_LIST = Object.keys(FOCUSED_VIEW_COMMANDS)
 	.join(", ");
 
 /** Commands whose handler owns the submitted draft, images included: Enter takes it out of the editor first. */
-const DETACHED_DRAFT_COMMANDS = new Set([
-	"plan",
-	"vibe",
-	"goal",
-	"guided-goal",
-	"tan",
-	"btw",
-	"omfg",
-	"handoff",
-	"cleanse",
-]);
+const DETACHED_DRAFT_COMMANDS = new Set(["plan", "goal", "guided-goal", "tan", "btw", "omfg", "handoff", "cleanse"]);
 
 function looksLikePastedShellPrompt(code: string): boolean {
 	const firstLine = code.split("\n", 1)[0]?.trimStart() ?? "";
@@ -1156,10 +1146,6 @@ export class InputController {
 				try {
 					slashResult = await executeBuiltinSlashCommand(text, { ctx: this.ctx, input, draftDetached });
 				} catch (error) {
-					// Detached mode commands (plan/vibe/goal/guided-goal) rethrow so
-					// this caller — the one that took the draft's images out of the
-					// editor before dispatch — restores the submission and reports
-					// the error, mirroring `handleFollowUp`'s Ctrl+Enter path.
 					if (!draftDetached) throw error;
 					restoreDetachedDraft(this.ctx.editor, text, inputImages, inputImageLinks);
 					this.ctx.showError(error instanceof Error ? error.message : String(error));

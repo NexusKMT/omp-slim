@@ -1,17 +1,17 @@
+import { type BaseType, type FluentType, type } from "@oh-my-pi/omptype";
 import type { AgentSource } from "@oh-my-pi/pi-tui/tools/task";
+import { $env, isRecord } from "@oh-my-pi/pi-utils";
 export {
-	TASK_SUBAGENT_PROGRESS_CHANNEL,
 	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
+	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
 export type {
-	SubagentProgressPayload,
 	SubagentLifecyclePayload,
+	SubagentProgressPayload,
 } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
-import { type BaseType, type FluentType, type } from "@oh-my-pi/omptype";
-import { $env, isRecord } from "@oh-my-pi/pi-utils";
 
-import type { AgentSessionEvent } from "../session/agent-session";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import type { AgentSessionEvent } from "../session/agent-session";
 
 const parseNumber = (value: string | undefined, defaultValue: number): number => {
 	if (value) {
@@ -320,8 +320,6 @@ export interface AgentDefinition {
 	autoloadSkills?: string[];
 	/** When `false`, the agent's `read` tool returns verbatim file content instead of structural summaries. */
 	readSummarize?: boolean;
-	/** Enable the advisor on the current model. Legacy model strings preserve enablement only. */
-	advisor?: boolean | string;
 	source: AgentSource;
 	filePath?: string;
 }

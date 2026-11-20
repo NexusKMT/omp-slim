@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -9,8 +8,9 @@ import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/p
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { createSessionDefaults } from "../helpers/session-defaults";
+import { createTestModel } from "../helpers/test-model";
 
 /**
  * Contract: when `task.maxRuntimeMs` is set, a subagent whose inference call
@@ -91,7 +91,7 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 		id: "subagent-walltime",
 		modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 		enableLsp: false,
-		parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+		parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 	};
 
 	it("aborts a stalled subagent and surfaces a runtime-limit reason", async () => {

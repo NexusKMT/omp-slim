@@ -1,22 +1,3 @@
-/**
- * Protocol handler for `cfg://` URLs: the agent's view of omp settings.
- *
- * Read forms (`/` and `.` both separate segments):
- * - `cfg://`                  every setting as a YAML-ish tree
- * - `cfg://<namespace>`       one namespace's subtree, e.g. `cfg://advisor`
- * - `cfg://<setting>`         one setting: value, type, default, source, description
- *
- * Write forms (content is the new value). Only a session created with
- * `settingsApproval` (the top-level TUI session) may write, and every write
- * requires user approval through the host registered with {@link setCfgApprovalHost}.
- * Other sessions (subagents, print, RPC, ACP, background forks) never see the
- * scheme advertised and are refused so they never block on a prompt the user
- * did not start:
- * - `cfg://<setting>`         session-only runtime override
- * - `cfg://<setting>/save`    persisted to the global config.yml
- *
- * Credential values are always redacted.
- */
 import { isRecord, prompt } from "@oh-my-pi/pi-utils";
 import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
 import { type CfgWriteDetails, type CfgWriteOutcome } from "@oh-my-pi/pi-tui/tools/cfg-render";

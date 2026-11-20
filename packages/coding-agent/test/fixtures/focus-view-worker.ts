@@ -6,13 +6,12 @@
  * registry (its worker mirror); a turn prompted with `[hold]` streams its
  * reply in two deltas, holding between them until the test opens the gate.
  */
-import { MessagePort, parentPort } from "node:worker_threads";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions, TextContent } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "../helpers/bundled-model";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import { isRecord } from "@oh-my-pi/pi-utils";
+import { MessagePort, parentPort } from "node:worker_threads";
 import type { ModelRegistry } from "../../src/config/model-registry";
 import { Settings } from "../../src/config/settings";
 import { ExtensionRuntime } from "../../src/extensibility/extensions/loader";
@@ -29,6 +28,7 @@ import { agentsThreadService } from "../../src/thread/services/agents";
 import { authService } from "../../src/thread/services/auth";
 import { identityThreadService } from "../../src/thread/services/identity";
 import { getApprovalGrants } from "../../src/tools/approval-cache";
+import { createTestModel } from "../helpers/test-model";
 
 /** What the worker-side session reports about itself. */
 export interface FocusSessionReport {
@@ -134,7 +134,7 @@ function textOf(content: unknown): string {
 
 const probe: FocusProbe = {
 	open: async (id, registry, overrides) => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("bundled model missing");
 		const agent = new Agent({
 			getApiKey: () => "test-key",

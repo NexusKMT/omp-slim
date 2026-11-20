@@ -1,15 +1,15 @@
-import { describe, expect, test, vi } from "bun:test";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { TempDir } from "@oh-my-pi/pi-utils";
+import { describe, expect, test, vi } from "bun:test";
 import { Settings } from "../../src/config/settings";
 import { createAgentSession } from "../../src/sdk";
 import { SessionManager } from "../../src/session/session-manager";
 import { createTools, type ToolSession } from "../../src/tools";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { createTestModel } from "../helpers/test-model";
 
-import { cfgAstGrepEnabled, cfgToolsXdev } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import { cfgCompactionExperimentalContextManagement } from "@oh-my-pi/pi-coding-agent/session/context-settings";
+import { cfgAstGrepEnabled, cfgToolsXdev } from "@oh-my-pi/pi-coding-agent/tools/settings";
 
 function createSession(enabled: boolean, restricted = false): ToolSession {
 	const settings = Settings.isolated();
@@ -49,14 +49,6 @@ describe("experimental context tool registration", () => {
 		expect(tools.map(tool => tool.name)).not.toContain("context_notes");
 		expect(tools.map(tool => tool.name)).not.toContain("new_context");
 	});
-
-	test("advisor identities cannot acquire a parent's journal tools", async () => {
-		const session = createSession(true);
-		session.getSessionId = () => `${session.sessionManager!.getSessionId!()}-advisor`;
-		const tools = await createTools(session, ["context_notes", "new_context"]);
-		expect(tools.map(tool => tool.name)).not.toContain("context_notes");
-		expect(tools.map(tool => tool.name)).not.toContain("new_context");
-	});
 	test("SDK preserves the recovery-capable notes pair in an explicit runtime tool set", async () => {
 		using tempDir = TempDir.createSync("@omp-context-tools-sdk-");
 		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
@@ -71,7 +63,7 @@ describe("experimental context tool registration", () => {
 				sessionManager,
 				settings: Settings.isolated({ "compaction.experimentalContextManagement": true }),
 				modelRegistry: new ModelRegistry(authStorage),
-				model: getBundledModel("openai", "gpt-4o-mini"),
+				model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 				toolNames: ["read", "grep"],
 				disableExtensionDiscovery: true,
 				skills: [],

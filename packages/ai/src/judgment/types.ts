@@ -1,17 +1,3 @@
-/**
- * Typed judgments: small, structured decisions over a JSON state.
- *
- * A {@link Judge} answers a map of named questions — {@link ChoiceQuestion}
- * (one option from a fixed set), {@link NoulQuestion} (probability that a
- * yes/no condition holds), {@link ScoreQuestion} (position on ordered levels),
- * {@link BoxQuestion} (where a target is in one of the request's images, native
- * judges only) — about one {@link JudgmentState}. Every question in a request sees the same
- * state and is answered independently, so callers batch independent questions
- * into one call. The shape mirrors TypeSafe's System One API so the native
- * backend ({@link NativeJudge}) forwards requests verbatim, while the text
- * bridge ({@link TextJudge}) renders the same questions into keyword prompts
- * for an ordinary chat model.
- */
 import type { ImageContent, Usage } from "../types";
 
 /** JSON-compatible value; readonly containers are accepted so `as const` state passes through. */
@@ -41,20 +27,7 @@ export interface ScoreQuestion {
 	criteria: readonly [string, string, ...string[]];
 }
 
-/**
- * Where one target is in an image (TypeSafe Box, Jev 1.14+): https://docs.typesafe.ai/primitives/box.
- * Only native judges answer it. `instructions` must name the target and, among several images, which
- * one to search; `image` stays local and says which entry of {@link JudgmentRequest.images} the
- * answer's edges measure, so a judge that resizes or pads that image can map them back.
- */
-export interface BoxQuestion {
-	type: "box";
-	instructions: string;
-	/** Index into the request's `images` of the image searched. */
-	image: number;
-}
-
-export type Question = ChoiceQuestion | NoulQuestion | ScoreQuestion | BoxQuestion;
+export type Question = ChoiceQuestion | NoulQuestion | ScoreQuestion;
 
 /** Questions keyed by caller-chosen ids; answers come back under the same ids. */
 export type Questions = Record<string, Question>;
@@ -93,25 +66,11 @@ export interface BoxEdges {
 	right: number;
 }
 
-export interface BoxAnswer {
-	type: "box";
-	/** Smallest rectangle containing the target, on the image the question's `image` names. Always present: absence is a separate yes/no question. */
-	box: BoxEdges;
-	/** How sure the model is of the box, 0–1. */
-	confidence: number;
-}
-
-export type Answer = ChoiceAnswer | NoulAnswer | ScoreAnswer | BoxAnswer;
+export type Answer = ChoiceAnswer | NoulAnswer | ScoreAnswer;
 
 /** The answer type for a question, preserving choice labels. */
 export type AnswerFor<Q extends Question> =
-	Q extends ChoiceQuestion<infer L>
-		? ChoiceAnswer<L>
-		: Q extends NoulQuestion
-			? NoulAnswer
-			: Q extends BoxQuestion
-				? BoxAnswer
-				: ScoreAnswer;
+	Q extends ChoiceQuestion<infer L> ? ChoiceAnswer<L> : Q extends NoulQuestion ? NoulAnswer : ScoreAnswer;
 
 export interface JudgmentRequest<Q extends Questions = Questions> {
 	state: JudgmentState;
@@ -121,7 +80,6 @@ export interface JudgmentRequest<Q extends Questions = Questions> {
 }
 
 export interface JudgmentResult<Q extends Questions = Questions> {
-	/** Transport that produced the answers (a judgment api such as `typesafe`, or the chat model's api). */
 	api: string;
 	provider: string;
 	model: string;
@@ -137,7 +95,7 @@ export interface JudgeOptions {
 export interface Judge {
 	/** Whether this backend can consume separate image content blocks. */
 	readonly supportsImages?: boolean;
-	/** Backend description for logs, e.g. `typesafe/jev-latest`. */
+
 	readonly label: string;
 	judge<Q extends Questions>(request: JudgmentRequest<Q>, options?: JudgeOptions): Promise<JudgmentResult<Q>>;
 }

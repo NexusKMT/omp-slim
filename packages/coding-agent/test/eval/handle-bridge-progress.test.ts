@@ -76,7 +76,6 @@ test("agent progress events keep scalar fields and cut long text", async () => {
 		task: assignment,
 		toolCount: 26,
 		cost: 0.0177,
-		advisor: false,
 		resolvedModelIdentity: "anthropic/claude-haiku-5-5",
 		extractedToolData: { yield: [{ data: "y".repeat(50_000) }] },
 		recentTools: [{ tool: "read", args: "z".repeat(5_000) }],
@@ -110,7 +109,6 @@ test("agent progress events keep scalar fields and cut long text", async () => {
 			status: "completed",
 			toolCount: 26,
 			cost: 0.0177,
-			advisor: false,
 			resolvedModelIdentity: "anthropic/claude-haiku-5-5",
 			taskPreview: "Review the parser",
 		});

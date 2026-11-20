@@ -1,6 +1,5 @@
 import { prompt } from "@oh-my-pi/pi-utils";
 import chillaxNotice from "../prompts/system/chillax-notice.md" with { type: "text" };
-import jevifyNotice from "../prompts/system/jevify-notice.md" with { type: "text" };
 import orchestrateNotice from "../prompts/system/orchestrate-notice.md" with { type: "text" };
 import ultrathinkNotice from "../prompts/system/ultrathink-notice.md" with { type: "text" };
 import workflowNotice from "../prompts/system/workflow-notice.md" with { type: "text" };
@@ -60,9 +59,6 @@ export const ULTRATHINK_NOTICE: string = ultrathinkNotice.trim();
 /** Hidden notice for "chillax": brief reasoning, direct path. */
 export const CHILLAX_NOTICE: string = chillaxNotice.trim();
 
-/** Hidden notice for "jevify": bulk classification through the eval kernel's `judge()`. */
-export const JEVIFY_NOTICE: string = jevifyNotice.trim();
-
 /** Hidden notice for "orchestrate", naming only the tools the session actually exposes. */
 export function renderOrchestrateNotice({ tools }: Pick<MagicKeywordContext, "tools">): string {
 	return prompt.render(orchestrateNotice, { tools }).trim();
@@ -120,16 +116,6 @@ export const MAGIC_KEYWORDS = [
 		description: "Let standalone workflowz append its hidden eval workflow notice",
 		requires: ["task", "eval"],
 		notice: renderWorkflowNotice,
-	},
-	{
-		id: "jevify",
-		word: "jevify",
-		hue: [300, 420],
-		label: "Jevify Keyword",
-		description: "Let standalone jevify append its hidden bulk-judge classification notice",
-		// The contract is entirely about the eval kernel's `judge()` helper.
-		requires: ["eval"],
-		notice: () => JEVIFY_NOTICE,
 	},
 ] as const satisfies readonly MagicKeyword[];
 

@@ -1,13 +1,13 @@
-import * as path from "node:path";
-import { sanitizeText } from "@oh-my-pi/pi-utils";
 import type { HighlightStream } from "@oh-my-pi/pi-natives";
-import type { Component } from "../tui";
+import { sanitizeText } from "@oh-my-pi/pi-utils";
+import type { TspTone } from "@oh-my-pi/pi-wire";
+import * as path from "node:path";
 import { fencedCode } from "../components/markdown";
 import { Text } from "../components/text";
 import { getLanguageFromPath } from "../lang-from-path";
-import { createHighlightStream, highlightCode, type Theme } from "../theme/theme";
+import { code, compact, md, node, span } from "../native/describe";
+import type { NativeChild, NativeNode } from "../native/node";
 import { fileHyperlink, renderStatusLine } from "../render";
-import { framedToolCard } from "../render/tool-card";
 import { wrapPrefixedLine } from "../render/hanging-wrap";
 import {
 	cachedRenderedString,
@@ -18,13 +18,19 @@ import {
 	formatExpandHint,
 	formatMoreItems,
 	PREVIEW_LIMITS,
-	type RenderedStringCache,
 	replaceTabs,
 	shortenPath,
 	TRUNCATE_LENGTHS,
 	truncateToWidth,
+	type RenderedStringCache,
 } from "../render/render-utils";
-import type { CoordinationDetails } from "./wait";
+import { framedToolCard } from "../render/tool-card";
+import { createHighlightStream, highlightCode, type Theme } from "../theme/theme";
+import type { Component } from "../tui";
+import { describeCfgWrite, renderCfgWrite, type CfgWriteDetails } from "./cfg-render";
+import type { FileDiagnosticsResult } from "./lsp";
+import { diagnosticsBadge, diagnosticsSection, displayPath, errorText, fileHref, resultText } from "./native-view";
+import type { OutputMeta } from "./output-meta";
 import {
 	describeAgentWrite,
 	describeProcWrite,
@@ -33,14 +39,7 @@ import {
 	type ProcWriteAction,
 	type ProcWriteDetails,
 } from "./proc-render";
-import type { TspTone } from "@oh-my-pi/pi-wire";
-import { code, compact, md, node, span } from "../native/describe";
-import type { NativeChild, NativeNode } from "../native/node";
-import { diagnosticsBadge, diagnosticsSection, displayPath, errorText, fileHref, resultText } from "./native-view";
-import { describeCfgWrite, renderCfgWrite, type CfgWriteDetails } from "./cfg-render";
-import type { FileDiagnosticsResult } from "./lsp";
-import type { OutputMeta } from "./output-meta";
-import type { CardToolResult } from "./result-card";
+import { pendingFileLinkPath } from "./read";
 import type {
 	NativeToolHead,
 	NativeToolView,
@@ -50,7 +49,10 @@ import type {
 	ToolFigure,
 	ToolRenderer,
 } from "./renderer";
+import { describeResolutionDeviceCall, isResolutionDeviceName, renderResolutionDeviceCall } from "./resolve";
+import type { CardToolResult } from "./result-card";
 import { splitUrlScheme } from "./url-scheme-host";
+import type { CoordinationDetails } from "./wait";
 import { couldBecomeXdUrl, parseXdUrl } from "./xd-url";
 import {
 	describeXdevCall,
@@ -58,16 +60,9 @@ import {
 	renderXdevCall,
 	renderXdevResult,
 	xdevActivitySummary,
-	type XdevRenderDispatch,
 	type XdevMountedRenderer,
+	type XdevRenderDispatch,
 } from "./xdev";
-import { describeResolutionDeviceCall, isResolutionDeviceName, renderResolutionDeviceCall } from "./resolve";
-import {
-	describeReportIssueDeviceCall,
-	REPORT_ISSUE_DEVICE_NAME,
-	renderReportIssueDeviceCall,
-} from "./report-tool-issue";
-import { pendingFileLinkPath } from "./read";
 
 /** Details returned by the write tool for transcript rendering. */
 export interface WriteToolDetails {
@@ -624,7 +619,6 @@ export const writeToolRenderer = {
 			const pathSettled = args.content !== undefined;
 			if (!xdev?.name || !pathSettled) return undefined;
 			if (isResolutionDeviceName(xdev.name)) return renderResolutionDeviceCall(xdev.name, args.content, uiTheme);
-			if (xdev.name === REPORT_ISSUE_DEVICE_NAME) return renderReportIssueDeviceCall(args.content, uiTheme);
 			return renderXdevCall(xdev.name, args.content, options, uiTheme, options.renderContext?.resolveXdevMounted);
 		}
 		const filePath = sanitizeText(shortenPath(rawPath));
@@ -810,7 +804,6 @@ export const writeToolRenderer = {
 			const xdev = parseXdUrl(rawPath);
 			if (!xdev?.name || args.content === undefined) return undefined;
 			if (isResolutionDeviceName(xdev.name)) return describeResolutionDeviceCall(xdev.name, args.content);
-			if (xdev.name === REPORT_ISSUE_DEVICE_NAME) return describeReportIssueDeviceCall(args.content);
 			return describeXdevCall(xdev.name, args.content, options, options.renderContext?.resolveXdevMounted);
 		}
 		const content = normalizeDisplayText(args.content);

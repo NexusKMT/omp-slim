@@ -1,13 +1,10 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
-import { AsyncJobManager } from "../src/async/job-manager";
-import { resetSettingsForTest, Settings, settings } from "../src/config/settings";
-import { getThemeByName, setThemeInstance, type Theme } from "@oh-my-pi/pi-tui/theme";
-import type { ToolSession } from "../src/tools";
-import { type CoordinationDetails, waitToolRenderer } from "@oh-my-pi/pi-tui/tools/wait";
-import { snapshotJobs } from "../src/async/job-control";
 import { formatDuration, thinkingLevelGlyph } from "@oh-my-pi/pi-tui/render/render-utils";
+import { getThemeByName, setThemeInstance, type Theme } from "@oh-my-pi/pi-tui/theme";
+import { type CoordinationDetails, waitToolRenderer } from "@oh-my-pi/pi-tui/tools/wait";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { resetSettingsForTest, Settings, settings } from "../src/config/settings";
 
 import { cfgTaskShowResolvedModelBadge } from "@oh-my-pi/pi-coding-agent/task/settings";
 
@@ -71,7 +68,6 @@ describe("hub jobs task model badges", () => {
 		expect(text).toContain(`${thinkingLevelGlyph(ThinkingLevel.High, uiTheme)} ${identity} Architect`);
 		expect(text.split(identity).length - 1).toBe(1);
 		expect(text).not.toContain(`${identity}:high`);
-		expect(text).not.toContain(uiTheme.icon.advisor);
 	});
 
 	it("fits a long model badge around the agent name and duration at 60 columns", () => {
@@ -88,7 +84,6 @@ describe("hub jobs task model badges", () => {
 						resolvedModel: "provider/a-very-long-model-name-with-a-distinctive-tail:high",
 						resolvedModelIdentity: "provider/a-very-long-model-name-with-a-distinctive-tail",
 						resolvedThinkingLevel: ThinkingLevel.High,
-						advisor: true,
 					},
 				],
 			},
@@ -97,8 +92,6 @@ describe("hub jobs task model badges", () => {
 			60,
 		);
 		const row = text.split("\n")[1]!;
-
-		expect(row).toContain(`${uiTheme.icon.advisor} Architect`);
 		expect(row).toContain(thinkingLevelGlyph(ThinkingLevel.High, uiTheme));
 		expect(row).toContain("…");
 		expect(row).toEndWith("1.2s");
@@ -119,7 +112,6 @@ describe("hub jobs task model badges", () => {
 						resolvedModel: "provider/a-very-long-model-name-with-a-distinctive-tail:high",
 						resolvedModelIdentity: "provider/a-very-long-model-name-with-a-distinctive-tail",
 						resolvedThinkingLevel: ThinkingLevel.High,
-						advisor: true,
 					},
 				],
 			},
@@ -128,61 +120,12 @@ describe("hub jobs task model badges", () => {
 			60,
 		);
 		const row = text.split("\n")[1]!;
-
-		expect(row).toContain(`${uiTheme.icon.advisor} Architect`);
 		expect(row).toContain("task");
 		expect(row).toEndWith("1.2s");
 		expect(text.split("\n")[2]).toContain("Architect 設計");
 		expect(text.split("\n")[3]).toContain("Follow-up design details");
 		for (const line of text.split("\n")) expect(visibleWidth(line)).toBeLessThanOrEqual(60);
 	});
-
-	it("renders a running task snapshot's advisor badge and keeps it on the settled result", async () => {
-		cfgTaskShowResolvedModelBadge.override(settings, true);
-		const identity = "p/runtime:max";
-		const reported = Promise.withResolvers<void>();
-		const finish = Promise.withResolvers<string>();
-		const manager = new AsyncJobManager({ onJobComplete: () => {} });
-		const id = manager.register(
-			"task",
-			"Architect",
-			async ({ reportProgress }) => {
-				await reportProgress("running", {
-					progress: [
-						{
-							id: "Architect",
-							resolvedModel: `${identity}:max`,
-							resolvedModelIdentity: identity,
-							resolvedThinkingLevel: ThinkingLevel.Max,
-							advisor: true,
-						},
-					],
-				});
-				reported.resolve();
-				return finish.promise;
-			},
-			{ id: "Architect" },
-		);
-		await reported.promise;
-
-		const session = { asyncJobManager: manager } as unknown as ToolSession;
-		try {
-			const text = renderJobText({ jobs: snapshotJobs(session, manager.getAllJobs()) }, true, true);
-			const prefix = `${thinkingLevelGlyph(ThinkingLevel.Max, uiTheme)} ${identity} ${uiTheme.icon.advisor} Architect`;
-			expect(text).toContain(prefix);
-			expect(text.split(identity).length - 1).toBe(1);
-			expect(text).not.toContain(`${identity}:max`);
-
-			finish.resolve("finished architecture review");
-			await manager.getJob(id)?.promise;
-			const settled = renderJobText({ jobs: snapshotJobs(session, manager.getAllJobs()) });
-			expect(settled).toContain(prefix);
-		} finally {
-			finish.resolve("done");
-			await manager.getJob(id)?.promise;
-		}
-	});
-
 	it("preserves a legacy selector without inferring a thinking glyph", () => {
 		cfgTaskShowResolvedModelBadge.override(settings, true);
 		const text = renderJobText({
@@ -215,7 +158,6 @@ describe("hub jobs task model badges", () => {
 					durationMs: 1_234,
 					resultText: "done",
 					resolvedModel: selector,
-					advisor: true,
 				},
 			],
 		});
@@ -223,7 +165,6 @@ describe("hub jobs task model badges", () => {
 		expect(text).toContain("Architect");
 		expect(text).not.toContain("p/model");
 		expect(text).not.toContain(thinkingLevelGlyph(ThinkingLevel.High, uiTheme));
-		expect(text).not.toContain(uiTheme.icon.advisor);
 	});
 
 	it("does not render resolved model metadata on bash job rows", () => {
@@ -239,7 +180,6 @@ describe("hub jobs task model badges", () => {
 					durationMs: 1_234,
 					resultText: "ok",
 					resolvedModel: selector,
-					advisor: true,
 				},
 			],
 		});
@@ -247,7 +187,6 @@ describe("hub jobs task model badges", () => {
 		expect(text).toContain("shell-1");
 		expect(text).toContain("bash");
 		expect(text).not.toContain("p/model");
-		expect(text).not.toContain(uiTheme.icon.advisor);
 	});
 
 	it("renders model-bearing task jobs before settings initialization", async () => {
@@ -262,14 +201,12 @@ describe("hub jobs task model badges", () => {
 						label: "ColdStart",
 						durationMs: 0,
 						resolvedModelIdentity: "provider/model",
-						advisor: true,
 					},
 				],
 			});
 			expect(text).toContain("ColdStart");
 			expect(text).toContain("task");
 			expect(text).not.toContain("provider/model");
-			expect(text).not.toContain(uiTheme.icon.advisor);
 		} finally {
 			await Settings.init({ inMemory: true });
 		}
@@ -296,7 +233,6 @@ describe("hub jobs task model badges", () => {
 									label: id,
 									durationMs: 1000,
 									resolvedModelIdentity: "provider/model",
-									advisor: true,
 								},
 							],
 						},

@@ -83,7 +83,7 @@ export class RpcSessionEventForwarder {
 	#filter: Set<string> | undefined;
 	#messageUpdates: RpcMessageUpdates = "full";
 	#messageCount = 0;
-	/** Ids of started, unfinished messages. External records (advisor cards, IRC) nest inside a streaming reply. */
+
 	#openMessageIds: string[] = [];
 	readonly #output: (frame: RpcProjectedSessionEventFrame) => void;
 

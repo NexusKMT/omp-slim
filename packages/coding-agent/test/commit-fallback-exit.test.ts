@@ -3,10 +3,7 @@
  * callers so a degraded numstat commit is distinguishable from a legitimate
  * single-commit decision (issue #7835).
  */
-import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { runAgenticCommit } from "@oh-my-pi/pi-coding-agent/commit/agentic";
 import * as agentModule from "@oh-my-pi/pi-coding-agent/commit/agentic/agent";
 import * as modelSelection from "@oh-my-pi/pi-coding-agent/commit/model-selection";
@@ -15,12 +12,15 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { VcsGitRepo } from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
+import { Database } from "bun:sqlite";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 const NUMSTAT = [{ path: "src/a.ts", added: 1, removed: 0 }];
 let authStorage: AuthStorage | undefined;
 
 function mockModelResolution() {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 	vi.spyOn(sdkModule, "loadCliExtensionProviders").mockResolvedValue(undefined);
 	vi.spyOn(modelSelection, "resolvePrimaryModel").mockResolvedValue({

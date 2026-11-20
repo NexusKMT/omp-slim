@@ -1,28 +1,11 @@
-import { describe, expect, it } from "bun:test";
 import { isProviderRetryableError } from "@oh-my-pi/pi-ai/error";
+import { describe, expect, it } from "bun:test";
 
 describe("isProviderRetryableError", () => {
 	it("retries known transient rate-limit errors", () => {
 		expect(isProviderRetryableError(new Error("Rate limit exceeded"))).toBe(true);
 		expect(isProviderRetryableError(new Error("error 1302 from upstream"))).toBe(true);
 	});
-
-	it("retries transient stream parse errors and pre-content envelope failures", () => {
-		expect(isProviderRetryableError(new Error("JSON Parse error: Unterminated string"))).toBe(true);
-		expect(isProviderRetryableError(new Error("Unexpected end of JSON input"))).toBe(true);
-		expect(
-			isProviderRetryableError(
-				new Error("Anthropic stream envelope error: received content_block_start before message_start"),
-			),
-		).toBe(true);
-		expect(
-			isProviderRetryableError(new Error("Anthropic stream envelope error: stream ended before message_start")),
-		).toBe(true);
-		expect(
-			isProviderRetryableError(new Error("Anthropic stream envelope error: stream ended before message_delta")),
-		).toBe(true);
-	});
-
 	it("retries gateway stream drops before message_delta", () => {
 		expect(
 			isProviderRetryableError(new Error("Claude upstream stream ended before message_delta, reason=scanner_error")),
@@ -31,15 +14,6 @@ describe("isProviderRetryableError", () => {
 			isProviderRetryableError(new Error("Claude upstream stream ended before message_start, reason=scanner_error")),
 		).toBe(true);
 	});
-
-	it("does not classify post-content envelope failures as provider-retryable", () => {
-		expect(
-			isProviderRetryableError(
-				new Error("Anthropic stream envelope error: stream ended before terminal stop signal"),
-			),
-		).toBe(false);
-	});
-
 	it("retries HTTP/2 stream errors (INTERNAL_ERROR)", () => {
 		expect(
 			isProviderRetryableError(new Error("stream error: stream ID 391; INTERNAL_ERROR; received from peer")),
@@ -93,24 +67,6 @@ describe("isProviderRetryableError", () => {
 		// A generic transient rate limit (no account/usage framing) still retries.
 		expect(isProviderRetryableError(new Error("Rate limit exceeded"))).toBe(true);
 	});
-
-	it("does not retry Copilot 400 model rejections", () => {
-		// Both codes are deterministic: GitHub gates models per integrator and
-		// per account, so a replay of the same request fails identically.
-		for (const code of ["model_not_supported", "model_not_available_for_integrator"]) {
-			const body = {
-				error: {
-					message: "The requested model is not supported.",
-					code,
-					param: "model",
-					type: "invalid_request_error",
-				},
-			};
-			const err = Object.assign(new Error(`400 ${JSON.stringify(body)}`), { status: 400, code, error: body });
-			expect(isProviderRetryableError(err)).toBe(false);
-		}
-	});
-
 	it("retries Aliyun multimodal-gateway 400s (flaky, byte-identical replay succeeds)", () => {
 		for (const text of [
 			"The provided URL does not appear to be valid. Ensure it is correctly formatted.",

@@ -1,10 +1,7 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Message, Model } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockHandler, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -17,6 +14,9 @@ import {
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { postmortem, TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 const zeroUsage = {
 	input: 0,
@@ -135,7 +135,7 @@ describe("AgentSession.restoreInterruptedTurn (omp --restore)", () => {
 	}
 
 	it("goes on with a turn a crash cut off mid tool call, running the cut-off call again", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
 		const executed: string[] = [];
 		// The process died while `probe` ran: no tool result, no session_exit record.
@@ -162,7 +162,7 @@ describe("AgentSession.restoreInterruptedTurn (omp --restore)", () => {
 	});
 
 	it("goes on with a turn exit recovery closed when the eval state snapshot follows it (#16195)", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
 		const executed: string[] = [];
 		const evalToolSession: ToolSession = {
@@ -217,7 +217,7 @@ describe("AgentSession.restoreInterruptedTurn (omp --restore)", () => {
 	});
 
 	it("goes on with a request its owner's shutdown cut off, not with one a normal quit stopped", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
 		const stops: Array<{ label: string; stop: (session: AgentSession) => Promise<void>; restored: boolean }> = [
 			// Lifecycle teardown of a running revived agent: the dispose itself cuts the request off.
@@ -270,7 +270,7 @@ describe("AgentSession.restoreInterruptedTurn (omp --restore)", () => {
 	});
 
 	it("goes on again with a restored turn a second shutdown cut off", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
 		let started = Promise.withResolvers<void>();
 		const hang: AgentTool<typeof probeSchema> = {
@@ -321,7 +321,7 @@ describe("AgentSession.restoreInterruptedTurn (omp --restore)", () => {
 	});
 
 	it("leaves a turn the user interrupted, and one that finished, as they are", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
 		const interrupted: Message[] = [
 			{ role: "user", content: "run the probe", timestamp: Date.now() },

@@ -1,6 +1,3 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
-import * as fs from "node:fs";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as pythonExecutor from "@oh-my-pi/pi-coding-agent/eval/py/executor";
@@ -11,7 +8,10 @@ import { createAgentSession, type ExtensionFactory, type WorkspaceTree } from "@
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { Snowflake, TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
+import * as fs from "node:fs";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 const OK_EXECUTION = { status: "ok", cancelled: false, timedOut: false, stdinRequested: false } as const;
 
@@ -72,7 +72,7 @@ class FakeKernel {
 }
 
 const getModel = () => {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("Expected bundled model");
 	return model;
 };

@@ -17,7 +17,6 @@
 - `packages/natives/scripts/build-bindings.ts`
 - `packages/natives/scripts/embed-native.ts`
 - `packages/natives/scripts/gen-enums.ts`
-- `packages/natives/scripts/gen-npm-packages.ts`
 - `packages/natives/scripts/verify-addon.ts`
 - `crates/pi-natives/src/lib.rs` and its modules
 
@@ -39,7 +38,7 @@ Current root capabilities include:
 - search, globbing, workspace scans, AST matching/editing, code summaries, syntax highlighting, text layout, token counting, and structured diffs;
 - shell, PTY, process, file-lock, isolation, and work-profile primitives;
 - clipboard, device-check, SIXEL, and snapcompact rendering;
-- PDF inspection/Markdown conversion, SVG rasterization, Mermaid terminal rendering, macOS spelling services, word prediction, and in-process Git/Jujutsu operations;
+- PDF inspection/Markdown conversion, SVG rasterization, Mermaid terminal rendering, macOS spelling services, and in-process Git/Jujutsu operations;
 - streaming edit sessions and shared edit state, and native OAuth callback registration.
 
 ## Loader and distribution
@@ -47,9 +46,7 @@ Current root capabilities include:
 `native/index.js` calls `loadNative()` from `loader-state.js`. The platform tag is `${process.platform}-${process.arch}`. Supported tags are:
 
 - `linux-x64`
-- `linux-arm64`
 - `darwin-x64`
-- `darwin-arm64`
 
 x64 builds have `modern` (x86-64-v3/AVX2) and `baseline` (x86-64-v2) variants. `PI_NATIVE_VARIANT=modern|baseline` overrides automatic detection. Automatic detection reads `/proc/cpuinfo` on Linux or calls `sysctl` on macOS. Its result is inherited by subsequent workers and child processes through the private `__PI_NATIVE_VARIANT_CACHE` environment entry. Non-x64 builds use an unsuffixed filename.
 
@@ -59,7 +56,7 @@ Filename fallback is:
 - baseline x64: `-baseline.node`, then unsuffixed `.node`;
 - non-x64: unsuffixed `.node` only.
 
-The published core package contains loader JS, declarations, and metadata but no `.node` files. Release publishing generates `@oh-my-pi/pi-natives-<platform>-<arch>` optional-dependency leaf packages and injects them at the same version into the core manifest. `LEAF_TARGETS` in `gen-npm-packages.ts` is the authoritative publish target list.
+OMP Slim distributes source and verified standalone artifacts from its public manual Actions workflows. Upstream npm leaf generation and publishing scripts are removed; see `SLIM.md`.
 
 ### Candidate ownership and order
 

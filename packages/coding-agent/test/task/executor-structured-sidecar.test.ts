@@ -5,21 +5,21 @@
  * a schema-invalid yield with parsed data must still get a sidecar so its
  * full payload stays recoverable via `agent://<id>` (PR #10625 review).
  */
-import { afterEach, describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
+import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createSessionDefaults } from "../helpers/session-defaults";
+import { createTestModel } from "../helpers/test-model";
 
 function createMockSession(onPrompt: (params: { emit: (event: AgentSessionEvent) => void }) => void): AgentSession {
 	const listeners: Array<(event: AgentSessionEvent) => void> = [];
@@ -116,7 +116,7 @@ describe("structured output sidecar lifecycle", () => {
 			settings: Settings.isolated(),
 			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 			enableLsp: false,
-			parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 			artifactsDir,
 			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
 		});
@@ -170,7 +170,7 @@ describe("structured output sidecar lifecycle", () => {
 			settings: Settings.isolated(),
 			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 			enableLsp: false,
-			parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 			artifactsDir,
 			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
 		});
@@ -200,7 +200,7 @@ describe("structured output sidecar lifecycle", () => {
 			settings: Settings.isolated(),
 			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 			enableLsp: false,
-			parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 			artifactsDir,
 			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
 		});

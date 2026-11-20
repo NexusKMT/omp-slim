@@ -1,21 +1,12 @@
+import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { sanitizeText } from "@oh-my-pi/pi-utils";
+import type { TspSpan } from "@oh-my-pi/pi-wire";
+import { truncateToVisualLines } from "../chrome/visual-truncate";
 import type { Component } from "../index";
 import { Markdown, Text } from "../index";
-import { sanitizeText } from "@oh-my-pi/pi-utils";
-import type {
-	NativeToolHead,
-	NativeToolView,
-	RenderResultContextOptions,
-	RenderResultOptions,
-	ToolRenderer,
-} from "./renderer";
-import type { TspSpan } from "@oh-my-pi/pi-wire";
 import { code, compact, keyed, md, node, span, text } from "../native/describe";
 import type { NativeChild, NativeNode } from "../native/node";
 import { plainText } from "../native/spans";
-import { resultText, runBox, runFoot, type RunFootInput, runInput, runOutput, type RunState } from "./native-view";
-import { renderAgentTreeRow } from "./agent-tree";
-import { truncateToVisualLines } from "../chrome/visual-truncate";
-import { getMarkdownTheme, type Theme } from "../theme/theme";
 import {
 	type CodeCellOptions,
 	markFramedBlockComponent,
@@ -23,25 +14,13 @@ import {
 	renderCodeCell,
 } from "../render/index";
 import { formatOutputPaneLines } from "../render/output-pane";
-import { formatEvalCodeForDisplay } from "./eval-format/index";
 import {
-	JSON_TREE_MAX_DEPTH_COLLAPSED,
-	JSON_TREE_MAX_DEPTH_EXPANDED,
-	JSON_TREE_MAX_LINES_COLLAPSED,
-	JSON_TREE_MAX_LINES_EXPANDED,
-	JSON_TREE_SCALAR_LEN_COLLAPSED,
-	JSON_TREE_SCALAR_LEN_EXPANDED,
-	describeJsonValue,
-	renderJsonTreeLines,
-} from "./json-tree";
-import { formatStyledTruncationWarning, stripOutputNotice } from "./output-meta";
-import { formatMCPProgress, parseMCPProgress } from "./mcp";
-import { splitPathAndSel } from "./read";
-import {
-	DEFAULT_TERMINAL_PREVIEW_LINES,
-	PREVIEW_LIMITS,
 	cappedHeadLines,
+	type ConfiguredThinkingLevel,
+	DEFAULT_TERMINAL_PREVIEW_LINES,
+	expandKeyHint,
 	formatTitle,
+	PREVIEW_LIMITS,
 	previewLine,
 	previewWindowRows,
 	replaceTabs,
@@ -50,9 +29,31 @@ import {
 	truncateToWidth,
 	wrapBrackets,
 } from "../render/render-utils";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { getMarkdownTheme, type Theme } from "../theme/theme";
+import { renderAgentTreeRow } from "./agent-tree";
+import { formatEvalCodeForDisplay } from "./eval-format/index";
+import {
+	describeJsonValue,
+	JSON_TREE_MAX_DEPTH_COLLAPSED,
+	JSON_TREE_MAX_DEPTH_EXPANDED,
+	JSON_TREE_MAX_LINES_COLLAPSED,
+	JSON_TREE_MAX_LINES_EXPANDED,
+	JSON_TREE_SCALAR_LEN_COLLAPSED,
+	JSON_TREE_SCALAR_LEN_EXPANDED,
+	renderJsonTreeLines,
+} from "./json-tree";
+import { formatMCPProgress, parseMCPProgress } from "./mcp";
+import { resultText, runBox, runFoot, type RunFootInput, runInput, runOutput, type RunState } from "./native-view";
 import type { OutputMeta } from "./output-meta";
-import { type ConfiguredThinkingLevel, expandKeyHint } from "../render/render-utils";
+import { formatStyledTruncationWarning, stripOutputNotice } from "./output-meta";
+import { splitPathAndSel } from "./read";
+import type {
+	NativeToolHead,
+	NativeToolView,
+	RenderResultContextOptions,
+	RenderResultOptions,
+	ToolRenderer,
+} from "./renderer";
 
 /** Runtime backend that an eval cell dispatches to. */
 export type EvalLanguage = "python" | "js";
@@ -346,7 +347,6 @@ function renderAgentProgressEvents(
 					width,
 					model: eventString(event.resolvedModelIdentity ?? event.model ?? event.resolvedModel),
 					thinkingLevel: event.resolvedThinkingLevel,
-					advisor: event.advisor === true,
 					spinnerFrame,
 					preview: preview ? ` ${theme.fg("muted", truncateToWidth(replaceTabs(preview), 48))}` : undefined,
 					stats: {

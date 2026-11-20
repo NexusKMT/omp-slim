@@ -1,8 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { applyRpcQueueModeCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
@@ -11,10 +8,11 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
-import { cfgInterruptMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
-import { cfgFollowUpMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
-import { cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
+import { cfgFollowUpMode, cfgInterruptMode, cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 
 /**
  * Regression guard for #11555: the RPC queue-mode path (`persist: false`)
@@ -42,7 +40,7 @@ describe("AgentSession queue-mode controls are session-scoped by default", () =>
 		authStorage.keys.setRuntime("anthropic", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 
-		model = getBundledModel("anthropic", "claude-sonnet-4-5") as Model;
+		model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }) as Model;
 		settings = await Settings.loadIsolated({ agentDir, cwd: agentDir });
 
 		session = new AgentSession({

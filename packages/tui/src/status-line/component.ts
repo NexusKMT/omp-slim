@@ -1,39 +1,39 @@
-import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { getNextTimeBasedPricingTransition } from "@oh-my-pi/pi-ai/models";
 import type { Model, ModelCost } from "@oh-my-pi/pi-ai/types";
 import type { VcsGitRepo, VcsRepo } from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
+import { adjustHsv, formatNumber, getProjectDir, hexToRgb, rgbToHex } from "@oh-my-pi/pi-utils";
+import type { TspMeterMark, TspProps } from "@oh-my-pi/pi-wire";
+import * as path from "node:path";
+import { getContextMeterThresholds } from "../chrome/context-thresholds";
+import { sanitizeHookStatusText, sanitizeStatusText } from "../chrome/shared";
+import type { Editor } from "../components/editor";
 import {
+	claudeComposerStyle,
 	type Component,
 	type ComposerStyle,
-	claudeComposerStyle,
-	padding,
 	motionEffectsEnabled,
+	padding,
 	spinnerAnimated,
 	spinnerInterval,
 	spinnerTickDelay,
 	truncateToWidth,
 	visibleWidth,
 } from "../index";
-import { adjustHsv, formatNumber, getProjectDir, hexToRgb, rgbToHex } from "@oh-my-pi/pi-utils";
-import type { ActiveRepoContext, StatusLineHost, StatusLineSession } from "./host";
-import type { Editor } from "../components/editor";
-import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
-import { sanitizeHookStatusText, sanitizeStatusText } from "../chrome/shared";
+import { col, node, span } from "../native/describe";
+import type { NativeNode, NativeUiEvent } from "../native/node";
+import { isNativeRendering, onNativeRenderingChange } from "../native/state";
 import { getThemeEpoch, theme } from "../theme";
+import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
+import { formatJobWidgetGlance, type JobWidgetEntry, latestJobWidget } from "../tools/job-widget";
 import { type CompactionBoundaries, EMPTY_STRING_PARTS, getToolSchemaMetadataRevision } from "./context-usage";
 import { canReuseCachedPr, createPrCacheContext, isSamePrCacheContext, type PrCacheContext } from "./git-utils";
+import type { ActiveRepoContext, StatusLineHost, StatusLineSession } from "./host";
 import { getPreset } from "./presets";
 import { describeSegment, renderSegment, type SegmentContext } from "./segments";
-import type { TspMeterMark, TspProps } from "@oh-my-pi/pi-wire";
-import type { NativeNode, NativeUiEvent } from "../native/node";
-import { col, node, span } from "../native/describe";
-import { getContextMeterThresholds } from "../chrome/context-thresholds";
-import { isNativeRendering, onNativeRenderingChange } from "../native/state";
 import { getSeparator } from "./separators";
-import { formatJobWidgetGlance, type JobWidgetEntry, latestJobWidget } from "../tools/job-widget";
 import type {
 	ComposerFacts,
 	ComposerFactsSource,
@@ -681,15 +681,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	#planModeStatus: { enabled: boolean; paused: boolean } | null = null;
 	#loopModeStatus: SegmentContext["loopMode"] = null;
 	#goalModeStatus: { enabled: boolean; paused: boolean } | null = null;
-	#vibeModeStatus: { enabled: boolean } | null = null;
 	#vimStatus: SegmentContext["vim"] = null;
-	/**
-	 * Injected aggregator that returns the aggregate tok/s of this session's
-	 * live vibe worker sessions, or null when no workers are streaming. Kept as
-	 * a callback so the render layer doesn't import the heavy vibe/task
-	 * dependency graph; interactive-mode wires it to VibeSessionRegistry.
-	 */
-	#vibeWorkerTokenRate: (() => number | null) | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
 
@@ -1075,13 +1067,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		this.#invalidateStatusLineRenderCache();
 	}
 
-	setVibeModeStatus(status: { enabled: boolean } | undefined): void {
-		const next = status ?? null;
-		if (this.#vibeModeStatus === next || this.#vibeModeStatus?.enabled === next?.enabled) return;
-		this.#vibeModeStatus = next;
-		this.#invalidateStatusLineRenderCache();
-	}
-
 	/** Mirror of the editor's modal state; `undefined` clears it (Vim mode off). */
 	setVimStatus(status: NonNullable<SegmentContext["vim"]> | undefined): void {
 		const next = status ?? null;
@@ -1095,18 +1080,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return;
 		}
 		this.#vimStatus = next;
-		this.#invalidateStatusLineRenderCache();
-	}
-
-	/**
-	 * Inject the aggregator that returns the aggregate tok/s of this session's
-	 * live vibe worker sessions (null when no workers are streaming). Wired by
-	 * interactive-mode, which owns the VibeSessionRegistry coupling, so the
-	 * render layer stays off the heavy vibe/task dependency graph. Pass
-	 * `undefined` to clear.
-	 */
-	setVibeWorkerTokenRateProvider(provider: (() => number | null) | undefined): void {
-		this.#vibeWorkerTokenRate = provider ?? null;
 		this.#invalidateStatusLineRenderCache();
 	}
 
@@ -1833,32 +1806,9 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	}
 
 	#getTokensPerSecond(): number | null {
-		// Aggregate tok/s across the main session AND every live vibe worker.
-		// In vibe mode the director is often idle while workers stream, so the
-		// main session's own rate alone would show a stale/zero value while
-		// parallel work is actively generating tokens.
-		const workerRate = this.#getVibeWorkerTokensPerSecond();
-		if (workerRate !== null) {
-			// At least one worker is streaming — add the director's live rate
-			// only when it is itself streaming (a finalized last-turn rate would
-			// double-count and overstate throughput).
-			const mainRate = this.session.isStreaming
-				? this.host.calculateTokensPerSecond(this.session.state.messages, true)
-				: 0;
-			return (mainRate ?? 0) + workerRate;
-		}
-
-		// No workers streaming — fall back to the main session's own rate with
-		// its sticky per-assistant-message cache so the badge doesn't flicker
-		// off in the brief gap between stream end and the finalized message.
 		return this.#getMainSessionTokensPerSecond();
 	}
 
-	/**
-	 * Main session's tok/s with sticky caching keyed on the last assistant
-	 * message timestamp. Preserves the pre-aggregation behavior when no vibe
-	 * workers are active.
-	 */
 	#getMainSessionTokensPerSecond(): number | null {
 		let lastAssistantTimestamp: number | null = null;
 		for (let i = this.session.state.messages.length - 1; i >= 0; i--) {
@@ -1887,17 +1837,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		}
 
 		return null;
-	}
-
-	/**
-	 * Aggregate tok/s across every live vibe worker session owned by this
-	 * session. Returns null when no workers are streaming (so the main
-	 * session's own rate shines through unchanged). The aggregation itself is
-	 * injected via {@link setVibeWorkerTokenRateProvider} to keep this render
-	 * layer off the heavy vibe/task dependency graph.
-	 */
-	#getVibeWorkerTokensPerSecond(): number | null {
-		return this.#vibeWorkerTokenRate?.() ?? null;
 	}
 
 	/**
@@ -2045,7 +1984,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			loopMode: this.#loopModeStatus,
 			goalMode: this.#goalModeStatus,
 			goalStatusInFooter: this.#goalModeStatus ? this.host.goalStatusInFooter(this.session) : false,
-			vibeMode: this.#vibeModeStatus,
 			vim: this.#vimStatus,
 			usageStats,
 			contextPercent,
@@ -2315,9 +2253,6 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		}
 		const includesTime = leftSegments.includes("time") || rightSegments.includes("time");
 		if (
-			// A running turn also moves readouts that have no invalidation path of
-			// their own (background-job badge, live and vibe-worker tok/s): refresh
-			// them once a second instead of on the spinner tick.
 			turnActive ||
 			leftSegments.includes("time_spent") ||
 			rightSegments.includes("time_spent") ||

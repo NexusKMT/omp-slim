@@ -30,11 +30,11 @@
  * real implementations at the dispatch site.
  */
 
-import { isServiceTierOpenAISettingValue, SERVICE_TIER_OPENAI_VALUES } from "../config/service-tier";
 import { parseMaxFps } from "@oh-my-pi/pi-tui/frame-rate";
-import { parseMotionMode } from "../config/motion-presets";
 import { parseSpinnerInterval } from "@oh-my-pi/pi-tui/spinner-clock";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import { parseMotionMode } from "../config/motion-presets";
+import { isServiceTierOpenAISettingValue, SERVICE_TIER_OPENAI_VALUES } from "../config/service-tier";
 import type { Args } from "./args";
 import { CliUsageError } from "./usage-error";
 
@@ -337,7 +337,6 @@ export const VALUELESS_FLAGS: ReadonlySet<string> = new Set([
 	"--no-lsp",
 	"--no-pty",
 	"--hide-thinking",
-	"--advisor",
 	"--wait-async",
 	"--external-thinking",
 	"--plan-yolo",

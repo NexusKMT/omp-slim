@@ -1,4 +1,3 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { CompactionPreparation } from "@oh-my-pi/pi-agent-core/compaction";
@@ -6,13 +5,14 @@ import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 /** Byte-limit 413s may be recoverable when older live history can be compacted. */
 
@@ -73,7 +73,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			emitBeforeAgentStart: async () => undefined,
 		};
 
-		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!bundled) {
 			throw new Error("Expected built-in anthropic model to exist");
 		}
@@ -1103,7 +1103,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	}
 
 	it("keeps usage-backed payload overflows off the configured chain", async () => {
-		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		const fallbackModel = createTestModel({ provider: "openai", id: "gpt-4o-mini" });
 		if (!fallbackModel) {
 			throw new Error("Expected bundled openai fallback model to exist");
 		}

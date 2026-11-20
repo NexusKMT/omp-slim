@@ -1,18 +1,16 @@
-import { describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { initializeWithSettings } from "@oh-my-pi/pi-coding-agent/discovery";
+import { cfgDisabledExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
-
-import { cfgAdvisorEnabled } from "@oh-my-pi/pi-coding-agent/advisor/settings";
-import { cfgDisabledExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/settings";
+import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 const INITIAL_CONTEXT = "reload-context-initial-marker";
 const UPDATED_CONTEXT = "reload-context-updated-marker";
@@ -21,15 +19,10 @@ const PROJECT_CONTEXT_EXTENSION_ID = "context-file:project:AGENTS.md";
 async function createContextSession(
 	cwd: string,
 	settings: Settings,
-	options: { advisor?: boolean } = {},
+	options: {} = {},
 ): Promise<{ session: AgentSession; authStorage: AuthStorage; sessionManager: SessionManager }> {
 	const authStorage = await AuthStorage.create(`${cwd}/auth.db`);
-	const model = getBundledModel("openai", "gpt-4o-mini");
-	if (options.advisor) {
-		authStorage.keys.setRuntime("openai", "test-key");
-		cfgAdvisorEnabled.set(settings, true);
-		// Named model roles removed: the advisor reviews with the session model.
-	}
+	const model = createTestModel({ provider: "openai", id: "gpt-4o-mini" });
 	const modelRegistry = new ModelRegistry(authStorage, `${cwd}/models.json`);
 	const sessionManager = SessionManager.inMemory(cwd);
 	const { session } = await createAgentSession({
@@ -115,32 +108,6 @@ describe("context-file prompt refresh", () => {
 			authStorage.close();
 		}
 	});
-
-	it("refreshes the advisor context prompt when context files change", async () => {
-		using tempDir = TempDir.createSync("@omp-context-refresh-advisor-");
-		const contextPath = tempDir.join("AGENTS.md");
-		await Bun.write(contextPath, INITIAL_CONTEXT);
-		const { session, authStorage } = await createContextSession(tempDir.path(), Settings.isolated({}), {
-			advisor: true,
-		});
-
-		try {
-			const advisorPrompt = () => session.getAdvisorAgent()?.state.systemPrompt.join("\n") ?? "";
-			expect(session.isAdvisorActive()).toBe(true);
-			expect(advisorPrompt()).toContain(INITIAL_CONTEXT);
-
-			await Bun.write(contextPath, UPDATED_CONTEXT);
-			await session.refreshSkills();
-
-			const refreshed = advisorPrompt();
-			expect(refreshed).toContain(UPDATED_CONTEXT);
-			expect(refreshed).not.toContain(INITIAL_CONTEXT);
-		} finally {
-			await session.dispose();
-			authStorage.close();
-		}
-	});
-
 	it("recomputes active repo context after the session cwd changes", async () => {
 		using tempDir = TempDir.createSync("@omp-context-refresh-cwd-");
 		const cwdA = tempDir.join("cwd-a");

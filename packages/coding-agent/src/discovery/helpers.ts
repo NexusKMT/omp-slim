@@ -1,7 +1,5 @@
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { FileType, glob } from "@oh-my-pi/pi-natives";
+import { type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import {
 	CONFIG_DIR_NAME,
 	getAgentDir,
@@ -15,6 +13,9 @@ import {
 	pathIsWithin,
 	tryParseJson,
 } from "@oh-my-pi/pi-utils";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { isUserSourceEnabled } from "../capability";
 import type { ContextFile } from "../capability/context-file";
 import type { ExtensionModule } from "../capability/extension-module";
@@ -30,7 +31,6 @@ import {
 import type { Skill, SkillFrontmatter } from "../capability/skill";
 import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
 import type { MCPRequestIdFormat } from "../mcp/types";
-import { type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { normalizeToolNames } from "../tools/builtin-names";
 
 import { realpathIfExists, resolveContainedPath } from "./contained-path";
@@ -244,8 +244,6 @@ export interface ParsedAgentFields {
 	blocking?: boolean;
 	/** `true` = keep `yield` and the output schema when `task.structured` is off. */
 	structured?: boolean;
-	/** Enable the advisor on the current model; legacy model strings enable it without selecting a model. */
-	advisor?: boolean | string;
 }
 
 /**
@@ -315,12 +313,6 @@ export function parseAgentFields(frontmatter: Record<string, unknown>): ParsedAg
 	const blocking = parseBoolean(frontmatter.blocking);
 	const structured = parseBoolean(frontmatter.structured);
 	const readSummarize = parseBoolean(frontmatter.readSummarize);
-	// Legacy advisor model strings preserve only enablement.
-	let advisor: boolean | string | undefined = parseBoolean(frontmatter.advisor);
-	if (advisor === undefined && typeof frontmatter.advisor === "string") {
-		const trimmed = frontmatter.advisor.trim();
-		if (trimmed) advisor = trimmed;
-	}
 	const autoloadSkills = parseArrayOrCSV(frontmatter.autoloadSkills)
 		?.map(s => s.trim())
 		.filter(Boolean);
@@ -336,7 +328,6 @@ export function parseAgentFields(frontmatter: Record<string, unknown>): ParsedAg
 		structured,
 		autoloadSkills,
 		readSummarize,
-		advisor,
 	};
 }
 

@@ -4,11 +4,8 @@
  * willContinue so Warp (and similar subscribers) do not emit a terminal stop
  * before the continuation runs.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -16,6 +13,9 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 describe("AgentSession session_stop willContinue", () => {
 	let tempDir: TempDir;
@@ -41,7 +41,7 @@ describe("AgentSession session_stop willContinue", () => {
 	});
 
 	it("marks extension agent_end willContinue when session_stop schedules a hidden turn", async () => {
-		const model = getBundledModel("openai", "gpt-5");
+		const model = createTestModel({ provider: "openai", id: "gpt-5" });
 		if (!model) {
 			throw new Error("Expected bundled OpenAI test model to exist");
 		}
@@ -68,7 +68,7 @@ describe("AgentSession session_stop willContinue", () => {
 			"compaction.enabled": false,
 			"retry.enabled": false,
 		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		settings.setModel(`${model.provider}/${model.id}`);
 
 		const extensionEmits: Array<{ type: string; willContinue?: boolean }> = [];
 		let sessionStopCalls = 0;

@@ -32,13 +32,12 @@ import type { OverlayLayers, Settings } from "../config/settings";
 import type { ContextUsage } from "../extensibility/extensions/types";
 import type { Skill } from "../extensibility/skills";
 import type { GoalModeState } from "../goals/state";
+import type { AgentSessionEvent, AgentSessionEventListener } from "../session/agent-session-events";
 import type {
-	AgentSessionAdvisorOverview,
 	AgentSessionHandle,
 	AgentViewToolSchema,
 	ToolExecutionUpdateEvent,
 } from "../session/agent-session-handle";
-import type { AgentSessionEvent, AgentSessionEventListener } from "../session/agent-session-events";
 import type {
 	AgentSessionDisposeOptions,
 	EphemeralTurnOptions,
@@ -76,7 +75,6 @@ export interface SessionMirrorState {
 	artifactsDir: string | null;
 	usageStatistics: UsageStatistics;
 	sessionStats: SessionStats;
-	advisorOverview: AgentSessionAdvisorOverview;
 	sessionAgents: AgentDefinition[];
 	effectiveExtensionRoots: EffectiveExtensionRoots;
 }
@@ -183,8 +181,6 @@ export interface SessionViewState {
 	fastModeActive: boolean;
 
 	goalMode: GoalModeState | undefined;
-	advisorCost: number;
-
 	todoPhases: TodoPhase[];
 	queuedMessages: SessionQueuedMessages;
 	restorableQueue: SessionRestorableQueue;
@@ -349,7 +345,6 @@ export const SESSION_STATE_READERS: {
 	artifactsDir: session => session.sessionManager.getArtifactsDir(),
 	usageStatistics: session => toWireData(session.sessionManager.getUsageStatistics()),
 	sessionStats: session => toWireData(session.getSessionStats()),
-	advisorOverview: session => toWireData(session.getAdvisorStatusOverview()),
 	sessionAgents: session => toWireData(session.getSessionAgents()),
 	effectiveExtensionRoots: session => toWireData(session.effectiveExtensionRoots),
 };

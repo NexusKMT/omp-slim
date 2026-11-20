@@ -1,7 +1,7 @@
-import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { isContextOverflow, isPayloadRejection } from "@oh-my-pi/pi-ai/error";
+import { describe, expect, it } from "bun:test";
 
 function createErrorMessage(errorMessage: string): AssistantMessage {
 	return {
@@ -172,12 +172,6 @@ describe("isContextOverflow/isPayloadRejection - HTTP 413 variants", () => {
 		expect(isContextOverflow(message)).toBe(true);
 		expect(isPayloadRejection(message)).toBe(false);
 	});
-
-	it("flags Anthropic 'maximum size' wording as payload rejection", () => {
-		const message = createErrorMessage("Request exceeds the maximum size allowed by this model");
-		expect(isPayloadRejection(message)).toBe(true);
-	});
-
 	it("does not classify unrelated 413 errors as overflow or payload rejection", () => {
 		const message = createErrorMessage("413 Forbidden");
 		expect(isContextOverflow(message)).toBe(false);
@@ -192,11 +186,6 @@ describe("isContextOverflow - 400/413 no-body (Cerebras, Mistral, proxy wrappers
 	// Regression: api.synthetic.new wraps upstream HF 400-no-body in a JSON envelope.
 	// finalizeErrorMessage transforms the response to "400 status code: {JSON}" where
 	// the JSON value contains the inner "400 status code (no body)" text.
-	it('detects wrapped proxy envelope: \'400 status code: {"error":"... 400 status code (no body)"}\'', () => {
-		const errorMessage = '400 status code: {"error":"Error from inference backend: 400 status code (no body)"}';
-		expect(isContextOverflow(createErrorMessage(errorMessage))).toBe(true);
-	});
-
 	it("does not classify unrelated 400 errors as overflow", () => {
 		expect(isContextOverflow(createErrorMessage("400 Bad Request: invalid API key"))).toBe(false);
 	});
@@ -297,7 +286,7 @@ describe("classify - token evidence arbitrates the status fallback across cause 
 
 describe("classifyMessage - final text clears the status-inferred payload bit (#9235 review)", () => {
 	it("drops the pre-body payload inference once formatting attaches a token-overflow body", () => {
-		const error = new AIError.OllamaApiError("HTTP 413 from http://localhost:11434/api/chat", 413);
+		const error = new AIError.ProviderHttpError("HTTP 413 from http://localhost:11434/api/chat", 413);
 		const earlyId = AIError.classify(error);
 		expect(AIError.is(earlyId, AIError.Flag.PayloadRejected)).toBe(true);
 		const id = AIError.classifyMessage({
@@ -310,7 +299,7 @@ describe("classifyMessage - final text clears the status-inferred payload bit (#
 	});
 
 	it("keeps the payload flag when the attached body names a media budget", () => {
-		const error = new AIError.OllamaApiError("HTTP 413 from http://localhost:11434/api/chat", 413);
+		const error = new AIError.ProviderHttpError("HTTP 413 from http://localhost:11434/api/chat", 413);
 		const id = AIError.classifyMessage({
 			errorId: AIError.classify(error),
 			errorMessage: "HTTP 413 from http://localhost:11434/api/chat\nimage count exceeds the limit of 20",

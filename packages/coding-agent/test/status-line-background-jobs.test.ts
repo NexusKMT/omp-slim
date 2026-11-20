@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { stripVTControlCharacters } from "node:util";
 import type { AsyncJobType } from "@oh-my-pi/pi-coding-agent/async";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
 import { statusLineHost } from "@oh-my-pi/pi-coding-agent/modes/status-line-host";
+import type { AsyncJobSnapshotItem } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { StatusLineComponent } from "@oh-my-pi/pi-tui/status-line";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { JobWidgetEntry, JobWidgetView } from "@oh-my-pi/pi-tui/tools/job-widget";
-import type { AsyncJobSnapshotItem } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { stripVTControlCharacters } from "node:util";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
 import { StatusLineTestComponents } from "./helpers/status-line";
 
@@ -55,8 +55,6 @@ function makeComponent(
 		isAutoThinking: false,
 		autoResolvedThinkingLevel: () => undefined,
 		isFastModeActive: () => false,
-		isAdvisorActive: () => false,
-		getAdvisorStatusOverview: () => ({ configured: false, advisors: [] }),
 		getAsyncJobSnapshot: () => ({ running }),
 		getRunningJobWidgets: widgets,
 		settings: { get: () => false },

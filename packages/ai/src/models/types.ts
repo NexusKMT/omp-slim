@@ -183,17 +183,7 @@ export interface ModelCost extends TokenCost {
  * generations rather than providers: DeepSeek V3 through V4 share
  * `"deepseek-v3"`; Kimi K2 through K3 share `"kimi-k2"`.
  */
-export type ModelTokenizer =
-	| "claude-v3"
-	| "claude-v47"
-	| "claude-v5"
-	| "claude-v5-sonnet"
-	| "qwen3"
-	| "deepseek-v3"
-	| "kimi-k2"
-	| "glm5"
-	| "cl100k"
-	| "o200k";
+export type ModelTokenizer = "qwen3" | "deepseek-v3" | "kimi-k2" | "glm5" | "cl100k" | "o200k";
 
 /** A manually configured endpoint and its explicit capabilities. */
 export interface Model<TApi extends Api = Api> {

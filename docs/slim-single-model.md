@@ -21,7 +21,8 @@ to `model` only when the same configuration layer has no explicit `model` value.
 Other retired role settings cannot reactivate routing. Historical session model
 entries and model tags remain readable.
 
-Advisors follow the current main model and its effort. Titles, job widgets,
+Advisors, Vibe, Autoresearch and built-in personality presets are removed.
+Titles, job widgets,
 skill-description compression, enabled edit repair, explicit judgments and
 image questions use the current model object. Failed requests do not select a
 second model. Title generation offers a fork or a separate request to this

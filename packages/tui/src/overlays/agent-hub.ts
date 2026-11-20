@@ -14,6 +14,7 @@
  * Replaces the old SessionObserverOverlayComponent (ctrl+s observer).
  */
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { formatAge, formatDuration, formatNumber, getProjectDir, logger } from "@oh-my-pi/pi-utils";
 import type {
 	TspPickerAction,
 	TspPickerColumn,
@@ -23,28 +24,33 @@ import type {
 	TspSpan,
 	TspTreeNode,
 } from "@oh-my-pi/pi-wire";
-import { Container, type OverlayHandle, type TUI } from "../tui";
-import { matchesKey } from "../keys";
-import { routeSelectListMouse, routeSgrMouseInput, type SelectListMouseTarget } from "../mouse";
-import { padding, visibleWidth, wrapTextWithAnsi } from "../utils";
-import { formatAge, formatDuration, formatNumber, getProjectDir, logger } from "@oh-my-pi/pi-utils";
-import {
-	type AgentActivitySource,
-	type AgentActivityKind,
-	type AgentActivityRow,
-	activityRowsFromProgress,
-} from "./agent-activity";
 import { formatKeyHint, formatKeyHints, type KeyId } from "../app-keybindings";
 import type { MessageRenderer } from "../chat/extension-types";
-import type { AgentLifecycleLike, IrcBusLike } from "./agent-hub-types";
-import { type AgentRecordLike, type AgentHubRegistry, type AgentStatus, MAIN_AGENT_ID } from "./agent-hub-types";
 import { USER_INTERRUPT_LABEL } from "../chat/messages";
-import { shortenPath, truncateToWidth } from "../render/render-utils";
-import { formatLocalDateTimeWithOffset } from "../chrome/local-date";
 import { getContextUsageLevel, getContextUsageTone } from "../chrome/context-thresholds";
-import type { ObservableSession, SessionObserverRegistry } from "./session-observer-registry";
-import { theme } from "../theme/theme";
+import { formatLocalDateTimeWithOffset } from "../chrome/local-date";
+import { bottomBorder, divider, dividerSplit, PanelRows, row, topBorder, topBorderSplit } from "../chrome/overlay-box";
+import { Input } from "../components/input";
+import { SplitPane } from "../components/layout/split-pane";
+import { Stack } from "../components/layout/stack";
+import { fuzzyMatch } from "../fuzzy";
 import { matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
+import { matchesKey } from "../keys";
+import { routeSelectListMouse, routeSgrMouseInput, type SelectListMouseTarget } from "../mouse";
+import { node, span, stableKey, text } from "../native/describe";
+import { type DescribeContext, leafKey, type NativeChild, type NativeNode, type NativeUiEvent } from "../native/node";
+import { hintsRow, type NativeHint, overlayCard } from "../native/overlay";
+import { CLOSE_ACTION, picker, pickerQuery } from "../native/picker";
+import { shortenPath, truncateToWidth } from "../render/render-utils";
+import { theme } from "../theme/theme";
+import { Container, type OverlayHandle, type TUI } from "../tui";
+import { padding, visibleWidth, wrapTextWithAnsi } from "../utils";
+import {
+	activityRowsFromProgress,
+	type AgentActivityKind,
+	type AgentActivityRow,
+	type AgentActivitySource,
+} from "./agent-activity";
 import {
 	type AgentMetrics,
 	type AggregateMetrics,
@@ -68,8 +74,8 @@ import {
 	modelChip,
 	type RosterRender,
 	sanitizeLine,
-	statusGlyph,
 	statusDot,
+	statusGlyph,
 	statusGlyphSpan,
 	statusText,
 	statusTone,
@@ -78,17 +84,11 @@ import {
 	treeContinuation,
 	treeMetadataIndent,
 } from "./agent-hub-renderer";
+import type { AgentLifecycleLike, IrcBusLike } from "./agent-hub-types";
+import { type AgentHubRegistry, type AgentRecordLike, type AgentStatus, MAIN_AGENT_ID } from "./agent-hub-types";
+import { type AgentTranscriptSource, AgentTranscriptViewer } from "./agent-transcript-viewer";
 import { sanitizeDisplaySingleLine } from "./extensions/display-text";
-import { AgentTranscriptViewer, type AgentTranscriptSource } from "./agent-transcript-viewer";
-import { fuzzyMatch } from "../fuzzy";
-import { bottomBorder, divider, dividerSplit, PanelRows, row, topBorder, topBorderSplit } from "../chrome/overlay-box";
-import { SplitPane } from "../components/layout/split-pane";
-import { Stack } from "../components/layout/stack";
-import { node, span, stableKey, text } from "../native/describe";
-import { type DescribeContext, leafKey, type NativeChild, type NativeNode, type NativeUiEvent } from "../native/node";
-import { hintsRow, type NativeHint, overlayCard } from "../native/overlay";
-import { CLOSE_ACTION, picker, pickerQuery } from "../native/picker";
-import { Input } from "../components/input";
+import type { ObservableSession, SessionObserverRegistry } from "./session-observer-registry";
 
 /** A chrome-less search field: the hub draws its own prompt. */
 function filterInput(): Input {
@@ -871,7 +871,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 	#agentPickerProps(): PickerBody {
 		const selected = this.#rows[this.#selectedRow];
-		const readOnly = selected?.kind === "advisor" ? "Read-only advisor transcript" : undefined;
+		const readOnly = selected?.history?.readOnly ? "Read-only transcript" : undefined;
 		const actions: TspPickerAction[] = [
 			{
 				id: "open",
@@ -917,7 +917,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		const metrics = this.#metricsFor(ref, observed);
 		const task = observed?.description ?? observed?.progress?.task ?? ref.activity;
 		const badges: { text: string; tone?: "warning" | "muted"; title?: string }[] = [];
-		if (ref.kind === "advisor") badges.push({ text: "read-only", tone: "warning" });
 		const unread = this.#irc.unreadCount(ref.id);
 		if (unread > 0) badges.push({ text: `${unread} unread`, tone: "warning" });
 		if (this.#viewMode === "roster" && ref.parentId && ref.parentId !== MAIN_AGENT_ID) {
@@ -1225,7 +1224,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		if (showParent && ref.parentId && ref.parentId !== MAIN_AGENT_ID) {
 			label.push(span(`  ↳ ${sanitizeDisplaySingleLine(ref.parentId)}`, "dim"));
 		}
-		if (ref.kind === "advisor") label.push(span("  read-only", "warning"));
 		const unread = this.#irc.unreadCount(ref.id);
 		if (unread > 0) label.push(span(`  ⧉ ${unread}`, "warning"));
 		return label;
@@ -1389,9 +1387,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			k: "Changes",
 			v: [
 				span(
-					ref.kind === "advisor" || ref.history?.readOnly
-						? "Read-only · 0 LoC"
-						: "Shared workspace · per-agent LoC not attributable",
+					ref.history?.readOnly ? "Read-only · 0 LoC" : "Shared workspace · per-agent LoC not attributable",
 					"dim",
 				),
 			],
@@ -2079,9 +2075,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		add(
 			theme.fg(
 				"dim",
-				ref.kind === "advisor" || ref.history?.readOnly
-					? "Read-only · 0 LoC"
-					: "Shared workspace · per-agent LoC not attributable",
+				ref.history?.readOnly ? "Read-only · 0 LoC" : "Shared workspace · per-agent LoC not attributable",
 			),
 		);
 		const artifacts = ref.history;
@@ -2134,9 +2128,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		const fields: string[] = [`${cursor} ${branch}${statusGlyph(ref.status)} ${styledId}`];
 		if (this.#viewMode === "roster" && ref.parentId && ref.parentId !== MAIN_AGENT_ID) {
 			fields.push(theme.fg("dim", `↳ ${sanitizeDisplaySingleLine(ref.parentId)}`));
-		}
-		if (ref.kind === "advisor") {
-			fields.push(theme.fg("warning", "read-only"));
 		}
 		const unread = this.#irc.unreadCount(ref.id);
 		if (unread > 0) {
@@ -2466,9 +2457,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#activateAgent(ref: TRecord): void {
 		this.#notice = undefined;
 		const focusAgent = this.#focusAgent;
-		// Advisor refs are read-only transcripts with no revivable session; open
-		// the in-hub viewer instead of failing ensureLive.
-		if (ref.kind === "advisor" || !focusAgent) {
+		if (!focusAgent) {
 			this.openChat(ref.id);
 			return;
 		}
@@ -2486,11 +2475,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#reviveSelected(): void {
 		const ref = this.#rows[this.#selectedRow];
 		if (!ref) return;
-		if (ref.kind === "advisor") {
-			this.#notice = `"${ref.id}" is a read-only advisor transcript — nothing to revive.`;
-			this.#requestRender();
-			return;
-		}
 		if (ref.status !== "parked" && ref.status !== "aborted") {
 			this.#notice = `Agent "${ref.id}" is ${ref.status} — only parked or killed agents can be revived.`;
 			this.#requestRender();
@@ -2510,11 +2494,6 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#killSelected(): void {
 		const ref = this.#rows[this.#selectedRow];
 		if (!ref) return;
-		if (ref.kind === "advisor") {
-			this.#notice = `"${ref.id}" is a read-only advisor transcript — cannot be killed.`;
-			this.#requestRender();
-			return;
-		}
 		this.#notice = undefined;
 		void (async () => {
 			try {

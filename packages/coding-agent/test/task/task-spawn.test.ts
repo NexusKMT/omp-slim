@@ -11,9 +11,8 @@
  * Param validation (missing agent / missing task) is covered by
  * test/task/task-schema.test.ts.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs/promises";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { snapshotJobs } from "@oh-my-pi/pi-coding-agent/async/job-control";
 import { type AsyncJob, AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
@@ -23,12 +22,13 @@ import { TaskTool } from "@oh-my-pi/pi-coding-agent/task";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
 import * as isolationRunner from "@oh-my-pi/pi-coding-agent/task/isolation-runner";
+import { cfgTaskMaxConcurrency } from "@oh-my-pi/pi-coding-agent/task/settings";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
-import type { AgentProgress, SingleResult, TaskParams } from "@oh-my-pi/pi-tui/tools/task";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { WaitTool } from "@oh-my-pi/pi-coding-agent/tools/wait";
-import { snapshotJobs } from "@oh-my-pi/pi-coding-agent/async/job-control";
-import { cfgTaskMaxConcurrency } from "@oh-my-pi/pi-coding-agent/task/settings";
+import type { AgentProgress, SingleResult, TaskParams } from "@oh-my-pi/pi-tui/tools/task";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
 
 const taskAgent: AgentDefinition = {
 	name: "task",
@@ -294,107 +294,6 @@ describe("task spawn routing", () => {
 			}
 		});
 	}
-
-	for (const { label, liveAdvisor, settledAdvisor, expectedAdvisor } of [
-		{
-			label: "retains an attached advisor through teardown",
-			liveAdvisor: true,
-			settledAdvisor: undefined,
-			expectedAdvisor: true,
-		},
-		{
-			label: "publishes an advisor attached at completion",
-			liveAdvisor: undefined,
-			settledAdvisor: true,
-			expectedAdvisor: true,
-		},
-		{
-			label: "omits an explicitly inactive advisor",
-			liveAdvisor: false,
-			settledAdvisor: false,
-			expectedAdvisor: undefined,
-		},
-	]) {
-		it(`${label} in detached job snapshots`, async () => {
-			vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-				// Configuration alone must not claim an attached runtime.
-				agents: [{ ...taskAgent, advisor: true }],
-				projectAgentsDir: null,
-			});
-			const gate = deferred();
-			let publishAdvisor: (() => void) | undefined;
-			vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-				const progress = {
-					index: 0,
-					id: options.id ?? "?",
-					agent: "task",
-					agentSource: "bundled" as const,
-					status: "pending" as const,
-					task: "Do the thing.",
-					recentTools: [],
-					recentOutput: [],
-					toolCount: 0,
-					requests: 1,
-					tokens: 1,
-					cost: 0,
-					durationMs: 1,
-					resolvedModel: "custom/coding-router:max:high",
-					resolvedModelIdentity: "custom/coding-router:max",
-					resolvedThinkingLevel: ThinkingLevel.High,
-				};
-				options.onProgress?.(progress);
-				publishAdvisor = () => options.onProgress?.({ ...progress, tokens: 2, advisor: liveAdvisor });
-				await gate.promise;
-				return makeResult(options.id ?? "?", {
-					resolvedModel: progress.resolvedModel,
-					resolvedModelIdentity: progress.resolvedModelIdentity,
-					resolvedThinkingLevel: progress.resolvedThinkingLevel,
-					advisor: settledAdvisor,
-				});
-			});
-
-			const manager = createManager();
-			const session = createSession({ manager });
-			const tool = await TaskTool.create(session);
-			const result = await tool.execute("tc-advisor", {
-				agent: "task",
-				name: "Advised",
-				task: "Do the thing.",
-			} as TaskParams);
-			const job = manager.getJob(result.details!.async!.jobId)!;
-			try {
-				await pollUntil(() => publishAdvisor !== undefined);
-				await pollUntil(() => snapshotJobs(session, [job])[0]?.resolvedModel === "custom/coding-router:max:high");
-				expect(snapshotJobs(session, [job])[0]).toMatchObject({
-					id: job.id,
-					status: "running",
-					resolvedModel: "custom/coding-router:max:high",
-					resolvedModelIdentity: "custom/coding-router:max",
-					resolvedThinkingLevel: ThinkingLevel.High,
-				});
-				expect(snapshotJobs(session, [job])[0]?.advisor).toBeUndefined();
-
-				publishAdvisor!();
-				await pollUntil(() => {
-					const progress = job.latestDetails?.progress;
-					return Array.isArray(progress) && progress[0]?.tokens === 2;
-				});
-				expect(snapshotJobs(session, [job])[0]?.advisor).toBe(liveAdvisor === true ? true : undefined);
-				expect(snapshotJobs(session, [job])[0]?.status).toBe("running");
-			} finally {
-				gate.resolve();
-				await job.promise;
-			}
-
-			expect(snapshotJobs(session, [job])[0]?.status).toBe("completed");
-			expect(snapshotJobs(session, [job])[0]).toMatchObject({
-				resolvedModelIdentity: "custom/coding-router:max",
-				resolvedThinkingLevel: ThinkingLevel.High,
-			});
-			expect(snapshotJobs(session, [job])[0]?.advisor).toBe(expectedAdvisor);
-		});
-	}
-
 	it("forwards the running call's arguments, key, start time and intent from detached progress", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });
 		const gate = deferred();

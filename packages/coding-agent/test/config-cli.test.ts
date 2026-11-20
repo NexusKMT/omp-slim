@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
 import { runConfigCommand } from "@oh-my-pi/pi-coding-agent/cli/config-cli";
 import { resetSettingsForTest } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { getConfigRootDir, getProjectDir, setAgentDir, setProjectDir, TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import { installTestSettings } from "./helpers/test-settings";
 
 let testAgentDir: TempDir | undefined;
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -274,9 +275,8 @@ describe("config list --scope", () => {
 				"    models: [openai/gpt-5]",
 				"compaction:",
 				"  enabled: false",
-				"dev:",
-				"  autoqaPush:",
-				"    token: secret-token",
+				"test:",
+				"  token: secret-token",
 				"",
 			].join("\n"),
 		);
@@ -284,13 +284,13 @@ describe("config list --scope", () => {
 
 		const layer = await listLayer("global");
 
-		expect(Object.keys(layer).toSorted()).toEqual(["compaction.enabled", "dev.autoqaPush.token", "enabledModels"]);
+		expect(Object.keys(layer).toSorted()).toEqual(["compaction.enabled", "enabledModels", "test.token"]);
 		expect(layer.enabledModels.value).toEqual([
 			"anthropic/claude-sonnet-4-5",
 			{ path: projectDir.path(), models: ["openai/gpt-5"] },
 		]);
 		expect(layer["compaction.enabled"]).toMatchObject({ value: false, type: "boolean" });
-		expect(layer["dev.autoqaPush.token"]).toEqual({
+		expect(layer["test.token"]).toEqual({
 			redacted: true,
 			type: "string",
 			description: expect.any(String),
@@ -318,7 +318,7 @@ describe("config list --scope", () => {
 		if (!testAgentDir) throw new Error("Test directory was not initialized");
 		await Bun.write(
 			path.join(testAgentDir.path(), "config.yml"),
-			"compaction:\n  enabled: false\ndev:\n  autoqaPush:\n    token: secret-token\n",
+			"compaction:\n  enabled: false\ntest:\n  token: secret-token\n",
 		);
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -326,7 +326,7 @@ describe("config list --scope", () => {
 
 		const text = Bun.stripANSI(logSpy.mock.calls.map(call => String(call[0] ?? "")).join("\n"));
 		expect(text).toContain("compaction.enabled = false");
-		expect(text).toContain("dev.autoqaPush.token = ********");
+		expect(text).toContain("test.token = ********");
 		expect(text).not.toContain("secret-token");
 		expect(text).not.toContain("defaultThinkingLevel");
 	});
@@ -343,3 +343,5 @@ describe("config list --scope", () => {
 		expect(exitSpy).toHaveBeenCalledWith(1);
 	});
 });
+beforeEach(installTestSettings);
+afterEach(() => vi.restoreAllMocks());

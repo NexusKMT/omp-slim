@@ -12,10 +12,6 @@ export interface CfgTarget {
 	save: boolean;
 }
 
-/**
- * Parse a `cfg://` URL (`cfg://advisor/enabled`, `cfg://advisor.enabled/save`).
- * Returns `null` for other schemes; query and fragment are ignored.
- */
 export function parseCfgUrl(input: string): CfgTarget | null {
 	const trimmed = input.trim();
 	if (!trimmed.toLowerCase().startsWith(CFG_URL_PREFIX)) return null;

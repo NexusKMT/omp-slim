@@ -1,4 +1,3 @@
-import { describe, expect, it } from "bun:test";
 import {
 	adaptSchemaForStrict,
 	type SchemaCompatibilityProvider,
@@ -8,7 +7,7 @@ import {
 } from "@oh-my-pi/pi-ai/utils/schema";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createTools, HIDDEN_TOOLS, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { createVibeTools } from "@oh-my-pi/pi-coding-agent/tools/vibe";
+import { describe, expect, it } from "bun:test";
 
 interface ToolSchemaEntry {
 	name: string;
@@ -55,14 +54,6 @@ const toolSchemasPromise: Promise<ToolSchemaEntry[]> = (async () => {
 			byToolName.set(name, schema);
 		}
 	}
-
-	for (const tool of createVibeTools(session)) {
-		const schema = toolWireSchema(tool);
-		if (asSchemaObject(schema)) {
-			byToolName.set(tool.name, schema);
-		}
-	}
-
 	return [...byToolName.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([name, schema]) => ({ name, schema }));

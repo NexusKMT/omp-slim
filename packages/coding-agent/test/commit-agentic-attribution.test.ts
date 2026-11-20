@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
-import { getBundledModel } from "./helpers/bundled-model";
 import { runCommitAgentSession } from "@oh-my-pi/pi-coding-agent/commit/agentic/agent";
 import * as toolsModule from "@oh-my-pi/pi-coding-agent/commit/agentic/tools";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 describe("commit agent prompt attribution", () => {
 	afterEach(() => {
@@ -25,7 +25,7 @@ describe("commit agent prompt attribution", () => {
 		vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue({ session } as unknown as CreateAgentSessionResult);
 		vi.spyOn(toolsModule, "createCommitTools").mockReturnValue([]);
 
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected claude-sonnet-4-5 model to exist");
 		}
@@ -72,7 +72,7 @@ describe("commit agent prompt attribution", () => {
 			return [];
 		});
 
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!model) {
 			throw new Error("Expected claude-sonnet-4-5 model to exist");
 		}

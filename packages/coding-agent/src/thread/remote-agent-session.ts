@@ -51,7 +51,6 @@ import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { AgentSession } from "../session/agent-session";
 import type { AgentSessionEvent, AgentSessionEventListener } from "../session/agent-session-events";
 import {
-	type AgentSessionAdvisorOverview,
 	type AgentViewLoop,
 	type AgentViewRuleSource,
 	type AgentViewSession,
@@ -80,10 +79,10 @@ import {
 	requestJobTreeCaptions,
 	runningJobWidgets,
 } from "../session/async-job-views";
-import { BlobStore, type BlobPutOptions, type BlobPutResult, lazyImageDataSync } from "../session/blob-store";
+import { type BlobPutOptions, type BlobPutResult, BlobStore, lazyImageDataSync } from "../session/blob-store";
 import type { IdleMaintenanceOptions } from "../session/idle-maintenance";
 import type { CustomMessage } from "../session/messages";
-import { roleThinkingLevelForModel, serviceTierForModel } from "../session/model-controls";
+import { configuredThinkingLevelForModel, serviceTierForModel } from "../session/model-controls";
 import type { ServingModel } from "../session/retry-fallback-chains";
 import {
 	buildSessionContext,
@@ -159,7 +158,6 @@ export function emptyMirrorState(): SessionMirrorState {
 			premiumRequests: 0,
 			cost: 0,
 		},
-		advisorOverview: { configured: false, advisors: [] },
 		sessionAgents: [],
 		effectiveExtensionRoots: { explicit: [], mode: "merge", configured: [], configuredLevel: "user" },
 	};
@@ -199,7 +197,6 @@ function emptyViewState(): SessionViewState {
 		fastModeActive: false,
 
 		goalMode: undefined,
-		advisorCost: 0,
 
 		todoPhases: [],
 		queuedMessages: { steering: [], followUp: [] },
@@ -487,10 +484,6 @@ export class RemoteAgentSession implements AgentViewSession {
 		return this.#state.sessionStats;
 	}
 
-	getAdvisorStatusOverview(): AgentSessionAdvisorOverview {
-		return this.#state.advisorOverview;
-	}
-
 	getSessionAgents(): AgentDefinition[] {
 		return this.#state.sessionAgents;
 	}
@@ -575,7 +568,7 @@ export class RemoteAgentSession implements AgentViewSession {
 	}
 
 	resolveTemporaryModelThinkingLevel(model: Model): ConfiguredThinkingLevel | undefined {
-		return roleThinkingLevelForModel(this.settings, this.modelRegistry.getAvailable(), model);
+		return configuredThinkingLevelForModel(this.settings, this.modelRegistry.getAvailable(), model);
 	}
 
 	setModelTemporary(
@@ -596,10 +589,6 @@ export class RemoteAgentSession implements AgentViewSession {
 
 	getGoalModeState(): GoalModeState | undefined {
 		return this.#view.goalMode;
-	}
-
-	getAdvisorCost(): number {
-		return this.#view.advisorCost;
 	}
 
 	getAsyncJobSnapshot(options?: { recentLimit?: number }): AsyncJobSnapshot | null {

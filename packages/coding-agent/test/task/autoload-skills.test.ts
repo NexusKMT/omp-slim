@@ -1,7 +1,3 @@
-import { afterEach, describe, expect, it, type Mock, vi } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import * as skillsModule from "@oh-my-pi/pi-coding-agent/extensibility/skills";
@@ -15,8 +11,12 @@ import { runStructuredSubagent } from "@oh-my-pi/pi-coding-agent/task/structured
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { getBundledModel } from "../helpers/bundled-model";
+import { afterEach, describe, expect, it, type Mock, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createSessionDefaults } from "../helpers/session-defaults";
+import { createTestModel } from "../helpers/test-model";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -99,7 +99,7 @@ describe("autoloadSkills in executor", () => {
 			refresh: async () => {},
 		} as unknown as import("@oh-my-pi/pi-coding-agent/config/model-registry").ModelRegistry,
 		enableLsp: false,
-		parentModel: getBundledModel("openai", "gpt-4.1-mini"),
+		parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 	};
 
 	it("calls sendCustomMessage for each autoloaded skill before prompt", async () => {
@@ -288,7 +288,7 @@ describe("autoloadSkills through task spawn", () => {
 				getSessionSpawns: () => "*",
 				getSessionAgents: () => [],
 				getPlanModeState: () => undefined,
-				getActiveModel: () => getBundledModel("openai", "gpt-4.1-mini"),
+				getActiveModel: () => createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
 				get skills() {
 					return parentSkills;
 				},

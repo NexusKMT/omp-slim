@@ -6,7 +6,6 @@
  * turn, so the run the user stopped does not resume on them, and the next turn sends them
  * to the model.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import {
@@ -15,7 +14,6 @@ import {
 	type MockResponse,
 	type MockResponseSource,
 } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -23,6 +21,8 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 interface ParkedHarness {
 	session: AgentSession;
@@ -61,7 +61,7 @@ describe("AgentSession editor-restoring interrupt", () => {
 	});
 
 	async function createSession(responses: MockResponseSource): Promise<Omit<ParkedHarness, "streamStarted">> {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ responses });
 		const agent = new Agent({
 			getApiKey: () => "test-key",

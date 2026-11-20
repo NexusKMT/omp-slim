@@ -1,12 +1,3 @@
-/**
- * Plain-text / markdown session formatting for `/dump` and `/advisor dump raw`.
- *
- * Renders a prelude (system prompt, model/thinking config, tool inventory)
- * followed by the message history as per-message markdown headings: `## User`,
- * `## Assistant` (with `<thinking>` blocks and `### Tool Call: <name>` + YAML
- * args), `### Tool Result: <name>`, and the execution/summary sections.
- * `/dump all` renders each persisted subagent as its own `# Subagent: <path>` document.
- */
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, ToolExample, TSchema } from "@oh-my-pi/pi-ai";
 import { renderToolInventory } from "../utils/tool-inventory";

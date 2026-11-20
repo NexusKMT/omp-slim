@@ -1,4 +1,3 @@
-import { describe, expect, it, spyOn } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { buildSessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import type {
@@ -10,6 +9,7 @@ import type {
 	ThinkingLevelChangeEntry,
 } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import * as snapcompact from "@oh-my-pi/snapcompact";
+import { describe, expect, it, spyOn } from "bun:test";
 
 function msg(id: string, parentId: string | null, role: "user" | "assistant", text: string): SessionMessageEntry {
 	const base = { type: "message" as const, id, parentId, timestamp: "2025-01-01T00:00:00Z" };
@@ -815,42 +815,6 @@ describe("buildSessionContext", () => {
 			expect(transcript.messages.map(m => m.role)).toEqual(["assistant", "compactionSummary"]);
 			expect(JSON.stringify(transcript.messages)).toContain("kept assistant suffix");
 		});
-
-		it("keeps the final answer when advisor notes follow a kept mid-turn suffix", () => {
-			const entries: SessionEntry[] = [
-				msg("1", null, "user", "original request"),
-				msg("2", "1", "assistant", "tool-loop continuation"),
-				msg("3", "2", "assistant", "final answer"),
-				{
-					type: "custom_message",
-					id: "4",
-					parentId: "3",
-					timestamp: "2025-01-01T00:00:00Z",
-					customType: "advisor-note",
-					content: "review note",
-					display: true,
-					attribution: "agent",
-				},
-				compaction("5", "4", "Idle compaction", "2"),
-			];
-
-			const transcript = buildSessionContext(entries, undefined, undefined, {
-				transcript: true,
-				collapseCompactedHistory: true,
-			});
-
-			expect(transcript.messages.map(message => message.role)).toEqual([
-				"assistant",
-				"assistant",
-				"custom",
-				"compactionSummary",
-			]);
-			expect(transcript.messages[1]).toMatchObject({
-				role: "assistant",
-				content: [{ type: "text", text: "final answer" }],
-			});
-		});
-
 		it("trims past agent notes to a later user-invoked skill request", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "old request"),

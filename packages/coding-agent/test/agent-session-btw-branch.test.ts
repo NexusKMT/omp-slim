@@ -1,12 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Api, AssistantMessage, ImageContent, Model } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockHandler } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
-import { loadAdvisorTranscriptCosts } from "@oh-my-pi/pi-coding-agent/advisor/transcript-recorder";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
@@ -15,6 +9,11 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as imageVisionFallback from "@oh-my-pi/pi-coding-agent/utils/image-vision-fallback";
 import { Snowflake } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "./helpers/test-model";
 
 function createBtwAssistant(): AssistantMessage {
 	return {
@@ -80,7 +79,7 @@ describe("AgentSession.branchFromBtw", () => {
 		handler?: MockHandler;
 		model?: Model<Api>;
 	}) {
-		const model = options?.model ?? getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = options?.model ?? createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: options?.handler ?? (() => ({ content: ["unused"] })) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -163,7 +162,7 @@ describe("AgentSession.branchFromBtw", () => {
 			.spyOn(imageVisionFallback, "describeAttachedImagesForTextModel")
 			.mockResolvedValue([{ type: "text", text: "A red square." }]);
 		const activeSession = await createSession({
-			model: { ...getBundledModel("anthropic", "claude-sonnet-4-5")!, input: [...input] },
+			model: { ...createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!, input: [...input] },
 		});
 		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
 		await activeSession.sessionManager.flush();
@@ -184,40 +183,6 @@ describe("AgentSession.branchFromBtw", () => {
 		expect(JSON.stringify(activeSession.messages.at(-3)).includes("A red square.")).toBe(input.length === 1);
 		expect(describe).toHaveBeenCalledTimes(input.length === 1 ? 1 : 0);
 	});
-	it("does not record a late advisor turn into a /btw branch", async () => {
-		const activeSession = await createSession();
-		// Named model roles removed: the advisor reviews with the session model.
-		activeSession.toggleAdvisorEnabled();
-		const advisor = activeSession.getAdvisorAgent();
-		if (!advisor) throw new Error("Expected advisor agent to exist");
-		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
-		await activeSession.sessionManager.flush();
-		const createBranchedSession = activeSession.sessionManager.createBranchedSession.bind(
-			activeSession.sessionManager,
-		);
-		vi.spyOn(activeSession.sessionManager, "createBranchedSession").mockImplementation(parentId => {
-			const result = createBranchedSession(parentId);
-			const lateMessage = createBtwAssistant();
-			lateMessage.usage.cost.total = 9;
-			advisor.emitExternalEvent({ type: "message_end", message: lateMessage });
-			return result;
-		});
-
-		const result = await activeSession.branchFromBtw(
-			"question",
-			createBtwAssistant(),
-			requiredLeafId(activeSession),
-			activeSession.sessionManager.getSessionId(),
-		);
-		expect(result.cancelled).toBe(false);
-		const replacementSessionFile = activeSession.sessionFile;
-		if (!replacementSessionFile) throw new Error("Expected the replacement session to be persisted");
-		await activeSession.dispose();
-		session = undefined;
-
-		expect((await loadAdvisorTranscriptCosts(replacementSessionFile)).get("")).toBeUndefined();
-	});
-
 	it("honors session_before_branch cancellation without creating a branch", async () => {
 		const emit = vi.fn(async () => ({ cancel: true }));
 		const extensionRunner = {

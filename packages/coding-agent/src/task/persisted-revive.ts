@@ -1,31 +1,31 @@
+import { logger } from "@oh-my-pi/pi-utils";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { AsyncJobManagerApi } from "../async";
 import { MAIN_AGENT_RULE_NAME, SUB_AGENT_RULE_NAME } from "../capability/rule";
 import type { ModelRegistry } from "../config/model-registry";
-import { inheritedModelGuard } from "./model-inheritance";
 import type { Settings } from "../config/settings";
+import type { PreparedExtension } from "../extensibility/extensions/types";
 import { MCPManager } from "../mcp/manager";
 import { initializeExtensions } from "../modes/runtime-init";
-import type { AsyncJobManagerApi } from "../async";
-import type { PreparedExtension } from "../extensibility/extensions/types";
 import type { PersistedSubagentReviverFactory } from "../registry/agent-lifecycle";
 import { type AgentRef, AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { createAgentSession } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import type { AgentSessionHandle } from "../session/agent-session-handle";
 import type { ArtifactManagerApi } from "../session/artifacts";
-import type { CostGateApi } from "../session/cost-gate";
 import type { AuthStorage } from "../session/auth-storage";
-import { revivePersistedPlaced } from "../thread/executor-routing";
-import { subagentWorkerPool } from "../thread/subagent-worker";
+import type { CostGateApi } from "../session/cost-gate";
 import {
 	extractSessionInit,
 	hasConversationalHistory,
 	type PersistedSessionInit,
 	SessionManager,
 } from "../session/session-manager";
+import { revivePersistedPlaced } from "../thread/executor-routing";
+import { subagentWorkerPool } from "../thread/subagent-worker";
 import type { EventBus } from "../utils/event-bus";
+import { isCompletionProbeEnabled } from "./completion-probe";
 import {
 	attachIrcWakeTurnMonitor,
 	compactionThresholdSettings,
@@ -34,7 +34,7 @@ import {
 	replayRevivedAgentStart,
 	softRequestBudgetFor,
 } from "./executor";
-import { isCompletionProbeEnabled } from "./completion-probe";
+import { inheritedModelGuard } from "./model-inheritance";
 import { type RestoredSeanceSession, restoreSeanceSession } from "./seance";
 import { seanceIsolationOptions } from "./seance-policy";
 import type { AgentDefinition } from "./types";
@@ -263,7 +263,6 @@ export async function revivePersistedSubagent(spec: PersistedReviveSpec, expecte
 	}
 	const subagentSettings = createSubagentSettings(spec.settings, {
 		...(init.readSummarize === false ? { "read.summarize.enabled": false } : undefined),
-		...(init.advisor ? { "advisor.enabled": true } : undefined),
 		...compactionThresholdSettings(init.compactionThreshold),
 	});
 	// Account pools are owner policy, like the extension roots below: take the

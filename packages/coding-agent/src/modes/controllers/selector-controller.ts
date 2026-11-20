@@ -2,27 +2,18 @@ import { type AgentMessage, type AgentToolResult, ThinkingLevel } from "@oh-my-p
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model } from "@oh-my-pi/pi-ai";
 
-import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import type { Component, OverlayHandle } from "@oh-my-pi/pi-tui";
 import { Loader, Spacer } from "@oh-my-pi/pi-tui";
 import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
 import { appKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
-import { getAgentDir, getProjectDir, logger, normalizePathForComparison } from "@oh-my-pi/pi-utils";
-import {
-	ADVISOR_DEFAULT_TOOL_NAMES,
-	discoverAdvisorConfigs,
-	loadWatchdogConfigFile,
-	resolveAdvisorConfigEditPath,
-	saveWatchdogConfigFile,
-} from "../../advisor";
+import { getProjectDir, logger, normalizePathForComparison } from "@oh-my-pi/pi-utils";
 import { reset as resetCapabilities } from "../../capability";
-import type { AdvisorConfigScope } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { showGitOverlay } from "../../cli/git-tui";
 
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
+import { getAvailableThemes, getSymbolTheme, previewTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import { settings } from "../../config/settings";
 import { createSettingsHost } from "../../config/settings-ui";
-import { createPluginSettingsHost } from "../../extensibility/plugins/settings-host";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import {
 	getInstalledPluginsRegistryPath,
@@ -31,7 +22,7 @@ import {
 	getPluginsCacheDir,
 	MarketplaceManager,
 } from "../../extensibility/plugins/marketplace";
-import { getAvailableThemes, getSymbolTheme, previewTheme, theme } from "@oh-my-pi/pi-tui/theme";
+import { createPluginSettingsHost } from "../../extensibility/plugins/settings-host";
 import type {
 	AgentHubOpenOptions,
 	InteractiveModeContext,
@@ -39,63 +30,59 @@ import type {
 	SessionPickHandler,
 } from "../../modes/types";
 
+import { isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { previewModelCompactionPoint, setModelCompactionPoint } from "../../session/model-compaction-threshold";
 import { isTranscriptEntry, type TranscriptEntry } from "../../session/session-context";
-import { isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import type { SessionEntry, SessionTreeNode } from "../../session/session-entries";
 import { findSessionContinuation, readSessionInfo, type SessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
 import { loadPinnedSessionIds, setSessionPinned } from "../../session/session-pins";
 import { FileSessionStorage } from "../../session/session-storage";
 
+import { sanitizeErrorLine } from "@oh-my-pi/pi-tui/chrome/error-block";
+import { getAssistantMessageLinkTargets } from "@oh-my-pi/pi-tui/prompt/interactive-context-helpers";
+import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 import {
 	AUTO_THINKING,
 	concreteThinkingLevel,
 	type ConfiguredThinkingLevel,
 	parseConfiguredThinkingLevel,
 } from "@oh-my-pi/pi-tui/thinking";
+import { type AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
 import type { ToolSession } from "../../tools";
 import { AskTool } from "../../tools/ask";
-import { type AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
-import { sanitizeDisplayWarnings, shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
-import { sanitizeErrorLine } from "@oh-my-pi/pi-tui/chrome/error-block";
 import { ToolAbortError } from "../../tools/tool-errors";
 import { copyToClipboard } from "../../utils/clipboard";
 import { openPath } from "../../utils/open";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
-import { getAssistantMessageLinkTargets } from "@oh-my-pi/pi-tui/prompt/interactive-context-helpers";
-import { type AdvisorConfigDeps, AdvisorConfigOverlayComponent } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { createAgentsHubDeps } from "../agents-hub-deps";
-import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 
 import { AgentHubOverlayComponent } from "@oh-my-pi/pi-tui/overlays/agent-hub";
-import { createAgentHubRuntime } from "../agent-hub-runtime";
 import { AgentsHubComponent } from "@oh-my-pi/pi-tui/overlays/agents-hub";
 import { CopySelectorComponent } from "@oh-my-pi/pi-tui/overlays/copy-selector";
 import { ExtensionDashboard } from "@oh-my-pi/pi-tui/overlays/extensions/extension-dashboard";
 import { listLiveToolRecords, liveToolRecordFromSession } from "@oh-my-pi/pi-tui/overlays/extensions/live-tool-session";
-import { createExtensionDashboardRuntime } from "../components/extensions/dashboard-runtime";
 import { HistorySearchComponent } from "@oh-my-pi/pi-tui/overlays/history-search";
 import { HookEditorComponent } from "@oh-my-pi/pi-tui/overlays/hook-editor";
 import { ModelHubComponent } from "@oh-my-pi/pi-tui/overlays/model-hub";
-import { createModelBrowserSource } from "../model-browser-source";
-import { formatSessionContinuationNotice } from "../persistence-failure";
 import { ModelPickerComponent } from "@oh-my-pi/pi-tui/overlays/model-picker";
 import { PluginSelectorComponent } from "@oh-my-pi/pi-tui/overlays/plugin-selector";
+import { createAgentHubRuntime } from "../agent-hub-runtime";
+import { createExtensionDashboardRuntime } from "../components/extensions/dashboard-runtime";
+import { createModelBrowserSource } from "../model-browser-source";
+import { formatSessionContinuationNotice } from "../persistence-failure";
 
 import { type BranchVariantPath, RewindSelectorComponent } from "@oh-my-pi/pi-tui/overlays/rewind-selector";
 
 import { SessionSelectorComponent, type SessionSelectorOptions } from "@oh-my-pi/pi-tui/overlays/session-selector";
 import { SettingsSelectorComponent } from "@oh-my-pi/pi-tui/overlays/settings-selector";
 
-import { TreeSelectorComponent } from "@oh-my-pi/pi-tui/overlays/tree-selector";
 import { ThinkingSelectorComponent } from "@oh-my-pi/pi-tui/overlays/thinking-selector";
+import { TreeSelectorComponent } from "@oh-my-pi/pi-tui/overlays/tree-selector";
 
 import type { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
-
-import { cfgAdvisorSyncBacklog } from "../../advisor/settings";
-import { cfgBranchSummaryEnabled } from "../../session/context-settings";
 import { cfgModelStorage } from "../../config/model-settings";
+import { cfgBranchSummaryEnabled } from "../../session/context-settings";
 import { cfgDefaultThinkingLevel, cfgSessionWorktreeScope } from "../../session/settings";
 import {
 	cfgStatusLineCompactThinkingLevel,
@@ -331,87 +318,6 @@ export class SelectorController {
 				this.#releaseMenu("settings", menu);
 				throw error;
 			});
-	}
-
-	showAdvisorConfigure(): void {
-		const cwd = this.ctx.sessionManager.getCwd();
-		const agentDir = getAgentDir() ?? getProjectDir();
-		const initialScope: AdvisorConfigScope = "project";
-		void (async () => {
-			// "Project" scope edits the repo-root WATCHDOG.yml (the project-level file
-			// discovery walks), not the launch subdir — `getProjectDir()` is only cwd.
-			let projectDir = cwd;
-			try {
-				projectDir = vcs.repo(cwd)?.root() ?? cwd;
-			} catch {
-				projectDir = cwd;
-			}
-			const dirs = { projectDir, agentDir };
-			const initialDoc = await loadWatchdogConfigFile(await resolveAdvisorConfigEditPath(initialScope, dirs));
-			if (initialDoc.warnings?.length) {
-				this.ctx.showWarning(`WATCHDOG.yml: ${sanitizeDisplayWarnings(initialDoc.warnings).join("; ")}`);
-			}
-			// Fullscreen editor on the alternate screen (the /settings idiom): the
-			// overlay holds the alt buffer + mouse tracking; the transcript stays put.
-			const done = () => {
-				overlayHandle?.hide();
-				this.focusActiveEditorArea();
-				this.ctx.ui.requestRender();
-			};
-			const defaultAdvisorModel = this.ctx.session.model;
-			const deps: AdvisorConfigDeps = {
-				defaultToolNames: ADVISOR_DEFAULT_TOOL_NAMES,
-				externalEditor: text => {
-					const command = getEditorCommand();
-					return command ? openInEditor(command, text) : Promise.resolve(null);
-				},
-				availableToolNames: this.ctx.session.getAdvisorAvailableToolNames(),
-				syncBacklog: cfgAdvisorSyncBacklog.get(this.ctx.settings),
-				defaultModelLabel: defaultAdvisorModel
-					? `${defaultAdvisorModel.provider}/${defaultAdvisorModel.id}`
-					: undefined,
-			};
-			const overlay = new AdvisorConfigOverlayComponent(this.ctx.ui, deps, initialScope, initialDoc, {
-				loadDoc: async scope => loadWatchdogConfigFile(await resolveAdvisorConfigEditPath(scope, dirs)),
-				save: async (scope, doc) => {
-					await saveWatchdogConfigFile(await resolveAdvisorConfigEditPath(scope, dirs), doc);
-					// Re-discover the merged roster (project + user) so the live advisors
-					// reflect cross-level precedence, not just the edited file.
-					const discovered = await discoverAdvisorConfigs(cwd, agentDir);
-					const count = this.ctx.session.applyAdvisorConfigs(
-						discovered.advisors,
-						discovered.sharedInstructions,
-						discovered.sharedMaxNotesPerUpdate,
-					);
-					this.ctx.statusLine.invalidate();
-					if (discovered.warnings.length > 0) {
-						this.ctx.showWarning(`WATCHDOG.yml: ${sanitizeDisplayWarnings(discovered.warnings).join("; ")}`);
-					}
-					this.ctx.showStatus(
-						count > 0
-							? `Saved ${scope} WATCHDOG.yml — ${count} advisor${count === 1 ? "" : "s"} active.`
-							: `Saved ${scope} WATCHDOG.yml. Run /advisor on to activate the configured advisors.`,
-					);
-					this.ctx.ui.requestRender();
-				},
-				close: done,
-				requestRender: () => this.ctx.ui.requestRender(),
-				notify: message => this.ctx.showStatus(message),
-				// Scope switches happen inside the overlay; the initial file's warnings
-				// were already shown above, so only newly activated files arrive here.
-				warn: message => this.ctx.showWarning(message),
-				getAdvisorStats: () => this.ctx.session.getAdvisorStats().advisors,
-			});
-			const overlayHandle = this.ctx.ui.showOverlay(overlay, {
-				anchor: "bottom-center",
-				width: "100%",
-				maxHeight: "100%",
-				margin: 0,
-				fullscreen: true,
-			});
-			this.ctx.ui.setFocus(overlay);
-			this.ctx.ui.requestRender();
-		})();
 	}
 
 	showHistorySearch(): void {
@@ -717,7 +623,7 @@ export class SelectorController {
 					try {
 						const project = cfgModelStorage.get(this.ctx.settings) === "project";
 						const isAuto = thinkingLevel === AUTO_THINKING;
-						const { switched } = await this.ctx.session.setModel(model, "default", {
+						const { switched } = await this.ctx.session.setModel(model, {
 							selector,
 							thinkingLevel: isAuto ? ThinkingLevel.Inherit : thinkingLevel,
 							persist: !project,

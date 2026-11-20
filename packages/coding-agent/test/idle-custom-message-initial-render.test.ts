@@ -6,8 +6,6 @@
  * the replay, so the append is lost if the replay misses its entry and duplicated
  * if the preserved-chat replay also carries a live paint.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
@@ -22,6 +20,8 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { Text } from "@oh-my-pi/pi-tui";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
 import { createInteractiveModeContext } from "./helpers/interactive-mode-context";
 
 let tempDir: TempDir;
@@ -61,7 +61,7 @@ function createInteractiveTranscript() {
 		streamFn: () => new AssistantMessageEventStream(),
 	});
 	const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
-	settings.setModelRole("default", `${model.provider}/${model.id}`);
+	settings.setModel(`${model.provider}/${model.id}`);
 	const created = new AgentSession({
 		agent,
 		sessionManager: SessionManager.inMemory(tempDir.path()),

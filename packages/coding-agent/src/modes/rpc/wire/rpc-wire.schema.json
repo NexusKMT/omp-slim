@@ -3926,28 +3926,6 @@
 				"type"
 			]
 		},
-		"AdvisorCostChangedEvent": {
-			"type": "object",
-			"properties": {
-				"type": {
-					"const": "advisor_cost_changed"
-				}
-			},
-			"required": [
-				"type"
-			]
-		},
-		"AdvisorYieldedEvent": {
-			"type": "object",
-			"properties": {
-				"type": {
-					"const": "advisor_yielded"
-				}
-			},
-			"required": [
-				"type"
-			]
-		},
 		"TtsrTriggeredEvent": {
 			"type": "object",
 			"properties": {
@@ -4182,12 +4160,6 @@
 				},
 				{
 					"$ref": "#/$defs/ConfigWarningsChangedEvent"
-				},
-				{
-					"$ref": "#/$defs/AdvisorCostChangedEvent"
-				},
-				{
-					"$ref": "#/$defs/AdvisorYieldedEvent"
 				},
 				{
 					"$ref": "#/$defs/TtsrTriggeredEvent"

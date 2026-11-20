@@ -1,9 +1,10 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { customMessageEntryMessage, isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { hasOpaqueCompaction, isTurnStartEntry } from "@oh-my-pi/pi-agent-core/compaction";
 import { coerceServiceTierByFamily, type Model, type ServiceTierByFamily } from "@oh-my-pi/pi-ai";
-import * as snapcompact from "@oh-my-pi/snapcompact";
+import { customMessageEntryMessage, isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { isRecord } from "@oh-my-pi/pi-utils";
+import * as snapcompact from "@oh-my-pi/snapcompact";
+import { CONTEXT_NOTES_ENTRY_TYPE, getContextNotes, renderContextNotes } from "./context-notes";
 import {
 	createBranchSummaryMessage,
 	createCompactionSummaryMessage,
@@ -12,9 +13,7 @@ import {
 	isEmptyErrorTurn,
 	PREWALK_PLAN_MESSAGE_TYPE,
 	REWIND_REPORT_MESSAGE_TYPE,
-	VIBE_MODE_CONTEXT_MESSAGE_TYPE,
 } from "./messages";
-import { CONTEXT_NOTES_ENTRY_TYPE, getContextNotes, renderContextNotes } from "./context-notes";
 import {
 	type CompactionEntry,
 	type CustomMessageEntry,
@@ -433,10 +432,7 @@ export function buildSessionContext(
 			}
 			pushMessage(entry.message);
 		} else if (entry.type === "custom_message") {
-			if (
-				!options?.transcript &&
-				(entry.customType === PREWALK_PLAN_MESSAGE_TYPE || entry.customType === VIBE_MODE_CONTEXT_MESSAGE_TYPE)
-			) {
+			if (!options?.transcript && entry.customType === PREWALK_PLAN_MESSAGE_TYPE) {
 				return;
 			}
 			const message = customMessageEntryMessage(entry);
@@ -569,12 +565,6 @@ export function buildSessionContext(
 			if (retainedStart >= 0 && retainedStart < compactionIdx) {
 				let displayStartIdx = retainedStart;
 				if (options?.transcript) {
-					// `findCutPoint` may leave the collapsed display's kept region
-					// mid-turn. Trim only to a new turn initiated by the user:
-					// agent-authored custom messages (such as advisor notes) can
-					// follow the final answer of that same turn. Keep the original
-					// suffix when there is no later boundary, because the summary
-					// does not include that kept content.
 					for (let i = retainedStart; i < compactionIdx; i++) {
 						const entry = path[i];
 						if (isTurnStartEntry(entry) && (entry.type !== "custom_message" || isUserRequestEntry(entry))) {

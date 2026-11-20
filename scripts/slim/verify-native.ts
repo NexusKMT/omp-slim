@@ -30,7 +30,18 @@ for (const addon of addons) {
 	for (const name of retained) {
 		if (typeof bindings[name] !== "function") throw new Error(`${path.basename(addon)} is missing ${name}`);
 	}
-	console.log(
-		`${path.basename(addon)}: retired desktop/audio/model/update/vector exports absent; core exports present`,
-	);
+	const countTokens = bindings.countTokens;
+	if (typeof countTokens !== "function" || countTokens("hello world", "O200kBase") !== 2) {
+		throw new Error(`${path.basename(addon)} cannot count tokens with the retained encoding`);
+	}
+	for (const encoding of ["ClaudeV3", "ClaudeV47", "ClaudeV5", "ClaudeV5Sonnet", "Jev"]) {
+		let rejected = false;
+		try {
+			countTokens("hello world", encoding);
+		} catch {
+			rejected = true;
+		}
+		if (!rejected) throw new Error(`${path.basename(addon)} still accepts retired encoding ${encoding}`);
+	}
+	console.log(`${path.basename(addon)}: retired exports and tokenizer encodings absent; core exports present`);
 }

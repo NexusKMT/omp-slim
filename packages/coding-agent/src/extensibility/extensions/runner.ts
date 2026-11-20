@@ -1637,20 +1637,6 @@ export class ExtensionRunner {
 		return withActiveSettings(this.settings, fn);
 	}
 
-	/**
-	 * Creates an extension context, optionally scoped to a provider request model.
-	 *
-	 * `delegation` wires the same-tool `ctx.invokeTool` for a re-registered built-in: when `toolName`
-	 * names an existing native built-in, the context carries an `invokeTool` that runs it (see
-	 * {@link invokeNativeTool}). The rest inherits the wrapper's own call so a bare
-	 * `ctx.invokeTool(params)` behaves like the outer call — `context` preserves `toolCall`/provider
-	 * metadata, `signal`/`onUpdate` default to the wrapper's own channels so aborting the outer tool
-	 * call stops the native one and native progress still streams, and `depth` bounds recursion per
-	 * call chain. Explicit options passed to `invokeTool` override the inherited `signal`/`onUpdate`.
-	 *
-	 * `agent` replaces this runner's identity as `ctx.agent` for work done on behalf of another
-	 * agent that shares the runner (the advisor's toolset, see `ExtensionToolWrapper`).
-	 */
 	createContext(
 		model?: Model,
 		delegation?: {

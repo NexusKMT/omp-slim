@@ -102,7 +102,7 @@ export const cfgExtensionHandlersModeControl = register({
 		group: "Extensions",
 		label: "Extension Mode Control",
 		description:
-			"Let extensions enter and exit plan, vibe, goal, and loop modes via ctx.sessionModes.set(); reading mode state stays available",
+			"Let extensions enter and exit plan, goal, and loop modes via ctx.sessionModes.set(); reading mode state stays available",
 	},
 });
 

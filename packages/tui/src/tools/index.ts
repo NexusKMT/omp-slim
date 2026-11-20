@@ -15,7 +15,6 @@ import { githubToolRenderer } from "./github";
 import { globToolRenderer } from "./glob";
 import { goalToolRenderer } from "./goal";
 import { grepToolRenderer } from "./grep";
-import { waitToolRenderer } from "./wait";
 import { lspToolRenderer } from "./lsp";
 import { readToolRenderer } from "./read";
 import type { ToolRenderer } from "./renderer";
@@ -23,11 +22,11 @@ import { resolveRenderer } from "./resolve";
 import { taskToolRenderer } from "./task";
 import { thinkToolRenderer } from "./think";
 import { todoToolRenderer } from "./todo";
-import { createVibeToolRenderer } from "./vibe";
+import { waitToolRenderer } from "./wait";
 import { webSearchToolRenderer } from "./web-search";
 import { writeToolRenderer } from "./write";
-import { yieldToolRenderer } from "./yield";
 import { setXdevRendererLookup } from "./xdev";
+import { yieldToolRenderer } from "./yield";
 
 export * from "./renderer";
 
@@ -58,11 +57,6 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	github: githubToolRenderer,
 	goal: goalToolRenderer,
 	web_search: webSearchToolRenderer,
-	vibe_spawn: createVibeToolRenderer("spawn"),
-	vibe_send: createVibeToolRenderer("send"),
-	vibe_wait: createVibeToolRenderer("wait"),
-	vibe_kill: createVibeToolRenderer("kill"),
-	vibe_list: createVibeToolRenderer("list"),
 	write: writeToolRenderer,
 	yield: yieldToolRenderer,
 };

@@ -6,16 +6,16 @@
  * settled update as its terminal frame. Logical session transitions must clear
  * every snapshot.
  */
-import { afterEach, describe, expect, it } from "bun:test";
 import { Agent, type AgentEvent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { afterEach, describe, expect, it } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 function taskUpdate(state: "running" | "completed" | "failed", toolCallId = "task-1"): AgentEvent {
 	return {
@@ -58,7 +58,7 @@ describe("AgentSession.activeToolExecutionUpdates cache lifecycle", () => {
 	});
 
 	async function makeSession(): Promise<AgentSession> {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",

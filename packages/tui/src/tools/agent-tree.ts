@@ -52,7 +52,6 @@ export interface AgentTreeRowOptions {
 	width: number;
 	model?: string;
 	thinkingLevel?: ConfiguredThinkingLevel;
-	advisor?: boolean;
 	spinnerFrame?: number;
 	frozen?: boolean;
 	roleBadge?: string;
@@ -107,7 +106,6 @@ export function renderAgentTreeRow(
 			? formatFeedModelBadge(
 					options.model,
 					options.thinkingLevel,
-					options.advisor,
 					theme,
 					Math.min(FEED_MODEL_BADGE_WIDTH, task ? Math.max(0, modelWidth) : modelWidth),
 				)

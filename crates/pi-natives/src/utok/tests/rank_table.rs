@@ -30,9 +30,6 @@ fn parses_empty_slots_duplicate_entries_and_short_long_boundaries() {
 	assert_eq!(PieceMemo::with(|memo| table.count_piece(b"abca", memo)), 2);
 }
 
-/// The per-thread piece memo is shared by every table a thread counts with
-/// (o200k and Jev's base table merge the same pieces): one table's count
-/// must never answer for another's.
 #[test]
 fn piece_memo_keeps_tables_apart() {
 	let bytes: Vec<Vec<u8>> = (0..=255).map(|byte| vec![byte]).collect();

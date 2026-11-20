@@ -584,16 +584,6 @@ export interface FittedImage {
 /** JPEG qualities {@link fitImage} steps through when the PNG exceeds its byte cap. */
 const FIT_JPEG_QUALITIES = [90, 80, 70, 60, 50, 40];
 
-/**
- * Re-encode `img` within `bounds` without distorting it, for APIs that reject out-of-bounds images
- * instead of resizing them (TypeSafe Jev). It scales down past a maximum, or up toward a minimum as far
- * as the maximums allow, then pads with its top-left pixel when an extreme aspect ratio still leaves a
- * side or the area short: under 280–1568 px sides, a 401x41 toolbar strip becomes 1568x160 centered on
- * 1568x280, whose content edges are top 60/280 and bottom 220/280. Output is PNG, or JPEG when the PNG
- * exceeds `maxBytes`.
- *
- * @throws when the image cannot be decoded or no encoding fits `maxBytes`.
- */
 export async function fitImage(img: ImageContent, bounds: ImageFitBounds): Promise<FittedImage> {
 	const input = Buffer.from(img.data, "base64");
 	const dimensions = await new Bun.Image(input).metadata();

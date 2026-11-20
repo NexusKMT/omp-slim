@@ -19,7 +19,7 @@ fn kimi_k2_matches_reference() {
 		let count = case["count"].as_u64().expect("count") as u32;
 		assert_eq!(count as usize, want.len(), "fixture self-consistency: {text:?}");
 
-		let got = Encoding::KimiK2.encode(text).expect("kimi is a BPE family");
+		let got = Encoding::KimiK2.encode(text);
 		assert_eq!(got, want, "encode mismatch on {text:?}");
 		assert_eq!(Encoding::KimiK2.count(text), count, "count mismatch on {text:?}");
 	}
@@ -40,17 +40,17 @@ fn kimi_k2_utf16_utf32_parity() {
 		.map(|c| c["text"].as_str().expect("text"))
 		.chain(std::iter::once(extra));
 	for text in texts {
-		let want = Encoding::KimiK2.encode(text).expect("kimi is a BPE family");
+		let want = Encoding::KimiK2.encode(text);
 		let u16s: Vec<u16> = text.encode_utf16().collect();
 		let u32s: Vec<u32> = text.chars().map(|c| c as u32).collect();
 		assert_eq!(
 			Encoding::KimiK2.encode(u16s.as_slice()),
-			Some(want.clone()),
+			want.clone(),
 			"utf16 encode mismatch on {text:?}"
 		);
 		assert_eq!(
 			Encoding::KimiK2.encode(u32s.as_slice()),
-			Some(want.clone()),
+			want.clone(),
 			"utf32 encode mismatch on {text:?}"
 		);
 		let n = want.len() as u32;

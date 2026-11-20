@@ -1,6 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type {
@@ -17,7 +15,9 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestModel } from "./helpers/test-model";
 
 function refusal(result: SessionModeResult): string {
 	if (result.ok) throw new Error("Expected the transition to be refused");
@@ -95,7 +95,7 @@ describe("ctx.sessionModes in the interactive TUI", () => {
 			cwd: dir.path(),
 			agentDir: dir.path(),
 			modelRegistry: registry,
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			sessionManager: SessionManager.create(dir.path(), dir.path()),
 			settings: Settings.isolated({
 				"plan.enabled": true,
@@ -190,22 +190,6 @@ describe("ctx.sessionModes in the interactive TUI", () => {
 			["active", "inactive"],
 		]);
 	});
-
-	it("keeps the slash commands' conflicts, reports repeats as unchanged, and emits nothing for them", async () => {
-		const { session, modes, events } = await tui();
-		const tools = session.getEnabledToolNames();
-		expect(changed(await modes.set({ mode: "vibe", action: "enter" }))).toBe(true);
-		expect(changed(await modes.set({ mode: "vibe", action: "enter" }))).toBe(false);
-		expect(refusal(await modes.set({ mode: "plan", action: "enter" }))).toBe("conflict");
-		expect(refusal(await modes.set({ mode: "goal", action: "enter", objective: "ship" }))).toBe("conflict");
-		expect(events).toHaveLength(1);
-		expect(changed(await modes.set({ mode: "vibe", action: "exit" }))).toBe(true);
-		expect(session.getVibeModeState()).toBeUndefined();
-		expect(session.getEnabledToolNames()).toEqual(tools);
-		expect(changed(await modes.set({ mode: "vibe", action: "exit" }))).toBe(false);
-		expect(events).toHaveLength(2);
-	});
-
 	it("refuses a transition during a turn without touching it, then applies once idle", async () => {
 		const { session, provider, modes } = await tui();
 		const started = Promise.withResolvers<void>();
@@ -386,7 +370,6 @@ describe("ctx.sessionModes in the interactive TUI", () => {
 		}
 		expect(modes.getState()).toEqual({
 			plan: { status: "inactive" },
-			vibe: { status: "inactive" },
 			goal: { status: "inactive" },
 			loop: { status: "inactive" },
 		});
@@ -415,10 +398,10 @@ describe("ctx.sessionModes in the interactive TUI", () => {
 
 		// A request racing the switch is refused instead of landing in either session.
 		const switching = session.newSession();
-		expect(refusal(await modes.set({ mode: "vibe", action: "enter" }))).toBe("busy");
+		expect(refusal(await modes.set({ mode: "goal", action: "enter", objective: "ship" }))).toBe("busy");
 		await switching;
 		await Bun.sleep(0);
-		expect(modes.getState().vibe.status).toBe("inactive");
+		expect(modes.getState().goal.status).toBe("inactive");
 
 		changed(await modes.set({ mode: "plan", action: "enter" }));
 		await Bun.sleep(0);
@@ -437,7 +420,7 @@ describe("ctx.sessionModes in the interactive TUI", () => {
 			["active", "inactive"],
 		]);
 		expect(seenMidSwitch).toEqual([false]);
-		expect(changed(await modes.set({ mode: "vibe", action: "enter" }))).toBe(true);
+		expect(changed(await modes.set({ mode: "goal", action: "enter", objective: "ship" }))).toBe(true);
 	});
 
 	it("repeats an extension's loop prompt after the turn it sent, and resumes a paused loop", async () => {

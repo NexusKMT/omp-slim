@@ -24,7 +24,7 @@ fn check_fixture(enc: Encoding, json: &str) {
 	let fx: Fixture = serde_json::from_str(json).unwrap();
 	assert!(!fx.cases.is_empty());
 	for (i, case) in fx.cases.iter().enumerate() {
-		let ids = enc.encode(&case.text).expect("BPE family must encode");
+		let ids = enc.encode(&case.text);
 		assert_eq!(
 			ids,
 			case.ids,
@@ -170,7 +170,7 @@ fn check_differential(enc: Encoding, reference: &tiktoken_rs::CoreBPE, seed: u64
 		.collect();
 	for text in &texts {
 		let want: Vec<u32> = reference.encode_ordinary(text);
-		let got = enc.encode(text.as_str()).unwrap();
+		let got = enc.encode(text.as_str());
 		assert_eq!(got, want, "{enc:?} differential ids mismatch on {text:?}");
 		assert_eq!(
 			enc.count(text.as_str()),
@@ -181,9 +181,9 @@ fn check_differential(enc: Encoding, reference: &tiktoken_rs::CoreBPE, seed: u64
 		// UTF flavor parity: same ids/counts from native u16/u32 scans.
 		let u16s: Vec<u16> = text.encode_utf16().collect();
 		let u32s: Vec<u32> = text.chars().map(|c| c as u32).collect();
-		assert_eq!(enc.encode(&u16s).unwrap(), want, "{enc:?} utf16 parity mismatch on {text:?}");
+		assert_eq!(enc.encode(&u16s), want, "{enc:?} utf16 parity mismatch on {text:?}");
 		assert_eq!(enc.count(&u16s), want.len() as u32, "{enc:?} utf16 count parity on {text:?}");
-		assert_eq!(enc.encode(&u32s).unwrap(), want, "{enc:?} utf32 parity mismatch on {text:?}");
+		assert_eq!(enc.encode(&u32s), want, "{enc:?} utf32 parity mismatch on {text:?}");
 		assert_eq!(enc.count(&u32s), want.len() as u32, "{enc:?} utf32 count parity on {text:?}");
 	}
 
@@ -201,7 +201,7 @@ fn check_differential(enc: Encoding, reference: &tiktoken_rs::CoreBPE, seed: u64
 			.collect();
 		let lossy = String::from_utf16_lossy(&raw);
 		let want: Vec<u32> = reference.encode_ordinary(&lossy);
-		assert_eq!(enc.encode(&raw).unwrap(), want, "{enc:?} lossy utf16 mismatch on {raw:x?}");
+		assert_eq!(enc.encode(&raw), want, "{enc:?} lossy utf16 mismatch on {raw:x?}");
 		assert_eq!(enc.count(&raw), want.len() as u32, "{enc:?} lossy utf16 count on {raw:x?}");
 	}
 }

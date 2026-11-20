@@ -7,14 +7,14 @@
  * previous turn, and the merged stdin/@file message is never dispatched as a
  * command: a pipe controls it end to end.
  */
-import { describe, expect, test, vi } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runPrintMode } from "@oh-my-pi/pi-coding-agent/modes/print-mode";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { describe, expect, test, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 function printSession(cwd: string, prompts: string[]): AgentSession {
 	return {
@@ -29,10 +29,8 @@ function printSession(cwd: string, prompts: string[]): AgentSession {
 			onPersistenceNotice: () => () => {},
 		},
 		disableStopTimeTodoReminders: () => {},
-		prepareForHeadlessAdvisorDrain: () => {},
 		waitForIdle: async () => {},
 		setTextOutputCommitted: () => {},
-		waitForAdvisorCatchup: async () => true,
 		prompt: async (text: string) => {
 			prompts.push(text);
 		},
@@ -142,10 +140,8 @@ describe("print mode builtin exit codes", () => {
 				onPersistenceNotice: () => () => {},
 			},
 			disableStopTimeTodoReminders: () => {},
-			prepareForHeadlessAdvisorDrain: () => {},
 			waitForIdle: async () => {},
 			setTextOutputCommitted: () => {},
-			waitForAdvisorCatchup: async () => true,
 			prompt: async (text: string) => {
 				prompts.push(text);
 			},

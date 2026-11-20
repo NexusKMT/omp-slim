@@ -1,24 +1,11 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent, Usage } from "@oh-my-pi/pi-ai";
 import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import type { Component } from "@oh-my-pi/pi-tui";
-import { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
-import { QueuedMessagesBand } from "@oh-my-pi/pi-tui/prompt/queued-messages";
-import { previewLine, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
-import { logger } from "@oh-my-pi/pi-utils";
-import type { AdvisorMessageDetails } from "../../advisor";
-import { InternalUrlRouter } from "../../internal-urls";
-import { settings } from "../../config/settings";
-import { continuesConversation } from "./conversation-position";
-import { createAdvisorMessageCard } from "@oh-my-pi/pi-tui/chat/advisor-message";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
-import { readMediaPath } from "@oh-my-pi/pi-tui/native/blobs";
 import { createBackgroundTanDispatchBlock } from "@oh-my-pi/pi-tui/chat/background-tan-message";
 import { BashExecutionComponent } from "@oh-my-pi/pi-tui/chat/bash-execution";
 import { detectCacheInvalidation } from "@oh-my-pi/pi-tui/chat/cache-invalidation-marker";
-import { ServedModelTracker } from "@oh-my-pi/pi-tui/chat/served-model-marker";
 import {
 	BranchSummaryMessageComponent,
 	CompactionSummaryMessageComponent,
@@ -33,15 +20,13 @@ import {
 } from "@oh-my-pi/pi-tui/chat/late-diagnostics-message";
 import {
 	groupedReadUsageCallIds,
-	ReadToolGroupComponent,
 	readArgsCollapseIntoGroup,
+	ReadToolGroupComponent,
 } from "@oh-my-pi/pi-tui/chat/read-tool-group";
-import { ReplyWriteComponent, replyDisplayMessage, toolResultReplies } from "@oh-my-pi/pi-tui/chat/reply-write";
+import { replyDisplayMessage, ReplyWriteComponent, toolResultReplies } from "@oh-my-pi/pi-tui/chat/reply-write";
+import { ServedModelTracker } from "@oh-my-pi/pi-tui/chat/served-model-marker";
 import { SkillMessageComponent } from "@oh-my-pi/pi-tui/chat/skill-message";
 import { StrippedToolCallsPlaceholder } from "@oh-my-pi/pi-tui/chat/stripped-tool-calls-placeholder";
-import { imageContent, textContent } from "@oh-my-pi/pi-tui/chat/transcript-entry";
-import { messageBlock, PresentedBlock } from "@oh-my-pi/pi-tui/chat/transcript-presentation";
-import { ToolActivityContainer } from "@oh-my-pi/pi-tui/chrome/tool-activity";
 import {
 	isSettledJobFrame,
 	parksAsBackground,
@@ -50,26 +35,54 @@ import {
 	type ToolExecutionHandle,
 	toolRenderName,
 } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { imageContent, textContent } from "@oh-my-pi/pi-tui/chat/transcript-entry";
+import { messageBlock, PresentedBlock } from "@oh-my-pi/pi-tui/chat/transcript-presentation";
+import {
+	assistantHasVisibleContent,
+	assistantUsageIsBilled,
+	buildAsyncResultComponent,
+	buildFileMentionBlock,
+	buildIrcMessageCard,
+	buildLaunchCompletionBlock,
+	buildParentIrcMessageCard,
+	normalizeToolArgs,
+	resolveAssistantErrorPresentation,
+	splitAssistantMessageToolTimeline,
+} from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
+import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
+import { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
+import { ToolActivityContainer } from "@oh-my-pi/pi-tui/chrome/tool-activity";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
 import { TranscriptNotice } from "@oh-my-pi/pi-tui/chrome/transcript-notice";
+import { readMediaPath } from "@oh-my-pi/pi-tui/native/blobs";
 import { createUsageRowBlock, turnElapsedMs } from "@oh-my-pi/pi-tui/overlays/usage-row";
-import { UserMessageComponent } from "@oh-my-pi/pi-tui/chat/user-message";
-import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/controllers/tool-args-reveal";
-import { createToolCallBlock } from "../../modes/controllers/tool-call-block";
+import { normalizeBlobExtension } from "@oh-my-pi/pi-tui/prompt/image-format";
 import {
 	materializeImageReferenceLinks,
 	materializeImageReferenceLinksSync,
 } from "@oh-my-pi/pi-tui/prompt/image-references";
-import { normalizeBlobExtension } from "@oh-my-pi/pi-tui/prompt/image-format";
 import { imageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
+import {
+	createAssistantMessageComponent,
+	getAssistantMessageLinkTargets,
+	refreshAssistantMessageLinkTargets,
+} from "@oh-my-pi/pi-tui/prompt/interactive-context-helpers";
+import { QueuedMessagesBand } from "@oh-my-pi/pi-tui/prompt/queued-messages";
 import { theme } from "@oh-my-pi/pi-tui/theme";
+import { logger } from "@oh-my-pi/pi-utils";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { extractTextContent } from "../../commit/utils";
+import { settings } from "../../config/settings";
+import { InternalUrlRouter } from "../../internal-urls";
+import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/controllers/tool-args-reveal";
+import { createToolCallBlock } from "../../modes/controllers/tool-call-block";
 import type {
 	CompactionQueuedMessage,
 	InteractiveModeContext,
 	RenderSessionContextOptions,
 	ShowStatusOptions,
 } from "../../modes/types";
-import { extractTextContent } from "../../commit/utils";
 import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
@@ -83,24 +96,9 @@ import type { SessionContext, StrippedToolCallsMarker } from "../../session/sess
 import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { parseSlashCommand } from "../../slash-commands/helpers/parse";
 import { buildSkillCommandPrompt, invokeSkillCommandFromText, isKnownSkillCommand } from "../skill-command";
-import {
-	createAssistantMessageComponent,
-	getAssistantMessageLinkTargets,
-	refreshAssistantMessageLinkTargets,
-} from "@oh-my-pi/pi-tui/prompt/interactive-context-helpers";
-import {
-	assistantHasVisibleContent,
-	assistantUsageIsBilled,
-	buildAsyncResultComponent,
-	buildFileMentionBlock,
-	buildIrcMessageCard,
-	buildParentIrcMessageCard,
-	buildLaunchCompletionBlock,
-	normalizeToolArgs,
-	resolveAssistantErrorPresentation,
-	splitAssistantMessageToolTimeline,
-} from "@oh-my-pi/pi-tui/chat/transcript-render-helpers";
+import { continuesConversation } from "./conversation-position";
 
+import { cfgReadToolResultPreview } from "../../tools/settings";
 import {
 	cfgComposerRecallClearedDrafts,
 	cfgDisplayCacheMissMarker,
@@ -109,7 +107,6 @@ import {
 	cfgDisplayShowTurnTime,
 	cfgTerminalShowImages,
 } from "../settings";
-import { cfgReadToolResultPreview } from "../../tools/settings";
 
 interface RenderInitialMessagesOptions {
 	preserveExistingChat?: boolean;
@@ -367,16 +364,6 @@ export class UiHelpers {
 						const card = buildIrcMessageCard(message, () => this.ctx.toolOutputExpanded);
 						this.ctx.chatContainer.addChild(card);
 						return [card];
-					}
-					if (message.customType === "advisor") {
-						const details = (message as CustomMessage<AdvisorMessageDetails>).details;
-						const card = new PresentedBlock(
-							createAdvisorMessageCard(details, () => this.ctx.toolOutputExpanded, theme),
-							messageBlock(message),
-						);
-						card.setExpanded(this.ctx.toolOutputExpanded);
-						this.ctx.chatContainer.addChild(card);
-						break;
 					}
 					if (message.customType === BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE) {
 						this.ctx.chatContainer.addChild(createBackgroundTanDispatchBlock(message as CustomMessage<unknown>));
@@ -910,8 +897,7 @@ export class UiHelpers {
 				// A user prompt closes the displacement window, same as the live path.
 				if (message.role === "user") resolveWaitingPoll();
 				if (message.role === "user") resolveTodoSnapshot();
-				// Only genuinely user-attributed prompts anchor the delta; a mid-run
-				// agent-attributed `user` message (advisor tool-loop redirect) must not.
+
 				if (message.role === "user" && message.attribution !== "agent") turnStartedAt = message.timestamp;
 				// A synthetic developer message initiates a fresh run (auto-continue,
 				// /goal, approved plan): replay must not inherit the preceding user

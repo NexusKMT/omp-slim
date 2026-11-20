@@ -1,5 +1,3 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Message, ThinkingContent } from "@oh-my-pi/pi-ai";
@@ -20,6 +18,8 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { RewindTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
 
 const checkpointSchema = type({ goal: type("string") });
 const rewindSchema = type({ report: type("string") });
@@ -130,7 +130,7 @@ async function createHarness(
 		"todo.eager": "default",
 		"todo.reminders": false,
 	});
-	settings.setModelRole("default", `${mock.provider}/${mock.id}`);
+	settings.setModel(`${mock.provider}/${mock.id}`);
 	const toolRegistry = new Map(tools.map(tool => [tool.name, tool]));
 	const agent = new Agent({
 		getApiKey: () => "test-key",
@@ -739,7 +739,7 @@ describe("AgentSession checkpoint rewind branch context", () => {
 			"todo.eager": "default",
 			"todo.reminders": false,
 		});
-		reloadedSettings.setModelRole("default", `${reloadedMock.provider}/${reloadedMock.id}`);
+		reloadedSettings.setModel(`${reloadedMock.provider}/${reloadedMock.id}`);
 		const reloadedTools = [checkpointTool as AgentTool, rewindTool as AgentTool];
 		const reloadedAgent = new Agent({
 			getApiKey: () => "test-key",
@@ -887,7 +887,7 @@ describe("AgentSession checkpoint rewind branch context", () => {
 			"todo.eager": "default",
 			"todo.reminders": false,
 		});
-		reloadedSettings.setModelRole("default", `${reloadedMock.provider}/${reloadedMock.id}`);
+		reloadedSettings.setModel(`${reloadedMock.provider}/${reloadedMock.id}`);
 		const reloadedTools = [checkpointTool as AgentTool, rewindTool as AgentTool];
 		const reloadedAgent = new Agent({
 			getApiKey: () => "test-key",
@@ -1021,7 +1021,7 @@ describe("AgentSession checkpoint rewind branch context", () => {
 			"todo.eager": "default",
 			"todo.reminders": false,
 		});
-		reloadedSettings.setModelRole("default", `${reloadedMock.provider}/${reloadedMock.id}`);
+		reloadedSettings.setModel(`${reloadedMock.provider}/${reloadedMock.id}`);
 		const reloadedTools = [xdevWriteTool as AgentTool];
 		const reloadedAgent = new Agent({
 			getApiKey: () => "test-key",

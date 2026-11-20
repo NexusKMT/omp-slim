@@ -4,33 +4,33 @@ import { createAgentHubRuntime } from "@oh-my-pi/pi-coding-agent/modes/agent-hub
  * `focusAgent` dep (session focus proxy) and closes the hub on success; a
  * focus failure keeps the hub open and surfaces the error as a notice.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, Usage } from "@oh-my-pi/pi-ai";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import { AgentHubOverlayComponent } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
-import { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
-import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { visitEntriesFromFileStream } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getBundledAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
-import { TempDir } from "@oh-my-pi/pi-utils";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { AgentHubOverlayComponent } from "@oh-my-pi/pi-tui/overlays/agent-hub";
 import {
 	aggregateMetrics,
 	hubFallbackStatsSession,
 	hubRowMetrics,
 	type AgentMetrics,
 } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
+import { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 const AGENT_ID = "Worker";
 const TEST_CWD = path.resolve("agent-hub-cwd");
@@ -517,73 +517,6 @@ describe("Agent hub Enter activation", () => {
 			vi.useRealTimers();
 		}
 	});
-
-	it("does not generically revive active or tombstoned Vibe children copied by a post-exit fork", async () => {
-		using tempDir = TempDir.createSync("@omp-agent-hub-vibe-fork-");
-		const manager = SessionManager.create(tempDir.path(), tempDir.path());
-		manager.appendModeChange("vibe");
-		const parentSessionId = manager.getSessionId();
-		for (const id of ["ActiveVibe", "KilledVibe"]) {
-			manager.appendCustomEntry("vibe-session-lifecycle", {
-				version: 1,
-				action: "spawn",
-				id,
-				ownerId: "Main",
-				parentSessionId,
-				cli: "fast",
-				agent: "sonic",
-				childSessionFile: `${id}.jsonl`,
-				createdAt: Date.now(),
-			});
-		}
-		manager.appendCustomEntry("vibe-session-lifecycle", {
-			version: 1,
-			action: "tombstone",
-			id: "KilledVibe",
-			ownerId: "Main",
-			parentSessionId,
-			reason: "mode-exit",
-		});
-		manager.appendModeChange("none");
-		await manager.ensureOnDisk();
-		await manager.flush();
-		const sourceSessionFile = manager.getSessionFile();
-		if (!sourceSessionFile) throw new Error("Expected source session file");
-		const sourceArtifacts = sourceSessionFile.slice(0, -6);
-		await fs.mkdir(sourceArtifacts, { recursive: true });
-		for (const id of ["ActiveVibe", "KilledVibe"]) {
-			await fs.writeFile(path.join(sourceArtifacts, `${id}.jsonl`), "persisted child");
-		}
-		await fs.writeFile(path.join(sourceArtifacts, "OrdinaryTask.jsonl"), persistedChildJsonl("OrdinaryTask"));
-		const fork = await manager.fork();
-		if (!fork) throw new Error("Expected persisted fork");
-		await fs.cp(sourceArtifacts, fork.newSessionFile.slice(0, -6), { recursive: true });
-		await manager.close();
-
-		const agents = new AgentRegistry();
-		const hub = new AgentHubOverlayComponent({
-			...createAgentHubRuntime({
-				settings: Settings.isolated(),
-				registry: agents,
-				sessionFile: fork.newSessionFile,
-			}),
-			observers: new SessionObserverRegistry(),
-			hubKeys: [],
-			onDone: () => {},
-			requestRender: () => {},
-			registry: agents,
-			irc: new IrcBus(agents),
-			focusAgent: async () => {},
-			sessionFile: fork.newSessionFile,
-		});
-		await hub.persistedSubagentsReady;
-
-		expect(agents.get("ActiveVibe")).toBeUndefined();
-		expect(agents.get("KilledVibe")).toBeUndefined();
-		expect(agents.get("OrdinaryTask")?.status).toBe("parked");
-		hub.dispose();
-	});
-
 	it("selector controller restores focus to the editor after Enter focuses an agent", async () => {
 		const agents = new AgentRegistry();
 		agents.register({

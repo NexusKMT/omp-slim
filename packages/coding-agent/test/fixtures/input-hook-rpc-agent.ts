@@ -1,7 +1,5 @@
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -11,6 +9,8 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 // Real RPC dispatch, session queues and extension input handlers; only the model response is scripted.
 // Input handler contract, keyed by message prefix:
@@ -49,7 +49,11 @@ const extensionRunner = new ExtensionRunner([extension], runtime, process.cwd(),
 const mock = createMockModel({ handler: { content: ["ok"] } });
 const agent = new Agent({
 	getApiKey: () => "test-key",
-	initialState: { model: getBundledModel("anthropic", "claude-sonnet-4-5")!, systemPrompt: ["Test"], tools: [] },
+	initialState: {
+		model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+		systemPrompt: ["Test"],
+		tools: [],
+	},
 	streamFn: mock.stream,
 });
 const session = new AgentSession({

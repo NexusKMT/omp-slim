@@ -10,16 +10,13 @@
  *   const isolated = Settings.isolated({ "compaction.enabled": false });
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { isLightTheme } from "@oh-my-pi/pi-tui/theme/theme";
 import {
 	expandTilde,
 	getAgentDbPath,
 	getAgentDir,
-	getProjectDir,
 	getProjectAgentDir,
+	getProjectDir,
 	isEnoent,
 	isRecord,
 	logger,
@@ -27,31 +24,33 @@ import {
 	procmgr,
 } from "@oh-my-pi/pi-utils";
 import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
-import { isLightTheme } from "@oh-my-pi/pi-tui/theme/theme";
 import { JSONC, YAML } from "bun";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { invalidate as invalidateCapabilityFsCache } from "../capability/fs";
-import { type Settings as SettingsCapabilityItem, settingsCapability } from "../capability/settings";
-import type { ModelRole } from "../config/model-roles";
+import { settingsCapability, type Settings as SettingsCapabilityItem } from "../capability/settings";
 import { loadCapability } from "../discovery";
 import { AgentStorage, type AgentStorageApi } from "../session/agent-storage";
 
-import { writeFileAtomically } from "../utils/atomic-file";
 import { stringifyYamlConfig } from "@oh-my-pi/pi-utils/yaml-config";
+import { writeFileAtomically } from "../utils/atomic-file";
 import {
-	type AnySetting,
 	all as allSettings,
 	bindEffects,
 	inheritWarnings,
 	lookup as lookupSetting,
 	resetRegistryForTest,
 	settingValuesEqual,
+	type AnySetting,
 	type ValueCacheEntry,
 	type WarnState,
 } from "./registry";
 // Registers every setting before any instance is read (definitions live next to their domains).
+import { cfgShellPath } from "../exec/settings";
 import "./all-settings";
 import { cfgDisabledProviders, cfgModel, cfgModelStorage } from "./model-settings";
-import { cfgShellPath } from "../exec/settings";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -336,10 +335,9 @@ export type SettingsMirrorWrite =
 	| { readonly op: "writeMember"; readonly id: string; readonly item: string; readonly member: boolean }
 	| { readonly op: "pinDefaultValue"; readonly id: string }
 	| { readonly op: "clearOverrideValue"; readonly id: string }
-	| { readonly op: "setModelRole"; readonly role: string; readonly modelId: string | undefined }
-	| { readonly op: "setProjectModelRole"; readonly role: string; readonly modelId: string }
-	| { readonly op: "clearProjectModelRole"; readonly role: string }
-	| { readonly op: "overrideModelRoles"; readonly roles: ReadOnlyDict<string> };
+	| { readonly op: "setModel"; readonly modelId: string | undefined }
+	| { readonly op: "setProjectModel"; readonly modelId: string }
+	| { readonly op: "clearProjectModel" };
 
 /** A disk or scope operation a worker mirror runs on its main-thread instance. */
 export type SettingsMirrorRefresh =
@@ -435,18 +433,6 @@ function stringArrayFromUnknown(value: unknown): string[] {
 	return [];
 }
 
-/**
- * Migrate a v17 leaf rename that used to nest under a boolean parent path
- * (`dev.autoqa.consent` → `dev.autoqaConsent`, `todo.reminders.max` →
- * `todo.remindersMax`). Pre-rename configs left the leaf beneath the parent,
- * so the parent path resolved to an object and truthy checks like
- * `isAutoQaEnabled` treated a consent-only container as "enabled".
- *
- * Handles nested (`{ parent: { leaf } }`) and quoted-dotted (`"parent.leaf"`)
- * legacy sources. An explicit new key always wins; a separately configured
- * boolean parent is preserved; an irrecoverable object-valued parent (only ever
- * a container for the old leaf) is dropped so the schema default applies.
- */
 function migrateNestedLeafRename(
 	raw: RawSettings,
 	root: string,
@@ -1917,7 +1903,7 @@ export class Settings {
 
 	/** Save the primary model in the active profile, synchronizing an existing CLI override. */
 	setModel(model: string | undefined): void {
-		if (this.#mirror) return this.#forward(this.#mirror, { op: "setModelRole", role: "default", modelId: model });
+		if (this.#mirror) return this.#forward(this.#mirror, { op: "setModel", modelId: model });
 		if (model === undefined) cfgModel.unset(this);
 		else cfgModel.set(this, model);
 		if (this.isProjectModelRuntimeOverrideActive()) return;
@@ -1945,15 +1931,14 @@ export class Settings {
 	}
 
 	setProjectModel(model: string): void {
-		if (this.#mirror)
-			return this.#forward(this.#mirror, { op: "setProjectModelRole", role: "default", modelId: model });
+		if (this.#mirror) return this.#forward(this.#mirror, { op: "setProjectModel", modelId: model });
 		this.#setProjectModelValue(model);
 		this.#captureRuntimeModelOverride();
 		this.#updateRuntimeModelOverride(model);
 	}
 
 	clearProjectModel(): void {
-		if (this.#mirror) return this.#forward(this.#mirror, { op: "clearProjectModelRole", role: "default" });
+		if (this.#mirror) return this.#forward(this.#mirror, { op: "clearProjectModel" });
 		this.#setProjectModelValue(null);
 		this.#captureRuntimeModelOverride();
 		this.#updateRuntimeModelOverride(undefined);
@@ -1962,51 +1947,6 @@ export class Settings {
 	overrideModel(model: string | undefined): void {
 		if (model === undefined) cfgModel.clearOverride(this);
 		else cfgModel.override(this, model);
-	}
-
-	#assertDefaultModelRole(role: string): void {
-		if (role !== "default")
-			throw new Error(`Model role "${role}" has been removed; select the session model instead`);
-	}
-
-	/** Compatibility with extensions that still address the primary model as `default`. */
-	setModelRole(role: ModelRole | string, modelId: string | undefined): void {
-		this.#assertDefaultModelRole(role);
-		this.setModel(modelId);
-	}
-	setProjectModelRole(role: ModelRole | string, modelId: string): void {
-		this.#assertDefaultModelRole(role);
-		this.setProjectModel(modelId);
-	}
-	clearProjectModelRole(role: ModelRole | string): void {
-		this.#assertDefaultModelRole(role);
-		this.clearProjectModel();
-	}
-	getModelRole(role: ModelRole | string): string | undefined {
-		return role === "default" ? this.getModel() : undefined;
-	}
-	getGlobalModelRole(role: ModelRole | string): string | undefined {
-		return role === "default" ? this.getGlobalModel() : undefined;
-	}
-	getProjectModelRole(role: ModelRole | string): string | undefined {
-		return role === "default" ? this.getProjectModel() : undefined;
-	}
-	getModelRoleProvenance(role: ModelRole | string): SettingProvenance {
-		return role === "default" ? this.getModelProvenance() : "default";
-	}
-	getModelRoleSource(role: ModelRole | string): "project" | "global" | "default" {
-		return role === "default" ? this.getModelSource() : "default";
-	}
-	isProjectModelRoleRuntimeOverrideActive(role: ModelRole | string): boolean {
-		return role === "default" && this.isProjectModelRuntimeOverrideActive();
-	}
-	getModelRoles(): ReadOnlyDict<string> {
-		const model = this.getModel();
-		return model === undefined ? {} : { default: model };
-	}
-	overrideModelRoles(roles: ReadOnlyDict<string>): void {
-		for (const role of Object.keys(roles)) this.#assertDefaultModelRole(role);
-		if (roles.default !== undefined) this.overrideModel(roles.default);
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -3186,10 +3126,6 @@ export class Settings {
 		// the incoherent "hashline edits without addressable anchors" state.
 		delete raw.readHashLines;
 
-		// serviceTier (single enum with scoped openai-only/claude-only sentinels)
-		// → per-family tier.openai/tier.anthropic/tier.google; serviceTierSubagent
-		// → tier.subagent; serviceTierAdvisor → tier.advisor. `fastModeScope` is
-		// dropped — per-family scoping is now expressed by the three tier settings.
 		const tierObj = isRecord(raw.tier) ? raw.tier : {};
 		let tierTouched = false;
 		const setTier = (family: string, value: unknown): void => {
@@ -3223,32 +3159,8 @@ export class Settings {
 			setTier("subagent", mapInheritTier(raw.serviceTierSubagent));
 			delete raw.serviceTierSubagent;
 		}
-		if ("serviceTierAdvisor" in raw) {
-			setTier("advisor", mapInheritTier(raw.serviceTierAdvisor));
-			delete raw.serviceTierAdvisor;
-		}
 		if (tierTouched) raw.tier = tierObj;
 		delete raw.fastModeScope;
-
-		// advisor.subagents (blanket advisor on every spawned subagent) → per-agent
-		// task.agentAdvisor, migrated to the bundled generic `task` agent. An
-		// explicit boolean maps to "on"/"off" IN THE SAME LAYER — migration runs
-		// per file, so a project-level `false` must keep overriding a global
-		// `true` after both layers migrate.
-		{
-			const advisorObj = isRecord(raw.advisor) ? raw.advisor : undefined;
-			const legacySubagents =
-				advisorObj && "subagents" in advisorObj ? advisorObj.subagents : raw["advisor.subagents"];
-			if (typeof legacySubagents === "boolean") {
-				const taskObj = isRecord(raw.task) ? raw.task : {};
-				const agentAdvisor = isRecord(taskObj.agentAdvisor) ? taskObj.agentAdvisor : {};
-				if (!("task" in agentAdvisor)) agentAdvisor.task = legacySubagents ? "on" : "off";
-				taskObj.agentAdvisor = agentAdvisor;
-				raw.task = taskObj;
-			}
-			if (advisorObj) delete advisorObj.subagents;
-			delete raw["advisor.subagents"];
-		}
 
 		// task.completionProbeMs (poll period, 0 = off) → task.completionProbe
 		// (on/off with a built-in backoff schedule). Mapped IN THE SAME LAYER so a
@@ -3274,7 +3186,7 @@ export class Settings {
 		{
 			const taskObj = isRecord(raw.task) ? raw.task : undefined;
 			if (taskObj) {
-				for (const key of ["agentPrewalk", "agentAdvisor"]) {
+				for (const key of ["agentPrewalk"]) {
 					const overrides = isRecord(taskObj[key]) ? taskObj[key] : undefined;
 					if (!overrides) continue;
 					for (const agentName in overrides) {
@@ -3285,17 +3197,6 @@ export class Settings {
 			}
 		}
 
-		// v17 renames that used to nest under a boolean parent path:
-		//   dev.autoqa.consent -> dev.autoqaConsent
-		//   todo.reminders.max -> todo.remindersMax
-		migrateNestedLeafRename(
-			raw,
-			"dev",
-			"autoqa",
-			"consent",
-			"autoqaConsent",
-			value => value === "unset" || value === "granted" || value === "denied",
-		);
 		migrateNestedLeafRename(
 			raw,
 			"todo",

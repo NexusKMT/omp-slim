@@ -1,10 +1,13 @@
-import { combine, effect, register, type Setting } from "../config/registry";
-import type { Settings } from "../config/settings";
-import { MOTION_MODES, MOTION_PRESETS } from "../config/motion-presets";
 import { formatKeyHint, formatKeyHints } from "@oh-my-pi/pi-tui/app-keybindings";
-import { cfgReadToolResultPreview } from "../tools/settings";
-import { MAGIC_KEYWORDS, type MagicKeywordId } from "./magic-keywords";
+import { setChatTranscriptDisplayPreferences } from "@oh-my-pi/pi-tui/chat/display-preferences";
+import { DEFAULT_MAX_FPS, parseMaxFps, setMaxFps } from "@oh-my-pi/pi-tui/frame-rate";
+import { setMotionEffects } from "@oh-my-pi/pi-tui/motion-effects";
 import { TREE_FILTER_MODES } from "@oh-my-pi/pi-tui/overlays/tree-selector";
+import { setEditorGapComposerShape } from "@oh-my-pi/pi-tui/prompt/editor-top-gap";
+import { setEmojiAutocompleteEnabled } from "@oh-my-pi/pi-tui/prompt/prompt-action-autocomplete";
+import { applyHyperlinkSetting } from "@oh-my-pi/pi-tui/render/hyperlink";
+import { setInlineImageMaxColumns, setInlineImageMaxRows } from "@oh-my-pi/pi-tui/render/render-utils";
+import { parseSpinnerInterval, setSpinnerInterval } from "@oh-my-pi/pi-tui/spinner-clock";
 import {
 	CONTEXT_LINE_MODE_VALUES,
 	CUSTOM_STATUS_LINE_DEFAULTS,
@@ -12,16 +15,13 @@ import {
 	STATUS_LINE_SEGMENT_IDS,
 	STATUS_LINE_SEPARATOR_VALUES,
 } from "@oh-my-pi/pi-tui/status-line/schema";
-import { setChatTranscriptDisplayPreferences } from "@oh-my-pi/pi-tui/chat/display-preferences";
-import { setEditorGapComposerShape } from "@oh-my-pi/pi-tui/prompt/editor-top-gap";
-import { setEmojiAutocompleteEnabled } from "@oh-my-pi/pi-tui/prompt/prompt-action-autocomplete";
-import { applyHyperlinkSetting } from "@oh-my-pi/pi-tui/render/hyperlink";
-import { setInlineImageMaxColumns, setInlineImageMaxRows } from "@oh-my-pi/pi-tui/render/render-utils";
 import { setShimmerMode } from "@oh-my-pi/pi-tui/theme/shimmer";
 import { setAutoThemeMapping, setColorBlindMode, setSymbolPreset } from "@oh-my-pi/pi-tui/theme/theme";
-import { DEFAULT_MAX_FPS, parseMaxFps, setMaxFps } from "@oh-my-pi/pi-tui/frame-rate";
-import { setMotionEffects } from "@oh-my-pi/pi-tui/motion-effects";
-import { parseSpinnerInterval, setSpinnerInterval } from "@oh-my-pi/pi-tui/spinner-clock";
+import { MOTION_MODES, MOTION_PRESETS } from "../config/motion-presets";
+import { combine, effect, register, type Setting } from "../config/registry";
+import type { Settings } from "../config/settings";
+import { cfgReadToolResultPreview } from "../tools/settings";
+import { MAGIC_KEYWORDS, type MagicKeywordId } from "./magic-keywords";
 
 const EMPTY_UNKNOWN_RECORD: Record<string, unknown> = {};
 
@@ -810,26 +810,6 @@ export const cfgDisplayShellVisualization = register({
 		description: "Show bash commands as an interactive execution visualization instead of plain shell commands",
 	},
 });
-
-export const cfgDisplayAdvisorCollapsedLines = register({
-	id: "display.advisorCollapsedLines",
-	type: "number",
-	default: 0,
-	ui: {
-		tab: "appearance",
-		group: "Display",
-		label: "Advisor Collapsed Lines",
-		description:
-			"Maximum note lines a collapsed advisor card shows below its header (0 keeps the full preview; expand with the tool-output toggle)",
-		options: [
-			{ value: "0", label: "No limit", description: "Default." },
-			{ value: "1", label: "1 line" },
-			{ value: "2", label: "2 lines" },
-			{ value: "3", label: "3 lines" },
-			{ value: "5", label: "5 lines" },
-		],
-	},
-});
 effect(
 	combine({
 		hideToolActivity: cfgDisplayHideToolActivity,
@@ -839,7 +819,6 @@ effect(
 		cacheMissMarker: cfgDisplayCacheMissMarker,
 		showTokenUsage: cfgDisplayShowTokenUsage,
 		showTurnTime: cfgDisplayShowTurnTime,
-		advisorCollapsedLines: cfgDisplayAdvisorCollapsedLines,
 	}),
 	setChatTranscriptDisplayPreferences,
 );

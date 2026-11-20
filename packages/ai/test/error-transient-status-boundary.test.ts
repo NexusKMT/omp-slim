@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { describe, expect, it } from "bun:test";
 
 /**
  * The transient classifier matches bare HTTP status codes in error text. Those

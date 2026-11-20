@@ -187,14 +187,12 @@ function replayWrite(target: Settings, write: SettingsMirrorWrite): void {
 			return target.pinDefaultValue(settingById(write.id));
 		case "clearOverrideValue":
 			return target.clearOverrideValue(settingById(write.id));
-		case "setModelRole":
-			return target.setModelRole(write.role, write.modelId);
-		case "setProjectModelRole":
-			return target.setProjectModelRole(write.role, write.modelId);
-		case "clearProjectModelRole":
-			return target.clearProjectModelRole(write.role);
-		case "overrideModelRoles":
-			return target.overrideModelRoles(write.roles);
+		case "setModel":
+			return target.setModel(write.modelId);
+		case "setProjectModel":
+			return target.setProjectModel(write.modelId);
+		case "clearProjectModel":
+			return target.clearProjectModel();
 	}
 }
 

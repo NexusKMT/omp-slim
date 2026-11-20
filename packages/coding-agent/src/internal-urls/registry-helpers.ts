@@ -3,10 +3,10 @@
  * registered agent sessions.
  */
 
+import { isEnoent } from "@oh-my-pi/pi-utils";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
 import { AgentRegistry } from "../registry/agent-registry";
 
 const extraArtifactsDirs = new Set<string>();
@@ -58,25 +58,6 @@ export function artifactsDirsFromRegistry(options?: { preferredDir?: string }): 
 	return dirs;
 }
 
-/**
- * Recursively scan artifacts dirs for agent session transcripts, keyed by
- * agent id (the `.jsonl` basename). Used by `history://` so transcripts of
- * agents no longer in the registry (unregistered one-shot helpers, released
- * agents, or any agent after session resume) remain reachable — mirroring how
- * `agent://` reads `.md` outputs straight off disk.
- *
- * Layout follows `task/index.ts`: a subagent's transcript is
- * `<artifactsDir>/<AgentId>.jsonl`, and its own children nest one level deeper
- * under `<artifactsDir>/<AgentId>/<AgentId>.<ChildId>.jsonl`. Advisor
- * transcripts (`__advisor*.jsonl`) are observability-only and excluded;
- * EPERM-rewrite backups (`.bak`) are skipped. When the same id appears in
- * multiple dirs, the first hit wins (registry dirs are scanned first; a
- * `preferredDir` from the caller root is scanned before them). Directory
- * listings are prefetched in parallel; the walk itself stays a sequential
- * depth-first pass so first-hit order is unaffected. In `onlyPreferred` mode,
- * only the supplied directory is scanned, with direct files before descendants.
- * `preserveDuplicates` retains every candidate path per id for ambiguity checks.
- */
 export function sessionFilesFromDisk(
 	preferredDir: string | undefined,
 	options: { onlyPreferred?: boolean; preserveDuplicates: true },
@@ -116,7 +97,6 @@ export async function sessionFilesFromDisk(
 	const seenDirs = new Set<string>();
 	const recordFile = (dir: string, entry: Dirent): void => {
 		if (!entry.isFile() || !entry.name.endsWith(".jsonl")) return;
-		if (entry.name.startsWith("__advisor")) return;
 		const id = entry.name.slice(0, -".jsonl".length);
 		const file = path.join(dir, entry.name);
 		if (options?.preserveDuplicates) {
@@ -179,8 +159,7 @@ export async function hasResolvableTranscript(agentId: string): Promise<boolean>
 		const registry = AgentRegistry.global();
 		const lower = agentId.toLowerCase();
 		let ref = registry.get(agentId);
-		if (ref?.kind === "advisor") ref = undefined;
-		ref ??= registry.list().find(candidate => candidate.kind !== "advisor" && candidate.id.toLowerCase() === lower);
+		ref ??= registry.list().find(candidate => candidate.id.toLowerCase() === lower);
 		if (ref?.session) return true;
 		// A running worker resolves to a "no transcript yet" note, not an error.
 		if (ref?.status === "running") return true;

@@ -1,18 +1,18 @@
-import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
-import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, Usage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { sumSubagentTreeCost } from "@oh-my-pi/pi-coding-agent/modes/agent-hub-runtime";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentMetricsSummary, AgentRef } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { AgentCostSnapshot } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
+import * as path from "node:path";
 
 const root = path.resolve("sessions", "root.jsonl");
 const artifacts = path.resolve("sessions", "root");
@@ -83,19 +83,6 @@ describe("sumSubagentTreeCost", () => {
 				ref("A", { cost: 0.1 }),
 				// Grandchild transcripts live in the child's artifacts dir.
 				ref("A.B", { parentId: "A", sessionFile: path.join(artifacts, "A", "A.B.jsonl"), cost: 0.02 }),
-				// Subagent advisors are part of the tree; the main advisor is billed separately.
-				ref("A/advisor", {
-					kind: "advisor",
-					parentId: "A",
-					sessionFile: path.join(artifacts, "A", "__advisor.jsonl"),
-					cost: 0.003,
-				}),
-				ref("Main/advisor", {
-					kind: "advisor",
-					parentId: "Main",
-					sessionFile: path.join(artifacts, "__advisor.jsonl"),
-					cost: 5,
-				}),
 				// A previous session's agent still in the process-global registry.
 				ref("Old", { sessionFile: path.resolve("sessions", "old", "Old.jsonl"), cost: 7 }),
 				// File-less and not observed by this session.
@@ -105,7 +92,7 @@ describe("sumSubagentTreeCost", () => {
 			rootSessionFile: root,
 			sessionCosts: new WeakMap(),
 		});
-		expect(cost).toBeCloseTo(0.123, 10);
+		expect(cost).toBeCloseTo(0.12, 10);
 	});
 
 	it("prefers live observer progress over persisted history", () => {

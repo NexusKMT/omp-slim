@@ -57,8 +57,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 		"promptCache?": { "+": "delete", "short?": "number > 0", "long?": "number > 0" },
 		"imageCountBudget?": "number.integer > 0",
 		"imageInputDecoder?": '"stb"',
-		"tokenizer?":
-			'"claude-v3" | "claude-v47" | "claude-v5" | "claude-v5-sonnet" | "qwen3" | "deepseek-v3" | "kimi-k2" | "glm5" | "cl100k" | "o200k"',
+		"tokenizer?": '"qwen3" | "deepseek-v3" | "kimi-k2" | "glm5" | "cl100k" | "o200k"',
 	});
 	const ModelDefinitionSchema = ModelOverrideSchema.and({ id: "string" });
 	const ProviderAuthSchema = type('"apiKey" | "none"');

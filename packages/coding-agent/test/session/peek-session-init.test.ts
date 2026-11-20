@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import * as path from "node:path";
-import { getBundledModel } from "../helpers/bundled-model";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage, MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
 const tempDirs: TempDir[] = [];
 const LARGE_SESSION_BYTES = 9 * 1024 * 1024;
@@ -28,7 +28,7 @@ class LargeFileSessionStorage extends FileSessionStorage {
 }
 
 function assistantMessage(text: string) {
-	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 	if (!model) throw new Error("Expected built-in anthropic model to exist");
 	return {
 		role: "assistant" as const,

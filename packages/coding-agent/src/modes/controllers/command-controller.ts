@@ -1,6 +1,3 @@
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { CompactionCancelledError, type CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import { type Model } from "@oh-my-pi/pi-ai";
 import {
@@ -13,33 +10,36 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui";
-import { formatDuration, logger, Snowflake, sanitizeText } from "@oh-my-pi/pi-utils";
-import { getActiveProfile, getConfigDirName } from "@oh-my-pi/pi-utils/dirs";
+import { BashExecutionComponent, bashPtyViewport } from "@oh-my-pi/pi-tui/chat/bash-execution";
+import { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
+import { appKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
 import { classifyTerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-multiplexer";
+import { formatDuration, logger, sanitizeText, Snowflake } from "@oh-my-pi/pi-utils";
+import { getActiveProfile, getConfigDirName } from "@oh-my-pi/pi-utils/dirs";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type BashResult, isPersistentShellCdCommand } from "../../exec/bash-executor";
 import type { CompactOptions } from "../../extensibility/extensions/types";
-import { BashExecutionComponent, bashPtyViewport } from "@oh-my-pi/pi-tui/chat/bash-execution";
-import { appKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
-import { EvalExecutionComponent } from "@oh-my-pi/pi-tui/chat/eval-execution";
 
-import { messageBlock, PresentedBlock } from "@oh-my-pi/pi-tui/chat/transcript-presentation";
-import { MoveOverlay, type MoveOverlayResult } from "@oh-my-pi/pi-tui/overlays/move-overlay";
-import { moveDirectorySource } from "../move-directory-source";
-import { getMarkdownTheme, getSymbolTheme, theme } from "@oh-my-pi/pi-tui/theme";
-import type { InteractiveModeContext } from "../../modes/types";
-import { continuesConversation } from "../utils/conversation-position";
-import { ContextViewer } from "@oh-my-pi/pi-tui/overlays/context-viewer";
 import type { OverlayHandle } from "@oh-my-pi/pi-tui";
-import { ReportPanel } from "@oh-my-pi/pi-tui/overlays/report-panel";
-import type { TspText } from "@oh-my-pi/pi-wire";
-import { computeSessionContextBreakdown } from "../../session/context-usage-runtime";
-import { buildSessionContextView } from "../../session/context-view";
+import { messageBlock, PresentedBlock } from "@oh-my-pi/pi-tui/chat/transcript-presentation";
 import { buildHotkeysMarkdown, HotkeysSheetComponent } from "@oh-my-pi/pi-tui/hotkeys-markdown";
 import { isNativeRendering } from "@oh-my-pi/pi-tui/native/state";
-import { buildToolsMarkdown } from "@oh-my-pi/pi-tui/prompt/tools-markdown";
-import type { AsyncJobSnapshotItem } from "../../session/agent-session";
+import { ContextViewer } from "@oh-my-pi/pi-tui/overlays/context-viewer";
 import { buildJobTree, jobTreeGuide, jobTreeIndent } from "@oh-my-pi/pi-tui/overlays/job-tree";
+import { MoveOverlay, type MoveOverlayResult } from "@oh-my-pi/pi-tui/overlays/move-overlay";
+import { ReportPanel } from "@oh-my-pi/pi-tui/overlays/report-panel";
+import { buildToolsMarkdown } from "@oh-my-pi/pi-tui/prompt/tools-markdown";
+import { getMarkdownTheme, getSymbolTheme, theme } from "@oh-my-pi/pi-tui/theme";
+import type { TspText } from "@oh-my-pi/pi-wire";
+import type { InteractiveModeContext } from "../../modes/types";
+import type { AsyncJobSnapshotItem } from "../../session/agent-session";
+import { computeSessionContextBreakdown } from "../../session/context-usage-runtime";
+import { buildSessionContextView } from "../../session/context-view";
+import { moveDirectorySource } from "../move-directory-source";
+import { continuesConversation } from "../utils/conversation-position";
 
 import type { CompactMode } from "../../session/compact-modes";
 import {
@@ -58,20 +58,19 @@ import {
 } from "../../session/session-worktree";
 import { formatShakeSummary, type ShakeMode, type ShakeResult } from "../../session/shake-types";
 
-import { resolveTernPane } from "../../utils/tern/kind";
-import { TernError, type TernErrorKind, TernSocketClient } from "../../utils/tern/wire";
+import { replaceTabs, shortenEmbeddedPaths } from "@oh-my-pi/pi-tui/render/render-utils";
+import { formatDumpArchiveReport, type SessionDumpArchive } from "../../session/session-dump-format";
 import { outputMeta } from "../../tools/output-meta";
 import { resolveToCwd, stripOuterDoubleQuotes } from "../../tools/path-utils";
-import { replaceTabs, shortenEmbeddedPaths } from "@oh-my-pi/pi-tui/render/render-utils";
 import { copyToClipboard } from "../../utils/clipboard";
-import { formatDumpArchiveReport, type SessionDumpArchive } from "../../session/session-dump-format";
 import { openPath } from "../../utils/open";
 import { resumeCommand } from "../../utils/resume-command";
+import { resolveTernPane } from "../../utils/tern/kind";
+import { TernError, type TernErrorKind, TernSocketClient } from "../../utils/tern/wire";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
 
-import { cfgTerminalShowImages } from "../settings";
-import { cfgProviderAppendOnlyContext } from "../../session/settings";
 import { flagConsumesValue, restartArgv } from "../../cli/flag-tables";
+import { cfgProviderAppendOnlyContext } from "../../session/settings";
 import {
 	createDefaultTerminalLaunchRequest,
 	getTerminalLaunchPlacement,
@@ -81,6 +80,7 @@ import {
 	type TerminalLaunchResult,
 } from "../../subprocess/terminal-launch";
 import { resolveCliEntryCmd } from "../../subprocess/worker-client";
+import { cfgTerminalShowImages } from "../settings";
 
 /** How long `/fork` waits for Tern to open the fork's pane. */
 const TERN_FORK_TIMEOUT_MS = 10_000;
@@ -367,26 +367,6 @@ export class CommandController {
 		}
 	}
 
-	handleAdvisorDumpCommand(isRaw = false) {
-		try {
-			const advisorHistory = this.ctx.session.formatAdvisorHistoryAsText({ compact: !isRaw });
-			if (advisorHistory === null) {
-				this.ctx.showError("Advisor is not active for this session.");
-				return;
-			}
-			if (!advisorHistory) {
-				this.ctx.showError("Advisor has no history yet.");
-				return;
-			}
-			copyToClipboard(advisorHistory);
-			this.ctx.showStatus("Advisor history copied to clipboard");
-		} catch (error: unknown) {
-			this.ctx.showError(
-				`Failed to copy advisor history: ${error instanceof Error ? error.message : "Unknown error"}`,
-			);
-		}
-	}
-
 	async handleDebugTranscriptCommand(): Promise<void> {
 		try {
 			const width = Math.max(1, this.ctx.ui.terminal.columns);
@@ -535,105 +515,6 @@ export class CommandController {
 		}
 
 		this.ctx.showSessionInfo(info, this.ctx.session.getContextUsage());
-	}
-
-	static readonly #advisorStatusGlyph: Record<string, string> = {
-		running: "●",
-		paused: "○",
-		no_model: "○",
-		quota_exhausted: "✕",
-		error: "✕",
-	};
-
-	static readonly #advisorStatusLabel: Record<string, string> = {
-		running: "running",
-		paused: "off",
-		no_model: "no model",
-		quota_exhausted: "quota exhausted",
-		error: "error",
-	};
-
-	async handleAdvisorStatusCommand(): Promise<void> {
-		const stats = this.ctx.session.getAdvisorStats();
-		if (!stats.configured) {
-			this.showCommandReport({ title: "Advisor Status", body: new Text("Advisor is disabled.", 0, 0) });
-			return;
-		}
-		// Roster view: show every configured advisor with its status, even when
-		// none are live (all paused/no-model). The old code returned a generic
-		// message that hid the per-advisor state the user needs to act on.
-		if (stats.advisors.length > 1 || (stats.configured && !stats.active)) {
-			let info = "";
-			for (const a of stats.advisors) {
-				const glyph = CommandController.#advisorStatusGlyph[a.status] ?? "?";
-				const label = CommandController.#advisorStatusLabel[a.status] ?? a.status;
-				const color =
-					a.status === "running"
-						? "success"
-						: a.status === "quota_exhausted" || a.status === "error"
-							? "error"
-							: "dim";
-				info += `\n${theme.fg(color, glyph)} ${theme.bold(a.name)} ${theme.fg("dim", `[${label}]`)}\n`;
-				if (a.model) {
-					info += `${theme.fg("dim", "Model:")} ${a.model.provider}/${a.model.id}\n`;
-				}
-
-				if (a.status === "running" || a.status === "quota_exhausted") {
-					const ctx =
-						a.contextWindow > 0
-							? `${a.contextTokens.toLocaleString()} / ${a.contextWindow.toLocaleString()} (${Math.round((a.contextTokens / a.contextWindow) * 100)}%)`
-							: `${a.contextTokens.toLocaleString()}`;
-					info += `${theme.fg("dim", "Context:")} ${ctx}\n`;
-					info += `${theme.fg("dim", "Messages:")} ${a.messages.total.toLocaleString()}\n`;
-					info += `${theme.fg("dim", "Spend:")} ${a.tokens.input.toLocaleString()} in / ${a.tokens.output.toLocaleString()} out`;
-					if (a.cost > 0) info += `, $${a.cost.toFixed(4)}`;
-					info += "\n";
-				}
-			}
-			if (stats.active) {
-				info += `\n${theme.bold("Totals")}\n`;
-				info += `${theme.fg("dim", "Tokens:")} ${stats.tokens.total.toLocaleString()}\n`;
-				if (stats.cost > 0) info += `${theme.fg("dim", "Cost:")} $${stats.cost.toFixed(4)}\n`;
-			}
-			this.showCommandReport({
-				title: `Advisor Status (${stats.advisors.length} advisors)`,
-				body: new Text(info.trim(), 0, 0),
-			});
-			return;
-		}
-		// Single active advisor — detailed view.
-		const model = stats.model;
-		let info = "";
-		if (stats.advisors.length === 1) {
-			const a = stats.advisors[0];
-			const glyph = CommandController.#advisorStatusGlyph[a.status] ?? "?";
-			const label = CommandController.#advisorStatusLabel[a.status] ?? a.status;
-			info += `${theme.fg(a.status === "running" ? "success" : "error", glyph)} ${a.name} ${theme.fg("dim", `[${label}]`)}\n\n`;
-		}
-		if (model) {
-			info += `${theme.bold("Provider")}\n`;
-			info += `${theme.fg("dim", "Model:")} ${model.provider}/${model.id}\n`;
-		}
-
-		info += `\n${theme.bold("Messages")}\n`;
-		info += `${theme.fg("dim", "User:")} ${stats.messages.user.toLocaleString()}\n`;
-		info += `${theme.fg("dim", "Assistant:")} ${stats.messages.assistant.toLocaleString()}\n`;
-		info += `${theme.fg("dim", "Total:")} ${stats.messages.total.toLocaleString()}\n`;
-		info += `\n${theme.bold("Context")}\n`;
-		if (stats.contextWindow > 0) {
-			const percent = Math.round((stats.contextTokens / stats.contextWindow) * 100);
-			info += `${theme.fg("dim", "Tokens:")} ${stats.contextTokens.toLocaleString()} / ${stats.contextWindow.toLocaleString()} (${percent}%)\n`;
-		} else {
-			info += `${theme.fg("dim", "Tokens:")} ${stats.contextTokens.toLocaleString()}\n`;
-		}
-		info += `\n${theme.bold("Spend")}\n`;
-		info += `${theme.fg("dim", "Input:")} ${stats.tokens.input.toLocaleString()}\n`;
-		info += `${theme.fg("dim", "Output:")} ${stats.tokens.output.toLocaleString()}\n`;
-		if (stats.tokens.cacheRead > 0) {
-			info += `${theme.fg("dim", "Cache Read:")} ${stats.tokens.cacheRead.toLocaleString()}\n`;
-		}
-		if (stats.cost > 0) info += `${theme.fg("dim", "Cost:")} $${stats.cost.toFixed(4)}\n`;
-		this.showCommandReport({ title: "Advisor Status", body: new Text(info.trim(), 0, 0) });
 	}
 
 	/**

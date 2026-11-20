@@ -2,11 +2,17 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replace internal role-based settings/model APIs with single-model selection; empty model registries no longer synthesize a test provider. Tests construct explicit fixtures.
+
 ### Changed
 
 - OMP Slim no longer downloads extra AST grammars by default; tools report skipped languages while built-in language parsing and ordinary text operations remain available.
 
 ### Removed
+
+- Removed Auto-QA/report_issue, grievances, Advisors, Vibe, Autoresearch, built-in personalities and the Jevify command; use ordinary sessions, task subagents and manual instructions.
 
 - Removed built-in SSH host management and remote `ssh://` file access.
 - Removed upstream self-update, startup version checks and the update setup scene; install verified OMP Slim artifacts or build from source.

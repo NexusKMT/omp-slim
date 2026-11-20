@@ -1,19 +1,18 @@
 import { TERMINAL } from "@oh-my-pi/pi-tui";
 import { isNativeRendering } from "@oh-my-pi/pi-tui/native/state";
 import { SETTING_TABS, type SettingsDisplayEntry, type SettingsHost } from "@oh-my-pi/pi-tui/overlays/settings-defs";
-import { isSettingsInitialized, Settings, settings } from "./settings";
 import { orderedSettings } from "./all-settings";
 import { type AnySetting, lookup } from "./registry";
+import { isSettingsInitialized, Settings, settings } from "./settings";
 
+import { cfgTuiVimMode } from "../modes/settings";
 import { cfgPlanAutosave, cfgPlanEnabled } from "../plan-mode/settings";
+import { cfgContextFilesExtra } from "../session/context-settings";
 import {
 	cfgDefaultThinkingLevel,
 	normalizeProviderMaxInFlightRequests,
 	validateProviderMaxInFlightRequests,
 } from "../session/settings";
-import { cfgTuiVimMode } from "../modes/settings";
-import { cfgAdvisorEnabled } from "../advisor/settings";
-import { cfgContextFilesExtra } from "../session/context-settings";
 import { cfgToolsRestrictedFolders } from "../tools/settings";
 
 /** Condition over the global settings; hidden (false) until they are initialized. */
@@ -25,7 +24,6 @@ const CONDITIONS: Record<string, () => boolean> = {
 	macOS: () => process.platform === "darwin",
 	hasImageProtocol: () => !!TERMINAL.imageProtocol,
 	nativeRendering: () => isNativeRendering(),
-	advisorEnabled: whenSettings(s => cfgAdvisorEnabled.get(s) === true),
 	vimModeEnabled: whenSettings(s => cfgTuiVimMode.get(s) === true),
 	autoThinkingActive: whenSettings(s => cfgDefaultThinkingLevel.get(s) === "auto"),
 	planModeEnabled: whenSettings(s => cfgPlanEnabled.get(s)),

@@ -8,10 +8,6 @@
  * and re-drives the turn so the model can read the file again and correct the
  * patch.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Api, AssistantMessage, Context, Message, Model } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
@@ -25,6 +21,10 @@ import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { removeWithRetries, TempDir } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 const emptyUsage = (): AssistantMessage["usage"] => ({
 	input: 0,
@@ -138,7 +138,6 @@ describe("AgentSession streaming edit preview recovery", () => {
 				"compaction.enabled": false,
 				"retry.enabled": false,
 				"todo.enabled": false,
-				"advisor.enabled": false,
 			});
 			const toolSession = {
 				cwd: dir,
@@ -158,7 +157,7 @@ describe("AgentSession streaming edit preview recovery", () => {
 			const agentEditTool = editTool as AgentTool;
 
 			const model = createMockModel({ provider: "anthropic", id: "claude-streaming-edit-recovery" }).model;
-			settings.setModelRole("default", `${model.provider}/${model.id}`);
+			settings.setModel(`${model.provider}/${model.id}`);
 			const contexts: Context[] = [];
 			let call = 0;
 			const agent = new Agent({

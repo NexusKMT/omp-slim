@@ -8,7 +8,7 @@
  */
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "../../config/model-registry";
-import { getModelMatchPreferences, resolveModelRoleValue } from "../../config/model-resolver";
+import { getModelMatchPreferences, resolveModelValue } from "../../config/model-resolver";
 import type { Settings } from "../../config/settings";
 import type { ExtensionModelQuery } from "./types";
 
@@ -24,12 +24,12 @@ export function createExtensionModelQuery(
 	return {
 		list: () => modelRegistry.getAvailable(),
 		current: () => getModel(),
-		// resolveModelRoleValue expands a role alias (`@slow`) to its full configured
+		// resolveModelValue expands a role alias (`@slow`) to its full configured
 		// priority list and tries each pattern — the same path core selection uses — so a
 		// fallback model lower in the list still resolves. Plain model strings pass through
 		// as a single pattern.
 		resolve: (spec: string): Model<Api> | undefined =>
-			resolveModelRoleValue(spec, modelRegistry.getAvailable(), {
+			resolveModelValue(spec, modelRegistry.getAvailable(), {
 				settings,
 				matchPreferences: getModelMatchPreferences(settings),
 			}).model,

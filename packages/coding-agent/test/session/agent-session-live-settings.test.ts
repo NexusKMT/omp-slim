@@ -1,26 +1,24 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-import { getBundledModel } from "../helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createTestModel } from "../helpers/test-model";
 
+import { cfgTtsrEnabled } from "@oh-my-pi/pi-coding-agent/export/ttsr-settings";
+import { cfgInterruptMode, cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import {
 	cfgIncludeWorkspaceTree,
 	cfgOmitThinking,
-	cfgPersonality,
 	cfgTemperature,
 	cfgTierOpenai,
 	cfgTopP,
 } from "@oh-my-pi/pi-coding-agent/session/settings";
-import { cfgTtsrEnabled } from "@oh-my-pi/pi-coding-agent/export/ttsr-settings";
-import { cfgInterruptMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
-import { cfgSteeringMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
 
 describe("AgentSession live settings", () => {
 	const tempDirs: string[] = [];
@@ -59,7 +57,7 @@ describe("AgentSession live settings", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings,
-			model: getBundledModel("openai", "gpt-4o-mini"),
+			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],
@@ -135,8 +133,6 @@ describe("AgentSession live settings", () => {
 		await live.runToolRegistryMutation(async () => {});
 		const before = live.systemPrompt.join("\n");
 		builds = 0;
-
-		cfgPersonality.set(settings, "none");
 		cfgIncludeWorkspaceTree.set(settings, true);
 		cfgTtsrEnabled.set(settings, false);
 		await Promise.resolve();

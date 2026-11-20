@@ -2,59 +2,37 @@
  * System prompt construction and project context loading
  */
 
-import * as os from "node:os";
-import * as path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { ToolExample, TSchema } from "@oh-my-pi/pi-ai";
-import { renderToolInventory } from "./utils/tool-inventory";
-import {
-	$env,
-	getAgentDir,
-	getProjectDir,
-	hasFsCode,
-	isEnoent,
-	isInteractiveHost,
-	logger,
-	prompt,
-} from "@oh-my-pi/pi-utils";
+import type { ActiveRepoContext } from "@oh-my-pi/pi-tui/status-line/host";
+import { XD_URL_PREFIX } from "@oh-my-pi/pi-tui/tools/xd-url";
+import { $env, getProjectDir, hasFsCode, isEnoent, isInteractiveHost, logger, prompt } from "@oh-my-pi/pi-utils";
+import * as os from "node:os";
+import * as path from "node:path";
 import { contextFileCapability } from "./capability/context-file";
 import { systemPromptCapability } from "./capability/system-prompt";
 import { findConfigFile } from "./config";
-import type { SkillsSettings } from "./extensibility/settings";
-import type { Personality } from "./session/settings";
+import { combine } from "./config/registry";
 import { type ContextFile, loadCapability, type SystemPrompt as SystemPromptFile } from "./discovery";
 import { expandAtImports } from "./discovery/at-imports";
 import type { EvalPreludeDefinition } from "./eval/preludes";
+import { cfgEvalAutoBackgroundEnabled } from "./eval/settings";
+import { cfgBashAutoBackgroundEnabled } from "./exec/settings";
+import { cfgTtsrBuiltinRules, cfgTtsrDisabledRules, cfgTtsrEnabled } from "./export/ttsr-settings";
+import type { SkillsSettings } from "./extensibility/settings";
 import { SkillDescriptionCatalog } from "./extensibility/skill-descriptions";
 import { loadSkills, type Skill } from "./extensibility/skills";
 import { InternalUrlRouter } from "./internal-urls/router";
 import type { SchemeHost } from "./internal-urls/types";
+import { cfgTuiAutoGraph, cfgTuiReactions, cfgTuiRenderMermaid, cfgTuiRenderSvg } from "./modes/settings";
 import activeRepoContextTemplate from "./prompts/system/active-repo-context.md" with { type: "text" };
 import customSystemPromptTemplate from "./prompts/system/custom-system-prompt.md" with { type: "text" };
-import defaultPersonality from "./prompts/system/personalities/default.md" with { type: "text" };
-import friendlyPersonality from "./prompts/system/personalities/friendly.md" with { type: "text" };
-import pragmaticPersonality from "./prompts/system/personalities/pragmatic.md" with { type: "text" };
 import projectPromptTemplate from "./prompts/system/project-prompt.md" with { type: "text" };
 import systemPromptTemplate from "./prompts/system/system-prompt.md" with { type: "text" };
 import userAppendPromptTemplate from "./prompts/system/user-append.md" with { type: "text" };
-import { normalizeConcurrencyLimit } from "./task/parallel";
-import type { ActiveRepoContext } from "@oh-my-pi/pi-tui/status-line/host";
-import { XD_URL_PREFIX } from "@oh-my-pi/pi-tui/tools/xd-url";
-import { resolveActiveRepoContext } from "./utils/active-repo-context";
-import { normalizePromptPath } from "./utils/prompt-path";
-import { AGENTS_MD_LIMIT, buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
-import { combine } from "./config/registry";
-import { cfgBashAutoBackgroundEnabled } from "./exec/settings";
-import { cfgEvalAutoBackgroundEnabled } from "./eval/settings";
-import { cfgTtsrBuiltinRules, cfgTtsrDisabledRules, cfgTtsrEnabled } from "./export/ttsr-settings";
-import { cfgTuiAutoGraph, cfgTuiReactions, cfgTuiRenderMermaid, cfgTuiRenderSvg } from "./modes/settings";
 import { cfgSecretsEnabled } from "./secrets/settings";
-import {
-	cfgIncludeModelInPrompt,
-	cfgIncludeWorkspaceTree,
-	cfgInlineToolDescriptors,
-	cfgPersonality,
-} from "./session/settings";
+import { cfgIncludeModelInPrompt, cfgIncludeWorkspaceTree, cfgInlineToolDescriptors } from "./session/settings";
+import { normalizeConcurrencyLimit } from "./task/parallel";
 import { cfgOvnfsPath, cfgTaskBatch, cfgTaskEager } from "./task/settings";
 import {
 	cfgAsyncEnabled,
@@ -64,6 +42,10 @@ import {
 	cfgToolsXdevInlineDevices,
 	cfgVaultEnabled,
 } from "./tools/settings";
+import { resolveActiveRepoContext } from "./utils/active-repo-context";
+import { normalizePromptPath } from "./utils/prompt-path";
+import { renderToolInventory } from "./utils/tool-inventory";
+import { AGENTS_MD_LIMIT, buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 
 /**
  * Settings the system prompt renders from (`secrets.enabled` via the obfuscator state it
@@ -72,7 +54,6 @@ import {
  * roots rebuild through their own reconcile instead.
  */
 export const cfgSystemPromptInputs = combine({
-	personality: cfgPersonality,
 	includeModelInPrompt: cfgIncludeModelInPrompt,
 	includeWorkspaceTree: cfgIncludeWorkspaceTree,
 	inlineToolDescriptors: cfgInlineToolDescriptors,
@@ -100,38 +81,6 @@ export const cfgSystemPromptInputs = combine({
 	ttsrDisabledRules: cfgTtsrDisabledRules,
 	secretsEnabled: cfgSecretsEnabled,
 });
-
-/** Bundled personality specs, keyed by the `personality` setting value. */
-const PERSONALITY_SPECS: Record<Exclude<Personality, "none">, string> = {
-	default: defaultPersonality,
-	friendly: friendlyPersonality,
-	pragmatic: pragmaticPersonality,
-};
-
-/**
- * Load the user-level PERSONALITY.md override for the system prompt's
- * personality block from `<agentDir>/PERSONALITY.md` (`~/.omp/agent` by
- * default; profile, XDG, and `PI_CODING_AGENT_DIR` aware). Returns null when
- * the file is absent, empty, or unreadable; callers then render the configured
- * preset. Read failures other than a missing file warn instead of failing the
- * build.
- */
-async function loadPersonalityOverride(): Promise<string | null> {
-	const filePath = path.join(getAgentDir(), "PERSONALITY.md");
-	try {
-		const content = (await Bun.file(filePath).text()).trim();
-		if (content) return content;
-		logger.warn("PERSONALITY.md is empty; using the configured personality preset", { path: filePath });
-	} catch (error) {
-		if (!isEnoent(error)) {
-			logger.warn("Failed to read PERSONALITY.md; using the configured personality preset", {
-				path: filePath,
-				error: String(error),
-			});
-		}
-	}
-	return null;
-}
 
 interface AlwaysApplyRule {
 	name: string;
@@ -585,8 +534,6 @@ export interface BuildSystemPromptOptions {
 	model?: string;
 	/** Whether to surface `model` in the workstation block. Default: true. */
 	includeModelInPrompt?: boolean;
-	/** Personality preset rendered into the default system prompt. "none" omits the block. Default: "default" */
-	personality?: Personality;
 	/** Whether to include the workspace directory tree in the system prompt. Default: false */
 	includeWorkspaceTree?: boolean;
 	/** Whether Mermaid fenced blocks render as terminal ASCII diagrams. Default: true */
@@ -603,8 +550,6 @@ export interface BuildSystemPromptOptions {
 	xdevTools?: Array<{ name: string; summary: string; dynamic?: boolean }>;
 	/** Full docs + JSON schema for every `xd://`-mounted tool, inlined into the protocol section so no discovery `read` is needed. */
 	xdevDocs?: string;
-	/** Whether Auto-QA grievance reporting is enabled; renders the `xd://report_issue` note. */
-	autoQaEnabled?: boolean;
 	/** ovnfs command when its binary is found (`ovnfsCommand`); renders the separate-checkout guidance. */
 	ovnfs?: string;
 	/** Whether active `write` is restricted to xd:// dispatch and the plan artifact sandbox. */
@@ -690,7 +635,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		evalPreludes = [],
 		model,
 		includeModelInPrompt = true,
-		personality = "default",
 		includeWorkspaceTree = false,
 		renderMermaid = true,
 		renderSvg = false,
@@ -698,7 +642,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		reactions = false,
 		xdevTools = [],
 		xdevDocs = "",
-		autoQaEnabled = false,
 		ovnfs,
 		writeTransportOnly = false,
 		subagent = false,
@@ -835,14 +778,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 			? Promise.resolve(providedActiveRepoContext)
 			: logger.time("resolveActiveRepoContext", () => resolveActiveRepoContext(resolvedCwd));
 	// "none" (explicit off — and every subagent) omits the block and skips the file lookup.
-	const bundledPersonality = personality === "none" ? "" : PERSONALITY_SPECS[personality].trim();
-	const personalityPromise: Promise<string> =
-		personality === "none"
-			? Promise.resolve("")
-			: logger
-					.time("loadPersonalityOverride", loadPersonalityOverride)
-					.then(override => override ?? bundledPersonality);
-
 	const [
 		resolvedCustomPrompt,
 		resolvedAppendPrompt,
@@ -851,7 +786,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		skills,
 		workspaceTree,
 		activeRepoContext,
-		personalityBlock,
 	] = await Promise.all([
 		withDeadline(
 			"customPrompt",
@@ -874,7 +808,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		withDeadline("loadSkills", skillsPromise, prepDefaults.skills),
 		withDeadline("buildWorkspaceTree", workspaceTreePromise, prepDefaults.workspaceTree),
 		withDeadline("resolveActiveRepoContext", activeRepoContextPromise, prepDefaults.activeRepoContext),
-		withDeadline("loadPersonalityOverride", personalityPromise, bundledPersonality),
 	]);
 	clearTimeout(deadlineTimer);
 	const agentsMdFiles = noContextFiles
@@ -1013,7 +946,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		model: includeModelInPrompt ? (model ?? "") : "",
 		// An explicit eager-tasks mode lifts balanced/restrained wording to eager; gated has its own eager-tasks text.
 		delegationTier: eagerTasks && delegationBias !== "gated" ? "eager" : delegationBias,
-		personality: personalityBlock,
 		intentTracing: !!intentField,
 		intentField: intentField ?? "",
 		intentGuidance: $env.PI_INTENT_PROMPT || intentGuidance || "",
@@ -1032,7 +964,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		xdevTools,
 		hasDynamicXdevTools: xdevTools.some(mounted => mounted.dynamic === true),
 		xdevDocs,
-		autoQaEnabled,
 		ovnfs,
 		writeTransportOnly,
 		subagent,

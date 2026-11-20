@@ -1,13 +1,13 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { CompactionPreparation } from "@oh-my-pi/pi-agent-core/compaction";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { CompactionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { createTestModel } from "./helpers/test-model";
 
 // A hook-supplied native compaction that covers only the history before the
 // kept tail must persist its replay boundary, or the rebuilt context drops the
@@ -80,7 +80,7 @@ describe("hook-provided compaction replay boundary", () => {
 			},
 			emitBeforeAgentStart: async () => undefined,
 		};
-		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
 		if (!bundled) throw new Error("Expected built-in anthropic model to exist");
 		session = new AgentSession({
 			agent: new Agent({

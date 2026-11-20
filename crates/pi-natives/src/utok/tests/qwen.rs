@@ -21,7 +21,7 @@ fn qwen3_matches_reference() {
 		let count = case["count"].as_u64().expect("count") as u32;
 		assert_eq!(count as usize, want.len(), "fixture self-consistency: {text:?}");
 
-		let got = Encoding::Qwen3.encode(text).expect("qwen is a BPE family");
+		let got = Encoding::Qwen3.encode(text);
 		assert_eq!(got, want, "encode mismatch on {text:?}");
 		assert_eq!(Encoding::Qwen3.count(text), count, "count mismatch on {text:?}");
 	}
@@ -44,17 +44,17 @@ fn qwen3_utf16_utf32_parity() {
 		.map(|c| c["text"].as_str().expect("text"))
 		.chain(std::iter::once(extra));
 	for text in texts {
-		let want = Encoding::Qwen3.encode(text).expect("qwen is a BPE family");
+		let want = Encoding::Qwen3.encode(text);
 		let u16s: Vec<u16> = text.encode_utf16().collect();
 		let u32s: Vec<u32> = text.chars().map(|c| c as u32).collect();
 		assert_eq!(
 			Encoding::Qwen3.encode(u16s.as_slice()),
-			Some(want.clone()),
+			want.clone(),
 			"utf16 encode mismatch on {text:?}"
 		);
 		assert_eq!(
 			Encoding::Qwen3.encode(u32s.as_slice()),
-			Some(want.clone()),
+			want.clone(),
 			"utf32 encode mismatch on {text:?}"
 		);
 		let n = want.len() as u32;
@@ -70,9 +70,7 @@ fn qwen3_utf16_utf32_parity() {
 fn qwen3_dead_ranks_not_emitted() {
 	// "毛泽东" is vocab id 105115 but unreachable via merges; HF emits
 	// [97008, 98340, 96265].
-	let got = Encoding::Qwen3
-		.encode("毛泽东")
-		.expect("qwen is a BPE family");
+	let got = Encoding::Qwen3.encode("毛泽东");
 	assert_eq!(got, vec![97008, 98340, 96265]);
 	assert!(!got.contains(&105115));
 }

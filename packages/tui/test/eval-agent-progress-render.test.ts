@@ -1,14 +1,14 @@
-import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { EvalStatusEvent, EvalToolDetails } from "@oh-my-pi/pi-tui/tools/eval";
-import { getThemeByName, setThemeInstance, type Theme } from "@oh-my-pi/pi-tui/theme";
-import { evalToolRenderer } from "@oh-my-pi/pi-tui/tools/eval";
+import { visibleWidth } from "@oh-my-pi/pi-tui";
 import {
 	isFeedModelBadgeEnabled,
 	setFeedModelBadgeEnabled,
 	thinkingLevelGlyph,
 } from "@oh-my-pi/pi-tui/render/render-utils";
-import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { getThemeByName, setThemeInstance, type Theme } from "@oh-my-pi/pi-tui/theme";
+import type { EvalStatusEvent, EvalToolDetails } from "@oh-my-pi/pi-tui/tools/eval";
+import { evalToolRenderer } from "@oh-my-pi/pi-tui/tools/eval";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 
 /**
  * Defends the contract that `agent()` calls inside an eval cell surface as a
@@ -78,7 +78,6 @@ describe("eval renderer: agent() progress below the cell box", () => {
 			resolvedModel: "p/model:high:high",
 			resolvedModelIdentity: "p/model:high",
 			resolvedThinkingLevel: ThinkingLevel.High,
-			advisor: true,
 		};
 
 		const lines = render([event]);
@@ -94,9 +93,7 @@ describe("eval renderer: agent() progress below the cell box", () => {
 		expect(below).toContain("0-Scout");
 		expect(below).toContain("read");
 		expect(below).toContain("Reading config");
-		expect(below).toContain(
-			`${thinkingLevelGlyph(ThinkingLevel.High, theme)} p/model:high ${theme.icon.advisor} 0-Scout`,
-		);
+		expect(below).toContain(`${thinkingLevelGlyph(ThinkingLevel.High, theme)} p/model:high 0-Scout`);
 		expect(below.split("p/model:high").length - 1).toBe(1);
 		expect(below).not.toContain("p/model:high:high");
 		// Agent progress is NOT folded into the box's Status section.
@@ -119,7 +116,6 @@ describe("eval renderer: agent() progress below the cell box", () => {
 			model: "p/model:low:high",
 			resolvedModelIdentity: "p/model:low",
 			resolvedThinkingLevel: ThinkingLevel.High,
-			advisor: false,
 		};
 
 		const lines = render([event], "complete");
@@ -133,7 +129,6 @@ describe("eval renderer: agent() progress below the cell box", () => {
 		expect(below).toContain(`${thinkingLevelGlyph(ThinkingLevel.High, theme)} p/model:low 0-Scout`);
 		expect(below.split("p/model:low").length - 1).toBe(1);
 		expect(below).not.toContain("p/model:low:high");
-		expect(below).not.toContain(theme.icon.advisor);
 	});
 
 	it("preserves legacy model fields without inferring thinking levels from their suffixes", () => {
@@ -178,7 +173,6 @@ describe("eval renderer: agent() progress below the cell box", () => {
 				agent: "task",
 				status: "running",
 				model: "p/model:high",
-				advisor: true,
 				currentTool: "read",
 				lastIntent: "Reading config",
 			},
@@ -188,7 +182,6 @@ describe("eval renderer: agent() progress below the cell box", () => {
 		expect(below).toContain("Reading config");
 		expect(below).not.toContain("p/model");
 		expect(below).not.toContain(thinkingLevelGlyph(ThinkingLevel.High, theme));
-		expect(below).not.toContain(theme.icon.advisor);
 	});
 
 	it("reserves failure status for oversized IDs even when badges are disabled", () => {
@@ -199,7 +192,6 @@ describe("eval renderer: agent() progress below the cell box", () => {
 				id: `LongWorker${"界".repeat(100)}`,
 				status: "failed",
 				resolvedModelIdentity: "provider/model",
-				advisor: true,
 			},
 		]);
 		const row = lines.slice(boxBottomIndex(lines) + 1).find(line => line.includes("LongWorker"))!;
@@ -219,7 +211,6 @@ describe("eval renderer: agent() progress below the cell box", () => {
 				status: "failed",
 				resolvedModelIdentity: model,
 				resolvedThinkingLevel: ThinkingLevel.High,
-				advisor: true,
 				toolCount: 7,
 				contextTokens: 8000,
 				contextWindow: 200000,

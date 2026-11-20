@@ -12,11 +12,11 @@
  * Contract: `runPrintMode` stays pending until the final record's write callback
  * fires (so `process.exit` can't discard it), and the full record is delivered.
  */
-import { afterEach, describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runPrintMode } from "@oh-my-pi/pi-coding-agent/modes/print-mode";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { postmortem } from "@oh-my-pi/pi-utils";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 
 interface FlushHarness {
 	session: AgentSession;
@@ -31,8 +31,6 @@ function createFlushHarness(dispose: () => Promise<void> = async () => {}): Flus
 	const { promise: promptReleased, resolve: resolvePrompt } = Promise.withResolvers<void>();
 	let subscriber: ((event: AgentSessionEvent) => void) | undefined;
 	let disposed = false;
-	let advisorDrainPrepared = false;
-
 	const session = {
 		sessionManager: {
 			getHeader: () => undefined,
@@ -54,13 +52,7 @@ function createFlushHarness(dispose: () => Promise<void> = async () => {}): Flus
 			return true;
 		},
 		disableStopTimeTodoReminders: () => {},
-		prepareForHeadlessAdvisorDrain: () => {
-			advisorDrainPrepared = true;
-		},
 		waitForIdle: async () => {},
-		waitForAdvisorCatchup: async () => {
-			if (!advisorDrainPrepared) throw new Error("advisor catch-up started before headless delivery was armed");
-		},
 		dispose: () => {
 			disposed = true;
 			return dispose();

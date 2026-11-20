@@ -1,13 +1,3 @@
-/**
- * AI-assisted selective staging for the git TUI ("what should we stage?").
- *
- * Every unit of unstaged change — each hunk of a tracked text file, each
- * untracked file, each binary file — is one independent judgment for the
- * `judge` role (TypeSafe jev when credentialed), scored against the full list
- * of changed paths for contrast and fanned out as a single concurrency-capped
- * wave. Accepted hunks are staged via `git apply --cached`; accepted untracked
- * and binary files are staged whole.
- */
 import * as path from "node:path";
 import { judgeQuestions } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";

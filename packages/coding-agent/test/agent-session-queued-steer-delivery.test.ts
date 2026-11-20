@@ -11,14 +11,9 @@
  *     post-prompt recovery, but the loop is already done) must be drained when
  *     the session settles.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { createMockModel, type MockHandler, type MockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { getBundledModel } from "./helpers/bundled-model";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import type { PromptTemplate } from "@oh-my-pi/pi-coding-agent/config/prompt-templates";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -31,8 +26,13 @@ import { convertToLlm, type CustomMessage, USER_INTERRUPT_LABEL } from "@oh-my-p
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { tagImageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
 import { removeSyncWithRetries, Snowflake, withTimeout } from "@oh-my-pi/pi-utils";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import manualContinuePrompt from "../src/prompts/system/manual-continue.md" with { type: "text" };
 import { createInteractiveModeContext } from "./helpers/interactive-mode-context";
+import { createTestModel } from "./helpers/test-model";
 
 const COLLAB_PROMPT_TYPE = "collab-prompt";
 const IMAGE_SOURCE_PATH = "/tmp/private-project/screenshot.png";
@@ -87,7 +87,7 @@ describe("AgentSession queued steer delivery", () => {
 		responses: MockHandler[],
 		promptTemplates: PromptTemplate[] = [],
 	): Promise<SteerHarness> {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
 		const mock = createMockModel({ responses });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -743,32 +743,6 @@ describe("AgentSession queued steer delivery", () => {
 		expect(userTexts).toContain("queued follow-up");
 		expect(session.agent.hasQueuedMessages()).toBe(false);
 	});
-
-	it("resumes a queued steer left behind a non-advisor custom transcript tail", async () => {
-		const { session } = await createSession([{ content: ["first answer"] }, { content: ["resumed"] }]);
-		await session.prompt("first");
-		// A non-advisor custom (e.g. a flushed irc:incoming aside) is the literal transcript tail.
-		// A queued steer must resume regardless of tail role — Agent.continue injects it via the
-		// initial steering poll — so the old advisor-only look-back can no longer strand it.
-		const aside = {
-			role: "custom" as const,
-			customType: "irc:incoming",
-			content: "peer pinged you",
-			display: true,
-			attribution: "agent" as const,
-			timestamp: Date.now(),
-		};
-		session.agent.emitExternalEvent({ type: "message_start", message: aside });
-		session.agent.emitExternalEvent({ type: "message_end", message: aside });
-
-		const delivered = nextUserMessage(session, "resume me");
-		await session.steer("resume me");
-		await delivered;
-		await session.waitForIdle();
-
-		expect(session.agent.peekSteeringQueue()).toEqual([]);
-	});
-
 	it("delivers an RPC skill through the default steering queue with its invocation intact", async () => {
 		const { session, mock } = await createSession([{ content: ["initial"] }, { content: ["skill response"] }]);
 		const skillPath = path.join(tempDir, "SKILL.md");

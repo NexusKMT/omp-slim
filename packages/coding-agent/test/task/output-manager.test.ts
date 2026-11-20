@@ -1,7 +1,7 @@
-import { describe, expect, it } from "bun:test";
-import * as path from "node:path";
 import { AgentOutputManager, PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-coding-agent/task/output-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { describe, expect, it } from "bun:test";
+import * as path from "node:path";
 
 // Contract: subagent output ids are the requested name, used verbatim the first
 // time and suffixed (`-2`, `-3`, …) only when the same name recurs. A parent
@@ -73,16 +73,6 @@ describe("AgentOutputManager", () => {
 		expect(await mgr.allocate("Gone")).toBe("Gone-2");
 		expect(await mgr.allocate("Fresh")).toBe("Fresh");
 	});
-
-	it("reserves the advisor transcript stem so a task can't clobber __advisor.jsonl", async () => {
-		const mgr = new AgentOutputManager(() => null);
-		// A subagent allocated `__advisor` would write `__advisor.jsonl`, colliding with
-		// the advisor transcript in the same artifacts dir; the stem is pre-reserved.
-		expect(await mgr.allocate("__advisor")).toBe("__advisor-2");
-		// Unrelated names sharing the prefix are unaffected.
-		expect(await mgr.allocate("__advisor-notes")).toBe("__advisor-notes");
-	});
-
 	it("reserves the pinned-HUD toggle sentinel so a task can't collide with it", async () => {
 		const mgr = new AgentOutputManager(() => null);
 		// A subagent allocated the sentinel id would be indistinguishable from
