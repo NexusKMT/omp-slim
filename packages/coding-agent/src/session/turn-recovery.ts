@@ -1344,26 +1344,6 @@ export class TurnRecovery {
 		);
 	}
 
-	/**
-	 * Known provider routes can repeatedly close after completing an expensive
-	 * reasoning phase. One retry covers a transient edge failure; the normal
-	 * ten-retry budget would otherwise replay the same reasoning cycle unchanged.
-	 */
-	#isBoundedThinkingStreamClose(message: AssistantMessage): boolean {
-		if (!message.content.some(block => block.type === "thinking" && block.thinking.trim().length > 0)) {
-			return false;
-		}
-		const errorMessage = message.errorMessage ?? "";
-		return (
-			(message.provider === "openrouter" &&
-				/server_error:\s*stream closed with reason:\s*error/i.test(errorMessage)) ||
-			(message.provider === "github-copilot" &&
-				message.model === "grok-4.6" &&
-				message.api === "openai-responses" &&
-				/OpenAI responses stream closed before a terminal response event was received/i.test(errorMessage))
-		);
-	}
-
 	/** Checks whether a provider error represents a classifier refusal. */
 	isClassifierRefusal(message: AssistantMessage): boolean {
 		if (message.stopReason !== "error") return false;
@@ -1420,9 +1400,7 @@ export class TurnRecovery {
 			this.#retryResolve = resolve;
 		}
 
-		const maxRetries = this.#isBoundedThinkingStreamClose(message)
-			? Math.min(retrySettings.maxRetries, 1)
-			: retrySettings.maxRetries;
+		const maxRetries = retrySettings.maxRetries;
 		const retryBudgetExhausted = this.#retryAttempt > maxRetries;
 
 		const errorMessage = message.errorMessage || "Unknown error";

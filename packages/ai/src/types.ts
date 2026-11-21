@@ -180,13 +180,9 @@ export interface RedactedThinkingContent {
 }
 
 /**
- * Anthropic server-side-fallback boundary marker persisted on assistant
- * turns whose response switched models mid-stream, whether the request
- * opted into `AnthropicOptions.fallbacks` or a gateway opted in on its
- * behalf. Consumers other than the Anthropic provider MUST ignore it —
- * `transformMessages` strips the block on any non-Anthropic hop, and
- * `convertAnthropicMessages` only puts it on the wire for an opted-in
- * request to the official endpoint.
+ * Server-side-fallback boundary marker persisted on assistant turns whose
+ * response switched models mid-stream. Retained for session-history replay of
+ * legacy sessions; slim produces no `fallback` blocks itself.
  */
 export interface AnthropicFallbackContent {
 	type: "fallback";
@@ -195,9 +191,9 @@ export interface AnthropicFallbackContent {
 }
 
 /**
- * Verbatim Anthropic web-search or tool-search call/result retained for
- * same-provider history replay. Other providers discard it in
- * `transformMessages`.
+ * Verbatim server-side web-search or tool-search call/result retained for
+ * same-provider history replay. Retained for session-history replay of legacy
+ * sessions; slim produces no `anthropicServerTool` blocks itself.
  */
 export interface AnthropicServerToolContent {
 	type: "anthropicServerTool";

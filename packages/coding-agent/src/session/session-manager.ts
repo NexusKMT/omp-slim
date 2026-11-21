@@ -41,7 +41,6 @@ import {
 	type HookMessage,
 	normalizeCustomMessagePayload,
 	type PythonExecutionMessage,
-	sanitizeRehydratedOpenAIResponsesAssistantMessage,
 	stripInternalDetailsFields,
 } from "./messages";
 import type { RetryFallbackRole } from "./retry-fallback-chains";
@@ -2485,8 +2484,6 @@ export class SessionManager {
 		this.#forceFileCreation = true;
 		this.#artifactManager = null;
 		this.#artifactManagerSessionFile = null;
-
-		if (this.sanitizeLoadedOpenAIResponsesReplayMetadata()) this.#rewriteRequired = true;
 	}
 
 	/**
@@ -3952,21 +3949,6 @@ export class SessionManager {
 		return lazyImageDataSync(this.#blobs, data);
 	}
 
-	/** Strip stale OpenAI Responses replay metadata from loaded assistant entries. */
-	sanitizeLoadedOpenAIResponsesReplayMetadata(): boolean {
-		let changed = false;
-		for (const entry of this.#entries) {
-			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-			const sanitized = sanitizeRehydratedOpenAIResponsesAssistantMessage(entry.message);
-			if (sanitized === entry.message) continue;
-
-			entry.message = sanitized;
-			changed = true;
-		}
-		if (changed) this.#bodyRevision++;
-		return changed;
-	}
-
 	getHeader(): SessionHeader | null {
 		return this.#header;
 	}
@@ -4321,7 +4303,6 @@ export class SessionManager {
 		manager.#hasTitleSlot = true;
 		manager.#entries = history;
 		manager.#index.rebuild(history);
-		manager.sanitizeLoadedOpenAIResponsesReplayMetadata();
 		if (options?.repairInterruptedTail) {
 			SessionManager.#repairForkedInterruptedTail(history, manager.#index.pathTo());
 			manager.#index.rebuild(history);

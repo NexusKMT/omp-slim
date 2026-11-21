@@ -275,38 +275,15 @@ function normalizeSessionMessageForProviderReplay(message: AgentMessage): unknow
 				providerPayload: message.providerPayload,
 			};
 		case "assistant": {
-			const isResponsesFamilyMessage =
-				message.api === "openai-responses" || message.api === "openai-codex-responses";
 			return {
 				role: message.role,
-				content:
-					isResponsesFamilyMessage && Array.isArray(message.content)
-						? message.content.flatMap(block => {
-								if (block.type === "thinking") {
-									return [];
-								}
-								if (block.type === "toolCall") {
-									return [
-										{
-											type: block.type,
-											id: block.id,
-											name: block.name,
-											arguments: block.arguments,
-										},
-									];
-								}
-								if (block.type === "text") {
-									return [{ type: block.type, text: block.text, textSignature: block.textSignature }];
-								}
-								return [normalizeProviderReplayValue(block)];
-							})
-						: normalizeProviderReplayValue(message.content),
+				content: normalizeProviderReplayValue(message.content),
 				api: message.api,
 				provider: message.provider,
 				model: message.model,
 				stopReason: message.stopReason,
 				errorMessage: message.errorMessage,
-				providerPayload: isResponsesFamilyMessage ? undefined : message.providerPayload,
+				providerPayload: message.providerPayload,
 			};
 		}
 		case "toolResult":
@@ -936,43 +913,6 @@ export function pythonExecutionToText(msg: PythonExecutionMessage): string {
 	}
 	text += formatOutputNotice(msg.meta);
 	return text;
-}
-
-export function sanitizeRehydratedOpenAIResponsesAssistantMessage(message: AssistantMessage): AssistantMessage {
-	if (message.providerPayload?.type !== "openaiResponsesHistory") {
-		return message;
-	}
-	// Only GitHub Copilot rejects replayed assistant-side native history on a
-	// warmed (resumed) session with HTTP 401 — that is the sole reason this strip
-	// exists. For every other Responses-family provider (OpenAI, OpenAI-Codex,
-	// Azure) the encrypted reasoning and native response items are self-contained
-	// and MUST survive rehydration: remote compaction replays them to rebuild
-	// faithful native history (user + assistant turns + encrypted reasoning), and
-	// same-model live turns reuse them for prompt-cache continuity. Stripping them
-	// for all providers is what left resumed sessions compacting tool-call-only
-	// history with no reasoning and no assistant prose.
-	if (message.provider !== "github-copilot") {
-		return message;
-	}
-
-	let didSanitizeContent = false;
-	const sanitizedContent = message.content.map(block => {
-		if (block.type !== "thinking" || block.thinkingSignature === undefined) {
-			return block;
-		}
-		didSanitizeContent = true;
-		return { ...block, thinkingSignature: undefined };
-	});
-
-	// Strip the assistant-side native replay payload entirely. After rehydration
-	// it belongs to a previous live Copilot connection and replaying it on a
-	// warmed session causes 401 rejections. User/developer payloads are preserved
-	// separately by the caller.
-	return {
-		...message,
-		...(didSanitizeContent ? { content: sanitizedContent } : {}),
-		providerPayload: undefined,
-	};
 }
 
 function customMessageContentToLlmContent(content: CustomMessage["content"]): (TextContent | ImageContent)[] {

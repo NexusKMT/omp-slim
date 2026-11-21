@@ -2050,31 +2050,28 @@ export interface ExtensionAPI {
 	 *
 	 * If `models` is provided: replaces all existing models for this provider.
 	 * If only `baseUrl` is provided: overrides the URL for existing models.
-	 * If `streamSimple` is provided: registers a custom API stream handler.
 	 *
 	 * @example
-	 * // Register a new provider with custom models and streaming
-	 * pi.registerProvider("google-vertex-claude", {
-	 *   baseUrl: "https://us-east5-aiplatform.googleapis.com",
-	 *   apiKey: "GOOGLE_CLOUD_PROJECT",
-	 *   api: "vertex-claude-api",
-	 *   streamSimple: myStreamFunction,
+	 * // Register a new provider with custom models
+	 * pi.registerProvider("acme-gateway", {
+	 *   baseUrl: "https://gateway.example.com/v1",
+	 *   apiKey: "ACME_API_KEY",
 	 *   models: [
 	 *     {
-	 *       id: "claude-sonnet-4@20250514",
-	 *       name: "Claude Sonnet 4 (Vertex)",
+	 *       id: "acme-pro-1",
+	 *       name: "Acme Pro 1",
 	 *       reasoning: true,
-	 *       thinking: { mode: "anthropic-adaptive", efforts: ["minimal", "low", "medium", "high"] },
 	 *       input: ["text", "image"],
 	 *       cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 	 *       contextWindow: 200000,
 	 *       maxTokens: 64000,
-	 *   ]
+	 *     },
+	 *   ],
 	 * });
 	 *
 	 * @example
 	 * // Override baseUrl for an existing provider
-	 * pi.registerProvider("anthropic", {
+	 * pi.registerProvider("acme", {
 	 *   baseUrl: "https://proxy.example.com"
 	 * });
 	 */
