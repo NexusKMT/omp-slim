@@ -45,11 +45,17 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 		Bun.env.BUN_NO_CODESIGN_MACHO_BINARY = "1";
 	}
 	try {
+		const logTimings = Bun.env.OMP_BUILD_TIMINGS === "1";
+		const prepareStarted = performance.now();
+		const files = options.native ? await embeddedAddonFiles(options.native) : {};
+		const plugins = [createJsonParsePlugin(), await createLegacyPiVirtualModulePlugin()];
+		if (logTimings) console.log(`CLI prepare: ${(performance.now() - prepareStarted).toFixed(0)} ms`);
+		const compileStarted = performance.now();
 		const output = await Bun.build({
 			entrypoints: [options.entrypoint],
 			root: options.repoRoot,
 			external: [...COMPILED_EXTERNAL_DEPENDENCIES],
-			files: options.native ? await embeddedAddonFiles(options.native) : {},
+			files,
 			define: {
 				"process.env.PI_COMPILED": JSON.stringify("true"),
 			},
@@ -65,7 +71,7 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 				identifiers: options.minifyIdentifiers ?? false,
 				keepNames: true,
 			},
-			plugins: [createJsonParsePlugin(), await createLegacyPiVirtualModulePlugin()],
+			plugins,
 			compile: {
 				// Bun's process-wide fetch User-Agent default. Any explicit
 				// provider fingerprint (Anthropic/Codex OAuth) still wins.
@@ -83,6 +89,7 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 			},
 			throw: false,
 		});
+		if (logTimings) console.log(`CLI compile: ${(performance.now() - compileStarted).toFixed(0)} ms`);
 		if (!output.success) {
 			throw new Error(`Coding-agent binary bundle failed:\n${output.logs.map(log => log.message).join("\n")}`);
 		}

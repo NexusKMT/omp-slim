@@ -1,4 +1,7 @@
 fn main() {
+  // This script only reads Cargo's target configuration. Avoid a whole-package
+  // mtime fingerprint, which changes when CI normalizes restored source mtimes.
+  println!("cargo::rerun-if-changed=build.rs");
   println!("cargo::rustc-check-cfg=cfg(tokio_unstable)");
   // The two WASI targets are indistinguishable at cfg level on current rustc:
   // `rustc --print cfg` emits IDENTICAL sets for wasm32-wasip1 and

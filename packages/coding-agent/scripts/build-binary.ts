@@ -60,6 +60,7 @@ async function main(): Promise<void> {
 	});
 
 	if (shouldAdhocSign) {
+		const codesignStarted = performance.now();
 		await runCommand([
 			"codesign",
 			"--force",
@@ -69,6 +70,9 @@ async function main(): Promise<void> {
 			path.join(repoRoot, "scripts", "macos-entitlements.plist"),
 			outputPath,
 		]);
+		if (Bun.env.OMP_BUILD_TIMINGS === "1") {
+			console.log(`CLI codesign: ${(performance.now() - codesignStarted).toFixed(0)} ms`);
+		}
 	}
 }
 

@@ -30,6 +30,7 @@ export OMP_NATIVE_CARGO_PROFILE=ci
 export PI_CODING_AGENT_DIR="$omp_build_dir/agent"
 export OMP_BUILD_LABEL="omp-slim/$omp_build_id"
 export OMP_SLIM_BUILD_DIR="$omp_build_dir"
+export OMP_BUILD_TIMINGS=1
 
 git rev-parse HEAD > "$omp_build_dir/source-commit"
 git status --porcelain=v1 > "$omp_build_dir/source-status"
