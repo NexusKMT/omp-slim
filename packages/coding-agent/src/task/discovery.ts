@@ -10,10 +10,8 @@
  *     Mirrors the same sub-discovery convention applied to `skills/`,
  *     `hooks/`, `tools/`, etc. by `discovery/omp-plugins.ts`.
  *
- * Claude Code marketplace plugin agents are discovered separately via the
- * claude-plugins provider. Direct cross-harness roots such as .claude/agents
- * are intentionally skipped because their frontmatter schema is not the OMP
- * task-agent contract.
+ * Other coding-agent configuration trees are not scanned. Task agents enter
+ * through OMP's own directories, enabled extension packages, and built-ins.
  *
  * Agent files use markdown with YAML frontmatter.
  */
@@ -75,8 +73,7 @@ async function loadAgentsFromDir({ dir, source, ignoreModel }: AgentDirectory): 
  * Discover agents from filesystem and merge with bundled agents.
  * Precedence (highest wins): project `.omp/agents`, user `.omp/agents`,
  * OMP extension-package agents from the effective `extensions` setting,
- * installed npm/link plugins, Claude marketplace plugin agents (project scope
- * before user), then bundled.
+ * installed npm/link plugins, then bundled.
  * @param cwd - Current working directory for project agent discovery
  * @param home - Home directory for user and marketplace discovery
  * @param extensionRoots - Session-local extension roots (explicit + mode + configured)

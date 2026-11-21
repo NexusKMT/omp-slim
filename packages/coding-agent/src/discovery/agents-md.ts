@@ -2,8 +2,8 @@
  * AGENTS.md Provider
  *
  * Discovers standalone AGENTS.md files by walking up from cwd.
- * This handles AGENTS.md files that live in project root (not in config directories
- * like .codex/ or .gemini/, which are handled by their respective providers).
+ * This handles standalone AGENTS.md files that live in a project hierarchy.
+ * Provider-specific config trees are not scanned for additional agent context.
  */
 import { registerProvider } from "../capability";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
@@ -24,7 +24,7 @@ export async function loadAgentsMd(ctx: LoadContext): Promise<LoadResult<Context
 registerProvider(contextFileCapability.id, {
 	id: PROVIDER_ID,
 	displayName: DISPLAY_NAME,
-	description: "Standalone AGENTS.md files (Codex/Gemini style)",
+	description: "Standalone AGENTS.md files in project hierarchies",
 	priority: 10,
 	load: loadAgentsMd,
 });

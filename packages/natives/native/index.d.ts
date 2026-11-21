@@ -1073,8 +1073,7 @@ export declare function copyToClipboard(text: string): void
  * is available). Always returns a single token total — use this for any
  * aggregate budget question without paying a per-element napi crossing.
  *
- * Measures user/model content, not wire-protocol tokens: BPE encodings
- * use ordinary encoding without special tokens or message framing.
+ * Measures ordinary content, without special tokens or message framing.
  * Defaults to `o200k_base`; select the configured encoding when available.
  */
 export declare function countTokens(input: string | string[], encoding?: Encoding | undefined | null): number
@@ -1466,7 +1465,7 @@ export declare enum Encoding {
   /** Kimi K2 … K3. */
   KimiK2 = 'KimiK2',
   /** GLM-5.x exact; GLM-4.x near-exact. */
-  Glm5 = 'Glm5',
+  Glm5 = 'Glm5'
 }
 
 /**

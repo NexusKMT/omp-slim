@@ -474,7 +474,7 @@ export const cfgTierOpenai = register({
 		group: "Sampling",
 		label: "Service Tier — OpenAI",
 		description:
-			"Processing tier for OpenAI / OpenAI-Codex requests, and OpenAI-family models routed via OpenRouter (none = omit). Sent as `service_tier`.",
+			"Processing tier for the configured Chat Completions endpoint (none = omit). Sent as `service_tier`.",
 		options: SERVICE_TIER_OPENAI_OPTIONS,
 	},
 });
